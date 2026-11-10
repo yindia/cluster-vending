@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "cloud/v1/conditions.proto";
+
+// ManagedResourceState is the state of one Crossplane managed resource.
+enum ManagedResourceState {
+  MANAGED_RESOURCE_STATE_UNSPECIFIED = 0;
+  // Being created or updated in the cloud.
+  MANAGED_RESOURCE_STATE_CREATING = 1;
+  // Waiting for a resource it references (e.g. a route waiting for its NAT
+  // gateway); resolves on its own.
+  MANAGED_RESOURCE_STATE_WAITING = 2;
+  // Exists in the cloud and matches its spec.
+  MANAGED_RESOURCE_STATE_READY = 3;
+  // The provider cannot reconcile it; see message (e.g. missing IAM
+  // permissions, quota).
+  MANAGED_RESOURCE_STATE_FAILED = 4;
+  // Being deleted.
+  MANAGED_RESOURCE_STATE_DELETING = 5;
+  // Recorded but not found in the management cluster (deleted outside the
+  // platform).
+  MANAGED_RESOURCE_STATE_MISSING = 6;
+}
+
+// ManagedResource is one Kubernetes object the platform created in the
+// management cluster (a Crossplane managed resource, a ProviderConfig, the
+// tenant namespace). Every one is recorded with its owner; its state is
+// read live from the cluster.
+message ManagedResource {
+  // Kubernetes kind, e.g. "VPC".
+  string kind = 1;
+  // Kubernetes name (in the tenant namespace).
+  string name = 3;
+  // The cloud ID (crossplane.io/external-name), e.g. "vpc-01b4239a341d2d026".
+  // Empty until the resource exists in the cloud.
+  string external_name = 4;
+  ManagedResourceState state = 5;
+  // The Crossplane Ready and Synced conditions.
+  ConditionStatus ready = 6;
+  ConditionStatus synced = 7;
+  // Reason and message of the condition behind state (empty when READY).
+  string reason = 8;
+  string message = 9;
+  // Zone ID, for zonal resources (subnets, NAT gateways, EIPs).
+  string zone_id = 10;
+  // Subnet role ("public" or "private"), for subnets.
+  string role = 11;
+}

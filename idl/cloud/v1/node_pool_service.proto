@@ -1,0 +1,252 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/aws.proto";
+import "cloud/v1/conditions.proto";
+import "cloud/v1/node_pool.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+// NodePoolService manages the node pools of a cluster beyond its default
+// pool. Every RPC is scoped by tenant_id and cluster_id (authorized against
+// the caller); mutations are asynchronous, like ClusterService: poll
+// GetNodePool until status.observed_generation catches up and status.state
+// is RUNNING.
+//
+// Every pool of a cluster is listed here:
+//   - "default": ClusterSpec.default_node_pool. Read-only here; change it
+//     with UpdateCluster, so a pool never has two edit paths.
+//   - pools created with CreateNodePool, or imported from representable node
+//     groups of an imported cluster.
+//   - carried-over node groups of an imported cluster (launch template,
+//     custom AMI), status.carried_over = true: read-only, but DeleteNodePool
+//     works, which is how they are retired once workloads moved to a pool
+//     the platform manages.
+// DeleteCluster deletes every pool of the cluster.
+service NodePoolService {
+  // Creates a node pool in a RUNNING cluster.
+  rpc CreateNodePool(CreateNodePoolRequest) returns (CreateNodePoolResponse);
+
+  // Returns one node pool, or NOT_FOUND.
+  rpc GetNodePool(GetNodePoolRequest) returns (GetNodePoolResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the node pools of a cluster, ordered by id.
+  rpc ListNodePools(ListNodePoolsRequest) returns (ListNodePoolsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Updates the mutable fields named in update_mask. Fails with
+  // FAILED_PRECONDITION for "default" (use UpdateCluster) and for
+  // carried-over pools.
+  rpc UpdateNodePool(UpdateNodePoolRequest) returns (UpdateNodePoolResponse);
+
+  // Deletes a node pool and its nodes. Fails with FAILED_PRECONDITION for
+  // "default"; allowed for carried-over pools.
+  rpc DeleteNodePool(DeleteNodePoolRequest) returns (DeleteNodePoolResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+// NodePool is one node pool of a cluster.
+//   AWS   eks.aws.m.upbound.io NodeGroup (+ IAM role shared with the
+//         cluster's default pool)
+//   GCP   container.gcp.m.upbound.io NodePool
+//   Azure containerservice.azure.m.upbound.io KubernetesClusterNodePool
+message NodePool {
+  option (buf.validate.message).cel = {
+    id: "aws.instance_types"
+    message: "AWS instance types look like m6i.large"
+    expression: "!has(this.aws) || this.spec.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))"
+  };
+  option (buf.validate.message).cel = {
+    id: "single_instance_type"
+    message: "only AWS accepts more than one instance type"
+    expression: "has(this.aws) || size(this.spec.instance_types) == 1"
+  };
+
+  // Output only: from the request.
+  string tenant_id = 1;
+  // Output only: from the request.
+  string cluster_id = 2;
+
+  // Node pool identifier, unique within the cluster, DNS-label safe.
+  // Immutable. "default" is the cluster's default pool.
+  string id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$"
+  }];
+
+  string display_name = 4 [(buf.validate.field).string.max_len = 128];
+
+  NodePoolSpec spec = 5 [(buf.validate.field).required = true];
+
+  // Output only.
+  NodePoolStatus status = 6;
+  // Output only.
+  int64 generation = 7;
+  // Output only. Optimistic concurrency token.
+  string etag = 8;
+  // Output only.
+  google.protobuf.Timestamp create_time = 9;
+  // Output only.
+  google.protobuf.Timestamp update_time = 10;
+
+  // Provider-only settings. Must match the cluster's provider; exactly one
+  // must be set, even if empty (e.g. `aws: {}`).
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+
+    AwsNodePoolSpec aws = 20;
+    // gcp = 21, azure = 22.
+  }
+}
+
+// NodePoolState is the coarse lifecycle state of a node pool.
+enum NodePoolState {
+  NODE_POOL_STATE_UNSPECIFIED = 0;
+  NODE_POOL_STATE_PROVISIONING = 1;
+  NODE_POOL_STATE_RUNNING = 2;
+  NODE_POOL_STATE_UPDATING = 3;
+  NODE_POOL_STATE_DELETING = 4;
+  NODE_POOL_STATE_FAILED = 5;
+}
+
+// NodePoolStatus is the observed state of a node pool.
+message NodePoolStatus {
+  NodePoolState state = 1;
+  string message = 2;
+  int64 observed_generation = 3;
+  repeated Condition conditions = 4;
+  // Current node count (the autoscaler moves it within scaling_config).
+  //   AWS   NodeGroup.status.atProvider.scalingConfig.desiredSize
+  uint32 current_size = 5;
+  // Kubernetes version of the nodes.
+  string current_kubernetes_version = 6;
+  // A node group carried over verbatim from an imported cluster (launch
+  // template or custom AMI). spec reflects what was observed; only
+  // DeleteNodePool is allowed.
+  bool carried_over = 7;
+  // Provider-specific observed state.
+  oneof provider {
+    AwsNodePoolStatus aws = 20;
+  }
+}
+
+message CreateNodePoolRequest {
+  option (buf.validate.message).cel = {
+    id: "create_node_pool.not_default"
+    message: "\"default\" is the cluster's default pool (ClusterSpec.default_node_pool)"
+    expression: "this.node_pool.id != 'default'"
+  };
+
+  // Same rules as CreateClusterRequest.tenant_id.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // id, spec and provider are required; output-only fields are ignored.
+  NodePool node_pool = 3 [(buf.validate.field).required = true];
+  // Optional idempotency key.
+  string request_id = 4 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message CreateNodePoolResponse {
+  NodePool node_pool = 1;
+}
+
+message GetNodePoolRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  string node_pool_id = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message GetNodePoolResponse {
+  NodePool node_pool = 1;
+}
+
+message ListNodePoolsRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // Defaults to 50; values above 200 are coerced to 200.
+  int32 page_size = 3 [(buf.validate.field).int32.gte = 0];
+  string page_token = 4;
+}
+
+message ListNodePoolsResponse {
+  repeated NodePool node_pools = 1;
+  string next_page_token = 2;
+}
+
+message UpdateNodePoolRequest {
+  option (buf.validate.message).cel = {
+    id: "update_node_pool.node_pool_required"
+    message: "node_pool is required"
+    expression: "has(this.node_pool)"
+  };
+
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // node_pool.id identifies the target; node_pool.etag, when set, must
+  // match. Only the masked paths are applied; the server validates the
+  // merged result.
+  NodePool node_pool = 3 [(buf.validate.field).ignore = IGNORE_ALWAYS];
+
+  // Mutable paths (lowerCamelCase in JSON):
+  //   display_name
+  //   spec.scaling_config.min_size
+  //   spec.scaling_config.max_size
+  //   spec.labels
+  //   spec.taints
+  // Instance types, capacity type, disk size and AMI type are immutable:
+  // create a new pool instead. Any other path fails with INVALID_ARGUMENT.
+  google.protobuf.FieldMask update_mask = 4 [(buf.validate.field).required = true];
+}
+
+message UpdateNodePoolResponse {
+  NodePool node_pool = 1;
+}
+
+message DeleteNodePoolRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  string node_pool_id = 3 [(buf.validate.field).string.min_len = 1];
+  // When set, must match the node pool's etag or the call fails with ABORTED.
+  string etag = 4;
+}
+
+message DeleteNodePoolResponse {
+  // The node pool in DELETING state.
+  NodePool node_pool = 1;
+}

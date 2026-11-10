@@ -1,0 +1,16 @@
+version: v2
+modules:
+  - path: idl
+    name: buf.build/cloud-vending/cloud
+deps:
+  - buf.build/bufbuild/protovalidate
+lint:
+  use:
+    - STANDARD
+breaking:
+  # WIRE_JSON protects binary and JSON clients (field numbers, types, JSON
+  # names) but allows deleting a field once its number and name are
+  # reserved. That is how temporary fields (e.g. ClusterSpec.existing_cluster)
+  # are dropped. FILE would also block those deletions.
+  use:
+    - WIRE_JSON

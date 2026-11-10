@@ -1,0 +1,289 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/access.proto";
+import "cloud/v1/aws.proto";
+import "cloud/v1/cluster_import.proto";
+import "cloud/v1/conditions.proto";
+import "cloud/v1/control_plane.proto";
+import "cloud/v1/import.proto";
+import "cloud/v1/managed_resource.proto";
+import "cloud/v1/network.proto";
+import "cloud/v1/node_pool.proto";
+import "google/protobuf/timestamp.proto";
+
+// Cluster is a managed Kubernetes cluster owned by exactly one tenant.
+message Cluster {
+  // Tenant that owns the cluster. Output only: set by the server from the
+  // request's tenant_id.
+  string tenant_id = 1;
+
+  // Output only. Assigned by the server on create (UUID); every other call
+  // refers to the cluster by it.
+  string id = 2;
+
+  // Name chosen by the client: DNS-label safe. It is the cloud cluster's
+  // name (AWS: the EKS cluster name), so it must be unique per account and
+  // region: CreateCluster fails with ALREADY_EXISTS when the platform or
+  // anyone else already has a cluster of that name there. The cluster's
+  // other cloud and Kubernetes resources are named "<name>-<hash8>-...".
+  // Immutable.
+  string name = 11 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$"
+  }];
+
+  // Human-friendly name. Mutable.
+  string display_name = 3 [(buf.validate.field).string.max_len = 128];
+
+  // API-level labels for grouping and filtering. Mutable. Not propagated to
+  // the cloud; see ClusterSpec.tags for that.
+  map<string, string> labels = 4 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 63
+        pattern: "^[a-z0-9]([a-z0-9_.-]{0,61}[a-z0-9])?$"
+      }
+    }
+    values: {
+      string: {max_len: 63}
+    }
+  }];
+
+  // Desired state.
+  ClusterSpec spec = 5 [(buf.validate.field).required = true];
+
+  // Observed state. Output only; ignored on create and update.
+  ClusterStatus status = 6;
+
+  // Incremented by the server on every spec change. Output only.
+  int64 generation = 7;
+
+  // Opaque version token for optimistic concurrency. Output only. Pass it
+  // back on UpdateCluster / DeleteCluster to reject stale writes.
+  string etag = 8;
+
+  // Output only.
+  google.protobuf.Timestamp create_time = 9;
+  // Output only.
+  google.protobuf.Timestamp update_time = 10;
+}
+
+// ClusterSpec is the desired state of a cluster.
+//
+// It is one provider-neutral contract: region, network, control_plane,
+// default_node_pool and tags mean the same thing on every cloud and each
+// field documents its Crossplane mapping per provider. The `provider` oneof
+// selects the cloud and carries only settings that have no cross-cloud
+// equivalent. Provider-specific constraints on the common fields are the
+// CEL rules below, keyed by provider.
+message ClusterSpec {
+  // --- AWS constraints on the common fields ---
+  // Network layout rules live on NetworkSpec: a cluster only references a
+  // Network.
+  option (buf.validate.message).cel = {
+    id: "aws.region"
+    message: "region must be an AWS region, e.g. us-east-1"
+    expression: "!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.instance_types"
+    message: "AWS instance types look like m6i.large"
+    expression: "!has(this.aws) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.tag_reserved_prefix"
+    message: "AWS tag keys must not start with 'aws:'"
+    expression: "!has(this.aws) || this.tags.all(k, !k.lowerAscii().startsWith('aws:'))"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "aws.admin_principals"
+    message: "AWS admin principals must be IAM role or user ARNs, not service-linked roles (role/aws-service-role/...: EKS manages their access entries)"
+    expression: "!has(this.aws) || this.access.admin_principals.all(p, p.matches('^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$') && !p.contains(':role/aws-service-role/'))"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.admin_access_auth_mode"
+    message: "admin_principals need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)"
+    expression: "!has(this.aws) || size(this.access.admin_principals) == 0 || this.aws.access_config.authentication_mode != 3"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "aws.no_pod_cidr"
+    message: "AWS pods take IPs from the VPC subnets (VPC CNI); network.pod_cidr must be empty"
+    expression: "!has(this.aws) || this.network.pod_cidr == ''"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.zone_ids"
+    message: "AWS clusters need at least two zone_ids (EKS), given as zone IDs like use1-az1"
+    expression: "!has(this.aws) || size(this.network.zone_ids) == 0 || (size(this.network.zone_ids) >= 2 && this.network.zone_ids.all(z, z.matches('^[a-z]+[0-9]-az[0-9]+$')))"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.service_cidr_size"
+    message: "EKS service_cidr must be /12 to /24"
+    expression: "!has(this.aws) || this.network.service_cidr == '' || this.network.service_cidr.matches('/(1[2-9]|2[0-4])$')"
+  };
+
+  // --- Constraints for every non-AWS provider ---
+  option (buf.validate.message).cel = {
+    id: "single_instance_type"
+    message: "only AWS accepts more than one instance type"
+    expression: "has(this.aws) || size(this.default_node_pool.instance_types) == 1"
+  };
+
+  // Region the cluster runs in. Immutable.
+  //   AWS   forProvider.region, e.g. "us-east-1"
+  //   GCP   forProvider.location (region), e.g. "us-central1"
+  //   Azure forProvider.location, e.g. "eastus"
+  string region = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9-]+$"
+  }];
+
+  // Where the cluster runs: a platform Network, by id, plus the cluster's
+  // pod and service ranges. Immutable.
+  ClusterNetwork network = 2 [(buf.validate.field).required = true];
+
+  // Control plane settings. Optional; every field has a default.
+  ControlPlaneSpec control_plane = 3;
+
+  // The node pool created together with the cluster. It is listed by
+  // NodePoolService as "default" but changed only through UpdateCluster.
+  // More pools: NodePoolService.CreateNodePool.
+  NodePoolSpec default_node_pool = 4 [(buf.validate.field).required = true];
+
+  // Applied to every cloud resource the server creates. The server adds its
+  // own ownership tags (tenant, cluster id), so the cap is below AWS's 50.
+  //   AWS   forProvider.tags
+  //   GCP   forProvider.resourceLabels / labels
+  //   Azure forProvider.tags
+  map<string, string> tags = 5 [(buf.validate.field).map = {
+    max_pairs: 40
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 128
+      }
+    }
+    values: {
+      string: {max_len: 256}
+    }
+  }];
+
+  // Who administers the cluster. Mutable.
+  AccessSpec access = 6;
+
+  // TEMPORARY (see cluster_import.proto): import a cluster built outside the
+  // platform instead of creating one. network.network_id is the imported
+  // Network of its VPC. The rest of the spec is the desired state after the
+  // takeover. Cleared through UpdateCluster to finish the import.
+  ExistingCluster existing_cluster = 7;
+
+  // The cloud the cluster runs on. Exactly one must be set, even if empty
+  // (e.g. `aws: {}`).
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+
+    AwsClusterSpec aws = 10;
+    // Kept for future providers. Not `reserved`: un-reserving later would be
+    // a breaking change for buf.
+    //   GcpClusterSpec   gcp   = 11;  (release channel, image type, ...)
+    //   AzureClusterSpec azure = 12;  (sku tier, upgrade channels, ...)
+  }
+}
+
+// ClusterState is the coarse lifecycle state of a cluster.
+enum ClusterState {
+  CLUSTER_STATE_UNSPECIFIED = 0;
+  // Accepted; cloud resources are being created.
+  CLUSTER_STATE_PROVISIONING = 1;
+  // All resources are ready and the API server is reachable.
+  CLUSTER_STATE_RUNNING = 2;
+  // A spec change is being rolled out.
+  CLUSTER_STATE_UPDATING = 3;
+  // Teardown in progress.
+  CLUSTER_STATE_DELETING = 4;
+  // Reconciliation failed; see `message` and `conditions`.
+  CLUSTER_STATE_FAILED = 5;
+}
+
+// ClusterStatus is the observed state, aggregated from the Crossplane
+// managed resources' status.
+message ClusterStatus {
+  ClusterState state = 1;
+
+  // Human-readable summary of the current state, typically the reason for
+  // FAILED.
+  string message = 2;
+
+  // The spec generation the status reflects. Lower than Cluster.generation
+  // means the latest change has not been observed yet.
+  int64 observed_generation = 3;
+
+  // Fine-grained conditions ("NetworkReady", "ControlPlaneReady",
+  // "NodePoolReady"), derived from Crossplane Ready/Synced conditions.
+  repeated Condition conditions = 4;
+
+  // Kubernetes API server connection details, once the control plane is
+  // ready.
+  ClusterEndpoint endpoint = 5;
+
+  // Kubernetes version running on the control plane.
+  //   AWS   Cluster.status.atProvider.version
+  //   GCP   Cluster.status.atProvider.masterVersion
+  //   Azure KubernetesCluster.status.atProvider.currentKubernetesVersion
+  string current_kubernetes_version = 6;
+
+  // Service-account token issuer, for workload identity.
+  //   AWS   Cluster.status.atProvider.identity[0].oidc[0].issuer
+  //   Azure KubernetesCluster.status.atProvider.oidcIssuerUrl
+  string oidc_issuer_url = 7;
+
+  // The cloud resources of the cluster's Network.
+  NetworkResources network = 8;
+
+  // Provider-specific observed state. Matches the arm set in ClusterSpec.
+  oneof provider {
+    AwsClusterStatus aws = 10;
+    // gcp = 11, azure = 12 (see ClusterSpec.provider).
+  }
+
+  // TEMPORARY (see cluster_import.proto): the import plan while
+  // spec.existing_cluster is set.
+  ImportStatus import = 13;
+
+  // Resources carried over from an import (disposition CARRIED_OVER, e.g.
+  // security groups, the KMS key, the OIDC provider, launch-template node
+  // groups): owned with the cluster and deleted with it, but not editable
+  // through the API. Permanent: it outlives the import. Empty for clusters
+  // the platform created.
+  repeated ImportedResource carried_over = 14;
+
+  // Every managed resource of the cluster (IAM roles, the EKS cluster, the
+  // default node group, add-ons, access entries, ...) with its Kubernetes
+  // name, cloud ID and state, in creation order. state is RUNNING once all
+  // of them are READY, FAILED when one is FAILED.
+  repeated ManagedResource managed_resources = 15;
+
+  // "<namespace>/<name>" of the Secret in the management cluster holding
+  // the cluster's kubeconfig (key "kubeconfig"), for Crossplane's Helm and
+  // Kubernetes providers. Its token is refreshed every 10 minutes and acts
+  // as the identity that created the cluster (the account's
+  // ProviderConfig), which is cluster admin. Empty until the control plane
+  // is ready.
+  string kubeconfig_secret = 16;
+}
+
+// ClusterEndpoint is how clients reach the Kubernetes API server.
+message ClusterEndpoint {
+  // HTTPS URL of the public endpoint.
+  string url = 1;
+  // PEM-encoded cluster CA certificate.
+  bytes certificate_authority_data = 2;
+}

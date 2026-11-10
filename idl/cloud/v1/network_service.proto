@@ -1,0 +1,229 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/aws.proto";
+import "cloud/v1/network.proto";
+import "google/protobuf/field_mask.proto";
+
+// NetworkService manages tenant networks. The platform is the source of truth
+// for every network: it either creates it, or imports an existing one (e.g.
+// built with Terraform) and takes it over so the previous tool can be
+// removed. Clusters reference networks through ClusterSpec.network.network_id.
+//
+// Like ClusterService, every RPC is scoped by tenant_id (authorized against
+// the caller), and mutations are asynchronous: poll GetNetwork until
+// status.observed_generation catches up and status.state is READY.
+service NetworkService {
+  // Creates a network.
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+
+  // Imports an existing network read-only and computes the plan
+  // (status.import): the server looks up the network's resources (see
+  // AwsImportNetwork), creates Observe-only managed resources for them and
+  // derives the spec from their status.atProvider. Nothing in the cloud
+  // changes. state becomes IMPORTED, or FAILED with phase BLOCKED.
+  rpc ImportNetwork(ImportNetworkRequest) returns (ImportNetworkResponse);
+
+  // Takes over an IMPORTED network: the platform becomes its owner and
+  // converges the plan. Call it only after the previous tool stopped
+  // managing the resources (`terraform state rm`). Fails with
+  // FAILED_PRECONDITION unless the phase is PLANNED, and when NOT_IMPORTED
+  // resources exist but acknowledge_not_imported is false.
+  rpc TakeOverNetwork(TakeOverNetworkRequest) returns (TakeOverNetworkResponse);
+
+  // Returns one network, or NOT_FOUND.
+  rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists a tenant's networks, oldest first (ids are time-ordered UUIDs).
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Updates the mutable fields named in update_mask.
+  rpc UpdateNetwork(UpdateNetworkRequest) returns (UpdateNetworkResponse);
+
+  // Deletes the network and all its cloud resources. Fails with
+  // FAILED_PRECONDITION while clusters use it (status.cluster_ids). An
+  // IMPORTED network that was
+  // never taken over is only forgotten: nothing in the cloud is deleted.
+  rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+message CreateNetworkRequest {
+  // Same rules as CreateClusterRequest.tenant_id.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // id and spec are required; output-only fields are ignored.
+  Network network = 2 [(buf.validate.field).required = true];
+  // Optional idempotency key.
+  string request_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message CreateNetworkResponse {
+  Network network = 1;
+}
+
+message ImportNetworkRequest {
+  option (buf.validate.message).cel = {
+    id: "import_network.aws_region"
+    message: "region must be an AWS region, e.g. us-east-1"
+    expression: "!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')"
+  };
+
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Network.name of the imported network; same rules. Its id is assigned
+  // by the server.
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$"
+  }];
+
+  string display_name = 3 [(buf.validate.field).string.max_len = 128];
+
+  // Region of the network; same rules as NetworkSpec.region.
+  string region = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9-]+$"
+  }];
+
+  // The network to import. It must live in the tenant's cloud account.
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+
+    AwsImportNetwork aws = 10;
+    // gcp = 11 (network self link), azure = 12 (VirtualNetwork ID).
+  }
+
+  // Optional idempotency key.
+  string request_id = 5 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // The bootstrapped account holding the network (CloudAccount.id);
+  // becomes spec.bootstrap_id.
+  string bootstrap_id = 6 [(buf.validate.field).string.uuid = true];
+}
+
+message ImportNetworkResponse {
+  // spec derived from the imported resources; status.import holds the plan
+  // (phase DISCOVERING until discovery finishes).
+  Network network = 1;
+}
+
+message TakeOverNetworkRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Network.id.
+  string network_id = 2 [(buf.validate.field).string.uuid = true];
+  // When set, must match the network's etag or the call fails with ABORTED.
+  string etag = 3;
+  // Confirms that every NOT_IMPORTED resource has another owner (or was
+  // deleted) and the previous tool no longer manages anything here.
+  bool acknowledge_not_imported = 4;
+}
+
+message TakeOverNetworkResponse {
+  Network network = 1;
+}
+
+message GetNetworkRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Network.id.
+  string network_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetNetworkResponse {
+  Network network = 1;
+}
+
+message ListNetworksRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Defaults to 50; values above 200 are coerced to 200.
+  int32 page_size = 2 [(buf.validate.field).int32.gte = 0];
+  string page_token = 3;
+}
+
+message ListNetworksResponse {
+  repeated Network networks = 1;
+  string next_page_token = 2;
+}
+
+message UpdateNetworkRequest {
+  option (buf.validate.message).cel = {
+    id: "update_network.network_required"
+    message: "network is required"
+    expression: "has(this.network)"
+  };
+
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // network.id identifies the target; network.etag, when set, must match.
+  // Only the masked paths are applied; the server validates the merged
+  // result.
+  Network network = 2 [(buf.validate.field).ignore = IGNORE_ALWAYS];
+
+  // Mutable paths:
+  //   display_name
+  //   labels
+  //   spec.tags
+  // The layout (address space, subnets, NAT) is immutable for now; any
+  // other path fails with INVALID_ARGUMENT. Updates of an IMPORTED network
+  // fail with FAILED_PRECONDITION until it is taken over.
+  google.protobuf.FieldMask update_mask = 3 [(buf.validate.field).required = true];
+}
+
+message UpdateNetworkResponse {
+  Network network = 1;
+}
+
+message DeleteNetworkRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Network.id.
+  string network_id = 2 [(buf.validate.field).string.uuid = true];
+  // When set, must match the network's etag or the call fails with ABORTED.
+  string etag = 3;
+}
+
+message DeleteNetworkResponse {
+  // The network in DELETING state.
+  Network network = 1;
+}

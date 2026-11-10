@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+
+// AccessSpec controls who can use the Kubernetes API. The server's own
+// provisioning identity is always an admin (AWS:
+// accessConfig.bootstrapClusterCreatorAdminPermissions = true); it is not
+// listed here.
+message AccessSpec {
+  // Principals granted cluster-admin, in the provider's native form. Mutable;
+  // removing a principal revokes its access.
+  //   AWS   IAM role or user ARN, e.g. "arn:aws:iam::111122223333:role/ops".
+  //         One AccessEntry (type STANDARD) plus one AccessPolicyAssociation
+  //         (AmazonEKSClusterAdminPolicy, accessScope.type = cluster) each.
+  //         Needs authenticationMode API or API_AND_CONFIG_MAP.
+  //   GCP   IAM member, e.g. "group:platform@example.com": a cluster-admin
+  //         ClusterRoleBinding (groups via authenticatorGroupsConfig).
+  //   Azure Entra ID group object ID:
+  //         azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds.
+  repeated string admin_principals = 1 [(buf.validate.field).repeated = {
+    max_items: 20
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 2048
+      }
+    }
+  }];
+}

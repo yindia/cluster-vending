@@ -1,0 +1,228 @@
+package cluster
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"strings"
+
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"connectrpc.com/connect/v2"
+
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/server/service"
+)
+
+// Condition types of ClusterStatus.
+const (
+	conditionReady  = "Ready"
+	conditionSynced = "Synced"
+)
+
+func encode(m proto.Message) (model.JSON, error) {
+	raw, err := protojson.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("encode %T: %w", m, err)
+	}
+	return model.JSON(raw), nil
+}
+
+// specOf decodes the stored (resolved) spec.
+func specOf(row *model.Cluster) (*cloudv1.ClusterSpec, error) {
+	spec := &cloudv1.ClusterSpec{}
+	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
+		return nil, fmt.Errorf("cluster %s: stored spec: %w", row.ID, err)
+	}
+	return spec, nil
+}
+
+// view is the API view of a stored cluster: spec, the live state of its
+// managed resources, and what EKS reports (endpoint, version, ARNs).
+func (s *ClusterService) view(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
+	spec, err := specOf(row)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	views, err := s.deps.Observe(ctx, records)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.retireNodeGroups(ctx, records, views); err != nil {
+		s.logger().ErrorContext(ctx, "retire node groups", "cluster_id", row.ID, "error", err)
+		return nil, connect.NewError(connect.CodeInternal, "could not retire the replaced node group")
+	}
+	st := status(row, views)
+	if err := s.observeEKS(ctx, records, st); err != nil {
+		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
+		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster from the management cluster")
+	}
+	return &cloudv1.Cluster{
+		TenantId: row.TenantID, Id: row.ID, Name: row.Name, DisplayName: row.DisplayName, Labels: row.Labels,
+		Spec: spec, Status: st, Generation: row.Generation, Etag: row.ETag,
+		CreateTime: timestamppb.New(row.CreatedAt), UpdateTime: timestamppb.New(row.UpdatedAt),
+	}, nil
+}
+
+// observeEKS copies what the EKS Cluster and NodeGroup report into st.
+func (s *ClusterService) observeEKS(ctx context.Context, records []model.ManagedResource, st *cloudv1.ClusterStatus) error {
+	aws := &cloudv1.AwsClusterStatus{}
+	views := make(map[string]*cloudv1.ManagedResource, len(st.GetManagedResources()))
+	for _, v := range st.GetManagedResources() {
+		views[v.GetKind()+"/"+v.GetName()] = v
+	}
+	for _, r := range records {
+		key := client.ObjectKey{Namespace: r.Namespace, Name: r.Name}
+		switch r.Kind {
+		case "Cluster":
+			c := &awseks.Cluster{}
+			if err := getIgnoreMissing(ctx, s.deps.Kube, key, c); err != nil {
+				return err
+			}
+			fromEKSCluster(c.Status.AtProvider, st, aws)
+		case "ClusterAuth":
+			if views[r.Kind+"/"+r.Name].GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
+				st.KubeconfigSecret = r.Namespace + "/" + kubeconfigSecret(r.Name)
+			}
+		case "NodeGroup":
+			ng := &awseks.NodeGroup{}
+			if err := getIgnoreMissing(ctx, s.deps.Kube, key, ng); err != nil {
+				return err
+			}
+			aws.NodeGroupArn = deref(ng.Status.AtProvider.Arn)
+		case "Addon":
+			addon := &awseks.Addon{}
+			if err := getIgnoreMissing(ctx, s.deps.Kube, key, addon); err != nil {
+				return err
+			}
+			v := views[r.Kind+"/"+r.Name]
+			aws.Addons = append(aws.Addons, &cloudv1.AwsAddonStatus{
+				Name: addonName(r.Name), Version: deref(addon.Status.AtProvider.AddonVersion),
+				State: v.GetState(), Message: v.GetMessage(),
+			})
+		}
+	}
+	st.Provider = &cloudv1.ClusterStatus_Aws{Aws: aws}
+	return nil
+}
+
+func getIgnoreMissing(ctx context.Context, c client.Client, key client.ObjectKey, obj client.Object) error {
+	err := c.Get(ctx, key, obj)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil
+	}
+	return err
+}
+
+func fromEKSCluster(at awseks.ClusterObservation, st *cloudv1.ClusterStatus, aws *cloudv1.AwsClusterStatus) {
+	aws.ClusterArn = deref(at.Arn)
+	aws.PlatformVersion = deref(at.PlatformVersion)
+	if at.VPCConfig != nil {
+		aws.ClusterSecurityGroupId = deref(at.VPCConfig.ClusterSecurityGroupID)
+	}
+	st.CurrentKubernetesVersion = deref(at.Version)
+	for _, id := range at.Identity {
+		for _, o := range id.Oidc {
+			st.OidcIssuerUrl = deref(o.Issuer)
+		}
+	}
+	if url := deref(at.Endpoint); url != "" {
+		st.Endpoint = &cloudv1.ClusterEndpoint{Url: url}
+		for _, ca := range at.CertificateAuthority {
+			// EKS returns the PEM base64-encoded; the API carries the PEM.
+			st.Endpoint.CertificateAuthorityData = decodeCA(deref(ca.Data))
+		}
+	}
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// status aggregates the managed resources' states: RUNNING once all are
+// READY, FAILED when one failed or vanished, else the stored lifecycle
+// state (PROVISIONING, UPDATING, DELETING).
+func status(row *model.Cluster, views []*cloudv1.ManagedResource) *cloudv1.ClusterStatus {
+	st := &cloudv1.ClusterStatus{ManagedResources: views, ObservedGeneration: row.Generation}
+	ready, waiting, left := 0, 0, 0
+	var failed *cloudv1.ManagedResource
+	for _, v := range views {
+		switch v.GetState() {
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
+			ready++
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING:
+			waiting++
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING:
+			if failed == nil {
+				failed = v
+			}
+		default:
+		}
+		if v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			left++
+		}
+	}
+	progress := fmt.Sprintf("%d of %d resources ready", ready, len(views))
+	if waiting > 0 {
+		progress += fmt.Sprintf(", %d waiting on others", waiting)
+	}
+	readyCond := &cloudv1.Condition{Type: conditionReady, Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE,
+		Reason: "ResourcesNotReady", Message: progress}
+	switch {
+	case row.State == stateDeleting:
+		st.State = cloudv1.ClusterState_CLUSTER_STATE_DELETING
+		st.Message = fmt.Sprintf("deleting; %d resources left", left)
+	case failed != nil:
+		st.State = cloudv1.ClusterState_CLUSTER_STATE_FAILED
+		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
+		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: conditionSynced,
+			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
+	case len(views) > 0 && ready == len(views):
+		st.State = cloudv1.ClusterState_CLUSTER_STATE_RUNNING
+		readyCond.Status, readyCond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, "AllResourcesReady"
+	case row.State == stateUpdating:
+		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING, progress
+	default:
+		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING, progress
+	}
+	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)
+	return st
+}
+
+func decodeCA(b64 string) []byte {
+	pem, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return []byte(b64)
+	}
+	return pem
+}
+
+// kubeconfigSecret is the Secret of a ClusterAuth object "<prefix>-auth".
+func kubeconfigSecret(auth string) string {
+	return crossplaneaws.KubeconfigSecretName(strings.TrimSuffix(auth, "-auth"))
+}
+
+// addonName is the add-on of an Addon object "<prefix>-addon-<name>".
+func addonName(object string) string {
+	if i := strings.LastIndex(object, addonInfix); i >= 0 {
+		return object[i+len(addonInfix):]
+	}
+	return object
+}
+
+const addonInfix = "-addon-"

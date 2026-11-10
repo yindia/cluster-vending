@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/options.proto";
+
+// NodePoolSpec is the provider-neutral node pool contract. It is always a
+// separate node pool resource, never a pool embedded in the cluster:
+//   AWS   eks.aws.upbound.io NodeGroup
+//   GCP   container.gcp.upbound.io NodePool (the Cluster is created with
+//         removeDefaultNodePool = true)
+//   Azure containerservice.azure.upbound.io KubernetesClusterNodePool,
+//         mode User. AKS's mandatory KubernetesCluster.defaultNodePool is a
+//         platform-managed system pool (onlyCriticalAddonsEnabled) and not
+//         part of the contract.
+// Nodes are placed in the private subnets. Field paths below are relative to
+// those resources.
+message NodePoolSpec {
+  // Machine types. AWS accepts up to 20 (useful with SPOT); GCP and Azure
+  // take exactly one.
+  //   AWS   NodeGroup.instanceTypes, e.g. "m6i.large"
+  //   GCP   NodePool.nodeConfig.machineType, e.g. "e2-standard-4"
+  //   Azure vmSize, e.g. "Standard_D4s_v5"
+  repeated string instance_types = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 20
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 64
+        pattern: "^[A-Za-z0-9._-]+$"
+      }
+    }
+  }];
+
+  CapacityType capacity_type = 2 [(buf.validate.field).enum.defined_only = true];
+
+  ScalingConfig scaling_config = 3 [(buf.validate.field).required = true];
+
+  // Root/OS disk size in GiB. Defaults to the provider default.
+  //   AWS   NodeGroup.diskSize
+  //   GCP   NodePool.nodeConfig.diskSizeGb
+  //   Azure osDiskSizeGb
+  uint32 disk_size_gb = 4 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).uint32 = {
+      gte: 20
+      lte: 16384
+    }
+  ];
+
+  // Kubernetes labels applied to every node.
+  //   AWS   NodeGroup.labels
+  //   GCP   NodePool.nodeConfig.labels
+  //   Azure nodeLabels
+  map<string, string> labels = 5 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 317
+      }
+    }
+    values: {
+      string: {max_len: 63}
+    }
+  }];
+
+  // Kubernetes taints applied to every node. Capped at 50 (EKS limit).
+  //   AWS   NodeGroup.taint[]
+  //   GCP   NodePool.nodeConfig.taint[]
+  //   Azure nodeTaints ("key=value:Effect")
+  repeated Taint taints = 6 [(buf.validate.field).repeated.max_items = 50];
+}
+
+// CapacityType selects on-demand or spot/preemptible capacity.
+enum CapacityType {
+  // Server default: ON_DEMAND.
+  CAPACITY_TYPE_UNSPECIFIED = 0;
+
+  // GCP: nodeConfig.spot = false.
+  CAPACITY_TYPE_ON_DEMAND = 1 [(crossplane) = {
+    aws: "ON_DEMAND" // NodeGroup.capacityType
+    azure: "Regular" // node pool priority
+  }];
+
+  // GCP: nodeConfig.spot = true. Azure: priority Spot (allowed because the
+  // contract's pool is always a User pool).
+  CAPACITY_TYPE_SPOT = 2 [(crossplane) = {
+    aws: "SPOT"
+    azure: "Spot"
+  }];
+}
+
+// ScalingConfig bounds the size of a node pool, counted over the whole pool
+// (not per zone).
+//   AWS   NodeGroup.scalingConfig.{minSize,maxSize}
+//   GCP   NodePool.autoscaling.{totalMinNodeCount,totalMaxNodeCount}
+//   Azure KubernetesClusterNodePool.{minCount,maxCount},
+//         autoScalingEnabled = true
+// desired_size goes to initProvider (create-only):
+//   AWS   scalingConfig.desiredSize
+//   GCP   initialNodeCount, which is PER ZONE: ceil(desired_size / zones)
+//   Azure nodeCount
+message ScalingConfig {
+  option (buf.validate.message).cel = {
+    id: "scaling_config.bounds"
+    message: "must satisfy min_size <= desired_size <= max_size"
+    expression: "this.min_size <= this.max_size && (!has(this.desired_size) || (this.min_size <= this.desired_size && this.desired_size <= this.max_size))"
+  };
+
+  uint32 min_size = 1 [(buf.validate.field).uint32.lte = 1000];
+  uint32 max_size = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 1000
+  }];
+  // Initial size, used at creation only. Defaults to max(min_size, 1). After
+  // creation the cluster autoscaler owns the node count: the server sets it
+  // through Crossplane `spec.initProvider` (AWS
+  // initProvider.scalingConfig.desiredSize), so it is never reconciled back
+  // and UpdateCluster ignores it. Only min_size / max_size are mutable.
+  optional uint32 desired_size = 3 [(buf.validate.field).uint32.lte = 1000];
+}
+
+// TaintEffect mirrors corev1.TaintEffect.
+enum TaintEffect {
+  TAINT_EFFECT_UNSPECIFIED = 0;
+  TAINT_EFFECT_NO_SCHEDULE = 1 [(crossplane) = {
+    aws: "NO_SCHEDULE"
+    gcp: "NO_SCHEDULE"
+    azure: "NoSchedule"
+  }];
+  TAINT_EFFECT_PREFER_NO_SCHEDULE = 2 [(crossplane) = {
+    aws: "PREFER_NO_SCHEDULE"
+    gcp: "PREFER_NO_SCHEDULE"
+    azure: "PreferNoSchedule"
+  }];
+  TAINT_EFFECT_NO_EXECUTE = 3 [(crossplane) = {
+    aws: "NO_EXECUTE"
+    gcp: "NO_EXECUTE"
+    azure: "NoExecute"
+  }];
+}
+
+// Taint is a Kubernetes taint: {key, value, effect} in every provider.
+message Taint {
+  string key = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 253
+  }];
+  string value = 2 [(buf.validate.field).string.max_len = 63];
+  TaintEffect effect = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

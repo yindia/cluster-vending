@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/cluster.proto";
+import "google/protobuf/field_mask.proto";
+
+// ClusterService manages the lifecycle of tenant clusters.
+//
+// Every RPC is scoped by tenant_id. The server must authorize tenant_id
+// against the caller's identity; it is never trusted on its own.
+//
+// Mutations are asynchronous: they return as soon as the desired state is
+// recorded, and callers poll GetCluster until status.observed_generation
+// catches up with generation and status.state is RUNNING (or the cluster is
+// gone, after a delete).
+service ClusterService {
+  // Creates a cluster. Returns ALREADY_EXISTS if (tenant_id, cluster.id) is
+  // taken, unless request_id matches the original request. With
+  // spec.existing_cluster (temporary) it imports a cluster built outside the
+  // platform instead; see cluster_import.proto.
+  rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
+
+  // Returns one cluster, or NOT_FOUND.
+  rpc GetCluster(GetClusterRequest) returns (GetClusterResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs).
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Updates the mutable fields named in update_mask.
+  rpc UpdateCluster(UpdateClusterRequest) returns (UpdateClusterResponse);
+
+  // Removes the cluster, all its node pools, and every cloud resource the
+  // platform owns for it. A shared Network (network.network_id) is not deleted. For
+  // an imported cluster, spec.existing_cluster.policy decides whether the
+  // imported resources are deleted (FULL) or left in place.
+  rpc DeleteCluster(DeleteClusterRequest) returns (DeleteClusterResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+message CreateClusterRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // The cluster to create. id and spec are required; output-only fields are
+  // ignored.
+  Cluster cluster = 2 [(buf.validate.field).required = true];
+
+  // Optional idempotency key. Retrying with the same key returns the
+  // original result instead of ALREADY_EXISTS.
+  string request_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message CreateClusterResponse {
+  Cluster cluster = 1;
+}
+
+message GetClusterRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetClusterResponse {
+  Cluster cluster = 1;
+}
+
+message ListClustersRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Maximum results per page. Defaults to 50; values above 200 are coerced to
+  // 200.
+  int32 page_size = 2 [(buf.validate.field).int32.gte = 0];
+
+  // next_page_token from a previous call. All other fields must match the
+  // call that produced it.
+  string page_token = 3;
+}
+
+message ListClustersResponse {
+  repeated Cluster clusters = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+}
+
+message UpdateClusterRequest {
+  option (buf.validate.message).cel = {
+    id: "update_cluster.cluster_required"
+    message: "cluster is required"
+    expression: "has(this.cluster)"
+  };
+
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // The new state. cluster.id identifies the target; cluster.etag, when set,
+  // must match the current etag or the call fails with ABORTED.
+  //
+  // Field rules are deliberately skipped here: only the masked paths matter,
+  // so the server applies the mask to the stored cluster and validates the
+  // merged result.
+  Cluster cluster = 2 [(buf.validate.field).ignore = IGNORE_ALWAYS];
+
+  // Fields to update, relative to Cluster. In JSON (Connect / protojson)
+  // the paths are lowerCamelCase and comma-separated, e.g.
+  // "spec.controlPlane.kubernetesVersion,labels". Mutable paths:
+  //   display_name
+  //   labels
+  //   spec.tags
+  //   spec.control_plane.kubernetes_version
+  //   spec.control_plane.endpoint_access.public_access_cidrs
+  //   spec.control_plane.secrets_encryption.enabled   (false -> true only)
+  //   spec.default_node_pool.scaling_config.min_size
+  //   spec.default_node_pool.scaling_config.max_size
+  //   spec.default_node_pool.labels
+  //   spec.default_node_pool.taints
+  //   spec.default_node_pool.instance_types
+  //   spec.default_node_pool.capacity_type
+  //   spec.default_node_pool.disk_size_gb
+  //     (EKS cannot change these in place: a new node group is created and
+  //     the old one is deleted once the new one is ready)
+  //   spec.aws.addons                                 (the whole list)
+  //   spec.aws.enabled_cluster_log_types
+  //   spec.aws.upgrade_policy.support_type
+  //   spec.aws.access_config.authentication_mode  (API_AND_CONFIG_MAP -> API only)
+  //   spec.access.admin_principals
+  //   spec.existing_cluster.policy                    (temporary)
+  //   spec.existing_cluster.acknowledge_not_imported  (temporary)
+  //   spec.existing_cluster  cleared, to finish an import: needs policy FULL
+  //                          and status.import.phase CONVERGED (temporary)
+  // Any other path (region, network, instance types, ...) fails with
+  // INVALID_ARGUMENT. A listed path can still fail with FAILED_PRECONDITION
+  // when the cluster's current state does not allow the change.
+  google.protobuf.FieldMask update_mask = 3 [(buf.validate.field).required = true];
+}
+
+message UpdateClusterResponse {
+  Cluster cluster = 1;
+}
+
+message DeleteClusterRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // When set, must match the current etag or the call fails with ABORTED.
+  string etag = 3;
+}
+
+message DeleteClusterResponse {
+  // The cluster in DELETING state.
+  Cluster cluster = 1;
+}

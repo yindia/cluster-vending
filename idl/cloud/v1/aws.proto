@@ -1,0 +1,270 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/managed_resource.proto";
+import "cloud/v1/options.proto";
+
+// AWS-only settings. Everything with a cross-cloud equivalent lives in the
+// common ClusterSpec; this message only carries EKS knobs that have none.
+// Field names and nesting mirror provider-upjet-aws eks.aws.upbound.io/v1beta2
+// Cluster and NodeGroup `spec.forProvider`.
+message AwsClusterSpec {
+  // Cluster.accessConfig
+  AwsAccessConfig access_config = 1;
+
+  // Cluster.enabledClusterLogTypes. Empty disables control plane logging.
+  repeated AwsClusterLogType enabled_cluster_log_types = 2 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+
+  // Cluster.upgradePolicy
+  AwsUpgradePolicy upgrade_policy = 3;
+
+  // AWS-only settings for ClusterSpec.default_node_pool (NodeGroup).
+  AwsNodePoolSpec default_node_pool = 4;
+
+  // EKS add-ons (Addon), merged by name into the defaults every cluster
+  // gets: vpc-cni, coredns, kube-proxy, eks-pod-identity-agent and
+  // aws-ebs-csi-driver. An entry with a default's name changes its version
+  // or configuration; aws-efs-csi-driver, aws-fsx-csi-driver,
+  // aws-mountpoint-s3-csi-driver, snapshot-controller and the community
+  // add-ons cert-manager, metrics-server and kube-state-metrics can be
+  // added. Mutable.
+  //
+  // Versions: an empty version is the version EKS recommends for the
+  // cluster's Kubernetes version. It is resolved on create and again when
+  // kubernetes_version or addons change, so unpinned add-ons follow
+  // Kubernetes upgrades; a pinned version must be compatible with the
+  // Kubernetes version or the call fails. The stored spec (GetCluster)
+  // holds the resolved versions of every add-on.
+  //
+  // Setup: the platform creates what an add-on needs to run: for the CSI
+  // drivers an IAM role with the driver's policy and an EKS Pod Identity
+  // association for its service account (EKS creates the service account).
+  // vpc-cni's policy is on the node role. What the add-ons use is the
+  // tenant's: file systems (EFS, FSx) and S3 buckets are not created.
+  repeated AwsAddon addons = 5 [(buf.validate.field).repeated.max_items = 12];
+
+  option (buf.validate.message).cel = {
+    id: "addons.unique"
+    message: "addon names must be unique"
+    expression: "this.addons.all(a, this.addons.filter(b, b.name == a.name).size() == 1)"
+  };
+}
+
+// AwsAddon is one EKS add-on (Addon.spec.forProvider).
+message AwsAddon {
+  option (buf.validate.message).cel = {
+    id: "addon.s3_buckets"
+    message: "s3_bucket_names is required for aws-mountpoint-s3-csi-driver and only allowed there"
+    expression: "(this.name == 'aws-mountpoint-s3-csi-driver') == (size(this.s3_bucket_names) > 0)"
+  };
+
+  // EKS add-on name.
+  string name = 1 [(buf.validate.field).string = {
+    in: [
+      "vpc-cni",
+      "coredns",
+      "kube-proxy",
+      "eks-pod-identity-agent",
+      "aws-ebs-csi-driver",
+      "aws-efs-csi-driver",
+      "aws-fsx-csi-driver",
+      "aws-mountpoint-s3-csi-driver",
+      "snapshot-controller",
+      "cert-manager",
+      "metrics-server",
+      "kube-state-metrics"
+    ]
+  }];
+
+  // Addon.addonVersion, e.g. v2.1.4-eksbuild.1. Empty: the version EKS
+  // recommends for the cluster's Kubernetes version.
+  string version = 2 [(buf.validate.field).string = {
+    max_len: 64
+    pattern: "^(v[0-9][0-9A-Za-z.+-]*)?$"
+  }];
+
+  // Addon.configurationValues: JSON matching the add-on's configuration
+  // schema (aws eks describe-addon-configuration).
+  string configuration_values = 3 [(buf.validate.field).string.max_len = 65536];
+
+  // aws-mountpoint-s3-csi-driver only: the S3 buckets the driver may
+  // mount. The platform writes the driver's IAM policy for them (list,
+  // read, write, delete objects); the buckets are not created.
+  repeated string s3_bucket_names = 4 [(buf.validate.field).repeated = {
+    max_items: 50
+    unique: true
+    items: {
+      string: {pattern: "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"}
+    }
+  }];
+}
+
+// AwsAddonStatus is the observed state of one add-on.
+message AwsAddonStatus {
+  string name = 1;
+  // Addon.status.atProvider.addonVersion: the version running.
+  string version = 2;
+  // State of the Addon managed resource.
+  ManagedResourceState state = 3;
+  string message = 4;
+}
+
+// AwsNetworkSpec selects AWS for a Network. Everything with a cross-cloud
+// equivalent lives in NetworkSpec; no AWS-only network settings exist yet.
+message AwsNetworkSpec {}
+
+// AwsImportNetwork names the VPC to import. The server looks the rest up
+// once, read-only, with the tenant's credentials (the role its
+// ProviderConfig assumes):
+//   ec2:DescribeSubnets           subnet-id=<subnet_ids> (each must be in the VPC)
+//   ec2:DescribeRouteTables       vpc-id (routes, associations, main table)
+//   ec2:DescribeInternetGateways  attachment.vpc-id
+//   ec2:DescribeNatGateways       vpc-id (+ their EIP allocations)
+//   ec2:DescribeSecurityGroups    vpc-id, group-name=default
+//   ec2:DescribeNetworkAcls       vpc-id, default=true
+//   ec2:DescribeVpcEndpoints      vpc-id
+//   ec2:DescribeFlowLogs          resource-id=<vpc and subnet ids>
+//   logs:DescribeLogGroups / iam:GetRole  for flow log destinations
+// and creates an Observe-only Crossplane managed resource for each result.
+// Modelled (spec.layout): VPC, subnets, route tables + associations, the
+// 0.0.0.0/0 routes, internet gateway, NAT gateways + EIPs. The VPC's main
+// route table is a DefaultRouteTable (a RouteTable resource could never be
+// deleted, which would block DeleteNetwork).
+// CARRIED_OVER by the closure rule (import.proto):
+//   - every other route in an imported route table (peering, Transit
+//     Gateway, VPN, ...), as Route; the targets themselves are NOT_IMPORTED
+//   - VPC endpoints on imported subnets or route tables (VPCEndpoint)
+//   - flow logs on the VPC or its subnets (FlowLog), with their CloudWatch
+//     log group and IAM role
+//   - the default security group (DefaultSecurityGroup) and default network
+//     ACL (DefaultNetworkACL), rules inline: those kinds own them
+// Other security groups and NACLs in the VPC belong to whatever uses them
+// and are NOT_IMPORTED.
+// From then on status comes from their status.atProvider; the lookup does
+// not run again.
+message AwsImportNetwork {
+  // e.g. "vpc-0a1b2c3d4e5f60718".
+  string vpc_id = 1 [(buf.validate.field).string.pattern = "^vpc-[0-9a-f]{8,17}$"];
+
+  // Subnets to import, required: the caller says which subnets of the VPC
+  // the platform uses (public and private, classified by their route
+  // tables). Every one must be in vpc_id. The VPC's other subnets (e.g.
+  // database or intra subnets) are not looked at and stay with their
+  // current owner.
+  repeated string subnet_ids = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 32
+    unique: true
+    items: {
+      string: {pattern: "^subnet-[0-9a-f]{8,17}$"}
+    }
+  }];
+}
+
+// AwsAccessConfig mirrors Cluster.accessConfig.
+message AwsAccessConfig {
+  AwsAuthenticationMode authentication_mode = 1 [(buf.validate.field).enum.defined_only = true];
+}
+
+// AwsAuthenticationMode is Cluster.accessConfig.authenticationMode.
+enum AwsAuthenticationMode {
+  // Server default: API.
+  AWS_AUTHENTICATION_MODE_UNSPECIFIED = 0;
+  // EKS access entries only.
+  AWS_AUTHENTICATION_MODE_API = 1 [(crossplane) = {aws: "API"}];
+  // Access entries plus the aws-auth ConfigMap.
+  AWS_AUTHENTICATION_MODE_API_AND_CONFIG_MAP = 2 [(crossplane) = {aws: "API_AND_CONFIG_MAP"}];
+  // aws-auth ConfigMap only (legacy).
+  AWS_AUTHENTICATION_MODE_CONFIG_MAP = 3 [(crossplane) = {aws: "CONFIG_MAP"}];
+}
+
+// AwsClusterLogType is an entry of Cluster.enabledClusterLogTypes.
+enum AwsClusterLogType {
+  AWS_CLUSTER_LOG_TYPE_UNSPECIFIED = 0;
+  AWS_CLUSTER_LOG_TYPE_API = 1 [(crossplane) = {aws: "api"}];
+  AWS_CLUSTER_LOG_TYPE_AUDIT = 2 [(crossplane) = {aws: "audit"}];
+  AWS_CLUSTER_LOG_TYPE_AUTHENTICATOR = 3 [(crossplane) = {aws: "authenticator"}];
+  AWS_CLUSTER_LOG_TYPE_CONTROLLER_MANAGER = 4 [(crossplane) = {aws: "controllerManager"}];
+  AWS_CLUSTER_LOG_TYPE_SCHEDULER = 5 [(crossplane) = {aws: "scheduler"}];
+}
+
+// AwsUpgradePolicy mirrors Cluster.upgradePolicy.
+message AwsUpgradePolicy {
+  AwsSupportType support_type = 1 [(buf.validate.field).enum.defined_only = true];
+}
+
+// AwsSupportType is Cluster.upgradePolicy.supportType.
+enum AwsSupportType {
+  // Server default: STANDARD.
+  AWS_SUPPORT_TYPE_UNSPECIFIED = 0;
+  // Auto-upgraded at the end of standard support.
+  AWS_SUPPORT_TYPE_STANDARD = 1 [(crossplane) = {aws: "STANDARD"}];
+  // Enters paid extended support at the end of standard support.
+  AWS_SUPPORT_TYPE_EXTENDED = 2 [(crossplane) = {aws: "EXTENDED"}];
+}
+
+// AwsNodePoolSpec carries NodeGroup fields with no cross-cloud equivalent.
+message AwsNodePoolSpec {
+  // NodeGroup.amiType.
+  AwsAmiType ami_type = 1 [(buf.validate.field).enum.defined_only = true];
+}
+
+// AwsAmiType is NodeGroup.amiType: the EKS AMI types a new managed node
+// group can use (no end-of-support AL2, no CUSTOM / launch templates).
+// Values may be added over time.
+enum AwsAmiType {
+  // Server default: AL2023_X86_64_STANDARD.
+  AWS_AMI_TYPE_UNSPECIFIED = 0;
+  AWS_AMI_TYPE_AL2023_X86_64_STANDARD = 1 [(crossplane) = {aws: "AL2023_x86_64_STANDARD"}];
+  AWS_AMI_TYPE_AL2023_ARM_64_STANDARD = 2 [(crossplane) = {aws: "AL2023_ARM_64_STANDARD"}];
+  AWS_AMI_TYPE_AL2023_X86_64_NVIDIA = 3 [(crossplane) = {aws: "AL2023_x86_64_NVIDIA"}];
+  AWS_AMI_TYPE_AL2023_X86_64_NEURON = 4 [(crossplane) = {aws: "AL2023_x86_64_NEURON"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_X86_64 = 5 [(crossplane) = {aws: "BOTTLEROCKET_x86_64"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_ARM_64 = 6 [(crossplane) = {aws: "BOTTLEROCKET_ARM_64"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_X86_64_NVIDIA = 7 [(crossplane) = {aws: "BOTTLEROCKET_x86_64_NVIDIA"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_ARM_64_NVIDIA = 8 [(crossplane) = {aws: "BOTTLEROCKET_ARM_64_NVIDIA"}];
+  AWS_AMI_TYPE_AL2023_ARM_64_NVIDIA = 9 [(crossplane) = {aws: "AL2023_ARM_64_NVIDIA"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_X86_64_FIPS = 10 [(crossplane) = {aws: "BOTTLEROCKET_x86_64_FIPS"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_ARM_64_FIPS = 11 [(crossplane) = {aws: "BOTTLEROCKET_ARM_64_FIPS"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_X86_64_NVIDIA_FIPS = 12 [(crossplane) = {aws: "BOTTLEROCKET_x86_64_NVIDIA_FIPS"}];
+  AWS_AMI_TYPE_BOTTLEROCKET_ARM_64_NVIDIA_FIPS = 13 [(crossplane) = {aws: "BOTTLEROCKET_ARM_64_NVIDIA_FIPS"}];
+  AWS_AMI_TYPE_WINDOWS_CORE_2019_X86_64 = 14 [(crossplane) = {aws: "WINDOWS_CORE_2019_x86_64"}];
+  AWS_AMI_TYPE_WINDOWS_FULL_2019_X86_64 = 15 [(crossplane) = {aws: "WINDOWS_FULL_2019_x86_64"}];
+  AWS_AMI_TYPE_WINDOWS_CORE_2022_X86_64 = 16 [(crossplane) = {aws: "WINDOWS_CORE_2022_x86_64"}];
+  AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64 = 17 [(crossplane) = {aws: "WINDOWS_FULL_2022_x86_64"}];
+  AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64 = 18 [(crossplane) = {aws: "WINDOWS_CORE_2025_x86_64"}];
+  AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64 = 19 [(crossplane) = {aws: "WINDOWS_FULL_2025_x86_64"}];
+}
+
+// AwsNodePoolStatus is AWS-only observed state of a node pool.
+message AwsNodePoolStatus {
+  // NodeGroup.status.atProvider.arn
+  string node_group_arn = 1;
+  // Launch template of a carried-over node group, "<id>:<version>".
+  string launch_template = 2;
+}
+
+// AwsClusterStatus is AWS-only observed state, read from
+// status.atProvider of the Crossplane managed resources.
+message AwsClusterStatus {
+  // Cluster.status.atProvider.arn
+  string cluster_arn = 1;
+  // Cluster.status.atProvider.vpcConfig.clusterSecurityGroupId
+  string cluster_security_group_id = 2;
+  // Cluster.status.atProvider.platformVersion
+  string platform_version = 3;
+  // NodeGroup.status.atProvider.arn
+  string node_group_arn = 4;
+  // Every add-on with the version it runs.
+  repeated AwsAddonStatus addons = 5;
+}

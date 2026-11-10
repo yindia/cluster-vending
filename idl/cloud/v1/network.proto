@@ -1,0 +1,384 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/aws.proto";
+import "cloud/v1/conditions.proto";
+import "cloud/v1/import.proto";
+import "cloud/v1/managed_resource.proto";
+import "cloud/v1/options.proto";
+import "google/protobuf/timestamp.proto";
+
+// Provider-neutral network contract. The platform is the source of truth
+// for every network it serves: networks are created by it (CreateNetwork) or
+// imported and then taken over (ImportNetwork + TakeOverNetwork). Clusters
+// only reference a network by id. There is no read-only "bring your own
+// network".
+//
+// Crossplane mapping:
+//   AWS   ec2.aws.m.upbound.io       VPC, Subnet, InternetGateway, NATGateway,
+//                                    EIP, RouteTable, RouteTableAssociation, Route
+//   GCP   compute.gcp.m.upbound.io   Network, Subnetwork, Router, RouterNAT,
+//                                    Address
+//   Azure network.azure.m.upbound.io VirtualNetwork, Subnet, NATGateway,
+//                                    PublicIP, SubnetNATGatewayAssociation
+
+// Network is a tenant network (AWS VPC, GCP VPC network, Azure VNet) with its
+// subnets, NAT and routing. One network can serve several clusters; it cannot
+// be deleted while a cluster uses it.
+message Network {
+  // Output only: set by the server from the request's tenant_id.
+  string tenant_id = 1;
+
+  // Output only. Assigned by the server on create (UUID); every other call
+  // and ClusterNetwork.network_id refer to the network by it.
+  string id = 2;
+
+  // Name chosen by the client: DNS-label safe, not unique. Prefix of the
+  // network's cloud and Kubernetes resource names
+  // ("<name>-<hash8>-<suffix>"). Immutable.
+  string name = 11 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$"
+  }];
+
+  string display_name = 3 [(buf.validate.field).string.max_len = 128];
+
+  // API-level labels, same rules as Cluster.labels.
+  map<string, string> labels = 4 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 63
+        pattern: "^[a-z0-9]([a-z0-9_.-]{0,61}[a-z0-9])?$"
+      }
+    }
+    values: {
+      string: {max_len: 63}
+    }
+  }];
+
+  NetworkSpec spec = 5 [(buf.validate.field).required = true];
+
+  // Output only.
+  NetworkStatus status = 6;
+
+  // Output only.
+  int64 generation = 7;
+  // Output only. Optimistic concurrency token.
+  string etag = 8;
+  // Output only.
+  google.protobuf.Timestamp create_time = 9;
+  // Output only.
+  google.protobuf.Timestamp update_time = 10;
+}
+
+// NetworkSpec is the desired state of a Network resource.
+message NetworkSpec {
+  // AWS constraints on the layout.
+  option (buf.validate.message).cel = {
+    id: "aws.region"
+    message: "region must be an AWS region, e.g. us-east-1"
+    expression: "!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.subnets_zonal"
+    message: "AWS subnets are zonal: every subnet needs a zone_id"
+    expression: "!has(this.aws) || this.layout.subnets.all(s, s.zone_id.matches('^[a-z]+[0-9]-az[0-9]+$'))"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.private_subnets_two_zones"
+    message: "EKS needs PRIVATE subnets in at least two availability zones"
+    expression: "!has(this.aws) || size(this.layout.subnets) == 0 || this.layout.subnets.exists(a, a.role == 2 && this.layout.subnets.exists(b, b.role == 2 && b.zone_id != a.zone_id))"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.public_subnet_required"
+    message: "AWS subnets, when set, must include at least one PUBLIC subnet (NAT and internet-facing load balancers)"
+    expression: "!has(this.aws) || size(this.layout.subnets) == 0 || this.layout.subnets.exists(s, s.role == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.per_zone_nat"
+    message: "PER_ZONE NAT needs a PUBLIC subnet in every zone that has a PRIVATE subnet"
+    expression: "!has(this.aws) || this.layout.nat_gateway_mode != 2 || this.layout.subnets.filter(s, s.role == 2).all(p, this.layout.subnets.exists(q, q.role == 1 && q.zone_id == p.zone_id))"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.tag_reserved_prefix"
+    message: "AWS tag keys must not start with 'aws:'"
+    expression: "!has(this.aws) || this.tags.all(k, !k.lowerAscii().startsWith('aws:'))"
+  };
+  option (buf.validate.message).cel = {
+    id: "public_subnets_aws_only"
+    message: "only AWS has PUBLIC subnets; GCP and Azure load balancers need none"
+    expression: "has(this.aws) || this.layout.subnets.all(s, s.role != 1)"
+  };
+
+  // Region of the network. Immutable. Same mapping as ClusterSpec.region.
+  string region = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9-]+$"
+  }];
+
+  // Address space, subnets and NAT.
+  NetworkLayout layout = 2 [(buf.validate.field).required = true];
+
+  // The tenant's cloud account the network lives in: the bootstrap ID
+  // (CloudAccount.id) returned by TenantService.BootstrapTenant. Its
+  // provider must be the network's. Immutable. Clusters run in their
+  // network's account.
+  string bootstrap_id = 4 [(buf.validate.field).string.uuid = true];
+
+  // Applied to every cloud resource of the network. Same rules as
+  // ClusterSpec.tags.
+  map<string, string> tags = 3 [(buf.validate.field).map = {
+    max_pairs: 40
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 128
+      }
+    }
+    values: {
+      string: {max_len: 256}
+    }
+  }];
+
+  // The cloud the network lives in. Must match the provider of every
+  // cluster that uses it.
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+
+    AwsNetworkSpec aws = 10;
+    // gcp = 11, azure = 12, as in ClusterSpec.provider.
+  }
+}
+
+// ClusterNetwork is where a cluster runs: a reference to a platform Network
+// plus the cluster's own pod and service ranges. The network's layout is
+// never repeated in a cluster request.
+message ClusterNetwork {
+  // Network.id (server-assigned UUID) of a Network in the same tenant
+  // (CreateNetwork, or ImportNetwork + TakeOverNetwork), possibly shared
+  // with other clusters. Same region and provider as the cluster. The
+  // cluster uses the network's PRIVATE subnets in zone_ids. Immutable.
+  string network_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // Zones of the network the cluster uses (its PRIVATE subnets in these
+  // zones host the control-plane interfaces and nodes). Empty means every
+  // zone of the network. Each must be a zone of the network (checked by the
+  // server). Immutable.
+  //   AWS   zone IDs, at least two (EKS); Cluster.vpcConfig.subnetIds
+  //   GCP   Cluster.nodeLocations
+  //   Azure node pool zones
+  repeated string zone_ids = 5 [(buf.validate.field).repeated = {
+    max_items: 6
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 64
+        pattern: "^[a-z0-9-]+$"
+      }
+    }
+  }];
+
+  // IPv4 range for pod IPs, for providers that give pods their own range.
+  // Immutable, per cluster. Defaults to a server-chosen range that does not
+  // overlap the network.
+  //   AWS   must be empty: the VPC CNI gives pods IPs from the subnets
+  //   GCP   Subnetwork.secondaryIpRange "pods" (+ Cluster.ipAllocationPolicy)
+  //   Azure networkProfile.podCidr (Azure CNI Overlay)
+  string pod_cidr = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.ipv4_prefix = true
+  ];
+
+  // IPv4 range for Kubernetes Service IPs. Immutable, per cluster. Defaults
+  // to a server-chosen range that does not overlap the network.
+  //   AWS   Cluster.kubernetesNetworkConfig.serviceIpv4Cidr (/12 to /24)
+  //   GCP   Subnetwork.secondaryIpRange "services"
+  //   Azure networkProfile.serviceCidr (dnsServiceIp = its .10 address)
+  string service_cidr = 4 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.ipv4_prefix = true
+  ];
+}
+
+// SubnetRole decides routing and placement for a subnet.
+enum SubnetRole {
+  SUBNET_ROLE_UNSPECIFIED = 0;
+  // Routed to the internet gateway; hosts NAT gateways and internet-facing
+  // load balancers (AWS tag kubernetes.io/role/elb=1). AWS only
+  // (Subnet.mapPublicIpOnLaunch = true): GCP and Azure load balancers need
+  // no public subnet.
+  SUBNET_ROLE_PUBLIC = 1;
+  // Egress through NAT only; hosts nodes, control-plane interfaces and
+  // internal load balancers (AWS tag kubernetes.io/role/internal-elb=1).
+  SUBNET_ROLE_PRIVATE = 2;
+}
+
+// NatGatewayMode controls NAT redundancy. The crossplane option is AWS
+// NATGateway.availabilityMode. Elsewhere the mode decides how many NAT
+// resources are created:
+//   GCP   Cloud NAT (RouterNAT) is always regional: only REGIONAL is valid.
+//   Azure NATGateway is zonal: SINGLE or PER_ZONE.
+enum NatGatewayMode {
+  // Server default: SINGLE.
+  NAT_GATEWAY_MODE_UNSPECIFIED = 0;
+
+  // One zonal NAT gateway. Cheapest; private egress depends on one zone.
+  NAT_GATEWAY_MODE_SINGLE = 1 [(crossplane) = {aws: "zonal"}];
+
+  // One zonal NAT gateway per zone; private subnets route to their own
+  // zone's gateway. Requires a public subnet in every zone that has a
+  // private subnet.
+  NAT_GATEWAY_MODE_PER_ZONE = 2 [(crossplane) = {aws: "zonal"}];
+
+  // One regional NAT spanning all zones.
+  NAT_GATEWAY_MODE_REGIONAL = 3 [(crossplane) = {aws: "regional"}];
+}
+
+// NetworkLayout is the address space, subnets and NAT of a Network.
+message NetworkLayout {
+  option (buf.validate.message).cel = {
+    id: "network_layout.zonal_subnets_or_zone_count"
+    message: "zonal subnets already define the zones; availability_zone_count only combines with regional subnets (no zone_id)"
+    expression: "size(this.subnets) == 0 || this.availability_zone_count == 0u || this.subnets.all(s, s.zone_id == '')"
+  };
+  option (buf.validate.message).cel = {
+    id: "network_layout.unique_subnet_cidrs"
+    message: "subnet cidr_block values must be unique"
+    expression: "this.subnets.map(s, s.cidr_block).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "network_layout.private_subnet_required"
+    message: "subnets, when set, must include at least one PRIVATE subnet"
+    expression: "size(this.subnets) == 0 || this.subnets.exists(s, s.role == 2)"
+  };
+
+  // Network IPv4 range, /16 to /24. Defaults to "10.0.0.0/16".
+  //   AWS   VPC.cidrBlock
+  //   GCP   no network-level range (custom-mode Network); subnets are carved
+  //         from this block
+  //   Azure VirtualNetwork.addressSpace[0]
+  string cidr_block = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      ipv4_prefix: true
+      pattern: "/(1[6-9]|2[0-4])$"
+    }
+  ];
+
+  // Explicit subnet layout. When empty, the server carves the default layout
+  // out of cidr_block:
+  //   AWS   one PUBLIC and one PRIVATE subnet per zone
+  //   GCP   one regional PRIVATE Subnetwork (privateIpGoogleAccess)
+  //   Azure one PRIVATE node Subnet (defaultOutboundAccessEnabled = false)
+  // CIDRs must lie inside cidr_block and not overlap (checked by the server).
+  repeated Subnet subnets = 2 [(buf.validate.field).repeated.max_items = 32];
+
+  // Number of zones the network spreads across. Defaults to 3.
+  //   AWS   one Subnet pair per zone. With explicit subnets the zones are
+  //         the subnets' zones, so this must be unset.
+  //   GCP   Cluster.nodeLocations (regional subnets: combines with
+  //         explicit subnets)
+  //   Azure node pool zones (regional subnets: combines with explicit
+  //         subnets)
+  uint32 availability_zone_count = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).uint32 = {
+      gte: 2
+      lte: 6
+    }
+  ];
+
+  NatGatewayMode nat_gateway_mode = 4 [(buf.validate.field).enum.defined_only = true];
+}
+
+// Subnet is one subnet of a managed network.
+message Subnet {
+  SubnetRole role = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  //   AWS   Subnet.cidrBlock
+  //   GCP   Subnetwork.ipCidrRange
+  //   Azure Subnet.addressPrefixes[0]
+  string cidr_block = 2 [(buf.validate.field).string.ipv4_prefix = true];
+
+  // Zone the subnet lives in, as a zone ID: the same physical zone in every
+  // account, unlike zone names (AWS "us-east-1a" maps to a different zone
+  // per account). Required on providers with zonal subnets (AWS:
+  // Subnet.availabilityZoneId, e.g. "use1-az1"; the known IDs are in
+  // pkg/constant/aws); must be empty on providers with regional subnets
+  // (GCP, Azure).
+  string zone_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 64
+      pattern: "^[a-z0-9-]+$"
+    }
+  ];
+}
+
+// NetworkState is the coarse lifecycle state of a network.
+enum NetworkState {
+  NETWORK_STATE_UNSPECIFIED = 0;
+  // Being created.
+  NETWORK_STATE_PROVISIONING = 1;
+  // Imported and read-only (Observe); waiting for TakeOverNetwork. See
+  // status.import for the plan.
+  NETWORK_STATE_IMPORTED = 2;
+  // Owned by the platform and matching the spec.
+  NETWORK_STATE_READY = 3;
+  // A spec change, or a takeover, is being applied.
+  NETWORK_STATE_UPDATING = 4;
+  NETWORK_STATE_DELETING = 5;
+  NETWORK_STATE_FAILED = 6;
+}
+
+// NetworkStatus is the observed state of a Network resource.
+message NetworkStatus {
+  NetworkState state = 1;
+  string message = 2;
+  int64 observed_generation = 3;
+  repeated Condition conditions = 4;
+  // Cloud IDs and egress IPs, read from the managed resources'
+  // status.atProvider.
+  NetworkResources resources = 5;
+  // ids of the clusters using this network. DeleteNetwork fails with
+  // FAILED_PRECONDITION while this is not empty.
+  repeated string cluster_ids = 6;
+  // Set for imported networks: the plan from ImportNetwork, kept as a
+  // record after the takeover.
+  ImportStatus import = 7;
+  // Resources carried over from an import (disposition CARRIED_OVER): owned
+  // with the network and deleted with it, but not editable through the API.
+  // Empty for networks the platform created.
+  repeated ImportedResource carried_over = 8;
+  // Every managed resource of the network (VPC, subnets, NAT gateways,
+  // routes, ...) with its Kubernetes name, cloud ID and state, in creation
+  // order. state is READY once all of them are READY, FAILED when one is
+  // FAILED.
+  repeated ManagedResource managed_resources = 9;
+}
+
+// NetworkResources lists the cloud resources of a network, all owned by the
+// platform. Also reported per cluster in ClusterStatus.network.
+message NetworkResources {
+  // AWS VPC ID, GCP network self link, Azure VirtualNetwork ID.
+  string cloud_network_id = 1;
+  repeated string public_subnet_ids = 2;
+  repeated string private_subnet_ids = 3;
+  repeated string nat_gateway_ids = 4;
+  // Public IPv4 addresses egress leaves through, for whitelisting
+  // downstream.
+  //   AWS   EIP.status.atProvider.publicIp
+  //   GCP   Address.status.atProvider.address
+  //   Azure PublicIP.status.atProvider.ipAddress
+  repeated string egress_ips = 5;
+}

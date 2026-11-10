@@ -1,0 +1,14 @@
+# Settings for `make run`: the server against the kind cluster from
+# hack/start.sh, with a local SQLite database. Flags and CV_* environment
+# variables win over this file.
+context: kind-cluster-vending
+log-format: text
+log-level: debug
+http-addr: 127.0.0.1:8080
+aws:
+  # Placeholders: nothing calls AWS with these yet.
+  management-account-id: "111122223333"
+  management-role-arn: arn:aws:iam::111122223333:role/crossplane-provider-aws
+database:
+  driver: sqlite
+  dsn: bin/cluster-vending.db

@@ -1,0 +1,66 @@
+# golangci-lint v2. Run with `make lint`.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - exhaustive
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags: [diagnostic, performance]
+      disabled-checks: [hugeParam, rangeValCopy]
+    gosec:
+      excludes:
+        - G304 # reading files named by the operator (config, kubeconfig) is the point
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true # stub RPC methods are documented by the proto
+        - name: package-comments
+        - name: error-strings
+        - name: error-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: unused-parameter
+          disabled: true
+  exclusions:
+    generated: strict
+    paths:
+      - pkg/gen
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, unparam, prealloc]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/yindia/cluster-vending
+  exclusions:
+    paths:
+      - pkg/gen

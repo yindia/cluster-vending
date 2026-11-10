@@ -1,0 +1,586 @@
+package network
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"testing"
+
+	"connectrpc.com/connect/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+	"github.com/google/uuid"
+	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"github.com/yindia/cluster-vending/pkg/crossplane"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database"
+	"github.com/yindia/cluster-vending/pkg/database/implementation"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/server/service"
+)
+
+const (
+	tenant    = "acme"
+	unknownID = "0190f1a2-0000-7000-8000-00000000dead"
+)
+
+type fixture struct {
+	svc       *NetworkService
+	kube      client.Client
+	store     repository.Store
+	accountID string // bootstrap ID of the tenant's AWS account
+}
+
+// newFixture is a NetworkService on a SQLite store (temporary file) with a
+// bootstrapped AWS account, and a fake Kubernetes client.
+func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
+	t.Helper()
+	db, err := database.Open(t.Context(), database.Config{
+		Driver: database.DriverSQLite, DSN: filepath.Join(t.TempDir(), "t.db"), MaxOpenConns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close(db) })
+	if err := database.Migrate(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	store := implementation.New(db)
+	ctx := t.Context()
+	if err := store.Tenants().Create(ctx, &model.Tenant{ID: tenant}); err != nil {
+		t.Fatal(err)
+	}
+	account := &model.CloudAccount{TenantID: tenant, Provider: model.ProviderAWS, AccountID: "444455556666",
+		ProviderConfigName: "aws-0a1b2c3d", Namespace: "tenant-acme",
+		Identity: "arn:aws:iam::444455556666:role/provisioner"}
+	if err := store.Tenants().PutCloudAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Tenants().GetCloudAccount(ctx, tenant, model.ProviderAWS, "444455556666")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := fakeKube(t, funcs...)
+	return fixture{svc: NewNetworkService(service.Deps{Store: store, Kube: k}), kube: k, store: store, accountID: stored.ID}
+}
+
+func fakeKube(t *testing.T, funcs ...interceptor.Funcs) client.Client {
+	t.Helper()
+	scheme, err := kube.Scheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(
+		&awsec2.VPC{}, &awsec2.Subnet{}, &awsec2.NATGateway{}, &awsec2.EIP{}, &awsec2.InternetGateway{},
+		&awsec2.RouteTable{}, &awsec2.Route{}, &awsec2.RouteTableAssociation{})
+	for _, fn := range funcs {
+		b = b.WithInterceptorFuncs(fn)
+	}
+	return b.Build()
+}
+
+func (f fixture) create(t *testing.T, name string, layout *cloudv1.NetworkLayout) *cloudv1.Network {
+	t.Helper()
+	res, err := f.svc.CreateNetwork(t.Context(), f.request(name, layout))
+	if err != nil {
+		t.Fatalf("CreateNetwork: %v", err)
+	}
+	return res.GetNetwork()
+}
+
+func (f fixture) request(name string, layout *cloudv1.NetworkLayout) *cloudv1.CreateNetworkRequest {
+	if layout == nil {
+		layout = &cloudv1.NetworkLayout{}
+	}
+	return &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
+		Name: name, DisplayName: "Production",
+		Spec: &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: f.accountID, Layout: layout,
+			Tags: map[string]string{"team": "platform"}, Provider: &cloudv1.NetworkSpec_Aws{Aws: &cloudv1.AwsNetworkSpec{}}},
+	}}
+}
+
+// key names one managed resource of n: "<name>-<hash8>-<suffix>".
+func key(n *cloudv1.Network, suffix string) client.ObjectKey {
+	return client.ObjectKey{Namespace: "tenant-acme",
+		Name: crossplaneaws.NetworkPrefix(tenant, n.GetId(), n.GetName()) + "-" + suffix}
+}
+
+// count returns how many objects of list's kind belong to the network (by
+// id).
+func (f fixture) count(t *testing.T, list client.ObjectList, network string) int {
+	t.Helper()
+	if err := f.kube.List(t.Context(), list, client.InNamespace("tenant-acme"),
+		client.MatchingLabels{crossplane.LabelNetwork: network}); err != nil {
+		t.Fatal(err)
+	}
+	return meta.LenList(list)
+}
+
+func TestCreateNetworkDefaultLayout(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+
+	if _, err := uuid.Parse(n.GetId()); err != nil || n.GetName() != "prod" {
+		t.Errorf("id, name = %q, %q: want a server-assigned UUID and the given name", n.GetId(), n.GetName())
+	}
+	if n.GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_PROVISIONING {
+		t.Errorf("state = %s", n.GetStatus().GetState())
+	}
+	if l := n.GetSpec().GetLayout(); l.GetCidrBlock() != "10.0.0.0/16" || len(l.GetSubnets()) != 6 ||
+		l.GetNatGatewayMode() != cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE {
+		t.Errorf("stored layout = %v, want the resolved default", l)
+	}
+	for list, want := range map[client.ObjectList]int{
+		&awsec2.VPCList{}: 1, &awsec2.InternetGatewayList{}: 1, &awsec2.SubnetList{}: 6,
+		&awsec2.EIPList{}: 1, &awsec2.NATGatewayList{}: 1, &awsec2.RouteTableList{}: 2,
+		&awsec2.RouteList{}: 2, &awsec2.RouteTableAssociationList{}: 6,
+	} {
+		if got := f.count(t, list, n.GetId()); got != want {
+			t.Errorf("%T: %d objects, want %d", list, got, want)
+		}
+	}
+
+	vpc := &awsec2.VPC{}
+	if err := f.kube.Get(t.Context(), key(n, "vpc"), vpc); err != nil {
+		t.Fatal(err)
+	}
+	if ref := vpc.Spec.ProviderConfigReference; ref == nil || ref.Name != "aws-0a1b2c3d" {
+		t.Errorf("providerConfigRef = %+v", ref)
+	}
+	if *vpc.Spec.ForProvider.CidrBlock != "10.0.0.0/16" || *vpc.Spec.ForProvider.Tags["team"] != "platform" ||
+		*vpc.Spec.ForProvider.Tags["cluster-vending.io/network"] != n.GetId() ||
+		*vpc.Spec.ForProvider.Tags["cluster-vending.io/network-name"] != "prod" {
+		t.Errorf("vpc = %+v", vpc.Spec.ForProvider)
+	}
+	sub := &awsec2.Subnet{}
+	if err := f.kube.Get(t.Context(), key(n, "private-use1-az2"), sub); err != nil {
+		t.Fatal(err)
+	}
+	if *sub.Spec.ForProvider.CidrBlock != "10.0.32.0/19" || sub.Spec.ForProvider.VPCIDRef.Name != key(n, "vpc").Name ||
+		*sub.Spec.ForProvider.Tags["kubernetes.io/role/internal-elb"] != "1" || sub.Labels[crossplane.LabelZone] != "use1-az2" {
+		t.Errorf("private subnet = %+v %v", sub.Spec.ForProvider, sub.Labels)
+	}
+}
+
+func TestCreateNetworkPerZoneNAT(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "ha", &cloudv1.NetworkLayout{NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE})
+	if got := f.count(t, &awsec2.NATGatewayList{}, n.GetId()); got != 3 {
+		t.Errorf("NAT gateways = %d, want 3", got)
+	}
+	route := &awsec2.Route{}
+	if err := f.kube.Get(t.Context(), key(n, "route-private-use1-az3"), route); err != nil {
+		t.Fatal(err)
+	}
+	if route.Spec.ForProvider.NATGatewayIDRef.Name != key(n, "nat-use1-az3").Name {
+		t.Errorf("zone 3 routes through %s", route.Spec.ForProvider.NATGatewayIDRef.Name)
+	}
+}
+
+// markReady sets Ready / Synced and the cloud IDs, as the provider would.
+func (f fixture) markReady(t *testing.T, syncError string) {
+	t.Helper()
+	ctx := t.Context()
+	for _, list := range []client.ObjectList{&awsec2.VPCList{}, &awsec2.SubnetList{}, &awsec2.NATGatewayList{}, &awsec2.EIPList{}} {
+		if err := f.kube.List(ctx, list); err != nil {
+			t.Fatal(err)
+		}
+		items, _ := meta.ExtractList(list)
+		for _, item := range items {
+			obj := item.(client.Object)
+			switch m := obj.(type) {
+			case *awsec2.VPC:
+				m.Status.AtProvider.ID = ptr.To("vpc-1")
+				m.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+			case *awsec2.Subnet:
+				m.Status.AtProvider.ID = ptr.To("subnet-" + m.Labels[crossplane.LabelSubnetRole] + "-" + m.Labels[crossplane.LabelZone])
+				m.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+			case *awsec2.NATGateway:
+				m.Status.AtProvider.ID = ptr.To("nat-1")
+				m.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+			case *awsec2.EIP:
+				m.Status.AtProvider.PublicIP = ptr.To("3.3.3.3")
+				m.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+				if syncError != "" {
+					m.SetConditions(xpv2.ReconcileError(errors.New(syncError)))
+				}
+			}
+			if err := f.kube.Status().Update(ctx, obj); err != nil {
+				t.Fatal(err)
+			}
+			// The provider sets the cloud ID as the external name.
+			if err := f.kube.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+				t.Fatal(err)
+			}
+			obj.SetAnnotations(map[string]string{"crossplane.io/external-name": "ext-" + obj.GetName()})
+			if err := f.kube.Update(ctx, obj); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestGetNetworkReportsResources(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	f.markReady(t, "")
+
+	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := res.GetNetwork().GetStatus()
+	// Only VPC, subnets, NAT and EIP were marked ready: the rest is pending.
+	if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_PROVISIONING {
+		t.Errorf("state = %s (%s)", st.GetState(), st.GetMessage())
+	}
+	r := st.GetResources()
+	if r.GetCloudNetworkId() != "vpc-1" || len(r.GetPublicSubnetIds()) != 3 || len(r.GetPrivateSubnetIds()) != 3 ||
+		r.GetNatGatewayIds()[0] != "nat-1" || r.GetEgressIps()[0] != "3.3.3.3" {
+		t.Errorf("resources = %v", r)
+	}
+	if r.GetPrivateSubnetIds()[0] != "subnet-private-use1-az1" {
+		t.Errorf("private subnets = %v", r.GetPrivateSubnetIds())
+	}
+
+	views := st.GetManagedResources()
+	if len(views) != 20 {
+		t.Fatalf("managed resources = %d, want 20", len(views))
+	}
+	first := views[0]
+	if first.GetKind() != "VPC" || first.GetName() != key(res.GetNetwork(), "vpc").Name ||
+		first.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
+		first.GetExternalName() != "ext-"+first.GetName() {
+		t.Errorf("first resource = %v, want the VPC, ready, with its cloud ID", first)
+	}
+	byState := map[cloudv1.ManagedResourceState]int{}
+	for _, v := range views {
+		byState[v.GetState()]++
+		if v.GetKind() == "Subnet" && (v.GetZoneId() == "" || v.GetRole() == "") {
+			t.Errorf("subnet %s without zone or role", v.GetName())
+		}
+	}
+	// VPC, 6 subnets, NAT and EIP are ready; the rest are still creating.
+	if byState[cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY] != 9 {
+		t.Errorf("states = %v", byState)
+	}
+}
+
+func TestNetworkStateFromResources(t *testing.T) {
+	mr := func(state cloudv1.ManagedResourceState, msg string) *cloudv1.ManagedResource {
+		return &cloudv1.ManagedResource{Kind: "Route", Name: "r", State: state, Message: msg}
+	}
+	ready := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY, "")
+	waiting := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, "cannot resolve references")
+	failed := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, "UnauthorizedOperation")
+	missing := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING, "not found")
+	live := &model.Network{Resource: model.Resource{State: stateProvisioning}}
+	for name, tc := range map[string]struct {
+		row   *model.Network
+		views []*cloudv1.ManagedResource
+		want  cloudv1.NetworkState
+	}{
+		"all ready":             {live, []*cloudv1.ManagedResource{ready, ready}, cloudv1.NetworkState_NETWORK_STATE_READY},
+		"waiting is not failed": {live, []*cloudv1.ManagedResource{ready, waiting}, cloudv1.NetworkState_NETWORK_STATE_PROVISIONING},
+		"one failed":            {live, []*cloudv1.ManagedResource{ready, waiting, failed}, cloudv1.NetworkState_NETWORK_STATE_FAILED},
+		"one missing":           {live, []*cloudv1.ManagedResource{ready, missing}, cloudv1.NetworkState_NETWORK_STATE_FAILED},
+		"nothing yet":           {live, nil, cloudv1.NetworkState_NETWORK_STATE_PROVISIONING},
+		"deleting":              {&model.Network{Resource: model.Resource{State: stateDeleting}}, []*cloudv1.ManagedResource{failed}, cloudv1.NetworkState_NETWORK_STATE_DELETING},
+	} {
+		if got := status(tc.row, tc.views, nil, nil); got.GetState() != tc.want {
+			t.Errorf("%s: state = %s, want %s", name, got.GetState(), tc.want)
+		}
+	}
+	st := status(live, []*cloudv1.ManagedResource{ready, waiting, failed}, nil, nil)
+	if st.GetMessage() != "Route r: UnauthorizedOperation" || len(st.GetConditions()) != 2 || len(st.GetManagedResources()) != 3 {
+		t.Errorf("failed status = %v", st)
+	}
+	if st := status(live, []*cloudv1.ManagedResource{ready, waiting}, nil, nil); st.GetMessage() != "1 of 2 resources ready, 1 waiting on others" {
+		t.Errorf("progress = %q", st.GetMessage())
+	}
+}
+
+func TestCreateNetworkErrors(t *testing.T) {
+	f := newFixture(t)
+	f.create(t, "prod", nil)
+	ctx := t.Context()
+
+	other := f.request("prod2", nil)
+	other.Network.Spec.BootstrapId = "0b1f6b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c"
+	regional := f.request("prod3", &cloudv1.NetworkLayout{NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_REGIONAL})
+	badRegion := f.request("prod4", nil)
+	badRegion.Network.Spec.Region = "us-north-9"
+	outside := f.request("prod5", &cloudv1.NetworkLayout{CidrBlock: "10.0.0.0/16", Subnets: []*cloudv1.Subnet{
+		{Role: cloudv1.SubnetRole_SUBNET_ROLE_PUBLIC, CidrBlock: "10.9.0.0/24", ZoneId: "use1-az1"},
+		{Role: cloudv1.SubnetRole_SUBNET_ROLE_PRIVATE, CidrBlock: "10.0.16.0/20", ZoneId: "use1-az1"},
+		{Role: cloudv1.SubnetRole_SUBNET_ROLE_PRIVATE, CidrBlock: "10.0.32.0/20", ZoneId: "use1-az2"},
+	}})
+	for name, tc := range map[string]struct {
+		req  *cloudv1.CreateNetworkRequest
+		want connect.Code
+	}{
+		"account not bootstrapped": {other, connect.CodeFailedPrecondition},
+		"regional NAT":             {regional, connect.CodeUnimplemented},
+		"unknown region":           {badRegion, connect.CodeInvalidArgument},
+		"subnet outside cidr":      {outside, connect.CodeInvalidArgument},
+		"invalid request":          {&cloudv1.CreateNetworkRequest{TenantId: tenant}, connect.CodeInvalidArgument},
+	} {
+		if _, err := f.svc.CreateNetwork(ctx, tc.req); connect.CodeOf(err) != tc.want {
+			t.Errorf("%s: %v, want %s", name, err, tc.want)
+		}
+	}
+}
+
+func TestNetworkNamesNeedNotBeUnique(t *testing.T) {
+	f := newFixture(t)
+	a, b := f.create(t, "shared", nil), f.create(t, "shared", nil)
+	if a.GetId() == b.GetId() || key(a, "vpc") == key(b, "vpc") {
+		t.Fatalf("two networks named shared share id or resources: %s %s", a.GetId(), b.GetId())
+	}
+	if f.count(t, &awsec2.VPCList{}, a.GetId()) != 1 || f.count(t, &awsec2.VPCList{}, b.GetId()) != 1 {
+		t.Error("each network must have its own VPC")
+	}
+}
+
+func TestCreateNetworkStoresInput(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil) // layout {}: defaults
+	row, err := f.store.Networks().Get(t.Context(), tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := &cloudv1.Network{}
+	if err := protojson.Unmarshal(row.Input, input); err != nil {
+		t.Fatal(err)
+	}
+	if input.GetName() != "prod" || len(input.GetSpec().GetLayout().GetSubnets()) != 0 {
+		t.Errorf("input = %v, want the request as sent (no resolved subnets)", input)
+	}
+	if len(n.GetSpec().GetLayout().GetSubnets()) != 6 {
+		t.Errorf("spec must hold the resolved layout")
+	}
+}
+
+func TestUpdateNetworkUpdatesInput(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil) // layout {}: defaults
+	upd := &cloudv1.Network{Id: n.GetId(), DisplayName: "Prod", Labels: map[string]string{"tier": "gold"},
+		Spec: &cloudv1.NetworkSpec{Tags: map[string]string{"team": "network"}}}
+	if _, err := f.svc.UpdateNetwork(t.Context(), &cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: upd,
+		UpdateMask: mask("display_name", "labels", "spec.tags")}); err != nil {
+		t.Fatalf("UpdateNetwork: %v", err)
+	}
+	row, err := f.store.Networks().Get(t.Context(), tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := &cloudv1.Network{}
+	if err := protojson.Unmarshal(row.Input, input); err != nil {
+		t.Fatal(err)
+	}
+	if input.GetDisplayName() != "Prod" || input.GetLabels()["tier"] != "gold" || input.GetSpec().GetTags()["team"] != "network" {
+		t.Errorf("input = %v, want the updated fields", input)
+	}
+	if input.GetName() != "prod" || input.GetSpec().GetRegion() == "" || len(input.GetSpec().GetLayout().GetSubnets()) != 0 {
+		t.Errorf("input = %v, want the rest as first sent (no resolved subnets)", input)
+	}
+}
+
+func TestUpdateNetworkLeavesMissingInputAlone(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	row, err := f.store.Networks().Get(t.Context(), tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Input = nil // a network stored before inputs were kept
+	if err := f.store.Networks().Update(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.UpdateNetwork(t.Context(), &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+		Network: &cloudv1.Network{Id: n.GetId(), DisplayName: "Prod"}, UpdateMask: mask("display_name")}); err != nil {
+		t.Fatalf("UpdateNetwork: %v", err)
+	}
+	if row, err = f.store.Networks().Get(t.Context(), tenant, n.GetId()); err != nil {
+		t.Fatal(err)
+	}
+	if len(row.Input) != 0 {
+		t.Errorf("input = %s, want none: the original request is unknown", row.Input)
+	}
+}
+
+func TestCreateNetworkIsIdempotentByRequestID(t *testing.T) {
+	f := newFixture(t)
+	req := f.request("prod", nil)
+	req.RequestId = "6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+	first, err := f.svc.CreateNetwork(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.svc.CreateNetwork(t.Context(), req)
+	if err != nil || again.GetNetwork().GetEtag() != first.GetNetwork().GetEtag() {
+		t.Fatalf("retry = %v, %v; want the first network", again, err)
+	}
+}
+
+func TestCreateNetworkWithoutProviderRollsBack(t *testing.T) {
+	f := newFixture(t, interceptor.Funcs{
+		Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+			return &meta.NoKindMatchError{GroupKind: awsec2.VPC_GroupVersionKind.GroupKind()}
+		},
+	})
+	_, err := f.svc.CreateNetwork(t.Context(), f.request("prod", nil))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
+	}
+	if rows, err := f.store.Networks().List(t.Context(), tenant, repository.Page{Limit: 10}); err != nil || len(rows) != 0 {
+		t.Errorf("rows after rollback: %d, %v; want none", len(rows), err)
+	}
+}
+
+func TestUpdateNetwork(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	ctx := t.Context()
+	upd := &cloudv1.Network{Id: n.GetId(), DisplayName: "Prod", Etag: n.GetEtag(),
+		Spec: &cloudv1.NetworkSpec{Tags: map[string]string{"team": "network"}}}
+
+	res, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: upd,
+		UpdateMask: mask("display_name", "spec.tags")})
+	if err != nil {
+		t.Fatalf("UpdateNetwork: %v", err)
+	}
+	if res.GetNetwork().GetDisplayName() != "Prod" || res.GetNetwork().GetSpec().GetTags()["team"] != "network" ||
+		res.GetNetwork().GetGeneration() != n.GetGeneration()+1 {
+		t.Errorf("updated = %v", res.GetNetwork())
+	}
+	vpc := &awsec2.VPC{}
+	if err := f.kube.Get(ctx, key(n, "vpc"), vpc); err != nil {
+		t.Fatal(err)
+	}
+	if *vpc.Spec.ForProvider.Tags["team"] != "network" {
+		t.Errorf("vpc tags not re-applied: %v", vpc.Spec.ForProvider.Tags)
+	}
+
+	for name, tc := range map[string]struct {
+		req  *cloudv1.UpdateNetworkRequest
+		want connect.Code
+	}{
+		"stale etag":   {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: upd, UpdateMask: mask("display_name")}, connect.CodeAborted},
+		"layout":       {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: n.GetId()}, UpdateMask: mask("spec.layout")}, connect.CodeInvalidArgument},
+		"unknown":      {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: unknownID}, UpdateMask: mask("display_name")}, connect.CodeNotFound},
+		"reserved tag": {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: n.GetId(), Spec: &cloudv1.NetworkSpec{Tags: map[string]string{"aws:x": "y"}}}, UpdateMask: mask("spec.tags")}, connect.CodeInvalidArgument},
+	} {
+		if _, err := f.svc.UpdateNetwork(ctx, tc.req); connect.CodeOf(err) != tc.want {
+			t.Errorf("%s: %v, want %s", name, err, tc.want)
+		}
+	}
+}
+
+func TestDeleteNetwork(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	ctx := t.Context()
+
+	res, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if err != nil {
+		t.Fatalf("DeleteNetwork: %v", err)
+	}
+	if res.GetNetwork().GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_DELETING {
+		t.Errorf("state = %s", res.GetNetwork().GetStatus().GetState())
+	}
+	// The fake client deletes at once (no finalizers): the network is gone.
+	if got := f.count(t, &awsec2.SubnetList{}, n.GetId()); got != 0 {
+		t.Errorf("%d subnets left", got)
+	}
+	if _, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("get after delete = %v, want NOT_FOUND", err)
+	}
+}
+
+func TestDeleteNetworkInUse(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	row, err := f.store.Networks().Get(t.Context(), tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &model.Cluster{TenantID: tenant, Name: "eks", NetworkID: row.ID, Provider: model.ProviderAWS, Region: "us-east-1",
+		Resource: model.Resource{State: "x", Spec: model.JSON(`{}`)}}
+	if err := f.store.Clusters().Create(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.svc.DeleteNetwork(t.Context(), &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
+	}
+	got, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if err != nil || got.GetNetwork().GetStatus().GetClusterIds()[0] != "eks" {
+		t.Errorf("cluster_ids = %v, %v", got.GetNetwork().GetStatus().GetClusterIds(), err)
+	}
+}
+
+func TestListNetworksPages(t *testing.T) {
+	f := newFixture(t)
+	var ids []string
+	for _, name := range []string{"a", "b", "c"} {
+		ids = append(ids, f.create(t, name, nil).GetId())
+	}
+	first, err := f.svc.ListNetworks(t.Context(), &cloudv1.ListNetworksRequest{TenantId: tenant, PageSize: 2})
+	if err != nil || len(first.GetNetworks()) != 2 || first.GetNextPageToken() != ids[1] || first.GetNetworks()[0].GetId() != ids[0] {
+		t.Fatalf("page 1 = %v, %v; want the two oldest", first, err)
+	}
+	second, err := f.svc.ListNetworks(t.Context(), &cloudv1.ListNetworksRequest{TenantId: tenant, PageSize: 2, PageToken: ids[1]})
+	if err != nil || len(second.GetNetworks()) != 1 || second.GetNextPageToken() != "" || second.GetNetworks()[0].GetId() != ids[2] {
+		t.Fatalf("page 2 = %v, %v", second, err)
+	}
+}
+
+func TestDatabaseErrorsAreInternal(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	store := mock.NewMockStore(ctrl)
+	networks := mock.NewMockNetworks(ctrl)
+	store.EXPECT().Networks().Return(networks).AnyTimes()
+	networks.EXPECT().Get(gomock.Any(), tenant, unknownID).Return(nil, errors.New("connection refused"))
+	svc := NewNetworkService(service.Deps{Store: store, Kube: fakeKube(t)})
+
+	_, err := svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: unknownID})
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("err = %v, want INTERNAL", err)
+	}
+}
+
+func mask(paths ...string) *fieldmaskpb.FieldMask { return &fieldmaskpb.FieldMask{Paths: paths} }
+
+func TestGetNetworkRecordsUnrecordedResources(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "old", nil)
+	// A network from before resources were recorded.
+	if err := f.store.ManagedResources().DeleteByOwner(t.Context(), model.OwnerNetwork, n.GetId()); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := res.GetNetwork().GetStatus().GetManagedResources()
+	if len(views) != 20 || views[0].GetKind() != "VPC" || views[len(views)-1].GetKind() != "RouteTableAssociation" {
+		t.Fatalf("views = %d, first %s, last %s; want all 20 in creation order", len(views), views[0].GetKind(), views[len(views)-1].GetKind())
+	}
+	recorded, err := f.store.ManagedResources().ListByOwner(t.Context(), model.OwnerNetwork, n.GetId())
+	if err != nil || len(recorded) != 20 {
+		t.Errorf("recorded = %d, %v; want 20", len(recorded), err)
+	}
+}

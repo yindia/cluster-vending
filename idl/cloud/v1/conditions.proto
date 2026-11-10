@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ConditionStatus mirrors Kubernetes condition status values.
+enum ConditionStatus {
+  CONDITION_STATUS_UNSPECIFIED = 0;
+  CONDITION_STATUS_TRUE = 1;
+  CONDITION_STATUS_FALSE = 2;
+  CONDITION_STATUS_UNKNOWN = 3;
+}
+
+// Condition is a single observation about a cluster component.
+message Condition {
+  string type = 1;
+  ConditionStatus status = 2;
+  // Machine-readable, CamelCase reason.
+  string reason = 3;
+  string message = 4;
+  google.protobuf.Timestamp last_transition_time = 5;
+}

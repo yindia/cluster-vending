@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+
+// ControlPlaneSpec is the provider-neutral control plane contract.
+//   AWS   eks.aws.upbound.io/v1beta2 Cluster
+//   GCP   container.gcp.upbound.io Cluster
+//   Azure containerservice.azure.upbound.io KubernetesCluster
+message ControlPlaneSpec {
+  // Kubernetes minor version, e.g. "1.33". Defaults to the newest version the
+  // server supports for the provider. Can only be increased. The server pins
+  // the default node pool to the same version, so an upgrade rolls the
+  // control plane first, then the nodes.
+  //   AWS   Cluster.version; NodeGroup.version
+  //   GCP   Cluster.minMasterVersion: a floor, the release channel may
+  //         upgrade past it (patch versions always move); NodePool.version
+  //   Azure KubernetesCluster.kubernetesVersion (automaticUpgradeChannel
+  //         "patch" moves patches only); NodePool.orchestratorVersion
+  // ClusterStatus.current_kubernetes_version reports what actually runs.
+  string kubernetes_version = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.pattern = "^1\\.[0-9]{2}$"
+  ];
+
+  EndpointAccess endpoint_access = 2;
+
+  // Envelope encryption of Kubernetes Secrets. Unset means off for a new
+  // cluster (and "keep current" on import).
+  SecretsEncryption secrets_encryption = 3;
+}
+
+// SecretsEncryption encrypts Kubernetes Secrets at rest with a key the
+// platform creates and owns for the cluster (deleted with it). It can be
+// turned on later but never off: EKS cannot disable it once enabled, so the
+// server rejects enabled true -> false with FAILED_PRECONDITION.
+//   AWS   kms.aws.m.upbound.io Key + Alias; Cluster.encryptionConfig
+//         {provider.keyArn, resources: ["secrets"]}
+//   GCP   Cloud KMS KeyRing + CryptoKey; Cluster.databaseEncryption
+//         {state: ENCRYPTED, keyName}
+//   Azure Key Vault key; KubernetesCluster.keyManagementService
+// An imported cluster keeps its existing key (CARRIED_OVER).
+message SecretsEncryption {
+  bool enabled = 1;
+}
+
+// EndpointAccess configures the Kubernetes API server endpoints. Nodes are
+// private and the API server always has a public endpoint, restricted by
+// public_access_cidrs:
+//   AWS   vpcConfig.endpointPrivateAccess = true,
+//         vpcConfig.endpointPublicAccess = true
+//   GCP   privateClusterConfig.enablePrivateNodes = true,
+//         privateClusterConfig.enablePrivateEndpoint = false,
+//         masterAuthorizedNetworksConfig.gcpPublicCidrsAccessEnabled = false
+//   Azure privateClusterEnabled = false. Nodes reach the API server through
+//         NAT on the public endpoint, unless API Server VNet Integration
+//         (apiServerAccessProfile.virtualNetworkIntegrationEnabled, needs a
+//         delegated subnet) is enabled.
+message EndpointAccess {
+  // IPv4 CIDRs allowed to reach the public endpoint. Empty means
+  // unrestricted: the server sends an explicit ["0.0.0.0/0"], because an
+  // omitted list is late-initialized from the cloud and would silently keep
+  // the previous whitelist.
+  //   AWS   vpcConfig.publicAccessCidrs
+  //   GCP   masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock
+  //   Azure apiServerAccessProfile.authorizedIpRanges
+  // The server appends CIDRs the cluster itself needs, which are not echoed
+  // in the spec: on Azure without VNet Integration, the cluster's own egress
+  // IPs (ClusterStatus.network.egress_ips), or nodes could not reach the API.
+  // Capped at 40, the lowest provider limit (EKS).
+  repeated string public_access_cidrs = 1 [(buf.validate.field).repeated = {
+    max_items: 40
+    unique: true
+    items: {
+      string: {ipv4_prefix: true}
+    }
+  }];
+}

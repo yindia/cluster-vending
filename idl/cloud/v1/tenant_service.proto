@@ -1,0 +1,170 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/conditions.proto";
+import "cloud/v1/managed_resource.proto";
+import "google/protobuf/timestamp.proto";
+
+// TenantService onboards tenants' cloud accounts. A tenant can have any
+// number of accounts, on any provider; an account must be bootstrapped
+// before a network is created or imported in it (NetworkSpec.account_id).
+service TenantService {
+  // Registers one of the tenant's cloud accounts, stores it, and creates in
+  //   the management cluster:
+  //   - the tenant namespace tenant-<tenant_id>, if it does not exist
+  //   - the account's provider credential in that namespace (AWS: a
+  //     ProviderConfig with credentials.source IRSA and an assumeRoleChain
+  //     into the tenant role, see "Account access" in idl/README.md). Its
+  //     name is generated on the first bootstrap of the account and kept
+  //     (status.provider_config_name).
+  //
+  // The Crossplane providers and their runtime config (AWS: IRSA as the
+  // management role) are installed by the platform, not here; without them
+  // the call fails with FAILED_PRECONDITION. The tenant must already have
+  // given the platform admin access to the account (AWS: the tenant role
+  // exists and trusts the management role).
+  //
+  // Idempotent: calling it again for the same account updates its name and
+  // converges the resources again. Another account ID adds an account. The
+  // result is asynchronous: account.status.state becomes READY once the
+  // credential works.
+  rpc BootstrapTenant(BootstrapTenantRequest) returns (BootstrapTenantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  // Returns one bootstrapped account of the tenant by its bootstrap ID
+  // (CloudAccount.id), or NOT_FOUND.
+  rpc GetCloudAccount(GetCloudAccountRequest) returns (GetCloudAccountResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the tenant's bootstrapped accounts, ordered by provider then
+  // account ID.
+  rpc ListCloudAccounts(ListCloudAccountsRequest) returns (ListCloudAccountsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message BootstrapTenantRequest {
+  // Same rules as CreateClusterRequest.tenant_id. The tenant is created if
+  // it does not exist.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // The account; output-only fields are ignored.
+  CloudAccount account = 2 [(buf.validate.field).required = true];
+}
+
+message BootstrapTenantResponse {
+  CloudAccount account = 1;
+}
+
+message GetCloudAccountRequest {
+  // Same rules as BootstrapTenantRequest.tenant_id.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // The bootstrap ID, CloudAccount.id.
+  string id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetCloudAccountResponse {
+  CloudAccount account = 1;
+}
+
+message ListCloudAccountsRequest {
+  // Same rules as BootstrapTenantRequest.tenant_id.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+}
+
+message ListCloudAccountsResponse {
+  // Not paginated: a tenant has a handful of accounts.
+  repeated CloudAccount accounts = 1;
+}
+
+// CloudAccount is a cloud account a tenant gave the platform access to. A
+// tenant has any number of them; any number of networks (and so clusters)
+// can live in one, referring to it by id.
+message CloudAccount {
+  // Output only. The bootstrap ID: assigned by the server on the first
+  // bootstrap of the account. GetCloudAccountRequest.id and
+  // NetworkSpec.bootstrap_id refer to it.
+  string id = 7;
+
+  // Output only: from the request.
+  string tenant_id = 1;
+
+  // Human-readable name of the account: AWS account name, GCP project
+  // name, Azure subscription name. Informational only; not unique.
+  string account_name = 2 [(buf.validate.field).string.max_len = 128];
+
+  // Output only.
+  CloudAccountStatus status = 3;
+  // Output only.
+  google.protobuf.Timestamp create_time = 4;
+  // Output only.
+  google.protobuf.Timestamp update_time = 5;
+
+  // The account's cloud and its identifier there, unique within the
+  // tenant. Bootstrapping the same identifier again updates that account.
+  // Exactly one must be set.
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+
+    AwsAccount aws = 10;
+    // gcp = 11 (GcpProject: project_id), azure = 12 (AzureSubscription:
+    // subscription_id, directory_id).
+  }
+}
+
+// AwsAccount identifies a tenant's AWS account and the role the platform
+// assumes in it.
+message AwsAccount {
+  // 12-digit AWS account ID. Immutable.
+  string account_id = 1 [(buf.validate.field).string.pattern = "^[0-9]{12}$"];
+
+  // Name of the IAM role the platform assumes in the account (no path),
+  // e.g. "cluster-vending-provisioner". The tenant creates it with admin
+  // rights, trusting the platform's management role.
+  string role = 2 [(buf.validate.field).string.pattern = "^[\\w+=,.@-]{1,64}$"];
+}
+
+// CloudAccountState is the coarse state of a tenant's cloud account.
+enum CloudAccountState {
+  CLOUD_ACCOUNT_STATE_UNSPECIFIED = 0;
+  // The namespace, runtime config and credential are being created.
+  CLOUD_ACCOUNT_STATE_BOOTSTRAPPING = 1;
+  // The credential is in place and works.
+  CLOUD_ACCOUNT_STATE_READY = 2;
+  // See status.conditions; typically the tenant role cannot be assumed.
+  CLOUD_ACCOUNT_STATE_FAILED = 3;
+}
+
+// CloudAccountStatus is the observed state of a tenant's cloud account.
+message CloudAccountStatus {
+  CloudAccountState state = 1;
+  // Kubernetes namespace holding the tenant's resources, tenant-<tenant_id>.
+  string namespace = 2;
+  // Name of the account's provider credential (AWS: ProviderConfig) in
+  // namespace: generated on the first bootstrap, then fixed. The managed
+  // resources of every network and cluster in the account reference it.
+  string provider_config_name = 3;
+  repeated Condition conditions = 4;
+  // The identity the provider credential assumes in the account: AWS the
+  // tenant role ARN (GCP: service account, Azure: client ID).
+  string identity = 5;
+  // Everything the platform created for the account, in creation order:
+  // the bootstrap's own objects (namespace, ProviderConfig) and those of
+  // its networks, clusters and node pools.
+  repeated ManagedResource managed_resources = 6;
+}

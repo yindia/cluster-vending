@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// CrossplaneValues is the literal string each provider's Crossplane managed
+// resource expects for an enum value. An empty string means the provider has
+// no string equivalent (the mapping is structural, see the field comment) or
+// does not support the value.
+//
+// The server translates enums with these options instead of hand-written
+// switch tables, so proto enum names never have to match provider spelling
+// (e.g. "AL2023_x86_64_STANDARD", "NoSchedule", "controllerManager").
+message CrossplaneValues {
+  // provider-upjet-aws (*.aws.upbound.io)
+  string aws = 1;
+  // provider-upjet-gcp (*.gcp.upbound.io)
+  string gcp = 2;
+  // provider-upjet-azure (*.azure.upbound.io)
+  string azure = 3;
+}
+
+extend google.protobuf.EnumValueOptions {
+  // Crossplane spelling of this enum value, per provider.
+  CrossplaneValues crossplane = 50001;
+}

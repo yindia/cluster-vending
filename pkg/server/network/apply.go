@@ -1,0 +1,143 @@
+package network
+
+import (
+	"context"
+	"fmt"
+
+	"connectrpc.com/connect/v2"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/yindia/cluster-vending/pkg/crossplane"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/server/service"
+)
+
+// resolved is a stored network ready to render.
+type resolved struct {
+	crossplaneaws.NetworkPlan
+}
+
+func newResolved(row *model.Network, spec *cloudv1.NetworkSpec, a *model.CloudAccount, l awsLayout) resolved {
+	return resolved{
+		NetworkPlan: crossplaneaws.NetworkPlan{
+			Namespace:          a.Namespace,
+			ProviderConfigName: a.ProviderConfigName,
+			TenantID:           row.TenantID,
+			NetworkID:          row.ID,
+			NetworkName:        row.Name,
+			Prefix:             crossplaneaws.NetworkPrefix(row.TenantID, row.ID, row.Name),
+			Region:             spec.GetRegion(),
+			CIDRBlock:          l.CIDRBlock,
+			Subnets:            l.Subnets,
+			NAT:                l.NAT,
+			Tags:               spec.GetTags(),
+		},
+	}
+}
+
+// layoutProto is the resolved layout as stored in the spec: explicit
+// subnets, so later renders do not depend on defaults.
+func layoutProto(r awsLayout) *cloudv1.NetworkLayout {
+	l := &cloudv1.NetworkLayout{CidrBlock: r.CIDRBlock, NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE}
+	if r.NAT == crossplaneaws.NATPerZone {
+		l.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
+	}
+	for _, s := range r.Subnets {
+		role := cloudv1.SubnetRole_SUBNET_ROLE_PRIVATE
+		if s.Role == crossplaneaws.SubnetPublic {
+			role = cloudv1.SubnetRole_SUBNET_ROLE_PUBLIC
+		}
+		l.Subnets = append(l.Subnets, &cloudv1.Subnet{Role: role, CidrBlock: s.CIDR, ZoneId: s.ZoneID})
+	}
+	return l
+}
+
+// apply creates or updates the network's managed resources, then records
+// them (model.ManagedResource) as the network's.
+func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model.CloudAccount, plan resolved) error {
+	objects, err := crossplaneaws.NetworkResources(plan.NetworkPlan)
+	if err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
+	}
+	return s.applyObjects(ctx, row, a, objects)
+}
+
+// applyObjects applies objects in order and records them as the network's.
+func (s *NetworkService) applyObjects(ctx context.Context, row *model.Network, a *model.CloudAccount, objects []client.Object) error {
+	if a.Namespace == "" || a.ProviderConfigName == "" {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("account %s is not fully bootstrapped; run BootstrapTenant again", a.ID))
+	}
+	for _, obj := range objects {
+		err := kube.Apply(ctx, s.deps.Kube, obj)
+		switch {
+		case err == nil:
+		case meta.IsNoMatchError(err):
+			return connect.NewError(connect.CodeFailedPrecondition,
+				"the Crossplane AWS ec2 provider is not installed in the management cluster")
+		default:
+			s.logger().ErrorContext(ctx, "apply network resource", "tenant_id", row.TenantID,
+				"network_id", row.ID, "object", obj.GetName(), "error", err)
+			return connect.NewError(connect.CodeInternal, "could not create the network's resources")
+		}
+	}
+	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
+	if err := s.deps.Record(ctx, owner, objects); err != nil {
+		s.logger().ErrorContext(ctx, "record network resources", "network_id", row.ID, "error", err)
+		return connect.NewError(connect.CodeInternal, "could not record the network's resources")
+	}
+	return nil
+}
+
+// deleteResources deletes every managed resource of the network. Crossplane
+// deletes the cloud resources and removes the objects when done.
+func (s *NetworkService) deleteResources(ctx context.Context, tenantID, networkID string) error {
+	for _, obj := range crossplaneaws.NetworkObjects() {
+		err := s.deps.Kube.DeleteAllOf(ctx, obj,
+			client.InNamespace(kube.TenantNamespace(tenantID)),
+			client.MatchingLabels{crossplane.LabelNetwork: networkID})
+		if err != nil && !meta.IsNoMatchError(err) {
+			return fmt.Errorf("delete %T: %w", obj, err)
+		}
+	}
+	return nil
+}
+
+// rollback undoes a create whose resources could not be applied.
+func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
+	if err := s.deleteResources(ctx, row.TenantID, row.ID); err != nil {
+		s.logger().ErrorContext(ctx, "rollback network resources", "network_id", row.ID, "error", err)
+	}
+	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil {
+		s.logger().ErrorContext(ctx, "rollback network row", "network_id", row.ID, "error", err)
+	}
+	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {
+		s.logger().ErrorContext(ctx, "rollback network records", "network_id", row.ID, "error", err)
+	}
+}
+
+// finalize removes a DELETING network's row once its resources are gone,
+// and reports whether it did.
+func (s *NetworkService) finalize(ctx context.Context, row *model.Network) (bool, error) {
+	if row.State != stateDeleting {
+		return false, nil
+	}
+	o, err := s.observe(ctx, row.TenantID, row.ID)
+	if err != nil {
+		return false, connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
+	}
+	if o.total > 0 {
+		return false, nil
+	}
+	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil {
+		return false, connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
+	}
+	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {
+		return false, connect.NewError(connect.CodeInternal, "could not forget the deleted network's resources: "+err.Error())
+	}
+	return true, nil
+}

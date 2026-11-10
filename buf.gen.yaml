@@ -1,0 +1,24 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+  disable:
+    # protovalidate ships its own go_package (buf.build/gen/go/...); keep it.
+    - file_option: go_package
+      module: buf.build/bufbuild/protovalidate
+  override:
+    - file_option: go_package_prefix
+      value: github.com/yindia/cluster-vending/pkg/gen/go
+plugins:
+  # Remote plugins run on the Buf Schema Registry. Keep each version in
+  # lockstep with the matching runtime module in go.mod:
+  #   protocolbuffers/go <-> google.golang.org/protobuf
+  #   connectrpc/go      <-> connectrpc.com/connect/v2
+  - remote: buf.build/protocolbuffers/go:v1.36.12
+    out: pkg/gen/go
+    opt: paths=source_relative
+  - remote: buf.build/connectrpc/go:v2.0.2
+    out: pkg/gen/go
+    opt: paths=source_relative
+inputs:
+  - directory: idl

@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+// Import plans: how existing cloud resources (e.g. built with Terraform) are
+// brought under the platform, which then becomes their source of truth.
+//
+// Every import works the same way:
+//   1. look the resources up once, read-only, with the tenant's credentials
+//      (Crossplane has no lookup kinds), and create an Observe-only managed
+//      resource (`managementPolicies: [Observe]`,
+//      `crossplane.io/external-name` = cloud ID) for each. Nothing in the
+//      cloud changes; from now on status comes from status.atProvider;
+//   2. compare them with the spec they map to and publish the plan;
+//   3. after the previous tool stopped managing them (`terraform state rm`),
+//      take over: the server fills `forProvider` from `status.atProvider`,
+//      switches to writing policies and converges the plan.
+//
+// Rules for every import:
+//   - The imported resources are the starting point: an optional spec field
+//     left empty means "keep what is there" (Crossplane late-initialization),
+//     never the server default. Only fields that are set can change.
+//   - Tags are kept. Every existing tag (e.g. Name, karpenter.sh/discovery,
+//     kubernetes.io/cluster/<name>) survives the takeover; the platform only
+//     adds its own ownership tags and spec.tags on top. Removing a key from
+//     spec.tags later removes only that key, never a tag the platform did
+//     not add.
+//   - Closure: everything an imported resource references is imported too.
+//     What the contract models becomes part of the spec; the rest is
+//     CARRIED_OVER (verbatim, owned, not editable through the API), so the
+//     previous tool has nothing left to manage. Resources that only
+//     reference the imported ones (e.g. a database security group allowing
+//     the node group) stay with their owner and are listed as NOT_IMPORTED.
+// Used by NetworkService.ImportNetwork (permanent) and by
+// ClusterSpec.existing_cluster (temporary, see cluster_import.proto).
+
+// ImportPhase is where an import stands.
+enum ImportPhase {
+  IMPORT_PHASE_UNSPECIFIED = 0;
+  // Discovering and importing the resources.
+  IMPORT_PHASE_DISCOVERING = 1;
+  // Plan ready; nothing changed yet. Review, then take over.
+  IMPORT_PHASE_PLANNED = 2;
+  // Cannot be expressed in the contract; see resources with BLOCKING.
+  IMPORT_PHASE_BLOCKED = 3;
+  // Taken over; WILL_UPDATE / WILL_CREATE changes are being applied.
+  IMPORT_PHASE_CONVERGING = 4;
+  // Taken over; the cloud matches the spec.
+  IMPORT_PHASE_CONVERGED = 5;
+}
+
+// Disposition is what the takeover does with one resource.
+enum Disposition {
+  DISPOSITION_UNSPECIFIED = 0;
+  // Imported and already matches the spec.
+  DISPOSITION_MATCHES = 1;
+  // Imported; the takeover changes it (see detail for the diff).
+  DISPOSITION_WILL_UPDATE = 2;
+  // Missing; created by the takeover (e.g. a route table to reach the
+  // standard layout, a subnet tag, a Usage).
+  DISPOSITION_WILL_CREATE = 3;
+  // Found next to the imported resources but outside the contract (e.g.
+  // database subnets, VPC endpoints, flow logs, Transit Gateway
+  // attachments, extra security groups). Never touched by the platform; it
+  // needs another owner, or deletion, before the previous tool is removed.
+  DISPOSITION_NOT_IMPORTED = 4;
+  // Cannot be expressed in the contract and prevents the import (e.g. a VPC
+  // CIDR outside /16-/24, private subnets in a single zone, private egress
+  // through something other than a NAT gateway).
+  DISPOSITION_BLOCKING = 5;
+  // Imported and taken over verbatim although no spec field describes it
+  // (e.g. security groups and their rules): the takeover copies its
+  // forProvider from status.atProvider and the platform owns it from then
+  // on. It is deleted with its owner (the Network or cluster), listed in
+  // their status, and not editable through the API.
+  DISPOSITION_CARRIED_OVER = 6;
+}
+
+// ImportedResource is one line of an import plan.
+message ImportedResource {
+  // Crossplane managed resource, e.g. "ec2.aws.m.upbound.io/v1beta1".
+  string api_version = 1;
+  // e.g. "Subnet".
+  string kind = 2;
+  // metadata.name in the tenant namespace. Empty for NOT_IMPORTED.
+  string name = 3;
+  // Cloud ID used as `crossplane.io/external-name`, e.g. "subnet-0abc...",
+  // "rtb-0abc..._0.0.0.0/0", "<role>/<policy arn>", "<cluster>:<addon>".
+  string external_name = 4;
+  // The spec field the resource backs, e.g. "spec.layout.subnets[2]".
+  string spec_path = 5;
+  Disposition disposition = 6;
+  // Human-readable diff (WILL_UPDATE) or reason (NOT_IMPORTED, BLOCKING).
+  string detail = 7;
+  // For WILL_UPDATE: the change cannot be applied in place and the cloud
+  // resource is replaced (deleted and recreated), e.g. a node group whose
+  // instance types differ from the spec. Review these before taking over.
+  bool requires_replacement = 8;
+}
+
+// ImportStatus is the plan and progress of one import.
+message ImportStatus {
+  ImportPhase phase = 1;
+  repeated ImportedResource resources = 2;
+}

@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+
+// TEMPORARY: importing clusters built with Terraform, so the platform
+// becomes their source of truth and Terraform can be removed. Networks are
+// imported permanently through NetworkService; this file only covers the
+// cluster side (IAM roles and policy attachments, the control plane, node
+// groups, add-ons, access entries).
+//
+// Used by ClusterSpec.existing_cluster (field 7) and ClusterStatus.import
+// (field 13). Dropping it once no cluster has existing_cluster set:
+//   1. delete this file and those two fields,
+//   2. add `reserved 7; reserved "existing_cluster";` to ClusterSpec and
+//      `reserved 13; reserved "import";` to ClusterStatus,
+//   3. `buf breaking` (WIRE_JSON) passes.
+//
+// The spec of an imported cluster is the desired state after the takeover,
+// with the import rules of import.proto: an optional field left empty keeps
+// the current value (e.g. no control_plane.kubernetes_version means "stay
+// on the running version", not "upgrade to the default"; the same for the
+// authentication mode, support type, log types, encryption, endpoint access
+// and add-ons). Fields that are set and differ from the cluster are
+// WILL_UPDATE in status.import, with requires_replacement when the change
+// recreates a resource (e.g. node group instance types, capacity type, AMI
+// type or disk size). Existing tags are kept.
+//
+// Flow, all through ClusterService:
+//   0. NetworkService.ImportNetwork + TakeOverNetwork for the cluster's VPC
+//   1. CreateCluster with spec.existing_cluster (policy OBSERVE_ONLY):
+//      every resource is imported by cloud ID with managementPolicies
+//      [Observe]; nothing changes. The spec is the desired state after the
+//      takeover; differences are in status.import (WILL_UPDATE / ...).
+//   2. GetCluster: review status.import.
+//   3. `terraform state rm` the cluster resources.
+//   4. UpdateCluster spec.existing_cluster.policy = MANAGE_NO_DELETE
+//   5. UpdateCluster spec.existing_cluster.policy = FULL (with
+//      acknowledge_not_imported)
+//   6. UpdateCluster clearing spec.existing_cluster once status.import.phase
+//      is CONVERGED: the cluster is now an ordinary platform cluster.
+// While spec.existing_cluster is set, ClusterStatus carries the condition
+// type "Imported" (reason = the policy name).
+
+// ExistingCluster identifies a cluster built outside the platform and how
+// far the platform manages it. The cluster lives in the tenant's cloud
+// account, to which the tenant has already given the platform admin access;
+// that access also lets the platform grant itself cluster-admin on it.
+message ExistingCluster {
+  option (buf.validate.message).cel = {
+    id: "existing_cluster.full_needs_ack"
+    message: "policy FULL needs acknowledge_not_imported: every NOT_IMPORTED resource must have another owner first"
+    expression: "this.policy != 3 || this.acknowledge_not_imported"
+  };
+
+  // Cluster name in the cloud (EKS: 1-100 chars). Immutable. Modelled from
+  // it: the cluster (spec.control_plane, spec.aws), its IAM roles, the
+  // default node pool, other representable node groups (as NodePools),
+  // add-ons and access entries (spec.access).
+  //
+  // Closure (import.proto): everything the imported resources reference is
+  // imported. CARRIED_OVER, as Observe-only resources first:
+  //   - security groups referenced by the cluster or node groups
+  //     (vpcConfig.securityGroupIds, remoteAccess), transitively through
+  //     their rules, with every rule (SecurityGroupIngressRule /
+  //     SecurityGroupEgressRule by sgr- ID); rules added to the EKS-managed
+  //     cluster security group (the group itself stays with EKS)
+  //   - the KMS key in encryptionConfig.provider.keyArn and its aliases (EKS
+  //     can never turn encryption off, so the key must not be orphaned)
+  //   - the control-plane log group /aws/eks/<name>/cluster
+  //   - the IAM OIDC provider matching the cluster's OIDC issuer URL
+  //   - IAM roles referenced by add-ons (serviceAccountRoleArn) and pod
+  //     identity associations, with their policy attachments
+  //   - node groups that NodePoolSpec cannot express (launch template,
+  //     custom AMI) with their launch templates, verbatim; representable
+  //     node groups become NodePools instead (see default_node_pool_name)
+  // Things that only reference ours stay with their owner and are
+  // NOT_IMPORTED: an RDS security group allowing the node group, IRSA roles
+  // of applications trusting the OIDC provider, Helm releases.
+  //
+  // Lookups, once, read-only, with the tenant's credentials (AWS):
+  //   eks:DescribeCluster, ListNodegroups, DescribeNodegroup, ListAddons,
+  //   DescribeAddon, ListAccessEntries, ListAssociatedAccessPolicies,
+  //   ListPodIdentityAssociations; iam:ListAttachedRolePolicies,
+  //   ListOpenIDConnectProviders; kms:DescribeKey, ListAliases;
+  //   logs:DescribeLogGroups; ec2:DescribeSecurityGroups,
+  //   DescribeSecurityGroupRules, DescribeLaunchTemplateVersions.
+  // For a cluster in CONFIG_MAP authentication mode, the platform also
+  // reads the kube-system/aws-auth ConfigMap through the Kubernetes API and
+  // plans an access entry for every mapped role and user (WILL_CREATE), plus
+  // the switch to API_AND_CONFIG_MAP (WILL_UPDATE).
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[0-9A-Za-z][A-Za-z0-9_-]*$"
+  }];
+
+  // Existing node group that spec.default_node_pool describes. Immutable.
+  // It must be representable by NodePoolSpec (AWS: no launch template, no
+  // custom AMI), otherwise it is BLOCKING. Leave empty to create
+  // spec.default_node_pool as a NEW pool at the takeover.
+  // Every other node group is imported too: representable ones as NodePools
+  // (id = node group name), the rest CARRIED_OVER verbatim with their launch
+  // templates and listed by NodePoolService with status.carried_over, to be
+  // retired with DeleteNodePool once workloads moved.
+  string default_node_pool_name = 2 [(buf.validate.field).string = {
+    max_len: 63
+    pattern: "^([0-9A-Za-z][A-Za-z0-9_-]*)?$"
+  }];
+
+  // How far the platform manages the imported resources. Mutable through
+  // UpdateCluster (spec.existing_cluster.policy).
+  ClusterImportPolicy policy = 3 [(buf.validate.field).enum.defined_only = true];
+
+  // Confirms that every NOT_IMPORTED resource has another owner (or was
+  // deleted). Required for policy FULL.
+  bool acknowledge_not_imported = 4;
+}
+
+// ClusterImportPolicy maps to Crossplane `spec.managementPolicies` on every
+// imported resource. Namespaced (v2) managed resources have no
+// deletionPolicy, so leaving out "Delete" is how deletion is orphaned.
+// Resources the platform creates for the cluster (WILL_CREATE, e.g. a new
+// node pool, add-ons, access entries, Usages) always have a full lifecycle.
+enum ClusterImportPolicy {
+  // OBSERVE_ONLY.
+  CLUSTER_IMPORT_POLICY_UNSPECIFIED = 0;
+
+  // ["Observe"]: nothing is changed or deleted. DeleteCluster forgets the
+  // cluster and removes only what the platform created.
+  CLUSTER_IMPORT_POLICY_OBSERVE_ONLY = 1;
+
+  // ["Observe", "Create", "Update", "LateInitialize"]: Crossplane manages and
+  // converges the cluster, but DeleteCluster leaves the imported resources
+  // in place. Only after `terraform state rm`.
+  CLUSTER_IMPORT_POLICY_MANAGE_NO_DELETE = 2;
+
+  // ["*"]: fully owned, deleted by DeleteCluster.
+  CLUSTER_IMPORT_POLICY_FULL = 3;
+}

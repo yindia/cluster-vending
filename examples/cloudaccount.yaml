@@ -6,5 +6,5 @@ metadata:
   tenant: sakshi
 spec:
   aws:
-    accountId: "312040893990"
+    accountId: "111122223333"
     role: cluster-vending-provisioner   # role in the account that trusts the platform

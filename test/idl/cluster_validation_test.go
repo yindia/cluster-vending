@@ -87,7 +87,7 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "tenant not dns label", wantErr: true, req: mutate(func(_ *spec, r *req) { r.TenantId = "Acme_Corp" })},
 		{name: "service-linked role as admin", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.Access = &cloudv1.AccessSpec{AdminPrincipals: []string{
-				"arn:aws:iam::312040893990:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"}}
+				"arn:aws:iam::111122223333:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"}}
 		})},
 		{name: "cluster name too long", wantErr: true, req: mutate(func(_ *spec, r *req) {
 			r.Cluster.Name = "a123456789012345678901234567890123456789x"

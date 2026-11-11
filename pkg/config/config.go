@@ -21,6 +21,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yindia/cluster-vending/pkg/database"
@@ -48,6 +49,31 @@ const (
 	EnvShutdownTimeout   = "CV_SHUTDOWN_TIMEOUT"
 	FlagInstallProviders = "install-providers"
 	EnvInstallProviders  = "CV_INSTALL_PROVIDERS"
+	FlagLoopInterval     = "loop-interval"
+	EnvLoopInterval      = "CV_LOOP_INTERVAL"
+	FlagLeaderElect      = "leader-elect"
+	EnvLeaderElect       = "CV_LEADER_ELECT"
+	FlagLeaseNamespace   = "lease-namespace"
+	EnvLeaseNamespace    = "CV_LEASE_NAMESPACE"
+	FlagRenderTarget     = "render-target"
+	EnvRenderTarget      = "CV_RENDER_TARGET"
+	FlagRenderRollout    = "render-rollout"
+	EnvRenderRollout     = "CV_RENDER_ROLLOUT"
+
+	FlagProviderPoll          = "provider-poll"
+	EnvProviderPoll           = "CV_PROVIDER_POLL"
+	FlagProviderEC2Poll       = "provider-ec2-poll"
+	EnvProviderEC2Poll        = "CV_PROVIDER_EC2_POLL"
+	FlagProviderReconcileRate = "provider-max-reconcile-rate"
+	EnvProviderReconcileRate  = "CV_PROVIDER_MAX_RECONCILE_RATE"
+	FlagProviderCPURequest    = "provider-cpu-request"
+	EnvProviderCPURequest     = "CV_PROVIDER_CPU_REQUEST"
+	FlagProviderMemoryRequest = "provider-memory-request"
+	EnvProviderMemoryRequest  = "CV_PROVIDER_MEMORY_REQUEST"
+	FlagProviderCPULimit      = "provider-cpu-limit"
+	EnvProviderCPULimit       = "CV_PROVIDER_CPU_LIMIT"
+	FlagProviderMemoryLimit   = "provider-memory-limit"
+	EnvProviderMemoryLimit    = "CV_PROVIDER_MEMORY_LIMIT"
 )
 
 // Defaults used when neither the flag nor the variable is set.
@@ -56,6 +82,9 @@ const (
 	DefaultLogFormat       = "json"
 	DefaultHTTPAddr        = ":8080"
 	DefaultShutdownTimeout = 30 * time.Second
+	// DefaultLeaseNamespace holds the leader election Lease: Crossplane's
+	// namespace exists in every management cluster.
+	DefaultLeaseNamespace = "crossplane-system"
 )
 
 var (
@@ -81,6 +110,26 @@ var serveSettings = append([]Setting{
 		Usage: "listen address of the Connect API, host:port"},
 	{Flag: FlagShutdownTimeout, Env: EnvShutdownTimeout, Default: DefaultShutdownTimeout.String(),
 		Usage: "how long in-flight requests get to finish on shutdown"},
+	{Flag: FlagLoopInterval, Env: EnvLoopInterval, Default: "30s",
+		Usage: "how often the background loop moves unsettled networks and clusters on"},
+	{Flag: FlagLeaderElect, Env: EnvLeaderElect, Default: "true",
+		Usage: "run the background loop behind leader election (a Lease), so one server replica runs it"},
+	{Flag: FlagLeaseNamespace, Env: EnvLeaseNamespace, Default: DefaultLeaseNamespace,
+		Usage: "namespace of the leader election Lease in the management cluster: the server's own namespace"},
+	{Flag: FlagRenderTarget, Env: EnvRenderTarget, Default: "0",
+		Usage: "renderer version existing networks and clusters are re-applied up to by the background loop; 0 is this build's version"},
+	{Flag: FlagRenderRollout, Env: EnvRenderRollout,
+		Usage: "comma-separated tenant, network or cluster IDs the renderer rollout is limited to; empty rolls out to all"},
+	{Flag: FlagProviderPoll, Env: EnvProviderPoll, Default: "10m",
+		Usage: "how often the AWS providers check each resource for drift (applies when the server creates their runtime config)"},
+	{Flag: FlagProviderEC2Poll, Env: EnvProviderEC2Poll, Default: "30m",
+		Usage: "the same for provider-aws-ec2 (networks: many resources that change rarely)"},
+	{Flag: FlagProviderReconcileRate, Env: EnvProviderReconcileRate, Default: "10",
+		Usage: "the AWS providers' maximum reconciles per second"},
+	{Flag: FlagProviderCPURequest, Env: EnvProviderCPURequest, Default: "100m", Usage: "CPU request of an AWS provider"},
+	{Flag: FlagProviderMemoryRequest, Env: EnvProviderMemoryRequest, Default: "512Mi", Usage: "memory request of an AWS provider"},
+	{Flag: FlagProviderCPULimit, Env: EnvProviderCPULimit, Usage: "CPU limit of an AWS provider; empty for none"},
+	{Flag: FlagProviderMemoryLimit, Env: EnvProviderMemoryLimit, Default: "2Gi", Usage: "memory limit of an AWS provider; empty for none"},
 	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
 		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere"},
 }, slices.Concat(awsSettings, databaseSettings)...)
@@ -110,8 +159,27 @@ type Serve struct {
 	ShutdownTimeout time.Duration
 	// InstallProviders: create the Crossplane providers on startup.
 	InstallProviders bool
-	AWS              AWS
-	Database         database.Config
+	// LoopInterval is the background loop's period; LeaderElect and
+	// LeaseNamespace its leader election.
+	LoopInterval   time.Duration
+	LeaderElect    bool
+	LeaseNamespace string
+	// RenderTarget (0: this build's renderer version) and RenderRollout
+	// (empty: all) drive the renderer rollout.
+	RenderTarget  int64
+	RenderRollout []string
+	// Provider is how the AWS providers run (their runtime config).
+	Provider ProviderRuntime
+	AWS      AWS
+	Database database.Config
+}
+
+// ProviderRuntime is how the Crossplane AWS providers run: drift check
+// intervals, reconcile rate and container resources.
+type ProviderRuntime struct {
+	Poll, EC2Poll                                    time.Duration
+	MaxReconcileRate                                 int
+	CPURequest, MemoryRequest, CPULimit, MemoryLimit string
 }
 
 // LoadGlobal resolves and validates the global settings from the flags, the
@@ -155,6 +223,32 @@ func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallProviders), v[FlagInstallProviders]))
 	}
 	cfg.InstallProviders = install
+	if cfg.LoopInterval, err = time.ParseDuration(v[FlagLoopInterval]); err != nil || cfg.LoopInterval <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive duration, got %q", setting(FlagLoopInterval), v[FlagLoopInterval]))
+	}
+	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))
+	}
+	cfg.LeaseNamespace = v[FlagLeaseNamespace]
+	if cfg.RenderTarget, err = strconv.ParseInt(v[FlagRenderTarget], 10, 64); err != nil || cfg.RenderTarget < 0 {
+		errs = append(errs, fmt.Errorf("%s must be a non-negative integer, got %q", setting(FlagRenderTarget), v[FlagRenderTarget]))
+	}
+	cfg.Provider = ProviderRuntime{CPURequest: v[FlagProviderCPURequest], MemoryRequest: v[FlagProviderMemoryRequest],
+		CPULimit: v[FlagProviderCPULimit], MemoryLimit: v[FlagProviderMemoryLimit]}
+	if cfg.Provider.Poll, err = time.ParseDuration(v[FlagProviderPoll]); err != nil || cfg.Provider.Poll <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive duration, got %q", setting(FlagProviderPoll), v[FlagProviderPoll]))
+	}
+	if cfg.Provider.EC2Poll, err = time.ParseDuration(v[FlagProviderEC2Poll]); err != nil || cfg.Provider.EC2Poll <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive duration, got %q", setting(FlagProviderEC2Poll), v[FlagProviderEC2Poll]))
+	}
+	if cfg.Provider.MaxReconcileRate, err = strconv.Atoi(v[FlagProviderReconcileRate]); err != nil || cfg.Provider.MaxReconcileRate <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive integer, got %q", setting(FlagProviderReconcileRate), v[FlagProviderReconcileRate]))
+	}
+	for _, id := range strings.Split(v[FlagRenderRollout], ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			cfg.RenderRollout = append(cfg.RenderRollout, id)
+		}
+	}
 
 	if cfg.HTTPAddr != "" {
 		if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {

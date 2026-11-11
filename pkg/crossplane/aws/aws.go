@@ -4,10 +4,16 @@
 package aws
 
 import (
+	"fmt"
+	"time"
+
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	pkgv1 "github.com/crossplane/crossplane/apis/v2/pkg/v1"
 	pkgv1beta1 "github.com/crossplane/crossplane/apis/v2/pkg/v1beta1"
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -19,54 +25,137 @@ import (
 // go.mod.
 const ProviderVersion = "v2.9.0"
 
+// RenderVersion is the version of what the renderers in this package
+// output. Bump it whenever a renderer's output changes for an unchanged
+// plan (a new object, field or name): the background loop then applies
+// existing networks and clusters again, one by one, up to the server's
+// target version (see service.Deps.RenderTarget).
+//
+//	1  Usages order deletions; desiredSize in initProvider only
+const RenderVersion = 1
+
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.
 var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam"}
 
 const (
-	// RuntimeConfigName is the DeploymentRuntimeConfig every AWS provider
-	// runs with.
-	RuntimeConfigName = "aws-irsa"
+	// RuntimeConfigName is the DeploymentRuntimeConfig the AWS providers
+	// run with; RuntimeConfigEC2Name the one of provider-aws-ec2.
+	RuntimeConfigName    = "cluster-vending-aws"
+	RuntimeConfigEC2Name = "cluster-vending-aws-ec2"
+	providerEC2          = "provider-aws-ec2"
 
 	// irsaRoleAnnotation is read by the EKS pod identity webhook.
 	irsaRoleAnnotation = "eks.amazonaws.com/role-arn"
-	awsPackageRegistry = "xpkg.upbound.io/upbound/"
+	// The open-source builds of provider-upjet-aws (same code as Upbound's).
+	awsPackageRegistry = "xpkg.crossplane.io/crossplane-contrib/"
 )
 
 // credentialsSourceIRSA is the AWS-only credentials source; Crossplane core
 // has no constant for it.
 const credentialsSourceIRSA xpv2.CredentialsSource = "IRSA"
 
-// RuntimeConfig is the DeploymentRuntimeConfig of the AWS providers: their
-// service account carries managementRoleARN, so on EKS the providers
-// authenticate as it (IRSA). Cluster-scoped and shared by every tenant.
-func RuntimeConfig(managementRoleARN string) *pkgv1beta1.DeploymentRuntimeConfig {
-	return &pkgv1beta1.DeploymentRuntimeConfig{
-		TypeMeta:   metav1.TypeMeta{APIVersion: pkgv1beta1.SchemeGroupVersion.String(), Kind: pkgv1beta1.DeploymentRuntimeConfigKind},
-		ObjectMeta: metav1.ObjectMeta{Name: RuntimeConfigName, Labels: crossplane.Labels("")},
-		Spec: pkgv1beta1.DeploymentRuntimeConfigSpec{
-			ServiceAccountTemplate: &pkgv1beta1.ServiceAccountTemplate{
-				Metadata: &pkgv1beta1.ObjectMeta{
-					Annotations: map[string]string{irsaRoleAnnotation: managementRoleARN},
-				},
-			},
-		},
+// runtimeContainer is the provider container in a package's Deployment.
+const runtimeContainer = "package-runtime"
+
+// ProviderRuntime is how the AWS providers' pods run.
+type ProviderRuntime struct {
+	// ManagementRoleARN is the role the providers authenticate as on EKS
+	// (IRSA: an annotation on their service account). Empty: none (local
+	// clusters, credentials from the ProviderConfig Secret).
+	ManagementRoleARN string
+	// Poll is how often a provider checks each resource for drift; EC2Poll
+	// the same for provider-aws-ec2, whose network resources are many and
+	// change rarely.
+	Poll, EC2Poll time.Duration
+	// MaxReconcileRate caps a provider's reconciles per second (and so its
+	// AWS API calls).
+	MaxReconcileRate int
+	// Resource requests and limits of a provider's container (quantities;
+	// empty: none).
+	CPURequest, MemoryRequest, CPULimit, MemoryLimit string
+}
+
+// DefaultProviderRuntime is the providers' runtime for ~100 clusters on
+// one management cluster.
+func DefaultProviderRuntime() ProviderRuntime {
+	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
+		CPURequest: "100m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"}
+}
+
+// RuntimeConfigs are the DeploymentRuntimeConfigs of the AWS providers:
+// RuntimeConfigName for all, RuntimeConfigEC2Name (its own poll interval)
+// for provider-aws-ec2. Cluster-scoped and shared by every tenant.
+func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, error) {
+	resources, err := rt.resources()
+	if err != nil {
+		return nil, err
 	}
+	config := func(name string, poll time.Duration) *pkgv1beta1.DeploymentRuntimeConfig {
+		c := &pkgv1beta1.DeploymentRuntimeConfig{
+			TypeMeta:   metav1.TypeMeta{APIVersion: pkgv1beta1.SchemeGroupVersion.String(), Kind: pkgv1beta1.DeploymentRuntimeConfigKind},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: crossplane.Labels("")},
+			Spec: pkgv1beta1.DeploymentRuntimeConfigSpec{DeploymentTemplate: &pkgv1beta1.DeploymentTemplate{
+				Spec: &appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{}, // required by the type; Crossplane sets it
+					Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+						Name: runtimeContainer, Resources: resources,
+						Args: []string{"--poll=" + poll.String(), fmt.Sprintf("--max-reconcile-rate=%d", rt.MaxReconcileRate)},
+					}}}},
+				},
+			}},
+		}
+		if rt.ManagementRoleARN != "" {
+			c.Spec.ServiceAccountTemplate = &pkgv1beta1.ServiceAccountTemplate{Metadata: &pkgv1beta1.ObjectMeta{
+				Annotations: map[string]string{irsaRoleAnnotation: rt.ManagementRoleARN}}}
+		}
+		return c
+	}
+	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll), config(RuntimeConfigEC2Name, rt.EC2Poll)}, nil
+}
+
+func (rt ProviderRuntime) resources() (corev1.ResourceRequirements, error) {
+	out := corev1.ResourceRequirements{}
+	for _, q := range []struct {
+		list  *corev1.ResourceList
+		name  corev1.ResourceName
+		value string
+	}{
+		{&out.Requests, corev1.ResourceCPU, rt.CPURequest}, {&out.Requests, corev1.ResourceMemory, rt.MemoryRequest},
+		{&out.Limits, corev1.ResourceCPU, rt.CPULimit}, {&out.Limits, corev1.ResourceMemory, rt.MemoryLimit},
+	} {
+		if q.value == "" {
+			continue
+		}
+		quantity, err := resource.ParseQuantity(q.value)
+		if err != nil {
+			return out, fmt.Errorf("provider %s %q: %w", q.name, q.value, err)
+		}
+		if *q.list == nil {
+			*q.list = corev1.ResourceList{}
+		}
+		(*q.list)[q.name] = quantity
+	}
+	return out, nil
 }
 
 // Providers are the Provider packages of ProviderPackages at
-// ProviderVersion, running with RuntimeConfig. Cluster-scoped and
-// shared by every tenant.
+// ProviderVersion, each running with its runtime config (RuntimeConfigs).
+// Cluster-scoped and shared by every tenant.
 func Providers() []*pkgv1.Provider {
 	out := make([]*pkgv1.Provider, 0, len(ProviderPackages))
 	for _, name := range ProviderPackages {
+		config := RuntimeConfigName
+		if name == providerEC2 {
+			config = RuntimeConfigEC2Name
+		}
 		out = append(out, &pkgv1.Provider{
 			TypeMeta:   metav1.TypeMeta{APIVersion: pkgv1.SchemeGroupVersion.String(), Kind: pkgv1.ProviderKind},
 			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: crossplane.Labels("")},
 			Spec: pkgv1.ProviderSpec{
 				PackageSpec: pkgv1.PackageSpec{Package: awsPackageRegistry + name + ":" + ProviderVersion},
 				PackageRuntimeSpec: pkgv1.PackageRuntimeSpec{
-					RuntimeConfigReference: &pkgv1.RuntimeConfigReference{Name: RuntimeConfigName},
+					RuntimeConfigReference: &pkgv1.RuntimeConfigReference{Name: config},
 				},
 			},
 		})

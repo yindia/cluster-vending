@@ -56,6 +56,16 @@ type Options struct {
 	ETag string
 	// UpdateMask is --update-mask: the fields an update changes.
 	UpdateMask []string
+	// Plan is --plan of cluster update: only show what the update would do
+	// (validate_only); PlanID is --plan-id: apply only if that plan still
+	// holds.
+	Plan   bool
+	PlanID string
+	// Force is --force of cluster delete: tear down even if the cluster's
+	// API is unreachable.
+	Force bool
+	// Cluster is --cluster of admin pause / resume: one cluster only.
+	Cluster string
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.
 	AcknowledgeNotImported bool
@@ -76,6 +86,7 @@ type Clients struct {
 	Tenant  cloudv1connect.TenantServiceClient
 	Network cloudv1connect.NetworkServiceClient
 	Cluster cloudv1connect.ClusterServiceClient
+	Admin   cloudv1connect.AdminServiceClient
 }
 
 // NewClients returns clients of the API at server (a base URL) over
@@ -89,6 +100,7 @@ func NewClients(server string, httpClient *http.Client) Clients {
 		Tenant:  cloudv1connect.NewTenantServiceClient(c),
 		Network: cloudv1connect.NewNetworkServiceClient(c),
 		Cluster: cloudv1connect.NewClusterServiceClient(c),
+		Admin:   cloudv1connect.NewAdminServiceClient(c),
 	}
 }
 

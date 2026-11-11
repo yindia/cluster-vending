@@ -46,7 +46,7 @@ func (s *ClusterService) nodeGroupName(ctx context.Context, row *model.Cluster, 
 	current := groups[len(groups)-1]
 	name := current.Name
 	live := &awseks.NodeGroup{}
-	err = s.deps.Kube.Get(ctx, client.ObjectKey{Namespace: current.Namespace, Name: current.Name}, live)
+	err = s.deps.Get(ctx, client.ObjectKey{Namespace: current.Namespace, Name: current.Name}, live)
 	switch {
 	case apierrors.IsNotFound(err):
 		// Gone: render it again under its name with the new settings.

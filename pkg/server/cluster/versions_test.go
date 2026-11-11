@@ -49,7 +49,7 @@ func versionsOf(spec *cloudv1.ClusterSpec) map[string]string {
 func TestResolveVersionsOnCreate(t *testing.T) {
 	in := minimalSpec()
 	in.GetAws().Addons = []*cloudv1.AwsAddon{{Name: "coredns", Version: "v0-1.34"}}
-	spec := resolveSpec(in, []string{"use1-az1", "use1-az2"})
+	spec := mustResolve(t, in, []string{"use1-az1", "use1-az2"})
 	err := versionService().resolveVersions(context.Background(), &model.CloudAccount{}, spec, pinnedAddons(in))
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestUpgradeMovesOnlyUnpinnedAddons(t *testing.T) {
 	// Created on 1.34 with coredns pinned; upgraded to 1.35.
 	in := minimalSpec()
 	in.GetAws().Addons = []*cloudv1.AwsAddon{{Name: "coredns", Version: "v0-1.34"}}
-	spec := resolveSpec(in, []string{"use1-az1", "use1-az2"})
+	spec := mustResolve(t, in, []string{"use1-az1", "use1-az2"})
 	s := versionService()
 	if err := s.resolveVersions(context.Background(), &model.CloudAccount{}, spec, pinnedAddons(in)); err != nil {
 		t.Fatal(err)

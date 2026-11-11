@@ -16,6 +16,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 )
@@ -85,6 +86,11 @@ type Networks interface {
 	Update(ctx context.Context, n *model.Network) error
 	// Delete fails with ErrInUse while clusters use the network.
 	Delete(ctx context.Context, tenantID, id string) error
+	// ListPending returns, across tenants, the networks the background loop
+	// must look at: in one of states, not fully applied
+	// (applied_generation < generation), or rendered by a renderer older
+	// than renderTarget.
+	ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Network, error)
 }
 
 // Clusters stores clusters of a tenant.
@@ -104,6 +110,11 @@ type Clusters interface {
 	Update(ctx context.Context, c *model.Cluster) error
 	// Delete also deletes the cluster's node pools.
 	Delete(ctx context.Context, tenantID, id string) error
+	// ListPending is Networks.ListPending for clusters.
+	ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Cluster, error)
+	// CountByState counts the clusters of every stored state, across
+	// tenants.
+	CountByState(ctx context.Context) (map[string]int64, error)
 }
 
 // NodePools stores node pools of a cluster (by cluster row ID).
@@ -123,6 +134,9 @@ type ManagedResources interface {
 	Put(ctx context.Context, objects []model.ManagedResource) error
 	// ListByOwner returns an owner's objects in the order they were recorded.
 	ListByOwner(ctx context.Context, kind model.OwnerKind, ownerID string) ([]model.ManagedResource, error)
+	// ListByOwners is ListByOwner for several owners of one kind in one
+	// query, keyed by owner ID.
+	ListByOwners(ctx context.Context, kind model.OwnerKind, ownerIDs []string) (map[string][]model.ManagedResource, error)
 	// ListByAccount returns every object of an account (bootstrap ID): its
 	// own and those of its networks, clusters and node pools.
 	ListByAccount(ctx context.Context, tenantID, cloudAccountID string) ([]model.ManagedResource, error)
@@ -131,6 +145,11 @@ type ManagedResources interface {
 	DeleteByOwner(ctx context.Context, kind model.OwnerKind, ownerID string) error
 	// Delete forgets one object (soft delete), by row ID.
 	Delete(ctx context.Context, id string) error
+	// SetExternalName stores an object's external name, by row ID.
+	SetExternalName(ctx context.Context, id, externalName string) error
+	// SetGoneAt stores when an object was first seen gone, by row ID; a
+	// time already stored is kept.
+	SetGoneAt(ctx context.Context, id string, at time.Time) error
 }
 
 // Store groups the repositories. WithinTransaction runs fn with

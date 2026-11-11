@@ -205,7 +205,8 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
-	if err := s.deps.Kube.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
+	// From the API server: a read-modify-write needs the current object.
+	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
 		return err
 	}
 	if err := unstructured.SetNestedStringSlice(u.Object, []string{"*"}, "spec", "managementPolicies"); err != nil {
@@ -228,7 +229,7 @@ func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error
 // same cloud resources.
 func (s *NetworkService) refuseOwnedVPC(ctx context.Context, a *model.CloudAccount, vpcID string) error {
 	vpcs := &awsec2.VPCList{}
-	if err := s.deps.Kube.List(ctx, vpcs, client.InNamespace(a.Namespace)); err != nil {
+	if err := s.deps.List(ctx, vpcs, client.InNamespace(a.Namespace)); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil
 		}

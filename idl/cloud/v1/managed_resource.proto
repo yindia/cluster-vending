@@ -3,6 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "cloud/v1/conditions.proto";
+import "google/protobuf/timestamp.proto";
 
 // ManagedResourceState is the state of one Crossplane managed resource.
 enum ManagedResourceState {
@@ -47,6 +48,16 @@ message ManagedResource {
   string zone_id = 10;
   // Subnet role ("public" or "private"), for subnets.
   string role = 11;
+  // When deletion of the object was requested (metadata.deletionTimestamp);
+  // unset while it is not being deleted. With Synced=False it tells how
+  // long a deletion has been stuck.
+  google.protobuf.Timestamp deletion_time = 12;
+  // metadata.generation: bumped by every change of the object's spec.
+  int64 generation = 13;
+  // The generation the provider last reconciled (the Synced condition's
+  // observedGeneration). Lower than generation: the latest change is not
+  // applied to the cloud yet.
+  int64 observed_generation = 14;
 }
 
 // ManagedResourceEvent is a change of one managed resource, as streamed by

@@ -2,6 +2,7 @@ package aws
 
 import (
 	apiextv1alpha1 "github.com/crossplane/crossplane/apis/v2/apiextensions/v1alpha1"
+	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,10 +50,12 @@ func ActivationPolicy() *apiextv1alpha1.ManagedResourceActivationPolicy {
 	}
 }
 
-// ManagedObjects are empty objects of every managed resource kind the
-// platform creates (networks and clusters), for watches and caches.
+// ManagedObjects are empty objects of every kind the platform creates in
+// tenant namespaces (networks' and clusters' managed resources, and the
+// Usages ordering their deletion), for watches and caches. Usage is a
+// Crossplane core kind, not an MRD: it needs no activation.
 func ManagedObjects() []client.Object {
-	return append(NetworkObjects(),
+	return append(NetworkObjects(), &protectionv1beta1.Usage{},
 		&awsiam.Role{}, &awsiam.RolePolicyAttachment{}, &awsiam.Policy{},
 		&awseks.Cluster{}, &awseks.NodeGroup{}, &awseks.Addon{}, &awseks.PodIdentityAssociation{},
 		&awseks.AccessEntry{}, &awseks.AccessPolicyAssociation{}, &awseks.ClusterAuth{},

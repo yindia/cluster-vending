@@ -99,7 +99,7 @@ func (s *ClusterService) liveKubernetesVersion(ctx context.Context, row *model.C
 			continue
 		}
 		c := &awseks.Cluster{}
-		if err := getIgnoreMissing(ctx, s.deps.Kube, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, c); err != nil {
+		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, c); err != nil {
 			return "", connect.NewError(connect.CodeUnavailable, "cannot read the EKS cluster: "+err.Error())
 		}
 		return deref(c.Status.AtProvider.Version), nil

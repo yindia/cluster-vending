@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -72,7 +74,9 @@ func (d Deps) Observe(ctx context.Context, records []model.ManagedResource) ([]*
 		u, err := d.read(ctx, r)
 		switch {
 		case err == nil:
-			out = append(out, view(r, u))
+			v := view(r, u)
+			d.keepExternalName(ctx, r, v.GetExternalName())
+			out = append(out, v)
 		case apierrors.IsNotFound(err), meta.IsNoMatchError(err):
 			v := base(r)
 			v.State, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING, "not found in the management cluster"
@@ -85,12 +89,42 @@ func (d Deps) Observe(ctx context.Context, records []model.ManagedResource) ([]*
 	return out, nil
 }
 
+// base is a record's view before reading the object: the stored external
+// name stays visible when the object is gone.
 func base(r model.ManagedResource) *cloudv1.ManagedResource {
-	return &cloudv1.ManagedResource{Kind: r.Kind, Name: r.Name}
+	return &cloudv1.ManagedResource{Kind: r.Kind, Name: r.Name, ExternalName: r.ExternalName}
+}
+
+// keepExternalName stores an object's external name when it is new or
+// changed (once per object, in practice). A failure is logged, not
+// returned: the name is stored on a later read.
+func (d Deps) keepExternalName(ctx context.Context, r model.ManagedResource, name string) {
+	if name == "" || name == r.ExternalName || r.ID == "" {
+		return
+	}
+	if err := d.Store.ManagedResources().SetExternalName(ctx, r.ID, name); err != nil && d.Logger != nil {
+		d.Logger.WarnContext(ctx, "store external name", "kind", r.Kind, "name", r.Name, "error", err)
+	}
+}
+
+// MarkGone stores, for the records of an owner being deleted, when each
+// was first seen gone (views in record order, as Observe returns them).
+func (d Deps) MarkGone(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource) error {
+	for i, v := range views {
+		if i >= len(records) || records[i].GoneAt != nil || records[i].ID == "" ||
+			v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			continue
+		}
+		if err := d.Store.ManagedResources().SetGoneAt(ctx, records[i].ID, now()); err != nil {
+			return fmt.Errorf("store when %s %s went away: %w", records[i].Kind, records[i].Name, err)
+		}
+	}
+	return nil
 }
 
 type condition struct {
 	status, reason, message string
+	observedGeneration      int64
 	since                   time.Time // lastTransitionTime; zero when absent
 }
 
@@ -106,12 +140,17 @@ type condition struct {
 func view(r model.ManagedResource, u *unstructured.Unstructured) *cloudv1.ManagedResource {
 	v := base(r)
 	v.ExternalName = u.GetAnnotations()[externalNameAnnotation]
+	if ts := u.GetDeletionTimestamp(); ts != nil {
+		v.DeletionTime = timestamppb.New(ts.Time)
+	}
+	v.Generation = u.GetGeneration()
 	v.ZoneId = u.GetLabels()[crossplane.LabelZone]
 	v.Role = u.GetLabels()[crossplane.LabelSubnetRole]
 	conds := conditions(u)
 	ready, hasReady := conds["Ready"]
 	synced, hasSynced := conds["Synced"]
 	v.Ready, v.Synced = conditionStatus(ready.status), conditionStatus(synced.status)
+	v.ObservedGeneration = synced.observedGeneration
 	switch {
 	case u.GetDeletionTimestamp() != nil:
 		v.State = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING
@@ -147,7 +186,9 @@ func conditions(u *unstructured.Unstructured) map[string]condition {
 		}
 		str := func(k string) string { s, _ := m[k].(string); return s }
 		since, _ := time.Parse(time.RFC3339, str("lastTransitionTime"))
-		out[str("type")] = condition{status: str("status"), reason: str("reason"), message: str("message"), since: since}
+		gen, _, _ := unstructured.NestedInt64(m, "observedGeneration")
+		out[str("type")] = condition{status: str("status"), reason: str("reason"), message: str("message"), since: since,
+			observedGeneration: gen}
 	}
 	return out
 }
@@ -165,20 +206,40 @@ func conditionStatus(s string) cloudv1.ConditionStatus {
 	}
 }
 
-// DeleteRecorded asks the cluster to delete recorded objects; Crossplane
-// removes the cloud resources and then the objects. Objects already gone
-// are skipped.
+// usageKind is Crossplane's protection.crossplane.io Usage.
+const usageKind = "Usage"
+
+// DeleteRecorded asks the management cluster to delete recorded objects,
+// last recorded first (dependents are recorded after what they use).
+// Crossplane removes the cloud resources, then the objects. It skips:
+//   - Usages: Kubernetes garbage-collects each with the object using
+//     (Crossplane owner-references it to spec.by); deleting one first
+//     would release its protection at once.
+//   - objects already gone.
+//
+// A 409 is the Usage webhook refusing an object still in use: Crossplane
+// records the attempt and replays the delete once the user is gone
+// (replayDeletion), so it counts as done. Other errors are collected; the
+// remaining objects are still deleted.
 func (d Deps) DeleteRecorded(ctx context.Context, records []model.ManagedResource) error {
-	for _, r := range records {
+	var errs []error
+	for i := len(records) - 1; i >= 0; i-- {
+		r := records[i]
+		if r.Kind == usageKind {
+			continue
+		}
 		u := &unstructured.Unstructured{}
 		u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
 		u.SetNamespace(r.Namespace)
 		u.SetName(r.Name)
-		if err := d.Kube.Delete(ctx, u); err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
-			return fmt.Errorf("delete %s %s: %w", r.Kind, r.Name, err)
+		err := d.Kube.Delete(ctx, u)
+		switch {
+		case err == nil, apierrors.IsNotFound(err), meta.IsNoMatchError(err), apierrors.IsConflict(err):
+		default:
+			errs = append(errs, fmt.Errorf("delete %s %s: %w", r.Kind, r.Name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Prune deletes the objects recorded for an owner that keep no longer
@@ -200,7 +261,7 @@ func (d Deps) Prune(ctx context.Context, owner Owner, keep []client.Object) erro
 		if kept[r.Kind+"/"+r.Namespace+"/"+r.Name] {
 			continue
 		}
-		if err := d.DeleteRecorded(ctx, []model.ManagedResource{r}); err != nil {
+		if err := d.deletePruned(ctx, r); err != nil {
 			return err
 		}
 		if err := d.Store.ManagedResources().Delete(ctx, r.ID); err != nil {
@@ -227,33 +288,65 @@ func inGrace(u *unstructured.Unstructured) bool {
 	return !created.IsZero() && now().Sub(created) < failureGrace
 }
 
-// read returns a recorded object: from the cache (typed, so the cache
-// serves it), else from the API server, which has objects the cache has
-// not seen yet (just applied) or does not hold.
+// read returns a recorded object, unstructured: from the cache, else from
+// the API server, which has objects the cache has not seen yet (just
+// applied).
 func (d Deps) read(ctx context.Context, r model.ManagedResource) (*unstructured.Unstructured, error) {
-	gvk := schema.FromAPIVersionAndKind(r.APIVersion, r.Kind)
-	key := client.ObjectKey{Namespace: r.Namespace, Name: r.Name}
-	typed, err := d.Kube.Scheme().New(gvk)
-	obj, ok := typed.(client.Object)
-	if err != nil || !ok {
-		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(gvk)
-		return u, d.Reader().Get(ctx, key, u)
-	}
-	err = d.Kube.Get(ctx, key, obj)
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
+	return u, d.getUnstructured(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u)
+}
+
+func (d Deps) getUnstructured(ctx context.Context, key client.ObjectKey, u *unstructured.Unstructured) error {
+	err := d.Kube.Get(ctx, key, u)
 	if apierrors.IsNotFound(err) && d.KubeReader != nil {
-		err = d.KubeReader.Get(ctx, key, obj)
+		err = d.KubeReader.Get(ctx, key, u)
 	}
+	return err
+}
+
+// Get reads a typed object through the cache. The cache holds unstructured
+// objects only (one informer per kind), so obj is read unstructured and
+// converted; an object the cache does not have (yet) is read from the API
+// server.
+func (d Deps) Get(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+	gvk, err := apiutil.GVKForObject(obj, d.Kube.Scheme())
 	if err != nil {
-		return nil, err
+		return err
 	}
-	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-	if err != nil {
-		return nil, fmt.Errorf("convert %s %s: %w", r.Kind, r.Name, err)
-	}
-	u := &unstructured.Unstructured{Object: content}
+	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(gvk)
-	return u, nil
+	if err := d.getUnstructured(ctx, key, u); err != nil {
+		return err
+	}
+	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, obj)
+}
+
+// List lists typed objects through the cache (see Get).
+func (d Deps) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	gvk, err := apiutil.GVKForObject(list, d.Kube.Scheme())
+	if err != nil {
+		return err
+	}
+	ul := &unstructured.UnstructuredList{}
+	ul.SetGroupVersionKind(gvk)
+	if err := d.Kube.List(ctx, ul, opts...); err != nil {
+		return err
+	}
+	return runtime.DefaultUnstructuredConverter.FromUnstructured(ul.UnstructuredContent(), list)
+}
+
+// SettleMissing turns MISSING into CREATING for objects recorded less than
+// failureGrace ago (views in record order, as Observe returns them): a
+// just-applied object the reader has not seen yet must not read as failed.
+// For resources being created or updated, never for deletions.
+func SettleMissing(records []model.ManagedResource, views []*cloudv1.ManagedResource) {
+	for i, v := range views {
+		if i < len(records) && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING &&
+			now().Sub(records[i].CreatedAt) < failureGrace {
+			v.State, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_CREATING, "not in the management cluster yet"
+		}
+	}
 }
 
 // Reader is the uncached reader, or Kube without one (see Deps.KubeReader).
@@ -262,4 +355,31 @@ func (d Deps) Reader() client.Reader {
 		return d.KubeReader
 	}
 	return d.Kube
+}
+
+// deletePruned deletes one object the render no longer contains. Unlike
+// DeleteRecorded it deletes Usages too: a dropped Usage must stop
+// protecting its object.
+func (d Deps) deletePruned(ctx context.Context, r model.ManagedResource) error {
+	if r.Kind != usageKind {
+		return d.DeleteRecorded(ctx, []model.ManagedResource{r})
+	}
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
+	u.SetNamespace(r.Namespace)
+	u.SetName(r.Name)
+	if err := d.Kube.Delete(ctx, u); err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		return fmt.Errorf("delete %s %s: %w", r.Kind, r.Name, err)
+	}
+	return nil
+}
+
+// ReadRecorded is a recorded object as Observe reads it (cache first, then
+// the API server); nil when it does not exist.
+func (d Deps) ReadRecorded(ctx context.Context, r model.ManagedResource) (*unstructured.Unstructured, error) {
+	u, err := d.read(ctx, r)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil, nil
+	}
+	return u, err
 }

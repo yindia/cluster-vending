@@ -26,17 +26,19 @@ func fakeKube(t *testing.T, objects ...client.Object) client.Client {
 
 func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 	ctx := context.Background()
+	withRole := crossplaneaws.DefaultProviderRuntime()
+	withRole.ManagementRoleARN = "arn:aws:iam::111122223333:role/platform"
 	// An operator pinned the EKS provider to another version.
 	pinned := &pkgv1.Provider{ObjectMeta: metav1.ObjectMeta{Name: "provider-aws-eks"},
 		Spec: pkgv1.ProviderSpec{PackageSpec: pkgv1.PackageSpec{Package: "xpkg.upbound.io/upbound/provider-aws-eks:v2.8.0"}}}
 	k := fakeKube(t, pinned)
 
-	got, err := crossplaneaws.InstallProviders(ctx, k, "arn:aws:iam::111122223333:role/platform")
+	got, err := crossplaneaws.InstallProviders(ctx, k, withRole)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Created) != 5 || len(got.Existing) != 1 {
-		t.Fatalf("created %v, existing %v; want the activation policy, runtime config, ec2, iam and helm created, eks existing", got.Created, got.Existing)
+	if len(got.Created) != 6 || len(got.Existing) != 1 {
+		t.Fatalf("created %v, existing %v; want the activation policy, 2 runtime configs, ec2, iam and helm created, eks existing", got.Created, got.Existing)
 	}
 	helm := &pkgv1.Provider{}
 	if err := k.Get(ctx, client.ObjectKey{Name: crossplane.HelmProviderName}, helm); err != nil ||
@@ -50,14 +52,14 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 	}
 	ec2 := &pkgv1.Provider{}
 	if err := k.Get(ctx, client.ObjectKey{Name: "provider-aws-ec2"}, ec2); err != nil ||
-		ec2.Spec.Package != "xpkg.upbound.io/upbound/provider-aws-ec2:"+crossplaneaws.ProviderVersion ||
-		ec2.Spec.RuntimeConfigReference.Name != crossplaneaws.RuntimeConfigName {
+		ec2.Spec.Package != "xpkg.crossplane.io/crossplane-contrib/provider-aws-ec2:"+crossplaneaws.ProviderVersion ||
+		ec2.Spec.RuntimeConfigReference.Name != crossplaneaws.RuntimeConfigEC2Name {
 		t.Errorf("provider-aws-ec2 = %+v, %v", ec2.Spec, err)
 	}
 
 	// Second start: nothing to create.
-	again, err := crossplaneaws.InstallProviders(ctx, k, "arn:aws:iam::111122223333:role/platform")
-	if err != nil || len(again.Created) != 0 || len(again.Existing) != 6 {
+	again, err := crossplaneaws.InstallProviders(ctx, k, withRole)
+	if err != nil || len(again.Created) != 0 || len(again.Existing) != 7 {
 		t.Errorf("second run: %+v, %v", again, err)
 	}
 }
@@ -65,15 +67,18 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 func TestInstallProvidersWithoutManagementRole(t *testing.T) {
 	ctx := context.Background()
 	k := fakeKube(t)
-	if _, err := crossplaneaws.InstallProviders(ctx, k, ""); err != nil {
+	if _, err := crossplaneaws.InstallProviders(ctx, k, crossplaneaws.DefaultProviderRuntime()); err != nil {
 		t.Fatal(err)
 	}
+	// Without a role the runtime config still tunes the provider; it only
+	// carries no IRSA annotation.
 	drc := &pkgv1beta1.DeploymentRuntimeConfig{}
-	if err := k.Get(ctx, client.ObjectKey{Name: crossplaneaws.RuntimeConfigName}, drc); err == nil {
-		t.Error("runtime config created without a management role")
+	if err := k.Get(ctx, client.ObjectKey{Name: crossplaneaws.RuntimeConfigName}, drc); err != nil || drc.Spec.ServiceAccountTemplate != nil {
+		t.Errorf("runtime config: %v, service account template %+v; want one without IRSA", err, drc.Spec.ServiceAccountTemplate)
 	}
 	iam := &pkgv1.Provider{}
-	if err := k.Get(ctx, client.ObjectKey{Name: "provider-aws-iam"}, iam); err != nil || iam.Spec.RuntimeConfigReference != nil {
-		t.Errorf("provider-aws-iam = %+v, %v; want Crossplane's default runtime config", iam.Spec, err)
+	if err := k.Get(ctx, client.ObjectKey{Name: "provider-aws-iam"}, iam); err != nil ||
+		iam.Spec.RuntimeConfigReference == nil || iam.Spec.RuntimeConfigReference.Name != crossplaneaws.RuntimeConfigName {
+		t.Errorf("provider-aws-iam = %+v, %v; want the platform's runtime config", iam.Spec, err)
 	}
 }

@@ -9,6 +9,7 @@ package cloudv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -174,9 +175,19 @@ type ManagedResource struct {
 	// Zone ID, for zonal resources (subnets, NAT gateways, EIPs).
 	ZoneId string `protobuf:"bytes,10,opt,name=zone_id,json=zoneId,proto3" json:"zone_id,omitempty"`
 	// Subnet role ("public" or "private"), for subnets.
-	Role          string `protobuf:"bytes,11,opt,name=role,proto3" json:"role,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Role string `protobuf:"bytes,11,opt,name=role,proto3" json:"role,omitempty"`
+	// When deletion of the object was requested (metadata.deletionTimestamp);
+	// unset while it is not being deleted. With Synced=False it tells how
+	// long a deletion has been stuck.
+	DeletionTime *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=deletion_time,json=deletionTime,proto3" json:"deletion_time,omitempty"`
+	// metadata.generation: bumped by every change of the object's spec.
+	Generation int64 `protobuf:"varint,13,opt,name=generation,proto3" json:"generation,omitempty"`
+	// The generation the provider last reconciled (the Synced condition's
+	// observedGeneration). Lower than generation: the latest change is not
+	// applied to the cloud yet.
+	ObservedGeneration int64 `protobuf:"varint,14,opt,name=observed_generation,json=observedGeneration,proto3" json:"observed_generation,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ManagedResource) Reset() {
@@ -279,6 +290,27 @@ func (x *ManagedResource) GetRole() string {
 	return ""
 }
 
+func (x *ManagedResource) GetDeletionTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DeletionTime
+	}
+	return nil
+}
+
+func (x *ManagedResource) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *ManagedResource) GetObservedGeneration() int64 {
+	if x != nil {
+		return x.ObservedGeneration
+	}
+	return 0
+}
+
 // ManagedResourceEvent is a change of one managed resource, as streamed by
 // WatchNetwork and WatchCluster.
 type ManagedResourceEvent struct {
@@ -338,7 +370,7 @@ var File_cloud_v1_managed_resource_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\n" +
-	"\x1fcloud/v1/managed_resource.proto\x12\bcloud.v1\x1a\x19cloud/v1/conditions.proto\"\xd7\x02\n" +
+	"\x1fcloud/v1/managed_resource.proto\x12\bcloud.v1\x1a\x19cloud/v1/conditions.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x03\n" +
 	"\x0fManagedResource\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12#\n" +
@@ -350,7 +382,12 @@ const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\amessage\x18\t \x01(\tR\amessage\x12\x17\n" +
 	"\azone_id\x18\n" +
 	" \x01(\tR\x06zoneId\x12\x12\n" +
-	"\x04role\x18\v \x01(\tR\x04role\"\xd9\x01\n" +
+	"\x04role\x18\v \x01(\tR\x04role\x12?\n" +
+	"\rdeletion_time\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\fdeletionTime\x12\x1e\n" +
+	"\n" +
+	"generation\x18\r \x01(\x03R\n" +
+	"generation\x12/\n" +
+	"\x13observed_generation\x18\x0e \x01(\x03R\x12observedGeneration\"\xd9\x01\n" +
 	"\x14ManagedResourceEvent\x127\n" +
 	"\x04type\x18\x01 \x01(\x0e2#.cloud.v1.ManagedResourceEvent.TypeR\x04type\x125\n" +
 	"\bresource\x18\x02 \x01(\v2\x19.cloud.v1.ManagedResourceR\bresource\"Q\n" +
@@ -390,18 +427,20 @@ var file_cloud_v1_managed_resource_proto_goTypes = []any{
 	(*ManagedResource)(nil),        // 2: cloud.v1.ManagedResource
 	(*ManagedResourceEvent)(nil),   // 3: cloud.v1.ManagedResourceEvent
 	(ConditionStatus)(0),           // 4: cloud.v1.ConditionStatus
+	(*timestamppb.Timestamp)(nil),  // 5: google.protobuf.Timestamp
 }
 var file_cloud_v1_managed_resource_proto_depIdxs = []int32{
 	0, // 0: cloud.v1.ManagedResource.state:type_name -> cloud.v1.ManagedResourceState
 	4, // 1: cloud.v1.ManagedResource.ready:type_name -> cloud.v1.ConditionStatus
 	4, // 2: cloud.v1.ManagedResource.synced:type_name -> cloud.v1.ConditionStatus
-	1, // 3: cloud.v1.ManagedResourceEvent.type:type_name -> cloud.v1.ManagedResourceEvent.Type
-	2, // 4: cloud.v1.ManagedResourceEvent.resource:type_name -> cloud.v1.ManagedResource
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	5, // 3: cloud.v1.ManagedResource.deletion_time:type_name -> google.protobuf.Timestamp
+	1, // 4: cloud.v1.ManagedResourceEvent.type:type_name -> cloud.v1.ManagedResourceEvent.Type
+	2, // 5: cloud.v1.ManagedResourceEvent.resource:type_name -> cloud.v1.ManagedResource
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_managed_resource_proto_init() }

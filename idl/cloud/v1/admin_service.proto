@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+
+// AdminService holds operations of the platform's operators, not of
+// tenants. Expose it to administrators only.
+service AdminService {
+  // Pauses Crossplane's reconciliation of a tenant's managed resources, or
+  // of one cluster's: every one of them gets the crossplane.io/paused
+  // annotation, so the providers neither change nor delete its cloud
+  // resource until resumed. Used to upgrade providers one tenant or
+  // cluster at a time: pause everything else, upgrade, check, resume step
+  // by step. Idempotent.
+  rpc PauseReconcile(PauseReconcileRequest) returns (PauseReconcileResponse);
+
+  // Removes the pause (PauseReconcile). Idempotent.
+  rpc ResumeReconcile(ResumeReconcileRequest) returns (ResumeReconcileResponse);
+}
+
+message PauseReconcileRequest {
+  // The tenant whose managed resources are paused.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Only this cluster's managed resources (Cluster.id); empty: all the
+  // tenant's, networks included.
+  string cluster_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message PauseReconcileResponse {
+  // Managed resources that are paused now (already paused ones included).
+  int32 resources = 1;
+}
+
+message ResumeReconcileRequest {
+  // The tenant whose managed resources are resumed.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Only this cluster's managed resources (Cluster.id); empty: all the
+  // tenant's.
+  string cluster_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message ResumeReconcileResponse {
+  // Managed resources that are reconciled again now.
+  int32 resources = 1;
+}

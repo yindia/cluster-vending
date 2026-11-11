@@ -25,9 +25,9 @@ func clusterPlan() crossplaneaws.ClusterPlan {
 func TestClusterResources(t *testing.T) {
 	objects := crossplaneaws.ClusterResources(clusterPlan())
 	// 3 roles + 5 attachments, cluster, node group, 5 add-ons, pod identity,
-	// cluster auth, access entry + policy association.
-	if len(objects) != 19 {
-		t.Fatalf("got %d objects, want 19", len(objects))
+	// cluster auth, access entry + policy association, 11 Usages.
+	if len(objects) != 30 {
+		t.Fatalf("got %d objects, want 30", len(objects))
 	}
 	byName := map[string]any{}
 	for _, o := range objects {

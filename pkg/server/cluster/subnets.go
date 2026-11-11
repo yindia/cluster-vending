@@ -44,7 +44,7 @@ func subnetManager(clusterID string) string { return kube.FieldOwner + "/cluster
 func (s *ClusterService) tagSubnets(ctx context.Context, row *model.Cluster, t target) error {
 	for _, name := range t.subnetObjects {
 		subnet := &awsec2.Subnet{}
-		if err := s.deps.Kube.Get(ctx, client.ObjectKey{Namespace: t.account.Namespace, Name: name}, subnet); err != nil {
+		if err := s.deps.Get(ctx, client.ObjectKey{Namespace: t.account.Namespace, Name: name}, subnet); err != nil {
 			s.logger().ErrorContext(ctx, "read network subnet", "subnet", name, "error", err)
 			return connect.NewError(connect.CodeUnavailable, "cannot read the network's subnet "+name)
 		}

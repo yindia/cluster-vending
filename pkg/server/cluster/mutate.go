@@ -90,7 +90,9 @@ func scaling(spec *cloudv1.ClusterSpec) *cloudv1.ScalingConfig {
 
 // UpdateCluster changes the fields named in update_mask and rolls spec
 // changes out by applying the cluster's resources again; resources the new
-// spec no longer has (a removed admin's access entry) are deleted.
+// spec no longer has (a removed admin's access entry) are deleted. With
+// validate_only it only returns the plan of that (planUpdate); with
+// plan_id it applies only if the plan is still the same.
 func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateClusterRequest) (*cloudv1.UpdateClusterResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -124,6 +126,22 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 			return nil, err
 		}
 	}
+	var plan *cloudv1.Plan
+	if req.GetValidateOnly() || req.GetPlanId() != "" {
+		if plan, err = s.planUpdate(ctx, req, row, spec, t); err != nil {
+			return nil, err
+		}
+		if req.GetValidateOnly() {
+			return s.planned(ctx, req, plan)
+		}
+		if plan.GetPlanId() != req.GetPlanId() {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				"the plan is stale: the request or a resource changed since it was made; plan again (validate_only)")
+		}
+		if !plan.GetApplicable() {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is not applicable: it changes a field the cloud cannot change")
+		}
+	}
 	if row.Spec, err = encode(spec); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -138,7 +156,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, service.ToConnect(err)
 	}
 	if specChanged {
-		plan := clusterPlan(spec, t.subnetIDs, s.base(row, t.account))
+		plan := s.renderPlan(spec, row, t)
 		if err := s.apply(ctx, row, t.account, plan); err != nil {
 			return nil, err
 		}
@@ -150,7 +168,18 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, err
 	}
 	c, err := s.view(ctx, row)
-	return &cloudv1.UpdateClusterResponse{Cluster: c}, err
+	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
+}
+
+// planned is a validate_only response: the plan, and the cluster as it is
+// (nothing was stored or applied).
+func (s *ClusterService) planned(ctx context.Context, req *cloudv1.UpdateClusterRequest, plan *cloudv1.Plan) (*cloudv1.UpdateClusterResponse, error) {
+	row, err := s.get(ctx, req.GetTenantId(), req.GetCluster().GetId())
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.view(ctx, row)
+	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
 }
 
 // checkMutable refuses updates of deleting clusters and stale etags.
@@ -274,8 +303,9 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
 	}
-	if row.State != stateDeleting {
+	if row.State != stateDeleting || (req.GetForce() && !row.DeleteForce) {
 		row.State = stateDeleting
+		row.DeleteForce = row.DeleteForce || req.GetForce()
 		if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 			return nil, service.ToConnect(err)
 		}

@@ -134,6 +134,12 @@ message ClusterSpec {
     expression: "!has(this.aws) || this.network.service_cidr == '' || this.network.service_cidr.matches('/(1[2-9]|2[0-4])$')"
   };
 
+  option (buf.validate.message).cel = {
+    id: "public_access_cidrs_required"
+    message: "control_plane.endpoint_access.public_access_cidrs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)"
+    expression: "has(this.control_plane) && has(this.control_plane.endpoint_access) && size(this.control_plane.endpoint_access.public_access_cidrs) > 0"
+  };
+
   // --- Constraints for every non-AWS provider ---
   option (buf.validate.message).cel = {
     id: "single_instance_type"

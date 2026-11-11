@@ -12,6 +12,7 @@ package mock
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	model "github.com/yindia/cluster-vending/pkg/database/model"
 	repository "github.com/yindia/cluster-vending/pkg/database/repository"
@@ -781,6 +782,45 @@ func (c *MockNetworksListCall) DoAndReturn(f func(context.Context, string, repos
 	return c
 }
 
+// ListPending mocks base method.
+func (m *MockNetworks) ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Network, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPending", ctx, states, renderTarget)
+	ret0, _ := ret[0].([]model.Network)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPending indicates an expected call of ListPending.
+func (mr *MockNetworksMockRecorder) ListPending(ctx, states, renderTarget any) *MockNetworksListPendingCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPending", reflect.TypeOf((*MockNetworks)(nil).ListPending), ctx, states, renderTarget)
+	return &MockNetworksListPendingCall{Call: call}
+}
+
+// MockNetworksListPendingCall wrap *gomock.Call
+type MockNetworksListPendingCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockNetworksListPendingCall) Return(arg0 []model.Network, arg1 error) *MockNetworksListPendingCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockNetworksListPendingCall) Do(f func(context.Context, []string, int64) ([]model.Network, error)) *MockNetworksListPendingCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockNetworksListPendingCall) DoAndReturn(f func(context.Context, []string, int64) ([]model.Network, error)) *MockNetworksListPendingCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Update mocks base method.
 func (m *MockNetworks) Update(ctx context.Context, n *model.Network) error {
 	m.ctrl.T.Helper()
@@ -841,6 +881,45 @@ func NewMockClusters(ctrl *gomock.Controller) *MockClusters {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockClusters) EXPECT() *MockClustersMockRecorder {
 	return m.recorder
+}
+
+// CountByState mocks base method.
+func (m *MockClusters) CountByState(ctx context.Context) (map[string]int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountByState", ctx)
+	ret0, _ := ret[0].(map[string]int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountByState indicates an expected call of CountByState.
+func (mr *MockClustersMockRecorder) CountByState(ctx any) *MockClustersCountByStateCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountByState", reflect.TypeOf((*MockClusters)(nil).CountByState), ctx)
+	return &MockClustersCountByStateCall{Call: call}
+}
+
+// MockClustersCountByStateCall wrap *gomock.Call
+type MockClustersCountByStateCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersCountByStateCall) Return(arg0 map[string]int64, arg1 error) *MockClustersCountByStateCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersCountByStateCall) Do(f func(context.Context) (map[string]int64, error)) *MockClustersCountByStateCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersCountByStateCall) DoAndReturn(f func(context.Context) (map[string]int64, error)) *MockClustersCountByStateCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // Create mocks base method.
@@ -1110,6 +1189,45 @@ func (c *MockClustersListByNetworkCall) Do(f func(context.Context, string) ([]mo
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockClustersListByNetworkCall) DoAndReturn(f func(context.Context, string) ([]model.Cluster, error)) *MockClustersListByNetworkCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ListPending mocks base method.
+func (m *MockClusters) ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Cluster, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPending", ctx, states, renderTarget)
+	ret0, _ := ret[0].([]model.Cluster)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPending indicates an expected call of ListPending.
+func (mr *MockClustersMockRecorder) ListPending(ctx, states, renderTarget any) *MockClustersListPendingCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPending", reflect.TypeOf((*MockClusters)(nil).ListPending), ctx, states, renderTarget)
+	return &MockClustersListPendingCall{Call: call}
+}
+
+// MockClustersListPendingCall wrap *gomock.Call
+type MockClustersListPendingCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersListPendingCall) Return(arg0 []model.Cluster, arg1 error) *MockClustersListPendingCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersListPendingCall) Do(f func(context.Context, []string, int64) ([]model.Cluster, error)) *MockClustersListPendingCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersListPendingCall) DoAndReturn(f func(context.Context, []string, int64) ([]model.Cluster, error)) *MockClustersListPendingCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1546,6 +1664,45 @@ func (c *MockManagedResourcesListByOwnerCall) DoAndReturn(f func(context.Context
 	return c
 }
 
+// ListByOwners mocks base method.
+func (m *MockManagedResources) ListByOwners(ctx context.Context, kind model.OwnerKind, ownerIDs []string) (map[string][]model.ManagedResource, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListByOwners", ctx, kind, ownerIDs)
+	ret0, _ := ret[0].(map[string][]model.ManagedResource)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListByOwners indicates an expected call of ListByOwners.
+func (mr *MockManagedResourcesMockRecorder) ListByOwners(ctx, kind, ownerIDs any) *MockManagedResourcesListByOwnersCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByOwners", reflect.TypeOf((*MockManagedResources)(nil).ListByOwners), ctx, kind, ownerIDs)
+	return &MockManagedResourcesListByOwnersCall{Call: call}
+}
+
+// MockManagedResourcesListByOwnersCall wrap *gomock.Call
+type MockManagedResourcesListByOwnersCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockManagedResourcesListByOwnersCall) Return(arg0 map[string][]model.ManagedResource, arg1 error) *MockManagedResourcesListByOwnersCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockManagedResourcesListByOwnersCall) Do(f func(context.Context, model.OwnerKind, []string) (map[string][]model.ManagedResource, error)) *MockManagedResourcesListByOwnersCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockManagedResourcesListByOwnersCall) DoAndReturn(f func(context.Context, model.OwnerKind, []string) (map[string][]model.ManagedResource, error)) *MockManagedResourcesListByOwnersCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Put mocks base method.
 func (m *MockManagedResources) Put(ctx context.Context, objects []model.ManagedResource) error {
 	m.ctrl.T.Helper()
@@ -1580,6 +1737,82 @@ func (c *MockManagedResourcesPutCall) Do(f func(context.Context, []model.Managed
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockManagedResourcesPutCall) DoAndReturn(f func(context.Context, []model.ManagedResource) error) *MockManagedResourcesPutCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetExternalName mocks base method.
+func (m *MockManagedResources) SetExternalName(ctx context.Context, id, externalName string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetExternalName", ctx, id, externalName)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetExternalName indicates an expected call of SetExternalName.
+func (mr *MockManagedResourcesMockRecorder) SetExternalName(ctx, id, externalName any) *MockManagedResourcesSetExternalNameCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetExternalName", reflect.TypeOf((*MockManagedResources)(nil).SetExternalName), ctx, id, externalName)
+	return &MockManagedResourcesSetExternalNameCall{Call: call}
+}
+
+// MockManagedResourcesSetExternalNameCall wrap *gomock.Call
+type MockManagedResourcesSetExternalNameCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockManagedResourcesSetExternalNameCall) Return(arg0 error) *MockManagedResourcesSetExternalNameCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockManagedResourcesSetExternalNameCall) Do(f func(context.Context, string, string) error) *MockManagedResourcesSetExternalNameCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockManagedResourcesSetExternalNameCall) DoAndReturn(f func(context.Context, string, string) error) *MockManagedResourcesSetExternalNameCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetGoneAt mocks base method.
+func (m *MockManagedResources) SetGoneAt(ctx context.Context, id string, at time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetGoneAt", ctx, id, at)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetGoneAt indicates an expected call of SetGoneAt.
+func (mr *MockManagedResourcesMockRecorder) SetGoneAt(ctx, id, at any) *MockManagedResourcesSetGoneAtCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetGoneAt", reflect.TypeOf((*MockManagedResources)(nil).SetGoneAt), ctx, id, at)
+	return &MockManagedResourcesSetGoneAtCall{Call: call}
+}
+
+// MockManagedResourcesSetGoneAtCall wrap *gomock.Call
+type MockManagedResourcesSetGoneAtCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockManagedResourcesSetGoneAtCall) Return(arg0 error) *MockManagedResourcesSetGoneAtCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockManagedResourcesSetGoneAtCall) Do(f func(context.Context, string, time.Time) error) *MockManagedResourcesSetGoneAtCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockManagedResourcesSetGoneAtCall) DoAndReturn(f func(context.Context, string, time.Time) error) *MockManagedResourcesSetGoneAtCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -18,8 +18,9 @@ type verb struct {
 	args  cobra.PositionalArgs
 	// id adds --id, input -f (the manifest), etag --etag, mask
 	// --update-mask, page --page-size and --page-token, ack
-	// --acknowledge-not-imported, wait --wait and --timeout.
-	id, input, etag, mask, page, ack, wait bool
+	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
+	// --plan-id, force --force, cluster --cluster.
+	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -91,6 +92,16 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.Int32Var(&o.PageSize, "page-size", 0, "maximum results per page; 0 uses the server default")
 			f.StringVar(&o.PageToken, "page-token", "", "next_page_token of the previous page")
 		}
+		if v.plan {
+			f.BoolVar(&o.Plan, "plan", false, "only show what the update would do (a plan: creates, in-place and disruptive changes, deletes); nothing changes")
+			f.StringVar(&o.PlanID, "plan-id", "", "apply only if this plan (planId of --plan) still holds")
+		}
+		if v.force {
+			f.BoolVar(&o.Force, "force", false, "tear the cluster down even if its API is unreachable: Helm releases are released without uninstalling")
+		}
+		if v.cluster {
+			f.StringVar(&o.Cluster, "cluster", "", "only this cluster's resources (cluster ID); default: all the tenant's")
+		}
 		if v.wait {
 			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone), printing its progress to stderr")
 			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
@@ -120,8 +131,17 @@ func newNetworkCmd() *cobra.Command {
 	return newResourceCmd("network", "Manage networks (NetworkService)", verbs)
 }
 
+func newAdminCmd() *cobra.Command {
+	return newResourceCmd("admin", "Operator actions (AdminService)", []verb{
+		{use: "pause", short: "Pause Crossplane's reconciliation of a tenant's (or one cluster's) resources, e.g. during a provider upgrade",
+			run: cli.AdminPause, args: cobra.NoArgs, cluster: true},
+		{use: "resume", short: "Resume the reconciliation paused with pause", run: cli.AdminResume, args: cobra.NoArgs, cluster: true},
+	})
+}
+
 func newClusterCmd() *cobra.Command {
 	verbs := crud("cluster", cli.KindCluster, cli.ClusterCreate, cli.ClusterGet, cli.ClusterList, cli.ClusterUpdate, cli.ClusterDelete)
+	verbs[3].plan, verbs[4].force = true, true
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", append(verbs, watchVerb("cluster", cli.ClusterWatch)))
 }
 

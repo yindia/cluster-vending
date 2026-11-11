@@ -12,13 +12,40 @@ const (
 	tenantRole = "arn:aws:iam::444455556666:role/cluster-vending-provisioner"
 )
 
-func TestAWSRuntimeConfig(t *testing.T) {
-	rc := crossplaneaws.RuntimeConfig(mgmtRole)
-	if rc.Name != crossplaneaws.RuntimeConfigName || rc.Namespace != "" {
-		t.Errorf("metadata = %+v", rc.ObjectMeta)
+func TestAWSRuntimeConfigs(t *testing.T) {
+	rt := crossplaneaws.DefaultProviderRuntime()
+	rt.ManagementRoleARN = mgmtRole
+	configs, err := crossplaneaws.RuntimeConfigs(rt)
+	if err != nil || len(configs) != 2 {
+		t.Fatalf("configs = %d, %v", len(configs), err)
 	}
-	if got := rc.Spec.ServiceAccountTemplate.Metadata.Annotations["eks.amazonaws.com/role-arn"]; got != mgmtRole {
-		t.Errorf("IRSA annotation = %q", got)
+	wantPoll := map[string]string{crossplaneaws.RuntimeConfigName: "--poll=10m0s", crossplaneaws.RuntimeConfigEC2Name: "--poll=30m0s"}
+	for _, rc := range configs {
+		if rc.Namespace != "" || wantPoll[rc.Name] == "" {
+			t.Errorf("metadata = %+v", rc.ObjectMeta)
+		}
+		if got := rc.Spec.ServiceAccountTemplate.Metadata.Annotations["eks.amazonaws.com/role-arn"]; got != mgmtRole {
+			t.Errorf("%s: IRSA annotation = %q", rc.Name, got)
+		}
+		c := rc.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0]
+		if c.Name != "package-runtime" || len(c.Args) != 2 || c.Args[0] != wantPoll[rc.Name] || c.Args[1] != "--max-reconcile-rate=10" {
+			t.Errorf("%s: container %s args %v", rc.Name, c.Name, c.Args)
+		}
+		if c.Resources.Requests.Memory().String() != "512Mi" || c.Resources.Limits.Memory().String() != "2Gi" ||
+			!c.Resources.Limits.Cpu().IsZero() {
+			t.Errorf("%s: resources = %+v", rc.Name, c.Resources)
+		}
+	}
+
+	// No management role (local): no IRSA annotation; a bad quantity fails.
+	rt.ManagementRoleARN = ""
+	configs, err = crossplaneaws.RuntimeConfigs(rt)
+	if err != nil || configs[0].Spec.ServiceAccountTemplate != nil {
+		t.Errorf("without a role: service account template %+v, %v", configs[0].Spec.ServiceAccountTemplate, err)
+	}
+	rt.MemoryLimit = "lots"
+	if _, err := crossplaneaws.RuntimeConfigs(rt); err == nil {
+		t.Error("a bad quantity must fail")
 	}
 }
 
@@ -28,11 +55,14 @@ func TestAWSProviders(t *testing.T) {
 		t.Fatalf("got %d providers", len(ps))
 	}
 	ec2 := ps[0]
-	if ec2.Name != "provider-aws-ec2" || ec2.Spec.Package != "xpkg.upbound.io/upbound/provider-aws-ec2:"+crossplaneaws.ProviderVersion {
+	if ec2.Name != "provider-aws-ec2" || ec2.Spec.Package != "xpkg.crossplane.io/crossplane-contrib/provider-aws-ec2:"+crossplaneaws.ProviderVersion {
 		t.Errorf("provider = %s %s", ec2.Name, ec2.Spec.Package)
 	}
-	if ref := ec2.Spec.RuntimeConfigReference; ref == nil || ref.Name != crossplaneaws.RuntimeConfigName {
-		t.Errorf("runtimeConfigRef = %+v", ref)
+	if ref := ec2.Spec.RuntimeConfigReference; ref == nil || ref.Name != crossplaneaws.RuntimeConfigEC2Name {
+		t.Errorf("ec2 runtimeConfigRef = %+v, want its own (poll interval)", ref)
+	}
+	if ref := ps[1].Spec.RuntimeConfigReference; ref == nil || ref.Name != crossplaneaws.RuntimeConfigName {
+		t.Errorf("%s runtimeConfigRef = %+v", ps[1].Name, ref)
 	}
 }
 

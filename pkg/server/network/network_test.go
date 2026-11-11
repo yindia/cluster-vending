@@ -514,7 +514,8 @@ func TestDeleteNetwork(t *testing.T) {
 			count(&awsec2.RouteTableAssociationList{}), count(&awsec2.NATGatewayList{}), count(&awsec2.SubnetList{}),
 			count(&awsec2.VPCList{}))
 	}
-	// Each read moves it on; dependencies outlive their dependents.
+	// Reads change nothing: the loop's Reconcile moves the deletion on,
+	// tier by tier; dependencies outlive their dependents.
 	for i := 0; ; i++ {
 		_, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
 		if connect.CodeOf(err) == connect.CodeNotFound {
@@ -522,6 +523,18 @@ func TestDeleteNetwork(t *testing.T) {
 		}
 		if err != nil || i > 10 {
 			t.Fatalf("get %d: %v", i, err)
+		}
+		before := count(&awsec2.RouteTableList{}) + count(&awsec2.NATGatewayList{}) + count(&awsec2.EIPList{}) +
+			count(&awsec2.SubnetList{}) + count(&awsec2.VPCList{})
+		if _, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
+			t.Fatal(err)
+		}
+		if after := count(&awsec2.RouteTableList{}) + count(&awsec2.NATGatewayList{}) + count(&awsec2.EIPList{}) +
+			count(&awsec2.SubnetList{}) + count(&awsec2.VPCList{}); after != before {
+			t.Fatal("a read deleted resources")
+		}
+		if err := f.svc.Reconcile(ctx, tenant, n.GetId()); err != nil {
+			t.Fatalf("reconcile %d: %v", i, err)
 		}
 		if count(&awsec2.NATGatewayList{}) > 0 && (count(&awsec2.EIPList{}) == 0 || count(&awsec2.SubnetList{}) == 0) {
 			t.Fatal("EIPs or subnets deleted before the NAT gateways")
@@ -589,24 +602,28 @@ func TestDatabaseErrorsAreInternal(t *testing.T) {
 
 func mask(paths ...string) *fieldmaskpb.FieldMask { return &fieldmaskpb.FieldMask{Paths: paths} }
 
-func TestGetNetworkRecordsUnrecordedResources(t *testing.T) {
+// Deleting a network records its live objects that have no record (left by
+// a failure between apply and record), so they are deleted in order too.
+func TestDeleteNetworkRecordsUnrecordedResources(t *testing.T) {
 	f := newFixture(t)
 	n := f.create(t, "old", nil)
-	// A network from before resources were recorded.
 	if err := f.store.ManagedResources().DeleteByOwner(t.Context(), model.OwnerNetwork, n.GetId()); err != nil {
 		t.Fatal(err)
 	}
-	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
-	if err != nil {
+	if _, err := f.svc.DeleteNetwork(t.Context(), &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
 		t.Fatal(err)
 	}
-	views := res.GetNetwork().GetStatus().GetManagedResources()
-	if len(views) != 20 || views[0].GetKind() != "VPC" || views[len(views)-1].GetKind() != "RouteTableAssociation" {
-		t.Fatalf("views = %d, first %s, last %s; want all 20 in creation order", len(views), views[0].GetKind(), views[len(views)-1].GetKind())
-	}
 	recorded, err := f.store.ManagedResources().ListByOwner(t.Context(), model.OwnerNetwork, n.GetId())
-	if err != nil || len(recorded) != 20 {
-		t.Errorf("recorded = %d, %v; want 20", len(recorded), err)
+	if err != nil || len(recorded) != 20 || recorded[0].Kind != "VPC" || recorded[len(recorded)-1].Kind != "RouteTableAssociation" {
+		t.Fatalf("recorded = %d, %v; want all 20 in creation order", len(recorded), err)
+	}
+	for i := 0; i < 10; i++ {
+		if err := f.svc.Reconcile(t.Context(), tenant, n.GetId()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := f.count(t, &awsec2.VPCList{}, n.GetId()); got != 0 {
+		t.Errorf("%d VPCs left", got)
 	}
 }
 

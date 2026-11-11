@@ -51,6 +51,9 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	row.Generation++
+	if !tagsChanged && row.AppliedGeneration == row.Generation-1 {
+		row.AppliedGeneration = row.Generation // nothing to apply for this change
+	}
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return nil, connect.NewError(connect.CodeAborted, "the network changed; get it again and retry with its etag")
@@ -169,7 +172,7 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 	}
 	// Deletes the first tier now; GetNetwork / ListNetworks (e.g. the CLI's
 	// --wait) move it on, tier by tier, until the network is gone.
-	if _, err := s.finalize(ctx, row); err != nil {
+	if err := s.finalize(ctx, row); err != nil {
 		return nil, err
 	}
 	s.logger().InfoContext(ctx, "network deleting", "tenant_id", row.TenantID, "network_id", row.ID, "name", row.Name)

@@ -163,13 +163,6 @@ func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetwork
 	if err != nil {
 		return nil, err
 	}
-	gone, err := s.finalize(ctx, row)
-	if err != nil {
-		return nil, err
-	}
-	if gone {
-		return nil, notFound(req.GetTenantId(), req.GetNetworkId())
-	}
 	n, err := s.view(ctx, row)
 	return &cloudv1.GetNetworkResponse{Network: n}, err
 }
@@ -193,13 +186,16 @@ func (s *NetworkService) ListNetworks(ctx context.Context, req *cloudv1.ListNetw
 		rows = rows[:size]
 		res.NextPageToken = rows[size-1].ID
 	}
+	ids := make([]string, 0, len(rows))
 	for i := range rows {
-		if gone, err := s.finalize(ctx, &rows[i]); err != nil {
-			return nil, err
-		} else if gone {
-			continue
-		}
-		n, err := s.view(ctx, &rows[i])
+		ids = append(ids, rows[i].ID)
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwners(ctx, model.OwnerNetwork, ids) // one query per page
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	for i := range rows {
+		n, err := s.viewOf(ctx, &rows[i], records[rows[i].ID])
 		if err != nil {
 			return nil, err
 		}
@@ -226,6 +222,15 @@ func notFound(tenantID, networkID string) error {
 // view is the API view of a stored network: spec, observed status, the
 // clusters using it.
 func (s *NetworkService) view(ctx context.Context, row *model.Network) (*cloudv1.Network, error) {
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	return s.viewOf(ctx, row, records)
+}
+
+// viewOf is view with the network's records at hand. It only reads.
+func (s *NetworkService) viewOf(ctx context.Context, row *model.Network, records []model.ManagedResource) (*cloudv1.Network, error) {
 	spec, err := specOf(row)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -235,13 +240,12 @@ func (s *NetworkService) view(ctx context.Context, row *model.Network) (*cloudv1
 		s.logger().ErrorContext(ctx, "observe network", "network_id", row.ID, "error", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
 	}
-	records, err := s.records(ctx, row, o.objects)
-	if err != nil {
-		return nil, err
-	}
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
 		return nil, err
+	}
+	if row.State == stateProvisioning {
+		service.SettleMissing(records, views)
 	}
 	clusters, err := s.deps.Store.Clusters().ListByNetwork(ctx, row.ID)
 	if err != nil {

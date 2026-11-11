@@ -45,7 +45,7 @@ func TestRunAnswersRPCsAndStopsOnCancel(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- server.Run(ctx, ln, server.NewHandler(service.Deps{}), time.Second, logger) }()
+	go func() { done <- server.Run(ctx, ln, server.NewHandler(service.Deps{}, nil), time.Second, logger) }()
 
 	// Every service is mounted: each rejects an empty request
 	// (INVALID_ARGUMENT, 400).
@@ -85,7 +85,7 @@ func TestRunReturnsErrorWhenListenerFails(t *testing.T) {
 	ln := listen(t)
 	_ = ln.Close() // Serve fails at once on a closed listener
 
-	if err := server.Run(t.Context(), ln, server.NewHandler(service.Deps{}), time.Second, discard()); err == nil {
+	if err := server.Run(t.Context(), ln, server.NewHandler(service.Deps{}, nil), time.Second, discard()); err == nil {
 		t.Fatal("want error from a closed listener")
 	}
 }

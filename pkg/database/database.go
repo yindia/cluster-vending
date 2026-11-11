@@ -146,6 +146,13 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 	if err != nil {
 		return fmt.Errorf("migrate database: backfill namespaces: %w", err)
 	}
+	// Rows from before applied generations were recorded were applied.
+	for _, table := range []string{"networks", "clusters"} {
+		err := db.WithContext(ctx).Exec("UPDATE " + table + " SET applied_generation = generation WHERE applied_generation = 0").Error
+		if err != nil {
+			return fmt.Errorf("migrate database: backfill %s applied generations: %w", table, err)
+		}
+	}
 	if err := migrateTagsToLabels(ctx, db); err != nil {
 		return fmt.Errorf("migrate database: move spec.tags to labels: %w", err)
 	}

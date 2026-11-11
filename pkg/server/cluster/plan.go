@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -17,7 +18,6 @@ const (
 	defaultAuthMode     = "API"
 	defaultCapacityType = "ON_DEMAND"
 	defaultAMIType      = "AL2023_x86_64_STANDARD"
-	anyIPv4             = "0.0.0.0/0"
 	minZones            = 2
 )
 
@@ -63,20 +63,16 @@ func chooseSubnets(subnets []privateSubnet, zoneIDs []string) ([]string, []strin
 	return zones, ids, nil
 }
 
-// resolveSpec fills the spec's defaults (zones, endpoint access, auth mode,
-// node pool capacity and AMI) so the stored spec says what was built.
-func resolveSpec(in *cloudv1.ClusterSpec, zones []string) *cloudv1.ClusterSpec {
+// resolveSpec fills the spec's defaults (zones, auth mode, node pool
+// capacity and AMI) so the stored spec says what was built. The public
+// endpoint's CIDRs have no default: who may reach the API is the
+// client's choice (the contract requires at least one).
+func resolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
+	if len(in.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()) == 0 {
+		return nil, errNoPublicAccessCIDRs
+	}
 	spec := cloneSpec(in)
 	spec.Network.ZoneIds = zones
-	if spec.ControlPlane == nil {
-		spec.ControlPlane = &cloudv1.ControlPlaneSpec{}
-	}
-	if spec.ControlPlane.EndpointAccess == nil {
-		spec.ControlPlane.EndpointAccess = &cloudv1.EndpointAccess{}
-	}
-	if len(spec.ControlPlane.EndpointAccess.PublicAccessCidrs) == 0 {
-		spec.ControlPlane.EndpointAccess.PublicAccessCidrs = []string{anyIPv4}
-	}
 	pool := spec.DefaultNodePool
 	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED {
 		pool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND
@@ -95,8 +91,12 @@ func resolveSpec(in *cloudv1.ClusterSpec, zones []string) *cloudv1.ClusterSpec {
 		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD
 	}
 	aws.Addons = mergeAddons(aws.GetAddons())
-	return spec
+	return spec, nil
 }
+
+// errNoPublicAccessCIDRs: the spec does not say who may reach the API.
+var errNoPublicAccessCIDRs = errors.New(
+	"spec.control_plane.endpoint_access.public_access_cidrs needs at least one CIDR (0.0.0.0/0 for any)")
 
 // mergeAddons is the default add-ons, each replaced by the entry of the
 // same name in addons, followed by the other entries in their order.

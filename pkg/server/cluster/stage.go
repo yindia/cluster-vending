@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,7 +44,7 @@ func (s *ClusterService) eksActive(ctx context.Context, records []model.ManagedR
 			continue
 		}
 		c := &awseks.Cluster{}
-		if err := getIgnoreMissing(ctx, s.deps.Kube, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, c); err != nil {
+		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, c); err != nil {
 			return false, fmt.Errorf("read EKS cluster %s: %w", r.Name, err)
 		}
 		return ptr.Deref(c.Status.AtProvider.Status, "") == eksActiveStatus, nil
@@ -65,30 +66,45 @@ func (s *ClusterService) holdBack(ctx context.Context, row *model.Cluster) (bool
 	return !active, err
 }
 
-// withoutAfterActive drops the afterActive objects.
+// withoutAfterActive drops the afterActive objects, and the Usages whose
+// "by" object is one of them: a Usage whose user never exists is never
+// garbage-collected and would block its object's deletion for good.
 func (s *ClusterService) withoutAfterActive(objects []client.Object) ([]client.Object, error) {
 	out := make([]client.Object, 0, len(objects))
+	kept := map[string]bool{}
 	for _, obj := range objects {
 		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
 		if err != nil {
 			return nil, err
 		}
-		if !afterActive[gvk.Kind] {
-			out = append(out, obj)
+		if afterActive[gvk.Kind] {
+			continue
 		}
+		if u, ok := obj.(*protectionv1beta1.Usage); ok {
+			if by := u.Spec.By; by == nil || by.ResourceRef == nil || !kept[by.Kind+"/"+by.ResourceRef.Name] {
+				continue
+			}
+		}
+		kept[gvk.Kind+"/"+obj.GetName()] = true
+		out = append(out, obj)
 	}
 	return out, nil
 }
 
-// advance creates the held-back objects of a PROVISIONING cluster once its
-// EKS cluster is ACTIVE. GetCluster and ListClusters call it, so reading a
-// cluster (e.g. the CLI's --wait) moves its creation on.
+// advance applies a cluster again until its generation is applied in
+// full with the target renderer: after a failed apply, for the objects
+// held back until EKS is ACTIVE (add-ons, access entries), during an
+// upgrade for the node groups and add-ons once the control plane reports
+// the target version (gateUpgrade), and when the renderer changed
+// (Deps.RenderBehind). The background loop calls it; it does nothing while
+// EKS is not ACTIVE.
 func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error {
-	if row.State != stateProvisioning && row.State != stateUpdating {
+	if row.State == stateDeleting ||
+		(row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID)) {
 		return nil
 	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil || createdAfterActive(records) || len(records) == 0 {
+	if err != nil || len(records) == 0 {
 		return err
 	}
 	active, err := s.eksActive(ctx, records)
@@ -103,18 +119,10 @@ func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error 
 	if err != nil {
 		return err
 	}
-	if err := s.apply(ctx, row, t.account, clusterPlan(spec, t.subnetIDs, s.base(row, t.account))); err != nil {
+	if err := s.apply(ctx, row, t.account, s.renderPlan(spec, row, t)); err != nil {
 		return err
 	}
-	s.logger().InfoContext(ctx, "EKS cluster active: created add-ons and access entries", "cluster_id", row.ID)
+	s.logger().InfoContext(ctx, "cluster applied again", "cluster_id", row.ID, "generation", row.Generation,
+		"applied_generation", row.AppliedGeneration, "render_version", row.RenderVersion)
 	return nil
-}
-
-// progress moves a cluster's creation on (advance) when it is read. A
-// failure is logged, not returned: the read still shows the cluster, and
-// the next read retries.
-func (s *ClusterService) progress(ctx context.Context, row *model.Cluster) {
-	if err := s.advance(ctx, row); err != nil {
-		s.logger().WarnContext(ctx, "continue creating cluster", "cluster_id", row.ID, "error", err)
-	}
 }

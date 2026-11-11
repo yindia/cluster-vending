@@ -15,6 +15,7 @@ import (
 	apiextv1alpha1 "github.com/crossplane/crossplane/apis/v2/apiextensions/v1alpha1"
 	pkgv1 "github.com/crossplane/crossplane/apis/v2/pkg/v1"
 	pkgv1beta1 "github.com/crossplane/crossplane/apis/v2/pkg/v1beta1"
+	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
@@ -73,6 +74,7 @@ func Scheme() (*runtime.Scheme, error) {
 		pkgv1.AddToScheme,
 		pkgv1beta1.AddToScheme,
 		apiextv1alpha1.AddToScheme,
+		protectionv1beta1.AddToScheme,
 		awsv1beta1.SchemeBuilder.AddToScheme,
 		awsec2.AddToScheme,
 		awseks.AddToScheme,

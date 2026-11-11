@@ -55,7 +55,7 @@ func (s *NetworkService) observe(ctx context.Context, tenantID, networkID string
 		client.MatchingLabels{crossplane.LabelNetwork: networkID},
 	}
 	for _, list := range crossplaneaws.NetworkLists() {
-		if err := s.deps.Kube.List(ctx, list, opts...); err != nil {
+		if err := s.deps.List(ctx, list, opts...); err != nil {
 			if meta.IsNoMatchError(err) {
 				continue // provider not installed: nothing of this kind exists
 			}

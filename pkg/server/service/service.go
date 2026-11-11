@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect/v2"
@@ -35,7 +36,12 @@ type Deps struct {
 	AWS        config.AWS
 	// AWSDiscovery makes the server's own read-only AWS lookups
 	// (ImportNetwork).
-	AWSDiscovery awscloud.NetworkDiscoverer
+	// RenderTarget is the renderer version resources are brought to by the
+	// background loop (0: none are re-applied for it). RenderRollout limits
+	// that to these tenant, network or cluster IDs; empty means all.
+	RenderTarget  int64
+	RenderRollout []string
+	AWSDiscovery  awscloud.NetworkDiscoverer
 	// AWSClusters checks EKS cluster names before CreateCluster; nil skips
 	// the check (tests).
 	AWSClusters awscloud.ClusterLookup
@@ -101,4 +107,14 @@ func ToConnect(err error) error {
 	default:
 		return connect.NewError(connect.CodeInternal, "internal error")
 	}
+}
+
+// RenderBehind reports whether a resource last applied with renderer
+// version must be applied again: it is below the target and the rollout
+// covers its tenant or the resource itself.
+func (d Deps) RenderBehind(version int64, tenantID, id string) bool {
+	if version >= d.RenderTarget {
+		return false
+	}
+	return len(d.RenderRollout) == 0 || slices.Contains(d.RenderRollout, tenantID) || slices.Contains(d.RenderRollout, id)
 }

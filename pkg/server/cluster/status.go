@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -52,21 +53,25 @@ func specOf(row *model.Cluster) (*cloudv1.ClusterSpec, error) {
 // view is the API view of a stored cluster: spec, the live state of its
 // managed resources, and what EKS reports (endpoint, version, ARNs).
 func (s *ClusterService) view(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
-	spec, err := specOf(row)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return nil, service.ToConnect(err)
+	}
+	return s.viewOf(ctx, row, records)
+}
+
+// viewOf is view with the cluster's records at hand. It only reads.
+func (s *ClusterService) viewOf(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (*cloudv1.Cluster, error) {
+	spec, err := specOf(row)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.retireNodeGroups(ctx, records, views); err != nil {
-		s.logger().ErrorContext(ctx, "retire node groups", "cluster_id", row.ID, "error", err)
-		return nil, connect.NewError(connect.CodeInternal, "could not retire the replaced node group")
+	if row.State == stateProvisioning || row.State == stateUpdating {
+		service.SettleMissing(records, views)
 	}
 	st := status(row, views, !createdAfterActive(records))
 	if err := s.observeEKS(ctx, records, st); err != nil {
@@ -92,7 +97,7 @@ func (s *ClusterService) observeEKS(ctx context.Context, records []model.Managed
 		switch r.Kind {
 		case "Cluster":
 			c := &awseks.Cluster{}
-			if err := getIgnoreMissing(ctx, s.deps.Kube, key, c); err != nil {
+			if err := s.getIgnoreMissing(ctx, key, c); err != nil {
 				return err
 			}
 			fromEKSCluster(c.Status.AtProvider, st, aws)
@@ -102,13 +107,13 @@ func (s *ClusterService) observeEKS(ctx context.Context, records []model.Managed
 			}
 		case "NodeGroup":
 			ng := &awseks.NodeGroup{}
-			if err := getIgnoreMissing(ctx, s.deps.Kube, key, ng); err != nil {
+			if err := s.getIgnoreMissing(ctx, key, ng); err != nil {
 				return err
 			}
 			aws.NodeGroupArn = deref(ng.Status.AtProvider.Arn)
 		case "Addon":
 			addon := &awseks.Addon{}
-			if err := getIgnoreMissing(ctx, s.deps.Kube, key, addon); err != nil {
+			if err := s.getIgnoreMissing(ctx, key, addon); err != nil {
 				return err
 			}
 			v := views[r.Kind+"/"+r.Name]
@@ -122,8 +127,8 @@ func (s *ClusterService) observeEKS(ctx context.Context, records []model.Managed
 	return nil
 }
 
-func getIgnoreMissing(ctx context.Context, c client.Client, key client.ObjectKey, obj client.Object) error {
-	err := c.Get(ctx, key, obj)
+func (s *ClusterService) getIgnoreMissing(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+	err := s.deps.Get(ctx, key, obj)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil
 	}
@@ -164,7 +169,11 @@ func deref(p *string) string {
 // access entries are not created yet (they follow once EKS is ACTIVE), so
 // the cluster cannot be RUNNING.
 func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bool) *cloudv1.ClusterStatus {
-	st := &cloudv1.ClusterStatus{ManagedResources: views, ObservedGeneration: row.Generation}
+	converged := convergedOn(row, views)
+	st := &cloudv1.ClusterStatus{ManagedResources: views, ObservedGeneration: row.ObservedGeneration}
+	if converged {
+		st.ObservedGeneration = row.Generation
+	}
 	ready, waiting, left := 0, 0, 0
 	var failed *cloudv1.ManagedResource
 	for _, v := range views {
@@ -174,7 +183,7 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING:
 			waiting++
 		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING:
-			if failed == nil {
+			if failed == nil && (row.State != stateUpdating || !versionSkew(v)) {
 				failed = v
 			}
 		default:
@@ -192,10 +201,7 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	switch {
 	case row.State == stateDeleting:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_DELETING
-		st.Message = fmt.Sprintf("deleting; %d resources left", left)
-		if kinds := deleteOrder.Current(views); len(kinds) > 0 {
-			st.Message = fmt.Sprintf("deleting %s; %d resources left", strings.Join(kinds, ", "), left)
-		}
+		st.Message = deletingMessage(views, left)
 	case failed != nil:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_FAILED
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
@@ -204,10 +210,13 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	case awaitingEKS:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING
 		st.Message = "creating the EKS cluster (" + progress + "); add-ons and access entries follow once it is ACTIVE"
-	case len(views) > 0 && ready == len(views):
+	case len(views) > 0 && ready == len(views) && converged:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_RUNNING
 		readyCond.Status, readyCond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, "AllResourcesReady"
-	case row.State == stateUpdating:
+	case len(views) > 0 && ready == len(views):
+		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING,
+			fmt.Sprintf("applying generation %d (%s)", row.Generation, progress)
+	case row.State == stateUpdating, row.State == stateRunning: // running, not ready: reconciling a change
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING, progress
 	default:
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING, progress
@@ -238,3 +247,75 @@ func addonName(object string) string {
 }
 
 const addonInfix = "-addon-"
+
+// deletionUsers are the kinds other objects' deletion waits for (the "by"
+// side of the cluster's Usages), outermost first: while they exist, what
+// they use stays.
+var deletionUsers = []string{"NodeGroup", "Cluster", "Addon"}
+
+// deletingMessage says where a deletion stands: the users still holding
+// the rest (the stage), and the objects whose deletion is stuck (Synced
+// False), with the error and for how long.
+func deletingMessage(views []*cloudv1.ManagedResource, left int) string {
+	msg := fmt.Sprintf("deleting; %d resources left", left)
+	for _, kind := range deletionUsers {
+		var names []string
+		for _, v := range views {
+			if v.GetKind() == kind && v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+				names = append(names, v.GetName())
+			}
+		}
+		if len(names) > 0 {
+			msg = fmt.Sprintf("deleting; waiting for %s %s; %d resources left", kind, strings.Join(names, ", "), left)
+			break
+		}
+	}
+	var stuck []string
+	for _, v := range views {
+		if v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_FALSE ||
+			v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING || v.GetDeletionTime() == nil {
+			continue
+		}
+		since := now().Sub(v.GetDeletionTime().AsTime()).Round(time.Minute)
+		stuck = append(stuck, fmt.Sprintf("%s %s (%s: %s) for %s", v.GetKind(), v.GetName(), v.GetReason(), v.GetMessage(), since))
+	}
+	if len(stuck) > 0 {
+		msg += "; stuck: " + strings.Join(stuck, "; ")
+	}
+	return msg
+}
+
+// now is the clock; tests replace it.
+var now = time.Now
+
+// convergedOn reports whether the cluster runs its latest generation: all
+// of it was applied (AppliedGeneration) and every object's provider has
+// reconciled the object's latest spec (its Synced condition's
+// observedGeneration is its metadata.generation).
+func convergedOn(row *model.Cluster, views []*cloudv1.ManagedResource) bool {
+	if row.AppliedGeneration < row.Generation {
+		return false
+	}
+	for _, v := range views {
+		if v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING ||
+			v.GetSynced() == cloudv1.ConditionStatus_CONDITION_STATUS_UNSPECIFIED { // no provider status (yet)
+			continue
+		}
+		if v.GetGeneration() != 0 && v.GetObservedGeneration() != v.GetGeneration() {
+			return false
+		}
+	}
+	return true
+}
+
+// versionSkew reports whether v fails because its Kubernetes version is
+// ahead of the control plane's: EKS refuses node groups and add-ons newer
+// than the cluster while the control plane upgrades. Expected during an
+// upgrade, not a failure.
+func versionSkew(v *cloudv1.ManagedResource) bool {
+	if v.GetKind() != "NodeGroup" && v.GetKind() != "Addon" {
+		return false
+	}
+	msg := strings.ToLower(v.GetMessage())
+	return strings.Contains(msg, "version") && (strings.Contains(msg, "cluster") || strings.Contains(msg, "kubernetes"))
+}

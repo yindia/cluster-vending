@@ -64,3 +64,24 @@ func ApplyFields(ctx context.Context, c client.Client, u *unstructured.Unstructu
 	}
 	return nil
 }
+
+// ApplyObject is obj as Apply sends it: unstructured, with apiVersion and
+// kind, without status. For callers that adjust the body before applying
+// (fields the Go types always serialize).
+func ApplyObject(obj client.Object, scheme *runtime.Scheme) (*unstructured.Unstructured, error) {
+	return applyConfiguration(obj, scheme)
+}
+
+// DryRunApply server-side applies u (an apply body, see ApplyObject) as a
+// dry run and returns the object as the API server would store it: u
+// merged with the fields of other managers, defaults applied. Nothing is
+// changed.
+func DryRunApply(ctx context.Context, c client.Client, u *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	out := u.DeepCopy()
+	err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(out),
+		client.FieldOwner(FieldOwner), client.ForceOwnership, client.DryRunAll)
+	if err != nil {
+		return nil, fmt.Errorf("dry-run apply %s %s/%s: %w", u.GetKind(), u.GetNamespace(), u.GetName(), err)
+	}
+	return out, nil
+}

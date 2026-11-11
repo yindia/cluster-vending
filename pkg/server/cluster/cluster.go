@@ -13,7 +13,9 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -33,6 +35,7 @@ const (
 // Lifecycle states stored on the cluster row; the others are observed.
 const (
 	stateProvisioning = "CLUSTER_STATE_PROVISIONING"
+	stateRunning      = "CLUSTER_STATE_RUNNING"
 	stateUpdating     = "CLUSTER_STATE_UPDATING"
 	stateDeleting     = "CLUSTER_STATE_DELETING"
 )
@@ -162,7 +165,10 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	in := req.GetCluster()
-	spec := resolveSpec(in.GetSpec(), t.zones)
+	spec, err := resolveSpec(in.GetSpec(), t.zones)
+	if err != nil {
+		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
 	if err := s.resolveVersions(ctx, t.account, spec, pinnedAddons(in.GetSpec())); err != nil {
 		return nil, crossplaneaws.ClusterPlan{}, err
 	}
@@ -183,7 +189,15 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
 		return nil, crossplaneaws.ClusterPlan{}, service.ToConnect(err)
 	}
-	return row, clusterPlan(spec, t.subnetIDs, s.base(row, t.account)), nil
+	return row, s.renderPlan(spec, row, t), nil
+}
+
+// renderPlan is the plan of the cluster's resources: the resolved spec on
+// the network's subnets.
+func (s *ClusterService) renderPlan(spec *cloudv1.ClusterSpec, row *model.Cluster, t target) crossplaneaws.ClusterPlan {
+	p := clusterPlan(spec, t.subnetIDs, s.base(row, t.account))
+	p.SubnetObjects = t.subnetObjects
+	return p
 }
 
 func (s *ClusterService) base(row *model.Cluster, a *model.CloudAccount) crossplaneaws.ClusterPlan {
@@ -205,6 +219,11 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's node group")
 	}
 	plan.NodeGroupName = name
+	upgrading, err := s.gateUpgrade(ctx, row, &plan)
+	if err != nil {
+		s.logger().ErrorContext(ctx, "read EKS cluster version", "cluster_id", row.ID, "error", err)
+		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's EKS cluster")
+	}
 	objects := crossplaneaws.ClusterResources(plan)
 	hold, err := s.holdBack(ctx, row)
 	if err != nil {
@@ -223,13 +242,29 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 		return connect.NewError(connect.CodeInternal, "could not record the cluster's resources: "+err.Error())
 	}
 	for _, obj := range objects {
-		if err := kube.Apply(ctx, s.deps.Kube, obj); err != nil {
+		if err := s.applyOne(ctx, obj); err != nil {
 			s.logger().ErrorContext(ctx, "apply cluster resource", "cluster_id", row.ID, "object", obj.GetName(), "error", err)
 			return applyError(err)
 		}
 	}
 	if err := s.deps.Prune(ctx, owner, append(slices.Clone(objects), retiring...)); err != nil {
 		return connect.NewError(connect.CodeInternal, "could not remove the cluster's dropped resources: "+err.Error())
+	}
+	if hold || upgrading {
+		return nil // partly rendered: applied again (advance) until complete
+	}
+	return s.markApplied(ctx, row)
+}
+
+// markApplied records that every object of the row's generation was
+// applied without error, with this build's renderer.
+func (s *ClusterService) markApplied(ctx context.Context, row *model.Cluster) error {
+	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion {
+		return nil
+	}
+	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
+	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
+		return connect.NewError(connect.CodeInternal, "could not record the applied generation: "+err.Error())
 	}
 	return nil
 }
@@ -256,7 +291,8 @@ func (s *ClusterService) rollback(ctx context.Context, row *model.Cluster, names
 	}
 }
 
-// GetCluster returns one cluster with its observed status.
+// GetCluster returns one cluster with its observed status. Reads change
+// nothing: the background loop (Reconcile) moves clusters on.
 func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -265,15 +301,8 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
-	s.progress(ctx, row)
 	c, err := s.view(ctx, row)
 	if err != nil {
-		return nil, err
-	}
-	if gone, err := s.finalize(ctx, row); err != nil || gone {
-		if err == nil {
-			err = notFound(req.GetTenantId(), req.GetClusterId())
-		}
 		return nil, err
 	}
 	return &cloudv1.GetClusterResponse{Cluster: c}, nil
@@ -298,17 +327,20 @@ func (s *ClusterService) ListClusters(ctx context.Context, req *cloudv1.ListClus
 		rows = rows[:size]
 		res.NextPageToken = rows[size-1].ID
 	}
+	ids := make([]string, 0, len(rows))
 	for i := range rows {
-		s.progress(ctx, &rows[i])
-		c, err := s.view(ctx, &rows[i])
+		ids = append(ids, rows[i].ID)
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwners(ctx, model.OwnerCluster, ids) // one query per page
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	for i := range rows {
+		c, err := s.viewOf(ctx, &rows[i], records[rows[i].ID])
 		if err != nil {
 			return nil, err
 		}
-		if gone, err := s.finalize(ctx, &rows[i]); err != nil {
-			return nil, err
-		} else if !gone {
-			res.Clusters = append(res.Clusters, c)
-		}
+		res.Clusters = append(res.Clusters, c)
 	}
 	return res, nil
 }
@@ -347,4 +379,19 @@ func (s *ClusterService) logger() *slog.Logger {
 		return slog.New(slog.DiscardHandler)
 	}
 	return s.deps.Logger
+}
+
+// applyOne server-side applies one object. A NodeGroup's desired size goes
+// in initProvider only (crossplaneaws.DesiredSizeAtCreateOnly), on create
+// and update alike.
+func (s *ClusterService) applyOne(ctx context.Context, obj client.Object) error {
+	if _, ok := obj.(*awseks.NodeGroup); !ok {
+		return kube.Apply(ctx, s.deps.Kube, obj)
+	}
+	u, err := kube.ApplyObject(obj, s.deps.Kube.Scheme())
+	if err != nil {
+		return err
+	}
+	crossplaneaws.DesiredSizeAtCreateOnly(u)
+	return kube.Apply(ctx, s.deps.Kube, u)
 }

@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
+	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -23,11 +27,13 @@ const kindsTimeout = 5 * time.Minute
 type ManagementOptions struct {
 	Kubeconfig, KubeContext string
 	// InstallProviders creates the Crossplane providers, provider-helm and
-	// the activation policy when missing; ManagementRoleARN is the AWS
-	// providers' IRSA role.
-	InstallProviders  bool
-	ManagementRoleARN string
-	Logger            *slog.Logger
+	// the activation policy when missing; ProviderRuntime is how the AWS
+	// providers run.
+	InstallProviders bool
+	ProviderRuntime  crossplaneaws.ProviderRuntime
+	// LeaderElection of the background loop.
+	LeaderElection kube.LeaderElection
+	Logger         *slog.Logger
 }
 
 // ConnectManagement prepares the management cluster and returns a manager,
@@ -46,13 +52,21 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 		if err != nil {
 			return nil, err
 		}
-		res, err := crossplaneaws.InstallProviders(ctx, direct, o.ManagementRoleARN)
+		res, err := crossplaneaws.InstallProviders(ctx, direct, o.ProviderRuntime)
 		if err != nil {
 			return nil, fmt.Errorf("install the Crossplane providers (is Crossplane installed?): %w", err)
 		}
 		o.Logger.Info("crossplane providers", "created", res.Created, "existing", res.Existing)
 	}
-	mgr, err := kube.NewManager(cfg)
+	scheme, err := kube.Scheme()
+	if err != nil {
+		return nil, err
+	}
+	cached, err := kube.GVKs(scheme, CachedObjects())
+	if err != nil {
+		return nil, err
+	}
+	mgr, err := kube.NewManager(cfg, cached, o.LeaderElection)
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +77,25 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 	return mgr, nil
 }
 
+// CachedObjects are the kinds the informer cache holds: the managed
+// resources and Usages of networks and clusters, the accounts'
+// ProviderConfigs and the tenant namespaces.
+func CachedObjects() []client.Object {
+	return append(crossplaneaws.ManagedObjects(), &awsv1beta1.ProviderConfig{}, &corev1.Namespace{})
+}
+
 // StartManagement starts mgr (its informers and controllers) in the
-// background and returns once the cache has synced. The channel receives
-// mgr's error when it stops (nil when ctx ends).
-func StartManagement(ctx context.Context, mgr manager.Manager) (<-chan error, error) {
+// background and returns once the cache has synced; ready then reports
+// true (the readiness probe). The channel receives mgr's error when it
+// stops (nil when ctx ends).
+func StartManagement(ctx context.Context, mgr manager.Manager, ready *atomic.Bool) (<-chan error, error) {
+	cached, err := kube.GVKs(mgr.GetScheme(), CachedObjects())
+	if err != nil {
+		return nil, err
+	}
+	if err := kube.StartInformers(ctx, mgr, cached); err != nil {
+		return nil, err
+	}
 	done := make(chan error, 1)
 	go func() { done <- mgr.Start(ctx) }()
 	if !mgr.GetCache().WaitForCacheSync(ctx) {
@@ -77,5 +106,6 @@ func StartManagement(ctx context.Context, mgr manager.Manager) (<-chan error, er
 			return nil, errors.New("management cluster cache did not sync")
 		}
 	}
+	ready.Store(true)
 	return done, nil
 }

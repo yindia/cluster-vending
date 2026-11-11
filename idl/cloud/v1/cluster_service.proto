@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
 import "cloud/v1/managed_resource.proto";
+import "cloud/v1/plan.proto";
 import "google/protobuf/field_mask.proto";
 
 // ClusterService manages the lifecycle of tenant clusters.
@@ -193,10 +194,23 @@ message UpdateClusterRequest {
   // INVALID_ARGUMENT. A listed path can still fail with FAILED_PRECONDITION
   // when the cluster's current state does not allow the change.
   google.protobuf.FieldMask update_mask = 3 [(buf.validate.field).required = true];
+
+  // Plan only: validate the update and return what it would do
+  // (UpdateClusterResponse.plan), changing nothing.
+  bool validate_only = 4;
+
+  // Apply exactly the plan a validate_only call returned (Plan.plan_id):
+  // the update is planned again and fails with FAILED_PRECONDITION when the
+  // request or a live resource changed since. Empty: apply without that
+  // check.
+  string plan_id = 5 [(buf.validate.field).string.max_len = 128];
 }
 
 message UpdateClusterResponse {
+  // The cluster: after the update, or as it is for validate_only.
   Cluster cluster = 1;
+  // What the update would do (validate_only) or did (with plan_id).
+  Plan plan = 2;
 }
 
 message DeleteClusterRequest {
@@ -211,6 +225,13 @@ message DeleteClusterRequest {
   string cluster_id = 2 [(buf.validate.field).string.uuid = true];
   // When set, must match the current etag or the call fails with ABORTED.
   string etag = 3;
+  // Tears the cluster down even when its Kubernetes API is unreachable:
+  // Helm Releases into the cluster are released without uninstalling
+  // (managementPolicies without Delete) instead of waiting for an
+  // uninstall that cannot happen. What those charts created in the cloud
+  // account (load balancers, volumes) may be left behind. Sticky: once
+  // set for a deletion, every later step of it is forced.
+  bool force = 4;
 }
 
 message DeleteClusterResponse {

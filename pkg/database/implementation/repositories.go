@@ -3,6 +3,7 @@ package implementation
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -228,4 +229,66 @@ func (r managedResources) DeleteByOwner(ctx context.Context, kind model.OwnerKin
 
 func (r managedResources) Delete(ctx context.Context, id string) error {
 	return remove[model.ManagedResource](ctx, r.db, map[string]any{"id": id})
+}
+
+// pending is the background loop's filter (see repository.Networks.ListPending).
+func pending(ctx context.Context, db *gorm.DB, states []string, renderTarget int64) *gorm.DB {
+	return db.WithContext(ctx).
+		Where("state IN ? OR applied_generation < generation OR render_version < ?", states, renderTarget).Order("id")
+}
+
+func (r networks) ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Network, error) {
+	var rows []model.Network
+	err := pending(ctx, r.db, states, renderTarget).Find(&rows).Error
+	return rows, translate(err, opWrite)
+}
+
+func (r clusters) ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Cluster, error) {
+	var rows []model.Cluster
+	err := pending(ctx, r.db, states, renderTarget).Find(&rows).Error
+	return rows, translate(err, opWrite)
+}
+
+func (r clusters) CountByState(ctx context.Context) (map[string]int64, error) {
+	var rows []struct {
+		State string
+		N     int64
+	}
+	err := r.db.WithContext(ctx).Model(&model.Cluster{}).Select("state, COUNT(*) AS n").Group("state").Scan(&rows).Error
+	if err != nil {
+		return nil, translate(err, opWrite)
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.State] = row.N
+	}
+	return out, nil
+}
+
+func (r managedResources) ListByOwners(ctx context.Context, kind model.OwnerKind, ownerIDs []string) (map[string][]model.ManagedResource, error) {
+	out := make(map[string][]model.ManagedResource, len(ownerIDs))
+	if len(ownerIDs) == 0 {
+		return out, nil
+	}
+	var rows []model.ManagedResource
+	err := r.db.WithContext(ctx).Where("owner_kind = ? AND owner_id IN ?", kind, ownerIDs).Order("id").Find(&rows).Error
+	if err != nil {
+		return nil, translate(err, opWrite)
+	}
+	for _, row := range rows {
+		out[row.OwnerID] = append(out[row.OwnerID], row)
+	}
+	return out, nil
+}
+
+func (r managedResources) SetExternalName(ctx context.Context, id, externalName string) error {
+	err := r.db.WithContext(ctx).Model(&model.ManagedResource{}).Where("id = ?", id).
+		Update("external_name", externalName).Error
+	return translate(err, opWrite)
+}
+
+func (r managedResources) SetGoneAt(ctx context.Context, id string, at time.Time) error {
+	err := r.db.WithContext(ctx).Model(&model.ManagedResource{}).Where("id = ? AND gone_at IS NULL", id).
+		Update("gone_at", at).Error
+	return translate(err, opWrite)
 }

@@ -46,6 +46,9 @@ func TestActivationPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if gvk.Group == "protection.crossplane.io" { // Usage: a core kind, no MRD
+			continue
+		}
 		covered := false
 		for _, a := range got {
 			plural, group, _ := strings.Cut(a, ".")

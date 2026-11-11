@@ -511,7 +511,15 @@ type UpdateClusterRequest struct {
 	// Any other path (region, network, instance types, ...) fails with
 	// INVALID_ARGUMENT. A listed path can still fail with FAILED_PRECONDITION
 	// when the cluster's current state does not allow the change.
-	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,3,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
+	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,3,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
+	// Plan only: validate the update and return what it would do
+	// (UpdateClusterResponse.plan), changing nothing.
+	ValidateOnly bool `protobuf:"varint,4,opt,name=validate_only,json=validateOnly,proto3" json:"validate_only,omitempty"`
+	// Apply exactly the plan a validate_only call returned (Plan.plan_id):
+	// the update is planned again and fails with FAILED_PRECONDITION when the
+	// request or a live resource changed since. Empty: apply without that
+	// check.
+	PlanId        string `protobuf:"bytes,5,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -567,9 +575,26 @@ func (x *UpdateClusterRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 	return nil
 }
 
+func (x *UpdateClusterRequest) GetValidateOnly() bool {
+	if x != nil {
+		return x.ValidateOnly
+	}
+	return false
+}
+
+func (x *UpdateClusterRequest) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
 type UpdateClusterResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Cluster       *Cluster               `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The cluster: after the update, or as it is for validate_only.
+	Cluster *Cluster `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	// What the update would do (validate_only) or did (with plan_id).
+	Plan          *Plan `protobuf:"bytes,2,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -611,6 +636,13 @@ func (x *UpdateClusterResponse) GetCluster() *Cluster {
 	return nil
 }
 
+func (x *UpdateClusterResponse) GetPlan() *Plan {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
 type DeleteClusterRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Tenant scope. DNS label, at most 56 chars so the tenant namespace
@@ -619,7 +651,14 @@ type DeleteClusterRequest struct {
 	// Cluster.id.
 	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	// When set, must match the current etag or the call fails with ABORTED.
-	Etag          string `protobuf:"bytes,3,opt,name=etag,proto3" json:"etag,omitempty"`
+	Etag string `protobuf:"bytes,3,opt,name=etag,proto3" json:"etag,omitempty"`
+	// Tears the cluster down even when its Kubernetes API is unreachable:
+	// Helm Releases into the cluster are released without uninstalling
+	// (managementPolicies without Delete) instead of waiting for an
+	// uninstall that cannot happen. What those charts created in the cloud
+	// account (load balancers, volumes) may be left behind. Sticky: once
+	// set for a deletion, every later step of it is forced.
+	Force         bool `protobuf:"varint,4,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -675,6 +714,13 @@ func (x *DeleteClusterRequest) GetEtag() string {
 	return ""
 }
 
+func (x *DeleteClusterRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
 type DeleteClusterResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The cluster in DELETING state.
@@ -724,7 +770,7 @@ var File_cloud_v1_cluster_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecloud/v1/cluster_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a google/protobuf/field_mask.proto\"\xc5\x01\n" +
+	"\x1ecloud/v1/cluster_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x13cloud/v1/plan.proto\x1a google/protobuf/field_mask.proto\"\xc5\x01\n" +
 	"\x14CreateClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x123\n" +
 	"\acluster\x18\x02 \x01(\v2\x11.cloud.v1.ClusterB\x06\xbaH\x03\xc8\x01\x01R\acluster\x12*\n" +
@@ -753,20 +799,24 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\"m\n" +
 	"\x14ListClustersResponse\x12-\n" +
 	"\bclusters\x18\x01 \x03(\v2\x11.cloud.v1.ClusterR\bclusters\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xae\x02\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xf6\x02\n" +
 	"\x14UpdateClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x123\n" +
 	"\acluster\x18\x02 \x01(\v2\x11.cloud.v1.ClusterB\x06\xbaH\x03\xd8\x01\x03R\acluster\x12C\n" +
 	"\vupdate_mask\x18\x03 \x01(\v2\x1a.google.protobuf.FieldMaskB\x06\xbaH\x03\xc8\x01\x01R\n" +
-	"updateMask:N\xbaHK\x1aI\n" +
-	"\x1fupdate_cluster.cluster_required\x12\x13cluster is required\x1a\x11has(this.cluster)\"D\n" +
+	"updateMask\x12#\n" +
+	"\rvalidate_only\x18\x04 \x01(\bR\fvalidateOnly\x12!\n" +
+	"\aplan_id\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x06planId:N\xbaHK\x1aI\n" +
+	"\x1fupdate_cluster.cluster_required\x12\x13cluster is required\x1a\x11has(this.cluster)\"h\n" +
 	"\x15UpdateClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\xa1\x01\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\x12\"\n" +
+	"\x04plan\x18\x02 \x01(\v2\x0e.cloud.v1.PlanR\x04plan\"\xb7\x01\n" +
 	"\x14DeleteClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12\x12\n" +
-	"\x04etag\x18\x03 \x01(\tR\x04etag\"D\n" +
+	"\x04etag\x18\x03 \x01(\tR\x04etag\x12\x14\n" +
+	"\x05force\x18\x04 \x01(\bR\x05force\"D\n" +
 	"\x15DeleteClusterResponse\x12+\n" +
 	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster2\x83\x04\n" +
 	"\x0eClusterService\x12P\n" +
@@ -808,6 +858,7 @@ var file_cloud_v1_cluster_service_proto_goTypes = []any{
 	(*Cluster)(nil),               // 12: cloud.v1.Cluster
 	(*ManagedResourceEvent)(nil),  // 13: cloud.v1.ManagedResourceEvent
 	(*fieldmaskpb.FieldMask)(nil), // 14: google.protobuf.FieldMask
+	(*Plan)(nil),                  // 15: cloud.v1.Plan
 }
 var file_cloud_v1_cluster_service_proto_depIdxs = []int32{
 	12, // 0: cloud.v1.CreateClusterRequest.cluster:type_name -> cloud.v1.Cluster
@@ -819,24 +870,25 @@ var file_cloud_v1_cluster_service_proto_depIdxs = []int32{
 	12, // 6: cloud.v1.UpdateClusterRequest.cluster:type_name -> cloud.v1.Cluster
 	14, // 7: cloud.v1.UpdateClusterRequest.update_mask:type_name -> google.protobuf.FieldMask
 	12, // 8: cloud.v1.UpdateClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	12, // 9: cloud.v1.DeleteClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	0,  // 10: cloud.v1.ClusterService.CreateCluster:input_type -> cloud.v1.CreateClusterRequest
-	2,  // 11: cloud.v1.ClusterService.GetCluster:input_type -> cloud.v1.GetClusterRequest
-	6,  // 12: cloud.v1.ClusterService.ListClusters:input_type -> cloud.v1.ListClustersRequest
-	8,  // 13: cloud.v1.ClusterService.UpdateCluster:input_type -> cloud.v1.UpdateClusterRequest
-	3,  // 14: cloud.v1.ClusterService.WatchCluster:input_type -> cloud.v1.WatchClusterRequest
-	10, // 15: cloud.v1.ClusterService.DeleteCluster:input_type -> cloud.v1.DeleteClusterRequest
-	1,  // 16: cloud.v1.ClusterService.CreateCluster:output_type -> cloud.v1.CreateClusterResponse
-	5,  // 17: cloud.v1.ClusterService.GetCluster:output_type -> cloud.v1.GetClusterResponse
-	7,  // 18: cloud.v1.ClusterService.ListClusters:output_type -> cloud.v1.ListClustersResponse
-	9,  // 19: cloud.v1.ClusterService.UpdateCluster:output_type -> cloud.v1.UpdateClusterResponse
-	4,  // 20: cloud.v1.ClusterService.WatchCluster:output_type -> cloud.v1.WatchClusterResponse
-	11, // 21: cloud.v1.ClusterService.DeleteCluster:output_type -> cloud.v1.DeleteClusterResponse
-	16, // [16:22] is the sub-list for method output_type
-	10, // [10:16] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	15, // 9: cloud.v1.UpdateClusterResponse.plan:type_name -> cloud.v1.Plan
+	12, // 10: cloud.v1.DeleteClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	0,  // 11: cloud.v1.ClusterService.CreateCluster:input_type -> cloud.v1.CreateClusterRequest
+	2,  // 12: cloud.v1.ClusterService.GetCluster:input_type -> cloud.v1.GetClusterRequest
+	6,  // 13: cloud.v1.ClusterService.ListClusters:input_type -> cloud.v1.ListClustersRequest
+	8,  // 14: cloud.v1.ClusterService.UpdateCluster:input_type -> cloud.v1.UpdateClusterRequest
+	3,  // 15: cloud.v1.ClusterService.WatchCluster:input_type -> cloud.v1.WatchClusterRequest
+	10, // 16: cloud.v1.ClusterService.DeleteCluster:input_type -> cloud.v1.DeleteClusterRequest
+	1,  // 17: cloud.v1.ClusterService.CreateCluster:output_type -> cloud.v1.CreateClusterResponse
+	5,  // 18: cloud.v1.ClusterService.GetCluster:output_type -> cloud.v1.GetClusterResponse
+	7,  // 19: cloud.v1.ClusterService.ListClusters:output_type -> cloud.v1.ListClustersResponse
+	9,  // 20: cloud.v1.ClusterService.UpdateCluster:output_type -> cloud.v1.UpdateClusterResponse
+	4,  // 21: cloud.v1.ClusterService.WatchCluster:output_type -> cloud.v1.WatchClusterResponse
+	11, // 22: cloud.v1.ClusterService.DeleteCluster:output_type -> cloud.v1.DeleteClusterResponse
+	17, // [17:23] is the sub-list for method output_type
+	11, // [11:17] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_service_proto_init() }
@@ -846,6 +898,7 @@ func file_cloud_v1_cluster_service_proto_init() {
 	}
 	file_cloud_v1_cluster_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
+	file_cloud_v1_plan_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

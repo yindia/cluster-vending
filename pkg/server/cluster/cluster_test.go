@@ -51,22 +51,37 @@ func equal(a, b []string) bool {
 
 func minimalSpec() *cloudv1.ClusterSpec {
 	return &cloudv1.ClusterSpec{
-		Region:  "us-east-1",
-		Network: &cloudv1.ClusterNetwork{NetworkId: "0190a000-0000-7000-8000-000000000001"},
+		Region:       "us-east-1",
+		Network:      &cloudv1.ClusterNetwork{NetworkId: "0190a000-0000-7000-8000-000000000001"},
+		ControlPlane: &cloudv1.ControlPlaneSpec{EndpointAccess: &cloudv1.EndpointAccess{PublicAccessCidrs: []string{"203.0.113.0/24"}}},
 		DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m6i.large"},
 			ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
 		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
 	}
 }
 
+// mustResolve is resolveSpec for specs that are valid.
+func mustResolve(t *testing.T, in *cloudv1.ClusterSpec, zones []string) *cloudv1.ClusterSpec {
+	t.Helper()
+	spec, err := resolveSpec(in, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
 func TestResolveSpecFillsDefaultsWithoutTouchingInput(t *testing.T) {
 	in := minimalSpec()
-	spec := resolveSpec(in, []string{"use1-az1", "use1-az2"})
-	if in.GetControlPlane() != nil || len(in.GetNetwork().GetZoneIds()) != 0 {
+	spec := mustResolve(t, in, []string{"use1-az1", "use1-az2"})
+	if in.GetAws().GetAccessConfig() != nil || len(in.GetNetwork().GetZoneIds()) != 0 {
 		t.Fatal("resolveSpec changed its input")
 	}
-	if got := spec.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs(); !equal(got, []string{anyIPv4}) {
-		t.Errorf("public cidrs = %v", got)
+	if got := spec.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs(); !equal(got, []string{"203.0.113.0/24"}) {
+		t.Errorf("public cidrs = %v, want the client's", got)
+	}
+	in.ControlPlane = nil
+	if _, err := resolveSpec(in, []string{"use1-az1", "use1-az2"}); err == nil {
+		t.Error("no public access CIDRs: want an error, not a 0.0.0.0/0 default")
 	}
 	plan := clusterPlan(spec, []string{"subnet-a", "subnet-b"}, crossplaneawsBase())
 	if plan.AuthenticationMode != defaultAuthMode || plan.NodePool.CapacityType != defaultCapacityType ||
@@ -109,7 +124,7 @@ func TestStatus(t *testing.T) {
 }
 
 func TestApplyMask(t *testing.T) {
-	newSpec := func() *cloudv1.ClusterSpec { return resolveSpec(minimalSpec(), []string{"use1-az1", "use1-az2"}) }
+	newSpec := func() *cloudv1.ClusterSpec { return mustResolve(t, minimalSpec(), []string{"use1-az1", "use1-az2"}) }
 	row := &model.Cluster{Name: "prod"}
 	in := &cloudv1.Cluster{DisplayName: "Prod", Spec: minimalSpec()}
 	in.Spec.DefaultNodePool.ScalingConfig.MaxSize = 9

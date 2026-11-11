@@ -134,6 +134,9 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "aws: bad instance type", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.DefaultNodePool.InstanceTypes = []string{"Standard_D4s_v5"}
 		})},
+		{name: "no public access cidrs", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.ControlPlane.EndpointAccess.PublicAccessCidrs = nil
+		})},
 		{name: "label too long for an AWS tag", wantErr: true, req: mutate(func(_ *spec, r *req) {
 			r.Cluster.Labels = map[string]string{"k": strings.Repeat("v", 257)}
 		})},

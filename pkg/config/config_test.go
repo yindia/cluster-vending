@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -84,7 +85,7 @@ func TestLoadGlobalFlagBeatsEnvBeatsDefault(t *testing.T) {
 		t.Fatalf("LoadGlobal: %v", err)
 	}
 	want := config.Global{Kubeconfig: path, KubeContext: "kind-dev", LogLevel: "debug", LogFormat: "text"}
-	if cfg != want {
+	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v, want %+v", cfg, want)
 	}
 }
@@ -120,13 +121,18 @@ func TestLoadServeDefaults(t *testing.T) {
 		HTTPAddr:         ":8080",
 		ShutdownTimeout:  30 * time.Second,
 		InstallProviders: true,
+		LoopInterval:     30 * time.Second,
+		LeaderElect:      true,
+		LeaseNamespace:   config.DefaultLeaseNamespace,
+		Provider: config.ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
+			CPURequest: "100m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"},
 		AWS: config.AWS{
 			ManagementAccountID: mgmtAccount,
 			ManagementRoleARN:   mgmtRole,
 		},
 		Database: database.DefaultConfig(),
 	}
-	if cfg != want {
+	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v, want %+v", cfg, want)
 	}
 }

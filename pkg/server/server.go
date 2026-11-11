@@ -12,8 +12,11 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
+	"github.com/yindia/cluster-vending/pkg/server/admin"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -29,14 +32,29 @@ const readHeaderTimeout = 10 * time.Second
 // NewHandler registers every cloud.v1 service and returns the HTTP handler
 // that serves them over Connect, gRPC and gRPC-Web, including the
 // server-streaming Watch RPCs.
-func NewHandler(d service.Deps) http.Handler {
+//
+// It also serves the probes, /healthz (the process is up) and /readyz
+// (ready reports true: the management cluster cache has synced; nil
+// counts as ready), and /metrics (Prometheus: the background loop's and
+// controller-runtime's client and cache metrics).
+func NewHandler(d service.Deps, ready func() bool) http.Handler {
 	server := connect.NewServer()
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d))
+	cloudv1connect.RegisterAdminServiceHandler(server, admin.NewService(d))
 
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
+	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if ready != nil && !ready() {
+			http.Error(w, "management cluster cache not synced", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	return mux
 }
 

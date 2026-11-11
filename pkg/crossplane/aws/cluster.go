@@ -11,6 +11,7 @@ import (
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -72,6 +73,13 @@ type ClusterPlan struct {
 	// NodeGroupName names the default node group object (and EKS node
 	// group); empty is DefaultNodeGroupName.
 	NodeGroupName string
+	// NodeKubernetesVersion, when set, is the node groups' version instead
+	// of KubernetesVersion: during an upgrade they follow the control
+	// plane, not the target (EKS refuses nodes newer than the cluster).
+	NodeKubernetesVersion string
+	// SubnetObjects are the network's Subnet objects of SubnetIDs: the
+	// cluster's Usages keep them while the EKS cluster exists.
+	SubnetObjects []string
 }
 
 // NodePoolPlan is the default node group.
@@ -112,6 +120,10 @@ func ClusterResources(p ClusterPlan) []client.Object {
 	for i, principal := range p.AdminPrincipals {
 		entry := fmt.Sprintf("admin-%d", i+1)
 		out = append(out, b.accessEntry(entry, principal), b.accessPolicy(entry, principal))
+	}
+	// Last: Usages refer to the objects above.
+	for _, u := range Usages(p.Namespace, p.Prefix, crossplane.ClusterLabels(p.TenantID, p.ClusterID), b.usagePairs()) {
+		out = append(out, u)
 	}
 	return out
 }
@@ -260,10 +272,7 @@ func SameNodeGroup(ng *awseks.NodeGroup, n NodePoolPlan) bool {
 
 func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 	n := b.p.NodePool
-	name := b.p.NodeGroupName
-	if name == "" {
-		name = DefaultNodeGroupName(b.p.Prefix)
-	}
+	name := b.nodeGroupName()
 	params := awseks.NodeGroupParameters{
 		Region:         ptr.To(b.p.Region),
 		ClusterNameRef: b.ref(b.p.Prefix),
@@ -280,8 +289,8 @@ func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 		Labels: strPtrs(n.Labels),
 		Tags:   b.tags(name),
 	}
-	if b.p.KubernetesVersion != "" {
-		params.Version = ptr.To(b.p.KubernetesVersion)
+	if v := b.nodeVersion(); v != "" {
+		params.Version = ptr.To(v)
 	}
 	if n.DiskSizeGB > 0 {
 		params.DiskSize = ptr.To(float64(n.DiskSizeGB))
@@ -346,4 +355,25 @@ func ClusterLists() []client.ObjectList {
 		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awseks.ClusterList{},
 		&awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
 	}
+}
+
+// DesiredSizeAtCreateOnly moves a NodeGroup's desired size (an apply body,
+// see kube.ApplyObject) from forProvider to initProvider: the provider's
+// Go type always serializes forProvider.scalingConfig.desiredSize (no
+// omitempty), so applying it as is makes Crossplane reset the node count
+// to it on every poll, against any autoscaler. In initProvider it is set
+// at creation only.
+func DesiredSizeAtCreateOnly(u *unstructured.Unstructured) {
+	desired, found, _ := unstructured.NestedFieldNoCopy(u.Object, "spec", "forProvider", "scalingConfig", "desiredSize")
+	unstructured.RemoveNestedField(u.Object, "spec", "forProvider", "scalingConfig", "desiredSize")
+	if found && desired != nil {
+		_ = unstructured.SetNestedField(u.Object, desired, "spec", "initProvider", "scalingConfig", "desiredSize")
+	}
+}
+
+func (b clusterBuilder) nodeVersion() string {
+	if b.p.NodeKubernetesVersion != "" {
+		return b.p.NodeKubernetesVersion
+	}
+	return b.p.KubernetesVersion
 }

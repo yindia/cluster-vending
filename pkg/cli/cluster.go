@@ -83,8 +83,9 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	}
 	res, err := call(ctx, &cloudv1.UpdateClusterRequest{
 		TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
+		ValidateOnly: o.Plan, PlanId: o.PlanID,
 	}, c.Cluster.UpdateCluster)
-	if err != nil || !o.Wait {
+	if err != nil || !o.Wait || o.Plan {
 		return res, err
 	}
 	return waitCluster(ctx, c, o, tenant, cl.GetId(), false)
@@ -97,7 +98,8 @@ func ClusterDelete(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
-	res, err := call(ctx, &cloudv1.DeleteClusterRequest{TenantId: o.Tenant, ClusterId: o.ID, Etag: o.ETag}, c.Cluster.DeleteCluster)
+	res, err := call(ctx, &cloudv1.DeleteClusterRequest{TenantId: o.Tenant, ClusterId: o.ID, Etag: o.ETag, Force: o.Force},
+		c.Cluster.DeleteCluster)
 	if err != nil || !o.Wait {
 		return res, err
 	}

@@ -172,10 +172,10 @@ func (x *SecretsEncryption) GetEnabled() bool {
 //	      delegated subnet) is enabled.
 type EndpointAccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// IPv4 CIDRs allowed to reach the public endpoint. Empty means
-	// unrestricted: the server sends an explicit ["0.0.0.0/0"], because an
-	// omitted list is late-initialized from the cloud and would silently keep
-	// the previous whitelist.
+	// IPv4 CIDRs allowed to reach the public endpoint. At least one is
+	// required (ClusterSpec rule public_access_cidrs_required): who may reach
+	// the API is the client's choice, there is no default. ["0.0.0.0/0"]
+	// allows any address.
 	//
 	//	AWS   vpcConfig.publicAccessCidrs
 	//	GCP   masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock

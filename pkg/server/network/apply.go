@@ -92,7 +92,38 @@ func (s *NetworkService) applyObjects(ctx context.Context, row *model.Network, a
 		s.logger().ErrorContext(ctx, "record network resources", "network_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeInternal, "could not record the network's resources")
 	}
+	return s.markApplied(ctx, row)
+}
+
+// markApplied records that every object of the row's generation was
+// applied without error, with this build's renderer.
+func (s *NetworkService) markApplied(ctx context.Context, row *model.Network) error {
+	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion {
+		return nil
+	}
+	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
+	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
+		return connect.NewError(connect.CodeInternal, "could not record the applied generation: "+err.Error())
+	}
 	return nil
+}
+
+// liveObjects counts the network's objects the API server still has (by
+// label, uncached).
+func (s *NetworkService) liveObjects(ctx context.Context, row *model.Network) (int, error) {
+	n := 0
+	for _, list := range crossplaneaws.NetworkLists() {
+		err := s.deps.Reader().List(ctx, list, client.InNamespace(kube.TenantNamespace(row.TenantID)),
+			client.MatchingLabels{crossplane.LabelNetwork: row.ID})
+		if meta.IsNoMatchError(err) {
+			continue
+		}
+		if err != nil {
+			return 0, fmt.Errorf("list %T: %w", list, err)
+		}
+		n += meta.LenList(list)
+	}
+	return n, nil
 }
 
 // deleteResources deletes every managed resource of the network. Crossplane
@@ -135,41 +166,53 @@ var deleteOrder = service.DeleteOrder{
 }
 
 // finalize moves a DELETING network's deletion on (deleteOrder: the next
-// tier once the previous one is gone), removes its row once all its
-// resources are gone, and reports whether it did. Every DeleteNetwork,
+// tier once the previous one is gone) and removes its row once all its
+// resources are gone. Every DeleteNetwork,
 // GetNetwork and ListNetworks of the network calls it.
-func (s *NetworkService) finalize(ctx context.Context, row *model.Network) (bool, error) {
+func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error {
 	if row.State != stateDeleting {
-		return false, nil
+		return nil
 	}
 	o, err := s.observe(ctx, row.TenantID, row.ID)
 	if err != nil {
-		return false, connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
+		return connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
 	}
 	// records also records live objects that were never recorded (by
 	// label), so every resource of the network is deleted in order.
 	records, err := s.records(ctx, row, o.objects)
 	if err != nil {
-		return false, err
+		return err
 	}
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
-		return false, err
+		return err
+	}
+	if err := s.deps.MarkGone(ctx, records, views); err != nil {
+		return connect.NewError(connect.CodeInternal, err.Error())
 	}
 	left, err := s.deps.DeleteNext(ctx, records, views, deleteOrder)
 	if err != nil {
 		s.logger().ErrorContext(ctx, "delete network resources", "network_id", row.ID, "error", err)
-		return false, connect.NewError(connect.CodeInternal, "could not delete the network's resources")
+		return connect.NewError(connect.CodeInternal, "could not delete the network's resources")
 	}
 	if left > 0 || o.total > 0 {
-		return false, nil
+		return nil
+	}
+	// The cache says everything is gone: confirm with the API server before
+	// forgetting the network (a cache that lost its objects must not make
+	// the platform forget cloud resources).
+	if live, err := s.liveObjects(ctx, row); err != nil || live > 0 {
+		if err != nil {
+			return connect.NewError(connect.CodeUnavailable, "cannot confirm the network's resources are gone: "+err.Error())
+		}
+		return nil
 	}
 	// The controller and an API read can both get here: gone is gone.
 	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return false, connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
+		return connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
 	}
 	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {
-		return false, connect.NewError(connect.CodeInternal, "could not forget the deleted network's resources: "+err.Error())
+		return connect.NewError(connect.CodeInternal, "could not forget the deleted network's resources: "+err.Error())
 	}
-	return true, nil
+	return nil
 }

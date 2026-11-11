@@ -36,7 +36,7 @@ func (d Deps) AWSAccess(ctx context.Context, a *model.CloudAccount) (awscloud.Ac
 		}}, nil
 	}
 	pc := &awsv1beta1.ProviderConfig{}
-	err := d.Kube.Get(ctx, client.ObjectKey{Namespace: a.Namespace, Name: a.ProviderConfigName}, pc)
+	err := d.Get(ctx, client.ObjectKey{Namespace: a.Namespace, Name: a.ProviderConfigName}, pc)
 	if apierrors.IsNotFound(err) {
 		return awscloud.Access{}, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Sprintf("account %s has no ProviderConfig %s/%s; bootstrap it", a.ID, a.Namespace, a.ProviderConfigName))

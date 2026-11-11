@@ -71,6 +71,15 @@ type Resource struct {
 	// generation the stored status reflects.
 	Generation         int64 `gorm:"not null;default:1"`
 	ObservedGeneration int64 `gorm:"not null;default:0"`
+	// AppliedGeneration is the generation whose objects were all applied
+	// without error (rendered in full: not held back for EKS or an
+	// upgrade). Below Generation, the resource is applied again.
+	AppliedGeneration int64 `gorm:"not null;default:0"`
+	// RenderVersion is the renderer version (crossplaneaws.RenderVersion)
+	// the resource's objects were last applied with. Below the server's
+	// target, the background loop applies it again, so renderer changes
+	// roll out resource by resource.
+	RenderVersion int64 `gorm:"not null;default:0"`
 	// ETag changes on every write; updates must present the current one.
 	ETag string `gorm:"column:etag;size:64;not null"`
 	// Spec and Status are the protojson cloud.v1 *Spec / *Status, including
@@ -205,6 +214,9 @@ type Cluster struct {
 	// cluster import).
 	Imported        bool    `gorm:"not null;default:false"`
 	CreateRequestID *string `gorm:"size:36;uniqueIndex:idx_clusters_tenant_request,where:deleted_at IS NULL"`
+	// DeleteForce: the deletion was requested with force (DeleteClusterRequest.force);
+	// every later step of it skips the in-cluster cleanup.
+	DeleteForce bool `gorm:"not null;default:false"`
 
 	NodePools []NodePool `gorm:"constraint:OnDelete:RESTRICT"`
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -12,43 +14,49 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
-// deleteOrder deletes a cluster from the outside in: what runs on or
-// attaches to the cluster, then the node groups (EKS drains them), then
-// the EKS cluster, then the IAM roles it and its nodes used. Deleting a
-// role first would leave draining nodes or the control plane without
-// permissions.
-var deleteOrder = service.DeleteOrder{
-	{"AccessPolicyAssociation", "AccessEntry", "PodIdentityAssociation", "Addon", "ClusterAuth"},
-	{"NodeGroup"},
-	{"Cluster"},
-	{"RolePolicyAttachment"},
-	{"Role", "Policy"},
-}
-
-// driveDelete moves a DELETING cluster one step on: it deletes the next
-// tier of its recorded objects (deleteOrder), then any object labelled with
-// the cluster but never recorded, then removes the network subnet tags and
-// the cluster's rows. It reports whether the cluster is gone. Every
-// DeleteCluster, GetCluster and ListClusters of the cluster calls it.
+// driveDelete moves a DELETING cluster on: its recorded objects are
+// deleted all at once (a forced deletion first releases its Helm
+// Releases, forceRelease); the Usages
+// rendered with them (see crossplaneaws.ClusterResources) make the webhook
+// hold each object until what uses it is gone, and replay its deletion
+// then: node groups before the EKS cluster before its IAM. Once every
+// recorded object is gone it deletes objects labelled with the cluster but
+// never recorded, removes the network subnet tags and the cluster's rows.
+// It reports whether the cluster is gone. Every step is idempotent: the
+// controller and API reads both call it.
 func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return false, fmt.Errorf("list cluster resources: %w", err)
 	}
+	if row.DeleteForce {
+		if err := s.forceRelease(ctx, row); err != nil {
+			return false, err
+		}
+	}
+	if err := s.deps.DeleteRecorded(ctx, records); err != nil {
+		return false, err
+	}
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
 		return false, err
 	}
-	left, err := s.deps.DeleteNext(ctx, records, views, deleteOrder)
-	if err != nil || left > 0 {
+	if err := s.deps.MarkGone(ctx, records, views); err != nil {
 		return false, err
 	}
+	if err := s.releaseOrphanUsages(ctx, records, views); err != nil {
+		return false, err
+	}
+	if !service.AllGone(views) {
+		return false, nil
+	}
 	namespace := kube.TenantNamespace(row.TenantID)
-	stray, err := s.deleteUnrecorded(ctx, row, namespace, records)
+	stray, err := s.deleteUnrecorded(ctx, row, namespace)
 	if err != nil || stray > 0 {
 		return false, err
 	}
@@ -66,19 +74,58 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	return true, nil
 }
 
-// deleteUnrecorded deletes objects labelled with the cluster that have no
-// record (left by a failure between apply and record) and reports how many
-// it found; the cluster is gone only once there are none.
-func (s *ClusterService) deleteUnrecorded(ctx context.Context, row *model.Cluster, namespace string,
-	records []model.ManagedResource,
-) (int, error) {
-	recorded := make(map[string]bool, len(records))
-	for _, r := range records {
-		recorded[r.Kind+"/"+r.Name] = true
+// releaseOrphanUsages deletes recorded Usages whose "by" object is gone but
+// that are still there: Kubernetes garbage-collects a Usage only once
+// Crossplane owner-referenced it to its user, which never happens when the
+// user was deleted (or never created) first. Deleting the Usage releases
+// its object at once.
+func (s *ClusterService) releaseOrphanUsages(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource) error {
+	present := make(map[string]bool, len(views))
+	for _, v := range views {
+		if v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			present[v.GetKind()+"/"+v.GetName()] = true
+		}
 	}
+	var errs []error
+	for _, r := range records {
+		if r.Kind != "Usage" || !present[r.Kind+"/"+r.Name] {
+			continue
+		}
+		u := &protectionv1beta1.Usage{}
+		if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
+			errs = append(errs, client.IgnoreNotFound(err))
+			continue
+		}
+		by := u.Spec.By
+		if by == nil || by.ResourceRef == nil || present[by.Kind+"/"+by.ResourceRef.Name] {
+			continue
+		}
+		if err := client.IgnoreNotFound(s.deps.Kube.Delete(ctx, u)); err != nil {
+			errs = append(errs, fmt.Errorf("release usage %s: %w", r.Name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// deleteUnrecorded confirms with the API server (by label, uncached) that
+// nothing of the cluster is left, and reports how many objects it still
+// found: the cluster is gone only once there are none. The cache saying
+// "all gone" is not enough to forget cloud resources. Objects found that
+// are not being deleted yet (never recorded: left by a failure between
+// apply and record) are deleted; Usages last, once nothing else is left,
+// so they protect until then.
+func (s *ClusterService) deleteUnrecorded(ctx context.Context, row *model.Cluster, namespace string) (int, error) {
+	found, err := s.sweep(ctx, row, namespace, crossplaneaws.ClusterLists())
+	if err != nil || found > 0 {
+		return found, err
+	}
+	return s.sweep(ctx, row, namespace, []client.ObjectList{&protectionv1beta1.UsageList{}})
+}
+
+func (s *ClusterService) sweep(ctx context.Context, row *model.Cluster, namespace string, lists []client.ObjectList) (int, error) {
 	found := 0
-	for _, list := range crossplaneaws.ClusterLists() {
-		err := s.deps.Kube.List(ctx, list, client.InNamespace(namespace), client.MatchingLabels{crossplane.LabelCluster: row.ID})
+	for _, list := range lists {
+		err := s.deps.Reader().List(ctx, list, client.InNamespace(namespace), client.MatchingLabels{crossplane.LabelCluster: row.ID})
 		if meta.IsNoMatchError(err) {
 			continue
 		}
@@ -94,17 +141,15 @@ func (s *ClusterService) deleteUnrecorded(ctx context.Context, row *model.Cluste
 			if !ok {
 				continue
 			}
-			kind := kindOf(list)
-			if recorded[kind+"/"+obj.GetName()] {
+			found++
+			if obj.GetDeletionTimestamp() != nil {
 				continue
 			}
-			found++
-			if obj.GetDeletionTimestamp() == nil {
-				if err := client.IgnoreNotFound(s.deps.Kube.Delete(ctx, obj)); err != nil {
-					return found, fmt.Errorf("delete unrecorded %s %s: %w", kind, obj.GetName(), err)
-				}
-				s.logger().InfoContext(ctx, "deleting unrecorded cluster resource", "cluster_id", row.ID, "kind", kind, "name", obj.GetName())
+			err := s.deps.Kube.Delete(ctx, obj)
+			if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+				return found, fmt.Errorf("delete %s %s: %w", kindOf(list), obj.GetName(), err)
 			}
+			s.logger().InfoContext(ctx, "deleting leftover cluster resource", "cluster_id", row.ID, "kind", kindOf(list), "name", obj.GetName())
 		}
 	}
 	return found, nil

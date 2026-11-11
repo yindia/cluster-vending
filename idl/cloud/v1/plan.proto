@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+// Plan is what an update would do, computed without changing anything
+// (UpdateClusterRequest.validate_only): the rendered resources are
+// server-side applied as a dry run and compared with the live ones.
+message Plan {
+  // Identifies the plan: a hash of the request and of the live resources'
+  // versions. Pass it back as UpdateClusterRequest.plan_id to apply exactly
+  // this plan; the update fails with FAILED_PRECONDITION if anything changed
+  // since.
+  string plan_id = 1;
+
+  // False when the update would be refused: a change is
+  // REJECTED_IMMUTABLE.
+  bool applicable = 2;
+
+  // Every change, in apply order; deletions last. Empty: the update changes
+  // no resource.
+  repeated PlannedChange changes = 3;
+
+  // Things to know before applying, e.g. that node groups follow the
+  // control plane during a Kubernetes upgrade.
+  repeated string warnings = 4;
+}
+
+// PlannedAction is what happens to a resource or one of its fields.
+enum PlannedAction {
+  PLANNED_ACTION_UNSPECIFIED = 0;
+  // The resource does not exist yet and is created.
+  PLANNED_ACTION_CREATE = 1;
+  // The field is changed on the existing cloud resource without
+  // interrupting it.
+  PLANNED_ACTION_UPDATE_IN_PLACE = 2;
+  // The field is changed in place, but workloads are affected while it
+  // rolls out (a Kubernetes upgrade, an add-on version, a node group's
+  // version: nodes are replaced one by one).
+  PLANNED_ACTION_DISRUPTIVE = 3;
+  // The resource is deleted.
+  PLANNED_ACTION_DELETE = 4;
+  // The cloud cannot change the field on an existing resource and the
+  // platform does not replace it: the update is refused.
+  PLANNED_ACTION_REJECTED_IMMUTABLE = 5;
+}
+
+// PlannedChange is one change of a plan: a resource created or deleted, or
+// one field of a resource changed.
+message PlannedChange {
+  // The managed resource: its Kubernetes apiVersion, kind and name (in the
+  // tenant namespace), and its cloud ID when it exists.
+  string api_version = 1;
+  string kind = 2;
+  string name = 3;
+  string external_name = 4;
+
+  // The field that changes: the API field it comes from when there is one
+  // (e.g. "spec.control_plane.kubernetes_version"), else the resource's own
+  // path ("forProvider.vpcConfig.subnetIds"). Empty for CREATE and DELETE.
+  string spec_path = 5;
+
+  PlannedAction action = 6;
+
+  // What changes, e.g. "forProvider.version: 1.34 -> 1.35", or why: "cloud
+  // has 5, set back to 3" for a change made outside the platform.
+  string detail = 7;
+
+  // The change replaces the resource: this one is created to replace
+  // another, or deleted because a replacement takes over (a node group
+  // whose instance types changed).
+  bool requires_replacement = 8;
+
+  // The change as a unified diff of the resource's spec (YAML paths).
+  string unified_diff = 9;
+}

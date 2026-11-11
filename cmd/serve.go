@@ -6,15 +6,18 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/config"
-	"github.com/yindia/cluster-vending/pkg/controller"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database"
 	"github.com/yindia/cluster-vending/pkg/database/implementation"
+	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/loop"
 	"github.com/yindia/cluster-vending/pkg/server"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/network"
@@ -61,7 +64,13 @@ func newServeCmd(g *globals) *cobra.Command {
 
 			mgr, err := server.ConnectManagement(ctx, server.ManagementOptions{
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
-				InstallProviders: cfg.InstallProviders, ManagementRoleARN: cfg.AWS.ManagementRoleARN, Logger: g.logger,
+				InstallProviders: cfg.InstallProviders, Logger: g.logger,
+				ProviderRuntime: crossplaneaws.ProviderRuntime{
+					ManagementRoleARN: cfg.AWS.ManagementRoleARN, Poll: cfg.Provider.Poll, EC2Poll: cfg.Provider.EC2Poll,
+					MaxReconcileRate: cfg.Provider.MaxReconcileRate, CPURequest: cfg.Provider.CPURequest,
+					MemoryRequest: cfg.Provider.MemoryRequest, CPULimit: cfg.Provider.CPULimit, MemoryLimit: cfg.Provider.MemoryLimit,
+				},
+				LeaderElection: kube.LeaderElection{Enabled: cfg.LeaderElect, Namespace: cfg.LeaseNamespace},
 			})
 			if err != nil {
 				return fmt.Errorf("%w (--%s=false skips installing the providers)", err, config.FlagInstallProviders)
@@ -85,19 +94,30 @@ func newServeCmd(g *globals) *cobra.Command {
 			if cfg.AWS.StaticKeys != nil {
 				g.logger.Warn("AWS keys found in the environment: the server's own AWS lookups use them for every account (local testing only)")
 			}
+			renderTarget := cfg.RenderTarget
+			if renderTarget == 0 {
+				renderTarget = crossplaneaws.RenderVersion
+			}
 			deps := service.Deps{
 				Store:        implementation.New(db),
 				Kube:         mgr.GetClient(), // reads from the informer cache
 				KubeReader:   mgr.GetAPIReader(),
 				AWS:          cfg.AWS,
+				RenderTarget: renderTarget, RenderRollout: cfg.RenderRollout,
 				AWSDiscovery: discovery,
 				AWSClusters:  discovery,
 				Logger:       g.logger,
 			}
-			if err := controller.Setup(mgr, network.NewNetworkService(deps), cluster.NewClusterService(deps)); err != nil {
+			err = mgr.Add(&loop.Loop{
+				Store: deps.Store, Networks: network.NewNetworkService(deps), Clusters: cluster.NewClusterService(deps),
+				NetworkStates: network.PendingStates(), ClusterStates: cluster.PendingStates(),
+				RenderTarget: deps.RenderTarget, Interval: cfg.LoopInterval, Logger: g.logger,
+			})
+			if err != nil {
 				return err
 			}
-			done, err := server.StartManagement(ctx, mgr)
+			var ready atomic.Bool
+			done, err := server.StartManagement(ctx, mgr, &ready)
 			if err != nil {
 				return err
 			}
@@ -110,7 +130,7 @@ func newServeCmd(g *globals) *cobra.Command {
 					cancel()
 				}
 			}()
-			return server.Run(ctx, ln, server.NewHandler(deps), cfg.ShutdownTimeout, g.logger)
+			return server.Run(ctx, ln, server.NewHandler(deps, ready.Load), cfg.ShutdownTimeout, g.logger)
 		},
 	}
 	addFlags(cmd.Flags(), config.ServeSettings())

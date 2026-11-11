@@ -15,25 +15,23 @@ type InstallResult struct {
 	Created, Existing []string
 }
 
-// InstallProviders creates the platform's activation policy
-// (ActivationPolicy: only the managed resource kinds it uses), the AWS
-// providers (Providers), provider-helm
-// (crossplane.HelmProvider) and, when the platform has a management role,
-// the AWS providers' DeploymentRuntimeConfig (RuntimeConfig, IRSA) in the
-// management cluster. Objects that exist are
-// left as they are: the call never overwrites a provider someone pinned
-// or configured. Without a management role (local clusters, credentials
-// from the ProviderConfig Secret) the providers run with Crossplane's
-// default runtime config.
-func InstallProviders(ctx context.Context, c client.Client, managementRoleARN string) (InstallResult, error) {
+// InstallProviders creates, in the management cluster, the platform's
+// activation policy (ActivationPolicy: only the managed resource kinds it
+// uses), the AWS providers' runtime configs (RuntimeConfigs: poll
+// intervals, reconcile rate, resources, IRSA role), the AWS providers
+// (Providers) and provider-helm (crossplane.HelmProvider). Objects that
+// exist are left as they are: the call never overwrites a provider or
+// runtime config someone pinned or tuned.
+func InstallProviders(ctx context.Context, c client.Client, rt ProviderRuntime) (InstallResult, error) {
 	objects := []client.Object{ActivationPolicy()}
-	if managementRoleARN != "" {
-		objects = append(objects, RuntimeConfig(managementRoleARN))
+	configs, err := RuntimeConfigs(rt)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	for _, config := range configs {
+		objects = append(objects, config)
 	}
 	for _, p := range Providers() {
-		if managementRoleARN == "" {
-			p.Spec.RuntimeConfigReference = nil
-		}
 		objects = append(objects, p)
 	}
 	objects = append(objects, crossplane.HelmProvider())

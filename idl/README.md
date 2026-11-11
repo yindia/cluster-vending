@@ -200,6 +200,46 @@ network can serve several clusters.
   (`status.carried_over`) and deleted with the cluster.
 - `DeleteCluster` deletes every node group.
 
+## How changes roll out
+
+- **Reads change nothing.** `Get*`, `List*` and `Watch*` only read (managed
+  resources from the server's informer cache). A background loop in the
+  server (every 30 s, one replica at a time through leader election) moves
+  on what is not settled: it applies a generation again until every object
+  of it was applied, creates add-ons and access entries once EKS is ACTIVE,
+  retires a replaced node group, continues deletions and removes the row
+  when everything is gone.
+- **Status.** `status.observed_generation` is the last generation that
+  converged: all of it applied, and every managed resource's provider has
+  reconciled its latest spec (`ManagedResource.generation` =
+  `observed_generation`). `RUNNING` needs that and every resource Ready.
+- **Kubernetes upgrades** are staged: the control plane first; node groups
+  and add-ons render at the version the control plane reports until it
+  reports the target. The version-skew errors EKS returns meanwhile are
+  `UPDATING`, not `FAILED`.
+- **Node count.** `scaling_config.desired_size` is sent at creation only
+  (`initProvider`); afterwards the node count is the autoscaler's.
+- **Plan before update.** `UpdateCluster` with `validate_only` returns a
+  `Plan` and changes nothing: every resource that would be created,
+  changed in place, changed disruptively, deleted, or that the cloud cannot
+  change (`REJECTED_IMMUTABLE`; the plan is then not `applicable`), with a
+  diff, including fields changed outside the platform that would be set
+  back. Passing `plan_id` back applies only if nothing changed since.
+- **Deletion order** of a cluster is enforced by Crossplane `Usage`
+  objects rendered with it (the EKS cluster is used by its node groups,
+  the IAM roles by the cluster and node groups, the network's subnets by
+  the cluster, ...): all objects are deleted at once, each cloud resource
+  goes only when its users are gone. `DeleteClusterRequest.force` also
+  releases Helm releases without uninstalling, for a cluster whose API is
+  unreachable. A deleting cluster's `status.message` names what it waits
+  for and what is stuck, with the error and for how long.
+- **Renderer changes** roll out resource by resource: every row stores the
+  renderer version it was applied with; the loop re-applies rows below the
+  server's target (`--render-target`, limited by `--render-rollout`).
+- **Provider upgrades**: `AdminService.PauseReconcile` /
+  `ResumeReconcile` set or remove `crossplane.io/paused` on a tenant's or
+  one cluster's managed resources.
+
 ## Imports
 
 `ImportStatus` (`cloud/v1/import.proto`) is the plan of a network import
@@ -334,9 +374,9 @@ tenants sharing a cloud account; the tenant stays visible through the
   region in `pkg/constant/aws`. A zone the account cannot use (constrained
   zones, e.g. one of us-west-1's three for newer accounts) shows up as a
   subnet creation error; the server then moves on to the next zone ID.
-- An empty list the caller wants cleared is sent explicitly (e.g.
-  `publicAccessCidrs: ["0.0.0.0/0"]`), because an omitted field is
-  late-initialized from the cloud and the old value would stay.
+- `endpoint_access.public_access_cidrs` has no default: at least one CIDR
+  is required (`["0.0.0.0/0"]` for any address), so who can reach a
+  cluster's API is always an explicit choice.
 - `kubernetes_version` is resolved to a concrete version and written to the
   control plane and every node pool.
 - `UpdateCluster` ignores `scaling_config.desired_size`: it

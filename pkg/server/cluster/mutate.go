@@ -110,9 +110,19 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	paths := req.GetUpdateMask().GetPaths()
+	stored, err := encode(spec) // the spec as stored, to tell what the update changes
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
+	}
+	versionBefore := spec.GetControlPlane().GetKubernetesVersion()
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
+	}
+	if slices.Contains(paths, pathKubernetesVersion) {
+		if err := s.checkVersionStep(ctx, row, versionBefore, spec.GetControlPlane().GetKubernetesVersion()); err != nil {
+			return nil, err
+		}
 	}
 	if row.Input, err = updatedInput(row, in, paths); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -125,6 +135,13 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		if err := s.reresolveVersions(ctx, row, t.account, spec); err != nil {
 			return nil, err
 		}
+		// Resolving may change the spec too (add-on versions for a new
+		// Kubernetes version, defaults merged back in).
+		resolved, err := encode(spec)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err.Error())
+		}
+		specChanged = specChanged || string(resolved) != string(stored)
 	}
 	var plan *cloudv1.Plan
 	if req.GetValidateOnly() || req.GetPlanId() != "" {
@@ -314,8 +331,8 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 	if err != nil {
 		return nil, err
 	}
-	// Deletes the first tier now; GetCluster / ListClusters (e.g. the CLI's
-	// --wait) move it on, tier by tier, until the cluster is gone.
+	// Starts the deletion now; the background loop moves it on until the
+	// cluster is gone.
 	if _, err := s.finalize(ctx, row); err != nil {
 		return nil, err
 	}

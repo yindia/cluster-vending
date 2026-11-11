@@ -167,8 +167,7 @@ var deleteOrder = service.DeleteOrder{
 
 // finalize moves a DELETING network's deletion on (deleteOrder: the next
 // tier once the previous one is gone) and removes its row once all its
-// resources are gone. Every DeleteNetwork,
-// GetNetwork and ListNetworks of the network calls it.
+// resources are gone. DeleteNetwork and the background loop call it.
 func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error {
 	if row.State != stateDeleting {
 		return nil
@@ -207,12 +206,13 @@ func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error
 		}
 		return nil
 	}
-	// The controller and an API read can both get here: gone is gone.
-	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
-	}
+	// Records first: a failure after it is retried on the next pass (the
+	// row is still there), never leaving records without a network.
 	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {
 		return connect.NewError(connect.CodeInternal, "could not forget the deleted network's resources: "+err.Error())
+	}
+	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
 	}
 	return nil
 }

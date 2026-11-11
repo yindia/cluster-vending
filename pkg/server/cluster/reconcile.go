@@ -46,6 +46,12 @@ func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) err
 	if err := s.retireNodeGroups(ctx, records, views); err != nil {
 		return fmt.Errorf("retire node groups: %w", err)
 	}
+	if len(nodeGroupRecords(records)) > 1 {
+		// A replaced node group is still being retired: the cluster stays
+		// pending until it is gone and forgotten, or its record would be
+		// left behind (and read as a missing resource) once RUNNING.
+		return nil
+	}
 	return s.recordConverged(ctx, row, status(row, views, !createdAfterActive(records)))
 }
 

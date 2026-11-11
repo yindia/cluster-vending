@@ -28,7 +28,7 @@ import (
 // recorded object is gone it deletes objects labelled with the cluster but
 // never recorded, removes the network subnet tags and the cluster's rows.
 // It reports whether the cluster is gone. Every step is idempotent: the
-// controller and API reads both call it.
+// background loop and DeleteCluster both call it.
 func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
@@ -63,12 +63,13 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	if err := s.untagSubnets(ctx, row, namespace); err != nil {
 		return false, fmt.Errorf("untag network subnets: %w", err)
 	}
-	// The controller and an API read can both get here: gone is gone.
-	if err := s.deps.Store.Clusters().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return false, fmt.Errorf("remove the cluster row: %w", err)
-	}
+	// Records first: a failure after it is retried on the next pass (the
+	// row is still there), never leaving records without a cluster.
 	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerCluster, row.ID); err != nil {
 		return false, fmt.Errorf("forget the cluster's resources: %w", err)
+	}
+	if err := s.deps.Store.Clusters().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return false, fmt.Errorf("remove the cluster row: %w", err)
 	}
 	s.logger().InfoContext(ctx, "cluster deleted", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	return true, nil

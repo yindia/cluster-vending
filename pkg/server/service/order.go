@@ -60,20 +60,6 @@ func (d Deps) DeleteNext(ctx context.Context, records []model.ManagedResource, v
 	return left, nil
 }
 
-// OwnerGone reports whether every recorded object of an owner is gone
-// from the management cluster.
-func (d Deps) OwnerGone(ctx context.Context, kind model.OwnerKind, id string) (bool, error) {
-	records, err := d.Store.ManagedResources().ListByOwner(ctx, kind, id)
-	if err != nil {
-		return false, err
-	}
-	views, err := d.Observe(ctx, records)
-	if err != nil {
-		return false, err
-	}
-	return AllGone(views), nil
-}
-
 // Current is the tier being deleted: the kinds of the first tier that
 // still has objects in views; nil when everything is gone.
 func (o DeleteOrder) Current(views []*cloudv1.ManagedResource) []string {

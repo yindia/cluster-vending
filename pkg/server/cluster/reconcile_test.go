@@ -317,3 +317,51 @@ func TestRecordsKeepExternalNameAndGoneAt(t *testing.T) {
 		t.Errorf("deleted EKS cluster record: gone at %v, external name %q; want both kept", got.GoneAt, got.ExternalName)
 	}
 }
+
+// While a replaced node group is retired the cluster stays pending: marked
+// RUNNING, the loop would stop and leave the old group's record behind.
+func TestReconcileStaysPendingWhileANodeGroupIsRetired(t *testing.T) {
+	w := newWorld(t, interceptor.Funcs{}, nil)
+	ctx := t.Context()
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil { // applies everything
+		t.Fatal(err)
+	}
+	old := &awseks.NodeGroup{ObjectMeta: metav1.ObjectMeta{Namespace: worldNS, Name: "prod-replacement",
+		Labels: crossplane.ClusterLabels(worldTenant, w.row.ID)}}
+	if err := w.kube.Create(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	// A second node group, recorded after the first: its replacement.
+	if err := w.store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: worldTenant,
+		OwnerKind: model.OwnerCluster, OwnerID: w.row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "NodeGroup",
+		Namespace: worldNS, Name: old.Name}}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := w.store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, w.row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every object READY and reconciled.
+	for _, r := range records {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion(r.APIVersion)
+		u.SetKind(r.Kind)
+		if err := w.kube.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
+			t.Fatal(err)
+		}
+		conds := []any{map[string]any{"type": "Ready", "status": "True"},
+			map[string]any{"type": "Synced", "status": "True", "observedGeneration": u.GetGeneration()}}
+		if err := unstructured.SetNestedSlice(u.Object, conds, "status", "conditions"); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.kube.Update(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.cluster(t); got.State == stateRunning {
+		t.Fatalf("cluster is %s with two node groups recorded, want it pending", got.State)
+	}
+}

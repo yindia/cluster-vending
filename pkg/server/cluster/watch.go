@@ -13,7 +13,7 @@ import (
 
 // WatchCluster streams the cluster's state and its managed resources'
 // changes until it is deleted or the client cancels. Each read is a
-// GetCluster, so watching moves creation and deletion on like --wait.
+// GetCluster: watching changes nothing.
 func (s *ClusterService) WatchCluster(ctx context.Context, req *cloudv1.WatchClusterRequest,
 	stream cloudv1connect.ClusterServiceWatchClusterServerStream,
 ) error {

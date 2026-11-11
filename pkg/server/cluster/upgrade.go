@@ -3,6 +3,10 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
+
+	"connectrpc.com/connect/v2"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -65,4 +69,43 @@ func (s *ClusterService) liveVersions(ctx context.Context, records []model.Manag
 		}
 	}
 	return cluster, addons, nil
+}
+
+// checkVersionStep refuses a Kubernetes version EKS cannot move to: a
+// downgrade, or more than one minor version ahead of what the control
+// plane runs (the stored version before EKS created it). Refused here, the
+// stored spec never holds a version the cluster can only fail on.
+func (s *ClusterService) checkVersionStep(ctx context.Context, row *model.Cluster, stored, target string) error {
+	from, err := s.liveKubernetesVersion(ctx, row)
+	if err != nil {
+		return err
+	}
+	if from == "" {
+		from = stored
+	}
+	fromMinor, ok1 := minorOf(from)
+	toMinor, ok2 := minorOf(target)
+	if !ok1 || !ok2 {
+		return nil // unknown or unset: EKS decides
+	}
+	switch {
+	case toMinor < fromMinor:
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Sprintf("kubernetes_version %s is older than the cluster's %s; EKS cannot downgrade", target, from))
+	case toMinor > fromMinor+1:
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Sprintf("kubernetes_version %s skips a minor version: the cluster runs %s; upgrade one minor version at a time", target, from))
+	}
+	return nil
+}
+
+// minorOf is the minor of a Kubernetes version "1.<minor>".
+func minorOf(version string) (int, bool) {
+	major, minor, ok := strings.Cut(version, ".")
+	if !ok || major != "1" {
+		return 0, false
+	}
+	minor, _, _ = strings.Cut(minor, ".")
+	n, err := strconv.Atoi(minor)
+	return n, err == nil
 }

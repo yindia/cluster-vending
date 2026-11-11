@@ -31,8 +31,11 @@ func (s *NetworkService) Reconcile(ctx context.Context, tenantID, id string) err
 	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
 		return nil
 	}
-	if row.State == stateImported || row.State == stateBlocked {
-		return s.markApplied(ctx, row) // observe-only: rendered at import, nothing to roll out
+	if row.State == stateImported || row.State == stateBlocked || storedImport(row) != nil {
+		// Imported (also after takeover): its objects were rendered from the
+		// discovered VPC, not from the spec. Rendering the spec would create
+		// a second set of resources.
+		return s.markApplied(ctx, row)
 	}
 	spec, err := specOf(row)
 	if err != nil {

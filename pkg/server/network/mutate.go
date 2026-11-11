@@ -40,9 +40,20 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	tagsChanged, err := applyMask(row, spec, in, req.GetUpdateMask().GetPaths())
+	paths := req.GetUpdateMask().GetPaths()
+	if len(paths) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			"update_mask is empty; updatable: "+strings.Join([]string{pathDisplayName, pathLabels}, ", "))
+	}
+	tagsChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
+	}
+	if tagsChanged && storedImport(row) != nil {
+		// A taken-over network's objects come from the discovered VPC, not
+		// from the spec: re-rendering it would create a second network.
+		return nil, connect.NewError(connect.CodeUnimplemented,
+			"labels of an imported network cannot be changed yet (its resources are not re-tagged)")
 	}
 	if row.Spec, err = encode(spec); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -170,8 +181,8 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 	if err != nil {
 		return nil, err
 	}
-	// Deletes the first tier now; GetNetwork / ListNetworks (e.g. the CLI's
-	// --wait) move it on, tier by tier, until the network is gone.
+	// Deletes the first tier now; the background loop moves it on, tier by
+	// tier, until the network is gone.
 	if err := s.finalize(ctx, row); err != nil {
 		return nil, err
 	}
@@ -179,9 +190,9 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 	return &cloudv1.DeleteNetworkResponse{Network: n}, nil
 }
 
-// refuseInUse fails while clusters use the network. A deleted cluster whose
-// resources are all gone but whose row was not removed yet (nobody read it
-// since) is removed here instead of blocking the delete.
+// refuseInUse fails while clusters use the network, also clusters still
+// being deleted: the background loop removes them once their resources are
+// confirmed gone and the subnets are untagged.
 func (s *NetworkService) refuseInUse(ctx context.Context, row *model.Network) error {
 	clusters, err := s.deps.Store.Clusters().ListByNetwork(ctx, row.ID)
 	if err != nil {
@@ -189,23 +200,11 @@ func (s *NetworkService) refuseInUse(ctx context.Context, row *model.Network) er
 	}
 	var using, deleting []string
 	for _, c := range clusters {
-		if c.State != clusterStateDeleting {
-			using = append(using, fmt.Sprintf("%s (%s)", c.Name, c.ID))
-			continue
-		}
-		gone, err := s.deps.OwnerGone(ctx, model.OwnerCluster, c.ID)
-		if err != nil {
-			return service.ToConnect(err)
-		}
-		if !gone {
+		if c.State == clusterStateDeleting {
 			deleting = append(deleting, fmt.Sprintf("%s (%s)", c.Name, c.ID))
-			continue
+		} else {
+			using = append(using, fmt.Sprintf("%s (%s)", c.Name, c.ID))
 		}
-		if err := errors.Join(s.deps.Store.Clusters().Delete(ctx, c.TenantID, c.ID),
-			s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerCluster, c.ID)); err != nil {
-			return service.ToConnect(err)
-		}
-		s.logger().InfoContext(ctx, "removed deleted cluster", "cluster_id", c.ID, "network_id", row.ID)
 	}
 	switch {
 	case len(using) > 0:

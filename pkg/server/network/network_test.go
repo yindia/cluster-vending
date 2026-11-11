@@ -627,26 +627,65 @@ func TestDeleteNetworkRecordsUnrecordedResources(t *testing.T) {
 	}
 }
 
-// A deleted cluster whose resources are all gone, but whose row nobody
-// removed yet, does not block deleting its network.
-func TestDeleteNetworkRemovesGoneClusters(t *testing.T) {
+// A cluster still being deleted blocks deleting its network: only the
+// background loop removes a cluster, once its resources are confirmed gone
+// and the network's subnets are untagged.
+func TestDeleteNetworkWaitsForDeletingClusters(t *testing.T) {
 	f := newFixture(t)
 	n := f.create(t, "prod", nil)
 	ctx := t.Context()
-	row, err := f.store.Networks().Get(ctx, tenant, n.GetId())
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := &model.Cluster{TenantID: tenant, Name: "eks", NetworkID: row.ID, Provider: model.ProviderAWS, Region: "us-east-1",
+	c := &model.Cluster{TenantID: tenant, Name: "eks", NetworkID: n.GetId(), Provider: model.ProviderAWS, Region: "us-east-1",
 		Resource: model.Resource{State: clusterStateDeleting, Spec: model.JSON(`{}`)}}
 	if err := f.store.Clusters().Create(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
-		t.Fatalf("DeleteNetwork: %v", err)
+	_, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("DeleteNetwork: %v, want FAILED_PRECONDITION", err)
 	}
-	if _, err := f.store.Clusters().Get(ctx, tenant, c.ID); !errors.Is(err, repository.ErrNotFound) {
-		t.Errorf("deleted cluster row still there: %v", err)
+	if _, err := f.store.Clusters().Get(ctx, tenant, c.ID); err != nil {
+		t.Errorf("the deleting cluster's row: %v, want it kept", err)
+	}
+}
+
+// A taken-over network is never rendered from its spec: its objects came
+// from the discovered VPC, and rendering would create a second network.
+func TestReconcileDoesNotRenderAnImportedNetwork(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+	row := &model.Network{TenantID: tenant, Name: "tf", CloudAccountID: f.accountID, Provider: model.ProviderAWS, Region: "us-east-1",
+		Resource: model.Resource{State: stateProvisioning, Generation: 1,
+			Spec: model.JSON(`{"region":"us-east-1","bootstrapId":"` + f.accountID +
+				`","layout":{"cidrBlock":"10.0.0.0/16","availabilityZoneCount":2}}`),
+			Status: model.JSON(`{"import":{"phase":"IMPORT_PHASE_CONVERGING"}}`)}}
+	if err := f.store.Networks().Create(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Reconcile(ctx, tenant, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	vpcs := &awsec2.VPCList{}
+	if err := f.kube.List(ctx, vpcs); err != nil || len(vpcs.Items) != 0 {
+		t.Errorf("%d VPCs rendered (%v), want none", len(vpcs.Items), err)
+	}
+	got, err := f.store.Networks().Get(ctx, tenant, row.ID)
+	if err != nil || got.AppliedGeneration != got.Generation {
+		t.Errorf("applied generation %d of %d (%v), want it settled", got.AppliedGeneration, got.Generation, err)
+	}
+	_, err = f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+		Network: &cloudv1.Network{Id: row.ID, Labels: map[string]string{"team": "a"}}, UpdateMask: mask("labels")})
+	if connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Errorf("label update of an imported network: %v, want UNIMPLEMENTED", err)
+	}
+}
+
+func TestUpdateNetworkNeedsAMask(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	_, err := f.svc.UpdateNetwork(t.Context(), &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+		Network: &cloudv1.Network{Id: n.GetId()}, UpdateMask: mask()})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("empty update_mask: %v, want INVALID_ARGUMENT", err)
 	}
 }
 

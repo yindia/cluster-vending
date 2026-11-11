@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
 	"context"
 	"testing"
 
@@ -89,6 +91,27 @@ func TestUpgradeMovesOnlyUnpinnedAddons(t *testing.T) {
 	for name, v := range versionsOf(spec) {
 		if v != "v1-1.35" {
 			t.Errorf("%s = %s, want v1-1.35", name, v)
+		}
+	}
+}
+
+func TestCheckVersionStep(t *testing.T) {
+	w := newWorld(t, interceptor.Funcs{}, nil) // the EKS cluster reports no version: the stored one counts
+	tests := []struct {
+		stored, target string
+		wantErr        bool
+	}{
+		{"1.31", "1.32", false},
+		{"1.31", "1.31", false},
+		{"1.31", "1.33", true},
+		{"1.31", "1.30", true},
+		{"", "1.33", false},
+		{"1.31", "", false},
+	}
+	for _, tt := range tests {
+		err := w.svc.checkVersionStep(t.Context(), w.row, tt.stored, tt.target)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("%q -> %q: %v, wantErr %v", tt.stored, tt.target, err, tt.wantErr)
 		}
 	}
 }

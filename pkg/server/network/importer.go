@@ -116,8 +116,7 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 	if plan.blocked() {
 		phase, state = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, stateBlocked
 	}
-	spec := &cloudv1.NetworkSpec{Region: req.GetRegion(), BootstrapId: a.ID, Layout: plan.layout,
-		Provider: &cloudv1.NetworkSpec_Aws{Aws: &cloudv1.AwsNetworkSpec{}}}
+	spec := &cloudv1.NetworkSpec{Region: req.GetRegion(), BootstrapId: a.ID, Layout: plan.layout}
 	rawSpec, err1 := encode(spec)
 	input, err2 := encode(req)
 	stored, err3 := encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.lines}})

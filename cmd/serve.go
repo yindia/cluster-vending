@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -11,11 +12,12 @@ import (
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/config"
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/controller"
 	"github.com/yindia/cluster-vending/pkg/database"
 	"github.com/yindia/cluster-vending/pkg/database/implementation"
-	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server"
+	"github.com/yindia/cluster-vending/pkg/server/cluster"
+	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -57,17 +59,12 @@ func newServeCmd(g *globals) *cobra.Command {
 				return err
 			}
 
-			kubeClient, err := kube.Connect(g.cfg.Kubeconfig, g.cfg.KubeContext)
+			mgr, err := server.ConnectManagement(ctx, server.ManagementOptions{
+				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
+				InstallProviders: cfg.InstallProviders, ManagementRoleARN: cfg.AWS.ManagementRoleARN, Logger: g.logger,
+			})
 			if err != nil {
-				return err
-			}
-			if cfg.InstallProviders {
-				res, err := crossplaneaws.InstallProviders(ctx, kubeClient, cfg.AWS.ManagementRoleARN)
-				if err != nil {
-					return fmt.Errorf("install the Crossplane AWS providers (is Crossplane installed? --%s=false skips this): %w",
-						config.FlagInstallProviders, err)
-				}
-				g.logger.Info("crossplane providers", "created", res.Created, "existing", res.Existing)
+				return fmt.Errorf("%w (--%s=false skips installing the providers)", err, config.FlagInstallProviders)
 			}
 
 			ln, err := new(net.ListenConfig).Listen(ctx, "tcp", cfg.HTTPAddr)
@@ -88,15 +85,32 @@ func newServeCmd(g *globals) *cobra.Command {
 			if cfg.AWS.StaticKeys != nil {
 				g.logger.Warn("AWS keys found in the environment: the server's own AWS lookups use them for every account (local testing only)")
 			}
-			handler := server.NewHandler(service.Deps{
+			deps := service.Deps{
 				Store:        implementation.New(db),
-				Kube:         kubeClient,
+				Kube:         mgr.GetClient(), // reads from the informer cache
+				KubeReader:   mgr.GetAPIReader(),
 				AWS:          cfg.AWS,
 				AWSDiscovery: discovery,
 				AWSClusters:  discovery,
 				Logger:       g.logger,
-			})
-			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
+			}
+			if err := controller.Setup(mgr, network.NewNetworkService(deps), cluster.NewClusterService(deps)); err != nil {
+				return err
+			}
+			done, err := server.StartManagement(ctx, mgr)
+			if err != nil {
+				return err
+			}
+			// The API stops with the informers and controller.
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			go func() {
+				if err := <-done; err != nil {
+					g.logger.Error("management cluster manager stopped", "error", err)
+					cancel()
+				}
+			}()
+			return server.Run(ctx, ln, server.NewHandler(deps), cfg.ShutdownTimeout, g.logger)
 		},
 	}
 	addFlags(cmd.Flags(), config.ServeSettings())

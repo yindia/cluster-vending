@@ -81,3 +81,43 @@ func TestExplicitSubnets(t *testing.T) {
 		t.Errorf("regional NAT = %v, want errUnsupported", err)
 	}
 }
+
+// The AWS rules on explicit subnets (formerly CEL rules keyed on the
+// network's aws arm; the cloud now comes from the account).
+func TestAWSSubnetRules(t *testing.T) {
+	sn := func(role cloudv1.SubnetRole, cidr, zone string) *cloudv1.Subnet {
+		return &cloudv1.Subnet{Role: role, CidrBlock: cidr, ZoneId: zone}
+	}
+	const pub, priv = cloudv1.SubnetRole_SUBNET_ROLE_PUBLIC, cloudv1.SubnetRole_SUBNET_ROLE_PRIVATE
+	twoZones := func() []*cloudv1.Subnet {
+		return []*cloudv1.Subnet{sn(pub, "10.0.0.0/20", "use1-az1"), sn(pub, "10.0.16.0/20", "use1-az2"),
+			sn(priv, "10.0.64.0/19", "use1-az1"), sn(priv, "10.0.96.0/19", "use1-az2")}
+	}
+	perZone := cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
+	single := cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE
+	tests := []struct {
+		name    string
+		nat     cloudv1.NatGatewayMode
+		subnets []*cloudv1.Subnet
+		wantErr bool
+	}{
+		{"two zones per-zone nat", perZone, twoZones(), false},
+		{"single nat, public subnet in one zone", single,
+			append(twoZones()[1:], sn(priv, "10.0.128.0/19", "use1-az3")), false},
+		{"zone name instead of zone id", single,
+			append([]*cloudv1.Subnet{sn(pub, "10.0.0.0/20", "us-east-1a")}, twoZones()[1:]...), true},
+		{"subnet without zone", single, append(twoZones(), sn(priv, "10.0.128.0/19", "")), true},
+		{"private subnets in one zone", single, []*cloudv1.Subnet{sn(pub, "10.0.0.0/20", "use1-az1"),
+			sn(priv, "10.0.64.0/19", "use1-az1"), sn(priv, "10.0.96.0/19", "use1-az1")}, true},
+		{"no public subnet", single, twoZones()[2:], true},
+		{"per-zone nat missing a public subnet", perZone, append(twoZones(), sn(priv, "10.0.128.0/19", "use1-az3")), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := planAWSLayout("us-east-1", &cloudv1.NetworkLayout{CidrBlock: "10.0.0.0/16", NatGatewayMode: tt.nat, Subnets: tt.subnets})
+			if (err != nil) != tt.wantErr {
+				t.Errorf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

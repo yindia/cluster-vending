@@ -3,7 +3,6 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
-import "cloud/v1/aws.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
@@ -46,18 +45,23 @@ message Network {
 
   string display_name = 3 [(buf.validate.field).string.max_len = 128];
 
-  // API-level labels, same rules as Cluster.labels.
+  // Labels, for grouping and filtering, and applied as tags to every cloud
+  // resource of the network (next to the platform's own tags). Mutable:
+  // an update re-tags the resources. Same rules as Cluster.labels.
   map<string, string> labels = 4 [(buf.validate.field).map = {
-    max_pairs: 64
+    max_pairs: 40
     keys: {
       string: {
         min_len: 1
-        max_len: 63
-        pattern: "^[a-z0-9]([a-z0-9_.-]{0,61}[a-z0-9])?$"
+        max_len: 128
+        pattern: "^[A-Za-z0-9 _.:/=+@-]+$"
       }
     }
     values: {
-      string: {max_len: 63}
+      string: {
+        max_len: 256
+        pattern: "^[A-Za-z0-9 _.:/=+@-]*$"
+      }
     }
   }];
 
@@ -78,42 +82,9 @@ message Network {
 
 // NetworkSpec is the desired state of a Network resource.
 message NetworkSpec {
-  // AWS constraints on the layout.
-  option (buf.validate.message).cel = {
-    id: "aws.region"
-    message: "region must be an AWS region, e.g. us-east-1"
-    expression: "!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')"
-  };
-  option (buf.validate.message).cel = {
-    id: "aws.subnets_zonal"
-    message: "AWS subnets are zonal: every subnet needs a zone_id"
-    expression: "!has(this.aws) || this.layout.subnets.all(s, s.zone_id.matches('^[a-z]+[0-9]-az[0-9]+$'))"
-  };
-  option (buf.validate.message).cel = {
-    id: "aws.private_subnets_two_zones"
-    message: "EKS needs PRIVATE subnets in at least two availability zones"
-    expression: "!has(this.aws) || size(this.layout.subnets) == 0 || this.layout.subnets.exists(a, a.role == 2 && this.layout.subnets.exists(b, b.role == 2 && b.zone_id != a.zone_id))"
-  };
-  option (buf.validate.message).cel = {
-    id: "aws.public_subnet_required"
-    message: "AWS subnets, when set, must include at least one PUBLIC subnet (NAT and internet-facing load balancers)"
-    expression: "!has(this.aws) || size(this.layout.subnets) == 0 || this.layout.subnets.exists(s, s.role == 1)"
-  };
-  option (buf.validate.message).cel = {
-    id: "aws.per_zone_nat"
-    message: "PER_ZONE NAT needs a PUBLIC subnet in every zone that has a PRIVATE subnet"
-    expression: "!has(this.aws) || this.layout.nat_gateway_mode != 2 || this.layout.subnets.filter(s, s.role == 2).all(p, this.layout.subnets.exists(q, q.role == 1 && q.zone_id == p.zone_id))"
-  };
-  option (buf.validate.message).cel = {
-    id: "aws.tag_reserved_prefix"
-    message: "AWS tag keys must not start with 'aws:'"
-    expression: "!has(this.aws) || this.tags.all(k, !k.lowerAscii().startsWith('aws:'))"
-  };
-  option (buf.validate.message).cel = {
-    id: "public_subnets_aws_only"
-    message: "only AWS has PUBLIC subnets; GCP and Azure load balancers need none"
-    expression: "has(this.aws) || this.layout.subnets.all(s, s.role != 1)"
-  };
+  // Provider-specific rules on the layout (AWS: zone IDs, PRIVATE subnets
+  // in two zones, a PUBLIC subnet, per-zone NAT) are checked by the server:
+  // the cloud is the account's (bootstrap_id), not part of the spec.
 
   // Region of the network. Immutable. Same mapping as ClusterSpec.region.
   string region = 1 [(buf.validate.field).string = {
@@ -131,29 +102,14 @@ message NetworkSpec {
   // network's account.
   string bootstrap_id = 4 [(buf.validate.field).string.uuid = true];
 
-  // Applied to every cloud resource of the network. Same rules as
-  // ClusterSpec.tags.
-  map<string, string> tags = 3 [(buf.validate.field).map = {
-    max_pairs: 40
-    keys: {
-      string: {
-        min_len: 1
-        max_len: 128
-      }
-    }
-    values: {
-      string: {max_len: 256}
-    }
-  }];
+  // Cloud tags are the network's labels.
+  reserved 3;
+  reserved "tags";
 
-  // The cloud the network lives in. Must match the provider of every
-  // cluster that uses it.
-  oneof provider {
-    option (buf.validate.oneof).required = true;
-
-    AwsNetworkSpec aws = 10;
-    // gcp = 11, azure = 12, as in ClusterSpec.provider.
-  }
+  // The cloud is the account's (bootstrap_id); a network has no provider
+  // settings.
+  reserved 10;
+  reserved "aws";
 }
 
 // ClusterNetwork is where a cluster runs: a reference to a platform Network

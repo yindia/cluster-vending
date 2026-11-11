@@ -1,0 +1,16 @@
+# go run ./main.go network import -f examples/network-import.yaml [--wait]
+# then: network takeover <id> [--wait]
+apiVersion: cluster-vending.io/v1
+kind: NetworkImport
+metadata:
+  name: tf-prod
+  tenant: acme
+  displayName: Terraform prod VPC
+spec:
+  region: us-east-1
+  bootstrapId: 00000000-0000-0000-0000-000000000000
+  aws:
+    vpcId: vpc-0123456789abcdef0
+    subnetIds:               # the subnets the platform will use
+      - subnet-0123456789abcdef0
+      - subnet-0123456789abcdef1

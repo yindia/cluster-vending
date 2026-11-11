@@ -10,30 +10,34 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// NetworkCreate calls NetworkService.CreateNetwork with the Network in the
-// input file; the argument, when given, is its name. The server assigns
-// the id.
+// NetworkCreate calls NetworkService.CreateNetwork with the Network
+// manifest; the server assigns the id. With --wait it returns once the
+// network is READY.
 func NetworkCreate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
-		return nil, err
-	}
-	n := &cloudv1.Network{}
-	if err := LoadInput(o.Input, n); err != nil {
-		return nil, err
-	}
-	if n.GetId() != "" {
-		return nil, fmt.Errorf("--config: id %q: a network's id is assigned by the server; set name instead", n.GetId())
-	}
-	if o.ID != "" {
-		n.Name = o.ID
-	}
-	req := &cloudv1.CreateNetworkRequest{TenantId: o.Tenant, Network: n}
-	id, err := requestID(o.Tenant, req)
+	m, err := LoadManifest(o.Input, KindNetwork)
 	if err != nil {
 		return nil, err
 	}
-	req.RequestId = id
-	return call(ctx, req, c.Network.CreateNetwork)
+	if m.Metadata.ID != "" {
+		return nil, fmt.Errorf("metadata.id %q: a network's id is assigned by the server", m.Metadata.ID)
+	}
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	n, err := m.Network()
+	if err != nil {
+		return nil, err
+	}
+	req := &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: n}
+	if req.RequestId, err = requestID(tenant, req); err != nil {
+		return nil, err
+	}
+	res, err := call(ctx, req, c.Network.CreateNetwork)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	return waitNetwork(ctx, c, o, tenant, res.(*cloudv1.CreateNetworkResponse).GetNetwork().GetId(), false)
 }
 
 // NetworkGet calls NetworkService.GetNetwork.
@@ -54,10 +58,21 @@ func NetworkList(ctx context.Context, c Clients, o Options) (proto.Message, erro
 	}, c.Network.ListNetworks)
 }
 
-// NetworkUpdate calls NetworkService.UpdateNetwork with the Network in the
-// input file and --update-mask.
+// NetworkUpdate calls NetworkService.UpdateNetwork with the Network
+// manifest and --update-mask; the network is the argument or metadata.id.
 func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	n, err := networkInput(o)
+	m, err := LoadManifest(o.Input, KindNetwork)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	if m.Metadata.ID, err = updateID(o.ID, m.Metadata.ID); err != nil {
+		return nil, err
+	}
+	n, err := m.Network()
 	if err != nil {
 		return nil, err
 	}
@@ -65,61 +80,102 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		n.Etag = o.ETag
 	}
 	return call(ctx, &cloudv1.UpdateNetworkRequest{
-		TenantId: o.Tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
+		TenantId: tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
 	}, c.Network.UpdateNetwork)
 }
 
-// NetworkDelete calls NetworkService.DeleteNetwork.
+// NetworkDelete calls NetworkService.DeleteNetwork. The server deletes the
+// network's resources in order, one step per read; --wait reads until the
+// network is gone.
 func NetworkDelete(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
-	return call(ctx, &cloudv1.DeleteNetworkRequest{TenantId: o.Tenant, NetworkId: o.ID, Etag: o.ETag}, c.Network.DeleteNetwork)
-}
-
-func networkInput(o Options) (*cloudv1.Network, error) {
-	if err := o.requireTenant(); err != nil {
+	res, err := call(ctx, &cloudv1.DeleteNetworkRequest{TenantId: o.Tenant, NetworkId: o.ID, Etag: o.ETag}, c.Network.DeleteNetwork)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	if _, err := waitNetwork(ctx, c, o, o.Tenant, o.ID, true); err != nil {
 		return nil, err
 	}
-	n := &cloudv1.Network{}
-	if err := LoadInput(o.Input, n); err != nil {
-		return nil, err
-	}
-	n.Id = o.ID // update: the argument is the network id
-	return n, nil
+	return res, nil
 }
 
-// NetworkImport calls NetworkService.ImportNetwork with the request in the
-// input file (name, bootstrapId, region, aws: {vpcId, subnetIds}); the
-// argument, when given, is the network name.
+// NetworkImport calls NetworkService.ImportNetwork with the NetworkImport
+// manifest. With --wait it returns once the import is observed (IMPORTED).
 func NetworkImport(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
+	m, err := LoadManifest(o.Input, KindNetworkImport)
+	if err != nil {
 		return nil, err
 	}
-	req := &cloudv1.ImportNetworkRequest{}
-	if err := LoadInput(o.Input, req); err != nil {
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
 		return nil, err
 	}
-	req.TenantId = o.Tenant
-	if o.ID != "" {
-		req.Name = o.ID
+	req, err := m.NetworkImport()
+	if err != nil {
+		return nil, err
 	}
+	req.TenantId = tenant
 	if req.GetRequestId() == "" {
-		id, err := requestID(o.Tenant, req)
-		if err != nil {
+		if req.RequestId, err = requestID(tenant, req); err != nil {
 			return nil, err
 		}
-		req.RequestId = id
 	}
-	return call(ctx, req, c.Network.ImportNetwork)
+	res, err := call(ctx, req, c.Network.ImportNetwork)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	return waitNetwork(ctx, c, o, tenant, res.(*cloudv1.ImportNetworkResponse).GetNetwork().GetId(), false)
 }
 
-// NetworkTakeOver calls NetworkService.TakeOverNetwork.
+// NetworkTakeOver calls NetworkService.TakeOverNetwork. With --wait it
+// returns once the network is READY under the platform.
 func NetworkTakeOver(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
-	return call(ctx, &cloudv1.TakeOverNetworkRequest{
+	res, err := call(ctx, &cloudv1.TakeOverNetworkRequest{
 		TenantId: o.Tenant, NetworkId: o.ID, Etag: o.ETag, AcknowledgeNotImported: o.AcknowledgeNotImported,
 	}, c.Network.TakeOverNetwork)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	return waitNetwork(ctx, c, o, o.Tenant, o.ID, false)
+}
+
+// waitNetwork waits until the network is READY or IMPORTED (gone: deleted)
+// and returns its last read.
+func waitNetwork(ctx context.Context, c Clients, o Options, tenant, id string, gone bool) (proto.Message, error) {
+	var last proto.Message
+	err := waitUntil(ctx, o, "network "+id, gone, func(ctx context.Context) (observation, error) {
+		res, err := call(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id}, c.Network.GetNetwork)
+		if err != nil {
+			return observation{}, err
+		}
+		last = res
+		st := res.(*cloudv1.GetNetworkResponse).GetNetwork().GetStatus()
+		state := st.GetState()
+		return observation{
+			state: state.String(), message: st.GetMessage(),
+			done:   !gone && (state == cloudv1.NetworkState_NETWORK_STATE_READY || state == cloudv1.NetworkState_NETWORK_STATE_IMPORTED),
+			failed: state == cloudv1.NetworkState_NETWORK_STATE_FAILED && !gone,
+		}, nil
+	})
+	return last, err
+}
+
+// updateID is the id an update targets: the argument or metadata.id, which
+// must agree when both are set.
+func updateID(arg, meta string) (string, error) {
+	switch {
+	case arg == "" && meta == "":
+		return "", fmt.Errorf("the id is required: the argument or metadata.id")
+	case arg != "" && meta != "" && arg != meta:
+		return "", fmt.Errorf("the argument %q and metadata.id %q differ", arg, meta)
+	case arg != "":
+		return arg, nil
+	default:
+		return meta, nil
+	}
 }

@@ -1,6 +1,6 @@
 // Package service holds what every cloud.v1 service implementation shares:
 // its dependencies and the mapping of errors to Connect codes. The services
-// themselves live in pkg/server/tenant, network, cluster and nodepool.
+// themselves live in pkg/server/tenant, network and cluster.
 package service
 
 import (
@@ -25,8 +25,14 @@ import (
 // created, and how tenant cloud accounts are reached.
 type Deps struct {
 	Store repository.Store
-	Kube  client.Client
-	AWS   config.AWS
+	// Kube reads from the informer cache (the server's manager) and writes
+	// to the API server; tests use a plain client.
+	Kube client.Client
+	// KubeReader reads from the API server, uncached: for objects the cache
+	// does not have yet (just applied) or does not hold (no managed-by
+	// label, managedFields). Nil: reads use Kube only.
+	KubeReader client.Reader
+	AWS        config.AWS
 	// AWSDiscovery makes the server's own read-only AWS lookups
 	// (ImportNetwork).
 	AWSDiscovery awscloud.NetworkDiscoverer

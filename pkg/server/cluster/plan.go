@@ -131,7 +131,6 @@ func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplanea
 	p.SubnetIDs = subnetIDs
 	p.PublicAccessCIDRs = spec.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()
 	p.ServiceCIDR = spec.GetNetwork().GetServiceCidr()
-	p.Tags = spec.GetTags()
 	p.AdminPrincipals = spec.GetAccess().GetAdminPrincipals()
 	aws := spec.GetAws()
 	p.AuthenticationMode = crossplaneName(aws.GetAccessConfig().GetAuthenticationMode(), defaultAuthMode)

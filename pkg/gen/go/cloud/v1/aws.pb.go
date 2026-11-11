@@ -547,44 +547,6 @@ func (x *AwsAddonStatus) GetMessage() string {
 	return ""
 }
 
-// AwsNetworkSpec selects AWS for a Network. Everything with a cross-cloud
-// equivalent lives in NetworkSpec; no AWS-only network settings exist yet.
-type AwsNetworkSpec struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AwsNetworkSpec) Reset() {
-	*x = AwsNetworkSpec{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AwsNetworkSpec) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AwsNetworkSpec) ProtoMessage() {}
-
-func (x *AwsNetworkSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AwsNetworkSpec.ProtoReflect.Descriptor instead.
-func (*AwsNetworkSpec) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{3}
-}
-
 // AwsImportNetwork names the VPC to import. The server looks the rest up
 // once, read-only, with the tenant's credentials (the role its
 // ProviderConfig assumes):
@@ -633,7 +595,7 @@ type AwsImportNetwork struct {
 
 func (x *AwsImportNetwork) Reset() {
 	*x = AwsImportNetwork{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[4]
+	mi := &file_cloud_v1_aws_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -645,7 +607,7 @@ func (x *AwsImportNetwork) String() string {
 func (*AwsImportNetwork) ProtoMessage() {}
 
 func (x *AwsImportNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[4]
+	mi := &file_cloud_v1_aws_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -658,7 +620,7 @@ func (x *AwsImportNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsImportNetwork.ProtoReflect.Descriptor instead.
 func (*AwsImportNetwork) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AwsImportNetwork) GetVpcId() string {
@@ -685,7 +647,7 @@ type AwsAccessConfig struct {
 
 func (x *AwsAccessConfig) Reset() {
 	*x = AwsAccessConfig{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[5]
+	mi := &file_cloud_v1_aws_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -697,7 +659,7 @@ func (x *AwsAccessConfig) String() string {
 func (*AwsAccessConfig) ProtoMessage() {}
 
 func (x *AwsAccessConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[5]
+	mi := &file_cloud_v1_aws_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -710,7 +672,7 @@ func (x *AwsAccessConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsAccessConfig.ProtoReflect.Descriptor instead.
 func (*AwsAccessConfig) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{5}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AwsAccessConfig) GetAuthenticationMode() AwsAuthenticationMode {
@@ -730,7 +692,7 @@ type AwsUpgradePolicy struct {
 
 func (x *AwsUpgradePolicy) Reset() {
 	*x = AwsUpgradePolicy{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[6]
+	mi := &file_cloud_v1_aws_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -742,7 +704,7 @@ func (x *AwsUpgradePolicy) String() string {
 func (*AwsUpgradePolicy) ProtoMessage() {}
 
 func (x *AwsUpgradePolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[6]
+	mi := &file_cloud_v1_aws_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -755,7 +717,7 @@ func (x *AwsUpgradePolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsUpgradePolicy.ProtoReflect.Descriptor instead.
 func (*AwsUpgradePolicy) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{6}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AwsUpgradePolicy) GetSupportType() AwsSupportType {
@@ -776,7 +738,7 @@ type AwsNodePoolSpec struct {
 
 func (x *AwsNodePoolSpec) Reset() {
 	*x = AwsNodePoolSpec{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[7]
+	mi := &file_cloud_v1_aws_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -788,7 +750,7 @@ func (x *AwsNodePoolSpec) String() string {
 func (*AwsNodePoolSpec) ProtoMessage() {}
 
 func (x *AwsNodePoolSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[7]
+	mi := &file_cloud_v1_aws_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -801,7 +763,7 @@ func (x *AwsNodePoolSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsNodePoolSpec.ProtoReflect.Descriptor instead.
 func (*AwsNodePoolSpec) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{7}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AwsNodePoolSpec) GetAmiType() AwsAmiType {
@@ -809,61 +771,6 @@ func (x *AwsNodePoolSpec) GetAmiType() AwsAmiType {
 		return x.AmiType
 	}
 	return AwsAmiType_AWS_AMI_TYPE_UNSPECIFIED
-}
-
-// AwsNodePoolStatus is AWS-only observed state of a node pool.
-type AwsNodePoolStatus struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// NodeGroup.status.atProvider.arn
-	NodeGroupArn string `protobuf:"bytes,1,opt,name=node_group_arn,json=nodeGroupArn,proto3" json:"node_group_arn,omitempty"`
-	// Launch template of a carried-over node group, "<id>:<version>".
-	LaunchTemplate string `protobuf:"bytes,2,opt,name=launch_template,json=launchTemplate,proto3" json:"launch_template,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *AwsNodePoolStatus) Reset() {
-	*x = AwsNodePoolStatus{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AwsNodePoolStatus) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AwsNodePoolStatus) ProtoMessage() {}
-
-func (x *AwsNodePoolStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AwsNodePoolStatus.ProtoReflect.Descriptor instead.
-func (*AwsNodePoolStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *AwsNodePoolStatus) GetNodeGroupArn() string {
-	if x != nil {
-		return x.NodeGroupArn
-	}
-	return ""
-}
-
-func (x *AwsNodePoolStatus) GetLaunchTemplate() string {
-	if x != nil {
-		return x.LaunchTemplate
-	}
-	return ""
 }
 
 // AwsClusterStatus is AWS-only observed state, read from
@@ -886,7 +793,7 @@ type AwsClusterStatus struct {
 
 func (x *AwsClusterStatus) Reset() {
 	*x = AwsClusterStatus{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[9]
+	mi := &file_cloud_v1_aws_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +805,7 @@ func (x *AwsClusterStatus) String() string {
 func (*AwsClusterStatus) ProtoMessage() {}
 
 func (x *AwsClusterStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[9]
+	mi := &file_cloud_v1_aws_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +818,7 @@ func (x *AwsClusterStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsClusterStatus.ProtoReflect.Descriptor instead.
 func (*AwsClusterStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{9}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AwsClusterStatus) GetClusterArn() string {
@@ -972,8 +879,7 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x124\n" +
 	"\x05state\x18\x03 \x01(\x0e2\x1e.cloud.v1.ManagedResourceStateR\x05state\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"\x10\n" +
-	"\x0eAwsNetworkSpec\"\x90\x01\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"\x90\x01\n" +
 	"\x10AwsImportNetwork\x122\n" +
 	"\x06vpc_id\x18\x01 \x01(\tB\x1b\xbaH\x18r\x162\x14^vpc-[0-9a-f]{8,17}$R\x05vpcId\x12H\n" +
 	"\n" +
@@ -983,10 +889,7 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\x10AwsUpgradePolicy\x12E\n" +
 	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"L\n" +
 	"\x0fAwsNodePoolSpec\x129\n" +
-	"\bami_type\x18\x01 \x01(\x0e2\x14.cloud.v1.AwsAmiTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aamiType\"b\n" +
-	"\x11AwsNodePoolStatus\x12$\n" +
-	"\x0enode_group_arn\x18\x01 \x01(\tR\fnodeGroupArn\x12'\n" +
-	"\x0flaunch_template\x18\x02 \x01(\tR\x0elaunchTemplate\"\xf1\x01\n" +
+	"\bami_type\x18\x01 \x01(\x0e2\x14.cloud.v1.AwsAmiTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aamiType\"\xf1\x01\n" +
 	"\x10AwsClusterStatus\x12\x1f\n" +
 	"\vcluster_arn\x18\x01 \x01(\tR\n" +
 	"clusterArn\x129\n" +
@@ -1080,7 +983,7 @@ func file_cloud_v1_aws_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_aws_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_cloud_v1_aws_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_cloud_v1_aws_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_cloud_v1_aws_proto_goTypes = []any{
 	(AwsAuthenticationMode)(0), // 0: cloud.v1.AwsAuthenticationMode
 	(AwsClusterLogType)(0),     // 1: cloud.v1.AwsClusterLogType
@@ -1089,22 +992,20 @@ var file_cloud_v1_aws_proto_goTypes = []any{
 	(*AwsClusterSpec)(nil),     // 4: cloud.v1.AwsClusterSpec
 	(*AwsAddon)(nil),           // 5: cloud.v1.AwsAddon
 	(*AwsAddonStatus)(nil),     // 6: cloud.v1.AwsAddonStatus
-	(*AwsNetworkSpec)(nil),     // 7: cloud.v1.AwsNetworkSpec
-	(*AwsImportNetwork)(nil),   // 8: cloud.v1.AwsImportNetwork
-	(*AwsAccessConfig)(nil),    // 9: cloud.v1.AwsAccessConfig
-	(*AwsUpgradePolicy)(nil),   // 10: cloud.v1.AwsUpgradePolicy
-	(*AwsNodePoolSpec)(nil),    // 11: cloud.v1.AwsNodePoolSpec
-	(*AwsNodePoolStatus)(nil),  // 12: cloud.v1.AwsNodePoolStatus
-	(*AwsClusterStatus)(nil),   // 13: cloud.v1.AwsClusterStatus
-	(ManagedResourceState)(0),  // 14: cloud.v1.ManagedResourceState
+	(*AwsImportNetwork)(nil),   // 7: cloud.v1.AwsImportNetwork
+	(*AwsAccessConfig)(nil),    // 8: cloud.v1.AwsAccessConfig
+	(*AwsUpgradePolicy)(nil),   // 9: cloud.v1.AwsUpgradePolicy
+	(*AwsNodePoolSpec)(nil),    // 10: cloud.v1.AwsNodePoolSpec
+	(*AwsClusterStatus)(nil),   // 11: cloud.v1.AwsClusterStatus
+	(ManagedResourceState)(0),  // 12: cloud.v1.ManagedResourceState
 }
 var file_cloud_v1_aws_proto_depIdxs = []int32{
-	9,  // 0: cloud.v1.AwsClusterSpec.access_config:type_name -> cloud.v1.AwsAccessConfig
+	8,  // 0: cloud.v1.AwsClusterSpec.access_config:type_name -> cloud.v1.AwsAccessConfig
 	1,  // 1: cloud.v1.AwsClusterSpec.enabled_cluster_log_types:type_name -> cloud.v1.AwsClusterLogType
-	10, // 2: cloud.v1.AwsClusterSpec.upgrade_policy:type_name -> cloud.v1.AwsUpgradePolicy
-	11, // 3: cloud.v1.AwsClusterSpec.default_node_pool:type_name -> cloud.v1.AwsNodePoolSpec
+	9,  // 2: cloud.v1.AwsClusterSpec.upgrade_policy:type_name -> cloud.v1.AwsUpgradePolicy
+	10, // 3: cloud.v1.AwsClusterSpec.default_node_pool:type_name -> cloud.v1.AwsNodePoolSpec
 	5,  // 4: cloud.v1.AwsClusterSpec.addons:type_name -> cloud.v1.AwsAddon
-	14, // 5: cloud.v1.AwsAddonStatus.state:type_name -> cloud.v1.ManagedResourceState
+	12, // 5: cloud.v1.AwsAddonStatus.state:type_name -> cloud.v1.ManagedResourceState
 	0,  // 6: cloud.v1.AwsAccessConfig.authentication_mode:type_name -> cloud.v1.AwsAuthenticationMode
 	2,  // 7: cloud.v1.AwsUpgradePolicy.support_type:type_name -> cloud.v1.AwsSupportType
 	3,  // 8: cloud.v1.AwsNodePoolSpec.ami_type:type_name -> cloud.v1.AwsAmiType
@@ -1129,7 +1030,7 @@ func file_cloud_v1_aws_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_aws_proto_rawDesc), len(file_cloud_v1_aws_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   10,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

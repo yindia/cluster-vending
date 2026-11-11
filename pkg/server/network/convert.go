@@ -11,10 +11,14 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
+// lenient reads stored JSON: fields the contract dropped since (e.g.
+// spec.tags, now labels; spec.aws) are skipped, not errors.
+var lenient = protojson.UnmarshalOptions{DiscardUnknown: true}
+
 // specOf decodes the stored spec.
 func specOf(row *model.Network) (*cloudv1.NetworkSpec, error) {
 	spec := &cloudv1.NetworkSpec{}
-	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
+	if err := lenient.Unmarshal(row.Spec, spec); err != nil {
 		return nil, fmt.Errorf("network %s: stored spec: %w", row.ID, err)
 	}
 	return spec, nil

@@ -31,7 +31,6 @@ func validCreate() *cloudv1.CreateClusterRequest {
 					InstanceTypes: []string{"m6i.large"},
 					ScalingConfig: &cloudv1.ScalingConfig{MinSize: 1, DesiredSize: proto.Uint32(2), MaxSize: 5},
 				},
-				Tags: map[string]string{"team": "platform"},
 				Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{
 					EnabledClusterLogTypes: []cloudv1.AwsClusterLogType{cloudv1.AwsClusterLogType_AWS_CLUSTER_LOG_TYPE_AUDIT},
 				}},
@@ -135,8 +134,8 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "aws: bad instance type", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.DefaultNodePool.InstanceTypes = []string{"Standard_D4s_v5"}
 		})},
-		{name: "aws: reserved tag prefix", wantErr: true, req: mutate(func(s *spec, _ *req) {
-			s.Tags = map[string]string{"AWS:foo": "bar"}
+		{name: "label too long for an AWS tag", wantErr: true, req: mutate(func(_ *spec, r *req) {
+			r.Cluster.Labels = map[string]string{"k": strings.Repeat("v", 257)}
 		})},
 		{name: "aws: unspecified log type", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.GetAws().EnabledClusterLogTypes = []cloudv1.AwsClusterLogType{cloudv1.AwsClusterLogType_AWS_CLUSTER_LOG_TYPE_UNSPECIFIED}

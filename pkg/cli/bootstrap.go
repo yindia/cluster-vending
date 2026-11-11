@@ -9,20 +9,23 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// BootstrapCreate calls TenantService.BootstrapTenant with the CloudAccount
-// in the input file (accountName, aws: {accountId}).
+// BootstrapCreate calls TenantService.BootstrapTenant with the
+// CloudAccount manifest (metadata.name: the account name; spec: aws:
+// {accountId, role}).
 func BootstrapCreate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
+	m, err := LoadManifest(o.Input, KindCloudAccount)
+	if err != nil {
 		return nil, err
 	}
-	if o.Input == "" {
-		return nil, errors.New("--config is required: the account to bootstrap")
-	}
-	account := &cloudv1.CloudAccount{}
-	if err := LoadInput(o.Input, account); err != nil {
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
 		return nil, err
 	}
-	return call(ctx, &cloudv1.BootstrapTenantRequest{TenantId: o.Tenant, Account: account}, c.Tenant.BootstrapTenant)
+	account, err := m.CloudAccount()
+	if err != nil {
+		return nil, err
+	}
+	return call(ctx, &cloudv1.BootstrapTenantRequest{TenantId: tenant, Account: account}, c.Tenant.BootstrapTenant)
 }
 
 // BootstrapGet calls TenantService.GetCloudAccount for --id, the

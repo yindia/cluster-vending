@@ -87,18 +87,22 @@ func TestFreshErrorsAreRetried(t *testing.T) {
 	at := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 	now = func() time.Time { return at }
 	t.Cleanup(func() { now = time.Now })
-	failing := func(since time.Time) *unstructured.Unstructured {
+	// The condition always looks fresh: every retry carries a new AWS
+	// request ID, so lastTransitionTime is "now". Only the object's age
+	// counts.
+	failing := func(created time.Time) *unstructured.Unstructured {
 		u := managed()
+		u.SetCreationTimestamp(metav1.NewTime(created))
 		_ = unstructured.SetNestedSlice(u.Object, []any{map[string]any{"type": "Synced", "status": "False", "reason": "ReconcileError",
-			"message": "ProviderConfigUsage already exists", "lastTransitionTime": since.Format(time.RFC3339)}}, "status", "conditions")
+			"message": "ProviderConfigUsage already exists", "lastTransitionTime": at.Format(time.RFC3339)}}, "status", "conditions")
 		return u
 	}
 	fresh := view(model.ManagedResource{}, failing(at.Add(-30*time.Second)))
 	if fresh.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_CREATING ||
 		fresh.GetMessage() != "retrying: ProviderConfigUsage already exists" {
-		t.Errorf("30s old error = %s %q, want CREATING retrying", fresh.GetState(), fresh.GetMessage())
+		t.Errorf("30s old object = %s %q, want CREATING retrying", fresh.GetState(), fresh.GetMessage())
 	}
-	if old := view(model.ManagedResource{}, failing(at.Add(-5*time.Minute))); old.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
-		t.Errorf("5m old error = %s, want FAILED", old.GetState())
+	if old := view(model.ManagedResource{}, failing(at.Add(-6*time.Hour))); old.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
+		t.Errorf("6h old object failing with a fresh condition = %s, want FAILED", old.GetState())
 	}
 }

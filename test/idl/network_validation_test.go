@@ -52,7 +52,6 @@ func TestNetworkLayoutValidation(t *testing.T) {
 			n.Subnets = append(n.Subnets, subnet(private, "10.0.128.0/19", "use1-az3"))
 		}},
 
-		{name: "aws: bad region", region: "eastus", wantErr: true, mutate: func(*layout) {}},
 		{name: "cidr too small", wantErr: true, mutate: func(n *layout) { n.CidrBlock = "10.0.0.0/28" }},
 		{name: "cidr host bits set", wantErr: true, mutate: func(n *layout) { n.CidrBlock = "10.0.0.1/16" }},
 		{name: "zone count out of range", wantErr: true, mutate: func(n *layout) { n.Subnets, n.AvailabilityZoneCount = nil, 1 }},
@@ -62,27 +61,6 @@ func TestNetworkLayoutValidation(t *testing.T) {
 		}},
 		{name: "subnet without role", wantErr: true, mutate: func(n *layout) {
 			n.Subnets = append(n.Subnets, subnet(cloudv1.SubnetRole_SUBNET_ROLE_UNSPECIFIED, "10.0.128.0/19", "use1-az3"))
-		}},
-		{name: "only public subnets", wantErr: true, mutate: func(n *layout) { n.Subnets = twoZoneLayout()[:2] }},
-		{name: "aws: zone name instead of zone id", wantErr: true, mutate: func(n *layout) {
-			n.Subnets[0].ZoneId = "us-east-1a"
-		}},
-		{name: "aws: subnet without zone", wantErr: true, mutate: func(n *layout) {
-			n.Subnets = append(n.Subnets, subnet(private, "10.0.128.0/19", ""))
-		}},
-		{name: "aws: private subnets in one zone", wantErr: true, mutate: func(n *layout) {
-			n.Subnets = []*cloudv1.Subnet{
-				subnet(public, "10.0.0.0/20", "use1-az1"),
-				subnet(private, "10.0.64.0/19", "use1-az1"),
-				subnet(private, "10.0.96.0/19", "use1-az1"),
-			}
-		}},
-		{name: "aws: no public subnet", wantErr: true, mutate: func(n *layout) {
-			n.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE
-			n.Subnets = twoZoneLayout()[2:]
-		}},
-		{name: "aws: per-zone nat missing public subnet", wantErr: true, mutate: func(n *layout) {
-			n.Subnets = append(n.Subnets, subnet(private, "10.0.128.0/19", "use1-az3"))
 		}},
 	}
 	for _, tt := range tests {
@@ -107,8 +85,6 @@ func validNetwork() *cloudv1.CreateNetworkRequest {
 			Region:      "us-east-1",
 			BootstrapId: "6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
 			Layout:      twoZoneNetwork(),
-			Tags:        map[string]string{"team": "platform"},
-			Provider:    &cloudv1.NetworkSpec_Aws{Aws: &cloudv1.AwsNetworkSpec{}},
 		},
 	}}
 }
@@ -126,15 +102,17 @@ func TestCreateNetworkRequestValidation(t *testing.T) {
 	}{
 		{name: "valid", req: validNetwork()},
 		{name: "missing layout", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) { r.Network.Spec.Layout = nil })},
-		{name: "missing provider", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) { r.Network.Spec.Provider = nil })},
 		{name: "missing account", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) { r.Network.Spec.BootstrapId = "" })},
 		{name: "account is not a bootstrap id", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) {
 			r.Network.Spec.BootstrapId = "444455556666"
 		})},
 		{name: "bad name", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) { r.Network.Name = "Shared_1" })},
 		{name: "no name", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) { r.Network.Name = "" })},
-		{name: "aws reserved tag", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) {
-			r.Network.Spec.Tags = map[string]string{"aws:x": "y"}
+		{name: "label with characters AWS tags refuse", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) {
+			r.Network.Labels = map[string]string{"team!": "x"}
+		})},
+		{name: "label with AWS tag characters", req: with(func(r *cloudv1.CreateNetworkRequest) {
+			r.Network.Labels = map[string]string{"CostCenter": "42", "owner/email": "a@b.c"}
 		})},
 		{name: "tenant too long", wantErr: true, req: with(func(r *cloudv1.CreateNetworkRequest) {
 			r.TenantId = "a234567890123456789012345678901234567890123456789012345678"
@@ -169,7 +147,6 @@ func TestImportNetworkRequestValidation(t *testing.T) {
 	}{
 		{name: "valid", mutate: func(*cloudv1.ImportNetworkRequest) {}},
 		{name: "not a vpc id", wantErr: true, mutate: func(r *cloudv1.ImportNetworkRequest) { r.GetAws().VpcId = "subnet-0f1e2d3c4b5a69788" }},
-		{name: "missing provider", wantErr: true, mutate: func(r *cloudv1.ImportNetworkRequest) { r.Provider = nil }},
 		{name: "single subnet", mutate: func(r *cloudv1.ImportNetworkRequest) {
 			r.GetAws().SubnetIds = []string{"subnet-0aaaaaaaaaaaaaaaa"}
 		}},
@@ -193,5 +170,18 @@ func TestImportNetworkRequestValidation(t *testing.T) {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNetworkRequestsUseTheTenantRule(t *testing.T) {
+	for _, msg := range []proto.Message{
+		&cloudv1.GetNetworkRequest{TenantId: "Acme_Corp", NetworkId: "n"},
+		&cloudv1.TakeOverNetworkRequest{TenantId: "Acme_Corp", NetworkId: "n"},
+		&cloudv1.DeleteNetworkRequest{TenantId: "Acme_Corp", NetworkId: "n"},
+		&cloudv1.ListNetworksRequest{TenantId: "Acme_Corp"},
+	} {
+		if err := protovalidate.Validate(msg); err == nil {
+			t.Errorf("%T accepted a tenant id that is not a DNS label", msg)
+		}
 	}
 }

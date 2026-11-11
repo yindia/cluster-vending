@@ -36,10 +36,14 @@ func encode(m proto.Message) (model.JSON, error) {
 	return model.JSON(raw), nil
 }
 
+// lenient reads stored JSON: fields the contract dropped since (e.g.
+// spec.tags, now labels) are skipped, not errors.
+var lenient = protojson.UnmarshalOptions{DiscardUnknown: true}
+
 // specOf decodes the stored (resolved) spec.
 func specOf(row *model.Cluster) (*cloudv1.ClusterSpec, error) {
 	spec := &cloudv1.ClusterSpec{}
-	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
+	if err := lenient.Unmarshal(row.Spec, spec); err != nil {
 		return nil, fmt.Errorf("cluster %s: stored spec: %w", row.ID, err)
 	}
 	return spec, nil
@@ -64,7 +68,7 @@ func (s *ClusterService) view(ctx context.Context, row *model.Cluster) (*cloudv1
 		s.logger().ErrorContext(ctx, "retire node groups", "cluster_id", row.ID, "error", err)
 		return nil, connect.NewError(connect.CodeInternal, "could not retire the replaced node group")
 	}
-	st := status(row, views)
+	st := status(row, views, !createdAfterActive(records))
 	if err := s.observeEKS(ctx, records, st); err != nil {
 		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster from the management cluster")
@@ -156,8 +160,10 @@ func deref(p *string) string {
 
 // status aggregates the managed resources' states: RUNNING once all are
 // READY, FAILED when one failed or vanished, else the stored lifecycle
-// state (PROVISIONING, UPDATING, DELETING).
-func status(row *model.Cluster, views []*cloudv1.ManagedResource) *cloudv1.ClusterStatus {
+// state (PROVISIONING, UPDATING, DELETING). awaitingEKS: the add-ons and
+// access entries are not created yet (they follow once EKS is ACTIVE), so
+// the cluster cannot be RUNNING.
+func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bool) *cloudv1.ClusterStatus {
 	st := &cloudv1.ClusterStatus{ManagedResources: views, ObservedGeneration: row.Generation}
 	ready, waiting, left := 0, 0, 0
 	var failed *cloudv1.ManagedResource
@@ -187,11 +193,17 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource) *cloudv1.Clust
 	case row.State == stateDeleting:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_DELETING
 		st.Message = fmt.Sprintf("deleting; %d resources left", left)
+		if kinds := deleteOrder.Current(views); len(kinds) > 0 {
+			st.Message = fmt.Sprintf("deleting %s; %d resources left", strings.Join(kinds, ", "), left)
+		}
 	case failed != nil:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_FAILED
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
 		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: conditionSynced,
 			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
+	case awaitingEKS:
+		st.State = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING
+		st.Message = "creating the EKS cluster (" + progress + "); add-ons and access entries follow once it is ACTIVE"
 	case len(views) > 0 && ready == len(views):
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_RUNNING
 		readyCond.Status, readyCond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, "AllResourcesReady"

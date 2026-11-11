@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect/v2"
@@ -11,6 +12,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -34,7 +36,7 @@ func newResolved(row *model.Network, spec *cloudv1.NetworkSpec, a *model.CloudAc
 			CIDRBlock:          l.CIDRBlock,
 			Subnets:            l.Subnets,
 			NAT:                l.NAT,
-			Tags:               spec.GetTags(),
+			Tags:               row.Labels,
 		},
 	}
 }
@@ -120,8 +122,22 @@ func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
 	}
 }
 
-// finalize removes a DELETING network's row once its resources are gone,
-// and reports whether it did.
+// deleteOrder deletes a network from the inside out, the order AWS
+// accepts: routes and subnet associations, then route tables and NAT
+// gateways, then the NAT gateways' EIPs, then subnets and the internet
+// gateway (it detaches only once no public IP is left), then the VPC.
+var deleteOrder = service.DeleteOrder{
+	{"RouteTableAssociation", "Route"},
+	{"RouteTable", "NATGateway"},
+	{"EIP"},
+	{"Subnet", "InternetGateway"},
+	{"VPC"},
+}
+
+// finalize moves a DELETING network's deletion on (deleteOrder: the next
+// tier once the previous one is gone), removes its row once all its
+// resources are gone, and reports whether it did. Every DeleteNetwork,
+// GetNetwork and ListNetworks of the network calls it.
 func (s *NetworkService) finalize(ctx context.Context, row *model.Network) (bool, error) {
 	if row.State != stateDeleting {
 		return false, nil
@@ -130,10 +146,26 @@ func (s *NetworkService) finalize(ctx context.Context, row *model.Network) (bool
 	if err != nil {
 		return false, connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
 	}
-	if o.total > 0 {
+	// records also records live objects that were never recorded (by
+	// label), so every resource of the network is deleted in order.
+	records, err := s.records(ctx, row, o.objects)
+	if err != nil {
+		return false, err
+	}
+	views, err := s.deps.Observe(ctx, records)
+	if err != nil {
+		return false, err
+	}
+	left, err := s.deps.DeleteNext(ctx, records, views, deleteOrder)
+	if err != nil {
+		s.logger().ErrorContext(ctx, "delete network resources", "network_id", row.ID, "error", err)
+		return false, connect.NewError(connect.CodeInternal, "could not delete the network's resources")
+	}
+	if left > 0 || o.total > 0 {
 		return false, nil
 	}
-	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil {
+	// The controller and an API read can both get here: gone is gone.
+	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return false, connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
 	}
 	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {

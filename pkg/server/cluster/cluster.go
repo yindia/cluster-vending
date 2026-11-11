@@ -75,6 +75,9 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	if err := supported(spec); err != nil {
 		return nil, err
 	}
+	if err := service.CheckAWSLabels(req.GetCluster().GetLabels()); err != nil {
+		return nil, err
+	}
 	t, err := s.target(ctx, req.GetTenantId(), spec)
 	if err != nil {
 		return nil, err
@@ -187,6 +190,7 @@ func (s *ClusterService) base(row *model.Cluster, a *model.CloudAccount) crosspl
 	return crossplaneaws.ClusterPlan{
 		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: row.TenantID,
 		ClusterID: row.ID, ClusterName: row.Name, Prefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
+		Tags: row.Labels,
 	}
 }
 
@@ -202,6 +206,18 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 	}
 	plan.NodeGroupName = name
 	objects := crossplaneaws.ClusterResources(plan)
+	hold, err := s.holdBack(ctx, row)
+	if err != nil {
+		s.logger().ErrorContext(ctx, "read EKS cluster state", "cluster_id", row.ID, "error", err)
+		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's EKS cluster")
+	}
+	if hold {
+		// Created in sequence: add-ons and access entries follow once EKS
+		// is ACTIVE (advance).
+		if objects, err = s.withoutAfterActive(objects); err != nil {
+			return connect.NewError(connect.CodeInternal, err.Error())
+		}
+	}
 	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
 	if err := s.deps.Record(ctx, owner, objects); err != nil {
 		return connect.NewError(connect.CodeInternal, "could not record the cluster's resources: "+err.Error())
@@ -249,11 +265,12 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
+	s.progress(ctx, row)
 	c, err := s.view(ctx, row)
 	if err != nil {
 		return nil, err
 	}
-	if gone, err := s.finalize(ctx, row, c); err != nil || gone {
+	if gone, err := s.finalize(ctx, row); err != nil || gone {
 		if err == nil {
 			err = notFound(req.GetTenantId(), req.GetClusterId())
 		}
@@ -282,11 +299,12 @@ func (s *ClusterService) ListClusters(ctx context.Context, req *cloudv1.ListClus
 		res.NextPageToken = rows[size-1].ID
 	}
 	for i := range rows {
+		s.progress(ctx, &rows[i])
 		c, err := s.view(ctx, &rows[i])
 		if err != nil {
 			return nil, err
 		}
-		if gone, err := s.finalize(ctx, &rows[i], c); err != nil {
+		if gone, err := s.finalize(ctx, &rows[i]); err != nil {
 			return nil, err
 		} else if !gone {
 			res.Clusters = append(res.Clusters, c)
@@ -310,18 +328,18 @@ func notFound(tenantID, id string) error {
 	return connect.NewError(connect.CodeNotFound, fmt.Sprintf("tenant %s has no cluster %s", tenantID, id))
 }
 
-// finalize removes a DELETING cluster's row once all its resources are
-// gone, and reports whether it did.
-func (s *ClusterService) finalize(ctx context.Context, row *model.Cluster, c *cloudv1.Cluster) (bool, error) {
-	if row.State != stateDeleting || !service.AllGone(c.GetStatus().GetManagedResources()) {
+// finalize moves a DELETING cluster's deletion on (driveDelete) and
+// reports whether the cluster is gone.
+func (s *ClusterService) finalize(ctx context.Context, row *model.Cluster) (bool, error) {
+	if row.State != stateDeleting {
 		return false, nil
 	}
-	err := errors.Join(s.deps.Store.Clusters().Delete(ctx, row.TenantID, row.ID),
-		s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerCluster, row.ID))
+	gone, err := s.driveDelete(ctx, row)
 	if err != nil {
-		return false, connect.NewError(connect.CodeInternal, "could not remove the deleted cluster: "+err.Error())
+		s.logger().ErrorContext(ctx, "delete cluster", "cluster_id", row.ID, "error", err)
+		return false, connect.NewError(connect.CodeUnavailable, "could not continue deleting the cluster: "+err.Error())
 	}
-	return true, nil
+	return gone, nil
 }
 
 func (s *ClusterService) logger() *slog.Logger {

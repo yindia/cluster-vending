@@ -94,8 +94,7 @@ type ExistingCluster struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Cluster name in the cloud (EKS: 1-100 chars). Immutable. Modelled from
 	// it: the cluster (spec.control_plane, spec.aws), its IAM roles, the
-	// default node pool, other representable node groups (as NodePools),
-	// add-ons and access entries (spec.access).
+	// default node pool, add-ons and access entries (spec.access).
 	//
 	// Closure (import.proto): everything the imported resources reference is
 	// imported. CARRIED_OVER, as Observe-only resources first:
@@ -110,9 +109,8 @@ type ExistingCluster struct {
 	//   - the IAM OIDC provider matching the cluster's OIDC issuer URL
 	//   - IAM roles referenced by add-ons (serviceAccountRoleArn) and pod
 	//     identity associations, with their policy attachments
-	//   - node groups that NodePoolSpec cannot express (launch template,
-	//     custom AMI) with their launch templates, verbatim; representable
-	//     node groups become NodePools instead (see default_node_pool_name)
+	//   - every node group other than the default node pool, with its launch
+	//     template if any, verbatim (see default_node_pool_name)
 	//
 	// Things that only reference ours stay with their owner and are
 	// NOT_IMPORTED: an RDS security group allowing the node group, IRSA roles
@@ -136,10 +134,9 @@ type ExistingCluster struct {
 	// It must be representable by NodePoolSpec (AWS: no launch template, no
 	// custom AMI), otherwise it is BLOCKING. Leave empty to create
 	// spec.default_node_pool as a NEW pool at the takeover.
-	// Every other node group is imported too: representable ones as NodePools
-	// (id = node group name), the rest CARRIED_OVER verbatim with their launch
-	// templates and listed by NodePoolService with status.carried_over, to be
-	// retired with DeleteNodePool once workloads moved.
+	// Every other node group is CARRIED_OVER verbatim with its launch template
+	// (status.carried_over): owned with the cluster and deleted with it, but
+	// not editable through the API.
 	DefaultNodePoolName string `protobuf:"bytes,2,opt,name=default_node_pool_name,json=defaultNodePoolName,proto3" json:"default_node_pool_name,omitempty"`
 	// How far the platform manages the imported resources. Mutable through
 	// UpdateCluster (spec.existing_cluster.policy).

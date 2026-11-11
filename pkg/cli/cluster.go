@@ -10,31 +10,35 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// ClusterCreate calls ClusterService.CreateCluster with the Cluster in the
-// input file; the argument, when given, is its name. The request ID is
-// derived from the request, so running the same create twice returns the
-// first cluster instead of building a second one.
+// ClusterCreate calls ClusterService.CreateCluster with the Cluster
+// manifest; the server assigns the id. The request ID is derived from the
+// request, so running the same create twice returns the first cluster.
+// With --wait it returns once the cluster is RUNNING.
 func ClusterCreate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
-		return nil, err
-	}
-	n := &cloudv1.Cluster{}
-	if err := LoadInput(o.Input, n); err != nil {
-		return nil, err
-	}
-	if n.GetId() != "" {
-		return nil, fmt.Errorf("--config: id %q: a cluster's id is assigned by the server; set name instead", n.GetId())
-	}
-	if o.ID != "" {
-		n.Name = o.ID
-	}
-	req := &cloudv1.CreateClusterRequest{TenantId: o.Tenant, Cluster: n}
-	id, err := requestID(o.Tenant, req)
+	m, err := LoadManifest(o.Input, KindCluster)
 	if err != nil {
 		return nil, err
 	}
-	req.RequestId = id
-	return call(ctx, req, c.Cluster.CreateCluster)
+	if m.Metadata.ID != "" {
+		return nil, fmt.Errorf("metadata.id %q: a cluster's id is assigned by the server", m.Metadata.ID)
+	}
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	cl, err := m.Cluster()
+	if err != nil {
+		return nil, err
+	}
+	req := &cloudv1.CreateClusterRequest{TenantId: tenant, Cluster: cl}
+	if req.RequestId, err = requestID(tenant, req); err != nil {
+		return nil, err
+	}
+	res, err := call(ctx, req, c.Cluster.CreateCluster)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	return waitCluster(ctx, c, o, tenant, res.(*cloudv1.CreateClusterResponse).GetCluster().GetId(), false)
 }
 
 // ClusterGet calls ClusterService.GetCluster.
@@ -55,39 +59,71 @@ func ClusterList(ctx context.Context, c Clients, o Options) (proto.Message, erro
 	}, c.Cluster.ListClusters)
 }
 
-// ClusterUpdate calls ClusterService.UpdateCluster with the Cluster in the
-// input file and --update-mask.
+// ClusterUpdate calls ClusterService.UpdateCluster with the Cluster
+// manifest and --update-mask; the cluster is the argument or metadata.id.
+// With --wait it returns once the cluster is RUNNING again.
 func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	n, err := clusterInput(o)
+	m, err := LoadManifest(o.Input, KindCluster)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	if m.Metadata.ID, err = updateID(o.ID, m.Metadata.ID); err != nil {
+		return nil, err
+	}
+	cl, err := m.Cluster()
 	if err != nil {
 		return nil, err
 	}
 	if o.ETag != "" {
-		n.Etag = o.ETag
+		cl.Etag = o.ETag
 	}
-	return call(ctx, &cloudv1.UpdateClusterRequest{
-		TenantId: o.Tenant, Cluster: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
+	res, err := call(ctx, &cloudv1.UpdateClusterRequest{
+		TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
 	}, c.Cluster.UpdateCluster)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	return waitCluster(ctx, c, o, tenant, cl.GetId(), false)
 }
 
-// ClusterDelete calls ClusterService.DeleteCluster.
+// ClusterDelete calls ClusterService.DeleteCluster. The server deletes the
+// cluster's resources in order (add-ons, node groups, the EKS cluster, IAM),
+// one step per read; --wait reads until the cluster is gone.
 func ClusterDelete(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
-	return call(ctx, &cloudv1.DeleteClusterRequest{TenantId: o.Tenant, ClusterId: o.ID, Etag: o.ETag}, c.Cluster.DeleteCluster)
+	res, err := call(ctx, &cloudv1.DeleteClusterRequest{TenantId: o.Tenant, ClusterId: o.ID, Etag: o.ETag}, c.Cluster.DeleteCluster)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	if _, err := waitCluster(ctx, c, o, o.Tenant, o.ID, true); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
-func clusterInput(o Options) (*cloudv1.Cluster, error) {
-	if err := o.requireTenant(); err != nil {
-		return nil, err
-	}
-	n := &cloudv1.Cluster{}
-	if err := LoadInput(o.Input, n); err != nil {
-		return nil, err
-	}
-	if o.ID != "" {
-		n.Id = o.ID
-	}
-	return n, nil
+// waitCluster waits until the cluster is RUNNING (gone: deleted) and
+// returns its last read.
+func waitCluster(ctx context.Context, c Clients, o Options, tenant, id string, gone bool) (proto.Message, error) {
+	var last proto.Message
+	err := waitUntil(ctx, o, "cluster "+id, gone, func(ctx context.Context) (observation, error) {
+		res, err := call(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: id}, c.Cluster.GetCluster)
+		if err != nil {
+			return observation{}, err
+		}
+		last = res
+		st := res.(*cloudv1.GetClusterResponse).GetCluster().GetStatus()
+		state := st.GetState()
+		return observation{
+			state: state.String(), message: st.GetMessage(),
+			done:   !gone && state == cloudv1.ClusterState_CLUSTER_STATE_RUNNING,
+			failed: !gone && state == cloudv1.ClusterState_CLUSTER_STATE_FAILED,
+		}, nil
+	})
+	return last, err
 }

@@ -84,21 +84,24 @@ func TestStatus(t *testing.T) {
 	failed := &cloudv1.ManagedResource{Kind: "NodeGroup", Name: "x", Message: "boom",
 		State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED}
 	tests := []struct {
-		name  string
-		state string
-		views []*cloudv1.ManagedResource
-		want  cloudv1.ClusterState
+		name        string
+		state       string
+		views       []*cloudv1.ManagedResource
+		awaitingEKS bool
+		want        cloudv1.ClusterState
 	}{
-		{"all ready", stateProvisioning, []*cloudv1.ManagedResource{ready, ready}, cloudv1.ClusterState_CLUSTER_STATE_RUNNING},
-		{"in progress", stateProvisioning, []*cloudv1.ManagedResource{ready, creating}, cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
-		{"updating", stateUpdating, []*cloudv1.ManagedResource{ready, creating}, cloudv1.ClusterState_CLUSTER_STATE_UPDATING},
-		{"failed", stateProvisioning, []*cloudv1.ManagedResource{ready, failed}, cloudv1.ClusterState_CLUSTER_STATE_FAILED},
-		{"deleting", stateDeleting, []*cloudv1.ManagedResource{failed}, cloudv1.ClusterState_CLUSTER_STATE_DELETING},
+		{"all ready", stateProvisioning, []*cloudv1.ManagedResource{ready, ready}, false, cloudv1.ClusterState_CLUSTER_STATE_RUNNING},
+		{"ready but add-ons not created yet", stateProvisioning, []*cloudv1.ManagedResource{ready, ready}, true,
+			cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
+		{"in progress", stateProvisioning, []*cloudv1.ManagedResource{ready, creating}, false, cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
+		{"updating", stateUpdating, []*cloudv1.ManagedResource{ready, creating}, false, cloudv1.ClusterState_CLUSTER_STATE_UPDATING},
+		{"failed", stateProvisioning, []*cloudv1.ManagedResource{ready, failed}, true, cloudv1.ClusterState_CLUSTER_STATE_FAILED},
+		{"deleting", stateDeleting, []*cloudv1.ManagedResource{failed}, false, cloudv1.ClusterState_CLUSTER_STATE_DELETING},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			row := &model.Cluster{Resource: model.Resource{State: tt.state}}
-			if got := status(row, tt.views).GetState(); got != tt.want {
+			if got := status(row, tt.views, tt.awaitingEKS).GetState(); got != tt.want {
 				t.Errorf("state = %v, want %v", got, tt.want)
 			}
 		})

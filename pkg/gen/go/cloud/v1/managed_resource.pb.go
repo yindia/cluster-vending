@@ -92,6 +92,65 @@ func (ManagedResourceState) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_managed_resource_proto_rawDescGZIP(), []int{0}
 }
 
+// Type is what happened to the resource since the previous message.
+type ManagedResourceEvent_Type int32
+
+const (
+	ManagedResourceEvent_TYPE_UNSPECIFIED ManagedResourceEvent_Type = 0
+	// First seen: every resource in a watch's first message, then any
+	// resource the network or cluster gains (e.g. add-ons once EKS is
+	// ACTIVE, a replacement node group).
+	ManagedResourceEvent_TYPE_ADDED ManagedResourceEvent_Type = 1
+	// Its state, conditions, message or external name changed.
+	ManagedResourceEvent_TYPE_MODIFIED ManagedResourceEvent_Type = 2
+	// No longer recorded for the network or cluster (deleted, or pruned by
+	// an update).
+	ManagedResourceEvent_TYPE_DELETED ManagedResourceEvent_Type = 3
+)
+
+// Enum value maps for ManagedResourceEvent_Type.
+var (
+	ManagedResourceEvent_Type_name = map[int32]string{
+		0: "TYPE_UNSPECIFIED",
+		1: "TYPE_ADDED",
+		2: "TYPE_MODIFIED",
+		3: "TYPE_DELETED",
+	}
+	ManagedResourceEvent_Type_value = map[string]int32{
+		"TYPE_UNSPECIFIED": 0,
+		"TYPE_ADDED":       1,
+		"TYPE_MODIFIED":    2,
+		"TYPE_DELETED":     3,
+	}
+)
+
+func (x ManagedResourceEvent_Type) Enum() *ManagedResourceEvent_Type {
+	p := new(ManagedResourceEvent_Type)
+	*p = x
+	return p
+}
+
+func (x ManagedResourceEvent_Type) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ManagedResourceEvent_Type) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_managed_resource_proto_enumTypes[1].Descriptor()
+}
+
+func (ManagedResourceEvent_Type) Type() protoreflect.EnumType {
+	return &file_cloud_v1_managed_resource_proto_enumTypes[1]
+}
+
+func (x ManagedResourceEvent_Type) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ManagedResourceEvent_Type.Descriptor instead.
+func (ManagedResourceEvent_Type) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_managed_resource_proto_rawDescGZIP(), []int{1, 0}
+}
+
 // ManagedResource is one Kubernetes object the platform created in the
 // management cluster (a Crossplane managed resource, a ProviderConfig, the
 // tenant namespace). Every one is recorded with its owner; its state is
@@ -220,6 +279,61 @@ func (x *ManagedResource) GetRole() string {
 	return ""
 }
 
+// ManagedResourceEvent is a change of one managed resource, as streamed by
+// WatchNetwork and WatchCluster.
+type ManagedResourceEvent struct {
+	state protoimpl.MessageState    `protogen:"open.v1"`
+	Type  ManagedResourceEvent_Type `protobuf:"varint,1,opt,name=type,proto3,enum=cloud.v1.ManagedResourceEvent_Type" json:"type,omitempty"`
+	// The resource as observed now (DELETED: as last observed).
+	Resource      *ManagedResource `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ManagedResourceEvent) Reset() {
+	*x = ManagedResourceEvent{}
+	mi := &file_cloud_v1_managed_resource_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ManagedResourceEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ManagedResourceEvent) ProtoMessage() {}
+
+func (x *ManagedResourceEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_managed_resource_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ManagedResourceEvent.ProtoReflect.Descriptor instead.
+func (*ManagedResourceEvent) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_managed_resource_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ManagedResourceEvent) GetType() ManagedResourceEvent_Type {
+	if x != nil {
+		return x.Type
+	}
+	return ManagedResourceEvent_TYPE_UNSPECIFIED
+}
+
+func (x *ManagedResourceEvent) GetResource() *ManagedResource {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
 var File_cloud_v1_managed_resource_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_managed_resource_proto_rawDesc = "" +
@@ -236,7 +350,16 @@ const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\amessage\x18\t \x01(\tR\amessage\x12\x17\n" +
 	"\azone_id\x18\n" +
 	" \x01(\tR\x06zoneId\x12\x12\n" +
-	"\x04role\x18\v \x01(\tR\x04role*\x95\x02\n" +
+	"\x04role\x18\v \x01(\tR\x04role\"\xd9\x01\n" +
+	"\x14ManagedResourceEvent\x127\n" +
+	"\x04type\x18\x01 \x01(\x0e2#.cloud.v1.ManagedResourceEvent.TypeR\x04type\x125\n" +
+	"\bresource\x18\x02 \x01(\v2\x19.cloud.v1.ManagedResourceR\bresource\"Q\n" +
+	"\x04Type\x12\x14\n" +
+	"\x10TYPE_UNSPECIFIED\x10\x00\x12\x0e\n" +
+	"\n" +
+	"TYPE_ADDED\x10\x01\x12\x11\n" +
+	"\rTYPE_MODIFIED\x10\x02\x12\x10\n" +
+	"\fTYPE_DELETED\x10\x03*\x95\x02\n" +
 	"\x14ManagedResourceState\x12&\n" +
 	"\"MANAGED_RESOURCE_STATE_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fMANAGED_RESOURCE_STATE_CREATING\x10\x01\x12\"\n" +
@@ -259,22 +382,26 @@ func file_cloud_v1_managed_resource_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_managed_resource_proto_rawDescData
 }
 
-var file_cloud_v1_managed_resource_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_cloud_v1_managed_resource_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_cloud_v1_managed_resource_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_cloud_v1_managed_resource_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_cloud_v1_managed_resource_proto_goTypes = []any{
-	(ManagedResourceState)(0), // 0: cloud.v1.ManagedResourceState
-	(*ManagedResource)(nil),   // 1: cloud.v1.ManagedResource
-	(ConditionStatus)(0),      // 2: cloud.v1.ConditionStatus
+	(ManagedResourceState)(0),      // 0: cloud.v1.ManagedResourceState
+	(ManagedResourceEvent_Type)(0), // 1: cloud.v1.ManagedResourceEvent.Type
+	(*ManagedResource)(nil),        // 2: cloud.v1.ManagedResource
+	(*ManagedResourceEvent)(nil),   // 3: cloud.v1.ManagedResourceEvent
+	(ConditionStatus)(0),           // 4: cloud.v1.ConditionStatus
 }
 var file_cloud_v1_managed_resource_proto_depIdxs = []int32{
 	0, // 0: cloud.v1.ManagedResource.state:type_name -> cloud.v1.ManagedResourceState
-	2, // 1: cloud.v1.ManagedResource.ready:type_name -> cloud.v1.ConditionStatus
-	2, // 2: cloud.v1.ManagedResource.synced:type_name -> cloud.v1.ConditionStatus
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 1: cloud.v1.ManagedResource.ready:type_name -> cloud.v1.ConditionStatus
+	4, // 2: cloud.v1.ManagedResource.synced:type_name -> cloud.v1.ConditionStatus
+	1, // 3: cloud.v1.ManagedResourceEvent.type:type_name -> cloud.v1.ManagedResourceEvent.Type
+	2, // 4: cloud.v1.ManagedResourceEvent.resource:type_name -> cloud.v1.ManagedResource
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_managed_resource_proto_init() }
@@ -288,8 +415,8 @@ func file_cloud_v1_managed_resource_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_managed_resource_proto_rawDesc), len(file_cloud_v1_managed_resource_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   1,
+			NumEnums:      2,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

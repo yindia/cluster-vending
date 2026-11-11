@@ -35,6 +35,9 @@ const (
 	// ClusterServiceUpdateClusterProcedure is the procedure name of the ClusterService's UpdateCluster
 	// RPC.
 	ClusterServiceUpdateClusterProcedure = "/cloud.v1.ClusterService/UpdateCluster"
+	// ClusterServiceWatchClusterProcedure is the procedure name of the ClusterService's WatchCluster
+	// RPC.
+	ClusterServiceWatchClusterProcedure = "/cloud.v1.ClusterService/WatchCluster"
 	// ClusterServiceDeleteClusterProcedure is the procedure name of the ClusterService's DeleteCluster
 	// RPC.
 	ClusterServiceDeleteClusterProcedure = "/cloud.v1.ClusterService/DeleteCluster"
@@ -71,6 +74,14 @@ var (
 			Procedure:  ClusterServiceUpdateClusterProcedure,
 		}
 	})
+	clusterServiceWatchClusterSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeServer,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("WatchCluster"),
+			Procedure:        ClusterServiceWatchClusterProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 	clusterServiceDeleteClusterSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -94,6 +105,13 @@ type ClusterServiceClient interface {
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Updates the mutable fields named in update_mask.
 	UpdateCluster(context.Context, *v1.UpdateClusterRequest) (*v1.UpdateClusterResponse, error)
+	// Streams one cluster's state: a first message with the cluster and an
+	// ADDED event per managed resource, then a message whenever something
+	// changes (the cluster's state or message, or a resource's), until the
+	// cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
+	// when the cluster does not exist. Like GetCluster, reading moves the
+	// cluster's creation (add-ons once EKS is ACTIVE) and deletion on.
+	WatchCluster(context.Context, *v1.WatchClusterRequest) (ClusterServiceWatchClusterClientStream, error)
 	// Removes the cluster, all its node pools, and every cloud resource the
 	// platform owns for it. A shared Network (network.network_id) is not deleted. For
 	// an imported cluster, spec.existing_cluster.policy decides whether the
@@ -105,6 +123,27 @@ type ClusterServiceClient interface {
 // service clients may share a single connect.Client.
 func NewClusterServiceClient(client *connect.Client) ClusterServiceClient {
 	return &clusterServiceClient{client: client}
+}
+
+// ClusterServiceWatchClusterClientStream is the client stream for the ClusterService's WatchCluster
+// RPC.
+type ClusterServiceWatchClusterClientStream struct {
+	stream connect.ClientStream
+}
+
+// Receive returns the next response message from the server.
+func (s ClusterServiceWatchClusterClientStream) Receive() (*v1.WatchClusterResponse, error) {
+	var res v1.WatchClusterResponse
+	if err := s.stream.Receive(&res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// Close releases the stream's resources. It is idempotent and is typically deferred to clean up a
+// stream abandoned before io.EOF.
+func (s ClusterServiceWatchClusterClientStream) Close() error {
+	return s.stream.Close()
 }
 
 // ClusterServiceHandler is an implementation of the cloud.v1.ClusterService service.
@@ -120,6 +159,13 @@ type ClusterServiceHandler interface {
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Updates the mutable fields named in update_mask.
 	UpdateCluster(context.Context, *v1.UpdateClusterRequest) (*v1.UpdateClusterResponse, error)
+	// Streams one cluster's state: a first message with the cluster and an
+	// ADDED event per managed resource, then a message whenever something
+	// changes (the cluster's state or message, or a resource's), until the
+	// cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
+	// when the cluster does not exist. Like GetCluster, reading moves the
+	// cluster's creation (add-ons once EKS is ACTIVE) and deletion on.
+	WatchCluster(context.Context, *v1.WatchClusterRequest, ClusterServiceWatchClusterServerStream) error
 	// Removes the cluster, all its node pools, and every cloud resource the
 	// platform owns for it. A shared Network (network.network_id) is not deleted. For
 	// an imported cluster, spec.existing_cluster.policy decides whether the
@@ -136,8 +182,25 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceGetClusterSpec(), Handler: adapter.getCluster},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
+		connect.Method{Spec: clusterServiceWatchClusterSpec(), Handler: adapter.watchCluster},
 		connect.Method{Spec: clusterServiceDeleteClusterSpec(), Handler: adapter.deleteCluster},
 	)
+}
+
+// ClusterServiceWatchClusterServerStream is the server stream for the ClusterService's WatchCluster
+// RPC.
+type ClusterServiceWatchClusterServerStream struct {
+	stream connect.ServerStream
+}
+
+// SendHeaders flushes the response headers without a message. The first Send does this implicitly.
+func (s ClusterServiceWatchClusterServerStream) SendHeaders() error {
+	return s.stream.SendHeaders()
+}
+
+// Send sends a response message to the client.
+func (s ClusterServiceWatchClusterServerStream) Send(res *v1.WatchClusterResponse) error {
+	return s.stream.Send(res)
 }
 
 // UnimplementedClusterServiceHandler returns CodeUnimplemented from all methods.
@@ -157,6 +220,10 @@ func (UnimplementedClusterServiceHandler) ListClusters(context.Context, *v1.List
 
 func (UnimplementedClusterServiceHandler) UpdateCluster(context.Context, *v1.UpdateClusterRequest) (*v1.UpdateClusterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.UpdateCluster is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) WatchCluster(context.Context, *v1.WatchClusterRequest, ClusterServiceWatchClusterServerStream) error {
+	return connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.WatchCluster is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) DeleteCluster(context.Context, *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error) {
@@ -197,6 +264,14 @@ func (c *clusterServiceClient) UpdateCluster(ctx context.Context, req *v1.Update
 		return nil, err
 	}
 	return &res, nil
+}
+
+func (c *clusterServiceClient) WatchCluster(ctx context.Context, req *v1.WatchClusterRequest) (ClusterServiceWatchClusterClientStream, error) {
+	stream, err := c.client.CallServerStream(ctx, clusterServiceWatchClusterSpec(), req)
+	if err != nil {
+		return ClusterServiceWatchClusterClientStream{}, err
+	}
+	return ClusterServiceWatchClusterClientStream{stream: stream}, nil
 }
 
 func (c *clusterServiceClient) DeleteCluster(ctx context.Context, req *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error) {
@@ -255,6 +330,14 @@ func (h clusterServiceHandler) updateCluster(ctx context.Context, _ connect.Spec
 		return err
 	}
 	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) watchCluster(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.WatchClusterRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	return h.svc.WatchCluster(ctx, &req, ClusterServiceWatchClusterServerStream{stream: stream})
 }
 
 func (h clusterServiceHandler) deleteCluster(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {

@@ -119,10 +119,6 @@ message AwsAddonStatus {
   string message = 4;
 }
 
-// AwsNetworkSpec selects AWS for a Network. Everything with a cross-cloud
-// equivalent lives in NetworkSpec; no AWS-only network settings exist yet.
-message AwsNetworkSpec {}
-
 // AwsImportNetwork names the VPC to import. The server looks the rest up
 // once, read-only, with the tenant's credentials (the role its
 // ProviderConfig assumes):
@@ -244,14 +240,6 @@ enum AwsAmiType {
   AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64 = 17 [(crossplane) = {aws: "WINDOWS_FULL_2022_x86_64"}];
   AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64 = 18 [(crossplane) = {aws: "WINDOWS_CORE_2025_x86_64"}];
   AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64 = 19 [(crossplane) = {aws: "WINDOWS_FULL_2025_x86_64"}];
-}
-
-// AwsNodePoolStatus is AWS-only observed state of a node pool.
-message AwsNodePoolStatus {
-  // NodeGroup.status.atProvider.arn
-  string node_group_arn = 1;
-  // Launch template of a carried-over node group, "<id>:<version>".
-  string launch_template = 2;
 }
 
 // AwsClusterStatus is AWS-only observed state, read from

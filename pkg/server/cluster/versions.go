@@ -7,7 +7,6 @@ import (
 
 	"connectrpc.com/connect/v2"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
-	"google.golang.org/protobuf/encoding/protojson"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
@@ -73,7 +72,7 @@ func (s *ClusterService) reresolveVersions(ctx context.Context, row *model.Clust
 ) error {
 	input := &cloudv1.Cluster{}
 	if len(row.Input) > 0 {
-		if err := protojson.Unmarshal(row.Input, input); err != nil {
+		if err := lenient.Unmarshal(row.Input, input); err != nil {
 			return connect.NewError(connect.CodeInternal, fmt.Sprintf("cluster %s: stored input: %v", row.ID, err))
 		}
 	}

@@ -146,6 +146,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 	if err != nil {
 		return fmt.Errorf("migrate database: backfill namespaces: %w", err)
 	}
+	if err := migrateTagsToLabels(ctx, db); err != nil {
+		return fmt.Errorf("migrate database: move spec.tags to labels: %w", err)
+	}
 	return nil
 }
 

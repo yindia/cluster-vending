@@ -8,7 +8,6 @@ import (
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect/v2"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -21,11 +20,10 @@ import (
 const (
 	pathDisplayName = "display_name"
 	pathLabels      = "labels"
-	pathTags        = "spec.tags"
 )
 
-// UpdateNetwork changes the fields named in update_mask: display_name,
-// labels and spec.tags. New tags are applied to every resource.
+// UpdateNetwork changes the fields named in update_mask: display_name and
+// labels. Labels are the AWS tags of every resource: an update re-tags.
 func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateNetworkRequest) (*cloudv1.UpdateNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -83,32 +81,31 @@ func checkMutable(row *model.Network, etag string) error {
 	return nil
 }
 
-// applyMask copies the masked fields of in onto row and spec, and checks
-// the result against the contract. It reports whether the tags changed.
+// applyMask copies the masked fields of in onto row, and checks the result
+// against the contract. It reports whether the resources must be applied
+// again (labels: they are the AWS tags).
 func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Network, paths []string) (bool, error) {
-	tagsChanged := false
+	reapply := false
 	for _, p := range paths {
 		switch p {
 		case pathDisplayName:
 			row.DisplayName = in.GetDisplayName()
 		case pathLabels:
 			row.Labels = model.Labels(in.GetLabels())
-		case pathTags:
 			// Always re-applied, even unchanged: that also adds tags the
 			// platform introduced after the network was created.
-			tagsChanged = true
-			spec.Tags = in.GetSpec().GetTags()
+			reapply = true
 		default:
 			return false, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
 				"update_mask path %q cannot be updated; updatable: %s", p,
-				strings.Join([]string{pathDisplayName, pathLabels, pathTags}, ", ")))
+				strings.Join([]string{pathDisplayName, pathLabels}, ", ")))
 		}
 	}
 	merged := &cloudv1.Network{Name: row.Name, DisplayName: row.DisplayName, Labels: row.Labels, Spec: spec}
 	if err := protovalidate.Validate(merged); err != nil {
 		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
-	return tagsChanged, nil
+	return reapply, service.CheckAWSLabels(row.Labels)
 }
 
 // updatedInput is the stored input with the masked fields of in copied
@@ -120,7 +117,7 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 		return row.Input, nil
 	}
 	input := &cloudv1.Network{}
-	if err := protojson.Unmarshal(row.Input, input); err != nil {
+	if err := lenient.Unmarshal(row.Input, input); err != nil {
 		return nil, fmt.Errorf("network %s: stored input: %w", row.ID, err)
 	}
 	for _, p := range paths {
@@ -129,11 +126,6 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 			input.DisplayName = in.GetDisplayName()
 		case pathLabels:
 			input.Labels = in.GetLabels()
-		case pathTags:
-			if input.Spec == nil {
-				input.Spec = &cloudv1.NetworkSpec{}
-			}
-			input.Spec.Tags = in.GetSpec().GetTags()
 		}
 	}
 	return encode(input)
@@ -171,14 +163,12 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 			return nil, service.ToConnect(err)
 		}
 	}
-	if err := s.deleteResources(ctx, row.TenantID, row.ID); err != nil {
-		s.logger().ErrorContext(ctx, "delete network resources", "network_id", row.ID, "error", err)
-		return nil, connect.NewError(connect.CodeInternal, "could not delete the network's resources")
-	}
 	n, err := s.view(ctx, row)
 	if err != nil {
 		return nil, err
 	}
+	// Deletes the first tier now; GetNetwork / ListNetworks (e.g. the CLI's
+	// --wait) move it on, tier by tier, until the network is gone.
 	if _, err := s.finalize(ctx, row); err != nil {
 		return nil, err
 	}
@@ -186,18 +176,45 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 	return &cloudv1.DeleteNetworkResponse{Network: n}, nil
 }
 
+// refuseInUse fails while clusters use the network. A deleted cluster whose
+// resources are all gone but whose row was not removed yet (nobody read it
+// since) is removed here instead of blocking the delete.
 func (s *NetworkService) refuseInUse(ctx context.Context, row *model.Network) error {
 	clusters, err := s.deps.Store.Clusters().ListByNetwork(ctx, row.ID)
 	if err != nil {
 		return service.ToConnect(err)
 	}
-	if len(clusters) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(clusters))
+	var using, deleting []string
 	for _, c := range clusters {
-		names = append(names, c.Name)
+		if c.State != clusterStateDeleting {
+			using = append(using, fmt.Sprintf("%s (%s)", c.Name, c.ID))
+			continue
+		}
+		gone, err := s.deps.OwnerGone(ctx, model.OwnerCluster, c.ID)
+		if err != nil {
+			return service.ToConnect(err)
+		}
+		if !gone {
+			deleting = append(deleting, fmt.Sprintf("%s (%s)", c.Name, c.ID))
+			continue
+		}
+		if err := errors.Join(s.deps.Store.Clusters().Delete(ctx, c.TenantID, c.ID),
+			s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerCluster, c.ID)); err != nil {
+			return service.ToConnect(err)
+		}
+		s.logger().InfoContext(ctx, "removed deleted cluster", "cluster_id", c.ID, "network_id", row.ID)
 	}
-	return connect.NewError(connect.CodeFailedPrecondition,
-		fmt.Sprintf("network %s is used by clusters %s; delete them first", row.ID, strings.Join(names, ", ")))
+	switch {
+	case len(using) > 0:
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("network %s is used by clusters %s; delete them first", row.ID, strings.Join(using, ", ")))
+	case len(deleting) > 0:
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("network %s is used by clusters still being deleted: %s; retry once they are gone (cluster get --wait)",
+				row.ID, strings.Join(deleting, ", ")))
+	}
+	return nil
 }
+
+// clusterStateDeleting is a cluster row's state while it is deleted.
+const clusterStateDeleting = "CLUSTER_STATE_DELETING"

@@ -1,17 +1,16 @@
-// Package cli is the API client behind the bootstrap, network, cluster and
-// nodepool commands: it builds requests from flags and an input file, calls
+// Package cli is the API client behind the bootstrap, network and cluster
+// commands: it builds requests from flags and Kubernetes-style manifests
+// (manifest.go), calls
 // the cloud.v1 API, and prints the response. cmd only wires cobra flags to
 // Options.
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"buf.build/go/protovalidate"
@@ -39,14 +38,20 @@ const (
 type Options struct {
 	// Tenant is --tenant, required by every command.
 	Tenant string
-	// Cluster is --cluster, the parent of node pools.
-	Cluster string
-	// ID is the resource ID: the argument of network, cluster and nodepool
+	// ID is the resource ID: the argument of network and cluster
 	// commands, --id of bootstrap get (the bootstrap ID, CloudAccount.id).
 	ID string
-	// Input is --config: a YAML (or JSON) file holding the resource of a
-	// create or update, in protojson field names (camelCase).
+	// Input is -f: the manifest of a create, update or import (Manifest).
 	Input string
+	// Wait is --wait: create, update, import, takeover and delete return
+	// once the resource is ready (or gone), polling it; Timeout bounds it.
+	Wait    bool
+	Timeout time.Duration
+	// Progress receives --wait's state changes (stderr).
+	Progress io.Writer
+	// Out and Output are where and how (--output) watch prints its stream.
+	Out    io.Writer
+	Output string
 	// ETag is --etag, for optimistic concurrency on update and delete.
 	ETag string
 	// UpdateMask is --update-mask: the fields an update changes.
@@ -68,10 +73,9 @@ func (o Options) requireTenant() error {
 
 // Clients are the cloud.v1 API clients.
 type Clients struct {
-	Tenant   cloudv1connect.TenantServiceClient
-	Network  cloudv1connect.NetworkServiceClient
-	Cluster  cloudv1connect.ClusterServiceClient
-	NodePool cloudv1connect.NodePoolServiceClient
+	Tenant  cloudv1connect.TenantServiceClient
+	Network cloudv1connect.NetworkServiceClient
+	Cluster cloudv1connect.ClusterServiceClient
 }
 
 // NewClients returns clients of the API at server (a base URL) over
@@ -82,10 +86,9 @@ func NewClients(server string, httpClient *http.Client) Clients {
 	}
 	c := connect.NewClient(connecthttp.NewTransport(httpClient, server))
 	return Clients{
-		Tenant:   cloudv1connect.NewTenantServiceClient(c),
-		Network:  cloudv1connect.NewNetworkServiceClient(c),
-		Cluster:  cloudv1connect.NewClusterServiceClient(c),
-		NodePool: cloudv1connect.NewNodePoolServiceClient(c),
+		Tenant:  cloudv1connect.NewTenantServiceClient(c),
+		Network: cloudv1connect.NewNetworkServiceClient(c),
+		Cluster: cloudv1connect.NewClusterServiceClient(c),
 	}
 }
 
@@ -93,12 +96,12 @@ func NewClients(server string, httpClient *http.Client) Clients {
 // the response.
 type Command func(ctx context.Context, c Clients, o Options) (proto.Message, error)
 
-// Run runs cmd and prints its response to w in format.
+// Run runs cmd and prints its response to w in format. Each API call is
+// bounded by requestTimeout; --wait by o.Timeout.
 func Run(ctx context.Context, cmd Command, c Clients, o Options, w io.Writer, format string) error {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
+	o.Out, o.Output = w, format
 	res, err := cmd(ctx, c, o)
-	if err != nil {
+	if err != nil || res == nil { // watch prints as it goes
 		return err
 	}
 	return Print(w, res, format)
@@ -111,6 +114,8 @@ func call[Req, Resp proto.Message](ctx context.Context, req Req, send func(conte
 	if err := protovalidate.Validate(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	return send(ctx, req)
 }
 
@@ -127,30 +132,6 @@ func requestID(tenant string, req proto.Message) (string, error) {
 		return "", err
 	}
 	return uuid.NewSHA1(requestNamespace, append([]byte(tenant+"\x00"), raw...)).String(), nil
-}
-
-// LoadInput reads a YAML or JSON file into msg (protojson field names).
-// An empty path leaves msg as it is. Unknown fields are errors, so typos do
-// not pass silently.
-func LoadInput(path string, msg proto.Message) error {
-	if path == "" {
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("--config: %w", err)
-	}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil
-	}
-	js, err := yaml.YAMLToJSON(raw)
-	if err != nil {
-		return fmt.Errorf("--config %s: %w", path, err)
-	}
-	if err := protojson.Unmarshal(js, msg); err != nil {
-		return fmt.Errorf("--config %s: %w", path, err)
-	}
-	return nil
 }
 
 // Print writes msg as YAML or JSON.

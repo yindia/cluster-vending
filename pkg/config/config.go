@@ -7,7 +7,7 @@
 // Global settings apply to every command (which cluster to talk to, how to
 // log). Serve settings apply to the API server only, including the settings
 // file (--config). Client settings apply to the commands that call the API
-// (bootstrap, network, cluster, nodepool); their --config is the request
+// (bootstrap, network, cluster); their --config is the request
 // input, not a settings file.
 //
 // Region and zone data is not configuration: it lives in the static catalog

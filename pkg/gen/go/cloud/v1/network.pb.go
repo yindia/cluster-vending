@@ -225,7 +225,9 @@ type Network struct {
 	// ("<name>-<hash8>-<suffix>"). Immutable.
 	Name        string `protobuf:"bytes,11,opt,name=name,proto3" json:"name,omitempty"`
 	DisplayName string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	// API-level labels, same rules as Cluster.labels.
+	// Labels, for grouping and filtering, and applied as tags to every cloud
+	// resource of the network (next to the platform's own tags). Mutable:
+	// an update re-tags the resources. Same rules as Cluster.labels.
 	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Spec   *NetworkSpec      `protobuf:"bytes,5,opt,name=spec,proto3" json:"spec,omitempty"`
 	// Output only.
@@ -360,17 +362,7 @@ type NetworkSpec struct {
 	// (CloudAccount.id) returned by TenantService.BootstrapTenant. Its
 	// provider must be the network's. Immutable. Clusters run in their
 	// network's account.
-	BootstrapId string `protobuf:"bytes,4,opt,name=bootstrap_id,json=bootstrapId,proto3" json:"bootstrap_id,omitempty"`
-	// Applied to every cloud resource of the network. Same rules as
-	// ClusterSpec.tags.
-	Tags map[string]string `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// The cloud the network lives in. Must match the provider of every
-	// cluster that uses it.
-	//
-	// Types that are valid to be assigned to Provider:
-	//
-	//	*NetworkSpec_Aws
-	Provider      isNetworkSpec_Provider `protobuf_oneof:"provider"`
+	BootstrapId   string `protobuf:"bytes,4,opt,name=bootstrap_id,json=bootstrapId,proto3" json:"bootstrap_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -425,39 +417,6 @@ func (x *NetworkSpec) GetBootstrapId() string {
 	}
 	return ""
 }
-
-func (x *NetworkSpec) GetTags() map[string]string {
-	if x != nil {
-		return x.Tags
-	}
-	return nil
-}
-
-func (x *NetworkSpec) GetProvider() isNetworkSpec_Provider {
-	if x != nil {
-		return x.Provider
-	}
-	return nil
-}
-
-func (x *NetworkSpec) GetAws() *AwsNetworkSpec {
-	if x != nil {
-		if x, ok := x.Provider.(*NetworkSpec_Aws); ok {
-			return x.Aws
-		}
-	}
-	return nil
-}
-
-type isNetworkSpec_Provider interface {
-	isNetworkSpec_Provider()
-}
-
-type NetworkSpec_Aws struct {
-	Aws *AwsNetworkSpec `protobuf:"bytes,10,opt,name=aws,proto3,oneof"` // gcp = 11, azure = 12, as in ClusterSpec.provider.
-}
-
-func (*NetworkSpec_Aws) isNetworkSpec_Provider() {}
 
 // ClusterNetwork is where a cluster runs: a reference to a platform Network
 // plus the cluster's own pod and service ranges. The network's layout is
@@ -927,13 +886,13 @@ var File_cloud_v1_network_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_network_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/network.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x12cloud/v1/aws.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x04\n" +
+	"\x16cloud/v1/network.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aNetwork\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
 	"\x04name\x18\v \x01(\tB,\xbaH)r'\x10\x01\x18(2!^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$R\x04name\x12+\n" +
-	"\fdisplay_name\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\vdisplayName\x12u\n" +
-	"\x06labels\x18\x04 \x03(\v2\x1d.cloud.v1.Network.LabelsEntryB>\xbaH;\x9a\x018\x10@\".r,\x10\x01\x18?2&^[a-z0-9]([a-z0-9_.-]{0,61}[a-z0-9])?$*\x04r\x02\x18?R\x06labels\x121\n" +
+	"\fdisplay_name\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\vdisplayName\x12\x81\x01\n" +
+	"\x06labels\x18\x04 \x03(\v2\x1d.cloud.v1.Network.LabelsEntryBJ\xbaHG\x9a\x01D\x10(\" r\x1e\x10\x01\x18\x80\x012\x17^[A-Za-z0-9 _.:/=+@-]+$*\x1er\x1c\x18\x80\x022\x17^[A-Za-z0-9 _.:/=+@-]*$R\x06labels\x121\n" +
 	"\x04spec\x18\x05 \x01(\v2\x15.cloud.v1.NetworkSpecB\x06\xbaH\x03\xc8\x01\x01R\x04spec\x12/\n" +
 	"\x06status\x18\x06 \x01(\v2\x17.cloud.v1.NetworkStatusR\x06status\x12\x1e\n" +
 	"\n" +
@@ -947,28 +906,12 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd7\r\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbb\x01\n" +
 	"\vNetworkSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x127\n" +
 	"\x06layout\x18\x02 \x01(\v2\x17.cloud.v1.NetworkLayoutB\x06\xbaH\x03\xc8\x01\x01R\x06layout\x12+\n" +
-	"\fbootstrap_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\vbootstrapId\x12M\n" +
-	"\x04tags\x18\x03 \x03(\v2\x1f.cloud.v1.NetworkSpec.TagsEntryB\x18\xbaH\x15\x9a\x01\x12\x10(\"\ar\x05\x10\x01\x18\x80\x01*\x05r\x03\x18\x80\x02R\x04tags\x12,\n" +
-	"\x03aws\x18\n" +
-	" \x01(\v2\x18.cloud.v1.AwsNetworkSpecH\x00R\x03aws\x1a7\n" +
-	"\tTagsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:\xe7\n" +
-	"\xbaH\xe3\n" +
-	"\x1a\x8f\x01\n" +
-	"\n" +
-	"aws.region\x12,region must be an AWS region, e.g. us-east-1\x1aS!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')\x1a\xa3\x01\n" +
-	"\x11aws.subnets_zonal\x123AWS subnets are zonal: every subnet needs a zone_id\x1aY!has(this.aws) || this.layout.subnets.all(s, s.zone_id.matches('^[a-z]+[0-9]-az[0-9]+$'))\x1a\x86\x02\n" +
-	"\x1daws.private_subnets_two_zones\x12<EKS needs PRIVATE subnets in at least two availability zones\x1a\xa6\x01!has(this.aws) || size(this.layout.subnets) == 0 || this.layout.subnets.exists(a, a.role == 2 && this.layout.subnets.exists(b, b.role == 2 && b.zone_id != a.zone_id))\x1a\xe5\x01\n" +
-	"\x1aaws.public_subnet_required\x12gAWS subnets, when set, must include at least one PUBLIC subnet (NAT and internet-facing load balancers)\x1a^!has(this.aws) || size(this.layout.subnets) == 0 || this.layout.subnets.exists(s, s.role == 1)\x1a\x8f\x02\n" +
-	"\x10aws.per_zone_nat\x12JPER_ZONE NAT needs a PUBLIC subnet in every zone that has a PRIVATE subnet\x1a\xae\x01!has(this.aws) || this.layout.nat_gateway_mode != 2 || this.layout.subnets.filter(s, s.role == 2).all(p, this.layout.subnets.exists(q, q.role == 1 && q.zone_id == p.zone_id))\x1a\x8a\x01\n" +
-	"\x17aws.tag_reserved_prefix\x12'AWS tag keys must not start with 'aws:'\x1aF!has(this.aws) || this.tags.all(k, !k.lowerAscii().startsWith('aws:'))\x1a\x98\x01\n" +
-	"\x17public_subnets_aws_only\x12Conly AWS has PUBLIC subnets; GCP and Azure load balancers need none\x1a8has(this.aws) || this.layout.subnets.all(s, s.role != 1)B\x11\n" +
-	"\bprovider\x12\x05\xbaH\x02\b\x01\"\xce\x01\n" +
+	"\fbootstrap_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\vbootstrapIdJ\x04\b\x03\x10\x04J\x04\b\n" +
+	"\x10\vR\x04tagsR\x03aws\"\xce\x01\n" +
 	"\x0eClusterNetwork\x12'\n" +
 	"\n" +
 	"network_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\x12;\n" +
@@ -1047,7 +990,7 @@ func file_cloud_v1_network_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_network_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_cloud_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_cloud_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_cloud_v1_network_proto_goTypes = []any{
 	(SubnetRole)(0),               // 0: cloud.v1.SubnetRole
 	(NatGatewayMode)(0),           // 1: cloud.v1.NatGatewayMode
@@ -1060,37 +1003,33 @@ var file_cloud_v1_network_proto_goTypes = []any{
 	(*NetworkStatus)(nil),         // 8: cloud.v1.NetworkStatus
 	(*NetworkResources)(nil),      // 9: cloud.v1.NetworkResources
 	nil,                           // 10: cloud.v1.Network.LabelsEntry
-	nil,                           // 11: cloud.v1.NetworkSpec.TagsEntry
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
-	(*AwsNetworkSpec)(nil),        // 13: cloud.v1.AwsNetworkSpec
-	(*Condition)(nil),             // 14: cloud.v1.Condition
-	(*ImportStatus)(nil),          // 15: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),      // 16: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),       // 17: cloud.v1.ManagedResource
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*Condition)(nil),             // 12: cloud.v1.Condition
+	(*ImportStatus)(nil),          // 13: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),      // 14: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),       // 15: cloud.v1.ManagedResource
 }
 var file_cloud_v1_network_proto_depIdxs = []int32{
 	10, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
 	4,  // 1: cloud.v1.Network.spec:type_name -> cloud.v1.NetworkSpec
 	8,  // 2: cloud.v1.Network.status:type_name -> cloud.v1.NetworkStatus
-	12, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
-	12, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
+	11, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
+	11, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
 	6,  // 5: cloud.v1.NetworkSpec.layout:type_name -> cloud.v1.NetworkLayout
-	11, // 6: cloud.v1.NetworkSpec.tags:type_name -> cloud.v1.NetworkSpec.TagsEntry
-	13, // 7: cloud.v1.NetworkSpec.aws:type_name -> cloud.v1.AwsNetworkSpec
-	7,  // 8: cloud.v1.NetworkLayout.subnets:type_name -> cloud.v1.Subnet
-	1,  // 9: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
-	0,  // 10: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
-	2,  // 11: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
-	14, // 12: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
-	9,  // 13: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
-	15, // 14: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
-	16, // 15: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	17, // 16: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	7,  // 6: cloud.v1.NetworkLayout.subnets:type_name -> cloud.v1.Subnet
+	1,  // 7: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
+	0,  // 8: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
+	2,  // 9: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
+	12, // 10: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
+	9,  // 11: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
+	13, // 12: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
+	14, // 13: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	15, // 14: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_proto_init() }
@@ -1098,21 +1037,17 @@ func file_cloud_v1_network_proto_init() {
 	if File_cloud_v1_network_proto != nil {
 		return
 	}
-	file_cloud_v1_aws_proto_init()
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_options_proto_init()
-	file_cloud_v1_network_proto_msgTypes[1].OneofWrappers = []any{
-		(*NetworkSpec_Aws)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_network_proto_rawDesc), len(file_cloud_v1_network_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   9,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

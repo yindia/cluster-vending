@@ -2,7 +2,10 @@ package aws
 
 import (
 	apiextv1alpha1 "github.com/crossplane/crossplane/apis/v2/apiextensions/v1alpha1"
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 )
@@ -44,4 +47,14 @@ func ActivationPolicy() *apiextv1alpha1.ManagedResourceActivationPolicy {
 		ObjectMeta: metav1.ObjectMeta{Name: ActivationPolicyName, Labels: crossplane.Labels("")},
 		Spec:       apiextv1alpha1.ManagedResourceActivationPolicySpec{Activations: activations},
 	}
+}
+
+// ManagedObjects are empty objects of every managed resource kind the
+// platform creates (networks and clusters), for watches and caches.
+func ManagedObjects() []client.Object {
+	return append(NetworkObjects(),
+		&awsiam.Role{}, &awsiam.RolePolicyAttachment{}, &awsiam.Policy{},
+		&awseks.Cluster{}, &awseks.NodeGroup{}, &awseks.Addon{}, &awseks.PodIdentityAssociation{},
+		&awseks.AccessEntry{}, &awseks.AccessPolicyAssociation{}, &awseks.ClusterAuth{},
+	)
 }

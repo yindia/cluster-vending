@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/aws.proto";
+import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
 import "google/protobuf/field_mask.proto";
 
@@ -35,6 +36,16 @@ service NetworkService {
 
   // Returns one network, or NOT_FOUND.
   rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Streams one network's state: a first message with the network and an
+  // ADDED event per managed resource, then a message whenever something
+  // changes (the network's state or message, or a resource's), until the
+  // network is deleted (deleted: true) or the client cancels. NOT_FOUND
+  // when the network does not exist. Like GetNetwork, reading a deleting
+  // network moves its deletion on.
+  rpc WatchNetwork(WatchNetworkRequest) returns (stream WatchNetworkResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -163,6 +174,26 @@ message GetNetworkResponse {
   Network network = 1;
 }
 
+message WatchNetworkRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Network.id.
+  string network_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message WatchNetworkResponse {
+  // The network, in the first message and whenever its state, message or
+  // generation changed; unset otherwise.
+  Network network = 1;
+  // The managed resources that changed since the previous message.
+  repeated ManagedResourceEvent events = 2;
+  // The network is gone; this is the last message.
+  bool deleted = 3;
+}
+
 message ListNetworksRequest {
   string tenant_id = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -199,8 +230,7 @@ message UpdateNetworkRequest {
 
   // Mutable paths:
   //   display_name
-  //   labels
-  //   spec.tags
+  //   labels         (also re-tags every cloud resource)
   // The layout (address space, subnets, NAT) is immutable for now; any
   // other path fails with INVALID_ARGUMENT. Updates of an IMPORTED network
   // fail with FAILED_PRECONDITION until it is taken over.

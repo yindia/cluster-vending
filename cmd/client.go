@@ -16,39 +16,38 @@ type verb struct {
 	short string
 	run   cli.Command
 	args  cobra.PositionalArgs
-	// id adds --id, input --config (the request input), etag --etag, mask
+	// id adds --id, input -f (the manifest), etag --etag, mask
 	// --update-mask, page --page-size and --page-token, ack
-	// --acknowledge-not-imported.
-	id, input, etag, mask, page, ack bool
+	// --acknowledge-not-imported, wait --wait and --timeout.
+	id, input, etag, mask, page, ack, wait bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
-// ID is the argument.
-func crud(noun string, create, get, list, update, del cli.Command) []verb {
+// manifest kind is kind.
+func crud(noun, kind string, create, get, list, update, del cli.Command) []verb {
 	return []verb{
-		{use: "create [id]", short: "Create a " + noun + " from --config", run: create, args: cobra.MaximumNArgs(1), input: true},
+		{use: "create", short: fmt.Sprintf("Create a %s from a %s manifest (-f); prints its server-assigned id", noun, kind),
+			run: create, args: cobra.NoArgs, input: true, wait: true},
 		{use: "get <id>", short: "Show a " + noun, run: get, args: cobra.ExactArgs(1)},
 		{use: "list", short: "List " + noun + "s", run: list, args: cobra.NoArgs, page: true},
-		{use: "update <id>", short: "Update the --update-mask fields of a " + noun + " from --config", run: update,
-			args: cobra.ExactArgs(1), input: true, etag: true, mask: true},
-		{use: "delete <id>", short: "Delete a " + noun, run: del, args: cobra.ExactArgs(1), etag: true},
+		{use: "update [id]", short: fmt.Sprintf("Update the --update-mask fields of a %s from a %s manifest (-f); the id is the argument or metadata.id", noun, kind),
+			run: update, args: cobra.MaximumNArgs(1), input: true, etag: true, mask: true, wait: true},
+		{use: "delete <id>", short: fmt.Sprintf("Delete a %s; its resources are deleted in order", noun), run: del,
+			args: cobra.ExactArgs(1), etag: true, wait: true},
 	}
 }
 
 // newResourceCmd returns a command group calling the API. Every verb takes
-// --tenant, --server and --output.
-func newResourceCmd(use, short string, verbs []verb, extra func(*cobra.Command, *cli.Options)) *cobra.Command {
+// --tenant (or metadata.tenant of the manifest), --server and --output.
+func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	var o cli.Options
 	var output string
 	group := &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs}
 	pf := group.PersistentFlags()
-	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (required)")
+	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (required unless the manifest sets metadata.tenant)")
 	pf.StringVarP(&output, "output", "o", cli.OutputYAML, "output format: yaml or json")
 	for _, s := range config.ClientSettings() {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
-	}
-	if extra != nil {
-		extra(group, &o)
 	}
 
 	for _, v := range verbs {
@@ -62,6 +61,7 @@ func newResourceCmd(use, short string, verbs []verb, extra func(*cobra.Command, 
 					return err
 				}
 				opts := o
+				opts.Progress = cmd.ErrOrStderr()
 				if len(args) > 0 {
 					opts.ID = args[0]
 				}
@@ -73,7 +73,9 @@ func newResourceCmd(use, short string, verbs []verb, extra func(*cobra.Command, 
 			f.StringVar(&o.ID, "id", "", "bootstrap ID: the id returned by bootstrap create / list")
 		}
 		if v.input {
-			f.StringVar(&o.Input, "config", "", "YAML or JSON file with the request input (protojson field names)")
+			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
+			f.StringVar(&o.Input, "config", "", "the manifest (use -f)")
+			_ = f.MarkDeprecated("config", "use -f/--file")
 		}
 		if v.etag {
 			f.StringVar(&o.ETag, "etag", "", "fail unless the resource still has this etag")
@@ -89,6 +91,10 @@ func newResourceCmd(use, short string, verbs []verb, extra func(*cobra.Command, 
 			f.Int32Var(&o.PageSize, "page-size", 0, "maximum results per page; 0 uses the server default")
 			f.StringVar(&o.PageToken, "page-token", "", "next_page_token of the previous page")
 		}
+		if v.wait {
+			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone), printing its progress to stderr")
+			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
+		}
 		group.AddCommand(cmd)
 	}
 	return group
@@ -96,36 +102,32 @@ func newResourceCmd(use, short string, verbs []verb, extra func(*cobra.Command, 
 
 func newBootstrapCmd() *cobra.Command {
 	return newResourceCmd("bootstrap", "Onboard a tenant's cloud account (TenantService)", []verb{
-		{use: "create", short: "Bootstrap the account in --config (accountName, aws.accountId) for --tenant",
+		{use: "create", short: "Bootstrap the account in a CloudAccount manifest (-f)",
 			run: cli.BootstrapCreate, args: cobra.NoArgs, input: true},
 		{use: "get", short: "Show the bootstrapped account --id", run: cli.BootstrapGet, args: cobra.NoArgs, id: true},
 		{use: "list", short: "List the tenant's bootstrapped accounts", run: cli.BootstrapList, args: cobra.NoArgs},
-	}, nil)
+	})
 }
 
 func newNetworkCmd() *cobra.Command {
-	verbs := crud("network", cli.NetworkCreate, cli.NetworkGet, cli.NetworkList, cli.NetworkUpdate, cli.NetworkDelete)
-	// Networks are named by the client and identified by the server.
-	verbs[0].use, verbs[0].short = "create [name]", "Create a network from --config; prints its server-assigned id"
+	verbs := crud("network", cli.KindNetwork, cli.NetworkCreate, cli.NetworkGet, cli.NetworkList, cli.NetworkUpdate, cli.NetworkDelete)
 	verbs = append(verbs,
-		verb{use: "import [name]", short: "Import an existing network read-only from --config (name, bootstrapId, region, aws.vpcId, aws.subnetIds)",
-			run: cli.NetworkImport, args: cobra.MaximumNArgs(1), input: true},
+		verb{use: "import", short: "Import an existing network read-only from a NetworkImport manifest (-f)",
+			run: cli.NetworkImport, args: cobra.NoArgs, input: true, wait: true},
 		verb{use: "takeover <id>", short: "Take over an imported network: the platform becomes its owner",
-			run: cli.NetworkTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true})
-	return newResourceCmd("network", "Manage networks (NetworkService)", verbs, nil)
+			run: cli.NetworkTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
+		watchVerb("network", cli.NetworkWatch))
+	return newResourceCmd("network", "Manage networks (NetworkService)", verbs)
 }
 
 func newClusterCmd() *cobra.Command {
-	verbs := crud("cluster", cli.ClusterCreate, cli.ClusterGet, cli.ClusterList, cli.ClusterUpdate, cli.ClusterDelete)
-	// Clusters are named by the client and identified by the server.
-	verbs[0].use, verbs[0].short = "create [name]", "Create an EKS cluster in a network from --config; prints its server-assigned id"
-	return newResourceCmd("cluster", "Manage clusters (ClusterService)", verbs, nil)
+	verbs := crud("cluster", cli.KindCluster, cli.ClusterCreate, cli.ClusterGet, cli.ClusterList, cli.ClusterUpdate, cli.ClusterDelete)
+	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", append(verbs, watchVerb("cluster", cli.ClusterWatch)))
 }
 
-func newNodePoolCmd() *cobra.Command {
-	return newResourceCmd("nodepool", "Manage the node pools of a cluster (NodePoolService)",
-		crud("node pool", cli.NodePoolCreate, cli.NodePoolGet, cli.NodePoolList, cli.NodePoolUpdate, cli.NodePoolDelete),
-		func(group *cobra.Command, o *cli.Options) {
-			group.PersistentFlags().StringVar(&o.Cluster, "cluster", "", "cluster ID (required)")
-		})
+// watchVerb streams a resource's state and its managed resources' events.
+func watchVerb(noun string, run cli.Command) verb {
+	return verb{use: "watch <id>",
+		short: fmt.Sprintf("Stream a %s's state and its resources' events (+ added, ~ changed, - deleted) until it is deleted; -o json for JSON lines", noun),
+		run:   run, args: cobra.ExactArgs(1)}
 }

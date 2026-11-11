@@ -39,19 +39,29 @@ message Cluster {
   // Human-friendly name. Mutable.
   string display_name = 3 [(buf.validate.field).string.max_len = 128];
 
-  // API-level labels for grouping and filtering. Mutable. Not propagated to
-  // the cloud; see ClusterSpec.tags for that.
+  // Labels, for grouping and filtering, and applied as tags to every cloud
+  // resource of the cluster (next to the platform's own ownership tags,
+  // hence 40, below AWS's 50). Mutable: an update re-tags the resources.
+  // Keys and values follow the AWS tag rules; keys starting with "aws:"
+  // are refused for AWS (the server checks: the cloud is the network's
+  // account).
+  //   AWS   forProvider.tags
+  //   GCP   forProvider.resourceLabels / labels
+  //   Azure forProvider.tags
   map<string, string> labels = 4 [(buf.validate.field).map = {
-    max_pairs: 64
+    max_pairs: 40
     keys: {
       string: {
         min_len: 1
-        max_len: 63
-        pattern: "^[a-z0-9]([a-z0-9_.-]{0,61}[a-z0-9])?$"
+        max_len: 128
+        pattern: "^[A-Za-z0-9 _.:/=+@-]+$"
       }
     }
     values: {
-      string: {max_len: 63}
+      string: {
+        max_len: 256
+        pattern: "^[A-Za-z0-9 _.:/=+@-]*$"
+      }
     }
   }];
 
@@ -95,11 +105,6 @@ message ClusterSpec {
     id: "aws.instance_types"
     message: "AWS instance types look like m6i.large"
     expression: "!has(this.aws) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))"
-  };
-  option (buf.validate.message).cel = {
-    id: "aws.tag_reserved_prefix"
-    message: "AWS tag keys must not start with 'aws:'"
-    expression: "!has(this.aws) || this.tags.all(k, !k.lowerAscii().startsWith('aws:'))"
   };
 
   option (buf.validate.message).cel = {
@@ -153,28 +158,13 @@ message ClusterSpec {
   // Control plane settings. Optional; every field has a default.
   ControlPlaneSpec control_plane = 3;
 
-  // The node pool created together with the cluster. It is listed by
-  // NodePoolService as "default" but changed only through UpdateCluster.
-  // More pools: NodePoolService.CreateNodePool.
+  // The node pool created together with the cluster, changed through
+  // UpdateCluster.
   NodePoolSpec default_node_pool = 4 [(buf.validate.field).required = true];
 
-  // Applied to every cloud resource the server creates. The server adds its
-  // own ownership tags (tenant, cluster id), so the cap is below AWS's 50.
-  //   AWS   forProvider.tags
-  //   GCP   forProvider.resourceLabels / labels
-  //   Azure forProvider.tags
-  map<string, string> tags = 5 [(buf.validate.field).map = {
-    max_pairs: 40
-    keys: {
-      string: {
-        min_len: 1
-        max_len: 128
-      }
-    }
-    values: {
-      string: {max_len: 256}
-    }
-  }];
+  // Cloud tags are the cluster's labels (Cluster.labels).
+  reserved 5;
+  reserved "tags";
 
   // Who administers the cluster. Mutable.
   AccessSpec access = 6;

@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
+import "cloud/v1/managed_resource.proto";
 import "google/protobuf/field_mask.proto";
 
 // ClusterService manages the lifecycle of tenant clusters.
@@ -34,6 +35,16 @@ service ClusterService {
 
   // Updates the mutable fields named in update_mask.
   rpc UpdateCluster(UpdateClusterRequest) returns (UpdateClusterResponse);
+
+  // Streams one cluster's state: a first message with the cluster and an
+  // ADDED event per managed resource, then a message whenever something
+  // changes (the cluster's state or message, or a resource's), until the
+  // cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
+  // when the cluster does not exist. Like GetCluster, reading moves the
+  // cluster's creation (add-ons once EKS is ACTIVE) and deletion on.
+  rpc WatchCluster(WatchClusterRequest) returns (stream WatchClusterResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // Removes the cluster, all its node pools, and every cloud resource the
   // platform owns for it. A shared Network (network.network_id) is not deleted. For
@@ -79,6 +90,26 @@ message GetClusterRequest {
   }];
   // Cluster.id.
   string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message WatchClusterRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message WatchClusterResponse {
+  // The cluster, in the first message and whenever its state, message or
+  // generation changed; unset otherwise.
+  Cluster cluster = 1;
+  // The managed resources that changed since the previous message.
+  repeated ManagedResourceEvent events = 2;
+  // The cluster is gone; this is the last message.
+  bool deleted = 3;
 }
 
 message GetClusterResponse {
@@ -136,8 +167,7 @@ message UpdateClusterRequest {
   // the paths are lowerCamelCase and comma-separated, e.g.
   // "spec.controlPlane.kubernetesVersion,labels". Mutable paths:
   //   display_name
-  //   labels
-  //   spec.tags
+  //   labels         (also re-tags every cloud resource)
   //   spec.control_plane.kubernetes_version
   //   spec.control_plane.endpoint_access.public_access_cidrs
   //   spec.control_plane.secrets_encryption.enabled   (false -> true only)

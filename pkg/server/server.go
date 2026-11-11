@@ -16,7 +16,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/network"
-	"github.com/yindia/cluster-vending/pkg/server/nodepool"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 	"github.com/yindia/cluster-vending/pkg/server/tenant"
 	"github.com/yindia/cluster-vending/pkg/version"
@@ -28,13 +27,12 @@ import (
 const readHeaderTimeout = 10 * time.Second
 
 // NewHandler registers every cloud.v1 service and returns the HTTP handler
-// that serves them over Connect, gRPC and gRPC-Web. The services answer
-// UNIMPLEMENTED for now.
+// that serves them over Connect, gRPC and gRPC-Web, including the
+// server-streaming Watch RPCs.
 func NewHandler(d service.Deps) http.Handler {
 	server := connect.NewServer()
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
-	cloudv1connect.RegisterNodePoolServiceHandler(server, nodepool.NewNodePoolService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d))
 
 	mux := http.NewServeMux()

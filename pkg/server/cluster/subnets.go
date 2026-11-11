@@ -72,8 +72,9 @@ func (s *ClusterService) tagSubnets(ctx context.Context, row *model.Cluster, t t
 // namespace that has them: applying no fields as the cluster's manager
 // drops what it owned.
 func (s *ClusterService) untagSubnets(ctx context.Context, row *model.Cluster, namespace string) error {
+	// From the API server: the cache strips the managedFields this reads.
 	subnets := &awsec2.SubnetList{}
-	err := s.deps.Kube.List(ctx, subnets, client.InNamespace(namespace),
+	err := s.deps.Reader().List(ctx, subnets, client.InNamespace(namespace),
 		client.MatchingLabels{crossplane.LabelNetwork: row.NetworkID})
 	if err != nil {
 		return fmt.Errorf("list network subnets: %w", err)

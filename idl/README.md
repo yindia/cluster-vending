@@ -16,8 +16,7 @@ their source of truth.
 |---|---|---|
 | `CloudAccount` | `TenantService` | A tenant's cloud account, one per provider. `BootstrapTenant` registers it and prepares the management cluster to reach it; required before any network or cluster. |
 | `Network` | `NetworkService` | VPC / VNet with subnets, NAT, routing. Created, or imported and taken over. Shared by clusters. |
-| `Cluster` | `ClusterService` | Kubernetes control plane + its default node pool. References a Network by id. |
-| `NodePool` | `NodePoolService` | Additional pools of a cluster; also lists the default pool and carried-over pools. |
+| `Cluster` | `ClusterService` | Kubernetes control plane + its default node pool (platform workloads; user workloads run on Karpenter nodes). References a Network by id. |
 
 All RPCs are scoped by `tenant_id` (one rule everywhere: DNS label, ≤ 56
 chars, so the namespace `tenant-<tenant_id>` fits 63) and are asynchronous:
@@ -98,7 +97,7 @@ also needs, outside this API:
    The server reads the option and never derives a value from the proto name.
    `test/idl/crossplane_contract_test.go` enforces this.
 4. **Provider-specific constraints on common fields** are CEL rules on
-   `ClusterSpec`, `NetworkSpec` and `NodePool`, with IDs prefixed by provider
+   `ClusterSpec` and `NetworkSpec`, with IDs prefixed by provider
    (`aws.region`, `aws.subnets_zonal`, ...). Rules that apply to every
    non-AWS provider use `has(this.aws) || ...`.
 5. **Units and shapes follow the majority.** `disk_size_gb` (GCP/Azure
@@ -114,8 +113,7 @@ Node pool paths are relative to the pool resource. The contract's pool is
 always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 `removeDefaultNodePool: true`), Azure `KubernetesClusterNodePool` in mode User
 (AKS's built-in `defaultNodePool` becomes a platform-managed system pool).
-`NodePoolSpec` maps the same way for `ClusterSpec.default_node_pool` and for
-`NodePool.spec`.
+`NodePoolSpec` maps this way for `ClusterSpec.default_node_pool`.
 
 | Common field | AWS | GCP | Azure |
 |---|---|---|---|
@@ -141,7 +139,7 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | pool `disk_size_gb` | `diskSize` | `nodeConfig.diskSizeGb` | `osDiskSizeGb` |
 | pool `labels` | `labels` | `nodeConfig.labels` | `nodeLabels` |
 | pool `taints` | `taint[]` | `nodeConfig.taint[]` | `nodeTaints` |
-| `spec.tags` | `tags` | `resourceLabels` | `tags` |
+| `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
 | `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds` |
 | `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
 
@@ -191,16 +189,16 @@ network can serve several clusters.
 
 ## Node pools
 
-- `ClusterSpec.default_node_pool` is created with the cluster and listed by
-  `NodePoolService` as `default`, but changed only through `UpdateCluster`.
-- `CreateNodePool` adds pools (e.g. GPU, spot). Instance types, capacity
-  type, disk size and AMI type are immutable: create a new pool and delete
-  the old one instead.
-- Pools of an imported cluster: representable node groups become NodePools;
-  node groups with a launch template or custom AMI are carried over verbatim
-  (`status.carried_over`). Those are read-only, but `DeleteNodePool` works:
-  create a replacement pool, move workloads, delete the carried one.
-- `DeleteCluster` deletes every pool.
+- A cluster has one node pool: `ClusterSpec.default_node_pool`, created with
+  the cluster and changed through `UpdateCluster`. It runs platform
+  workloads; user workloads run on Karpenter nodes, so there is no
+  node pool API.
+- Changing instance types, capacity type or disk size replaces the node
+  group: a new one is created and the old one deleted once the new one is
+  ready.
+- Other node groups of an imported cluster are carried over verbatim
+  (`status.carried_over`) and deleted with the cluster.
+- `DeleteCluster` deletes every node group.
 
 ## Imports
 
@@ -214,8 +212,8 @@ network can serve several clusters.
   endpoint access and add-ons. Only fields that are set can change.
 - **Tags are kept.** Every existing tag survives the takeover (`Name`,
   `karpenter.sh/discovery`, `kubernetes.io/cluster/<name>`, ...); the
-  platform only adds its own ownership tags and `spec.tags` on top. Removing
-  a key from `spec.tags` later removes only that key.
+  platform only adds its own ownership tags and the labels on top. Removing
+  a label later removes only that tag.
 - **Closure.** Everything an imported resource references is imported too.
   What the contract models becomes part of the spec; the rest is
   `CARRIED_OVER`. Resources that only reference ours stay with their owner
@@ -274,7 +272,7 @@ the normal `ClusterService`.
 |---|---|---|
 | 0. Network | `ImportNetwork` + `TakeOverNetwork` for the cluster's VPC | see [Networks](#networks) |
 | 1. Import + plan | `CreateCluster` with `spec.existing_cluster` and `network.network_id` | one read-only lookup, then Observe-only resources for everything modelled and carried over. Nothing changes. |
-| 2. Review | `GetCluster` (`status.import`), `ListNodePools` | check `requires_replacement` and `NOT_IMPORTED` |
+| 2. Review | `GetCluster` (`status.import`) | check `requires_replacement` and `NOT_IMPORTED` |
 | 3. Hand off | `terraform state rm` | — |
 | 4. Take over | `UpdateCluster` `spec.existingCluster.policy` = `MANAGE_NO_DELETE` | `[Observe, Create, Update, LateInitialize]`; `forProvider` filled from `atProvider` first, then the plan converges |
 | 5. Own | `UpdateCluster` policy `FULL` + `acknowledgeNotImported` | `["*"]` |
@@ -341,7 +339,7 @@ tenants sharing a cloud account; the tenant stays visible through the
   late-initialized from the cloud and the old value would stay.
 - `kubernetes_version` is resolved to a concrete version and written to the
   control plane and every node pool.
-- `UpdateCluster` / `UpdateNodePool` ignore `scaling_config.desired_size`: it
+- `UpdateCluster` ignores `scaling_config.desired_size`: it
   is create-only (`initProvider`) and the cluster autoscaler owns the node
   count afterwards. GCP `initialNodeCount` is per zone:
   `ceil(desired_size / zones)`.
@@ -355,7 +353,7 @@ tenants sharing a cloud account; the tenant stays visible through the
   `RoleAssignment.principalId` (from the identity's `atProvider.principalId`)
   and the NAT egress IP appended to `authorizedIpRanges` (from
   `PublicIP.atProvider.ipAddress`).
-- GCP label charset for `spec.tags` (`[a-z0-9_-]`, key starts with a letter):
+- GCP label charset for `labels` (`[a-z0-9_-]`, key starts with a letter):
   a `gcp.*` CEL rule when GCP ships.
 
 ### Read-only lookups the server makes
@@ -385,18 +383,17 @@ part of the admin access granted at onboarding.
 ## Adding a provider
 
 1. Add `cloud/v1/<provider>.proto` with `<Provider>ClusterSpec`,
-   `<Provider>ClusterStatus`, `<Provider>NodePoolSpec` and
-   `<Provider>NodePoolStatus`, holding only settings missing from the common
+   `<Provider>ClusterStatus` and `<Provider>NodePoolSpec`, holding only
+   settings missing from the common
    spec (e.g. GCP `release_channel`, `image_type`; Azure `sku_tier`).
 2. Add the arm to the `ClusterSpec.provider`, `ClusterStatus.provider`,
    `NetworkSpec.provider` and `ImportNetworkRequest.provider` oneofs (11 =
-   gcp, 12 = azure) and to `NodePool.provider` / `NodePoolStatus.provider`
-   (21 = gcp, 22 = azure). They are not `reserved`, because un-reserving is a
+   gcp, 12 = azure). They are not `reserved`, because un-reserving is a
    breaking change for buf.
 3. Fill in the provider's `crossplane` value on the common enums
    (`CapacityType`, `TaintEffect`, `NatGatewayMode`) and extend the contract
    test.
-4. Add `<provider>.*` CEL rules on `ClusterSpec`, `NetworkSpec` and `NodePool`
+4. Add `<provider>.*` CEL rules on `ClusterSpec` and `NetworkSpec`
    for its constraints on the common fields (region format, layout, zones,
    GCP label charset, ...).
 5. Add its region / zone catalog next to `pkg/constant/aws`.

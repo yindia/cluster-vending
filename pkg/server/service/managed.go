@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -26,10 +27,13 @@ const externalNameAnnotation = "crossplane.io/external-name"
 // that is not ready yet: the resource waits, it did not fail.
 const waitingOnReference = "cannot resolve references"
 
-// failureGrace is how long a resource may report Synced=False before it
-// counts as FAILED: providers often hit transient errors on the first
-// reconciles (e.g. a ProviderConfigUsage race) that clear on retry. Until
-// then it is CREATING, with the error as its message.
+// failureGrace is how long after its creation a resource may report
+// Synced=False before it counts as FAILED: providers often hit transient
+// errors on the first reconciles (e.g. a ProviderConfigUsage race) that
+// clear on retry. Until then it is CREATING, with the error as its
+// message. It runs from the object's creation, not from the condition's
+// lastTransitionTime: AWS errors carry a new request ID on every retry, so
+// the condition "changes" each time and that clock never runs out.
 const failureGrace = 2 * time.Minute
 
 // now is the clock; tests replace it.
@@ -65,9 +69,7 @@ func (d Deps) Record(ctx context.Context, owner Owner, objects []client.Object) 
 func (d Deps) Observe(ctx context.Context, records []model.ManagedResource) ([]*cloudv1.ManagedResource, error) {
 	out := make([]*cloudv1.ManagedResource, 0, len(records))
 	for _, r := range records {
-		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
-		err := d.Kube.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u)
+		u, err := d.read(ctx, r)
 		switch {
 		case err == nil:
 			out = append(out, view(r, u))
@@ -117,7 +119,7 @@ func view(r model.ManagedResource, u *unstructured.Unstructured) *cloudv1.Manage
 		v.State = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY
 	case synced.status == "False" && strings.Contains(synced.message, waitingOnReference):
 		v.State, v.Reason, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, synced.reason, synced.message
-	case synced.status == "False" && !synced.since.IsZero() && now().Sub(synced.since) < failureGrace:
+	case synced.status == "False" && inGrace(u):
 		v.State, v.Reason, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_CREATING, synced.reason,
 			"retrying: "+synced.message
 	case synced.status == "False":
@@ -217,4 +219,47 @@ func AllGone(views []*cloudv1.ManagedResource) bool {
 		}
 	}
 	return true
+}
+
+// inGrace reports whether u is younger than failureGrace (see there).
+func inGrace(u *unstructured.Unstructured) bool {
+	created := u.GetCreationTimestamp().Time
+	return !created.IsZero() && now().Sub(created) < failureGrace
+}
+
+// read returns a recorded object: from the cache (typed, so the cache
+// serves it), else from the API server, which has objects the cache has
+// not seen yet (just applied) or does not hold.
+func (d Deps) read(ctx context.Context, r model.ManagedResource) (*unstructured.Unstructured, error) {
+	gvk := schema.FromAPIVersionAndKind(r.APIVersion, r.Kind)
+	key := client.ObjectKey{Namespace: r.Namespace, Name: r.Name}
+	typed, err := d.Kube.Scheme().New(gvk)
+	obj, ok := typed.(client.Object)
+	if err != nil || !ok {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(gvk)
+		return u, d.Reader().Get(ctx, key, u)
+	}
+	err = d.Kube.Get(ctx, key, obj)
+	if apierrors.IsNotFound(err) && d.KubeReader != nil {
+		err = d.KubeReader.Get(ctx, key, obj)
+	}
+	if err != nil {
+		return nil, err
+	}
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return nil, fmt.Errorf("convert %s %s: %w", r.Kind, r.Name, err)
+	}
+	u := &unstructured.Unstructured{Object: content}
+	u.SetGroupVersionKind(gvk)
+	return u, nil
+}
+
+// Reader is the uncached reader, or Kube without one (see Deps.KubeReader).
+func (d Deps) Reader() client.Reader {
+	if d.KubeReader != nil {
+		return d.KubeReader
+	}
+	return d.Kube
 }

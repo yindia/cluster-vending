@@ -3,10 +3,13 @@ package network
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/google/uuid"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
@@ -28,6 +31,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -105,9 +109,8 @@ func (f fixture) request(name string, layout *cloudv1.NetworkLayout) *cloudv1.Cr
 		layout = &cloudv1.NetworkLayout{}
 	}
 	return &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
-		Name: name, DisplayName: "Production",
-		Spec: &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: f.accountID, Layout: layout,
-			Tags: map[string]string{"team": "platform"}, Provider: &cloudv1.NetworkSpec_Aws{Aws: &cloudv1.AwsNetworkSpec{}}},
+		Name: name, DisplayName: "Production", Labels: map[string]string{"team": "platform"},
+		Spec: &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: f.accountID, Layout: layout},
 	}}
 }
 
@@ -376,10 +379,9 @@ func TestCreateNetworkStoresInput(t *testing.T) {
 func TestUpdateNetworkUpdatesInput(t *testing.T) {
 	f := newFixture(t)
 	n := f.create(t, "prod", nil) // layout {}: defaults
-	upd := &cloudv1.Network{Id: n.GetId(), DisplayName: "Prod", Labels: map[string]string{"tier": "gold"},
-		Spec: &cloudv1.NetworkSpec{Tags: map[string]string{"team": "network"}}}
+	upd := &cloudv1.Network{Id: n.GetId(), DisplayName: "Prod", Labels: map[string]string{"tier": "gold"}}
 	if _, err := f.svc.UpdateNetwork(t.Context(), &cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: upd,
-		UpdateMask: mask("display_name", "labels", "spec.tags")}); err != nil {
+		UpdateMask: mask("display_name", "labels")}); err != nil {
 		t.Fatalf("UpdateNetwork: %v", err)
 	}
 	row, err := f.store.Networks().Get(t.Context(), tenant, n.GetId())
@@ -390,7 +392,7 @@ func TestUpdateNetworkUpdatesInput(t *testing.T) {
 	if err := protojson.Unmarshal(row.Input, input); err != nil {
 		t.Fatal(err)
 	}
-	if input.GetDisplayName() != "Prod" || input.GetLabels()["tier"] != "gold" || input.GetSpec().GetTags()["team"] != "network" {
+	if input.GetDisplayName() != "Prod" || input.GetLabels()["tier"] != "gold" {
 		t.Errorf("input = %v, want the updated fields", input)
 	}
 	if input.GetName() != "prod" || input.GetSpec().GetRegion() == "" || len(input.GetSpec().GetLayout().GetSubnets()) != 0 {
@@ -455,14 +457,15 @@ func TestUpdateNetwork(t *testing.T) {
 	n := f.create(t, "prod", nil)
 	ctx := t.Context()
 	upd := &cloudv1.Network{Id: n.GetId(), DisplayName: "Prod", Etag: n.GetEtag(),
-		Spec: &cloudv1.NetworkSpec{Tags: map[string]string{"team": "network"}}}
+		Labels: map[string]string{"team": "network"}}
 
+	// Labels are the AWS tags: updating them re-tags every resource.
 	res, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: upd,
-		UpdateMask: mask("display_name", "spec.tags")})
+		UpdateMask: mask("display_name", "labels")})
 	if err != nil {
 		t.Fatalf("UpdateNetwork: %v", err)
 	}
-	if res.GetNetwork().GetDisplayName() != "Prod" || res.GetNetwork().GetSpec().GetTags()["team"] != "network" ||
+	if res.GetNetwork().GetDisplayName() != "Prod" || res.GetNetwork().GetLabels()["team"] != "network" ||
 		res.GetNetwork().GetGeneration() != n.GetGeneration()+1 {
 		t.Errorf("updated = %v", res.GetNetwork())
 	}
@@ -481,7 +484,8 @@ func TestUpdateNetwork(t *testing.T) {
 		"stale etag":   {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: upd, UpdateMask: mask("display_name")}, connect.CodeAborted},
 		"layout":       {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: n.GetId()}, UpdateMask: mask("spec.layout")}, connect.CodeInvalidArgument},
 		"unknown":      {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: unknownID}, UpdateMask: mask("display_name")}, connect.CodeNotFound},
-		"reserved tag": {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: n.GetId(), Spec: &cloudv1.NetworkSpec{Tags: map[string]string{"aws:x": "y"}}}, UpdateMask: mask("spec.tags")}, connect.CodeInvalidArgument},
+		"reserved tag": {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: n.GetId(), Labels: map[string]string{"aws:x": "y"}}, UpdateMask: mask("labels")}, connect.CodeInvalidArgument},
+		"spec.tags":    {&cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{Id: n.GetId()}, UpdateMask: mask("spec.tags")}, connect.CodeInvalidArgument},
 	} {
 		if _, err := f.svc.UpdateNetwork(ctx, tc.req); connect.CodeOf(err) != tc.want {
 			t.Errorf("%s: %v, want %s", name, err, tc.want)
@@ -501,12 +505,33 @@ func TestDeleteNetwork(t *testing.T) {
 	if res.GetNetwork().GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_DELETING {
 		t.Errorf("state = %s", res.GetNetwork().GetStatus().GetState())
 	}
-	// The fake client deletes at once (no finalizers): the network is gone.
-	if got := f.count(t, &awsec2.SubnetList{}, n.GetId()); got != 0 {
-		t.Errorf("%d subnets left", got)
+	// Deleted in order, one tier per call (the fake client deletes at once):
+	// the delete removed the routes and associations only.
+	count := func(list client.ObjectList) int { return f.count(t, list, n.GetId()) }
+	if count(&awsec2.RouteList{}) != 0 || count(&awsec2.RouteTableAssociationList{}) != 0 ||
+		count(&awsec2.NATGatewayList{}) == 0 || count(&awsec2.SubnetList{}) == 0 || count(&awsec2.VPCList{}) != 1 {
+		t.Fatalf("after delete: routes %d, associations %d, NATs %d, subnets %d, VPC %d", count(&awsec2.RouteList{}),
+			count(&awsec2.RouteTableAssociationList{}), count(&awsec2.NATGatewayList{}), count(&awsec2.SubnetList{}),
+			count(&awsec2.VPCList{}))
 	}
-	if _, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); connect.CodeOf(err) != connect.CodeNotFound {
-		t.Errorf("get after delete = %v, want NOT_FOUND", err)
+	// Each read moves it on; dependencies outlive their dependents.
+	for i := 0; ; i++ {
+		_, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			break
+		}
+		if err != nil || i > 10 {
+			t.Fatalf("get %d: %v", i, err)
+		}
+		if count(&awsec2.NATGatewayList{}) > 0 && (count(&awsec2.EIPList{}) == 0 || count(&awsec2.SubnetList{}) == 0) {
+			t.Fatal("EIPs or subnets deleted before the NAT gateways")
+		}
+		if count(&awsec2.SubnetList{}) > 0 && count(&awsec2.VPCList{}) == 0 {
+			t.Fatal("VPC deleted before its subnets")
+		}
+	}
+	if count(&awsec2.VPCList{}) != 0 {
+		t.Error("VPC left after the network is gone")
 	}
 }
 
@@ -582,5 +607,73 @@ func TestGetNetworkRecordsUnrecordedResources(t *testing.T) {
 	recorded, err := f.store.ManagedResources().ListByOwner(t.Context(), model.OwnerNetwork, n.GetId())
 	if err != nil || len(recorded) != 20 {
 		t.Errorf("recorded = %d, %v; want 20", len(recorded), err)
+	}
+}
+
+// A deleted cluster whose resources are all gone, but whose row nobody
+// removed yet, does not block deleting its network.
+func TestDeleteNetworkRemovesGoneClusters(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	ctx := t.Context()
+	row, err := f.store.Networks().Get(ctx, tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &model.Cluster{TenantID: tenant, Name: "eks", NetworkID: row.ID, Provider: model.ProviderAWS, Region: "us-east-1",
+		Resource: model.Resource{State: clusterStateDeleting, Spec: model.JSON(`{}`)}}
+	if err := f.store.Clusters().Create(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
+		t.Fatalf("DeleteNetwork: %v", err)
+	}
+	if _, err := f.store.Clusters().Get(ctx, tenant, c.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("deleted cluster row still there: %v", err)
+	}
+}
+
+// WatchNetwork over a real Connect stream: the first message carries the
+// network and one ADDED event per managed resource.
+func TestWatchNetworkFirstMessage(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	server := connect.NewServer()
+	cloudv1connect.RegisterNetworkServiceHandler(server, f.svc)
+	mux := http.NewServeMux()
+	connecthttp.Mount(mux, server)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := cloudv1connect.NewNetworkServiceClient(connect.NewClient(connecthttp.NewTransport(srv.Client(), srv.URL)))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stream, err := client.WatchNetwork(ctx, &cloudv1.WatchNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stream.Close() }()
+	first, err := stream.Receive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(n.GetStatus().GetManagedResources())
+	if first.GetNetwork().GetId() != n.GetId() || len(first.GetEvents()) != want || want == 0 {
+		t.Fatalf("first message: network %q, %d events; want %s and %d", first.GetNetwork().GetId(), len(first.GetEvents()), n.GetId(), want)
+	}
+	for _, e := range first.GetEvents() {
+		if e.GetType() != cloudv1.ManagedResourceEvent_TYPE_ADDED {
+			t.Errorf("%s %s: %s, want ADDED", e.GetResource().GetKind(), e.GetResource().GetName(), e.GetType())
+		}
+	}
+
+	// An unknown network fails the stream with NOT_FOUND.
+	bad, err := client.WatchNetwork(ctx, &cloudv1.WatchNetworkRequest{TenantId: tenant, NetworkId: "0190a000-0000-7000-8000-00000000dead"})
+	if err == nil {
+		_, err = bad.Receive()
+		_ = bad.Close()
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("unknown network: %v, want NOT_FOUND", err)
 	}
 }

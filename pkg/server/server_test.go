@@ -47,14 +47,12 @@ func TestRunAnswersRPCsAndStopsOnCancel(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- server.Run(ctx, ln, server.NewHandler(service.Deps{}), time.Second, logger) }()
 
-	// Every service is mounted: the node pool stub answers an empty response
-	// (200); the implemented services reject an empty request
+	// Every service is mounted: each rejects an empty request
 	// (INVALID_ARGUMENT, 400).
 	client := &http.Client{Timeout: testTimeout}
 	for rpc, want := range map[string]int{
 		"cloud.v1.ClusterService/GetCluster":       http.StatusBadRequest,
 		"cloud.v1.NetworkService/ImportNetwork":    http.StatusBadRequest,
-		"cloud.v1.NodePoolService/ListNodePools":   http.StatusOK,
 		"cloud.v1.TenantService/BootstrapTenant":   http.StatusBadRequest,
 		"cloud.v1.TenantService/ListCloudAccounts": http.StatusBadRequest,
 	} {

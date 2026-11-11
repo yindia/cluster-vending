@@ -57,6 +57,9 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 			return nil, service.ToConnect(err)
 		}
 	}
+	if err := service.CheckAWSLabels(req.GetNetwork().GetLabels()); err != nil {
+		return nil, err
+	}
 	account, layout, err := s.plan(ctx, req.GetTenantId(), req.GetNetwork().GetSpec())
 	if err != nil {
 		return nil, err
@@ -108,18 +111,20 @@ func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkR
 	return row, nil
 }
 
-// plan checks the account and region and resolves the layout.
+// plan checks the account and region and resolves the layout. The cloud
+// is the account's: a network has no provider of its own.
 func (s *NetworkService) plan(ctx context.Context, tenantID string, spec *cloudv1.NetworkSpec) (*model.CloudAccount, awsLayout, error) {
-	if spec.GetAws() == nil {
-		return nil, awsLayout{}, connect.NewError(connect.CodeUnimplemented, "only aws networks are supported")
+	account, err := s.account(ctx, tenantID, spec.GetBootstrapId())
+	if err != nil {
+		return nil, awsLayout{}, err
+	}
+	if account.Provider != model.ProviderAWS {
+		return nil, awsLayout{}, connect.NewError(connect.CodeUnimplemented,
+			fmt.Sprintf("account %s is %s; only aws networks are supported", account.ID, account.Provider))
 	}
 	if !awscatalog.IsRegion(spec.GetRegion()) {
 		return nil, awsLayout{}, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Sprintf("spec.region %q is not a known AWS region", spec.GetRegion()))
-	}
-	account, err := s.account(ctx, tenantID, spec.GetBootstrapId())
-	if err != nil {
-		return nil, awsLayout{}, err
 	}
 	layout, err := planAWSLayout(spec.GetRegion(), spec.GetLayout())
 	switch {

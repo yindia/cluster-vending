@@ -337,3 +337,13 @@ func strPtrs(in map[string]string) map[string]*string {
 	}
 	return out
 }
+
+// ClusterLists are empty lists of every kind ClusterResources creates, to
+// find a cluster's objects by label.
+func ClusterLists() []client.ObjectList {
+	return []client.ObjectList{
+		&awseks.AccessPolicyAssociationList{}, &awseks.AccessEntryList{}, &awseks.PodIdentityAssociationList{},
+		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awseks.ClusterList{},
+		&awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
+	}
+}

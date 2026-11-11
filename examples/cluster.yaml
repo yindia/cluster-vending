@@ -1,0 +1,28 @@
+# go run ./main.go cluster create -f examples/cluster.yaml [--wait]
+apiVersion: cluster-vending.io/v1
+kind: Cluster
+metadata:
+  name: prod-eks             # the EKS cluster name (unique per account and region)
+  tenant: acme
+  displayName: Prod EKS
+  labels: {env: prod, ring: "3", team: platform}   # filtering, and AWS tags on every resource
+spec:
+  region: us-east-1
+  network:
+    networkId: 00000000-0000-0000-0000-000000000000   # network list
+  controlPlane:
+    # kubernetesVersion: "1.34"   # omitted: the EKS default
+    endpointAccess:
+      publicAccessCidrs: ["0.0.0.0/0"]
+  defaultNodePool:           # platform workloads; user workloads run on Karpenter
+    instanceTypes: [m7i-flex.large]
+    diskSizeGb: 30
+    scalingConfig: {minSize: 2, maxSize: 3}
+  access:
+    adminPrincipals: []      # IAM role/user ARNs; the creator is admin already
+  aws:
+    upgradePolicy:
+      supportType: AWS_SUPPORT_TYPE_STANDARD
+    addons:                  # merged into vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver
+      - name: metrics-server
+      - name: kube-state-metrics

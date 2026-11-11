@@ -48,3 +48,24 @@ message ManagedResource {
   // Subnet role ("public" or "private"), for subnets.
   string role = 11;
 }
+
+// ManagedResourceEvent is a change of one managed resource, as streamed by
+// WatchNetwork and WatchCluster.
+message ManagedResourceEvent {
+  // Type is what happened to the resource since the previous message.
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    // First seen: every resource in a watch's first message, then any
+    // resource the network or cluster gains (e.g. add-ons once EKS is
+    // ACTIVE, a replacement node group).
+    TYPE_ADDED = 1;
+    // Its state, conditions, message or external name changed.
+    TYPE_MODIFIED = 2;
+    // No longer recorded for the network or cluster (deleted, or pruned by
+    // an update).
+    TYPE_DELETED = 3;
+  }
+  Type type = 1;
+  // The resource as observed now (DELETED: as last observed).
+  ManagedResource resource = 2;
+}

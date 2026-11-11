@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect/v2"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -33,7 +33,6 @@ const (
 // field of the request's spec onto the stored one. Every one of them is
 // rolled out by applying the cluster's resources again.
 var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
-	"spec.tags": func(dst, src *cloudv1.ClusterSpec) { dst.Tags = src.GetTags() },
 	pathKubernetesVersion: func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.KubernetesVersion = src.GetControlPlane().GetKubernetesVersion()
 	},
@@ -176,7 +175,8 @@ func updatablePaths() string {
 }
 
 // applyMask copies the masked fields of in onto row and spec and checks
-// the result against the contract. It reports whether the spec changed.
+// the result against the contract. It reports whether the cluster must be
+// applied again: the spec changed, or the labels (the AWS tags) did.
 func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluster, paths []string) (bool, error) {
 	if len(paths) == 0 {
 		return false, connect.NewError(connect.CodeInvalidArgument, "update_mask is empty; updatable: "+updatablePaths())
@@ -185,6 +185,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	if err != nil {
 		return false, connect.NewError(connect.CodeInternal, err.Error())
 	}
+	labelsBefore := maps.Clone(row.Labels)
 	for _, p := range paths {
 		switch copyField, ok := specPaths[p]; {
 		case p == pathDisplayName:
@@ -205,11 +206,14 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	if err := protovalidate.Validate(merged); err != nil {
 		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
+	if err := service.CheckAWSLabels(row.Labels); err != nil {
+		return false, err
+	}
 	after, err := encode(spec)
 	if err != nil {
 		return false, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	return string(before) != string(after), nil
+	return string(before) != string(after) || !maps.Equal(labelsBefore, row.Labels), nil
 }
 
 // updatedInput is the stored input with the masked fields copied over, so
@@ -219,7 +223,7 @@ func updatedInput(row *model.Cluster, in *cloudv1.Cluster, paths []string) (mode
 		return row.Input, nil
 	}
 	input := &cloudv1.Cluster{}
-	if err := protojson.Unmarshal(row.Input, input); err != nil {
+	if err := lenient.Unmarshal(row.Input, input); err != nil {
 		return nil, fmt.Errorf("cluster %s: stored input: %w", row.ID, err)
 	}
 	for _, p := range paths {
@@ -276,25 +280,13 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 			return nil, service.ToConnect(err)
 		}
 	}
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	if err := s.deps.DeleteRecorded(ctx, records); err != nil {
-		s.logger().ErrorContext(ctx, "delete cluster resources", "cluster_id", row.ID, "error", err)
-		return nil, connect.NewError(connect.CodeInternal, "could not delete the cluster's resources")
-	}
-	if len(records) > 0 {
-		if err := s.untagSubnets(ctx, row, records[0].Namespace); err != nil {
-			s.logger().ErrorContext(ctx, "untag network subnets", "cluster_id", row.ID, "error", err)
-			return nil, connect.NewError(connect.CodeInternal, "could not remove the cluster's tags from the network's subnets")
-		}
-	}
 	c, err := s.view(ctx, row)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.finalize(ctx, row, c); err != nil {
+	// Deletes the first tier now; GetCluster / ListClusters (e.g. the CLI's
+	// --wait) move it on, tier by tier, until the cluster is gone.
+	if _, err := s.finalize(ctx, row); err != nil {
 		return nil, err
 	}
 	s.logger().InfoContext(ctx, "cluster deleting", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)

@@ -66,6 +66,9 @@ func planAWSLayout(region string, l *cloudv1.NetworkLayout) (awsLayout, error) {
 	}
 	if len(l.GetSubnets()) > 0 {
 		out.Subnets, err = explicitSubnets(network, region, l.GetSubnets())
+		if err == nil {
+			err = checkAWSRoles(out.Subnets, out.NAT)
+		}
 	} else {
 		out.Subnets, err = defaultSubnets(network, regionZones, int(l.GetAvailabilityZoneCount()))
 	}
@@ -128,6 +131,35 @@ func explicitSubnets(network netip.Prefix, region string, subnets []*cloudv1.Sub
 		out = append(out, crossplaneaws.SubnetPlan{Role: role, CIDR: p.String(), ZoneID: s.GetZoneId()})
 	}
 	return out, nil
+}
+
+// checkAWSRoles checks the subnet roles AWS networks need: PRIVATE subnets
+// in at least two zones (EKS), a PUBLIC subnet (NAT gateways, internet-
+// facing load balancers), and with PER_ZONE NAT a PUBLIC subnet in every
+// zone with a PRIVATE one.
+func checkAWSRoles(subnets []crossplaneaws.SubnetPlan, nat crossplaneaws.NATMode) error {
+	privateZones, publicZones := map[string]bool{}, map[string]bool{}
+	for _, s := range subnets {
+		if s.Role == crossplaneaws.SubnetPublic {
+			publicZones[s.ZoneID] = true
+		} else {
+			privateZones[s.ZoneID] = true
+		}
+	}
+	switch {
+	case len(privateZones) < 2:
+		return errors.New("EKS needs PRIVATE subnets in at least two availability zones")
+	case len(publicZones) == 0:
+		return errors.New("AWS networks need at least one PUBLIC subnet (NAT gateways, internet-facing load balancers)")
+	}
+	if nat == crossplaneaws.NATPerZone {
+		for zone := range privateZones {
+			if !publicZones[zone] {
+				return fmt.Errorf("PER_ZONE NAT needs a PUBLIC subnet in every zone with a PRIVATE subnet; %s has none", zone)
+			}
+		}
+	}
+	return nil
 }
 
 // nthSubnet returns the i-th /(bits+newBits) block of p.

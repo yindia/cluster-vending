@@ -100,16 +100,27 @@ func faultCode(err error) connect.Code {
 
 // Faults is the server interceptor that answers an RPC failing with a
 // fault (from code that knows no RPC library) with the fault's Connect
-// code and message. Other errors pass as they are.
+// code and message, and one that ended because its context did (the
+// client went away, or a deadline passed) with CANCELED or
+// DEADLINE_EXCEEDED, however deep the context error was wrapped. Connect
+// errors and other errors pass as they are.
 func Faults(next connect.ServerFunc) connect.ServerFunc {
 	return func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
-		err := next(ctx, spec, stream)
-		if err != nil && faultCode(err) != 0 {
-			var codeErr *connect.Error
-			if !errors.As(err, &codeErr) {
-				return ToConnect(err)
-			}
-		}
+		return answer(next(ctx, spec, stream))
+	}
+}
+
+// answer is the error an RPC returns for err (see Faults).
+func answer(err error) error {
+	if err == nil {
+		return nil
+	}
+	var codeErr *connect.Error
+	if errors.As(err, &codeErr) {
 		return err
 	}
+	if faultCode(err) != 0 || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return ToConnect(err)
+	}
+	return err
 }

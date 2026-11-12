@@ -239,10 +239,11 @@ func notFound(tenantID, id string) error {
 func PendingStates() []string { return reconcilecluster.PendingStates() }
 
 // rpcError is the answer to an RPC that failed in code that knows no RPC
-// library (the Reconciler): a fault becomes its Connect code and message.
-// Every other error passes as it is.
+// library (the Reconciler): a fault becomes its Connect code and message,
+// an ended context CANCELED or DEADLINE_EXCEEDED. Every other error passes
+// as it is.
 func rpcError(err error) error {
-	if _, ok := fault.As(err); ok {
+	if _, ok := fault.As(err); ok || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return service.ToConnect(err)
 	}
 	return err

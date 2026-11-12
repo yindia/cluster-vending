@@ -109,3 +109,30 @@ func TestToConnectMapsFaults(t *testing.T) {
 		}
 	}
 }
+
+// An RPC that ended because its context did answers CANCELED or
+// DEADLINE_EXCEEDED, also when the context error is wrapped (a store call
+// inside a reconciler returns it as it is since the split); a fault keeps
+// its code, a Connect error passes as it is.
+func TestFaultsAnswersEndedContexts(t *testing.T) {
+	ok := connect.NewError(connect.CodeNotFound, "missing")
+	for name, tt := range map[string]struct {
+		err  error
+		want connect.Code
+	}{
+		"canceled":          {context.Canceled, connect.CodeCanceled},
+		"wrapped canceled":  {fmt.Errorf("list networks: %w", context.Canceled), connect.CodeCanceled},
+		"deadline":          {fmt.Errorf("observe: %w", context.DeadlineExceeded), connect.CodeDeadlineExceeded},
+		"fault":             {fault.New(fault.Unavailable, "down"), connect.CodeUnavailable},
+		"connect error":     {ok, connect.CodeNotFound},
+		"fault in a cancel": {fmt.Errorf("%w: %w", fault.New(fault.Invalid, "bad"), context.Canceled), connect.CodeInvalidArgument},
+	} {
+		h := Faults(func(context.Context, connect.Spec, connect.ServerStream) error { return tt.err })
+		if got := connect.CodeOf(h(t.Context(), connect.Spec{}, nil)); got != tt.want {
+			t.Errorf("%s: %s, want %s", name, got, tt.want)
+		}
+	}
+	if Faults(func(context.Context, connect.Spec, connect.ServerStream) error { return nil })(t.Context(), connect.Spec{}, nil) != nil {
+		t.Error("a successful RPC got an error")
+	}
+}

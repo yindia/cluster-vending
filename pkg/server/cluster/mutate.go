@@ -11,6 +11,7 @@ import (
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect/v2"
 
+	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -94,7 +95,7 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	"spec.control_plane.endpoint_access.endpoint_public_access": func(dst, src *cloudv1.ClusterSpec) {
 		endpointAccess(dst).EndpointPublicAccess = optionalBool(src.GetControlPlane().GetEndpointAccess(), func(a *cloudv1.EndpointAccess) *bool { return a.EndpointPublicAccess })
 	},
-	// Can be turned on, never off (UpdateCluster checks: encryptionKept).
+	// Can be turned on, never off (UpdateCluster checks: corecluster.EncryptionKept).
 	pathSecretsEncryption: func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.SecretsEncryption = src.GetControlPlane().GetSecretsEncryption()
 	},
@@ -175,7 +176,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), encryption(spec)
+	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
@@ -184,7 +185,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, err
 	}
 	// A plan shows the refusal (REJECTED_IMMUTABLE); an update fails.
-	if !encryptionKept(encryptionBefore, encryption(spec)) && !req.GetValidateOnly() {
+	if !corecluster.EncryptionKept(encryptionBefore, corecluster.Encryption(spec)) && !req.GetValidateOnly() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			"secrets encryption cannot be turned off or moved to another key once it is on: EKS cannot change it")
 	}
@@ -324,7 +325,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	if err := protovalidate.Validate(merged); err != nil {
 		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
-	if err := resolveOptions(spec); err != nil {
+	if err := corecluster.ResolveOptions(spec); err != nil {
 		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
 	if err := service.CheckAWSLabels(row.Labels); err != nil {

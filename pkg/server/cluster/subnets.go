@@ -18,19 +18,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
-// objectNames are the Subnet object names of ids, in order.
-func objectNames(subnets []privateSubnet, ids []string) []string {
-	byID := make(map[string]string, len(subnets))
-	for _, s := range subnets {
-		byID[s.id] = s.name
-	}
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, byID[id])
-	}
-	return out
-}
-
 // subnetManager is the field manager of a cluster's tags on the network's
 // subnets. The network's own applies (another manager) leave them alone,
 // and untagSubnets removes exactly them.

@@ -14,27 +14,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
-func addonNames(addons []*cloudv1.AwsAddon) []string {
-	out := make([]string, 0, len(addons))
-	for _, a := range addons {
-		out = append(out, a.GetName())
-	}
-	return out
-}
-
-func TestMergeAddons(t *testing.T) {
-	got := mergeAddons([]*cloudv1.AwsAddon{
-		{Name: "aws-efs-csi-driver"}, {Name: "coredns", ConfigurationValues: `{"replicaCount":3}`},
-	})
-	want := []string{"vpc-cni", "coredns", "kube-proxy", "eks-pod-identity-agent", "aws-ebs-csi-driver", "aws-efs-csi-driver"}
-	if !equal(addonNames(got), want) {
-		t.Fatalf("merged = %v, want %v", addonNames(got), want)
-	}
-	if got[1].GetConfigurationValues() != `{"replicaCount":3}` {
-		t.Error("an entry with a default's name must replace the default")
-	}
-}
-
 func versionService() *ClusterService {
 	return NewClusterService(service.Deps{AWSClusters: fakeLookup{},
 		AWS: config.AWS{StaticKeys: &config.StaticKeys{AccessKeyID: "AKIA", SecretAccessKey: "x"}}})

@@ -26,43 +26,52 @@ import (
 var specAddons = []string{"vpc-cni", "coredns", "kube-proxy", "eks-pod-identity-agent", "aws-ebs-csi-driver",
 	"aws-efs-csi-driver", "aws-fsx-csi-driver", "snapshot-controller", "cert-manager", "metrics-server", "kube-state-metrics"}
 
-// importInput is what an import plan is made from.
-type importInput struct {
-	found *awscloud.Cluster
-	// name is the cluster's (and EKS cluster's) name; nodeGroup the node
+// ImportInput is what an import plan is made from.
+type ImportInput struct {
+	// Found is the cluster as the cloud has it.
+	Found *awscloud.Cluster
+	// Name is the cluster's (and EKS cluster's) name; NodeGroup the node
 	// group that becomes the default node pool.
-	name, nodeGroup string
-	networkID       string
-	region          string
-	// subnets are the network's private subnets.
-	subnets []privateSubnet
-	// base carries the namespace, names and account of the cluster.
-	base   crossplaneaws.ClusterPlan
-	scheme *runtime.Scheme
+	Name, NodeGroup string
+	NetworkID       string
+	Region          string
+	// Subnets are the network's private subnets.
+	Subnets []PrivateSubnet
+	// Base carries the namespace, names and account of the cluster.
+	Base crossplaneaws.ClusterPlan
+	// Scheme knows the kinds of the rendered objects.
+	Scheme *runtime.Scheme
 }
 
-// clusterImport is what ImportCluster does with a discovered cluster.
-type clusterImport struct {
-	// spec is the cluster's spec, derived from what was found.
-	spec     *cloudv1.ClusterSpec
-	adoption crossplaneaws.Adoption
-	// objects are the Observe-only objects that import it, in creation
-	// order; podIdentities the external names (association IDs) of the
+// ImportPlan is what ImportCluster does with a discovered cluster.
+type ImportPlan struct {
+	// Spec is the cluster's spec, derived from what was found.
+	Spec *cloudv1.ClusterSpec
+	// Adoption is what the cluster keeps of the resources it was imported
+	// with (role names, trust policies, external names).
+	Adoption crossplaneaws.Adoption
+	// Objects are the Observe-only objects that import it, in creation
+	// order; PodIdentities the external names (association IDs) of the
 	// PodIdentityAssociation objects among them, by object name: the
 	// provider assigns those, so they are not rendered (Adoption) but set
 	// once.
-	objects       []client.Object
-	podIdentities map[string]string
-	lines         []*cloudv1.ImportedResource
+	Objects       []client.Object
+	PodIdentities map[string]string
+	// Lines are the plan: one per resource, with what the import and the
+	// takeover do with it.
+	Lines []*cloudv1.ImportedResource
 }
 
-func (p clusterImport) blocked() bool {
-	return slices.ContainsFunc(p.lines, func(l *cloudv1.ImportedResource) bool {
+// Blocked reports whether the plan has a BLOCKING line: nothing is
+// imported then.
+func (p ImportPlan) Blocked() bool {
+	return slices.ContainsFunc(p.Lines, func(l *cloudv1.ImportedResource) bool {
 		return l.GetDisposition() == cloudv1.Disposition_DISPOSITION_BLOCKING
 	})
 }
 
-func notImported(lines []*cloudv1.ImportedResource) []*cloudv1.ImportedResource {
+// NotImported are the lines of resources that stay unmanaged.
+func NotImported(lines []*cloudv1.ImportedResource) []*cloudv1.ImportedResource {
 	var out []*cloudv1.ImportedResource
 	for _, l := range lines {
 		if l.GetDisposition() == cloudv1.Disposition_DISPOSITION_NOT_IMPORTED {
@@ -72,9 +81,10 @@ func notImported(lines []*cloudv1.ImportedResource) []*cloudv1.ImportedResource 
 	return out
 }
 
-const eksAPIVersion = "eks.aws.m.upbound.io/v1beta1"
+// EKSAPIVersion is the API version of the EKS managed resources.
+const EKSAPIVersion = "eks.aws.m.upbound.io/v1beta1"
 
-// planClusterImport maps a discovered cluster onto the contract. The spec
+// PlanImport maps a discovered cluster onto the contract. The spec
 // is derived from it, rendered like any cluster's, and each rendered
 // object adopts the cloud resource it describes (crossplaneaws.Adopt), so
 // the cluster is rendered the same way before and after the takeover.
@@ -95,32 +105,32 @@ const eksAPIVersion = "eks.aws.m.upbound.io/v1beta1"
 //	              groups)
 //	BLOCKING      not expressible: a field EKS cannot change differs from
 //	              the render, or the spec is not valid
-func planClusterImport(in importInput) clusterImport {
+func PlanImport(in ImportInput) ImportPlan {
 	p := &importPlanner{in: in}
-	d := in.found
+	d := in.Found
 	group := p.preconditions()
-	if p.plan.blocked() {
+	if p.plan.Blocked() {
 		return p.plan
 	}
 	zones, subnetIDs, subnetObjects := p.subnets()
-	if p.plan.blocked() {
+	if p.plan.Blocked() {
 		return p.plan
 	}
-	spec, err := resolveSpec(p.deriveSpec(group, zones), zones)
+	spec, err := ResolveSpec(p.deriveSpec(group, zones), zones)
 	if err == nil {
-		err = protovalidate.Validate(&cloudv1.Cluster{Name: in.name, Spec: spec})
+		err = protovalidate.Validate(&cloudv1.Cluster{Name: in.Name, Spec: spec})
 	}
 	if err != nil {
 		p.block("Cluster", d.Name, "the cluster cannot be expressed in the contract: "+err.Error())
 		return p.plan
 	}
-	p.plan.spec = spec
-	p.plan.adoption = crossplaneaws.Adoption{ClusterRoleName: d.Role.Name, ClusterRoleTrust: d.Role.AssumeRolePolicy,
+	p.plan.Spec = spec
+	p.plan.Adoption = crossplaneaws.Adoption{ClusterRoleName: d.Role.Name, ClusterRoleTrust: d.Role.AssumeRolePolicy,
 		NodeRoleName: d.NodeRole.Name, NodeRoleTrust: d.NodeRole.AssumeRolePolicy, ExternalNames: map[string]string{},
 		BootstrapAdmin: d.BootstrapAdmin}
-	base := in.base
-	base.Adoption = p.plan.adoption
-	render := clusterPlan(spec, subnetIDs, base)
+	base := in.Base
+	base.Adoption = p.plan.Adoption
+	render := RenderPlan(spec, subnetIDs, base)
 	render.SubnetObjects = subnetObjects
 	p.adopt(render, group)
 	p.carryOver(render)
@@ -129,24 +139,24 @@ func planClusterImport(in importInput) clusterImport {
 }
 
 type importPlanner struct {
-	in   importInput
-	plan clusterImport
+	in   ImportInput
+	plan ImportPlan
 }
 
 func (p *importPlanner) line(apiVersion, kind, name, externalName, specPath string, d cloudv1.Disposition, detail string) {
-	p.plan.lines = append(p.plan.lines, &cloudv1.ImportedResource{ApiVersion: apiVersion, Kind: kind, Name: name,
+	p.plan.Lines = append(p.plan.Lines, &cloudv1.ImportedResource{ApiVersion: apiVersion, Kind: kind, Name: name,
 		ExternalName: externalName, SpecPath: specPath, Disposition: d, Detail: detail})
 }
 
 func (p *importPlanner) block(kind, externalName, detail string) {
-	p.line(eksAPIVersion, kind, "", externalName, "", cloudv1.Disposition_DISPOSITION_BLOCKING, detail)
+	p.line(EKSAPIVersion, kind, "", externalName, "", cloudv1.Disposition_DISPOSITION_BLOCKING, detail)
 }
 
 // preconditions checks what must hold before anything is derived and
 // returns the default node group.
 func (p *importPlanner) preconditions() awscloud.NodeGroup {
-	d := p.in.found
-	if d.Status != eksActiveStatus {
+	d := p.in.Found
+	if d.Status != crossplaneaws.EKSActive {
 		p.block("Cluster", d.Name, fmt.Sprintf("the EKS cluster is %s; it must be ACTIVE", d.Status))
 	}
 	if d.IPFamily != "" && d.IPFamily != "ipv4" {
@@ -155,9 +165,9 @@ func (p *importPlanner) preconditions() awscloud.NodeGroup {
 	if d.Role.Unreadable != "" {
 		p.block("Role", d.Role.ARN, "the cluster's role cannot be read: "+d.Role.Unreadable)
 	}
-	i := slices.IndexFunc(d.NodeGroups, func(g awscloud.NodeGroup) bool { return g.Name == p.in.nodeGroup })
+	i := slices.IndexFunc(d.NodeGroups, func(g awscloud.NodeGroup) bool { return g.Name == p.in.NodeGroup })
 	if i < 0 {
-		p.block("NodeGroup", p.in.nodeGroup, fmt.Sprintf("the cluster has no node group %q to adopt as the default node pool", p.in.nodeGroup))
+		p.block("NodeGroup", p.in.NodeGroup, fmt.Sprintf("the cluster has no node group %q to adopt as the default node pool", p.in.NodeGroup))
 		return awscloud.NodeGroup{}
 	}
 	if d.NodeRole.Unreadable != "" {
@@ -170,31 +180,31 @@ func (p *importPlanner) preconditions() awscloud.NodeGroup {
 // network's private subnets in them (what a cluster of the network
 // renders).
 func (p *importPlanner) subnets() (zones, ids, objects []string) {
-	byID := map[string]privateSubnet{}
-	for _, s := range p.in.subnets {
-		byID[s.id] = s
+	byID := map[string]PrivateSubnet{}
+	for _, s := range p.in.Subnets {
+		byID[s.ID] = s
 	}
-	for _, id := range p.in.found.SubnetIDs {
+	for _, id := range p.in.Found.SubnetIDs {
 		s, ok := byID[id]
 		if !ok {
 			p.line("ec2.aws.m.upbound.io/v1beta1", "Subnet", "", id, "spec.network.network_id", cloudv1.Disposition_DISPOSITION_BLOCKING,
-				fmt.Sprintf("the cluster's subnet %s is not a private subnet of network %s; import the cluster's network first", id, p.in.networkID))
+				fmt.Sprintf("the cluster's subnet %s is not a private subnet of network %s; import the cluster's network first", id, p.in.NetworkID))
 			continue
 		}
-		if !slices.Contains(zones, s.zone) {
-			zones = append(zones, s.zone)
+		if !slices.Contains(zones, s.Zone) {
+			zones = append(zones, s.Zone)
 		}
 	}
-	if p.plan.blocked() {
+	if p.plan.Blocked() {
 		return nil, nil, nil
 	}
 	sort.Strings(zones)
-	zones, ids, err := chooseSubnets(p.in.subnets, zones)
+	zones, ids, err := ChooseSubnets(p.in.Subnets, zones)
 	if err != nil {
-		p.block("Cluster", p.in.found.Name, err.Error())
+		p.block("Cluster", p.in.Found.Name, err.Error())
 		return nil, nil, nil
 	}
-	return zones, ids, objectNames(p.in.subnets, ids)
+	return zones, ids, SubnetObjectNames(p.in.Subnets, ids)
 }
 
 // enumFor is the enum value whose provider-side spelling (its
@@ -207,7 +217,7 @@ func enumFor[E interface {
 	values := zero.Descriptor().Values()
 	for i := range values.Len() {
 		v := E(values.Get(i).Number())
-		if name != "" && crossplaneName(v, "") == name {
+		if name != "" && CrossplaneName(v, "") == name {
 			return v, true
 		}
 	}
@@ -216,7 +226,7 @@ func enumFor[E interface {
 
 // deriveSpec is the spec that says what the cluster is.
 func (p *importPlanner) deriveSpec(g awscloud.NodeGroup, zones []string) *cloudv1.ClusterSpec {
-	d := p.in.found
+	d := p.in.Found
 	access := &cloudv1.EndpointAccess{}
 	if !d.EndpointPrivateAccess {
 		access.EndpointPrivateAccess = ptr.To(false)
@@ -246,8 +256,8 @@ func (p *importPlanner) deriveSpec(g awscloud.NodeGroup, zones []string) *cloudv
 			aws.Addons = append(aws.Addons, &cloudv1.AwsAddon{Name: a.Name, Version: a.Version, ConfigurationValues: a.ConfigurationValues})
 		}
 	}
-	spec := &cloudv1.ClusterSpec{Region: p.in.region, ControlPlane: controlPlane,
-		Network:         &cloudv1.ClusterNetwork{NetworkId: p.in.networkID, ZoneIds: zones, ServiceCidr: d.ServiceCIDR},
+	spec := &cloudv1.ClusterSpec{Region: p.in.Region, ControlPlane: controlPlane,
+		Network:         &cloudv1.ClusterNetwork{NetworkId: p.in.NetworkID, ZoneIds: zones, ServiceCidr: d.ServiceCIDR},
 		DefaultNodePool: p.nodePool(g, aws.DefaultNodePool),
 		Provider:        &cloudv1.ClusterSpec_Aws{Aws: aws}}
 	for _, e := range d.AccessEntries {
@@ -295,12 +305,12 @@ func (p *importPlanner) nodePool(g awscloud.NodeGroup, aws *cloudv1.AwsNodePoolS
 // of managed node groups' roles and of service-linked roles.
 func (p *importPlanner) eksManaged(e awscloud.AccessEntry) bool {
 	return strings.Contains(e.PrincipalARN, ":role/aws-service-role/") ||
-		slices.ContainsFunc(p.in.found.NodeGroups, func(g awscloud.NodeGroup) bool { return g.NodeRoleARN == e.PrincipalARN })
+		slices.ContainsFunc(p.in.Found.NodeGroups, func(g awscloud.NodeGroup) bool { return g.NodeRoleARN == e.PrincipalARN })
 }
 
 // identities are the cloud identities the rendered objects adopt.
 func (p *importPlanner) identities(prefix string, g awscloud.NodeGroup) crossplaneaws.ClusterIdentities {
-	d := p.in.found
+	d := p.in.Found
 	ids := crossplaneaws.ClusterIdentities{ClusterName: d.Name, NodeGroupName: g.Name,
 		RoleNames:        map[string]string{prefix + "-cluster-role": d.Role.Name, prefix + "-node-role": d.NodeRole.Name},
 		AttachedPolicies: map[string][]string{d.Role.Name: d.Role.PolicyARNs, d.NodeRole.Name: d.NodeRole.PolicyARNs},
@@ -327,21 +337,21 @@ func (p *importPlanner) identities(prefix string, g awscloud.NodeGroup) crosspla
 // they only order deletions.
 func (p *importPlanner) adopt(render crossplaneaws.ClusterPlan, g awscloud.NodeGroup) {
 	ids := p.identities(render.Prefix, g)
-	p.plan.podIdentities = map[string]string{}
+	p.plan.PodIdentities = map[string]string{}
 	// Rendered twice: the external names found in the first pass are part
 	// of the second render, as of every later one.
 	for _, obj := range crossplaneaws.ClusterResources(render) {
 		if name, ok := crossplaneaws.Adopt(obj, ids); ok {
 			if _, provider := obj.(*awseks.PodIdentityAssociation); provider {
-				p.plan.podIdentities[obj.GetName()] = name
+				p.plan.PodIdentities[obj.GetName()] = name
 				continue
 			}
-			p.plan.adoption.ExternalNames[obj.GetName()] = name
+			p.plan.Adoption.ExternalNames[obj.GetName()] = name
 		}
 	}
-	render.Adoption = p.plan.adoption
+	render.Adoption = p.plan.Adoption
 	for _, obj := range crossplaneaws.ClusterResources(render) {
-		u, err := kube.ApplyObject(obj, p.in.scheme)
+		u, err := kube.ApplyObject(obj, p.in.Scheme)
 		if err != nil || u.GetKind() == "Usage" {
 			continue
 		}
@@ -351,7 +361,7 @@ func (p *importPlanner) adopt(render crossplaneaws.ClusterPlan, g awscloud.NodeG
 				"the platform adds it at the takeover")
 			continue
 		}
-		p.plan.objects = append(p.plan.objects, obj)
+		p.plan.Objects = append(p.plan.Objects, obj)
 		disposition, detail := p.compare(u, g)
 		p.line(u.GetAPIVersion(), u.GetKind(), u.GetName(), name, "", disposition, detail)
 	}
@@ -413,7 +423,7 @@ func (p *importPlanner) compare(rendered *unstructured.Unstructured, g awscloud.
 // nil for kinds that are not compared (their render has nothing the import
 // could differ in).
 func (p *importPlanner) actual(rendered *unstructured.Unstructured, g awscloud.NodeGroup) map[string]any {
-	d := p.in.found
+	d := p.in.Found
 	out := map[string]any{}
 	tags := func(m map[string]string) {
 		for k, v := range m {
@@ -494,7 +504,7 @@ func list(in []string) []any {
 
 // carryOver imports what no spec field describes, as it is.
 func (p *importPlanner) carryOver(render crossplaneaws.ClusterPlan) {
-	d := p.in.found
+	d := p.in.Found
 	c := crossplaneaws.CarriedOverResources{OIDCProviderARN: d.OIDCProviderARN, OIDCIssuer: d.OIDCIssuer, EncryptionKeyARN: d.EncryptionKeyARN,
 		RoleNames:     map[string]string{"cluster-role": d.Role.Name, "node-role": d.NodeRole.Name},
 		ExtraPolicies: map[string][]string{"cluster-role": d.Role.PolicyARNs, "node-role": d.NodeRole.PolicyARNs}}
@@ -543,7 +553,7 @@ func (p *importPlanner) carryOver(render crossplaneaws.ClusterPlan) {
 		c.SecurityGroups = append(c.SecurityGroups, sg)
 	}
 	for _, obj := range crossplaneaws.CarriedOver(render, c) {
-		u, err := kube.ApplyObject(obj, p.in.scheme)
+		u, err := kube.ApplyObject(obj, p.in.Scheme)
 		if err != nil {
 			continue
 		}
@@ -551,7 +561,7 @@ func (p *importPlanner) carryOver(render crossplaneaws.ClusterPlan) {
 		if obj.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" {
 			detail = "owned without Delete: something else uses it too, or the platform cannot tell, so it stays when the cluster is deleted"
 		}
-		p.plan.objects = append(p.plan.objects, obj)
+		p.plan.Objects = append(p.plan.Objects, obj)
 		p.line(u.GetAPIVersion(), u.GetKind(), u.GetName(), obj.GetAnnotations()[crossplaneaws.ExternalNameAnnotation], "",
 			cloudv1.Disposition_DISPOSITION_CARRIED_OVER, detail)
 	}
@@ -559,16 +569,16 @@ func (p *importPlanner) carryOver(render crossplaneaws.ClusterPlan) {
 
 // leftAlone lists what stays unmanaged.
 func (p *importPlanner) leftAlone(g awscloud.NodeGroup) {
-	d := p.in.found
+	d := p.in.Found
 	for _, other := range d.NodeGroups {
 		if other.Name != g.Name {
-			p.line(eksAPIVersion, "NodeGroup", "", other.Name, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
+			p.line(EKSAPIVersion, "NodeGroup", "", other.Name, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
 				"only the default node group is imported: this one stays unmanaged and blocks deleting the cluster until it is removed")
 		}
 	}
 	for _, e := range d.AccessEntries {
 		if p.eksManaged(e) {
-			p.line(eksAPIVersion, "AccessEntry", "", d.Name+":"+e.PrincipalARN, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
+			p.line(EKSAPIVersion, "AccessEntry", "", d.Name+":"+e.PrincipalARN, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
 				"EKS manages the access entries of node group roles and service-linked roles")
 		}
 	}

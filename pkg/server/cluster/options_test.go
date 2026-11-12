@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -29,64 +30,6 @@ const (
 	viewPolicy  = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
 	devRole     = "arn:aws:iam::444455556666:role/dev"
 )
-
-// A spec without the optional settings resolves to what it resolved to
-// before they existed; with them, their defaults are filled in.
-func TestResolveOptions(t *testing.T) {
-	zones := []string{"use1-az1", "use1-az2"}
-	plain := mustResolve(t, minimalSpec(), zones)
-	if plain.GetAws().GetControlPlaneLogGroup() != nil || plain.GetAccess().GetAccessEntries() != nil ||
-		plain.GetControlPlane().GetEndpointAccess().EndpointPublicAccess != nil || plain.GetAws().Irsa != nil ||
-		plain.GetAws().GetDefaultNodePool().GetLaunchTemplate() != nil {
-		t.Errorf("optional settings appeared in a spec without them: %v", plain)
-	}
-	base := crossplaneaws.ClusterPlan{Prefix: "prod", ClusterName: "prod"}
-	if p := clusterPlan(plain, []string{"subnet-a"}, base); len(p.Pending()) != 0 || p.LogGroupRetentionDays != 0 ||
-		p.CreateEncryptionKey || p.EncryptionKeyARN != "" || p.IRSA || p.NodePool.LaunchTemplate != nil || p.AccessEntries != nil ||
-		p.EndpointPublicAccess != nil || p.AdditionalSecurityGroupIDs != nil {
-		t.Errorf("plan of a spec without options = %+v", p)
-	}
-
-	in := minimalSpec()
-	in.GetAws().ControlPlaneLogGroup = &cloudv1.AwsControlPlaneLogGroup{Enabled: ptr.To(true)}
-	in.Access = &cloudv1.AccessSpec{AccessEntries: []*cloudv1.AccessEntry{{PrincipalArn: devRole,
-		Policies: []*cloudv1.AccessPolicy{{PolicyArn: viewPolicy}}}}}
-	in.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{ImageId: "ami-0123456789abcdef0", UserData: "Zm9v"}}
-	in.ControlPlane.SecretsEncryption = &cloudv1.SecretsEncryption{Enabled: true}
-	got := mustResolve(t, in, zones)
-	entry := got.GetAccess().GetAccessEntries()[0]
-	if got.GetAws().GetControlPlaneLogGroup().GetRetentionDays() != 90 ||
-		entry.GetType() != cloudv1.AccessEntryType_ACCESS_ENTRY_TYPE_STANDARD ||
-		entry.GetPolicies()[0].GetScope() != cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_CLUSTER ||
-		got.GetAws().GetDefaultNodePool().GetAmiType() != cloudv1.AwsAmiType_AWS_AMI_TYPE_CUSTOM {
-		t.Errorf("defaults not filled: %v", got)
-	}
-	p := clusterPlan(got, []string{"subnet-a"}, base)
-	if p.LogGroupRetentionDays != 90 || !p.CreateEncryptionKey || p.NodePool.AMIType != "CUSTOM" || !p.NodePool.LaunchTemplate.Rendered() ||
-		p.AccessEntries[0].Type != "STANDARD" || p.AccessEntries[0].Policies[0].Scope != "cluster" {
-		t.Errorf("plan = %+v", p)
-	}
-
-	for name, change := range map[string]func(*cloudv1.ClusterSpec){
-		"launch template with a disk size": func(s *cloudv1.ClusterSpec) {
-			s.DefaultNodePool.DiskSizeGb = 50
-			s.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{Id: "lt-0123456789abcdef0", Version: "1"}}
-		},
-		"public endpoint without CIDRs": func(s *cloudv1.ClusterSpec) { s.ControlPlane.EndpointAccess.PublicAccessCidrs = nil },
-	} {
-		bad := minimalSpec()
-		change(bad)
-		if _, err := resolveSpec(bad, zones); err == nil {
-			t.Errorf("%s accepted", name)
-		}
-	}
-	private := minimalSpec()
-	private.ControlPlane.EndpointAccess = &cloudv1.EndpointAccess{EndpointPublicAccess: ptr.To(false)}
-	if got, err := resolveSpec(private, zones); err != nil ||
-		ptr.Deref(clusterPlan(got, nil, base).EndpointPublicAccess, true) {
-		t.Errorf("private-only endpoint without CIDRs: %v", err)
-	}
-}
 
 // newCluster turns a world's cluster into one that was just stored and
 // never applied, with change applied to its spec.
@@ -106,7 +49,7 @@ func newCluster(t *testing.T, w world, change func(*cloudv1.ClusterSpec)) {
 		t.Fatal(err)
 	}
 	change(spec)
-	if err := resolveOptions(spec); err != nil {
+	if err := corecluster.ResolveOptions(spec); err != nil {
 		t.Fatal(err)
 	}
 	if row.Spec, err = encode(spec); err != nil {

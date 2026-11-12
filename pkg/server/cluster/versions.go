@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
+	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -76,7 +77,7 @@ func (s *ClusterService) reresolveVersions(ctx context.Context, row *model.Clust
 			return connect.NewError(connect.CodeInternal, fmt.Sprintf("cluster %s: stored input: %v", row.ID, err))
 		}
 	}
-	spec.GetAws().Addons = mergeAddons(spec.GetAws().GetAddons())
+	spec.GetAws().Addons = corecluster.MergeAddons(spec.GetAws().GetAddons())
 	if spec.GetControlPlane().GetKubernetesVersion() == "" {
 		live, err := s.liveKubernetesVersion(ctx, row)
 		if err != nil {

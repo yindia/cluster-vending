@@ -1,3 +1,9 @@
+// Package cluster is the cluster logic that needs no API and no database:
+// a spec's defaults and its render plan (ResolveSpec, RenderPlan), the
+// plan of importing an existing EKS cluster (PlanImport), and what an
+// update changes on rendered objects (FieldChanges). It takes plain
+// values and returns plain errors; pkg/server/cluster maps them to the
+// API.
 package cluster
 
 import (
@@ -15,33 +21,47 @@ import (
 
 // Defaults of a cluster spec.
 const (
-	defaultAuthMode     = "API"
-	defaultCapacityType = "ON_DEMAND"
-	defaultAMIType      = "AL2023_x86_64_STANDARD"
+	DefaultAuthMode     = "API"
+	DefaultCapacityType = "ON_DEMAND"
+	DefaultAMIType      = "AL2023_x86_64_STANDARD"
 	minZones            = 2
 )
 
-// privateSubnet is a private subnet of the network, as observed.
-type privateSubnet struct{ id, zone, name string }
+// PrivateSubnet is a private subnet of the network, as observed: its
+// cloud ID, its zone ID and the name of its Subnet object.
+type PrivateSubnet struct{ ID, Zone, Name string }
 
-// privateSubnets are the network's private subnets that exist in the cloud
+// PrivateSubnets are the network's private subnets that exist in the cloud
 // (have an ID), from the network's managed resources.
-func privateSubnets(views []*cloudv1.ManagedResource) []privateSubnet {
-	var out []privateSubnet
+func PrivateSubnets(views []*cloudv1.ManagedResource) []PrivateSubnet {
+	var out []PrivateSubnet
 	for _, v := range views {
 		if v.GetKind() == "Subnet" && v.GetRole() == "private" && v.GetExternalName() != "" {
-			out = append(out, privateSubnet{id: v.GetExternalName(), zone: v.GetZoneId(), name: v.GetName()})
+			out = append(out, PrivateSubnet{ID: v.GetExternalName(), Zone: v.GetZoneId(), Name: v.GetName()})
 		}
 	}
 	return out
 }
 
-// chooseSubnets returns the zones the cluster uses (zone_ids, or every zone
+// SubnetObjectNames are the Subnet object names of ids, in order.
+func SubnetObjectNames(subnets []PrivateSubnet, ids []string) []string {
+	byID := make(map[string]string, len(subnets))
+	for _, s := range subnets {
+		byID[s.ID] = s.Name
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, byID[id])
+	}
+	return out
+}
+
+// ChooseSubnets returns the zones the cluster uses (zone_ids, or every zone
 // with a private subnet) and their private subnet IDs. EKS needs two zones.
-func chooseSubnets(subnets []privateSubnet, zoneIDs []string) ([]string, []string, error) {
+func ChooseSubnets(subnets []PrivateSubnet, zoneIDs []string) ([]string, []string, error) {
 	available := map[string][]string{}
 	for _, s := range subnets {
-		available[s.zone] = append(available[s.zone], s.id)
+		available[s.Zone] = append(available[s.Zone], s.ID)
 	}
 	zones := slices.Clone(zoneIDs)
 	if len(zones) == 0 {
@@ -63,13 +83,13 @@ func chooseSubnets(subnets []privateSubnet, zoneIDs []string) ([]string, []strin
 	return zones, ids, nil
 }
 
-// resolveSpec fills the spec's defaults (zones, auth mode, node pool
+// ResolveSpec fills the spec's defaults (zones, auth mode, node pool
 // capacity and AMI, and those of the optional settings in use:
-// resolveOptions) so the stored spec says what was built. The public
+// ResolveOptions) so the stored spec says what was built. The public
 // endpoint's CIDRs have no default: who may reach the API is the
 // client's choice (the contract requires at least one while that endpoint
 // is on).
-func resolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
+func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
 	spec := cloneSpec(in)
 	spec.Network.ZoneIds = zones
 	pool := spec.DefaultNodePool
@@ -89,17 +109,17 @@ func resolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 	if aws.DefaultNodePool.AmiType == cloudv1.AwsAmiType_AWS_AMI_TYPE_UNSPECIFIED {
 		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD
 	}
-	aws.Addons = mergeAddons(aws.GetAddons())
-	return spec, resolveOptions(spec)
+	aws.Addons = MergeAddons(aws.GetAddons())
+	return spec, ResolveOptions(spec)
 }
 
-// errNoPublicAccessCIDRs: the spec does not say who may reach the API.
-var errNoPublicAccessCIDRs = errors.New(
+// ErrNoPublicAccessCIDRs: the spec does not say who may reach the API.
+var ErrNoPublicAccessCIDRs = errors.New(
 	"spec.control_plane.endpoint_access.public_access_cidrs needs at least one CIDR (0.0.0.0/0 for any)")
 
-// mergeAddons is the default add-ons, each replaced by the entry of the
+// MergeAddons is the default add-ons, each replaced by the entry of the
 // same name in addons, followed by the other entries in their order.
-func mergeAddons(addons []*cloudv1.AwsAddon) []*cloudv1.AwsAddon {
+func MergeAddons(addons []*cloudv1.AwsAddon) []*cloudv1.AwsAddon {
 	byName := make(map[string]*cloudv1.AwsAddon, len(addons))
 	for _, a := range addons {
 		byName[a.GetName()] = a
@@ -121,9 +141,9 @@ func mergeAddons(addons []*cloudv1.AwsAddon) []*cloudv1.AwsAddon {
 	return out
 }
 
-// clusterPlan maps a resolved spec onto the AWS plan. base carries the
+// RenderPlan maps a resolved spec onto the AWS plan. base carries the
 // namespace, names and account.
-func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplaneaws.ClusterPlan) crossplaneaws.ClusterPlan {
+func RenderPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplaneaws.ClusterPlan) crossplaneaws.ClusterPlan {
 	p := base
 	p.Region = spec.GetRegion()
 	p.KubernetesVersion = spec.GetControlPlane().GetKubernetesVersion()
@@ -132,12 +152,12 @@ func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplanea
 	p.ServiceCIDR = spec.GetNetwork().GetServiceCidr()
 	p.AdminPrincipals = spec.GetAccess().GetAdminPrincipals()
 	aws := spec.GetAws()
-	p.AuthenticationMode = crossplaneName(aws.GetAccessConfig().GetAuthenticationMode(), defaultAuthMode)
+	p.AuthenticationMode = CrossplaneName(aws.GetAccessConfig().GetAuthenticationMode(), DefaultAuthMode)
 	for _, t := range aws.GetEnabledClusterLogTypes() {
-		p.LogTypes = append(p.LogTypes, crossplaneName(t, ""))
+		p.LogTypes = append(p.LogTypes, CrossplaneName(t, ""))
 	}
 	if st := aws.GetUpgradePolicy().GetSupportType(); st != cloudv1.AwsSupportType_AWS_SUPPORT_TYPE_UNSPECIFIED {
-		p.SupportType = crossplaneName(st, "")
+		p.SupportType = CrossplaneName(st, "")
 	}
 	pool := spec.GetDefaultNodePool()
 	sc := pool.GetScalingConfig()
@@ -147,8 +167,8 @@ func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplanea
 	}
 	p.NodePool = crossplaneaws.NodePoolPlan{
 		InstanceTypes: pool.GetInstanceTypes(),
-		CapacityType:  crossplaneName(pool.GetCapacityType(), defaultCapacityType),
-		AMIType:       crossplaneName(aws.GetDefaultNodePool().GetAmiType(), defaultAMIType),
+		CapacityType:  CrossplaneName(pool.GetCapacityType(), DefaultCapacityType),
+		AMIType:       CrossplaneName(aws.GetDefaultNodePool().GetAmiType(), DefaultAMIType),
 		DiskSizeGB:    int(pool.GetDiskSizeGb()),
 		MinSize:       int(sc.GetMinSize()), MaxSize: int(sc.GetMaxSize()), Desired: int(desired),
 		Labels: pool.GetLabels(),
@@ -159,7 +179,7 @@ func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplanea
 	}
 	for _, t := range pool.GetTaints() {
 		p.NodePool.Taints = append(p.NodePool.Taints, crossplaneaws.TaintPlan{Key: t.GetKey(), Value: t.GetValue(),
-			Effect: crossplaneName(t.GetEffect(), "")})
+			Effect: CrossplaneName(t.GetEffect(), "")})
 	}
 	optionsPlan(spec, &p)
 	return p
@@ -167,9 +187,9 @@ func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplanea
 
 func cloneSpec(in *cloudv1.ClusterSpec) *cloudv1.ClusterSpec { return proto.CloneOf(in) }
 
-// crossplaneName is the provider-side spelling of an enum value, from its
+// CrossplaneName is the provider-side spelling of an enum value, from its
 // (cloud.v1.crossplane) option; def when it has none.
-func crossplaneName(e protoreflect.Enum, def string) string {
+func CrossplaneName(e protoreflect.Enum, def string) string {
 	value := e.Descriptor().Values().ByNumber(e.Number())
 	if value == nil {
 		return def

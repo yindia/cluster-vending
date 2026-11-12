@@ -5,49 +5,10 @@ import (
 
 	"connectrpc.com/connect/v2"
 
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
-
-func TestChooseSubnets(t *testing.T) {
-	subnets := []privateSubnet{{"subnet-b", "use1-az2", "b"}, {"subnet-a", "use1-az1", "a"}, {"subnet-c", "use1-az4", "c"}}
-	tests := []struct {
-		name      string
-		zones     []string
-		wantZones []string
-		wantIDs   []string
-		wantErr   bool
-	}{
-		{"every zone by default", nil, []string{"use1-az1", "use1-az2", "use1-az4"}, []string{"subnet-a", "subnet-b", "subnet-c"}, false},
-		{"requested zones", []string{"use1-az4", "use1-az1"}, []string{"use1-az4", "use1-az1"}, []string{"subnet-c", "subnet-a"}, false},
-		{"zone without subnet", []string{"use1-az1", "use1-az6"}, nil, nil, true},
-		{"one zone", []string{"use1-az1"}, nil, nil, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			zones, ids, err := chooseSubnets(subnets, tt.zones)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !equal(zones, tt.wantZones) || !equal(ids, tt.wantIDs) {
-				t.Errorf("got %v %v, want %v %v", zones, ids, tt.wantZones, tt.wantIDs)
-			}
-		})
-	}
-}
-
-func equal(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 func minimalSpec() *cloudv1.ClusterSpec {
 	return &cloudv1.ClusterSpec{
@@ -60,37 +21,14 @@ func minimalSpec() *cloudv1.ClusterSpec {
 	}
 }
 
-// mustResolve is resolveSpec for specs that are valid.
+// mustResolve is corecluster.ResolveSpec for specs that are valid.
 func mustResolve(t *testing.T, in *cloudv1.ClusterSpec, zones []string) *cloudv1.ClusterSpec {
 	t.Helper()
-	spec, err := resolveSpec(in, zones)
+	spec, err := corecluster.ResolveSpec(in, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return spec
-}
-
-func TestResolveSpecFillsDefaultsWithoutTouchingInput(t *testing.T) {
-	in := minimalSpec()
-	spec := mustResolve(t, in, []string{"use1-az1", "use1-az2"})
-	if in.GetAws().GetAccessConfig() != nil || len(in.GetNetwork().GetZoneIds()) != 0 {
-		t.Fatal("resolveSpec changed its input")
-	}
-	if got := spec.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs(); !equal(got, []string{"203.0.113.0/24"}) {
-		t.Errorf("public cidrs = %v, want the client's", got)
-	}
-	in.ControlPlane = nil
-	if _, err := resolveSpec(in, []string{"use1-az1", "use1-az2"}); err == nil {
-		t.Error("no public access CIDRs: want an error, not a 0.0.0.0/0 default")
-	}
-	plan := clusterPlan(spec, []string{"subnet-a", "subnet-b"}, crossplaneawsBase())
-	if plan.AuthenticationMode != defaultAuthMode || plan.NodePool.CapacityType != defaultCapacityType ||
-		plan.NodePool.AMIType != defaultAMIType {
-		t.Errorf("plan defaults = %q %q %q", plan.AuthenticationMode, plan.NodePool.CapacityType, plan.NodePool.AMIType)
-	}
-	if plan.NodePool.Desired != 2 {
-		t.Errorf("desired = %d, want min_size 2", plan.NodePool.Desired)
-	}
 }
 
 func TestStatus(t *testing.T) {
@@ -148,9 +86,4 @@ func TestApplyMask(t *testing.T) {
 			t.Errorf("%s: err = %v, want %v", path, err, code)
 		}
 	}
-}
-
-func crossplaneawsBase() crossplaneaws.ClusterPlan {
-	return crossplaneaws.ClusterPlan{Namespace: "tenant-acme", ProviderConfigName: "aws-1", TenantID: "acme",
-		ClusterID: "id", ClusterName: "prod", Prefix: "prod-12345678"}
 }

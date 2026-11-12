@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
@@ -147,12 +148,12 @@ func (s *ClusterService) target(ctx context.Context, tenantID string, spec *clou
 	if err != nil {
 		return target{}, err
 	}
-	subnets := privateSubnets(views)
-	zones, ids, err := chooseSubnets(subnets, spec.GetNetwork().GetZoneIds())
+	subnets := corecluster.PrivateSubnets(views)
+	zones, ids, err := corecluster.ChooseSubnets(subnets, spec.GetNetwork().GetZoneIds())
 	if err != nil {
 		return target{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("network %s: %v", n.ID, err))
 	}
-	return target{network: n, account: account, zones: zones, subnetIDs: ids, subnetObjects: objectNames(subnets, ids)}, nil
+	return target{network: n, account: account, zones: zones, subnetIDs: ids, subnetObjects: corecluster.SubnetObjectNames(subnets, ids)}, nil
 }
 
 // insert stores the cluster as sent (input) and resolved (spec); the ID is
@@ -163,7 +164,7 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	in := req.GetCluster()
-	spec, err := resolveSpec(in.GetSpec(), t.zones)
+	spec, err := corecluster.ResolveSpec(in.GetSpec(), t.zones)
 	if err != nil {
 		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
@@ -209,7 +210,7 @@ func createError(err error, row *model.Cluster) error {
 // renderPlan is the plan of the cluster's resources: the resolved spec on
 // the network's subnets.
 func (s *ClusterService) renderPlan(spec *cloudv1.ClusterSpec, row *model.Cluster, t target) crossplaneaws.ClusterPlan {
-	p := clusterPlan(spec, t.subnetIDs, s.base(row, t.account))
+	p := corecluster.RenderPlan(spec, t.subnetIDs, s.base(row, t.account))
 	p.SubnetObjects = t.subnetObjects
 	return p
 }

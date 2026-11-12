@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
+	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -73,19 +74,19 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	row := &model.Cluster{Resource: model.Resource{Base: model.Base{ID: id.String()}, DisplayName: req.GetDisplayName()},
 		TenantID: req.GetTenantId(), Name: req.GetName(), NetworkID: network.ID, Provider: model.ProviderAWS,
 		Region: network.Region, Imported: true}
-	plan := planClusterImport(importInput{found: found, name: req.GetName(), nodeGroup: req.GetAws().GetDefaultNodeGroupName(),
-		networkID: network.ID, region: network.Region, subnets: subnets, base: s.base(row, account), scheme: s.deps.Kube.Scheme()})
+	plan := corecluster.PlanImport(corecluster.ImportInput{Found: found, Name: req.GetName(), NodeGroup: req.GetAws().GetDefaultNodeGroupName(),
+		NetworkID: network.ID, Region: network.Region, Subnets: subnets, Base: s.base(row, account), Scheme: s.deps.Kube.Scheme()})
 	if err := s.insertImport(ctx, req, row, plan); err != nil {
 		return nil, err
 	}
-	if !plan.blocked() {
+	if !plan.Blocked() {
 		if err := s.applyImport(ctx, row, account, plan); err != nil {
 			s.rollback(ctx, row, account.Namespace)
 			return nil, err
 		}
 	}
 	s.logger().InfoContext(ctx, "cluster imported", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
-		"network_id", network.ID, "blocked", plan.blocked(), "plan_lines", len(plan.lines), "objects", len(plan.objects))
+		"network_id", network.ID, "blocked", plan.Blocked(), "plan_lines", len(plan.Lines), "objects", len(plan.Objects))
 	c, err := s.respond(ctx, row)
 	return &cloudv1.ImportClusterResponse{Cluster: c}, err
 }
@@ -93,7 +94,7 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 // importNetwork loads the network an imported cluster runs in, its account
 // and its private subnets. The network may be imported (Observe-only) or
 // owned; the takeover needs it owned.
-func (s *ClusterService) importNetwork(ctx context.Context, tenantID, networkID string) (*model.Network, *model.CloudAccount, []privateSubnet, error) {
+func (s *ClusterService) importNetwork(ctx context.Context, tenantID, networkID string) (*model.Network, *model.CloudAccount, []corecluster.PrivateSubnet, error) {
 	n, err := s.deps.Store.Networks().Get(ctx, tenantID, networkID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, nil, nil, connect.NewError(connect.CodeFailedPrecondition,
@@ -118,7 +119,7 @@ func (s *ClusterService) importNetwork(ctx context.Context, tenantID, networkID 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return n, account, privateSubnets(views), nil
+	return n, account, corecluster.PrivateSubnets(views), nil
 }
 
 // discover makes the read-only AWS lookup.
@@ -150,21 +151,21 @@ func (s *ClusterService) discover(ctx context.Context, a *model.CloudAccount, re
 // as sent (input), the plan (status) and what it keeps of the roles it
 // adopts, IMPORTED or, when blocked, FAILED. Its generation counts as
 // applied: the loop leaves it alone until the takeover.
-func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportClusterRequest, row *model.Cluster, plan clusterImport) error {
+func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportClusterRequest, row *model.Cluster, plan corecluster.ImportPlan) error {
 	phase := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED
 	row.State = stateImported
-	if plan.blocked() {
+	if plan.Blocked() {
 		phase, row.State = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, stateBlocked
 	}
-	spec := plan.spec
+	spec := plan.Spec
 	if spec == nil {
 		spec = &cloudv1.ClusterSpec{Region: row.Region, Network: &cloudv1.ClusterNetwork{NetworkId: row.NetworkID},
 			Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}}}
 	}
 	rawSpec, err1 := encode(spec)
 	input, err2 := encode(req)
-	status, err3 := encode(&cloudv1.ClusterStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.lines}})
-	adoption, err4 := json.Marshal(plan.adoption)
+	status, err3 := encode(&cloudv1.ClusterStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
+	adoption, err4 := json.Marshal(plan.Adoption)
 	if err := errors.Join(err1, err2, err3, err4); err != nil {
 		return connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -196,14 +197,14 @@ func importSet(objects []client.Object) sequence.Set {
 // Pod identity associations then get their external name (an ID only the
 // cloud knows) set once, outside the apply: it is not part of any later
 // render.
-func (s *ClusterService) applyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan clusterImport) error {
+func (s *ClusterService) applyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan corecluster.ImportPlan) error {
 	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	if _, err := s.deps.Sequence().Apply(ctx, importSet(plan.objects), s.deps.Inventory(owner)); err != nil {
+	if _, err := s.deps.Sequence().Apply(ctx, importSet(plan.Objects), s.deps.Inventory(owner)); err != nil {
 		s.logger().ErrorContext(ctx, "apply imported resources", "cluster_id", row.ID, "error", err)
 		return applyError(err)
 	}
-	for _, obj := range plan.objects {
-		id, ok := plan.podIdentities[obj.GetName()]
+	for _, obj := range plan.Objects {
+		id, ok := plan.PodIdentities[obj.GetName()]
 		if !ok {
 			continue
 		}
@@ -309,7 +310,7 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("import phase is %s, want PLANNED", imp.GetPhase()))
 	}
-	left := notImported(imp.GetResources())
+	left := corecluster.NotImported(imp.GetResources())
 	if len(left) > 0 && !req.GetAcknowledgeNotImported() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
 			"%d resources are NOT_IMPORTED (first: %s %s: %s); give them another owner, then retry with acknowledge_not_imported",

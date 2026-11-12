@@ -198,18 +198,26 @@ func (n *Network) BeforeSave(*gorm.DB) error { return n.Provider.Validate() }
 type Cluster struct {
 	Resource
 	TenantID string `gorm:"type:varchar(56);not null;index:idx_clusters_tenant_name_lookup;uniqueIndex:idx_clusters_tenant_request,where:deleted_at IS NULL"`
-	// Name is cloud.v1 Cluster.name: chosen by the client, not unique. The
+	// Name is cloud.v1 Cluster.name: chosen by the client, unique per
+	// account and region (see CloudAccountID). The
 	// API identifier (Cluster.id) is ID.
-	Name string `gorm:"size:40;not null;index:idx_clusters_tenant_name_lookup"`
+	Name string `gorm:"size:40;not null;index:idx_clusters_tenant_name_lookup;uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
 	// Input is the cluster as the client sent it (protojson cloud.v1
 	// Cluster); Spec is the resolved one.
 	Input JSON
 	// NetworkID is the networks row the cluster runs in (Network.Clusters
 	// owns the foreign key).
 	NetworkID string `gorm:"type:varchar(36);not null;index"`
+	// CloudAccountID is the account of the cluster's network, set by the
+	// repository on create. A cluster's name is the cloud cluster's (AWS:
+	// the EKS cluster name), unique per account and region: the index
+	// idx_clusters_account_region_name refuses a second one, also when two
+	// creates race. Empty for rows stored before the column existed; the
+	// index leaves those out.
+	CloudAccountID string `gorm:"type:varchar(36);not null;default:'';uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
 	// Provider must match the network's; the repository checks it.
 	Provider Provider `gorm:"size:16;not null;check:chk_clusters_provider,provider IN ('aws','gcp','azure')"`
-	Region   string   `gorm:"size:64;not null"`
+	Region   string   `gorm:"size:64;not null;uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
 	// Imported is true while spec.existing_cluster is set (temporary
 	// cluster import).
 	Imported bool `gorm:"not null;default:false"`

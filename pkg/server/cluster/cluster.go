@@ -186,9 +186,20 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 		row.CreateRequestID = &rid
 	}
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
-		return nil, crossplaneaws.ClusterPlan{}, service.ToConnect(err)
+		return nil, crossplaneaws.ClusterPlan{}, createError(err, row)
 	}
 	return row, s.renderPlan(spec, row, t), nil
+}
+
+// createError maps a failed insert: a duplicate is a second cluster of the
+// name in the account and region (the name check passed, but another
+// create won the race) or a reused request_id.
+func createError(err error, row *model.Cluster) error {
+	if errors.Is(err, repository.ErrAlreadyExists) {
+		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
+			"a cluster named %q already exists in this account and %s (or the request_id was used before)", row.Name, row.Region))
+	}
+	return service.ToConnect(err)
 }
 
 // renderPlan is the plan of the cluster's resources: the resolved spec on

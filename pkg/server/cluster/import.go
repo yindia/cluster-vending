@@ -171,7 +171,10 @@ func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportCl
 	if rid := req.GetRequestId(); rid != "" {
 		row.CreateRequestID = &rid
 	}
-	return service.ToConnect(s.deps.Store.Clusters().Create(ctx, row))
+	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
+		return createError(err, row)
+	}
+	return nil
 }
 
 // applyImport records and applies the import's objects. Pod identity

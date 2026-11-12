@@ -121,6 +121,9 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 		return fmt.Errorf("%w: network %s belongs to tenant %s on %s, cluster to tenant %s on %s",
 			repository.ErrInvalid, n.Name, n.TenantID, n.Provider, c.TenantID, c.Provider)
 	}
+	// The network's account is the cluster's: with it the unique index on
+	// (account, region, name) refuses a second cluster of the name.
+	c.CloudAccountID = n.CloudAccountID
 	return create(ctx, r.db, c)
 }
 

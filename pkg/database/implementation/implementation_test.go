@@ -171,17 +171,34 @@ func TestNetworkNamesAreNotUnique(t *testing.T) {
 	}
 }
 
-func TestClusterNamesAreNotUnique(t *testing.T) {
+// A cluster's name is the cloud cluster's name: one per account and
+// region, also when two creates race (the index decides, not a check).
+func TestClusterNamesAreUniquePerAccountAndRegion(t *testing.T) {
 	s := newStore(t)
 	mustTenant(t, s, "acme")
 	n := mustNetwork(t, s, "acme", "n")
-	a, b := mustCluster(t, s, "acme", "prod", n), mustCluster(t, s, "acme", "prod", n)
-	if a.ID == b.ID {
-		t.Fatal("two clusters got one ID")
+	first := mustCluster(t, s, "acme", "prod", n)
+	if first.CloudAccountID != n.CloudAccountID || first.CloudAccountID == "" {
+		t.Fatalf("cluster account = %q, want its network's %q", first.CloudAccountID, n.CloudAccountID)
 	}
-	got, err := s.Clusters().Get(t.Context(), "acme", b.ID)
-	if err != nil || got.Name != "prod" {
-		t.Fatalf("Get by ID = %+v, %v", got, err)
+	again := &model.Cluster{TenantID: "acme", Name: "prod", NetworkID: n.ID, Provider: "aws", Region: "us-east-1",
+		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: spec("cluster")}}
+	requireErr(t, s.Clusters().Create(t.Context(), again), repository.ErrAlreadyExists)
+
+	// Another name, and the same name in another region, are free.
+	mustCluster(t, s, "acme", "staging", n)
+	elsewhere := &model.Cluster{TenantID: "acme", Name: "prod", NetworkID: n.ID, Provider: "aws", Region: "eu-west-1",
+		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: spec("cluster")}}
+	if err := s.Clusters().Create(t.Context(), elsewhere); err != nil {
+		t.Fatalf("same name in another region: %v", err)
+	}
+	// Once the cluster is deleted its name can be used again.
+	if err := s.Clusters().Delete(t.Context(), "acme", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	again.ID = ""
+	if err := s.Clusters().Create(t.Context(), again); err != nil {
+		t.Fatalf("name of a deleted cluster: %v", err)
 	}
 }
 

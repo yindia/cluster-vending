@@ -69,6 +69,17 @@ func TestNodeGroupName(t *testing.T) {
 		{"instance type changed", []model.ManagedResource{ngRecord("1", "prod-1a2b3c4d-default")},
 			[]client.Object{liveNodeGroup("prod-1a2b3c4d-default", "t3.medium")}, replacement, 1},
 		{"object gone", []model.ManagedResource{ngRecord("1", "prod-1a2b3c4d-default")}, nil, "prod-1a2b3c4d-default", 0},
+		// A change reverted before its replacement was ready: back to the
+		// node group that is still there, not a third one.
+		{"change reverted", []model.ManagedResource{ngRecord("1", "prod-1a2b3c4d-default"), ngRecord("2", "prod-1a2b3c4d-default-abc123")},
+			[]client.Object{liveNodeGroup("prod-1a2b3c4d-default", "t3.small"), liveNodeGroup("prod-1a2b3c4d-default-abc123", "t3.medium")},
+			"prod-1a2b3c4d-default", 1},
+		{"newest matches", []model.ManagedResource{ngRecord("1", "prod-1a2b3c4d-default"), ngRecord("2", "prod-1a2b3c4d-default-abc123")},
+			[]client.Object{liveNodeGroup("prod-1a2b3c4d-default", "t3.medium"), liveNodeGroup("prod-1a2b3c4d-default-abc123", "t3.small")},
+			"prod-1a2b3c4d-default-abc123", 1},
+		{"neither matches", []model.ManagedResource{ngRecord("1", "prod-1a2b3c4d-default"), ngRecord("2", "prod-1a2b3c4d-default-abc123")},
+			[]client.Object{liveNodeGroup("prod-1a2b3c4d-default", "t3.large"), liveNodeGroup("prod-1a2b3c4d-default-abc123", "t3.medium")},
+			replacement, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,7 +104,7 @@ func TestRetireNodeGroups(t *testing.T) {
 	// Replacement not ready: the old node group stays.
 	s, _, k := ngService(t, records, liveNodeGroup("prod-default", "t3.medium"))
 	if err := s.retireNodeGroups(context.Background(), records, []*cloudv1.ManagedResource{
-		view(old.Name, ready), view(replacement.Name, creating)}); err != nil {
+		view(old.Name, ready), view(replacement.Name, creating)}, replacement.Name); err != nil {
 		t.Fatal(err)
 	}
 	if err := k.Get(context.Background(), client.ObjectKey{Namespace: ngNamespace, Name: old.Name}, &awseks.NodeGroup{}); err != nil {
@@ -102,7 +113,7 @@ func TestRetireNodeGroups(t *testing.T) {
 
 	// Replacement ready: the old one is deleted.
 	if err := s.retireNodeGroups(context.Background(), records, []*cloudv1.ManagedResource{
-		view(old.Name, ready), view(replacement.Name, ready)}); err != nil {
+		view(old.Name, ready), view(replacement.Name, ready)}, replacement.Name); err != nil {
 		t.Fatal(err)
 	}
 	if err := k.Get(context.Background(), client.ObjectKey{Namespace: ngNamespace, Name: old.Name}, &awseks.NodeGroup{}); err == nil {
@@ -113,7 +124,21 @@ func TestRetireNodeGroups(t *testing.T) {
 	s, mrs, _ := ngService(t, records)
 	mrs.EXPECT().Delete(gomock.Any(), old.ID).Return(nil)
 	if err := s.retireNodeGroups(context.Background(), records, []*cloudv1.ManagedResource{
-		view(old.Name, missing), view(replacement.Name, ready)}); err != nil {
+		view(old.Name, missing), view(replacement.Name, ready)}, replacement.Name); err != nil {
 		t.Fatal(err)
+	}
+
+	// A reverted change: the older node group is the current one, and the
+	// newer one, still being created, is what goes.
+	s, _, k = ngService(t, records, liveNodeGroup(old.Name, "t3.small"), liveNodeGroup(replacement.Name, "t3.medium"))
+	if err := s.retireNodeGroups(context.Background(), records, []*cloudv1.ManagedResource{
+		view(old.Name, ready), view(replacement.Name, creating)}, old.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Get(context.Background(), client.ObjectKey{Namespace: ngNamespace, Name: old.Name}, &awseks.NodeGroup{}); err != nil {
+		t.Fatalf("the node group the spec was reverted to was deleted: %v", err)
+	}
+	if err := k.Get(context.Background(), client.ObjectKey{Namespace: ngNamespace, Name: replacement.Name}, &awseks.NodeGroup{}); err == nil {
+		t.Fatal("the abandoned replacement was not deleted")
 	}
 }

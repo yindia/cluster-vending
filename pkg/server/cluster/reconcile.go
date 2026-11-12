@@ -46,10 +46,14 @@ func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) err
 	if err != nil {
 		return err
 	}
-	if err := s.retireNodeGroups(ctx, records, views); err != nil {
-		return fmt.Errorf("retire node groups: %w", err)
-	}
 	if len(nodeGroupRecords(records)) > 1 {
+		current, err := s.currentNodeGroup(ctx, row)
+		if err != nil {
+			return fmt.Errorf("find the current node group: %w", err)
+		}
+		if err := s.retireNodeGroups(ctx, records, views, current); err != nil {
+			return fmt.Errorf("retire node groups: %w", err)
+		}
 		// A replaced node group is still being retired: the cluster stays
 		// pending until it is gone and forgotten, or its record would be
 		// left behind (and read as a missing resource) once RUNNING.

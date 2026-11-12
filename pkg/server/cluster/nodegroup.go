@@ -31,11 +31,13 @@ func nodeGroupRecords(records []model.ManagedResource) []model.ManagedResource {
 }
 
 // nodeGroupName picks the default node group for plan. EKS cannot change
-// a node group's instance types, capacity type, AMI type or disk size, so
-// when they differ from the current node group's a new one is created
-// (ReplacementNodeGroupName) and the current one is retired once the new
-// one is ready. It returns the name and the node groups to keep until
-// then.
+// a node group's instance types, capacity type, AMI type, disk size or
+// launch template, so when they differ from the current node group's a new
+// one is created (ReplacementNodeGroupName) and the others are retired
+// once it is ready. A recorded node group that already has the plan's
+// settings is the one: reverting a change before its replacement is ready
+// goes back to the node group that is still there instead of creating a
+// third. It returns the name and the node groups to keep until then.
 func (s *ClusterService) nodeGroupName(ctx context.Context, row *model.Cluster, plan crossplaneaws.ClusterPlan) (string, []client.Object, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
@@ -45,16 +47,25 @@ func (s *ClusterService) nodeGroupName(ctx context.Context, row *model.Cluster, 
 	if len(groups) == 0 {
 		return crossplaneaws.DefaultNodeGroupName(plan.Prefix), nil, nil
 	}
-	current := groups[len(groups)-1]
-	name := current.Name
-	live := &awseks.NodeGroup{}
-	err = s.deps.Get(ctx, client.ObjectKey{Namespace: current.Namespace, Name: current.Name}, live)
+	name, newestGone := "", false
+	for i := len(groups) - 1; i >= 0 && name == ""; i-- {
+		live := &awseks.NodeGroup{}
+		err := s.deps.Get(ctx, client.ObjectKey{Namespace: groups[i].Namespace, Name: groups[i].Name}, live)
+		switch {
+		case apierrors.IsNotFound(err):
+			newestGone = newestGone || i == len(groups)-1
+		case err != nil:
+			return "", nil, fmt.Errorf("read node group %s: %w", groups[i].Name, err)
+		case crossplaneaws.SameNodeGroup(live, plan.NodePool):
+			name = groups[i].Name
+		}
+	}
 	switch {
-	case apierrors.IsNotFound(err):
+	case name != "":
+	case newestGone:
 		// Gone: render it again under its name with the new settings.
-	case err != nil:
-		return "", nil, fmt.Errorf("read node group %s: %w", current.Name, err)
-	case !crossplaneaws.SameNodeGroup(live, plan.NodePool):
+		name = groups[len(groups)-1].Name
+	default:
 		name = crossplaneaws.ReplacementNodeGroupName(plan.Prefix, plan.NodePool)
 	}
 	var keep []client.Object
@@ -89,9 +100,26 @@ func (s *ClusterService) retireLaunchTemplate(ctx context.Context, records []mod
 	return nil
 }
 
-// retireNodeGroups deletes the node groups a replacement superseded once
-// the newest one is READY, and forgets them when they are gone.
-func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource) error {
+// currentNodeGroup is the node group the cluster's spec renders now (see
+// nodeGroupName): the one the others are retired for.
+func (s *ClusterService) currentNodeGroup(ctx context.Context, row *model.Cluster) (string, error) {
+	spec, err := specOf(row)
+	if err != nil {
+		return "", err
+	}
+	t, err := s.target(ctx, row.TenantID, spec)
+	if err != nil {
+		return "", err
+	}
+	name, _, err := s.nodeGroupName(ctx, row, s.renderPlan(spec, row, t))
+	return name, err
+}
+
+// retireNodeGroups deletes the node groups that current superseded once
+// current is READY, and forgets them when they are gone. current is the
+// node group the spec renders, not the one recorded last: after a change
+// is reverted it is the older of the two.
+func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource, current string) error {
 	groups := nodeGroupRecords(records)
 	if len(groups) < 2 {
 		return nil
@@ -100,11 +128,13 @@ func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.M
 	for _, v := range views {
 		state[v.GetKind()+"/"+v.GetName()] = v.GetState()
 	}
-	newest := groups[len(groups)-1]
-	if state[kindNodeGroup+"/"+newest.Name] != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
+	if state[kindNodeGroup+"/"+current] != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
 		return nil
 	}
-	for _, old := range groups[:len(groups)-1] {
+	for _, old := range groups {
+		if old.Name == current {
+			continue
+		}
 		if state[kindNodeGroup+"/"+old.Name] == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
 			if err := s.retireLaunchTemplate(ctx, records, old); err != nil {
 				return err
@@ -117,7 +147,7 @@ func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.M
 		if err := s.deps.DeleteRecorded(ctx, []model.ManagedResource{old}); err != nil {
 			return err
 		}
-		s.logger().InfoContext(ctx, "retiring replaced node group", "cluster_id", old.OwnerID, "node_group", old.Name, "replacement", newest.Name)
+		s.logger().InfoContext(ctx, "retiring replaced node group", "cluster_id", old.OwnerID, "node_group", old.Name, "replacement", current)
 	}
 	return nil
 }

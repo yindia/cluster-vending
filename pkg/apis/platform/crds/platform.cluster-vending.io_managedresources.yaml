@@ -1,0 +1,112 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: managedresources.platform.cluster-vending.io
+spec:
+  group: platform.cluster-vending.io
+  names:
+    kind: ManagedResource
+    listKind: ManagedResourceList
+    plural: managedresources
+    singular: managedresource
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.ownerKind
+      name: Owner
+      type: string
+    - jsonPath: .spec.kind
+      name: Kind
+      type: string
+    - jsonPath: .spec.name
+      name: Object
+      type: string
+    - jsonPath: .spec.externalName
+      name: External
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ManagedResource records one object the platform created in the
+          management cluster for an account, network, cluster or node pool.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ManagedResourceSpec is a managed resource row.
+            properties:
+              apiVersion:
+                description: APIVersion, Kind, Namespace and Name identify the recorded
+                  object.
+                type: string
+              carriedOver:
+                type: boolean
+              cloudAccountID:
+                type: string
+              createdAt:
+                format: date-time
+                type: string
+              externalName:
+                type: string
+              goneAt:
+                format: date-time
+                type: string
+              kind:
+                type: string
+              name:
+                type: string
+              namespace:
+                type: string
+              order:
+                description: |-
+                  Order is the position of the record among its owner's: records list
+                  in the order they were made.
+                format: int64
+                type: integer
+              ownerID:
+                type: string
+              ownerKind:
+                enum:
+                - cloud_account
+                - network
+                - cluster
+                - node_pool
+                type: string
+              tenantID:
+                type: string
+              updatedAt:
+                format: date-time
+                type: string
+            required:
+            - apiVersion
+            - cloudAccountID
+            - kind
+            - name
+            - order
+            - ownerID
+            - ownerKind
+            - tenantID
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

@@ -124,6 +124,7 @@ func TestLoadServeDefaults(t *testing.T) {
 		LoopInterval:     30 * time.Second,
 		LeaderElect:      true,
 		LeaseNamespace:   config.DefaultLeaseNamespace,
+		Store:            config.StoreDatabase, PlatformNamespace: config.DefaultPlatformNamespace,
 		Provider: config.ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
 			CPURequest: "100m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"},
 		AWS: config.AWS{
@@ -134,6 +135,16 @@ func TestLoadServeDefaults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v, want %+v", cfg, want)
+	}
+}
+
+func TestLoadServeStore(t *testing.T) {
+	env := awsEnv()
+	env[config.EnvStore] = config.StoreKubernetes
+	env[config.EnvPlatformNS] = "platform"
+	cfg, err := config.LoadServe(nil, lookup(env), nil)
+	if err != nil || cfg.Store != config.StoreKubernetes || cfg.PlatformNamespace != "platform" {
+		t.Fatalf("store %q in namespace %q (%v), want kubernetes in platform", cfg.Store, cfg.PlatformNamespace, err)
 	}
 }
 
@@ -175,6 +186,7 @@ func TestLoadServeRejectsInvalidValues(t *testing.T) {
 		{"role arn is a user", config.EnvAWSManagementRoleARN, "arn:aws:iam::111122223333:user/bob", config.EnvAWSManagementRoleARN},
 		{"role arn in another account", config.EnvAWSManagementRoleARN, "arn:aws:iam::444455556666:role/cluster-vending", config.EnvAWSManagementRoleARN},
 		{"role arn in another partition", config.EnvAWSManagementRoleARN, "arn:aws-cn:iam::111122223333:role/cluster-vending", config.EnvAWSManagementRoleARN},
+		{"unknown store", config.EnvStore, "etcd", config.EnvStore},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

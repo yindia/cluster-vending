@@ -16,6 +16,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database"
 	"github.com/yindia/cluster-vending/pkg/database/implementation"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/loop"
 	"github.com/yindia/cluster-vending/pkg/server"
@@ -49,20 +50,7 @@ func newServeCmd(g *globals) *cobra.Command {
 				stop()
 			}()
 
-			db, err := database.Open(ctx, cfg.Database)
-			if err != nil {
-				return err
-			}
-			defer func() {
-				if err := database.Close(db); err != nil {
-					g.logger.Error("close database", "error", err)
-				}
-			}()
-			if err := database.Migrate(ctx, db); err != nil {
-				return err
-			}
-
-			mgr, err := server.ConnectManagement(ctx, server.ManagementOptions{
+			management := server.ManagementOptions{
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
 				InstallProviders: cfg.InstallProviders, Logger: g.logger,
 				ProviderRuntime: crossplaneaws.ProviderRuntime{
@@ -71,7 +59,14 @@ func newServeCmd(g *globals) *cobra.Command {
 					MemoryRequest: cfg.Provider.MemoryRequest, CPULimit: cfg.Provider.CPULimit, MemoryLimit: cfg.Provider.MemoryLimit,
 				},
 				LeaderElection: kube.LeaderElection{Enabled: cfg.LeaderElect, Namespace: cfg.LeaseNamespace},
-			})
+			}
+			store, closeStore, err := openStore(ctx, cfg, management)
+			if err != nil {
+				return err
+			}
+			defer closeStore()
+
+			mgr, err := server.ConnectManagement(ctx, management)
 			if err != nil {
 				return fmt.Errorf("%w (--%s=false skips installing the providers)", err, config.FlagInstallProviders)
 			}
@@ -85,6 +80,7 @@ func newServeCmd(g *globals) *cobra.Command {
 				"context", g.cfg.KubeContext,
 				"aws_management_account_id", cfg.AWS.ManagementAccountID,
 				"aws_management_role_arn", cfg.AWS.ManagementRoleARN,
+				"store", cfg.Store,
 				// Never log the DSN: it may hold a password.
 				"database_driver", cfg.Database.Driver)
 			discovery, err := awscloud.New(ctx, awscloud.Config{})
@@ -99,7 +95,7 @@ func newServeCmd(g *globals) *cobra.Command {
 				renderTarget = crossplaneaws.RenderVersion
 			}
 			deps := service.Deps{
-				Store:        implementation.New(db),
+				Store:        store,
 				Kube:         mgr.GetClient(), // reads from the informer cache
 				KubeReader:   mgr.GetAPIReader(),
 				AWS:          cfg.AWS,
@@ -135,4 +131,28 @@ func newServeCmd(g *globals) *cobra.Command {
 	}
 	addFlags(cmd.Flags(), config.ServeSettings())
 	return cmd
+}
+
+// openStore opens where the server keeps its state (config.Serve.Store):
+// the database, migrated, or the custom resources of the management
+// cluster, for which no database is opened. The returned func closes it.
+func openStore(ctx context.Context, cfg config.Serve, management server.ManagementOptions) (repository.Store, func(), error) {
+	if cfg.Store == config.StoreKubernetes {
+		store, err := server.ConnectStore(ctx, management, cfg.PlatformNamespace)
+		return store, func() {}, err
+	}
+	db, err := database.Open(ctx, cfg.Database)
+	if err != nil {
+		return nil, nil, err
+	}
+	closeDB := func() {
+		if err := database.Close(db); err != nil {
+			management.Logger.Error("close database", "error", err)
+		}
+	}
+	if err := database.Migrate(ctx, db); err != nil {
+		closeDB()
+		return nil, nil, err
+	}
+	return implementation.New(db), closeDB, nil
 }

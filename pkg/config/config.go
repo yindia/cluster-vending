@@ -55,6 +55,10 @@ const (
 	EnvLeaderElect       = "CV_LEADER_ELECT"
 	FlagLeaseNamespace   = "lease-namespace"
 	EnvLeaseNamespace    = "CV_LEASE_NAMESPACE"
+	FlagStore            = "store"
+	EnvStore             = "CV_STORE"
+	FlagPlatformNS       = "platform-namespace"
+	EnvPlatformNS        = "CV_PLATFORM_NAMESPACE"
 	FlagRenderTarget     = "render-target"
 	EnvRenderTarget      = "CV_RENDER_TARGET"
 	FlagRenderRollout    = "render-rollout"
@@ -85,11 +89,24 @@ const (
 	// DefaultLeaseNamespace holds the leader election Lease: Crossplane's
 	// namespace exists in every management cluster.
 	DefaultLeaseNamespace = "crossplane-system"
+	// DefaultPlatformNamespace holds the platform's own custom resources
+	// when they are the store.
+	DefaultPlatformNamespace = "cluster-vending-system"
+)
+
+// Where the server keeps its state (FlagStore).
+const (
+	// StoreDatabase: the database of the database-* settings.
+	StoreDatabase = "database"
+	// StoreKubernetes: custom resources in the management cluster
+	// (pkg/database/kubestore); no database is opened.
+	StoreKubernetes = "kubernetes"
 )
 
 var (
 	logLevels  = []string{"debug", "info", "warn", "error"}
 	logFormats = []string{"json", "text"}
+	stores     = []string{StoreDatabase, StoreKubernetes}
 )
 
 var globalSettings = []Setting{
@@ -116,6 +133,10 @@ var serveSettings = append([]Setting{
 		Usage: "run the background loop behind leader election (a Lease), so one server replica runs it"},
 	{Flag: FlagLeaseNamespace, Env: EnvLeaseNamespace, Default: DefaultLeaseNamespace,
 		Usage: "namespace of the leader election Lease in the management cluster: the server's own namespace"},
+	{Flag: FlagStore, Env: EnvStore, Default: StoreDatabase,
+		Usage: "where networks, clusters and tenants are stored: database (the database-* settings) or kubernetes (custom resources in the management cluster; no database is opened)"},
+	{Flag: FlagPlatformNS, Env: EnvPlatformNS, Default: DefaultPlatformNamespace,
+		Usage: "namespace of the platform's custom resources in the management cluster, with --store=kubernetes; created when missing"},
 	{Flag: FlagRenderTarget, Env: EnvRenderTarget, Default: "0",
 		Usage: "renderer version existing networks and clusters are re-applied up to by the background loop; 0 is this build's version"},
 	{Flag: FlagRenderRollout, Env: EnvRenderRollout,
@@ -164,6 +185,10 @@ type Serve struct {
 	LoopInterval   time.Duration
 	LeaderElect    bool
 	LeaseNamespace string
+	// Store is where the state is kept (StoreDatabase or StoreKubernetes);
+	// PlatformNamespace holds the custom resources of StoreKubernetes.
+	Store             string
+	PlatformNamespace string
 	// RenderTarget (0: this build's renderer version) and RenderRollout
 	// (empty: all) drive the renderer rollout.
 	RenderTarget  int64
@@ -230,6 +255,10 @@ func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))
 	}
 	cfg.LeaseNamespace = v[FlagLeaseNamespace]
+	cfg.Store, cfg.PlatformNamespace = v[FlagStore], v[FlagPlatformNS]
+	if cfg.Store != "" && !slices.Contains(stores, cfg.Store) {
+		errs = append(errs, fmt.Errorf("%s must be one of %v, got %q", setting(FlagStore), stores, cfg.Store))
+	}
 	if cfg.RenderTarget, err = strconv.ParseInt(v[FlagRenderTarget], 10, 64); err != nil || cfg.RenderTarget < 0 {
 		errs = append(errs, fmt.Errorf("%s must be a non-negative integer, got %q", setting(FlagRenderTarget), v[FlagRenderTarget]))
 	}

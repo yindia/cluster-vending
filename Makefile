@@ -158,7 +158,7 @@ docker-build: ## Build the container image IMAGE:TAG (needs Docker; nothing is p
 
 .PHONY: deploy-manifests
 deploy-manifests: ## Render the controller's and the server's manifests into bin/deploy (nothing is applied)
-	@mkdir -p $(BIN_DIR)/deploy
+	@rm -rf $(BIN_DIR)/deploy && mkdir -p $(BIN_DIR)/deploy
 	@for dir in $(DEPLOY_DIRS); do \
 	  out=$(BIN_DIR)/deploy/$$(echo $$dir | tr '/' '-').yaml; \
 	  $(KUSTOMIZE) $$dir | sed 's|ghcr.io/yindia/cluster-vending:latest|$(IMAGE):$(TAG)|' > $$out; \

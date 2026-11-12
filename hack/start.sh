@@ -5,7 +5,7 @@
 #   2. Crossplane (CROSSPLANE_VERSION) from the crossplane-stable Helm chart
 #
 # That is all. The server creates the rest: on startup the Crossplane AWS
-# providers (ec2, eks, iam), provider-helm and, with a management role, the
+# providers (ec2, eks, iam, cloudwatchlogs), provider-helm and, with a management role, the
 # AWS providers' IRSA
 # DeploymentRuntimeConfig, when missing (--install-providers); tenant
 # namespaces, ProviderConfigs and managed resources when it handles

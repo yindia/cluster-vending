@@ -558,8 +558,9 @@ func (x *AwsAddonStatus) GetMessage() string {
 //	ec2:DescribeSecurityGroups    vpc-id, group-name=default
 //	ec2:DescribeNetworkAcls       vpc-id, default=true
 //	ec2:DescribeVpcEndpoints      vpc-id
-//	ec2:DescribeFlowLogs          resource-id=<vpc and subnet ids>
-//	logs:DescribeLogGroups / iam:GetRole  for flow log destinations
+//	ec2:DescribeFlowLogs          the region's (those on the VPC are imported)
+//	logs:DescribeLogGroups, logs:ListTagsForResource, iam:GetRole
+//	                              for flow log destinations
 //
 // and creates an Observe-only Crossplane managed resource for each result.
 // Modelled (spec.layout): VPC, subnets, route tables + associations, the

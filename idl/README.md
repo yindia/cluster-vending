@@ -404,7 +404,7 @@ part of the admin access granted at onboarding.
 
 | When | AWS calls |
 |---|---|
-| `ImportNetwork` | `ec2:DescribeSubnets`, `DescribeRouteTables`, `DescribeInternetGateways`, `DescribeNatGateways`, `DescribeAddresses`, `DescribeSecurityGroups`, `DescribeNetworkAcls`, `DescribeVpcEndpoints`, `DescribeFlowLogs`; `logs:DescribeLogGroups`; `iam:GetRole` |
+| `ImportNetwork` | `ec2:DescribeSubnets`, `DescribeRouteTables`, `DescribeInternetGateways`, `DescribeNatGateways`, `DescribeAddresses`, `DescribeSecurityGroups`, `DescribeNetworkAcls`, `DescribeVpcEndpoints`, `DescribeFlowLogs`; `logs:DescribeLogGroups`, `ListTagsForResource`; `iam:GetRole` |
 | Cluster import (temporary) | `eks:DescribeCluster`, `ListNodegroups`, `DescribeNodegroup`, `ListAddons`, `DescribeAddon`, `ListAccessEntries`, `ListAssociatedAccessPolicies`, `ListPodIdentityAssociations`; `iam:ListAttachedRolePolicies`, `ListOpenIDConnectProviders`; `kms:DescribeKey`, `ListAliases`; `logs:DescribeLogGroups`; `ec2:DescribeSecurityGroups`, `DescribeSecurityGroupRules`, `DescribeLaunchTemplateVersions`; Kubernetes `kube-system/aws-auth` for `CONFIG_MAP` clusters |
 
 ## Always created (not in the contract)

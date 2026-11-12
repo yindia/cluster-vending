@@ -1,6 +1,8 @@
 package aws
 
 import (
+	"reflect"
+
 	apiextv1alpha1 "github.com/crossplane/crossplane/apis/v2/apiextensions/v1alpha1"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
@@ -23,6 +25,8 @@ var managedMRDs = []string{
 	"vpcs.ec2.aws.m.upbound.io", "internetgateways.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io",
 	"eips.ec2.aws.m.upbound.io", "natgateways.ec2.aws.m.upbound.io", "routetables.ec2.aws.m.upbound.io",
 	"routes.ec2.aws.m.upbound.io", "routetableassociations.ec2.aws.m.upbound.io",
+	// Network flow logs (also roles, policies and their attachments, below).
+	"flowlogs.ec2.aws.m.upbound.io", "groups.cloudwatchlogs.aws.m.upbound.io",
 	// Clusters (ClusterResources).
 	"roles.iam.aws.m.upbound.io", "rolepolicyattachments.iam.aws.m.upbound.io", "policies.iam.aws.m.upbound.io",
 	"clusters.eks.aws.m.upbound.io", "nodegroups.eks.aws.m.upbound.io", "addons.eks.aws.m.upbound.io",
@@ -55,9 +59,19 @@ func ActivationPolicy() *apiextv1alpha1.ManagedResourceActivationPolicy {
 // Usages ordering their deletion), for watches and caches. Usage is a
 // Crossplane core kind, not an MRD: it needs no activation.
 func ManagedObjects() []client.Object {
-	return append(NetworkObjects(), &protectionv1beta1.Usage{},
+	all := append(NetworkObjects(), &protectionv1beta1.Usage{},
 		&awsiam.Role{}, &awsiam.RolePolicyAttachment{}, &awsiam.Policy{},
 		&awseks.Cluster{}, &awseks.NodeGroup{}, &awseks.Addon{}, &awseks.PodIdentityAssociation{},
 		&awseks.AccessEntry{}, &awseks.AccessPolicyAssociation{}, &awseks.ClusterAuth{},
 	)
+	// Networks and clusters share kinds (IAM): each once.
+	out := make([]client.Object, 0, len(all))
+	seen := map[reflect.Type]bool{}
+	for _, obj := range all {
+		if t := reflect.TypeOf(obj); !seen[t] {
+			seen[t] = true
+			out = append(out, obj)
+		}
+	}
+	return out
 }

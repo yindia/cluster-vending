@@ -14,7 +14,6 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
-	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -49,7 +48,7 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	if err := s.deps.MarkGone(ctx, records, views); err != nil {
 		return false, err
 	}
-	if err := s.releaseOrphanUsages(ctx, records, views); err != nil {
+	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
 		return false, err
 	}
 	if !service.AllGone(views) {
@@ -73,39 +72,6 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	}
 	s.logger().InfoContext(ctx, "cluster deleted", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	return true, nil
-}
-
-// releaseOrphanUsages deletes recorded Usages whose "by" object is gone but
-// that are still there: Kubernetes garbage-collects a Usage only once
-// Crossplane owner-referenced it to its user, which never happens when the
-// user was deleted (or never created) first. Deleting the Usage releases
-// its object at once.
-func (s *ClusterService) releaseOrphanUsages(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource) error {
-	present := make(map[string]bool, len(views))
-	for _, v := range views {
-		if v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
-			present[v.GetKind()+"/"+v.GetName()] = true
-		}
-	}
-	var errs []error
-	for _, r := range records {
-		if r.Kind != "Usage" || !present[r.Kind+"/"+r.Name] {
-			continue
-		}
-		u := &protectionv1beta1.Usage{}
-		if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
-			errs = append(errs, client.IgnoreNotFound(err))
-			continue
-		}
-		by := u.Spec.By
-		if by == nil || by.ResourceRef == nil || present[by.Kind+"/"+by.ResourceRef.Name] {
-			continue
-		}
-		if err := client.IgnoreNotFound(s.deps.Kube.Delete(ctx, u)); err != nil {
-			errs = append(errs, fmt.Errorf("release usage %s: %w", r.Name, err))
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // deleteUnrecorded confirms with the API server (by label, uncached) that

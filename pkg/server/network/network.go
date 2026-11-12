@@ -91,6 +91,7 @@ func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkR
 	}
 	spec := proto.CloneOf(in.GetSpec())
 	spec.Layout = layoutProto(l)
+	spec.FlowLogs = resolvedFlowLogs(spec.GetFlowLogs())
 	raw, err := encode(spec)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())

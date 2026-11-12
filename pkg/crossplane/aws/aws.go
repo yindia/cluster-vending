@@ -36,7 +36,7 @@ const RenderVersion = 1
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.
-var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam"}
+var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam", "provider-aws-cloudwatchlogs"}
 
 const (
 	// RuntimeConfigName is the DeploymentRuntimeConfig the AWS providers

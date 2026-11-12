@@ -18,6 +18,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -25,12 +26,12 @@ import (
 const PausedAnnotation = "crossplane.io/paused"
 
 // Service implements cloud.v1.AdminService.
-type Service struct{ deps service.Deps }
+type Service struct{ deps reconcile.Deps }
 
 var _ cloudv1connect.AdminServiceHandler = (*Service)(nil)
 
 // NewService returns the AdminService.
-func NewService(d service.Deps) *Service { return &Service{deps: d} }
+func NewService(d reconcile.Deps) *Service { return &Service{deps: d} }
 
 // PauseReconcile pauses the tenant's (or one cluster's) managed resources.
 func (s *Service) PauseReconcile(ctx context.Context, req *cloudv1.PauseReconcileRequest) (*cloudv1.PauseReconcileResponse, error) {

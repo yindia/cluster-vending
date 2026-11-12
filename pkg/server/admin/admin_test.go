@@ -14,7 +14,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 const (
@@ -39,7 +39,7 @@ func TestPauseAndResumeReconcile(t *testing.T) {
 		ng("tenant-acme", "a-default", crossplane.ClusterLabels("acme", clusterA)),
 		ng("tenant-acme", "b-default", crossplane.ClusterLabels("acme", clusterB)),
 		ng("tenant-beta", "c-default", crossplane.ClusterLabels("beta", clusterA)), vpc).Build()
-	s := NewService(service.Deps{Kube: k})
+	s := NewService(reconcile.Deps{Kube: k})
 	paused := func(obj client.Object) bool {
 		t.Helper()
 		if err := k.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {

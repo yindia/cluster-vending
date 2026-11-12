@@ -36,8 +36,7 @@ type Options struct {
 	Kubeconfig, KubeContext string
 	// InstallProviders creates the Crossplane providers, provider-helm and
 	// the activation policy when missing; ProviderRuntime is how the AWS
-	// providers run. Only what reconciles installs them (the controller,
-	// or the server while it runs the background loop); the API server
+	// providers run. Only the controller installs them; the API server
 	// waits for their kinds.
 	InstallProviders bool
 	// InstallKinds installs the CustomResourceDefinitions of the platform's
@@ -45,7 +44,7 @@ type Options struct {
 	// them, the API server waits for them.
 	InstallKinds    bool
 	ProviderRuntime crossplaneaws.ProviderRuntime
-	// LeaderElection of the background loop, or of the controllers.
+	// LeaderElection of the controllers; the API server needs none.
 	LeaderElection kube.LeaderElection
 	Logger         *slog.Logger
 	// WatchPlatformKinds also caches the platform's own kinds (CloudAccount,

@@ -282,13 +282,11 @@ type Cluster struct {
 	// refers to the cluster by it.
 	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	// Name chosen by the client: DNS-label safe. It is the cloud cluster's
-	// name (AWS: the EKS cluster name), so it must be unique per account and
-	// region. CreateCluster fails with ALREADY_EXISTS when a cluster of the
-	// platform already has it (the database store checks the account and
-	// region; the Kubernetes store, where the name is the Cluster object's,
-	// the tenant). A cluster of the name that the platform did not create is
-	// found by the controller before anything is created: the new cluster
-	// becomes FAILED. The cluster's other cloud and Kubernetes resources are
+	// name (AWS: the EKS cluster name) and the Cluster object's, unique per
+	// tenant: CreateCluster fails with ALREADY_EXISTS when another cluster of
+	// the tenant has it. A cluster of the name that the platform did not
+	// create is found by the controller before anything is created: the new
+	// cluster becomes FAILED. The cluster's other cloud and Kubernetes resources are
 	// named "<name>-<hash8>-...". Immutable.
 	Name string `protobuf:"bytes,11,opt,name=name,proto3" json:"name,omitempty"`
 	// Human-friendly name. Mutable.

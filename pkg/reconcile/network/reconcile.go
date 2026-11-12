@@ -3,7 +3,7 @@
 // applies imported ones as observed and, after a takeover, as owned (the
 // same set, rendered again), deletes them tier by tier,
 // observes them for the network's status, and records what it saw,
-// including what went wrong. The background loop calls Reconcile; the API
+// including what went wrong. The controller calls Reconcile; the API
 // handlers (pkg/server/network) only store what was asked for, and use
 // this package to check a request and to read. It knows no RPC library: a
 // failure a caller can act on is a fault (pkg/fault).
@@ -25,14 +25,14 @@ type Reconciler struct{ deps reconcile.Deps }
 // New returns the Reconciler.
 func New(d reconcile.Deps) *Reconciler { return &Reconciler{deps: d} }
 
-// PendingStates are the stored states of networks the background loop
-// looks at every pass.
-// Imported networks are only observed: the loop records their status.
+// PendingStates are the stored states of networks that are not settled:
+// the controller looks at them again soon.
+// Imported networks are only observed: their status is recorded.
 func PendingStates() []string {
 	return []string{StateProvisioning, StateUpdating, StateDeleting, StateImported}
 }
 
-// Reconcile moves one network on; the background loop calls it, so no read
+// Reconcile moves one network on; the controller calls it, so no read
 // has to, and no API call does: the handlers only store what was asked
 // for. It moves a deletion on (the next tier, then the row), applies
 // the network again while its generation or renderer version is behind

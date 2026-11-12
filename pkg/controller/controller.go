@@ -4,8 +4,7 @@
 // A controller here has no reconcile logic of its own. The objects are
 // the rows of the store on these kinds (pkg/database/cloudstore), and
 // what moves a row towards its spec already exists (pkg/reconcile/account,
-// network, cluster: the same code the API server's background loop runs
-// on the database store). A controller turns a watch event into a call of
+// network, cluster). A controller turns a watch event into a call of
 // that reconciler:
 //
 //   - it maps the object to its tenant and row ID (the store's labels);

@@ -25,7 +25,6 @@ const (
 	controllerDeployment = "manager/manager.yaml"
 	controllerRole       = "rbac/platform_role.yaml"
 	serverBase           = "server/base"
-	serverOverlays       = "server/overlays"
 )
 
 // documents are the YAML documents of a manifest file.
@@ -165,50 +164,29 @@ func TestControllerDeploymentUsesTheCommandsSettings(t *testing.T) {
 	}
 }
 
-// Each server overlay's settings are settings the serve command has, and
-// they load as the backend the overlay is for.
-func TestServerOverlaysLoad(t *testing.T) {
+// The server's settings are settings the serve command has, and only
+// its three: no store, loop, leader election, provider or AWS setting.
+func TestServerSettingsLoad(t *testing.T) {
 	_, envNames := known(config.ServeSettings(), config.GlobalSettings())
 	c := deployment(t, filepath.Join(serverBase, "deployment.yaml")).Spec.Template.Spec.Containers[0]
-	if !slices.Equal(c.Command, []string{"/cluster-vending", "serve"}) || len(c.Args) != 0 {
-		t.Errorf("command %v args %v", c.Command, c.Args)
+	if !slices.Equal(c.Command, []string{"/cluster-vending", "serve"}) || len(c.Args) != 0 || len(c.Env) != 0 {
+		t.Errorf("command %v args %v env %v", c.Command, c.Args, c.Env)
 	}
-	for overlay, store := range map[string]string{"kubernetes-store": config.StoreKubernetes, "postgres": config.StoreDatabase} {
-		env := literals(t, serverBase)
-		for name, value := range literals(t, filepath.Join(serverOverlays, overlay)) {
-			env[name] = value
+	env := literals(t, serverBase)
+	for name := range env {
+		if !slices.Contains(envNames, name) {
+			t.Errorf("%s is not an environment variable of the serve command", name)
 		}
-		for _, e := range c.Env {
-			env[e.Name] = "cluster-vending-system" // CV_LEASE_NAMESPACE, from the downward API
+		if strings.Contains(name, "AWS") || strings.Contains(name, "LEADER") || strings.Contains(name, "PROVIDER") {
+			t.Errorf("the server is given %s: it reconciles nothing and makes no AWS call", name)
 		}
-		if store == config.StoreDatabase {
-			// From the Secret, in the cluster (database_dsn_patch.yaml).
-			env[config.EnvDatabaseDSN] = "postgres://user@db.example.internal:5432/cluster_vending"
-		}
-		for name := range env {
-			if !slices.Contains(envNames, name) {
-				t.Errorf("%s: %s is not an environment variable of the serve command", overlay, name)
-			}
-		}
-		cfg, err := config.LoadServe(lookup(nil), lookup(env), nil)
-		if err != nil {
-			t.Errorf("%s: the settings do not load: %v", overlay, err)
-			continue
-		}
-		if cfg.Store != store || cfg.HTTPAddr != ":8080" || !cfg.LeaderElect || cfg.LeaseNamespace != "cluster-vending-system" {
-			t.Errorf("%s: loaded store %s, addr %s, leader election %t in %s", overlay, cfg.Store, cfg.HTTPAddr,
-				cfg.LeaderElect, cfg.LeaseNamespace)
-		}
-		// With the Kubernetes store the server only stores the desired
-		// state: it has no AWS setting at all and does not reconcile. With
-		// a database it runs the loop, and is given the reconciler's.
-		aws := false
-		for name := range env {
-			aws = aws || strings.Contains(name, "AWS") || name == config.EnvInstallProviders
-		}
-		if reconciles := store == config.StoreDatabase; cfg.BackgroundLoop != reconciles || aws != reconciles {
-			t.Errorf("%s: background loop %t, AWS or provider settings %t; want both %t", overlay, cfg.BackgroundLoop, aws, reconciles)
-		}
+	}
+	cfg, err := config.LoadServe(lookup(nil), lookup(env), nil)
+	if err != nil {
+		t.Fatalf("the settings do not load: %v", err)
+	}
+	if cfg.HTTPAddr != ":8080" {
+		t.Errorf("loaded addr %s", cfg.HTTPAddr)
 	}
 }
 
@@ -236,7 +214,7 @@ func TestOnlyTheControllerHasAnIAMRole(t *testing.T) {
 	if role := serviceAccountRole(t, "default"); !strings.HasPrefix(role, "arn:aws:iam::111122223333:role/") {
 		t.Errorf("the controller's service account role = %q, want the placeholder IRSA role", role)
 	}
-	for _, dir := range []string{serverBase, filepath.Join(serverOverlays, "kubernetes-store")} {
+	for _, dir := range []string{serverBase} {
 		if role := serviceAccountRole(t, dir); role != "" {
 			t.Errorf("%s gives the server an IAM role (%s): the server makes no AWS call", dir, role)
 		}
@@ -277,12 +255,10 @@ func managedKinds() []string {
 
 // What reconciles can do, on every managed resource kind the platform
 // uses, what the code does with them, and can install the providers: the
-// controller, and the server of the postgres overlay (it runs the
-// background loop). Neither reads a Secret.
+// controller. It reads no Secret.
 func TestReconcilerRolesCoverTheKindsThePlatformRenders(t *testing.T) {
 	roles := map[string]*rbacv1.ClusterRole{
-		"controller":      clusterRole(t, controllerRole),
-		"postgres server": clusterRole(t, filepath.Join(serverOverlays, "postgres", "reconciler_role.yaml")),
+		"controller": clusterRole(t, controllerRole),
 	}
 	verbs := []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}
 	for name, role := range roles {

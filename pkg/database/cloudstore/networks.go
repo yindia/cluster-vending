@@ -418,32 +418,6 @@ func (r networks) SetStatus(ctx context.Context, tenantID, id, etag string, stat
 	}))
 }
 
-// MarkBehind puts the applied generation below the generation and assigns
-// a new etag, so a write based on the row as it was fails.
-func (r networks) MarkBehind(ctx context.Context, tenantID, id string) error {
-	return translate(retry(func() error {
-		obj, err := r.find(ctx, tenantID, id)
-		if err != nil {
-			return err
-		}
-		if err := markBehind(obj); err != nil {
-			return err
-		}
-		return r.c.Update(ctx, obj)
-	}))
-}
-
-// markBehind edits obj's row annotation: a new etag, and an applied
-// generation below the generation.
-func markBehind(obj client.Object) error {
-	m := metaOf(obj)
-	m.ETag = newETag()
-	if m.AppliedGeneration >= m.Generation {
-		m.AppliedGeneration = m.Generation - 1
-	}
-	return setMeta(obj, m)
-}
-
 // Delete removes the network unless clusters use it. A cluster created in
 // the same instant changes the network (clusters.Create), so the delete of
 // the network as it was read is refused, or sees the network gone when it
@@ -469,18 +443,4 @@ func (r networks) Delete(ctx context.Context, tenantID, id string) error {
 	}
 	r.release(ctx, obj.Namespace, networkKeys(row)...)
 	return nil
-}
-
-func (r networks) ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Network, error) {
-	rows, err := r.all(ctx, "", nil)
-	if err != nil {
-		return nil, err
-	}
-	out := rows[:0]
-	for _, n := range rows {
-		if isPending(&n.Resource, states, renderTarget) {
-			out = append(out, n)
-		}
-	}
-	return out, nil
 }

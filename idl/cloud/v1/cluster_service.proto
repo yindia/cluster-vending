@@ -54,12 +54,11 @@ service ClusterService {
   // taken over. From then on it is a cluster like any other.
   rpc TakeOverCluster(TakeOverClusterRequest) returns (TakeOverClusterResponse);
 
-  // Returns one cluster, or NOT_FOUND, from the platform's database: its
-  // spec and the status the platform last recorded for it (while a cluster
-  // is being created, changed or deleted that is at most one pass of the
-  // background loop old; afterwards it is the status it converged on). It
-  // does not read the management cluster. GetClusterStatus reads the live
-  // status.
+  // Returns one cluster, or NOT_FOUND, from the platform's store: its spec
+  // and the status the controller last recorded for it (it records one on
+  // every reconcile while the cluster is being created, changed or deleted;
+  // afterwards it is the status the cluster converged on). It does not read
+  // the provider objects. GetClusterStatus reads the live status.
   rpc GetCluster(GetClusterRequest) returns (GetClusterResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -73,7 +72,7 @@ service ClusterService {
   }
 
   // Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
-  // from the database like GetCluster.
+  // from the platform's store like GetCluster.
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

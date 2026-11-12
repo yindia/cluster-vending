@@ -97,7 +97,7 @@ service comments say so.
 
 | Call | Source | Status returned |
 |---|---|---|
-| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters`, `WatchNetwork`, `WatchCluster` | the platform's store | the status last recorded: by the background loop on every pass while the resource is being created, changed or deleted, or is imported, and by every call that changes it. A converged resource keeps the status it converged on. |
+| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters`, `WatchNetwork`, `WatchCluster` | the platform's store | the status last recorded: by the controller on every reconcile while the resource is being created, changed or deleted, or is imported. A converged resource keeps the status it converged on. |
 | `GetNetworkStatus`, `GetClusterStatus` | the management cluster, now | live: the conditions of every managed resource, cloud IDs, the EKS endpoint and versions |
 
 A stored change shows in `Get*` at once (`DELETING`, `UPDATING`). What the

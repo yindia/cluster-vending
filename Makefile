@@ -17,11 +17,6 @@ GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo $(BIN_DIR)
 KIND_CLUSTER ?= cluster-vending
 KUBE_CONTEXT ?= kind-$(KIND_CLUSTER)
 
-# Throwaway Postgres for `make test-postgres`.
-PG_CONTAINER ?= cv-test-postgres
-PG_PORT      ?= 55432
-PG_DSN       ?= postgres://postgres:postgres@127.0.0.1:$(PG_PORT)/postgres?sslmode=disable
-
 # Buf breaking-change baseline, e.g. make breaking AGAINST='.git#branch=main'
 AGAINST ?= .git\#branch=main
 
@@ -100,7 +95,7 @@ $(BIN_DIR)/golangci-lint:
 ##@ Test
 
 .PHONY: test
-test: ## Unit tests with the race detector (SQLite, no cluster needed)
+test: ## Unit tests with the race detector (a fake API server, no cluster needed)
 	go test -race -count=1 ./...
 
 .PHONY: cover
@@ -109,25 +104,6 @@ cover: ## Unit tests with a coverage report in bin/coverage.html
 	go test -race -count=1 -coverprofile=$(BIN_DIR)/coverage.out ./pkg/...
 	go tool cover -func=$(BIN_DIR)/coverage.out | tail -1
 	go tool cover -html=$(BIN_DIR)/coverage.out -o $(BIN_DIR)/coverage.html
-
-.PHONY: postgres-up
-postgres-up: ## Start a throwaway Postgres in docker on PG_PORT
-	@docker start $(PG_CONTAINER) >/dev/null 2>&1 || \
-	  docker run -d --name $(PG_CONTAINER) -e POSTGRES_PASSWORD=postgres -p $(PG_PORT):5432 postgres:17 >/dev/null
-	@for i in $$(seq 1 30); do \
-	  docker exec $(PG_CONTAINER) pg_isready -U postgres >/dev/null 2>&1 && exit 0; sleep 1; \
-	done; echo "postgres did not become ready" >&2; exit 1
-
-.PHONY: postgres-down
-postgres-down: ## Remove the throwaway Postgres
-	docker rm -f $(PG_CONTAINER)
-
-.PHONY: test-postgres
-test-postgres: postgres-up ## Database tests against Postgres
-	CV_TEST_POSTGRES_DSN='$(PG_DSN)' go test -race -count=1 ./pkg/database/... ./pkg/server/...
-
-.PHONY: test-all
-test-all: test test-postgres ## Unit tests on SQLite and the database tests on Postgres
 
 ##@ Local cluster
 
@@ -159,9 +135,9 @@ run-controller: build ## Run the controller against the kind cluster (hack/contr
 	$(BINARY) controller --config hack/controller.local.yaml
 
 .PHONY: clean
-clean: ## Remove build output and the local database
+clean: ## Remove build output
 	go clean -testcache
-	rm -f bin/cluster-vending bin/coverage.out bin/coverage.html bin/cluster-vending.db
+	rm -f bin/cluster-vending bin/coverage.out bin/coverage.html
 
 ##@ Image and deploy manifests
 
@@ -173,7 +149,7 @@ TAG      ?= $(VERSION)
 GO_IMAGE_VERSION ?= $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
 # kustomize, or the one built into kubectl.
 KUSTOMIZE ?= $(shell command -v kustomize >/dev/null 2>&1 && echo 'kustomize build' || echo 'kubectl kustomize')
-DEPLOY_DIRS := config/default config/server/overlays/kubernetes-store config/server/overlays/postgres
+DEPLOY_DIRS := config/default config/server/base
 
 .PHONY: docker-build
 docker-build: ## Build the container image IMAGE:TAG (needs Docker; nothing is pushed)

@@ -56,8 +56,6 @@ func ownerList(kind model.OwnerKind) (client.ObjectList, error) {
 		return &cloudv1alpha1.NetworkList{}, nil
 	case model.OwnerCluster:
 		return &cloudv1alpha1.ClusterList{}, nil
-	case model.OwnerNodePool:
-		return nil, fmt.Errorf("%w: %w", repository.ErrInvalid, ErrNodePools)
 	}
 	return nil, fmt.Errorf("%w: owner kind %q", repository.ErrInvalid, kind)
 }

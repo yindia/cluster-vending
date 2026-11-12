@@ -20,7 +20,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 type fakeClusterDiscoverer struct{ cluster *awscloud.Cluster }
@@ -81,7 +81,7 @@ func terraformCluster() *awscloud.Cluster {
 
 func importWorld(t *testing.T, found *awscloud.Cluster) world {
 	t.Helper()
-	return newWorld(t, interceptor.Funcs{}, nil, withVersions, func(d *service.Deps) {
+	return newWorld(t, interceptor.Funcs{}, nil, withVersions, func(d *recon.Deps) {
 		d.AWSClusterDiscovery = fakeClusterDiscoverer{cluster: found}
 	})
 }
@@ -120,7 +120,7 @@ func update(t *testing.T, w world, req *cloudv1.UpdateClusterRequest) (*cloudv1.
 	return res, err
 }
 
-// reconcile runs one pass of the background loop for the cluster: a call
+// reconcile runs one pass of the controller for the cluster: a call
 // only stores what was asked for, this applies it.
 func reconcile(t *testing.T, w world, id string) {
 	t.Helper()

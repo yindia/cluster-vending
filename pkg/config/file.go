@@ -12,18 +12,15 @@ import (
 )
 
 // LoadFile reads a YAML config file and returns a lookup keyed by flag
-// name, for LoadGlobal / LoadServe. Keys are flag names; nested mappings
-// are joined with "-", so these are the same:
+// name, for LoadGlobal, LoadServe and LoadController. Keys are flag names;
+// nested mappings are joined with "-", so these are the same:
 //
-//	database:
-//	  driver: postgres         # database-driver
 //	aws:
 //	  management-account-id: "111122223333"   # aws-management-account-id
 //
 // Values are scalars (strings, numbers, booleans, durations such as 30s).
 // Unknown keys, lists, null values and the "config" key itself are errors.
-// Keep secrets (e.g. a password in database-dsn) in the environment: it
-// wins over the file.
+// Keep secrets in the environment: it wins over the file.
 func LoadFile(path string) (LookupFunc, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

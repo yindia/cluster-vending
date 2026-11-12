@@ -1,15 +1,10 @@
-# The API server (`cluster-vending serve`) in the management cluster. This
-# base does not say where the server keeps its state: use one of the
-# overlays.
+# The API server (`cluster-vending serve`) in the management cluster. It
+# keeps its state as CloudAccount, Network and Cluster objects in the
+# tenants' namespaces: no database. It only stores the desired state:
+# deploy the controller (config/default) with it, which installs the kinds
+# the server waits for, installs the providers and reconciles.
 #
-#   ../overlays/kubernetes-store   custom resources in the management cluster,
-#                                  no database (--store=kubernetes); deploy the
-#                                  controller (config/default) with it
-#   ../overlays/postgres           an external Postgres (--store=database); the
-#                                  server is then the reconciler too and gets
-#                                  the controller's settings, role and AWS access
-#
-#   make deploy-manifests          # render both, nothing is applied
+#   make deploy-manifests          # render, nothing is applied
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -22,8 +17,6 @@ resources:
 - service_account.yaml
 - role.yaml
 - role_binding.yaml
-- leader_election_role.yaml
-- leader_election_role_binding.yaml
 - deployment.yaml
 - service.yaml
 
@@ -35,7 +28,6 @@ configMapGenerator:
   - CV_HTTP_ADDR=:8080
   - CV_LOG_FORMAT=json
   - CV_LOG_LEVEL=info
-  - CV_LEADER_ELECT=true
   # Nothing of AWS: the server validates requests and stores the desired
   # state. The controller (../../default) installs the providers, looks the
   # cloud up and reconciles; it is the one with AWS settings and an IAM role.

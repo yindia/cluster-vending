@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -20,16 +19,15 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/database"
-	"github.com/yindia/cluster-vending/pkg/database/implementation"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
-// world is a cluster in a real (SQLite) store on a network whose subnets
+// world is a cluster in a store (storetest.NewStore) on a network whose subnets
 // exist in a fake management cluster, its EKS cluster ACTIVE.
 type world struct {
 	svc   *ClusterService
@@ -40,18 +38,10 @@ type world struct {
 
 const worldTenant, worldNS = "acme", "tenant-acme"
 
-func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts ...func(*service.Deps)) world {
+func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts ...func(*recon.Deps)) world {
 	t.Helper()
 	ctx := t.Context()
-	db, err := database.Open(ctx, database.Config{Driver: database.DriverSQLite, DSN: filepath.Join(t.TempDir(), "t.db"), MaxOpenConns: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close(db) })
-	if err := database.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
-	store := implementation.New(db)
+	store := storetest.NewStore(t)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -62,7 +52,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	account := &model.CloudAccount{TenantID: worldTenant, Provider: model.ProviderAWS, AccountID: "444455556666",
 		ProviderConfigName: "aws-0a1b2c3d", Namespace: worldNS, Identity: "arn:aws:iam::444455556666:role/provisioner"}
 	must(store.Tenants().PutCloudAccount(ctx, account))
-	account, err = store.Tenants().GetCloudAccount(ctx, worldTenant, model.ProviderAWS, "444455556666")
+	account, err := store.Tenants().GetCloudAccount(ctx, worldTenant, model.ProviderAWS, "444455556666")
 	must(err)
 	network := &model.Network{TenantID: worldTenant, Name: "net", CloudAccountID: account.ID, Provider: model.ProviderAWS,
 		Region: "us-east-1", Resource: model.Resource{State: "NETWORK_STATE_PROVISIONING", Spec: model.JSON(`{}`)}}
@@ -108,7 +98,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	}
 	funcs.Apply = withoutSubnetTags(funcs.Apply)
 	k := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(funcs).Build()
-	deps := service.Deps{Store: store, Kube: k, KubeReader: reader}
+	deps := recon.Deps{Store: store, Kube: k, KubeReader: reader}
 	for _, opt := range opts {
 		opt(&deps)
 	}

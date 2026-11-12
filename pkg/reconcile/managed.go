@@ -31,8 +31,8 @@ type Owner struct {
 // (managed.DeleteOrder).
 type DeleteOrder = managed.DeleteOrder
 
-// Objects reads and deletes objects in the management cluster: the
-// database-free half of what Deps does with recorded objects.
+// Objects reads and deletes objects in the management cluster: the half
+// of what Deps does with recorded objects that needs no store.
 func (d Deps) Objects() managed.Client { return managed.Client{Kube: d.Kube, Uncached: d.KubeReader} }
 
 // ref is a recorded object's Ref.

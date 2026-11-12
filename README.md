@@ -28,8 +28,7 @@ decided but not built, and what is not verified.
 |---|---|
 | `make build` | Builds `bin/cluster-vending`. |
 | `make check` | Lint (protos and Go), `go vet` and the unit tests. This is the gate before every commit. |
-| `make test` | Unit tests with the race detector. They use SQLite and a fake API server; no cluster is needed. |
-| `make test-postgres` | The database tests against a throwaway Postgres in docker. |
+| `make test` | Unit tests with the race detector. They use a fake API server; no cluster is needed. |
 | `make generate` | Regenerates `pkg/gen` from `idl/`. |
 | `make controller-apis` | Regenerate deepcopy code, CRDs and RBAC for the kinds in `api/`. |
 | `make mocks` | Regenerates the repository mocks. |
@@ -72,8 +71,8 @@ Both the controller's lookups and the providers assume each account's
 tenant role, whatever their own credentials are, so the tenant role's trust
 policy must allow the IAM user or role the keys belong to.
 
-`hack/config.local.yaml` keeps the server's state as custom resources in
-the kind cluster (`store: kubernetes`) and needs no AWS setting.
+`hack/config.local.yaml` points the server at the kind cluster and needs
+no AWS setting; its state is custom resources there (there is no database).
 `hack/controller.local.yaml` turns leader election off and names the
 providers' credentials Secret. Every setting is also a flag and a `CV_*`
 environment variable; a flag wins over the variable, which wins over the

@@ -14,8 +14,8 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/network"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // emptyVPC is a VPC with nothing in it: its import plan is blocked.
@@ -52,7 +52,7 @@ func TestImportIsStoredThenDiscoveredOnTheKinds(t *testing.T) {
 		Provider: &cloudv1.ImportNetworkRequest_Aws{Aws: &cloudv1.AwsImportNetwork{VpcId: vpc, SubnetIds: []string{"subnet-0123456789abcdef0"}}}}
 
 	// The API server: no AWS lookup at all.
-	api := network.NewNetworkService(service.Deps{Store: store, Kube: k})
+	api := network.NewNetworkService(reconcile.Deps{Store: store, Kube: k})
 	res, err := api.ImportNetwork(ctx, request)
 	if err != nil {
 		t.Fatalf("ImportNetwork: %v", err)
@@ -77,7 +77,7 @@ func TestImportIsStoredThenDiscoveredOnTheKinds(t *testing.T) {
 
 	// The controller: the same store, with the AWS lookup.
 	lookups := 0
-	controller := network.NewNetworkService(service.Deps{Store: store, Kube: k, AWSDiscovery: emptyVPC{&lookups}})
+	controller := network.NewNetworkService(reconcile.Deps{Store: store, Kube: k, AWSDiscovery: emptyVPC{&lookups}})
 	for range 2 {
 		if err := controller.Reconcile(ctx, tenant, id); err != nil {
 			t.Fatalf("Reconcile: %v", err)

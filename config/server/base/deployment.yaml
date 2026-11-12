@@ -1,6 +1,6 @@
 # `cluster-vending serve` (cmd/serve.go). Settings come from the
 # server-config ConfigMap as CV_* environment variables; flags win over
-# them, so an overlay can also add args.
+# them, so a patch can also add args.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,13 +40,6 @@ spec:
         envFrom:
         - configMapRef:
             name: server-config
-        env:
-        # The leader election Lease lives in the server's own namespace
-        # (--lease-namespace).
-        - name: CV_LEASE_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
         ports:
         # The Connect API (Connect, gRPC, gRPC-Web; cleartext HTTP/1.1 and
         # HTTP/2), the probes and /metrics share this port.

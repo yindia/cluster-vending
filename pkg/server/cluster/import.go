@@ -42,11 +42,11 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 			return nil, service.ToConnect(err)
 		}
 	}
-	network, account, err := s.ImportNetwork(ctx, req.GetTenantId(), req.GetNetworkId())
+	network, _, err := s.ImportNetwork(ctx, req.GetTenantId(), req.GetNetworkId())
 	if err != nil {
 		return nil, err
 	}
-	if err := s.NameTaken(ctx, req.GetTenantId(), req.GetName(), network.Region, account); err != nil {
+	if err := s.NameTaken(ctx, req.GetTenantId(), req.GetName()); err != nil {
 		return nil, err
 	}
 	id, err := uuid.NewV7()

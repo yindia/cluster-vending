@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/yindia/cluster-vending/pkg/config"
-	"github.com/yindia/cluster-vending/pkg/database"
 )
 
 const (
@@ -26,11 +25,10 @@ func lookup(kv map[string]string) config.LookupFunc {
 	}
 }
 
-// awsEnv is the minimal environment LoadServe accepts.
+// awsEnv is the minimal environment LoadController accepts.
 func awsEnv() map[string]string {
 	return map[string]string{
-		config.EnvAWSManagementAccountID: mgmtAccount,
-		config.EnvAWSManagementRoleARN:   mgmtRole,
+		config.EnvAWSManagementRoleARN: mgmtRole,
 	}
 }
 
@@ -112,52 +110,23 @@ func TestLoadGlobalRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+// The API server has three settings, and needs none of AWS, of a store or
+// of the providers: it only validates and stores the desired state.
 func TestLoadServeDefaults(t *testing.T) {
-	cfg, err := config.LoadServe(nil, lookup(awsEnv()), nil)
+	cfg, err := config.LoadServe(nil, lookup(nil), nil)
 	if err != nil {
 		t.Fatalf("LoadServe: %v", err)
 	}
-	want := config.Serve{
-		HTTPAddr:         ":8080",
-		ShutdownTimeout:  30 * time.Second,
-		InstallProviders: true,
-		LoopInterval:     30 * time.Second,
-		LeaderElect:      true,
-		LeaseNamespace:   config.DefaultLeaseNamespace,
-		Store:            config.StoreDatabase,
-		BackgroundLoop:   true,
-		Provider: config.ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
-			CPURequest: "100m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"},
-		AWS: config.AWS{
-			ManagementAccountID: mgmtAccount,
-			ManagementRoleARN:   mgmtRole,
-		},
-		Database: database.DefaultConfig(),
-	}
+	want := config.Serve{HTTPAddr: ":8080", ShutdownTimeout: 30 * time.Second}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v, want %+v", cfg, want)
 	}
-}
-
-func TestLoadServeStore(t *testing.T) {
-	env := awsEnv()
-	env[config.EnvStore] = config.StoreKubernetes
-	cfg, err := config.LoadServe(nil, lookup(env), nil)
-	if err != nil || cfg.Store != config.StoreKubernetes {
-		t.Fatalf("store %q (%v), want kubernetes", cfg.Store, err)
+	var flags []string
+	for _, s := range config.ServeSettings() {
+		flags = append(flags, s.Flag)
 	}
-	// With the Kubernetes store the controller reconciles, not the server,
-	// unless it is asked to.
-	if cfg.BackgroundLoop {
-		t.Error("the background loop runs with the Kubernetes store by default")
-	}
-	env[config.EnvBackgroundLoop] = config.LoopOn
-	if cfg, err = config.LoadServe(nil, lookup(env), nil); err != nil || !cfg.BackgroundLoop {
-		t.Errorf("background loop forced on = %t (%v)", cfg.BackgroundLoop, err)
-	}
-	env[config.EnvBackgroundLoop] = "sometimes"
-	if _, err = config.LoadServe(nil, lookup(env), nil); err == nil {
-		t.Error("an unknown background loop mode was accepted")
+	if want := []string{config.FlagConfig, config.FlagHTTPAddr, config.FlagShutdownTimeout}; !slices.Equal(flags, want) {
+		t.Errorf("serve settings = %v, want only %v", flags, want)
 	}
 }
 
@@ -166,8 +135,7 @@ func TestLoadServeFlagsOverrideEnv(t *testing.T) {
 		config.FlagHTTPAddr:        "127.0.0.1:9090",
 		config.FlagShutdownTimeout: "5s",
 	})
-	env := awsEnv()
-	env[config.EnvHTTPAddr] = ":7070"
+	env := map[string]string{config.EnvHTTPAddr: ":7070"}
 
 	cfg, err := config.LoadServe(flags, lookup(env), nil)
 
@@ -179,33 +147,22 @@ func TestLoadServeFlagsOverrideEnv(t *testing.T) {
 	}
 }
 
-// With the background loop the server is the reconciler too, and needs
-// the management account like the controller does.
-func TestLoadServeRequiresManagementIdentityWithTheLoop(t *testing.T) {
-	_, err := config.LoadServe(nil, lookup(nil), nil)
-	requireErrorNaming(t, err, config.EnvAWSManagementAccountID, config.EnvAWSManagementRoleARN)
-	_, err = config.LoadServe(nil, lookup(map[string]string{config.EnvStore: config.StoreKubernetes,
-		config.EnvBackgroundLoop: config.LoopOn}), nil)
-	requireErrorNaming(t, err, config.EnvAWSManagementAccountID, config.EnvAWSManagementRoleARN)
-}
-
-// The API server that only stores the desired state (the Kubernetes
-// store, where the controller reconciles) needs nothing of AWS: no
-// setting, no credentials.
-func TestLoadServeNeedsNoAWSSettingWithoutTheLoop(t *testing.T) {
-	for name, env := range map[string]map[string]string{
-		"kubernetes store":       {config.EnvStore: config.StoreKubernetes},
-		"database, loop off":     {config.EnvBackgroundLoop: config.LoopOff},
-		"kubernetes, AWS absent": {config.EnvStore: config.StoreKubernetes, config.EnvBackgroundLoop: config.LoopAuto},
-	} {
-		cfg, err := config.LoadServe(nil, lookup(env), nil)
-		if err != nil {
-			t.Errorf("%s: %v; want the server to load without any AWS setting", name, err)
-			continue
-		}
-		if cfg.BackgroundLoop || cfg.AWS.ManagementAccountID != "" || cfg.AWS.ManagementRoleARN != "" || cfg.AWS.StaticKeys != nil {
-			t.Errorf("%s: loop %t, AWS %+v", name, cfg.BackgroundLoop, cfg.AWS)
-		}
+// Keys in the environment (local testing) are noticed, not required: the
+// AWS SDK reads them itself.
+func TestStaticKeysFromTheEnvironment(t *testing.T) {
+	env := awsEnv()
+	cfg, err := config.LoadController(nil, lookup(env), nil)
+	if err != nil || cfg.AWS.StaticKeys != nil {
+		t.Fatalf("without keys: %+v, %v", cfg.AWS.StaticKeys, err)
+	}
+	env[config.EnvAWSAccessKeyID], env[config.EnvAWSSecretAccessKey] = "AKID", "secret"
+	cfg, err = config.LoadController(nil, lookup(env), nil)
+	if err != nil || cfg.AWS.StaticKeys == nil || cfg.AWS.StaticKeys.AccessKeyID != "AKID" {
+		t.Fatalf("with keys: %+v, %v", cfg.AWS.StaticKeys, err)
+	}
+	delete(env, config.EnvAWSSecretAccessKey)
+	if cfg, _ := config.LoadController(nil, lookup(env), nil); cfg.AWS.StaticKeys != nil {
+		t.Error("a key ID without a secret must be ignored")
 	}
 }
 
@@ -219,19 +176,30 @@ func TestLoadServeRejectsInvalidValues(t *testing.T) {
 		{"addr without port", config.EnvHTTPAddr, "localhost", config.EnvHTTPAddr},
 		{"unparsable timeout", config.EnvShutdownTimeout, "soon", config.EnvShutdownTimeout},
 		{"zero timeout", config.EnvShutdownTimeout, "0s", config.EnvShutdownTimeout},
-		{"short account id", config.EnvAWSManagementAccountID, "12345", config.EnvAWSManagementAccountID},
-		{"non-numeric account id", config.EnvAWSManagementAccountID, "11112222333x", config.EnvAWSManagementAccountID},
-		{"role arn is a user", config.EnvAWSManagementRoleARN, "arn:aws:iam::111122223333:user/bob", config.EnvAWSManagementRoleARN},
-		{"role arn in another account", config.EnvAWSManagementRoleARN, "arn:aws:iam::444455556666:role/cluster-vending", config.EnvAWSManagementRoleARN},
-		{"role arn in another partition", config.EnvAWSManagementRoleARN, "arn:aws-cn:iam::111122223333:role/cluster-vending", config.EnvAWSManagementRoleARN},
-		{"unknown store", config.EnvStore, "etcd", config.EnvStore},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.LoadServe(nil, lookup(map[string]string{tt.key: tt.value}), nil)
+			requireErrorNaming(t, err, tt.wantName)
+		})
+	}
+}
+
+// The management identity the controller needs is checked: a role ARN of
+// the aws partition (its account is the management account).
+func TestManagementIdentityIsChecked(t *testing.T) {
+	tests := []struct {
+		name, key, value string
+	}{
+		{"role arn is a user", config.EnvAWSManagementRoleARN, "arn:aws:iam::111122223333:user/bob"},
+		{"role arn in another partition", config.EnvAWSManagementRoleARN, "arn:aws-cn:iam::111122223333:role/cluster-vending"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := awsEnv()
 			env[tt.key] = tt.value
-			_, err := config.LoadServe(nil, lookup(env), nil)
-			requireErrorNaming(t, err, tt.wantName)
+			_, err := config.LoadController(nil, lookup(env), nil)
+			requireErrorNaming(t, err, tt.key)
 		})
 	}
 }
@@ -241,7 +209,7 @@ func TestLoadServeReportsAllProblemsTogether(t *testing.T) {
 		config.EnvHTTPAddr:        "nope",
 		config.EnvShutdownTimeout: "soon",
 	}), nil)
-	requireErrorNaming(t, err, config.EnvHTTPAddr, config.EnvShutdownTimeout, config.EnvAWSManagementAccountID)
+	requireErrorNaming(t, err, config.EnvHTTPAddr, config.EnvShutdownTimeout)
 }
 
 func TestSettingsAreUniqueAndPrefixed(t *testing.T) {
@@ -277,35 +245,5 @@ func TestTenantRoleARN(t *testing.T) {
 		if _, err := config.TenantRoleARN(bad[0], bad[1]); err == nil {
 			t.Errorf("TenantRoleARN(%q, %q) accepted", bad[0], bad[1])
 		}
-	}
-}
-
-func TestLoadServeStaticKeys(t *testing.T) {
-	env := awsEnv()
-	cfg, err := config.LoadServe(nil, lookup(env), nil)
-	if err != nil || cfg.AWS.StaticKeys != nil {
-		t.Fatalf("without keys: %+v, %v", cfg.AWS.StaticKeys, err)
-	}
-	env[config.EnvAWSAccessKeyID], env[config.EnvAWSSecretAccessKey] = "AKID", "secret"
-	cfg, err = config.LoadServe(nil, lookup(env), nil)
-	if err != nil || cfg.AWS.StaticKeys == nil || cfg.AWS.StaticKeys.AccessKeyID != "AKID" {
-		t.Fatalf("with keys: %+v, %v", cfg.AWS.StaticKeys, err)
-	}
-	delete(env, config.EnvAWSSecretAccessKey)
-	if cfg, _ := config.LoadServe(nil, lookup(env), nil); cfg.AWS.StaticKeys != nil {
-		t.Error("a key ID without a secret must be ignored")
-	}
-}
-
-func TestLoadServeInstallProviders(t *testing.T) {
-	env := awsEnv()
-	env[config.EnvInstallProviders] = "false"
-	cfg, err := config.LoadServe(nil, lookup(env), nil)
-	if err != nil || cfg.InstallProviders {
-		t.Fatalf("got %v, %v; want install-providers false", cfg.InstallProviders, err)
-	}
-	env[config.EnvInstallProviders] = "maybe"
-	if _, err := config.LoadServe(nil, lookup(env), nil); err == nil {
-		t.Fatal("want an error for install-providers=maybe")
 	}
 }

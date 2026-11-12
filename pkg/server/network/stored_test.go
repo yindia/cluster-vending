@@ -113,9 +113,8 @@ func TestGetNetworkReadsOnlyTheDatabase(t *testing.T) {
 	if r := row(); r.State != netreconcile.StateReady {
 		t.Errorf("stored state %s, want %s", r.State, netreconcile.StateReady)
 	}
-	pending, err := f.store.Networks().ListPending(ctx, PendingStates(), crossplaneaws.RenderVersion)
-	if err != nil || len(pending) != 0 {
-		t.Errorf("%d networks pending (%v), want none", len(pending), err)
+	if r := row(); r.AppliedGeneration != r.Generation {
+		t.Errorf("applied generation %d of %d: the network is not settled", r.AppliedGeneration, r.Generation)
 	}
 	// Recording a status alone does not change the etag.
 	settled := row().ETag

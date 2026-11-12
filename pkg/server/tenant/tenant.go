@@ -17,6 +17,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -28,24 +29,22 @@ const (
 )
 
 // TenantService implements cloud.v1.TenantService.
-type TenantService struct{ deps service.Deps }
+type TenantService struct{ deps reconcile.Deps }
 
 var _ cloudv1connect.TenantServiceHandler = (*TenantService)(nil)
 
 // NewTenantService returns the TenantService.
-func NewTenantService(d service.Deps) *TenantService { return &TenantService{deps: d} }
+func NewTenantService(d reconcile.Deps) *TenantService { return &TenantService{deps: d} }
 
 // rec is the account Reconciler on the service's dependencies: what
 // applies and reads the account's objects in the management cluster.
 func (s *TenantService) rec() *accountreconcile.Reconciler { return accountreconcile.New(s.deps) }
 
-// BootstrapTenant records the tenant and its account. When a controller
-// reconciles accounts (Deps.AccountsByController: the CloudAccount
-// controller, with the Kubernetes store) that is all: the controller
-// applies what the management cluster needs, and the answer shows the
-// account as stored. Otherwise (the server's background loop, which has no
-// account reconciler) it also applies it here (account.Reconciler.Apply).
-// Every step is idempotent, so a failed call is fixed by calling again.
+// BootstrapTenant records the tenant and its account, and that is all: the
+// CloudAccount controller applies what the management cluster needs (the
+// tenant namespace and the account's ProviderConfig), and the answer shows
+// the account as stored. Every step is idempotent, so a failed call is
+// fixed by calling again.
 func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -70,11 +69,6 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 	})
 	if err != nil {
 		return nil, err
-	}
-	if !s.deps.AccountsByController {
-		if err := s.rec().Apply(ctx, stored); err != nil {
-			return nil, service.ToConnect(err)
-		}
 	}
 
 	// Account access check, disabled for now: assume the tenant role once,

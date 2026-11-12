@@ -31,13 +31,12 @@ func noWrites() interceptor.Funcs {
 	}
 }
 
-// When a controller reconciles accounts, BootstrapTenant stores the
-// account and writes nothing to the management cluster: the CloudAccount
-// controller applies the namespace and the ProviderConfig (with the
-// providers' credentials it is configured with).
-func TestBootstrapTenantOnlyStoresWhenAControllerReconciles(t *testing.T) {
+// BootstrapTenant stores the account and writes nothing to the management
+// cluster: the CloudAccount controller applies the namespace and the
+// ProviderConfig (with the providers' credentials it is configured with),
+// so the server never overwrites them.
+func TestBootstrapTenantOnlyStores(t *testing.T) {
 	f := newFixture(t, noWrites())
-	f.svc.deps.AccountsByController = true
 	f.expectNewTenant()
 	f.expectPut(account)
 

@@ -1,17 +1,17 @@
-// Package repository declares data access for cluster-vending, independent
-// of the database. pkg/database/implementation implements it with GORM.
+// Package repository declares the data access of cluster-vending: what the
+// API handlers and the reconcilers store and read. pkg/database/cloudstore
+// implements it on the platform's own kinds in the management cluster.
 //
-// Nothing is removed: every Delete is a soft delete (it sets deleted_at),
-// and Get / List never return deleted rows. The repositories enforce the
-// relationships themselves, because soft-deleted rows still exist: a parent
-// must be live to create a child, and a row in use cannot be deleted.
+// Every Delete removes the row. The repositories enforce the relationships:
+// a parent must exist to create a child, and a row in use cannot be
+// deleted.
 //
 // The directory is not called "interface": that is a Go keyword and cannot
 // be a package name. Generated mocks of every interface live in
 // repository/mock (go generate ./pkg/database/repository, or make mocks).
 package repository
 
-//go:generate go tool mockgen -typed -destination=mock/repository.go -package=mock . Store,Tenants,Networks,Clusters,NodePools,ManagedResources
+//go:generate go tool mockgen -typed -destination=mock/repository.go -package=mock . Store,Tenants,Networks,Clusters,ManagedResources
 
 import (
 	"context"
@@ -92,18 +92,8 @@ type Networks interface {
 	// not overwrite what that call stored. ErrNotFound when the row is
 	// gone, ErrConflict when it changed.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
-	// MarkBehind makes the row count as not applied (applied_generation
-	// below generation) and assigns a new etag, whatever its etag is: the
-	// background loop applies it again. For an apply that finished after
-	// the row had changed: what it applied may be older than the row.
-	MarkBehind(ctx context.Context, tenantID, id string) error
 	// Delete fails with ErrInUse while clusters use the network.
 	Delete(ctx context.Context, tenantID, id string) error
-	// ListPending returns, across tenants, the networks the background loop
-	// must look at: in one of states, not fully applied
-	// (applied_generation < generation), or rendered by a renderer older
-	// than renderTarget.
-	ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Network, error)
 }
 
 // Clusters stores clusters of a tenant.
@@ -123,28 +113,11 @@ type Clusters interface {
 	Update(ctx context.Context, c *model.Cluster) error
 	// SetStatus is Networks.SetStatus for clusters.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
-	// MarkBehind is Networks.MarkBehind for clusters.
-	MarkBehind(ctx context.Context, tenantID, id string) error
-	// Delete also deletes the cluster's node pools.
 	Delete(ctx context.Context, tenantID, id string) error
-	// ListPending is Networks.ListPending for clusters.
-	ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Cluster, error)
-	// CountByState counts the clusters of every stored state, across
-	// tenants.
-	CountByState(ctx context.Context) (map[string]int64, error)
-}
-
-// NodePools stores node pools of a cluster (by cluster row ID).
-type NodePools interface {
-	Create(ctx context.Context, p *model.NodePool) error
-	Get(ctx context.Context, clusterID, name string) (*model.NodePool, error)
-	List(ctx context.Context, clusterID string, page Page) ([]model.NodePool, error)
-	Update(ctx context.Context, p *model.NodePool) error
-	Delete(ctx context.Context, clusterID, name string) error
 }
 
 // ManagedResources records the Kubernetes objects created for accounts,
-// networks, clusters and node pools.
+// networks and clusters.
 type ManagedResources interface {
 	// Put records objects, all for one owner; recording an object again is
 	// a no-op.
@@ -155,12 +128,12 @@ type ManagedResources interface {
 	// query, keyed by owner ID.
 	ListByOwners(ctx context.Context, kind model.OwnerKind, ownerIDs []string) (map[string][]model.ManagedResource, error)
 	// ListByAccount returns every object of an account (bootstrap ID): its
-	// own and those of its networks, clusters and node pools.
+	// own and those of its networks and clusters.
 	ListByAccount(ctx context.Context, tenantID, cloudAccountID string) ([]model.ManagedResource, error)
-	// DeleteByOwner forgets an owner's objects (soft delete), once they are
-	// gone from the cluster.
+	// DeleteByOwner forgets an owner's objects, once they are gone from the
+	// cluster.
 	DeleteByOwner(ctx context.Context, kind model.OwnerKind, ownerID string) error
-	// Delete forgets one object (soft delete), by row ID.
+	// Delete forgets one object, by row ID.
 	Delete(ctx context.Context, id string) error
 	// SetExternalName stores an object's external name, by row ID.
 	SetExternalName(ctx context.Context, id, externalName string) error
@@ -170,12 +143,12 @@ type ManagedResources interface {
 }
 
 // Store groups the repositories. WithinTransaction runs fn with
-// repositories bound to one transaction: fn's error rolls it back.
+// repositories that take back what fn created when fn fails (the store
+// says how far that goes).
 type Store interface {
 	Tenants() Tenants
 	Networks() Networks
 	Clusters() Clusters
-	NodePools() NodePools
 	ManagedResources() ManagedResources
 	WithinTransaction(ctx context.Context, fn func(Store) error) error
 }

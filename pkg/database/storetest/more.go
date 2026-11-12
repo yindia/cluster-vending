@@ -45,51 +45,6 @@ func testDeletedRowsAreGoneAndTheirNamesFree(t *testing.T, b Backend) {
 	}
 }
 
-// The background loop sees rows in one of its states, rows whose
-// generation is not applied and rows rendered by an older renderer,
-// across tenants, oldest first.
-func testListPendingAndCountByState(t *testing.T, b Backend) {
-	s := b.New(t)
-	ctx := t.Context()
-	MustTenant(t, s, "acme")
-	MustTenant(t, s, "globex")
-	n := MustNetwork(t, s, "acme", "n")
-	settled := MustCluster(t, s, "acme", "settled", n)
-	behind := MustCluster(t, s, "acme", "behind", n)
-	old := MustCluster(t, s, "acme", "old-render", n)
-	deleting := MustCluster(t, s, "globex", "deleting", MustNetwork(t, s, "globex", "n"))
-	for c, change := range map[*model.Cluster]func(*model.Cluster){
-		settled:  func(c *model.Cluster) { c.AppliedGeneration, c.RenderVersion = 1, 3 },
-		behind:   func(c *model.Cluster) { c.Generation, c.AppliedGeneration, c.RenderVersion = 2, 1, 3 },
-		old:      func(c *model.Cluster) { c.AppliedGeneration, c.RenderVersion = 1, 2 },
-		deleting: func(c *model.Cluster) { c.AppliedGeneration, c.RenderVersion, c.State = 1, 3, "CLUSTER_STATE_DELETING" },
-	} {
-		change(c)
-		if err := s.Clusters().Update(ctx, c); err != nil {
-			t.Fatal(err)
-		}
-	}
-	pending, err := s.Clusters().ListPending(ctx, []string{"CLUSTER_STATE_DELETING"}, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make([]string, 0, len(pending))
-	for _, c := range pending {
-		names = append(names, c.Name)
-	}
-	if len(names) != 3 || names[0] != "behind" || names[1] != "old-render" || names[2] != "deleting" {
-		t.Errorf("pending clusters = %v, want behind, old-render, deleting", names)
-	}
-	counts, err := s.Clusters().CountByState(ctx)
-	if err != nil || counts["CLUSTER_STATE_RUNNING"] != 3 || counts["CLUSTER_STATE_DELETING"] != 1 {
-		t.Errorf("CountByState = %v (%v)", counts, err)
-	}
-	networks, err := s.Networks().ListPending(ctx, []string{"NETWORK_STATE_DELETING"}, 0)
-	if err != nil || len(networks) != 2 {
-		t.Errorf("%d pending networks (%v), want both: created rows are not applied yet", len(networks), err)
-	}
-}
-
 // Records keep the order they were made in, also across calls; what is
 // known of an object later (its cloud ID, when it went away) is stored on
 // its record, and a record can be forgotten alone.
@@ -201,48 +156,4 @@ func testClusterLookups(t *testing.T, b Backend) {
 	_, err = s.Clusters().Get(ctx, "globex", c.ID)
 	RequireErr(t, err, repository.ErrNotFound)
 	RequireErr(t, s.Clusters().Delete(ctx, "globex", c.ID), repository.ErrNotFound)
-	RequireErr(t, s.Clusters().MarkBehind(ctx, "globex", c.ID), repository.ErrNotFound)
-}
-
-// Node pools are addressed by cluster and name, listed by name, and
-// updated like every row.
-func testNodePools(t *testing.T, b Backend) {
-	s := b.New(t)
-	ctx := t.Context()
-	MustTenant(t, s, "acme")
-	c := MustCluster(t, s, "acme", "prod", MustNetwork(t, s, "acme", "n"))
-	if b.NoNodePools != nil {
-		_, err := s.NodePools().Get(ctx, c.ID, "default")
-		RequireErr(t, err, b.NoNodePools)
-		RequireErr(t, s.NodePools().Update(ctx, &model.NodePool{ClusterID: c.ID, Name: "default"}), b.NoNodePools)
-		return
-	}
-	for _, name := range []string{"gpu", "default", "spot"} {
-		MustPool(t, s, c, name)
-	}
-	pools, err := s.NodePools().List(ctx, c.ID, repository.Page{Limit: 2})
-	if err != nil || len(pools) != 2 || pools[0].Name != "default" || pools[1].Name != "gpu" {
-		t.Fatalf("List = %+v, %v; want default then gpu", pools, err)
-	}
-	if pools, err = s.NodePools().List(ctx, c.ID, repository.Page{Limit: 2, After: "gpu"}); err != nil || len(pools) != 1 || pools[0].Name != "spot" {
-		t.Fatalf("second page = %+v, %v", pools, err)
-	}
-	gpu, err := s.NodePools().Get(ctx, c.ID, "gpu")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := *gpu
-	gpu.State = "NODE_POOL_STATE_UPDATING"
-	if err := s.NodePools().Update(ctx, gpu); err != nil {
-		t.Fatal(err)
-	}
-	RequireErr(t, s.NodePools().Update(ctx, &stale), repository.ErrConflict)
-	if err := s.NodePools().Delete(ctx, c.ID, "gpu"); err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.NodePools().Get(ctx, c.ID, "gpu")
-	RequireErr(t, err, repository.ErrNotFound)
-	MustPool(t, s, c, "gpu") // the name is free again
-	RequireErr(t, s.NodePools().Create(ctx, &model.NodePool{ClusterID: "no-such-cluster", Name: "x",
-		Resource: model.Resource{State: "x", Spec: Spec("p")}}), repository.ErrNotFound)
 }

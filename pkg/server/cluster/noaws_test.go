@@ -14,7 +14,7 @@ import (
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // awsGate is every AWS lookup a cluster's reconciler makes (the EKS name,
@@ -36,7 +36,7 @@ func newGate(t *testing.T) *awsGate {
 }
 
 // use gives the service the gate as all its AWS lookups.
-func (g *awsGate) use(d *service.Deps) { d.AWSClusters, d.AWSClusterDiscovery = g, g }
+func (g *awsGate) use(d *recon.Deps) { d.AWSClusters, d.AWSClusterDiscovery = g, g }
 
 func (g *awsGate) refuse(what string) error {
 	g.t.Helper()

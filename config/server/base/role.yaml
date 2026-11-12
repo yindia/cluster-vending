@@ -4,10 +4,6 @@
 # Secret: that is the controller (config/rbac/platform_role.yaml). It makes
 # no AWS call, so its service account has no IAM role. Kept in step with the
 # code by config/deploy_test.go.
-#
-# With a database and the background loop (overlays/postgres) the server is
-# the reconciler too; that overlay adds what a reconciler needs
-# (reconciler_role.yaml).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -16,8 +12,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: server-role
 rules:
-# The state itself, with --store=kubernetes: CloudAccount, Network and
-# Cluster objects in the tenants' namespaces (pkg/database/cloudstore).
+# The state itself: CloudAccount, Network and Cluster objects in the
+# tenants' namespaces (pkg/database/cloudstore).
 - apiGroups:
   - cloud.cluster-vending.io
   resources:

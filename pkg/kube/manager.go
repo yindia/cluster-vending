@@ -109,7 +109,7 @@ func off(addr string) string {
 const leaseName = "cluster-vending"
 
 // LeaderElection configures the manager's leader election: runnables that
-// need it (the background loop) run on the replica holding the Lease
+// need it (the controllers) run on the replica holding the Lease
 // leaseName in Namespace. Disabled, they run in every replica.
 type LeaderElection struct {
 	Enabled   bool

@@ -16,6 +16,7 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/admin"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/network"
@@ -35,9 +36,9 @@ const readHeaderTimeout = 10 * time.Second
 //
 // It also serves the probes, /healthz (the process is up) and /readyz
 // (ready reports true: the management cluster cache has synced; nil
-// counts as ready), and /metrics (Prometheus: the background loop's and
-// controller-runtime's client and cache metrics).
-func NewHandler(d service.Deps, ready func() bool) http.Handler {
+// counts as ready), and /metrics (Prometheus: controller-runtime's client
+// and cache metrics).
+func NewHandler(d reconcile.Deps, ready func() bool) http.Handler {
 	server := connect.NewServer(service.Faults)
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))

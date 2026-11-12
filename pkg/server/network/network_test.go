@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,17 +25,16 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/database"
-	"github.com/yindia/cluster-vending/pkg/database/implementation"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 const (
@@ -51,20 +49,11 @@ type fixture struct {
 	accountID string // bootstrap ID of the tenant's AWS account
 }
 
-// newFixture is a NetworkService on a SQLite store (temporary file) with a
+// newFixture is a NetworkService on a store (storetest.NewStore) with a
 // bootstrapped AWS account, and a fake Kubernetes client.
 func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 	t.Helper()
-	db, err := database.Open(t.Context(), database.Config{
-		Driver: database.DriverSQLite, DSN: filepath.Join(t.TempDir(), "t.db"), MaxOpenConns: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close(db) })
-	if err := database.Migrate(t.Context(), db); err != nil {
-		t.Fatal(err)
-	}
-	store := implementation.New(db)
+	store := storetest.NewStore(t)
 	ctx := t.Context()
 	if err := store.Tenants().Create(ctx, &model.Tenant{ID: tenant}); err != nil {
 		t.Fatal(err)
@@ -80,7 +69,7 @@ func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 		t.Fatal(err)
 	}
 	k := fakeKube(t, funcs...)
-	return fixture{svc: NewNetworkService(service.Deps{Store: store, Kube: k}), kube: k, store: store, accountID: stored.ID}
+	return fixture{svc: NewNetworkService(reconcile.Deps{Store: store, Kube: k}), kube: k, store: store, accountID: stored.ID}
 }
 
 func fakeKube(t *testing.T, funcs ...interceptor.Funcs) client.Client {
@@ -133,7 +122,7 @@ func (f fixture) takenOver(t *testing.T) *cloudv1.Network {
 	return f.status(t, n.GetId())
 }
 
-// reconcile runs one pass of the background loop for the network: a call
+// reconcile runs one pass of the controller for the network: a call
 // only stores what was asked for, this applies it.
 func (f fixture) reconcile(t *testing.T, id string) {
 	t.Helper()
@@ -401,14 +390,21 @@ func TestCreateNetworkErrors(t *testing.T) {
 	}
 }
 
-func TestNetworkNamesNeedNotBeUnique(t *testing.T) {
+// A network's name is the tenant's once (it is the Network object's name
+// in the tenant's namespace); networks of other names have their own
+// resources.
+func TestNetworkNamesAreUniquePerTenant(t *testing.T) {
 	f := newFixture(t)
-	a, b := f.create(t, "shared", nil), f.create(t, "shared", nil)
+	a, b := f.create(t, "shared", nil), f.create(t, "other", nil)
 	if a.GetId() == b.GetId() || key(a, "vpc") == key(b, "vpc") {
-		t.Fatalf("two networks named shared share id or resources: %s %s", a.GetId(), b.GetId())
+		t.Fatalf("two networks share id or resources: %s %s", a.GetId(), b.GetId())
 	}
 	if f.count(t, &awsec2.VPCList{}, a.GetId()) != 1 || f.count(t, &awsec2.VPCList{}, b.GetId()) != 1 {
 		t.Error("each network must have its own VPC")
+	}
+	_, err := f.svc.CreateNetwork(t.Context(), f.request("shared", nil))
+	if connect.CodeOf(err) != connect.CodeAlreadyExists || !strings.Contains(err.Error(), "unique per tenant") {
+		t.Errorf("a second network named shared = %v, want ALREADY_EXISTS naming the rule", err)
 	}
 }
 
@@ -681,7 +677,7 @@ func TestDatabaseErrorsAreInternal(t *testing.T) {
 	networks := mock.NewMockNetworks(ctrl)
 	store.EXPECT().Networks().Return(networks).AnyTimes()
 	networks.EXPECT().Get(gomock.Any(), tenant, unknownID).Return(nil, errors.New("connection refused"))
-	svc := NewNetworkService(service.Deps{Store: store, Kube: fakeKube(t)})
+	svc := NewNetworkService(reconcile.Deps{Store: store, Kube: fakeKube(t)})
 
 	_, err := svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: unknownID})
 	if connect.CodeOf(err) != connect.CodeInternal {
@@ -718,7 +714,7 @@ func TestDeleteNetworkRecordsUnrecordedResources(t *testing.T) {
 }
 
 // A cluster still being deleted blocks deleting its network: only the
-// background loop removes a cluster, once its resources are confirmed gone
+// controller removes a cluster, once its resources are confirmed gone
 // and the network's subnets are untagged.
 func TestDeleteNetworkWaitsForDeletingClusters(t *testing.T) {
 	f := newFixture(t)

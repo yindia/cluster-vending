@@ -10,10 +10,8 @@ import (
 
 // Flag names and environment variables of the AWS settings.
 const (
-	FlagAWSManagementAccountID = "aws-management-account-id"
-	EnvAWSManagementAccountID  = "CV_AWS_MANAGEMENT_ACCOUNT_ID"
-	FlagAWSManagementRoleARN   = "aws-management-role-arn"
-	EnvAWSManagementRoleARN    = "CV_AWS_MANAGEMENT_ROLE_ARN"
+	FlagAWSManagementRoleARN = "aws-management-role-arn"
+	EnvAWSManagementRoleARN  = "CV_AWS_MANAGEMENT_ROLE_ARN"
 	// FlagProviderCredentialsSecret names the Secret the Crossplane AWS
 	// providers authenticate with instead of IRSA (local testing).
 	FlagProviderCredentialsSecret = "provider-credentials-secret"
@@ -23,13 +21,6 @@ const (
 // DefaultCredentialsKey is the key of a credentials Secret when the
 // setting names none: an AWS shared credentials file.
 const DefaultCredentialsKey = "credentials"
-
-var awsSettings = []Setting{
-	{Flag: FlagAWSManagementAccountID, Env: EnvAWSManagementAccountID,
-		Usage: "AWS account ID (12 digits) of the management cluster; required by what reconciles (the controller, or the server with the background loop)"},
-	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
-		Usage: "IAM role ARN the Crossplane AWS provider runs as (IRSA), in the management account; tenant roles trust it; required by what reconciles"},
-}
 
 // providerCredentialsSetting is the controller's: the Secret the
 // providers authenticate with where there is no IRSA.
@@ -134,16 +125,6 @@ func TenantRoleARN(accountID, roleName string) (string, error) {
 
 func (a AWS) validate() []error {
 	var errs []error
-	accountOK := false
-	switch {
-	case a.ManagementAccountID == "":
-		errs = append(errs, fmt.Errorf("%s is required", setting(FlagAWSManagementAccountID)))
-	case !accountIDPattern.MatchString(a.ManagementAccountID):
-		errs = append(errs, fmt.Errorf("%s must be 12 digits, got %q", setting(FlagAWSManagementAccountID), a.ManagementAccountID))
-	default:
-		accountOK = true
-	}
-
 	if a.ManagementRoleARN == "" {
 		errs = append(errs, fmt.Errorf("%s is required", setting(FlagAWSManagementRoleARN)))
 	} else if m := roleARNPattern.FindStringSubmatch(a.ManagementRoleARN); m == nil {
@@ -153,10 +134,6 @@ func (a AWS) validate() []error {
 		if partition := m[1]; partition != awscatalog.PartitionAWS {
 			errs = append(errs, fmt.Errorf("%s must be in the %q partition, got %q",
 				setting(FlagAWSManagementRoleARN), awscatalog.PartitionAWS, partition))
-		}
-		if account := m[2]; accountOK && account != a.ManagementAccountID {
-			errs = append(errs, fmt.Errorf("%s is in account %s, want the management account %s",
-				setting(FlagAWSManagementRoleARN), account, a.ManagementAccountID))
 		}
 	}
 	return errs

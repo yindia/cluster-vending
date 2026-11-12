@@ -26,9 +26,9 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/network"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 const tenant = "acme"
@@ -56,7 +56,7 @@ func TestNetworkServiceRunsOnTheKinds(t *testing.T) {
 	if err := store.Tenants().PutCloudAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
-	svc := network.NewNetworkService(service.Deps{Store: store, Kube: k})
+	svc := network.NewNetworkService(reconcile.Deps{Store: store, Kube: k})
 
 	created, err := svc.CreateNetwork(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
 		Name: "prod", Labels: map[string]string{"team": "platform"},
@@ -220,7 +220,7 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 	must(store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: tenant, CloudAccountID: account.ID, OwnerKind: model.OwnerCluster,
 		OwnerID: row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "Cluster", Namespace: namespace, Name: prefix}}))
 
-	svc := cluster.NewClusterService(service.Deps{Store: store, Kube: k})
+	svc := cluster.NewClusterService(reconcile.Deps{Store: store, Kube: k})
 	if err := svc.Reconcile(ctx, tenant, row.ID); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}

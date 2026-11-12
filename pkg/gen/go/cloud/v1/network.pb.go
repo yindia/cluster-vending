@@ -274,9 +274,8 @@ type Network struct {
 	// Output only. Assigned by the server on create (UUID); every other call
 	// and ClusterNetwork.network_id refer to the network by it.
 	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	// Name chosen by the client: DNS-label safe. The database store allows
-	// two networks of a name; the Kubernetes store, where the name is the
-	// Network object's, makes it unique per tenant (ALREADY_EXISTS). Prefix
+	// Name chosen by the client: DNS-label safe, and the Network object's
+	// name: unique per tenant (CreateNetwork fails with ALREADY_EXISTS). Prefix
 	// of the network's cloud and Kubernetes resource names
 	// ("<name>-<hash8>-<suffix>"). Immutable.
 	Name        string `protobuf:"bytes,11,opt,name=name,proto3" json:"name,omitempty"`

@@ -44,9 +44,7 @@ func (r tenants) Create(ctx context.Context, t *model.Tenant) error {
 	if !labelValue(t.ID) {
 		return fmt.Errorf("%w: tenant ID %q", repository.ErrInvalid, t.ID)
 	}
-	if err := t.BeforeCreate(nil); err != nil {
-		return err
-	}
+	t.Defaults()
 	t.CreatedAt = now()
 	t.UpdatedAt = t.CreatedAt
 	mark := func(ns *corev1.Namespace) {
@@ -234,7 +232,7 @@ func (r tenants) PutCloudAccount(ctx context.Context, a *model.CloudAccount) err
 func (r tenants) createAccount(ctx context.Context, key client.ObjectKey, a *model.CloudAccount) (*cloudv1alpha1.CloudAccount, error) {
 	row := *a
 	row.Base = model.Base{}
-	if err := row.BeforeCreate(nil); err != nil {
+	if err := row.AssignNew(); err != nil {
 		return nil, err
 	}
 	obj := &cloudv1alpha1.CloudAccount{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name,

@@ -3,14 +3,11 @@
 // management cluster, how tenant cloud accounts are reached) and what
 // every kind of owner shares (recording, observing and deleting its
 // objects). It knows no RPC library: failures a caller can act on are
-// faults (pkg/fault). The controller (and the server's background loop,
-// while the database store has one) reconcile with it; the API handlers
+// faults (pkg/fault). The controller reconciles with it; the API handlers
 // use it to check a request against the store and to read.
 package reconcile
 
 import (
-	"context"
-	"fmt"
 	"log/slog"
 	"slices"
 
@@ -19,9 +16,7 @@ import (
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 
-	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
-	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
 // Deps are what reconciling works with: the database (the source of
@@ -60,29 +55,7 @@ type Deps struct {
 	// kind cluster). The tenant role is assumed either way. Nil in
 	// production.
 	ProviderCredentials *crossplaneaws.CredentialsSecret
-	// AccountsByController: a controller applies the stored accounts (the
-	// CloudAccount controller), so the API stores an account and applies
-	// nothing. False while the server reconciles itself (the background
-	// loop has no account reconciler): BootstrapTenant then applies.
-	AccountsByController bool
-	Logger               *slog.Logger
-}
-
-// AWSTenantRoleARN returns the IAM role the platform assumes in one of a
-// tenant's bootstrapped AWS accounts, by bootstrap ID (CloudAccount.id, as
-// in NetworkSpec.bootstrap_id): the role stored at bootstrap.
-func (d Deps) AWSTenantRoleARN(ctx context.Context, tenantID, cloudAccountID string) (string, error) {
-	account, err := d.Store.Tenants().GetCloudAccountByID(ctx, tenantID, cloudAccountID)
-	if err != nil {
-		return "", fmt.Errorf("account %s of tenant %s: %w", cloudAccountID, tenantID, err)
-	}
-	if account.Provider != model.ProviderAWS {
-		return "", fault.New(fault.Invalid, fmt.Sprintf("account %s is a %s account, not aws", cloudAccountID, account.Provider))
-	}
-	if account.Identity == "" {
-		return "", fault.New(fault.FailedPrecondition, fmt.Sprintf("account %s has no tenant role yet; bootstrap it again", cloudAccountID))
-	}
-	return account.Identity, nil
+	Logger              *slog.Logger
 }
 
 // RenderBehind reports whether a resource last applied with renderer

@@ -3,7 +3,6 @@ package account
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -16,10 +15,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
-	"github.com/yindia/cluster-vending/pkg/database"
-	"github.com/yindia/cluster-vending/pkg/database/implementation"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -32,7 +30,7 @@ const (
 	identity  = "arn:aws:iam::444455556666:role/cluster-vending-provisioner"
 )
 
-// world is a Reconciler on a real (SQLite) store and a fake management
+// world is a Reconciler on a store (storetest.NewStore) and a fake management
 // cluster, with one stored account of tenant acme.
 type world struct {
 	rec     *Reconciler
@@ -44,20 +42,11 @@ type world struct {
 func newWorld(t *testing.T, funcs ...interceptor.Funcs) world {
 	t.Helper()
 	ctx := t.Context()
-	db, err := database.Open(ctx, database.Config{
-		Driver: database.DriverSQLite, DSN: filepath.Join(t.TempDir(), "t.db"), MaxOpenConns: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close(db) })
-	if err := database.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
-	store := implementation.New(db)
+	store := storetest.NewStore(t)
 	if err := store.Tenants().Create(ctx, &model.Tenant{ID: tenant}); err != nil {
 		t.Fatal(err)
 	}
-	err = store.Tenants().PutCloudAccount(ctx, &model.CloudAccount{TenantID: tenant, Provider: model.ProviderAWS,
+	err := store.Tenants().PutCloudAccount(ctx, &model.CloudAccount{TenantID: tenant, Provider: model.ProviderAWS,
 		AccountID: "444455556666", AccountName: "Acme production", Namespace: namespace, Identity: identity})
 	if err != nil {
 		t.Fatal(err)
@@ -227,8 +216,13 @@ func TestDelete(t *testing.T) {
 	if err := w.rec.Apply(ctx, w.account); err != nil {
 		t.Fatal(err)
 	}
+	network := &model.Network{TenantID: tenant, Name: "prod", Provider: model.ProviderAWS, Region: "us-east-1",
+		CloudAccountID: w.account.ID, Resource: model.Resource{State: "NETWORK_STATE_READY", Spec: storetest.Spec("network")}}
+	if err := w.store.Networks().Create(ctx, network); err != nil {
+		t.Fatal(err)
+	}
 	inUse := []model.ManagedResource{{TenantID: tenant, CloudAccountID: w.account.ID, OwnerKind: model.OwnerNetwork,
-		OwnerID: "0190f1a2-0000-7000-8000-000000000001", APIVersion: "ec2.aws.m.upbound.io/v1beta1", Kind: "VPC",
+		OwnerID: network.ID, APIVersion: "ec2.aws.m.upbound.io/v1beta1", Kind: "VPC",
 		Namespace: namespace, Name: "prod-vpc"}}
 	if err := w.store.ManagedResources().Put(ctx, inUse); err != nil {
 		t.Fatal(err)

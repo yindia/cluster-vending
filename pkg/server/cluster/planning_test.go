@@ -13,12 +13,12 @@ import (
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // withVersions gives the service an EKS lookup that resolves add-on
 // versions ("v1-<kubernetes version>").
-func withVersions(d *service.Deps) {
+func withVersions(d *recon.Deps) {
 	d.AWSClusters = fakeLookup{}
 }
 

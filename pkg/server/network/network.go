@@ -1,7 +1,7 @@
 // Package network implements the cloud.v1 NetworkService: the RPC
 // handlers. They validate a request and store what was asked for (the row
 // is the source of truth); they change nothing in the management cluster.
-// pkg/reconcile/network, called by the background loop, builds the network
+// pkg/reconcile/network, called by the controller, builds the network
 // from Crossplane managed resources in the tenant namespace, and reports
 // what goes wrong doing so as the network's status.
 package network
@@ -18,6 +18,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -30,27 +31,23 @@ const (
 )
 
 // NetworkService implements cloud.v1.NetworkService.
-type NetworkService struct{ deps service.Deps }
+type NetworkService struct{ deps reconcile.Deps }
 
 var _ cloudv1connect.NetworkServiceHandler = (*NetworkService)(nil)
 
 // NewNetworkService returns the NetworkService.
-func NewNetworkService(d service.Deps) *NetworkService { return &NetworkService{deps: d} }
+func NewNetworkService(d reconcile.Deps) *NetworkService { return &NetworkService{deps: d} }
 
 // rec is what moves networks towards their spec (pkg/reconcile/network).
-// The handlers use it to check a request and to read; the background loop
-// to apply.
+// The handlers use it to check a request and to read; the controller to
+// apply.
 func (s *NetworkService) rec() *netreconcile.Reconciler { return netreconcile.New(s.deps) }
 
 // Reconcile moves one network on (netreconcile.Reconciler.Reconcile); the
-// background loop calls it.
+// controller calls it, and tests.
 func (s *NetworkService) Reconcile(ctx context.Context, tenantID, id string) error {
 	return s.rec().Reconcile(ctx, tenantID, id)
 }
-
-// PendingStates are the stored states of networks the background loop
-// looks at every pass.
-func PendingStates() []string { return netreconcile.PendingStates() }
 
 func (s *NetworkService) logger() *slog.Logger {
 	if s.deps.Logger == nil {
@@ -82,6 +79,11 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 		return nil, service.ToConnect(err)
 	}
 	if err := s.deps.Store.Networks().Create(ctx, row); err != nil {
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
+				"a network named %q already exists in tenant %s: network names are unique per tenant (or the request_id was used before)",
+				row.Name, row.TenantID))
+		}
 		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network stored", "tenant_id", row.TenantID, "network_id", row.ID,

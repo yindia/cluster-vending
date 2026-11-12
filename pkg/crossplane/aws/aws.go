@@ -27,9 +27,9 @@ const ProviderVersion = "v2.9.0"
 
 // RenderVersion is the version of what the renderers in this package
 // output. Bump it whenever a renderer's output changes for an unchanged
-// plan (a new object, field or name): the background loop then applies
-// existing networks and clusters again, one by one, up to the server's
-// target version (see service.Deps.RenderTarget).
+// plan (a new object, field or name): the controller then applies
+// existing networks and clusters again, one by one, up to its target
+// version (see reconcile.Deps.RenderTarget).
 //
 //	1  Usages order deletions; desiredSize in initProvider only
 const RenderVersion = 1

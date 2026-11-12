@@ -42,9 +42,9 @@ service NetworkService {
   // resources exist but acknowledge_not_imported is false.
   rpc TakeOverNetwork(TakeOverNetworkRequest) returns (TakeOverNetworkResponse);
 
-  // Returns one network, or NOT_FOUND, from the platform's database: its
-  // spec and the status the platform last recorded for it. It does not
-  // read the management cluster. GetNetworkStatus reads the live status.
+  // Returns one network, or NOT_FOUND, from the platform's store: its spec
+  // and the status the controller last recorded for it. It does not read
+  // the provider objects. GetNetworkStatus reads the live status.
   rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

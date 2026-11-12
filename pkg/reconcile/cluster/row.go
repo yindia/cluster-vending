@@ -10,7 +10,6 @@ import (
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
-	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -83,7 +82,7 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err != nil {
 		return nil, err
 	}
-	if err := s.NameTaken(ctx, req.GetTenantId(), in.GetName(), in.GetSpec().GetRegion(), t.Account); err != nil {
+	if err := s.NameTaken(ctx, req.GetTenantId(), in.GetName()); err != nil {
 		return nil, err
 	}
 	id, err := uuid.NewV7()
@@ -111,31 +110,21 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	return row, nil
 }
 
-// NameTaken fails with an AlreadyExists fault when a cluster of the
-// tenant already has the EKS name in the account and region. It reads the
-// store only: clusters made outside the platform are found by Reconcile
-// (resolve).
-func (s *Reconciler) NameTaken(ctx context.Context, tenantID, name, region string, account *model.CloudAccount) error {
+// NameTaken fails with an AlreadyExists fault when the tenant already has
+// a cluster of the name: a cluster's name is unique per tenant (it is the
+// Cluster object's name in the tenant's namespace), whatever its account
+// and region. It reads the store only: an EKS cluster of the name made
+// outside the platform is found by Reconcile (resolve).
+func (s *Reconciler) NameTaken(ctx context.Context, tenantID, name string) error {
 	rows, err := s.deps.Store.Clusters().ListByName(ctx, tenantID, name)
 	if err != nil {
 		return storeError(err)
 	}
-	for _, c := range rows {
-		if c.Region != region {
-			continue
-		}
-		n, err := s.deps.Store.Networks().Get(ctx, tenantID, c.NetworkID)
-		if errors.Is(err, repository.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return storeError(err)
-		}
-		if n.CloudAccountID == account.ID {
-			return fault.New(fault.AlreadyExists, fmt.Sprintf(
-				"cluster %s (%s) already uses the EKS name %q in account %s, %s; choose another name",
-				c.ID, c.State, name, account.AccountID, region))
-		}
+	if len(rows) > 0 {
+		c := rows[0]
+		return fault.New(fault.AlreadyExists, fmt.Sprintf(
+			"cluster %s (%s) already has the name %q: cluster names are unique per tenant; choose another name",
+			c.ID, c.State, name))
 	}
 	return nil
 }

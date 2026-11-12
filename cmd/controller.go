@@ -17,7 +17,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 		Short: "Run the controller manager of the platform's custom resources",
 		Long: "Run the controller manager for the cloud.cluster-vending.io kinds\n" +
 			"(CloudAccount, Network, Cluster) until SIGINT or SIGTERM. It reconciles\n" +
-			"the objects the API server writes with --store=kubernetes (and adopts\n" +
+			"the objects the API server writes (and adopts\n" +
 			"Networks and Clusters created with kubectl): it creates, updates and\n" +
 			"deletes their cloud resources through Crossplane. It installs the\n" +
 			"kinds' CRDs and the Crossplane AWS providers (--install-providers), and\n" +

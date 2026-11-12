@@ -22,9 +22,11 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 )
 
 const (
@@ -78,7 +80,7 @@ func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 		b = b.WithInterceptorFuncs(f)
 	}
 	k := b.Build()
-	svc := NewTenantService(service.Deps{
+	svc := NewTenantService(reconcile.Deps{
 		Store: store,
 		Kube:  k,
 	})
@@ -139,6 +141,13 @@ func (f fixture) expectPut(accountID string) {
 	f.tenants.EXPECT().GetCloudAccount(gomock.Any(), "acme", model.ProviderAWS, accountID).Return(stored(accountID), nil)
 }
 
+// apply is what the CloudAccount controller does with a stored account:
+// BootstrapTenant only stores it.
+func (f fixture) apply(t *testing.T, a *model.CloudAccount) error {
+	t.Helper()
+	return accountreconcile.New(f.svc.deps).Apply(t.Context(), a)
+}
+
 func (f fixture) providerConfig(t *testing.T, name string) *awsv1beta1.ProviderConfig {
 	t.Helper()
 	pc := &awsv1beta1.ProviderConfig{}
@@ -160,12 +169,14 @@ func TestBootstrapTenantCreatesResources(t *testing.T) {
 	}
 
 	st := res.GetAccount().GetStatus()
-	if st.GetState() != cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_READY ||
-		st.GetNamespace() != "tenant-acme" || st.GetProviderConfigName() != "aws-0a1b2c3d" || st.GetIdentity() != roleARN(account) {
+	if st.GetNamespace() != "tenant-acme" || st.GetProviderConfigName() != "aws-0a1b2c3d" || st.GetIdentity() != roleARN(account) {
 		t.Errorf("status = %v", st)
 	}
 	if res.GetAccount().GetAws().GetAccountId() != account || res.GetAccount().GetCreateTime() == nil {
 		t.Errorf("account = %v", res.GetAccount())
+	}
+	if err := f.apply(t, stored(account)); err != nil {
+		t.Fatalf("apply: %v", err)
 	}
 
 	ns := &corev1.Namespace{}
@@ -212,6 +223,9 @@ func TestEveryAccountGetsItsOwnProviderConfig(t *testing.T) {
 		if _, err := f.svc.BootstrapTenant(t.Context(), request("acme", id)); err != nil {
 			t.Fatalf("BootstrapTenant(%s): %v", id, err)
 		}
+		if err := f.apply(t, stored(id)); err != nil {
+			t.Fatalf("apply(%s): %v", id, err)
+		}
 	}
 	for id, name := range providerConfigNames {
 		want := "arn:aws:iam::" + id + ":role/cluster-vending-provisioner"
@@ -245,9 +259,12 @@ func TestBootstrapTenantWithoutAWSProvider(t *testing.T) {
 	f.expectNewTenant()
 	f.expectPut(account)
 
-	_, err := f.svc.BootstrapTenant(t.Context(), request("acme", account))
-	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
+	// The call stores the account; applying it is what fails.
+	if _, err := f.svc.BootstrapTenant(t.Context(), request("acme", account)); err != nil {
+		t.Fatalf("BootstrapTenant: %v", err)
+	}
+	if err := f.apply(t, stored(account)); !fault.Is(err, fault.FailedPrecondition) {
+		t.Fatalf("apply = %v, want a FailedPrecondition fault", err)
 	}
 }
 
@@ -324,6 +341,9 @@ func TestBootstrapTenantUsesRequestedRole(t *testing.T) {
 	if got := res.GetAccount().GetAws().GetRole(); got != "acme-admin" {
 		t.Errorf("response role name = %q", got)
 	}
+	if err := f.apply(t, row); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
 	if got := *f.providerConfig(t, "aws-0a1b2c3d").Spec.AssumeRoleChain[0].RoleARN; got != row.Identity {
 		t.Errorf("ProviderConfig assumes %s", got)
 	}
@@ -334,8 +354,13 @@ func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 	f.expectNewTenant()
 	f.expectPut(account)
 
-	res, err := f.svc.BootstrapTenant(t.Context(), request("acme", account))
-	if err != nil {
+	if _, err := f.svc.BootstrapTenant(t.Context(), request("acme", account)); err != nil {
+		t.Fatal(err)
+	}
+	if len(*f.recorded) != 0 {
+		t.Fatalf("recorded = %+v before the controller applied it, want nothing", *f.recorded)
+	}
+	if err := f.apply(t, stored(account)); err != nil {
 		t.Fatal(err)
 	}
 	if len(*f.recorded) != 2 {
@@ -347,7 +372,11 @@ func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 		pc.OwnerKind != model.OwnerCloudAccount || pc.OwnerID != "row-"+account || pc.CloudAccountID != "row-"+account {
 		t.Errorf("recorded = %+v / %+v", ns, pc)
 	}
-	views := res.GetAccount().GetStatus().GetManagedResources()
+	view, err := accountreconcile.New(f.svc.deps).View(t.Context(), stored(account))
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := view.GetStatus().GetManagedResources()
 	if len(views) != 2 || views[1].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
 		views[1].GetKind() != "ProviderConfig" {
 		t.Errorf("account resources = %v", views)

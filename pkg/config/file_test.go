@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/yindia/cluster-vending/pkg/config"
-	"github.com/yindia/cluster-vending/pkg/database"
 )
 
 func writeYAML(t *testing.T, body string) string {
@@ -34,22 +33,13 @@ log-level: debug
 http-addr: "127.0.0.1:9090"
 shutdown-timeout: 5s
 aws:
-  management-account-id: "111122223333"
   management-role-arn: arn:aws:iam::111122223333:role/platform/cluster-vending
-database:
-  driver: postgres
-  dsn: postgres://cv@db:5432/cv?sslmode=require
-  max-open-conns: 20
 `)
 	flat := mustLoadFile(t, `
 log-level: debug
 http-addr: "127.0.0.1:9090"
 shutdown-timeout: 5s
-aws-management-account-id: "111122223333"
 aws-management-role-arn: arn:aws:iam::111122223333:role/platform/cluster-vending
-database-driver: postgres
-database-dsn: postgres://cv@db:5432/cv?sslmode=require
-database-max-open-conns: 20
 `)
 	for name, file := range map[string]config.LookupFunc{"nested": nested, "flat": flat} {
 		t.Run(name, func(t *testing.T) {
@@ -61,10 +51,12 @@ database-max-open-conns: 20
 			if err != nil {
 				t.Fatalf("LoadServe: %v", err)
 			}
-			want := database.Config{Driver: "postgres", DSN: "postgres://cv@db:5432/cv?sslmode=require", MaxOpenConns: 20}
-			if s.HTTPAddr != "127.0.0.1:9090" || s.ShutdownTimeout != 5*time.Second ||
-				s.AWS.ManagementAccountID != mgmtAccount || s.Database != want {
+			if s.HTTPAddr != "127.0.0.1:9090" || s.ShutdownTimeout != 5*time.Second {
 				t.Fatalf("LoadServe = %+v", s)
+			}
+			c, err := config.LoadController(nil, lookup(nil), file)
+			if err != nil || c.AWS.ManagementAccountID != mgmtAccount || c.AWS.ManagementRoleARN != mgmtRole {
+				t.Fatalf("LoadController = %+v, %v", c.AWS, err)
 			}
 		})
 	}
@@ -89,8 +81,8 @@ func TestLoadFileRejects(t *testing.T) {
 	tests := []struct {
 		name, body, wantName string
 	}{
-		{name: "unknown key", body: "http-adress: :9090\n", wantName: "http-adress"}, //nolint:misspell // a deliberate typo
-		{name: "unknown nested key", body: "database:\n  drvier: postgres\n", wantName: "database-drvier"},
+		{name: "unknown key", body: "http-adress: :9090\n", wantName: "http-adress"},                              //nolint:misspell // a deliberate typo
+		{name: "unknown nested key", body: "aws:\n  managment-role-arn: x\n", wantName: "aws-managment-role-arn"}, //nolint:misspell // a deliberate typo
 		{name: "list value", body: "log-level: [debug]\n", wantName: "log-level"},
 		{name: "config inside the file", body: "config: other.yaml\n", wantName: "config"},
 		{name: "not a mapping", body: "- a\n- b\n", wantName: "mapping"},
@@ -128,51 +120,4 @@ func TestFileFrom(t *testing.T) {
 
 	_, err = config.FileFrom(lookup(map[string]string{config.FlagConfig: "/does/not/exist.yaml"}), lookup(nil))
 	requireErrorNaming(t, err, "/does/not/exist.yaml")
-}
-
-func TestDatabaseDefaultsToLocalSQLite(t *testing.T) {
-	s, err := config.LoadServe(nil, lookup(awsEnv()), nil)
-	if err != nil {
-		t.Fatalf("LoadServe: %v", err)
-	}
-	if s.Database != database.DefaultConfig() {
-		t.Fatalf("database = %+v, want %+v", s.Database, database.DefaultConfig())
-	}
-}
-
-func TestDatabaseSettingsAreValidated(t *testing.T) {
-	tests := []struct {
-		name, key, value, wantName string
-	}{
-		{"unknown driver", config.EnvDatabaseDriver, "mysql", config.EnvDatabaseDriver},
-		{"open conns not a number", config.EnvDatabaseMaxOpenConns, "many", config.EnvDatabaseMaxOpenConns},
-		{"negative idle conns", config.EnvDatabaseMaxIdleConns, "-1", config.EnvDatabaseMaxIdleConns},
-		{"bad lifetime", config.EnvDatabaseConnMaxLifetime, "forever", config.EnvDatabaseConnMaxLifetime},
-		{"negative lifetime", config.EnvDatabaseConnMaxLifetime, "-1m", config.EnvDatabaseConnMaxLifetime},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := awsEnv()
-			env[tt.key] = tt.value
-			_, err := config.LoadServe(nil, lookup(env), nil)
-			requireErrorNaming(t, err, tt.wantName)
-		})
-	}
-}
-
-func TestDatabaseFromEnv(t *testing.T) {
-	env := awsEnv()
-	env[config.EnvDatabaseDriver] = "postgres"
-	env[config.EnvDatabaseDSN] = "host=db user=cv dbname=cv"
-	env[config.EnvDatabaseConnMaxLifetime] = "30m"
-
-	s, err := config.LoadServe(nil, lookup(env), nil)
-
-	if err != nil {
-		t.Fatalf("LoadServe: %v", err)
-	}
-	want := database.Config{Driver: "postgres", DSN: "host=db user=cv dbname=cv", ConnMaxLifetime: 30 * time.Minute}
-	if s.Database != want {
-		t.Fatalf("database = %+v, want %+v", s.Database, want)
-	}
 }

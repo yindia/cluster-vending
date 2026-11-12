@@ -4,7 +4,7 @@
 // handlers store what was asked for (the row is the source of truth) and
 // change nothing in the management cluster. What builds the cluster from
 // the row (Crossplane managed resources in the tenant namespace) is
-// pkg/reconcile/cluster, called by the background loop; what goes wrong
+// pkg/reconcile/cluster, called by the controller; what goes wrong
 // there is the cluster's status. The handlers use it to check a request
 // and to read.
 package cluster
@@ -22,6 +22,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
+	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -39,13 +40,13 @@ const (
 // loop calls its Reconcile; the handlers only its checks and reads.
 type ClusterService struct {
 	*reconcilecluster.Reconciler
-	deps service.Deps
+	deps recon.Deps
 }
 
 var _ cloudv1connect.ClusterServiceHandler = (*ClusterService)(nil)
 
 // NewClusterService returns the ClusterService.
-func NewClusterService(d service.Deps) *ClusterService {
+func NewClusterService(d recon.Deps) *ClusterService {
 	return &ClusterService{Reconciler: reconcilecluster.New(d), deps: d}
 }
 
@@ -90,9 +91,9 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 }
 
 // createError maps a failed insert: a duplicate is a second cluster of the
-// name in the account and region (the name check passed, but another
-// create won the race) or a reused request_id; a conflict is the network
-// being deleted at the same moment.
+// name in the tenant (the name check passed, but another create won the
+// race) or a reused request_id; a conflict is the network being deleted at
+// the same moment.
 func createError(err error, row *model.Cluster) error {
 	if errors.Is(err, repository.ErrConflict) {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
@@ -100,7 +101,8 @@ func createError(err error, row *model.Cluster) error {
 	}
 	if errors.Is(err, repository.ErrAlreadyExists) {
 		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
-			"a cluster named %q already exists in this account and %s (or the request_id was used before)", row.Name, row.Region))
+			"a cluster named %q already exists in tenant %s: cluster names are unique per tenant (or the request_id was used before)",
+			row.Name, row.TenantID))
 	}
 	return service.ToConnect(err)
 }
@@ -169,10 +171,6 @@ func (s *ClusterService) get(ctx context.Context, tenantID, id string) (*model.C
 func notFound(tenantID, id string) error {
 	return connect.NewError(connect.CodeNotFound, fmt.Sprintf("tenant %s has no cluster %s", tenantID, id))
 }
-
-// PendingStates are the stored states of clusters the background loop
-// looks at every pass (reconcilecluster.PendingStates).
-func PendingStates() []string { return reconcilecluster.PendingStates() }
 
 // rpcError is the answer to an RPC that failed in code that knows no RPC
 // library (the Reconciler): a fault becomes its Connect code and message,

@@ -32,7 +32,6 @@ func (e eksNames) ResolveEKSVersions(context.Context, awscloud.Access, string, a
 // The platform's own clusters of a name are found in the store: no look
 // at the cloud is needed to refuse a second one.
 func TestNameTakenReadsTheStoreOnly(t *testing.T) {
-	account := &model.CloudAccount{Base: model.Base{ID: "acct-1"}, AccountID: "111122223333"}
 	same := model.Cluster{Resource: model.Resource{Base: model.Base{ID: "c-1"}}, Name: "prod", Region: "us-east-1", NetworkID: "n-1"}
 	other := same
 	other.Region = "eu-west-1"
@@ -40,19 +39,17 @@ func TestNameTakenReadsTheStoreOnly(t *testing.T) {
 		existing []model.Cluster
 		taken    bool
 	}{
-		"free":                                  {nil, false},
-		"a cluster in the same account, region": {[]model.Cluster{same}, true},
-		"a cluster in another region":           {[]model.Cluster{other}, false},
+		"free":                        {nil, false},
+		"a cluster of the name":       {[]model.Cluster{same}, true},
+		"a cluster in another region": {[]model.Cluster{other}, true}, // names are the tenant's
 	} {
 		ctrl := gomock.NewController(t)
-		store, clusters, networks := mock.NewMockStore(ctrl), mock.NewMockClusters(ctrl), mock.NewMockNetworks(ctrl)
+		store, clusters := mock.NewMockStore(ctrl), mock.NewMockClusters(ctrl)
 		store.EXPECT().Clusters().Return(clusters).AnyTimes()
-		store.EXPECT().Networks().Return(networks).AnyTimes()
 		clusters.EXPECT().ListByName(gomock.Any(), "acme", "prod").Return(tt.existing, nil)
-		networks.EXPECT().Get(gomock.Any(), "acme", "n-1").Return(&model.Network{CloudAccountID: account.ID}, nil).AnyTimes()
 		asked := 0
 		s := New(reconcile.Deps{Store: store, AWSClusters: eksNames{exists: true, asked: &asked}})
-		err := s.NameTaken(t.Context(), "acme", "prod", "us-east-1", account)
+		err := s.NameTaken(t.Context(), "acme", "prod")
 		if fault.Is(err, fault.AlreadyExists) != tt.taken || (err != nil) != tt.taken {
 			t.Errorf("%s: %v, want taken %t", name, err, tt.taken)
 		}

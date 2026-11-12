@@ -6,8 +6,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/config"
 )
 
-// The local run files load: `make run` is the API server on the
-// Kubernetes store, without the background loop and without any AWS
+// The local run files load: `make run` is the API server, with no AWS
 // setting; `make run-controller` is the controller without leader
 // election. The controller's file loads with the credentials Secret line
 // both commented (IRSA) and uncommented.
@@ -16,12 +15,8 @@ func TestLocalRunFilesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve, err := config.LoadServe(nil, lookupIn(nil), file)
-	if err != nil {
+	if _, err := config.LoadServe(nil, lookupIn(nil), file); err != nil {
 		t.Fatalf("hack/config.local.yaml: %v", err)
-	}
-	if serve.Store != config.StoreKubernetes || serve.BackgroundLoop {
-		t.Errorf("serve: store %s, background loop %t; want the Kubernetes store, the controller reconciling", serve.Store, serve.BackgroundLoop)
 	}
 	file, err = config.LoadFile("../../hack/controller.local.yaml")
 	if err != nil {

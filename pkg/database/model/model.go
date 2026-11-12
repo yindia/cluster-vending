@@ -1,52 +1,39 @@
-// Package model defines the database tables of cluster-vending.
+// Package model defines the rows the repositories store (pkg/database/
+// repository): tenants, their cloud accounts, networks and clusters, and
+// the records of the objects created for them. The one store
+// (pkg/database/cloudstore) keeps each as a custom resource of the
+// management cluster: a tenant is its namespace, an account, a network and
+// a cluster are CloudAccount, Network and Cluster objects in it.
 //
-//	tenants ─┬─< cloud_accounts ─< networks   a tenant has any number of
-//	         │                       │         accounts; a network lives in one
-//	         ├─< networks ───────────┘         (cloud_account_id)
-//	         └─< clusters ── network_id -> networks: a network cannot be
-//	                │              deleted while clusters use it; a cluster
-//	                │              runs in its network's account
-//	                └─< node_pools   deleted together with their cluster
+//	tenant ─< cloud accounts ─< networks ─< clusters
 //
-// A tenant cannot be deleted while it has networks or clusters.
+// A network cannot be deleted while clusters use it, and an account while
+// networks use it; the store enforces that.
 //
-// Nothing is ever removed: deleting a row sets deleted_at (soft delete), and
-// reads skip deleted rows. The lifecycle is State (e.g. CLUSTER_STATE_DELETING
-// while Crossplane tears the cloud resources down), then deleted_at once
-// they are gone. Because rows stay, the relationships above are enforced by
-// the repositories (pkg/database/implementation); the foreign keys remain
-// as a safety net against hard deletes. Unique names only count rows that
-// are not deleted, so a deleted name can be reused.
-//
-// Every table is provider-neutral, like the cloud.v1 contract: Provider says
+// Every row is provider-neutral, like the cloud.v1 contract: Provider says
 // which cloud a row belongs to, and the provider-specific parts live in the
 // protojson Spec / Status (their provider oneofs).
 //
-// Every row has a time-ordered UUID (v7) primary key. Networks and clusters
-// are addressed by it in the API (Network.id, Cluster.id); their Name is a
-// free prefix. Node pools are still addressed by Name (NodePool.id), unique
-// per cluster.
+// Every row has a time-ordered UUID (v7) ID. Networks and clusters are
+// addressed by it in the API (Network.id, Cluster.id).
 package model
 
 import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // Base holds the columns every table has.
 type Base struct {
-	ID        string `gorm:"type:varchar(36);primaryKey"`
+	ID        string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	// DeletedAt marks a soft-deleted row; reads skip it.
-	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
-// BeforeCreate assigns a UUIDv7 when the caller did not: time-ordered, so
+// AssignID assigns a UUIDv7 when the caller did not: time-ordered, so
 // ordering by ID is creation order.
-func (b *Base) BeforeCreate(*gorm.DB) error {
+func (b *Base) AssignID() error {
 	if b.ID != "" {
 		return nil
 	}
@@ -58,33 +45,33 @@ func (b *Base) BeforeCreate(*gorm.DB) error {
 	return nil
 }
 
-// Resource holds the columns of every API resource (networks, clusters,
-// node pools): lifecycle state, optimistic concurrency and the protojson
+// Resource holds the fields of every API resource (networks and
+// clusters): lifecycle state, optimistic concurrency and the protojson
 // spec / status.
 type Resource struct {
 	Base
-	DisplayName string `gorm:"size:128;not null;default:''"`
+	DisplayName string
 	Labels      Labels
 	// State is the cloud.v1 *State enum name, e.g. "CLUSTER_STATE_RUNNING".
-	State string `gorm:"size:64;not null;index"`
+	State string
 	// Generation increments on every spec change; ObservedGeneration is the
 	// generation the stored status reflects.
-	Generation         int64 `gorm:"not null;default:1"`
-	ObservedGeneration int64 `gorm:"not null;default:0"`
+	Generation         int64
+	ObservedGeneration int64
 	// AppliedGeneration is the generation whose objects were all applied
 	// without error (rendered in full: not held back for EKS or an
 	// upgrade). Below Generation, the resource is applied again.
-	AppliedGeneration int64 `gorm:"not null;default:0"`
+	AppliedGeneration int64
 	// RenderVersion is the renderer version (crossplaneaws.RenderVersion)
-	// the resource's objects were last applied with. Below the server's
-	// target, the background loop applies it again, so renderer changes
+	// the resource's objects were last applied with. Below the controller's
+	// target, the controller applies it again, so renderer changes
 	// roll out resource by resource.
-	RenderVersion int64 `gorm:"not null;default:0"`
+	RenderVersion int64
 	// ETag changes on every write; updates must present the current one.
-	ETag string `gorm:"column:etag;size:64;not null"`
+	ETag string
 	// Spec and Status are the protojson cloud.v1 *Spec / *Status, including
 	// their provider oneof (aws / gcp / azure).
-	Spec   JSON `gorm:"not null"`
+	Spec   JSON
 	Status JSON
 }
 
@@ -92,26 +79,20 @@ type Resource struct {
 // resource kind the same way (e.g. etag-checked updates).
 func (r *Resource) Meta() *Resource { return r }
 
-// Tenant is a customer of the platform. tenant_id is the primary key: it
-// is the API scope of every request.
+// Tenant is a customer of the platform. Its ID is the API scope of every
+// request.
 type Tenant struct {
-	ID          string `gorm:"type:varchar(56);primaryKey"`
-	DisplayName string `gorm:"size:128;not null;default:''"`
+	ID          string
+	DisplayName string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	DeletedAt   gorm.DeletedAt `gorm:"index"`
-
-	CloudAccounts []CloudAccount `gorm:"constraint:OnDelete:RESTRICT"`
-	Networks      []Network      `gorm:"constraint:OnDelete:RESTRICT"`
-	Clusters      []Cluster      `gorm:"constraint:OnDelete:RESTRICT"`
 }
 
-// BeforeCreate names the tenant after its ID when no display name is given.
-func (t *Tenant) BeforeCreate(*gorm.DB) error {
+// Defaults names the tenant after its ID when no display name is given.
+func (t *Tenant) Defaults() {
 	if t.DisplayName == "" {
 		t.DisplayName = t.ID
 	}
-	return nil
 }
 
 // CloudAccount is a cloud account a tenant gave the platform admin access
@@ -121,36 +102,34 @@ func (t *Tenant) BeforeCreate(*gorm.DB) error {
 // account is stored.
 type CloudAccount struct {
 	Base
-	TenantID string   `gorm:"type:varchar(56);not null;uniqueIndex:idx_cloud_accounts_tenant_account,where:deleted_at IS NULL;uniqueIndex:idx_cloud_accounts_tenant_provider_config,where:deleted_at IS NULL"`
-	Provider Provider `gorm:"size:16;not null;check:chk_cloud_accounts_provider,provider IN ('aws','gcp','azure');uniqueIndex:idx_cloud_accounts_tenant_account,where:deleted_at IS NULL"`
+	TenantID string
+	Provider Provider
 	// AccountID is the AWS account ID (12 digits), GCP project ID or Azure
 	// subscription ID (UUID).
-	AccountID string `gorm:"size:128;not null;uniqueIndex:idx_cloud_accounts_tenant_account,where:deleted_at IS NULL"`
+	AccountID string
 	// ProviderConfigName is the account's Crossplane ProviderConfig in the
 	// tenant namespace, generated on the first bootstrap and never changed:
 	// the managed resources of the account reference it.
-	ProviderConfigName string `gorm:"size:63;not null;default:'';uniqueIndex:idx_cloud_accounts_tenant_provider_config,where:deleted_at IS NULL"`
+	ProviderConfigName string
 	// Namespace is the tenant namespace holding the ProviderConfig and the
 	// account's managed resources.
-	Namespace string `gorm:"size:63;not null;default:''"`
+	Namespace string
 	// Identity is what the ProviderConfig assumes in the account: AWS the
 	// tenant role ARN (GCP: service account, Azure: client ID).
-	Identity string `gorm:"size:2048;not null;default:''"`
+	Identity string
 	// DirectoryID is the Azure Entra tenant ID (UUID) the subscription
 	// belongs to. Empty for AWS and GCP.
-	DirectoryID string `gorm:"size:64;not null;default:''"`
+	DirectoryID string
 	// AccountName is the human-readable name (AWS account name, GCP project
 	// name, Azure subscription name). Informational only.
-	AccountName string `gorm:"size:128;not null;default:''"`
-
-	Networks []Network `gorm:"constraint:OnDelete:RESTRICT"`
+	AccountName string
 }
 
-// BeforeCreate generates the ProviderConfig name when the caller set none:
-// "<provider>-<8 random hex>", a Kubernetes object name unique within the
-// tenant. On an upsert of an existing account the stored name is kept.
-func (a *CloudAccount) BeforeCreate(tx *gorm.DB) error {
-	if err := a.Base.BeforeCreate(tx); err != nil {
+// AssignNew gives a new account its ID and, when the caller set none, its
+// ProviderConfig name: "<provider>-<8 random hex>", a Kubernetes object
+// name unique within the tenant. An existing account keeps its stored name.
+func (a *CloudAccount) AssignNew() error {
+	if err := a.AssignID(); err != nil {
 		return err
 	}
 	if a.ProviderConfigName == "" {
@@ -163,78 +142,64 @@ func (a *CloudAccount) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
-// BeforeSave rejects accounts that do not fit their provider.
-func (a *CloudAccount) BeforeSave(*gorm.DB) error {
-	return ValidateAccount(a.Provider, a.AccountID, a.DirectoryID)
-}
-
 // Network is a cloud.v1 Network.
 type Network struct {
 	Resource
-	TenantID string `gorm:"type:varchar(56);not null;index:idx_networks_tenant_name_lookup;uniqueIndex:idx_networks_tenant_request,where:deleted_at IS NULL"`
+	TenantID string
 	// Name is cloud.v1 Network.name: chosen by the client, not unique. The
 	// API identifier (Network.id) is ID.
-	Name string `gorm:"size:40;not null;index:idx_networks_tenant_name_lookup"`
+	Name string
 	// Input is the network as the client sent it (protojson cloud.v1
 	// Network); Spec is the resolved one (defaults filled in).
 	Input JSON
 	// CloudAccountID is the cloud_accounts row of spec.account_id
 	// (CloudAccount.Networks owns the foreign key). Its tenant and provider
 	// must be the network's; the repository checks it.
-	CloudAccountID string   `gorm:"type:varchar(36);not null;index;uniqueIndex:idx_networks_account_region_external,where:deleted_at IS NULL AND external_id IS NOT NULL"`
-	Provider       Provider `gorm:"size:16;not null;check:chk_networks_provider,provider IN ('aws','gcp','azure')"`
-	Region         string   `gorm:"size:64;not null;uniqueIndex:idx_networks_account_region_external,where:deleted_at IS NULL AND external_id IS NOT NULL"`
+	CloudAccountID string
+	Provider       Provider
+	Region         string
 	// ExternalID is the cloud network an imported network stands for (AWS:
 	// the VPC ID), unique per account and region: a VPC is imported once.
 	// NULL for a network the platform created, and for an import that was
 	// blocked (nothing was imported).
-	ExternalID *string `gorm:"size:64;uniqueIndex:idx_networks_account_region_external,where:deleted_at IS NULL AND external_id IS NOT NULL"`
+	ExternalID *string
 	// CreateRequestID is the request_id of the creating call, for
 	// idempotent retries. NULL when none was given.
-	CreateRequestID *string `gorm:"size:36;uniqueIndex:idx_networks_tenant_request,where:deleted_at IS NULL"`
-
-	Clusters []Cluster `gorm:"constraint:OnDelete:RESTRICT"`
+	CreateRequestID *string
 }
-
-// BeforeSave rejects unknown providers.
-func (n *Network) BeforeSave(*gorm.DB) error { return n.Provider.Validate() }
 
 // Cluster is a cloud.v1 Cluster.
 type Cluster struct {
 	Resource
-	TenantID string `gorm:"type:varchar(56);not null;index:idx_clusters_tenant_name_lookup;uniqueIndex:idx_clusters_tenant_request,where:deleted_at IS NULL"`
+	TenantID string
 	// Name is cloud.v1 Cluster.name: chosen by the client, unique per
-	// account and region (see CloudAccountID). The
-	// API identifier (Cluster.id) is ID.
-	Name string `gorm:"size:40;not null;index:idx_clusters_tenant_name_lookup;uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
+	// tenant (it is the Cluster object's name in the tenant's namespace)
+	// and the EKS cluster's name. The API identifier (Cluster.id) is ID.
+	Name string
 	// Input is the cluster as the client sent it (protojson cloud.v1
 	// Cluster); Spec is the resolved one.
 	Input JSON
 	// NetworkID is the networks row the cluster runs in (Network.Clusters
 	// owns the foreign key).
-	NetworkID string `gorm:"type:varchar(36);not null;index"`
+	NetworkID string
 	// CloudAccountID is the account of the cluster's network, set by the
-	// repository on create. A cluster's name is the cloud cluster's (AWS:
-	// the EKS cluster name), unique per account and region: the index
-	// idx_clusters_account_region_name refuses a second one, also when two
-	// creates race. Empty for rows stored before the column existed; the
-	// index leaves those out.
-	CloudAccountID string `gorm:"type:varchar(36);not null;default:'';uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
+	// repository on create.
+	CloudAccountID string
 	// Provider must match the network's; the repository checks it.
-	Provider Provider `gorm:"size:16;not null;check:chk_clusters_provider,provider IN ('aws','gcp','azure')"`
-	Region   string   `gorm:"size:64;not null;uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
+	Provider Provider
+	Region   string
 	// Imported is true for a cluster that came in through ImportCluster,
 	// also after its takeover.
-	Imported bool `gorm:"not null;default:false"`
+	Imported bool
 	// Adoption is what an imported cluster keeps of the resources it was
 	// imported from that its spec cannot say (JSON
 	// crossplaneaws.Adoption: the IAM role names and trust policies). NULL
 	// for clusters the platform created.
 	Adoption        JSON
-	CreateRequestID *string `gorm:"size:36;uniqueIndex:idx_clusters_tenant_request,where:deleted_at IS NULL"`
+	CreateRequestID *string
 	// DeleteForce: the deletion was requested with force (DeleteClusterRequest.force);
 	// every later step of it skips the in-cluster cleanup.
-	DeleteForce bool `gorm:"not null;default:false"`
+	DeleteForce bool
 	// ResolvedGeneration is the generation whose cloud lookups were made by
 	// the reconciler: the EKS cluster name was found free (a new cluster)
 	// and the Kubernetes and add-on versions were resolved against what
@@ -242,27 +207,5 @@ type Cluster struct {
 	// update of its versions) without them; while it is below Generation
 	// the reconciler makes them before it renders anything. A call that
 	// changes nothing they depend on moves it along with Generation.
-	ResolvedGeneration int64 `gorm:"not null;default:0"`
-
-	NodePools []NodePool `gorm:"constraint:OnDelete:RESTRICT"`
-}
-
-// BeforeSave rejects unknown providers.
-func (c *Cluster) BeforeSave(*gorm.DB) error { return c.Provider.Validate() }
-
-// NodePool is a cloud.v1 NodePool; its provider is its cluster's. The
-// default pool of a cluster is a row too, with Name "default".
-type NodePool struct {
-	Resource
-	ClusterID string `gorm:"type:varchar(36);not null;uniqueIndex:idx_node_pools_cluster_name,where:deleted_at IS NULL;uniqueIndex:idx_node_pools_cluster_request,where:deleted_at IS NULL"`
-	// Name is cloud.v1 NodePool.id.
-	Name string `gorm:"size:40;not null;uniqueIndex:idx_node_pools_cluster_name,where:deleted_at IS NULL"`
-	// CarriedOver marks a node group taken over verbatim from an import.
-	CarriedOver     bool    `gorm:"not null;default:false"`
-	CreateRequestID *string `gorm:"size:36;uniqueIndex:idx_node_pools_cluster_request,where:deleted_at IS NULL"`
-}
-
-// All lists every model, parents before children, for migrations.
-func All() []any {
-	return []any{&Tenant{}, &CloudAccount{}, &Network{}, &Cluster{}, &NodePool{}, &ManagedResource{}}
+	ResolvedGeneration int64
 }

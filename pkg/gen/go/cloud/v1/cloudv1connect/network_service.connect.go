@@ -147,9 +147,9 @@ type NetworkServiceClient interface {
 	// FAILED_PRECONDITION unless the phase is PLANNED, and when NOT_IMPORTED
 	// resources exist but acknowledge_not_imported is false.
 	TakeOverNetwork(context.Context, *v1.TakeOverNetworkRequest) (*v1.TakeOverNetworkResponse, error)
-	// Returns one network, or NOT_FOUND, from the platform's database: its
-	// spec and the status the platform last recorded for it. It does not
-	// read the management cluster. GetNetworkStatus reads the live status.
+	// Returns one network, or NOT_FOUND, from the platform's store: its spec
+	// and the status the controller last recorded for it. It does not read
+	// the provider objects. GetNetworkStatus reads the live status.
 	GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error)
 	// Returns one network with its live status, read now from its managed
 	// resources in the management cluster. UNAVAILABLE when the management
@@ -225,9 +225,9 @@ type NetworkServiceHandler interface {
 	// FAILED_PRECONDITION unless the phase is PLANNED, and when NOT_IMPORTED
 	// resources exist but acknowledge_not_imported is false.
 	TakeOverNetwork(context.Context, *v1.TakeOverNetworkRequest) (*v1.TakeOverNetworkResponse, error)
-	// Returns one network, or NOT_FOUND, from the platform's database: its
-	// spec and the status the platform last recorded for it. It does not
-	// read the management cluster. GetNetworkStatus reads the live status.
+	// Returns one network, or NOT_FOUND, from the platform's store: its spec
+	// and the status the controller last recorded for it. It does not read
+	// the provider objects. GetNetworkStatus reads the live status.
 	GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error)
 	// Returns one network with its live status, read now from its managed
 	// resources in the management cluster. UNAVAILABLE when the management

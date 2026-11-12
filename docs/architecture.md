@@ -16,23 +16,19 @@ last column were checked with `go list -deps`.
 | `pkg/crossplane/managed` | Reads an object's state from its conditions, deletes objects, releases Usages whose user is gone. | Kubernetes only. |
 | `pkg/network`, `pkg/cluster` | Logic that needs neither the API nor storage: defaults, layout, render plan, import planning, update changes. | No RPC library, no `pkg/database`, no `pkg/server`. |
 | `pkg/fault` | An error with a kind and a message for the caller, for code that is not an RPC handler. | Imports nothing from the repository. |
-| `pkg/reconcile` | What reconciling needs: `Deps` (store, management cluster, the AWS lookups) and the bookkeeping every owner shares (record, observe, prune, the database-backed `Inventory`), the checks a request and a reconciler share (`Validate`, `CheckAWSLabels`), and how a tenant's account is reached (`AWSAccess`: always through its tenant role). | No RPC library, no `pkg/server`. Failures a caller can act on are faults. |
+| `pkg/reconcile` | What reconciling needs: `Deps` (store, management cluster, the AWS lookups) and the bookkeeping every owner shares (record, observe, prune, the store-backed `Inventory`), the checks a request and a reconciler share (`Validate`, `CheckAWSLabels`), and how a tenant's account is reached (`AWSAccess`: always through its tenant role). | No RPC library, no `pkg/server`. Failures a caller can act on are faults. |
 | `pkg/reconcile/network`, `pkg/reconcile/cluster`, `pkg/reconcile/account` | A `Reconciler` each: moves one stored network, cluster or account towards its spec (apply, staging, delete, takeover, status). They also build the row a create or an import stores (`NewRow`, `NewImportRow`), and they are the only code that looks at AWS: the discovery of an import, the EKS name check and the version resolution. | Same as `pkg/reconcile`. |
 | `pkg/management` | Prepares the management cluster for the two commands: the manager whose cache both read from, the store on the platform's kinds, and, for what reconciles only, the Crossplane providers, the CRDs and the AWS lookups (`WithAWS`). | No RPC library, no `pkg/server`. |
 | `pkg/server/network`, `pkg/server/cluster`, `pkg/server/tenant` | RPC handlers only: validate, read and write rows, map errors to Connect codes. They use the reconcilers to check a request against the store and to read. They make no AWS call, and the network and cluster handlers write nothing to the management cluster (the tenant handler still applies an account's namespace and ProviderConfig itself). | May import everything above. |
 | `pkg/server/service` | What handlers share: request validation, `ToConnect` (repository errors and faults to Connect codes), the `Faults` interceptor. | The only shared package that imports the RPC library. |
-| `pkg/database` | `repository` is the storage interface. `implementation` is the GORM backend (SQLite, Postgres). `cloudstore` is the Kubernetes-backed backend, on the controller's kinds. `storetest` is the behaviour suite both run. | `repository` and `model` import nothing else from the repository. |
-| `pkg/loop` | The background loop: every interval it calls `Reconcile` for rows that are not settled. | Imports only `pkg/database`. It is handed the reconcilers. |
+| `pkg/database` | `repository` is the storage interface, `model` its rows. `cloudstore` is the one store, on the controller's kinds in the management cluster. `storetest` is the behaviour suite it runs, and the store fixture of every test that needs one. | `repository` and `model` import nothing else from the repository. |
 | `pkg/cloud/aws` | Read-only AWS lookups for imports and checks, always as the tenant role of the account they read. Called by the reconcilers only. | Imports only `pkg/constant/aws`. |
 | `pkg/kube` | Client, scheme and server-side apply. | No storage, no RPC library. |
 | `api/`, `pkg/controller`, `pkg/convert`, `pkg/owner`, `config/` | The kubebuilder project (`PROJECT` at the root): API types (`api/v1alpha1`), their conversion to the contract, the controllers and the manager (`pkg/controller/manager`), CRDs and deploy manifests for the controller and the server. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore` and `pkg/management`. Nothing in them imports `pkg/server`. |
 | `pkg/cli`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin and has no tests. | `pkg/cli` imports only the generated client. |
 
-Two things the table would otherwise hide:
+What the table would otherwise hide:
 
-- `pkg/database/model` uses GORM for its hooks, so every package that imports
-  the models (`pkg/reconcile` and above) links GORM even when no database is
-  opened.
 - `pkg/kube` registers the controller's kinds (`api/v1alpha1`) in
   its scheme, so `pkg/crossplane/sequence` and everything above it depend on
   that package through `pkg/kube`.
@@ -63,10 +59,8 @@ for local testing), then optionally a source role, then always the tenant
 role stored at the account's bootstrap. Nothing is read with the base
 credentials themselves.
 
-While the database store exists, `serve` with the background loop is the
-reconciler too (there is no controller for that store): only then does it
-take the controller's AWS settings, install the providers and look the
-cloud up, through the same reconcilers.
+The API server has no AWS setting, credentials or role: it only stores the
+desired state.
 
 ## How a create flows
 
@@ -87,8 +81,7 @@ cloud up, through the same reconcilers.
    ready, applies them with server-side apply, and reports what waits.
 5. **Crossplane** creates the cloud resources and reports conditions on the
    objects.
-6. **Status.** Whatever reconciles (the controller, or the background loop
-   with the database store) calls `Reconcile` while the network is not
+6. **Status.** The controller calls `Reconcile` while the network is not
    settled: it applies again while anything was held back, records the
    status that `GetNetwork` returns, and stores `READY` once every resource
    is ready and the provider has seen the latest change. What goes wrong
@@ -112,7 +105,7 @@ before and after:
   that changes neither the version nor the add-ons needs none.
 - After the apply the reconciler tags the network's subnets for the
   cluster.
-- The loop keeps applying until the set is complete, retires replaced node
+- The controller keeps applying until the set is complete, retires replaced node
   groups, and stores `RUNNING`.
 
 ### Ordering rules
@@ -123,7 +116,7 @@ before and after:
 | Add-ons, access entries, access policy associations and pod identity associations are created only once the EKS cluster is `ACTIVE`; a Usage whose user is one of them waits with it. | A `Field` condition in `crossplaneaws.ClusterSet`. |
 | Values that exist only after another object does: the ARN of the encryption key the platform creates, the cluster's OIDC issuer (for IRSA) and its security group; a new cluster waits for its log group. | Items with a `Build` in `ClusterSet`; the rule is `ClusterPlan.FillLive` in `pkg/crossplane/aws`. |
 | During a Kubernetes upgrade, node groups and add-ons stay at the running version until the control plane reports the target. | `upgrade.phase` in `pkg/reconcile/cluster/upgrade.go`: one rule, read by `GateUpgrade` (what is applied) and reported as `status.upgrade` (`ClusterUpgrade`: phase, from and to version, start, message). It is the one ordering rule still outside the engine: the engine has no result for "applied, but at a held version", which is what keeps the cluster being applied again. |
-| A change EKS cannot make in place on a node group (instance types, capacity type, AMI type, disk size, launch template) creates a new node group; the old one is retired once the new one is Ready. | `pkg/reconcile/cluster` (`NodeGroupName`, retirement in the loop). |
+| A change EKS cannot make in place on a node group (instance types, capacity type, AMI type, disk size, launch template) creates a new node group; the old one is retired once the new one is Ready. | `pkg/reconcile/cluster` (`NodeGroupName`, retirement on a later pass). |
 
 A condition gates creation only. Once the owner has the object, or has any
 object that waited for the same condition, it is applied whatever the
@@ -160,7 +153,7 @@ is read and edited in place, and AWS is not looked up again; what the import
 discovered is kept with the row for this (a network's discovered resources
 in its stored input, a cluster's planned objects in its stored adoption).
 The row leaves the imported state first, so a takeover that stops half-way
-is finished by the loop.
+is finished by the controller.
 
 - **Network**: `crossplaneaws.OwnedNetworkResources` renders every imported
   object with full management, or without the right to delete for a log
@@ -198,16 +191,26 @@ import it again; it is never rendered from something else.
 ## Storage
 
 `pkg/database/repository` is the interface the server and the reconcilers
-use: tenants and cloud accounts, networks, clusters, node pools, and the
-record of which objects belong to which owner. An update must present the
-row's etag; recording a status does not change it.
+use: tenants and cloud accounts, networks, clusters, and the record of which
+objects belong to which owner. An update must present the row's etag;
+recording a status does not change it.
 
-| Backend | Selected with | Notes |
-|---|---|---|
-| Database (GORM: SQLite or Postgres) | `--store=database`, the default | Deletes are soft deletes. Uniqueness is enforced by partial unique indexes. |
-| Kubernetes custom resources | `--store=kubernetes` | Rows are CloudAccount, Network and Cluster objects of the `cloud.cluster-vending.io` kinds in the tenant's namespace (`pkg/database/cloudstore`), with the typed spec converted to and from the contract (`pkg/convert`). Names are unique per tenant. Deletes are real deletes. Its one "transaction" undoes created rows on failure and is not atomic. There are no node pools. |
+There is one store and no database: rows are CloudAccount, Network and
+Cluster objects of the `cloud.cluster-vending.io` kinds in the tenant's
+namespace (`pkg/database/cloudstore`), with the typed spec converted to and
+from the contract (`pkg/convert`).
 
-Both run the same behaviour suite (`pkg/database/storetest`).
+- Names are unique per tenant: a network's or cluster's name is its
+  object's name in the tenant's namespace.
+- Deletes are real deletes: there is no history of deleted rows.
+- Uniqueness that is not an object name (a create request ID, an imported
+  VPC per account and region) is a claim object whose name is derived from
+  the value, so of two creates one wins.
+- Its one "transaction" (`WithinTransaction`, used by the tenant bootstrap)
+  takes back the rows it created when it fails; it is not atomic.
+
+It runs the behaviour suite `pkg/database/storetest`, which also gives every
+test that needs a store its own fake API server (`storetest.NewStore`).
 
 ## The contract
 
@@ -238,8 +241,9 @@ it exists, that is said.
   `pkg/controller` turn a watch event into a call of the
   existing reconcilers in `pkg/reconcile` (on `pkg/database/cloudstore`),
   adopt Networks and Clusters created with kubectl, apply spec edits, and
-  requeue until a resource is settled. With `--store=kubernetes` the server
-  leaves reconciling to it (`--background-loop`). See `docs/controller.md`.
+  requeue until a resource is settled. It is the only thing that
+  reconciles: the server's background loop is removed. See
+  `docs/controller.md`.
 - **Ownership.** A CloudAccount owns its Networks and a Network owns its
   Clusters; one account has many of each. The references are required and
   immutable in the types, and the store and the controllers set the owner
@@ -253,8 +257,10 @@ it exists, that is said.
   applies the account's namespace and ProviderConfig itself, and the
   validate-only update plan needs to be allowed a dry-run apply.
 - **Storage moves onto the controller's kinds, and the database is
-  removed.** The current Kubernetes-backed store uses separate storage kinds
-  and is a first step. No existing state is migrated.
+  removed.** Done: the store on the controller's kinds is the only one, the
+  GORM backend, its migrations and the `--store` and `--database-*` settings
+  are gone, and so is the server's background loop. No existing state was
+  migrated.
 - **Moving upgrade gating onto the engine.** The upgrade's step is now a
   status field (`status.upgrade`) computed by the same rule that gates the
   apply; the rule itself still lives in the reconciler.

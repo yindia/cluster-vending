@@ -1,6 +1,7 @@
 // Package service holds what every cloud.v1 service implementation shares:
-// its dependencies (reconcile.Deps) and the mapping of errors to Connect codes. The services
-// themselves live in pkg/server/tenant, network and cluster.
+// request validation and the mapping of errors to Connect codes. The
+// services themselves live in pkg/server/tenant, network and cluster; their
+// dependencies are reconcile.Deps.
 package service
 
 import (
@@ -11,30 +12,9 @@ import (
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
-	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
-
-// Deps are what the services work with (reconcile.Deps).
-type Deps = reconcile.Deps
-
-// Owner names what objects are created for (reconcile.Owner).
-type Owner = reconcile.Owner
-
-// DeleteOrder is the order an owner's objects are deleted in.
-type DeleteOrder = reconcile.DeleteOrder
-
-// AllGone reports whether every recorded object is gone from the cluster.
-func AllGone(views []*cloudv1.ManagedResource) bool { return reconcile.AllGone(views) }
-
-// SettleMissing turns MISSING into CREATING for objects recorded a moment
-// ago (reconcile.SettleMissing).
-func SettleMissing(records []model.ManagedResource, views []*cloudv1.ManagedResource) {
-	reconcile.SettleMissing(records, views)
-}
 
 // Validate checks a request against its protovalidate rules (the
 // buf.validate options in idl/), as INVALID_ARGUMENT.
@@ -43,11 +23,6 @@ func Validate(req proto.Message) error {
 		return connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
 	return nil
-}
-
-// Unimplemented is the answer of every RPC until it is written.
-func Unimplemented(method string) error {
-	return connect.NewError(connect.CodeUnimplemented, method+" is not implemented yet")
 }
 
 // ToConnect maps repository errors to Connect codes. Unknown errors become

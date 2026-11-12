@@ -4,11 +4,10 @@
 // (CloudAccount owns Network owns Cluster).
 //
 // The controllers (internal/controller) reconcile those objects by
-// calling the reconcilers the API server's background loop runs on the
-// database store (pkg/reconcile/account, network, cluster), on the store
-// that keeps its rows as these objects (pkg/database/cloudstore). The API
-// server with --store=kubernetes writes the same objects and leaves
-// reconciling to this controller.
+// calling the reconcilers (pkg/reconcile/account, network, cluster) on the
+// store that keeps its rows as these objects (pkg/database/cloudstore).
+// The API server writes the same objects and leaves reconciling to this
+// controller.
 //
 // kubebuilder scaffolds a cmd/main.go and a Makefile next to PROJECT; this
 // project has neither. The binary is the repository's (`cluster-vending
@@ -138,8 +137,8 @@ func Run(ctx context.Context, o Options) error {
 		Kube:                mgr.GetClient(), // reads from the informer cache
 		KubeReader:          mgr.GetAPIReader(),
 		RenderTarget:        renderTarget,
-		ProviderCredentials: management.CredentialsSecret(o.AWS.ProviderCredentials), AccountsByController: true,
-		Logger: logger,
+		ProviderCredentials: management.CredentialsSecret(o.AWS.ProviderCredentials),
+		Logger:              logger,
 	})
 	if err != nil {
 		return err

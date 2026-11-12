@@ -17,8 +17,8 @@ import (
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // An update that names an optional setting in its mask but leaves the
@@ -78,7 +78,7 @@ func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 			}
 			return c.Apply(ctx, obj, opts...)
 		},
-	}, nil, withVersions, func(d *service.Deps) { d.AWSClusterDiscovery = fakeClusterDiscoverer{cluster: terraformCluster()} })
+	}, nil, withVersions, func(d *recon.Deps) { d.AWSClusterDiscovery = fakeClusterDiscoverer{cluster: terraformCluster()} })
 	ctx := t.Context()
 	c := importTF(t, w)
 	if _, err := w.svc.TakeOverCluster(ctx, &cloudv1.TakeOverClusterRequest{TenantId: worldTenant, ClusterId: c.GetId(),

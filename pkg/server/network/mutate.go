@@ -204,7 +204,7 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 }
 
 // refuseInUse fails while clusters use the network, also clusters still
-// being deleted: the background loop removes them once their resources are
+// being deleted: the controller removes them once their resources are
 // confirmed gone and the subnets are untagged.
 func (s *NetworkService) refuseInUse(ctx context.Context, row *model.Network) error {
 	clusters, err := s.deps.Store.Clusters().ListByNetwork(ctx, row.ID)

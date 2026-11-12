@@ -1,8 +1,6 @@
-// Package storetest is the behaviour every repository.Store must have, as
-// tests: the GORM implementation (pkg/database/implementation) and the
-// one on the platform's own kinds (pkg/database/cloudstore) both run it.
-// Where the two differ on purpose a Backend says so, and the test of that
-// behaviour checks what the backend promises instead of being skipped.
+// Package storetest is the behaviour a repository.Store must have, as
+// tests. The store on the platform's own kinds (pkg/database/cloudstore)
+// runs it.
 package storetest
 
 import (
@@ -20,8 +18,7 @@ import (
 // Factory returns a new, empty store for one test.
 type Factory func(t *testing.T) repository.Store
 
-// Backend is a store implementation under test, with the semantics it
-// has on purpose that differ from the database's.
+// Backend is a store implementation under test.
 type Backend struct {
 	// New returns a new, empty store for one test.
 	New Factory
@@ -31,15 +28,6 @@ type Backend struct {
 	// keeps the spec typed gives a real contract spec for the row.
 	NetworkSpec func(*model.Network) model.JSON
 	ClusterSpec func(*model.Cluster) model.JSON
-	// NamesUniquePerTenant: a network's or cluster's name is taken once
-	// per tenant (the database: networks share names, clusters share them
-	// across accounts and regions).
-	NamesUniquePerTenant bool
-	// AWSOnly: accounts of other providers are refused with ErrInvalid.
-	AWSOnly bool
-	// NoNodePools, when set, is the error every node pool method returns:
-	// the store has no node pools.
-	NoNodePools error
 }
 
 // Run runs every behaviour test against the backend's stores.
@@ -50,36 +38,30 @@ func Run(t *testing.T, b Backend) {
 		test func(*testing.T, Backend)
 	}{
 		{"CreateAssignsIDAndETagAndRoundTrips", testCreateAssignsIDAndETagAndRoundTrips},
-		{"NetworkNamesAreNotUnique", testNetworkNamesAreNotUnique},
-		{"ClusterNamesAreUniquePerAccountAndRegion", testClusterNamesAreUniquePerAccountAndRegion},
+		{"NetworkNamesAreUniquePerTenant", testNetworkNamesAreUniquePerTenant},
+		{"ClusterNamesAreUniquePerTenant", testClusterNamesAreUniquePerTenant},
 		{"ClusterCreateAndNetworkDeleteCannotBothWin", testClusterCreateAndNetworkDeleteCannotBothWin},
 		{"CreateRequestIDIsIdempotencyKey", testCreateRequestIDIsIdempotencyKey},
 		{"ParentsMustExist", testParentsMustExist},
 		{"NetworkInUseCannotBeDeleted", testNetworkInUseCannotBeDeleted},
-		{"DeletingClusterDeletesItsNodePools", testDeletingClusterDeletesItsNodePools},
-		{"NodePoolNamesAreUniquePerCluster", testNodePoolNamesAreUniquePerCluster},
 		{"TenantWithResourcesCannotBeDeleted", testTenantWithResourcesCannotBeDeleted},
 		{"TenantHasManyCloudAccounts", testTenantHasManyCloudAccounts},
 		{"NetworkMustBeInItsTenantsAccount", testNetworkMustBeInItsTenantsAccount},
 		{"UpdateChecksETag", testUpdateChecksETag},
 		{"ListPagesNetworksOldestFirst", testListPagesNetworksOldestFirst},
 		{"NotFound", testNotFound},
-		{"WithinTransactionRollsBack", testWithinTransactionRollsBack},
 		{"DeletedParentsTakeNoChildren", testDeletedParentsTakeNoChildren},
 		{"ClusterMustMatchItsNetwork", testClusterMustMatchItsNetwork},
-		{"EveryProviderIsSupported", testEveryProviderIsSupported},
+		{"OnlyAWSAccounts", testOnlyAWSAccounts},
 		{"ProviderRulesAreEnforced", testProviderRulesAreEnforced},
 		{"ListCloudAccounts", testListCloudAccounts},
 		{"TenantDisplayNameDefaultsToID", testTenantDisplayNameDefaultsToID},
 		{"ManagedResourcesByOwnerAndAccount", testManagedResourcesByOwnerAndAccount},
 		{"SetStatusOnlyForTheRowItWasObservedFor", testSetStatusOnlyForTheRowItWasObservedFor},
-		{"MarkBehind", testMarkBehind},
 		{"ImportedVPCIsUniquePerAccountAndRegion", testImportedVPCIsUniquePerAccountAndRegion},
 		{"DeletedRowsAreGoneAndTheirNamesFree", testDeletedRowsAreGoneAndTheirNamesFree},
-		{"ListPendingAndCountByState", testListPendingAndCountByState},
 		{"ManagedResourceRecords", testManagedResourceRecords},
 		{"ClusterLookups", testClusterLookups},
-		{"NodePools", testNodePools},
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.test(t, b) })
 	}
@@ -139,19 +121,6 @@ func MustCluster(t *testing.T, s repository.Store, tenant, name string, network 
 	return c
 }
 
-// MustPool creates a node pool of the name in the cluster.
-func MustPool(t *testing.T, s repository.Store, cluster *model.Cluster, name string) *model.NodePool {
-	t.Helper()
-	p := &model.NodePool{
-		ClusterID: cluster.ID, Name: name,
-		Resource: model.Resource{State: "NODE_POOL_STATE_RUNNING", Spec: Spec("pool")},
-	}
-	if err := s.NodePools().Create(t.Context(), p); err != nil {
-		t.Fatalf("create node pool %s: %v", name, err)
-	}
-	return p
-}
-
 // RequireErr fails the test unless err is want (errors.Is).
 func RequireErr(t *testing.T, err, want error) {
 	t.Helper()
@@ -179,8 +148,7 @@ func testCreateAssignsIDAndETagAndRoundTrips(t *testing.T, b Backend) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	// Compare meaning, not bytes: Postgres jsonb and the API server
-	// normalize documents.
+	// Compare meaning, not bytes: the store normalizes documents.
 	if got.ID != n.ID || !sameDocument(got.Spec, n.Spec) || got.Region != "us-east-1" || got.Name != "shared-use1" {
 		t.Fatalf("round trip = %+v\nspec %s\nwant %s", got, got.Spec, n.Spec)
 	}
@@ -208,30 +176,31 @@ func sameDocument(a, b model.JSON) bool {
 	return reflect.DeepEqual(x, y)
 }
 
-func testNetworkNamesAreNotUnique(t *testing.T, b Backend) {
+// A network's name is taken once per tenant, in any region; another
+// tenant has its own names.
+func testNetworkNamesAreUniquePerTenant(t *testing.T, b Backend) {
 	s := b.New(t)
 	MustTenant(t, s, "acme")
 	first := MustNetwork(t, s, "acme", "prod")
-	if b.NamesUniquePerTenant {
-		again := &model.Network{TenantID: "acme", Name: "prod", Provider: "aws", Region: "eu-west-1", CloudAccountID: first.CloudAccountID,
-			Resource: model.Resource{State: "NETWORK_STATE_READY", Spec: Spec("network")}}
-		RequireErr(t, s.Networks().Create(t.Context(), again), repository.ErrAlreadyExists)
-		MustTenant(t, s, "globex")
-		MustNetwork(t, s, "globex", "prod") // another tenant has its own names
-		return
-	}
-	second := MustNetwork(t, s, "acme", "prod")
+	again := &model.Network{TenantID: "acme", Name: "prod", Provider: "aws", Region: "eu-west-1", CloudAccountID: first.CloudAccountID,
+		Resource: model.Resource{State: "NETWORK_STATE_READY", Spec: Spec("network")}}
+	RequireErr(t, s.Networks().Create(t.Context(), again), repository.ErrAlreadyExists)
+	second := MustNetwork(t, s, "acme", "staging")
 	if first.ID == second.ID {
 		t.Fatal("two networks got one ID")
 	}
 	if first.ID >= second.ID {
 		t.Errorf("IDs %s, %s are not time-ordered", first.ID, second.ID)
 	}
+	MustTenant(t, s, "globex")
+	MustNetwork(t, s, "globex", "prod")
 }
 
+// A cluster's name is taken once per tenant, in any region (it is also
+// the EKS cluster's name), and free again once that cluster is deleted.
 // A cluster's name is the cloud cluster's name: one per account and
 // region, also when two creates race (the index decides, not a check).
-func testClusterNamesAreUniquePerAccountAndRegion(t *testing.T, b Backend) {
+func testClusterNamesAreUniquePerTenant(t *testing.T, b Backend) {
 	s := b.New(t)
 	MustTenant(t, s, "acme")
 	n := MustNetwork(t, s, "acme", "n")
@@ -243,15 +212,11 @@ func testClusterNamesAreUniquePerAccountAndRegion(t *testing.T, b Backend) {
 		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: Spec("cluster")}}
 	RequireErr(t, s.Clusters().Create(t.Context(), again), repository.ErrAlreadyExists)
 
-	// Another name, and the same name in another region, are free.
+	// Another name is free; the same name in another region is not.
 	MustCluster(t, s, "acme", "staging", n)
 	elsewhere := &model.Cluster{TenantID: "acme", Name: "prod", NetworkID: n.ID, Provider: "aws", Region: "eu-west-1",
 		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: Spec("cluster")}}
-	if err := s.Clusters().Create(t.Context(), elsewhere); b.NamesUniquePerTenant {
-		RequireErr(t, err, repository.ErrAlreadyExists) // the name is the tenant's, whatever the region
-	} else if err != nil {
-		t.Fatalf("same name in another region: %v", err)
-	}
+	RequireErr(t, s.Clusters().Create(t.Context(), elsewhere), repository.ErrAlreadyExists)
 	// Once the cluster is deleted its name can be used again.
 	if err := s.Clusters().Delete(t.Context(), "acme", first.ID); err != nil {
 		t.Fatal(err)
@@ -356,45 +321,6 @@ func testNetworkInUseCannotBeDeleted(t *testing.T, b Backend) {
 	if err := s.Networks().Delete(t.Context(), "acme", n.ID); err != nil {
 		t.Fatalf("delete unused network: %v", err)
 	}
-}
-
-func testDeletingClusterDeletesItsNodePools(t *testing.T, b Backend) {
-	s := b.New(t)
-	MustTenant(t, s, "acme")
-	c := MustCluster(t, s, "acme", "prod", MustNetwork(t, s, "acme", "n"))
-	if b.NoNodePools != nil {
-		if err := s.Clusters().Delete(t.Context(), "acme", c.ID); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		_, err := s.NodePools().List(t.Context(), c.ID, repository.Page{Limit: 10})
-		RequireErr(t, err, b.NoNodePools)
-		return
-	}
-	MustPool(t, s, c, "default")
-	MustPool(t, s, c, "gpu")
-
-	if err := s.Clusters().Delete(t.Context(), "acme", c.ID); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	pools, err := s.NodePools().List(t.Context(), c.ID, repository.Page{Limit: 10})
-	if err != nil || len(pools) != 0 {
-		t.Fatalf("node pools after cluster delete = %d, %v; want 0", len(pools), err)
-	}
-}
-
-func testNodePoolNamesAreUniquePerCluster(t *testing.T, b Backend) {
-	s := b.New(t)
-	MustTenant(t, s, "acme")
-	n := MustNetwork(t, s, "acme", "n")
-	first, second := MustCluster(t, s, "acme", "a", n), MustCluster(t, s, "acme", "b", n)
-	dup := &model.NodePool{ClusterID: first.ID, Name: "default", Resource: model.Resource{State: "x", Spec: Spec("p")}}
-	if b.NoNodePools != nil {
-		RequireErr(t, s.NodePools().Create(t.Context(), dup), b.NoNodePools)
-		return
-	}
-	MustPool(t, s, first, "default")
-	MustPool(t, s, second, "default")
-	RequireErr(t, s.NodePools().Create(t.Context(), dup), repository.ErrAlreadyExists)
 }
 
 func testTenantWithResourcesCannotBeDeleted(t *testing.T, b Backend) {
@@ -533,30 +459,7 @@ func testNotFound(t *testing.T, b Backend) {
 	s := b.New(t)
 	_, err := s.Clusters().Get(t.Context(), "acme", "missing")
 	RequireErr(t, err, repository.ErrNotFound)
-	if b.NoNodePools != nil {
-		RequireErr(t, s.NodePools().Delete(t.Context(), "no-cluster", "x"), b.NoNodePools)
-	} else {
-		RequireErr(t, s.NodePools().Delete(t.Context(), "no-cluster", "x"), repository.ErrNotFound)
-	}
 	_, err = s.Tenants().Get(t.Context(), "missing")
-	RequireErr(t, err, repository.ErrNotFound)
-}
-
-func testWithinTransactionRollsBack(t *testing.T, b Backend) {
-	s := b.New(t)
-	MustTenant(t, s, "acme")
-	boom := errors.New("boom")
-
-	var id string
-	err := s.WithinTransaction(t.Context(), func(tx repository.Store) error {
-		n := MustNetwork(t, tx, "acme", "n")
-		id = n.ID
-		MustCluster(t, tx, "acme", "c", n)
-		return boom
-	})
-
-	RequireErr(t, err, boom)
-	_, err = s.Networks().Get(t.Context(), "acme", id)
 	RequireErr(t, err, repository.ErrNotFound)
 }
 
@@ -567,13 +470,6 @@ func testDeletedParentsTakeNoChildren(t *testing.T, b Backend) {
 	c := MustCluster(t, s, "acme", "c", n)
 	if err := s.Clusters().Delete(t.Context(), "acme", c.ID); err != nil {
 		t.Fatalf("delete cluster: %v", err)
-	}
-
-	pool := &model.NodePool{ClusterID: c.ID, Name: "late", Resource: model.Resource{State: "x", Spec: Spec("p")}}
-	if b.NoNodePools != nil {
-		RequireErr(t, s.NodePools().Create(t.Context(), pool), b.NoNodePools)
-	} else {
-		RequireErr(t, s.NodePools().Create(t.Context(), pool), repository.ErrNotFound)
 	}
 
 	if err := s.Networks().Delete(t.Context(), "acme", n.ID); err != nil {
@@ -599,7 +495,8 @@ func testClusterMustMatchItsNetwork(t *testing.T, b Backend) {
 	RequireErr(t, s.Clusters().Create(t.Context(), otherCloud), repository.ErrInvalid)
 }
 
-func testEveryProviderIsSupported(t *testing.T, b Backend) {
+// Only AWS accounts are kept: the kinds have no other provider.
+func testOnlyAWSAccounts(t *testing.T, b Backend) {
 	s := b.New(t)
 	MustTenant(t, s, "acme")
 	accounts := []model.CloudAccount{
@@ -610,7 +507,7 @@ func testEveryProviderIsSupported(t *testing.T, b Backend) {
 	for _, a := range accounts {
 		a.TenantID = "acme"
 		err := s.Tenants().PutCloudAccount(t.Context(), &a)
-		if b.AWSOnly && a.Provider != model.ProviderAWS {
+		if a.Provider != model.ProviderAWS {
 			RequireErr(t, err, repository.ErrInvalid)
 			_, err = s.Tenants().GetCloudAccount(t.Context(), "acme", a.Provider, a.AccountID)
 			RequireErr(t, err, repository.ErrNotFound)
@@ -628,13 +525,6 @@ func testEveryProviderIsSupported(t *testing.T, b Backend) {
 		if err := s.Networks().Create(t.Context(), n); err != nil {
 			t.Fatalf("network on %s: %v", a.Provider, err)
 		}
-	}
-	if b.AWSOnly {
-		return
-	}
-	got, err := s.Tenants().GetCloudAccount(t.Context(), "acme", model.ProviderAzure, "0b1f6b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c")
-	if err != nil || got.DirectoryID == "" {
-		t.Fatalf("azure account = %+v, %v", got, err)
 	}
 }
 
@@ -663,10 +553,7 @@ func testProviderRulesAreEnforced(t *testing.T, b Backend) {
 func testListCloudAccounts(t *testing.T, b Backend) {
 	s := b.New(t)
 	MustTenant(t, s, "acme")
-	second := model.CloudAccount{Provider: model.ProviderGCP, AccountID: "acme-prod-1234"}
-	if b.AWSOnly {
-		second = model.CloudAccount{Provider: model.ProviderAWS, AccountID: "777788889999"}
-	}
+	second := model.CloudAccount{Provider: model.ProviderAWS, AccountID: "777788889999"}
 	for _, a := range []model.CloudAccount{second, {Provider: model.ProviderAWS, AccountID: "444455556666"}} {
 		a.TenantID = "acme"
 		if err := s.Tenants().PutCloudAccount(t.Context(), &a); err != nil {
@@ -778,35 +665,6 @@ func testSetStatusOnlyForTheRowItWasObservedFor(t *testing.T, b Backend) {
 	for _, name := range []string{"a", "b"} {
 		MustCluster(t, s, "acme", name, n)
 	}
-}
-
-// A row marked behind is applied again, and a write based on the row as it
-// was fails.
-func testMarkBehind(t *testing.T, b Backend) {
-	s := b.New(t)
-	ctx := t.Context()
-	MustTenant(t, s, "acme")
-	n := MustNetwork(t, s, "acme", "n")
-	c := MustCluster(t, s, "acme", "prod", n)
-	c.Generation, c.AppliedGeneration = 3, 3
-	if err := s.Clusters().Update(ctx, c); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 { // repeating it does not move the generation further back
-		if err := s.Clusters().MarkBehind(ctx, "acme", c.ID); err != nil {
-			t.Fatalf("MarkBehind: %v", err)
-		}
-	}
-	got, err := s.Clusters().Get(ctx, "acme", c.ID)
-	if err != nil || got.AppliedGeneration != 2 || got.Generation != 3 || got.ETag == c.ETag {
-		t.Fatalf("applied %d of %d, etag changed %t (%v); want 2 of 3 and a new etag",
-			got.AppliedGeneration, got.Generation, got.ETag != c.ETag, err)
-	}
-	RequireErr(t, s.Clusters().Update(ctx, c), repository.ErrConflict)
-	if err := s.Networks().MarkBehind(ctx, "acme", n.ID); err != nil {
-		t.Fatalf("MarkBehind network: %v", err)
-	}
-	RequireErr(t, s.Networks().MarkBehind(ctx, "acme", "0190f1a2-0000-7000-8000-00000000dead"), repository.ErrNotFound)
 }
 
 // A VPC is imported once per account and region; again once that network

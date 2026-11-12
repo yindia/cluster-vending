@@ -3,9 +3,9 @@
 The platform's controller, laid out as a kubebuilder v4 project at the root
 of the repository's one Go module. It holds the API of the platform's own custom
 resources and the controllers that reconcile them. The controllers have no
-reconcile logic of their own: each turns a watch event into a call of the
-reconciler the API server's background loop also runs (`pkg/reconcile/account`,
-`network`, `cluster`), on the store that keeps its rows as these objects
+reconcile logic of their own: each turns a watch event into a call of a
+reconciler (`pkg/reconcile/account`, `network`, `cluster`), on the store
+that keeps its rows as these objects
 (`pkg/database/cloudstore`). None of it has run against a real API server
 or AWS; it is tested on a fake API server only.
 
@@ -34,10 +34,9 @@ The specs mirror the `cloud.v1` contract in `idl/cloud/v1`, with Kubernetes
 conventions (camelCase, string enums, `metav1.Condition`). `pkg/convert`
 translates between the two, both ways without loss.
 
-With `--store=kubernetes` the API server keeps its state in these kinds
-(`pkg/database/cloudstore`): a tenant is its namespace, and every account,
-network and cluster the API knows is an object here, written through the
-same repository interface the database store has.
+The API server keeps its state in these kinds (`pkg/database/cloudstore`,
+the only store): a tenant is its namespace, and every account, network and
+cluster the API knows is an object here.
 
 ## Layout
 
@@ -77,7 +76,7 @@ covers these packages like any other.
 
 ```
 cluster-vending controller --leader-elect=false --aws-management-role-arn <role arn>
-cluster-vending serve --store=kubernetes   # the API: writes the objects
+cluster-vending serve                      # the API: writes the objects
 ```
 
 `controller` takes the global `--kubeconfig`, `--context`, `--log-format`
@@ -203,16 +202,8 @@ In a cluster without IRSA that runs the controller as a Deployment, enable
 `config/local-credentials` (a Role to read that one Secret, and the
 setting) and create the Secret in the controller's namespace.
 
-The server with the database store and the background loop (`serve`,
-`--background-loop`) is the reconciler too and follows the same rule with
-its own credentials; that mode goes away with the database store.
-
-Who reconciles: one reconciler per resource. With `--store=kubernetes` the
-server's background loop is off by default (`--background-loop=auto`) and
-this controller reconciles; `serve --store=kubernetes --background-loop=true`
-runs the server alone, without the controller. Do not run both on the same
-objects. With the database store the loop reconciles and the controller has
-nothing to watch.
+Who reconciles: this controller, and nothing else. The API server only
+stores the desired state; it has no background loop.
 
 ## What a controller does
 

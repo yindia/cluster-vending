@@ -366,21 +366,6 @@ func (r clusters) SetStatus(ctx context.Context, tenantID, id, etag string, stat
 	}))
 }
 
-// MarkBehind puts the applied generation below the generation and assigns
-// a new etag, so a write based on the row as it was fails.
-func (r clusters) MarkBehind(ctx context.Context, tenantID, id string) error {
-	return translate(retry(func() error {
-		obj, err := r.find(ctx, tenantID, id)
-		if err != nil {
-			return err
-		}
-		if err := markBehind(obj); err != nil {
-			return err
-		}
-		return r.c.Update(ctx, obj)
-	}))
-}
-
 // Delete removes the cluster.
 func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	obj, err := r.find(ctx, tenantID, id)
@@ -396,30 +381,4 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	}
 	r.release(ctx, obj.Namespace, clusterKeys(row)...)
 	return nil
-}
-
-func (r clusters) ListPending(ctx context.Context, states []string, renderTarget int64) ([]model.Cluster, error) {
-	rows, err := r.all(ctx, "", nil)
-	if err != nil {
-		return nil, err
-	}
-	out := rows[:0]
-	for _, c := range rows {
-		if isPending(&c.Resource, states, renderTarget) {
-			out = append(out, c)
-		}
-	}
-	return out, nil
-}
-
-func (r clusters) CountByState(ctx context.Context) (map[string]int64, error) {
-	rows, err := r.all(ctx, "", nil)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]int64{}
-	for _, c := range rows {
-		out[c.State]++
-	}
-	return out, nil
 }

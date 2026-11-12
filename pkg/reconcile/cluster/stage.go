@@ -89,7 +89,7 @@ func (s *Reconciler) resumeCreate(ctx context.Context, row *model.Cluster, recor
 // held back until EKS is ACTIVE (add-ons, access entries), during an
 // upgrade for the node groups and add-ons once the control plane reports
 // the target version (gateUpgrade), and when the renderer changed
-// (Deps.RenderBehind). The background loop calls it.
+// (Deps.RenderBehind). The controller calls it.
 //
 // While EKS is not ACTIVE it only starts or resumes a create
 // (resumeCreate): the objects of the first stage are applied again, the

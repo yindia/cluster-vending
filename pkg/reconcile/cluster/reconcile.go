@@ -10,14 +10,14 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// PendingStates are the stored states of clusters the background loop
-// looks at every pass.
-// Imported clusters are only observed: the loop records their status.
+// PendingStates are the stored states of clusters that are not settled:
+// the controller looks at them again soon.
+// Imported clusters are only observed: their status is recorded.
 func PendingStates() []string {
 	return []string{StateProvisioning, StateUpdating, StateDeleting, StateImported}
 }
 
-// Reconcile moves one cluster on; the background loop calls it, so no read
+// Reconcile moves one cluster on; the controller calls it, so no read
 // has to, and no API call does: the handlers only store what was asked
 // for. It applies the cluster again while its generation or renderer
 // version is behind (advance), retires node groups a replacement

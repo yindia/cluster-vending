@@ -3,7 +3,7 @@
 // must wait, replaces node groups, deletes, and reads the cluster's status
 // from its resources. The stored row is the source of truth: the API
 // handlers (pkg/server/cluster) only store what was asked for and read;
-// the background loop calls Reconcile, which applies it and records what
+// the controller calls Reconcile, which applies it and records what
 // goes wrong as the cluster's status. It knows no RPC library: failures a
 // caller can act on are faults (pkg/fault).
 package cluster

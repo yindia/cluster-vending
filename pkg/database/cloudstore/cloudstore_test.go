@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
@@ -19,22 +18,13 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
 const namespace = "tenant-acme"
 
 // newClient is a fake API server that knows the kinds and their status
 // subresources, as the real one does.
-func newClient(t *testing.T) client.Client {
-	t.Helper()
-	scheme, err := kube.Scheme()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fake.NewClientBuilder().WithScheme(scheme).
-		WithStatusSubresource(&cloudv1alpha1.CloudAccount{}, &cloudv1alpha1.Network{}, &cloudv1alpha1.Cluster{}).Build()
-}
+func newClient(t *testing.T) client.Client { return storetest.NewClient(t) }
 
 func newStore(t *testing.T) repository.Store { return cloudstore.New(newClient(t)) }
 
@@ -89,16 +79,12 @@ func clusterSpec(c *model.Cluster) *cloudv1.ClusterSpec {
 		}}}
 }
 
-// The store on the cloud.cluster-vending.io kinds behaves as every store
-// must, but for what it does differently on purpose (the Backend).
+// The store on the cloud.cluster-vending.io kinds behaves as a store must.
 func TestStore(t *testing.T) {
 	storetest.Run(t, storetest.Backend{
-		New:                  newStore,
-		NetworkSpec:          func(n *model.Network) model.JSON { return document(t, networkSpec(n)) },
-		ClusterSpec:          func(c *model.Cluster) model.JSON { return document(t, clusterSpec(c)) },
-		NamesUniquePerTenant: true,
-		AWSOnly:              true,
-		NoNodePools:          cloudstore.ErrNodePools,
+		New:         newStore,
+		NetworkSpec: func(n *model.Network) model.JSON { return document(t, networkSpec(n)) },
+		ClusterSpec: func(c *model.Cluster) model.JSON { return document(t, clusterSpec(c)) },
 	})
 }
 

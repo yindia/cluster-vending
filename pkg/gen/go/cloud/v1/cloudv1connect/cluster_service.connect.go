@@ -157,12 +157,11 @@ type ClusterServiceClient interface {
 	// previous tool stopped managing the cluster, and after its network was
 	// taken over. From then on it is a cluster like any other.
 	TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error)
-	// Returns one cluster, or NOT_FOUND, from the platform's database: its
-	// spec and the status the platform last recorded for it (while a cluster
-	// is being created, changed or deleted that is at most one pass of the
-	// background loop old; afterwards it is the status it converged on). It
-	// does not read the management cluster. GetClusterStatus reads the live
-	// status.
+	// Returns one cluster, or NOT_FOUND, from the platform's store: its spec
+	// and the status the controller last recorded for it (it records one on
+	// every reconcile while the cluster is being created, changed or deleted;
+	// afterwards it is the status the cluster converged on). It does not read
+	// the provider objects. GetClusterStatus reads the live status.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
 	// Returns one cluster with its live status, read now from its managed
 	// resources in the management cluster (their conditions, the EKS
@@ -170,7 +169,7 @@ type ClusterServiceClient interface {
 	// cannot be read.
 	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
-	// from the database like GetCluster.
+	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Updates the mutable fields named in update_mask. The call stores the
 	// change and returns; the API server does not look at the cloud. After a
@@ -260,12 +259,11 @@ type ClusterServiceHandler interface {
 	// previous tool stopped managing the cluster, and after its network was
 	// taken over. From then on it is a cluster like any other.
 	TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error)
-	// Returns one cluster, or NOT_FOUND, from the platform's database: its
-	// spec and the status the platform last recorded for it (while a cluster
-	// is being created, changed or deleted that is at most one pass of the
-	// background loop old; afterwards it is the status it converged on). It
-	// does not read the management cluster. GetClusterStatus reads the live
-	// status.
+	// Returns one cluster, or NOT_FOUND, from the platform's store: its spec
+	// and the status the controller last recorded for it (it records one on
+	// every reconcile while the cluster is being created, changed or deleted;
+	// afterwards it is the status the cluster converged on). It does not read
+	// the provider objects. GetClusterStatus reads the live status.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
 	// Returns one cluster with its live status, read now from its managed
 	// resources in the management cluster (their conditions, the EKS
@@ -273,7 +271,7 @@ type ClusterServiceHandler interface {
 	// cannot be read.
 	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
-	// from the database like GetCluster.
+	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Updates the mutable fields named in update_mask. The call stores the
 	// change and returns; the API server does not look at the cloud. After a

@@ -1,10 +1,8 @@
 // Package cloudstore implements pkg/database/repository on the platform's
 // own kinds in the management cluster (cloud.cluster-vending.io/v1alpha1:
-// CloudAccount, Network, Cluster) instead of a database. The API handlers
-// and the reconcilers use it through the same interface as the database
-// store; the GORM implementation (pkg/database/implementation) is the
-// reference for what every method means, and both pass the same tests
-// (pkg/database/storetest), but for the differences listed below.
+// CloudAccount, Network, Cluster): the platform's only store. The API
+// handlers and the reconcilers use it through that interface, and it
+// passes the behaviour tests of pkg/database/storetest.
 //
 // How a row is an object:
 //
@@ -27,7 +25,7 @@
 //   - a Network is owned by its CloudAccount and a Cluster by its Network
 //     (controller owner references, pkg/owner).
 //
-// What a database gives and Kubernetes does not:
+// What a database would give and Kubernetes does not:
 //
 //   - an etag is an annotation. Every write is sent with the
 //     resourceVersion the object was read at, so of two writers one is
@@ -36,20 +34,20 @@
 //     (spec, annotations: everything that decides what is applied), then
 //     the status. If the second fails the row has its new etag and its old
 //     status; the caller's retry is refused (ErrConflict), reads the row
-//     and writes again, and the loop records the status on its next pass.
+//     and writes again, and the controller records the status on its next pass.
+//   - there are no transactions: WithinTransaction takes back what its
+//     function created when it fails, nothing more.
 //   - a unique value that is not an object name (a create request ID, the
 //     VPC a network was imported from) is a claim: a ConfigMap whose name
 //     is derived from the value. Creating an object is atomic, so one of
 //     two creates gets the value. The claim goes with the row.
-//   - there are no transactions (WithinTransaction).
 //
-// Differences from the database store:
+// What the rows are:
 //
 //   - names are unique per tenant: a second network or cluster of a name
-//     is ErrAlreadyExists (the database allows networks of one name, and
-//     clusters of one name in different accounts or regions).
+//     in the tenant is ErrAlreadyExists (it is the object's name in the
+//     tenant's namespace).
 //   - AWS accounts only: the kinds have no other provider.
-//   - no node pools (NodePools): there is no kind for them.
 //   - deletes are real: there is no history of deleted rows.
 //
 // The client must read from the API server, not from an informer cache: a
@@ -140,10 +138,6 @@ var claimGrace = time.Minute
 // now is the clock; tests replace it.
 var now = time.Now
 
-// ErrNodePools is what every node pool method returns: the kinds have no
-// node pool, the default one is part of its Cluster.
-var ErrNodePools = errors.New("node pools are not supported by the store on the cloud.cluster-vending.io kinds")
-
 // New returns a Store that keeps its rows as CloudAccount, Network and
 // Cluster objects in the tenants' namespaces. c must read from the API
 // server (not from a cache) and know the kinds
@@ -157,10 +151,9 @@ type store struct {
 	undo *[]func(context.Context) error
 }
 
-func (s store) Tenants() repository.Tenants     { return tenants{s} }
-func (s store) Networks() repository.Networks   { return networks{s} }
-func (s store) Clusters() repository.Clusters   { return clusters{s} }
-func (s store) NodePools() repository.NodePools { return nodePools{} }
+func (s store) Tenants() repository.Tenants   { return tenants{s} }
+func (s store) Networks() repository.Networks { return networks{s} }
+func (s store) Clusters() repository.Clusters { return clusters{s} }
 
 func (s store) ManagedResources() repository.ManagedResources { return managedResources{s} }
 
@@ -505,10 +498,10 @@ func newETag() string {
 	return hex.EncodeToString(b)
 }
 
-// prepare gives a new row what the database gives it on insert: an ID, an
+// prepare gives a new row what a store gives it on insert: an ID, an
 // etag, generation 1 and its times.
 func prepare(m *model.Resource) error {
-	if err := m.BeforeCreate(nil); err != nil {
+	if err := m.AssignID(); err != nil {
 		return err
 	}
 	m.ETag = newETag()
@@ -518,11 +511,6 @@ func prepare(m *model.Resource) error {
 	m.CreatedAt = now()
 	m.UpdatedAt = m.CreatedAt
 	return nil
-}
-
-// isPending is the background loop's filter (repository.Networks.ListPending).
-func isPending(m *model.Resource, states []string, renderTarget int64) bool {
-	return slices.Contains(states, m.State) || m.AppliedGeneration < m.Generation || m.RenderVersion < renderTarget
 }
 
 // page cuts rows (sorted by key) to one page.

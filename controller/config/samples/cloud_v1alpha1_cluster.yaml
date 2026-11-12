@@ -1,0 +1,34 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: Cluster
+metadata:
+  # The EKS cluster's name.
+  name: prod
+  namespace: tenant-acme
+spec:
+  displayName: Production
+  tags:
+    team: platform
+  region: us-east-1
+  network:
+    # The Network that owns this cluster (cloud_v1alpha1_network.yaml).
+    networkRef:
+      name: prod
+  controlPlane:
+    kubernetesVersion: "1.33"
+    endpointAccess:
+      publicAccessCIDRs:
+        - 203.0.113.0/24
+  defaultNodePool:
+    instanceTypes:
+      - m6i.large
+    scaling:
+      minSize: 2
+      maxSize: 6
+  access:
+    adminPrincipals:
+      - arn:aws:iam::111122223333:role/platform-admin
+  # Stored only for now: a release reaches Alpha, then Beta, then Stable,
+  # and within a channel Tier2, then Tier1, then Tier0.
+  releaseChannel: Stable
+  tier: Tier0
+  aws: {}

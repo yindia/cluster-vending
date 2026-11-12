@@ -1,0 +1,10 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: CloudAccount
+metadata:
+  name: production
+  namespace: tenant-acme
+spec:
+  accountName: acme-production
+  aws:
+    accountID: "111122223333"
+    role: cluster-vending-provisioner

@@ -1,0 +1,637 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: networks.cloud.cluster-vending.io
+spec:
+  group: cloud.cluster-vending.io
+  names:
+    categories:
+    - cluster-vending
+    kind: Network
+    listKind: NetworkList
+    plural: networks
+    shortNames:
+    - cvnet
+    - cvnetwork
+    singular: network
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.accountRef.name
+      name: Account
+      type: string
+    - jsonPath: .spec.region
+      name: Region
+      type: string
+    - jsonPath: .status.resources.cloudNetworkID
+      name: VPC
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Network is a tenant network (AWS: a VPC) with its subnets, NAT and
+          routing, created by the platform or imported and then taken over. It is
+          owned by exactly one CloudAccount (spec.accountRef) and owns the
+          Clusters that run in it: one network serves many clusters. It is not
+          deleted while it owns a Cluster (NetworkFinalizer).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Network
+            properties:
+              accountRef:
+                description: |-
+                  accountRef names the CloudAccount the network lives in, in the same
+                  namespace. The account owns the network. Immutable. Clusters run in
+                  their network's account.
+                properties:
+                  name:
+                    description: name of the referenced object.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: accountRef is immutable
+                  rule: self == oldSelf
+              displayName:
+                description: displayName is a human-friendly name. Mutable.
+                maxLength: 128
+                type: string
+              flowLogs:
+                description: 'flowLogs of the network''s IP traffic. Unset: none.'
+                properties:
+                  aggregationIntervalSeconds:
+                    default: 600
+                    description: |-
+                      aggregationIntervalSeconds is how many seconds of traffic one record
+                      aggregates.
+                    enum:
+                    - 60
+                    - 600
+                    format: int32
+                    type: integer
+                  enabled:
+                    description: 'enabled turns flow logs on. Unset or false: no flow
+                      log resources.'
+                    type: boolean
+                  retentionDays:
+                    default: 30
+                    description: |-
+                      retentionDays is how long the log group keeps the records: one of the
+                      retention periods CloudWatch Logs has.
+                    enum:
+                    - 1
+                    - 3
+                    - 5
+                    - 7
+                    - 14
+                    - 30
+                    - 60
+                    - 90
+                    - 120
+                    - 150
+                    - 180
+                    - 365
+                    - 400
+                    - 545
+                    - 731
+                    - 1096
+                    - 1827
+                    - 2192
+                    - 2557
+                    - 2922
+                    - 3288
+                    - 3653
+                    format: int32
+                    type: integer
+                  trafficType:
+                    default: All
+                    description: trafficType is the traffic recorded.
+                    enum:
+                    - All
+                    - Accept
+                    - Reject
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: the traffic type and aggregation interval of existing flow
+                    logs cannot be changed; turn flow logs off, then on with the new
+                    settings
+                  rule: '!(has(oldSelf.enabled) && oldSelf.enabled && has(self.enabled)
+                    && self.enabled) || (self.trafficType == oldSelf.trafficType &&
+                    self.aggregationIntervalSeconds == oldSelf.aggregationIntervalSeconds)'
+              importFrom:
+                description: importFrom imports an existing network instead of creating
+                  one.
+                properties:
+                  acknowledgeNotImported:
+                    description: |-
+                      acknowledgeNotImported confirms that the plan's NotImported resources
+                      stay outside the platform. A takeover of a plan with such lines waits
+                      for it.
+                    type: boolean
+                  aws:
+                    description: aws names the VPC to import.
+                    properties:
+                      subnetIDs:
+                        description: subnetIDs are the VPC's subnets the network takes
+                          in.
+                        items:
+                          pattern: ^subnet-[0-9a-f]{8,17}$
+                          type: string
+                        maxItems: 32
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: set
+                      vpcID:
+                        description: vpcID of the VPC.
+                        pattern: ^vpc-[0-9a-f]{8,17}$
+                        type: string
+                    required:
+                    - subnetIDs
+                    - vpcID
+                    type: object
+                  takeOver:
+                    description: |-
+                      takeOver makes the platform the owner of the imported resources:
+                      they switch from observe-only to full management and are brought to
+                      the spec (the plan's WillUpdate and WillCreate lines). Once true it
+                      stays true.
+                    type: boolean
+                type: object
+                x-kubernetes-validations:
+                - message: 'exactly one provider must be set: aws'
+                  rule: has(self.aws)
+                - message: what is imported is immutable
+                  rule: self.aws == oldSelf.aws
+                - message: a takeover cannot be undone
+                  rule: '!has(oldSelf.takeOver) || !oldSelf.takeOver || (has(self.takeOver)
+                    && self.takeOver)'
+              layout:
+                description: |-
+                  layout is the address space, subnets and NAT of a network the
+                  platform creates. Immutable. Not set for an imported network: its
+                  layout is read from the cloud and reported in status.layout.
+                properties:
+                  availabilityZoneCount:
+                    description: |-
+                      availabilityZoneCount is the number of zones the default layout
+                      spreads across. Defaults to 3. With explicit zonal subnets the zones
+                      are the subnets', so it must be unset.
+                    format: int32
+                    maximum: 6
+                    minimum: 2
+                    type: integer
+                  cidrBlock:
+                    default: 10.0.0.0/16
+                    description: cidrBlock is the network's IPv4 range, /16 to /24.
+                    maxLength: 18
+                    pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/(1[6-9]|2[0-4])$
+                    type: string
+                  natGatewayMode:
+                    default: Single
+                    description: natGatewayMode controls NAT redundancy.
+                    enum:
+                    - Single
+                    - PerZone
+                    - Regional
+                    type: string
+                  subnets:
+                    description: |-
+                      subnets is the explicit subnet layout. Empty: the default layout is
+                      carved out of cidrBlock (AWS: one Public and one Private subnet per
+                      zone) and reported in status.layout. The ranges must lie inside
+                      cidrBlock and not overlap (checked by the controller).
+                    items:
+                      description: Subnet is one subnet of a network.
+                      properties:
+                        cidrBlock:
+                          description: cidrBlock is the subnet's IPv4 range, inside
+                            the network's.
+                          maxLength: 18
+                          pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
+                          type: string
+                        role:
+                          description: role of the subnet.
+                          enum:
+                          - Public
+                          - Private
+                          type: string
+                        zoneID:
+                          description: |-
+                            zoneID is the zone the subnet lives in, as a zone ID (AWS:
+                            "use1-az1"): the same physical zone in every account, unlike zone
+                            names. Required on providers with zonal subnets (AWS).
+                          maxLength: 64
+                          pattern: ^[a-z0-9-]*$
+                          type: string
+                      required:
+                      - cidrBlock
+                      - role
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: zonal subnets already define the zones; availabilityZoneCount
+                    only combines with regional subnets (no zoneID)
+                  rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
+                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
+                - message: subnet cidrBlock values must be unique
+                  rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
+                    b.cidrBlock == a.cidrBlock))'
+                - message: subnets, when set, must include at least one Private subnet
+                  rule: '!has(self.subnets) || size(self.subnets) == 0 || self.subnets.exists(s,
+                    s.role == ''Private'')'
+              region:
+                description: 'region of the network (AWS: e.g. "us-east-1"). Immutable.'
+                maxLength: 64
+                minLength: 1
+                pattern: ^[a-z0-9-]+$
+                type: string
+                x-kubernetes-validations:
+                - message: region is immutable
+                  rule: self == oldSelf
+              tags:
+                additionalProperties:
+                  type: string
+                description: |-
+                  tags of every cloud resource of the network. Mutable: a change
+                  re-tags the resources (an imported network's resources keep their
+                  other tags).
+                maxProperties: 40
+                type: object
+                x-kubernetes-validations:
+                - message: tag keys are 1-128 and values 0-256 characters of letters,
+                    digits, space and _.:/=+@-
+                  rule: self.all(k, size(k) >= 1 && size(k) <= 128 && k.matches('^[A-Za-z0-9
+                    _.:/=+@-]+$') && size(self[k]) <= 256 && self[k].matches('^[A-Za-z0-9
+                    _.:/=+@-]*$'))
+            required:
+            - accountRef
+            - region
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of layout (a network the platform creates) and
+                importFrom (an existing one) must be set
+              rule: has(self.importFrom) != has(self.layout)
+            - message: layout is immutable
+              rule: has(self.layout) == has(oldSelf.layout) && (!has(self.layout)
+                || self.layout == oldSelf.layout)
+            - message: 'a network is created or imported for good: importFrom cannot
+                be added or removed'
+              rule: has(self.importFrom) == has(oldSelf.importFrom)
+            - message: 'flowLogs cannot be set on an imported network: it keeps the
+                flow logs it was imported with'
+              rule: '!has(self.importFrom) || !has(self.flowLogs)'
+          status:
+            description: status defines the observed state of Network
+            properties:
+              clusters:
+                description: |-
+                  clusters are the names of the Clusters the network owns. The network
+                  cannot be deleted while there are any.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+              conditions:
+                description: 'conditions: Ready and Synced.'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              importPlan:
+                description: |-
+                  importPlan is set for an imported network: the plan of the import,
+                  kept as a record after the takeover.
+                properties:
+                  phase:
+                    description: phase of the import.
+                    enum:
+                    - Discovering
+                    - Planned
+                    - Blocked
+                    - Converging
+                    - Converged
+                    type: string
+                  resources:
+                    description: resources are the plan's lines.
+                    items:
+                      description: ImportedResource is one line of an import plan.
+                      properties:
+                        apiVersion:
+                          description: apiVersion of the Crossplane object the resource
+                            is (or would be).
+                          type: string
+                        detail:
+                          description: detail explains the disposition.
+                          type: string
+                        disposition:
+                          description: disposition is what a takeover does with the
+                            resource.
+                          enum:
+                          - Matches
+                          - WillUpdate
+                          - WillCreate
+                          - NotImported
+                          - Blocking
+                          - CarriedOver
+                          type: string
+                        externalName:
+                          description: externalName is the resource's cloud identifier.
+                          type: string
+                        kind:
+                          description: kind of that object.
+                          type: string
+                        name:
+                          description: name of that object; empty for a resource that
+                            is not imported.
+                          type: string
+                        requiresReplacement:
+                          description: |-
+                            requiresReplacement is true when bringing the resource to the spec
+                            replaces it.
+                          type: boolean
+                        specPath:
+                          description: specPath is the spec field that describes the
+                            resource, if any.
+                          type: string
+                      required:
+                      - disposition
+                      - kind
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              inventory:
+                description: |-
+                  inventory lists every Crossplane object of the network (VPC, subnets,
+                  NAT gateways, routes, ...) with its cloud identifier, in creation
+                  order.
+                items:
+                  description: |-
+                    InventoryEntry is one Crossplane object the owner has in the management
+                    cluster.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the object.
+                      type: string
+                    carriedOver:
+                      description: |-
+                        carriedOver marks an object that came with an import and that no spec
+                        field describes: it is never removed when the owner is rendered
+                        again, and is deleted with the owner.
+                      type: boolean
+                    externalName:
+                      description: |-
+                        externalName is the cloud identifier of the resource the object
+                        stands for (crossplane.io/external-name): what a rebuilt management
+                        cluster needs to adopt the resource instead of creating a new one.
+                        Empty until the provider created the resource.
+                      type: string
+                    kind:
+                      description: kind of the object.
+                      type: string
+                    name:
+                      description: name of the object, in the owner's namespace.
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              layout:
+                description: |-
+                  layout is the layout as built: spec.layout with its defaults
+                  resolved (the carved subnets), or the layout read from an imported
+                  network.
+                properties:
+                  availabilityZoneCount:
+                    description: |-
+                      availabilityZoneCount is the number of zones the default layout
+                      spreads across. Defaults to 3. With explicit zonal subnets the zones
+                      are the subnets', so it must be unset.
+                    format: int32
+                    maximum: 6
+                    minimum: 2
+                    type: integer
+                  cidrBlock:
+                    default: 10.0.0.0/16
+                    description: cidrBlock is the network's IPv4 range, /16 to /24.
+                    maxLength: 18
+                    pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/(1[6-9]|2[0-4])$
+                    type: string
+                  natGatewayMode:
+                    default: Single
+                    description: natGatewayMode controls NAT redundancy.
+                    enum:
+                    - Single
+                    - PerZone
+                    - Regional
+                    type: string
+                  subnets:
+                    description: |-
+                      subnets is the explicit subnet layout. Empty: the default layout is
+                      carved out of cidrBlock (AWS: one Public and one Private subnet per
+                      zone) and reported in status.layout. The ranges must lie inside
+                      cidrBlock and not overlap (checked by the controller).
+                    items:
+                      description: Subnet is one subnet of a network.
+                      properties:
+                        cidrBlock:
+                          description: cidrBlock is the subnet's IPv4 range, inside
+                            the network's.
+                          maxLength: 18
+                          pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
+                          type: string
+                        role:
+                          description: role of the subnet.
+                          enum:
+                          - Public
+                          - Private
+                          type: string
+                        zoneID:
+                          description: |-
+                            zoneID is the zone the subnet lives in, as a zone ID (AWS:
+                            "use1-az1"): the same physical zone in every account, unlike zone
+                            names. Required on providers with zonal subnets (AWS).
+                          maxLength: 64
+                          pattern: ^[a-z0-9-]*$
+                          type: string
+                      required:
+                      - cidrBlock
+                      - role
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: zonal subnets already define the zones; availabilityZoneCount
+                    only combines with regional subnets (no zoneID)
+                  rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
+                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
+                - message: subnet cidrBlock values must be unique
+                  rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
+                    b.cidrBlock == a.cidrBlock))'
+                - message: subnets, when set, must include at least one Private subnet
+                  rule: '!has(self.subnets) || size(self.subnets) == 0 || self.subnets.exists(s,
+                    s.role == ''Private'')'
+              message:
+                description: message summarises the state, typically the reason for
+                  Failed.
+                type: string
+              observedGeneration:
+                description: observedGeneration is the generation the status reflects.
+                format: int64
+                type: integer
+              phase:
+                description: phase is the coarse lifecycle state.
+                enum:
+                - Provisioning
+                - Imported
+                - Ready
+                - Updating
+                - Deleting
+                - Failed
+                type: string
+              resources:
+                description: resources are the cloud identifiers and egress IPs of
+                  the network.
+                properties:
+                  cloudNetworkID:
+                    description: 'cloudNetworkID is the network''s cloud identifier
+                      (AWS: the VPC ID).'
+                    type: string
+                  egressIPs:
+                    description: |-
+                      egressIPs are the public IPv4 addresses egress leaves through, for
+                      allow-lists downstream.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  natGatewayIDs:
+                    description: natGatewayIDs are the cloud identifiers of the NAT
+                      gateways.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  privateSubnetIDs:
+                    description: privateSubnetIDs are the cloud identifiers of the
+                      private subnets.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  publicSubnetIDs:
+                    description: publicSubnetIDs are the cloud identifiers of the
+                      public subnets.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: 'the name is a lowercase DNS label of at most 40 characters: it
+            prefixes the network''s cloud resource names'
+          rule: self.metadata.name.matches('^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,1103 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: clusters.cloud.cluster-vending.io
+spec:
+  group: cloud.cluster-vending.io
+  names:
+    categories:
+    - cluster-vending
+    kind: Cluster
+    listKind: ClusterList
+    plural: clusters
+    shortNames:
+    - cvc
+    - cvcluster
+    singular: cluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.network.networkRef.name
+      name: Network
+      type: string
+    - jsonPath: .spec.region
+      name: Region
+      type: string
+    - jsonPath: .status.currentKubernetesVersion
+      name: Version
+      type: string
+    - jsonPath: .spec.releaseChannel
+      name: Channel
+      type: string
+    - jsonPath: .spec.tier
+      name: Tier
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Cluster is a managed Kubernetes cluster (AWS: EKS) of a tenant. Its name
+          is the cloud cluster's name, unique per account and region. It is owned
+          by exactly one Network (spec.network.networkRef) and, through it, by the
+          network's CloudAccount. The kind is also the name of the EKS provider's
+          Cluster (eks.aws.m.upbound.io): `kubectl get cvc` (or
+          clusters.cloud.cluster-vending.io) names this one.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Cluster
+            properties:
+              access:
+                description: access controls who administers the cluster. Mutable.
+                properties:
+                  accessEntries:
+                    description: |-
+                      accessEntries are EKS access entries beyond the admins. A principal
+                      is either an admin or has an entry, not both. Mutable.
+                    items:
+                      description: |-
+                        AccessEntry is an EKS access entry beyond the admins: a principal with
+                        the access policies it gets.
+                      properties:
+                        policies:
+                          description: policies the principal gets.
+                          items:
+                            description: AccessPolicy is one EKS access policy of
+                              an access entry.
+                            properties:
+                              namespaces:
+                                description: namespaces the policy applies to, with
+                                  scope Namespace.
+                                items:
+                                  maxLength: 63
+                                  minLength: 1
+                                  type: string
+                                maxItems: 50
+                                type: array
+                                x-kubernetes-list-type: set
+                              policyARN:
+                                description: policyARN of the EKS cluster access policy.
+                                pattern: ^arn:aws[a-z-]*:eks::aws:cluster-access-policy/[A-Za-z0-9]+$
+                                type: string
+                              scope:
+                                default: Cluster
+                                description: scope the policy applies to.
+                                enum:
+                                - Cluster
+                                - Namespace
+                                type: string
+                            required:
+                            - policyARN
+                            type: object
+                            x-kubernetes-validations:
+                            - message: namespaces are set exactly when the scope is
+                                Namespace
+                              rule: (has(self.scope) && self.scope == 'Namespace')
+                                == (has(self.namespaces) && size(self.namespaces)
+                                > 0)
+                          maxItems: 20
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - policyARN
+                          x-kubernetes-list-type: map
+                        principalARN:
+                          description: |-
+                            principalARN is the IAM role or user the entry is for; not a
+                            service-linked role.
+                          maxLength: 2048
+                          pattern: ^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$
+                          type: string
+                          x-kubernetes-validations:
+                          - message: service-linked roles have access entries EKS
+                              manages
+                            rule: '!self.contains('':role/aws-service-role/'')'
+                        type:
+                          default: STANDARD
+                          description: type of the entry.
+                          enum:
+                          - STANDARD
+                          - EC2_LINUX
+                          - EC2_WINDOWS
+                          - FARGATE_LINUX
+                          - EC2
+                          - HYBRID_LINUX
+                          - HYPERPOD_LINUX
+                          type: string
+                      required:
+                      - principalARN
+                      type: object
+                      x-kubernetes-validations:
+                      - message: only STANDARD access entries take policies
+                        rule: '!has(self.policies) || size(self.policies) == 0 ||
+                          !has(self.type) || self.type == ''STANDARD'''
+                    maxItems: 50
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - principalARN
+                    x-kubernetes-list-type: map
+                  adminPrincipals:
+                    description: |-
+                      adminPrincipals are granted cluster-admin, in the provider's native
+                      form (AWS: IAM role or user ARNs). Mutable; removing a principal
+                      revokes its access.
+                    items:
+                      maxLength: 2048
+                      minLength: 1
+                      type: string
+                    maxItems: 20
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
+              aws:
+                description: aws selects AWS (EKS) and carries its settings.
+                properties:
+                  accessConfig:
+                    description: accessConfig is the EKS access configuration.
+                    properties:
+                      authenticationMode:
+                        default: API
+                        description: |-
+                          authenticationMode of the cluster. Admins and access entries need
+                          API or API_AND_CONFIG_MAP.
+                        enum:
+                        - API
+                        - API_AND_CONFIG_MAP
+                        - CONFIG_MAP
+                        type: string
+                    type: object
+                  additionalSecurityGroupIDs:
+                    description: |-
+                      additionalSecurityGroupIDs are attached to the control plane's
+                      network interfaces. Immutable: EKS cannot change them.
+                    items:
+                      pattern: ^sg-[0-9a-f]{8,17}$
+                      type: string
+                    maxItems: 4
+                    type: array
+                    x-kubernetes-list-type: set
+                    x-kubernetes-validations:
+                    - message: additionalSecurityGroupIDs are immutable
+                      rule: self == oldSelf
+                  addons:
+                    description: addons are EKS add-ons beyond, or overriding, the
+                      default ones.
+                    items:
+                      description: |-
+                        AWSAddon is an EKS add-on. The platform always installs vpc-cni,
+                        coredns, kube-proxy and eks-pod-identity-agent; an entry of the same
+                        name overrides its version or configuration.
+                      properties:
+                        configurationValues:
+                          description: configurationValues is the add-on's configuration,
+                            as JSON or YAML.
+                          maxLength: 65536
+                          type: string
+                        name:
+                          description: name of the add-on.
+                          enum:
+                          - vpc-cni
+                          - coredns
+                          - kube-proxy
+                          - eks-pod-identity-agent
+                          - aws-ebs-csi-driver
+                          - aws-efs-csi-driver
+                          - aws-fsx-csi-driver
+                          - aws-mountpoint-s3-csi-driver
+                          - snapshot-controller
+                          - cert-manager
+                          - metrics-server
+                          - kube-state-metrics
+                          type: string
+                        s3BucketNames:
+                          description: s3BucketNames the Mountpoint for S3 driver
+                            may mount.
+                          items:
+                            pattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+                            type: string
+                          maxItems: 50
+                          type: array
+                          x-kubernetes-list-type: set
+                        version:
+                          description: |-
+                            version of the add-on, e.g. "v1.19.0-eksbuild.1". Unset: EKS's
+                            default for the cluster's Kubernetes version.
+                          maxLength: 64
+                          pattern: ^(v[0-9][0-9A-Za-z.+-]*)?$
+                          type: string
+                      required:
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: s3BucketNames are set exactly for aws-mountpoint-s3-csi-driver
+                        rule: (self.name == 'aws-mountpoint-s3-csi-driver') == (has(self.s3BucketNames)
+                          && size(self.s3BucketNames) > 0)
+                    maxItems: 12
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  controlPlaneLogGroup:
+                    description: |-
+                      controlPlaneLogGroup makes the platform own the control plane's log
+                      group.
+                    properties:
+                      enabled:
+                        description: enabled turns it on.
+                        type: boolean
+                      retentionDays:
+                        default: 90
+                        description: |-
+                          retentionDays is how long the group keeps the logs: one of the
+                          retention periods CloudWatch Logs has.
+                        enum:
+                        - 1
+                        - 3
+                        - 5
+                        - 7
+                        - 14
+                        - 30
+                        - 60
+                        - 90
+                        - 120
+                        - 150
+                        - 180
+                        - 365
+                        - 400
+                        - 545
+                        - 731
+                        - 1096
+                        - 1827
+                        - 2192
+                        - 2557
+                        - 2922
+                        - 3288
+                        - 3653
+                        format: int32
+                        type: integer
+                    type: object
+                  defaultNodePool:
+                    description: defaultNodePool are the AWS settings of the default
+                      node pool.
+                    properties:
+                      amiType:
+                        description: amiType of the nodes. Defaults to AL2023_x86_64_STANDARD.
+                        enum:
+                        - AL2023_x86_64_STANDARD
+                        - AL2023_ARM_64_STANDARD
+                        - AL2023_x86_64_NVIDIA
+                        - AL2023_x86_64_NEURON
+                        - AL2023_ARM_64_NVIDIA
+                        - BOTTLEROCKET_x86_64
+                        - BOTTLEROCKET_ARM_64
+                        - BOTTLEROCKET_x86_64_NVIDIA
+                        - BOTTLEROCKET_ARM_64_NVIDIA
+                        - BOTTLEROCKET_x86_64_FIPS
+                        - BOTTLEROCKET_ARM_64_FIPS
+                        - BOTTLEROCKET_x86_64_NVIDIA_FIPS
+                        - BOTTLEROCKET_ARM_64_NVIDIA_FIPS
+                        - WINDOWS_CORE_2019_x86_64
+                        - WINDOWS_FULL_2019_x86_64
+                        - WINDOWS_CORE_2022_x86_64
+                        - WINDOWS_FULL_2022_x86_64
+                        - WINDOWS_CORE_2025_x86_64
+                        - WINDOWS_FULL_2025_x86_64
+                        - CUSTOM
+                        type: string
+                      launchTemplate:
+                        description: 'launchTemplate of the node group. Unset: EKS''s
+                          own.'
+                        properties:
+                          id:
+                            description: id of an existing launch template.
+                            pattern: ^lt-[0-9a-f]{8,17}$
+                            type: string
+                          imageID:
+                            description: imageID of a custom AMI. Makes the AMI type
+                              CUSTOM.
+                            pattern: ^ami-[0-9a-f]{8,17}$
+                            type: string
+                          name:
+                            description: name of an existing launch template.
+                            maxLength: 128
+                            type: string
+                          securityGroupIDs:
+                            description: |-
+                              securityGroupIDs the nodes get in addition to the cluster's security
+                              group.
+                            items:
+                              pattern: ^sg-[0-9a-f]{8,17}$
+                              type: string
+                            maxItems: 4
+                            minItems: 1
+                            type: array
+                            x-kubernetes-list-type: set
+                          userData:
+                            description: userData is the bootstrap script of the custom
+                              AMI.
+                            maxLength: 21848
+                            type: string
+                          version:
+                            description: version of the existing launch template.
+                            pattern: ^[1-9][0-9]*$
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: name an existing launch template (id or name, with
+                            a version) or give what the platform renders one from
+                            (securityGroupIDs, imageID with userData), not both
+                          rule: ((has(self.id) != has(self.name)) && has(self.version)
+                            && !has(self.securityGroupIDs) && !has(self.imageID) &&
+                            !has(self.userData)) || (!has(self.id) && !has(self.name)
+                            && !has(self.version) && (has(self.securityGroupIDs) ||
+                            has(self.imageID)))
+                        - message: 'imageID and userData go together: a custom image
+                            needs its bootstrap script'
+                          rule: has(self.imageID) == has(self.userData)
+                    type: object
+                    x-kubernetes-validations:
+                    - message: amiType CUSTOM needs a launch template with the image
+                      rule: '!has(self.amiType) || self.amiType != ''CUSTOM'' || has(self.launchTemplate)'
+                  enabledClusterLogTypes:
+                    description: |-
+                      enabledClusterLogTypes are the control plane logs sent to CloudWatch
+                      Logs.
+                    items:
+                      description: AWSClusterLogType is a control plane log type (AWS's
+                        own spelling).
+                      enum:
+                      - api
+                      - audit
+                      - authenticator
+                      - controllerManager
+                      - scheduler
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  irsa:
+                    description: |-
+                      irsa creates the cluster's IAM OIDC provider (IAM roles for service
+                      accounts). Unset or false: none.
+                    type: boolean
+                  upgradePolicy:
+                    description: upgradePolicy is the EKS upgrade policy.
+                    properties:
+                      supportType:
+                        description: |-
+                          supportType of the cluster's Kubernetes version. Unset: EKS's
+                          default.
+                        enum:
+                        - STANDARD
+                        - EXTENDED
+                        type: string
+                    type: object
+                type: object
+              controlPlane:
+                description: controlPlane settings.
+                properties:
+                  endpointAccess:
+                    description: endpointAccess configures the API server's endpoints.
+                    properties:
+                      privateAccess:
+                        description: |-
+                          privateAccess is the API server's endpoint inside the network.
+                          Defaults to true. Mutable.
+                        type: boolean
+                      publicAccess:
+                        description: |-
+                          publicAccess is the API server's public endpoint. Defaults to true.
+                          Without it the API is reachable from the cluster's network only.
+                          Mutable.
+                        type: boolean
+                      publicAccessCIDRs:
+                        description: |-
+                          publicAccessCIDRs are the IPv4 ranges allowed to reach the public
+                          endpoint. At least one is required while the public endpoint is on:
+                          who may reach the API is the client's choice, there is no default.
+                          ["0.0.0.0/0"] allows any address.
+                        items:
+                          maxLength: 18
+                          pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
+                          type: string
+                        maxItems: 40
+                        type: array
+                        x-kubernetes-list-type: set
+                    type: object
+                    x-kubernetes-validations:
+                    - message: privateAccess and publicAccess cannot both be false
+                      rule: '!has(self.privateAccess) || !has(self.publicAccess) ||
+                        self.privateAccess || self.publicAccess'
+                    - message: publicAccess false needs privateAccess true (its default)
+                      rule: '!has(self.publicAccess) || self.publicAccess || !has(self.privateAccess)
+                        || self.privateAccess'
+                  kubernetesVersion:
+                    description: |-
+                      kubernetesVersion is the Kubernetes minor version, e.g. "1.33".
+                      Defaults to the newest version the platform supports. It can only be
+                      increased; the default node pool follows it once the control plane
+                      runs it.
+                    pattern: ^1\.[0-9]{2}$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: kubernetesVersion can only be increased
+                      rule: int(self.split('.')[1]) >= int(oldSelf.split('.')[1])
+                  secretsEncryption:
+                    description: |-
+                      secretsEncryption is the envelope encryption of Kubernetes Secrets.
+                      Unset: off for a new cluster, kept as it is for an imported one.
+                    properties:
+                      enabled:
+                        description: |-
+                          enabled turns encryption on with a key the platform creates for the
+                          cluster and deletes with it, unless kmsKeyARN names an existing one.
+                        type: boolean
+                      kmsKeyARN:
+                        description: |-
+                          kmsKeyARN is an existing KMS key to encrypt with instead. The
+                          platform does not create, change or delete it. Implies enabled.
+                        pattern: ^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: secrets encryption cannot be turned off once it is
+                        on
+                      rule: '!((has(oldSelf.enabled) && oldSelf.enabled) || has(oldSelf.kmsKeyARN))
+                        || (has(self.enabled) && self.enabled) || has(self.kmsKeyARN)'
+                    - message: kmsKeyARN is immutable once set
+                      rule: '!has(oldSelf.kmsKeyARN) || (has(self.kmsKeyARN) && self.kmsKeyARN
+                        == oldSelf.kmsKeyARN)'
+                    - message: secrets encryption cannot move from the platform's
+                        key to another one
+                      rule: '!(has(oldSelf.enabled) && oldSelf.enabled && !has(oldSelf.kmsKeyARN))
+                        || !has(self.kmsKeyARN)'
+                type: object
+              defaultNodePool:
+                description: |-
+                  defaultNodePool is the node pool created together with the cluster.
+                  Required for a cluster the platform creates.
+                properties:
+                  capacityType:
+                    default: OnDemand
+                    description: capacityType is how the nodes are bought.
+                    enum:
+                    - OnDemand
+                    - Spot
+                    type: string
+                  diskSizeGB:
+                    description: |-
+                      diskSizeGB is the root volume size of a node. Unset: the provider's
+                      default. Not with a launch template: the template decides.
+                    format: int32
+                    maximum: 16384
+                    minimum: 20
+                    type: integer
+                  instanceTypes:
+                    description: |-
+                      instanceTypes of the nodes. AWS accepts several (e.g. "m6i.large");
+                      other providers one.
+                    items:
+                      maxLength: 64
+                      minLength: 1
+                      pattern: ^[A-Za-z0-9._-]+$
+                      type: string
+                    maxItems: 20
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: labels are the Kubernetes labels of the nodes.
+                    maxProperties: 64
+                    type: object
+                  scaling:
+                    description: scaling is the size of the pool.
+                    properties:
+                      desiredSize:
+                        description: |-
+                          desiredSize is the number of nodes the pool starts with. Defaults to
+                          minSize, at least 1. Applied at creation only: afterwards the
+                          autoscaler owns it.
+                        format: int32
+                        maximum: 1000
+                        minimum: 0
+                        type: integer
+                      maxSize:
+                        description: maxSize is the largest number of nodes.
+                        format: int32
+                        maximum: 1000
+                        minimum: 1
+                        type: integer
+                      minSize:
+                        description: minSize is the smallest number of nodes.
+                        format: int32
+                        maximum: 1000
+                        minimum: 0
+                        type: integer
+                    required:
+                    - maxSize
+                    - minSize
+                    type: object
+                    x-kubernetes-validations:
+                    - message: minSize <= desiredSize <= maxSize
+                      rule: self.minSize <= self.maxSize && (!has(self.desiredSize)
+                        || (self.minSize <= self.desiredSize && self.desiredSize <=
+                        self.maxSize))
+                  taints:
+                    description: taints of the nodes.
+                    items:
+                      description: Taint is a taint on the nodes of a pool.
+                      properties:
+                        effect:
+                          description: effect of the taint.
+                          enum:
+                          - NoSchedule
+                          - PreferNoSchedule
+                          - NoExecute
+                          type: string
+                        key:
+                          description: key of the taint.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        value:
+                          description: value of the taint.
+                          maxLength: 63
+                          type: string
+                      required:
+                      - effect
+                      - key
+                      type: object
+                    maxItems: 50
+                    type: array
+                    x-kubernetes-list-type: atomic
+                required:
+                - instanceTypes
+                - scaling
+                type: object
+              displayName:
+                description: displayName is a human-friendly name. Mutable.
+                maxLength: 128
+                type: string
+              importFrom:
+                description: importFrom imports an existing cluster instead of creating
+                  one.
+                properties:
+                  acknowledgeNotImported:
+                    description: |-
+                      acknowledgeNotImported confirms that the plan's NotImported resources
+                      stay outside the platform. A takeover of a plan with such lines waits
+                      for it.
+                    type: boolean
+                  aws:
+                    description: aws names what of the EKS cluster is imported.
+                    properties:
+                      defaultNodeGroupName:
+                        description: |-
+                          defaultNodeGroupName is the node group that becomes
+                          spec.defaultNodePool. The cluster's other node groups are not
+                          imported: they stay unmanaged and block deleting the cluster until
+                          they are removed.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[0-9A-Za-z][A-Za-z0-9_-]*$
+                        type: string
+                    required:
+                    - defaultNodeGroupName
+                    type: object
+                  takeOver:
+                    description: |-
+                      takeOver makes the platform the owner of the imported resources:
+                      they switch from observe-only to full management and are brought to
+                      the spec (the plan's WillUpdate and WillCreate lines). Once true it
+                      stays true.
+                    type: boolean
+                type: object
+                x-kubernetes-validations:
+                - message: 'exactly one provider must be set: aws'
+                  rule: has(self.aws)
+                - message: what is imported is immutable
+                  rule: self.aws == oldSelf.aws
+                - message: a takeover cannot be undone
+                  rule: '!has(oldSelf.takeOver) || !oldSelf.takeOver || (has(self.takeOver)
+                    && self.takeOver)'
+              network:
+                description: |-
+                  network is where the cluster runs: its Network (which owns the
+                  cluster) and the cluster's own ranges. Immutable.
+                properties:
+                  networkRef:
+                    description: |-
+                      networkRef names the Network the cluster runs in, in the same
+                      namespace, possibly shared with other clusters. The network owns the
+                      cluster; the cluster runs in the network's account and region, in the
+                      network's Private subnets of zoneIDs.
+                    properties:
+                      name:
+                        description: name of the referenced object.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  podCIDR:
+                    description: |-
+                      podCIDR is the IPv4 range for pod IPs, on providers that give pods
+                      their own range. AWS: must be empty (pods take IPs from the subnets).
+                    maxLength: 18
+                    pattern: ^(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2})?$
+                    type: string
+                  serviceCIDR:
+                    description: |-
+                      serviceCIDR is the IPv4 range for Kubernetes Service IPs. Defaults to
+                      a range that does not overlap the network. AWS: /12 to /24.
+                    maxLength: 18
+                    pattern: ^(([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2})?$
+                    type: string
+                  zoneIDs:
+                    description: |-
+                      zoneIDs are the zones of the network the cluster uses. Empty: every
+                      zone of the network. AWS: zone IDs like "use1-az1", at least two.
+                    items:
+                      maxLength: 64
+                      pattern: ^[a-z0-9-]+$
+                      type: string
+                    maxItems: 6
+                    type: array
+                    x-kubernetes-list-type: set
+                required:
+                - networkRef
+                type: object
+                x-kubernetes-validations:
+                - message: network is immutable
+                  rule: self == oldSelf
+              region:
+                description: 'region the cluster runs in: its network''s. Immutable.'
+                maxLength: 64
+                minLength: 1
+                pattern: ^[a-z0-9-]+$
+                type: string
+                x-kubernetes-validations:
+                - message: region is immutable
+                  rule: self == oldSelf
+              releaseChannel:
+                description: |-
+                  releaseChannel is the channel the cluster takes platform releases
+                  from: Alpha, then Beta, then Stable. Stored only for now.
+                enum:
+                - Alpha
+                - Beta
+                - Stable
+                type: string
+              tags:
+                additionalProperties:
+                  type: string
+                description: |-
+                  tags of every cloud resource of the cluster. Mutable: a change
+                  re-tags the resources. Keys starting with "aws:" are refused for AWS.
+                maxProperties: 40
+                type: object
+                x-kubernetes-validations:
+                - message: tag keys are 1-128 and values 0-256 characters of letters,
+                    digits, space and _.:/=+@-
+                  rule: self.all(k, size(k) >= 1 && size(k) <= 128 && k.matches('^[A-Za-z0-9
+                    _.:/=+@-]+$') && size(self[k]) <= 256 && self[k].matches('^[A-Za-z0-9
+                    _.:/=+@-]*$'))
+              tier:
+                description: |-
+                  tier is how sensitive the cluster is. Within a release channel a
+                  release reaches Tier2 first, then Tier1, then Tier0. Stored only for
+                  now.
+                enum:
+                - Tier0
+                - Tier1
+                - Tier2
+                type: string
+            required:
+            - network
+            - region
+            type: object
+            x-kubernetes-validations:
+            - message: 'exactly one provider must be set: aws (it may be empty)'
+              rule: has(self.aws)
+            - message: 'a cluster is created or imported for good: importFrom cannot
+                be added or removed'
+              rule: has(self.importFrom) == has(oldSelf.importFrom)
+            - message: defaultNodePool is required (an imported cluster's is read
+                from the cloud)
+              rule: has(self.importFrom) || has(self.defaultNodePool)
+            - message: controlPlane.endpointAccess.publicAccessCIDRs needs at least
+                one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)
+              rule: has(self.importFrom) || (has(self.controlPlane) && has(self.controlPlane.endpointAccess)
+                && ((has(self.controlPlane.endpointAccess.publicAccessCIDRs) && size(self.controlPlane.endpointAccess.publicAccessCIDRs)
+                > 0) || (has(self.controlPlane.endpointAccess.publicAccess) && !self.controlPlane.endpointAccess.publicAccess)))
+            - message: region must be an AWS region, e.g. us-east-1
+              rule: '!has(self.aws) || self.region.matches(''^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$'')'
+            - message: AWS instance types look like m6i.large
+              rule: '!has(self.aws) || !has(self.defaultNodePool) || self.defaultNodePool.instanceTypes.all(t,
+                t.matches(''^[a-z][a-z0-9-]*[.][a-z0-9]+$''))'
+            - message: AWS admin principals must be IAM role or user ARNs, not service-linked
+                roles
+              rule: '!has(self.aws) || !has(self.access) || !has(self.access.adminPrincipals)
+                || self.access.adminPrincipals.all(p, p.matches(''^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$'')
+                && !p.contains('':role/aws-service-role/''))'
+            - message: adminPrincipals and accessEntries need authenticationMode API
+                or API_AND_CONFIG_MAP
+              rule: '!has(self.aws) || !has(self.aws.accessConfig) || self.aws.accessConfig.authenticationMode
+                != ''CONFIG_MAP'' || !has(self.access) || ((!has(self.access.adminPrincipals)
+                || size(self.access.adminPrincipals) == 0) && (!has(self.access.accessEntries)
+                || size(self.access.accessEntries) == 0))'
+            - message: a principal is either in adminPrincipals or in accessEntries,
+                not both
+              rule: '!has(self.access) || !has(self.access.accessEntries) || !has(self.access.adminPrincipals)
+                || self.access.accessEntries.all(e, !(e.principalARN in self.access.adminPrincipals))'
+            - message: AWS pods take IPs from the VPC subnets; network.podCIDR must
+                be empty
+              rule: '!has(self.aws) || !has(self.network.podCIDR) || self.network.podCIDR
+                == '''''
+            - message: AWS clusters need at least two zoneIDs, given as zone IDs like
+                use1-az1
+              rule: '!has(self.aws) || !has(self.network.zoneIDs) || size(self.network.zoneIDs)
+                == 0 || (size(self.network.zoneIDs) >= 2 && self.network.zoneIDs.all(z,
+                z.matches(''^[a-z]+[0-9]-az[0-9]+$'')))'
+            - message: EKS serviceCIDR must be /12 to /24
+              rule: '!has(self.aws) || !has(self.network.serviceCIDR) || self.network.serviceCIDR
+                == '''' || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
+            - message: 'defaultNodePool.diskSizeGB cannot be set with a launch template:
+                EKS takes the disk from the template'
+              rule: '!has(self.defaultNodePool) || !has(self.defaultNodePool.diskSizeGB)
+                || !has(self.aws) || !has(self.aws.defaultNodePool) || !has(self.aws.defaultNodePool.launchTemplate)'
+          status:
+            description: status defines the observed state of Cluster
+            properties:
+              aws:
+                description: aws is the observed state of the EKS cluster.
+                properties:
+                  addons:
+                    description: addons are the cluster's EKS add-ons.
+                    items:
+                      description: AWSAddonStatus is the observed state of one EKS
+                        add-on.
+                      properties:
+                        message:
+                          description: message explains a state that is not ready.
+                          type: string
+                        name:
+                          description: name of the add-on.
+                          type: string
+                        ready:
+                          description: ready reports whether the add-on is active.
+                          type: boolean
+                        version:
+                          description: version that is installed.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  clusterARN:
+                    description: clusterARN of the EKS cluster.
+                    type: string
+                  clusterSecurityGroupID:
+                    description: |-
+                      clusterSecurityGroupID is the security group EKS created for the
+                      cluster.
+                    type: string
+                  nodeGroupARN:
+                    description: nodeGroupARN of the default node group.
+                    type: string
+                  platformVersion:
+                    description: platformVersion of the EKS cluster.
+                    type: string
+                type: object
+              conditions:
+                description: |-
+                  conditions: Ready and Synced, and finer ones (NetworkReady,
+                  ControlPlaneReady, NodePoolReady).
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              currentKubernetesVersion:
+                description: currentKubernetesVersion is the version the control plane
+                  runs.
+                type: string
+              endpoint:
+                description: |-
+                  endpoint of the Kubernetes API server, once the control plane is
+                  ready.
+                properties:
+                  certificateAuthorityData:
+                    description: certificateAuthorityData is the PEM-encoded cluster
+                      CA certificate.
+                    format: byte
+                    type: string
+                  url:
+                    description: url is the HTTPS URL of the endpoint.
+                    type: string
+                type: object
+              importPlan:
+                description: |-
+                  importPlan is set for an imported cluster: the plan of the import,
+                  kept as a record after the takeover.
+                properties:
+                  phase:
+                    description: phase of the import.
+                    enum:
+                    - Discovering
+                    - Planned
+                    - Blocked
+                    - Converging
+                    - Converged
+                    type: string
+                  resources:
+                    description: resources are the plan's lines.
+                    items:
+                      description: ImportedResource is one line of an import plan.
+                      properties:
+                        apiVersion:
+                          description: apiVersion of the Crossplane object the resource
+                            is (or would be).
+                          type: string
+                        detail:
+                          description: detail explains the disposition.
+                          type: string
+                        disposition:
+                          description: disposition is what a takeover does with the
+                            resource.
+                          enum:
+                          - Matches
+                          - WillUpdate
+                          - WillCreate
+                          - NotImported
+                          - Blocking
+                          - CarriedOver
+                          type: string
+                        externalName:
+                          description: externalName is the resource's cloud identifier.
+                          type: string
+                        kind:
+                          description: kind of that object.
+                          type: string
+                        name:
+                          description: name of that object; empty for a resource that
+                            is not imported.
+                          type: string
+                        requiresReplacement:
+                          description: |-
+                            requiresReplacement is true when bringing the resource to the spec
+                            replaces it.
+                          type: boolean
+                        specPath:
+                          description: specPath is the spec field that describes the
+                            resource, if any.
+                          type: string
+                      required:
+                      - disposition
+                      - kind
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              inventory:
+                description: |-
+                  inventory lists every Crossplane object of the cluster (IAM roles,
+                  the EKS cluster, the default node group, add-ons, access entries,
+                  ...) with its cloud identifier, in creation order.
+                items:
+                  description: |-
+                    InventoryEntry is one Crossplane object the owner has in the management
+                    cluster.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the object.
+                      type: string
+                    carriedOver:
+                      description: |-
+                        carriedOver marks an object that came with an import and that no spec
+                        field describes: it is never removed when the owner is rendered
+                        again, and is deleted with the owner.
+                      type: boolean
+                    externalName:
+                      description: |-
+                        externalName is the cloud identifier of the resource the object
+                        stands for (crossplane.io/external-name): what a rebuilt management
+                        cluster needs to adopt the resource instead of creating a new one.
+                        Empty until the provider created the resource.
+                      type: string
+                    kind:
+                      description: kind of the object.
+                      type: string
+                    name:
+                      description: name of the object, in the owner's namespace.
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              kubeconfigSecret:
+                description: |-
+                  kubeconfigSecret is the name of the Secret in this namespace holding
+                  the cluster's kubeconfig (key "kubeconfig"). Empty until the control
+                  plane is ready.
+                type: string
+              message:
+                description: message summarises the state, typically the reason for
+                  Failed.
+                type: string
+              network:
+                description: network are the cloud resources of the cluster's Network.
+                properties:
+                  cloudNetworkID:
+                    description: 'cloudNetworkID is the network''s cloud identifier
+                      (AWS: the VPC ID).'
+                    type: string
+                  egressIPs:
+                    description: |-
+                      egressIPs are the public IPv4 addresses egress leaves through, for
+                      allow-lists downstream.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  natGatewayIDs:
+                    description: natGatewayIDs are the cloud identifiers of the NAT
+                      gateways.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  privateSubnetIDs:
+                    description: privateSubnetIDs are the cloud identifiers of the
+                      private subnets.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  publicSubnetIDs:
+                    description: publicSubnetIDs are the cloud identifiers of the
+                      public subnets.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
+              observedGeneration:
+                description: observedGeneration is the generation the status reflects.
+                format: int64
+                type: integer
+              oidcIssuerURL:
+                description: |-
+                  oidcIssuerURL is the service-account token issuer, for workload
+                  identity.
+                type: string
+              phase:
+                description: phase is the coarse lifecycle state.
+                enum:
+                - Provisioning
+                - Imported
+                - Running
+                - Updating
+                - Deleting
+                - Failed
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: 'the name is a lowercase DNS label of at most 40 characters: it
+            is the cloud cluster''s name'
+          rule: self.metadata.name.matches('^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}

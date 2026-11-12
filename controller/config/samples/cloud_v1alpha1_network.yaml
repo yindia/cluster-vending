@@ -1,0 +1,20 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: Network
+metadata:
+  name: prod
+  namespace: tenant-acme
+spec:
+  # The CloudAccount that owns this network (cloud_v1alpha1_cloudaccount.yaml).
+  accountRef:
+    name: production
+  displayName: Production network
+  tags:
+    team: platform
+  region: us-east-1
+  layout:
+    cidrBlock: 10.0.0.0/16
+    availabilityZoneCount: 3
+    natGatewayMode: Single
+  flowLogs:
+    enabled: true
+    retentionDays: 30

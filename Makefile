@@ -34,7 +34,7 @@ help: ## Show this help
 	  /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
 .PHONY: all
-all: generate apis mocks fmt lint test build ## Generate, format, lint, test and build
+all: generate apis controller-apis mocks fmt lint test build ## Generate, format, lint, test and build
 
 .PHONY: check
 check: lint vet test ## What CI runs: lint, vet and unit tests
@@ -88,6 +88,12 @@ mocks: ## Generate the repository mocks (go.uber.org/mock, pkg/database/reposito
 apis: ## Generate the deepcopy code and CRDs of the platform's own kinds (controller-gen, pkg/apis)
 	go tool controller-gen object paths=./pkg/apis/...
 	go tool controller-gen crd paths=./pkg/apis/... output:crd:dir=pkg/apis/platform/crds
+
+.PHONY: controller-apis
+controller-apis: ## Generate the deepcopy code, CRDs and RBAC of the controller's API (controller-gen, controller/)
+	go tool controller-gen object:headerFile=controller/hack/boilerplate.go.txt paths=./controller/api/...
+	go tool controller-gen crd paths=./controller/api/... output:crd:dir=controller/config/crd/bases
+	go tool controller-gen rbac:roleName=manager-role paths=./controller/internal/... output:rbac:dir=controller/config/rbac
 
 .PHONY: tidy
 tidy: ## Run go mod tidy

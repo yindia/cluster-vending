@@ -76,6 +76,7 @@ func NewRootCmd() *cobra.Command {
 	addFlags(root.PersistentFlags(), config.GlobalSettings())
 	root.AddCommand(
 		newServeCmd(g),
+		newControllerCmd(g),
 		newBootstrapCmd(),
 		newNetworkCmd(),
 		newClusterCmd(),

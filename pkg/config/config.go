@@ -337,7 +337,7 @@ func regularFile(path string) error {
 
 // setting returns the setting with the given flag name, for error messages.
 func setting(flag string) Setting {
-	for _, s := range slices.Concat(globalSettings, serveSettings, clientSettings) {
+	for _, s := range slices.Concat(globalSettings, serveSettings, clientSettings, controllerSettings) {
 		if s.Flag == flag {
 			return s
 		}

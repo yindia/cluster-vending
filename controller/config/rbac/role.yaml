@@ -1,0 +1,38 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - cloudaccounts
+  - clusters
+  - networks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - cloudaccounts/finalizers
+  - clusters/finalizers
+  - networks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - cloudaccounts/status
+  - clusters/status
+  - networks/status
+  verbs:
+  - get
+  - patch
+  - update

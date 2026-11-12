@@ -193,8 +193,13 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 
 // createError maps a failed insert: a duplicate is a second cluster of the
 // name in the account and region (the name check passed, but another
-// create won the race) or a reused request_id.
+// create won the race) or a reused request_id; a conflict is the network
+// being deleted or changed at the same moment.
 func createError(err error, row *model.Cluster) error {
+	if errors.Is(err, repository.ErrConflict) {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
+			"network %s changed while the cluster was being stored (is it being deleted?); get the network and retry", row.NetworkID))
+	}
 	if errors.Is(err, repository.ErrAlreadyExists) {
 		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
 			"a cluster named %q already exists in this account and %s (or the request_id was used before)", row.Name, row.Region))

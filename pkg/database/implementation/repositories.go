@@ -112,19 +112,37 @@ func (r networks) Delete(ctx context.Context, tenantID, id string) error {
 
 type clusters struct{ db *gorm.DB }
 
+// networkDeleting is the stored state of a network being deleted.
+const networkDeleting = "NETWORK_STATE_DELETING"
+
+// Create stores a cluster in its network. In one transaction it also
+// claims the network: the network must not be DELETING, and its etag
+// changes. DeleteNetwork marks the network DELETING with the etag it read
+// before it checked for clusters, so of a create and a delete that race
+// exactly one wins: the other fails with ErrConflict.
 func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
-	n, err := first[model.Network](ctx, r.db, map[string]any{"id": c.NetworkID})
-	if err != nil {
-		return fmt.Errorf("network: %w", err)
-	}
-	if n.TenantID != c.TenantID || n.Provider != c.Provider {
-		return fmt.Errorf("%w: network %s belongs to tenant %s on %s, cluster to tenant %s on %s",
-			repository.ErrInvalid, n.Name, n.TenantID, n.Provider, c.TenantID, c.Provider)
-	}
-	// The network's account is the cluster's: with it the unique index on
-	// (account, region, name) refuses a second cluster of the name.
-	c.CloudAccountID = n.CloudAccountID
-	return create(ctx, r.db, c)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		n, err := first[model.Network](ctx, tx, map[string]any{"id": c.NetworkID})
+		if err != nil {
+			return fmt.Errorf("network: %w", err)
+		}
+		if n.TenantID != c.TenantID || n.Provider != c.Provider {
+			return fmt.Errorf("%w: network %s belongs to tenant %s on %s, cluster to tenant %s on %s",
+				repository.ErrInvalid, n.Name, n.TenantID, n.Provider, c.TenantID, c.Provider)
+		}
+		claim := tx.Model(&model.Network{}).Where("id = ? AND etag = ? AND state <> ?", n.ID, n.ETag, networkDeleting).
+			UpdateColumn("etag", newETag())
+		if claim.Error != nil {
+			return translate(claim.Error, opWrite)
+		}
+		if claim.RowsAffected != 1 {
+			return fmt.Errorf("%w: network %s is being deleted or changed", repository.ErrConflict, n.ID)
+		}
+		// The network's account is the cluster's: with it the unique index on
+		// (account, region, name) refuses a second cluster of the name.
+		c.CloudAccountID = n.CloudAccountID
+		return create(ctx, tx, c)
+	})
 }
 
 func (r clusters) Update(ctx context.Context, c *model.Cluster) error { return update(ctx, r.db, c) }

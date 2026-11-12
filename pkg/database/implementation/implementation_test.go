@@ -202,6 +202,45 @@ func TestClusterNamesAreUniquePerAccountAndRegion(t *testing.T) {
 	}
 }
 
+// A cluster create and its network's delete that race: exactly one wins.
+func TestClusterCreateAndNetworkDeleteCannotBothWin(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	mustTenant(t, s, "acme")
+	n := mustNetwork(t, s, "acme", "n")
+	cluster := func(name string) *model.Cluster {
+		return &model.Cluster{TenantID: "acme", Name: name, NetworkID: n.ID, Provider: "aws", Region: "us-east-1",
+			Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: spec("cluster")}}
+	}
+
+	// The delete read the network (and found no cluster), then a create
+	// commits: the delete's write is refused.
+	deleting, err := s.Networks().Get(ctx, "acme", n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clusters().Create(ctx, cluster("first")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	deleting.State = "NETWORK_STATE_DELETING"
+	requireErr(t, s.Networks().Update(ctx, deleting), repository.ErrConflict)
+
+	// The delete commits first: a create is refused, and stores nothing.
+	current, err := s.Networks().Get(ctx, "acme", n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.State = "NETWORK_STATE_DELETING"
+	if err := s.Networks().Update(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	requireErr(t, s.Clusters().Create(ctx, cluster("second")), repository.ErrConflict)
+	rows, err := s.Clusters().ListByNetwork(ctx, n.ID)
+	if err != nil || len(rows) != 1 {
+		t.Errorf("%d clusters in the network (%v), want only the first", len(rows), err)
+	}
+}
+
 func TestCreateRequestIDIsIdempotencyKey(t *testing.T) {
 	s := newStore(t)
 	mustTenant(t, s, "acme")

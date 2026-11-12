@@ -13,6 +13,9 @@ const (
 	// LabelCluster is on every managed resource of a cluster: its
 	// cloud.v1 Cluster.id.
 	LabelCluster = "cluster-vending.io/cluster"
+	// LabelComponent is on every managed resource of a component, next to
+	// the cluster's labels: the component's catalog name.
+	LabelComponent = "cluster-vending.io/component"
 	// LabelSubnetRole (public / private) and LabelZone (zone ID) are on
 	// subnets, NAT gateways and their EIPs.
 	LabelSubnetRole = "cluster-vending.io/subnet-role"
@@ -46,5 +49,14 @@ func NetworkLabels(tenantID, networkID string) map[string]string {
 func ClusterLabels(tenantID, clusterID string) map[string]string {
 	l := Labels(tenantID)
 	l[LabelCluster] = clusterID
+	return l
+}
+
+// ComponentLabels returns the labels of a component's managed resources:
+// its cluster's, so the cluster's forced deletion finds them too, and the
+// component's name.
+func ComponentLabels(tenantID, clusterID, component string) map[string]string {
+	l := ClusterLabels(tenantID, clusterID)
+	l[LabelComponent] = component
 	return l
 }

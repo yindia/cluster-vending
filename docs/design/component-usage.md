@@ -161,12 +161,10 @@ type ComponentDefinitionSpec struct {
 	// +optional
 	// +listType=set
 	ConflictsWithAddons []string `json:"conflictsWithAddons,omitempty"`
-	// CloudResources names the renderer that creates what the component
-	// needs in the tenant's account (IAM roles, queues). Empty: none. Only
-	// renderers the running build has are accepted (condition Valid).
+	// CloudResources is what the platform creates in the tenant's account
+	// before installing the component: an IAM role so far (section 5.2).
 	// +optional
-	// +kubebuilder:validation:Enum=Karpenter;LoadBalancerController
-	CloudResources string `json:"cloudResources,omitempty"`
+	CloudResources *ComponentCloudResources `json:"cloudResources,omitempty"`
 	// PlatformValues are set by the platform team for every tenant and
 	// locked: every leaf path in them wins, and a tenant who touches one
 	// is refused. Tenants never see them in the values file.
@@ -247,7 +245,7 @@ credentials provider-helm uses its default credential chain.
 That step also gives the controller `get` on Secrets in the platform
 namespace only; step 1 adds no Secret access.
 
-Print columns: `Requires`, `CloudResources`, `Valid`.
+Print columns: `Requires`, `IAM` (the role's access, `IRSA` or `PodIdentity`), `Valid`.
 
 **Decided (proposed): Kubernetes support comes from the Release only.** A
 definition has no list of minors. A component is offered on a cluster when
@@ -465,7 +463,7 @@ refers to a Secret in the workload cluster by name.
 | 1 | `ComponentDefinition.spec.userValues`, the values file | platform team | the definition is edited |
 | 2 | `Component.spec.values`, the tenant's edits of that file | tenant | `UpdateComponent` |
 | 3 | `ComponentDefinition.spec.platformValues`, locked | platform team | the definition is edited |
-| 4 | Computed values (cluster name, endpoint, region, queue names, service account names), locked (later step) | the renderer | the cluster's cloud resources change |
+| 4 | Placeholders in `platformValues` filled in per cluster (`${cluster.name}`, `${iam.roleArn}`, ...; section 5.1) | the controller | the cluster or the component's role changes |
 
 `component.Merge(chart, userValues, overrides, platformValues)` merges
 layers 0 to 3. Layers 3 and 4 always win, but not silently: a request
@@ -500,7 +498,108 @@ definition's `platformValues`, or of a key of its `userValues` file a tenant
 did not edit, is a platform change and reaches every cluster, manual ones
 included (manual protects versions, not configuration fixes).
 
+### 5.1 Placeholders: values the platform fills in
+
+The platform team writes `${name}` in a definition's `platformValues` and in
+its IAM policy (`cloudResources.iamRole.policy`, `managedPolicyArns`); the
+controller fills them in per cluster before it installs the component. The
+list is fixed in code (`pkg/component`, `PlaceholderNames`): each name has one
+source, and a definition naming any other is invalid (`Valid=False`, the
+name and its path in the message).
+
+| Placeholder | Source | Known once |
+|---|---|---|
+| `${region}` | Cluster `spec.region` | always |
+| `${account.id}` | the owning CloudAccount `spec.aws.accountID` | always |
+| `${cluster.name}` | the Cluster's name (the EKS cluster's name) | always |
+| `${cluster.endpoint}` | Cluster `status.endpoint.url` | the control plane is up |
+| `${cluster.oidcIssuer}` | Cluster `status.oidcIssuerURL` | the control plane is up |
+| `${cluster.oidcProviderArn}` | `arn:<partition>:iam::<account>:oidc-provider/<issuer without https://>` | the issuer is known, on a cluster with `spec.aws.irsa: true` only; with IRSA off it never is, and the wait says so |
+| `${cluster.nodeRoleName}` | the IAM name of the cluster's managed node group role: the name an import recorded, or `<prefix>-node-role` | always |
+| `${cluster.nodeRoleArn}` | `arn:<partition>:iam::<account>:role/<nodeRoleName>` | always |
+| `${network.vpcId}` | the owning Network `status.resources.cloudNetworkID` | the network is built |
+| `${iam.roleArn}`, `${iam.roleName}` | the component's own role (section 5.2), from its status | the role exists |
+| `${iam.policyArn}` | the component's own policy | the policy exists |
+
+Rules:
+
+- A placeholder may sit inside a longer string
+  (`arn:aws:iam::${account.id}:policy/x`). `$${` writes a literal `${`.
+- A known name without a value yet is not an error: the controller waits and
+  tries again (`ErrNotReady`, naming each missing value). It never installs a
+  blank.
+- The `iam.*` names are not available in the IAM policy and managed policy
+  ARNs: they name the role and policy that policy belongs to.
+- **Tenant values are taken literally and never expanded.** A tenant cannot
+  read another account's values through a placeholder.
+- A value changes (a new endpoint): the controller fills it in again and
+  provider-helm upgrades the release.
+
+### 5.2 Cloud resources: an IAM role
+
+A definition may ask for one IAM role per cluster it is enabled on. Only an
+IAM role and its policies can be declared so far; no queues or other
+presets (Karpenter's interruption queue comes later).
+
+```yaml
+cloudResources:
+  iamRole:
+    access: IRSA            # default; or PodIdentity
+    serviceAccounts:        # 1 to 8
+      - {namespace: kube-system, name: aws-load-balancer-controller}
+    policy: |               # optional; placeholders allowed, iam.* excepted
+      {"Version": "2012-10-17", "Statement": [...]}
+    managedPolicyArns:      # optional, at most 10 with the policy
+      - arn:aws:iam::${account.id}:policy/AWSLoadBalancerControllerIAMPolicy
+```
+
+**The trust policy is always the platform's**, never written in the
+definition:
+
+| Access | Trust policy | Also created |
+|---|---|---|
+| `IRSA` (default) | `Federated` = the cluster's IAM OIDC provider, `sts:AssumeRoleWithWebIdentity`, `<issuer>:aud` = `sts.amazonaws.com` and `<issuer>:sub` = each `system:serviceaccount:<ns>:<name>` | nothing; the role is built once the cluster's OIDC provider has its ARN |
+| `PodIdentity` | `pods.eks.amazonaws.com`, `sts:AssumeRole` and `sts:TagSession` | one pod identity association per service account |
+
+**IRSA needs the cluster's OIDC provider.** Enabling a component whose role
+uses IRSA on a cluster with `spec.aws.irsa` off is refused with
+`FAILED_PRECONDITION`, naming the setting (`component.CheckCluster`).
+
+**The service account annotation is the platform team's to write.** The
+platform does not annotate service accounts: each chart has its own key. For
+IRSA the definition's `platformValues` set it with `${iam.roleArn}`:
+
+```yaml
+platformValues:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: "${iam.roleArn}"
+```
+
+**Names.** Every object is named `<cluster prefix>-<component>-...`, cut and
+hashed to fit IAM's 64 characters: the role `...-role`, the policy
+`...-policy`, attachments `...-attach-policy` and `...-attach-<n>`,
+associations `...-identity-<n>`. They carry the cluster's labels and
+`cluster-vending.io/component`.
+
+**Order** (`crossplaneaws.ComponentIAMSet`, one set per component):
+
+1. The policy and the role (an IRSA role once the OIDC provider is known).
+2. The attachments and associations, once the role (and the policy) is
+   Ready.
+3. Placeholders filled in (section 5.1), then the Helm release.
+
+Deletion is the reverse, held by Usages: the release goes first, then the
+associations, then the attachments, then the role and the policy.
+
 ## 6. Karpenter, end to end
+
+> **Later.** This section is the target for Karpenter. What can be declared
+> today is an IAM role and policy (section 5.2); the interruption queue, its
+> EventBridge rules, the node role and access entry below need a Karpenter
+> preset that does not exist yet. The sample definition in
+> `config/samples` uses an IRSA role with `iam:PassRole` on
+> `${cluster.nodeRoleArn}` (the cluster's own node role) until then.
 
 ### 6.1 The definition
 
@@ -512,7 +611,8 @@ metadata:
 spec:
   description: Node autoscaling. Launches EC2 instances for pending pods.
   namespace: kube-system
-  cloudResources: Karpenter
+  cloudResources:                         # section 5.2; a Karpenter preset later
+    iamRole: {serviceAccounts: [{namespace: kube-system, name: karpenter}], policy: '...'}
   install:
     helm:
       repository: oci://public.ecr.aws/karpenter
@@ -560,7 +660,7 @@ spec:
           disruption: {type: object}
 ```
 
-### 6.2 Cloud prerequisites the `Karpenter` renderer creates
+### 6.2 Cloud prerequisites a Karpenter preset would create (later)
 
 | Object | Purpose | Exists today? |
 |---|---|---|

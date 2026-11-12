@@ -3,6 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/component_cloud.proto";
 import "cloud/v1/conditions.proto";
 import "google/protobuf/struct.proto";
 
@@ -147,4 +148,8 @@ message ComponentDefinition {
   // left as in this file are not stored, so later changes to the file
   // still reach them. Empty when the component takes no values.
   string user_values = 9;
+
+  // What the platform creates in the tenant's account for the component
+  // (an IAM role), shown so tenants know what the component may do there.
+  ComponentCloudResources cloud_resources = 16;
 }

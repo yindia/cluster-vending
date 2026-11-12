@@ -370,9 +370,12 @@ type ComponentDefinition struct {
 	// (GetComponentValues), edit it and send it as Component.values; keys
 	// left as in this file are not stored, so later changes to the file
 	// still reach them. Empty when the component takes no values.
-	UserValues    string `protobuf:"bytes,9,opt,name=user_values,json=userValues,proto3" json:"user_values,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	UserValues string `protobuf:"bytes,9,opt,name=user_values,json=userValues,proto3" json:"user_values,omitempty"`
+	// What the platform creates in the tenant's account for the component
+	// (an IAM role), shown so tenants know what the component may do there.
+	CloudResources *ComponentCloudResources `protobuf:"bytes,16,opt,name=cloud_resources,json=cloudResources,proto3" json:"cloud_resources,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ComponentDefinition) Reset() {
@@ -461,11 +464,18 @@ func (x *ComponentDefinition) GetUserValues() string {
 	return ""
 }
 
+func (x *ComponentDefinition) GetCloudResources() *ComponentCloudResources {
+	if x != nil {
+		return x.CloudResources
+	}
+	return nil
+}
+
 var File_cloud_v1_component_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_component_proto_rawDesc = "" +
 	"\n" +
-	"\x18cloud/v1/component.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xef\x02\n" +
+	"\x18cloud/v1/component.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ecloud/v1/component_cloud.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xef\x02\n" +
 	"\tComponent\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12*\n" +
@@ -490,7 +500,7 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\x11installed_version\x18\x06 \x01(\tR\x10installedVersion\x12%\n" +
 	"\x0etarget_version\x18\a \x01(\tR\rtargetVersion\x12\x18\n" +
 	"\arelease\x18\b \x01(\tR\arelease\x12B\n" +
-	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\"\xd8\x03\n" +
+	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\"\xa4\x04\n" +
 	"\x13ComponentDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +
@@ -500,7 +510,8 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\bversions\x18\a \x03(\v2+.cloud.v1.ComponentDefinition.VersionsEntryR\bversions\x12@\n" +
 	"\x0fplatform_values\x18\b \x01(\v2\x17.google.protobuf.StructR\x0eplatformValues\x12\x1f\n" +
 	"\vuser_values\x18\t \x01(\tR\n" +
-	"userValues\x1a;\n" +
+	"userValues\x12J\n" +
+	"\x0fcloud_resources\x18\x10 \x01(\v2!.cloud.v1.ComponentCloudResourcesR\x0ecloudResources\x1a;\n" +
 	"\rVersionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10\aR\x0eprotected_keys*\xe1\x01\n" +
@@ -529,13 +540,14 @@ func file_cloud_v1_component_proto_rawDescGZIP() []byte {
 var file_cloud_v1_component_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_cloud_v1_component_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cloud_v1_component_proto_goTypes = []any{
-	(ComponentPhase)(0),         // 0: cloud.v1.ComponentPhase
-	(*Component)(nil),           // 1: cloud.v1.Component
-	(*ComponentStatus)(nil),     // 2: cloud.v1.ComponentStatus
-	(*ComponentDefinition)(nil), // 3: cloud.v1.ComponentDefinition
-	nil,                         // 4: cloud.v1.ComponentDefinition.VersionsEntry
-	(*structpb.Struct)(nil),     // 5: google.protobuf.Struct
-	(*Condition)(nil),           // 6: cloud.v1.Condition
+	(ComponentPhase)(0),             // 0: cloud.v1.ComponentPhase
+	(*Component)(nil),               // 1: cloud.v1.Component
+	(*ComponentStatus)(nil),         // 2: cloud.v1.ComponentStatus
+	(*ComponentDefinition)(nil),     // 3: cloud.v1.ComponentDefinition
+	nil,                             // 4: cloud.v1.ComponentDefinition.VersionsEntry
+	(*structpb.Struct)(nil),         // 5: google.protobuf.Struct
+	(*Condition)(nil),               // 6: cloud.v1.Condition
+	(*ComponentCloudResources)(nil), // 7: cloud.v1.ComponentCloudResources
 }
 var file_cloud_v1_component_proto_depIdxs = []int32{
 	5, // 0: cloud.v1.Component.values:type_name -> google.protobuf.Struct
@@ -546,11 +558,12 @@ var file_cloud_v1_component_proto_depIdxs = []int32{
 	5, // 5: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
 	4, // 6: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
 	5, // 7: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	7, // 8: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_component_proto_init() }
@@ -558,6 +571,7 @@ func file_cloud_v1_component_proto_init() {
 	if File_cloud_v1_component_proto != nil {
 		return
 	}
+	file_cloud_v1_component_cloud_proto_init()
 	file_cloud_v1_conditions_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{

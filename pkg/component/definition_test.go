@@ -70,6 +70,15 @@ func TestCheckDefinition(t *testing.T) {
 			wantIn: []string{"no valuesSchema"}},
 		{name: "valuesSchema with an unsupported keyword", d: component.Definition{UserValues: "replicas: 2\n",
 			ValuesSchema: object(t, `{"type": "object", "oneOf": []}`)}, wantIn: []string{`valuesSchema: schema: keyword "oneOf" is not supported`}},
+
+		{name: "platformValues with placeholders", d: component.Definition{
+			PlatformValues: object(t, `{"settings": {"clusterName": "${cluster.name}"}, "sa": "${iam.roleArn}"}`)}},
+		{name: "platformValues with an unknown placeholder", d: component.Definition{
+			PlatformValues: object(t, `{"settings": {"queue": "${karpenter.queueName}"}}`)},
+			wantIn: []string{"platformValues: settings.queue: unknown placeholder ${karpenter.queueName}"}},
+		{name: "an IAM role with a bad policy", d: component.Definition{CloudResources: component.CloudResources{
+			IAMRole: &component.IAMRole{ServiceAccounts: []component.ServiceAccount{{Namespace: "ns", Name: "sa"}}, Policy: "{}"}}},
+			wantIn: []string{"policy has no Version"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

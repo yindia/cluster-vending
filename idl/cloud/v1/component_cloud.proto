@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+// ComponentCloudResources is what the platform creates in the tenant's AWS
+// account for a component, before its chart is installed, and removes after
+// the chart is uninstalled.
+message ComponentCloudResources {
+  // The IAM role of the component's service accounts. Unset: none.
+  ComponentIamRole iam_role = 1;
+}
+
+// ComponentIamAccess is how a component's pods get its IAM role.
+enum ComponentIamAccess {
+  COMPONENT_IAM_ACCESS_UNSPECIFIED = 0;
+  // IAM roles for service accounts: the role trusts the cluster's IAM OIDC
+  // provider (the cluster needs IRSA on). The default.
+  COMPONENT_IAM_ACCESS_IRSA = 1;
+  // EKS Pod Identity: one pod identity association per service account.
+  COMPONENT_IAM_ACCESS_POD_IDENTITY = 2;
+}
+
+// ComponentIamRole is the IAM role the platform creates for a component on
+// each cluster it is enabled on. Its trust policy is always the platform's.
+message ComponentIamRole {
+  ComponentIamAccess access = 1;
+
+  // Service accounts that may use the role.
+  repeated ComponentServiceAccount service_accounts = 2;
+
+  // The IAM policy document (JSON) attached to the role, with its
+  // placeholders as the definition has them.
+  string policy = 3;
+
+  // Existing policies attached to the role.
+  repeated string managed_policy_arns = 4;
+}
+
+// ComponentServiceAccount is a service account in the workload cluster.
+message ComponentServiceAccount {
+  string namespace = 1;
+  string name = 2;
+}

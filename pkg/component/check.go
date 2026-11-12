@@ -34,6 +34,8 @@ type Cluster struct {
 	KubernetesMinor string
 	// Addons are the names in the cluster's spec.aws.addons.
 	Addons []string
+	// IRSA: the cluster has its IAM OIDC provider (spec.aws.irsa).
+	IRSA bool
 }
 
 // Offering is what the release that applies to the cluster offers for its

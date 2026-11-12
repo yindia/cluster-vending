@@ -36,6 +36,8 @@ func (s seen) Get(_ context.Context, obj client.Object) (bool, error) {
 		*into = *have.(*awseks.Cluster)
 	case *awskms.Key:
 		*into = *have.(*awskms.Key)
+	case *awsiam.OpenIDConnectProvider:
+		*into = *have.(*awsiam.OpenIDConnectProvider)
 	}
 	return true, nil
 }

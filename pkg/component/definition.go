@@ -32,6 +32,10 @@ func ParseUserValues(file string) (Values, error) {
 // CheckDefinition reports what makes a definition's values unusable, for
 // its Valid condition, every problem at once; nil when they are usable:
 //   - the values schema uses what the subset does not support (CheckSchema);
+//   - platformValues name a placeholder that is not on the list, or write
+//     one badly (Validate);
+//   - the cloud resources are unusable (ValidateCloudResources: the IAM
+//     policy is no policy document, or uses an unknown placeholder);
 //   - userValues does not parse as a YAML object;
 //   - userValues and platformValues share a path (the same leaf, or one
 //     inside the other): the file would offer a key the tenant may not
@@ -46,6 +50,12 @@ func CheckDefinition(d Definition) []string {
 	}
 	for _, p := range schemaProblems {
 		out = append(out, "valuesSchema: "+p)
+	}
+	if err := Validate(d.PlatformValues); err != nil {
+		out = append(out, "platformValues: "+err.Error())
+	}
+	if err := ValidateCloudResources(d.CloudResources); err != nil {
+		out = append(out, err.Error())
 	}
 	user, err := ParseUserValues(d.UserValues)
 	if err != nil {

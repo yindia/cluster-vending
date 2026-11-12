@@ -20,8 +20,8 @@ spec:
     - jsonPath: .spec.requires
       name: Requires
       type: string
-    - jsonPath: .spec.cloudResources
-      name: CloudResources
+    - jsonPath: .spec.cloudResources.iamRole.access
+      name: IAM
       type: string
     - jsonPath: .status.conditions[?(@.type=="Valid")].status
       name: Valid
@@ -58,13 +58,79 @@ spec:
             properties:
               cloudResources:
                 description: |-
-                  cloudResources names the renderer that creates what the component
-                  needs in the tenant's account (IAM roles, queues). Unset: none. Only
-                  renderers the running build has are accepted (condition Valid).
-                enum:
-                - Karpenter
-                - LoadBalancerController
-                type: string
+                  cloudResources is what the platform creates in the tenant's account
+                  for the component before installing it: an IAM role so far. Unset:
+                  none.
+                properties:
+                  iamRole:
+                    description: iamRole for the component's service accounts.
+                    properties:
+                      access:
+                        default: IRSA
+                        description: access is how the component's pods get the role.
+                          Defaults to IRSA.
+                        enum:
+                        - IRSA
+                        - PodIdentity
+                        type: string
+                      managedPolicyArns:
+                        description: |-
+                          managedPolicyArns are existing policies attached to the role: AWS
+                          managed ones, or policies of the tenant account (account.id).
+                        items:
+                          pattern: ^arn:aws(-cn|-us-gov)?:iam::(aws|[0-9]{12}|\$\{account\.id\}):policy/[A-Za-z0-9+=,.@/_-]{1,512}$
+                          type: string
+                        maxItems: 10
+                        type: array
+                        x-kubernetes-list-type: set
+                      policy:
+                        description: |-
+                          policy is an IAM policy document (JSON) the platform creates and
+                          attaches to the role. It may use the placeholders of the definition
+                          (account.id, cluster.name, ...), filled in per cluster; the iam.*
+                          ones, which name this role and policy, are not available in it.
+                        maxLength: 6144
+                        type: string
+                      serviceAccounts:
+                        description: serviceAccounts that may use the role.
+                        items:
+                          description: |-
+                            ComponentServiceAccount is a service account of the component in the
+                            workload cluster.
+                          properties:
+                            name:
+                              description: name of the service account.
+                              maxLength: 253
+                              pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                              type: string
+                            namespace:
+                              description: namespace of the service account.
+                              pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                              type: string
+                          required:
+                          - name
+                          - namespace
+                          type: object
+                        maxItems: 8
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - namespace
+                        - name
+                        x-kubernetes-list-type: map
+                    required:
+                    - serviceAccounts
+                    type: object
+                    x-kubernetes-validations:
+                    - message: iamRole needs a policy or managedPolicyArns
+                      rule: (has(self.policy) && size(self.policy) > 0) || (has(self.managedPolicyArns)
+                        && size(self.managedPolicyArns) > 0)
+                    - message: 'an IAM role takes at most 10 policies: the policy
+                        and managedPolicyArns together'
+                      rule: '(has(self.managedPolicyArns) ? size(self.managedPolicyArns)
+                        : 0) + (has(self.policy) && size(self.policy) > 0 ? 1 : 0)
+                        <= 10'
+                type: object
               conflictsWithAddons:
                 description: |-
                   conflictsWithAddons lists EKS add-ons the cluster must not have in
@@ -263,7 +329,9 @@ spec:
                   platformValues are set by the platform team for every tenant, and
                   locked: every leaf path in them wins over the tenant's values, and
                   an enable or update whose overrides touch one is refused, naming the
-                  path. Tenants never see them in the values file.
+                  path. Tenants never see them in the values file. Strings may use the
+                  placeholders (${cluster.name}, ${iam.roleArn}, ...), filled in per
+                  cluster by the controller.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
               requires:

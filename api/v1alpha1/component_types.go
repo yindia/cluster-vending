@@ -264,16 +264,17 @@ type ComponentDefinitionSpec struct {
 	// +listType=set
 	// +kubebuilder:validation:items:Enum=vpc-cni;coredns;kube-proxy;eks-pod-identity-agent;aws-ebs-csi-driver;aws-efs-csi-driver;aws-fsx-csi-driver;aws-mountpoint-s3-csi-driver;snapshot-controller;cert-manager;metrics-server;kube-state-metrics
 	ConflictsWithAddons []string `json:"conflictsWithAddons,omitempty"`
-	// cloudResources names the renderer that creates what the component
-	// needs in the tenant's account (IAM roles, queues). Unset: none. Only
-	// renderers the running build has are accepted (condition Valid).
+	// cloudResources is what the platform creates in the tenant's account
+	// for the component before installing it: an IAM role so far. Unset:
+	// none.
 	// +optional
-	// +kubebuilder:validation:Enum=Karpenter;LoadBalancerController
-	CloudResources string `json:"cloudResources,omitempty"`
+	CloudResources *ComponentCloudResources `json:"cloudResources,omitempty"`
 	// platformValues are set by the platform team for every tenant, and
 	// locked: every leaf path in them wins over the tenant's values, and
 	// an enable or update whose overrides touch one is refused, naming the
-	// path. Tenants never see them in the values file.
+	// path. Tenants never see them in the values file. Strings may use the
+	// placeholders (${cluster.name}, ${iam.roleArn}, ...), filled in per
+	// cluster by the controller.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
@@ -321,7 +322,7 @@ type ComponentDefinitionStatus struct {
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')",message="a component definition is named as a DNS label"
 // +kubebuilder:validation:XValidation:rule="!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)",message="a component cannot require itself"
 // +kubebuilder:printcolumn:name="Requires",type=string,JSONPath=`.spec.requires`
-// +kubebuilder:printcolumn:name="CloudResources",type=string,JSONPath=`.spec.cloudResources`
+// +kubebuilder:printcolumn:name="IAM",type=string,JSONPath=`.spec.cloudResources.iamRole.access`
 // +kubebuilder:printcolumn:name="Valid",type=string,JSONPath=`.status.conditions[?(@.type=="Valid")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type ComponentDefinition struct {

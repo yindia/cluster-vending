@@ -70,7 +70,28 @@ metadata:
 spec:
   description: Node autoscaling. Launches EC2 instances for pending pods.
   namespace: kube-system
-  cloudResources: Karpenter
+  # An IRSA role (the default access): the cluster needs spec.aws.irsa. The
+  # ${...} placeholders are filled in per cluster. No interruption queue
+  # yet: only an IAM role and policy can be declared so far.
+  cloudResources:
+    iamRole:
+      serviceAccounts:
+      - {namespace: kube-system, name: karpenter}
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {"Sid": "Compute", "Effect": "Allow", "Resource": "*",
+             "Action": ["ec2:CreateFleet", "ec2:CreateLaunchTemplate", "ec2:CreateTags", "ec2:DeleteLaunchTemplate",
+                        "ec2:RunInstances", "ec2:TerminateInstances", "ec2:Describe*", "pricing:GetProducts", "ssm:GetParameter"]},
+            {"Sid": "PassNodeRole", "Effect": "Allow", "Action": "iam:PassRole", "Resource": "${cluster.nodeRoleArn}"},
+            {"Sid": "InstanceProfiles", "Effect": "Allow", "Resource": "*",
+             "Action": ["iam:CreateInstanceProfile", "iam:TagInstanceProfile", "iam:AddRoleToInstanceProfile",
+                        "iam:RemoveRoleFromInstanceProfile", "iam:DeleteInstanceProfile", "iam:GetInstanceProfile"]},
+            {"Sid": "Cluster", "Effect": "Allow", "Action": "eks:DescribeCluster",
+             "Resource": "arn:aws:eks:${region}:${account.id}:cluster/${cluster.name}"}
+          ]
+        }
   install:
     helm:
       repository: oci://public.ecr.aws/karpenter
@@ -81,10 +102,18 @@ spec:
       - name: karpenter-defaults
         repository: oci://ghcr.io/yindia/cluster-vending/charts
         chart: karpenter-defaults
-  # Locked for every tenant. The cluster name, endpoint, interruption queue
-  # and service account are computed per cluster (a later step) and locked
-  # the same way.
+  # Locked for every tenant. The ${...} placeholders are filled in per
+  # cluster by the controller.
   platformValues:
+    settings:
+      clusterName: "${cluster.name}"
+      clusterEndpoint: "${cluster.endpoint}"
+    serviceAccount:
+      name: karpenter
+      # IRSA: the platform does not annotate service accounts itself; each
+      # chart has its own key for it.
+      annotations:
+        eks.amazonaws.com/role-arn: "${iam.roleArn}"
     controller:
       resources:
         requests: {cpu: 250m, memory: 512Mi}
@@ -151,3 +180,48 @@ spec:
         secretRef:
           namespace: cluster-vending-system
           name: ecr-charts-pull
+---
+# IRSA with a policy the tenant account already has (created once per
+# account, e.g. from the controller's iam_policy.json). The chart's own key
+# carries the role ARN.
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: aws-load-balancer-controller
+spec:
+  description: Provisions AWS load balancers for Services and Ingresses.
+  namespace: kube-system
+  install:
+    helm:
+      repository: https://aws.github.io/eks-charts
+      chart: aws-load-balancer-controller
+  cloudResources:
+    iamRole:
+      access: IRSA
+      serviceAccounts:
+      - {namespace: kube-system, name: aws-load-balancer-controller}
+      managedPolicyArns:
+      - "arn:aws:iam::${account.id}:policy/AWSLoadBalancerControllerIAMPolicy"
+  platformValues:
+    clusterName: "${cluster.name}"
+    region: "${region}"
+    vpcId: "${network.vpcId}"
+    serviceAccount:
+      name: aws-load-balancer-controller
+      # IRSA: the platform does not annotate service accounts itself; this
+      # chart takes the role ARN here.
+      annotations:
+        eks.amazonaws.com/role-arn: "${iam.roleArn}"
+  userValues: |
+    # Controller replicas, 1 to 3.
+    replicaCount: 2
+    # Attach AWS WAFv2 web ACLs to ALBs from Ingress annotations.
+    enableWafv2: false
+  valuesSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      replicaCount: {type: integer, minimum: 1, maximum: 3}
+      enableShield: {type: boolean}
+      enableWaf: {type: boolean}
+      enableWafv2: {type: boolean}

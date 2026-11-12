@@ -254,13 +254,21 @@ Rules:
 | Catalog | Only what is installed inside the workload cluster. | A `ComponentDefinition` and a version in a release. No code. |
 | Builtin | Cloud resources in the tenant's account as well (IAM roles, queues, instance profiles, tags on subnets). | Renderer code that produces those objects, shipped in a platform build, plus the definition. |
 
+**Update.** A component that only needs an IAM role is no longer Builtin:
+the definition declares the role (`cloudResources.iamRole`: IRSA by
+default, or Pod Identity; a policy with placeholders and managed policy
+ARNs), and the platform renders it with its own trust policy, no code per
+component (component-usage.md, sections 5.1 and 5.2). Builtin, meaning code,
+is left for what a role cannot cover: Karpenter's interruption queue and
+EventBridge rules, a later preset.
+
 Classification of the components named so far. "To confirm" marks what was
 not verified against the component's current documentation.
 
 | Component | Class | Cloud resources it needs | EKS add-on available | Depends on |
 |---|---|---|---|---|
 | Karpenter | Builtin | IAM role for the controller, a role and instance profile for the nodes it launches, an SQS queue and EventBridge rules for interruption handling, discovery tags on subnets and security groups | To confirm | none |
-| AWS load balancer controller | Builtin | IAM role with the controller's policy; subnet role tags (the platform already tags subnets for load balancers) | To confirm | none |
+| AWS load balancer controller | Catalog with an IAM role (`cloudResources.iamRole`) | IAM role with the controller's policy; subnet role tags (the platform already tags subnets for load balancers) | To confirm | none |
 | GPU operator | Catalog | None in the account. Needs GPU instance types in a node group or from Karpenter; the node image must suit it. | No (to confirm) | GPU nodes; to confirm whether Karpenter should be a declared dependency |
 | Dragonfly | Catalog (to confirm) | None known; to confirm whether it is configured with an object store that needs an IAM role | No (to confirm) | none |
 | Istio | Catalog | None for the mesh itself. An ingress gateway that is exposed needs a load balancer. | No (to confirm) | AWS load balancer controller, when a gateway is exposed (to confirm as a hard dependency) |

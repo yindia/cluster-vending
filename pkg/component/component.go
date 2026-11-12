@@ -60,6 +60,9 @@ type Definition struct {
 	// ValuesSchema is what a tenant may override, written by hand; nil: no
 	// overrides.
 	ValuesSchema Values
+	// CloudResources the platform creates in the tenant's account
+	// (CloudResourcesOf).
+	CloudResources CloudResources
 }
 
 // ParseValues reads a tenant's values from JSON: an object of at most

@@ -92,6 +92,11 @@ type Networks interface {
 	// not overwrite what that call stored. ErrNotFound when the row is
 	// gone, ErrConflict when it changed.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
+	// MarkBehind makes the row count as not applied (applied_generation
+	// below generation) and assigns a new etag, whatever its etag is: the
+	// background loop applies it again. For an apply that finished after
+	// the row had changed: what it applied may be older than the row.
+	MarkBehind(ctx context.Context, tenantID, id string) error
 	// Delete fails with ErrInUse while clusters use the network.
 	Delete(ctx context.Context, tenantID, id string) error
 	// ListPending returns, across tenants, the networks the background loop
@@ -118,6 +123,8 @@ type Clusters interface {
 	Update(ctx context.Context, c *model.Cluster) error
 	// SetStatus is Networks.SetStatus for clusters.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
+	// MarkBehind is Networks.MarkBehind for clusters.
+	MarkBehind(ctx context.Context, tenantID, id string) error
 	// Delete also deletes the cluster's node pools.
 	Delete(ctx context.Context, tenantID, id string) error
 	// ListPending is Networks.ListPending for clusters.

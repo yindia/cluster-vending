@@ -68,9 +68,15 @@ func (s *NetworkService) moveOn(ctx context.Context, row *model.Network) error {
 	if row.State == stateImported || row.State == stateBlocked {
 		return s.markApplied(ctx, row)
 	}
+	defer s.recheck(ctx, row)
 	if storedImport(row) != nil {
-		// Taken over: what a change can touch is its labels, as tags on the
-		// objects it has (also the rest of an update that failed half-way).
+		// Taken over: its objects are owned (the rest of a takeover that
+		// stopped half-way), and what a change can touch is its labels, as
+		// tags on the objects it has (also the rest of an update that
+		// failed half-way).
+		if err := s.ownAll(ctx, row); err != nil {
+			return err
+		}
 		return s.retag(ctx, row)
 	}
 	spec, err := specOf(row)

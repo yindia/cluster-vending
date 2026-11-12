@@ -181,9 +181,14 @@ type Network struct {
 	// CloudAccountID is the cloud_accounts row of spec.account_id
 	// (CloudAccount.Networks owns the foreign key). Its tenant and provider
 	// must be the network's; the repository checks it.
-	CloudAccountID string   `gorm:"type:varchar(36);not null;index"`
+	CloudAccountID string   `gorm:"type:varchar(36);not null;index;uniqueIndex:idx_networks_account_region_external,where:deleted_at IS NULL AND external_id IS NOT NULL"`
 	Provider       Provider `gorm:"size:16;not null;check:chk_networks_provider,provider IN ('aws','gcp','azure')"`
-	Region         string   `gorm:"size:64;not null"`
+	Region         string   `gorm:"size:64;not null;uniqueIndex:idx_networks_account_region_external,where:deleted_at IS NULL AND external_id IS NOT NULL"`
+	// ExternalID is the cloud network an imported network stands for (AWS:
+	// the VPC ID), unique per account and region: a VPC is imported once.
+	// NULL for a network the platform created, and for an import that was
+	// blocked (nothing was imported).
+	ExternalID *string `gorm:"size:64;uniqueIndex:idx_networks_account_region_external,where:deleted_at IS NULL AND external_id IS NOT NULL"`
 	// CreateRequestID is the request_id of the creating call, for
 	// idempotent retries. NULL when none was given.
 	CreateRequestID *string `gorm:"size:36;uniqueIndex:idx_networks_tenant_request,where:deleted_at IS NULL"`

@@ -180,11 +180,38 @@ func (s *NetworkService) markApplied(ctx context.Context, row *model.Network) er
 	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion {
 		return nil
 	}
+	before, version := row.AppliedGeneration, row.RenderVersion
 	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
-	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
+	err := s.deps.Store.Networks().Update(ctx, row)
+	if errors.Is(err, repository.ErrConflict) {
+		// The row changed while it was applied: whoever changed it applies
+		// it, or the loop does (recheck).
+		row.AppliedGeneration, row.RenderVersion = before, version
+		return nil
+	}
+	if err != nil {
 		return connect.NewError(connect.CodeInternal, "could not record the applied generation: "+err.Error())
 	}
 	return nil
+}
+
+// recheck is called by the loop after it applied row: when a call changed
+// the row meanwhile, what the loop applied may be older than what that
+// call applied, and may have been written over it. The row is marked as
+// not applied, so the next pass applies it as it is now.
+func (s *NetworkService) recheck(ctx context.Context, row *model.Network) {
+	current, err := s.deps.Store.Networks().Get(ctx, row.TenantID, row.ID)
+	if errors.Is(err, repository.ErrNotFound) || (err == nil && (current.ETag == row.ETag || current.State == stateDeleting)) {
+		return
+	}
+	if err == nil {
+		err = s.deps.Store.Networks().MarkBehind(ctx, row.TenantID, row.ID)
+	}
+	if err != nil {
+		s.logger().ErrorContext(ctx, "recheck a network applied while it changed", "network_id", row.ID, "error", err)
+		return
+	}
+	s.logger().InfoContext(ctx, "network changed while it was applied; it is applied again", "network_id", row.ID)
 }
 
 // liveObjects counts the network's objects the API server still has (by

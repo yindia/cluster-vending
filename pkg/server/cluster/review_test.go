@@ -146,3 +146,29 @@ func TestImportKeepsTheClusterCreatorSetting(t *testing.T) {
 	}
 	check("after the takeover")
 }
+
+// What the loop applied while a call changed the cluster may be older
+// than what the call applied (an update silently reverted): the cluster
+// is applied again.
+func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
+	w := appliedWorld(t)
+	ctx := t.Context()
+	seen := w.cluster(t) // the row as the loop read it
+	w.svc.recheck(ctx, seen)
+	if w.cluster(t).ETag != seen.ETag {
+		t.Fatal("a cluster nobody changed was marked behind")
+	}
+	changed := w.cluster(t) // a call stores and applies a change
+	changed.Generation++
+	changed.AppliedGeneration = changed.Generation
+	if err := w.store.Clusters().Update(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.svc.markApplied(ctx, seen); err != nil {
+		t.Errorf("markApplied on a changed row: %v", err)
+	}
+	w.svc.recheck(ctx, seen)
+	if got := w.cluster(t); got.AppliedGeneration >= got.Generation {
+		t.Fatalf("applied %d of %d; want the cluster applied again", got.AppliedGeneration, got.Generation)
+	}
+}

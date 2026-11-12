@@ -89,6 +89,10 @@ func (r networks) SetStatus(ctx context.Context, tenantID, id, etag string, stat
 	return setStatus[model.Network](ctx, r.db, tenantID, id, etag, status)
 }
 
+func (r networks) MarkBehind(ctx context.Context, tenantID, id string) error {
+	return markBehind[model.Network](ctx, r.db, tenantID, id)
+}
+
 func (r networks) Get(ctx context.Context, tenantID, id string) (*model.Network, error) {
 	return first[model.Network](ctx, r.db, map[string]any{"tenant_id": tenantID, "id": id})
 }
@@ -156,6 +160,28 @@ func (r clusters) Update(ctx context.Context, c *model.Cluster) error { return u
 
 func (r clusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	return setStatus[model.Cluster](ctx, r.db, tenantID, id, etag, status)
+}
+
+func (r clusters) MarkBehind(ctx context.Context, tenantID, id string) error {
+	return markBehind[model.Cluster](ctx, r.db, tenantID, id)
+}
+
+// markBehind puts applied_generation below generation and assigns a new
+// etag, so a write based on the row as it was fails.
+func markBehind[T any](ctx context.Context, db *gorm.DB, tenantID, id string) error {
+	res := db.WithContext(ctx).Model(new(T)).Where("tenant_id = ? AND id = ?", tenantID, id).
+		UpdateColumns(map[string]any{
+			"etag": newETag(),
+			"applied_generation": gorm.Expr(
+				"CASE WHEN applied_generation >= generation THEN generation - 1 ELSE applied_generation END"),
+		})
+	if res.Error != nil {
+		return translate(res.Error, opWrite)
+	}
+	if res.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
 }
 
 // setStatus writes the status column only (no etag, no update time), and

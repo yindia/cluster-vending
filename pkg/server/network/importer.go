@@ -136,7 +136,17 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 	if rid := req.GetRequestId(); rid != "" {
 		row.CreateRequestID = &rid
 	}
-	if err := s.deps.Store.Networks().Create(ctx, row); err != nil {
+	if vpc := req.GetAws().GetVpcId(); !plan.blocked() {
+		// Unique per account and region: of two imports of one VPC at the
+		// same moment (refuseOwnedVPC lets both pass), one is stored.
+		row.ExternalID = &vpc
+	}
+	err = s.deps.Store.Networks().Create(ctx, row)
+	if errors.Is(err, repository.ErrAlreadyExists) {
+		return nil, importPlan{}, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
+			"VPC %s is already imported (or request_id %q was used before)", req.GetAws().GetVpcId(), req.GetRequestId()))
+	}
+	if err != nil {
 		return nil, importPlan{}, service.ToConnect(err)
 	}
 	return row, plan, nil
@@ -158,25 +168,25 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, err
 	}
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	for _, r := range records {
-		if err := s.own(ctx, r); err != nil {
-			s.logger().ErrorContext(ctx, "take over resource", "network_id", row.ID, "object", r.Name, "error", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Sprintf("could not take over %s %s", r.Kind, r.Name))
-		}
-	}
+	// The row first: a network whose objects are owned (deleting them
+	// deletes the cloud resources) must never be stored as read-only. A
+	// takeover that stops half-way is finished by the loop (moveOn).
 	imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING
 	if row.Status, err = encode(&cloudv1.NetworkStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	row.State = stateProvisioning
+	row.Generation++
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		return nil, service.ToConnect(err)
 	}
-	s.logger().InfoContext(ctx, "network taken over", "tenant_id", row.TenantID, "network_id", row.ID, "resources", len(records))
+	if err := s.ownAll(ctx, row); err != nil {
+		return nil, err
+	}
+	if err := s.markApplied(ctx, row); err != nil {
+		return nil, err
+	}
+	s.logger().InfoContext(ctx, "network taken over", "tenant_id", row.TenantID, "network_id", row.ID)
 	n, err := s.respond(ctx, row)
 	return &cloudv1.TakeOverNetworkResponse{Network: n}, err
 }
@@ -202,6 +212,22 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 			len(notImported), notImported[0].GetKind(), notImported[0].GetExternalName(), notImported[0].GetDetail()))
 	}
 	return imp, nil
+}
+
+// ownAll switches every recorded object of a taken-over network to full
+// management. It is safe to repeat.
+func (s *NetworkService) ownAll(ctx context.Context, row *model.Network) error {
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
+	if err != nil {
+		return service.ToConnect(err)
+	}
+	for _, r := range records {
+		if err := s.own(ctx, r); err != nil {
+			s.logger().ErrorContext(ctx, "take over resource", "network_id", row.ID, "object", r.Name, "error", err)
+			return connect.NewError(connect.CodeInternal, fmt.Sprintf("could not take over %s %s", r.Kind, r.Name))
+		}
+	}
+	return nil
 }
 
 // own switches one recorded object to full management (without Delete for
@@ -243,7 +269,8 @@ func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error
 func (s *NetworkService) refuseOwnedVPC(ctx context.Context, a *model.CloudAccount, vpcID string) error {
 	vpcs := &awsec2.VPCList{}
 	// From the API server, not the cache: an import a moment ago must be
-	// seen. Two imports in the very same instant can still both pass.
+	// seen. Of two imports in the very same instant, the unique index on
+	// networks.external_id stores one (insertImport).
 	if err := s.deps.Reader().List(ctx, vpcs, client.InNamespace(a.Namespace)); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil

@@ -821,6 +821,44 @@ func (c *MockNetworksListPendingCall) DoAndReturn(f func(context.Context, []stri
 	return c
 }
 
+// MarkBehind mocks base method.
+func (m *MockNetworks) MarkBehind(ctx context.Context, tenantID, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkBehind", ctx, tenantID, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkBehind indicates an expected call of MarkBehind.
+func (mr *MockNetworksMockRecorder) MarkBehind(ctx, tenantID, id any) *MockNetworksMarkBehindCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkBehind", reflect.TypeOf((*MockNetworks)(nil).MarkBehind), ctx, tenantID, id)
+	return &MockNetworksMarkBehindCall{Call: call}
+}
+
+// MockNetworksMarkBehindCall wrap *gomock.Call
+type MockNetworksMarkBehindCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockNetworksMarkBehindCall) Return(arg0 error) *MockNetworksMarkBehindCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockNetworksMarkBehindCall) Do(f func(context.Context, string, string) error) *MockNetworksMarkBehindCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockNetworksMarkBehindCall) DoAndReturn(f func(context.Context, string, string) error) *MockNetworksMarkBehindCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetStatus mocks base method.
 func (m *MockNetworks) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()
@@ -1266,6 +1304,44 @@ func (c *MockClustersListPendingCall) Do(f func(context.Context, []string, int64
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockClustersListPendingCall) DoAndReturn(f func(context.Context, []string, int64) ([]model.Cluster, error)) *MockClustersListPendingCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// MarkBehind mocks base method.
+func (m *MockClusters) MarkBehind(ctx context.Context, tenantID, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkBehind", ctx, tenantID, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkBehind indicates an expected call of MarkBehind.
+func (mr *MockClustersMockRecorder) MarkBehind(ctx, tenantID, id any) *MockClustersMarkBehindCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkBehind", reflect.TypeOf((*MockClusters)(nil).MarkBehind), ctx, tenantID, id)
+	return &MockClustersMarkBehindCall{Call: call}
+}
+
+// MockClustersMarkBehindCall wrap *gomock.Call
+type MockClustersMarkBehindCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersMarkBehindCall) Return(arg0 error) *MockClustersMarkBehindCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersMarkBehindCall) Do(f func(context.Context, string, string) error) *MockClustersMarkBehindCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersMarkBehindCall) DoAndReturn(f func(context.Context, string, string) error) *MockClustersMarkBehindCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

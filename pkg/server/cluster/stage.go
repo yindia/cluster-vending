@@ -173,6 +173,7 @@ func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error 
 	if err != nil {
 		return err
 	}
+	defer s.recheck(ctx, row)
 	if err := s.apply(ctx, row, t.account, s.renderPlan(spec, row, t)); err != nil {
 		return err
 	}

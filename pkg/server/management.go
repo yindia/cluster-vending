@@ -38,9 +38,9 @@ type ManagementOptions struct {
 
 // ConnectManagement prepares the management cluster and returns a manager,
 // not started: it installs the providers (when asked), waits until the API
-// server serves every managed resource kind (informers on a missing kind
-// fail), and builds the manager whose client reads from the informer
-// cache. Register controllers on it, then StartManagement.
+// server serves every cached kind (the manager's cache and its informers
+// fail on a missing one), and builds the manager whose client reads from
+// the informer cache. Register controllers on it, then StartManagement.
 func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manager, error) {
 	ctrllog.SetLogger(logr.FromSlogHandler(o.Logger.Handler()))
 	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
@@ -66,15 +66,17 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 	if err != nil {
 		return nil, err
 	}
-	mgr, err := kube.NewManager(cfg, cached, o.LeaderElection)
+	// Before the manager: its cache looks every kind up when it is built,
+	// and the CRDs of providers installed just now are not there yet.
+	mapper, err := kube.NewRESTMapper(cfg)
 	if err != nil {
 		return nil, err
 	}
 	o.Logger.Info("waiting for the managed resource kinds")
-	if err := kube.WaitForKinds(ctx, mgr, crossplaneaws.ManagedObjects(), kindsTimeout); err != nil {
+	if err := kube.WaitForKinds(ctx, mapper, cached, kindsTimeout); err != nil {
 		return nil, err
 	}
-	return mgr, nil
+	return kube.NewManager(cfg, cached, o.LeaderElection)
 }
 
 // CachedObjects are the kinds the informer cache holds: the managed

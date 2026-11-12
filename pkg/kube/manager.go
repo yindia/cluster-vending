@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +30,8 @@ import (
 // cheaply and reads cost no API calls. Reads of any other kind fail
 // (cache.ErrResourceNotCached) instead of starting an informer, and
 // Secrets are never cached: read those, and objects that must be current,
-// with GetAPIReader. Start the informers with StartInformers.
+// with GetAPIReader. Every cached kind must be served already
+// (WaitForKinds). Start the informers with StartInformers.
 func NewManager(cfg *rest.Config, cached []schema.GroupVersionKind, election LeaderElection) (manager.Manager, error) {
 	scheme, err := Scheme()
 	if err != nil {
@@ -75,24 +77,38 @@ type LeaderElection struct {
 	Namespace string
 }
 
-// kindPoll is how often WaitForKinds checks the API server.
-const kindPoll = 5 * time.Second
+// kindPoll is how often WaitForKinds checks the API server; tests shorten
+// it.
+var kindPoll = 5 * time.Second
 
-// WaitForKinds waits until the API server serves every kind of objects
-// (their CRDs exist): informers on a missing kind fail. A fresh management
-// cluster gets the providers' CRDs a minute or two after the providers
+// NewRESTMapper returns a REST mapper for cfg that looks kinds up in the
+// API server and again when one is missing, so it sees CRDs installed
+// after it was created.
+func NewRESTMapper(cfg *rest.Config) (meta.RESTMapper, error) {
+	httpClient, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("management cluster client: %w", err)
+	}
+	mapper, err := apiutil.NewDynamicRESTMapper(cfg, httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("management cluster API discovery: %w", err)
+	}
+	return mapper, nil
+}
+
+// WaitForKinds waits until the API server serves every kind (their CRDs
+// exist). It must run before NewManager: the manager's cache looks every
+// cached kind up when it is built and fails on a missing one. A fresh
+// management cluster, or one whose server was upgraded to use more
+// providers, gets the providers' CRDs a minute or two after the providers
 // are installed.
-func WaitForKinds(ctx context.Context, mgr manager.Manager, objects []client.Object, timeout time.Duration) error {
+func WaitForKinds(ctx context.Context, mapper meta.RESTMapper, kinds []schema.GroupVersionKind, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
 		var missing []string
-		for _, obj := range objects {
-			gvk, err := apiutil.GVKForObject(obj, mgr.GetScheme())
-			if err != nil {
-				return err
-			}
-			if _, err := mgr.GetRESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+		for _, gvk := range kinds {
+			if _, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
 				missing = append(missing, gvk.Kind+"."+gvk.Group)
 			}
 		}

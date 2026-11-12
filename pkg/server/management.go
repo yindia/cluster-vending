@@ -33,9 +33,17 @@ type ManagementOptions struct {
 	// providers run.
 	InstallProviders bool
 	ProviderRuntime  crossplaneaws.ProviderRuntime
-	// LeaderElection of the background loop.
+	// LeaderElection of the background loop, or of the controllers.
 	LeaderElection kube.LeaderElection
 	Logger         *slog.Logger
+	// WatchPlatformKinds also caches the platform's own kinds (CloudAccount,
+	// Network, Cluster), whatever their labels: the controller manager
+	// watches them. They must be installed (ConnectStore does it).
+	WatchPlatformKinds bool
+	// LeaseName, MetricsAddr and ProbeAddr are the manager's leader
+	// election Lease and listen addresses; empty for the server's Lease
+	// and for off.
+	LeaseName, MetricsAddr, ProbeAddr string
 }
 
 // ConnectManagement prepares the management cluster and returns a manager,
@@ -78,7 +86,12 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 	if err := kube.WaitForKinds(ctx, mapper, cached, kindsTimeout); err != nil {
 		return nil, err
 	}
-	return kube.NewManager(cfg, cached, o.LeaderElection)
+	opts := kube.ManagerOptions{Cached: cached, Election: o.LeaderElection, LeaseName: o.LeaseName,
+		MetricsAddr: o.MetricsAddr, ProbeAddr: o.ProbeAddr}
+	if o.WatchPlatformKinds {
+		opts.Unfiltered = cloudstore.Kinds()
+	}
+	return kube.NewManagerWith(cfg, opts)
 }
 
 // ConnectStore returns the store that keeps its rows as CloudAccount,

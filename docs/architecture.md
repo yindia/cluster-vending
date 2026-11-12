@@ -25,7 +25,7 @@ last column were checked with `go list -deps`.
 | `pkg/loop` | The background loop: every interval it calls `Reconcile` for rows that are not settled. | Imports only `pkg/database`. It is handed the reconcilers. |
 | `pkg/cloud/aws` | Read-only AWS lookups for imports and checks. | Imports only `pkg/constant/aws`. |
 | `pkg/kube` | Client, scheme and server-side apply. | No storage, no RPC library. |
-| `controller/` | The kubebuilder project: API types (`controller/api/v1alpha1`), stub reconcilers, CRDs, the manager. | Imports nothing from `pkg/`. |
+| `controller/` | The kubebuilder project: API types (`controller/api/v1alpha1`), their conversion to the contract, the controllers, CRDs, the manager. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore`, `pkg/server` (the shared management cluster setup) and `pkg/server/{network,cluster}` (the row a create stores). |
 | `pkg/cli`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin and has no tests. | `pkg/cli` imports only the generated client. |
 
 Two things the table would otherwise hide:
@@ -190,15 +190,19 @@ them.
 Everything in this section is decided. None of it works yet; where part of
 it exists, that is said.
 
-- **A controller reconciles the `cloud.cluster-vending.io` kinds.** The
-  kinds (CloudAccount, Network, Cluster), their CRDs and a manager exist in
-  `controller/`; the reconcilers are stubs. They will call the existing
-  reconcilers in `pkg/reconcile`, not a second implementation.
+- **A controller reconciles the `cloud.cluster-vending.io` kinds.** Built,
+  not verified against a real API server: the three controllers in
+  `controller/internal/controller` turn a watch event into a call of the
+  existing reconcilers in `pkg/reconcile` (on `pkg/database/cloudstore`),
+  adopt Networks and Clusters created with kubectl, apply spec edits, and
+  requeue until a resource is settled. With `--store=kubernetes` the server
+  leaves reconciling to it (`--background-loop`). See `controller/README.md`.
 - **Ownership.** A CloudAccount owns its Networks and a Network owns its
   Clusters; one account has many of each. The references are required and
-  immutable in the types, and a helper sets the owner references. An owner
-  is not deleted while it has dependents; there is no cascade. The finalizer
-  logic for this is not written.
+  immutable in the types, and the store and the controllers set the owner
+  references. An owner is not deleted while it has dependents; there is no
+  cascade: the controllers hold the finalizer and say what blocks the
+  deletion.
 - **API handlers write desired state only.** Today they apply objects
   inline. They will validate, store and return; a failed apply becomes a
   status on the resource, not an error on the call.

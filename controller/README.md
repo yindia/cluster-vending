@@ -2,8 +2,12 @@
 
 The platform's controller, laid out as a kubebuilder v4 project inside the
 repository's one Go module. It holds the API of the platform's own custom
-resources. The reconcilers are not implemented: nothing here is connected to
-the server, the background loop or the database yet.
+resources and the controllers that reconcile them. The controllers have no
+reconcile logic of their own: each turns a watch event into a call of the
+reconciler the API server's background loop also runs (`pkg/reconcile/account`,
+`network`, `cluster`), on the store that keeps its rows as these objects
+(`pkg/database/cloudstore`). None of it has run against a real API server
+or AWS; it is tested on a fake API server only.
 
 ## API
 
@@ -40,7 +44,7 @@ same repository interface the database store has.
 ```
 PROJECT                 kubebuilder project file
 api/v1alpha1/           the types (edit these), generated deepcopy
-internal/controller/    the three reconcilers: empty stubs
+internal/controller/    the three controllers
 owner/                  the ownership chain as owner references and labels
 manager.go              Run: the manager with the reconcilers and probes
 config/crd/bases/       generated CRDs
@@ -69,14 +73,54 @@ covers this directory like any other package.
 ## Run
 
 ```
-kubectl apply -f controller/config/crd/bases
-cluster-vending controller --leader-elect=false
+cluster-vending serve --store=kubernetes        # the API: writes the objects
+cluster-vending controller --leader-elect=false # reconciles them
 ```
 
 `controller` takes the global `--kubeconfig` and `--context`, plus
-`--metrics-addr` (off by default), `--health-probe-addr`, `--leader-elect`
-and `--lease-namespace`. It runs an idle manager: it watches the three kinds
-and changes nothing.
+`--metrics-addr` (off by default), `--health-probe-addr`, `--leader-elect`,
+`--lease-namespace`, `--render-target` and `--render-rollout`. It installs
+the CRDs of the three kinds itself and waits for the Crossplane AWS
+providers' kinds; it does not install the providers (`serve` does, or an
+operator).
+
+Who reconciles: one reconciler per resource. With `--store=kubernetes` the
+server's background loop is off by default (`--background-loop=auto`) and
+this controller reconciles; `serve --store=kubernetes --background-loop=true`
+runs the server alone, without the controller. Do not run both on the same
+objects. With the database store the loop reconciles and the controller has
+nothing to watch.
+
+## What a controller does
+
+- **Event to reconciler.** The object's labels (`cloud.cluster-vending.io/tenant`,
+  `/id`) name the tenant and the row; the controller calls the reconciler's
+  `Reconcile(tenant, id)`. It acts on changes of the spec, labels and
+  annotations (the store keeps a row's state there) and on a deletion, not
+  on status changes, so its own writes do not wake it.
+- **Created with kubectl.** A Network or Cluster without those labels is
+  adopted: it gets the row the API's create would have stored, after the
+  same checks. A Network keeps its spec as written (the layout is resolved
+  again whenever it is rendered); a Cluster gets its resolved spec written
+  back (zones, default add-ons, tier). What the API would have refused is
+  the condition `Adopted=False` with the reason. Imports (`spec.importFrom`)
+  and CloudAccounts are not adopted: they are made through the API, and say
+  so in the same condition.
+- **Spec edits.** When `metadata.generation` is ahead of
+  `status.observedGeneration` the row's generation is moved on and the
+  reconciler applies the edit. The edit is applied as written: only the
+  kinds' own validation rules check it, not the API's update checks.
+- **Requeue.** 5s while a generation is not applied in full, 20s while the
+  cloud works on it, 1m for an import that is only observed, 30s after a
+  failed pass, and a 10m resync when settled. A change of a provider object
+  wakes its owner at once (by the `cluster-vending.io/network` or
+  `/cluster` label).
+- **Deletion.** With dependents (a network of an account, a cluster of a
+  network) nothing is deleted and the condition `DeletionBlocked=True` names
+  them. Without, the row is marked DELETING and the reconciler deletes the
+  cloud resources pass by pass; when it removes the row, the store drops the
+  finalizer and the object goes. A CloudAccount loses its ProviderConfig
+  (the tenant namespace stays) and then its finalizer.
 
 The scaffolded manifests under `config/` were adjusted to start
 `/cluster-vending controller`, but there is no image build for them yet, and

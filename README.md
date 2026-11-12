@@ -8,7 +8,8 @@ then take it over.
 
 The repository holds one binary with three roles: an API server (`serve`), a
 CLI that calls it (`bootstrap`, `network`, `cluster`, `admin`), and a
-controller manager (`controller`) whose reconcilers are not implemented yet.
+controller manager (`controller`) that reconciles the same resources when
+they are kept as custom resources.
 
 Nothing here has run against a real AWS account. See
 [docs/architecture.md](docs/architecture.md) for what is built, what is
@@ -59,12 +60,14 @@ architecture document).
 The controller manager is a separate command:
 
 ```sh
-kubectl apply -f controller/config/crd/bases
+bin/cluster-vending serve --config hack/config.local.yaml --store=kubernetes
 bin/cluster-vending controller --leader-elect=false
 ```
 
-It watches the `cloud.cluster-vending.io` kinds and changes nothing: the
-reconcilers are stubs. See [controller/README.md](controller/README.md).
+With `--store=kubernetes` the server only writes the
+`cloud.cluster-vending.io` objects and the controller reconciles them (the
+server's background loop is off; `--background-loop=true` runs the server
+without the controller). See [controller/README.md](controller/README.md).
 
 ## CLI walkthrough
 

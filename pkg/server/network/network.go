@@ -78,23 +78,15 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 			return nil, service.ToConnect(err)
 		}
 	}
-	if err := service.CheckAWSLabels(req.GetNetwork().GetLabels()); err != nil {
-		return nil, service.ToConnect(err)
-	}
-	account, layout, err := s.rec().Plan(ctx, req.GetTenantId(), req.GetNetwork().GetSpec())
+	row, err := s.NewRow(ctx, req)
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := bootstrapped(account); err != nil {
-		return nil, err
-	}
-	row, err := s.insert(ctx, req, account, layout)
-	if err != nil {
+	if err := s.deps.Store.Networks().Create(ctx, row); err != nil {
 		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network stored", "tenant_id", row.TenantID, "network_id", row.ID,
-		"name", row.Name, "bootstrap_id", account.ID, "region", row.Region,
-		"cidr", layout.CIDRBlock, "subnets", len(layout.Subnets))
+		"name", row.Name, "bootstrap_id", row.CloudAccountID, "region", row.Region)
 	n, err := s.stored(ctx, row)
 	return &cloudv1.CreateNetworkResponse{Network: n}, service.ToConnect(err)
 }
@@ -109,10 +101,27 @@ func bootstrapped(a *model.CloudAccount) error {
 	return nil
 }
 
-// insert stores the network as sent (input) and resolved (spec with the
+// NewRow checks a create request (the contract's rules, the labels, the
+// account, the layout) and returns the row CreateNetwork stores for it,
+// not stored yet: the network as sent (input) and resolved (spec with the
 // layout's defaults filled in), state PROVISIONING, its generation not
-// applied yet: the reconciler applies it. The row ID becomes Network.id.
-func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkRequest, a *model.CloudAccount, l corenetwork.Layout) (*model.Network, error) {
+// applied yet (the reconciler applies it). The stored row's ID becomes
+// Network.id. The controller builds the same row for a Network object
+// that was created without the API.
+func (s *NetworkService) NewRow(ctx context.Context, req *cloudv1.CreateNetworkRequest) (*model.Network, error) {
+	if err := service.Validate(req); err != nil {
+		return nil, err
+	}
+	if err := service.CheckAWSLabels(req.GetNetwork().GetLabels()); err != nil {
+		return nil, err
+	}
+	a, l, err := s.rec().Plan(ctx, req.GetTenantId(), req.GetNetwork().GetSpec())
+	if err != nil {
+		return nil, err
+	}
+	if err := bootstrapped(a); err != nil {
+		return nil, err
+	}
 	in := req.GetNetwork()
 	input, err := netreconcile.Encode(in)
 	if err != nil {
@@ -134,9 +143,6 @@ func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkR
 	}
 	if id := req.GetRequestId(); id != "" {
 		row.CreateRequestID = &id
-	}
-	if err := s.deps.Store.Networks().Create(ctx, row); err != nil {
-		return nil, service.ToConnect(err)
 	}
 	return row, nil
 }

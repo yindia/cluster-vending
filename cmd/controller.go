@@ -9,7 +9,6 @@ import (
 
 	"github.com/yindia/cluster-vending/controller"
 	"github.com/yindia/cluster-vending/pkg/config"
-	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
 func newControllerCmd(g *globals) *cobra.Command {
@@ -17,10 +16,12 @@ func newControllerCmd(g *globals) *cobra.Command {
 		Use:   "controller",
 		Short: "Run the controller manager of the platform's custom resources",
 		Long: "Run the controller manager for the cloud.cluster-vending.io kinds\n" +
-			"(CloudAccount, Network, Cluster) until SIGINT or SIGTERM. The\n" +
-			"reconcilers are not implemented yet: the manager watches the kinds and\n" +
-			"changes nothing. Their CRDs (controller/config/crd/bases) must be\n" +
-			"installed in the management cluster.",
+			"(CloudAccount, Network, Cluster) until SIGINT or SIGTERM. It reconciles\n" +
+			"the objects the API server writes with --store=kubernetes (and adopts\n" +
+			"Networks and Clusters created with kubectl): it creates, updates and\n" +
+			"deletes their cloud resources through Crossplane. It installs the\n" +
+			"kinds' CRDs and waits for the Crossplane AWS providers, which the API\n" +
+			"server (serve --install-providers) or an operator installs.",
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationSettingsFile: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -28,15 +29,13 @@ func newControllerCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			restConfig, err := kube.RESTConfig(g.cfg.Kubeconfig, g.cfg.KubeContext)
-			if err != nil {
-				return err
-			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return controller.Run(ctx, controller.Options{
-				Config: restConfig, MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
-				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace, Logger: g.logger,
+				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
+				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
+				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace,
+				RenderTarget: cfg.RenderTarget, RenderRollout: cfg.RenderRollout, AWS: cfg.AWS, Logger: g.logger,
 			})
 		},
 	}

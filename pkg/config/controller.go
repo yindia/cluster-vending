@@ -5,6 +5,7 @@ import (
 	"net"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // Flags and environment variables of the controller command.
@@ -33,6 +34,10 @@ var controllerSettings = []Setting{
 		Usage: "run the controllers behind leader election (a Lease), so one replica reconciles"},
 	{Flag: FlagLeaseNamespace, Env: EnvLeaseNamespace, Default: DefaultLeaseNamespace,
 		Usage: "namespace of the leader election Lease in the management cluster: the controller's own namespace"},
+	{Flag: FlagRenderTarget, Env: EnvRenderTarget, Default: "0",
+		Usage: "renderer version existing networks and clusters are re-applied up to; 0 is this build's version"},
+	{Flag: FlagRenderRollout, Env: EnvRenderRollout,
+		Usage: "comma-separated tenant, network or cluster IDs the renderer rollout is limited to; empty for all"},
 }
 
 // ControllerSettings returns the settings of the controller command.
@@ -44,6 +49,15 @@ type Controller struct {
 	MetricsAddr, ProbeAddr string
 	LeaderElect            bool
 	LeaseNamespace         string
+	// RenderTarget (0: this build's renderer version) and RenderRollout
+	// (empty: all) drive the renderer rollout, as for the server.
+	RenderTarget  int64
+	RenderRollout []string
+	// AWS holds only the keys found in the environment (AWS.StaticKeys:
+	// the controller's own AWS lookups use them for every account, for
+	// local testing). The management account is the server's to know: it
+	// installs the providers.
+	AWS AWS
 }
 
 // LoadController resolves and validates the controller settings from the
@@ -52,9 +66,18 @@ type Controller struct {
 func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	v, errs := resolve(controllerSettings, flags, env, file)
 	cfg := Controller{MetricsAddr: v[FlagMetricsAddr], ProbeAddr: v[FlagProbeAddr], LeaseNamespace: v[FlagLeaseNamespace]}
+	cfg.AWS.StaticKeys = staticKeysFrom(env)
 	var err error
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))
+	}
+	if cfg.RenderTarget, err = strconv.ParseInt(v[FlagRenderTarget], 10, 64); err != nil || cfg.RenderTarget < 0 {
+		errs = append(errs, fmt.Errorf("%s must be a non-negative integer, got %q", setting(FlagRenderTarget), v[FlagRenderTarget]))
+	}
+	for _, id := range strings.Split(v[FlagRenderRollout], ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			cfg.RenderRollout = append(cfg.RenderRollout, id)
+		}
 	}
 	for _, flag := range []string{FlagMetricsAddr, FlagProbeAddr} {
 		addr := v[flag]

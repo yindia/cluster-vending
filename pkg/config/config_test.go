@@ -125,6 +125,7 @@ func TestLoadServeDefaults(t *testing.T) {
 		LeaderElect:      true,
 		LeaseNamespace:   config.DefaultLeaseNamespace,
 		Store:            config.StoreDatabase,
+		BackgroundLoop:   true,
 		Provider: config.ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
 			CPURequest: "100m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"},
 		AWS: config.AWS{
@@ -144,6 +145,19 @@ func TestLoadServeStore(t *testing.T) {
 	cfg, err := config.LoadServe(nil, lookup(env), nil)
 	if err != nil || cfg.Store != config.StoreKubernetes {
 		t.Fatalf("store %q (%v), want kubernetes", cfg.Store, err)
+	}
+	// With the Kubernetes store the controller reconciles, not the server,
+	// unless it is asked to.
+	if cfg.BackgroundLoop {
+		t.Error("the background loop runs with the Kubernetes store by default")
+	}
+	env[config.EnvBackgroundLoop] = config.LoopOn
+	if cfg, err = config.LoadServe(nil, lookup(env), nil); err != nil || !cfg.BackgroundLoop {
+		t.Errorf("background loop forced on = %t (%v)", cfg.BackgroundLoop, err)
+	}
+	env[config.EnvBackgroundLoop] = "sometimes"
+	if _, err = config.LoadServe(nil, lookup(env), nil); err == nil {
+		t.Error("an unknown background loop mode was accepted")
 	}
 }
 

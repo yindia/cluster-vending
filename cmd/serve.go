@@ -104,13 +104,20 @@ func newServeCmd(g *globals) *cobra.Command {
 				AWSClusters: discovery,
 				Logger:      g.logger,
 			}
-			err = mgr.Add(&loop.Loop{
-				Store: deps.Store, Networks: network.NewNetworkService(deps), Clusters: cluster.NewClusterService(deps),
-				NetworkStates: network.PendingStates(), ClusterStates: cluster.PendingStates(),
-				RenderTarget: deps.RenderTarget, Interval: cfg.LoopInterval, Logger: g.logger,
-			})
-			if err != nil {
-				return err
+			if cfg.BackgroundLoop {
+				err = mgr.Add(&loop.Loop{
+					Store: deps.Store, Networks: network.NewNetworkService(deps), Clusters: cluster.NewClusterService(deps),
+					NetworkStates: network.PendingStates(), ClusterStates: cluster.PendingStates(),
+					RenderTarget: deps.RenderTarget, Interval: cfg.LoopInterval, Logger: g.logger,
+				})
+				if err != nil {
+					return err
+				}
+			} else {
+				// One reconciler per resource: with the Kubernetes store that
+				// is the controller.
+				g.logger.Info("the server does not reconcile: run `cluster-vending controller` (or --background-loop=true)",
+					"store", cfg.Store)
 			}
 			var ready atomic.Bool
 			done, err := server.StartManagement(ctx, mgr, &ready)

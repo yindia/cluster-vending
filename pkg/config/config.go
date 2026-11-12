@@ -51,6 +51,8 @@ const (
 	EnvInstallProviders  = "CV_INSTALL_PROVIDERS"
 	FlagLoopInterval     = "loop-interval"
 	EnvLoopInterval      = "CV_LOOP_INTERVAL"
+	FlagBackgroundLoop   = "background-loop"
+	EnvBackgroundLoop    = "CV_BACKGROUND_LOOP"
 	FlagLeaderElect      = "leader-elect"
 	EnvLeaderElect       = "CV_LEADER_ELECT"
 	FlagLeaseNamespace   = "lease-namespace"
@@ -99,10 +101,24 @@ const (
 	StoreKubernetes = "kubernetes"
 )
 
+// Whether the server reconciles by itself (FlagBackgroundLoop).
+const (
+	// LoopAuto: the background loop runs with the database store, and
+	// not with the Kubernetes store, where the controller (`cluster-vending
+	// controller`) reconciles the same objects: two reconcilers of one
+	// resource would apply over each other.
+	LoopAuto = "auto"
+	// LoopOn and LoopOff force it. LoopOn with the Kubernetes store is for
+	// running the server without the controller.
+	LoopOn  = "true"
+	LoopOff = "false"
+)
+
 var (
 	logLevels  = []string{"debug", "info", "warn", "error"}
 	logFormats = []string{"json", "text"}
 	stores     = []string{StoreDatabase, StoreKubernetes}
+	loopModes  = []string{LoopAuto, LoopOn, LoopOff}
 )
 
 var globalSettings = []Setting{
@@ -125,6 +141,8 @@ var serveSettings = append([]Setting{
 		Usage: "how long in-flight requests get to finish on shutdown"},
 	{Flag: FlagLoopInterval, Env: EnvLoopInterval, Default: "30s",
 		Usage: "how often the background loop moves unsettled networks and clusters on"},
+	{Flag: FlagBackgroundLoop, Env: EnvBackgroundLoop, Default: LoopAuto,
+		Usage: "whether the server reconciles networks and clusters itself (the background loop): auto (with --store=database, and not with --store=kubernetes, where `cluster-vending controller` does), true or false"},
 	{Flag: FlagLeaderElect, Env: EnvLeaderElect, Default: "true",
 		Usage: "run the background loop behind leader election (a Lease), so one server replica runs it"},
 	{Flag: FlagLeaseNamespace, Env: EnvLeaseNamespace, Default: DefaultLeaseNamespace,
@@ -179,6 +197,9 @@ type Serve struct {
 	LoopInterval   time.Duration
 	LeaderElect    bool
 	LeaseNamespace string
+	// BackgroundLoop is whether the server runs the background loop
+	// (FlagBackgroundLoop, resolved: auto is on for the database store only).
+	BackgroundLoop bool
 	// Store is where the state is kept (StoreDatabase or StoreKubernetes).
 	Store string
 	// RenderTarget (0: this build's renderer version) and RenderRollout
@@ -250,6 +271,14 @@ func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 	cfg.Store = v[FlagStore]
 	if cfg.Store != "" && !slices.Contains(stores, cfg.Store) {
 		errs = append(errs, fmt.Errorf("%s must be one of %v, got %q", setting(FlagStore), stores, cfg.Store))
+	}
+	switch mode := v[FlagBackgroundLoop]; mode {
+	case LoopAuto, "":
+		cfg.BackgroundLoop = cfg.Store != StoreKubernetes
+	case LoopOn, LoopOff:
+		cfg.BackgroundLoop = mode == LoopOn
+	default:
+		errs = append(errs, fmt.Errorf("%s must be one of %v, got %q", setting(FlagBackgroundLoop), loopModes, mode))
 	}
 	if cfg.RenderTarget, err = strconv.ParseInt(v[FlagRenderTarget], 10, 64); err != nil || cfg.RenderTarget < 0 {
 		errs = append(errs, fmt.Errorf("%s must be a non-negative integer, got %q", setting(FlagRenderTarget), v[FlagRenderTarget]))

@@ -33,13 +33,44 @@ import (
 // with GetAPIReader. Every cached kind must be served already
 // (WaitForKinds). Start the informers with StartInformers.
 func NewManager(cfg *rest.Config, cached []schema.GroupVersionKind, election LeaderElection) (manager.Manager, error) {
+	return NewManagerWith(cfg, ManagerOptions{Cached: cached, Election: election})
+}
+
+// ManagerOptions are what a manager of the management cluster is built
+// with (NewManagerWith).
+type ManagerOptions struct {
+	// Cached are the kinds the cache holds, the platform's objects only
+	// (the managed-by label): see NewManager.
+	Cached []schema.GroupVersionKind
+	// Unfiltered are kinds the cache holds whatever their labels: the
+	// platform's own kinds, which a controller watches and which someone
+	// may have created by hand.
+	Unfiltered []schema.GroupVersionKind
+	Election   LeaderElection
+	// LeaseName is the leader election Lease; empty for the server's.
+	LeaseName string
+	// MetricsAddr and ProbeAddr are the listen addresses of the manager's
+	// metrics and probes; empty or "0" turns them off.
+	MetricsAddr, ProbeAddr string
+}
+
+// NewManagerWith is NewManager with every option.
+func NewManagerWith(cfg *rest.Config, o ManagerOptions) (manager.Manager, error) {
 	scheme, err := Scheme()
 	if err != nil {
 		return nil, err
 	}
-	byObject := make(map[client.Object]cache.ByObject, len(cached))
-	for _, gvk := range cached {
+	election := o.Election
+	byObject := make(map[client.Object]cache.ByObject, len(o.Cached)+len(o.Unfiltered))
+	for _, gvk := range o.Cached {
 		byObject[unstructuredOf(gvk)] = cache.ByObject{}
+	}
+	for _, gvk := range o.Unfiltered {
+		byObject[unstructuredOf(gvk)] = cache.ByObject{Label: labels.Everything()}
+	}
+	lease := o.LeaseName
+	if lease == "" {
+		lease = leaseName
 	}
 	mgr, err := manager.New(cfg, manager.Options{
 		Scheme: scheme,
@@ -54,16 +85,24 @@ func NewManager(cfg *rest.Config, cached []schema.GroupVersionKind, election Lea
 			DisableFor:   []client.Object{&corev1.Secret{}},
 		}},
 		LeaderElection:                election.Enabled,
-		LeaderElectionID:              leaseName,
+		LeaderElectionID:              lease,
 		LeaderElectionNamespace:       election.Namespace,
 		LeaderElectionReleaseOnCancel: true,
-		Metrics:                       metricsserver.Options{BindAddress: "0"},
-		HealthProbeBindAddress:        "0",
+		Metrics:                       metricsserver.Options{BindAddress: off(o.MetricsAddr)},
+		HealthProbeBindAddress:        off(o.ProbeAddr),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("management cluster manager: %w", err)
 	}
 	return mgr, nil
+}
+
+// off is a listen address, "0" (off) for none.
+func off(addr string) string {
+	if addr == "" {
+		return "0"
+	}
+	return addr
 }
 
 // leaseName is the leader election Lease.

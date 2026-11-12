@@ -8,20 +8,35 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/yaml"
 
 	"github.com/yindia/cluster-vending/controller"
 	cloudv1alpha1 "github.com/yindia/cluster-vending/controller/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
-// The manager is built, with its three controllers and probes, without
-// contacting a cluster.
-func TestNewManagerRegistersTheControllers(t *testing.T) {
-	mgr, err := controller.NewManager(controller.Options{
-		Config: &rest.Config{Host: "http://127.0.0.1:1"}, MetricsAddr: "0", ProbeAddr: "0",
+// The three controllers and the probes are registered with a manager,
+// with the watches of the platform's kinds and of every provider kind it
+// renders, without contacting a cluster.
+func TestSetupRegistersTheControllers(t *testing.T) {
+	scheme, err := kube.Scheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := ctrl.NewManager(&rest.Config{Host: "http://127.0.0.1:1"}, ctrl.Options{
+		Scheme: scheme, Metrics: metricsserver.Options{BindAddress: "0"}, HealthProbeBindAddress: "0",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := controller.Setup(mgr, controller.Deps{}); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	// Registered once: a second controller of a name is refused.
+	if err := controller.Setup(mgr, controller.Deps{}); err == nil {
+		t.Error("the controllers were registered twice")
 	}
 	for _, kind := range []string{"CloudAccount", "Network", "Cluster"} {
 		if !mgr.GetScheme().Recognizes(cloudv1alpha1.GroupVersion.WithKind(kind)) {

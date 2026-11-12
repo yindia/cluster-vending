@@ -191,6 +191,17 @@ message ClusterSpec {
   // UpdateCluster refuse this field.
   ExistingCluster existing_cluster = 7;
 
+  // Which platform releases the cluster receives: how early it gets a new
+  // version of what the platform runs on its clusters. It is not the
+  // Kubernetes version (control_plane.kubernetes_version). Stored and
+  // returned; nothing acts on it yet.
+  ReleaseChannel release_channel = 8 [(buf.validate.field).enum.defined_only = true];
+
+  // How sensitive the cluster is, which decides its turn within its
+  // release channel: a release reaches tier 2 first, then tier 1, then
+  // tier 0. Stored and returned; nothing acts on it yet.
+  ClusterTier tier = 9 [(buf.validate.field).enum.defined_only = true];
+
   // The cloud the cluster runs on. Exactly one must be set, even if empty
   // (e.g. `aws: {}`).
   oneof provider {
@@ -202,6 +213,35 @@ message ClusterSpec {
     //   GcpClusterSpec   gcp   = 11;  (release channel, image type, ...)
     //   AzureClusterSpec azure = 12;  (sku tier, upgrade channels, ...)
   }
+}
+
+// ReleaseChannel is how early a cluster receives a platform release. A
+// release goes to the channels in order: ALPHA, then BETA, then STABLE.
+// Within a channel it goes to the clusters tier by tier (ClusterTier).
+enum ReleaseChannel {
+  // Not chosen. What that means is decided with the rollout itself.
+  RELEASE_CHANNEL_UNSPECIFIED = 0;
+  // First to receive a release: clusters that exist to find its problems.
+  RELEASE_CHANNEL_ALPHA = 1;
+  // Receives a release once it went through ALPHA.
+  RELEASE_CHANNEL_BETA = 2;
+  // Receives a release last, once it went through BETA.
+  RELEASE_CHANNEL_STABLE = 3;
+}
+
+// ClusterTier is how sensitive a cluster is: how much depends on it. The
+// lower the number, the more sensitive. Within a release channel a release
+// reaches the least sensitive clusters first: tier 2, then tier 1, then
+// tier 0.
+enum ClusterTier {
+  // Not chosen. What that means is decided with the rollout itself.
+  CLUSTER_TIER_UNSPECIFIED = 0;
+  // Most sensitive: receives a release of its channel last.
+  CLUSTER_TIER_0 = 1;
+  // Receives a release of its channel after tier 2 and before tier 0.
+  CLUSTER_TIER_1 = 2;
+  // Least sensitive: receives a release of its channel first.
+  CLUSTER_TIER_2 = 3;
 }
 
 // ClusterState is the coarse lifecycle state of a cluster.

@@ -23,6 +23,125 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ReleaseChannel is how early a cluster receives a platform release. A
+// release goes to the channels in order: ALPHA, then BETA, then STABLE.
+// Within a channel it goes to the clusters tier by tier (ClusterTier).
+type ReleaseChannel int32
+
+const (
+	// Not chosen. What that means is decided with the rollout itself.
+	ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED ReleaseChannel = 0
+	// First to receive a release: clusters that exist to find its problems.
+	ReleaseChannel_RELEASE_CHANNEL_ALPHA ReleaseChannel = 1
+	// Receives a release once it went through ALPHA.
+	ReleaseChannel_RELEASE_CHANNEL_BETA ReleaseChannel = 2
+	// Receives a release last, once it went through BETA.
+	ReleaseChannel_RELEASE_CHANNEL_STABLE ReleaseChannel = 3
+)
+
+// Enum value maps for ReleaseChannel.
+var (
+	ReleaseChannel_name = map[int32]string{
+		0: "RELEASE_CHANNEL_UNSPECIFIED",
+		1: "RELEASE_CHANNEL_ALPHA",
+		2: "RELEASE_CHANNEL_BETA",
+		3: "RELEASE_CHANNEL_STABLE",
+	}
+	ReleaseChannel_value = map[string]int32{
+		"RELEASE_CHANNEL_UNSPECIFIED": 0,
+		"RELEASE_CHANNEL_ALPHA":       1,
+		"RELEASE_CHANNEL_BETA":        2,
+		"RELEASE_CHANNEL_STABLE":      3,
+	}
+)
+
+func (x ReleaseChannel) Enum() *ReleaseChannel {
+	p := new(ReleaseChannel)
+	*p = x
+	return p
+}
+
+func (x ReleaseChannel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReleaseChannel) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_cluster_proto_enumTypes[0].Descriptor()
+}
+
+func (ReleaseChannel) Type() protoreflect.EnumType {
+	return &file_cloud_v1_cluster_proto_enumTypes[0]
+}
+
+func (x ReleaseChannel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReleaseChannel.Descriptor instead.
+func (ReleaseChannel) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{0}
+}
+
+// ClusterTier is how sensitive a cluster is: how much depends on it. The
+// lower the number, the more sensitive. Within a release channel a release
+// reaches the least sensitive clusters first: tier 2, then tier 1, then
+// tier 0.
+type ClusterTier int32
+
+const (
+	// Not chosen. What that means is decided with the rollout itself.
+	ClusterTier_CLUSTER_TIER_UNSPECIFIED ClusterTier = 0
+	// Most sensitive: receives a release of its channel last.
+	ClusterTier_CLUSTER_TIER_0 ClusterTier = 1
+	// Receives a release of its channel after tier 2 and before tier 0.
+	ClusterTier_CLUSTER_TIER_1 ClusterTier = 2
+	// Least sensitive: receives a release of its channel first.
+	ClusterTier_CLUSTER_TIER_2 ClusterTier = 3
+)
+
+// Enum value maps for ClusterTier.
+var (
+	ClusterTier_name = map[int32]string{
+		0: "CLUSTER_TIER_UNSPECIFIED",
+		1: "CLUSTER_TIER_0",
+		2: "CLUSTER_TIER_1",
+		3: "CLUSTER_TIER_2",
+	}
+	ClusterTier_value = map[string]int32{
+		"CLUSTER_TIER_UNSPECIFIED": 0,
+		"CLUSTER_TIER_0":           1,
+		"CLUSTER_TIER_1":           2,
+		"CLUSTER_TIER_2":           3,
+	}
+)
+
+func (x ClusterTier) Enum() *ClusterTier {
+	p := new(ClusterTier)
+	*p = x
+	return p
+}
+
+func (x ClusterTier) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ClusterTier) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_cluster_proto_enumTypes[1].Descriptor()
+}
+
+func (ClusterTier) Type() protoreflect.EnumType {
+	return &file_cloud_v1_cluster_proto_enumTypes[1]
+}
+
+func (x ClusterTier) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ClusterTier.Descriptor instead.
+func (ClusterTier) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{1}
+}
+
 // ClusterState is the coarse lifecycle state of a cluster.
 type ClusterState int32
 
@@ -76,11 +195,11 @@ func (x ClusterState) String() string {
 }
 
 func (ClusterState) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_cluster_proto_enumTypes[0].Descriptor()
+	return file_cloud_v1_cluster_proto_enumTypes[2].Descriptor()
 }
 
 func (ClusterState) Type() protoreflect.EnumType {
-	return &file_cloud_v1_cluster_proto_enumTypes[0]
+	return &file_cloud_v1_cluster_proto_enumTypes[2]
 }
 
 func (x ClusterState) Number() protoreflect.EnumNumber {
@@ -89,7 +208,7 @@ func (x ClusterState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClusterState.Descriptor instead.
 func (ClusterState) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{0}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{2}
 }
 
 // Cluster is a managed Kubernetes cluster owned by exactly one tenant.
@@ -275,6 +394,15 @@ type ClusterSpec struct {
 	// ClusterService.ImportCluster and TakeOverCluster. CreateCluster and
 	// UpdateCluster refuse this field.
 	ExistingCluster *ExistingCluster `protobuf:"bytes,7,opt,name=existing_cluster,json=existingCluster,proto3" json:"existing_cluster,omitempty"`
+	// Which platform releases the cluster receives: how early it gets a new
+	// version of what the platform runs on its clusters. It is not the
+	// Kubernetes version (control_plane.kubernetes_version). Stored and
+	// returned; nothing acts on it yet.
+	ReleaseChannel ReleaseChannel `protobuf:"varint,8,opt,name=release_channel,json=releaseChannel,proto3,enum=cloud.v1.ReleaseChannel" json:"release_channel,omitempty"`
+	// How sensitive the cluster is, which decides its turn within its
+	// release channel: a release reaches tier 2 first, then tier 1, then
+	// tier 0. Stored and returned; nothing acts on it yet.
+	Tier ClusterTier `protobuf:"varint,9,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
 	// The cloud the cluster runs on. Exactly one must be set, even if empty
 	// (e.g. `aws: {}`).
 	//
@@ -356,6 +484,20 @@ func (x *ClusterSpec) GetExistingCluster() *ExistingCluster {
 		return x.ExistingCluster
 	}
 	return nil
+}
+
+func (x *ClusterSpec) GetReleaseChannel() ReleaseChannel {
+	if x != nil {
+		return x.ReleaseChannel
+	}
+	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
+}
+
+func (x *ClusterSpec) GetTier() ClusterTier {
+	if x != nil {
+		return x.Tier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
 }
 
 func (x *ClusterSpec) GetProvider() isClusterSpec_Provider {
@@ -664,14 +806,16 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf5\x16\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf7\x17\n" +
 	"\vClusterSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x12:\n" +
 	"\anetwork\x18\x02 \x01(\v2\x18.cloud.v1.ClusterNetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12?\n" +
 	"\rcontrol_plane\x18\x03 \x01(\v2\x1a.cloud.v1.ControlPlaneSpecR\fcontrolPlane\x12J\n" +
 	"\x11default_node_pool\x18\x04 \x01(\v2\x16.cloud.v1.NodePoolSpecB\x06\xbaH\x03\xc8\x01\x01R\x0fdefaultNodePool\x12,\n" +
 	"\x06access\x18\x06 \x01(\v2\x14.cloud.v1.AccessSpecR\x06access\x12D\n" +
-	"\x10existing_cluster\x18\a \x01(\v2\x19.cloud.v1.ExistingClusterR\x0fexistingCluster\x12,\n" +
+	"\x10existing_cluster\x18\a \x01(\v2\x19.cloud.v1.ExistingClusterR\x0fexistingCluster\x12K\n" +
+	"\x0frelease_channel\x18\b \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x0ereleaseChannel\x123\n" +
+	"\x04tier\x18\t \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12,\n" +
 	"\x03aws\x18\n" +
 	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\xaa\x13\xbaH\xa6\x13\x1a\x8f\x01\n" +
 	"\n" +
@@ -708,7 +852,17 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\bprovider\"a\n" +
 	"\x0fClusterEndpoint\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12<\n" +
-	"\x1acertificate_authority_data\x18\x02 \x01(\fR\x18certificateAuthorityData*\xd6\x01\n" +
+	"\x1acertificate_authority_data\x18\x02 \x01(\fR\x18certificateAuthorityData*\x82\x01\n" +
+	"\x0eReleaseChannel\x12\x1f\n" +
+	"\x1bRELEASE_CHANNEL_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15RELEASE_CHANNEL_ALPHA\x10\x01\x12\x18\n" +
+	"\x14RELEASE_CHANNEL_BETA\x10\x02\x12\x1a\n" +
+	"\x16RELEASE_CHANNEL_STABLE\x10\x03*g\n" +
+	"\vClusterTier\x12\x1c\n" +
+	"\x18CLUSTER_TIER_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eCLUSTER_TIER_0\x10\x01\x12\x12\n" +
+	"\x0eCLUSTER_TIER_1\x10\x02\x12\x12\n" +
+	"\x0eCLUSTER_TIER_2\x10\x03*\xd6\x01\n" +
 	"\fClusterState\x12\x1d\n" +
 	"\x19CLUSTER_STATE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCLUSTER_STATE_PROVISIONING\x10\x01\x12\x19\n" +
@@ -731,54 +885,58 @@ func file_cloud_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_cluster_proto_rawDescData
 }
 
-var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_cloud_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_cloud_v1_cluster_proto_goTypes = []any{
-	(ClusterState)(0),             // 0: cloud.v1.ClusterState
-	(*Cluster)(nil),               // 1: cloud.v1.Cluster
-	(*ClusterSpec)(nil),           // 2: cloud.v1.ClusterSpec
-	(*ClusterStatus)(nil),         // 3: cloud.v1.ClusterStatus
-	(*ClusterEndpoint)(nil),       // 4: cloud.v1.ClusterEndpoint
-	nil,                           // 5: cloud.v1.Cluster.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
-	(*ClusterNetwork)(nil),        // 7: cloud.v1.ClusterNetwork
-	(*ControlPlaneSpec)(nil),      // 8: cloud.v1.ControlPlaneSpec
-	(*NodePoolSpec)(nil),          // 9: cloud.v1.NodePoolSpec
-	(*AccessSpec)(nil),            // 10: cloud.v1.AccessSpec
-	(*ExistingCluster)(nil),       // 11: cloud.v1.ExistingCluster
-	(*AwsClusterSpec)(nil),        // 12: cloud.v1.AwsClusterSpec
-	(*Condition)(nil),             // 13: cloud.v1.Condition
-	(*NetworkResources)(nil),      // 14: cloud.v1.NetworkResources
-	(*AwsClusterStatus)(nil),      // 15: cloud.v1.AwsClusterStatus
-	(*ImportStatus)(nil),          // 16: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),      // 17: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),       // 18: cloud.v1.ManagedResource
+	(ReleaseChannel)(0),           // 0: cloud.v1.ReleaseChannel
+	(ClusterTier)(0),              // 1: cloud.v1.ClusterTier
+	(ClusterState)(0),             // 2: cloud.v1.ClusterState
+	(*Cluster)(nil),               // 3: cloud.v1.Cluster
+	(*ClusterSpec)(nil),           // 4: cloud.v1.ClusterSpec
+	(*ClusterStatus)(nil),         // 5: cloud.v1.ClusterStatus
+	(*ClusterEndpoint)(nil),       // 6: cloud.v1.ClusterEndpoint
+	nil,                           // 7: cloud.v1.Cluster.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*ClusterNetwork)(nil),        // 9: cloud.v1.ClusterNetwork
+	(*ControlPlaneSpec)(nil),      // 10: cloud.v1.ControlPlaneSpec
+	(*NodePoolSpec)(nil),          // 11: cloud.v1.NodePoolSpec
+	(*AccessSpec)(nil),            // 12: cloud.v1.AccessSpec
+	(*ExistingCluster)(nil),       // 13: cloud.v1.ExistingCluster
+	(*AwsClusterSpec)(nil),        // 14: cloud.v1.AwsClusterSpec
+	(*Condition)(nil),             // 15: cloud.v1.Condition
+	(*NetworkResources)(nil),      // 16: cloud.v1.NetworkResources
+	(*AwsClusterStatus)(nil),      // 17: cloud.v1.AwsClusterStatus
+	(*ImportStatus)(nil),          // 18: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),      // 19: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),       // 20: cloud.v1.ManagedResource
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
-	5,  // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
-	2,  // 1: cloud.v1.Cluster.spec:type_name -> cloud.v1.ClusterSpec
-	3,  // 2: cloud.v1.Cluster.status:type_name -> cloud.v1.ClusterStatus
-	6,  // 3: cloud.v1.Cluster.create_time:type_name -> google.protobuf.Timestamp
-	6,  // 4: cloud.v1.Cluster.update_time:type_name -> google.protobuf.Timestamp
-	7,  // 5: cloud.v1.ClusterSpec.network:type_name -> cloud.v1.ClusterNetwork
-	8,  // 6: cloud.v1.ClusterSpec.control_plane:type_name -> cloud.v1.ControlPlaneSpec
-	9,  // 7: cloud.v1.ClusterSpec.default_node_pool:type_name -> cloud.v1.NodePoolSpec
-	10, // 8: cloud.v1.ClusterSpec.access:type_name -> cloud.v1.AccessSpec
-	11, // 9: cloud.v1.ClusterSpec.existing_cluster:type_name -> cloud.v1.ExistingCluster
-	12, // 10: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
-	0,  // 11: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
-	13, // 12: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
-	4,  // 13: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
-	14, // 14: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
-	15, // 15: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
-	16, // 16: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
-	17, // 17: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	18, // 18: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	7,  // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
+	4,  // 1: cloud.v1.Cluster.spec:type_name -> cloud.v1.ClusterSpec
+	5,  // 2: cloud.v1.Cluster.status:type_name -> cloud.v1.ClusterStatus
+	8,  // 3: cloud.v1.Cluster.create_time:type_name -> google.protobuf.Timestamp
+	8,  // 4: cloud.v1.Cluster.update_time:type_name -> google.protobuf.Timestamp
+	9,  // 5: cloud.v1.ClusterSpec.network:type_name -> cloud.v1.ClusterNetwork
+	10, // 6: cloud.v1.ClusterSpec.control_plane:type_name -> cloud.v1.ControlPlaneSpec
+	11, // 7: cloud.v1.ClusterSpec.default_node_pool:type_name -> cloud.v1.NodePoolSpec
+	12, // 8: cloud.v1.ClusterSpec.access:type_name -> cloud.v1.AccessSpec
+	13, // 9: cloud.v1.ClusterSpec.existing_cluster:type_name -> cloud.v1.ExistingCluster
+	0,  // 10: cloud.v1.ClusterSpec.release_channel:type_name -> cloud.v1.ReleaseChannel
+	1,  // 11: cloud.v1.ClusterSpec.tier:type_name -> cloud.v1.ClusterTier
+	14, // 12: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
+	2,  // 13: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
+	15, // 14: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
+	6,  // 15: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
+	16, // 16: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
+	17, // 17: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
+	18, // 18: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
+	19, // 19: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	20, // 20: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -806,7 +964,7 @@ func file_cloud_v1_cluster_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_cluster_proto_rawDesc), len(file_cloud_v1_cluster_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      3,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,

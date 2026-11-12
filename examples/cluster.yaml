@@ -18,6 +18,8 @@ spec:
     instanceTypes: [m7i-flex.large]
     diskSizeGb: 30
     scalingConfig: {minSize: 2, maxSize: 3}
+  # releaseChannel: RELEASE_CHANNEL_STABLE   # ALPHA | BETA | STABLE: stored, not acted on yet
+  # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2: a release reaches tier 2 first
   access:
     adminPrincipals: []      # IAM role/user ARNs; the creator is admin already
   aws:

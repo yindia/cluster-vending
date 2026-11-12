@@ -153,6 +153,7 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | pool `labels` | `labels` | `nodeConfig.labels` | `nodeLabels` |
 | pool `taints` | `taint[]` | `nodeConfig.taint[]` | `nodeTaints` |
 | `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
+| `spec.release_channel`, `spec.tier` | stored and returned only (see below) | - | - |
 | `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds` |
 | `spec.access.access_entries` | `AccessEntry` (any type) + one `AccessPolicyAssociation` per policy (cluster or namespace scope) | - | - |
 | `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` | - | - |
@@ -160,6 +161,12 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` (immutable) | - | - |
 | `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate`: an existing template, or a rendered ec2 `LaunchTemplate` (extra security groups, custom AMI) | - | - |
 | `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
+
+`spec.release_channel` (ALPHA, BETA, STABLE) and `spec.tier` (0, 1, 2; 0 is
+the most sensitive) say when a cluster receives a platform release: the
+channels in the order ALPHA, BETA, STABLE, and within a channel tier 2
+first, then tier 1, then tier 0. Both are accepted on create, stored and
+returned; nothing acts on them yet, and they render no Crossplane field.
 
 Per-provider settings that stay out of the common spec and land in the
 provider block (`gcp` / `azure`) when those providers ship: GCP release

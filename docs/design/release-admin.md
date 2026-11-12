@@ -611,3 +611,37 @@ Steps 1 to 3 can be done in parallel.
 6. **Hold expiry.** `until` ends a hold by itself. *Recommendation:* keep it
    optional; holds without it show on the channel's `held` count so they are
    not forgotten.
+
+## Resolver notes
+
+`pkg/release` implements section 5 with these choices where the section left
+room; they are proposals like the rest of this document.
+
+- **API shape.** `Resolve(ClusterFacts, releases, channels, *Hold) Decision`
+  and `CheckVersion(releases, channels, channel, version) error`, with the
+  package's own plain types instead of the `Input`/`Desired` sketch, so the
+  package depends on nothing. An adapter from the kinds comes with the
+  callers.
+- **Manual clusters** are checked against the release their channel offers
+  (unset: stable), not "the newest release on any channel": one rule for
+  both modes, and the channel is what the tenant chose.
+- **Manual protects versions, not bugs** (decided by the project owner): a
+  manual cluster's Kubernetes and component versions stay the tenant's, but
+  its renderer version is the offered release's, so platform fixes reach it
+  (note code `RendererFixes`). Component pins are not applied to manual
+  clusters.
+- **Staying means nothing moves.** When a cluster stays (paused channel,
+  unknown channel, channel offering nothing usable, frozen hold), neither
+  the release nor the Kubernetes minor changes, even if the current
+  release has an `upgradeTo` for that minor.
+- **A pause wins over a withdrawal.** A cluster on a withdrawn release does
+  not move while its channel is paused; it is warned and moves once the
+  channel resumes.
+- **Holds apply to automatic clusters only;** a manual cluster's versions are
+  already the tenant's.
+- **The tier is not an input.** It orders the rollout (the channel
+  controller), not its target.
+- **`CheckVersion` checks the minor** (`1.34.2` as `1.34`) against the
+  offered release and passes when there is nothing to check against (no
+  release, unknown channel, nothing offered), so a fresh install behaves as
+  today.

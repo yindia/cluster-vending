@@ -1,6 +1,6 @@
 # One image for the single binary: `cluster-vending serve` (the API server)
 # and `cluster-vending controller` (the controller manager) are subcommands
-# of it; the manifests under deploy/server and controller/config choose.
+# of it; the manifests under config/server and config choose.
 #
 #   make docker-build IMAGE=registry.example.com/cluster-vending TAG=dev
 #

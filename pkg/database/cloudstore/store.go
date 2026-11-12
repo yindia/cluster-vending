@@ -14,7 +14,7 @@
 //     "<provider>-<account ID>"). The row ID, which names the cloud
 //     resources and which the API addresses rows by, is a label
 //     (LabelID); rows are looked up by it.
-//   - spec is the row's contract spec, converted (controller/convert).
+//   - spec is the row's contract spec, converted (pkg/convert).
 //     The typed spec is the desired state: an edit of it is what the next
 //     read returns. What the typed spec has no field for is kept in an
 //     annotation (AnnotationRemainder) and handed back on reads.
@@ -25,7 +25,7 @@
 //     (contractStatus), the typed fields read from it, and the owner's
 //     managed resource records (inventory).
 //   - a Network is owned by its CloudAccount and a Cluster by its Network
-//     (controller owner references, controller/owner).
+//     (controller owner references, pkg/owner).
 //
 // What a database gives and Kubernetes does not:
 //
@@ -76,7 +76,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cloudv1alpha1 "github.com/yindia/cluster-vending/controller/api/v1alpha1"
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"

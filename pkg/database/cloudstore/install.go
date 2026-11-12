@@ -7,8 +7,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cloudv1alpha1 "github.com/yindia/cluster-vending/controller/api/v1alpha1"
-	"github.com/yindia/cluster-vending/controller/config/crd"
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/config/crd"
 )
 
 // fieldOwner is the server-side apply field manager of the definitions.

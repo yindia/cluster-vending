@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	cloudv1alpha1 "github.com/yindia/cluster-vending/controller/api/v1alpha1"
-	"github.com/yindia/cluster-vending/controller/owner"
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/owner"
 )
 
 // errNotThisStore is what the Adopt functions return for another store.

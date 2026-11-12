@@ -31,7 +31,7 @@ decided but not built, and what is not verified.
 | `make test` | Unit tests with the race detector. They use SQLite and a fake API server; no cluster is needed. |
 | `make test-postgres` | The database tests against a throwaway Postgres in docker. |
 | `make generate` | Regenerates `pkg/gen` from `idl/`. |
-| `make controller-apis` | Regenerate deepcopy code, CRDs and RBAC for the kinds in `controller/`. |
+| `make controller-apis` | Regenerate deepcopy code, CRDs and RBAC for the kinds in `api/`. |
 | `make mocks` | Regenerates the repository mocks. |
 | `make help` | Lists every target. |
 
@@ -67,7 +67,7 @@ bin/cluster-vending controller --leader-elect=false
 With `--store=kubernetes` the server only writes the
 `cloud.cluster-vending.io` objects and the controller reconciles them (the
 server's background loop is off; `--background-loop=true` runs the server
-without the controller). See [controller/README.md](controller/README.md).
+without the controller). See [docs/controller.md](docs/controller.md).
 
 ## CLI walkthrough
 
@@ -112,7 +112,7 @@ streams state and resource events, and `list` lists. Each command has
   direction the project is moving in.
 - [idl/README.md](idl/README.md): the `cloud.v1` contract and how its fields
   map to AWS.
-- [controller/README.md](controller/README.md): the kubebuilder project and
+- [docs/controller.md](docs/controller.md): the kubebuilder project and
   its kinds.
 - [docs/design/rollouts.md](docs/design/rollouts.md): the design for
   rollouts by release channel and tier (design only).

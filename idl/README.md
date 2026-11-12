@@ -14,7 +14,7 @@ It is read by:
   specs and statuses as its JSON form;
 - the code that turns a spec into Crossplane managed resources
   (`pkg/network`, `pkg/cluster`, `pkg/crossplane/aws`);
-- the controller's kinds (`controller/api/v1alpha1`), which mirror it.
+- the controller's kinds (`api/v1alpha1`), which mirror it.
 
 The server translates the contract into Crossplane managed resources of
 `crossplane-contrib/provider-upjet-aws` v2.9.0 (namespaced kinds,

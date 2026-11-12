@@ -25,7 +25,7 @@ last column were checked with `go list -deps`.
 | `pkg/loop` | The background loop: every interval it calls `Reconcile` for rows that are not settled. | Imports only `pkg/database`. It is handed the reconcilers. |
 | `pkg/cloud/aws` | Read-only AWS lookups for imports and checks. | Imports only `pkg/constant/aws`. |
 | `pkg/kube` | Client, scheme and server-side apply. | No storage, no RPC library. |
-| `controller/` | The kubebuilder project: API types (`controller/api/v1alpha1`), their conversion to the contract, the controllers, CRDs, the manager. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore`, `pkg/server` (the shared management cluster setup) and `pkg/server/{network,cluster}` (the row a create stores). |
+| `api/`, `pkg/controller`, `pkg/convert`, `pkg/owner`, `config/` | The kubebuilder project (`PROJECT` at the root): API types (`api/v1alpha1`), their conversion to the contract, the controllers and the manager (`pkg/controller/manager`), CRDs and deploy manifests for the controller and the server. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore`, `pkg/server` (the shared management cluster setup) and `pkg/server/{network,cluster}` (the row a create stores). |
 | `pkg/cli`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin and has no tests. | `pkg/cli` imports only the generated client. |
 
 Two things the table would otherwise hide:
@@ -33,7 +33,7 @@ Two things the table would otherwise hide:
 - `pkg/database/model` uses GORM for its hooks, so every package that imports
   the models (`pkg/reconcile` and above) links GORM even when no database is
   opened.
-- `pkg/kube` registers the controller's kinds (`controller/api/v1alpha1`) in
+- `pkg/kube` registers the controller's kinds (`api/v1alpha1`) in
   its scheme, so `pkg/crossplane/sequence` and everything above it depend on
   that package through `pkg/kube`.
 
@@ -162,7 +162,7 @@ row's etag; recording a status does not change it.
 | Backend | Selected with | Notes |
 |---|---|---|
 | Database (GORM: SQLite or Postgres) | `--store=database`, the default | Deletes are soft deletes. Uniqueness is enforced by partial unique indexes. |
-| Kubernetes custom resources | `--store=kubernetes` | Rows are CloudAccount, Network and Cluster objects of the `cloud.cluster-vending.io` kinds in the tenant's namespace (`pkg/database/cloudstore`), with the typed spec converted to and from the contract (`controller/convert`). Names are unique per tenant. Deletes are real deletes. Its one "transaction" undoes created rows on failure and is not atomic. There are no node pools. |
+| Kubernetes custom resources | `--store=kubernetes` | Rows are CloudAccount, Network and Cluster objects of the `cloud.cluster-vending.io` kinds in the tenant's namespace (`pkg/database/cloudstore`), with the typed spec converted to and from the contract (`pkg/convert`). Names are unique per tenant. Deletes are real deletes. Its one "transaction" undoes created rows on failure and is not atomic. There are no node pools. |
 
 Both run the same behaviour suite (`pkg/database/storetest`).
 
@@ -192,11 +192,11 @@ it exists, that is said.
 
 - **A controller reconciles the `cloud.cluster-vending.io` kinds.** Built,
   not verified against a real API server: the three controllers in
-  `controller/internal/controller` turn a watch event into a call of the
+  `pkg/controller` turn a watch event into a call of the
   existing reconcilers in `pkg/reconcile` (on `pkg/database/cloudstore`),
   adopt Networks and Clusters created with kubectl, apply spec edits, and
   requeue until a resource is settled. With `--store=kubernetes` the server
-  leaves reconciling to it (`--background-loop`). See `controller/README.md`.
+  leaves reconciling to it (`--background-loop`). See `docs/controller.md`.
 - **Ownership.** A CloudAccount owns its Networks and a Network owns its
   Clusters; one account has many of each. The references are required and
   immutable in the types, and the store and the controllers set the owner

@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yindia/cluster-vending/controller"
 	"github.com/yindia/cluster-vending/pkg/config"
+	"github.com/yindia/cluster-vending/pkg/controller/manager"
 )
 
 func newControllerCmd(g *globals) *cobra.Command {
@@ -31,7 +31,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return controller.Run(ctx, controller.Options{
+			return manager.Run(ctx, manager.Options{
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace,

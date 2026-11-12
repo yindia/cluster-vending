@@ -85,10 +85,10 @@ mocks: ## Generate the repository mocks (go.uber.org/mock, pkg/database/reposito
 	go generate ./pkg/database/repository/...
 
 .PHONY: controller-apis
-controller-apis: ## Generate the deepcopy code, CRDs and RBAC of the controller's API (controller-gen, controller/)
-	go tool controller-gen object:headerFile=controller/hack/boilerplate.go.txt paths=./controller/api/...
-	go tool controller-gen crd paths=./controller/api/... output:crd:dir=controller/config/crd/bases
-	go tool controller-gen rbac:roleName=manager-role paths=./controller/internal/... output:rbac:dir=controller/config/rbac
+controller-apis: ## Generate the deepcopy code, CRDs and RBAC of the controller's API (controller-gen, api/ and config/)
+	go tool controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/...
+	go tool controller-gen crd paths=./api/... output:crd:dir=config/crd/bases
+	go tool controller-gen rbac:roleName=manager-role paths=./pkg/controller/... output:rbac:dir=config/rbac
 
 .PHONY: tidy
 tidy: ## Run go mod tidy
@@ -169,7 +169,7 @@ TAG      ?= $(VERSION)
 GO_IMAGE_VERSION ?= $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
 # kustomize, or the one built into kubectl.
 KUSTOMIZE ?= $(shell command -v kustomize >/dev/null 2>&1 && echo 'kustomize build' || echo 'kubectl kustomize')
-DEPLOY_DIRS := controller/config/default deploy/server/overlays/kubernetes-store deploy/server/overlays/postgres
+DEPLOY_DIRS := config/default config/server/overlays/kubernetes-store config/server/overlays/postgres
 
 .PHONY: docker-build
 docker-build: ## Build the container image IMAGE:TAG (needs Docker; nothing is pushed)

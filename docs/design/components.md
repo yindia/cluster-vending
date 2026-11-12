@@ -61,7 +61,7 @@ in section 8.
 
 | Fact | Where |
 |---|---|
-| The platform installs five EKS add-ons on every cluster and accepts more through the cluster spec. | `crossplaneaws.DefaultAddons`, `spec.aws.addons`, `AWSAddon` in `controller/api/v1alpha1` |
+| The platform installs five EKS add-ons on every cluster and accepts more through the cluster spec. | `crossplaneaws.DefaultAddons`, `spec.aws.addons`, `AWSAddon` in `api/v1alpha1` |
 | Add-ons are created only once the EKS cluster is ACTIVE, and their versions are held back during a Kubernetes upgrade until the control plane reports the target. | `crossplaneaws.ClusterSet`, `Reconciler.GateUpgrade` |
 | An add-on can be given an IAM role through a pod identity association. | `PodIdentityAssociation` objects rendered with the add-ons |
 | The Crossplane Helm provider is installed in the management cluster with the AWS providers, and its `Release` kind is activated. Nothing renders a `Release` yet. | `crossplane.HelmProvider` (v1.5.0), `pkg/crossplane/aws/install.go`, `activation.go` |

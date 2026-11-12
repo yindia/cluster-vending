@@ -58,7 +58,7 @@ Order and promotion:
   tier 1, tier 2). Tier 0 is the most sensitive. Both are on the contract
   (`ClusterSpec.release_channel`, `ClusterSpec.tier` in
   `idl/cloud/v1/cluster.proto`) and on the controller's `Cluster` kind
-  (`spec.releaseChannel`, `spec.tier` in `controller/api/v1alpha1`). Today
+  (`spec.releaseChannel`, `spec.tier` in `api/v1alpha1`). Today
   they are stored and returned and nothing acts on them.
 - Channels receive a release in the order alpha, beta, stable. Within a
   channel a release reaches tier 2 first, then tier 1, then tier 0.
@@ -106,7 +106,7 @@ question 8.
 | Upgrade gating | `Reconciler.GateUpgrade`, `CheckVersionStep` (`pkg/reconcile/cluster/upgrade.go`) | During a Kubernetes upgrade the node groups and add-ons stay at the running versions until the control plane reports the target. `CheckVersionStep` checks the step between the stored and the requested version. |
 | Default add-ons | `crossplaneaws.DefaultAddons` (`pkg/crossplane/aws/addons.go`) | The add-ons every cluster gets: vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver. |
 | Ordered apply | `sequence.Engine` (`pkg/crossplane/sequence`) | Applies one owner's objects in order. It orders objects inside one cluster, not clusters. |
-| Kinds and ownership | `controller/api/v1alpha1`: CloudAccount owns Network owns Cluster | Status subresource with `observedGeneration`, `phase`, `conditions` (Ready, Synced), observed versions and an inventory. |
+| Kinds and ownership | `api/v1alpha1`: CloudAccount owns Network owns Cluster | Status subresource with `observedGeneration`, `phase`, `conditions` (Ready, Synced), observed versions and an inventory. |
 
 Two facts follow from the code and shape the design:
 

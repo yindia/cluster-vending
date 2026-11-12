@@ -316,6 +316,76 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 	}
 }
 
+// The OIDC identity provider is set, changed and removed as an object of
+// its own: the EKS cluster is not touched, and a change is a new object
+// (EKS cannot change an association).
+func TestOIDCIdentityProviderChangesInPlace(t *testing.T) {
+	w := appliedWorld(t)
+	ctx := t.Context()
+	const path = "spec.access.oidc"
+	oidc := func(groupsPrefix string) *cloudv1.ClusterSpec {
+		return &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta",
+			IssuerUrl: "https://example.okta.com", ClientId: "kubernetes", GroupsClaim: "groups", GroupsPrefix: groupsPrefix}}}
+	}
+	list := func() []awseks.IdentityProviderConfig {
+		t.Helper()
+		l := &awseks.IdentityProviderConfigList{}
+		if err := w.kube.List(ctx, l, client.InNamespace(worldNS)); err != nil {
+			t.Fatal(err)
+		}
+		return l.Items
+	}
+
+	if _, err := update(t, w, updateRequest(w, oidc("oidc:"), path)); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got := list()
+	if len(got) != 1 || got[0].Annotations[crossplaneaws.ExternalNameAnnotation] != "okta" ||
+		*got[0].Spec.ForProvider.Oidc.GroupsPrefix != "oidc:" {
+		t.Fatalf("after set: %+v", got)
+	}
+	first := got[0].Name
+
+	// A change: planned as one object created and one deleted, nothing on
+	// the cluster, applicable.
+	plan := updateRequest(w, oidc("sso:"), path)
+	plan.ValidateOnly = true
+	planned, err := update(t, w, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pl := planned.GetPlan()
+	if len(changesOf(pl, "IdentityProviderConfig", cloudv1.PlannedAction_PLANNED_ACTION_CREATE)) != 1 ||
+		len(changesOf(pl, "IdentityProviderConfig", cloudv1.PlannedAction_PLANNED_ACTION_DELETE)) != 1 ||
+		len(changesOf(pl, "IdentityProviderConfig", cloudv1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE)) != 0 || !pl.GetApplicable() {
+		t.Errorf("plan of a changed identity provider = %v (applicable %t), want one created and one deleted", pl.GetChanges(), pl.GetApplicable())
+	}
+	for _, c := range pl.GetChanges() {
+		if c.GetKind() == "Cluster" || c.GetKind() == "NodeGroup" {
+			t.Errorf("an identity provider change plans %s %s: %s", c.GetKind(), c.GetName(), c.GetDetail())
+		}
+	}
+	if _, err := update(t, w, updateRequest(w, oidc("sso:"), path)); err != nil {
+		t.Fatalf("change: %v", err)
+	}
+	if got = list(); len(got) != 1 || got[0].Name == first || *got[0].Spec.ForProvider.Oidc.GroupsPrefix != "sso:" {
+		t.Errorf("after the change: %+v, want only the new object", got)
+	}
+
+	if _, err := update(t, w, updateRequest(w, &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{}}, path)); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if got = list(); len(got) != 0 {
+		t.Errorf("after remove: %+v", got)
+	}
+
+	bad := oidc("")
+	bad.Access.Oidc.IssuerUrl = "http://example.okta.com"
+	if _, err := update(t, w, updateRequest(w, bad, path)); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("an http issuer: %v, want INVALID_ARGUMENT", err)
+	}
+}
+
 func objectMeta(name string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Namespace: worldNS, Name: name}
 }

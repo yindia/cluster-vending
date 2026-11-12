@@ -186,6 +186,77 @@ spec:
                     maxItems: 20
                     type: array
                     x-kubernetes-list-type: set
+                  oidc:
+                    description: |-
+                      oidc is an OIDC identity provider the Kubernetes API accepts tokens
+                      from, next to IAM (AWS only; a cluster takes one). Mutable: a change
+                      removes the association and makes a new one. The users it
+                      authenticates have no permissions until a (Cluster)RoleBinding
+                      names them or their groups.
+                    properties:
+                      clientID:
+                        description: 'clientID is the client the tokens are issued
+                          to: their "aud" claim.'
+                        maxLength: 255
+                        minLength: 1
+                        type: string
+                      groupsClaim:
+                        description: |-
+                          groupsClaim is the claim that lists the user's groups. Unset: no
+                          groups.
+                        maxLength: 255
+                        type: string
+                      groupsPrefix:
+                        description: groupsPrefix is put in front of every group.
+                        maxLength: 255
+                        type: string
+                        x-kubernetes-validations:
+                        - message: 'a prefix cannot contain system:'
+                          rule: '!self.contains(''system:'')'
+                      issuerURL:
+                        description: |-
+                          issuerURL is the "iss" claim of the provider's tokens: HTTPS, and
+                          reachable from the internet.
+                        maxLength: 2048
+                        pattern: ^https://[^\s?#]+$
+                        type: string
+                      name:
+                        description: name of the association.
+                        maxLength: 100
+                        minLength: 1
+                        pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                        type: string
+                      requiredClaims:
+                        additionalProperties:
+                          type: string
+                        description: requiredClaims are claims a token must carry,
+                          with their values.
+                        maxProperties: 50
+                        type: object
+                        x-kubernetes-validations:
+                        - message: a required claim is 1 to 63 characters, its value
+                            1 to 253
+                          rule: self.all(k, size(k) >= 1 && size(k) <= 63 && size(self[k])
+                            >= 1 && size(self[k]) <= 253)
+                      usernameClaim:
+                        description: 'usernameClaim is the claim that is the user
+                          name. Unset: "sub".'
+                        maxLength: 255
+                        type: string
+                      usernamePrefix:
+                        description: |-
+                          usernamePrefix is put in front of the user name; "-" for none.
+                          Unset: the issuer URL, unless usernameClaim is "email".
+                        maxLength: 255
+                        type: string
+                        x-kubernetes-validations:
+                        - message: 'a prefix cannot contain system:'
+                          rule: '!self.contains(''system:'')'
+                    required:
+                    - clientID
+                    - issuerURL
+                    - name
+                    type: object
                 type: object
               aws:
                 description: aws selects AWS (EKS) and carries its settings.

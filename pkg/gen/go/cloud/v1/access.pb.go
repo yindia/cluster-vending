@@ -171,6 +171,17 @@ type AccessSpec struct {
 	//	AWS   one AccessEntry each, plus one AccessPolicyAssociation per
 	//	      policy
 	AccessEntries []*AccessEntry `protobuf:"bytes,2,rep,name=access_entries,json=accessEntries,proto3" json:"access_entries,omitempty"`
+	// AWS: an OIDC identity provider the Kubernetes API accepts tokens from,
+	// next to IAM. Unset: IAM only. A cluster takes one. Mutable: set,
+	// changed or removed without touching the cluster; EKS cannot change an
+	// association in place, so a change removes it and associates the new
+	// one (each takes EKS several minutes, and tokens are refused in
+	// between). Works with every authentication_mode. A user it
+	// authenticates has no permissions until a (Cluster)RoleBinding names
+	// the user or one of its groups: the platform creates none.
+	//
+	//	AWS   one IdentityProviderConfig, created once the cluster is ACTIVE
+	Oidc          *OidcIdentityProvider `protobuf:"bytes,3,opt,name=oidc,proto3" json:"oidc,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -219,6 +230,127 @@ func (x *AccessSpec) GetAccessEntries() []*AccessEntry {
 	return nil
 }
 
+func (x *AccessSpec) GetOidc() *OidcIdentityProvider {
+	if x != nil {
+		return x.Oidc
+	}
+	return nil
+}
+
+// OidcIdentityProvider is an OIDC identity provider of the Kubernetes API
+// (EKS: IdentityProviderConfig.oidc).
+type OidcIdentityProvider struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Name of the association (identityProviderConfigName).
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The issuer: the "iss" claim of its tokens, e.g.
+	// "https://example.okta.com". HTTPS, and reachable from the internet:
+	// EKS reads its discovery document.
+	IssuerUrl string `protobuf:"bytes,2,opt,name=issuer_url,json=issuerUrl,proto3" json:"issuer_url,omitempty"`
+	// The client the tokens are issued to: their "aud" claim.
+	ClientId string `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// The claim that is the Kubernetes user name. Unset: EKS uses "sub".
+	UsernameClaim string `protobuf:"bytes,4,opt,name=username_claim,json=usernameClaim,proto3" json:"username_claim,omitempty"`
+	// Put in front of the user name, e.g. "oidc:". Unset: EKS prefixes the
+	// issuer URL, unless username_claim is "email". "-" for none.
+	UsernamePrefix string `protobuf:"bytes,5,opt,name=username_prefix,json=usernamePrefix,proto3" json:"username_prefix,omitempty"`
+	// The claim that lists the user's groups, e.g. "groups". Unset: no
+	// groups.
+	GroupsClaim string `protobuf:"bytes,6,opt,name=groups_claim,json=groupsClaim,proto3" json:"groups_claim,omitempty"`
+	// Put in front of every group, e.g. "oidc:".
+	GroupsPrefix string `protobuf:"bytes,7,opt,name=groups_prefix,json=groupsPrefix,proto3" json:"groups_prefix,omitempty"`
+	// Claims a token must carry, with their values.
+	RequiredClaims map[string]string `protobuf:"bytes,8,rep,name=required_claims,json=requiredClaims,proto3" json:"required_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OidcIdentityProvider) Reset() {
+	*x = OidcIdentityProvider{}
+	mi := &file_cloud_v1_access_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OidcIdentityProvider) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OidcIdentityProvider) ProtoMessage() {}
+
+func (x *OidcIdentityProvider) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_access_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OidcIdentityProvider.ProtoReflect.Descriptor instead.
+func (*OidcIdentityProvider) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *OidcIdentityProvider) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetIssuerUrl() string {
+	if x != nil {
+		return x.IssuerUrl
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetUsernameClaim() string {
+	if x != nil {
+		return x.UsernameClaim
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetUsernamePrefix() string {
+	if x != nil {
+		return x.UsernamePrefix
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetGroupsClaim() string {
+	if x != nil {
+		return x.GroupsClaim
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetGroupsPrefix() string {
+	if x != nil {
+		return x.GroupsPrefix
+	}
+	return ""
+}
+
+func (x *OidcIdentityProvider) GetRequiredClaims() map[string]string {
+	if x != nil {
+		return x.RequiredClaims
+	}
+	return nil
+}
+
 // AccessEntry is one EKS access entry.
 type AccessEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -235,7 +367,7 @@ type AccessEntry struct {
 
 func (x *AccessEntry) Reset() {
 	*x = AccessEntry{}
-	mi := &file_cloud_v1_access_proto_msgTypes[1]
+	mi := &file_cloud_v1_access_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -247,7 +379,7 @@ func (x *AccessEntry) String() string {
 func (*AccessEntry) ProtoMessage() {}
 
 func (x *AccessEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_access_proto_msgTypes[1]
+	mi := &file_cloud_v1_access_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -260,7 +392,7 @@ func (x *AccessEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccessEntry.ProtoReflect.Descriptor instead.
 func (*AccessEntry) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_access_proto_rawDescGZIP(), []int{1}
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AccessEntry) GetPrincipalArn() string {
@@ -300,7 +432,7 @@ type AccessPolicy struct {
 
 func (x *AccessPolicy) Reset() {
 	*x = AccessPolicy{}
-	mi := &file_cloud_v1_access_proto_msgTypes[2]
+	mi := &file_cloud_v1_access_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -312,7 +444,7 @@ func (x *AccessPolicy) String() string {
 func (*AccessPolicy) ProtoMessage() {}
 
 func (x *AccessPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_access_proto_msgTypes[2]
+	mi := &file_cloud_v1_access_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -325,7 +457,7 @@ func (x *AccessPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccessPolicy.ProtoReflect.Descriptor instead.
 func (*AccessPolicy) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_access_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AccessPolicy) GetPolicyArn() string {
@@ -353,12 +485,27 @@ var File_cloud_v1_access_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_access_proto_rawDesc = "" +
 	"\n" +
-	"\x15cloud/v1/access.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/options.proto\"\x92\x02\n" +
+	"\x15cloud/v1/access.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/options.proto\"\xc6\x02\n" +
 	"\n" +
 	"AccessSpec\x12>\n" +
 	"\x10admin_principals\x18\x01 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10\x14\x18\x01\"\ar\x05\x10\x01\x18\x80\x10R\x0fadminPrincipals\x12F\n" +
-	"\x0eaccess_entries\x18\x02 \x03(\v2\x15.cloud.v1.AccessEntryB\b\xbaH\x05\x92\x01\x02\x102R\raccessEntries:|\xbaHy\x1aw\n" +
-	"\x15access_entries.unique\x12(access_entries principals must be unique\x1a4this.access_entries.map(e, e.principal_arn).unique()\"\x9b\x04\n" +
+	"\x0eaccess_entries\x18\x02 \x03(\v2\x15.cloud.v1.AccessEntryB\b\xbaH\x05\x92\x01\x02\x102R\raccessEntries\x122\n" +
+	"\x04oidc\x18\x03 \x01(\v2\x1e.cloud.v1.OidcIdentityProviderR\x04oidc:|\xbaHy\x1aw\n" +
+	"\x15access_entries.unique\x12(access_entries principals must be unique\x1a4this.access_entries.map(e, e.principal_arn).unique()\"\xc8\x04\n" +
+	"\x14OidcIdentityProvider\x12;\n" +
+	"\x04name\x18\x01 \x01(\tB'\xbaH$r\"\x10\x01\x18d2\x1c^[A-Za-z0-9][A-Za-z0-9._-]*$R\x04name\x12;\n" +
+	"\n" +
+	"issuer_url\x18\x02 \x01(\tB\x1c\xbaH\x19r\x17\x18\x80\x102\x12^https://[^\\s?#]+$R\tissuerUrl\x12'\n" +
+	"\tclient_id\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\bclientId\x12/\n" +
+	"\x0eusername_claim\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\rusernameClaim\x12;\n" +
+	"\x0fusername_prefix\x18\x05 \x01(\tB\x12\xbaH\x0fr\r\x18\xff\x01\xba\x01\asystem:R\x0eusernamePrefix\x12+\n" +
+	"\fgroups_claim\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\vgroupsClaim\x127\n" +
+	"\rgroups_prefix\x18\a \x01(\tB\x12\xbaH\x0fr\r\x18\xff\x01\xba\x01\asystem:R\fgroupsPrefix\x12v\n" +
+	"\x0frequired_claims\x18\b \x03(\v22.cloud.v1.OidcIdentityProvider.RequiredClaimsEntryB\x19\xbaH\x16\x9a\x01\x13\x102\"\x06r\x04\x10\x01\x18?*\ar\x05\x10\x01\x18\xfd\x01R\x0erequiredClaims\x1aA\n" +
+	"\x13RequiredClaimsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9b\x04\n" +
 	"\vAccessEntry\x12\x86\x01\n" +
 	"\rprincipal_arn\x18\x01 \x01(\tBa\xbaH^r\\2@^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$\xba\x01\x17:role/aws-service-role/R\fprincipalArn\x127\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x19.cloud.v1.AccessEntryTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04type\x12<\n" +
@@ -411,24 +558,28 @@ func file_cloud_v1_access_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_access_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_cloud_v1_access_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_cloud_v1_access_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_cloud_v1_access_proto_goTypes = []any{
-	(AccessEntryType)(0),   // 0: cloud.v1.AccessEntryType
-	(AccessPolicyScope)(0), // 1: cloud.v1.AccessPolicyScope
-	(*AccessSpec)(nil),     // 2: cloud.v1.AccessSpec
-	(*AccessEntry)(nil),    // 3: cloud.v1.AccessEntry
-	(*AccessPolicy)(nil),   // 4: cloud.v1.AccessPolicy
+	(AccessEntryType)(0),         // 0: cloud.v1.AccessEntryType
+	(AccessPolicyScope)(0),       // 1: cloud.v1.AccessPolicyScope
+	(*AccessSpec)(nil),           // 2: cloud.v1.AccessSpec
+	(*OidcIdentityProvider)(nil), // 3: cloud.v1.OidcIdentityProvider
+	(*AccessEntry)(nil),          // 4: cloud.v1.AccessEntry
+	(*AccessPolicy)(nil),         // 5: cloud.v1.AccessPolicy
+	nil,                          // 6: cloud.v1.OidcIdentityProvider.RequiredClaimsEntry
 }
 var file_cloud_v1_access_proto_depIdxs = []int32{
-	3, // 0: cloud.v1.AccessSpec.access_entries:type_name -> cloud.v1.AccessEntry
-	0, // 1: cloud.v1.AccessEntry.type:type_name -> cloud.v1.AccessEntryType
-	4, // 2: cloud.v1.AccessEntry.policies:type_name -> cloud.v1.AccessPolicy
-	1, // 3: cloud.v1.AccessPolicy.scope:type_name -> cloud.v1.AccessPolicyScope
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: cloud.v1.AccessSpec.access_entries:type_name -> cloud.v1.AccessEntry
+	3, // 1: cloud.v1.AccessSpec.oidc:type_name -> cloud.v1.OidcIdentityProvider
+	6, // 2: cloud.v1.OidcIdentityProvider.required_claims:type_name -> cloud.v1.OidcIdentityProvider.RequiredClaimsEntry
+	0, // 3: cloud.v1.AccessEntry.type:type_name -> cloud.v1.AccessEntryType
+	5, // 4: cloud.v1.AccessEntry.policies:type_name -> cloud.v1.AccessPolicy
+	1, // 5: cloud.v1.AccessPolicy.scope:type_name -> cloud.v1.AccessPolicyScope
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_access_proto_init() }
@@ -443,7 +594,7 @@ func file_cloud_v1_access_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_access_proto_rawDesc), len(file_cloud_v1_access_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -108,6 +108,9 @@ type ClusterPlan struct {
 	ClusterHeld bool
 	// AccessEntries are the access entries beyond AdminPrincipals.
 	AccessEntries []AccessEntryPlan
+	// IdentityProvider is the OIDC identity provider the Kubernetes API
+	// accepts tokens from; nil for none.
+	IdentityProvider *IdentityProviderPlan
 	// IRSA renders the IAM OIDC provider of the cluster's issuer, once
 	// OIDCIssuer (the EKS cluster's, known when it is ACTIVE) is set.
 	IRSA       bool
@@ -212,7 +215,8 @@ func ClusterPrefix(tenantID, clusterID, name string) string {
 // and node roles with their policies, the EKS cluster, the default node
 // group (after its launch template), the add-ons, the EBS CSI driver's
 // role and pod identity, one access entry with cluster-admin per admin
-// principal, the other access entries and the IAM OIDC provider. Objects
+// principal, the other access entries, the OIDC identity provider of the
+// Kubernetes API and the IAM OIDC provider. Objects
 // that cannot be rendered yet (Pending) are left out, with the Usages that
 // refer to them.
 func ClusterResources(p ClusterPlan) []client.Object {
@@ -239,6 +243,9 @@ func ClusterResources(p ClusterPlan) []client.Object {
 		out = append(out, b.accessEntry(entry, principal), b.accessPolicy(entry, principal))
 	}
 	out = append(out, b.accessEntries()...)
+	if p.IdentityProvider != nil {
+		out = append(out, b.managedIdentityProvider(*p.IdentityProvider))
+	}
 	if p.IRSA {
 		out = append(out, b.oidcProvider())
 	}

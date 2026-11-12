@@ -115,6 +115,14 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 		}
 		dst.Access.AccessEntries = src.GetAccess().GetAccessEntries()
 	},
+	// The identity provider is an object of its own too. EKS cannot change
+	// one: a change deletes it and creates the new one.
+	"spec.access.oidc": func(dst, src *cloudv1.ClusterSpec) {
+		if dst.Access == nil {
+			dst.Access = &cloudv1.AccessSpec{}
+		}
+		dst.Access.Oidc = src.GetAccess().GetOidc()
+	},
 	"spec.control_plane.endpoint_access.endpoint_private_access": func(dst, src *cloudv1.ClusterSpec) {
 		endpointAccess(dst).EndpointPrivateAccess = optionalBool(src.GetControlPlane().GetEndpointAccess(), func(a *cloudv1.EndpointAccess) *bool { return a.EndpointPrivateAccess })
 	},

@@ -153,12 +153,14 @@ func (s *Reconciler) nothingCarriedOver(ctx context.Context, row *model.Cluster)
 
 // CarriedOverConflict refuses to turn on a setting that renders an object
 // the cluster already carries over from its import: the IAM OIDC provider
-// (spec.aws.irsa) and the control plane's log group. Both would be
-// rendered under the carried-over object's name, without its cloud
-// identity.
+// (spec.aws.irsa) and the control plane's log group, both rendered under
+// the carried-over object's name, without its cloud identity; and the
+// OIDC identity provider (spec.access.oidc), of which EKS takes one per
+// cluster.
 func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec) error {
 	irsa, logGroup := spec.GetAws().GetIrsa(), spec.GetAws().GetControlPlaneLogGroup().GetEnabled()
-	if !row.Imported || (!irsa && !logGroup) {
+	oidc := spec.GetAccess().GetOidc() != nil
+	if !row.Imported || (!irsa && !logGroup && !oidc) {
 		return nil
 	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
@@ -174,6 +176,9 @@ func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster
 		case logGroup && r.Kind == "Group":
 			return fault.New(fault.FailedPrecondition,
 				"spec.aws.control_plane_log_group: the cluster already has the log group it was imported with ("+r.Name+"); it stays as it is")
+		case oidc && r.Kind == "IdentityProviderConfig":
+			return fault.New(fault.FailedPrecondition,
+				"spec.access.oidc: the cluster already has the OIDC identity provider it was imported with ("+r.Name+"), and EKS takes one per cluster; it stays as it is")
 		}
 	}
 	return nil

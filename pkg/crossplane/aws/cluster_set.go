@@ -22,13 +22,14 @@ var AfterActiveKinds = map[string]bool{
 	awseks.Addon_Kind: true, awseks.PodIdentityAssociation_Kind: true,
 	awseks.AccessEntry_Kind: true, awseks.AccessPolicyAssociation_Kind: true,
 	awseks.NodeGroup_Kind: true, awseks.ClusterAuth_Kind: true,
+	awseks.IdentityProviderConfig_Kind: true,
 }
 
 // afterActive reports whether obj is of one of AfterActiveKinds.
 func afterActive(obj client.Object) bool {
 	switch obj.(type) {
 	case *awseks.Addon, *awseks.PodIdentityAssociation, *awseks.AccessEntry, *awseks.AccessPolicyAssociation,
-		*awseks.NodeGroup, *awseks.ClusterAuth:
+		*awseks.NodeGroup, *awseks.ClusterAuth, *awseks.IdentityProviderConfig:
 		return true
 	}
 	return false

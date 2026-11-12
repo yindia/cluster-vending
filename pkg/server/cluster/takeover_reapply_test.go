@@ -3,8 +3,10 @@ package cluster
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
+	"connectrpc.com/connect/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
@@ -134,6 +136,26 @@ func TestTakeoverReappliesTheCarriedOverObjects(t *testing.T) {
 // A taken-over cluster with carried-over objects and nothing kept from
 // its import (it was imported before that was kept) has nothing to apply
 // them from: it says so, and no object is touched.
+// An imported cluster keeps the OIDC identity provider it came with: EKS
+// takes one per cluster, so spec.access.oidc is refused next to it.
+func TestOIDCIdentityProviderRefusedNextToAnImportedOne(t *testing.T) {
+	w := importWorld(t, terraformCluster())
+	c := importTF(t, w)
+	takeOver(t, w, c.GetId())
+	reconcile(t, w, c.GetId())
+
+	req := updateRequest(w, &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{
+		Name: "dex", IssuerUrl: "https://dex.example.com", ClientId: "kubernetes"}}}, "spec.access.oidc")
+	req.Cluster.Id = c.GetId()
+	_, err := update(t, w, req)
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "spec.access.oidc") {
+		t.Fatalf("spec.access.oidc on a cluster imported with an identity provider: %v, want FAILED_PRECONDITION naming the field", err)
+	}
+	if got := objectsOfKind(objectsOf(t, w, c.GetId()), "IdentityProviderConfig"); len(got) != 1 {
+		t.Errorf("%d identity providers, want only the imported one", len(got))
+	}
+}
+
 func TestTakeoverWithoutStoredImportSaysToImportAgain(t *testing.T) {
 	w := importWorld(t, terraformCluster())
 	c := importTF(t, w)

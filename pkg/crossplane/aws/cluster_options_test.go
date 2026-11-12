@@ -37,6 +37,8 @@ func allOptions(p *crossplaneaws.ClusterPlan) {
 			{PolicyARN: viewPolicy, Scope: "namespace", Namespaces: []string{"b", "a"}}}},
 		{Principal: "arn:aws:iam::444455556666:role/nodes", Type: "EC2_LINUX"},
 	}
+	p.IdentityProvider = &crossplaneaws.IdentityProviderPlan{Name: "okta", IssuerURL: "https://example.okta.com", ClientID: "kubernetes",
+		UsernameClaim: "email", GroupsClaim: "groups", GroupsPrefix: "oidc:", RequiredClaims: map[string]string{"hd": "example.com"}}
 	p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{SecurityGroupIDs: []string{"sg-0bbb"},
 		ImageID: "ami-0123456789abcdef0", UserData: "Zm9v"}
 	p.NodePool.AMIType, p.NodePool.DiskSizeGB = "CUSTOM", 0
@@ -46,6 +48,16 @@ func byName(objects []client.Object) map[string]client.Object {
 	out := map[string]client.Object{}
 	for _, o := range objects {
 		out[o.GetName()] = o
+	}
+	return out
+}
+
+func identityProviders(objects []client.Object) []*awseks.IdentityProviderConfig {
+	var out []*awseks.IdentityProviderConfig
+	for _, o := range objects {
+		if idp, ok := o.(*awseks.IdentityProviderConfig); ok {
+			out = append(out, idp)
+		}
 	}
 	return out
 }
@@ -156,6 +168,29 @@ func TestClusterOptionsRender(t *testing.T) {
 	}
 	if scoped == nil || *scoped.Spec.ForProvider.AccessScope.Type != "namespace" || *scoped.Spec.ForProvider.AccessScope.Namespaces[0] != "a" {
 		t.Fatalf("namespace-scoped association = %+v", scoped)
+	}
+	// eks IdentityProviderConfig: the association's name is the external
+	// name; every setting is part of the object's name.
+	idps := identityProviders(objects)
+	if len(idps) != 1 {
+		t.Fatalf("identity providers = %d, want 1", len(idps))
+	}
+	idp := idps[0]
+	if got := idp.Spec.ForProvider; idp.Annotations[crossplaneaws.ExternalNameAnnotation] != "okta" ||
+		*got.Oidc.IssuerURL != "https://example.okta.com" || *got.Oidc.ClientID != "kubernetes" || *got.Oidc.UsernameClaim != "email" ||
+		got.Oidc.UsernamePrefix != nil || *got.Oidc.GroupsClaim != "groups" || *got.Oidc.GroupsPrefix != "oidc:" ||
+		*got.Oidc.RequiredClaims["hd"] != "example.com" || got.ClusterNameRef.Name != "prod-1a2b3c4d" ||
+		idp.Spec.ManagementPolicies != nil || *got.Tags[crossplaneaws.TagClusterName] != "prod" {
+		t.Errorf("identity provider = %v %+v %+v", idp.Annotations, got, got.Oidc)
+	}
+	changed := p
+	changed.IdentityProvider = ptr.To(*p.IdentityProvider)
+	changed.IdentityProvider.GroupsPrefix = "sso:"
+	if other := identityProviders(crossplaneaws.ClusterResources(changed)); len(other) != 1 || other[0].Name == idp.Name {
+		t.Errorf("a changed identity provider renders %v, want one object with a new name (not %s)", other, idp.Name)
+	}
+	if again := identityProviders(crossplaneaws.ClusterResources(p)); again[0].Name != idp.Name {
+		t.Errorf("the same identity provider renders %s, then %s", idp.Name, again[0].Name)
 	}
 	// Usages: the log group, the key and the OIDC provider outlive the EKS
 	// cluster; the launch template its node group.

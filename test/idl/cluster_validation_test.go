@@ -186,6 +186,36 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 				"arn:aws:iam::111122223333:role/ops", "arn:aws:iam::111122223333:role/ops",
 			}}
 		})},
+
+		// OIDC identity provider.
+		{name: "oidc", req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com/oauth2/default",
+				ClientId: "kubernetes", UsernameClaim: "email", GroupsClaim: "groups", GroupsPrefix: "oidc:",
+				RequiredClaims: map[string]string{"hd": "example.com"}}}
+		})},
+		{name: "oidc with config map auth", req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com", ClientId: "kubernetes"}}
+			s.GetAws().AccessConfig = &cloudv1.AwsAccessConfig{
+				AuthenticationMode: cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_CONFIG_MAP,
+			}
+		})},
+		{name: "oidc empty required claim value", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com",
+				ClientId: "kubernetes", RequiredClaims: map[string]string{"hd": ""}}}
+		})},
+		{name: "oidc issuer not https", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "http://example.okta.com", ClientId: "kubernetes"}}
+		})},
+		{name: "oidc without a client id", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com"}}
+		})},
+		{name: "oidc without a name", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{IssuerUrl: "https://example.okta.com", ClientId: "kubernetes"}}
+		})},
+		{name: "oidc system: groups prefix", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com",
+				ClientId: "kubernetes", GroupsPrefix: "system:"}}
+		})},
 	}
 
 	for _, tt := range tests {

@@ -164,6 +164,12 @@ func accessToAPI(p *cloudv1.AccessSpec) *cloudv1alpha1.AccessSpec {
 		}
 		out.AccessEntries = append(out.AccessEntries, entry)
 	}
+	if o := p.GetOidc(); o != nil {
+		out.OIDC = &cloudv1alpha1.OIDCIdentityProvider{Name: o.GetName(), IssuerURL: o.GetIssuerUrl(), ClientID: o.GetClientId(),
+			UsernameClaim: o.GetUsernameClaim(), UsernamePrefix: o.GetUsernamePrefix(),
+			GroupsClaim: o.GetGroupsClaim(), GroupsPrefix: o.GetGroupsPrefix(),
+			RequiredClaims: maps.Clone(o.GetRequiredClaims())}
+	}
 	return out
 }
 
@@ -184,6 +190,12 @@ func accessFromAPI(a *cloudv1alpha1.AccessSpec) *cloudv1.AccessSpec {
 			})
 		}
 		out.AccessEntries = append(out.AccessEntries, entry)
+	}
+	if o := a.OIDC; o != nil {
+		out.Oidc = &cloudv1.OidcIdentityProvider{Name: o.Name, IssuerUrl: o.IssuerURL, ClientId: o.ClientID,
+			UsernameClaim: o.UsernameClaim, UsernamePrefix: o.UsernamePrefix,
+			GroupsClaim: o.GroupsClaim, GroupsPrefix: o.GroupsPrefix,
+			RequiredClaims: maps.Clone(o.RequiredClaims)}
 	}
 	return out
 }

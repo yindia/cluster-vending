@@ -28,6 +28,13 @@ spec:
   # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2; unset is tier 0
   access:
     adminPrincipals: []      # IAM role/user ARNs, e.g. arn:aws:iam::111122223333:role/platform-admin; the creator is admin already
+    # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (one per cluster)
+    #   name: okta
+    #   issuerUrl: https://example.okta.com/oauth2/default   # HTTPS, reachable from the internet
+    #   clientId: kubernetes
+    #   usernameClaim: email
+    #   groupsClaim: groups
+    #   groupsPrefix: "oidc:"  # bind RBAC to oidc:<group>; its users have no permissions until you do
   aws:
     controlPlaneLogGroup: {enabled: true, retentionDays: 30}   # /aws/eks/<name>/cluster, created before the EKS cluster
     enabledClusterLogTypes: [AWS_CLUSTER_LOG_TYPE_API, AWS_CLUSTER_LOG_TYPE_AUDIT, AWS_CLUSTER_LOG_TYPE_AUTHENTICATOR]

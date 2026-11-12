@@ -3,3 +3,8 @@
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Local files: the user's own config, and worker worktrees
+/cluster.yaml
+/config.yaml
+/.claude/

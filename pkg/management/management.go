@@ -1,4 +1,9 @@
-package server
+// Package management prepares the management cluster for the two commands
+// that talk to it: the API server (`serve`), which reads it and writes the
+// platform's own kinds, and the controller, which also installs the
+// Crossplane providers and reconciles. It builds the manager whose cache
+// both read from, and the store that keeps its rows as objects.
+package management
 
 import (
 	"context"
@@ -25,20 +30,26 @@ import (
 // management cluster.
 const kindsTimeout = 5 * time.Minute
 
-// ManagementOptions say how to reach and prepare the management cluster.
-type ManagementOptions struct {
+// Options say how to reach and prepare the management cluster.
+type Options struct {
 	Kubeconfig, KubeContext string
 	// InstallProviders creates the Crossplane providers, provider-helm and
 	// the activation policy when missing; ProviderRuntime is how the AWS
-	// providers run.
+	// providers run. Only what reconciles installs them (the controller,
+	// or the server while it runs the background loop); the API server
+	// waits for their kinds.
 	InstallProviders bool
-	ProviderRuntime  crossplaneaws.ProviderRuntime
+	// InstallKinds installs the CustomResourceDefinitions of the platform's
+	// own kinds (ConnectStore). The same rule: what reconciles installs
+	// them, the API server waits for them.
+	InstallKinds    bool
+	ProviderRuntime crossplaneaws.ProviderRuntime
 	// LeaderElection of the background loop, or of the controllers.
 	LeaderElection kube.LeaderElection
 	Logger         *slog.Logger
 	// WatchPlatformKinds also caches the platform's own kinds (CloudAccount,
 	// Network, Cluster), whatever their labels: the controller manager
-	// watches them. They must be installed (ConnectStore does it).
+	// watches them. They must be installed (ConnectStore with InstallKinds).
 	WatchPlatformKinds bool
 	// LeaseName, MetricsAddr and ProbeAddr are the manager's leader
 	// election Lease and listen addresses; empty for the server's Lease
@@ -46,12 +57,12 @@ type ManagementOptions struct {
 	LeaseName, MetricsAddr, ProbeAddr string
 }
 
-// ConnectManagement prepares the management cluster and returns a manager,
+// Connect prepares the management cluster and returns a manager,
 // not started: it installs the providers (when asked), waits until the API
 // server serves every cached kind (the manager's cache and its informers
 // fail on a missing one), and builds the manager whose client reads from
-// the informer cache. Register controllers on it, then StartManagement.
-func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manager, error) {
+// the informer cache. Register controllers on it, then Start.
+func Connect(ctx context.Context, o Options) (manager.Manager, error) {
 	ctrllog.SetLogger(logr.FromSlogHandler(o.Logger.Handler()))
 	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
 	if err != nil {
@@ -97,11 +108,11 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 // ConnectStore returns the store that keeps its rows as CloudAccount,
 // Network and Cluster objects in the tenants' namespaces of the
 // management cluster (pkg/database/cloudstore): it installs the
-// CustomResourceDefinitions of the cloud.cluster-vending.io kinds and
-// waits until they are served. The store's client reads from the API
+// CustomResourceDefinitions of the cloud.cluster-vending.io kinds when
+// asked (Options.InstallKinds) and waits until they are served. The store's client reads from the API
 // server, not from the manager's cache: a row is read right after it was
 // written.
-func ConnectStore(ctx context.Context, o ManagementOptions) (repository.Store, error) {
+func ConnectStore(ctx context.Context, o Options) (repository.Store, error) {
 	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
 	if err != nil {
 		return nil, err
@@ -110,8 +121,10 @@ func ConnectStore(ctx context.Context, o ManagementOptions) (repository.Store, e
 	if err != nil {
 		return nil, err
 	}
-	if err := cloudstore.Install(ctx, direct); err != nil {
-		return nil, err
+	if o.InstallKinds {
+		if err := cloudstore.Install(ctx, direct); err != nil {
+			return nil, err
+		}
 	}
 	mapper, err := kube.NewRESTMapper(cfg)
 	if err != nil {
@@ -131,11 +144,11 @@ func CachedObjects() []client.Object {
 	return append(crossplaneaws.ManagedObjects(), &awsv1beta1.ProviderConfig{}, &corev1.Namespace{})
 }
 
-// StartManagement starts mgr (its informers and controllers) in the
+// Start starts mgr (its informers and controllers) in the
 // background and returns once the cache has synced; ready then reports
 // true (the readiness probe). The channel receives mgr's error when it
 // stops (nil when ctx ends).
-func StartManagement(ctx context.Context, mgr manager.Manager, ready *atomic.Bool) (<-chan error, error) {
+func Start(ctx context.Context, mgr manager.Manager, ready *atomic.Bool) (<-chan error, error) {
 	cached, err := kube.GVKs(mgr.GetScheme(), CachedObjects())
 	if err != nil {
 		return nil, err

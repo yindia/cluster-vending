@@ -59,6 +59,22 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # REQUIRED, placeholders: the AWS account the management cluster runs
+        # in and the IAM role the Crossplane AWS providers run as (IRSA); the
+        # tenant roles trust that role. Replace both in an overlay.
+        - name: CV_AWS_MANAGEMENT_ACCOUNT_ID
+          value: "111122223333"
+        - name: CV_AWS_MANAGEMENT_ROLE_ARN
+          value: arn:aws:iam::111122223333:role/crossplane-provider-aws
+        # The controller creates the Crossplane AWS providers, provider-helm
+        # and the activation policy when missing. "false" when they are
+        # managed elsewhere (then the install rules in
+        # ../rbac/platform_role.yaml can go).
+        - name: CV_INSTALL_PROVIDERS
+          value: "true"
+        # No AWS keys here, ever: the controller's own AWS credentials are
+        # its service account's IAM role (IRSA, see ../default), and every
+        # lookup assumes the tenant role of the account it reads.
         ports:
         - containerPort: 8081
           name: health
@@ -81,8 +97,8 @@ spec:
             port: health
           initialDelaySeconds: 5
           periodSeconds: 10
-        # Sized for an idle manager; revisit once the reconcilers do work
-        # (the server's informer cache for ~100 clusters is the reference).
+        # A first guess; the informer cache for ~100 clusters is the
+        # reference to size it by.
         resources:
           limits:
             cpu: 500m

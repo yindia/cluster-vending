@@ -4,12 +4,13 @@
 #   1. a kind cluster (KIND_CLUSTER, default cluster-vending)
 #   2. Crossplane (CROSSPLANE_VERSION) from the crossplane-stable Helm chart
 #
-# That is all. The server creates the rest: on startup the Crossplane AWS
-# providers (ec2, eks, iam, cloudwatchlogs, kms), provider-helm and, with a management role, the
-# AWS providers' IRSA
-# DeploymentRuntimeConfig, when missing (--install-providers); tenant
-# namespaces, ProviderConfigs and managed resources when it handles
-# requests.
+# That is all. What reconciles creates the rest (the controller; or the
+# server with hack/config.local.yaml, whose database store makes it run the
+# background loop): on startup the Crossplane AWS providers (ec2, eks, iam,
+# cloudwatchlogs, kms), provider-helm and, with a management role, the AWS
+# providers' IRSA DeploymentRuntimeConfig, when missing
+# (--install-providers); tenant namespaces, ProviderConfigs and managed
+# resources as it reconciles.
 #
 # Safe to re-run: every step is idempotent. Delete the cluster with
 # hack/stop.sh.

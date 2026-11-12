@@ -15,7 +15,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
-	"github.com/yindia/cluster-vending/pkg/server/cluster"
 )
 
 // ClusterReconciler reconciles Cluster objects by calling the cluster
@@ -23,13 +22,12 @@ import (
 type ClusterReconciler struct {
 	deps   Deps
 	rec    *reconcilecluster.Reconciler
-	rows   *cluster.ClusterService
 	owners *owners
 }
 
 // NewClusterReconciler returns the controller of Clusters.
 func NewClusterReconciler(d Deps) *ClusterReconciler {
-	return &ClusterReconciler{deps: d, rec: reconcilecluster.New(d.Deps), rows: cluster.NewClusterService(d.Deps), owners: &owners{}}
+	return &ClusterReconciler{deps: d, rec: reconcilecluster.New(d.Deps), owners: &owners{}}
 }
 
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -125,7 +123,7 @@ func (r *ClusterReconciler) deleting(ctx context.Context, tenant, id string) (bo
 
 // adopt makes a Cluster that was created without the API a row: the row
 // the API's CreateCluster would have stored for the same cluster (the
-// same checks and resolved defaults, cluster.ClusterService.NewRow),
+// same checks and defaults, reconcilecluster.Reconciler.NewRow),
 // written onto the object (cloudstore.AdoptCluster: the resolved spec
 // too). What the API would have refused is a condition on the object,
 // not an error.
@@ -150,7 +148,7 @@ func (r *ClusterReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Cluste
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonWaiting, fmt.Sprintf("network %s does not exist in this namespace (yet)", obj.Spec.Network.NetworkRef.Name))
 	}
 	networkID := network.Labels[cloudstore.LabelID]
-	row, err := r.rows.NewRow(ctx, &cloudv1.CreateClusterRequest{TenantId: tenant, Cluster: &cloudv1.Cluster{
+	row, err := r.rec.NewRow(ctx, &cloudv1.CreateClusterRequest{TenantId: tenant, Cluster: &cloudv1.Cluster{
 		Name: obj.Name, DisplayName: obj.Spec.DisplayName, Labels: obj.Spec.Tags,
 		Spec: convert.ClusterSpecFromAPI(obj.Spec, networkID, nil),
 	}})

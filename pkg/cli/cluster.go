@@ -120,7 +120,12 @@ func ClusterDelete(ctx context.Context, c Clients, o Options) (proto.Message, er
 }
 
 // ClusterImport calls ClusterService.ImportCluster with the ClusterImport
-// manifest. It returns the imported cluster with its plan (status.import).
+// manifest. The call only stores the import: the answer is the cluster as
+// IMPORTED with its import DISCOVERING, before the EKS cluster was looked
+// at. With --wait it returns once the controller has looked the cluster
+// up and the plan (status.import) is there: PLANNED with the resources
+// observed, or BLOCKED. A cluster that does not exist or cannot be read
+// ends the wait as an error (the cluster is FAILED, with the reason).
 func ClusterImport(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	m, err := LoadManifest(o.Input, KindClusterImport)
 	if err != nil {
@@ -140,7 +145,23 @@ func ClusterImport(ctx context.Context, c Clients, o Options) (proto.Message, er
 			return nil, err
 		}
 	}
-	return call(ctx, req, c.Cluster.ImportCluster)
+	res, err := call(ctx, req, c.Cluster.ImportCluster)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	id := res.(*cloudv1.ImportClusterResponse).GetCluster().GetId()
+	var last proto.Message
+	err = waitUntil(ctx, o, "cluster "+id, false, func(ctx context.Context) (observation, error) {
+		res, err := call(ctx, &cloudv1.GetClusterStatusRequest{TenantId: tenant, ClusterId: id}, c.Cluster.GetClusterStatus)
+		if err != nil {
+			return observation{}, err
+		}
+		last = res
+		st := res.(*cloudv1.GetClusterStatusResponse).GetCluster().GetStatus()
+		return importObservation(st.GetState().String(), st.GetMessage(), st.GetImport(), len(st.GetManagedResources()),
+			st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_FAILED), nil
+	})
+	return last, err
 }
 
 // ClusterTakeOver calls ClusterService.TakeOverCluster. With --wait it

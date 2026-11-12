@@ -103,7 +103,12 @@ func NetworkDelete(ctx context.Context, c Clients, o Options) (proto.Message, er
 }
 
 // NetworkImport calls NetworkService.ImportNetwork with the NetworkImport
-// manifest. With --wait it returns once the import is observed (IMPORTED).
+// manifest. The call only stores the import: the answer is the network as
+// IMPORTED with its import DISCOVERING, before the VPC was looked at. With
+// --wait it returns once the controller has looked the VPC up and the
+// plan (status.import) is there: PLANNED with the resources observed, or
+// BLOCKED. A VPC that does not exist or cannot be read ends the wait as
+// an error (the network is FAILED, with the reason).
 func NetworkImport(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	m, err := LoadManifest(o.Input, KindNetworkImport)
 	if err != nil {
@@ -127,7 +132,19 @@ func NetworkImport(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil || !o.Wait {
 		return res, err
 	}
-	return waitNetwork(ctx, c, o, tenant, res.(*cloudv1.ImportNetworkResponse).GetNetwork().GetId(), false)
+	id := res.(*cloudv1.ImportNetworkResponse).GetNetwork().GetId()
+	var last proto.Message
+	err = waitUntil(ctx, o, "network "+id, false, func(ctx context.Context) (observation, error) {
+		res, err := call(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id}, c.Network.GetNetworkStatus)
+		if err != nil {
+			return observation{}, err
+		}
+		last = res
+		st := res.(*cloudv1.GetNetworkStatusResponse).GetNetwork().GetStatus()
+		return importObservation(st.GetState().String(), st.GetMessage(), st.GetImport(), len(st.GetManagedResources()),
+			st.GetState() == cloudv1.NetworkState_NETWORK_STATE_FAILED), nil
+	})
+	return last, err
 }
 
 // NetworkTakeOver calls NetworkService.TakeOverNetwork. With --wait it

@@ -38,7 +38,8 @@ func FailureCondition(err error) *cloudv1.Condition {
 	if f, ok := fault.As(err); ok {
 		c.Message = f.Message
 		switch f.Kind {
-		case fault.FailedPrecondition, fault.Invalid, fault.Unimplemented, fault.NotFound:
+		case fault.FailedPrecondition, fault.Invalid, fault.Unimplemented, fault.NotFound, fault.AlreadyExists:
+			// AlreadyExists: EKS has a cluster of the name already.
 			c.Reason = ReasonFailed
 		default:
 		}

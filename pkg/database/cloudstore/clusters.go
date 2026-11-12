@@ -76,6 +76,7 @@ func (r clusters) fill(c *model.Cluster, networkName string, obj *cloudv1alpha1.
 	annotate(obj, map[string]string{AnnotationInput: string(c.Input), AnnotationRemainder: rest, AnnotationAdoption: string(c.Adoption)})
 	m := resourceMeta(&c.Resource)
 	m.Provider, m.CreateRequestID, m.Imported, m.DeleteForce = string(c.Provider), c.CreateRequestID, c.Imported, c.DeleteForce
+	m.ResolvedGeneration = c.ResolvedGeneration
 	return setMeta(obj, m)
 }
 
@@ -96,7 +97,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 		TenantID: obj.Labels[LabelTenant], Name: obj.Name, Input: model.JSON(obj.Annotations[AnnotationInput]),
 		NetworkID: obj.Labels[LabelNetworkID], CloudAccountID: obj.Labels[LabelAccountID],
 		Provider: model.Provider(m.Provider), Region: obj.Spec.Region, Imported: m.Imported,
-		CreateRequestID: m.CreateRequestID, DeleteForce: m.DeleteForce,
+		CreateRequestID: m.CreateRequestID, DeleteForce: m.DeleteForce, ResolvedGeneration: m.ResolvedGeneration,
 	}
 	if adoption := obj.Annotations[AnnotationAdoption]; adoption != "" {
 		c.Adoption = model.JSON(adoption)

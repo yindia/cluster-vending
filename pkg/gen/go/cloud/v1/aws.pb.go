@@ -647,9 +647,9 @@ func (x *AwsAddonStatus) GetMessage() string {
 	return ""
 }
 
-// AwsImportNetwork names the VPC to import. The server looks the rest up
-// once, read-only, with the tenant's credentials (the role its
-// ProviderConfig assumes):
+// AwsImportNetwork names the VPC to import. The controller (not the API
+// server) looks the rest up once, read-only, as the tenant role of the
+// account (the role its ProviderConfig assumes too):
 //
 //	ec2:DescribeVpcs              the VPC
 //	ec2:DescribeSubnets           subnet-id=<subnet_ids> (each must be in the VPC)

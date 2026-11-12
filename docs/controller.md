@@ -76,16 +76,85 @@ covers these packages like any other.
 ## Run
 
 ```
-cluster-vending serve --store=kubernetes        # the API: writes the objects
-cluster-vending controller --leader-elect=false # reconciles them
+cluster-vending controller --leader-elect=false \
+  --aws-management-account-id <account> --aws-management-role-arn <role arn>
+cluster-vending serve --store=kubernetes   # the API: writes the objects
 ```
 
 `controller` takes the global `--kubeconfig` and `--context`, plus
 `--metrics-addr` (off by default), `--health-probe-addr`, `--leader-elect`,
-`--lease-namespace`, `--render-target` and `--render-rollout`. It installs
-the CRDs of the three kinds itself and waits for the Crossplane AWS
-providers' kinds; it does not install the providers (`serve` does, or an
-operator).
+`--lease-namespace`, `--render-target`, `--render-rollout`,
+`--install-providers` and the `--provider-*` settings, and the AWS settings
+below. It installs the CRDs of the three kinds and the Crossplane AWS
+providers (unless `--install-providers=false`) and waits for their kinds.
+The API server installs nothing; it waits for the kinds the controller
+installs, so start the controller first.
+
+## AWS access
+
+The controller is the only command that looks at AWS: it discovers the VPC
+or EKS cluster of an import, checks a new cluster's name against EKS, and
+resolves the Kubernetes and add-on versions EKS offers. The API server makes
+no AWS call and has no AWS setting or credentials.
+
+There is one rule for how a lookup reaches a tenant's account:
+
+```
+the controller's own credentials -> (source role, optional) -> tenant role
+```
+
+- **Own credentials.** Whatever the AWS SDK's default chain finds. They are
+  never a flag or a file of this project.
+- **Source role**, `--aws-source-role-arn`, optional: assumed first, when the
+  controller's own credentials are not the role the tenant roles trust.
+- **Tenant role**, always: the role stored when the account was bootstrapped
+  (the same one the account's ProviderConfig assumes). Nothing is read with
+  the credentials before it, so keys of one account cannot read another, and
+  a role that is not a role of the account is refused.
+
+Two settings are required: `--aws-management-account-id` and
+`--aws-management-role-arn`, the role the Crossplane AWS providers run as.
+
+### Production: IRSA
+
+The controller's service account carries the IAM role annotation
+(`eks.amazonaws.com/role-arn`); `config/default/kustomization.yaml` sets it,
+with a placeholder to replace. No keys exist anywhere. What must be true:
+
+- The role's trust policy lets the controller's service account assume it
+  through the cluster's OIDC provider (the usual IRSA trust policy).
+- The role may call `sts:AssumeRole` on the tenant roles.
+- Each tenant role's trust policy allows the role that assumes it
+  (`sts:AssumeRole`, principal: that role's ARN). The tenant role is the one
+  the account was bootstrapped with, and the Crossplane providers assume it
+  too, as the management role.
+
+The simplest arrangement is to run the controller as the management role
+itself: the tenant roles then trust one role. If the controller has its own
+role instead, either add it to the tenant roles' trust policies, or let it
+assume the management role first (`--aws-source-role-arn=<management role>`;
+the management role's trust policy must then allow the controller's role).
+
+### Local testing: keys in the environment
+
+```
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...   # when the keys are temporary
+cluster-vending controller --leader-elect=false \
+  --aws-management-account-id <account> --aws-management-role-arn <role arn>
+```
+
+The keys are the controller's own credentials, nothing more: every lookup
+still assumes the tenant role of the account it reads, so the tenant role's
+trust policy must allow the user or role the keys belong to. There is no
+mode in which keys read a tenant's account directly. Export them in the
+shell; do not put them in a config file, a flag or a manifest. The
+controller logs that it found keys, never the keys.
+
+The server with the database store and the background loop (`serve`,
+`--background-loop`) is the reconciler too and follows the same rule with
+its own credentials; that mode goes away with the database store.
 
 Who reconciles: one reconciler per resource. With `--store=kubernetes` the
 server's background loop is off by default (`--background-loop=auto`) and

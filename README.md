@@ -43,9 +43,11 @@ make run       # the server against it, with hack/config.local.yaml
 ```
 
 `hack/start.sh` creates a kind cluster named `cluster-vending` and installs
-Crossplane from its Helm chart. It installs no provider: on startup the
-server installs the Crossplane AWS providers it needs and activates only the
-managed resource kinds it uses.
+Crossplane from its Helm chart. It installs no provider: on startup what
+reconciles installs the Crossplane AWS providers it needs and activates only
+the managed resource kinds it uses. That is the controller; with the
+database store of `hack/config.local.yaml` the server runs the background
+loop and is the reconciler itself.
 
 `hack/config.local.yaml` points the server at the `kind-cluster-vending`
 context, listens on `127.0.0.1:8080`, keeps state in a local SQLite file
@@ -60,14 +62,23 @@ architecture document).
 The controller manager is a separate command:
 
 ```sh
-bin/cluster-vending serve --config hack/config.local.yaml --store=kubernetes
-bin/cluster-vending controller --leader-elect=false
+bin/cluster-vending controller --leader-elect=false \
+  --aws-management-account-id <account> --aws-management-role-arn <role arn>
+bin/cluster-vending serve --http-addr 127.0.0.1:8080 --store=kubernetes
 ```
 
 With `--store=kubernetes` the server only writes the
 `cloud.cluster-vending.io` objects and the controller reconciles them (the
 server's background loop is off; `--background-loop=true` runs the server
-without the controller). See [docs/controller.md](docs/controller.md).
+without the controller). In this mode the server needs nothing of AWS: no
+`--aws-*` setting, no credentials. The controller is the only command that
+looks at AWS and the one that installs the providers; it needs
+`--aws-management-account-id`, `--aws-management-role-arn` and AWS
+credentials (for local testing, `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` in its environment; every lookup still assumes the
+tenant role of the account it reads). Start the controller first: the
+server waits for the kinds it installs. See
+[docs/controller.md](docs/controller.md).
 
 ## CLI walkthrough
 

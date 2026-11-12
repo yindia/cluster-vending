@@ -13,13 +13,12 @@ import (
 	"log/slog"
 
 	"connectrpc.com/connect/v2"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
-	corenetwork "github.com/yindia/cluster-vending/pkg/network"
+
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -78,7 +77,7 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 			return nil, service.ToConnect(err)
 		}
 	}
-	row, err := s.NewRow(ctx, req)
+	row, err := s.rec().NewRow(ctx, req)
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
@@ -91,60 +90,10 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	return &cloudv1.CreateNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
-// bootstrapped refuses an account that cannot hold managed resources yet:
-// nothing could ever be applied for a network in it.
+// bootstrapped refuses an account that cannot hold managed resources yet
+// (netreconcile.Bootstrapped), as FAILED_PRECONDITION.
 func bootstrapped(a *model.CloudAccount) error {
-	if a.Namespace == "" || a.ProviderConfigName == "" {
-		return connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("account %s is not fully bootstrapped; run BootstrapTenant again", a.ID))
-	}
-	return nil
-}
-
-// NewRow checks a create request (the contract's rules, the labels, the
-// account, the layout) and returns the row CreateNetwork stores for it,
-// not stored yet: the network as sent (input) and resolved (spec with the
-// layout's defaults filled in), state PROVISIONING, its generation not
-// applied yet (the reconciler applies it). The stored row's ID becomes
-// Network.id. The controller builds the same row for a Network object
-// that was created without the API.
-func (s *NetworkService) NewRow(ctx context.Context, req *cloudv1.CreateNetworkRequest) (*model.Network, error) {
-	if err := service.Validate(req); err != nil {
-		return nil, err
-	}
-	if err := service.CheckAWSLabels(req.GetNetwork().GetLabels()); err != nil {
-		return nil, err
-	}
-	a, l, err := s.rec().Plan(ctx, req.GetTenantId(), req.GetNetwork().GetSpec())
-	if err != nil {
-		return nil, err
-	}
-	if err := bootstrapped(a); err != nil {
-		return nil, err
-	}
-	in := req.GetNetwork()
-	input, err := netreconcile.Encode(in)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
-	spec := proto.CloneOf(in.GetSpec())
-	spec.Layout = corenetwork.LayoutProto(l)
-	spec.FlowLogs = corenetwork.ResolveFlowLogs(spec.GetFlowLogs())
-	raw, err := netreconcile.Encode(spec)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
-	row := &model.Network{
-		Resource: model.Resource{
-			DisplayName: in.GetDisplayName(), Labels: in.GetLabels(), State: netreconcile.StateProvisioning, Spec: raw,
-		},
-		TenantID: req.GetTenantId(), Name: in.GetName(), Input: input, CloudAccountID: a.ID,
-		Provider: model.ProviderAWS, Region: spec.GetRegion(),
-	}
-	if id := req.GetRequestId(); id != "" {
-		row.CreateRequestID = &id
-	}
-	return row, nil
+	return service.ToConnect(netreconcile.Bootstrapped(a))
 }
 
 // GetNetwork returns one network from the database: its spec and the

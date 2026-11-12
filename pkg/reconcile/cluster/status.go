@@ -227,6 +227,8 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
 		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: conditionSynced,
 			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
+	case discovering(row):
+		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_IMPORTED, discoveringMessage
 	case row.State == StateImported:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_IMPORTED
 		st.Message = "imported read-only (" + progress + "); review status.import, then TakeOverCluster"

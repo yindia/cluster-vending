@@ -8,11 +8,20 @@
 #
 # The DSN holds a password: it is read from the Secret, never from the
 # ConfigMap, and the server never logs it.
+#
+# There is no controller for the database store: the server runs the
+# background loop and is the reconciler too. So, unlike the base, this
+# overlay gives the server what the controller has: the AWS settings, the
+# reconciler's role in the management cluster (reconciler_role.yaml), and
+# an IAM role for its service account (IRSA, a placeholder below) that may
+# assume the tenant roles.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
 - ../../base
+- reconciler_role.yaml
+- reconciler_role_binding.yaml
 
 configMapGenerator:
 - name: server-config
@@ -20,9 +29,26 @@ configMapGenerator:
   literals:
   - CV_STORE=database
   - CV_DATABASE_DRIVER=postgres
+  - CV_LOOP_INTERVAL=30s
+  # Creates the Crossplane AWS providers, provider-helm and the activation
+  # policy when missing. false when they are managed elsewhere.
+  - CV_INSTALL_PROVIDERS=true
+  # REQUIRED, placeholders: the AWS account the management cluster runs in
+  # and the IAM role the AWS providers run as (IRSA).
+  - CV_AWS_MANAGEMENT_ACCOUNT_ID=111122223333
+  - CV_AWS_MANAGEMENT_ROLE_ARN=arn:aws:iam::111122223333:role/crossplane-provider-aws
 
 patches:
 - path: database_dsn_patch.yaml
   target:
     kind: Deployment
     name: server
+# PLACEHOLDER: the IAM role the server's AWS lookups start from.
+- target:
+    kind: ServiceAccount
+    name: server
+  patch: |-
+    - op: add
+      path: /metadata/annotations
+      value:
+        eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/cluster-vending-controller

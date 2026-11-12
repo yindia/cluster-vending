@@ -16,9 +16,7 @@ import (
 	"log/slog"
 
 	"connectrpc.com/connect/v2"
-	"github.com/google/uuid"
 
-	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
@@ -59,9 +57,12 @@ func (s *ClusterService) logger() *slog.Logger {
 }
 
 // CreateCluster stores the cluster with its defaults filled in,
-// PROVISIONING. Its managed resources are created by the reconciler; a
-// failure there is the cluster's status. A retry with the same request_id
-// returns the cluster created by the first call.
+// PROVISIONING (reconcilecluster.Reconciler.NewRow). It does not look at
+// the cloud: the reconciler checks the name against EKS and resolves the
+// Kubernetes and add-on versions before it creates anything, then creates
+// the managed resources; a failure there (a taken name, a version EKS
+// does not offer) is the cluster's status. A retry with the same
+// request_id returns the cluster created by the first call.
 func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateClusterRequest) (_ *cloudv1.CreateClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -86,71 +87,6 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 		"network_id", row.NetworkID)
 	c, err := stored(row)
 	return &cloudv1.CreateClusterResponse{Cluster: c}, err
-}
-
-// supported rejects what this version cannot build.
-func supported(spec *cloudv1.ClusterSpec) error {
-	switch {
-	case spec.GetAws() == nil:
-		return connect.NewError(connect.CodeUnimplemented, "only aws clusters are supported")
-	case spec.GetExistingCluster() != nil:
-		return connect.NewError(connect.CodeUnimplemented,
-			"spec.existing_cluster is not implemented; import a cluster with ImportCluster and TakeOverCluster")
-	}
-	return nil
-}
-
-// NewRow checks a create request (the contract's rules, what this version
-// can build, the labels, the network and its subnets, the name, the
-// versions) and returns the row CreateCluster stores for it, not stored
-// yet: the cluster as sent (input) and resolved (spec), PROVISIONING, its
-// generation not applied yet (the reconciler applies it). The ID is
-// chosen here, it names the resources. The controller builds the same row
-// for a Cluster object that was created without the API.
-func (s *ClusterService) NewRow(ctx context.Context, req *cloudv1.CreateClusterRequest) (*model.Cluster, error) {
-	if err := service.Validate(req); err != nil {
-		return nil, err
-	}
-	if err := supported(req.GetCluster().GetSpec()); err != nil {
-		return nil, err
-	}
-	if err := service.CheckAWSLabels(req.GetCluster().GetLabels()); err != nil {
-		return nil, err
-	}
-	t, err := s.Target(ctx, req.GetTenantId(), req.GetCluster().GetSpec())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.checkName(ctx, req.GetTenantId(), req.GetCluster().GetName(), req.GetCluster().GetSpec().GetRegion(), t); err != nil {
-		return nil, err
-	}
-	id, err := uuid.NewV7()
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
-	in := req.GetCluster()
-	spec, err := corecluster.ResolveSpec(in.GetSpec(), t.Zones)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
-	}
-	if err := s.resolveVersions(ctx, t.Account, spec, pinnedAddons(in.GetSpec())); err != nil {
-		return nil, err
-	}
-	input, err1 := reconcilecluster.Encode(in)
-	raw, err2 := reconcilecluster.Encode(spec)
-	if err := errors.Join(err1, err2); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
-	row := &model.Cluster{
-		Resource: model.Resource{Base: model.Base{ID: id.String()}, DisplayName: in.GetDisplayName(),
-			Labels: in.GetLabels(), State: reconcilecluster.StateProvisioning, Spec: raw},
-		TenantID: req.GetTenantId(), Name: in.GetName(), Input: input, NetworkID: t.Network.ID,
-		Provider: model.ProviderAWS, Region: spec.GetRegion(),
-	}
-	if rid := req.GetRequestId(); rid != "" {
-		row.CreateRequestID = &rid
-	}
-	return row, nil
 }
 
 // createError maps a failed insert: a duplicate is a second cluster of the

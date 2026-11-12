@@ -27,6 +27,11 @@ func PendingStates() []string {
 // status (ConditionReconciled) and tried again on the next pass. Every
 // step is idempotent. A cluster that
 // does not exist is done.
+//
+// It is also where the cloud is looked at, never the call that stored the
+// row: the EKS cluster of an import is discovered here (discoverImport),
+// and a new cluster's name and a generation's versions are checked
+// against EKS here (resolve), before anything is rendered.
 func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
@@ -60,6 +65,17 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 		_, err := s.driveDelete(ctx, row)
 		return err
 	}
+	if discovering(row) {
+		// The import was stored without looking at the cloud: the EKS
+		// cluster is looked up here, once, and the plan stored with the row.
+		stored, err := s.discoverImport(ctx, row)
+		if err != nil {
+			return fmt.Errorf("discover: %w", err)
+		}
+		if !stored {
+			return nil // a call changed the row: the next pass sees it
+		}
+	}
 	if row.State == StateImported || row.State == StateBlocked {
 		if row.State == StateImported && row.AppliedGeneration < row.Generation {
 			// The import was stored; its Observe-only objects are created here.
@@ -70,6 +86,17 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 		// Observed only, until TakeOverCluster. Counted as applied with this
 		// renderer, or a renderer change would list it as pending forever.
 		return s.markApplied(ctx, row)
+	}
+	if unresolved(row) {
+		// The call stored the generation without looking at the cloud: the
+		// EKS name and the versions are checked here, before any render.
+		stored, err := s.resolve(ctx, row)
+		if err != nil {
+			return fmt.Errorf("resolve: %w", err)
+		}
+		if !stored {
+			return nil // a call changed the row: the next pass sees it
+		}
 	}
 	if err := s.advance(ctx, row); err != nil {
 		return fmt.Errorf("apply: %w", err)

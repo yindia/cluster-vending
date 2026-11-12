@@ -15,7 +15,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
-	"github.com/yindia/cluster-vending/pkg/server/network"
 )
 
 // NetworkReconciler reconciles Network objects by calling the network
@@ -23,13 +22,12 @@ import (
 type NetworkReconciler struct {
 	deps   Deps
 	rec    *netreconcile.Reconciler
-	rows   *network.NetworkService
 	owners *owners
 }
 
 // NewNetworkReconciler returns the controller of Networks.
 func NewNetworkReconciler(d Deps) *NetworkReconciler {
-	return &NetworkReconciler{deps: d, rec: netreconcile.New(d.Deps), rows: network.NewNetworkService(d.Deps), owners: &owners{}}
+	return &NetworkReconciler{deps: d, rec: netreconcile.New(d.Deps), owners: &owners{}}
 }
 
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=networks,verbs=get;list;watch;create;update;patch;delete
@@ -137,7 +135,7 @@ func (r *NetworkReconciler) deleting(ctx context.Context, obj *cloudv1alpha1.Net
 
 // adopt makes a Network that was created without the API a row: the row
 // the API's CreateNetwork would have stored for the same network (the
-// same checks, network.NetworkService.NewRow), written onto the object
+// same checks, netreconcile.Reconciler.NewRow), written onto the object
 // (cloudstore.AdoptNetwork). What the API would have refused is a
 // condition on the object, not an error.
 func (r *NetworkReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Network) (ctrl.Result, error) {
@@ -161,7 +159,7 @@ func (r *NetworkReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Networ
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonWaiting, fmt.Sprintf("account %s is not a bootstrapped account of this tenant", obj.Spec.AccountRef.Name))
 	}
 	accountID := account.Labels[cloudstore.LabelID]
-	row, err := r.rows.NewRow(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
+	row, err := r.rec.NewRow(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
 		Name: obj.Name, DisplayName: obj.Spec.DisplayName, Labels: obj.Spec.Tags,
 		Spec: convert.NetworkSpecFromAPI(obj.Spec, accountID, nil),
 	}})

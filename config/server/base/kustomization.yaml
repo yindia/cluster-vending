@@ -3,8 +3,11 @@
 # overlays.
 #
 #   ../overlays/kubernetes-store   custom resources in the management cluster,
-#                                  no database (--store=kubernetes)
-#   ../overlays/postgres           an external Postgres (--store=database)
+#                                  no database (--store=kubernetes); deploy the
+#                                  controller (config/default) with it
+#   ../overlays/postgres           an external Postgres (--store=database); the
+#                                  server is then the reconciler too and gets
+#                                  the controller's settings, role and AWS access
 #
 #   make deploy-manifests          # render both, nothing is applied
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -33,15 +36,9 @@ configMapGenerator:
   - CV_LOG_FORMAT=json
   - CV_LOG_LEVEL=info
   - CV_LEADER_ELECT=true
-  - CV_LOOP_INTERVAL=30s
-  # Creates the Crossplane AWS providers, provider-helm and the activation
-  # policy when missing. false when they are managed elsewhere (then the
-  # providers-install rules in role.yaml can go).
-  - CV_INSTALL_PROVIDERS=true
-  # REQUIRED, placeholders: the AWS account the management cluster runs in
-  # and the IAM role the AWS providers assume (IRSA).
-  - CV_AWS_MANAGEMENT_ACCOUNT_ID=111122223333
-  - CV_AWS_MANAGEMENT_ROLE_ARN=arn:aws:iam::111122223333:role/crossplane-provider-aws
+  # Nothing of AWS: the server validates requests and stores the desired
+  # state. The controller (../../default) installs the providers, looks the
+  # cloud up and reconciles; it is the one with AWS settings and an IAM role.
 
 images:
 - name: server

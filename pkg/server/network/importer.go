@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -23,12 +22,14 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
-// ImportNetwork looks an existing VPC up once, read-only, and stores the
-// import: the spec derived from the VPC, the plan (status.import) and what
-// was discovered. The reconciler creates the Observe-only managed
-// resources from that, without looking the cloud up again. Nothing changes
-// in the cloud. The network is IMPORTED, or FAILED when the plan is
-// BLOCKED (then nothing is imported).
+// ImportNetwork stores the import of an existing VPC: the request, and a
+// network that is IMPORTED with its import DISCOVERING. It does not look
+// at the cloud. The reconciler looks the VPC up once, read-only, stores
+// the spec derived from it and the plan (status.import: PLANNED, or
+// BLOCKED and then the network is FAILED and nothing is imported), and
+// creates the Observe-only managed resources. A VPC that does not exist
+// or cannot be read is the network's status (FAILED, with the reason),
+// not the answer of this call. Nothing changes in the cloud.
 func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportNetworkRequest) (*cloudv1.ImportNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -57,98 +58,37 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	if err := s.refuseOwnedVPC(ctx, account, req.GetAws().GetVpcId()); err != nil {
 		return nil, service.ToConnect(err)
 	}
-	found, err := s.discover(ctx, account, req)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	row, plan, err := s.insertImport(ctx, req, account, found)
+	row, err := s.insertImport(ctx, req, account)
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network import stored", "tenant_id", row.TenantID, "network_id", row.ID,
-		"vpc_id", req.GetAws().GetVpcId(), "blocked", plan.Blocked(), "plan_lines", len(plan.Lines))
+		"vpc_id", req.GetAws().GetVpcId())
 	n, err := s.stored(ctx, row)
 	return &cloudv1.ImportNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
-// discover makes the read-only AWS lookup.
-func (s *NetworkService) discover(ctx context.Context, a *model.CloudAccount, req *cloudv1.ImportNetworkRequest) (*awscloud.Network, error) {
-	if s.deps.AWSDiscovery == nil {
-		return nil, connect.NewError(connect.CodeUnavailable, "AWS lookups are not configured on this server")
-	}
-	access, err := s.deps.AWSAccess(ctx, a)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	found, err := s.deps.AWSDiscovery.DiscoverNetwork(ctx, access, req.GetRegion(),
-		req.GetAws().GetVpcId(), req.GetAws().GetSubnetIds())
-	switch {
-	case err == nil:
-		return found, nil
-	case errors.Is(err, awscloud.ErrNotFound):
-		return nil, connect.NewError(connect.CodeNotFound, err.Error())
-	case errors.Is(err, awscloud.ErrInvalid):
-		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
-	case errors.Is(err, awscloud.ErrAccessDenied):
-		return nil, connect.NewError(connect.CodeFailedPrecondition, "cannot read the VPC with the account's credentials: "+err.Error())
-	default:
-		s.logger().ErrorContext(ctx, "discover network", "vpc_id", req.GetAws().GetVpcId(), "error", err)
-		return nil, connect.NewError(connect.CodeUnavailable, "the AWS lookup failed: "+err.Error())
-	}
-}
-
-// insertImport plans the import and stores the network: the derived spec,
-// the request as sent with what was discovered (input: the reconciler
-// renders the network's objects from it), and the plan (status), IMPORTED
-// or, when blocked, FAILED. The ID is chosen first: it names the
-// resources.
-func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNetworkRequest, a *model.CloudAccount, found *awscloud.Network) (*model.Network, corenetwork.ImportPlan, error) {
+// insertImport stores the import as a network that is IMPORTED and
+// DISCOVERING (netreconcile.NewImportRow): the request as sent, nothing of
+// the VPC yet. The ID is chosen first: it names the resources.
+func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNetworkRequest, a *model.CloudAccount) (*model.Network, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeInternal, err.Error())
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	plan := corenetwork.PlanImport(found, crossplaneaws.ImportedNetwork{
-		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: req.GetTenantId(),
-		NetworkID: id.String(), NetworkName: req.GetName(), Region: req.GetRegion(),
-		Prefix: crossplaneaws.NetworkPrefix(req.GetTenantId(), id.String(), req.GetName()),
-	})
-	phase, state := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED, netreconcile.StateImported
-	if plan.Blocked() {
-		phase, state = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, netreconcile.StateBlocked
-	}
-	spec := &cloudv1.NetworkSpec{Region: req.GetRegion(), BootstrapId: a.ID, Layout: plan.Layout}
-	rawSpec, err1 := netreconcile.Encode(spec)
-	input, err2 := netreconcile.Encode(req)
-	stored, err3 := netreconcile.Encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
-	if err2 == nil && !plan.Blocked() {
-		input, err2 = netreconcile.WithImportedResources(input, plan.Resources)
-	}
-	if err := errors.Join(err1, err2, err3); err != nil {
-		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeInternal, err.Error())
-	}
-	row := &model.Network{
-		Resource: model.Resource{Base: model.Base{ID: id.String()}, DisplayName: req.GetDisplayName(),
-			State: state, Spec: rawSpec, Status: stored},
-		TenantID: req.GetTenantId(), Name: req.GetName(), Input: input, CloudAccountID: a.ID,
-		Provider: model.ProviderAWS, Region: req.GetRegion(),
-	}
-	if rid := req.GetRequestId(); rid != "" {
-		row.CreateRequestID = &rid
-	}
-	if vpc := req.GetAws().GetVpcId(); !plan.Blocked() {
-		// Unique per account and region: of two imports of one VPC at the
-		// same moment (refuseOwnedVPC lets both pass), one is stored.
-		row.ExternalID = &vpc
+	row, err := netreconcile.NewImportRow(req, a, id.String())
+	if err != nil {
+		return nil, err
 	}
 	err = s.deps.Store.Networks().Create(ctx, row)
 	if errors.Is(err, repository.ErrAlreadyExists) {
-		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
 			"VPC %s is already imported (or request_id %q was used before)", req.GetAws().GetVpcId(), req.GetRequestId()))
 	}
 	if err != nil {
-		return nil, corenetwork.ImportPlan{}, service.ToConnect(err)
+		return nil, service.ToConnect(err)
 	}
-	return row, plan, nil
+	return row, nil
 }
 
 // TakeOverNetwork stores an IMPORTED network as taken over. The reconciler

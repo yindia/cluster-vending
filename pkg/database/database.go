@@ -149,6 +149,14 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 	if err != nil {
 		return fmt.Errorf("migrate database: backfill namespaces: %w", err)
 	}
+	// Clusters from before the reconciler made the cloud lookups had them
+	// made by the call that stored them. Before the next backfill: a row
+	// not applied yet keeps its lookups to make.
+	err = db.WithContext(ctx).Exec(
+		"UPDATE clusters SET resolved_generation = generation WHERE resolved_generation = 0 AND applied_generation >= generation").Error
+	if err != nil {
+		return fmt.Errorf("migrate database: backfill clusters resolved generations: %w", err)
+	}
 	// Rows from before applied generations were recorded were applied.
 	for _, table := range []string{"networks", "clusters"} {
 		err := db.WithContext(ctx).Exec("UPDATE " + table + " SET applied_generation = generation WHERE applied_generation = 0").Error

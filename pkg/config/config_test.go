@@ -179,9 +179,34 @@ func TestLoadServeFlagsOverrideEnv(t *testing.T) {
 	}
 }
 
-func TestLoadServeRequiresManagementIdentity(t *testing.T) {
+// With the background loop the server is the reconciler too, and needs
+// the management account like the controller does.
+func TestLoadServeRequiresManagementIdentityWithTheLoop(t *testing.T) {
 	_, err := config.LoadServe(nil, lookup(nil), nil)
 	requireErrorNaming(t, err, config.EnvAWSManagementAccountID, config.EnvAWSManagementRoleARN)
+	_, err = config.LoadServe(nil, lookup(map[string]string{config.EnvStore: config.StoreKubernetes,
+		config.EnvBackgroundLoop: config.LoopOn}), nil)
+	requireErrorNaming(t, err, config.EnvAWSManagementAccountID, config.EnvAWSManagementRoleARN)
+}
+
+// The API server that only stores the desired state (the Kubernetes
+// store, where the controller reconciles) needs nothing of AWS: no
+// setting, no credentials.
+func TestLoadServeNeedsNoAWSSettingWithoutTheLoop(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"kubernetes store":       {config.EnvStore: config.StoreKubernetes},
+		"database, loop off":     {config.EnvBackgroundLoop: config.LoopOff},
+		"kubernetes, AWS absent": {config.EnvStore: config.StoreKubernetes, config.EnvBackgroundLoop: config.LoopAuto},
+	} {
+		cfg, err := config.LoadServe(nil, lookup(env), nil)
+		if err != nil {
+			t.Errorf("%s: %v; want the server to load without any AWS setting", name, err)
+			continue
+		}
+		if cfg.BackgroundLoop || cfg.AWS.ManagementAccountID != "" || cfg.AWS.ManagementRoleARN != "" || cfg.AWS.StaticKeys != nil {
+			t.Errorf("%s: loop %t, AWS %+v", name, cfg.BackgroundLoop, cfg.AWS)
+		}
+	}
 }
 
 func TestLoadServeRejectsInvalidValues(t *testing.T) {

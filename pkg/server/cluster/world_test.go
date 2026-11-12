@@ -60,7 +60,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	}
 	must(store.Tenants().Create(ctx, &model.Tenant{ID: worldTenant}))
 	account := &model.CloudAccount{TenantID: worldTenant, Provider: model.ProviderAWS, AccountID: "444455556666",
-		ProviderConfigName: "aws-0a1b2c3d", Namespace: worldNS}
+		ProviderConfigName: "aws-0a1b2c3d", Namespace: worldNS, Identity: "arn:aws:iam::444455556666:role/provisioner"}
 	must(store.Tenants().PutCloudAccount(ctx, account))
 	account, err = store.Tenants().GetCloudAccount(ctx, worldTenant, model.ProviderAWS, "444455556666")
 	must(err)

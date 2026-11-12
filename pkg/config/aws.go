@@ -13,14 +13,21 @@ const (
 	EnvAWSManagementAccountID  = "CV_AWS_MANAGEMENT_ACCOUNT_ID"
 	FlagAWSManagementRoleARN   = "aws-management-role-arn"
 	EnvAWSManagementRoleARN    = "CV_AWS_MANAGEMENT_ROLE_ARN"
+	FlagAWSSourceRoleARN       = "aws-source-role-arn"
+	EnvAWSSourceRoleARN        = "CV_AWS_SOURCE_ROLE_ARN"
 )
 
 var awsSettings = []Setting{
 	{Flag: FlagAWSManagementAccountID, Env: EnvAWSManagementAccountID,
-		Usage: "AWS account ID (12 digits) of the management cluster; required"},
+		Usage: "AWS account ID (12 digits) of the management cluster; required by what reconciles (the controller, or the server with the background loop)"},
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
-		Usage: "IAM role ARN the Crossplane AWS provider runs as (IRSA), in the management account; tenant roles trust it; required"},
+		Usage: "IAM role ARN the Crossplane AWS provider runs as (IRSA), in the management account; tenant roles trust it; required by what reconciles"},
 }
+
+// awsSourceSetting is the role between the controller's own credentials
+// and the tenant roles.
+var awsSourceSetting = Setting{Flag: FlagAWSSourceRoleARN, Env: EnvAWSSourceRoleARN,
+	Usage: "IAM role ARN assumed with the controller's own credentials before every tenant role; empty when those credentials already are the role the tenant roles trust (IRSA as the management role). The credentials themselves are never a setting: they come from the AWS SDK's default chain (IRSA in production; for local testing export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the environment, never in a file or flag)"}
 
 var (
 	accountIDPattern = regexp.MustCompile(`^\d{12}$`)
@@ -37,10 +44,14 @@ var (
 type AWS struct {
 	ManagementAccountID string
 	ManagementRoleARN   string
-	// StaticKeys are AWS keys from the environment (AWS_ACCESS_KEY_ID,
-	// AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN). When set, the server's own
-	// AWS calls use them directly for every account (local testing); else
-	// they follow each account's ProviderConfig. Never logged.
+	// SourceRoleARN, when set, is assumed with the controller's own
+	// credentials before every tenant role (FlagAWSSourceRoleARN).
+	SourceRoleARN string
+	// StaticKeys are AWS keys found in the environment (AWS_ACCESS_KEY_ID,
+	// AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN): local testing. They are
+	// only noticed here, to say so in the log; the AWS SDK reads them
+	// itself as the controller's own credentials, and every lookup still
+	// assumes the tenant role of the account it reads. Never logged.
 	StaticKeys *StaticKeys
 }
 
@@ -105,6 +116,10 @@ func (a AWS) validate() []error {
 			errs = append(errs, fmt.Errorf("%s is in account %s, want the management account %s",
 				setting(FlagAWSManagementRoleARN), account, a.ManagementAccountID))
 		}
+	}
+	if a.SourceRoleARN != "" && !roleARNPattern.MatchString(a.SourceRoleARN) {
+		errs = append(errs, fmt.Errorf("%s must be an IAM role ARN (arn:aws:iam::<account>:role/<name>), got %q",
+			setting(FlagAWSSourceRoleARN), a.SourceRoleARN))
 	}
 	return errs
 }

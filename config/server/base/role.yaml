@@ -1,6 +1,13 @@
-# What `cluster-vending serve` does in the management cluster today,
-# derived from the code named at each rule. Kept in step with it by
-# config/deploy_test.go.
+# What `cluster-vending serve` does in the management cluster: it writes the
+# platform's own kinds (the desired state) and reads the rest. It applies and
+# deletes nothing of a network or cluster, installs nothing, and reads no
+# Secret: that is the controller (config/rbac/platform_role.yaml). It makes
+# no AWS call, so its service account has no IAM role. Kept in step with the
+# code by config/deploy_test.go.
+#
+# With a database and the background loop (overlays/postgres) the server is
+# the reconciler too; that overlay adds what a reconciler needs
+# (reconciler_role.yaml).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -9,34 +16,41 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: server-role
 rules:
-# Installing the providers at startup (--install-providers,
-# pkg/crossplane/aws InstallProviders): the AWS providers, provider-helm and
-# their runtime configs are created when missing, never changed.
+# The state itself, with --store=kubernetes: CloudAccount, Network and
+# Cluster objects in the tenants' namespaces (pkg/database/cloudstore).
 - apiGroups:
-  - pkg.crossplane.io
+  - cloud.cluster-vending.io
   resources:
-  - providers
-  - deploymentruntimeconfigs
+  - "*"
   verbs:
   - get
   - list
   - watch
   - create
-# The platform's activation policy: created, and kinds a newer build uses are
-# added to an existing one (addActivations).
+  - update
+  - patch
+  - delete
+  - deletecollection
+# A tenant is its namespace: created or adopted when the tenant is, never
+# deleted by the server.
 - apiGroups:
-  - apiextensions.crossplane.io
+  - ""
   resources:
-  - managedresourceactivationpolicies
+  - namespaces
   verbs:
   - get
+  - list
+  - watch
   - create
   - update
-# The managed resources the platform renders for networks and clusters:
-# the kinds of pkg/crossplane/aws ActivationPolicy (managedMRDs). Applied
-# (create, patch), read through the informer cache (list, watch), changed
-# at takeover, retag and pause (update, patch), deleted one by one and by
-# label (delete, deletecollection).
+  - patch
+# The managed resources of networks and clusters, read through the informer
+# cache for a resource's live status and for the checks a request needs (a
+# network's subnets, a VPC that is already imported). create and patch are
+# for one thing only: the server-side apply DRY RUN behind UpdateCluster
+# validate_only (pkg/server/cluster planning.go), which Kubernetes authorizes
+# like a real apply. No handler applies for real
+# (pkg/server/*/writeonly_test.go), and nothing is updated in place or deleted.
 - apiGroups:
   - ec2.aws.m.upbound.io
   resources:
@@ -61,10 +75,7 @@ rules:
   - list
   - watch
   - create
-  - update
   - patch
-  - delete
-  - deletecollection
 - apiGroups:
   - eks.aws.m.upbound.io
   resources:
@@ -81,10 +92,7 @@ rules:
   - list
   - watch
   - create
-  - update
   - patch
-  - delete
-  - deletecollection
 - apiGroups:
   - iam.aws.m.upbound.io
   resources:
@@ -97,10 +105,7 @@ rules:
   - list
   - watch
   - create
-  - update
   - patch
-  - delete
-  - deletecollection
 - apiGroups:
   - kms.aws.m.upbound.io
   resources:
@@ -111,10 +116,7 @@ rules:
   - list
   - watch
   - create
-  - update
   - patch
-  - delete
-  - deletecollection
 - apiGroups:
   - cloudwatchlogs.aws.m.upbound.io
   resources:
@@ -124,12 +126,8 @@ rules:
   - list
   - watch
   - create
-  - update
   - patch
-  - delete
-  - deletecollection
-# Usages order the deletion of managed resources (pkg/crossplane/aws
-# usage.go); orphaned ones are released (pkg/crossplane/managed).
+# Usages, read for a deletion that waits on one.
 - apiGroups:
   - protection.crossplane.io
   resources:
@@ -138,13 +136,9 @@ rules:
   - get
   - list
   - watch
-  - create
-  - update
-  - patch
-  - delete
-  - deletecollection
-# An account's ProviderConfig, applied at bootstrap and read for the
-# account's access (pkg/reconcile/access.go).
+# An account's ProviderConfig: BootstrapTenant still applies it itself (and
+# the tenant namespace above) when the account is stored; the controller
+# reconciles it from then on (pkg/reconcile/account).
 - apiGroups:
   - aws.m.upbound.io
   resources:
@@ -154,61 +148,8 @@ rules:
   - list
   - watch
   - create
-  - update
   - patch
-  - delete
-  - deletecollection
-# Tenant namespaces, applied at bootstrap and cached.
-- apiGroups:
-  - ""
-  resources:
-  - namespaces
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-# The credentials Secret an account's ProviderConfig names, for the
-# platform's own read-only AWS lookups (pkg/reconcile/access.go). It can be
-# in any namespace, so this is cluster-wide; read only, never listed.
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-# With --store=kubernetes the server installs the CustomResourceDefinitions
-# of the kinds it keeps its state in (pkg/server/management.go ConnectStore).
-- apiGroups:
-  - apiextensions.k8s.io
-  resources:
-  - customresourcedefinitions
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-# With --store=kubernetes: the state itself, as objects of the
-# controller's kinds in the tenant namespaces (pkg/database/cloudstore).
-- apiGroups:
-  - cloud.cluster-vending.io
-  resources:
-  - "*"
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-  - deletecollection
-# Events of the leader election.
+# Events on the platform's objects and of the leader election.
 - apiGroups:
   - ""
   - events.k8s.io

@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,22 +10,33 @@ import (
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
-	"github.com/yindia/cluster-vending/pkg/config"
-	"github.com/yindia/cluster-vending/pkg/database/repository"
+
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// testKeys stand for AWS keys in the server's environment.
-var testKeys = &config.StaticKeys{AccessKeyID: "AKID", SecretAccessKey: "secret"}
-
-// fakeDiscoverer returns a fixed network, or err.
+// fakeDiscoverer returns a fixed network, or err, and counts its lookups
+// when given somewhere to.
 type fakeDiscoverer struct {
 	network *awscloud.Network
 	err     error
+	lookups *int
 }
 
 func (f fakeDiscoverer) DiscoverNetwork(context.Context, awscloud.Access, string, string, []string) (*awscloud.Network, error) {
+	if f.lookups != nil {
+		*f.lookups++
+	}
 	return f.network, f.err
+}
+
+// noAWS fails the test when anything looks the cloud up: what a handler
+// must never do.
+type noAWS struct{ t *testing.T }
+
+func (n noAWS) DiscoverNetwork(context.Context, awscloud.Access, string, string, []string) (*awscloud.Network, error) {
+	n.t.Helper()
+	n.t.Error("a handler looked the cloud up: only the reconciler may")
+	return nil, errors.New("no AWS in a handler")
 }
 
 // existingVPC is a Terraform-style two-zone VPC: public subnets on one
@@ -85,7 +97,6 @@ func dispositions(imp *cloudv1.ImportStatus) map[cloudv1.Disposition]int {
 func TestImportNetwork(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 
 	n := f.imported(t)
 	if n.GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED || n.GetName() != "tf" {
@@ -136,7 +147,6 @@ func TestImportNetwork(t *testing.T) {
 func TestTakeOverNetwork(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
 	if err != nil {
 		t.Fatal(err)
@@ -186,39 +196,91 @@ func TestImportNetworkBlocked(t *testing.T) {
 	vpc := existingVPC()
 	vpc.Subnets[3].Role = awscloud.SubnetRoleIsolated // private egress is not through a NAT gateway
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpc}
-	f.svc.deps.AWS.StaticKeys = testKeys
 
 	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := res.GetNetwork().GetStatus()
-	if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_FAILED || st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED {
-		t.Errorf("blocked import = %s / %s (%s)", st.GetState(), st.GetImport().GetPhase(), st.GetMessage())
+	// The call stored the import; the reconciler finds the plan blocked.
+	if st := res.GetNetwork().GetStatus(); st.GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED ||
+		st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_DISCOVERING {
+		t.Errorf("right after the call = %s / %s, want IMPORTED and DISCOVERING", st.GetState(), st.GetImport().GetPhase())
+	}
+	f.reconcile(t, res.GetNetwork().GetId())
+	for name, n := range map[string]*cloudv1.Network{"stored": f.get(t, res.GetNetwork().GetId()), "live": f.status(t, res.GetNetwork().GetId())} {
+		st := n.GetStatus()
+		if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_FAILED || st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED {
+			t.Errorf("%s blocked import = %s / %s (%s)", name, st.GetState(), st.GetImport().GetPhase(), st.GetMessage())
+		}
 	}
 	if got := f.count(t, &awsec2.VPCList{}, res.GetNetwork().GetId()); got != 0 {
 		t.Errorf("blocked import created %d VPCs", got)
 	}
+	// The blocked network still stands for the VPC: it is deleted before
+	// the VPC is imported again.
+	if _, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID)); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Errorf("a second import next to the blocked one = %v, want ALREADY_EXISTS", err)
+	}
+	if _, err := f.svc.DeleteNetwork(t.Context(), &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: res.GetNetwork().GetId()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Reconcile(t.Context(), tenant, res.GetNetwork().GetId()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID)); err != nil {
+		t.Errorf("importing the VPC again once the blocked network is deleted: %v", err)
+	}
 }
 
-func TestImportNetworkErrors(t *testing.T) {
-	f := newFixture(t)
-	f.svc.deps.AWS.StaticKeys = testKeys
+// The call never looks at the cloud: what the lookup finds wrong is the
+// network's status once the reconciler made it. A VPC that is not there
+// or cannot be read is FAILED with the reason; a lookup that did not
+// answer is tried again.
+func TestImportNetworkErrorsAreStatus(t *testing.T) {
 	for name, tc := range map[string]struct {
 		discovery awscloud.NetworkDiscoverer
-		want      connect.Code
+		state     cloudv1.NetworkState
+		message   string
 	}{
-		"not configured": {nil, connect.CodeUnavailable},
-		"access denied":  {fakeDiscoverer{err: awscloud.ErrAccessDenied}, connect.CodeFailedPrecondition},
-		"vpc not found":  {fakeDiscoverer{err: awscloud.ErrNotFound}, connect.CodeNotFound},
+		"not configured": {nil, cloudv1.NetworkState_NETWORK_STATE_IMPORTED, "retrying: AWS lookups are not configured"},
+		"lookup failed": {fakeDiscoverer{err: errors.New("timeout")}, cloudv1.NetworkState_NETWORK_STATE_IMPORTED,
+			"retrying: the AWS lookup failed: timeout"},
+		"access denied": {fakeDiscoverer{err: awscloud.ErrAccessDenied}, cloudv1.NetworkState_NETWORK_STATE_FAILED,
+			"cannot read the VPC with the account's credentials"},
+		"vpc not found": {fakeDiscoverer{err: awscloud.ErrNotFound}, cloudv1.NetworkState_NETWORK_STATE_FAILED, "not found"},
+		"bad vpc id":    {fakeDiscoverer{err: awscloud.ErrInvalid}, cloudv1.NetworkState_NETWORK_STATE_FAILED, "invalid"},
 	} {
-		f.svc.deps.AWSDiscovery = tc.discovery
-		if _, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID)); connect.CodeOf(err) != tc.want {
-			t.Errorf("%s: %v, want %s", name, err, tc.want)
-		}
-	}
-	if rows, _ := f.store.Networks().List(t.Context(), tenant, repository.Page{Limit: 10}); len(rows) != 0 {
-		t.Errorf("failed imports left %d networks", len(rows))
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.svc.deps.AWSDiscovery = noAWS{t}
+			res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
+			if err != nil {
+				t.Fatalf("ImportNetwork: %v; the call stores the import whatever the cloud says", err)
+			}
+			id := res.GetNetwork().GetId()
+			f.svc.deps.AWSDiscovery = tc.discovery
+			if err := f.svc.Reconcile(t.Context(), tenant, id); err == nil {
+				t.Error("the pass reported no error")
+			}
+			for view, n := range map[string]*cloudv1.Network{"stored": f.get(t, id), "live": f.status(t, id)} {
+				st := n.GetStatus()
+				if st.GetState() != tc.state || !strings.Contains(st.GetMessage(), tc.message) ||
+					st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_DISCOVERING {
+					t.Errorf("%s status = %s %q (%s), want %s with %q, still DISCOVERING", view, st.GetState(), st.GetMessage(),
+						st.GetImport().GetPhase(), tc.state, tc.message)
+				}
+			}
+			if got := f.count(t, &awsec2.VPCList{}, id); got != 0 {
+				t.Errorf("a failed lookup created %d VPCs", got)
+			}
+			// Once the cloud answers the import goes on.
+			f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
+			f.reconcile(t, id)
+			if st := f.status(t, id).GetStatus(); st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED ||
+				st.GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED {
+				t.Errorf("after the lookup succeeded = %s / %s (%s)", st.GetState(), st.GetImport().GetPhase(), st.GetMessage())
+			}
+		})
 	}
 }
 
@@ -228,13 +290,13 @@ func TestImportListsMainRouteTableWhenUsed(t *testing.T) {
 	vpc.Subnets[3].RouteTableID = "rtb-main" // no association of its own
 	vpc.RouteTables[3].Associations = nil
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpc}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.reconcile(t, res.GetNetwork().GetId())
 	found := false
-	for _, l := range res.GetNetwork().GetStatus().GetImport().GetResources() {
+	for _, l := range f.get(t, res.GetNetwork().GetId()).GetStatus().GetImport().GetResources() {
 		found = found || (l.GetKind() == "DefaultRouteTable" && l.GetDisposition() == cloudv1.Disposition_DISPOSITION_NOT_IMPORTED)
 	}
 	if !found {
@@ -245,7 +307,6 @@ func TestImportListsMainRouteTableWhenUsed(t *testing.T) {
 func TestImportRefusesAVPCThatHasANetwork(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	first, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
 	if err != nil {
 		t.Fatal(err)

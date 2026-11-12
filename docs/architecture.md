@@ -16,16 +16,16 @@ last column were checked with `go list -deps`.
 | `pkg/crossplane/managed` | Reads an object's state from its conditions, deletes objects, releases Usages whose user is gone. | Kubernetes only. |
 | `pkg/network`, `pkg/cluster` | Logic that needs neither the API nor storage: defaults, layout, render plan, import planning, update changes. | No RPC library, no `pkg/database`, no `pkg/server`. |
 | `pkg/fault` | An error with a kind and a message for the caller, for code that is not an RPC handler. | Imports nothing from the repository. |
-| `pkg/reconcile` | What reconciling needs: `Deps` (store, management cluster, AWS access) and the bookkeeping every owner shares (record, observe, prune, the database-backed `Inventory`). | No RPC library, no `pkg/server`. Failures a caller can act on are faults. |
-| `pkg/reconcile/network`, `pkg/reconcile/cluster` | A `Reconciler` each: moves one stored network or cluster towards its spec (apply, staging, delete, takeover, status). | Same as `pkg/reconcile`. |
-| `pkg/server/network`, `pkg/server/cluster` | RPC handlers only: validate, read and write rows, call the reconciler, map errors to Connect codes. | May import everything above. |
-| `pkg/server/tenant` | Handlers and the account bootstrap logic together; it has not been split yet. | As the other server packages. |
+| `pkg/reconcile` | What reconciling needs: `Deps` (store, management cluster, the AWS lookups) and the bookkeeping every owner shares (record, observe, prune, the database-backed `Inventory`), the checks a request and a reconciler share (`Validate`, `CheckAWSLabels`), and how a tenant's account is reached (`AWSAccess`: always through its tenant role). | No RPC library, no `pkg/server`. Failures a caller can act on are faults. |
+| `pkg/reconcile/network`, `pkg/reconcile/cluster`, `pkg/reconcile/account` | A `Reconciler` each: moves one stored network, cluster or account towards its spec (apply, staging, delete, takeover, status). They also build the row a create or an import stores (`NewRow`, `NewImportRow`), and they are the only code that looks at AWS: the discovery of an import, the EKS name check and the version resolution. | Same as `pkg/reconcile`. |
+| `pkg/management` | Prepares the management cluster for the two commands: the manager whose cache both read from, the store on the platform's kinds, and, for what reconciles only, the Crossplane providers, the CRDs and the AWS lookups (`WithAWS`). | No RPC library, no `pkg/server`. |
+| `pkg/server/network`, `pkg/server/cluster`, `pkg/server/tenant` | RPC handlers only: validate, read and write rows, map errors to Connect codes. They use the reconcilers to check a request against the store and to read. They make no AWS call, and the network and cluster handlers write nothing to the management cluster (the tenant handler still applies an account's namespace and ProviderConfig itself). | May import everything above. |
 | `pkg/server/service` | What handlers share: request validation, `ToConnect` (repository errors and faults to Connect codes), the `Faults` interceptor. | The only shared package that imports the RPC library. |
 | `pkg/database` | `repository` is the storage interface. `implementation` is the GORM backend (SQLite, Postgres). `cloudstore` is the Kubernetes-backed backend, on the controller's kinds. `storetest` is the behaviour suite both run. | `repository` and `model` import nothing else from the repository. |
 | `pkg/loop` | The background loop: every interval it calls `Reconcile` for rows that are not settled. | Imports only `pkg/database`. It is handed the reconcilers. |
-| `pkg/cloud/aws` | Read-only AWS lookups for imports and checks. | Imports only `pkg/constant/aws`. |
+| `pkg/cloud/aws` | Read-only AWS lookups for imports and checks, always as the tenant role of the account they read. Called by the reconcilers only. | Imports only `pkg/constant/aws`. |
 | `pkg/kube` | Client, scheme and server-side apply. | No storage, no RPC library. |
-| `api/`, `pkg/controller`, `pkg/convert`, `pkg/owner`, `config/` | The kubebuilder project (`PROJECT` at the root): API types (`api/v1alpha1`), their conversion to the contract, the controllers and the manager (`pkg/controller/manager`), CRDs and deploy manifests for the controller and the server. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore`, `pkg/server` (the shared management cluster setup) and `pkg/server/{network,cluster}` (the row a create stores). |
+| `api/`, `pkg/controller`, `pkg/convert`, `pkg/owner`, `config/` | The kubebuilder project (`PROJECT` at the root): API types (`api/v1alpha1`), their conversion to the contract, the controllers and the manager (`pkg/controller/manager`), CRDs and deploy manifests for the controller and the server. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore` and `pkg/management`. Nothing in them imports `pkg/server`. |
 | `pkg/cli`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin and has no tests. | `pkg/cli` imports only the generated client. |
 
 Two things the table would otherwise hide:
@@ -36,17 +36,50 @@ Two things the table would otherwise hide:
 - `pkg/kube` registers the controller's kinds (`api/v1alpha1`) in
   its scheme, so `pkg/crossplane/sequence` and everything above it depend on
   that package through `pkg/kube`.
+- The server packages construct no AWS client and call none, but they still
+  link the AWS SDK: `pkg/reconcile` (and `pkg/network`, `pkg/cluster`) use
+  the types of `pkg/cloud/aws` (what a lookup returns, the lookup
+  interfaces), and that package holds the SDK-backed implementation too.
+
+## Who talks to AWS
+
+Only what reconciles: the controller (`cluster-vending controller`). The API
+server (`cluster-vending serve`) validates a request against the store and
+the management cluster, stores the desired state, and returns. It has no AWS
+setting, no AWS credentials and no IAM role.
+
+| What needs the cloud | Where it runs | What the client sees when it fails |
+|---|---|---|
+| Looking up the VPC of an imported network | `pkg/reconcile/network` (`discoverImport`), once | The network is `FAILED` with the reason, its import still `DISCOVERING`; a lookup that did not answer is retried. |
+| Looking up the EKS cluster of an imported cluster | `pkg/reconcile/cluster` (`discoverImport`), once | The same, on the cluster. |
+| Is the EKS name of a new cluster taken by a cluster made elsewhere | `pkg/reconcile/cluster` (`resolve`), before anything is created | The cluster is `FAILED`: "account ... already has an EKS cluster named ...". |
+| Which Kubernetes and add-on versions EKS offers | `pkg/reconcile/cluster` (`resolve`), for a new cluster and after an update of the version or the add-ons, before anything is rendered | The cluster is `FAILED` with what EKS refused; nothing is applied. |
+| Installing the Crossplane AWS providers | `pkg/management`, at the controller's start | The controller does not start. |
+
+The controller's lookups have one way into a tenant's account
+(`reconcile.Deps.AWSAccess`, `pkg/cloud/aws`): its own credentials, as the AWS
+SDK's default chain finds them (IRSA in production, keys in the environment
+for local testing), then optionally a source role, then always the tenant
+role stored at the account's bootstrap. Nothing is read with the base
+credentials themselves.
+
+While the database store exists, `serve` with the background loop is the
+reconciler too (there is no controller for that store): only then does it
+take the controller's AWS settings, install the providers and look the
+cloud up, through the same reconcilers.
 
 ## How a create flows
 
 ### Network
 
-1. **Handler** (`pkg/server/network`, `CreateNetwork`). It validates the
-   request, returns the existing network for a repeated request ID, checks
-   the labels as AWS tags, and resolves the account and the layout
+1. **Handler** (`pkg/server/network`, `CreateNetwork`). It returns the
+   existing network for a repeated request ID and builds the row
+   (`pkg/reconcile/network` `NewRow`): the request is validated, the labels
+   are checked as AWS tags, and the account and the layout are resolved
    (`pkg/network`: defaults, subnets inside the CIDR, zones of the region).
-2. **Store.** The row is inserted with the resolved spec, so later renders
-   do not depend on defaults.
+2. **Store.** The row is inserted with the resolved spec, `PROVISIONING` and
+   not applied; the call returns. Nothing was written to the management
+   cluster.
 3. **Reconciler** (`pkg/reconcile/network`, `Apply`). It renders the plan
    into a set with `crossplaneaws.NetworkSet` and gives it to the engine with
    the network's inventory.
@@ -54,14 +87,13 @@ Two things the table would otherwise hide:
    ready, applies them with server-side apply, and reports what waits.
 5. **Crossplane** creates the cloud resources and reports conditions on the
    objects.
-6. **Status.** The handler answers with the network as it is now. From then
-   on the background loop calls `Reconcile` every interval while the network
-   is not settled: it applies again while anything was held back, records
-   the status that `GetNetwork` returns, and stores `READY` once every
-   resource is ready and the provider has seen the latest change.
-
-The handler applies inline today. If that apply fails, the create is rolled
-back and the call fails.
+6. **Status.** Whatever reconciles (the controller, or the background loop
+   with the database store) calls `Reconcile` while the network is not
+   settled: it applies again while anything was held back, records the
+   status that `GetNetwork` returns, and stores `READY` once every resource
+   is ready and the provider has seen the latest change. What goes wrong
+   applying is the network's status (`FAILED`, or "retrying"), not an error
+   of the call, and nothing is rolled back.
 
 ### Cluster
 
@@ -69,10 +101,17 @@ The shape is the same (`pkg/server/cluster` `CreateCluster`,
 `pkg/reconcile/cluster` `Apply`, `crossplaneaws.ClusterSet`), with more
 before and after:
 
-- The handler resolves the target: the account, the network and its private
-  subnets in at least two zones. It checks the name against the store and
-  against EKS, and fills the spec's defaults (`pkg/cluster`).
-- After the apply it tags the network's subnets for the cluster.
+- The row (`pkg/reconcile/cluster` `NewRow`) resolves the target: the
+  account, the network and its private subnets in at least two zones. It
+  checks the name against the platform's own clusters in the store and
+  fills the spec's defaults (`pkg/cluster`). It does not look at the cloud.
+- Before the first render the reconciler makes the cloud lookups of the
+  generation (`resolve`): that EKS has no cluster of the name, and the
+  Kubernetes and add-on versions, which it writes to the stored spec. The
+  row's `ResolvedGeneration` says which generation had them made; an update
+  that changes neither the version nor the add-ons needs none.
+- After the apply the reconciler tags the network's subnets for the
+  cluster.
 - The loop keeps applying until the set is complete, retires replaced node
   groups, and stores `RUNNING`.
 
@@ -92,9 +131,13 @@ condition says. While anything waits, the engine removes nothing.
 
 ## Import and takeover
 
-An import is read-only. The handler looks the existing VPC or EKS cluster up
-in AWS once (`pkg/cloud/aws`), and `pkg/network` or `pkg/cluster` turns what
-it found into a plan:
+An import is read-only, and the call that starts it does not look at the
+cloud: it stores the request as a network or cluster that is `IMPORTED` with
+its import `DISCOVERING` (`NewImportRow`). The reconciler looks the existing
+VPC or EKS cluster up in AWS once (`pkg/cloud/aws`, `discoverImport`), and
+`pkg/network` or `pkg/cluster` turns what it found into a plan, which is
+stored with the row before anything is applied, so no later pass looks the
+cloud up again:
 
 - A spec derived from what exists.
 - Objects that only observe: `managementPolicies` is `Observe` for a
@@ -203,9 +246,12 @@ it exists, that is said.
   references. An owner is not deleted while it has dependents; there is no
   cascade: the controllers hold the finalizer and say what blocks the
   deletion.
-- **API handlers write desired state only.** Today they apply objects
-  inline. They will validate, store and return; a failed apply becomes a
-  status on the resource, not an error on the call.
+- **API handlers write desired state only, and the API server needs no AWS
+  access.** Built for networks and clusters: the handlers validate, store
+  and return, make no AWS call, and a failed apply or lookup is a status on
+  the resource, not an error on the call. Still to do: BootstrapTenant
+  applies the account's namespace and ProviderConfig itself, and the
+  validate-only update plan needs to be allowed a dry-run apply.
 - **Storage moves onto the controller's kinds, and the database is
   removed.** The current Kubernetes-backed store uses separate storage kinds
   and is a first step. No existing state is migrated.

@@ -127,11 +127,19 @@ var (
 type NetworkServiceClient interface {
 	// Creates a network.
 	CreateNetwork(context.Context, *v1.CreateNetworkRequest) (*v1.CreateNetworkResponse, error)
-	// Imports an existing network read-only and computes the plan
-	// (status.import): the server looks up the network's resources (see
-	// AwsImportNetwork), creates Observe-only managed resources for them and
-	// derives the spec from their status.atProvider. Nothing in the cloud
-	// changes. state becomes IMPORTED, or FAILED with phase BLOCKED.
+	// Imports an existing network read-only. The call only stores the
+	// import and returns: the network is IMPORTED with status.import.phase
+	// DISCOVERING, and the API server does not look at the cloud. The
+	// controller then looks the network's resources up once (see
+	// AwsImportNetwork), derives the spec from them, writes the plan
+	// (status.import) and creates Observe-only managed resources. Nothing in
+	// the cloud changes. Poll GetNetwork: the phase becomes PLANNED (state
+	// IMPORTED), or BLOCKED (state FAILED, nothing imported). A network that
+	// does not exist or cannot be read with the account's credentials is not
+	// an error of this call: the network becomes FAILED with the reason in
+	// status.message, still DISCOVERING. ALREADY_EXISTS when a network of
+	// the tenant already stands for the VPC (also a blocked or failed
+	// import: delete it first).
 	ImportNetwork(context.Context, *v1.ImportNetworkRequest) (*v1.ImportNetworkResponse, error)
 	// Takes over an IMPORTED network: the platform becomes its owner and
 	// converges the plan. Call it only after the previous tool stopped
@@ -196,11 +204,19 @@ func (s NetworkServiceWatchNetworkClientStream) Close() error {
 type NetworkServiceHandler interface {
 	// Creates a network.
 	CreateNetwork(context.Context, *v1.CreateNetworkRequest) (*v1.CreateNetworkResponse, error)
-	// Imports an existing network read-only and computes the plan
-	// (status.import): the server looks up the network's resources (see
-	// AwsImportNetwork), creates Observe-only managed resources for them and
-	// derives the spec from their status.atProvider. Nothing in the cloud
-	// changes. state becomes IMPORTED, or FAILED with phase BLOCKED.
+	// Imports an existing network read-only. The call only stores the
+	// import and returns: the network is IMPORTED with status.import.phase
+	// DISCOVERING, and the API server does not look at the cloud. The
+	// controller then looks the network's resources up once (see
+	// AwsImportNetwork), derives the spec from them, writes the plan
+	// (status.import) and creates Observe-only managed resources. Nothing in
+	// the cloud changes. Poll GetNetwork: the phase becomes PLANNED (state
+	// IMPORTED), or BLOCKED (state FAILED, nothing imported). A network that
+	// does not exist or cannot be read with the account's credentials is not
+	// an error of this call: the network becomes FAILED with the reason in
+	// status.message, still DISCOVERING. ALREADY_EXISTS when a network of
+	// the tenant already stands for the VPC (also a blocked or failed
+	// import: delete it first).
 	ImportNetwork(context.Context, *v1.ImportNetworkRequest) (*v1.ImportNetworkResponse, error)
 	// Takes over an IMPORTED network: the platform becomes its owner and
 	// converges the plan. Call it only after the previous tool stopped

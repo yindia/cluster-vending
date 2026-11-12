@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database"
@@ -19,9 +18,10 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/loop"
+	"github.com/yindia/cluster-vending/pkg/management"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server"
-	"github.com/yindia/cluster-vending/pkg/server/cluster"
-	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -32,7 +32,13 @@ func newServeCmd(g *globals) *cobra.Command {
 		Long: "Run the Connect API server until SIGINT or SIGTERM, then drain in-flight\n" +
 			"requests; a second signal exits at once. It speaks Connect, gRPC and\n" +
 			"gRPC-Web, over HTTP/1.1 and cleartext HTTP/2.\n\n" +
-			"--aws-management-account-id and --aws-management-role-arn are required.",
+			"The server validates requests and stores the desired state; it makes\n" +
+			"no AWS call and needs no AWS setting or credentials. What reconciles is\n" +
+			"`cluster-vending controller` (with --store=kubernetes). Only while the\n" +
+			"server runs the background loop itself (--background-loop, the default\n" +
+			"with --store=database) is it the reconciler too, and then it takes the\n" +
+			"controller's settings: --aws-management-account-id and\n" +
+			"--aws-management-role-arn are required, and it needs AWS credentials.",
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationSettingsFile: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -50,9 +56,11 @@ func newServeCmd(g *globals) *cobra.Command {
 				stop()
 			}()
 
-			management := server.ManagementOptions{
+			options := management.Options{
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
-				InstallProviders: cfg.InstallProviders, Logger: g.logger,
+				// The providers are the reconciler's to install: the
+				// controller, or this server while it runs the loop.
+				InstallProviders: cfg.BackgroundLoop && cfg.InstallProviders, InstallKinds: cfg.BackgroundLoop, Logger: g.logger,
 				ProviderRuntime: crossplaneaws.ProviderRuntime{
 					ManagementRoleARN: cfg.AWS.ManagementRoleARN, Poll: cfg.Provider.Poll, EC2Poll: cfg.Provider.EC2Poll,
 					MaxReconcileRate: cfg.Provider.MaxReconcileRate, CPURequest: cfg.Provider.CPURequest,
@@ -60,15 +68,15 @@ func newServeCmd(g *globals) *cobra.Command {
 				},
 				LeaderElection: kube.LeaderElection{Enabled: cfg.LeaderElect, Namespace: cfg.LeaseNamespace},
 			}
-			store, closeStore, err := openStore(ctx, cfg, management)
+			store, closeStore, err := openStore(ctx, cfg, options)
 			if err != nil {
 				return err
 			}
 			defer closeStore()
 
-			mgr, err := server.ConnectManagement(ctx, management)
+			mgr, err := management.Connect(ctx, options)
 			if err != nil {
-				return fmt.Errorf("%w (--%s=false skips installing the providers)", err, config.FlagInstallProviders)
+				return fmt.Errorf("%w (the Crossplane AWS providers are installed by `cluster-vending controller`)", err)
 			}
 
 			ln, err := new(net.ListenConfig).Listen(ctx, "tcp", cfg.HTTPAddr)
@@ -78,18 +86,10 @@ func newServeCmd(g *globals) *cobra.Command {
 			g.logger.Info("configuration loaded",
 				"kubeconfig", g.cfg.Kubeconfig,
 				"context", g.cfg.KubeContext,
-				"aws_management_account_id", cfg.AWS.ManagementAccountID,
-				"aws_management_role_arn", cfg.AWS.ManagementRoleARN,
 				"store", cfg.Store,
+				"background_loop", cfg.BackgroundLoop,
 				// Never log the DSN: it may hold a password.
 				"database_driver", cfg.Database.Driver)
-			discovery, err := awscloud.New(ctx, awscloud.Config{})
-			if err != nil {
-				return err
-			}
-			if cfg.AWS.StaticKeys != nil {
-				g.logger.Warn("AWS keys found in the environment: the server's own AWS lookups use them for every account (local testing only)")
-			}
 			renderTarget := cfg.RenderTarget
 			if renderTarget == 0 {
 				renderTarget = crossplaneaws.RenderVersion
@@ -98,16 +98,22 @@ func newServeCmd(g *globals) *cobra.Command {
 				Store:        store,
 				Kube:         mgr.GetClient(), // reads from the informer cache
 				KubeReader:   mgr.GetAPIReader(),
-				AWS:          cfg.AWS,
 				RenderTarget: renderTarget, RenderRollout: cfg.RenderRollout,
-				AWSDiscovery: discovery, AWSClusterDiscovery: discovery,
-				AWSClusters: discovery,
-				Logger:      g.logger,
+				Logger: g.logger,
 			}
 			if cfg.BackgroundLoop {
+				// The server is the reconciler too: only the loop's
+				// reconcilers get the AWS lookups, the handlers never do.
+				reconciling, err := management.WithAWS(ctx, deps, "")
+				if err != nil {
+					return err
+				}
+				g.logger.Info("the server reconciles (background loop): it needs AWS credentials and installs the providers",
+					"aws_management_account_id", cfg.AWS.ManagementAccountID, "aws_management_role_arn", cfg.AWS.ManagementRoleARN,
+					"aws_keys_in_environment", cfg.AWS.StaticKeys != nil)
 				err = mgr.Add(&loop.Loop{
-					Store: deps.Store, Networks: network.NewNetworkService(deps), Clusters: cluster.NewClusterService(deps),
-					NetworkStates: network.PendingStates(), ClusterStates: cluster.PendingStates(),
+					Store: deps.Store, Networks: netreconcile.New(reconciling), Clusters: reconcilecluster.New(reconciling),
+					NetworkStates: netreconcile.PendingStates(), ClusterStates: reconcilecluster.PendingStates(),
 					RenderTarget: deps.RenderTarget, Interval: cfg.LoopInterval, Logger: g.logger,
 				})
 				if err != nil {
@@ -120,7 +126,7 @@ func newServeCmd(g *globals) *cobra.Command {
 					"store", cfg.Store)
 			}
 			var ready atomic.Bool
-			done, err := server.StartManagement(ctx, mgr, &ready)
+			done, err := management.Start(ctx, mgr, &ready)
 			if err != nil {
 				return err
 			}
@@ -143,9 +149,9 @@ func newServeCmd(g *globals) *cobra.Command {
 // openStore opens where the server keeps its state (config.Serve.Store):
 // the database, migrated, or the custom resources of the management
 // cluster, for which no database is opened. The returned func closes it.
-func openStore(ctx context.Context, cfg config.Serve, management server.ManagementOptions) (repository.Store, func(), error) {
+func openStore(ctx context.Context, cfg config.Serve, options management.Options) (repository.Store, func(), error) {
 	if cfg.Store == config.StoreKubernetes {
-		store, err := server.ConnectStore(ctx, management)
+		store, err := management.ConnectStore(ctx, options)
 		return store, func() {}, err
 	}
 	db, err := database.Open(ctx, cfg.Database)
@@ -154,7 +160,7 @@ func openStore(ctx context.Context, cfg config.Serve, management server.Manageme
 	}
 	closeDB := func() {
 		if err := database.Close(db); err != nil {
-			management.Logger.Error("close database", "error", err)
+			options.Logger.Error("close database", "error", err)
 		}
 	}
 	if err := database.Migrate(ctx, db); err != nil {

@@ -87,12 +87,13 @@ func (g *guard) during(t *testing.T, call string, fn func() error) {
 
 // Every mutating call stores the desired state and returns: nothing is
 // created, changed or deleted in the management cluster until the
-// reconciler runs.
+// reconciler runs, and no call makes an AWS lookup.
 func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 	g := &guard{}
 	f := newFixture(t, g.funcs())
-	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
-	f.svc.deps.AWS.StaticKeys = testKeys
+	// No call looks at the cloud either: a lookup fails the test, except
+	// in the one pass of the reconciler that discovers the import.
+	f.svc.deps.AWSDiscovery = noAWS{t}
 	ctx := t.Context()
 	row := func(id string) (state string, applied, generation int64) {
 		t.Helper()
@@ -145,25 +146,35 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 		t.Fatalf("after DeleteNetwork: row %s, %d flow logs; want DELETING and everything still there", state, f.count(t, &awsec2.FlowLogList{}, n.GetId()))
 	}
 
-	// Import: the plan is in the answer, the objects are not created.
+	// Import: stored as DISCOVERING without a look at the cloud; the
+	// reconciler looks the VPC up, plans and creates the objects.
 	var imported *cloudv1.Network
+	f.svc.deps.AWSDiscovery = noAWS{t}
 	g.during(t, "ImportNetwork", func() error {
 		res, err := f.svc.ImportNetwork(ctx, importRequest(f.accountID))
 		imported = res.GetNetwork()
 		return err
 	})
-	if st := imported.GetStatus(); st.GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED || len(st.GetImport().GetResources()) == 0 ||
+	if st := imported.GetStatus(); st.GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED ||
+		st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_DISCOVERING || len(st.GetImport().GetResources()) != 0 ||
 		f.count(t, &awsec2.VPCList{}, imported.GetId()) != 0 {
-		t.Fatalf("after ImportNetwork: %s, %d plan lines, %d VPCs; want the plan in the answer and nothing applied",
-			st.GetState(), len(st.GetImport().GetResources()), f.count(t, &awsec2.VPCList{}, imported.GetId()))
+		t.Fatalf("after ImportNetwork: %s / %s, %d plan lines, %d VPCs; want it stored as DISCOVERING, no plan yet and nothing applied",
+			st.GetState(), st.GetImport().GetPhase(), len(st.GetImport().GetResources()), f.count(t, &awsec2.VPCList{}, imported.GetId()))
 	}
+	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
 	f.reconcile(t, imported.GetId())
+	if st := f.get(t, imported.GetId()).GetStatus(); st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED ||
+		len(st.GetImport().GetResources()) == 0 {
+		t.Fatalf("after the reconciler's pass: %s, %d plan lines; want the plan", st.GetImport().GetPhase(), len(st.GetImport().GetResources()))
+	}
 	vpc := &awsec2.VPC{}
 	if err := f.kube.Get(ctx, key(imported, "vpc"), vpc); err != nil || vpc.Spec.ManagementPolicies[0] != "Observe" {
 		t.Fatalf("the reconciler did not create the import's Observe-only VPC: %v (%v)", vpc.Spec.ManagementPolicies, err)
 	}
 
-	// TakeOver: stored, nothing owned.
+	// TakeOver: stored, nothing owned, and no look at the cloud from here
+	// on: the reconciler renders from what the import stored.
+	f.svc.deps.AWSDiscovery = noAWS{t}
 	g.during(t, "TakeOverNetwork", func() error {
 		_, err := f.svc.TakeOverNetwork(ctx, &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: imported.GetId(),
 			AcknowledgeNotImported: true})
@@ -178,21 +189,40 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 	}
 }
 
-// The reconciler renders an import's objects from what the call stored:
-// exactly what the plan would have applied, without another lookup.
-func TestImportIsAppliedFromWhatWasStored(t *testing.T) {
-	f := newFixture(t)
-	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpcWithFlowLogs()}
-	f.svc.deps.AWS.StaticKeys = testKeys
+// The VPC of an import is looked up once. The plan and what was
+// discovered are stored with the row before anything is applied, so a
+// pass that fails after the lookup, every later pass, the takeover and
+// every update render from what was stored: exactly what the plan would
+// have applied, without another lookup.
+func TestImportIsDiscoveredOnceAndAppliedFromWhatWasStored(t *testing.T) {
+	g := &guard{}
+	f := newFixture(t, g.funcs())
+	lookups := 0
+	f.svc.deps.AWSDiscovery = noAWS{t}
 	ctx := t.Context()
 	res, err := f.svc.ImportNetwork(ctx, importRequest(f.accountID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := res.GetNetwork().GetId()
+	// The first pass looks the VPC up and stores the plan, then cannot
+	// apply (the management cluster refuses writes).
+	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpcWithFlowLogs(), lookups: &lookups}
+	g.on = true
+	if err := f.svc.Reconcile(ctx, tenant, id); err == nil {
+		t.Fatal("the pass succeeded although nothing could be applied")
+	}
+	g.on = false
+	if st := f.get(t, id).GetStatus(); lookups != 1 || st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
+		t.Fatalf("after the failed pass: %d lookups, phase %s; want one lookup and the plan stored", lookups, st.GetImport().GetPhase())
+	}
 	// No discovery from here on: a second lookup would fail the pass.
-	f.svc.deps.AWSDiscovery = fakeDiscoverer{err: errors.New("the reconciler looked the cloud up again")}
+	f.svc.deps.AWSDiscovery = fakeDiscoverer{err: errors.New("the reconciler looked the cloud up again"), lookups: &lookups}
 	f.reconcile(t, id)
+	f.reconcile(t, id)
+	if lookups != 1 {
+		t.Fatalf("%d lookups of the VPC, want one", lookups)
+	}
 	n := f.status(t, id)
 	if got := len(n.GetStatus().GetManagedResources()); got != 24 {
 		t.Fatalf("%d managed resources from the stored import, want 24", got)

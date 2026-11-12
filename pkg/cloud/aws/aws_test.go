@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 )
 
@@ -205,58 +206,91 @@ func TestVerifyAccess(t *testing.T) {
 	}
 }
 
-func TestTenantWithAmbientCredentials(t *testing.T) {
+// envClient is New as the controller calls it, with the SDK's default
+// chain reading keys from the environment (local testing), every AWS call
+// sent to the fake.
+func envClient(t *testing.T, sts http.Handler, cfg Config) *Client {
+	t.Helper()
+	srv := httptest.NewServer(sts)
+	t.Cleanup(srv.Close)
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDENV")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	// Nothing of the machine the test runs on.
+	t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	c, err := New(t.Context(), cfg, awsconfig.WithRegion("us-east-1"), awsconfig.WithBaseEndpoint(srv.URL),
+		awsconfig.WithHTTPClient(srv.Client()))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return c
+}
+
+// Keys in the controller's environment are its own credentials, not a way
+// around the tenant role: the role is assumed with them, and the calls
+// are the role's.
+func TestEnvironmentKeysAssumeTheTenantRole(t *testing.T) {
 	sts := &fakeSTS{callerAccount: tenantAccount}
-	tenant, err := newTestClient(t, sts, Config{}).Tenant(tenantAccount, "", "us-east-1")
+	tenant, err := envClient(t, sts, Config{}).TenantFor(Access{AccountID: tenantAccount, RoleARN: tenantRole}, "us-east-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.VerifyAccess(t.Context()); err != nil {
 		t.Fatalf("VerifyAccess: %v", err)
 	}
-	if n := len(sts.recorded()); n != 0 {
-		t.Errorf("AssumeRole calls = %d, want none without a role", n)
+	want := []stsCall{{role: tenantRole, session: DefaultSessionName, signedBy: "AKIDENV"}}
+	if calls := sts.recorded(); fmt.Sprint(calls) != fmt.Sprint(want) {
+		t.Errorf("STS calls = %+v, want the tenant role assumed with the environment's keys: %+v", calls, want)
 	}
 }
 
-func TestTenantWithStaticKeys(t *testing.T) {
-	keys := &StaticCredentials{AccessKeyID: "AKIDSTATIC", SecretAccessKey: "secret"}
-
-	// Keys alone: no AssumeRole, calls signed with the keys.
+// With a source role the chain is: own credentials, source role, tenant
+// role.
+func TestEnvironmentKeysChainThroughTheSourceRole(t *testing.T) {
 	sts := &fakeSTS{callerAccount: tenantAccount}
-	tenant, err := newTestClient(t, sts, Config{}).TenantFor(Access{AccountID: tenantAccount, Static: keys}, "us-east-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.VerifyAccess(t.Context()); err != nil || len(sts.recorded()) != 0 {
-		t.Fatalf("VerifyAccess = %v, AssumeRole calls = %d; want ok and none", err, len(sts.recorded()))
-	}
-
-	// Keys plus a role: the role is assumed with the keys.
-	sts = &fakeSTS{callerAccount: tenantAccount}
-	c := newTestClient(t, sts, Config{})
-	tenant, err = c.TenantFor(Access{AccountID: tenantAccount, Static: keys, RoleARN: tenantRole}, "us-east-1")
+	tenant, err := envClient(t, sts, Config{SourceRoleARN: sourceRole}).TenantFor(Access{AccountID: tenantAccount, RoleARN: tenantRole}, "us-east-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant.VerifyAccess(t.Context()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("VerifyAccess: %v", err)
 	}
-	if calls := sts.recorded(); len(calls) != 1 || calls[0].signedBy != "AKIDSTATIC" || calls[0].role != tenantRole {
-		t.Errorf("AssumeRole calls = %+v; want one, signed with the static key", calls)
+	want := []stsCall{
+		{role: sourceRole, session: DefaultSessionName, signedBy: "AKIDENV"},
+		{role: tenantRole, session: DefaultSessionName, signedBy: "ASIA1"},
 	}
-
-	if _, err := c.TenantFor(Access{AccountID: tenantAccount, Static: &StaticCredentials{AccessKeyID: "x"}}, "us-east-1"); !errors.Is(err, ErrInvalid) {
-		t.Errorf("keys without a secret = %v, want ErrInvalid", err)
+	if calls := sts.recorded(); fmt.Sprint(calls) != fmt.Sprint(want) {
+		t.Errorf("STS calls = %+v, want %+v", calls, want)
 	}
 }
 
+// There is no way to a tenant's account around its role: an access
+// without one is refused before any call, whatever the client's own
+// credentials are.
+func TestTenantAccountIsOnlyReachedThroughItsRole(t *testing.T) {
+	sts := &fakeSTS{callerAccount: tenantAccount}
+	for name, c := range map[string]*Client{"own credentials": newTestClient(t, sts, Config{}), "environment keys": envClient(t, sts, Config{})} {
+		if _, err := c.TenantFor(Access{AccountID: tenantAccount}, "us-east-1"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s, no role: %v, want ErrInvalid", name, err)
+		}
+		if _, err := c.DiscoverNetwork(t.Context(), Access{AccountID: tenantAccount}, "us-east-1", "vpc-0123456789abcdef0", nil); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s, DiscoverNetwork without a role: %v, want ErrInvalid", name, err)
+		}
+	}
+	if n := len(sts.recorded()); n != 0 {
+		t.Errorf("%d STS calls for refused accesses, want none", n)
+	}
+}
+
+// Credentials that land in another account are refused before any EC2
+// call: the role that was assumed is not the tenant's.
 func TestDiscoverNetworkRefusesOtherAccounts(t *testing.T) {
-	// Environment keys of another account: refused before any EC2 call.
 	sts := &fakeSTS{callerAccount: "999999999999"}
-	keys := &StaticCredentials{AccessKeyID: "AKIDOTHER", SecretAccessKey: "s"}
 	_, err := newTestClient(t, sts, Config{}).DiscoverNetwork(t.Context(),
-		Access{AccountID: tenantAccount, Static: keys}, "us-east-1", "vpc-0123456789abcdef0", []string{"subnet-0123456789abcdef0"})
+		Access{AccountID: tenantAccount, RoleARN: tenantRole}, "us-east-1", "vpc-0123456789abcdef0", []string{"subnet-0123456789abcdef0"})
 	if !errors.Is(err, ErrAccessDenied) || !strings.Contains(err.Error(), "999999999999") {
 		t.Fatalf("DiscoverNetwork = %v, want ErrAccessDenied naming the other account", err)
 	}

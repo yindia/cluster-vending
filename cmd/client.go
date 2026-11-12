@@ -103,7 +103,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.Cluster, "cluster", "", "only this cluster's resources (cluster ID); default: all the tenant's")
 		}
 		if v.wait {
-			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone), printing its progress to stderr")
+			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit")
 			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
 		}
 		group.AddCommand(cmd)
@@ -146,7 +146,7 @@ func newClusterCmd() *cobra.Command {
 	verbs[3].plan, verbs[4].force = true, true
 	verbs = append(verbs,
 		verb{use: "import", short: "Import an existing EKS cluster read-only from a ClusterImport manifest (-f)",
-			run: cli.ClusterImport, args: cobra.NoArgs, input: true},
+			run: cli.ClusterImport, args: cobra.NoArgs, input: true, wait: true},
 		verb{use: "takeover <id>", short: "Take over an imported cluster: the platform becomes its owner",
 			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
 		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",

@@ -23,7 +23,7 @@ const (
 	DefaultProbeAddr   = ":8081"
 )
 
-var controllerSettings = []Setting{
+var controllerSettings = append([]Setting{
 	{Flag: FlagConfig, Env: EnvConfig,
 		Usage: "YAML file with any of these settings, keyed by flag name; flags and environment variables win over it"},
 	{Flag: FlagMetricsAddr, Env: EnvMetricsAddr, Default: DefaultMetricsAddr,
@@ -38,7 +38,8 @@ var controllerSettings = []Setting{
 		Usage: "renderer version existing networks and clusters are re-applied up to; 0 is this build's version"},
 	{Flag: FlagRenderRollout, Env: EnvRenderRollout,
 		Usage: "comma-separated tenant, network or cluster IDs the renderer rollout is limited to; empty for all"},
-}
+	awsSourceSetting,
+}, slices.Concat(providerSettings, awsSettings)...)
 
 // ControllerSettings returns the settings of the controller command.
 func ControllerSettings() []Setting { return slices.Clone(controllerSettings) }
@@ -53,10 +54,13 @@ type Controller struct {
 	// (empty: all) drive the renderer rollout, as for the server.
 	RenderTarget  int64
 	RenderRollout []string
-	// AWS holds only the keys found in the environment (AWS.StaticKeys:
-	// the controller's own AWS lookups use them for every account, for
-	// local testing). The management account is the server's to know: it
-	// installs the providers.
+	// InstallProviders: create the Crossplane providers on startup, with
+	// Provider as how the AWS providers run.
+	InstallProviders bool
+	Provider         ProviderRuntime
+	// AWS is the management account the providers run in (required), the
+	// optional role between the controller's own credentials and the
+	// tenant roles, and whether keys were found in the environment.
 	AWS AWS
 }
 
@@ -66,8 +70,16 @@ type Controller struct {
 func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	v, errs := resolve(controllerSettings, flags, env, file)
 	cfg := Controller{MetricsAddr: v[FlagMetricsAddr], ProbeAddr: v[FlagProbeAddr], LeaseNamespace: v[FlagLeaseNamespace]}
-	cfg.AWS.StaticKeys = staticKeysFrom(env)
+	cfg.AWS = AWS{ManagementAccountID: v[FlagAWSManagementAccountID], ManagementRoleARN: v[FlagAWSManagementRoleARN],
+		SourceRoleARN: v[FlagAWSSourceRoleARN], StaticKeys: staticKeysFrom(env)}
+	errs = append(errs, cfg.AWS.validate()...)
+	provider, providerErrs := loadProviderRuntime(v)
+	cfg.Provider = provider
+	errs = append(errs, providerErrs...)
 	var err error
+	if cfg.InstallProviders, err = strconv.ParseBool(v[FlagInstallProviders]); err != nil {
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallProviders), v[FlagInstallProviders]))
+	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))
 	}

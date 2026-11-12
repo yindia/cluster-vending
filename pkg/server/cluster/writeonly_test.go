@@ -16,12 +16,13 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // guard fails every write to the management cluster while it is on, and
 // counts them: what a handler must never do.
 type guard struct {
+	// aws, when set, is closed during a handler call.
+	aws    *awsGate
 	on     bool
 	writes []string
 }
@@ -77,12 +78,19 @@ func (g *guard) funcs() interceptor.Funcs {
 }
 
 // during runs a handler call with the guard on and fails the test if the
-// call failed or wrote anything.
+// call failed or wrote anything. With an AWS gate, a lookup of the cloud
+// during the call fails the test too.
 func (g *guard) during(t *testing.T, call string, fn func() error) {
 	t.Helper()
 	g.on, g.writes = true, nil
+	if g.aws != nil {
+		g.aws.closed = true
+	}
 	err := fn()
 	g.on = false
+	if g.aws != nil {
+		g.aws.closed = false
+	}
 	if err != nil || len(g.writes) > 0 {
 		t.Fatalf("%s: %v, writes to the management cluster %v; a handler only stores what was asked for", call, err, g.writes)
 	}
@@ -99,10 +107,10 @@ func createRequest(w world, name string) *cloudv1.CreateClusterRequest {
 // created, changed or deleted in the management cluster until the
 // reconciler runs.
 func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
-	g := &guard{}
-	w := newWorld(t, g.funcs(), nil, withVersions, func(d *service.Deps) {
-		d.AWSClusterDiscovery = fakeClusterDiscoverer{cluster: terraformCluster()}
-	})
+	// No handler writes to the management cluster, and none looks at the
+	// cloud: the AWS gate is closed during every call.
+	g := &guard{aws: newGate(t)}
+	w := newWorld(t, g.funcs(), nil, g.aws.use)
 	ctx := t.Context()
 	row := func(id string) *model.Cluster {
 		t.Helper()
@@ -159,7 +167,8 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 		t.Errorf("the reconciler did not apply the stored update: %v (%v)", group.Spec.ForProvider.ScalingConfig, err)
 	}
 
-	// Import: the plan is in the answer, the objects are not created.
+	// Import: stored as DISCOVERING without a look at the cloud; the
+	// reconciler looks the cluster up, plans and creates the objects.
 	var imported *cloudv1.Cluster
 	g.during(t, "ImportCluster", func() error {
 		res, err := w.svc.ImportCluster(ctx, &cloudv1.ImportClusterRequest{TenantId: worldTenant, Name: "tf", NetworkId: w.row.NetworkID,
@@ -167,10 +176,11 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 		imported = res.GetCluster()
 		return err
 	})
-	if st := imported.GetStatus(); st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_IMPORTED || len(st.GetImport().GetResources()) == 0 ||
+	if st := imported.GetStatus(); st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_IMPORTED ||
+		st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_DISCOVERING || len(st.GetImport().GetResources()) != 0 ||
 		len(objectsOf(t, w, imported.GetId())) != 0 {
-		t.Fatalf("after ImportCluster: %s, %d plan lines, %d objects; want the plan in the answer and nothing applied",
-			st.GetState(), len(st.GetImport().GetResources()), len(objectsOf(t, w, imported.GetId())))
+		t.Fatalf("after ImportCluster: %s / %s, %d plan lines, %d objects; want it stored as DISCOVERING, no plan yet and nothing applied",
+			st.GetState(), st.GetImport().GetPhase(), len(st.GetImport().GetResources()), len(objectsOf(t, w, imported.GetId())))
 	}
 	// Not before its objects are there.
 	takeOver := &cloudv1.TakeOverClusterRequest{TenantId: worldTenant, ClusterId: imported.GetId(), AcknowledgeNotImported: true}
@@ -178,6 +188,10 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 		t.Fatal("a cluster whose import is not applied yet was taken over")
 	}
 	reconcile(t, w, imported.GetId())
+	if st := storedCluster(t, w, imported.GetId()).GetStatus(); st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED ||
+		len(st.GetImport().GetResources()) == 0 {
+		t.Fatalf("after the reconciler's pass: %s, %d plan lines; want the plan", st.GetImport().GetPhase(), len(st.GetImport().GetResources()))
+	}
 	objects := objectsOf(t, w, imported.GetId())
 	if len(objects) == 0 {
 		t.Fatal("the reconciler did not create the import's objects")

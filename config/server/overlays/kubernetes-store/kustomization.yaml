@@ -1,6 +1,8 @@
 # The server with its state in custom resources of the management cluster
-# (--store=kubernetes): no database to run. This is the overlay meant for
-# in-cluster use.
+# (--store=kubernetes): no database to run, no AWS access. This is the
+# overlay meant for in-cluster use. The server only stores the desired
+# state: deploy the controller (config/default) with it, which installs
+# the kinds the server waits for and reconciles.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

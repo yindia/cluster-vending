@@ -43,6 +43,9 @@ func PendingStates() []string {
 // fails is recorded as the network's status (ConditionReconciled) and
 // tried again on the next pass. Every step is idempotent. A network that
 // does not exist is done.
+//
+// It is also where the cloud is looked at: the VPC of an import is
+// discovered here (discoverImport), not by the call that stored it.
 func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Networks().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
@@ -82,6 +85,17 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 	// Imported (also after takeover): its objects are rendered from the
 	// discovered VPC, not from the spec. Rendering the spec would create a
 	// second set of resources.
+	if Discovering(row) {
+		// The import was stored without looking at the cloud: the VPC is
+		// looked up here, once, and the plan stored with the row.
+		stored, err := s.discoverImport(ctx, row)
+		if err != nil {
+			return fmt.Errorf("discover: %w", err)
+		}
+		if !stored {
+			return nil // a call changed the row: the next pass sees it
+		}
+	}
 	if row.State == StateImported || row.State == StateBlocked {
 		if row.State == StateImported && row.AppliedGeneration < row.Generation {
 			// The import was stored; its Observe-only objects are created here.

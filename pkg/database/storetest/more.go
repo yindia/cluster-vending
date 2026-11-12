@@ -169,7 +169,7 @@ func testClusterLookups(t *testing.T, b Backend) {
 	key := "7d1a3b5c-2e4f-4a6b-8c9d-0e1f2a3b4c5d"
 	c := &model.Cluster{TenantID: "acme", Name: "prod", NetworkID: n.ID, Provider: "aws", Region: "us-east-1", CreateRequestID: &key,
 		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: Spec("cluster"), Labels: model.Labels{"team": "a"}},
-		Input:    Spec("input"), Adoption: Spec("adoption"), DeleteForce: true}
+		Input:    Spec("input"), Adoption: Spec("adoption"), DeleteForce: true, ResolvedGeneration: 1}
 	if err := s.Clusters().Create(ctx, c); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func testClusterLookups(t *testing.T, b Backend) {
 	MustCluster(t, s, "globex", "prod", MustNetwork(t, s, "globex", "n")) // another tenant, another account
 
 	got, err := s.Clusters().GetByCreateRequest(ctx, "acme", key)
-	if err != nil || got.ID != c.ID || got.Labels["team"] != "a" || len(got.Input) == 0 || len(got.Adoption) == 0 || !got.DeleteForce ||
+	if err != nil || got.ID != c.ID || got.Labels["team"] != "a" || len(got.Input) == 0 || len(got.Adoption) == 0 || !got.DeleteForce || got.ResolvedGeneration != 1 ||
 		got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 		t.Fatalf("GetByCreateRequest = %+v, %v", got, err)
 	}

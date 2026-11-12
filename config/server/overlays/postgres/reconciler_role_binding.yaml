@@ -1,0 +1,17 @@
+# Binds reconciler_role.yaml to the server's service account, by the name
+# it has after the base's namePrefix and namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-server
+    app.kubernetes.io/managed-by: kustomize
+  name: cluster-vending-server-reconciler-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-vending-server-reconciler-role
+subjects:
+- kind: ServiceAccount
+  name: cluster-vending-server
+  namespace: cluster-vending-system

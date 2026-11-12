@@ -3,8 +3,9 @@
 // management cluster, how tenant cloud accounts are reached) and what
 // every kind of owner shares (recording, observing and deleting its
 // objects). It knows no RPC library: failures a caller can act on are
-// faults (pkg/fault). The API handlers and the background loop both call
-// it.
+// faults (pkg/fault). The controller (and the server's background loop,
+// while the database store has one) reconcile with it; the API handlers
+// use it to check a request against the store and to read.
 package reconcile
 
 import (
@@ -16,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
-	"github.com/yindia/cluster-vending/pkg/config"
+
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
@@ -34,20 +35,23 @@ type Deps struct {
 	// does not have yet (just applied) or does not hold (no managed-by
 	// label, managedFields). Nil: reads use Kube only.
 	KubeReader client.Reader
-	AWS        config.AWS
-	// AWSDiscovery makes the server's own read-only AWS lookups
-	// (ImportNetwork).
-	// RenderTarget is the renderer version resources are brought to by the
-	// background loop (0: none are re-applied for it). RenderRollout limits
+	// RenderTarget is the renderer version resources are brought to by
+	// what reconciles (0: none are re-applied for it). RenderRollout limits
 	// that to these tenant, network or cluster IDs; empty means all.
 	RenderTarget  int64
 	RenderRollout []string
-	AWSDiscovery  awscloud.NetworkDiscoverer
-	// AWSClusterDiscovery looks an existing EKS cluster up (ImportCluster);
-	// nil: imports are unavailable.
+	// The three AWS lookups are what the reconcilers look the cloud up
+	// with (management.WithAWS). Only what reconciles has them: the API
+	// handlers are built without, and make no AWS call.
+	//
+	// AWSDiscovery looks the VPC of an imported network up; nil: the
+	// import fails as unavailable.
+	AWSDiscovery awscloud.NetworkDiscoverer
+	// AWSClusterDiscovery looks the EKS cluster of an imported cluster up;
+	// nil: the import fails as unavailable.
 	AWSClusterDiscovery awscloud.ClusterDiscoverer
-	// AWSClusters checks EKS cluster names before CreateCluster; nil skips
-	// the check (tests).
+	// AWSClusters checks a new cluster's name against EKS and resolves the
+	// versions EKS offers; nil skips both (tests): EKS chooses at create.
 	AWSClusters awscloud.ClusterLookup
 	Logger      *slog.Logger
 }

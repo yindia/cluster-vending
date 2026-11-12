@@ -1,16 +1,20 @@
-// Package aws makes the read-only AWS calls the server needs and Crossplane
-// cannot (it has no lookup kinds), such as discovering the resources of an
-// existing VPC before ImportNetwork creates Observe-only managed resources
-// for them. See "Read-only lookups the server makes" in idl/README.md.
+// Package aws makes the read-only AWS calls the controller needs and
+// Crossplane cannot (it has no lookup kinds), such as discovering the
+// resources of an existing VPC so that an import can create Observe-only
+// managed resources for them (the calls are listed at AwsImportNetwork in
+// idl/cloud/v1/aws.proto). The API server makes none of them.
 //
-// Every call runs in a tenant's account. The server starts from its own
-// identity in the management account (IRSA in production, the default
-// credential chain otherwise), optionally assumes the management role
-// first, then assumes the account's tenant role, stored at bootstrap (the
-// account's identity).
+// Every call runs in a tenant's account, and there is one way in. The
+// controller starts from its own credentials, as the AWS SDK's default
+// chain finds them (IRSA in production: the web identity of its service
+// account; keys in its environment for local testing), optionally assumes
+// a source role first, and then ALWAYS assumes the account's tenant role,
+// stored at bootstrap (the account's identity). Nothing is read with the
+// base credentials themselves: keys of one account cannot read another,
+// and a tenant grants access in one place, its role's trust policy.
 //
-//	ambient credentials ─(SourceRoleARN, optional)─> management role
-//	                     ─(tenant role ARN)─> tenant role ─> EC2, ...
+//	own credentials ─(SourceRoleARN, optional)─> source role
+//	                ─(tenant role ARN, always)─> tenant role ─> EC2, ...
 package aws
 
 import (
@@ -24,7 +28,6 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -62,12 +65,13 @@ var (
 	ErrInvalid = errors.New("aws: invalid")
 )
 
-// Config says how the server reaches tenant accounts.
+// Config says how the controller reaches tenant accounts.
 type Config struct {
-	// SourceRoleARN is assumed first, when set: for running the server
-	// with credentials that are not the management role itself (a
-	// developer's SSO session). Leave it empty when the server already runs
-	// as the management role (IRSA): a role cannot assume itself unless its
+	// SourceRoleARN is assumed first, when set: for running the controller
+	// with credentials that are not the role the tenant roles trust (a
+	// developer's keys or SSO session, or a service account role that is
+	// not the management role). Leave it empty when the controller already
+	// runs as that role (IRSA): a role cannot assume itself unless its
 	// trust policy says so.
 	SourceRoleARN string
 	// SessionName defaults to DefaultSessionName.
@@ -95,8 +99,9 @@ type Client struct {
 	creds map[string]*awssdk.CredentialsCache // key: roleARN/region
 }
 
-// New loads the ambient AWS configuration (environment, shared config,
-// IRSA web identity, instance role) and returns a Client.
+// New loads the process's own AWS configuration with the SDK's default
+// chain (keys in the environment, shared config, the IRSA web identity,
+// an instance role) and returns a Client that starts from it.
 func New(ctx context.Context, cfg Config, optFns ...func(*awsconfig.LoadOptions) error) (*Client, error) {
 	base, err := awsconfig.LoadDefaultConfig(ctx, optFns...)
 	if err != nil {
@@ -114,78 +119,49 @@ func NewFromConfig(base awssdk.Config, cfg Config) (*Client, error) {
 	return &Client{base: base, cfg: cfg, creds: map[string]*awssdk.CredentialsCache{}}, nil
 }
 
-// StaticCredentials are an IAM user's access keys.
-type StaticCredentials struct {
-	AccessKeyID, SecretAccessKey, SessionToken string
-}
-
-// Access is how the server reaches an account, mirroring its ProviderConfig:
-// start from Static keys (credentials.source Secret) or the server's own
-// credentials (IRSA), then assume RoleARN when set.
+// Access is where a lookup goes: one tenant account, through its tenant
+// role. There is no way to a tenant's account around its role.
 type Access struct {
 	AccountID string
-	RoleARN   string
-	Static    *StaticCredentials
+	// RoleARN is the tenant role, a role of AccountID. Required.
+	RoleARN string
 }
 
-// Tenant is TenantFor(Access{accountID, roleARN}, region): the server's own
-// credentials, assuming roleARN unless it is empty.
+// Tenant is TenantFor(Access{accountID, roleARN}, region).
 func (c *Client) Tenant(accountID, roleARN, region string) (*Tenant, error) {
 	return c.TenantFor(Access{AccountID: accountID, RoleARN: roleARN}, region)
 }
 
-// TenantFor returns a client for one tenant account in one region. RoleARN
-// must be a role of that account. It does not call AWS: roles are assumed
-// on the first request; VerifyAccess checks where the credentials land.
+// TenantFor returns a client for one tenant account in one region, whose
+// calls are made as the account's tenant role: the role is assumed with
+// the client's own credentials (through the source role, when one is
+// configured). RoleARN must be a role of that account. It does not call
+// AWS: roles are assumed on the first request; VerifyAccess checks where
+// the credentials land.
 func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 	if !accountIDPattern.MatchString(a.AccountID) {
 		return nil, fmt.Errorf("%w: account ID must be 12 digits, got %q", ErrInvalid, a.AccountID)
 	}
-	if a.RoleARN != "" && !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
+	if a.RoleARN == "" {
+		return nil, fmt.Errorf("%w: account %s has no tenant role: a tenant's account is only reached through its role", ErrInvalid, a.AccountID)
+	}
+	if !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
 		return nil, fmt.Errorf("%w: %q is not a role of account %s", ErrInvalid, a.RoleARN, a.AccountID)
 	}
 	if !awscatalog.IsRegion(region) {
 		return nil, fmt.Errorf("%w: unknown region %q", ErrInvalid, region)
 	}
-	if a.Static != nil && (a.Static.AccessKeyID == "" || a.Static.SecretAccessKey == "") {
-		return nil, fmt.Errorf("%w: static credentials need an access key ID and a secret access key", ErrInvalid)
-	}
 	cfg := c.base.Copy()
 	cfg.Region = region
-	switch {
-	case a.Static != nil && a.RoleARN != "":
-		cfg.Credentials = c.staticAssumed(*a.Static, a.RoleARN, region)
-	case a.Static != nil:
-		cfg.Credentials = staticProvider(*a.Static)
-	case a.RoleARN != "":
-		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
-	}
+	cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
 	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
 	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
 		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
 }
 
-func staticProvider(s StaticCredentials) awssdk.CredentialsProvider {
-	return credentials.NewStaticCredentialsProvider(s.AccessKeyID, s.SecretAccessKey, s.SessionToken)
-}
-
-// staticAssumed assumes roleARN with static keys, cached per key, role and
-// region.
-func (c *Client) staticAssumed(s StaticCredentials, roleARN, region string) *awssdk.CredentialsCache {
-	key := "static:" + s.AccessKeyID + "|" + roleARN + "/" + region
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if cached, ok := c.creds[key]; ok {
-		return cached
-	}
-	source := c.base.Copy()
-	source.Region = region
-	source.Credentials = staticProvider(s)
-	creds := c.assume(source, roleARN)
-	c.creds[key] = creds
-	return creds
-}
-
+// tenantCredentials are the credentials of a tenant role, cached per role
+// and region: assumed with the client's own credentials, or with the
+// source role's when one is configured.
 func (c *Client) tenantCredentials(roleARN, region string) *awssdk.CredentialsCache {
 	key := roleARN + "/" + region
 	c.mu.Lock()
@@ -287,9 +263,8 @@ type NetworkDiscoverer interface {
 var _ NetworkDiscoverer = (*Client)(nil)
 
 // DiscoverNetwork is TenantFor(access, region).DiscoverNetwork, after
-// VerifyAccess: credentials of another account (e.g. keys in the server's
-// environment for a different account) fail with ErrAccessDenied instead
-// of reading that account's VPCs.
+// VerifyAccess: credentials that do not land in the tenant's account fail
+// with ErrAccessDenied instead of reading another account's VPCs.
 func (c *Client) DiscoverNetwork(ctx context.Context, access Access, region, vpcID string, subnetIDs []string) (*Network, error) {
 	t, err := c.TenantFor(access, region)
 	if err != nil {

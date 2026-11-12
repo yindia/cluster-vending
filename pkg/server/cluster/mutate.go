@@ -154,9 +154,13 @@ func scaling(spec *cloudv1.ClusterSpec) *cloudv1.ScalingConfig {
 // UpdateCluster changes the fields named in update_mask in the stored
 // cluster. The reconciler rolls spec changes out by applying the cluster's
 // resources again; resources the new spec no longer has (a removed admin's
-// access entry) are deleted. With validate_only it only returns the plan
-// of that (planUpdate); with plan_id it stores the change only if the plan
-// is still the same.
+// access entry) are deleted. It does not look at the cloud: after a change
+// of the Kubernetes version or the add-ons the reconciler resolves the
+// versions against what EKS offers first, and a version EKS refuses is
+// the cluster's status (FAILED), not the answer of this call. With
+// validate_only it only returns the plan of the change (planUpdate, with
+// versions EKS has yet to choose shown as known after apply); with
+// plan_id it stores the change only if the plan is still the same.
 func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateClusterRequest) (_ *cloudv1.UpdateClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -175,10 +179,6 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	paths := req.GetUpdateMask().GetPaths()
-	specBefore, err := reconcilecluster.Encode(spec) // the spec as stored, to tell what the update changes
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
@@ -204,21 +204,26 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err != nil {
 		return nil, err
 	}
-	if slices.Contains(paths, pathKubernetesVersion) || slices.Contains(paths, pathAddons) {
-		if err := s.reresolveVersions(ctx, row, t.Account, spec); err != nil {
+	// A change of the Kubernetes version or the add-ons has versions to
+	// look up at EKS: the reconciler does that before it applies the
+	// change (the row's resolved generation stays behind).
+	unresolved := slices.Contains(paths, pathKubernetesVersion) || slices.Contains(paths, pathAddons)
+	if unresolved {
+		if err := s.prepareVersions(ctx, row, spec); err != nil {
 			return nil, err
 		}
-		// Resolving may change the spec too (add-on versions for a new
-		// Kubernetes version, defaults merged back in).
-		resolved, err := reconcilecluster.Encode(spec)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err.Error())
-		}
-		specChanged = specChanged || string(resolved) != string(specBefore)
+		specChanged = true
 	}
 	var plan *cloudv1.Plan
 	if req.GetValidateOnly() || req.GetPlanId() != "" {
-		if plan, err = s.planUpdate(ctx, req, row, spec, t); err != nil {
+		shown := spec
+		if unresolved {
+			// The versions EKS will choose are not known here.
+			if shown, err = withUnknownVersions(row, spec, versionBefore); err != nil {
+				return nil, err
+			}
+		}
+		if plan, err = s.planUpdate(ctx, req, row, shown, t); err != nil {
 			return nil, err
 		}
 		if req.GetValidateOnly() {
@@ -237,6 +242,9 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	}
 	if specChanged {
 		row.Generation++
+		if !unresolved && row.ResolvedGeneration == row.Generation-1 {
+			row.ResolvedGeneration = row.Generation // nothing to look up for this change
+		}
 		row.State = reconcilecluster.StateUpdating
 		reconcilecluster.ClearFailure(row) // of the generation before: the next pass reports on this one
 	}

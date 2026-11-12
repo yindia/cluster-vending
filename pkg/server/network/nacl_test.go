@@ -32,7 +32,6 @@ func TestImportNetworkACLs(t *testing.T) {
 	}
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: d}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	n := f.imported(t)
 	lines := planLines(n)
 	carried, notImported := cloudv1.Disposition_DISPOSITION_CARRIED_OVER, cloudv1.Disposition_DISPOSITION_NOT_IMPORTED
@@ -123,7 +122,6 @@ func TestImportPublicRouteTableWithSpecificRoutes(t *testing.T) {
 	}
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: d}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	n := f.imported(t)
 	if n.GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED ||
 		dispositions(n.GetStatus().GetImport())[cloudv1.Disposition_DISPOSITION_BLOCKING] != 0 {

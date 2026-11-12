@@ -1,7 +1,13 @@
-# Hand-written (role.yaml is the generated one). What the controller needs
-# in the management cluster once its reconcilers are implemented: they will
-# call the same packages the server's background loop calls today
-# (pkg/reconcile, pkg/crossplane), so this is that code's footprint.
+# Hand-written (role.yaml is the generated one). What the controller does in
+# the management cluster: it is the only thing that reconciles, so it
+# installs the Crossplane providers and applies, watches and deletes the
+# objects the platform renders (pkg/reconcile, pkg/crossplane). Its own kinds
+# are in the generated role.yaml.
+#
+# It reads no Secret: its AWS credentials are its own (IRSA, the service
+# account's annotation), and every lookup assumes the tenant role of the
+# account it reads (pkg/reconcile/access.go). Kept in step with the code by
+# config/deploy_test.go.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -10,11 +16,33 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: platform-role
 rules:
+# Installing the providers at startup (--install-providers,
+# pkg/crossplane/aws InstallProviders): the AWS providers, provider-helm and
+# their runtime configs are created when missing, never changed.
+- apiGroups:
+  - pkg.crossplane.io
+  resources:
+  - providers
+  - deploymentruntimeconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+# The platform's activation policy: created, and kinds a newer build uses are
+# added to an existing one (addActivations).
+- apiGroups:
+  - apiextensions.crossplane.io
+  resources:
+  - managedresourceactivationpolicies
+  verbs:
+  - get
+  - create
+  - update
 # The managed resources the platform renders for networks and clusters:
 # the kinds of pkg/crossplane/aws ActivationPolicy (managedMRDs). Applied
-# (create, patch), read through the informer cache (list, watch), changed
-# at takeover, retag and pause (update, patch), deleted one by one and by
-# label (delete, deletecollection).
+# (create, patch), read through the informer cache (list, watch), deleted
+# one by one and by label (delete, deletecollection).
 - apiGroups:
   - ec2.aws.m.upbound.io
   resources:
@@ -121,8 +149,7 @@ rules:
   - patch
   - delete
   - deletecollection
-# An account's ProviderConfig, applied at bootstrap and read for the
-# account's access (pkg/reconcile/access.go).
+# An account's ProviderConfig, applied at bootstrap (pkg/reconcile/account).
 - apiGroups:
   - aws.m.upbound.io
   resources:
@@ -149,16 +176,21 @@ rules:
   - update
   - patch
   - delete
-# The credentials Secret an account's ProviderConfig names, for the
-# platform's own read-only AWS lookups (pkg/reconcile/access.go). It can be
-# in any namespace, so this is cluster-wide; read only, never listed.
+# The CustomResourceDefinitions of the cloud.cluster-vending.io kinds, which
+# the controller installs at startup (pkg/management ConnectStore). The API
+# server waits for them.
 - apiGroups:
-  - ""
+  - apiextensions.k8s.io
   resources:
-  - secrets
+  - customresourcedefinitions
   verbs:
   - get
-# Events on the platform's objects.
+  - list
+  - watch
+  - create
+  - update
+  - patch
+# Events on the platform's objects and of the leader election.
 - apiGroups:
   - ""
   - events.k8s.io

@@ -190,7 +190,6 @@ func (f fixture) setLabels(t *testing.T, id string, labels map[string]string) {
 func TestTakeoverReappliesWhatTheInPlaceEditMade(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: everyImportedKind()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	n := f.imported(t)
 	id := n.GetId()
 
@@ -252,7 +251,6 @@ func keysOf(m map[string]string) []string {
 func TestALabelThatGoesGivesTheImportedTagBack(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()} // its VPC is tagged Name=tf
-	f.svc.deps.AWS.StaticKeys = testKeys
 	n := f.takenOver(t)
 	nameTag := func() string {
 		t.Helper()

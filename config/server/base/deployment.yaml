@@ -10,8 +10,7 @@ metadata:
   name: server
   namespace: system
 spec:
-  # More than one replica serves the API; leader election lets one run the
-  # background loop.
+  # More than one replica serves the API.
   replicas: 1
   selector:
     matchLabels:
@@ -42,8 +41,8 @@ spec:
         - configMapRef:
             name: server-config
         env:
-        # The leader election Lease of the background loop lives in the
-        # server's own namespace (--lease-namespace).
+        # The leader election Lease lives in the server's own namespace
+        # (--lease-namespace).
         - name: CV_LEASE_NAMESPACE
           valueFrom:
             fieldRef:
@@ -72,8 +71,8 @@ spec:
             path: /readyz
             port: http
           periodSeconds: 10
-        # On a fresh management cluster the server installs the providers
-        # and waits up to 5 minutes for their kinds before it listens.
+        # The server waits up to 5 minutes for the kinds the controller
+        # installs (the platform's own and the providers') before it listens.
         startupProbe:
           httpGet:
             path: /healthz

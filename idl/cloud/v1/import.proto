@@ -37,7 +37,9 @@ package cloud.v1;
 // ImportPhase is where an import stands.
 enum ImportPhase {
   IMPORT_PHASE_UNSPECIFIED = 0;
-  // Discovering and importing the resources.
+  // The import is stored; the controller has yet to look the resources up
+  // (or the lookup is failing: see the resource's state and message).
+  // There is no plan yet.
   IMPORT_PHASE_DISCOVERING = 1;
   // Plan ready; nothing changed yet. Review, then take over.
   IMPORT_PHASE_PLANNED = 2;

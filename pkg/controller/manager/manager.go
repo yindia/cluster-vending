@@ -25,13 +25,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/config"
 	reconcilers "github.com/yindia/cluster-vending/pkg/controller"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/management"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
-	"github.com/yindia/cluster-vending/pkg/server"
 )
 
 // leaseName is the leader election Lease of the controller: not the API
@@ -57,7 +56,15 @@ type Options struct {
 	// (empty: all) drive the renderer rollout, as for the API server.
 	RenderTarget  int64
 	RenderRollout []string
-	// AWS holds the keys found in the environment, if any (local testing).
+	// InstallProviders creates the Crossplane providers, provider-helm and
+	// the activation policy when missing; ProviderRuntime is how the AWS
+	// providers run.
+	InstallProviders bool
+	ProviderRuntime  crossplaneaws.ProviderRuntime
+	// AWS is the management account (the providers run as its role), the
+	// optional role between the controller's own credentials and the
+	// tenant roles, and whether keys were found in the environment (local
+	// testing).
 	AWS config.AWS
 	// Logger receives the manager's and the controllers' logs. Nil: they
 	// are discarded.
@@ -85,30 +92,36 @@ func Setup(mgr manager.Manager, d Deps) error {
 }
 
 // Run runs the controller manager until ctx ends. It prepares the
-// management cluster the way the API server does (pkg/server: the
-// platform's CustomResourceDefinitions are installed, and it waits until
-// the providers' kinds are served), with two differences: it does not
-// install the Crossplane providers (the API server does, or the operator;
-// the controller waits for them), and its cache also holds the platform's
-// own kinds, which it watches.
+// management cluster (pkg/management): the platform's
+// CustomResourceDefinitions and, unless told not to, the Crossplane
+// providers are installed, and it waits until their kinds are served. The
+// API server installs neither providers nor anything of AWS; it waits for
+// the controller. The controller's cache also holds the platform's own
+// kinds, which it watches.
+//
+// The controller is what looks at the cloud. Its lookups start from its
+// own credentials (the AWS SDK's default chain: IRSA in production, keys
+// in the environment for local testing) and always assume the tenant role
+// of the account they read (management.WithAWS).
 func Run(ctx context.Context, o Options) error {
 	logger := o.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	management := server.ManagementOptions{
+	options := management.Options{
 		Kubeconfig: o.Kubeconfig, KubeContext: o.KubeContext, Logger: logger,
+		InstallProviders: o.InstallProviders, ProviderRuntime: o.ProviderRuntime, InstallKinds: true,
 		LeaderElection:     kube.LeaderElection{Enabled: o.LeaderElect, Namespace: o.LeaseNamespace},
 		WatchPlatformKinds: true, LeaseName: leaseName, MetricsAddr: o.MetricsAddr, ProbeAddr: o.ProbeAddr,
 	}
 	// The store first: it installs the kinds the manager's cache holds.
-	store, err := server.ConnectStore(ctx, management)
+	store, err := management.ConnectStore(ctx, options)
 	if err != nil {
 		return err
 	}
-	mgr, err := server.ConnectManagement(ctx, management)
+	mgr, err := management.Connect(ctx, options)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w (--install-providers=false skips installing the providers)", err)
 	}
 	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
 	if err != nil {
@@ -118,31 +131,29 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	discovery, err := awscloud.New(ctx, awscloud.Config{})
-	if err != nil {
-		return err
-	}
 	if o.AWS.StaticKeys != nil {
-		logger.Warn("AWS keys found in the environment: the controller's own AWS lookups use them for every account (local testing only)")
+		logger.Warn("AWS keys found in the environment: they are the controller's own credentials (local testing); every lookup still assumes the tenant role of the account it reads")
 	}
 	renderTarget := o.RenderTarget
 	if renderTarget == 0 {
 		renderTarget = crossplaneaws.RenderVersion
 	}
-	deps := Deps{Direct: direct, Deps: reconcile.Deps{
+	reconciling, err := management.WithAWS(ctx, reconcile.Deps{
 		Store:        store,
 		Kube:         mgr.GetClient(), // reads from the informer cache
 		KubeReader:   mgr.GetAPIReader(),
-		AWS:          o.AWS,
 		RenderTarget: renderTarget, RenderRollout: o.RenderRollout,
-		AWSDiscovery: discovery, AWSClusterDiscovery: discovery, AWSClusters: discovery,
 		Logger: logger,
-	}}
+	}, o.AWS.SourceRoleARN)
+	if err != nil {
+		return err
+	}
+	deps := Deps{Direct: direct, Deps: reconciling}
 	if err := Setup(mgr, deps); err != nil {
 		return err
 	}
 	var ready atomic.Bool
-	done, err := server.StartManagement(ctx, mgr, &ready)
+	done, err := management.Start(ctx, mgr, &ready)
 	if err != nil {
 		return err
 	}

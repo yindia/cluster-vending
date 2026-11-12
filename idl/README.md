@@ -65,8 +65,8 @@ authenticate callers yet.
 
 | RPC | What it does |
 |---|---|
-| `CreateNetwork` | Stores a network with its defaults resolved and creates its managed resources. |
-| `ImportNetwork` | Looks an existing VPC up once, read-only, creates Observe-only managed resources for it, derives the spec and stores the plan (`status.import`). |
+| `CreateNetwork` | Stores a network with its defaults resolved. The controller creates its managed resources. |
+| `ImportNetwork` | Stores the import of an existing VPC (`IMPORTED`, import phase `DISCOVERING`) without looking at the cloud. The controller looks the VPC up once, read-only, derives the spec, stores the plan (`status.import`) and creates Observe-only managed resources for it. |
 | `TakeOverNetwork` | Makes the platform the owner of an `IMPORTED` network. |
 | `GetNetwork`, `ListNetworks` | Return the stored network: its spec and the status last recorded. They do not read the management cluster. |
 | `GetNetworkStatus` | Returns the network with its status read now from the management cluster. |
@@ -78,8 +78,8 @@ authenticate callers yet.
 
 | RPC | What it does |
 |---|---|
-| `CreateCluster` | Stores a cluster with its defaults and versions resolved and creates its managed resources. |
-| `ImportCluster` | Looks an existing EKS cluster up once, read-only, derives the spec, creates managed resources that only observe it, and stores the plan (`status.import`). |
+| `CreateCluster` | Stores a cluster with its defaults, without looking at the cloud. The controller checks the name against EKS, resolves the Kubernetes and add-on versions (and writes them to the spec), then creates the managed resources. |
+| `ImportCluster` | Stores the import of an existing EKS cluster (`IMPORTED`, import phase `DISCOVERING`) without looking at the cloud. The controller looks the cluster up once, read-only, derives the spec, stores the plan (`status.import`) and creates managed resources that only observe it. |
 | `TakeOverCluster` | Makes the platform the owner of an `IMPORTED` cluster. |
 | `GetCluster`, `ListClusters` | Return the stored cluster: its spec and the status last recorded. |
 | `GetClusterStatus` | Returns the cluster with its status read now from the management cluster. |
@@ -106,10 +106,18 @@ cloud did since the last pass of the loop shows in the status calls first.
 The watch RPCs read the stored resource every five seconds and send what
 changed. The CLI's `--wait` polls the status call.
 
-Mutations are asynchronous: a call returns once the desired state is stored
-and the first apply was made. A resource has converged when
-`status.observed_generation` equals `generation` and `status.state` is
-`READY` (network) or `RUNNING` (cluster).
+Mutations are asynchronous: a call returns once the desired state is
+stored. The API server checks a request against the contract, the store and
+the management cluster; it never looks at the cloud and applies nothing.
+What needs the cloud happens in the controller afterwards, and what it
+finds wrong is the resource's status, not the answer of the call: `FAILED`
+with the reason in `status.message` (a VPC or EKS cluster to import that
+does not exist or cannot be read, an EKS cluster name that is taken, a
+version EKS does not offer, a provider that is not installed), or the
+state it had with a "retrying" message when the cloud did not answer. A
+resource has converged when `status.observed_generation` equals
+`generation` and `status.state` is `READY` (network) or `RUNNING`
+(cluster).
 
 ## Resources
 
@@ -148,7 +156,7 @@ Bootstrap creates the namespace and one `ProviderConfig`
 (`aws.m.upbound.io`) that uses the provider pods' own identity (IRSA) and an
 `assumeRoleChain` into the tenant role. No static credentials are stored.
 The Crossplane provider packages (`provider-aws-ec2`, `-eks`, `-iam`,
-`-cloudwatchlogs`, `-kms`) are installed by the server at startup, not by
+`-cloudwatchlogs`, `-kms`) are installed by the controller at startup, not by
 bootstrap; without the AWS `ProviderConfig` kind bootstrap fails with
 `FAILED_PRECONDITION`.
 
@@ -442,13 +450,26 @@ interceptor map to the same codes.
 | Code | Used for |
 |---|---|
 | `INVALID_ARGUMENT` | A request that fails the contract's validation; an `update_mask` path that cannot be updated or an empty mask; a layout, region, version or add-on the cloud does not accept; a label key starting with `aws:`. |
-| `FAILED_PRECONDITION` | The state does not allow the call: the account is not bootstrapped; the network is not ready, or is used by clusters on delete; the resource is being deleted or is imported read-only; a takeover when the phase is not `PLANNED` or `NOT_IMPORTED` lines are not acknowledged; encryption turned off; a stale or inapplicable plan; a provider package that is not installed; credentials that cannot read the cloud. |
+| `FAILED_PRECONDITION` | The state does not allow the call: the account is not bootstrapped; the network is not ready, or is used by clusters on delete; the resource is being deleted or is imported read-only; a takeover when the phase is not `PLANNED` or `NOT_IMPORTED` lines are not acknowledged; encryption turned off; a stale or inapplicable plan. |
 | `NOT_FOUND` | The network, cluster or account does not exist in the tenant. |
-| `ALREADY_EXISTS` | A cluster of that name in the account and region (in the platform or in EKS); a VPC that is already imported; a reused `request_id`. |
+| `ALREADY_EXISTS` | A cluster of the platform with that name in the account and region; a VPC that a network already stands for (also a blocked or failed import); a reused `request_id`. |
 | `ABORTED` | The `etag` does not match, or the resource changed while the call ran. Get it again and retry. |
-| `UNAVAILABLE` | The management cluster or an AWS lookup cannot be reached. |
+| `UNAVAILABLE` | The management cluster cannot be reached. |
 | `UNIMPLEMENTED` | Valid in the contract and not built: a provider other than AWS, `REGIONAL` NAT, `spec.existing_cluster`, updating the authentication mode. |
 | `INTERNAL` | The platform failed. The message carries no detail; the cause is in the server log. |
+
+No call fails because of the cloud. These are a resource's status after the
+controller looked (`status.state` `FAILED`, the text in `status.message`,
+and a condition `Reconciled` with status `FALSE`), where they used to be the
+codes above:
+
+| Was | Now the status of |
+|---|---|
+| `NOT_FOUND`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION` of `ImportNetwork` and `ImportCluster` (the VPC or cluster does not exist, its ID is malformed, the account's credentials cannot read it) | the imported network or cluster, its import still `DISCOVERING` |
+| `ALREADY_EXISTS` of `CreateCluster` for an EKS cluster made outside the platform | the cluster: "account ... already has an EKS cluster named ..." |
+| `INVALID_ARGUMENT` of `CreateCluster` and `UpdateCluster` for a Kubernetes or add-on version EKS does not offer | the cluster; nothing of it is created or changed |
+| `FAILED_PRECONDITION` for a provider package that is not installed | the network or cluster |
+| `UNAVAILABLE` for an AWS lookup that did not answer | not `FAILED`: the message reads "retrying: ..." and the controller tries again |
 
 ## Field mapping
 
@@ -508,9 +529,10 @@ Names are derived by the server so they fit the provider limits:
 `ImportStatus` is the plan of a network import and of a cluster import. The
 rules, for both:
 
-- **Nothing changes at import.** The server looks the resources up once,
-  read-only, with the tenant's credentials, because Crossplane has no lookup
-  kinds. Network objects are created with `managementPolicies: [Observe]`,
+- **Nothing changes at import.** The call stores the import and returns
+  (`DISCOVERING`). The controller looks the resources up once, read-only, as
+  the tenant role of the account, because Crossplane has no lookup kinds,
+  and stores the plan (`PLANNED` or `BLOCKED`) before it applies anything. Network objects are created with `managementPolicies: [Observe]`,
   cluster objects with `[Observe, LateInitialize]`, each with the cloud ID
   as `crossplane.io/external-name`. The lookup does not run again.
 - **Tags are kept.** Every existing tag survives the takeover; the platform
@@ -622,7 +644,6 @@ region and zone catalog next to `pkg/constant/aws`.
 | Providers other than AWS (`gcp`, `azure`) | No message exists; only `aws` can be set. Accounts, networks and clusters of another provider are refused. |
 | `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
 | `spec.release_channel`, `spec.tier` | Stored and returned; nothing acts on them and they cannot be updated. |
-| `IMPORT_PHASE_DISCOVERING` | Never set: an import looks the resources up within the call and answers with `PLANNED` or `BLOCKED`. |
 | `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
 | Caller authorization of `tenant_id` | Not implemented: the server trusts the `tenant_id` of the request. |
 | `ImportedResource` lists in `NetworkStatus.carried_over` and `ClusterStatus.carried_over` | Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |

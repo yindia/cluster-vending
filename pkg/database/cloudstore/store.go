@@ -243,6 +243,7 @@ type rowMeta struct {
 	ExternalID         *string   `json:"externalID,omitempty"`
 	Imported           bool      `json:"imported,omitempty"`
 	DeleteForce        bool      `json:"deleteForce,omitempty"`
+	ResolvedGeneration int64     `json:"resolvedGeneration,omitempty"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
 }

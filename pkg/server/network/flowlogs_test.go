@@ -158,7 +158,6 @@ func vpcWithFlowLogs() *awscloud.Network {
 func TestImportNetworkFlowLogs(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpcWithFlowLogs()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	n := f.imported(t)
 	lines := map[string]*cloudv1.ImportedResource{}
 	for _, l := range n.GetStatus().GetImport().GetResources() {
@@ -282,7 +281,6 @@ func TestUpdateNetworkFlowLogs(t *testing.T) {
 func TestUpdateImportedNetworkLabels(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	ctx := t.Context()
 	n := f.takenOver(t)
 	before := len(n.GetStatus().GetManagedResources())

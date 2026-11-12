@@ -8,7 +8,7 @@ import (
 	"github.com/yindia/cluster-vending/config/crd"
 )
 
-// The server installs what is embedded: the three kinds, each with its
+// The controller installs what is embedded: the three kinds, each with its
 // status subresource, and the contract status kept as it is written.
 func TestEmbeddedDefinitions(t *testing.T) {
 	definitions, err := crd.All()

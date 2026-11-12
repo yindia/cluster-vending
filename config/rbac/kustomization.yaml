@@ -6,10 +6,10 @@ resources:
 # own kinds, their status and finalizers. Do not edit by hand.
 - role.yaml
 - role_binding.yaml
-# Hand-written: what the reconcilers will do in the management cluster once
-# implemented (the Crossplane and provider kinds the platform renders,
-# tenant namespaces, credentials Secrets). Kept in step with the code by
-# config/deploy_test.go.
+# Hand-written: what the reconcilers do in the management cluster (the
+# Crossplane providers they install, the provider kinds the platform
+# renders, tenant namespaces, the CRDs of the platform's own kinds). No
+# Secrets. Kept in step with the code by config/deploy_test.go.
 - platform_role.yaml
 - platform_role_binding.yaml
 # Leader election: Leases and events in the controller's namespace.

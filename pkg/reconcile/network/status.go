@@ -163,6 +163,8 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
 		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: ConditionSynced,
 			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
+	case Discovering(row):
+		st.State, st.Message = cloudv1.NetworkState_NETWORK_STATE_IMPORTED, discoveringMessage
 	case row.State == StateImported:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_IMPORTED
 		st.Message = "imported read-only (" + progress + "); review status.import, then TakeOverNetwork"

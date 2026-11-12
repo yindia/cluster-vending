@@ -18,20 +18,33 @@ import "google/protobuf/field_mask.proto";
 // catches up with generation and status.state is RUNNING (or the cluster is
 // gone, after a delete).
 service ClusterService {
-  // Creates a cluster. Returns ALREADY_EXISTS if (tenant_id, cluster.id) is
-  // taken, unless request_id matches the original request. Clusters built
-  // outside the platform are imported with ImportCluster;
-  // spec.existing_cluster is refused.
+  // Creates a cluster. The call stores it (PROVISIONING) and returns; the
+  // API server does not look at the cloud. Returns ALREADY_EXISTS if a
+  // cluster of the platform already has the name in the account and
+  // region, unless request_id matches the original request. Whether EKS
+  // has a cluster of the name that the platform did not create, and which
+  // Kubernetes and add-on versions EKS offers, is checked by the
+  // controller before it creates anything: a taken name or a version EKS
+  // does not offer is not an error of this call, the cluster becomes FAILED
+  // with the reason in status.message. The versions the controller
+  // resolved are written to spec (control_plane.kubernetes_version, the
+  // add-ons' versions). Clusters built outside the platform are imported
+  // with ImportCluster; spec.existing_cluster is refused.
   rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
 
-  // Imports an existing cluster read-only and computes the plan
-  // (status.import): the server looks the cluster's resources up once, with
-  // the tenant's credentials, derives the spec from them and creates a
-  // managed resource for each with managementPolicies
-  // ["Observe", "LateInitialize"]. Nothing changes in the cloud. The
-  // cluster is IMPORTED, or FAILED when the plan is BLOCKED (then nothing is
-  // imported). Its network must be a Network of the tenant, imported or
-  // owned, that holds the cluster's subnets.
+  // Imports an existing cluster read-only. The call only stores the import
+  // and returns: the cluster is IMPORTED with status.import.phase
+  // DISCOVERING, and the API server does not look at the cloud. The
+  // controller then looks the cluster's resources up once, as the tenant
+  // role of the account, derives the spec from them, writes the plan
+  // (status.import) and creates a managed resource for each with
+  // managementPolicies ["Observe", "LateInitialize"]. Nothing changes in
+  // the cloud. Poll GetCluster: the phase becomes PLANNED (state IMPORTED),
+  // or BLOCKED (state FAILED, nothing imported). A cluster that does not
+  // exist or cannot be read is not an error of this call: the cluster
+  // becomes FAILED with the reason in status.message, still DISCOVERING.
+  // Its network must be a Network of the tenant, imported or owned, that
+  // holds the cluster's subnets.
   rpc ImportCluster(ImportClusterRequest) returns (ImportClusterResponse);
 
   // Takes over an IMPORTED cluster: the platform becomes its owner and
@@ -64,7 +77,15 @@ service ClusterService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Updates the mutable fields named in update_mask.
+  // Updates the mutable fields named in update_mask. The call stores the
+  // change and returns; the API server does not look at the cloud. After a
+  // change of the Kubernetes version or the add-ons the controller
+  // resolves the versions against what EKS offers before it applies the
+  // change: a version EKS does not offer (or a pinned add-on version that
+  // does not fit the new Kubernetes version) is not an error of this call,
+  // the cluster becomes FAILED with the reason and is not touched. A plan
+  // (validate_only) made before that shows the versions EKS has yet to
+  // choose as "(known after apply)".
   rpc UpdateCluster(UpdateClusterRequest) returns (UpdateClusterResponse);
 
   // Streams one cluster's state: a first message with the cluster and an

@@ -18,7 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -82,7 +81,6 @@ func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 	svc := NewTenantService(service.Deps{
 		Store: store,
 		Kube:  k,
-		AWS:   config.AWS{ManagementRoleARN: mgmtRole},
 	})
 	return fixture{svc: svc, kube: k, tenants: tenants, recorded: recorded}
 }

@@ -26,7 +26,9 @@ type ImportPhase int32
 
 const (
 	ImportPhase_IMPORT_PHASE_UNSPECIFIED ImportPhase = 0
-	// Discovering and importing the resources.
+	// The import is stored; the controller has yet to look the resources up
+	// (or the lookup is failing: see the resource's state and message).
+	// There is no plan yet.
 	ImportPhase_IMPORT_PHASE_DISCOVERING ImportPhase = 1
 	// Plan ready; nothing changed yet. Review, then take over.
 	ImportPhase_IMPORT_PHASE_PLANNED ImportPhase = 2

@@ -9,6 +9,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/controller/manager"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
 func newControllerCmd(g *globals) *cobra.Command {
@@ -20,8 +21,14 @@ func newControllerCmd(g *globals) *cobra.Command {
 			"the objects the API server writes with --store=kubernetes (and adopts\n" +
 			"Networks and Clusters created with kubectl): it creates, updates and\n" +
 			"deletes their cloud resources through Crossplane. It installs the\n" +
-			"kinds' CRDs and waits for the Crossplane AWS providers, which the API\n" +
-			"server (serve --install-providers) or an operator installs.",
+			"kinds' CRDs and the Crossplane AWS providers (--install-providers), and\n" +
+			"it is the only command that looks at AWS: it discovers imported VPCs and\n" +
+			"EKS clusters and checks names and versions against EKS.\n\n" +
+			"Its AWS credentials come from the AWS SDK's default chain: IRSA in\n" +
+			"production; for local testing export AWS_ACCESS_KEY_ID and\n" +
+			"AWS_SECRET_ACCESS_KEY (never a flag or a file). Whatever they are, every\n" +
+			"lookup assumes the tenant role of the account it reads.\n\n" +
+			"--aws-management-account-id and --aws-management-role-arn are required.",
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationSettingsFile: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -36,6 +43,12 @@ func newControllerCmd(g *globals) *cobra.Command {
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace,
 				RenderTarget: cfg.RenderTarget, RenderRollout: cfg.RenderRollout, AWS: cfg.AWS, Logger: g.logger,
+				InstallProviders: cfg.InstallProviders,
+				ProviderRuntime: crossplaneaws.ProviderRuntime{
+					ManagementRoleARN: cfg.AWS.ManagementRoleARN, Poll: cfg.Provider.Poll, EC2Poll: cfg.Provider.EC2Poll,
+					MaxReconcileRate: cfg.Provider.MaxReconcileRate, CPURequest: cfg.Provider.CPURequest,
+					MemoryRequest: cfg.Provider.MemoryRequest, CPULimit: cfg.Provider.CPULimit, MemoryLimit: cfg.Provider.MemoryLimit,
+				},
 			})
 		},
 	}

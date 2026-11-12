@@ -11,7 +11,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -21,7 +20,6 @@ import (
 // versions ("v1-<kubernetes version>").
 func withVersions(d *service.Deps) {
 	d.AWSClusters = fakeLookup{}
-	d.AWS = config.AWS{StaticKeys: &config.StaticKeys{AccessKeyID: "AKIA", SecretAccessKey: "x"}}
 }
 
 // appliedWorld is a world whose cluster is fully applied.
@@ -75,6 +73,13 @@ func TestPlanKubernetesUpgradeIsDisruptive(t *testing.T) {
 	if !plan.GetApplicable() || plan.GetPlanId() == "" || len(plan.GetWarnings()) == 0 {
 		t.Errorf("applicable %v, id %q, warnings %v", plan.GetApplicable(), plan.GetPlanId(), plan.GetWarnings())
 	}
+	// The add-on versions EKS will choose for 1.35 are not known to the
+	// call: the plan says so.
+	for _, c := range changesOf(plan, "Addon", disruptive) {
+		if !strings.Contains(c.GetUnifiedDiff(), crossplaneaws.KnownAfterApply) {
+			t.Errorf("add-on %s: the plan does not show its version as known after apply:\n%s", c.GetName(), c.GetUnifiedDiff())
+		}
+	}
 	// A plan changes nothing.
 	after := w.cluster(t)
 	live := &awseks.Cluster{}
@@ -82,8 +87,9 @@ func TestPlanKubernetesUpgradeIsDisruptive(t *testing.T) {
 	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix}, live); err != nil {
 		t.Fatal(err)
 	}
-	if after.Generation != before.Generation || after.ETag != before.ETag || live.Spec.ForProvider.Version != nil {
-		t.Errorf("the plan changed the cluster: generation %d -> %d, live version %v", before.Generation, after.Generation, live.Spec.ForProvider.Version)
+	if after.Generation != before.Generation || after.ETag != before.ETag || ptr.Deref(live.Spec.ForProvider.Version, "") == "1.35" {
+		t.Errorf("the plan changed the cluster: generation %d -> %d, live version %v", before.Generation, after.Generation,
+			ptr.Deref(live.Spec.ForProvider.Version, ""))
 	}
 }
 

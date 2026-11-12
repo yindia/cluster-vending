@@ -24,6 +24,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -47,9 +48,9 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // How long until an object is reconciled again when nothing wakes it.
@@ -263,7 +264,23 @@ func refusal(err error) (reason, message string) {
 	if fault.Is(err, fault.Unavailable) || fault.Is(err, fault.Internal) {
 		reason = reasonWaiting
 	}
-	return reason, service.ToConnect(err).Error()
+	return reason, describe(err)
+}
+
+// describe is what a condition says of err: a fault's message for the
+// caller, a storage error as it is, and nothing of any other error (its
+// text may hold details of the management cluster).
+func describe(err error) string {
+	if f, ok := fault.As(err); ok {
+		return f.Message
+	}
+	for _, known := range []error{repository.ErrNotFound, repository.ErrAlreadyExists, repository.ErrConflict,
+		repository.ErrInUse, repository.ErrInvalid} {
+		if errors.Is(err, known) {
+			return err.Error()
+		}
+	}
+	return "internal error (see the controller's log)"
 }
 
 // ensureFinalizer adds the kind's finalizer to obj, so its deletion waits

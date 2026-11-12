@@ -235,6 +235,14 @@ type Cluster struct {
 	// DeleteForce: the deletion was requested with force (DeleteClusterRequest.force);
 	// every later step of it skips the in-cluster cleanup.
 	DeleteForce bool `gorm:"not null;default:false"`
+	// ResolvedGeneration is the generation whose cloud lookups were made by
+	// the reconciler: the EKS cluster name was found free (a new cluster)
+	// and the Kubernetes and add-on versions were resolved against what
+	// EKS offers and written to the spec. The API stores a cluster (or an
+	// update of its versions) without them; while it is below Generation
+	// the reconciler makes them before it renders anything. A call that
+	// changes nothing they depend on moves it along with Generation.
+	ResolvedGeneration int64 `gorm:"not null;default:0"`
 
 	NodePools []NodePool `gorm:"constraint:OnDelete:RESTRICT"`
 }

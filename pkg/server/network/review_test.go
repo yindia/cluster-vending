@@ -23,7 +23,6 @@ import (
 func TestLoopFinishesTaggingAnImportedNetwork(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpcWithFlowLogs()} // its log group is shared with other VPCs
-	f.svc.deps.AWS.StaticKeys = testKeys
 	ctx := t.Context()
 	res, err := f.svc.ImportNetwork(ctx, importRequest(f.accountID))
 	if err != nil {
@@ -84,7 +83,6 @@ func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
 		return c.Apply(ctx, obj, opts...)
 	}})
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
-	f.svc.deps.AWS.StaticKeys = testKeys
 	ctx := t.Context()
 	res, err := f.svc.ImportNetwork(ctx, importRequest(f.accountID))
 	if err != nil {

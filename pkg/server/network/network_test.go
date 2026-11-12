@@ -142,6 +142,16 @@ func (f fixture) reconcile(t *testing.T, id string) {
 	}
 }
 
+// get is the network as GetNetwork returns it: from the store.
+func (f fixture) get(t *testing.T, id string) *cloudv1.Network {
+	t.Helper()
+	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id})
+	if err != nil {
+		t.Fatalf("GetNetwork: %v", err)
+	}
+	return res.GetNetwork()
+}
+
 // status is the network as GetNetworkStatus returns it: read live.
 func (f fixture) status(t *testing.T, id string) *cloudv1.Network {
 	t.Helper()

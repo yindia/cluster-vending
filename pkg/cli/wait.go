@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
 // pollInterval is how often --wait reads the resource. A call only stores
-// what was asked for and reads change nothing: the server's background
-// loop does the work, and --wait watches it.
+// what was asked for and reads change nothing: the controller does the
+// work, and --wait watches it.
 const pollInterval = 15 * time.Second
 
 // DefaultWaitTimeout bounds --wait: an EKS cluster takes ~15 minutes, a
@@ -24,6 +26,28 @@ type observation struct {
 	// done: the wait is over (ready, or gone for a delete); failed: it is
 	// over and failed.
 	done, failed bool
+}
+
+// importObservation is what a wait for an import sees in one read of the
+// resource's status. The call that started the import only stored it; the
+// controller looks the cloud up and writes the plan. The wait is over
+// when the plan is there: PLANNED and its Observe-only resources exist
+// (resources > 0), or BLOCKED, which is an answer too (the plan says what
+// blocks, and nothing was imported). It has failed when the resource is
+// FAILED for any other reason: what was to be imported does not exist or
+// cannot be read. While the import is DISCOVERING a failure that is being
+// retried only shows in the message.
+func importObservation(state, message string, imp *cloudv1.ImportStatus, resources int, failed bool) observation {
+	obs := observation{state: state, message: message}
+	switch imp.GetPhase() {
+	case cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED:
+		obs.done = true
+	case cloudv1.ImportPhase_IMPORT_PHASE_PLANNED:
+		obs.done, obs.failed = resources > 0 && !failed, failed
+	default:
+		obs.failed = failed
+	}
+	return obs
 }
 
 // waitUntil polls read until it reports done, printing each state change

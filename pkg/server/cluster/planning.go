@@ -113,6 +113,9 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 		default:
 		}
 	}
+	if warning := crossplaneaws.DedicatedPoolWarning(final.NodePool); warning != "" {
+		plan.Warnings = append(plan.Warnings, warning)
+	}
 	plan.PlanId, err = planID(req, versions)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())

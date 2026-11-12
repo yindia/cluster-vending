@@ -37,7 +37,10 @@ const ProviderVersion = "v2.9.0"
 //	3  a provider-helm ProviderConfig per cluster (<prefix>-helm, through
 //	   the ClusterAuth's kubeconfig), with a Usage keeping the ClusterAuth
 //	   while it exists
-const RenderVersion = 3
+//	4  coredns and the EBS CSI controller follow the default node pool:
+//	   its labels as their nodeSelector, a toleration per taint (only for
+//	   clusters whose default pool has labels or taints)
+const RenderVersion = 4
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.

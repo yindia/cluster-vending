@@ -47,6 +47,7 @@ func TestVarsFor(t *testing.T) {
 		VarClusterNodeRoleARN:     "arn:aws:iam::444455556666:role/prod-1a2b-node-role",
 		VarNetworkVPCID:           "vpc-0abc",
 		VarIAMRoleARN:             iam.RoleARN, VarIAMRoleName: "r", VarIAMPolicyARN: iam.PolicyARN,
+		VarSystemNodeSelector: "{}", VarSystemTolerations: "[]",
 	}
 	for _, name := range PlaceholderNames() {
 		if v[name] != want[name] {

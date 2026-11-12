@@ -94,8 +94,8 @@ func (b clusterBuilder) addon(a AddonPlan) *awseks.Addon {
 	if a.Version != "" {
 		params.AddonVersion = ptr.To(a.Version)
 	}
-	if a.ConfigurationValues != "" {
-		params.ConfigurationValues = ptr.To(a.ConfigurationValues)
+	if values := b.placedConfiguration(a); values != "" {
+		params.ConfigurationValues = ptr.To(values)
 	}
 	return &awseks.Addon{ObjectMeta: b.meta(name), Spec: awseks.AddonSpec{ManagedResourceSpec: b.spec(), ForProvider: params}}
 }

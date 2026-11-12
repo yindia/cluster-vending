@@ -520,11 +520,17 @@ name and its path in the message).
 | `${network.vpcId}` | the owning Network `status.resources.cloudNetworkID` | the network is built |
 | `${iam.roleArn}`, `${iam.roleName}` | the component's own role (section 5.2), from its status | the role exists |
 | `${iam.policyArn}` | the component's own policy | the policy exists |
+| `${system.nodeSelector}` | the labels of the cluster's default node pool (`spec.defaultNodePool.labels`), as a map; `{}` for none | always |
+| `${system.tolerations}` | one toleration per taint of the default node pool (`spec.defaultNodePool.taints`): `{key, operator: Equal, value, effect}`; `[]` for none | always |
 
 Rules:
 
 - A placeholder may sit inside a longer string
   (`arn:aws:iam::${account.id}:policy/x`). `$${` writes a literal `${`.
+- The two `system.*` names are **whole values**: the field's value must be
+  exactly the placeholder (`nodeSelector: ${system.nodeSelector}`), and it is
+  replaced by the map or the list. Inside a longer string they are refused,
+  with the path. They are for `platformValues` only, not the IAM policy.
 - A known name without a value yet is not an error: the controller waits and
   tries again (`ErrNotReady`, naming each missing value). It never installs a
   blank.
@@ -534,6 +540,37 @@ Rules:
   read another account's values through a placeholder.
 - A value changes (a new endpoint): the controller fills it in again and
   provider-helm upgrades the release.
+
+#### Running on the default node pool
+
+The cluster's default node pool is where the platform's components run. A
+tenant who wants it for nothing else gives it labels and a taint
+(`spec.defaultNodePool.labels` and `.taints`); the platform team makes every
+catalog component follow it, at the chart's own keys:
+
+```yaml
+platformValues:
+  nodeSelector: ${system.nodeSelector}
+  tolerations: ${system.tolerations}
+  # a chart with several workloads repeats it per workload, e.g.
+  # controller: {nodeSelector: ${system.nodeSelector}, tolerations: ${system.tolerations}}
+```
+
+- A list replaces the chart's own default as a whole. A chart whose default
+  tolerations matter keeps them only if the definition does not set the key:
+  such a component sets the nodeSelector and leaves the tolerations alone, or
+  the platform team checks that the pool's tolerations are enough.
+- DaemonSets that must run on every node (a CNI, ztunnel, a device plugin)
+  do not take the nodeSelector; they tolerate every taint in their own chart.
+- The same placement is applied to the EKS add-ons whose configuration
+  schema is confirmed (coredns and the EBS CSI controller; the table is in
+  `pkg/crossplane/aws/addon_placement.go`). A nodeSelector or tolerations
+  the tenant set in the add-on's `configurationValues` wins. The other
+  add-ons' controllers are placed by the tenant, the same way.
+- A default pool with a `NoSchedule` or `NoExecute` taint leaves tenant
+  workloads nowhere to run until other nodes exist (the karpenter component)
+  or they tolerate the taint. The API does not refuse it: the plan of a
+  cluster update carries a warning.
 
 ### 5.2 Cloud resources: an IAM role
 

@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 )
 
 // SubnetRole is the role of a planned subnet.
@@ -193,6 +194,31 @@ func NetworkResources(p NetworkPlan) ([]client.Object, error) {
 		objects = append(objects, flowLogs...)
 	}
 	return objects, nil
+}
+
+// NetworkSet is NetworkResources as a set to apply in order: a public NAT
+// gateway can only be created in a VPC whose internet gateway is attached
+// (created earlier it fails), so the NAT gateways wait for the
+// InternetGateway to be Ready (the provider creates and attaches it in
+// one step).
+func NetworkSet(p NetworkPlan) (sequence.Set, error) {
+	objects, err := NetworkResources(p)
+	if err != nil {
+		return nil, err
+	}
+	var gateway client.Object
+	for _, obj := range objects {
+		if _, ok := obj.(*awsec2.InternetGateway); ok {
+			gateway = obj
+		}
+	}
+	set := sequence.Of(objects...)
+	for i, item := range set {
+		if _, ok := item.Object.(*awsec2.NATGateway); ok && gateway != nil {
+			set[i].After = []sequence.Condition{sequence.Ready(gateway)}
+		}
+	}
+	return set, nil
 }
 
 func containsName(objects []client.Object, name string) bool {

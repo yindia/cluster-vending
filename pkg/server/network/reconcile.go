@@ -20,7 +20,7 @@ func PendingStates() []string {
 // has to. It moves a deletion on (the next tier, then the row), applies
 // the network again while its generation or renderer version is behind
 // (after a change, and for the NAT gateways held back until the internet
-// gateway is attached: holdNAT), and records the network's status (what
+// gateway is attached: crossplaneaws.NetworkSet), and records the network's status (what
 // GetNetwork returns) and READY once it is (settle). Imported networks
 // are observed only: nothing is applied for them. Every step is
 // idempotent. A network that does not exist is done.

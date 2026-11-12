@@ -72,3 +72,35 @@ func TestNetworkPrefix(t *testing.T) {
 		t.Errorf("prefixes %q, %q: want shared-<hash8>, distinct", a, b)
 	}
 }
+
+// The set is the rendered objects in their order; only the NAT gateways
+// wait (for the internet gateway).
+func TestNetworkSetHoldsNATGatewaysForTheInternetGateway(t *testing.T) {
+	plan := plan(
+		crossplaneaws.SubnetPlan{Role: crossplaneaws.SubnetPublic, CIDR: "10.0.0.0/24", ZoneID: "use1-az1"},
+		crossplaneaws.SubnetPlan{Role: crossplaneaws.SubnetPrivate, CIDR: "10.0.16.0/20", ZoneID: "use1-az1"})
+	objects, err := crossplaneaws.NetworkResources(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := crossplaneaws.NetworkSet(plan)
+	if err != nil || len(set) != len(objects) {
+		t.Fatalf("set of %d items for %d objects (%v)", len(set), len(objects), err)
+	}
+	nats := 0
+	for i, item := range set {
+		if item.Object.GetName() != objects[i].GetName() {
+			t.Errorf("item %d is %s, want %s", i, item.Object.GetName(), objects[i].GetName())
+		}
+		_, isNAT := item.Object.(*awsec2.NATGateway)
+		if isNAT {
+			nats++
+		}
+		if (len(item.After) == 1) != isNAT {
+			t.Errorf("%T %s waits for %d conditions", item.Object, item.Object.GetName(), len(item.After))
+		}
+	}
+	if nats == 0 {
+		t.Error("the plan rendered no NAT gateway")
+	}
+}

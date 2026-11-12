@@ -9,10 +9,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -62,116 +62,43 @@ func layoutProto(r awsLayout) *cloudv1.NetworkLayout {
 	return l
 }
 
-// apply creates or updates the network's managed resources, then records
-// them (model.ManagedResource) as the network's.
+// apply makes the network's managed resources match plan, in order
+// (crossplaneaws.NetworkSet), and marks the generation applied once the
+// whole set is: while NAT gateways wait for the internet gateway,
+// Reconcile applies the network again.
 func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model.CloudAccount, plan resolved) error {
-	objects, err := crossplaneaws.NetworkResources(plan.NetworkPlan)
+	set, err := crossplaneaws.NetworkSet(plan.NetworkPlan)
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
 	}
-	hold, err := s.holdNAT(ctx, row)
-	if err != nil {
-		return err
-	}
-	if hold {
-		// Created in sequence: the NAT gateways follow once the internet
-		// gateway is attached (Reconcile applies the network again).
-		if objects, err = s.withoutKind(objects, natGatewayKind); err != nil {
-			return connect.NewError(connect.CodeInternal, err.Error())
-		}
-	}
-	if err := s.applyObjects(ctx, row, a, objects); err != nil || hold {
+	res, err := s.applySet(ctx, row, a, set)
+	if err != nil || !res.Complete() {
 		return err // held back: not applied in full yet
-	}
-	// What the spec no longer has (flow logs turned off) is deleted. Only
-	// after a full render: an object held back is not a dropped one.
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
-	if err := s.deps.Prune(ctx, owner, objects); err != nil {
-		s.logger().ErrorContext(ctx, "prune network resources", "network_id", row.ID, "error", err)
-		return connect.NewError(connect.CodeInternal, "could not remove the network's dropped resources")
 	}
 	return s.markApplied(ctx, row)
 }
 
-// Kinds of the NAT gateway stage.
-const (
-	natGatewayKind      = "NATGateway"
-	internetGatewayKind = "InternetGateway"
-)
-
-// holdNAT reports whether apply must leave out the NAT gateways: a public
-// NAT gateway can only be created in a VPC whose internet gateway is
-// attached, and created earlier it fails and turns the network FAILED.
-// They are held back until the InternetGateway is Ready (the provider
-// creates and attaches it in one step), and never again once they were
-// created.
-func (s *NetworkService) holdNAT(ctx context.Context, row *model.Network) (bool, error) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
-	if err != nil {
-		return false, service.ToConnect(err)
-	}
-	var gateways []model.ManagedResource
-	for _, r := range records {
-		switch r.Kind {
-		case natGatewayKind:
-			return false, nil
-		case internetGatewayKind:
-			gateways = append(gateways, r)
-		}
-	}
-	views, err := s.deps.Observe(ctx, gateways)
-	if err != nil {
-		return false, err
-	}
-	for _, v := range views {
-		if v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// withoutKind drops the objects of one kind.
-func (s *NetworkService) withoutKind(objects []client.Object, kind string) ([]client.Object, error) {
-	out := make([]client.Object, 0, len(objects))
-	for _, obj := range objects {
-		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
-		if err != nil {
-			return nil, err
-		}
-		if gvk.Kind != kind {
-			out = append(out, obj)
-		}
-	}
-	return out, nil
-}
-
-// applyObjects applies objects in order and records them as the network's.
-// The caller marks the row applied once nothing is held back.
-func (s *NetworkService) applyObjects(ctx context.Context, row *model.Network, a *model.CloudAccount, objects []client.Object) error {
+// applySet applies set as the network's objects (sequence.Engine: what
+// the network has is recorded, what waits is held back, what the set
+// dropped is removed). The caller marks the row applied once the result
+// is complete.
+func (s *NetworkService) applySet(ctx context.Context, row *model.Network, a *model.CloudAccount, set sequence.Set) (sequence.Result, error) {
 	if a.Namespace == "" || a.ProviderConfigName == "" {
-		return connect.NewError(connect.CodeFailedPrecondition,
+		return sequence.Result{}, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Sprintf("account %s is not fully bootstrapped; run BootstrapTenant again", a.ID))
 	}
-	for _, obj := range objects {
-		err := kube.Apply(ctx, s.deps.Kube, obj)
-		switch {
-		case err == nil:
-		case meta.IsNoMatchError(err):
-			return connect.NewError(connect.CodeFailedPrecondition,
-				"a Crossplane AWS provider the network needs (ec2, iam, cloudwatchlogs) is not installed in the management cluster")
-		default:
-			s.logger().ErrorContext(ctx, "apply network resource", "tenant_id", row.TenantID,
-				"network_id", row.ID, "object", obj.GetName(), "error", err)
-			return connect.NewError(connect.CodeInternal, "could not create the network's resources")
-		}
-	}
 	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
-	if err := s.deps.Record(ctx, owner, objects); err != nil {
-		s.logger().ErrorContext(ctx, "record network resources", "network_id", row.ID, "error", err)
-		return connect.NewError(connect.CodeInternal, "could not record the network's resources")
+	res, err := s.deps.Sequence().Apply(ctx, set, s.deps.Inventory(owner))
+	switch {
+	case err == nil:
+		return res, nil
+	case meta.IsNoMatchError(err):
+		return res, connect.NewError(connect.CodeFailedPrecondition,
+			"a Crossplane AWS provider the network needs (ec2, iam, cloudwatchlogs) is not installed in the management cluster")
+	default:
+		s.logger().ErrorContext(ctx, "apply network resources", "tenant_id", row.TenantID, "network_id", row.ID, "error", err)
+		return res, connect.NewError(connect.CodeInternal, "could not create the network's resources")
 	}
-	return nil
 }
 
 // markApplied records that every object of the row's generation was

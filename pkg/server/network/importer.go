@@ -17,6 +17,7 @@ import (
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -62,7 +63,7 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 		return nil, err
 	}
 	if !plan.blocked() {
-		err := s.applyObjects(ctx, row, account, crossplaneaws.ImportedNetworkResources(plan.resources))
+		_, err := s.applySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(plan.resources)...))
 		if err == nil {
 			err = s.markApplied(ctx, row)
 		}

@@ -23,6 +23,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
 const (
@@ -44,7 +45,7 @@ func newCluster(t *testing.T, w world, change func(*cloudv1.ClusterSpec)) {
 		t.Fatal(err)
 	}
 	row := w.cluster(t)
-	spec, err := specOf(row)
+	spec, err := reconcilecluster.SpecOf(row)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +53,10 @@ func newCluster(t *testing.T, w world, change func(*cloudv1.ClusterSpec)) {
 	if err := corecluster.ResolveOptions(spec); err != nil {
 		t.Fatal(err)
 	}
-	if row.Spec, err = encode(spec); err != nil {
+	if row.Spec, err = reconcilecluster.Encode(spec); err != nil {
 		t.Fatal(err)
 	}
-	row.State, row.Generation, row.AppliedGeneration = stateProvisioning, 1, 0
+	row.State, row.Generation, row.AppliedGeneration = reconcilecluster.StateProvisioning, 1, 0
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +88,8 @@ func markReady(t *testing.T, w world, obj client.Object, name string) {
 // applied only once the log group is Ready and the key has an ARN, and
 // then encrypts with that key.
 func TestLogGroupAndKeyStageBeforeTheCluster(t *testing.T) {
-	resumeAfter, stageAfter = 0, 0
-	t.Cleanup(func() { resumeAfter, stageAfter = 2*time.Minute, 15*time.Second })
+	reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 0, 0
+	t.Cleanup(func() { reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 2*time.Minute, 15*time.Second })
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)

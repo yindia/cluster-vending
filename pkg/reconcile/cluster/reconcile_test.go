@@ -30,13 +30,13 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // world is a cluster in a real (SQLite) store on a network whose subnets
 // exist in a fake management cluster, its EKS cluster ACTIVE.
 type world struct {
-	svc   *ClusterService
+	svc   *Reconciler
 	store repository.Store
 	kube  client.Client
 	row   *model.Cluster
@@ -44,7 +44,7 @@ type world struct {
 
 const worldTenant, worldNS = "acme", "tenant-acme"
 
-func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts ...func(*service.Deps)) world {
+func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts ...func(*reconcile.Deps)) world {
 	t.Helper()
 	ctx := t.Context()
 	db, err := database.Open(ctx, database.Config{Driver: database.DriverSQLite, DSN: filepath.Join(t.TempDir(), "t.db"), MaxOpenConns: 1})
@@ -91,10 +91,10 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 
 	spec := minimalSpec()
 	spec.Network.NetworkId = network.ID
-	raw, err := encode(mustResolve(t, spec, []string{"use1-az1", "use1-az2"}))
+	raw, err := Encode(mustResolve(t, spec, []string{"use1-az1", "use1-az2"}))
 	must(err)
 	row := &model.Cluster{TenantID: worldTenant, Name: "prod", NetworkID: network.ID, Provider: model.ProviderAWS, Region: "us-east-1",
-		Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 1, Spec: raw}}
+		Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 1, Spec: raw}}
 	must(store.Clusters().Create(ctx, row))
 
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, row.ID, row.Name)
@@ -111,11 +111,11 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 		funcs.Apply = dryRunApply(scheme)
 	}
 	k := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(funcs).Build()
-	deps := service.Deps{Store: store, Kube: k, KubeReader: reader}
+	deps := reconcile.Deps{Store: store, Kube: k, KubeReader: reader}
 	for _, opt := range opts {
 		opt(&deps)
 	}
-	return world{svc: NewClusterService(deps), store: store, kube: k, row: row}
+	return world{svc: New(deps), store: store, kube: k, row: row}
 }
 
 func (w world) cluster(t *testing.T) *model.Cluster {
@@ -173,7 +173,7 @@ func TestReconcileFinishesADeletionWithoutReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := w.cluster(t)
-	row.State = stateDeleting
+	row.State = StateDeleting
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestDeletionWaitsForTheAPIServerToConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := w.cluster(t)
-	row.State = stateDeleting
+	row.State = StateDeleting
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestRecordsKeepExternalNameAndGoneAt(t *testing.T) {
 		t.Errorf("EKS cluster record: external name %q, gone at %v; want the EKS name and not gone", got.ExternalName, got.GoneAt)
 	}
 	row := w.cluster(t)
-	row.State = stateDeleting
+	row.State = StateDeleting
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestReconcileStaysPendingWhileANodeGroupIsRetired(t *testing.T) {
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := w.cluster(t); got.State == stateRunning {
+	if got := w.cluster(t); got.State == StateRunning {
 		t.Fatalf("cluster is %s with two node groups recorded, want it pending", got.State)
 	}
 }
@@ -372,8 +372,8 @@ func TestReconcileStaysPendingWhileANodeGroupIsRetired(t *testing.T) {
 // is applied again while EKS is still creating, the later stage (add-ons,
 // access entries) only once it is ACTIVE, and the cluster reaches RUNNING.
 func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
-	resumeAfter = 0
-	t.Cleanup(func() { resumeAfter = 2 * time.Minute })
+	ResumeAfter = 0
+	t.Cleanup(func() { ResumeAfter = 2 * time.Minute })
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
@@ -402,7 +402,7 @@ func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
 	// written before the applies) but was never applied.
 	setEKS("CREATING")
 	row := w.cluster(t)
-	row.State, row.Generation, row.AppliedGeneration = stateProvisioning, 1, 0
+	row.State, row.Generation, row.AppliedGeneration = StateProvisioning, 1, 0
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
 	if n := count(&awseks.AddonList{}) + count(&awseks.AccessEntryList{}) + count(&awseks.PodIdentityAssociationList{}); n != 0 {
 		t.Fatalf("%d later-stage objects applied while EKS is still creating", n)
 	}
-	if got := w.cluster(t); got.AppliedGeneration != 0 || got.State != stateProvisioning {
+	if got := w.cluster(t); got.AppliedGeneration != 0 || got.State != StateProvisioning {
 		t.Fatalf("applied generation %d, state %s: the create is not complete yet", got.AppliedGeneration, got.State)
 	}
 	// Nothing is missing any more: further passes leave the cluster alone
@@ -468,8 +468,8 @@ func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := w.cluster(t); got.State != stateRunning {
-		t.Errorf("state = %s, want %s", got.State, stateRunning)
+	if got := w.cluster(t); got.State != StateRunning {
+		t.Errorf("state = %s, want %s", got.State, StateRunning)
 	}
 }
 
@@ -482,13 +482,13 @@ func TestReconcileDoesNotResumeOtherClusters(t *testing.T) {
 		state      string
 		laterStage bool
 	}{
-		{"row written a moment ago", time.Hour, stateProvisioning, false},
-		{"past the first stage", 0, stateProvisioning, true},
-		{"an update", 0, stateUpdating, false},
+		{"row written a moment ago", time.Hour, StateProvisioning, false},
+		{"past the first stage", 0, StateProvisioning, true},
+		{"an update", 0, StateUpdating, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			resumeAfter = tt.grace
-			t.Cleanup(func() { resumeAfter = 2 * time.Minute })
+			ResumeAfter = tt.grace
+			t.Cleanup(func() { ResumeAfter = 2 * time.Minute })
 			w := newWorld(t, interceptor.Funcs{}, nil)
 			ctx := t.Context()
 			prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
@@ -522,5 +522,34 @@ func TestReconcileDoesNotResumeOtherClusters(t *testing.T) {
 				t.Errorf("%d node groups applied (%v), want none", len(groups.Items), err)
 			}
 		})
+	}
+}
+
+// What the loop applied while a call changed the cluster may be older
+// than what the call applied (an update silently reverted): the cluster
+// is applied again.
+func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
+	w := newWorld(t, interceptor.Funcs{}, nil)
+	ctx := t.Context()
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	seen := w.cluster(t) // the row as the loop read it
+	w.svc.recheck(ctx, seen)
+	if w.cluster(t).ETag != seen.ETag {
+		t.Fatal("a cluster nobody changed was marked behind")
+	}
+	changed := w.cluster(t) // a call stores and applies a change
+	changed.Generation++
+	changed.AppliedGeneration = changed.Generation
+	if err := w.store.Clusters().Update(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.svc.markApplied(ctx, seen); err != nil {
+		t.Errorf("markApplied on a changed row: %v", err)
+	}
+	w.svc.recheck(ctx, seen)
+	if got := w.cluster(t); got.AppliedGeneration >= got.Generation {
+		t.Fatalf("applied %d of %d; want the cluster applied again", got.AppliedGeneration, got.Generation)
 	}
 }

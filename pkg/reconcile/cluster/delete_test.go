@@ -16,7 +16,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 func TestDeletingMessage(t *testing.T) {
@@ -75,7 +75,7 @@ func TestForceReleaseReleasesHelmReleases(t *testing.T) {
 				return c.Patch(ctx, obj, p, opts...)
 			},
 		}).Build()
-	s := NewClusterService(service.Deps{Kube: k})
+	s := New(reconcile.Deps{Kube: k})
 	row := &model.Cluster{Base: model.Base{ID: "c-1"}, TenantID: "acme", DeleteForce: true}
 	if err := s.forceRelease(context.Background(), row); err != nil {
 		t.Fatal(err)

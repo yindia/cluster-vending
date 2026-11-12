@@ -15,6 +15,7 @@ import (
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -35,8 +36,8 @@ func TestUpdateWithAMaskedFieldLeftOut(t *testing.T) {
 // The loop does not move a create on to its next stage while the call
 // that stored it may still be applying or rolling back.
 func TestStageWaitsForTheCreateToFinish(t *testing.T) {
-	resumeAfter, stageAfter = 0, time.Hour
-	t.Cleanup(func() { resumeAfter, stageAfter = 2*time.Minute, 15*time.Second })
+	reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 0, time.Hour
+	t.Cleanup(func() { reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 2*time.Minute, 15*time.Second })
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
@@ -44,19 +45,19 @@ func TestStageWaitsForTheCreateToFinish(t *testing.T) {
 		s.GetAws().ControlPlaneLogGroup = &cloudv1.AwsControlPlaneLogGroup{Enabled: ptr.To(true)}
 	})
 	// The create's own first apply (records exist, the EKS cluster is held).
-	stageAfter = 0
+	reconcilecluster.StageAfter = 0
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
 	}
 	markReady(t, w, &awscwl.Group{}, prefix+"-logs")
-	stageAfter = time.Hour
+	reconcilecluster.StageAfter = time.Hour
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix}, &awseks.Cluster{}); err == nil {
 		t.Fatal("the next stage was applied although the row was written a moment ago")
 	}
-	stageAfter = 0
+	reconcilecluster.StageAfter = 0
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 		t.Fatal("the takeover succeeded although an object could not be taken over")
 	}
 	row, err := w.store.Clusters().Get(ctx, worldTenant, c.GetId())
-	if err != nil || row.State == stateImported {
+	if err != nil || row.State == reconcilecluster.StateImported {
 		t.Fatalf("state %s (%v): a cluster with objects already owned must not read as imported, read-only", row.State, err)
 	}
 	fail = false
@@ -145,30 +146,4 @@ func TestImportKeepsTheClusterCreatorSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("after the takeover")
-}
-
-// What the loop applied while a call changed the cluster may be older
-// than what the call applied (an update silently reverted): the cluster
-// is applied again.
-func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
-	w := appliedWorld(t)
-	ctx := t.Context()
-	seen := w.cluster(t) // the row as the loop read it
-	w.svc.recheck(ctx, seen)
-	if w.cluster(t).ETag != seen.ETag {
-		t.Fatal("a cluster nobody changed was marked behind")
-	}
-	changed := w.cluster(t) // a call stores and applies a change
-	changed.Generation++
-	changed.AppliedGeneration = changed.Generation
-	if err := w.store.Clusters().Update(ctx, changed); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.svc.markApplied(ctx, seen); err != nil {
-		t.Errorf("markApplied on a changed row: %v", err)
-	}
-	w.svc.recheck(ctx, seen)
-	if got := w.cluster(t); got.AppliedGeneration >= got.Generation {
-		t.Fatalf("applied %d of %d; want the cluster applied again", got.AppliedGeneration, got.Generation)
-	}
 }

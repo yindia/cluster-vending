@@ -6,22 +6,21 @@ import (
 	"strconv"
 	"strings"
 
-	"connectrpc.com/connect/v2"
-
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
-// gateUpgrade holds a Kubernetes upgrade's node groups and add-ons back
+// GateUpgrade holds a Kubernetes upgrade's node groups and add-ons back
 // until the control plane runs the target version: while the EKS cluster
 // reports another version (status.atProvider.version), the node groups
 // render at that version and the add-ons keep the versions they run, so
 // EKS never sees nodes or add-ons ahead of the cluster. It reports whether
 // the plan is gated; the cluster is then applied again (advance) until the
 // control plane reports the target.
-func (s *ClusterService) gateUpgrade(ctx context.Context, row *model.Cluster, plan *crossplaneaws.ClusterPlan) (bool, error) {
+func (s *Reconciler) GateUpgrade(ctx context.Context, row *model.Cluster, plan *crossplaneaws.ClusterPlan) (bool, error) {
 	if plan.KubernetesVersion == "" {
 		return false, nil
 	}
@@ -45,7 +44,7 @@ func (s *ClusterService) gateUpgrade(ctx context.Context, row *model.Cluster, pl
 // liveVersions is the Kubernetes version the EKS cluster reports and the
 // add-on versions the Addon objects ask for now (spec.forProvider), from
 // the cache.
-func (s *ClusterService) liveVersions(ctx context.Context, records []model.ManagedResource) (string, map[string]string, error) {
+func (s *Reconciler) liveVersions(ctx context.Context, records []model.ManagedResource) (string, map[string]string, error) {
 	cluster := ""
 	addons := map[string]string{}
 	for _, r := range records {
@@ -71,12 +70,12 @@ func (s *ClusterService) liveVersions(ctx context.Context, records []model.Manag
 	return cluster, addons, nil
 }
 
-// checkVersionStep refuses a Kubernetes version EKS cannot move to: a
+// CheckVersionStep refuses a Kubernetes version EKS cannot move to: a
 // downgrade, or more than one minor version ahead of what the control
 // plane runs (the stored version before EKS created it). Refused here, the
 // stored spec never holds a version the cluster can only fail on.
-func (s *ClusterService) checkVersionStep(ctx context.Context, row *model.Cluster, stored, target string) error {
-	from, err := s.liveKubernetesVersion(ctx, row)
+func (s *Reconciler) CheckVersionStep(ctx context.Context, row *model.Cluster, stored, target string) error {
+	from, err := s.LiveKubernetesVersion(ctx, row)
 	if err != nil {
 		return err
 	}
@@ -90,10 +89,10 @@ func (s *ClusterService) checkVersionStep(ctx context.Context, row *model.Cluste
 	}
 	switch {
 	case toMinor < fromMinor:
-		return connect.NewError(connect.CodeInvalidArgument,
+		return fault.New(fault.Invalid,
 			fmt.Sprintf("kubernetes_version %s is older than the cluster's %s; EKS cannot downgrade", target, from))
 	case toMinor > fromMinor+1:
-		return connect.NewError(connect.CodeInvalidArgument,
+		return fault.New(fault.Invalid,
 			fmt.Sprintf("kubernetes_version %s skips a minor version: the cluster runs %s; upgrade one minor version at a time", target, from))
 	}
 	return nil

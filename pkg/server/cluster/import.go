@@ -5,35 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 
 	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
-	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
-	"google.golang.org/protobuf/encoding/protojson"
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
-)
-
-// Stored states of an imported cluster.
-const (
-	// stateImported: ImportCluster created Observe-only objects; nothing is
-	// managed until TakeOverCluster.
-	stateImported = "CLUSTER_STATE_IMPORTED"
-	// stateBlocked: the import plan has BLOCKING lines; nothing was
-	// imported.
-	stateBlocked = "CLUSTER_STATE_FAILED"
 )
 
 // ImportCluster looks an existing EKS cluster up once, read-only, and
@@ -41,7 +24,8 @@ const (
 // resources that only observes, and the plan (status.import). Nothing
 // changes in the cloud. The cluster is IMPORTED, or FAILED when the plan is
 // BLOCKED (then nothing is imported).
-func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportClusterRequest) (*cloudv1.ImportClusterResponse, error) {
+func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportClusterRequest) (_ *cloudv1.ImportClusterResponse, err error) {
+	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -50,7 +34,7 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	}
 	if rid := req.GetRequestId(); rid != "" {
 		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
-			c, err := s.view(ctx, row)
+			c, err := s.View(ctx, row)
 			return &cloudv1.ImportClusterResponse{Cluster: c}, err
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
@@ -75,19 +59,19 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 		TenantID: req.GetTenantId(), Name: req.GetName(), NetworkID: network.ID, Provider: model.ProviderAWS,
 		Region: network.Region, Imported: true}
 	plan := corecluster.PlanImport(corecluster.ImportInput{Found: found, Name: req.GetName(), NodeGroup: req.GetAws().GetDefaultNodeGroupName(),
-		NetworkID: network.ID, Region: network.Region, Subnets: subnets, Base: s.base(row, account), Scheme: s.deps.Kube.Scheme()})
+		NetworkID: network.ID, Region: network.Region, Subnets: subnets, Base: s.Base(row, account), Scheme: s.deps.Kube.Scheme()})
 	if err := s.insertImport(ctx, req, row, plan); err != nil {
 		return nil, err
 	}
 	if !plan.Blocked() {
-		if err := s.applyImport(ctx, row, account, plan); err != nil {
-			s.rollback(ctx, row, account.Namespace)
+		if err := s.ApplyImport(ctx, row, account, plan); err != nil {
+			s.Rollback(ctx, row, account.Namespace)
 			return nil, err
 		}
 	}
 	s.logger().InfoContext(ctx, "cluster imported", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
 		"network_id", network.ID, "blocked", plan.Blocked(), "plan_lines", len(plan.Lines), "objects", len(plan.Objects))
-	c, err := s.respond(ctx, row)
+	c, err := s.Respond(ctx, row)
 	return &cloudv1.ImportClusterResponse{Cluster: c}, err
 }
 
@@ -153,18 +137,18 @@ func (s *ClusterService) discover(ctx context.Context, a *model.CloudAccount, re
 // applied: the loop leaves it alone until the takeover.
 func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportClusterRequest, row *model.Cluster, plan corecluster.ImportPlan) error {
 	phase := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED
-	row.State = stateImported
+	row.State = reconcilecluster.StateImported
 	if plan.Blocked() {
-		phase, row.State = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, stateBlocked
+		phase, row.State = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, reconcilecluster.StateBlocked
 	}
 	spec := plan.Spec
 	if spec == nil {
 		spec = &cloudv1.ClusterSpec{Region: row.Region, Network: &cloudv1.ClusterNetwork{NetworkId: row.NetworkID},
 			Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}}}
 	}
-	rawSpec, err1 := encode(spec)
-	input, err2 := encode(req)
-	status, err3 := encode(&cloudv1.ClusterStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
+	rawSpec, err1 := reconcilecluster.Encode(spec)
+	input, err2 := reconcilecluster.Encode(req)
+	status, err3 := reconcilecluster.Encode(&cloudv1.ClusterStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
 	adoption, err4 := json.Marshal(plan.Adoption)
 	if err := errors.Join(err1, err2, err3, err4); err != nil {
 		return connect.NewError(connect.CodeInternal, err.Error())
@@ -180,78 +164,13 @@ func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportCl
 	return nil
 }
 
-// importSet is an import's objects as a set: nothing waits (they only
-// observe what exists), and a node group is applied with its desired size
-// at creation only, like every node group (crossplaneaws.ClusterSet).
-func importSet(objects []client.Object) sequence.Set {
-	set := sequence.Of(objects...)
-	for i, item := range set {
-		if _, ok := item.Object.(*awseks.NodeGroup); ok {
-			set[i].Adjust = crossplaneaws.DesiredSizeAtCreateOnly
-		}
-	}
-	return set
-}
-
-// applyImport records and applies the import's objects (sequence.Engine).
-// Pod identity associations then get their external name (an ID only the
-// cloud knows) set once, outside the apply: it is not part of any later
-// render.
-func (s *ClusterService) applyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan corecluster.ImportPlan) error {
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	if _, err := s.deps.Sequence().Apply(ctx, importSet(plan.Objects), s.deps.Inventory(owner)); err != nil {
-		s.logger().ErrorContext(ctx, "apply imported resources", "cluster_id", row.ID, "error", err)
-		return applyError(err)
-	}
-	for _, obj := range plan.Objects {
-		id, ok := plan.PodIdentities[obj.GetName()]
-		if !ok {
-			continue
-		}
-		live := &awseks.PodIdentityAssociation{}
-		if err := s.deps.Reader().Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
-			return connect.NewError(connect.CodeInternal, "could not read the imported pod identity association: "+err.Error())
-		}
-		if live.Annotations == nil {
-			live.Annotations = map[string]string{}
-		}
-		live.Annotations[crossplaneaws.ExternalNameAnnotation] = id
-		if err := s.deps.Kube.Update(ctx, live); err != nil {
-			return connect.NewError(connect.CodeInternal, "could not name the imported pod identity association: "+err.Error())
-		}
-	}
-	return nil
-}
-
-// storedImport is the import plan kept on the row (imported clusters), or
-// nil.
-func storedImport(row *model.Cluster) *cloudv1.ImportStatus {
-	if len(row.Status) == 0 {
-		return nil
-	}
-	st := &cloudv1.ClusterStatus{}
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(row.Status, st); err != nil {
-		return nil
-	}
-	return st.GetImport()
-}
-
-// adoption is what the cluster keeps of the resources it was imported
-// from; zero for a cluster the platform created.
-func adoption(row *model.Cluster) crossplaneaws.Adoption {
-	var a crossplaneaws.Adoption
-	if len(row.Adoption) > 0 {
-		_ = json.Unmarshal(row.Adoption, &a) // written by insertImport
-	}
-	return a
-}
-
 // TakeOverCluster makes the platform the owner of an IMPORTED cluster. The
 // objects carried over switch to full management (without Delete where
 // marked); the rest is rendered from the spec like any cluster's, which
 // drops their Observe-only policy, adds the platform's tags and creates
 // what the plan lists as WILL_CREATE. The network must be owned by then.
-func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeOverClusterRequest) (*cloudv1.TakeOverClusterResponse, error) {
+func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeOverClusterRequest) (_ *cloudv1.TakeOverClusterResponse, err error) {
+	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -263,12 +182,12 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, err
 	}
-	spec, err := specOf(row)
+	spec, err := reconcilecluster.SpecOf(row)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	// Refuses a network that is still imported read-only.
-	t, err := s.target(ctx, row.TenantID, spec)
+	t, err := s.Target(ctx, row.TenantID, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -277,36 +196,36 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	// apply then owns the carried-over objects and renders the rest; what
 	// fails is finished by the loop.
 	imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING
-	if row.Status, err = encode(&cloudv1.ClusterStatus{Import: imp}); err != nil {
+	if row.Status, err = reconcilecluster.Encode(&cloudv1.ClusterStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	row.State = stateUpdating
+	row.State = reconcilecluster.StateUpdating
 	row.Generation++
 	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := s.apply(ctx, row, t.account, s.renderPlan(spec, row, t)); err != nil {
+	if err := s.Apply(ctx, row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
 		return nil, err
 	}
-	if err := s.tagSubnets(ctx, row, t); err != nil {
+	if err := s.TagSubnets(ctx, row, t); err != nil {
 		return nil, err
 	}
 	s.logger().InfoContext(ctx, "cluster taken over", "tenant_id", row.TenantID, "cluster_id", row.ID)
-	c, err := s.respond(ctx, row)
+	c, err := s.Respond(ctx, row)
 	return &cloudv1.TakeOverClusterResponse{Cluster: c}, err
 }
 
 // takeOverAllowed checks state, etag, phase and the acknowledgement of
 // NOT_IMPORTED resources, and returns the stored plan.
 func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*cloudv1.ImportStatus, error) {
-	if row.State != stateImported {
+	if row.State != reconcilecluster.StateImported {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Sprintf("cluster %s is not IMPORTED (only imported clusters are taken over)", row.ID))
 	}
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
 	}
-	imp := storedImport(row)
+	imp := reconcilecluster.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("import phase is %s, want PLANNED", imp.GetPhase()))
 	}
@@ -317,84 +236,4 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 			len(left), left[0].GetKind(), left[0].GetExternalName(), left[0].GetDetail()))
 	}
 	return imp, nil
-}
-
-// ownCarriedOver switches the carried-over objects of a taken-over cluster
-// to full management (own). Every apply of such a cluster does it, so a
-// takeover that failed half-way is finished by the next one; an object
-// already owned is left alone. Clusters the platform created, and
-// imported ones before their takeover, have nothing to own.
-func (s *ClusterService) ownCarriedOver(ctx context.Context, row *model.Cluster) error {
-	if !row.Imported || row.State == stateImported || row.State == stateBlocked {
-		return nil
-	}
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil {
-		return err
-	}
-	for _, r := range records {
-		if !r.CarriedOver {
-			continue // rendered: the apply takes it over
-		}
-		if err := s.own(ctx, r); err != nil {
-			return fmt.Errorf("%s %s: %w", r.Kind, r.Name, err)
-		}
-	}
-	return nil
-}
-
-// carriedOverConflict refuses to turn on a setting that renders an object
-// the cluster already carries over from its import: the IAM OIDC provider
-// (spec.aws.irsa) and the control plane's log group. Both would be
-// rendered under the carried-over object's name, without its cloud
-// identity.
-func (s *ClusterService) carriedOverConflict(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec) error {
-	irsa, logGroup := spec.GetAws().GetIrsa(), spec.GetAws().GetControlPlaneLogGroup().GetEnabled()
-	if !row.Imported || (!irsa && !logGroup) {
-		return nil
-	}
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil {
-		return service.ToConnect(err)
-	}
-	for _, r := range records {
-		switch {
-		case !r.CarriedOver:
-		case irsa && r.Kind == "OpenIDConnectProvider":
-			return connect.NewError(connect.CodeFailedPrecondition,
-				"spec.aws.irsa: the cluster already has the IAM OIDC provider it was imported with ("+r.Name+"); it stays as it is")
-		case logGroup && r.Kind == "Group":
-			return connect.NewError(connect.CodeFailedPrecondition,
-				"spec.aws.control_plane_log_group: the cluster already has the log group it was imported with ("+r.Name+"); it stays as it is")
-		}
-	}
-	return nil
-}
-
-// own switches one carried-over object to full management, without Delete
-// for one marked crossplaneaws.RetainAnnotation.
-func (s *ClusterService) own(ctx context.Context, r model.ManagedResource) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
-	// From the API server: a read-modify-write needs the current object.
-	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
-		if meta.IsNoMatchError(err) {
-			return nil
-		}
-		return err
-	}
-	policies := []string{"*"}
-	if u.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" {
-		policies = policies[:0]
-		for _, action := range crossplaneaws.PolicyNoDelete {
-			policies = append(policies, string(action))
-		}
-	}
-	if have, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "managementPolicies"); slices.Equal(have, policies) {
-		return nil
-	}
-	if err := unstructured.SetNestedStringSlice(u.Object, policies, "spec", "managementPolicies"); err != nil {
-		return err
-	}
-	return s.deps.Kube.Update(ctx, u)
 }

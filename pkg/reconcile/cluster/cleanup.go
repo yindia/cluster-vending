@@ -24,7 +24,7 @@ var helmRelease = schema.GroupVersionKind{Group: "helm.m.crossplane.io", Version
 // managementPolicies without Delete so removing them does not try to
 // uninstall, then removed. Idempotent; a forced deletion runs it on every
 // step.
-func (s *ClusterService) forceRelease(ctx context.Context, row *model.Cluster) error {
+func (s *Reconciler) forceRelease(ctx context.Context, row *model.Cluster) error {
 	releases := &unstructured.UnstructuredList{}
 	releases.SetGroupVersionKind(helmRelease.GroupVersion().WithKind(helmRelease.Kind + "List"))
 	err := s.deps.Reader().List(ctx, releases, client.InNamespace(kube.TenantNamespace(row.TenantID)),

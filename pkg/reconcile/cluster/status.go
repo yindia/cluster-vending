@@ -14,12 +14,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"connectrpc.com/connect/v2"
-
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // Condition types of ClusterStatus.
@@ -28,7 +27,8 @@ const (
 	conditionSynced = "Synced"
 )
 
-func encode(m proto.Message) (model.JSON, error) {
+// Encode is m as the JSON a row stores (protojson).
+func Encode(m proto.Message) (model.JSON, error) {
 	raw, err := protojson.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("encode %T: %w", m, err)
@@ -36,52 +36,52 @@ func encode(m proto.Message) (model.JSON, error) {
 	return model.JSON(raw), nil
 }
 
-// lenient reads stored JSON: fields the contract dropped since (e.g.
+// Lenient reads stored JSON: fields the contract dropped since (e.g.
 // spec.tags, now labels) are skipped, not errors.
-var lenient = protojson.UnmarshalOptions{DiscardUnknown: true}
+var Lenient = protojson.UnmarshalOptions{DiscardUnknown: true}
 
-// specOf decodes the stored (resolved) spec.
-func specOf(row *model.Cluster) (*cloudv1.ClusterSpec, error) {
+// SpecOf decodes the stored (resolved) spec.
+func SpecOf(row *model.Cluster) (*cloudv1.ClusterSpec, error) {
 	spec := &cloudv1.ClusterSpec{}
-	if err := lenient.Unmarshal(row.Spec, spec); err != nil {
+	if err := Lenient.Unmarshal(row.Spec, spec); err != nil {
 		return nil, fmt.Errorf("cluster %s: stored spec: %w", row.ID, err)
 	}
 	return spec, nil
 }
 
-// view is the API view of a stored cluster: spec, the live state of its
+// View is the API view of a stored cluster: spec, the live state of its
 // managed resources, and what EKS reports (endpoint, version, ARNs).
-func (s *ClusterService) view(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
+func (s *Reconciler) View(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
-		return nil, service.ToConnect(err)
+		return nil, storeError(err)
 	}
 	return s.viewOf(ctx, row, records)
 }
 
 // viewOf is view with the cluster's records at hand. It only reads.
-func (s *ClusterService) viewOf(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (*cloudv1.Cluster, error) {
-	spec, err := specOf(row)
+func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (*cloudv1.Cluster, error) {
+	spec, err := SpecOf(row)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
+		return nil, fault.New(fault.Internal, err.Error())
 	}
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
 		return nil, err
 	}
-	if row.State == stateProvisioning || row.State == stateUpdating {
-		service.SettleMissing(records, views)
+	if row.State == StateProvisioning || row.State == StateUpdating {
+		reconcile.SettleMissing(records, views)
 	}
 	st := status(row, views, !createdAfterActive(records))
 	if err := s.observeEKS(ctx, records, st); err != nil {
 		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
-		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster from the management cluster")
+		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
-	return clusterProto(row, spec, st), nil
+	return ClusterProto(row, spec, st), nil
 }
 
 // observeEKS copies what the EKS Cluster and NodeGroup report into st.
-func (s *ClusterService) observeEKS(ctx context.Context, records []model.ManagedResource, st *cloudv1.ClusterStatus) error {
+func (s *Reconciler) observeEKS(ctx context.Context, records []model.ManagedResource, st *cloudv1.ClusterStatus) error {
 	aws := &cloudv1.AwsClusterStatus{}
 	views := make(map[string]*cloudv1.ManagedResource, len(st.GetManagedResources()))
 	for _, v := range st.GetManagedResources() {
@@ -122,7 +122,7 @@ func (s *ClusterService) observeEKS(ctx context.Context, records []model.Managed
 	return nil
 }
 
-func (s *ClusterService) getIgnoreMissing(ctx context.Context, key client.ObjectKey, obj client.Object) error {
+func (s *Reconciler) getIgnoreMissing(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 	err := s.deps.Get(ctx, key, obj)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil
@@ -178,7 +178,7 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING:
 			waiting++
 		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING:
-			if failed == nil && (row.State != stateUpdating || !versionSkew(v)) {
+			if failed == nil && (row.State != StateUpdating || !versionSkew(v)) {
 				failed = v
 			}
 		default:
@@ -193,12 +193,12 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	}
 	readyCond := &cloudv1.Condition{Type: conditionReady, Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE,
 		Reason: "ResourcesNotReady", Message: progress}
-	st.Import = storedImport(row)
+	st.Import = StoredImport(row)
 	switch {
-	case row.State == stateDeleting:
+	case row.State == StateDeleting:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_DELETING
 		st.Message = deletingMessage(views, left)
-	case row.State == stateBlocked:
+	case row.State == StateBlocked:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_FAILED
 		st.Message = "import blocked: " + firstBlocking(st.GetImport())
 	case failed != nil:
@@ -206,7 +206,7 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
 		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: conditionSynced,
 			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
-	case row.State == stateImported:
+	case row.State == StateImported:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_IMPORTED
 		st.Message = "imported read-only (" + progress + "); review status.import, then TakeOverCluster"
 	case awaitingEKS:
@@ -221,7 +221,7 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	case len(views) > 0 && ready == len(views):
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING,
 			fmt.Sprintf("applying generation %d (%s)", row.Generation, progress)
-	case row.State == stateUpdating, row.State == stateRunning: // running, not ready: reconciling a change
+	case row.State == StateUpdating, row.State == StateRunning: // running, not ready: reconciling a change
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING, progress
 	default:
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING, progress

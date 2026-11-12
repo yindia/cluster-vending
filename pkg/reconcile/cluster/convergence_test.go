@@ -30,17 +30,17 @@ func TestStatusConvergence(t *testing.T) {
 		want         cloudv1.ClusterState
 		wantObserved int64
 	}{
-		{"converged", model.Cluster{Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 2, ObservedGeneration: 1}},
+		{"converged", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 2, ObservedGeneration: 1}},
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 3), mr("NodeGroup", 2, 2)}, cloudv1.ClusterState_CLUSTER_STATE_RUNNING, 2},
-		{"provider behind the spec", model.Cluster{Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 2, ObservedGeneration: 1}},
+		{"provider behind the spec", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 2, ObservedGeneration: 1}},
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 2), mr("NodeGroup", 2, 2)}, cloudv1.ClusterState_CLUSTER_STATE_UPDATING, 1},
-		{"generation not fully applied", model.Cluster{Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 1, ObservedGeneration: 1}},
+		{"generation not fully applied", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 1, ObservedGeneration: 1}},
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 3)}, cloudv1.ClusterState_CLUSTER_STATE_UPDATING, 1},
-		{"version skew during an upgrade", model.Cluster{Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 1}},
+		{"version skew during an upgrade", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 1}},
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 3), {Kind: "NodeGroup", Name: "ng", State: failed,
 				Message: "InvalidParameterException: Requested Nodegroup release version 1.35 is newer than the cluster version 1.34"}},
 			cloudv1.ClusterState_CLUSTER_STATE_UPDATING, 0},
-		{"version skew outside an upgrade fails", model.Cluster{Resource: model.Resource{State: stateRunning, Generation: 2, AppliedGeneration: 2}},
+		{"version skew outside an upgrade fails", model.Cluster{Resource: model.Resource{State: StateRunning, Generation: 2, AppliedGeneration: 2}},
 			[]*cloudv1.ManagedResource{{Kind: "NodeGroup", Name: "ng", State: failed, Message: "newer than the cluster version"}},
 			cloudv1.ClusterState_CLUSTER_STATE_FAILED, 2},
 	}
@@ -79,7 +79,7 @@ func TestUpgradeRendersNodesAtTheControlPlaneVersion(t *testing.T) {
 	// The control plane still runs 1.34: nodes at 1.34, coredns at its version.
 	s, _, _ := ngService(t, records, []client.Object{eks("1.34"), coredns}...)
 	plan := target()
-	gated, err := s.gateUpgrade(context.Background(), row, &plan)
+	gated, err := s.GateUpgrade(context.Background(), row, &plan)
 	if err != nil || !gated || plan.NodeKubernetesVersion != "1.34" || plan.Addons[0].Version != "v1.11.4-eksbuild.1" ||
 		plan.Addons[1].Version != "v1.35.0" {
 		t.Errorf("during the upgrade: gated %v (%v), nodes %q, add-ons %+v", gated, err, plan.NodeKubernetesVersion, plan.Addons)
@@ -88,7 +88,7 @@ func TestUpgradeRendersNodesAtTheControlPlaneVersion(t *testing.T) {
 	// The control plane reports 1.35: everything at the target.
 	s, _, _ = ngService(t, records, []client.Object{eks("1.35"), coredns}...)
 	plan = target()
-	gated, err = s.gateUpgrade(context.Background(), row, &plan)
+	gated, err = s.GateUpgrade(context.Background(), row, &plan)
 	if err != nil || gated || plan.NodeKubernetesVersion != "" || plan.Addons[0].Version != "v1.12.0-eksbuild.1" {
 		t.Errorf("after the upgrade: gated %v (%v), nodes %q, add-ons %+v", gated, err, plan.NodeKubernetesVersion, plan.Addons)
 	}

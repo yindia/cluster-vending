@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"connectrpc.com/connect/v2"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +11,7 @@ import (
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
+	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
 // An object the deletion cannot read is UNAVAILABLE, named; any other
@@ -20,23 +20,20 @@ func TestDeleteErrorMapping(t *testing.T) {
 	other := errors.New("delete tier 0: boom")
 	for name, tt := range map[string]struct {
 		err  error
-		code connect.Code
+		kind fault.Kind // 0: not a fault, the error as it is
 		msg  string
 	}{
 		"unreadable object": {&managed.ReadError{Ref: managed.Ref{Kind: "NodeGroup", Name: "prod-default"}, Err: errors.New("timeout")},
-			connect.CodeUnavailable, "cannot read NodeGroup prod-default from the management cluster"},
-		"other": {other, connect.CodeUnknown, other.Error()},
+			fault.Unavailable, "cannot read NodeGroup prod-default from the management cluster"},
+		"other": {other, 0, other.Error()},
 	} {
 		got := deleteError(tt.err)
-		var ce *connect.Error
-		if errors.As(got, &ce) {
-			if ce.Code() != tt.code || ce.Message() != tt.msg {
-				t.Errorf("%s: %s %q, want %s %q", name, ce.Code(), ce.Message(), tt.code, tt.msg)
-			}
-			continue
-		}
-		if tt.code != connect.CodeUnknown || got.Error() != tt.msg {
-			t.Errorf("%s: %v, want a %s error", name, got, tt.code)
+		f, isFault := fault.As(got)
+		switch {
+		case tt.kind == 0 && (isFault || got.Error() != tt.msg):
+			t.Errorf("%s: %v, want the error as it is", name, got)
+		case tt.kind != 0 && (!isFault || f.Kind != tt.kind || f.Message != tt.msg):
+			t.Errorf("%s: %v, want fault %d %q", name, got, tt.kind, tt.msg)
 		}
 	}
 }

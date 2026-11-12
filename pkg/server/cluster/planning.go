@@ -20,6 +20,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -36,21 +37,21 @@ import (
 // too; Usages (they only order deletions) are not. The plan's ID covers
 // req and the live objects' versions.
 func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClusterRequest, row *model.Cluster,
-	spec *cloudv1.ClusterSpec, t target,
+	spec *cloudv1.ClusterSpec, t reconcilecluster.Target,
 ) (*cloudv1.Plan, error) {
-	final := s.renderPlan(spec, row, t)
-	name, retiring, err := s.nodeGroupName(ctx, row, final)
+	final := s.RenderPlan(spec, row, t)
+	name, retiring, err := s.NodeGroupName(ctx, row, final)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster's node group")
 	}
 	final.NodeGroupName = name
-	if err := s.fillLive(ctx, row, &final); err != nil {
+	if err := s.FillLive(ctx, row, &final); err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster's resources")
 	}
 	// first is what the update's first apply renders (see apply).
 	first := final
 	first.Addons = slices.Clone(final.Addons)
-	gated, err := s.gateUpgrade(ctx, row, &first)
+	gated, err := s.GateUpgrade(ctx, row, &first)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster's EKS cluster")
 	}
@@ -90,7 +91,7 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 		versions = append(versions, r.Kind+"/"+r.Name+"=recorded")
 		change := &cloudv1.PlannedChange{ApiVersion: r.APIVersion, Kind: r.Kind, Name: r.Name,
 			Action: cloudv1.PlannedAction_PLANNED_ACTION_DELETE, Detail: "no longer part of the cluster"}
-		if r.Kind == kindNodeGroup {
+		if r.Kind == reconcilecluster.KindNodeGroup {
 			change.RequiresReplacement = true
 			change.Detail = "replaced by " + name + "; deleted once the replacement is ready"
 			change.WaitsFor = "node group " + name + " is ready"
@@ -169,7 +170,7 @@ func (s *ClusterService) renderChanges(ctx context.Context, render crossplaneaws
 func (s *ClusterService) encryptionChange(row *model.Cluster, spec *cloudv1.ClusterSpec, render crossplaneaws.ClusterPlan,
 	changes []*cloudv1.PlannedChange,
 ) *cloudv1.PlannedChange {
-	stored, err := specOf(row)
+	stored, err := reconcilecluster.SpecOf(row)
 	if err != nil || corecluster.EncryptionKept(corecluster.Encryption(stored), corecluster.Encryption(spec)) {
 		return nil
 	}

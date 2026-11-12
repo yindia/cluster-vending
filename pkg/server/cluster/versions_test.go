@@ -11,6 +11,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -50,7 +51,7 @@ func TestUpgradeMovesOnlyUnpinnedAddons(t *testing.T) {
 	if err := s.resolveVersions(context.Background(), &model.CloudAccount{}, spec, pinnedAddons(in)); err != nil {
 		t.Fatal(err)
 	}
-	input, _ := encode(&cloudv1.Cluster{Spec: in})
+	input, _ := reconcilecluster.Encode(&cloudv1.Cluster{Spec: in})
 	row := &model.Cluster{Input: input}
 	spec.ControlPlane.KubernetesVersion = "1.35"
 
@@ -62,7 +63,7 @@ func TestUpgradeMovesOnlyUnpinnedAddons(t *testing.T) {
 
 	// Unpinned (no version in the input): every add-on follows 1.35.
 	in.GetAws().Addons = nil
-	input, _ = encode(&cloudv1.Cluster{Spec: in})
+	input, _ = reconcilecluster.Encode(&cloudv1.Cluster{Spec: in})
 	row.Input = input
 	if err := s.reresolveVersions(context.Background(), row, &model.CloudAccount{}, spec); err != nil {
 		t.Fatal(err)
@@ -88,7 +89,7 @@ func TestCheckVersionStep(t *testing.T) {
 		{"1.31", "", false},
 	}
 	for _, tt := range tests {
-		err := w.svc.checkVersionStep(t.Context(), w.row, tt.stored, tt.target)
+		err := w.svc.CheckVersionStep(t.Context(), w.row, tt.stored, tt.target)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("%q -> %q: %v, wantErr %v", tt.stored, tt.target, err, tt.wantErr)
 		}

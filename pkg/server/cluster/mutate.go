@@ -15,6 +15,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -155,7 +156,8 @@ func scaling(spec *cloudv1.ClusterSpec) *cloudv1.ScalingConfig {
 // spec no longer has (a removed admin's access entry) are deleted. With
 // validate_only it only returns the plan of that (planUpdate); with
 // plan_id it applies only if the plan is still the same.
-func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateClusterRequest) (*cloudv1.UpdateClusterResponse, error) {
+func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateClusterRequest) (_ *cloudv1.UpdateClusterResponse, err error) {
+	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -167,12 +169,12 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err := checkMutable(row, in.GetEtag()); err != nil {
 		return nil, err
 	}
-	spec, err := specOf(row)
+	spec, err := reconcilecluster.SpecOf(row)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	paths := req.GetUpdateMask().GetPaths()
-	stored, err := encode(spec) // the spec as stored, to tell what the update changes
+	stored, err := reconcilecluster.Encode(spec) // the spec as stored, to tell what the update changes
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -181,7 +183,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err != nil {
 		return nil, err
 	}
-	if err := s.carriedOverConflict(ctx, row, spec); err != nil {
+	if err := s.CarriedOverConflict(ctx, row, spec); err != nil {
 		return nil, err
 	}
 	// A plan shows the refusal (REJECTED_IMMUTABLE); an update fails.
@@ -190,24 +192,24 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 			"secrets encryption cannot be turned off or moved to another key once it is on: EKS cannot change it")
 	}
 	if slices.Contains(paths, pathKubernetesVersion) {
-		if err := s.checkVersionStep(ctx, row, versionBefore, spec.GetControlPlane().GetKubernetesVersion()); err != nil {
+		if err := s.CheckVersionStep(ctx, row, versionBefore, spec.GetControlPlane().GetKubernetesVersion()); err != nil {
 			return nil, err
 		}
 	}
 	if row.Input, err = updatedInput(row, in, paths); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	t, err := s.target(ctx, row.TenantID, spec)
+	t, err := s.Target(ctx, row.TenantID, spec)
 	if err != nil {
 		return nil, err
 	}
 	if slices.Contains(paths, pathKubernetesVersion) || slices.Contains(paths, pathAddons) {
-		if err := s.reresolveVersions(ctx, row, t.account, spec); err != nil {
+		if err := s.reresolveVersions(ctx, row, t.Account, spec); err != nil {
 			return nil, err
 		}
 		// Resolving may change the spec too (add-on versions for a new
 		// Kubernetes version, defaults merged back in).
-		resolved, err := encode(spec)
+		resolved, err := reconcilecluster.Encode(spec)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err.Error())
 		}
@@ -229,12 +231,12 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is not applicable: it changes a field the cloud cannot change")
 		}
 	}
-	if row.Spec, err = encode(spec); err != nil {
+	if row.Spec, err = reconcilecluster.Encode(spec); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	if specChanged {
 		row.Generation++
-		row.State = stateUpdating
+		row.State = reconcilecluster.StateUpdating
 	}
 	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -243,18 +245,18 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, service.ToConnect(err)
 	}
 	if specChanged {
-		plan := s.renderPlan(spec, row, t)
-		if err := s.apply(ctx, row, t.account, plan); err != nil {
+		plan := s.RenderPlan(spec, row, t)
+		if err := s.Apply(ctx, row, t.Account, plan); err != nil {
 			return nil, err
 		}
 		s.logger().InfoContext(ctx, "cluster updated", "cluster_id", row.ID, "paths", paths)
 	}
 	// Idempotent: also tags the subnets of clusters created before the
 	// platform tagged them.
-	if err := s.tagSubnets(ctx, row, t); err != nil {
+	if err := s.TagSubnets(ctx, row, t); err != nil {
 		return nil, err
 	}
-	c, err := s.respond(ctx, row)
+	c, err := s.Respond(ctx, row)
 	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
 }
 
@@ -265,16 +267,16 @@ func (s *ClusterService) planned(ctx context.Context, req *cloudv1.UpdateCluster
 	if err != nil {
 		return nil, err
 	}
-	c, err := s.view(ctx, row)
+	c, err := s.View(ctx, row)
 	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
 }
 
 // checkMutable refuses updates of deleting clusters and stale etags.
 func checkMutable(row *model.Cluster, etag string) error {
-	if row.State == stateDeleting {
+	if row.State == reconcilecluster.StateDeleting {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("cluster %s is being deleted", row.ID))
 	}
-	if row.State == stateImported || row.State == stateBlocked {
+	if row.State == reconcilecluster.StateImported || row.State == reconcilecluster.StateBlocked {
 		return connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Sprintf("cluster %s is imported read-only; take it over first", row.ID))
 	}
@@ -301,7 +303,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	if len(paths) == 0 {
 		return false, connect.NewError(connect.CodeInvalidArgument, "update_mask is empty; updatable: "+updatablePaths())
 	}
-	before, err := encode(spec)
+	before, err := reconcilecluster.Encode(spec)
 	if err != nil {
 		return false, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -331,7 +333,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	if err := service.CheckAWSLabels(row.Labels); err != nil {
 		return false, err
 	}
-	after, err := encode(spec)
+	after, err := reconcilecluster.Encode(spec)
 	if err != nil {
 		return false, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -345,7 +347,7 @@ func updatedInput(row *model.Cluster, in *cloudv1.Cluster, paths []string) (mode
 		return row.Input, nil
 	}
 	input := &cloudv1.Cluster{}
-	if err := lenient.Unmarshal(row.Input, input); err != nil {
+	if err := reconcilecluster.Lenient.Unmarshal(row.Input, input); err != nil {
 		return nil, fmt.Errorf("cluster %s: stored input: %w", row.ID, err)
 	}
 	for _, p := range paths {
@@ -361,7 +363,7 @@ func updatedInput(row *model.Cluster, in *cloudv1.Cluster, paths []string) (mode
 			}
 		}
 	}
-	return encode(input)
+	return reconcilecluster.Encode(input)
 }
 
 // ensureSpec creates the messages the spec path setters write into.
@@ -385,7 +387,8 @@ func ensureSpec(c *cloudv1.Cluster) {
 
 // DeleteCluster deletes the cluster's resources; the cluster is removed
 // once they are gone (until then it is DELETING).
-func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteClusterRequest) (*cloudv1.DeleteClusterResponse, error) {
+func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteClusterRequest) (_ *cloudv1.DeleteClusterResponse, err error) {
+	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -396,20 +399,20 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
 	}
-	if row.State != stateDeleting || (req.GetForce() && !row.DeleteForce) {
-		row.State = stateDeleting
+	if row.State != reconcilecluster.StateDeleting || (req.GetForce() && !row.DeleteForce) {
+		row.State = reconcilecluster.StateDeleting
 		row.DeleteForce = row.DeleteForce || req.GetForce()
 		if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 			return nil, service.ToConnect(err)
 		}
 	}
-	c, err := s.respond(ctx, row)
+	c, err := s.Respond(ctx, row)
 	if err != nil {
 		return nil, err
 	}
 	// Starts the deletion now; the background loop moves it on until the
 	// cluster is gone.
-	if _, err := s.finalize(ctx, row); err != nil {
+	if _, err := s.Finalize(ctx, row); err != nil {
 		return nil, err
 	}
 	s.logger().InfoContext(ctx, "cluster deleting", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)

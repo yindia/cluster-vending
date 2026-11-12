@@ -6,14 +6,12 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect/v2"
-	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
 // pinnedAddons are the add-ons the client gave a version (input: the
@@ -73,37 +71,17 @@ func (s *ClusterService) reresolveVersions(ctx context.Context, row *model.Clust
 ) error {
 	input := &cloudv1.Cluster{}
 	if len(row.Input) > 0 {
-		if err := lenient.Unmarshal(row.Input, input); err != nil {
+		if err := reconcilecluster.Lenient.Unmarshal(row.Input, input); err != nil {
 			return connect.NewError(connect.CodeInternal, fmt.Sprintf("cluster %s: stored input: %v", row.ID, err))
 		}
 	}
 	spec.GetAws().Addons = corecluster.MergeAddons(spec.GetAws().GetAddons())
 	if spec.GetControlPlane().GetKubernetesVersion() == "" {
-		live, err := s.liveKubernetesVersion(ctx, row)
+		live, err := s.LiveKubernetesVersion(ctx, row)
 		if err != nil {
 			return err
 		}
 		spec.ControlPlane.KubernetesVersion = live
 	}
 	return s.resolveVersions(ctx, a, spec, pinnedAddons(input.GetSpec()))
-}
-
-// liveKubernetesVersion is the version the EKS cluster reports; empty
-// before EKS created it.
-func (s *ClusterService) liveKubernetesVersion(ctx context.Context, row *model.Cluster) (string, error) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil {
-		return "", service.ToConnect(err)
-	}
-	for _, r := range records {
-		if r.Kind != "Cluster" {
-			continue
-		}
-		c := &awseks.Cluster{}
-		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, c); err != nil {
-			return "", connect.NewError(connect.CodeUnavailable, "cannot read the EKS cluster: "+err.Error())
-		}
-		return deref(c.Status.AtProvider.Version), nil
-	}
-	return "", nil
 }

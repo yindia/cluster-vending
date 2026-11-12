@@ -10,6 +10,7 @@ import (
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -18,14 +19,14 @@ import (
 // region; a taken one would make Crossplane adopt (and later delete) the
 // existing cluster. Checked twice: the platform's own clusters (also those
 // EKS has not created yet), then AWS (clusters made elsewhere).
-func (s *ClusterService) checkName(ctx context.Context, tenantID, name, region string, t target) error {
-	if err := s.nameTaken(ctx, tenantID, name, region, t.account); err != nil {
+func (s *ClusterService) checkName(ctx context.Context, tenantID, name, region string, t reconcilecluster.Target) error {
+	if err := s.nameTaken(ctx, tenantID, name, region, t.Account); err != nil {
 		return err
 	}
 	if s.deps.AWSClusters == nil {
 		return nil
 	}
-	access, err := s.deps.AWSAccess(ctx, t.account)
+	access, err := s.deps.AWSAccess(ctx, t.Account)
 	if err != nil {
 		return err
 	}
@@ -40,7 +41,7 @@ func (s *ClusterService) checkName(ctx context.Context, tenantID, name, region s
 	case exists:
 		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
 			"account %s already has an EKS cluster named %q in %s (not created by the platform); choose another name",
-			t.account.AccountID, name, region))
+			t.Account.AccountID, name, region))
 	}
 	return nil
 }

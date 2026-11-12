@@ -31,36 +31,6 @@ func mustResolve(t *testing.T, in *cloudv1.ClusterSpec, zones []string) *cloudv1
 	return spec
 }
 
-func TestStatus(t *testing.T) {
-	ready := &cloudv1.ManagedResource{Kind: "Role", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY}
-	creating := &cloudv1.ManagedResource{Kind: "Cluster", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_CREATING}
-	failed := &cloudv1.ManagedResource{Kind: "NodeGroup", Name: "x", Message: "boom",
-		State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED}
-	tests := []struct {
-		name        string
-		state       string
-		views       []*cloudv1.ManagedResource
-		awaitingEKS bool
-		want        cloudv1.ClusterState
-	}{
-		{"all ready", stateProvisioning, []*cloudv1.ManagedResource{ready, ready}, false, cloudv1.ClusterState_CLUSTER_STATE_RUNNING},
-		{"ready but add-ons not created yet", stateProvisioning, []*cloudv1.ManagedResource{ready, ready}, true,
-			cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
-		{"in progress", stateProvisioning, []*cloudv1.ManagedResource{ready, creating}, false, cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
-		{"updating", stateUpdating, []*cloudv1.ManagedResource{ready, creating}, false, cloudv1.ClusterState_CLUSTER_STATE_UPDATING},
-		{"failed", stateProvisioning, []*cloudv1.ManagedResource{ready, failed}, true, cloudv1.ClusterState_CLUSTER_STATE_FAILED},
-		{"deleting", stateDeleting, []*cloudv1.ManagedResource{failed}, false, cloudv1.ClusterState_CLUSTER_STATE_DELETING},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			row := &model.Cluster{Resource: model.Resource{State: tt.state}}
-			if got := status(row, tt.views, tt.awaitingEKS).GetState(); got != tt.want {
-				t.Errorf("state = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestApplyMask(t *testing.T) {
 	newSpec := func() *cloudv1.ClusterSpec { return mustResolve(t, minimalSpec(), []string{"use1-az1", "use1-az2"}) }
 	row := &model.Cluster{Name: "prod"}

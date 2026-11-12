@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"connectrpc.com/connect/v2"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +14,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
@@ -23,17 +23,17 @@ import (
 // and untagSubnets removes exactly them.
 func subnetManager(clusterID string) string { return kube.FieldOwner + "/cluster-" + clusterID }
 
-// tagSubnets adds the cluster's tags to the network subnets it runs in:
+// TagSubnets adds the cluster's tags to the network subnets it runs in:
 // kubernetes.io/cluster/<name>=shared always, and karpenter.sh/discovery=
 // <name> unless another cluster of the network already has it (the tag
 // holds one value: that cluster's Karpenter selects the subnets by
 // kubernetes.io/cluster/<name> instead).
-func (s *ClusterService) tagSubnets(ctx context.Context, row *model.Cluster, t target) error {
-	for _, name := range t.subnetObjects {
+func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Target) error {
+	for _, name := range t.SubnetObjects {
 		subnet := &awsec2.Subnet{}
-		if err := s.deps.Get(ctx, client.ObjectKey{Namespace: t.account.Namespace, Name: name}, subnet); err != nil {
+		if err := s.deps.Get(ctx, client.ObjectKey{Namespace: t.Account.Namespace, Name: name}, subnet); err != nil {
 			s.logger().ErrorContext(ctx, "read network subnet", "subnet", name, "error", err)
-			return connect.NewError(connect.CodeUnavailable, "cannot read the network's subnet "+name)
+			return fault.New(fault.Unavailable, "cannot read the network's subnet "+name)
 		}
 		tags := map[string]any{crossplaneaws.TagKubernetesClusterPrefix + row.Name: "shared"}
 		if v := subnet.Spec.ForProvider.Tags[crossplaneaws.TagKarpenterDiscovery]; v == nil || *v == row.Name {
@@ -42,23 +42,23 @@ func (s *ClusterService) tagSubnets(ctx context.Context, row *model.Cluster, t t
 			s.logger().WarnContext(ctx, "subnet already has a karpenter discovery tag; select it by kubernetes.io/cluster/<name>",
 				"cluster_id", row.ID, "subnet", name, "karpenter.sh/discovery", *v)
 		}
-		u := subnetPatch(t.account.Namespace, name)
+		u := subnetPatch(t.Account.Namespace, name)
 		if err := unstructured.SetNestedMap(u.Object, tags, "spec", "forProvider", "tags"); err != nil {
 			return err
 		}
 		if err := kube.ApplyFields(ctx, s.deps.Kube, u, subnetManager(row.ID)); err != nil {
 			s.logger().ErrorContext(ctx, "tag network subnet", "cluster_id", row.ID, "subnet", name, "error", err)
-			return connect.NewError(connect.CodeInternal, "could not tag the network's subnet "+name+" for the cluster")
+			return fault.New(fault.Internal, "could not tag the network's subnet "+name+" for the cluster")
 		}
 	}
-	s.logger().InfoContext(ctx, "tagged network subnets", "cluster_id", row.ID, "subnets", t.subnetObjects)
+	s.logger().InfoContext(ctx, "tagged network subnets", "cluster_id", row.ID, "subnets", t.SubnetObjects)
 	return nil
 }
 
 // untagSubnets removes the cluster's tags from every subnet of the
 // namespace that has them: applying no fields as the cluster's manager
 // drops what it owned.
-func (s *ClusterService) untagSubnets(ctx context.Context, row *model.Cluster, namespace string) error {
+func (s *Reconciler) untagSubnets(ctx context.Context, row *model.Cluster, namespace string) error {
 	// From the API server: the cache strips the managedFields this reads.
 	subnets := &awsec2.SubnetList{}
 	err := s.deps.Reader().List(ctx, subnets, client.InNamespace(namespace),

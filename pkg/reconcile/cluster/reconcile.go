@@ -14,7 +14,7 @@ import (
 // looks at every pass.
 // Imported clusters are only observed: the loop records their status.
 func PendingStates() []string {
-	return []string{stateProvisioning, stateUpdating, stateDeleting, stateImported}
+	return []string{StateProvisioning, StateUpdating, StateDeleting, StateImported}
 }
 
 // Reconcile moves one cluster on; the background loop calls it, so no read
@@ -24,7 +24,7 @@ func PendingStates() []string {
 // gone, stores a converged generation, and records the cluster's status
 // (what GetCluster returns). Every step is idempotent. A cluster that
 // does not exist is done.
-func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) error {
+func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil
@@ -44,7 +44,7 @@ func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) err
 	if err != nil {
 		return err
 	}
-	c, err := s.view(ctx, current)
+	c, err := s.View(ctx, current)
 	if err != nil {
 		return fmt.Errorf("observe: %w", err)
 	}
@@ -52,12 +52,12 @@ func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) err
 }
 
 // moveOn is Reconcile without recording the status.
-func (s *ClusterService) moveOn(ctx context.Context, row *model.Cluster) error {
-	if row.State == stateDeleting {
+func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
+	if row.State == StateDeleting {
 		_, err := s.driveDelete(ctx, row)
 		return err
 	}
-	if row.State == stateImported || row.State == stateBlocked {
+	if row.State == StateImported || row.State == StateBlocked {
 		// Observed only, until TakeOverCluster. Counted as applied with this
 		// renderer, or a renderer change would list it as pending forever.
 		return s.markApplied(ctx, row)
@@ -91,12 +91,12 @@ func (s *ClusterService) moveOn(ctx context.Context, row *model.Cluster) error {
 
 // recordConverged stores a converged generation: observed_generation, and
 // the cluster as RUNNING (the loop then leaves it alone until it changes).
-func (s *ClusterService) recordConverged(ctx context.Context, row *model.Cluster, st *cloudv1.ClusterStatus) error {
+func (s *Reconciler) recordConverged(ctx context.Context, row *model.Cluster, st *cloudv1.ClusterStatus) error {
 	if st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_RUNNING ||
-		(row.ObservedGeneration == row.Generation && row.State == stateRunning) {
+		(row.ObservedGeneration == row.Generation && row.State == StateRunning) {
 		return nil
 	}
-	row.ObservedGeneration, row.State = row.Generation, stateRunning
+	row.ObservedGeneration, row.State = row.Generation, StateRunning
 	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil && !errors.Is(err, repository.ErrConflict) {
 		return err // a conflict: an API call changed the row; the next pass sees it
 	}

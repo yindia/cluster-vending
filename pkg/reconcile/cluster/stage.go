@@ -13,7 +13,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // eksActiveStatus is the EKS cluster status once it can be used.
@@ -33,7 +33,7 @@ func createdAfterActive(records []model.ManagedResource) bool {
 }
 
 // eksActive reports whether the cluster's EKS cluster is ACTIVE.
-func (s *ClusterService) eksActive(ctx context.Context, records []model.ManagedResource) (bool, error) {
+func (s *Reconciler) eksActive(ctx context.Context, records []model.ManagedResource) (bool, error) {
 	for _, r := range records {
 		if r.Kind != "Cluster" {
 			continue
@@ -47,13 +47,13 @@ func (s *ClusterService) eksActive(ctx context.Context, records []model.ManagedR
 	return false, nil
 }
 
-// fillLive sets the plan's values that only exist once other resources do
+// FillLive sets the plan's values that only exist once other resources do
 // (crossplaneaws.ClusterPlan.FillLive), from the cluster's objects as the
 // management cluster has them. An apply does not need it: the set reads
 // the same values when it is applied (crossplaneaws.ClusterSet). It is
 // for a plan of an update, which renders without applying.
-func (s *ClusterService) fillLive(ctx context.Context, row *model.Cluster, plan *crossplaneaws.ClusterPlan) error {
-	owner := service.Owner{TenantID: row.TenantID, Kind: model.OwnerCluster, ID: row.ID}
+func (s *Reconciler) FillLive(ctx context.Context, row *model.Cluster, plan *crossplaneaws.ClusterPlan) error {
+	owner := reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerCluster, ID: row.ID}
 	seen, err := s.deps.Sequence().Observe(ctx, s.deps.Inventory(owner))
 	if err != nil {
 		return err
@@ -61,35 +61,35 @@ func (s *ClusterService) fillLive(ctx context.Context, row *model.Cluster, plan 
 	return plan.FillLive(ctx, seen)
 }
 
-// resumeAfter is how long a cluster row must have been left alone before
+// ResumeAfter is how long a cluster row must have been left alone before
 // an interrupted create is resumed: a CreateCluster still applying (or
 // rolling back) must not be raced.
-var resumeAfter = 2 * time.Minute
+var ResumeAfter = 2 * time.Minute
 
-// stageAfter is how long after a cluster row was last written the loop
+// StageAfter is how long after a cluster row was last written the loop
 // moves a create on to its next stage. CreateCluster applies its first
 // stage within a second or two; a pass that started in that window would
 // apply alongside it, and after its rollback re-create what it removed.
-var stageAfter = 15 * time.Second
+var StageAfter = 15 * time.Second
 
 // resumeCreate reports whether a cluster whose EKS cluster is not ACTIVE
 // must be applied again: a new cluster still before its EKS cluster (what
 // must exist first is being created), or a create that stopped half-way
 // (the server went away between the applies): still in its first stage,
-// no call touched its row for resumeAfter, and objects of that stage are
+// no call touched its row for ResumeAfter, and objects of that stage are
 // not in the management cluster (none recorded yet, or recorded and
 // missing).
-func (s *ClusterService) resumeCreate(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (bool, error) {
-	if row.State != stateProvisioning || createdAfterActive(records) {
+func (s *Reconciler) resumeCreate(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (bool, error) {
+	if row.State != StateProvisioning || createdAfterActive(records) {
 		return false, nil
 	}
 	if len(records) > 0 && !slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "Cluster" }) {
 		// The stage before the EKS cluster (its log group, its encryption
 		// key): apply renders the cluster once they exist. Not while the
 		// create that stored the row may still be applying or rolling back.
-		return time.Since(row.UpdatedAt) >= stageAfter, nil
+		return time.Since(row.UpdatedAt) >= StageAfter, nil
 	}
-	if time.Since(row.UpdatedAt) < resumeAfter {
+	if time.Since(row.UpdatedAt) < ResumeAfter {
 		return false, nil
 	}
 	views, err := s.deps.Observe(ctx, records)
@@ -112,8 +112,8 @@ func (s *ClusterService) resumeCreate(ctx context.Context, row *model.Cluster, r
 // (resumeCreate): the objects of the first stage are applied again, the
 // later ones stay held back (crossplaneaws.ClusterSet). A cluster past its first
 // stage (an update or upgrade in progress) waits for ACTIVE.
-func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error {
-	if row.State == stateDeleting ||
+func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
+	if row.State == StateDeleting ||
 		(row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID)) {
 		return nil
 	}
@@ -132,16 +132,16 @@ func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error 
 		}
 		s.logger().InfoContext(ctx, "resuming an interrupted cluster create", "cluster_id", row.ID, "recorded", len(records))
 	}
-	spec, err := specOf(row)
+	spec, err := SpecOf(row)
 	if err != nil {
 		return err
 	}
-	t, err := s.target(ctx, row.TenantID, spec)
+	t, err := s.Target(ctx, row.TenantID, spec)
 	if err != nil {
 		return err
 	}
 	defer s.recheck(ctx, row)
-	if err := s.apply(ctx, row, t.account, s.renderPlan(spec, row, t)); err != nil {
+	if err := s.Apply(ctx, row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
 		return err
 	}
 	s.logger().InfoContext(ctx, "cluster applied again", "cluster_id", row.ID, "generation", row.Generation,

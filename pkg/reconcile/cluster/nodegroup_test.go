@@ -16,13 +16,13 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 const ngNamespace = "tenant-acme"
 
 func ngRecord(id, name string) model.ManagedResource {
-	return model.ManagedResource{Base: model.Base{ID: id}, OwnerID: "c-1", Kind: kindNodeGroup,
+	return model.ManagedResource{Base: model.Base{ID: id}, OwnerID: "c-1", Kind: KindNodeGroup,
 		APIVersion: "eks.aws.m.upbound.io/v1beta1", Namespace: ngNamespace, Name: name}
 }
 
@@ -37,7 +37,7 @@ func liveNodeGroup(name string, types ...string) *awseks.NodeGroup {
 	return ng
 }
 
-func ngService(t *testing.T, records []model.ManagedResource, objects ...client.Object) (*ClusterService, *mock.MockManagedResources, client.Client) {
+func ngService(t *testing.T, records []model.ManagedResource, objects ...client.Object) (*Reconciler, *mock.MockManagedResources, client.Client) {
 	t.Helper()
 	scheme, err := kube.Scheme()
 	if err != nil {
@@ -48,7 +48,7 @@ func ngService(t *testing.T, records []model.ManagedResource, objects ...client.
 	store, mrs := mock.NewMockStore(ctrl), mock.NewMockManagedResources(ctrl)
 	store.EXPECT().ManagedResources().Return(mrs).AnyTimes()
 	mrs.EXPECT().ListByOwner(gomock.Any(), model.OwnerCluster, "c-1").Return(records, nil).AnyTimes()
-	return NewClusterService(service.Deps{Store: store, Kube: k}), mrs, k
+	return New(reconcile.Deps{Store: store, Kube: k}), mrs, k
 }
 
 func TestNodeGroupName(t *testing.T) {
@@ -84,7 +84,7 @@ func TestNodeGroupName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, _, _ := ngService(t, tt.records, tt.live...)
-			got, keep, err := s.nodeGroupName(context.Background(), row, plan)
+			got, keep, err := s.NodeGroupName(context.Background(), row, plan)
 			if err != nil || got != tt.want || len(keep) != tt.wantKeep {
 				t.Errorf("got %q keep %d err %v; want %q keep %d", got, len(keep), err, tt.want, tt.wantKeep)
 			}
@@ -96,7 +96,7 @@ func TestRetireNodeGroups(t *testing.T) {
 	old, replacement := ngRecord("1", "prod-default"), ngRecord("2", "prod-default-abc123")
 	records := []model.ManagedResource{old, replacement}
 	view := func(name string, st cloudv1.ManagedResourceState) *cloudv1.ManagedResource {
-		return &cloudv1.ManagedResource{Kind: kindNodeGroup, Name: name, State: st}
+		return &cloudv1.ManagedResource{Kind: KindNodeGroup, Name: name, State: st}
 	}
 	const ready, creating, missing = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY,
 		cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_CREATING, cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING

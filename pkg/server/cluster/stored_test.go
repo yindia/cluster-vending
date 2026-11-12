@@ -10,6 +10,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
 // GetCluster and ListClusters answer from the database: the spec and the
@@ -94,20 +95,20 @@ func TestStoredState(t *testing.T) {
 		recorded cloudv1.ClusterState
 		want     cloudv1.ClusterState
 	}{
-		{"nothing recorded", stateProvisioning, unspecified, cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
-		{"converged", stateRunning, running, running},
-		{"a change stored since", stateUpdating, running, updating},
-		{"observed failure", stateUpdating, failed, failed},
-		{"delete stored since", stateDeleting, running, deleting},
-		{"taken over since", stateUpdating, imported, updating},
-		{"still imported", stateImported, imported, imported},
+		{"nothing recorded", reconcilecluster.StateProvisioning, unspecified, cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING},
+		{"converged", reconcilecluster.StateRunning, running, running},
+		{"a change stored since", reconcilecluster.StateUpdating, running, updating},
+		{"observed failure", reconcilecluster.StateUpdating, failed, failed},
+		{"delete stored since", reconcilecluster.StateDeleting, running, deleting},
+		{"taken over since", reconcilecluster.StateUpdating, imported, updating},
+		{"still imported", reconcilecluster.StateImported, imported, imported},
 	} {
 		if got := storedState(tt.row, tt.recorded); got != tt.want {
 			t.Errorf("%s: %s, want %s", tt.name, got, tt.want)
 		}
 	}
 	// An unreadable recorded status is no reason to fail a read.
-	c, err := stored(&model.Cluster{Resource: model.Resource{State: stateRunning, Spec: model.JSON(`{}`), Status: model.JSON(`not json`)}})
+	c, err := stored(&model.Cluster{Resource: model.Resource{State: reconcilecluster.StateRunning, Spec: model.JSON(`{}`), Status: model.JSON(`not json`)}})
 	if err != nil || c.GetStatus().GetState() != running {
 		t.Errorf("unreadable status: %v, %v", c.GetStatus(), err)
 	}

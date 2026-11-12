@@ -12,6 +12,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -44,7 +45,7 @@ func (f fakeLookup) ResolveEKSVersions(_ context.Context, _ awscloud.Access, _ s
 
 func TestCheckName(t *testing.T) {
 	account := &model.CloudAccount{Base: model.Base{ID: "acct-1"}, AccountID: "111122223333"}
-	tgt := target{account: account}
+	tgt := reconcilecluster.Target{Account: account}
 	same := model.Cluster{Base: model.Base{ID: "c-1"}, Name: "prod", Region: "us-east-1", NetworkID: "n-1"}
 	other := same
 	other.Region = "eu-west-1"

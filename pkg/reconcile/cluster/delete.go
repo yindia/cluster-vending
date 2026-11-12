@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"connectrpc.com/connect/v2"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -16,8 +15,9 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // driveDelete moves a DELETING cluster on: its recorded objects are
@@ -31,7 +31,7 @@ import (
 // never recorded, removes the network subnet tags and the cluster's rows.
 // It reports whether the cluster is gone. Every step is idempotent: the
 // background loop and DeleteCluster both call it.
-func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (bool, error) {
+func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return false, fmt.Errorf("list cluster resources: %w", err)
@@ -41,7 +41,7 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 			return false, err
 		}
 	}
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerCluster, ID: row.ID}
+	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerCluster, ID: row.ID}
 	if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.ClusterDeleteOrder); err != nil {
 		return false, deleteError(err)
 	}
@@ -58,7 +58,7 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
 		return false, err
 	}
-	if !service.AllGone(views) {
+	if !reconcile.AllGone(views) {
 		return false, nil
 	}
 	namespace := kube.TenantNamespace(row.TenantID)
@@ -86,7 +86,7 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 func deleteError(err error) error {
 	var unreadable *managed.ReadError
 	if errors.As(err, &unreadable) {
-		return connect.NewError(connect.CodeUnavailable,
+		return fault.New(fault.Unavailable,
 			fmt.Sprintf("cannot read %s %s from the management cluster", unreadable.Ref.Kind, unreadable.Ref.Name))
 	}
 	return err
@@ -99,7 +99,7 @@ func deleteError(err error) error {
 // are not being deleted yet (never recorded: left by a failure between
 // apply and record) are deleted; Usages last, once nothing else is left,
 // so they protect until then.
-func (s *ClusterService) deleteUnrecorded(ctx context.Context, row *model.Cluster, namespace string) (int, error) {
+func (s *Reconciler) deleteUnrecorded(ctx context.Context, row *model.Cluster, namespace string) (int, error) {
 	found, err := s.sweep(ctx, row, namespace, crossplaneaws.ClusterLists())
 	if err != nil || found > 0 {
 		return found, err
@@ -107,7 +107,7 @@ func (s *ClusterService) deleteUnrecorded(ctx context.Context, row *model.Cluste
 	return s.sweep(ctx, row, namespace, []client.ObjectList{&protectionv1beta1.UsageList{}})
 }
 
-func (s *ClusterService) sweep(ctx context.Context, row *model.Cluster, namespace string, lists []client.ObjectList) (int, error) {
+func (s *Reconciler) sweep(ctx context.Context, row *model.Cluster, namespace string, lists []client.ObjectList) (int, error) {
 	found := 0
 	for _, list := range lists {
 		err := s.deps.Reader().List(ctx, list, client.InNamespace(namespace), client.MatchingLabels{crossplane.LabelCluster: row.ID})

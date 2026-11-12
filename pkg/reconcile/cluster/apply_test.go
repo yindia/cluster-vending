@@ -15,7 +15,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // noInventory remembers nothing.
@@ -47,7 +47,7 @@ func TestApplyNodeGroupSendsDesiredSizeAtCreateOnly(t *testing.T) {
 	ng.Spec.ForProvider.ScalingConfig = &awseks.ScalingConfigParameters{
 		MinSize: ptr.To(1.0), MaxSize: ptr.To(3.0), DesiredSize: ptr.To(2.0)}
 	// An imported node group, like a rendered one (crossplaneaws.ClusterSet).
-	res, err := service.Deps{Kube: k}.Sequence().Apply(context.Background(), importSet([]client.Object{ng}), noInventory{})
+	res, err := reconcile.Deps{Kube: k}.Sequence().Apply(context.Background(), importSet([]client.Object{ng}), noInventory{})
 	if err != nil || res.Applied != 1 {
 		t.Fatalf("apply = %+v (%v)", res, err)
 	}

@@ -16,21 +16,21 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-const kindNodeGroup = "NodeGroup"
+const KindNodeGroup = "NodeGroup"
 
 // nodeGroupRecords are the cluster's NodeGroup records, oldest first: more
 // than one while a replaced node group is retired.
 func nodeGroupRecords(records []model.ManagedResource) []model.ManagedResource {
 	var out []model.ManagedResource
 	for _, r := range records {
-		if r.Kind == kindNodeGroup {
+		if r.Kind == KindNodeGroup {
 			out = append(out, r)
 		}
 	}
 	return out
 }
 
-// nodeGroupName picks the default node group for plan. EKS cannot change
+// NodeGroupName picks the default node group for plan. EKS cannot change
 // a node group's instance types, capacity type, AMI type, disk size or
 // launch template, so when they differ from the current node group's a new
 // one is created (ReplacementNodeGroupName) and the others are retired
@@ -38,7 +38,7 @@ func nodeGroupRecords(records []model.ManagedResource) []model.ManagedResource {
 // settings is the one: reverting a change before its replacement is ready
 // goes back to the node group that is still there instead of creating a
 // third. It returns the name and the node groups to keep until then.
-func (s *ClusterService) nodeGroupName(ctx context.Context, row *model.Cluster, plan crossplaneaws.ClusterPlan) (string, []client.Object, error) {
+func (s *Reconciler) NodeGroupName(ctx context.Context, row *model.Cluster, plan crossplaneaws.ClusterPlan) (string, []client.Object, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return "", nil, fmt.Errorf("list cluster resources: %w", err)
@@ -85,7 +85,7 @@ func (s *ClusterService) nodeGroupName(ctx context.Context, row *model.Cluster, 
 
 // retireLaunchTemplate deletes and forgets the rendered launch template of
 // a node group that is gone.
-func (s *ClusterService) retireLaunchTemplate(ctx context.Context, records []model.ManagedResource, group model.ManagedResource) error {
+func (s *Reconciler) retireLaunchTemplate(ctx context.Context, records []model.ManagedResource, group model.ManagedResource) error {
 	for _, r := range records {
 		if r.Kind != "LaunchTemplate" || r.Name != crossplaneaws.LaunchTemplateName(group.Name) {
 			continue
@@ -102,16 +102,16 @@ func (s *ClusterService) retireLaunchTemplate(ctx context.Context, records []mod
 
 // currentNodeGroup is the node group the cluster's spec renders now (see
 // nodeGroupName): the one the others are retired for.
-func (s *ClusterService) currentNodeGroup(ctx context.Context, row *model.Cluster) (string, error) {
-	spec, err := specOf(row)
+func (s *Reconciler) currentNodeGroup(ctx context.Context, row *model.Cluster) (string, error) {
+	spec, err := SpecOf(row)
 	if err != nil {
 		return "", err
 	}
-	t, err := s.target(ctx, row.TenantID, spec)
+	t, err := s.Target(ctx, row.TenantID, spec)
 	if err != nil {
 		return "", err
 	}
-	name, _, err := s.nodeGroupName(ctx, row, s.renderPlan(spec, row, t))
+	name, _, err := s.NodeGroupName(ctx, row, s.RenderPlan(spec, row, t))
 	return name, err
 }
 
@@ -119,7 +119,7 @@ func (s *ClusterService) currentNodeGroup(ctx context.Context, row *model.Cluste
 // current is READY, and forgets them when they are gone. current is the
 // node group the spec renders, not the one recorded last: after a change
 // is reverted it is the older of the two.
-func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource, current string) error {
+func (s *Reconciler) retireNodeGroups(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource, current string) error {
 	groups := nodeGroupRecords(records)
 	if len(groups) < 2 {
 		return nil
@@ -128,14 +128,14 @@ func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.M
 	for _, v := range views {
 		state[v.GetKind()+"/"+v.GetName()] = v.GetState()
 	}
-	if state[kindNodeGroup+"/"+current] != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
+	if state[KindNodeGroup+"/"+current] != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
 		return nil
 	}
 	for _, old := range groups {
 		if old.Name == current {
 			continue
 		}
-		if state[kindNodeGroup+"/"+old.Name] == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+		if state[KindNodeGroup+"/"+old.Name] == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
 			if err := s.retireLaunchTemplate(ctx, records, old); err != nil {
 				return err
 			}

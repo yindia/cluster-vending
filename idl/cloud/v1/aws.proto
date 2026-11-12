@@ -53,11 +53,76 @@ message AwsClusterSpec {
   // tenant's: file systems (EFS, FSx) and S3 buckets are not created.
   repeated AwsAddon addons = 5 [(buf.validate.field).repeated.max_items = 12];
 
+  // The CloudWatch Logs log group of the control plane logs
+  // ("/aws/eks/<cluster name>/cluster"). Unset: EKS creates it itself when
+  // logging is on, unmanaged and kept forever, as before.
+  AwsControlPlaneLogGroup control_plane_log_group = 6;
+
+  // IAM roles for service accounts: an IAM OIDC provider for the cluster's
+  // issuer (iam OpenIDConnectProvider, client ID sts.amazonaws.com),
+  // created once the cluster is ACTIVE. Unset or false: none; EKS Pod
+  // Identity, which every cluster has, needs none. Immutable for now.
+  optional bool irsa = 7;
+
+  // Extra security groups on the control plane's network interfaces, next
+  // to the cluster security group EKS creates
+  // (Cluster.vpcConfig.securityGroupIds). The groups are the client's: the
+  // platform does not create or delete them. Immutable: EKS cannot change
+  // them on an existing cluster.
+  repeated string additional_security_group_ids = 8 [(buf.validate.field).repeated = {
+    max_items: 4
+    unique: true
+    items: {
+      string: {pattern: "^sg-[0-9a-f]{8,17}$"}
+    }
+  }];
+
   option (buf.validate.message).cel = {
     id: "addons.unique"
     message: "addon names must be unique"
     expression: "this.addons.all(a, this.addons.filter(b, b.name == a.name).size() == 1)"
   };
+}
+
+// AwsControlPlaneLogGroup makes the platform own the control plane's log
+// group: created before the EKS cluster (so EKS does not create it), with
+// a retention, and deleted with the cluster.
+//   AWS   cloudwatchlogs Group, external name "/aws/eks/<cluster name>/cluster"
+message AwsControlPlaneLogGroup {
+  // Unset or false: the platform creates no log group.
+  optional bool enabled = 1;
+
+  // Days the log group keeps the logs (Group.retentionInDays): one of the
+  // retention periods CloudWatch Logs has. Defaults to 90. Mutable.
+  uint32 retention_days = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).uint32 = {
+      in: [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653
+      ]
+    }
+  ];
 }
 
 // AwsAddon is one EKS add-on (Addon.spec.forProvider).
@@ -220,13 +285,78 @@ enum AwsSupportType {
 
 // AwsNodePoolSpec carries NodeGroup fields with no cross-cloud equivalent.
 message AwsNodePoolSpec {
-  // NodeGroup.amiType.
+  option (buf.validate.message).cel = {
+    id: "node_pool.custom_ami_type"
+    message: "ami_type CUSTOM needs a launch_template that brings the AMI (image_id, or an existing template)"
+    expression: "this.ami_type != 20 || has(this.launch_template)"
+  };
+
+  // NodeGroup.amiType. With launch_template.image_id it is CUSTOM.
   AwsAmiType ami_type = 1 [(buf.validate.field).enum.defined_only = true];
+
+  // An EC2 launch template for the node group (NodeGroup.launchTemplate).
+  // Unset: none, as before. With one, disk_size_gb must be unset (EKS takes
+  // the disk from the template). Setting, removing or switching the
+  // template replaces the node group (a new one is created, the old one
+  // deleted once it is ready); a new version of the same template is
+  // rolled out in place.
+  AwsLaunchTemplate launch_template = 2;
+}
+
+// AwsLaunchTemplate is either an existing launch template (id or name, and
+// version) or one the platform renders (security_group_ids and / or
+// image_id + user_data).
+message AwsLaunchTemplate {
+  option (buf.validate.message).cel = {
+    id: "launch_template.existing_or_rendered"
+    message: "give an existing template (id or name, with version) or a rendered one (security_group_ids, image_id), not both and not neither"
+    expression: "((this.id != '') != (this.name != '') && this.version != '' && size(this.security_group_ids) == 0 && this.image_id == '' && this.user_data == '') || (this.id == '' && this.name == '' && this.version == '' && (size(this.security_group_ids) > 0 || this.image_id != ''))"
+  };
+  option (buf.validate.message).cel = {
+    id: "launch_template.custom_ami"
+    message: "image_id and user_data go together: nodes of a custom AMI join the cluster through their user data"
+    expression: "(this.image_id != '') == (this.user_data != '')"
+  };
+
+  // An existing template: its ID ("lt-...") or its name, one of the two.
+  // The template is the client's: the platform does not change or delete
+  // it.
+  string id = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.pattern = "^lt-[0-9a-f]{8,17}$"
+  ];
+  string name = 2 [(buf.validate.field).string.max_len = 128];
+
+  // The version number of the existing template to use, e.g. "3".
+  // "$Latest" and "$Default" are refused: EKS resolves them to a number,
+  // which would read as a change on every reconcile.
+  string version = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.pattern = "^[1-9][0-9]*$"
+  ];
+
+  // A rendered template (ec2 LaunchTemplate, owned by the cluster): extra
+  // security groups for the nodes, next to the cluster security group.
+  repeated string security_group_ids = 4 [(buf.validate.field).repeated = {
+    max_items: 4
+    unique: true
+    items: {
+      string: {pattern: "^sg-[0-9a-f]{8,17}$"}
+    }
+  }];
+
+  // A rendered template: a custom AMI (ami_type becomes CUSTOM) and the
+  // base64 user data that makes its nodes join the cluster.
+  string image_id = 5 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.pattern = "^ami-[0-9a-f]{8,17}$"
+  ];
+  string user_data = 6 [(buf.validate.field).string.max_len = 21848];
 }
 
 // AwsAmiType is NodeGroup.amiType: the EKS AMI types a new managed node
-// group can use (no end-of-support AL2, no CUSTOM / launch templates).
-// Values may be added over time.
+// group can use (no end-of-support AL2). CUSTOM is for a launch template
+// that names its own AMI. Values may be added over time.
 enum AwsAmiType {
   // Server default: AL2023_X86_64_STANDARD.
   AWS_AMI_TYPE_UNSPECIFIED = 0;
@@ -249,6 +379,7 @@ enum AwsAmiType {
   AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64 = 17 [(crossplane) = {aws: "WINDOWS_FULL_2022_x86_64"}];
   AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64 = 18 [(crossplane) = {aws: "WINDOWS_CORE_2025_x86_64"}];
   AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64 = 19 [(crossplane) = {aws: "WINDOWS_FULL_2025_x86_64"}];
+  AWS_AMI_TYPE_CUSTOM = 20 [(crossplane) = {aws: "CUSTOM"}];
 }
 
 // AwsClusterStatus is AWS-only observed state, read from

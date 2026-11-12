@@ -5,8 +5,11 @@ import (
 
 	apiextv1alpha1 "github.com/crossplane/crossplane/apis/v2/apiextensions/v1alpha1"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
+	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -35,6 +38,10 @@ var managedMRDs = []string{
 	"clusters.eks.aws.m.upbound.io", "nodegroups.eks.aws.m.upbound.io", "addons.eks.aws.m.upbound.io",
 	"podidentityassociations.eks.aws.m.upbound.io", "accessentries.eks.aws.m.upbound.io",
 	"accesspolicyassociations.eks.aws.m.upbound.io", "clusterauths.eks.aws.m.upbound.io",
+	// Cluster options: secrets encryption, IRSA, a rendered launch template
+	// (the control plane's log group is groups.cloudwatchlogs, above).
+	"keys.kms.aws.m.upbound.io", "aliases.kms.aws.m.upbound.io",
+	"openidconnectproviders.iam.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
 	// provider-helm.
 	"releases.helm.m.crossplane.io",
 }
@@ -66,6 +73,7 @@ func ManagedObjects() []client.Object {
 		&awsiam.Role{}, &awsiam.RolePolicyAttachment{}, &awsiam.Policy{},
 		&awseks.Cluster{}, &awseks.NodeGroup{}, &awseks.Addon{}, &awseks.PodIdentityAssociation{},
 		&awseks.AccessEntry{}, &awseks.AccessPolicyAssociation{}, &awseks.ClusterAuth{},
+		&awscwl.Group{}, &awskms.Key{}, &awskms.Alias{}, &awsiam.OpenIDConnectProvider{}, &awsec2.LaunchTemplate{},
 	)
 	// Networks and clusters share kinds (IAM): each once.
 	out := make([]client.Object, 0, len(all))

@@ -39,8 +39,8 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Created) != 7 || len(got.Existing) != 1 {
-		t.Fatalf("created %v, existing %v; want the activation policy, 2 runtime configs, ec2, iam, cloudwatchlogs and helm created, eks existing", got.Created, got.Existing)
+	if len(got.Created) != 8 || len(got.Existing) != 1 {
+		t.Fatalf("created %v, existing %v; want the activation policy, 2 runtime configs, ec2, iam, cloudwatchlogs, kms and helm created, eks existing", got.Created, got.Existing)
 	}
 	helm := &pkgv1.Provider{}
 	if err := k.Get(ctx, client.ObjectKey{Name: crossplane.HelmProviderName}, helm); err != nil ||
@@ -61,7 +61,7 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 
 	// Second start: nothing to create.
 	again, err := crossplaneaws.InstallProviders(ctx, k, withRole)
-	if err != nil || len(again.Created) != 0 || len(again.Existing) != 8 || len(again.Updated) != 0 {
+	if err != nil || len(again.Created) != 0 || len(again.Existing) != 9 || len(again.Updated) != 0 {
 		t.Errorf("second run: %+v, %v", again, err)
 	}
 }

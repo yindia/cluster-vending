@@ -42,12 +42,23 @@ message ControlPlaneSpec {
 //   Azure Key Vault key; KubernetesCluster.keyManagementService
 // An imported cluster keeps its existing key (CARRIED_OVER).
 message SecretsEncryption {
+  // Turns encryption on with a key the platform creates for the cluster
+  // (AWS: kms Key with rotation on, Alias "alias/<cluster name>-eks"),
+  // unless kms_key_arn names an existing one.
   bool enabled = 1;
+
+  // AWS: ARN of an existing KMS key to encrypt with instead. The platform
+  // does not create, change or delete it. Implies enabled. Immutable once
+  // set.
+  string kms_key_arn = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.pattern = "^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$"
+  ];
 }
 
 // EndpointAccess configures the Kubernetes API server endpoints. Nodes are
-// private and the API server always has a public endpoint, restricted by
-// public_access_cidrs:
+// private. By default the API server has a private and a public endpoint,
+// the public one restricted by public_access_cidrs:
 //   AWS   vpcConfig.endpointPrivateAccess = true,
 //         vpcConfig.endpointPublicAccess = true
 //   GCP   privateClusterConfig.enablePrivateNodes = true,
@@ -58,10 +69,22 @@ message SecretsEncryption {
 //         (apiServerAccessProfile.virtualNetworkIntegrationEnabled, needs a
 //         delegated subnet) is enabled.
 message EndpointAccess {
+  option (buf.validate.message).cel = {
+    id: "endpoint_access.one_endpoint"
+    message: "endpoint_private_access and endpoint_public_access cannot both be false"
+    expression: "!has(this.endpoint_private_access) || !has(this.endpoint_public_access) || this.endpoint_private_access || this.endpoint_public_access"
+  };
+  option (buf.validate.message).cel = {
+    id: "endpoint_access.private_when_not_public"
+    message: "endpoint_public_access false needs endpoint_private_access true (its default)"
+    expression: "!has(this.endpoint_public_access) || this.endpoint_public_access || !has(this.endpoint_private_access) || this.endpoint_private_access"
+  };
+
   // IPv4 CIDRs allowed to reach the public endpoint. At least one is
-  // required (ClusterSpec rule public_access_cidrs_required): who may reach
-  // the API is the client's choice, there is no default. ["0.0.0.0/0"]
-  // allows any address.
+  // required while the public endpoint is on (ClusterSpec rule
+  // public_access_cidrs_required): who may reach the API is the client's
+  // choice, there is no default. ["0.0.0.0/0"] allows any address. Ignored
+  // when endpoint_public_access is false.
   //   AWS   vpcConfig.publicAccessCidrs
   //   GCP   masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock
   //   Azure apiServerAccessProfile.authorizedIpRanges
@@ -76,4 +99,16 @@ message EndpointAccess {
       string: {ipv4_prefix: true}
     }
   }];
+
+  // The API server's endpoint inside the network. Defaults to true. At
+  // least one of the two endpoints must be on. Mutable.
+  //   AWS   vpcConfig.endpointPrivateAccess
+  optional bool endpoint_private_access = 2;
+
+  // The API server's public endpoint. Defaults to true. Without it the
+  // API is reachable from the cluster's network only: tooling that runs
+  // elsewhere (the management cluster's Helm provider included) cannot
+  // reach it. Mutable.
+  //   AWS   vpcConfig.endpointPublicAccess
+  optional bool endpoint_public_access = 3;
 }

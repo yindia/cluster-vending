@@ -397,6 +397,7 @@ func (b networkBuilder) association(subnet, routeTable string) *awsec2.RouteTabl
 // and deleting a network's resources by label.
 func NetworkLists() []client.ObjectList {
 	return []client.ObjectList{
+		&awsec2.NetworkACLRuleList{}, &awsec2.NetworkACLList{}, &awsec2.DefaultNetworkACLList{},
 		&awsec2.FlowLogList{}, &awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
 		&awscwl.GroupList{},
 		&awsec2.RouteTableAssociationList{}, &awsec2.RouteList{}, &awsec2.RouteTableList{},
@@ -409,6 +410,7 @@ func NetworkLists() []client.ObjectList {
 // same order, for DeleteAllOf.
 func NetworkObjects() []client.Object {
 	return []client.Object{
+		&awsec2.NetworkACLRule{}, &awsec2.NetworkACL{}, &awsec2.DefaultNetworkACL{},
 		&awsec2.FlowLog{}, &awsiam.RolePolicyAttachment{}, &awsiam.Policy{}, &awsiam.Role{},
 		&awscwl.Group{},
 		&awsec2.RouteTableAssociation{}, &awsec2.Route{}, &awsec2.RouteTable{},

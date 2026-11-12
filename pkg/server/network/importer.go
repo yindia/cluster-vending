@@ -62,7 +62,11 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 		return nil, err
 	}
 	if !plan.blocked() {
-		if err := s.applyObjects(ctx, row, account, crossplaneaws.ImportedNetworkResources(plan.resources)); err != nil {
+		err := s.applyObjects(ctx, row, account, crossplaneaws.ImportedNetworkResources(plan.resources))
+		if err == nil {
+			err = s.markApplied(ctx, row)
+		}
+		if err != nil {
 			s.rollback(ctx, row)
 			return nil, err
 		}

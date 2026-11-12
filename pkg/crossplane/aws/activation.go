@@ -27,6 +27,9 @@ var managedMRDs = []string{
 	"routes.ec2.aws.m.upbound.io", "routetableassociations.ec2.aws.m.upbound.io",
 	// Network flow logs (also roles, policies and their attachments, below).
 	"flowlogs.ec2.aws.m.upbound.io", "groups.cloudwatchlogs.aws.m.upbound.io",
+	// Network ACLs of imported networks.
+	"defaultnetworkacls.ec2.aws.m.upbound.io", "networkacls.ec2.aws.m.upbound.io",
+	"networkaclrules.ec2.aws.m.upbound.io",
 	// Clusters (ClusterResources).
 	"roles.iam.aws.m.upbound.io", "rolepolicyattachments.iam.aws.m.upbound.io", "policies.iam.aws.m.upbound.io",
 	"clusters.eks.aws.m.upbound.io", "nodegroups.eks.aws.m.upbound.io", "addons.eks.aws.m.upbound.io",

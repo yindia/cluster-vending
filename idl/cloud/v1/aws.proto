@@ -122,31 +122,39 @@ message AwsAddonStatus {
 // AwsImportNetwork names the VPC to import. The server looks the rest up
 // once, read-only, with the tenant's credentials (the role its
 // ProviderConfig assumes):
+//   ec2:DescribeVpcs              the VPC
 //   ec2:DescribeSubnets           subnet-id=<subnet_ids> (each must be in the VPC)
 //   ec2:DescribeRouteTables       vpc-id (routes, associations, main table)
 //   ec2:DescribeInternetGateways  attachment.vpc-id
 //   ec2:DescribeNatGateways       vpc-id (+ their EIP allocations)
 //   ec2:DescribeSecurityGroups    vpc-id, group-name=default
-//   ec2:DescribeNetworkAcls       vpc-id, default=true
-//   ec2:DescribeVpcEndpoints      vpc-id
+//   ec2:DescribeNetworkAcls       vpc-id (the default and the custom ones)
 //   ec2:DescribeFlowLogs          the region's (those on the VPC are imported)
 //   logs:DescribeLogGroups, logs:ListTagsForResource, iam:GetRole
 //                                 for flow log destinations
-// and creates an Observe-only Crossplane managed resource for each result.
-// Modelled (spec.layout): VPC, subnets, route tables + associations, the
-// 0.0.0.0/0 routes, internet gateway, NAT gateways + EIPs. The VPC's main
-// route table is a DefaultRouteTable (a RouteTable resource could never be
-// deleted, which would block DeleteNetwork).
-// CARRIED_OVER by the closure rule (import.proto):
-//   - every other route in an imported route table (peering, Transit
-//     Gateway, VPN, ...), as Route; the targets themselves are NOT_IMPORTED
-//   - VPC endpoints on imported subnets or route tables (VPCEndpoint)
-//   - flow logs on the VPC or its subnets (FlowLog), with their CloudWatch
-//     log group and IAM role
-//   - the default security group (DefaultSecurityGroup) and default network
-//     ACL (DefaultNetworkACL), rules inline: those kinds own them
-// Other security groups and NACLs in the VPC belong to whatever uses them
-// and are NOT_IMPORTED.
+// and creates an Observe-only Crossplane managed resource for each result
+// it imports.
+// Modelled (spec.layout): VPC, subnets, their route tables + associations,
+// the 0.0.0.0/0 routes, internet gateway, NAT gateways + EIPs. A subnet is
+// PUBLIC when its route table routes to the internet gateway (0.0.0.0/0 or
+// specific CIDRs only), PRIVATE when its default route is a NAT gateway.
+// CARRIED_OVER (import.proto):
+//   - flow logs on the VPC that deliver to CloudWatch Logs (FlowLog), with
+//     their log group (cloudwatchlogs Group) and delivery role (iam Role);
+//     a log group or role that flow logs of other VPCs use too is owned
+//     without Delete
+//   - the default network ACL (DefaultNetworkACL, rules inline: that kind
+//     owns them); it is never deleted
+//   - custom network ACLs associated with an imported subnet (NetworkACL,
+//     subnets in subnetIds) with their rules (NetworkACLRule)
+//   - routes of specific CIDRs to the internet gateway in imported route
+//     tables (Route)
+// NOT_IMPORTED: the VPC's main route table (subnets without a route table
+// of their own keep using it), other routes (peering, Transit Gateway,
+// VPN, ...), the default security group, flow logs to S3 or Firehose or
+// whose log group or role cannot be read, network ACLs of subnets that are
+// not imported, unused NAT gateways, secondary VPC CIDRs. VPC endpoints
+// and flow logs on subnets are not looked at.
 // From then on status comes from their status.atProvider; the lookup does
 // not run again.
 message AwsImportNetwork {

@@ -273,7 +273,7 @@ Carried over (AWS):
 
 | Import | Resources |
 |---|---|
-| Network | routes other than `0.0.0.0/0` in imported route tables (peering, Transit Gateway, VPN; the targets are `NOT_IMPORTED`); VPC endpoints on imported subnets / route tables; flow logs with their log group and IAM role; the default security group and default network ACL (`DefaultSecurityGroup`, `DefaultNetworkACL`, rules inline) |
+| Network | flow logs on the VPC that deliver to CloudWatch Logs, with their log group and delivery role (`FlowLog`, cloudwatchlogs `Group`, iam `Role`; a log group or role other VPCs' flow logs use too is owned without `Delete`); the default network ACL (`DefaultNetworkACL`, rules inline, never deleted); custom network ACLs associated with an imported subnet, with their rules (`NetworkACL` with every associated subnet in `subnetIds`, `NetworkACLRule`; the provider has no association kind); routes of specific CIDRs to the internet gateway in imported route tables. `NOT_IMPORTED` today: the main route table, other routes (peering, Transit Gateway, VPN), VPC endpoints, the default security group, flow logs to S3 or Firehose, network ACLs of other subnets |
 | Cluster | security groups referenced by the cluster or node groups, transitively through their rules, with every rule (`SecurityGroupIngressRule` / `SecurityGroupEgressRule` by `sgr-` ID; avoid the legacy `SecurityGroupRule`, its ID is composite), plus rules added to the EKS-managed cluster group (the group stays with EKS); the KMS key in `encryptionConfig` and its aliases (EKS can never turn encryption off); the log group `/aws/eks/<name>/cluster`; the IAM OIDC provider of the cluster's issuer; IAM roles of add-ons and pod identity associations; node groups with launch templates or custom AMIs, with their launch templates |
 
 `BLOCKING` today (the layout can't express them): secondary VPC CIDRs (e.g.
@@ -288,7 +288,10 @@ the provider builds them from (needed even for Observe-only):
 |---|---|---|
 | VPC, Subnet, InternetGateway, EIP, NATGateway, RouteTable, DefaultRouteTable, DefaultNetworkACL, DefaultSecurityGroup, SecurityGroup, VPCEndpoint, FlowLog, LaunchTemplate | cloud ID (`vpc-…`, `subnet-…`, `eipalloc-…`, `rtb-…`, `acl-…`, `sg-…`, `vpce-…`, `fl-…`, `lt-…`) | `region` (+ `vpcId` for the default kinds) |
 | SecurityGroupIngressRule, SecurityGroupEgressRule | `sgr-…` | `region`, `securityGroupId` |
-| Route | `<rtb-id>_<destination cidr>` | `routeTableId`, `destinationCidrBlock` |
+| NetworkACL | `acl-…` | `region`, `vpcId` |
+| NetworkACLRule | `nacl-<crc32 of "<acl-id>-<rule number>-<egress>-<protocol>-">` | `networkAclId`, `ruleNumber`, `egress`, `protocol` |
+| Group (cloudwatchlogs) | log group name | `region` |
+| Route | `r-<rtb-id><crc32 of the destination cidr>` | `routeTableId`, `destinationCidrBlock` |
 | RouteTableAssociation | association ID `rtbassoc-…` (not Terraform's `subnet/rtb` import shorthand) | `subnetId`, `routeTableId` |
 | Role | role name | — |
 | OpenIDConnectProvider | provider ARN | — |

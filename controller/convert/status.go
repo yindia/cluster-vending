@@ -49,6 +49,27 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.AWS = awsStatus(p.GetAws())
 	into.ImportPlan = importPlan(p.GetImport())
 	into.KubeconfigSecret = p.GetKubeconfigSecret()
+	into.Upgrade = upgrade(p.GetUpgrade())
+}
+
+// upgradePhases are the kind's spellings of the contract's upgrade phases.
+var upgradePhases = map[cloudv1.ClusterUpgradePhase]cloudv1alpha1.ClusterUpgradePhase{
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE:    cloudv1alpha1.ClusterUpgradeControlPlane,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS: cloudv1alpha1.ClusterUpgradeNodesAndAddons,
+}
+
+// upgrade is the kind's view of a Kubernetes upgrade in progress; nil
+// when there is none.
+func upgrade(p *cloudv1.ClusterUpgrade) *cloudv1alpha1.ClusterUpgrade {
+	if p == nil {
+		return nil
+	}
+	out := &cloudv1alpha1.ClusterUpgrade{FromVersion: p.GetFromVersion(), ToVersion: p.GetToVersion(),
+		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage()}
+	if p.GetStartTime() != nil {
+		out.StartTime = &metav1.Time{Time: p.GetStartTime().AsTime()}
+	}
+	return out
 }
 
 // phase is the kind's phase of a contract state; of the stored state name

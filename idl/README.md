@@ -29,7 +29,7 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `network_service.proto` | `NetworkService` and its request and response messages |
 | `network.proto` | `Network`, `NetworkSpec`, `NetworkLayout`, `Subnet`, `NetworkFlowLogs`, `NetworkStatus`, `NetworkResources`; `ClusterNetwork` (a cluster's reference to a network) |
 | `cluster_service.proto` | `ClusterService` and its request and response messages; `AwsImportCluster` |
-| `cluster.proto` | `Cluster`, `ClusterSpec` with its CEL rules, `ReleaseChannel`, `ClusterTier`, `ClusterState`, `ClusterStatus`, `ClusterEndpoint` |
+| `cluster.proto` | `Cluster`, `ClusterSpec` with its CEL rules, `ReleaseChannel`, `ClusterTier`, `ClusterState`, `ClusterStatus`, `ClusterEndpoint`, `ClusterUpgrade`, `ClusterUpgradePhase` |
 | `control_plane.proto` | `ControlPlaneSpec`, `SecretsEncryption`, `EndpointAccess` |
 | `node_pool.proto` | `NodePoolSpec`, `ScalingConfig`, `Taint`, `CapacityType`, `TaintEffect` |
 | `access.proto` | `AccessSpec`, `AccessEntry`, `AccessPolicy` and their enums |
@@ -292,7 +292,21 @@ Status (`ClusterStatus`): `state`, `message`, `observed_generation`,
 (URL and CA), `current_kubernetes_version`, `oidc_issuer_url`, `network`
 (the network's cloud IDs), `aws` (cluster ARN, cluster security group,
 platform version, node group ARN, add-ons with the version each runs),
-`import`, `managed_resources`, `kubeconfig_secret`.
+`import`, `managed_resources`, `kubeconfig_secret`, and `upgrade` while a
+Kubernetes upgrade is in progress.
+
+`status.upgrade` (`ClusterUpgrade`) is set from the moment
+`spec.control_plane.kubernetes_version` differs from what the control plane
+runs until the node group and the add-ons have followed, and unset
+otherwise. `state` stays `UPDATING` meanwhile.
+
+| Field | Meaning |
+|---|---|
+| `from_version` | The version the upgrade started from: what the control plane ran. |
+| `to_version` | The version being moved to: `spec.control_plane.kubernetes_version`. |
+| `phase` | `CLUSTER_UPGRADE_PHASE_CONTROL_PLANE`: the control plane still reports `from_version`; the EKS cluster is applied at `to_version`, the node group at `from_version` and the add-ons at the versions they run. `CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS`: the control plane runs `to_version`; the node group and the add-ons are applied at it and are rolling out. |
+| `start_time` | When the upgrade was first seen in progress. |
+| `message` | What the step waits for; when the cloud refuses or fails the step, the provider's error for the resource concerned. The upgrade is retried, not given up. |
 
 A cluster is imported with `ImportClusterRequest`: `name` (the EKS cluster
 name), `network_id` (a network of the tenant, imported or owned, that holds

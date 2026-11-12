@@ -92,6 +92,12 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
+	u, err := s.observeUpgrade(ctx, records, spec.GetControlPlane().GetKubernetesVersion())
+	if err != nil {
+		s.logger().ErrorContext(ctx, "observe upgrade", "cluster_id", row.ID, "error", err)
+		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
+	}
+	st.Upgrade = u.status(row, views, storedUpgrade(row))
 	return ClusterProto(row, spec, st), nil
 }
 

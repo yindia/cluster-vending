@@ -329,6 +329,54 @@ message ClusterStatus {
   // ProviderConfig), which is cluster admin. Empty until the control plane
   // is ready.
   string kubeconfig_secret = 16;
+
+  // The Kubernetes upgrade in progress: set from the moment
+  // spec.control_plane.kubernetes_version differs from what the control
+  // plane runs until the node group and the add-ons have followed. Unset
+  // when no upgrade is in progress. state stays UPDATING meanwhile; this
+  // says which step the upgrade is at.
+  ClusterUpgrade upgrade = 17;
+}
+
+// ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in
+// two steps, in this order, because EKS refuses node groups and add-ons
+// ahead of the control plane: the control plane first, then the node
+// group and the add-ons.
+message ClusterUpgrade {
+  // The version the upgrade started from: what the control plane ran.
+  string from_version = 1;
+
+  // The version being moved to: spec.control_plane.kubernetes_version.
+  string to_version = 2;
+
+  // The step the upgrade is at.
+  ClusterUpgradePhase phase = 3;
+
+  // When the upgrade was first seen in progress.
+  google.protobuf.Timestamp start_time = 4;
+
+  // What the step waits for; when the cloud refuses or fails the step,
+  // the provider's error for the resource concerned (the upgrade is
+  // retried, it is not given up).
+  string message = 5;
+}
+
+// ClusterUpgradePhase is the step of a Kubernetes upgrade.
+enum ClusterUpgradePhase {
+  CLUSTER_UPGRADE_PHASE_UNSPECIFIED = 0;
+
+  // The control plane is being upgraded: it still reports from_version.
+  // The EKS cluster is applied at to_version; the node group is applied at
+  // from_version and the add-ons at the versions they run, so nothing is
+  // ahead of the control plane. Other changes of the same update are
+  // applied meanwhile.
+  CLUSTER_UPGRADE_PHASE_CONTROL_PLANE = 1;
+
+  // The control plane runs to_version. The node group and the add-ons are
+  // applied at to_version (the add-ons at the versions resolved for it)
+  // and are rolling out: the node group replaces its nodes, the add-ons
+  // restart.
+  CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS = 2;
 }
 
 // ClusterEndpoint is how clients reach the Kubernetes API server.

@@ -630,6 +630,44 @@ type AWSClusterStatus struct {
 	Addons []AWSAddonStatus `json:"addons,omitempty"`
 }
 
+// ClusterUpgradePhase is the step of a Kubernetes upgrade. An upgrade runs
+// in two steps, in this order, because EKS refuses node groups and add-ons
+// ahead of the control plane.
+// +kubebuilder:validation:Enum=ControlPlane;NodesAndAddons
+type ClusterUpgradePhase string
+
+const (
+	// ClusterUpgradeControlPlane: the control plane is being upgraded and
+	// still reports the version the upgrade started from. The node group
+	// stays at that version and the add-ons at the versions they run.
+	ClusterUpgradeControlPlane ClusterUpgradePhase = "ControlPlane"
+	// ClusterUpgradeNodesAndAddons: the control plane runs the target
+	// version; the node group and the add-ons are applied at it and are
+	// rolling out.
+	ClusterUpgradeNodesAndAddons ClusterUpgradePhase = "NodesAndAddons"
+)
+
+// ClusterUpgrade is where a Kubernetes upgrade stands.
+type ClusterUpgrade struct {
+	// fromVersion is the version the upgrade started from.
+	// +optional
+	FromVersion string `json:"fromVersion,omitempty"`
+	// toVersion is the version being moved to
+	// (spec.controlPlane.kubernetesVersion).
+	// +optional
+	ToVersion string `json:"toVersion,omitempty"`
+	// phase is the step the upgrade is at.
+	// +optional
+	Phase ClusterUpgradePhase `json:"phase,omitempty"`
+	// startTime is when the upgrade was first seen in progress.
+	// +optional
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+	// message is what the step waits for or, when the cloud refuses or
+	// fails the step, the provider's error for the resource concerned.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // ClusterStatus is the observed state of a Cluster, aggregated from its
 // Crossplane objects.
 type ClusterStatus struct {
@@ -675,6 +713,12 @@ type ClusterStatus struct {
 	// +listType=atomic
 	// +optional
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
+	// upgrade is the Kubernetes upgrade in progress: set from the moment
+	// spec.controlPlane.kubernetesVersion differs from what the control
+	// plane runs until the node group and the add-ons have followed. Unset
+	// when no upgrade is in progress.
+	// +optional
+	Upgrade *ClusterUpgrade `json:"upgrade,omitempty"`
 	// kubeconfigSecret is the name of the Secret in this namespace holding
 	// the cluster's kubeconfig (key "kubeconfig"). Empty until the control
 	// plane is ready.
@@ -696,6 +740,8 @@ type ClusterStatus struct {
 // +kubebuilder:printcolumn:name="Network",type=string,JSONPath=`.spec.network.networkRef.name`
 // +kubebuilder:printcolumn:name="Region",type=string,JSONPath=`.spec.region`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.currentKubernetesVersion`
+// +kubebuilder:printcolumn:name="Upgrade",type=string,JSONPath=`.status.upgrade.phase`,priority=1
+// +kubebuilder:printcolumn:name="Upgrading-To",type=string,JSONPath=`.status.upgrade.toVersion`,priority=1
 // +kubebuilder:printcolumn:name="Channel",type=string,JSONPath=`.spec.releaseChannel`
 // +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`

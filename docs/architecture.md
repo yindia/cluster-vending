@@ -83,7 +83,7 @@ before and after:
 | NAT gateways are created only once the internet gateway is Ready. | A `Ready` condition on the NAT items in `crossplaneaws.NetworkSet`. |
 | Add-ons, access entries, access policy associations and pod identity associations are created only once the EKS cluster is `ACTIVE`; a Usage whose user is one of them waits with it. | A `Field` condition in `crossplaneaws.ClusterSet`. |
 | Values that exist only after another object does: the ARN of the encryption key the platform creates, the cluster's OIDC issuer (for IRSA) and its security group; a new cluster waits for its log group. | Items with a `Build` in `ClusterSet`; the rule is `ClusterPlan.FillLive` in `pkg/crossplane/aws`. |
-| During a Kubernetes upgrade, node groups and add-ons stay at the running version until the control plane reports the target. | `GateUpgrade` in `pkg/reconcile/cluster`. This is the one ordering rule still outside the engine. |
+| During a Kubernetes upgrade, node groups and add-ons stay at the running version until the control plane reports the target. | `upgrade.phase` in `pkg/reconcile/cluster/upgrade.go`: one rule, read by `GateUpgrade` (what is applied) and reported as `status.upgrade` (`ClusterUpgrade`: phase, from and to version, start, message). It is the one ordering rule still outside the engine: the engine has no result for "applied, but at a held version", which is what keeps the cluster being applied again. |
 | A change EKS cannot make in place on a node group (instance types, capacity type, AMI type, disk size, launch template) creates a new node group; the old one is retired once the new one is Ready. | `pkg/reconcile/cluster` (`NodeGroupName`, retirement in the loop). |
 
 A condition gates creation only. Once the owner has the object, or has any
@@ -189,8 +189,9 @@ it exists, that is said.
 - **Storage moves onto the controller's kinds, and the database is
   removed.** The current Kubernetes-backed store uses separate storage kinds
   and is a first step. No existing state is migrated.
-- **Upgrade gating becomes a status field** on the Cluster, instead of a
-  rule in the reconciler.
+- **Moving upgrade gating onto the engine.** The upgrade's step is now a
+  status field (`status.upgrade`) computed by the same rule that gates the
+  apply; the rule itself still lives in the reconciler.
 - **Takeover becomes a re-apply** of the imported set without its
   Observe-only policies. This needs what was discovered to be kept in full,
   which it is not today.

@@ -29,6 +29,14 @@ spec:
     - jsonPath: .status.currentKubernetesVersion
       name: Version
       type: string
+    - jsonPath: .status.upgrade.phase
+      name: Upgrade
+      priority: 1
+      type: string
+    - jsonPath: .status.upgrade.toVersion
+      name: Upgrading-To
+      priority: 1
+      type: string
     - jsonPath: .spec.releaseChannel
       name: Channel
       type: string
@@ -1114,6 +1122,37 @@ spec:
                 - Deleting
                 - Failed
                 type: string
+              upgrade:
+                description: |-
+                  upgrade is the Kubernetes upgrade in progress: set from the moment
+                  spec.controlPlane.kubernetesVersion differs from what the control
+                  plane runs until the node group and the add-ons have followed. Unset
+                  when no upgrade is in progress.
+                properties:
+                  fromVersion:
+                    description: fromVersion is the version the upgrade started from.
+                    type: string
+                  message:
+                    description: |-
+                      message is what the step waits for or, when the cloud refuses or
+                      fails the step, the provider's error for the resource concerned.
+                    type: string
+                  phase:
+                    description: phase is the step the upgrade is at.
+                    enum:
+                    - ControlPlane
+                    - NodesAndAddons
+                    type: string
+                  startTime:
+                    description: startTime is when the upgrade was first seen in progress.
+                    format: date-time
+                    type: string
+                  toVersion:
+                    description: |-
+                      toVersion is the version being moved to
+                      (spec.controlPlane.kubernetesVersion).
+                    type: string
+                type: object
             type: object
         required:
         - spec

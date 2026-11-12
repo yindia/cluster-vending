@@ -9,7 +9,6 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/controller/manager"
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
 func newControllerCmd(g *globals) *cobra.Command {
@@ -28,7 +27,10 @@ func newControllerCmd(g *globals) *cobra.Command {
 			"production; for local testing export AWS_ACCESS_KEY_ID and\n" +
 			"AWS_SECRET_ACCESS_KEY (never a flag or a file). Whatever they are, every\n" +
 			"lookup assumes the tenant role of the account it reads.\n\n" +
-			"--aws-management-account-id and --aws-management-role-arn are required.",
+			"The Crossplane AWS providers authenticate with IRSA as the management\n" +
+			"role, or, with --provider-credentials-secret, with the keys in that\n" +
+			"Secret (a local kind cluster); either way they assume the tenant role.\n\n" +
+			"--aws-management-role-arn is required.",
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationSettingsFile: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -42,13 +44,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace,
-				RenderTarget: cfg.RenderTarget, RenderRollout: cfg.RenderRollout, AWS: cfg.AWS, Logger: g.logger,
-				InstallProviders: cfg.InstallProviders,
-				ProviderRuntime: crossplaneaws.ProviderRuntime{
-					ManagementRoleARN: cfg.AWS.ManagementRoleARN, Poll: cfg.Provider.Poll, EC2Poll: cfg.Provider.EC2Poll,
-					MaxReconcileRate: cfg.Provider.MaxReconcileRate, CPURequest: cfg.Provider.CPURequest,
-					MemoryRequest: cfg.Provider.MemoryRequest, CPULimit: cfg.Provider.CPULimit, MemoryLimit: cfg.Provider.MemoryLimit,
-				},
+				AWS: cfg.AWS, Logger: g.logger, InstallProviders: cfg.InstallProviders,
 			})
 		},
 	}

@@ -101,7 +101,7 @@ question 8.
 | Mechanism | Where | What it does now |
 |---|---|---|
 | Renderer version | `crossplaneaws.RenderVersion` (`pkg/crossplane/aws/aws.go`), stored per row as `render_version` | Identifies what the renderers produce. A row applied with an older renderer is behind. |
-| Renderer rollout | `reconcile.Deps.RenderTarget`, `RenderRollout`, `Deps.RenderBehind` (`pkg/reconcile/reconcile.go`); flags `--render-target`, `--render-rollout` | The background loop re-applies rows whose `render_version` is below the target, limited to the listed tenant, network or cluster IDs. This is a rollout by hand-maintained list. |
+| Renderer rollout | `reconcile.Deps.RenderTarget`, `RenderRollout`, `Deps.RenderBehind` (`pkg/reconcile/reconcile.go`); the controller's `--render-target` and `--render-rollout` flags were removed: the controller always brings every resource to its own build's renderer version (the server's background loop still has them until the database store goes) | A renderer change reaches every resource as soon as the new build runs. There is no staged rollout of renderer changes until releases exist. |
 | Version resolution | `resolveVersions`, `reresolveVersions`, `pinnedAddons` (`pkg/server/cluster/versions.go`); `ResolveEKSVersions` (`pkg/cloud/aws/eks.go`) | At create and update, an empty Kubernetes version becomes the EKS default and an add-on without a version becomes the one EKS recommends. The resolved versions are stored in the spec. Add-ons the client gave a version are pinned. |
 | Upgrade gating | `Reconciler.GateUpgrade`, `CheckVersionStep` (`pkg/reconcile/cluster/upgrade.go`) | During a Kubernetes upgrade the node groups and add-ons stay at the running versions until the control plane reports the target. `CheckVersionStep` checks the step between the stored and the requested version. |
 | Default add-ons | `crossplaneaws.DefaultAddons` (`pkg/crossplane/aws/addons.go`) | The add-ons every cluster gets: vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver. |
@@ -193,8 +193,8 @@ A release is an object, not configuration, for three reasons:
 - It has state that changes while it runs (which stage, which clusters are
   done, why it stopped). Configuration has nowhere to hold that.
 - Two releases can exist at once (section 13). Flags describe one.
-- Pausing and resuming must not need a server restart. `--render-target`
-  does today.
+- Pausing and resuming must not need a restart. The removed
+  `--render-target` setting did.
 
 `Release` is cluster-scoped: it is the platform operator's object and spans
 every tenant namespace.
@@ -304,10 +304,11 @@ How configuration grows:
   existed do not have it and behave as before. Fields are added, never
   given a new meaning, the same rule the contract follows.
 
-What it replaces: the server flags `--render-target` and `--render-rollout`
-(`reconcile.Deps.RenderTarget`, `RenderRollout`). Today a renderer change is
-rolled out by restarting the server with a higher target and a hand-kept
-list of tenant, network or cluster IDs. With releases, `spec.renderVersion`
+What it replaces: the `--render-target` and `--render-rollout` settings,
+already removed from the controller (it always renders with its own build's
+version); `reconcile.Deps.RenderTarget` and `RenderRollout` remain as the
+mechanism a release will drive. Today a renderer change reaches every
+resource as soon as the new controller build runs. With releases, `spec.renderVersion`
 is the target and the stages are the list. The flags are removed in step 3
 of the plan (section 14).
 
@@ -589,7 +590,7 @@ Steps, each useful by itself:
 |---|---|
 | 1. `upgradeMode` on the contract and the kind, default manual; update path for mode, channel and tier | The fields exist and can be corrected after creation. Every cluster is manual; nothing moves. |
 | 2. `status.release` on `Cluster`, written by the cluster reconciler | Every cluster reports which release it has. Useful for inventory alone. |
-| 3. `Release` kind with the renderer version and the per-minor component lists; no stages yet | Newly enabled components take their versions from the release. Replaces `--render-target` / `--render-rollout`. |
+| 3. `Release` kind with the renderer version and the per-minor component lists; no stages yet | Newly enabled components take their versions from the release. Brings back a staged renderer rollout, which the removed `--render-target` / `--render-rollout` settings gave by hand. |
 | 4. Support window: unsupported condition and end-of-support date in cluster status | Operators and tenants see which clusters are out of support. |
 | 5. Stages for automatic clusters: health gates, `maxInProgress`, `maxFailed`, soak, automatic promotion | The nine-stage order runs by itself, for the renderer version. |
 | 6. Pause, resume, hold, and the admin RPCs | The full control surface. |

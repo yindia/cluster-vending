@@ -15,11 +15,10 @@ import (
 //
 // The lookups start from the process's own credentials, as the AWS SDK's
 // default chain finds them (keys in the environment for local testing,
-// IRSA in production), assume sourceRoleARN when it is not empty, and
-// then always the tenant role of the account they read
-// (reconcile.Deps.AWSAccess).
-func WithAWS(ctx context.Context, d reconcile.Deps, sourceRoleARN string) (reconcile.Deps, error) {
-	lookups, err := awscloud.New(ctx, awscloud.Config{SourceRoleARN: sourceRoleARN})
+// IRSA in production), then always assume the tenant role of the account
+// they read (reconcile.Deps.AWSAccess).
+func WithAWS(ctx context.Context, d reconcile.Deps) (reconcile.Deps, error) {
+	lookups, err := awscloud.New(ctx, awscloud.Config{})
 	if err != nil {
 		return reconcile.Deps{}, err
 	}

@@ -20,6 +20,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -168,4 +169,13 @@ func Start(ctx context.Context, mgr manager.Manager, ready *atomic.Bool) (<-chan
 	}
 	ready.Store(true)
 	return done, nil
+}
+
+// CredentialsSecret is the provider credentials Secret of the settings
+// (config.AWS.ProviderCredentials) as the renderer takes it; nil for none.
+func CredentialsSecret(ref *config.SecretKeyRef) *crossplaneaws.CredentialsSecret {
+	if ref == nil {
+		return nil
+	}
+	return &crossplaneaws.CredentialsSecret{Namespace: ref.Namespace, Name: ref.Name, Key: ref.Key}
 }

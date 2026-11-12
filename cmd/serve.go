@@ -99,12 +99,17 @@ func newServeCmd(g *globals) *cobra.Command {
 				Kube:         mgr.GetClient(), // reads from the informer cache
 				KubeReader:   mgr.GetAPIReader(),
 				RenderTarget: renderTarget, RenderRollout: cfg.RenderRollout,
-				Logger: g.logger,
+				// With the background loop the server bootstraps accounts
+				// itself (the loop has no account reconciler); otherwise the
+				// CloudAccount controller does.
+				ProviderCredentials:  management.CredentialsSecret(cfg.AWS.ProviderCredentials),
+				AccountsByController: !cfg.BackgroundLoop,
+				Logger:               g.logger,
 			}
 			if cfg.BackgroundLoop {
 				// The server is the reconciler too: only the loop's
 				// reconcilers get the AWS lookups, the handlers never do.
-				reconciling, err := management.WithAWS(ctx, deps, "")
+				reconciling, err := management.WithAWS(ctx, deps)
 				if err != nil {
 					return err
 				}

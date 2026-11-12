@@ -39,10 +39,13 @@ func NewTenantService(d service.Deps) *TenantService { return &TenantService{dep
 // applies and reads the account's objects in the management cluster.
 func (s *TenantService) rec() *accountreconcile.Reconciler { return accountreconcile.New(s.deps) }
 
-// BootstrapTenant records the tenant and its account, then applies what the
-// management cluster needs to reach the account
-// (account.Reconciler.Apply). Every step is idempotent, so a failed call
-// is fixed by calling again.
+// BootstrapTenant records the tenant and its account. When a controller
+// reconciles accounts (Deps.AccountsByController: the CloudAccount
+// controller, with the Kubernetes store) that is all: the controller
+// applies what the management cluster needs, and the answer shows the
+// account as stored. Otherwise (the server's background loop, which has no
+// account reconciler) it also applies it here (account.Reconciler.Apply).
+// Every step is idempotent, so a failed call is fixed by calling again.
 func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -68,8 +71,10 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 	if err != nil {
 		return nil, err
 	}
-	if err := s.rec().Apply(ctx, stored); err != nil {
-		return nil, service.ToConnect(err)
+	if !s.deps.AccountsByController {
+		if err := s.rec().Apply(ctx, stored); err != nil {
+			return nil, service.ToConnect(err)
+		}
 	}
 
 	// Account access check, disabled for now: assume the tenant role once,

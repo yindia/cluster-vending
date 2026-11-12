@@ -151,8 +151,12 @@ build: ## Build bin/cluster-vending
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY) .
 
 .PHONY: run
-run: build ## Run the server against the kind cluster (hack/config.local.yaml)
+run: build ## Run the API server against the kind cluster (hack/config.local.yaml); start run-controller first
 	$(BINARY) serve --config hack/config.local.yaml
+
+.PHONY: run-controller
+run-controller: build ## Run the controller against the kind cluster (hack/controller.local.yaml); AWS keys from the environment
+	$(BINARY) controller --config hack/controller.local.yaml
 
 .PHONY: clean
 clean: ## Remove build output and the local database

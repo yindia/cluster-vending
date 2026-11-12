@@ -4,13 +4,12 @@
 #   1. a kind cluster (KIND_CLUSTER, default cluster-vending)
 #   2. Crossplane (CROSSPLANE_VERSION) from the crossplane-stable Helm chart
 #
-# That is all. What reconciles creates the rest (the controller; or the
-# server with hack/config.local.yaml, whose database store makes it run the
-# background loop): on startup the Crossplane AWS providers (ec2, eks, iam,
-# cloudwatchlogs, kms), provider-helm and, with a management role, the AWS
-# providers' IRSA DeploymentRuntimeConfig, when missing
-# (--install-providers); tenant namespaces, ProviderConfigs and managed
-# resources as it reconciles.
+# That is all. The controller (`make run-controller`) creates the rest: on
+# startup the platform's CRDs, the Crossplane AWS providers (ec2, eks, iam,
+# cloudwatchlogs, kms), provider-helm and their runtime config, when
+# missing (--install-providers); tenant namespaces, ProviderConfigs and
+# managed resources as it reconciles. Kind has no IRSA: the providers need
+# a credentials Secret (docs/controller.md, "Local run").
 #
 # Safe to re-run: every step is idempotent. Delete the cluster with
 # hack/stop.sh.
@@ -37,8 +36,8 @@ fi
 
 # provider.defaultActivations=null: no catch-all activation policy. The AWS
 # providers define ~280 managed resource kinds; activating all of them makes
-# ~300 CRDs and starves a laptop kind cluster. The server activates only the
-# kinds it uses (ManagedResourceActivationPolicy "cluster-vending").
+# ~300 CRDs and starves a laptop kind cluster. The controller activates only
+# the kinds it uses (ManagedResourceActivationPolicy "cluster-vending").
 log "installing Crossplane $CROSSPLANE_VERSION"
 helm repo add crossplane-stable https://charts.crossplane.io/stable --force-update >/dev/null
 helm upgrade --install crossplane crossplane-stable/crossplane \
@@ -55,6 +54,8 @@ cat <<MSG
 
 Ready. kubectl context: $CONTEXT
 
-  make run      run the server against this cluster
+  1. create the providers' credentials Secret (docs/controller.md, "Local run")
+  2. make run-controller   the controller (AWS keys exported in its shell)
+  3. make run              the API server
 
 MSG

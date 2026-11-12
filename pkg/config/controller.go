@@ -5,7 +5,6 @@ import (
 	"net"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 // Flags and environment variables of the controller command.
@@ -23,7 +22,13 @@ const (
 	DefaultProbeAddr   = ":8081"
 )
 
-var controllerSettings = append([]Setting{
+// controllerSettings are all the controller takes. How the providers run
+// (poll intervals, reconcile rate, resources) is fixed in the code that
+// renders their runtime config (crossplaneaws.DefaultProviderRuntime);
+// an operator who needs other values sets --install-providers=false and
+// manages the provider objects. The controller always brings resources to
+// this build's renderer.
+var controllerSettings = []Setting{
 	{Flag: FlagConfig, Env: EnvConfig,
 		Usage: "YAML file with any of these settings, keyed by flag name; flags and environment variables win over it"},
 	{Flag: FlagMetricsAddr, Env: EnvMetricsAddr, Default: DefaultMetricsAddr,
@@ -34,12 +39,12 @@ var controllerSettings = append([]Setting{
 		Usage: "run the controllers behind leader election (a Lease), so one replica reconciles"},
 	{Flag: FlagLeaseNamespace, Env: EnvLeaseNamespace, Default: DefaultLeaseNamespace,
 		Usage: "namespace of the leader election Lease in the management cluster: the controller's own namespace"},
-	{Flag: FlagRenderTarget, Env: EnvRenderTarget, Default: "0",
-		Usage: "renderer version existing networks and clusters are re-applied up to; 0 is this build's version"},
-	{Flag: FlagRenderRollout, Env: EnvRenderRollout,
-		Usage: "comma-separated tenant, network or cluster IDs the renderer rollout is limited to; empty for all"},
-	awsSourceSetting,
-}, slices.Concat(providerSettings, awsSettings)...)
+	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
+		Usage: "IAM role ARN the Crossplane AWS providers run as (IRSA), in the management account (the account is taken from the ARN); tenant roles trust it; required"},
+	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
+		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere, also to run the providers with other settings than the platform's"},
+	providerCredentialsSetting,
+}
 
 // ControllerSettings returns the settings of the controller command.
 func ControllerSettings() []Setting { return slices.Clone(controllerSettings) }
@@ -50,17 +55,11 @@ type Controller struct {
 	MetricsAddr, ProbeAddr string
 	LeaderElect            bool
 	LeaseNamespace         string
-	// RenderTarget (0: this build's renderer version) and RenderRollout
-	// (empty: all) drive the renderer rollout, as for the server.
-	RenderTarget  int64
-	RenderRollout []string
-	// InstallProviders: create the Crossplane providers on startup, with
-	// Provider as how the AWS providers run.
+	// InstallProviders: create the Crossplane providers on startup.
 	InstallProviders bool
-	Provider         ProviderRuntime
-	// AWS is the management account the providers run in (required), the
-	// optional role between the controller's own credentials and the
-	// tenant roles, and whether keys were found in the environment.
+	// AWS is the management role the providers run as (its account
+	// derived from it), the credentials Secret of the providers when set,
+	// and whether keys were found in the environment.
 	AWS AWS
 }
 
@@ -70,26 +69,20 @@ type Controller struct {
 func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	v, errs := resolve(controllerSettings, flags, env, file)
 	cfg := Controller{MetricsAddr: v[FlagMetricsAddr], ProbeAddr: v[FlagProbeAddr], LeaseNamespace: v[FlagLeaseNamespace]}
-	cfg.AWS = AWS{ManagementAccountID: v[FlagAWSManagementAccountID], ManagementRoleARN: v[FlagAWSManagementRoleARN],
-		SourceRoleARN: v[FlagAWSSourceRoleARN], StaticKeys: staticKeysFrom(env)}
-	errs = append(errs, cfg.AWS.validate()...)
-	provider, providerErrs := loadProviderRuntime(v)
-	cfg.Provider = provider
-	errs = append(errs, providerErrs...)
-	var err error
+	aws, awsErrs := managementFromRole(v[FlagAWSManagementRoleARN])
+	errs = append(errs, awsErrs...)
+	cfg.AWS = aws
+	cfg.AWS.StaticKeys = staticKeysFrom(env)
+	creds, err := parseSecretKeyRef(v[FlagProviderCredentialsSecret])
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.AWS.ProviderCredentials = creds
 	if cfg.InstallProviders, err = strconv.ParseBool(v[FlagInstallProviders]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallProviders), v[FlagInstallProviders]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))
-	}
-	if cfg.RenderTarget, err = strconv.ParseInt(v[FlagRenderTarget], 10, 64); err != nil || cfg.RenderTarget < 0 {
-		errs = append(errs, fmt.Errorf("%s must be a non-negative integer, got %q", setting(FlagRenderTarget), v[FlagRenderTarget]))
-	}
-	for _, id := range strings.Split(v[FlagRenderRollout], ",") {
-		if id = strings.TrimSpace(id); id != "" {
-			cfg.RenderRollout = append(cfg.RenderRollout, id)
-		}
 	}
 	for _, flag := range []string{FlagMetricsAddr, FlagProbeAddr} {
 		addr := v[flag]
@@ -104,4 +97,20 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 		return Controller{}, invalid(errs)
 	}
 	return cfg, nil
+}
+
+// managementFromRole is the management account of the role the providers
+// run as: the account is the ARN's. The role is required and validated as
+// the server's two settings are (AWS.validate).
+func managementFromRole(roleARN string) (AWS, []error) {
+	if roleARN == "" {
+		return AWS{}, []error{fmt.Errorf("%s is required", setting(FlagAWSManagementRoleARN))}
+	}
+	m := roleARNPattern.FindStringSubmatch(roleARN)
+	if m == nil {
+		return AWS{}, []error{fmt.Errorf("%s must be an IAM role ARN (arn:aws:iam::<account>:role/<name>), got %q",
+			setting(FlagAWSManagementRoleARN), roleARN)}
+	}
+	a := AWS{ManagementAccountID: m[2], ManagementRoleARN: roleARN}
+	return a, a.validate()
 }

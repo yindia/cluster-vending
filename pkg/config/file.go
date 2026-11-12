@@ -95,7 +95,9 @@ func flatten(n *yaml.Node, prefix string, out map[string]string) error {
 
 func checkKeys(values map[string]string) error {
 	known := map[string]bool{}
-	for _, s := range slices.Concat(globalSettings, serveSettings) {
+	// Any command's settings: the file is read before the command is known
+	// to it, and the controller's settings are not the server's.
+	for _, s := range slices.Concat(globalSettings, serveSettings, controllerSettings) {
 		known[s.Flag] = true
 	}
 	var errs []error

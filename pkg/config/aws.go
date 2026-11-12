@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 )
@@ -13,9 +14,15 @@ const (
 	EnvAWSManagementAccountID  = "CV_AWS_MANAGEMENT_ACCOUNT_ID"
 	FlagAWSManagementRoleARN   = "aws-management-role-arn"
 	EnvAWSManagementRoleARN    = "CV_AWS_MANAGEMENT_ROLE_ARN"
-	FlagAWSSourceRoleARN       = "aws-source-role-arn"
-	EnvAWSSourceRoleARN        = "CV_AWS_SOURCE_ROLE_ARN"
+	// FlagProviderCredentialsSecret names the Secret the Crossplane AWS
+	// providers authenticate with instead of IRSA (local testing).
+	FlagProviderCredentialsSecret = "provider-credentials-secret"
+	EnvProviderCredentialsSecret  = "CV_PROVIDER_CREDENTIALS_SECRET" //nolint:gosec // a variable name, not a credential
 )
+
+// DefaultCredentialsKey is the key of a credentials Secret when the
+// setting names none: an AWS shared credentials file.
+const DefaultCredentialsKey = "credentials"
 
 var awsSettings = []Setting{
 	{Flag: FlagAWSManagementAccountID, Env: EnvAWSManagementAccountID,
@@ -24,10 +31,44 @@ var awsSettings = []Setting{
 		Usage: "IAM role ARN the Crossplane AWS provider runs as (IRSA), in the management account; tenant roles trust it; required by what reconciles"},
 }
 
-// awsSourceSetting is the role between the controller's own credentials
-// and the tenant roles.
-var awsSourceSetting = Setting{Flag: FlagAWSSourceRoleARN, Env: EnvAWSSourceRoleARN,
-	Usage: "IAM role ARN assumed with the controller's own credentials before every tenant role; empty when those credentials already are the role the tenant roles trust (IRSA as the management role). The credentials themselves are never a setting: they come from the AWS SDK's default chain (IRSA in production; for local testing export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the environment, never in a file or flag)"}
+// providerCredentialsSetting is the controller's: the Secret the
+// providers authenticate with where there is no IRSA.
+var providerCredentialsSetting = Setting{Flag: FlagProviderCredentialsSecret, Env: EnvProviderCredentialsSecret,
+	Usage: "<namespace>/<name>[:<key>] of a Secret holding AWS keys as a shared credentials file (key default \"credentials\"): every account's ProviderConfig then authenticates the Crossplane AWS providers with it instead of IRSA, and still assumes the tenant role. For a management cluster without IRSA (local kind); empty in production. The controller's own credentials are never a setting: they come from the AWS SDK's default chain (IRSA in production; for local testing export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, never in a file or flag)"}
+
+// SecretKeyRef names one key of a Secret.
+type SecretKeyRef struct {
+	Namespace, Name, Key string
+}
+
+// String is the setting's own spelling of the reference.
+func (r SecretKeyRef) String() string { return r.Namespace + "/" + r.Name + ":" + r.Key }
+
+var (
+	// A namespace is a DNS label; a Secret name a DNS subdomain.
+	dnsLabelPattern     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+	dnsSubdomainPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+	secretKeyPattern    = regexp.MustCompile(`^[-._a-zA-Z0-9]{1,253}$`)
+)
+
+// parseSecretKeyRef reads <namespace>/<name>[:<key>]; nil for "".
+func parseSecretKeyRef(raw string) (*SecretKeyRef, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	ref, key, hasKey := strings.Cut(raw, ":")
+	ns, name, ok := strings.Cut(ref, "/")
+	if !hasKey {
+		key = DefaultCredentialsKey
+	}
+	switch {
+	case !ok || !dnsLabelPattern.MatchString(ns) || !dnsSubdomainPattern.MatchString(name):
+		return nil, fmt.Errorf("%s must be <namespace>/<name>[:<key>], got %q", setting(FlagProviderCredentialsSecret), raw)
+	case !secretKeyPattern.MatchString(key):
+		return nil, fmt.Errorf("%s: %q is not a Secret key", setting(FlagProviderCredentialsSecret), key)
+	}
+	return &SecretKeyRef{Namespace: ns, Name: name, Key: key}, nil
+}
 
 var (
 	accountIDPattern = regexp.MustCompile(`^\d{12}$`)
@@ -44,9 +85,10 @@ var (
 type AWS struct {
 	ManagementAccountID string
 	ManagementRoleARN   string
-	// SourceRoleARN, when set, is assumed with the controller's own
-	// credentials before every tenant role (FlagAWSSourceRoleARN).
-	SourceRoleARN string
+	// ProviderCredentials, when set, is the Secret the Crossplane AWS
+	// providers authenticate with instead of IRSA
+	// (FlagProviderCredentialsSecret); nil in production.
+	ProviderCredentials *SecretKeyRef
 	// StaticKeys are AWS keys found in the environment (AWS_ACCESS_KEY_ID,
 	// AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN): local testing. They are
 	// only noticed here, to say so in the log; the AWS SDK reads them
@@ -116,10 +158,6 @@ func (a AWS) validate() []error {
 			errs = append(errs, fmt.Errorf("%s is in account %s, want the management account %s",
 				setting(FlagAWSManagementRoleARN), account, a.ManagementAccountID))
 		}
-	}
-	if a.SourceRoleARN != "" && !roleARNPattern.MatchString(a.SourceRoleARN) {
-		errs = append(errs, fmt.Errorf("%s must be an IAM role ARN (arn:aws:iam::<account>:role/<name>), got %q",
-			setting(FlagAWSSourceRoleARN), a.SourceRoleARN))
 	}
 	return errs
 }

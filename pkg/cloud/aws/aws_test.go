@@ -17,7 +17,6 @@ import (
 const (
 	tenantAccount = "444455556666"
 	tenantRole    = "arn:aws:iam::444455556666:role/cluster-vending-provisioner"
-	sourceRole    = "arn:aws:iam::111122223333:role/cluster-vending"
 )
 
 func tenantRoleARN(accountID string) string {
@@ -113,23 +112,6 @@ func TestAssumesTenantRoleFromAmbientCredentials(t *testing.T) {
 		t.Errorf("credentials = %s, want the assumed role's", got.AccessKeyID)
 	}
 	want := []stsCall{{role: tenantRole, session: DefaultSessionName, signedBy: "AKIDBASE"}}
-	if calls := sts.recorded(); fmt.Sprint(calls) != fmt.Sprint(want) {
-		t.Errorf("STS calls = %+v, want %+v", calls, want)
-	}
-}
-
-func TestChainsThroughSourceRole(t *testing.T) {
-	sts := &fakeSTS{}
-	c := newTestClient(t, sts, Config{SourceRoleARN: sourceRole, SessionName: "dev-alice"})
-
-	if _, err := c.tenantCredentials(tenantRole, "us-east-1").Retrieve(t.Context()); err != nil {
-		t.Fatalf("Retrieve: %v", err)
-	}
-	// The tenant role is assumed with the source role's credentials.
-	want := []stsCall{
-		{role: sourceRole, session: "dev-alice", signedBy: "AKIDBASE"},
-		{role: tenantRole, session: "dev-alice", signedBy: "ASIA1"},
-	}
 	if calls := sts.recorded(); fmt.Sprint(calls) != fmt.Sprint(want) {
 		t.Errorf("STS calls = %+v, want %+v", calls, want)
 	}
@@ -244,26 +226,6 @@ func TestEnvironmentKeysAssumeTheTenantRole(t *testing.T) {
 	want := []stsCall{{role: tenantRole, session: DefaultSessionName, signedBy: "AKIDENV"}}
 	if calls := sts.recorded(); fmt.Sprint(calls) != fmt.Sprint(want) {
 		t.Errorf("STS calls = %+v, want the tenant role assumed with the environment's keys: %+v", calls, want)
-	}
-}
-
-// With a source role the chain is: own credentials, source role, tenant
-// role.
-func TestEnvironmentKeysChainThroughTheSourceRole(t *testing.T) {
-	sts := &fakeSTS{callerAccount: tenantAccount}
-	tenant, err := envClient(t, sts, Config{SourceRoleARN: sourceRole}).TenantFor(Access{AccountID: tenantAccount, RoleARN: tenantRole}, "us-east-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.VerifyAccess(t.Context()); err != nil {
-		t.Fatalf("VerifyAccess: %v", err)
-	}
-	want := []stsCall{
-		{role: sourceRole, session: DefaultSessionName, signedBy: "AKIDENV"},
-		{role: tenantRole, session: DefaultSessionName, signedBy: "ASIA1"},
-	}
-	if calls := sts.recorded(); fmt.Sprint(calls) != fmt.Sprint(want) {
-		t.Errorf("STS calls = %+v, want %+v", calls, want)
 	}
 }
 

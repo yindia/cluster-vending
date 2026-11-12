@@ -1,0 +1,26 @@
+# Optional, for a management cluster without IRSA (kind, or any cluster
+# whose providers cannot get a web identity): the Crossplane AWS providers
+# authenticate with AWS keys in a Secret instead, and still assume each
+# account's tenant role. Not for production, where IRSA needs nothing.
+#
+# The Secret is created by hand, never by the platform, in the
+# controller's namespace (the kustomization's namespace:), with the keys as
+# an AWS shared credentials file under the key "credentials":
+#
+#   kubectl -n cluster-vending-system create secret generic aws-local-credentials \
+#     --from-file=credentials=/dev/stdin <<< "$(printf '[default]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
+#       "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY")"
+#
+# The controller only checks that the key exists (get on that one
+# Secret); the providers read the keys themselves. Enable it in
+# ../default with components: [../local-credentials].
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- role.yaml
+- role_binding.yaml
+patches:
+- path: manager_patch.yaml
+  target:
+    kind: Deployment
+    name: controller-manager

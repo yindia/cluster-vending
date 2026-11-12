@@ -1,0 +1,8 @@
+# The ProviderConfigs authenticate with the Secret instead of IRSA. Its
+# namespace is the kustomization's namespace: (cluster-vending-system in
+# ../default); change both together.
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: CV_PROVIDER_CREDENTIALS_SECRET
+    value: cluster-vending-system/aws-local-credentials:credentials

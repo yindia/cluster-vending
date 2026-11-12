@@ -37,48 +37,49 @@ decided but not built, and what is not verified.
 
 ## Run locally
 
-```sh
-make kind-up   # hack/start.sh: a kind cluster with Crossplane, nothing else
-make run       # the server against it, with hack/config.local.yaml
-```
-
-`hack/start.sh` creates a kind cluster named `cluster-vending` and installs
-Crossplane from its Helm chart. It installs no provider: on startup what
-reconciles installs the Crossplane AWS providers it needs and activates only
-the managed resource kinds it uses. That is the controller; with the
-database store of `hack/config.local.yaml` the server runs the background
-loop and is the reconciler itself.
-
-`hack/config.local.yaml` points the server at the `kind-cluster-vending`
-context, listens on `127.0.0.1:8080`, keeps state in a local SQLite file
-(`bin/cluster-vending.db`) and turns leader election off. Every setting is
-also a flag and a `CV_*` environment variable; a flag wins over the variable,
-which wins over the file. `bin/cluster-vending serve --help` lists them.
-
-The server keeps its state in a database by default. `--store=kubernetes`
-keeps it in custom resources in the management cluster instead (see the
-architecture document).
-
-The controller manager is a separate command:
+Three terminals, against a kind cluster. The controller does the work and is
+the only command that talks to AWS; the API server validates and stores.
 
 ```sh
-bin/cluster-vending controller --leader-elect=false \
-  --aws-management-account-id <account> --aws-management-role-arn <role arn>
-bin/cluster-vending serve --http-addr 127.0.0.1:8080 --store=kubernetes
+# Once: a kind cluster with Crossplane, nothing else (hack/start.sh).
+make kind-up
+
+# Your AWS keys, in the shell only (never in a file or flag).
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+
+# Once: the same keys as a Secret the Crossplane providers authenticate
+# with (kind has no IRSA). They never appear on the command line.
+kubectl --context kind-cluster-vending -n crossplane-system create secret generic \
+  aws-local-credentials --from-file=credentials=/dev/stdin <<EOF
+[default]
+aws_access_key_id = $AWS_ACCESS_KEY_ID
+aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+EOF
+# then uncomment provider-credentials-secret in hack/controller.local.yaml
+# and set aws-management-role-arn there.
+
+# Terminal 1, in the shell with the keys: the controller.
+make run-controller    # hack/controller.local.yaml
+
+# Terminal 2: the API server, once the controller has installed the CRDs
+# and providers (it waits for them).
+make run               # hack/config.local.yaml
+
+# Terminal 3: the CLI walkthrough below.
 ```
 
-With `--store=kubernetes` the server only writes the
-`cloud.cluster-vending.io` objects and the controller reconciles them (the
-server's background loop is off; `--background-loop=true` runs the server
-without the controller). In this mode the server needs nothing of AWS: no
-`--aws-*` setting, no credentials. The controller is the only command that
-looks at AWS and the one that installs the providers; it needs
-`--aws-management-account-id`, `--aws-management-role-arn` and AWS
-credentials (for local testing, `AWS_ACCESS_KEY_ID` and
-`AWS_SECRET_ACCESS_KEY` in its environment; every lookup still assumes the
-tenant role of the account it reads). Start the controller first: the
-server waits for the kinds it installs. See
-[docs/controller.md](docs/controller.md).
+Both the controller's lookups and the providers assume each account's
+tenant role, whatever their own credentials are, so the tenant role's trust
+policy must allow the IAM user or role the keys belong to.
+
+`hack/config.local.yaml` keeps the server's state as custom resources in
+the kind cluster (`store: kubernetes`) and needs no AWS setting.
+`hack/controller.local.yaml` turns leader election off and names the
+providers' credentials Secret. Every setting is also a flag and a `CV_*`
+environment variable; a flag wins over the variable, which wins over the
+file. `bin/cluster-vending serve --help` and `controller --help` list them.
+In production there is no Secret and no keys: the controller and the
+providers run with IRSA. See [docs/controller.md](docs/controller.md).
 
 ## CLI walkthrough
 

@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,12 +60,41 @@ func (r *Reconciler) Reconcile(ctx context.Context, tenantID, cloudAccountID str
 
 // objects are what an AWS account needs in the management cluster, in the
 // order they are applied: the tenant namespace, then the account's
-// ProviderConfig in it (it assumes the tenant role, a.Identity).
-func objects(a *model.CloudAccount) []client.Object {
+// ProviderConfig in it (it assumes the tenant role, a.Identity, with the
+// providers' IRSA credentials or, when set, the credentials Secret).
+func objects(a *model.CloudAccount, secret *crossplaneaws.CredentialsSecret) []client.Object {
 	return []client.Object{
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: a.Namespace, Labels: crossplane.Labels(a.TenantID)}},
-		crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity),
+		crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, secret),
 	}
+}
+
+// CheckCredentialsSecret reports, as a FailedPrecondition fault, a
+// credentials Secret (Deps.ProviderCredentials) that does not exist or
+// lacks its key: every ProviderConfig would point the providers at it and
+// fail. Only the key's presence is looked at; the keys themselves are
+// never read into anything the platform keeps or logs. Nil when no Secret
+// is set.
+func CheckCredentialsSecret(ctx context.Context, d reconcile.Deps) error {
+	ref := d.ProviderCredentials
+	if ref == nil {
+		return nil
+	}
+	secret := &corev1.Secret{}
+	err := d.Reader().Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, secret)
+	switch {
+	case apierrors.IsNotFound(err):
+		return fault.Newf(fault.FailedPrecondition,
+			"the provider credentials Secret %s/%s does not exist; create it (see docs/controller.md) or unset --provider-credentials-secret",
+			ref.Namespace, ref.Name)
+	case err != nil:
+		return fault.Newf(fault.Unavailable, "cannot read the provider credentials Secret %s/%s: %v", ref.Namespace, ref.Name, err)
+	}
+	if _, ok := secret.Data[ref.Key]; !ok {
+		return fault.Newf(fault.FailedPrecondition,
+			"the provider credentials Secret %s/%s has no key %q (an AWS shared credentials file)", ref.Namespace, ref.Name, ref.Key)
+	}
+	return nil
 }
 
 // owner is the account as the owner of its own objects.
@@ -78,7 +108,10 @@ func owner(a *model.CloudAccount) reconcile.Owner {
 // beforehand: without them the ProviderConfig kind does not exist and
 // Apply fails with a FailedPrecondition fault. Every step is idempotent.
 func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
-	objs := objects(a)
+	if err := CheckCredentialsSecret(ctx, r.deps); err != nil {
+		return err
+	}
+	objs := objects(a, r.deps.ProviderCredentials)
 	for _, obj := range objs {
 		err := kube.Apply(ctx, r.deps.Kube, obj)
 		switch {

@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -53,7 +54,18 @@ type Deps struct {
 	// AWSClusters checks a new cluster's name against EKS and resolves the
 	// versions EKS offers; nil skips both (tests): EKS chooses at create.
 	AWSClusters awscloud.ClusterLookup
-	Logger      *slog.Logger
+	// ProviderCredentials, when set, is the Secret every account's
+	// ProviderConfig authenticates the Crossplane AWS providers with,
+	// instead of IRSA (a management cluster without IRSA, such as a local
+	// kind cluster). The tenant role is assumed either way. Nil in
+	// production.
+	ProviderCredentials *crossplaneaws.CredentialsSecret
+	// AccountsByController: a controller applies the stored accounts (the
+	// CloudAccount controller), so the API stores an account and applies
+	// nothing. False while the server reconciles itself (the background
+	// loop has no account reconciler): BootstrapTenant then applies.
+	AccountsByController bool
+	Logger               *slog.Logger
 }
 
 // AWSTenantRoleARN returns the IAM role the platform assumes in one of a

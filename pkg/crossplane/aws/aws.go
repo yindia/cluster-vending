@@ -164,15 +164,32 @@ func Providers() []*pkgv1.Provider {
 	return out
 }
 
+// CredentialsSecret names the Secret key that holds AWS keys in the
+// shared credentials file format ([default] aws_access_key_id = ...): the
+// providers' own credentials where there is no IRSA (a local kind
+// cluster). The providers read it themselves; the platform never does.
+type CredentialsSecret struct {
+	Namespace, Name, Key string
+}
+
 // ProviderConfig is the ProviderConfig of a tenant's AWS account: the
-// provider authenticates with IRSA as the management role (RuntimeConfig),
-// then assumes tenantRoleARN in the tenant's account. No static credentials
-// are stored.
+// provider authenticates with its own credentials, then assumes
+// tenantRoleARN in the tenant's account. Its own credentials are IRSA as
+// the management role (RuntimeConfig), or, with secret set, the keys in
+// that Secret (local testing); the tenant role is assumed either way, so a
+// local run exercises the permissions production has. No keys are stored
+// in the ProviderConfig.
 //
 // name is the account's stored ProviderConfig name
 // (model.CloudAccount.ProviderConfigName): a tenant has one ProviderConfig
 // per account, and the managed resources in that account reference it.
-func ProviderConfig(namespace, name, tenantID, tenantRoleARN string) *awsv1beta1.ProviderConfig {
+func ProviderConfig(namespace, name, tenantID, tenantRoleARN string, secret *CredentialsSecret) *awsv1beta1.ProviderConfig {
+	credentials := awsv1beta1.ProviderCredentials{Source: credentialsSourceIRSA}
+	if secret != nil {
+		credentials = awsv1beta1.ProviderCredentials{Source: xpv2.CredentialsSourceSecret,
+			CommonCredentialSelectors: xpv2.CommonCredentialSelectors{SecretRef: &xpv2.SecretKeySelector{
+				SecretReference: xpv2.SecretReference{Namespace: secret.Namespace, Name: secret.Name}, Key: secret.Key}}}
+	}
 	return &awsv1beta1.ProviderConfig{
 		TypeMeta: metav1.TypeMeta{APIVersion: awsv1beta1.SchemeGroupVersion.String(), Kind: awsv1beta1.ProviderConfigKind},
 		ObjectMeta: metav1.ObjectMeta{
@@ -181,7 +198,7 @@ func ProviderConfig(namespace, name, tenantID, tenantRoleARN string) *awsv1beta1
 			Labels:    crossplane.Labels(tenantID),
 		},
 		Spec: awsv1beta1.ProviderConfigSpec{
-			Credentials:     awsv1beta1.ProviderCredentials{Source: credentialsSourceIRSA},
+			Credentials:     credentials,
 			AssumeRoleChain: []awsv1beta1.AssumeRoleOptions{{RoleARN: ptr.To(tenantRoleARN)}},
 		},
 	}

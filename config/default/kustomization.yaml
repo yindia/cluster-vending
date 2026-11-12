@@ -30,12 +30,17 @@ resources:
 #components:
 #- ../metrics
 
+# [NO IRSA] For a management cluster without IRSA: the providers
+# authenticate with AWS keys in a Secret you create, then assume the tenant
+# roles (see ../local-credentials). Not for production.
+#components:
+#- ../local-credentials
+
 # [IRSA] The controller's AWS access in production: the IAM role of its
 # service account. PLACEHOLDER, replace it. The role must be allowed to
 # assume the tenant roles (sts:AssumeRole), and every tenant role's trust
-# policy must name it (or the management role, when this role assumes that
-# first: --aws-source-role-arn). With the management role itself here, the
-# tenant roles need to trust one role only. For local testing there is no
+# policy must name it. With the management role itself here, the tenant
+# roles need to trust one role only. For local testing there is no
 # annotation: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and run
 # `cluster-vending controller` (docs/controller.md).
 patches:

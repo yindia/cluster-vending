@@ -31,6 +31,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/management"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
+	"github.com/yindia/cluster-vending/pkg/reconcile/account"
 )
 
 // leaseName is the leader election Lease of the controller: not the API
@@ -52,19 +53,14 @@ type Options struct {
 	// so one replica reconciles.
 	LeaderElect    bool
 	LeaseNamespace string
-	// RenderTarget (0: this build's renderer version) and RenderRollout
-	// (empty: all) drive the renderer rollout, as for the API server.
-	RenderTarget  int64
-	RenderRollout []string
 	// InstallProviders creates the Crossplane providers, provider-helm and
-	// the activation policy when missing; ProviderRuntime is how the AWS
-	// providers run.
+	// the activation policy when missing, running as the platform's
+	// defaults (crossplaneaws.DefaultProviderRuntime) and as the management
+	// role.
 	InstallProviders bool
-	ProviderRuntime  crossplaneaws.ProviderRuntime
-	// AWS is the management account (the providers run as its role), the
-	// optional role between the controller's own credentials and the
-	// tenant roles, and whether keys were found in the environment (local
-	// testing).
+	// AWS is the management role the providers run as, the providers'
+	// credentials Secret when there is no IRSA, and whether keys were
+	// found in the environment (local testing).
 	AWS config.AWS
 	// Logger receives the manager's and the controllers' logs. Nil: they
 	// are discarded.
@@ -110,7 +106,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	options := management.Options{
 		Kubeconfig: o.Kubeconfig, KubeContext: o.KubeContext, Logger: logger,
-		InstallProviders: o.InstallProviders, ProviderRuntime: o.ProviderRuntime, InstallKinds: true,
+		InstallProviders: o.InstallProviders, ProviderRuntime: providerRuntime(o.AWS), InstallKinds: true,
 		LeaderElection:     kube.LeaderElection{Enabled: o.LeaderElect, Namespace: o.LeaseNamespace},
 		WatchPlatformKinds: true, LeaseName: leaseName, MetricsAddr: o.MetricsAddr, ProbeAddr: o.ProbeAddr,
 	}
@@ -134,20 +130,21 @@ func Run(ctx context.Context, o Options) error {
 	if o.AWS.StaticKeys != nil {
 		logger.Warn("AWS keys found in the environment: they are the controller's own credentials (local testing); every lookup still assumes the tenant role of the account it reads")
 	}
-	renderTarget := o.RenderTarget
-	if renderTarget == 0 {
-		renderTarget = crossplaneaws.RenderVersion
-	}
+	// Always this build's renderer, for every resource: releases replace
+	// a configurable target later (docs/design/rollouts.md).
+	renderTarget := int64(crossplaneaws.RenderVersion)
 	reconciling, err := management.WithAWS(ctx, reconcile.Deps{
-		Store:        store,
-		Kube:         mgr.GetClient(), // reads from the informer cache
-		KubeReader:   mgr.GetAPIReader(),
-		RenderTarget: renderTarget, RenderRollout: o.RenderRollout,
+		Store:               store,
+		Kube:                mgr.GetClient(), // reads from the informer cache
+		KubeReader:          mgr.GetAPIReader(),
+		RenderTarget:        renderTarget,
+		ProviderCredentials: management.CredentialsSecret(o.AWS.ProviderCredentials), AccountsByController: true,
 		Logger: logger,
-	}, o.AWS.SourceRoleARN)
+	})
 	if err != nil {
 		return err
 	}
+	checkCredentialsSecret(ctx, reconciling, logger)
 	deps := Deps{Direct: direct, Deps: reconciling}
 	if err := Setup(mgr, deps); err != nil {
 		return err
@@ -162,4 +159,31 @@ func Run(ctx context.Context, o Options) error {
 		return fmt.Errorf("controller manager: %w", err)
 	}
 	return nil
+}
+
+// checkCredentialsSecret logs how the providers authenticate, and a
+// credentials Secret that is missing or lacks its key. It does not stop
+// the controller: every account reports the same problem on its status
+// (account.CheckCredentialsSecret) until the Secret is fixed.
+func checkCredentialsSecret(ctx context.Context, d reconcile.Deps, logger *slog.Logger) {
+	ref := d.ProviderCredentials
+	if ref == nil {
+		logger.Info("the Crossplane AWS providers authenticate with IRSA, then assume each account's tenant role")
+		return
+	}
+	logger.Info("the Crossplane AWS providers authenticate with a credentials Secret (no IRSA), then assume each account's tenant role",
+		"secret", ref.Namespace+"/"+ref.Name, "key", ref.Key)
+	if err := account.CheckCredentialsSecret(ctx, d); err != nil {
+		logger.Error("provider credentials Secret: accounts cannot be bootstrapped until it is fixed", "error", err)
+	}
+}
+
+// providerRuntime is how the controller installs the AWS providers: the
+// platform's defaults, running as the management role (IRSA). Other values
+// mean managing the provider objects outside the platform
+// (--install-providers=false).
+func providerRuntime(a config.AWS) crossplaneaws.ProviderRuntime {
+	rt := crossplaneaws.DefaultProviderRuntime()
+	rt.ManagementRoleARN = a.ManagementRoleARN
+	return rt
 }

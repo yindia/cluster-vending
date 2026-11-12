@@ -76,19 +76,37 @@ covers these packages like any other.
 ## Run
 
 ```
-cluster-vending controller --leader-elect=false \
-  --aws-management-account-id <account> --aws-management-role-arn <role arn>
+cluster-vending controller --leader-elect=false --aws-management-role-arn <role arn>
 cluster-vending serve --store=kubernetes   # the API: writes the objects
 ```
 
-`controller` takes the global `--kubeconfig` and `--context`, plus
-`--metrics-addr` (off by default), `--health-probe-addr`, `--leader-elect`,
-`--lease-namespace`, `--render-target`, `--render-rollout`,
-`--install-providers` and the `--provider-*` settings, and the AWS settings
-below. It installs the CRDs of the three kinds and the Crossplane AWS
-providers (unless `--install-providers=false`) and waits for their kinds.
-The API server installs nothing; it waits for the kinds the controller
-installs, so start the controller first.
+`controller` takes the global `--kubeconfig`, `--context`, `--log-format`
+and `--log-level`, and only these:
+
+| Setting | What it is |
+|---|---|
+| `--config` | YAML file with any of these settings |
+| `--health-probe-addr`, `--metrics-addr` | listen addresses (metrics off by default) |
+| `--leader-elect`, `--lease-namespace` | one replica reconciles |
+| `--aws-management-role-arn` | required: the IAM role the Crossplane AWS providers run as (IRSA); the management account is taken from it |
+| `--install-providers` | create the providers, provider-helm and their runtime config when missing |
+| `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
+
+It installs the CRDs of the three kinds and the Crossplane AWS providers
+(unless `--install-providers=false`) and waits for their kinds. The API
+server installs nothing; it waits for the kinds the controller installs, so
+start the controller first.
+
+How the providers run is the platform's: a drift check every 10 minutes (30
+for provider-aws-ec2), at most 10 reconciles per second, 100m CPU and 512Mi
+memory requested, 2Gi memory limit (`crossplaneaws.DefaultProviderRuntime`).
+There is no setting for these. To run the providers otherwise, set
+`--install-providers=false` and manage the `Provider` and
+`DeploymentRuntimeConfig` objects yourself.
+
+The controller always brings every resource to this build's renderer. The
+former `--render-target` and `--render-rollout` settings are gone; release
+objects take their place (docs/design/rollouts.md).
 
 ## AWS access
 
@@ -97,60 +115,93 @@ or EKS cluster of an import, checks a new cluster's name against EKS, and
 resolves the Kubernetes and add-on versions EKS offers. The API server makes
 no AWS call and has no AWS setting or credentials.
 
-There is one rule for how a lookup reaches a tenant's account:
+There is one rule, for the controller's lookups and for the Crossplane
+providers alike:
 
 ```
-the controller's own credentials -> (source role, optional) -> tenant role
+own credentials -> tenant role (always)
 ```
 
-- **Own credentials.** Whatever the AWS SDK's default chain finds. They are
-  never a flag or a file of this project.
-- **Source role**, `--aws-source-role-arn`, optional: assumed first, when the
-  controller's own credentials are not the role the tenant roles trust.
+- **Own credentials.** For the controller, whatever the AWS SDK's default
+  chain finds: IRSA in production, keys in its environment for local
+  testing. For the providers, IRSA as the management role in production, or
+  the keys in `--provider-credentials-secret` where there is no IRSA. They
+  are never a flag value or a file of this project.
 - **Tenant role**, always: the role stored when the account was bootstrapped
-  (the same one the account's ProviderConfig assumes). Nothing is read with
-  the credentials before it, so keys of one account cannot read another, and
-  a role that is not a role of the account is refused.
-
-Two settings are required: `--aws-management-account-id` and
-`--aws-management-role-arn`, the role the Crossplane AWS providers run as.
+  (the one every account's ProviderConfig assumes). Nothing is read with the
+  own credentials, so keys of one account cannot read another, and a role
+  that is not a role of the account is refused. A local run therefore needs
+  and exercises the same permissions as production.
 
 ### Production: IRSA
 
 The controller's service account carries the IAM role annotation
 (`eks.amazonaws.com/role-arn`); `config/default/kustomization.yaml` sets it,
-with a placeholder to replace. No keys exist anywhere. What must be true:
+with a placeholder to replace. The providers run as the management role
+(`--aws-management-role-arn`, on their runtime config). No keys exist
+anywhere and `--provider-credentials-secret` is not set. What must be true:
 
-- The role's trust policy lets the controller's service account assume it
-  through the cluster's OIDC provider (the usual IRSA trust policy).
-- The role may call `sts:AssumeRole` on the tenant roles.
-- Each tenant role's trust policy allows the role that assumes it
-  (`sts:AssumeRole`, principal: that role's ARN). The tenant role is the one
-  the account was bootstrapped with, and the Crossplane providers assume it
-  too, as the management role.
+- The roles' trust policies let the service accounts assume them through
+  the cluster's OIDC provider (the usual IRSA trust policy).
+- They may call `sts:AssumeRole` on the tenant roles.
+- Each tenant role's trust policy allows them (`sts:AssumeRole`, principal:
+  the role's ARN).
 
 The simplest arrangement is to run the controller as the management role
-itself: the tenant roles then trust one role. If the controller has its own
-role instead, either add it to the tenant roles' trust policies, or let it
-assume the management role first (`--aws-source-role-arn=<management role>`;
-the management role's trust policy must then allow the controller's role).
+itself: the tenant roles then trust one role.
 
-### Local testing: keys in the environment
+### Local run: keys in the environment and in a Secret
 
+Kind has no IRSA, so both the controller and the providers start from your
+keys, and both assume the tenant role. The tenant role's trust policy must
+allow the IAM user or role the keys belong to.
+
+1. A kind cluster with Crossplane: `make kind-up`.
+2. Your keys in the shell, never in a file or a flag:
+   ```
+   export AWS_ACCESS_KEY_ID=...
+   export AWS_SECRET_ACCESS_KEY=...
+   export AWS_SESSION_TOKEN=...   # only for temporary keys
+   ```
+3. The same keys as the providers' Secret, in the AWS shared credentials
+   format under the key `credentials` (the command does not print them):
+   ```
+   kubectl --context kind-cluster-vending -n crossplane-system create secret generic \
+     aws-local-credentials --from-file=credentials=/dev/stdin <<EOF
+   [default]
+   aws_access_key_id = $AWS_ACCESS_KEY_ID
+   aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+   EOF
+   ```
+   An existing Secret works as it is; name it in the next step.
+4. In `hack/controller.local.yaml`, set `aws-management-role-arn` (any role
+   ARN of the management account; on kind it is only validated) and
+   uncomment `provider-credentials-secret: crossplane-system/aws-local-credentials`.
+5. `make run-controller` in the shell with the keys.
+6. `make run` in another terminal: the API server (`hack/config.local.yaml`,
+   the Kubernetes store, no AWS setting).
+
+With the Secret set, every ProviderConfig the platform writes is:
+
+```yaml
+spec:
+  credentials:
+    source: Secret
+    secretRef: {namespace: crossplane-system, name: aws-local-credentials, key: credentials}
+  assumeRoleChain:
+  - roleARN: arn:aws:iam::<tenant account>:role/<tenant role>
 ```
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
-export AWS_SESSION_TOKEN=...   # when the keys are temporary
-cluster-vending controller --leader-elect=false \
-  --aws-management-account-id <account> --aws-management-role-arn <role arn>
-```
 
-The keys are the controller's own credentials, nothing more: every lookup
-still assumes the tenant role of the account it reads, so the tenant role's
-trust policy must allow the user or role the keys belong to. There is no
-mode in which keys read a tenant's account directly. Export them in the
-shell; do not put them in a config file, a flag or a manifest. The
-controller logs that it found keys, never the keys.
+and without it (production) `credentials: {source: IRSA}` with the same
+`assumeRoleChain`. The controller checks once at startup, and before every
+account it applies, that the Secret exists and has its key; it reads nothing
+else of it. A missing Secret or key shows on each CloudAccount's `Ready`
+condition, and nothing is applied until it is fixed. The platform never
+writes the Secret.
+
+In a cluster without IRSA that runs the controller as a Deployment, enable
+`config/local-credentials` (a Role to read that one Secret, and the
+setting) and create the Secret in the controller's namespace.
 
 The server with the database store and the background loop (`serve`,
 `--background-loop`) is the reconciler too and follows the same rule with

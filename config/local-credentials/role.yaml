@@ -1,0 +1,19 @@
+# The controller may read the one credentials Secret, to check its key
+# exists before writing ProviderConfigs that point at it. Nothing else of
+# Secrets. Kept in step with the code by config/deploy_test.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: provider-credentials-reader
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  resourceNames:
+  - aws-local-credentials
+  verbs:
+  - get

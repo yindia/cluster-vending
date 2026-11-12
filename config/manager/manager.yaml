@@ -59,17 +59,17 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        # REQUIRED, placeholders: the AWS account the management cluster runs
-        # in and the IAM role the Crossplane AWS providers run as (IRSA); the
-        # tenant roles trust that role. Replace both in an overlay.
-        - name: CV_AWS_MANAGEMENT_ACCOUNT_ID
-          value: "111122223333"
+        # REQUIRED, placeholder: the IAM role the Crossplane AWS providers
+        # run as (IRSA), in the management account (the account is taken
+        # from the ARN); the tenant roles trust that role. Replace it in an
+        # overlay.
         - name: CV_AWS_MANAGEMENT_ROLE_ARN
           value: arn:aws:iam::111122223333:role/crossplane-provider-aws
         # The controller creates the Crossplane AWS providers, provider-helm
-        # and the activation policy when missing. "false" when they are
-        # managed elsewhere (then the install rules in
-        # ../rbac/platform_role.yaml can go).
+        # and the activation policy when missing, with the platform's poll
+        # intervals, reconcile rate and resources. "false" when they are
+        # managed elsewhere, also to run them with other values (then the
+        # install rules in ../rbac/platform_role.yaml can go).
         - name: CV_INSTALL_PROVIDERS
           value: "true"
         # No AWS keys here, ever: the controller's own AWS credentials are

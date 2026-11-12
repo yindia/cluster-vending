@@ -1,22 +1,13 @@
-# Settings for `make run`: the server against the kind cluster from
-# hack/start.sh, with a local SQLite database. Flags and CV_* environment
-# variables win over this file.
+# Settings for `make run`: the API server against the kind cluster from
+# hack/start.sh. Flags and CV_* environment variables win over this file.
+#
+# The server only validates and stores: its state is CloudAccount, Network
+# and Cluster objects in the tenants' namespaces, and `make
+# run-controller` (hack/controller.local.yaml) applies them. It needs no
+# AWS setting and no AWS credentials. Start the controller first: it
+# installs the CRDs and the Crossplane providers the server waits for.
 context: kind-cluster-vending
 log-format: text
 log-level: debug
 http-addr: 127.0.0.1:8080
-# One local server: the background loop runs without a leader election
-# Lease. With it, a server that was killed leaves the Lease behind and the
-# next start waits 15 seconds for it to expire ("failed to acquire lease").
-leader-elect: false
-aws:
-  # Placeholders: nothing calls AWS with these yet.
-  management-account-id: "111122223333"
-  management-role-arn: arn:aws:iam::111122223333:role/crossplane-provider-aws
-database:
-  driver: sqlite
-  dsn: bin/cluster-vending.db
-# Without a database: the state is kept as CloudAccount, Network and
-# Cluster objects (cloud.cluster-vending.io) in the tenants' namespaces of
-# the management cluster.
-# store: kubernetes
+store: kubernetes

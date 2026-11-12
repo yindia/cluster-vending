@@ -7,14 +7,13 @@
 // Every call runs in a tenant's account, and there is one way in. The
 // controller starts from its own credentials, as the AWS SDK's default
 // chain finds them (IRSA in production: the web identity of its service
-// account; keys in its environment for local testing), optionally assumes
-// a source role first, and then ALWAYS assumes the account's tenant role,
-// stored at bootstrap (the account's identity). Nothing is read with the
+// account; keys in its environment for local testing), and then ALWAYS
+// assumes the account's tenant role, stored at bootstrap (the account's
+// identity). Nothing is read with the
 // base credentials themselves: keys of one account cannot read another,
 // and a tenant grants access in one place, its role's trust policy.
 //
-//	own credentials ─(SourceRoleARN, optional)─> source role
-//	                ─(tenant role ARN, always)─> tenant role ─> EC2, ...
+//	own credentials ─(tenant role ARN, always)─> tenant role ─> EC2, ...
 package aws
 
 import (
@@ -67,13 +66,6 @@ var (
 
 // Config says how the controller reaches tenant accounts.
 type Config struct {
-	// SourceRoleARN is assumed first, when set: for running the controller
-	// with credentials that are not the role the tenant roles trust (a
-	// developer's keys or SSO session, or a service account role that is
-	// not the management role). Leave it empty when the controller already
-	// runs as that role (IRSA): a role cannot assume itself unless its
-	// trust policy says so.
-	SourceRoleARN string
 	// SessionName defaults to DefaultSessionName.
 	SessionName string
 }
@@ -160,8 +152,7 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 }
 
 // tenantCredentials are the credentials of a tenant role, cached per role
-// and region: assumed with the client's own credentials, or with the
-// source role's when one is configured.
+// and region, assumed with the client's own credentials.
 func (c *Client) tenantCredentials(roleARN, region string) *awssdk.CredentialsCache {
 	key := roleARN + "/" + region
 	c.mu.Lock()
@@ -171,9 +162,6 @@ func (c *Client) tenantCredentials(roleARN, region string) *awssdk.CredentialsCa
 	}
 	source := c.base.Copy()
 	source.Region = region // regional STS endpoint, next to the calls
-	if c.cfg.SourceRoleARN != "" {
-		source.Credentials = c.assume(source, c.cfg.SourceRoleARN)
-	}
 	creds := c.assume(source, roleARN)
 	c.creds[key] = creds
 	return creds

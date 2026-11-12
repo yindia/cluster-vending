@@ -25,10 +25,6 @@ import (
 // keys of one account cannot read another, and a tenant grants access in
 // one place: its role's trust policy.
 //
-// The source role, when configured (awscloud.Config.SourceRoleARN), is
-// assumed in between: for a controller whose own credentials are not the
-// role the tenant roles trust.
-//
 // It only says where to go; it makes no call. The role must be a role of
 // the account.
 func (d Deps) AWSAccess(_ context.Context, a *model.CloudAccount) (awscloud.Access, error) {

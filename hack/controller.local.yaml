@@ -1,0 +1,26 @@
+# Settings for `make run-controller`: the controller against the kind
+# cluster from hack/start.sh. Flags and CV_* environment variables win over
+# this file.
+#
+# Its own AWS credentials are never here: export AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN for temporary keys) in the
+# shell that runs it. Every lookup assumes the tenant role of the account it
+# reads, so that role must trust the IAM user or role of those keys.
+context: kind-cluster-vending
+log-format: text
+log-level: debug
+# One local controller: no leader election Lease. With it, a controller
+# that was killed leaves the Lease behind and the next start waits for it
+# to expire.
+leader-elect: false
+health-probe-addr: 127.0.0.1:8081
+# The IAM role the Crossplane AWS providers would run as with IRSA; the
+# management account is taken from it. PLACEHOLDER: on kind there is no
+# IRSA, the providers use the Secret below, and this only has to be a valid
+# role ARN of the management account.
+aws-management-role-arn: arn:aws:iam::111122223333:role/crossplane-provider-aws
+# Kind has no IRSA: the providers authenticate with the AWS keys in this
+# Secret (an AWS shared credentials file under the key, default
+# "credentials"), then assume each account's tenant role. Create it once
+# (docs/controller.md, "Local run"), then uncomment:
+# provider-credentials-secret: crossplane-system/aws-local-credentials

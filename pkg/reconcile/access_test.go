@@ -1,4 +1,4 @@
-package service
+package reconcile
 
 import (
 	"testing"
@@ -11,10 +11,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"connectrpc.com/connect/v2"
-
 	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
@@ -70,7 +69,7 @@ func TestAWSAccessFollowsProviderConfig(t *testing.T) {
 		"empty Secret": deps(t, providerConfig("Secret", ref), &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: "tenant-acme"}}),
 	} {
-		if _, err := d.AWSAccess(t.Context(), testAccount); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		if _, err := d.AWSAccess(t.Context(), testAccount); !fault.Is(err, fault.FailedPrecondition) {
 			t.Errorf("%s: %v, want FAILED_PRECONDITION", name, err)
 		}
 	}

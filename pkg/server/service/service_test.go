@@ -13,6 +13,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/implementation"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
 func TestToConnect(t *testing.T) {
@@ -60,7 +61,7 @@ func TestAWSTenantRoleARN(t *testing.T) {
 	}
 	d := Deps{Store: store}
 
-	if _, err := d.AWSTenantRoleARN(ctx, "acme", "0b1f6b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c"); connect.CodeOf(err) != connect.CodeNotFound {
+	if _, err := d.AWSTenantRoleARN(ctx, "acme", "0b1f6b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c"); connect.CodeOf(ToConnect(err)) != connect.CodeNotFound {
 		t.Fatalf("without an account: %v, want NOT_FOUND", err)
 	}
 	for _, a := range []*model.CloudAccount{
@@ -76,7 +77,7 @@ func TestAWSTenantRoleARN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.AWSTenantRoleARN(ctx, "acme", gcp.ID); connect.CodeOf(err) != connect.CodeInvalidArgument {
+	if _, err := d.AWSTenantRoleARN(ctx, "acme", gcp.ID); connect.CodeOf(ToConnect(err)) != connect.CodeInvalidArgument {
 		t.Errorf("gcp account: %v, want INVALID_ARGUMENT", err)
 	}
 	aws, err := store.Tenants().GetCloudAccount(ctx, "acme", model.ProviderAWS, "444455556666")
@@ -89,5 +90,22 @@ func TestAWSTenantRoleARN(t *testing.T) {
 	}
 	if want := "arn:aws:iam::444455556666:role/cluster-vending-provisioner"; got != want {
 		t.Errorf("role ARN = %s, want %s", got, want)
+	}
+}
+
+// A fault from code that knows no RPC library is answered with its code
+// and message.
+func TestToConnectMapsFaults(t *testing.T) {
+	for kind, want := range map[fault.Kind]connect.Code{
+		fault.Internal: connect.CodeInternal, fault.Invalid: connect.CodeInvalidArgument,
+		fault.FailedPrecondition: connect.CodeFailedPrecondition, fault.Unavailable: connect.CodeUnavailable,
+		fault.NotFound: connect.CodeNotFound, fault.AlreadyExists: connect.CodeAlreadyExists,
+		fault.Aborted: connect.CodeAborted, fault.Unimplemented: connect.CodeUnimplemented,
+	} {
+		err := ToConnect(fmt.Errorf("apply: %w", fault.New(kind, "what the caller reads")))
+		var codeErr *connect.Error
+		if !errors.As(err, &codeErr) || codeErr.Code() != want || codeErr.Message() != "what the caller reads" {
+			t.Errorf("kind %d: %v, want %s with the fault's message", kind, err, want)
+		}
 	}
 }

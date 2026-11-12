@@ -38,7 +38,7 @@ const readHeaderTimeout = 10 * time.Second
 // counts as ready), and /metrics (Prometheus: the background loop's and
 // controller-runtime's client and cache metrics).
 func NewHandler(d service.Deps, ready func() bool) http.Handler {
-	server := connect.NewServer()
+	server := connect.NewServer(service.Faults)
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d))

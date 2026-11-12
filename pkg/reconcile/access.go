@@ -1,4 +1,4 @@
-package service
+package reconcile
 
 import (
 	"bufio"
@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"connectrpc.com/connect/v2"
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,6 +14,7 @@ import (
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
 // credentialsSourceSecret is the ProviderConfig source of static keys.
@@ -38,11 +38,10 @@ func (d Deps) AWSAccess(ctx context.Context, a *model.CloudAccount) (awscloud.Ac
 	pc := &awsv1beta1.ProviderConfig{}
 	err := d.Get(ctx, client.ObjectKey{Namespace: a.Namespace, Name: a.ProviderConfigName}, pc)
 	if apierrors.IsNotFound(err) {
-		return awscloud.Access{}, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("account %s has no ProviderConfig %s/%s; bootstrap it", a.ID, a.Namespace, a.ProviderConfigName))
+		return awscloud.Access{}, fault.New(fault.FailedPrecondition, fmt.Sprintf("account %s has no ProviderConfig %s/%s; bootstrap it", a.ID, a.Namespace, a.ProviderConfigName))
 	}
 	if err != nil {
-		return awscloud.Access{}, connect.NewError(connect.CodeUnavailable, "cannot read the account's ProviderConfig: "+err.Error())
+		return awscloud.Access{}, fault.New(fault.Unavailable, "cannot read the account's ProviderConfig: "+err.Error())
 	}
 	access := awscloud.Access{AccountID: a.AccountID}
 	if chain := pc.Spec.AssumeRoleChain; len(chain) > 0 && chain[len(chain)-1].RoleARN != nil {
@@ -53,17 +52,15 @@ func (d Deps) AWSAccess(ctx context.Context, a *model.CloudAccount) (awscloud.Ac
 	}
 	ref := pc.Spec.Credentials.SecretRef
 	if ref == nil {
-		return awscloud.Access{}, connect.NewError(connect.CodeFailedPrecondition, "the ProviderConfig uses a Secret but names none")
+		return awscloud.Access{}, fault.New(fault.FailedPrecondition, "the ProviderConfig uses a Secret but names none")
 	}
 	secret := &corev1.Secret{}
 	if err := d.Kube.Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, secret); err != nil {
-		return awscloud.Access{}, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("cannot read credentials Secret %s/%s: %v", ref.Namespace, ref.Name, err))
+		return awscloud.Access{}, fault.New(fault.FailedPrecondition, fmt.Sprintf("cannot read credentials Secret %s/%s: %v", ref.Namespace, ref.Name, err))
 	}
 	keys, err := parseCredentials(secret.Data[ref.Key])
 	if err != nil {
-		return awscloud.Access{}, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("credentials Secret %s/%s key %s: %v", ref.Namespace, ref.Name, ref.Key, err))
+		return awscloud.Access{}, fault.New(fault.FailedPrecondition, fmt.Sprintf("credentials Secret %s/%s key %s: %v", ref.Namespace, ref.Name, ref.Key, err))
 	}
 	access.Static = keys
 	return access, nil

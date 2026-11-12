@@ -1,54 +1,39 @@
 // Package service holds what every cloud.v1 service implementation shares:
-// its dependencies and the mapping of errors to Connect codes. The services
+// its dependencies (reconcile.Deps) and the mapping of errors to Connect codes. The services
 // themselves live in pkg/server/tenant, network and cluster.
 package service
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log/slog"
-	"slices"
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
-	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/fault"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
-// Deps are what the services work with: the database (the source of
-// truth), the management cluster where Crossplane managed resources are
-// created, and how tenant cloud accounts are reached.
-type Deps struct {
-	Store repository.Store
-	// Kube reads from the informer cache (the server's manager) and writes
-	// to the API server; tests use a plain client.
-	Kube client.Client
-	// KubeReader reads from the API server, uncached: for objects the cache
-	// does not have yet (just applied) or does not hold (no managed-by
-	// label, managedFields). Nil: reads use Kube only.
-	KubeReader client.Reader
-	AWS        config.AWS
-	// AWSDiscovery makes the server's own read-only AWS lookups
-	// (ImportNetwork).
-	// RenderTarget is the renderer version resources are brought to by the
-	// background loop (0: none are re-applied for it). RenderRollout limits
-	// that to these tenant, network or cluster IDs; empty means all.
-	RenderTarget  int64
-	RenderRollout []string
-	AWSDiscovery  awscloud.NetworkDiscoverer
-	// AWSClusterDiscovery looks an existing EKS cluster up (ImportCluster);
-	// nil: imports are unavailable.
-	AWSClusterDiscovery awscloud.ClusterDiscoverer
-	// AWSClusters checks EKS cluster names before CreateCluster; nil skips
-	// the check (tests).
-	AWSClusters awscloud.ClusterLookup
-	Logger      *slog.Logger
+// Deps are what the services work with (reconcile.Deps).
+type Deps = reconcile.Deps
+
+// Owner names what objects are created for (reconcile.Owner).
+type Owner = reconcile.Owner
+
+// DeleteOrder is the order an owner's objects are deleted in.
+type DeleteOrder = reconcile.DeleteOrder
+
+// AllGone reports whether every recorded object is gone from the cluster.
+func AllGone(views []*cloudv1.ManagedResource) bool { return reconcile.AllGone(views) }
+
+// SettleMissing turns MISSING into CREATING for objects recorded a moment
+// ago (reconcile.SettleMissing).
+func SettleMissing(records []model.ManagedResource, views []*cloudv1.ManagedResource) {
+	reconcile.SettleMissing(records, views)
 }
 
 // Validate checks a request against its protovalidate rules (the
@@ -65,25 +50,6 @@ func Unimplemented(method string) error {
 	return connect.NewError(connect.CodeUnimplemented, method+" is not implemented yet")
 }
 
-// AWSTenantRoleARN returns the IAM role the platform assumes in one of a
-// tenant's bootstrapped AWS accounts, by bootstrap ID (CloudAccount.id, as
-// in NetworkSpec.bootstrap_id): the role stored at bootstrap.
-func (d Deps) AWSTenantRoleARN(ctx context.Context, tenantID, cloudAccountID string) (string, error) {
-	account, err := d.Store.Tenants().GetCloudAccountByID(ctx, tenantID, cloudAccountID)
-	if err != nil {
-		return "", ToConnect(fmt.Errorf("account %s of tenant %s: %w", cloudAccountID, tenantID, err))
-	}
-	if account.Provider != model.ProviderAWS {
-		return "", connect.NewError(connect.CodeInvalidArgument,
-			fmt.Sprintf("account %s is a %s account, not aws", cloudAccountID, account.Provider))
-	}
-	if account.Identity == "" {
-		return "", connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("account %s has no tenant role yet; bootstrap it again", cloudAccountID))
-	}
-	return account.Identity, nil
-}
-
 // ToConnect maps repository errors to Connect codes. Unknown errors become
 // INTERNAL without their text, which may hold database details.
 func ToConnect(err error) error {
@@ -93,6 +59,9 @@ func ToConnect(err error) error {
 		return nil
 	case errors.As(err, &codeErr):
 		return err
+	case faultCode(err) != 0:
+		f, _ := fault.As(err)
+		return connect.NewError(faultCode(err), f.Message)
 	case errors.Is(err, repository.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err.Error())
 	case errors.Is(err, repository.ErrAlreadyExists):
@@ -112,12 +81,35 @@ func ToConnect(err error) error {
 	}
 }
 
-// RenderBehind reports whether a resource last applied with renderer
-// version must be applied again: it is below the target and the rollout
-// covers its tenant or the resource itself.
-func (d Deps) RenderBehind(version int64, tenantID, id string) bool {
-	if version >= d.RenderTarget {
-		return false
+// faultCodes are the Connect codes of the fault kinds.
+var faultCodes = map[fault.Kind]connect.Code{
+	fault.Internal: connect.CodeInternal, fault.Invalid: connect.CodeInvalidArgument,
+	fault.FailedPrecondition: connect.CodeFailedPrecondition, fault.Unavailable: connect.CodeUnavailable,
+	fault.NotFound: connect.CodeNotFound, fault.AlreadyExists: connect.CodeAlreadyExists,
+	fault.Aborted: connect.CodeAborted, fault.Unimplemented: connect.CodeUnimplemented,
+}
+
+// faultCode is the Connect code of the fault in err's chain; 0 without one.
+func faultCode(err error) connect.Code {
+	f, ok := fault.As(err)
+	if !ok {
+		return 0
 	}
-	return len(d.RenderRollout) == 0 || slices.Contains(d.RenderRollout, tenantID) || slices.Contains(d.RenderRollout, id)
+	return faultCodes[f.Kind]
+}
+
+// Faults is the server interceptor that answers an RPC failing with a
+// fault (from code that knows no RPC library) with the fault's Connect
+// code and message. Other errors pass as they are.
+func Faults(next connect.ServerFunc) connect.ServerFunc {
+	return func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
+		err := next(ctx, spec, stream)
+		if err != nil && faultCode(err) != 0 {
+			var codeErr *connect.Error
+			if !errors.As(err, &codeErr) {
+				return ToConnect(err)
+			}
+		}
+		return err
+	}
 }

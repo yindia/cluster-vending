@@ -1,4 +1,4 @@
-package service
+package reconcile
 
 import (
 	"context"
@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"connectrpc.com/connect/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
@@ -73,8 +73,8 @@ func (d Deps) Observe(ctx context.Context, records []model.ManagedResource) ([]*
 	views, err := d.Objects().Observe(ctx, refs(records))
 	var unreadable *managed.ReadError
 	if errors.As(err, &unreadable) {
-		return nil, connect.NewError(connect.CodeUnavailable,
-			fmt.Sprintf("cannot read %s %s from the management cluster", unreadable.Ref.Kind, unreadable.Ref.Name))
+		return nil, fault.Newf(fault.Unavailable, "cannot read %s %s from the management cluster",
+			unreadable.Ref.Kind, unreadable.Ref.Name)
 	}
 	if err != nil {
 		return nil, err

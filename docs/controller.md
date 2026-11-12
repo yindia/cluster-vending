@@ -186,21 +186,25 @@ With the Secret set, every ProviderConfig the platform writes is:
 spec:
   credentials:
     source: Secret
-    secretRef: {namespace: crossplane-system, name: aws-local-credentials, key: credentials}
+    secretRef: {namespace: tenant-<tenant>, name: <providerConfig>-credentials, key: credentials}
   assumeRoleChain:
   - roleARN: arn:aws:iam::<tenant account>:role/<tenant role>
 ```
 
 and without it (production) `credentials: {source: IRSA}` with the same
-`assumeRoleChain`. The controller checks once at startup, and before every
-account it applies, that the Secret exists and has its key; it reads nothing
-else of it. A missing Secret or key shows on each CloudAccount's `Ready`
-condition, and nothing is applied until it is fixed. The platform never
-writes the Secret.
+`assumeRoleChain`. A namespaced ProviderConfig reads its Secret from its own
+namespace, whatever namespace its `secretRef` names, so the controller copies
+the configured key of your Secret into the tenant namespace as
+`<providerConfig>-credentials` on every account it applies (a rotated key is
+copied again on the next reconcile), and deletes the copy with the account.
+It never logs the keys. A missing Secret or key shows on each CloudAccount's
+`Ready` condition, and nothing is applied until it is fixed. You create only
+the source Secret; the copies are the platform's.
 
 In a cluster without IRSA that runs the controller as a Deployment, enable
-`config/local-credentials` (a Role to read that one Secret, and the
-setting) and create the Secret in the controller's namespace.
+`config/local-credentials` (read on that one Secret, and write on Secrets in
+the tenant namespaces for the copies) and create the Secret in the
+controller's namespace.
 
 Who reconciles: this controller, and nothing else. The API server only
 stores the desired state; it has no background loop.

@@ -1,6 +1,6 @@
-# The controller may read the one credentials Secret, to check its key
-# exists before writing ProviderConfigs that point at it. Nothing else of
-# Secrets. Kept in step with the code by config/deploy_test.go.
+# The controller may read the one credentials Secret in its own namespace,
+# the source of the copies in the tenant namespaces (cluster_role.yaml).
+# Kept in step with the code by config/credentials_test.go.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

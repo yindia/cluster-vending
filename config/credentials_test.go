@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -12,8 +13,9 @@ import (
 )
 
 // The local-credentials component lets the controller get the one
-// credentials Secret its setting names, in the namespace the controller
-// is deployed to, and nothing else; the setting it adds loads.
+// credentials Secret its setting names, in the namespace the controller is
+// deployed to, and write the copies of it in the tenant namespaces; the
+// setting it adds loads.
 func TestLocalCredentialsComponent(t *testing.T) {
 	raw, err := os.ReadFile("local-credentials/role.yaml")
 	if err != nil {
@@ -53,5 +55,30 @@ func TestLocalCredentialsComponent(t *testing.T) {
 	if ref == nil || ref.Name != rule.ResourceNames[0] || ref.Namespace != "cluster-vending-system" {
 		t.Errorf("setting %+v, role on Secret %s: they must name the same Secret, in the controller's namespace",
 			ref, rule.ResourceNames[0])
+	}
+}
+
+// The copies in the tenant namespaces need Secret writes, granted only by
+// the component's ClusterRole, bound to the controller.
+func TestLocalCredentialsCopierRole(t *testing.T) {
+	raw, err := os.ReadFile("local-credentials/cluster_role.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := strings.Split(string(raw), "\n---\n")
+	role, binding := &rbacv1.ClusterRole{}, &rbacv1.ClusterRoleBinding{}
+	if len(docs) != 2 || yaml.UnmarshalStrict([]byte(docs[0]), role) != nil || yaml.UnmarshalStrict([]byte(docs[1]), binding) != nil {
+		t.Fatalf("cluster_role.yaml: want a ClusterRole and its binding")
+	}
+	if len(role.Rules) != 1 || !slices.Equal(role.Rules[0].Resources, []string{"secrets"}) ||
+		!slices.Contains(role.Rules[0].Verbs, "create") || !slices.Contains(role.Rules[0].Verbs, "delete") {
+		t.Errorf("rules = %+v, want writes on Secrets", role.Rules)
+	}
+	if binding.RoleRef.Name != role.Name || len(binding.Subjects) != 1 || binding.Subjects[0].Name != "controller-manager" {
+		t.Errorf("binding = %+v, want %s bound to the controller", binding, role.Name)
+	}
+	raw, err = os.ReadFile("local-credentials/kustomization.yaml")
+	if err != nil || !strings.Contains(string(raw), "- cluster_role.yaml") {
+		t.Errorf("the component does not include cluster_role.yaml (%v)", err)
 	}
 }

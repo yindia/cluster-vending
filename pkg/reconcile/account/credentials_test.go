@@ -40,20 +40,46 @@ func (w world) providerConfig(t *testing.T) *awsv1beta1.ProviderConfig {
 	return pc
 }
 
-// With a credentials Secret every pass applies the Secret-based
-// ProviderConfig, which still assumes the tenant role, and never flips it
-// back to IRSA.
+// With a credentials Secret every pass copies it into the tenant namespace
+// (a namespaced ProviderConfig reads its Secret from its own namespace) and
+// applies the Secret-based ProviderConfig pointing at the copy, which still
+// assumes the tenant role and is never flipped back to IRSA. The copy holds
+// the configured key only, follows a change of the source, and is recorded
+// as the account's (deleted with it).
 func TestApplyWithACredentialsSecret(t *testing.T) {
-	w := withCredentials(t, newWorld(t), map[string][]byte{"credentials": []byte("[default]\n")})
+	keys := map[string][]byte{"credentials": []byte("[default]\n"), "unrelated": []byte("x")}
+	w := withCredentials(t, newWorld(t), keys)
 	for pass := range 2 {
+		if pass == 1 {
+			source := &corev1.Secret{}
+			if err := w.kube.Get(t.Context(), client.ObjectKey{Namespace: localCredentials.Namespace, Name: localCredentials.Name}, source); err != nil {
+				t.Fatal(err)
+			}
+			source.Data["credentials"] = []byte("[default]\nrotated\n")
+			if err := w.kube.Update(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := w.rec.Apply(t.Context(), w.account); err != nil {
 			t.Fatalf("pass %d: %v", pass, err)
 		}
 		pc := w.providerConfig(t)
 		ref := pc.Spec.Credentials.SecretRef
-		if pc.Spec.Credentials.Source != "Secret" || ref == nil || ref.Name != "aws-local" ||
-			ref.Namespace != "crossplane-system" || ref.Key != "credentials" {
-			t.Errorf("pass %d: credentials = %+v, want the Secret", pass, pc.Spec.Credentials)
+		copyName := CredentialsCopyName(w.account)
+		if pc.Spec.Credentials.Source != "Secret" || ref == nil || ref.Name != copyName ||
+			ref.Namespace != namespace || ref.Key != "credentials" {
+			t.Errorf("pass %d: credentials = %+v, secretRef %+v, want the copy %s/%s", pass, pc.Spec.Credentials, ref, namespace, copyName)
+		}
+		copied := &corev1.Secret{}
+		if err := w.kube.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: copyName}, copied); err != nil {
+			t.Fatalf("pass %d: the copy: %v", pass, err)
+		}
+		want := "[default]\n"
+		if pass == 1 {
+			want = "[default]\nrotated\n"
+		}
+		if len(copied.Data) != 1 || string(copied.Data["credentials"]) != want {
+			t.Errorf("pass %d: the copy holds %d keys, credentials %q; want only the configured key, as the source has it", pass, len(copied.Data), copied.Data["credentials"])
 		}
 		if chain := pc.Spec.AssumeRoleChain; len(chain) != 1 || *chain[0].RoleARN != identity {
 			t.Errorf("pass %d: assumeRoleChain = %+v, want the tenant role", pass, chain)

@@ -11,14 +11,17 @@
 #     --from-file=credentials=/dev/stdin <<< "$(printf '[default]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
 #       "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY")"
 #
-# The controller only checks that the key exists (get on that one
-# Secret); the providers read the keys themselves. Enable it in
+# The controller reads that one Secret (role.yaml) and copies its key into
+# each tenant namespace as <providerConfig>-credentials, which the account's
+# ProviderConfig points at: a namespaced ProviderConfig reads its Secret
+# from its own namespace (cluster_role.yaml). Enable it in
 # ../default with components: [../local-credentials].
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 resources:
 - role.yaml
 - role_binding.yaml
+- cluster_role.yaml
 patches:
 - path: manager_patch.yaml
   target:

@@ -59,14 +59,55 @@ func (r *Reconciler) Reconcile(ctx context.Context, tenantID, cloudAccountID str
 }
 
 // objects are what an AWS account needs in the management cluster, in the
-// order they are applied: the tenant namespace, then the account's
-// ProviderConfig in it (it assumes the tenant role, a.Identity, with the
-// providers' IRSA credentials or, when set, the credentials Secret).
-func objects(a *model.CloudAccount, secret *crossplaneaws.CredentialsSecret) []client.Object {
-	return []client.Object{
+// order they are applied: the tenant namespace, then, with a credentials
+// Secret (local runs), the account's copy of it, then the account's
+// ProviderConfig (it assumes the tenant role, a.Identity, with the
+// providers' IRSA credentials or the keys in that copy).
+func objects(a *model.CloudAccount, keys *corev1.Secret) []client.Object {
+	objs := []client.Object{
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: a.Namespace, Labels: crossplane.Labels(a.TenantID)}},
-		crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, secret),
 	}
+	var ref *crossplaneaws.CredentialsSecret
+	if keys != nil {
+		objs = append(objs, keys)
+		ref = &crossplaneaws.CredentialsSecret{Namespace: keys.Namespace, Name: keys.Name, Key: credentialsKey(keys)}
+	}
+	return append(objs, crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, ref))
+}
+
+// credentialsKey is the one key of an account's credentials copy.
+func credentialsKey(s *corev1.Secret) string {
+	for k := range s.Data {
+		return k
+	}
+	return ""
+}
+
+// CredentialsCopyName is the name of an account's copy of the providers'
+// credentials Secret, in the tenant namespace next to its ProviderConfig.
+func CredentialsCopyName(a *model.CloudAccount) string { return a.ProviderConfigName + "-credentials" }
+
+// credentialsCopy is the account's copy of the providers' credentials
+// Secret (Deps.ProviderCredentials), in the tenant namespace: a namespaced
+// ProviderConfig reads its Secret from its own namespace, whatever
+// namespace its secretRef names. Only the configured key is copied; the
+// keys pass through, never into anything the platform logs. Nil without a
+// credentials Secret.
+func (r *Reconciler) credentialsCopy(ctx context.Context, a *model.CloudAccount) (*corev1.Secret, error) {
+	ref := r.deps.ProviderCredentials
+	if ref == nil {
+		return nil, nil
+	}
+	source, err := readCredentialsSecret(ctx, r.deps)
+	if err != nil {
+		return nil, err
+	}
+	return &corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{Name: CredentialsCopyName(a), Namespace: a.Namespace, Labels: crossplane.Labels(a.TenantID)},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{ref.Key: source.Data[ref.Key]},
+	}, nil
 }
 
 // CheckCredentialsSecret reports, as a FailedPrecondition fault, a
@@ -76,25 +117,32 @@ func objects(a *model.CloudAccount, secret *crossplaneaws.CredentialsSecret) []c
 // never read into anything the platform keeps or logs. Nil when no Secret
 // is set.
 func CheckCredentialsSecret(ctx context.Context, d reconcile.Deps) error {
-	ref := d.ProviderCredentials
-	if ref == nil {
+	if d.ProviderCredentials == nil {
 		return nil
 	}
+	_, err := readCredentialsSecret(ctx, d)
+	return err
+}
+
+// readCredentialsSecret reads the providers' credentials Secret and checks
+// it has its key (CheckCredentialsSecret).
+func readCredentialsSecret(ctx context.Context, d reconcile.Deps) (*corev1.Secret, error) {
+	ref := d.ProviderCredentials
 	secret := &corev1.Secret{}
 	err := d.Reader().Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, secret)
 	switch {
 	case apierrors.IsNotFound(err):
-		return fault.Newf(fault.FailedPrecondition,
+		return nil, fault.Newf(fault.FailedPrecondition,
 			"the provider credentials Secret %s/%s does not exist; create it (see docs/controller.md) or unset --provider-credentials-secret",
 			ref.Namespace, ref.Name)
 	case err != nil:
-		return fault.Newf(fault.Unavailable, "cannot read the provider credentials Secret %s/%s: %v", ref.Namespace, ref.Name, err)
+		return nil, fault.Newf(fault.Unavailable, "cannot read the provider credentials Secret %s/%s: %v", ref.Namespace, ref.Name, err)
 	}
 	if _, ok := secret.Data[ref.Key]; !ok {
-		return fault.Newf(fault.FailedPrecondition,
+		return nil, fault.Newf(fault.FailedPrecondition,
 			"the provider credentials Secret %s/%s has no key %q (an AWS shared credentials file)", ref.Namespace, ref.Name, ref.Key)
 	}
-	return nil
+	return secret, nil
 }
 
 // owner is the account as the owner of its own objects.
@@ -102,16 +150,19 @@ func owner(a *model.CloudAccount) reconcile.Owner {
 	return reconcile.Owner{TenantID: a.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCloudAccount, ID: a.ID}
 }
 
-// Apply applies the tenant namespace and the account's ProviderConfig,
-// from the stored account, and records them as the account's. The
+// Apply applies the tenant namespace, with a credentials Secret the
+// account's copy of it, and the account's ProviderConfig, from the stored
+// account, and records them as the account's (the copy is deleted with the
+// account). The
 // providers and their runtime config are the platform's, installed
 // beforehand: without them the ProviderConfig kind does not exist and
 // Apply fails with a FailedPrecondition fault. Every step is idempotent.
 func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
-	if err := CheckCredentialsSecret(ctx, r.deps); err != nil {
+	keys, err := r.credentialsCopy(ctx, a)
+	if err != nil {
 		return err
 	}
-	objs := objects(a, r.deps.ProviderCredentials)
+	objs := objects(a, keys)
 	for _, obj := range objs {
 		err := kube.Apply(ctx, r.deps.Kube, obj)
 		switch {

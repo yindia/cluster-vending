@@ -31,6 +31,8 @@ const (
 	Aborted
 	// Unimplemented: valid, but not supported (yet).
 	Unimplemented
+	// PermissionDenied: the caller may not do this, whatever the input.
+	PermissionDenied
 )
 
 // Error is an error with a Kind and a message for the caller.

@@ -1,0 +1,30 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: istio-base
+spec:
+  description: Istio cluster-wide resources (Istio CRDs and the default-revision validation webhook); required by the Istio control plane.
+  # A member of the istio bundle (istio.yaml): installed with it, by the
+  # platform, with every cluster.
+  management: Platform
+  internal: true
+  namespace: istio-system
+  versionGroup: istio
+  upgradeOneMinorAtATime: true
+  install:
+    helm:
+      repository: https://blob.istio.io/istio-release/charts
+      chart: base
+  platformValues:
+    # The ambient guide installs base with no profile.
+    global:
+      istioNamespace: istio-system
+    # Non-revisioned install: the "default" revision validates Istio resources.
+    defaultRevision: default
+    base:
+      # The Istio CRDs are rendered as templates, so `helm upgrade` upgrades them
+      # (Helm never upgrades crds/). They carry helm.sh/resource-policy: keep, so
+      # uninstalling this release leaves the CRDs and tenants' Istio objects.
+      enableCRDTemplates: true
+      enableIstioConfigCRDs: true
+      excludedCRDs: []

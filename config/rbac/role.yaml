@@ -48,8 +48,8 @@ rules:
   - cloud.cluster-vending.io
   resources:
   - componentdefinitions
-  - releaseholds
   verbs:
+  - create
   - get
   - list
   - watch
@@ -64,4 +64,12 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releaseholds
+  verbs:
+  - get
+  - list
   - watch

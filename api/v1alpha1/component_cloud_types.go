@@ -55,8 +55,11 @@ type ComponentIAMRole struct {
 	// attaches to the role. It may use the placeholders of the definition
 	// (account.id, cluster.name, ...), filled in per cluster; the iam.*
 	// ones, which name this role and policy, are not available in it.
+	// AWS limits a managed policy to 6144 characters without whitespace,
+	// which the controller checks (condition Valid); the field allows more,
+	// for the indentation of a readable document.
 	// +optional
-	// +kubebuilder:validation:MaxLength=6144
+	// +kubebuilder:validation:MaxLength=20480
 	Policy string `json:"policy,omitempty"`
 	// managedPolicyArns are existing policies attached to the role: AWS
 	// managed ones, or policies of the tenant account (account.id).

@@ -1,0 +1,50 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: istio-ingress-gateway
+spec:
+  description: Cluster ingress as a Gateway API Gateway (class istio) that istiod deploys behind an internal AWS Network Load Balancer.
+  # A member of the istio bundle (istio.yaml): installed with it, by the
+  # platform, with every cluster.
+  management: Platform
+  internal: true
+  # Separate namespace from the control plane. The Gateway, and the Deployment
+  # and Service that istiod generates for it (ingress-istio), live here.
+  namespace: istio-ingress
+  # istiod: owns the `istio` GatewayClass and deploys the gateway.
+  # aws-load-balancer-controller: the generated Service is handed to it
+  # (type "external"); without the controller the NLB is never created.
+  requires: [istiod, aws-load-balancer-controller]
+  install:
+    helm:
+      # Platform-owned chart (drafted in charts/istio-ingress-gateway): one
+      # Gateway and one ConfigMap. There is no upstream chart for this path.
+      repository: oci://ghcr.io/yindia/cluster-vending/charts
+      chart: istio-ingress-gateway
+  platformValues:
+    name: ingress
+    gatewayClassName: istio
+    loadBalancer:
+      # Locked. An internet-facing ingress would be a separate definition.
+      scheme: internal
+    # Tenants attach HTTPRoutes (port 80) and ListenerSets (their own hostnames
+    # and TLS certificates) from their own namespaces.
+    routesFrom: All
+    listenerSetsFrom: All
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 80
+    podDisruptionBudget:
+      minAvailable: 1
+    # The gateway pods istiod generates run on the default node pool.
+    # The cluster's default node pool: its labels, and a toleration per taint.
+    nodeSelector: ${system.nodeSelector}
+    tolerations: ${system.tolerations}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi

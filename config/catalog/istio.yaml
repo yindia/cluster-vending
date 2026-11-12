@@ -1,0 +1,23 @@
+# Istio in ambient mode (no sidecars): one component made of six charts,
+# each a definition of its own (internal: true) with its chart, namespace,
+# version pin and requires. Checked against Istio 1.32.0 and Gateway API
+# v1.6.1; docs/catalog.md has the caveats.
+#
+# The members are installed in requires order, each once the one before is
+# Ready: gateway-api-crds and istio-base, then istiod, istio-cni, ztunnel,
+# and the ingress gateway after istiod. A release pins every member.
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: istio
+spec:
+  description: Istio service mesh in ambient mode, with an internal ingress gateway. Namespaces join the mesh with the label istio.io/dataplane-mode=ambient.
+  # Installed with every cluster by the platform; not a tenant's to enable.
+  management: Platform
+  includes:
+  - gateway-api-crds
+  - istio-base
+  - istiod
+  - istio-cni
+  - ztunnel
+  - istio-ingress-gateway

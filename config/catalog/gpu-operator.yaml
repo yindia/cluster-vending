@@ -1,0 +1,157 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: gpu-operator
+spec:
+  description: NVIDIA GPU Operator, which runs the device plugin, GPU Feature Discovery, DCGM exporter, MIG manager and Node Feature Discovery on GPU nodes that use the EKS-optimized AL2023 NVIDIA AMI (the AMI already provides the driver and container toolkit).
+  namespace: gpu-operator
+  install:
+    helm:
+      repository: https://helm.ngc.nvidia.com/nvidia
+      chart: gpu-operator
+  # No cloudResources: the operator and its operands make no AWS API calls.
+  platformValues:
+    operator:
+      # The operator's own Deployment runs on the default node pool; its
+      # operands (DaemonSets) keep the chart's GPU tolerations.
+      # The cluster's default node pool: its labels, and a toleration per taint.
+      nodeSelector: ${system.nodeSelector}
+      tolerations: ${system.tolerations}
+    # The EKS-optimized AL2023 NVIDIA AMI ships the NVIDIA driver and container toolkit, and
+    # nodeadm makes "nvidia" the default containerd runtime. AWS says to disable both in the
+    # operator (docs.aws.amazon.com/eks/latest/userguide/ml-eks-optimized-ami.html).
+    driver:
+      enabled: false
+    toolkit:
+      enabled: false
+    # The operator finds GPU nodes from the NFD PCI labels (feature.node.kubernetes.io/pci-10de.present),
+    # so NFD is required. Set this to false only when a separate NFD is already installed.
+    nfd:
+      enabled: true
+  userValues: |
+    # NVIDIA GPU Operator: values you may change.
+    # The platform sets the driver and container toolkit (the EKS AL2023 NVIDIA AMI provides them)
+    # and Node Feature Discovery. Edit and send back only the keys below.
+
+    # MIG strategy for the device plugin and GPU Feature Discovery.
+    #   none:   ignore MIG and advertise whole GPUs only.
+    #   single: every GPU on a node uses the same MIG profile and is advertised as nvidia.com/gpu.
+    #   mixed:  each profile is advertised as its own resource, for example nvidia.com/mig-1g.10gb.
+    # It has no effect on GPUs that do not support MIG (for example g4dn, g5, g6 and g6e).
+    mig:
+      strategy: single
+
+    migManager:
+      # MIG manager: partitions MIG-capable GPUs (A100, H100, H200 and B200 on P instances)
+      # according to the nvidia.com/mig.config node label.
+      enabled: true
+      config:
+        # MIG layout applied to nodes that do not have an nvidia.com/mig.config label.
+        # Built-in layouts include all-disabled, all-enabled and all-<profile> (for example all-1g.10gb).
+        default: all-disabled
+
+    dcgmExporter:
+      # DCGM exporter: per-GPU Prometheus metrics on port 9400 of every GPU node.
+      enabled: true
+      serviceMonitor:
+        # Creates a ServiceMonitor for the exporter. The operator skips it when the
+        # Prometheus Operator CRDs are not installed.
+        enabled: true
+        interval: 15s
+        # Labels your Prometheus serviceMonitorSelector matches, for example release: kube-prometheus-stack
+        additionalLabels: {}
+
+    devicePlugin:
+      # Device plugin configuration, including time-slicing.
+      # By default (name empty) the plugin uses the built-in config: whole GPUs, no sharing.
+      config:
+        # true: this chart creates the ConfigMap <name> from "data" below.
+        # false with a name set: the plugin uses an existing ConfigMap <name> that you created in the gpu-operator namespace.
+        create: false
+        name: ""
+        # Key in the ConfigMap applied to every GPU node. To pick a different key on a node,
+        # label it nvidia.com/device-plugin.config=<key>.
+        default: ""
+        # One entry per named config. Example of 4-way time-slicing (set create: true,
+        # name: device-plugin-config, default: time-sliced-4):
+        #   data:
+        #     time-sliced-4: |-
+        #       version: v1
+        #       sharing:
+        #         timeSlicing:
+        #           renameByDefault: false
+        #           failRequestsGreaterThanOne: true
+        #           resources:
+        #           - name: nvidia.com/gpu
+        #             replicas: 4
+        data: {}
+  valuesSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      mig:
+        type: object
+        additionalProperties: false
+        properties:
+          strategy:
+            type: string
+            enum: [none, single, mixed]
+      migManager:
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+          config:
+            type: object
+            additionalProperties: false
+            properties:
+              default:
+                type: string
+                minLength: 1
+                maxLength: 63
+                pattern: "^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$"
+      dcgmExporter:
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+          serviceMonitor:
+            type: object
+            additionalProperties: false
+            properties:
+              enabled:
+                type: boolean
+              interval:
+                type: string
+                pattern: "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+              additionalLabels:
+                type: object
+                maxProperties: 16
+                additionalProperties:
+                  type: string
+                  maxLength: 63
+      devicePlugin:
+        type: object
+        additionalProperties: false
+        properties:
+          config:
+            type: object
+            additionalProperties: false
+            properties:
+              create:
+                type: boolean
+              name:
+                type: string
+                maxLength: 253
+                pattern: "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+              default:
+                type: string
+                maxLength: 253
+              data:
+                type: object
+                maxProperties: 16
+                additionalProperties:
+                  type: string
+                  maxLength: 65536

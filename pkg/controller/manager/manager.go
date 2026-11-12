@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/config"
 	reconcilers "github.com/yindia/cluster-vending/pkg/controller"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -57,6 +58,10 @@ type Options struct {
 	// defaults (crossplaneaws.DefaultProviderRuntime) and as the management
 	// role.
 	InstallProviders bool
+	// InstallCatalog creates the shipped component definitions
+	// (config/catalog) that are missing, once the platform's kinds are
+	// served; existing ones are never changed.
+	InstallCatalog bool
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -125,6 +130,15 @@ func Run(ctx context.Context, o Options) error {
 	direct, err := kube.New(cfg)
 	if err != nil {
 		return err
+	}
+	if o.InstallCatalog {
+		// The platform's kinds are served (ConnectStore waited for them).
+		// Every replica may try: creating only what is missing is safe twice.
+		res, err := catalog.Install(ctx, direct)
+		if err != nil {
+			return fmt.Errorf("%w (--install-catalog=false skips installing the component catalog)", err)
+		}
+		logger.Info("component catalog", "created", res.Created, "existing", res.Existing)
 	}
 	if o.AWS.StaticKeys != nil {
 		logger.Warn("AWS keys found in the environment: they are the controller's own credentials (local testing); every lookup still assumes the tenant role of the account it reads")

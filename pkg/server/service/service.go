@@ -62,6 +62,7 @@ var faultCodes = map[fault.Kind]connect.Code{
 	fault.FailedPrecondition: connect.CodeFailedPrecondition, fault.Unavailable: connect.CodeUnavailable,
 	fault.NotFound: connect.CodeNotFound, fault.AlreadyExists: connect.CodeAlreadyExists,
 	fault.Aborted: connect.CodeAborted, fault.Unimplemented: connect.CodeUnimplemented,
+	fault.PermissionDenied: connect.CodePermissionDenied,
 }
 
 // faultCode is the Connect code of the fault in err's chain; 0 without one.

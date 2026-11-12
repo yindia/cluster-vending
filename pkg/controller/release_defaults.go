@@ -7,6 +7,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -21,9 +22,37 @@ func date(year int, month time.Month, day int) metav1.Time {
 	return metav1.NewTime(time.Date(year, month, day, 0, 0, 0, 0, time.UTC))
 }
 
+// defaultPins are the versions of the shipped catalog (config/catalog,
+// docs/catalog.md) on one Kubernetes minor: the chart versions each
+// definition was checked against, the same on the three minors. The
+// cluster autoscaler's image must be of the cluster's Kubernetes minor,
+// and no single chart ships all three, so its pin sets the image tag
+// (autoscalerImage) over chart 9.60.0.
+func defaultPins(autoscalerImage string) []cloudv1alpha1.ComponentPin {
+	pin := func(name, version string) cloudv1alpha1.ComponentPin {
+		return cloudv1alpha1.ComponentPin{Name: name, Version: version}
+	}
+	autoscaler := pin("cluster-autoscaler", "9.60.0")
+	autoscaler.Values = &runtime.RawExtension{Raw: []byte(`{"image":{"tag":"` + autoscalerImage + `"}}`)}
+	return []cloudv1alpha1.ComponentPin{
+		pin("aws-load-balancer-controller", "3.6.2"),
+		autoscaler,
+		pin("gateway-api-crds", "1.6.1"),
+		pin("gpu-operator", "v26.7.2"),
+		pin("istio-base", "1.32.0"),
+		pin("istio-cni", "1.32.0"),
+		pin("istio-ingress-gateway", "0.1.0"),
+		pin("istiod", "1.32.0"),
+		pin("karpenter", "1.15.1"),
+		pin("kyverno", "3.10.0"),
+		pin("kyverno-policies", "3.10.0"),
+		pin("ztunnel", "1.32.0"),
+	}
+}
+
 // DefaultRelease is the release this build ships: the three newest
 // Kubernetes minors, the newest the default, each older one upgrading to
-// the next, and this build's renderer. No platform components yet. The
+// the next, this build's renderer, and the shipped catalog's versions. The
 // end-of-support dates are placeholders for the operator to replace by
 // publishing a release of their own.
 func DefaultRelease() *cloudv1alpha1.Release {
@@ -35,9 +64,9 @@ func DefaultRelease() *cloudv1alpha1.Release {
 			Content: cloudv1alpha1.ReleaseContent{
 				RenderVersion: crossplaneaws.RenderVersion,
 				Kubernetes: []cloudv1alpha1.KubernetesRelease{
-					{Minor: "1.37", Default: true, EndOfSupport: date(2028, time.January, 31)},
-					{Minor: "1.36", UpgradeTo: "1.37", EndOfSupport: date(2027, time.September, 30)},
-					{Minor: "1.35", UpgradeTo: "1.36", EndOfSupport: date(2027, time.May, 31)},
+					{Minor: "1.37", Default: true, EndOfSupport: date(2028, time.January, 31), Components: defaultPins("v1.37.0")},
+					{Minor: "1.36", UpgradeTo: "1.37", EndOfSupport: date(2027, time.September, 30), Components: defaultPins("v1.36.2")},
+					{Minor: "1.35", UpgradeTo: "1.36", EndOfSupport: date(2027, time.May, 31), Components: defaultPins("v1.35.3")},
 				},
 			},
 		},

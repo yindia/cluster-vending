@@ -20,6 +20,7 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/release"
 )
 
 // The release controllers keep the status of the operator's release
@@ -47,12 +48,14 @@ func setupReleases(mgr ctrl.Manager, d Deps) error {
 	err := ctrl.NewControllerManagedBy(mgr).Named("release").For(&cloudv1alpha1.Release{}).
 		Watches(&cloudv1alpha1.ReleaseChannel{}, all(&cloudv1alpha1.ReleaseList{})).
 		Watches(&cloudv1alpha1.ReleaseHold{}, all(&cloudv1alpha1.ReleaseList{})).
+		Watches(&cloudv1alpha1.ComponentDefinition{}, all(&cloudv1alpha1.ReleaseList{})).
 		Complete(&ReleaseReconciler{c: c, render: crossplaneaws.RenderVersion})
 	if err != nil {
 		return err
 	}
 	err = ctrl.NewControllerManagedBy(mgr).Named("releasechannel").For(&cloudv1alpha1.ReleaseChannel{}).
 		Watches(&cloudv1alpha1.Release{}, all(&cloudv1alpha1.ReleaseChannelList{})).
+		Watches(&cloudv1alpha1.ComponentDefinition{}, all(&cloudv1alpha1.ReleaseChannelList{})).
 		Complete(&ReleaseChannelReconciler{c: c})
 	if err != nil {
 		return err
@@ -115,7 +118,14 @@ func (r *ReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	status := *rel.Status.DeepCopy()
 	status.Channels, status.Holds = channels.offering, holds
-	setValid(&status.Conditions, rel.Generation, ValidateRelease(rel.Spec.Content, r.render))
+	catalog, err := listCatalog(ctx, r.c)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	problems := ValidateRelease(rel.Spec.Content, r.render)
+	problems = append(problems, release.CheckGroups(releasePins(rel.Name, rel.Spec.Content), catalog)...)
+	problems = append(problems, release.CheckBundles(releasePins(rel.Name, rel.Spec.Content), catalog)...)
+	setValid(&status.Conditions, rel.Generation, problems)
 	setInUse(&status.Conditions, rel.Generation, rel.DeletionTimestamp.IsZero(), channels.names, holds)
 	if equality.Semantic.DeepEqual(status, rel.Status) {
 		return ctrl.Result{}, nil
@@ -201,7 +211,7 @@ func ValidateRelease(content cloudv1alpha1.ReleaseContent, render int64) []strin
 			problems = append(problems, fmt.Sprintf("%s upgrades to %s, which the release does not have", k.Minor, k.UpgradeTo))
 		}
 	}
-	return problems
+	return append(problems, pinValueProblems(content)...)
 }
 
 // minorNumber is n of "1.<n>".
@@ -284,7 +294,13 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	status := *ch.Status.DeepCopy()
 	offering := metav1.Condition{Type: cloudv1alpha1.ChannelConditionOffering, ObservedGeneration: ch.Generation}
-	switch problem := r.unusable(ctx, want, why); {
+	problem := r.unusable(ctx, want, why)
+	if problem == "" {
+		if problem, err = stepProblem(ctx, r.c, status.Release, want); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	switch {
 	case problem != "":
 		offering.Status, offering.Reason, offering.Message = metav1.ConditionFalse, "NotOffered", problem
 	default:

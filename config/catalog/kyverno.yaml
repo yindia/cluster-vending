@@ -1,0 +1,110 @@
+# Checked against chart kyverno 3.10.0 (Kyverno v1.20.0) and kyverno-policies 3.10.0,
+# from https://kyverno.github.io/kyverno/ (index.yaml, chart tarballs' values.yaml and templates).
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: kyverno
+spec:
+  description: Kyverno policy engine (admission, background, cleanup and reports controllers) installed highly available and fail closed, with system and platform namespaces excluded from its webhooks.
+  # Installed with every cluster by the platform; not a tenant's to enable.
+  management: Platform
+  namespace: kyverno
+  # kyverno and kyverno-policies are released together.
+  versionGroup: kyverno
+  install:
+    helm:
+      repository: https://kyverno.github.io/kyverno/
+      chart: kyverno
+  platformValues:
+    global:
+      # Every Kyverno workload (controllers, hook Jobs). The chart always adds
+      # kubernetes.io/os: linux to the node selector.
+      # The cluster's default node pool: its labels, and a toleration per taint.
+      nodeSelector: ${system.nodeSelector}
+      tolerations: ${system.tolerations}
+    features:
+      # Keep the resource webhooks fail closed: never let a values change force failurePolicy Ignore.
+      forceFailurePolicyIgnore:
+        enabled: false
+      # Keep Node and CertificateSigningRequest out of Fail webhooks so nodes (managed node group,
+      # Karpenter) can join while no Kyverno pod is running. Avoids a bootstrap deadlock.
+      excludeBootstrapResources:
+        enabled: true
+      # PolicyExceptions are on, but only in the kyverno namespace, which the platform owns.
+      policyExceptions:
+        enabled: true
+        namespace: kyverno
+    config:
+      excludeKyvernoNamespace: true
+      # Webhook namespaceSelector. The chart appends the kyverno namespace itself
+      # (excludeKyvernoNamespace). The system namespaces plus every catalog definition's
+      # spec.namespace; a test in config/catalog keeps it in line with the catalog.
+      webhooks:
+        namespaceSelector:
+          matchExpressions:
+          - key: kubernetes.io/metadata.name
+            operator: NotIn
+            values:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - kyverno
+            - gateway-system
+            - gpu-operator
+            - istio-ingress
+            - istio-system
+      # The default resourceFilters already cover kube-system, kube-public, kube-node-lease and
+      # kyverno; add the catalog's other namespaces so Kyverno also skips them.
+      resourceFiltersIncludeNamespaces:
+      - gateway-system
+      - gpu-operator
+      - istio-ingress
+      - istio-system
+    # Fixed by the platform at the researched defaults.
+    # Replicas and resources per controller.
+    # Each controller is its own Deployment. With more than one replica the chart also adds a
+    # PodDisruptionBudget (minAvailable: 1) and spreads replicas across nodes (preferred anti-affinity).
+
+    admissionController:
+      # Serves every admission webhook call; all replicas serve requests.
+      # Kyverno's HA minimum for the admission controller is 3. Allowed: 3 to 7.
+      replicas: 3
+      container:
+        resources:
+          limits:
+            memory: "384Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+
+    backgroundController:
+      # Generate and mutate-existing rules. Leader elected: extra replicas are standby only.
+      # Allowed: 2 or 3.
+      replicas: 2
+      resources:
+        limits:
+          memory: "128Mi"
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+
+    cleanupController:
+      # DeletingPolicies and TTL cleanup. Allowed: 2 or 3.
+      replicas: 2
+      resources:
+        limits:
+          memory: "128Mi"
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+
+    reportsController:
+      # Policy reports. Leader elected: extra replicas are standby only. Allowed: 2 or 3.
+      # Raise memory on clusters with many resources or policies.
+      replicas: 2
+      resources:
+        limits:
+          memory: "128Mi"
+        requests:
+          cpu: "100m"
+          memory: "64Mi"

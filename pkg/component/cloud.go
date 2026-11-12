@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"unicode"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/fault"
@@ -81,6 +82,9 @@ func ValidateCloudResources(r CloudResources) error {
 	if role.Policy == "" {
 		return nil
 	}
+	if n := policySize(role.Policy); n > MaxPolicySize {
+		return fault.Newf(fault.Invalid, "cloudResources.iamRole.policy has %d characters without whitespace; AWS allows %d", n, MaxPolicySize)
+	}
 	doc, err := parsePolicy(role.Policy)
 	if err != nil {
 		return err
@@ -89,6 +93,21 @@ func ValidateCloudResources(r CloudResources) error {
 		return fault.Newf(fault.Invalid, "cloudResources.iamRole.policy: %v", err)
 	}
 	return nil
+}
+
+// MaxPolicySize is AWS's limit on a managed policy document: characters
+// other than whitespace.
+const MaxPolicySize = 6144
+
+// policySize counts the characters AWS counts: all but whitespace.
+func policySize(policy string) int {
+	n := 0
+	for _, r := range policy {
+		if !unicode.IsSpace(r) {
+			n++
+		}
+	}
+	return n
 }
 
 // parsePolicy reads a policy document: a JSON object with a Version string

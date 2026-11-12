@@ -202,10 +202,10 @@ func scan(s string, fn func(name string) string) (string, error) {
 	return out.String(), nil
 }
 
-// walk calls fn on every string of doc (map values and list items, not
+// walk calls fn on every string of doc (map values, list items and map
 // keys) with its path, and returns a new document with each string
 // replaced by fn's result (a string, or a map or list for a whole-value
-// placeholder). doc is not changed.
+// placeholder, which a key cannot be). doc is not changed.
 func walk(doc any, path string, fn func(path, s string) (any, error)) (any, error) {
 	switch d := doc.(type) {
 	case string:
@@ -221,7 +221,20 @@ func walk(doc any, path string, fn func(path, s string) (any, error)) (any, erro
 			if err != nil {
 				return nil, err
 			}
-			out[k] = nv
+			// Keys carry placeholders too (an IAM condition key such as
+			// aws:ResourceTag/kubernetes.io/cluster/${cluster.name}).
+			filled, err := fn(child+" (key)", k)
+			if err != nil {
+				return nil, err
+			}
+			nk, ok := filled.(string)
+			if !ok {
+				return nil, fault.Newf(fault.Invalid, "%s: a key cannot be a whole-value placeholder", orRoot(child))
+			}
+			if _, dup := out[nk]; dup {
+				return nil, fault.Newf(fault.Invalid, "%s: two keys become %q once their placeholders are filled in", orRoot(path), nk)
+			}
+			out[nk] = nv
 		}
 		return out, nil
 	case []any:

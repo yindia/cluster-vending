@@ -36,6 +36,9 @@ func ParseUserValues(file string) (Values, error) {
 //     one badly (Validate);
 //   - the cloud resources are unusable (ValidateCloudResources: the IAM
 //     policy is no policy document, or uses an unknown placeholder);
+//   - a Platform component has userValues or a valuesSchema;
+//   - a bundle (includes) has an install, values, a schema or cloud
+//     resources of its own, or is internal;
 //   - userValues does not parse as a YAML object;
 //   - userValues and platformValues share a path (the same leaf, or one
 //     inside the other): the file would offer a key the tenant may not
@@ -57,6 +60,10 @@ func CheckDefinition(d Definition) []string {
 	if err := ValidateCloudResources(d.CloudResources); err != nil {
 		out = append(out, err.Error())
 	}
+	if d.IsPlatform() && (d.UserValues != "" || d.ValuesSchema != nil) {
+		out = append(out, "a Platform component takes no tenant values: remove userValues and valuesSchema")
+	}
+	out = append(out, bundleProblems(d)...)
 	user, err := ParseUserValues(d.UserValues)
 	if err != nil {
 		return append(out, "userValues: "+err.Error())
@@ -72,6 +79,25 @@ func CheckDefinition(d Definition) []string {
 		for _, msg := range ValidateSchema(d.ValuesSchema, user) {
 			out = append(out, "userValues: "+msg)
 		}
+	}
+	return out
+}
+
+// bundleProblems are what a bundle may not have: it installs nothing
+// itself, so everything about a chart belongs to its members.
+func bundleProblems(d Definition) []string {
+	if !d.IsBundle() {
+		return nil
+	}
+	var out []string
+	if d.HasInstall {
+		out = append(out, "a bundle (includes) has no install of its own")
+	}
+	if d.Internal {
+		out = append(out, "a bundle is not internal: bundles do not nest")
+	}
+	if len(d.PlatformValues) > 0 || d.UserValues != "" || d.ValuesSchema != nil || d.CloudResources.IAMRole != nil {
+		out = append(out, "a bundle has no values, schema or cloud resources: they belong to its members")
 	}
 	return out
 }

@@ -45,6 +45,15 @@ type Definition struct {
 	// Valid is the definition's Valid condition: an invalid entry counts as
 	// not in the catalog.
 	Valid bool
+	// Management says who controls the component; empty is Tenant.
+	Management Management
+	// Internal: only installed as a member of a bundle.
+	Internal bool
+	// Includes are the members of a bundle; empty for a component with a
+	// chart of its own.
+	Includes []string
+	// HasInstall: the definition has an install of its own (spec.install).
+	HasInstall bool
 	// Requires are components that must be enabled first.
 	Requires []string
 	// ConflictsWithAddons are EKS add-on names the cluster must not have

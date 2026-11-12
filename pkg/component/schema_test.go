@@ -46,6 +46,32 @@ func TestValidateSchema(t *testing.T) {
 	}
 }
 
+func TestValidateSchemaCounts(t *testing.T) {
+	schema := parseValues(`{
+		"type": "object", "maxProperties": 3,
+		"properties": {
+			"labels": {"type": "object", "minProperties": 1, "maxProperties": 2, "additionalProperties": {"type": "string"}},
+			"list": {"type": "array", "minItems": 1, "maxItems": 2}
+		}}`)
+	for _, tt := range []struct {
+		name, values string
+		want         []string
+	}{
+		{"within", `{"labels":{"a":"x"},"list":[1,2]}`, nil},
+		{"too many properties", `{"labels":{"a":"x","b":"y","c":"z"}}`, []string{"labels: must have at most 2 properties"}},
+		{"too few properties", `{"labels":{}}`, []string{"labels: must have at least 1 properties"}},
+		{"too many items", `{"list":[1,2,3]}`, []string{"list: must have at most 2 items"}},
+		{"too few items", `{"list":[]}`, []string{"list: must have at least 1 items"}},
+		{"top level", `{"a":1,"b":2,"c":3,"d":4}`, []string{"values: must have at most 3 properties"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ValidateSchema(schema, parseValues(tt.values)); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A key with a dot is quoted in paths, so a path is never ambiguous.
 func TestValidateSchemaQuotesDottedKeys(t *testing.T) {
 	schema := parseValues(`{"type":"object","properties":{"sel":{"type":"object","additionalProperties":{"type":"string"}}}}`)

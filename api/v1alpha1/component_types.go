@@ -214,9 +214,21 @@ type HelmCompanion struct {
 	HelmChartSource `json:",inline"`
 }
 
-// HelmInstall is a chart, and optional companion charts installed after it.
+// HelmInstall is a chart, an optional chart of its CustomResourceDefinitions
+// installed before it, and optional companion charts installed after it.
 type HelmInstall struct {
 	HelmChartSource `json:",inline"`
+
+	// crds is a chart that holds only the component's
+	// CustomResourceDefinitions, as templates (so Helm upgrades them; Helm
+	// installs a chart's crds/ directory once and never upgrades it). It is
+	// installed, and upgraded, before the main chart, at the same version
+	// the release pins for the component; the main chart then runs with
+	// skipCRDs (provider-helm Release forProvider.skipCRDs). It gets no
+	// values. Unset: the main chart's own CRDs, if any, which are never
+	// upgraded.
+	// +optional
+	CRDs *HelmChartSource `json:"crds,omitempty"`
 
 	// companions are charts the platform owns, installed in order after the
 	// main chart is Ready (e.g. Karpenter's default node class).
@@ -236,27 +248,83 @@ type ComponentInstall struct {
 	Helm *HelmInstall `json:"helm,omitempty"`
 }
 
+// ComponentManagement says who controls a component.
+// +kubebuilder:validation:Enum=Platform;Tenant
+type ComponentManagement string
+
+// Who controls a component.
+const (
+	// ComponentManagementPlatform: installed with every cluster.
+	ComponentManagementPlatform ComponentManagement = "Platform"
+	// ComponentManagementTenant: enabled by a tenant on a cluster.
+	ComponentManagementTenant ComponentManagement = "Tenant"
+)
+
 // ComponentDefinitionSpec is one entry of the catalog.
+// +kubebuilder:validation:XValidation:rule="has(self.install) != has(self.includes)",message="exactly one of install and includes is set"
+// +kubebuilder:validation:XValidation:rule="!has(self.install) || has(self.__namespace__)",message="namespace is required with install"
+// +kubebuilder:validation:XValidation:rule="!has(self.includes) || !has(self.internal) || !self.internal",message="a bundle (includes) is not internal: bundles do not nest"
 type ComponentDefinitionSpec struct {
 	// description shown to tenants.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Description string `json:"description"`
+	// management says who controls the component. Platform: installed
+	// with every cluster by the cluster's own reconcile, once the cluster
+	// can be reached, with fixed values; no Component object exists for
+	// it and the Component API refuses its name. Tenant (the default): a
+	// tenant enables and disables it on a cluster (a Component).
+	// +optional
+	// +kubebuilder:default=Tenant
+	Management ComponentManagement `json:"management,omitempty"`
+	// internal marks a definition that is only installed as a member of a
+	// bundle (includes): tenants cannot enable it by itself, and the
+	// catalog they see does not list it.
+	// +optional
+	Internal bool `json:"internal,omitempty"`
 	// install is how the component reaches a workload cluster. Opaque to
-	// tenants: the API never returns it.
-	// +required
-	Install ComponentInstall `json:"install"`
-	// namespace in the workload cluster.
-	// +required
+	// tenants: the API never returns it. Exactly one of install and
+	// includes is set.
+	// +optional
+	Install *ComponentInstall `json:"install,omitempty"`
+	// includes makes the definition a bundle: one component made of
+	// several charts, each a definition of its own (internal: true) with
+	// its chart, namespace, version pin and requires. Enabling the bundle
+	// installs every member in requires order, each once the one before
+	// is Ready; disabling removes them in reverse; the bundle is Ready
+	// when every member is. A release that offers a bundle pins every
+	// member. A bundle is not a member of another bundle.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
+	Includes []string `json:"includes,omitempty"`
+	// namespace in the workload cluster. Required with install; a bundle
+	// has none (its members have theirs).
+	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
-	Namespace string `json:"namespace"`
+	Namespace string `json:"namespace,omitempty"`
 	// requires lists other components that must be Ready first.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	Requires []string `json:"requires,omitempty"`
+	// versionGroup names components that are versions of one product (the
+	// Istio charts, Kyverno and its policies): a release must pin every
+	// member it pins, on each Kubernetes minor, at the same version. Unset:
+	// none.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
+	VersionGroup string `json:"versionGroup,omitempty"`
+	// upgradeOneMinorAtATime: the component supports in-place upgrades of
+	// one minor version at a time only (Istio). A channel does not move to
+	// a release whose pin skips a minor of the component relative to the
+	// release the channel offers now.
+	// +optional
+	UpgradeOneMinorAtATime bool `json:"upgradeOneMinorAtATime,omitempty"`
 	// conflictsWithAddons lists EKS add-ons the cluster must not have in
 	// spec.aws.addons while this component is enabled. The names are the
 	// add-ons AWSAddon.name accepts.

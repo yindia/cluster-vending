@@ -43,6 +43,8 @@ var controllerSettings = []Setting{
 		Usage: "IAM role ARN the Crossplane AWS providers run as (IRSA), in the management account (the account is taken from the ARN); tenant roles trust it; required"},
 	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
 		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere, also to run the providers with other settings than the platform's"},
+	{Flag: FlagInstallCatalog, Env: EnvInstallCatalog, Default: "true",
+		Usage: "on startup, create the component catalog this build ships (config/catalog) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -59,6 +61,9 @@ type Controller struct {
 	LeaseNamespace         string
 	// InstallProviders: create the Crossplane providers on startup.
 	InstallProviders bool
+	// InstallCatalog: create the shipped component definitions that are
+	// missing on startup.
+	InstallCatalog bool
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -92,6 +97,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.InstallProviders, err = strconv.ParseBool(v[FlagInstallProviders]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallProviders), v[FlagInstallProviders]))
+	}
+	if cfg.InstallCatalog, err = strconv.ParseBool(v[FlagInstallCatalog]); err != nil {
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallCatalog), v[FlagInstallCatalog]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

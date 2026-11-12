@@ -46,6 +46,12 @@ func TestValidateCloudResources(t *testing.T) {
 		{name: "own role in policy", res: role(func(r *IAMRole) {
 			r.Policy = strings.Replace(testPolicy, "${region}", "${iam.roleArn}", 1)
 		}), wantErr: "own role or policy"},
+		{name: "long but within the limit once whitespace is dropped", res: role(func(r *IAMRole) {
+			r.Policy = bigPolicy(MaxPolicySize, 4)
+		})},
+		{name: "over the limit without whitespace", res: role(func(r *IAMRole) {
+			r.Policy = bigPolicy(MaxPolicySize+1, 0)
+		}), wantErr: "without whitespace"},
 		{name: "own policy in managed ARNs", res: role(func(r *IAMRole) {
 			r.ManagedPolicyARNs = []string{"${iam.policyArn}"}
 		}), wantErr: "managedPolicyArns[0]"},
@@ -136,4 +142,12 @@ func TestCloudResourcesOf(t *testing.T) {
 	if pod.IAMRole.UsesIRSA() {
 		t.Error("PodIdentity uses IRSA")
 	}
+}
+
+// bigPolicy is a policy document of exactly size characters other than
+// whitespace, with indent spaces before each statement.
+func bigPolicy(size, indent int) string {
+	head, tail := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::`, `"}]}`
+	pad := strings.Repeat(" ", indent)
+	return pad + head + strings.Repeat("a", size-len(head)-len(tail)) + tail + pad
 }

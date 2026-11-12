@@ -89,6 +89,7 @@ and `--log-level`, and only these:
 | `--leader-elect`, `--lease-namespace` | one replica reconciles |
 | `--aws-management-role-arn` | required: the IAM role the Crossplane AWS providers run as (IRSA); the management account is taken from it |
 | `--install-providers` | create the providers, provider-helm and their runtime config when missing |
+| `--install-catalog` | create the shipped component definitions (`config/catalog`, [catalog.md](catalog.md)) that are missing; existing ones are never changed |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 

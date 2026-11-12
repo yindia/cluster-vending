@@ -89,7 +89,10 @@ spec:
                           attaches to the role. It may use the placeholders of the definition
                           (account.id, cluster.name, ...), filled in per cluster; the iam.*
                           ones, which name this role and policy, are not available in it.
-                        maxLength: 6144
+                          AWS limits a managed policy to 6144 characters without whitespace,
+                          which the controller checks (condition Valid); the field allows more,
+                          for the indentation of a readable document.
+                        maxLength: 20480
                         type: string
                       serviceAccounts:
                         description: serviceAccounts that may use the role.
@@ -158,10 +161,27 @@ spec:
                 maxLength: 1024
                 minLength: 1
                 type: string
+              includes:
+                description: |-
+                  includes makes the definition a bundle: one component made of
+                  several charts, each a definition of its own (internal: true) with
+                  its chart, namespace, version pin and requires. Enabling the bundle
+                  installs every member in requires order, each once the one before
+                  is Ready; disabling removes them in reverse; the bundle is Ready
+                  when every member is. A release that offers a bundle pins every
+                  member. A bundle is not a member of another bundle.
+                items:
+                  pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                  type: string
+                maxItems: 16
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
               install:
                 description: |-
                   install is how the component reaches a workload cluster. Opaque to
-                  tenants: the API never returns it.
+                  tenants: the API never returns it. Exactly one of install and
+                  includes is set.
                 properties:
                   helm:
                     description: helm installs the component with provider-helm.
@@ -257,6 +277,83 @@ spec:
                         x-kubernetes-list-map-keys:
                         - name
                         x-kubernetes-list-type: map
+                      crds:
+                        description: |-
+                          crds is a chart that holds only the component's
+                          CustomResourceDefinitions, as templates (so Helm upgrades them; Helm
+                          installs a chart's crds/ directory once and never upgrades it). It is
+                          installed, and upgraded, before the main chart, at the same version
+                          the release pins for the component; the main chart then runs with
+                          skipCRDs (provider-helm Release forProvider.skipCRDs). It gets no
+                          values. Unset: the main chart's own CRDs, if any, which are never
+                          upgraded.
+                        properties:
+                          chart:
+                            description: chart name in the repository (provider-helm
+                              forProvider.chart.name).
+                            maxLength: 128
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$
+                            type: string
+                          credentials:
+                            description: 'credentials for a private repository. Unset:
+                              a public one.'
+                            properties:
+                              secretRef:
+                                description: secretRef is the Secret holding them.
+                                properties:
+                                  name:
+                                    description: name of the Secret.
+                                    maxLength: 253
+                                    minLength: 1
+                                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                                    type: string
+                                  namespace:
+                                    description: |-
+                                      namespace of the Secret: the platform's own namespace, where the
+                                      operator creates it. Never a tenant namespace.
+                                    minLength: 1
+                                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                                    type: string
+                                required:
+                                - name
+                                - namespace
+                                type: object
+                              type:
+                                description: type of the Secret.
+                                enum:
+                                - BasicAuth
+                                - DockerConfigJSON
+                                type: string
+                            required:
+                            - secretRef
+                            - type
+                            type: object
+                          insecureSkipTLSVerify:
+                            description: |-
+                              insecureSkipTLSVerify skips the check of the repository's TLS
+                              certificate (provider-helm forProvider.insecureSkipTLSVerify). For
+                              test registries only.
+                            type: boolean
+                          plainHTTP:
+                            description: |-
+                              plainHTTP fetches the chart over HTTP (provider-helm
+                              forProvider.plainHTTP), oci:// only. For test registries only.
+                            type: boolean
+                          repository:
+                            description: |-
+                              repository is an https:// Helm repository URL or an oci:// registry
+                              path (provider-helm forProvider.chart.repository).
+                            maxLength: 512
+                            pattern: ^(https|oci)://[^ ]+$
+                            type: string
+                        required:
+                        - chart
+                        - repository
+                        type: object
+                        x-kubernetes-validations:
+                        - message: plainHTTP is for oci:// registries
+                          rule: '!has(self.plainHTTP) || !self.plainHTTP || self.repository.startsWith(''oci://'')'
                       credentials:
                         description: 'credentials for a private repository. Unset:
                           a public one.'
@@ -320,8 +417,28 @@ spec:
                 x-kubernetes-validations:
                 - message: helm is the only install mechanism so far
                   rule: has(self.helm)
+              internal:
+                description: |-
+                  internal marks a definition that is only installed as a member of a
+                  bundle (includes): tenants cannot enable it by itself, and the
+                  catalog they see does not list it.
+                type: boolean
+              management:
+                default: Tenant
+                description: |-
+                  management says who controls the component. Platform: installed
+                  with every cluster by the cluster's own reconcile, once the cluster
+                  can be reached, with fixed values; no Component object exists for
+                  it and the Component API refuses its name. Tenant (the default): a
+                  tenant enables and disables it on a cluster (a Component).
+                enum:
+                - Platform
+                - Tenant
+                type: string
               namespace:
-                description: namespace in the workload cluster.
+                description: |-
+                  namespace in the workload cluster. Required with install; a bundle
+                  has none (its members have theirs).
                 pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
                 type: string
               platformValues:
@@ -342,6 +459,13 @@ spec:
                 maxItems: 16
                 type: array
                 x-kubernetes-list-type: set
+              upgradeOneMinorAtATime:
+                description: |-
+                  upgradeOneMinorAtATime: the component supports in-place upgrades of
+                  one minor version at a time only (Istio). A channel does not move to
+                  a release whose pin skips a minor of the component relative to the
+                  release the channel offers now.
+                type: boolean
               userValues:
                 description: |-
                   userValues is the starting values file tenants pull (cluster-vending
@@ -362,11 +486,24 @@ spec:
                   Unset: no overrides are accepted (and userValues must be empty).
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              versionGroup:
+                description: |-
+                  versionGroup names components that are versions of one product (the
+                  Istio charts, Kyverno and its policies): a release must pin every
+                  member it pins, on each Kubernetes minor, at the same version. Unset:
+                  none.
+                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                type: string
             required:
             - description
-            - install
-            - namespace
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of install and includes is set
+              rule: has(self.install) != has(self.includes)
+            - message: namespace is required with install
+              rule: '!has(self.install) || has(self.__namespace__)'
+            - message: 'a bundle (includes) is not internal: bundles do not nest'
+              rule: '!has(self.includes) || !has(self.internal) || !self.internal'
           status:
             description: ComponentDefinitionStatus is written by the controller.
             properties:

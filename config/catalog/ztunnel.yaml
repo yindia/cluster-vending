@@ -1,0 +1,44 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: ztunnel
+spec:
+  description: Istio ztunnel node proxy (DaemonSet); gives ambient workloads mTLS and L4 policy without sidecars.
+  # A member of the istio bundle (istio.yaml): installed with it, by the
+  # platform, with every cluster.
+  management: Platform
+  internal: true
+  # The ambient guide installs it in istio-system. istiod only trusts the
+  # service account istio-system/ztunnel (istiod trustedZtunnelNamespace/Name).
+  namespace: istio-system
+  requires: [istio-cni]
+  versionGroup: istio
+  upgradeOneMinorAtATime: true
+  install:
+    helm:
+      repository: https://blob.istio.io/istio-release/charts
+      chart: ztunnel
+  platformValues:
+    # The ambient guide installs ztunnel with no profile.
+    istioNamespace: istio-system
+    multiCluster:
+      # Must be the same name as istiod's global.multiCluster.clusterName.
+      clusterName: ${cluster.name}
+    revision: ""
+    # Keep the default names: istiod's trustedZtunnelName depends on them.
+    resourceName: ""
+    logAsJson: true
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+    # A ztunnel restart briefly interrupts all ambient traffic on its node.
+    # ztunnel drains connections for this long, minus one second.
+    terminationGracePeriodSeconds: 30
+    # In-place upgrade, one node at a time, new pod started before the old one
+    # stops. See notes for the OnDelete alternative (upgrade by replacing nodes).
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0

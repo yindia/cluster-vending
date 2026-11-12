@@ -20,7 +20,8 @@ func newControllerCmd(g *globals) *cobra.Command {
 			"the objects the API server writes (and adopts\n" +
 			"Networks and Clusters created with kubectl): it creates, updates and\n" +
 			"deletes their cloud resources through Crossplane. It installs the\n" +
-			"kinds' CRDs and the Crossplane AWS providers (--install-providers), and\n" +
+			"kinds' CRDs, the Crossplane AWS providers (--install-providers) and the\n" +
+			"component catalog (--install-catalog), and\n" +
 			"it is the only command that looks at AWS: it discovers imported VPCs and\n" +
 			"EKS clusters and checks names and versions against EKS.\n\n" +
 			"Its AWS credentials come from the AWS SDK's default chain: IRSA in\n" +
@@ -44,7 +45,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace,
-				AWS: cfg.AWS, Logger: g.logger, InstallProviders: cfg.InstallProviders,
+				AWS: cfg.AWS, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
 			})
 		},
 	}

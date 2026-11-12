@@ -1,0 +1,90 @@
+# Checked against chart cluster-autoscaler 9.60.0 from
+# https://kubernetes.github.io/autoscaler. The autoscaler's minor version must
+# equal the cluster's Kubernetes minor, and the chart hardcodes one image per
+# chart release, so the Release sets image.tag per Kubernetes minor in the
+# component's pin (ComponentPin.values).
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: cluster-autoscaler
+spec:
+  description: Kubernetes Cluster Autoscaler, which resizes the cluster's managed node groups between their minimum and maximum size.
+  # Installed with every cluster by the platform; not a tenant's to enable.
+  management: Platform
+  namespace: kube-system
+  install:
+    helm:
+      repository: https://kubernetes.github.io/autoscaler
+      chart: cluster-autoscaler
+  cloudResources:
+    iamRole:
+      access: IRSA
+      serviceAccounts: [{namespace: kube-system, name: cluster-autoscaler}]
+      # Read access to what the autoscaler inspects; changing capacity only on
+      # Auto Scaling groups tagged for this cluster.
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeScalingActivities",
+                "ec2:DescribeImages",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeLaunchTemplateVersions",
+                "ec2:GetInstanceTypesFromInstanceRequirements",
+                "eks:DescribeNodegroup"
+              ],
+              "Resource": ["*"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup"
+              ],
+              "Resource": ["*"],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/k8s.io/cluster-autoscaler/${cluster.name}": "owned"
+                }
+              }
+            }
+          ]
+        }
+  # Fixed by the platform.
+  # image.tag is not here: the Release pins it per Kubernetes minor.
+  platformValues:
+    cloudProvider: aws
+    awsRegion: ${region}
+    # Node groups are found by the tags EKS puts on a managed node group's
+    # Auto Scaling group (the chart's default autoDiscovery.tags).
+    autoDiscovery:
+      clusterName: ${cluster.name}
+    rbac:
+      serviceAccount:
+        create: true
+        name: cluster-autoscaler
+        annotations:
+          eks.amazonaws.com/role-arn: ${iam.roleArn}
+    replicaCount: 2
+    priorityClassName: system-cluster-critical
+    # The cluster's default node pool: its labels, and a toleration per taint.
+    nodeSelector: ${system.nodeSelector}
+    tolerations: ${system.tolerations}
+    extraArgs:
+      expander: least-waste
+      balance-similar-node-groups: true
+      skip-nodes-with-system-pods: true
+      scale-down-unneeded-time: 10m
+    # The chart sets none; these are the platform's choice, not from the docs.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 300Mi
+      limits:
+        memory: 600Mi

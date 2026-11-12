@@ -1,0 +1,58 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: istiod
+spec:
+  description: Istio control plane (istiod) with the ambient profile; also deploys Gateway API gateways and waypoints.
+  # A member of the istio bundle (istio.yaml): installed with it, by the
+  # platform, with every cluster.
+  management: Platform
+  internal: true
+  namespace: istio-system
+  # gateway-api-crds: the ambient guide installs the Gateway API CRDs before istiod.
+  requires: [istio-base, gateway-api-crds]
+  versionGroup: istio
+  upgradeOneMinorAtATime: true
+  install:
+    helm:
+      repository: https://blob.istio.io/istio-release/charts
+      chart: istiod
+  platformValues:
+    # The cluster's default node pool: its labels, and a toleration per taint.
+    nodeSelector: ${system.nodeSelector}
+    tolerations: ${system.tolerations}
+    # `--set profile=ambient` from the ambient guide. The profile sets
+    # PILOT_ENABLE_AMBIENT=true, HBONE for proxies and distroless images.
+    profile: ambient
+    global:
+      istioNamespace: istio-system
+      multiCluster:
+        # Must be the same name as ztunnel's multiCluster.clusterName.
+        clusterName: ${cluster.name}
+      configValidation: true
+    # One non-revisioned control plane, upgraded in place.
+    revision: ""
+    revisionTags: []
+    istiodRemote:
+      enabled: false
+    # The only identity allowed to request certificates on behalf of pods: the
+    # ztunnel service account of the ztunnel component (istio-system/ztunnel).
+    trustedZtunnelNamespace: istio-system
+    trustedZtunnelName: ztunnel
+    sidecarInjectorWebhook:
+      # No cluster-wide sidecar injection. Workloads join with the ambient label.
+      enableNamespacesByDefault: false
+    autoscaleEnabled: true
+    autoscaleMin: 2
+    autoscaleMax: 5
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2048Mi
+    gateways:
+      # Gateways and waypoints that istiod deploys (also into tenant namespaces)
+      # get the RuntimeDefault seccomp profile, so they pass Pod Security "restricted".
+      seccompProfile:
+        type: RuntimeDefault
+    meshConfig:
+      trustDomain: cluster.local

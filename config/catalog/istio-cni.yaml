@@ -1,0 +1,33 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: istio-cni
+spec:
+  description: Istio CNI node agent (DaemonSet) with the ambient profile; redirects traffic of ambient pods to ztunnel.
+  # A member of the istio bundle (istio.yaml): installed with it, by the
+  # platform, with every cluster.
+  management: Platform
+  internal: true
+  # The ambient guide installs it in istio-system. It runs with host access, so
+  # this namespace must allow privileged pods (see notes).
+  namespace: istio-system
+  requires: [istiod]
+  versionGroup: istio
+  upgradeOneMinorAtATime: true
+  install:
+    helm:
+      repository: https://blob.istio.io/istio-release/charts
+      chart: cni
+  platformValues:
+    # `--set profile=ambient` from the ambient guide; turns on ambient.enabled.
+    profile: ambient
+    # Amazon VPC CNI on EKS nodes (AL2023, Bottlerocket): the chart defaults are
+    # right, and Istio has no `global.platform` value for EKS. Istio CNI adds
+    # itself to the VPC CNI plugin chain (10-aws.conflist).
+    cniBinDir: /opt/cni/bin
+    cniConfDir: /etc/cni/net.d
+    chained: true
+    # Pods in these namespaces are never redirected, whatever their labels.
+    excludeNamespaces:
+      - kube-system
+    revision: ""

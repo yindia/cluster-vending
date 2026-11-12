@@ -67,6 +67,10 @@ type Request struct {
 	// Offering is what the cluster's release offers; nil when no release
 	// applies (none is published, or its channel offers none).
 	Offering *Offering
+	// Catalog are the catalog's definitions, to tell what a requirement is
+	// (a Platform component is on every cluster) and which bundle an
+	// internal component belongs to. May be nil.
+	Catalog []Definition
 	// Update: an update of an enabled component, not an enable.
 	Update bool
 	// Version is a pin; empty: the release's version.
@@ -129,6 +133,10 @@ func checkTargets(r Request) *Problem {
 	switch {
 	case r.Definition == nil || !r.Definition.Valid:
 		return &Problem{Check: 1, Kind: fault.NotFound, Message: fmt.Sprintf("component %s is not in the catalog", r.Component)}
+	case CheckTenantAccess(*r.Definition, r.Catalog) != nil:
+		// Platform components come with the cluster, and a bundle's
+		// members with the bundle: not a tenant's to enable or change.
+		return &Problem{Check: 1, Kind: fault.PermissionDenied, Message: CheckTenantAccess(*r.Definition, r.Catalog).Error()}
 	case r.Cluster == nil:
 		return &Problem{Check: 2, Kind: fault.NotFound, Message: "the tenant has no such cluster"}
 	case !r.Update && slices.Contains(r.Enabled, r.Component):
@@ -202,7 +210,7 @@ func checkPin(r Request) []Problem {
 func checkDependencies(r Request) []Problem {
 	var out []Problem
 	for _, req := range sortedCopy(r.Definition.Requires) {
-		if !slices.Contains(r.Enabled, req) {
+		if !slices.Contains(r.Enabled, req) && !platformProvides(req, r.Catalog) {
 			out = append(out, Problem{Check: 7, Kind: fault.FailedPrecondition, Message: fmt.Sprintf("enable %s first", req)})
 		}
 	}
@@ -256,6 +264,11 @@ func checkValues(d *Definition, v Values) []Problem {
 func CheckDisable(name string, enabled []Definition) error {
 	var needed []string
 	for _, d := range enabled {
+		if d.Name == name {
+			if err := CheckTenantAccess(d, enabled); err != nil {
+				return err
+			}
+		}
 		if d.Name != name && slices.Contains(d.Requires, name) {
 			needed = append(needed, d.Name)
 		}
@@ -286,6 +299,12 @@ func CheckAddons(addons []string, enabled []Definition) error {
 	}
 	slices.Sort(msgs)
 	return fault.New(fault.FailedPrecondition, strings.Join(msgs, "; "))
+}
+
+// platformProvides reports whether name is a Platform component of the
+// catalog: installed with every cluster, so a tenant never enables it.
+func platformProvides(name string, catalog []Definition) bool {
+	return slices.ContainsFunc(catalog, func(d Definition) bool { return d.Name == name && d.IsPlatform() })
 }
 
 func sortedCopy(s []string) []string {

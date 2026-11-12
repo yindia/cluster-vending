@@ -119,6 +119,37 @@ func TestExpand(t *testing.T) {
 	}
 }
 
+// Placeholders in object keys are filled in and validated like those in
+// values: an IAM condition key names the cluster.
+func TestExpandKeys(t *testing.T) {
+	doc := map[string]any{"Condition": map[string]any{"StringEquals": map[string]any{
+		"aws:ResourceTag/k8s.io/cluster-autoscaler/${cluster.name}": "owned"}}}
+
+	got, err := Expand(doc, Vars{VarClusterName: "prod"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"Condition": map[string]any{"StringEquals": map[string]any{
+		"aws:ResourceTag/k8s.io/cluster-autoscaler/prod": "owned"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if names := Placeholders(doc); !reflect.DeepEqual(names, []string{VarClusterName}) {
+		t.Errorf("Placeholders = %v", names)
+	}
+	if err := Validate(map[string]any{"tag/${cluster.zone}": "x"}); err == nil || !strings.Contains(err.Error(), "${cluster.zone}") {
+		t.Errorf("an unknown placeholder in a key: %v", err)
+	}
+	if _, err := Expand(doc, Vars{}); !errors.Is(err, ErrNotReady) {
+		t.Errorf("a key whose value is not known yet: %v", err)
+	}
+	clash := map[string]any{"${cluster.name}": 1, "prod": 2}
+	if _, err := Expand(clash, Vars{VarClusterName: "prod"}); err == nil || !strings.Contains(err.Error(), "two keys") {
+		t.Errorf("two keys that become one: %v", err)
+	}
+}
+
 func TestExpandErrors(t *testing.T) {
 	tests := []struct {
 		name     string

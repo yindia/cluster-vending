@@ -7,18 +7,12 @@ import (
 	"reflect"
 	"testing"
 
-	apiextensionsinternal "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
-	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
-	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
-	"k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"sigs.k8s.io/yaml"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/config/crd/crdtest"
 	"github.com/yindia/cluster-vending/pkg/component"
 )
 
@@ -58,50 +52,25 @@ func TestComponentSamplesDecodeStrictly(t *testing.T) {
 }
 
 // validator checks an object against a CRD's schema and CEL rules, as the
-// API server does on create with strict field validation, without one: a
-// field the schema does not have is an error too.
-type validator struct {
-	schema validation.SchemaValidator
-	cel    *cel.Validator
-	s      *structuralschema.Structural
-}
+// API server does on create with strict field validation (crdtest).
+type validator struct{ v *crdtest.Validator }
 
 func newValidator(t *testing.T, kind string) validator {
 	t.Helper()
-	def := embedded(t)[kind]
-	crdv1 := &apiextensionsv1.CustomResourceDefinition{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(def.Object, crdv1); err != nil {
-		t.Fatal(err)
-	}
-	internal := &apiextensionsinternal.JSONSchemaProps{}
-	if err := apiextensionsv1.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(
-		crdv1.Spec.Versions[0].Schema.OpenAPIV3Schema, internal, nil); err != nil {
-		t.Fatal(err)
-	}
-	schema, _, err := validation.NewSchemaValidator(internal)
+	v, err := crdtest.New(kind)
 	if err != nil {
 		t.Fatal(err)
 	}
-	structural, err := structuralschema.NewStructural(internal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return validator{schema: schema, s: structural, cel: cel.NewValidator(structural, true, celconfig.PerCallLimit)}
+	return validator{v: v}
 }
 
 func (v validator) validate(t *testing.T, doc []byte) field.ErrorList {
 	t.Helper()
-	obj := map[string]any{}
-	if err := yaml.Unmarshal(doc, &obj); err != nil {
+	errs, err := v.v.Validate(t.Context(), doc)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var errs field.ErrorList
-	for _, path := range pruning.PruneWithOptions(obj, v.s, true, structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true}) {
-		errs = append(errs, field.Forbidden(field.NewPath(path), "unknown field"))
-	}
-	errs = append(errs, validation.ValidateCustomResource(nil, obj, v.schema)...)
-	celErrs, _ := v.cel.Validate(t.Context(), nil, v.s, obj, nil, celconfig.RuntimeCELCostBudget)
-	return append(errs, celErrs...)
+	return errs
 }
 
 // Every component sample is one the API server accepts: the CRD's schema
@@ -158,6 +127,42 @@ spec:
 	}
 }
 
+// A definition has a chart of its own or is a bundle, never both; a chart
+// needs a namespace; a bundle is not internal; management is Platform or
+// Tenant; a CRD chart is a chart source.
+func TestComponentDefinitionShapeRules(t *testing.T) {
+	v := newValidator(t, "ComponentDefinition")
+	const head = "apiVersion: cloud.cluster-vending.io/v1alpha1\nkind: ComponentDefinition\nmetadata:\n  name: x\nspec:\n  description: d\n"
+	const install = "  install:\n    helm: {repository: 'https://charts.example.com', chart: tools}\n"
+	for name, tt := range map[string]struct {
+		spec    string
+		wantErr bool
+	}{
+		"chart":                     {"  namespace: tools\n" + install, false},
+		"platform chart":            {"  management: Platform\n  namespace: tools\n" + install, false},
+		"internal member":           {"  internal: true\n  namespace: tools\n" + install, false},
+		"bundle":                    {"  includes: [a, b]\n", false},
+		"chart with a CRD chart":    {"  namespace: tools\n  install:\n    helm: {repository: 'https://c.example.com', chart: tools, crds: {repository: 'oci://r.example.com/c', chart: tools-crds}}\n", false},
+		"version group and stepped": {"  namespace: tools\n  versionGroup: istio\n  upgradeOneMinorAtATime: true\n" + install, false},
+		"neither chart nor bundle":  {"  namespace: tools\n", true},
+		"chart and bundle":          {"  namespace: tools\n  includes: [a]\n" + install, true},
+		"chart without a namespace": {install, true},
+		"internal bundle":           {"  internal: true\n  includes: [a]\n", true},
+		"empty bundle":              {"  includes: []\n", true},
+		"unknown management":        {"  management: Operator\n  namespace: tools\n" + install, true},
+		"CRD chart without a chart": {"  namespace: tools\n  install:\n    helm: {repository: 'https://c.example.com', chart: tools, crds: {repository: 'oci://r.example.com/c'}}\n", true},
+		"version group not a label": {"  namespace: tools\n  versionGroup: Istio Mesh\n" + install, true},
+	} {
+		errs := v.validate(t, []byte(head+tt.spec))
+		if tt.wantErr && len(errs) == 0 {
+			t.Errorf("%s: accepted", name)
+		}
+		if !tt.wantErr && len(errs) > 0 {
+			t.Errorf("%s: %v", name, errs.ToAggregate())
+		}
+	}
+}
+
 func fmtDoc(base, name string) string {
 	return string(bytes.Replace([]byte(base), []byte("%s"), []byte(name), 1))
 }
@@ -186,16 +191,13 @@ spec:
 	if errs := v.validate(t, doc("prod-eks-Karpenter", "Karpenter")); len(errs) == 0 {
 		t.Error("a component name that is not a DNS label was accepted")
 	}
-	old := map[string]any{}
-	if err := yaml.Unmarshal(doc("prod-eks-karpenter", "karpenter"), &old); err != nil {
+	moved := bytes.Replace(doc("prod-eks-karpenter", "karpenter"),
+		[]byte("01a1d0a6-69d5-7e15-965e-fc6a53fa3d33"), []byte("02b2e1b7-7ae6-7f26-a76f-0d7b6eab4e44"), 1)
+	errs, err := v.v.ValidateUpdate(t.Context(), moved, doc("prod-eks-karpenter", "karpenter"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	moved := map[string]any{}
-	if err := yaml.Unmarshal(bytes.Replace(doc("prod-eks-karpenter", "karpenter"),
-		[]byte("01a1d0a6-69d5-7e15-965e-fc6a53fa3d33"), []byte("02b2e1b7-7ae6-7f26-a76f-0d7b6eab4e44"), 1), &moved); err != nil {
-		t.Fatal(err)
-	}
-	if errs, _ := v.cel.Validate(t.Context(), nil, v.s, moved, old, celconfig.RuntimeCELCostBudget); len(errs) == 0 {
+	if len(errs) == 0 {
 		t.Error("a component moved to another cluster")
 	}
 }

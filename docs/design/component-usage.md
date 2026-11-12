@@ -141,6 +141,13 @@ tenant needs when a value does not take effect.
 read it through `ListComponentDefinitions`; the install details are not part
 of that answer.
 
+The definitions this build ships are in `config/catalog/` and listed in
+[catalog.md](../catalog.md). The controller creates the missing ones on
+startup (`--install-catalog`) and never changes an existing one. The fields
+`install.helm.crds`, `versionGroup` and `upgradeOneMinorAtATime` are
+described in section 7.1; they are the operator's and not part of the
+tenants' contract (`component.proto` has no install details).
+
 ```go
 // ComponentDefinitionSpec is one entry of the catalog.
 type ComponentDefinitionSpec struct {
@@ -817,6 +824,111 @@ billed, and blocks deleting the node role.
 | Any cluster outside the support window | Installed components stay; enabling new ones is refused. |
 
 The tier and channel are the cluster's; a component has none of its own.
+
+### 7.1 CRD charts, version groups and upgrade order
+
+**CRD charts (built: the field and its checks; the installer comes with
+step 6).** Helm installs a chart's `crds/` directory once and never upgrades
+it. A definition may name a chart that holds only the component's CRDs as
+templates:
+
+```yaml
+install:
+  helm:
+    repository: oci://public.ecr.aws/karpenter
+    chart: karpenter
+    crds:
+      repository: oci://public.ecr.aws/karpenter
+      chart: karpenter-crd
+```
+
+- The CRD chart is installed, and upgraded, **before** the main chart, at
+  the version the release pins for the component (`ComponentPin.version`;
+  there is no separate pin: upstream CRD charts are released with their
+  main chart, and the platform's own follow the upstream version).
+- The main chart then runs with provider-helm's
+  `spec.forProvider.skipCRDs: true` (present in the provider-helm v1.5.0
+  `Release` CRD).
+- It gets no values and may carry `credentials` like any chart.
+- Shipped: `karpenter` (upstream `karpenter-crd`) and
+  `aws-load-balancer-controller` (the platform's
+  `charts/aws-load-balancer-controller-crds`). See [catalog.md](../catalog.md).
+
+**Version groups (built).** `versionGroup: <name>` on a definition marks
+components that are versions of one product (the Istio charts; `kyverno` and
+`kyverno-policies`). A `Release` that pins members of a group at different
+versions on the same Kubernetes minor gets `Valid=False`
+(`release.CheckGroups`, in the release controller). A group partly pinned is
+fine.
+
+**One minor at a time (built).** `upgradeOneMinorAtATime: true` (Istio:
+in-place upgrades skip no minor). A channel does not move to a release whose
+pin skips a minor version of such a component relative to the release the
+channel offers now: `Offering=False`, naming the component and both
+versions, and the channel keeps offering what it did (`release.CheckStep`,
+in the channel controller). A cluster moving to a new Kubernetes minor is
+compared with the highest version the current release pins for the
+component. The operator publishes the in-between release first.
+
+**Upgrade order (built as a pure function; the installer must follow it).**
+Components are installed and upgraded in `requires` order, then by name
+(`release.UpgradeOrder`): `istio-base`, `istiod`, `istio-cni`, `ztunnel`;
+`kyverno` before `kyverno-policies`. A cycle, or a requirement the catalog
+does not have, is an error.
+
+**Values a release sets (built).** A pin may carry `values`
+(`ComponentPin.values`): Helm values for the component on that Kubernetes
+minor, merged over the definition's `platformValues`
+(`component.WithPinValues`), locked the same way, placeholders allowed.
+The cluster autoscaler's image tag is set this way, since its minor must
+equal the cluster's.
+
+### 7.2 Platform components and bundles
+
+**Who controls a component (built: the field and the pure checks).**
+`spec.management` is `Tenant` (the default) or `Platform`.
+
+- **Tenant** components are what this document describes: a tenant enables
+  one on a cluster, which creates a `Component`. Shipped: `gpu-operator`
+  and `kyverno-policies`.
+- **Platform** components are part of cluster creation. No `Component`
+  object exists for them and they never appear in `ListComponents`.
+  `EnableComponent`, `UpdateComponent` and `DisableComponent` refuse their
+  names with `PERMISSION_DENIED` ("installed with the cluster";
+  `component.CheckTenantAccess`, used by `CheckEnable` and `CheckDisable`).
+  A Platform definition has no `userValues` or `valuesSchema`
+  (`CheckDefinition`) and requires only Platform definitions
+  (`CheckCatalog`). A Tenant component may require a Platform one; nothing
+  has to be enabled first for it (`Request.Catalog`).
+- `ListComponentDefinitions` (handler: later) shows only Tenant, not
+  internal definitions (`component.TenantCatalog`).
+
+**How Platform components are installed (decided; the renderer is a later
+step).** The cluster's reconcile renders them into the cluster's own
+sequence after the `<prefix>-helm` ProviderConfig is Ready
+(`component.PlatformComponents`: Platform definitions with a chart, bundles
+expanded to their members, in `requires` order). For each component: its
+IAM role, then its CRD chart, its chart, its companions. Versions come from
+the cluster's release. Their state is reported on the Cluster: a
+`PlatformComponentsReady` condition, and a phase per component in the
+cluster's status. It does not hold back the cluster's own Ready.
+
+**Bundles (built: the fields and the pure checks).** A definition with
+`includes` and no `install` is one component made of several charts. Each
+member is a definition of its own, marked `internal: true`, with its chart,
+namespace, version pin, `versionGroup` and `requires`.
+
+- Enabling the bundle installs every member in `requires` order
+  (`component.BundleOrder`), each once the one before is Ready; disabling
+  removes them in reverse order; the bundle is Ready when every member is.
+  A bundle's status reports each member's phase.
+- A release pins every member of a bundle on a Kubernetes minor, or none
+  (`release.CheckBundles`, in the release controller's Valid condition).
+- An internal definition cannot be enabled by itself: the refusal names the
+  bundle. It is a member of exactly one bundle, and bundles do not nest
+  (`CheckCatalog`; the CRD refuses an internal bundle and a definition with
+  both `install` and `includes`).
+- Shipped: `istio` (Platform), six members.
 
 ## 8. Dependencies and conflicts
 

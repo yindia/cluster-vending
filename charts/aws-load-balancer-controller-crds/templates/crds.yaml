@@ -1,0 +1,17 @@
+{{- /*
+Every CustomResourceDefinition in files/, unchanged except for the
+helm.sh/resource-policy: keep annotation: uninstalling the chart must not
+delete the CRDs, and with them every TargetGroupBinding and
+IngressClassParams of the cluster.
+*/}}
+{{- range $path, $_ := .Files.Glob "files/*.yaml" }}
+{{- range $doc := regexSplit "(?m)^---[ \\t]*$" ($.Files.Get $path) -1 }}
+{{- $crd := fromYaml $doc }}
+{{- if $crd.kind }}
+{{- $annotations := merge (dict "helm.sh/resource-policy" "keep") (default (dict) $crd.metadata.annotations) }}
+{{- $_ := set $crd.metadata "annotations" $annotations }}
+---
+{{ toYaml $crd }}
+{{- end }}
+{{- end }}
+{{- end }}

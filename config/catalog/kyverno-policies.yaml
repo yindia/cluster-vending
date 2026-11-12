@@ -1,0 +1,94 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: kyverno-policies
+spec:
+  description: Kubernetes Pod Security Standards (baseline or restricted) as Kyverno ValidatingPolicies, with system and platform namespaces excluded.
+  namespace: kyverno
+  requires: [kyverno]
+  # kyverno and kyverno-policies are released together.
+  versionGroup: kyverno
+  install:
+    helm:
+      repository: https://kyverno.github.io/kyverno/
+      chart: kyverno-policies
+  platformValues:
+    # Fail closed on policy evaluation errors.
+    failurePolicy: Fail
+    # Applies to every ValidatingPolicy in the chart, including when Kyverno turns them into native
+    # ValidatingAdmissionPolicies (generateValidatingAdmissionPolicy is on by default in 1.20), which
+    # do not go through Kyverno's webhook namespaceSelector. Same list as the kyverno definition.
+    vpolExclude:
+      excludeNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - kyverno
+      - gateway-system
+      - gpu-operator
+      - istio-ingress
+      - istio-system
+  userValues: |
+    # Pod Security Standards, enforced by Kyverno.
+    # System and platform namespaces are always excluded; you cannot change that.
+
+    # Profile: baseline or restricted. restricted includes every baseline policy.
+    podSecurityStandard: baseline
+
+    # What happens to a Pod that violates a policy:
+    #   Audit   - allowed, and the violation shows in PolicyReports (start here)
+    #   Enforce - rejected
+    validationFailureAction: Audit
+
+    # Per-policy override of validationFailureAction, e.g. to enforce some policies while the rest
+    # audit. Keys are policy names from the chosen profile.
+    # Baseline: disallow-capabilities, disallow-host-namespaces, disallow-host-path,
+    #   disallow-host-ports, disallow-host-probes, disallow-host-process,
+    #   disallow-privileged-containers, disallow-proc-mount, disallow-selinux,
+    #   restrict-apparmor-profiles, restrict-seccomp, restrict-sysctls
+    # Restricted adds (some only for certain podSecurityVersion values): disallow-capabilities-strict, disallow-privilege-escalation,
+    #   disallow-proc-mount-strict, require-run-as-non-root-user, require-run-as-nonroot,
+    #   restrict-seccomp-strict, restrict-volume-types
+    validationFailureActionByPolicy: {}
+    #  disallow-privileged-containers: Enforce
+    #  disallow-host-path: Enforce
+
+    # Pod Security Admission version the policies follow: latest, or v1.25 to v1.37 (e.g. v1.34).
+    # latest uses the cluster's Kubernetes minor at install/upgrade time.
+    podSecurityVersion: latest
+  valuesSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      podSecurityStandard:
+        type: string
+        enum: [baseline, restricted]
+      validationFailureAction:
+        type: string
+        enum: [Audit, Enforce]
+      validationFailureActionByPolicy:
+        type: object
+        additionalProperties: false
+        properties:
+          disallow-capabilities: {type: string, enum: [Audit, Enforce]}
+          disallow-host-namespaces: {type: string, enum: [Audit, Enforce]}
+          disallow-host-path: {type: string, enum: [Audit, Enforce]}
+          disallow-host-ports: {type: string, enum: [Audit, Enforce]}
+          disallow-host-probes: {type: string, enum: [Audit, Enforce]}
+          disallow-host-process: {type: string, enum: [Audit, Enforce]}
+          disallow-privileged-containers: {type: string, enum: [Audit, Enforce]}
+          disallow-proc-mount: {type: string, enum: [Audit, Enforce]}
+          disallow-selinux: {type: string, enum: [Audit, Enforce]}
+          restrict-apparmor-profiles: {type: string, enum: [Audit, Enforce]}
+          restrict-seccomp: {type: string, enum: [Audit, Enforce]}
+          restrict-sysctls: {type: string, enum: [Audit, Enforce]}
+          disallow-capabilities-strict: {type: string, enum: [Audit, Enforce]}
+          disallow-privilege-escalation: {type: string, enum: [Audit, Enforce]}
+          disallow-proc-mount-strict: {type: string, enum: [Audit, Enforce]}
+          require-run-as-non-root-user: {type: string, enum: [Audit, Enforce]}
+          require-run-as-nonroot: {type: string, enum: [Audit, Enforce]}
+          restrict-seccomp-strict: {type: string, enum: [Audit, Enforce]}
+          restrict-volume-types: {type: string, enum: [Audit, Enforce]}
+      podSecurityVersion:
+        type: string
+        pattern: '^(latest|v1\.(2[5-9]|3[0-7]))$'

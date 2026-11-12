@@ -42,11 +42,23 @@ type ComponentPin struct {
 	// +required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	Name string `json:"name"`
-	// Version installed, e.g. the chart version.
+	// Version installed, e.g. the chart version. A component's CRD chart
+	// (ComponentDefinition install.helm.crds) is installed at this version
+	// too: there is no separate pin.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	Version string `json:"version"`
+	// values are Helm values the release sets for the component on this
+	// Kubernetes minor (cluster-autoscaler's image tag follows the
+	// minor). They are merged over the definition's platformValues and
+	// locked the same way: a tenant who touches one of their paths is
+	// refused. Placeholders are allowed. Unset: none.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	Values *runtime.RawExtension `json:"values,omitempty"`
 }
 
 // KubernetesRelease is what clusters on one supported Kubernetes minor run.

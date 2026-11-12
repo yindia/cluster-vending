@@ -15,7 +15,8 @@ import (
 // type (a name or a list of names: object, array, string, integer,
 // number, boolean, null), properties, required, additionalProperties (a
 // boolean or a schema), items, enum, minimum, maximum, minLength,
-// maxLength and pattern, plus description and title (ignored). No library
+// maxLength, pattern, minItems, maxItems, minProperties and maxProperties,
+// plus description and title (ignored). No library
 // in the module graph validates plain JSON Schema; the Kubernetes ones
 // would bring Kubernetes into this package. CheckSchema refuses any other
 // keyword, so an operator never writes a rule that is silently ignored.
@@ -24,6 +25,7 @@ import (
 var schemaKeywords = []string{
 	"type", "properties", "required", "additionalProperties", "items", "enum",
 	"minimum", "maximum", "minLength", "maxLength", "pattern", "description", "title",
+	"minItems", "maxItems", "minProperties", "maxProperties",
 }
 
 // schemaTypes are the type names the subset knows.
@@ -107,6 +109,7 @@ func validateAt(s map[string]any, v any, path string, out *[]string) {
 	case map[string]any:
 		validateObject(s, t, path, out)
 	case []any:
+		checkCount(s, len(t), "minItems", "maxItems", "items", path, out)
 		if items, ok := s["items"].(map[string]any); ok {
 			for i, e := range t {
 				validateAt(items, e, fmt.Sprintf("%s[%d]", path, i), out)
@@ -121,8 +124,10 @@ func validateAt(s map[string]any, v any, path string, out *[]string) {
 	}
 }
 
-// validateObject checks required, properties and additionalProperties.
+// validateObject checks the property count, required, properties and
+// additionalProperties.
 func validateObject(s map[string]any, obj map[string]any, path string, out *[]string) {
+	checkCount(s, len(obj), "minProperties", "maxProperties", "properties", path, out)
 	if req, ok := s["required"].([]any); ok {
 		for _, r := range req {
 			if name, ok := r.(string); ok {
@@ -292,4 +297,16 @@ func display(path string) string {
 		return "values"
 	}
 	return path
+}
+
+// checkCount checks a list's or an object's size against the schema's
+// minimum and maximum keywords (minKey, maxKey); what names the counted
+// things in the message.
+func checkCount(s map[string]any, n int, minKey, maxKey, what, path string, out *[]string) {
+	if limit, ok := number(s[maxKey]); ok && float64(n) > limit {
+		*out = append(*out, fmt.Sprintf("%s: must have at most %v %s", display(path), limit, what))
+	}
+	if limit, ok := number(s[minKey]); ok && float64(n) < limit {
+		*out = append(*out, fmt.Sprintf("%s: must have at least %v %s", display(path), limit, what))
+	}
 }

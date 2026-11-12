@@ -52,6 +52,8 @@ const (
 const (
 	FlagInstallProviders = "install-providers"
 	EnvInstallProviders  = "CV_INSTALL_PROVIDERS"
+	FlagInstallCatalog   = "install-catalog"
+	EnvInstallCatalog    = "CV_INSTALL_CATALOG"
 	FlagLeaderElect      = "leader-elect"
 	EnvLeaderElect       = "CV_LEADER_ELECT"
 	FlagLeaseNamespace   = "lease-namespace"

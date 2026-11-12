@@ -161,6 +161,10 @@ reconciler installs.
 
 ## 6. The catalog entry
 
+The catalog this build ships, with each component's chart version, CRD
+chart and caveats, is in [catalog.md](../catalog.md); version groups and the
+upgrade order are in component-usage.md, section 7.1.
+
 **Proposed.** A cluster-scoped kind `ComponentDefinition`, written by the
 operator with `kubectl` or from Git, like `Release`.
 

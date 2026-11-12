@@ -1,0 +1,45 @@
+{{- /*
+Overlays (strategic merge patch) that istiod applies to the objects it generates for the Gateway.
+istiod creates the HorizontalPodAutoscaler and the PodDisruptionBudget only because their keys are present here.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}-options
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
+data:
+  horizontalPodAutoscaler: |
+    spec:
+      minReplicas: {{ int .Values.autoscaling.minReplicas }}
+      maxReplicas: {{ int .Values.autoscaling.maxReplicas }}
+      metrics:
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: {{ int .Values.autoscaling.targetCPUUtilizationPercentage }}
+  podDisruptionBudget: |
+    spec:
+      minAvailable: {{ int .Values.podDisruptionBudget.minAvailable }}
+  deployment: |
+    spec:
+      template:
+        spec:
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+          - name: istio-proxy
+            resources:
+              {{- toYaml .Values.resources | nindent 14 }}

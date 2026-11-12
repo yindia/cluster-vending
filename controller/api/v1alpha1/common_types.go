@@ -1,5 +1,7 @@
 package v1alpha1
 
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 // The kinds of this group form one ownership chain inside a tenant's
 // namespace:
 //
@@ -72,9 +74,13 @@ type InventoryEntry struct {
 	// kind of the object.
 	// +required
 	Kind string `json:"kind"`
-	// name of the object, in the owner's namespace.
+	// name of the object.
 	// +required
 	Name string `json:"name"`
+	// namespace of the object. Empty for a cluster-scoped object (the
+	// tenant's namespace itself, recorded for its account).
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 	// externalName is the cloud identifier of the resource the object
 	// stands for (crossplane.io/external-name): what a rebuilt management
 	// cluster needs to adopt the resource instead of creating a new one.
@@ -86,6 +92,15 @@ type InventoryEntry struct {
 	// again, and is deleted with the owner.
 	// +optional
 	CarriedOver bool `json:"carriedOver,omitempty"`
+	// recordedAt is when the object was first recorded as the owner's. An
+	// object recorded a moment ago and not in the management cluster yet
+	// is being created, not missing.
+	// +optional
+	RecordedAt *metav1.Time `json:"recordedAt,omitempty"`
+	// goneAt is when the object was first seen gone from the management
+	// cluster after its owner's deletion was requested.
+	// +optional
+	GoneAt *metav1.Time `json:"goneAt,omitempty"`
 }
 
 // ImportPhase is how far an import is.

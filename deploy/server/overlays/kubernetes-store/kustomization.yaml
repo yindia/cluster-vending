@@ -12,5 +12,3 @@ configMapGenerator:
   behavior: merge
   literals:
   - CV_STORE=kubernetes
-  # Where the custom resources live; the server creates it when missing.
-  - CV_PLATFORM_NAMESPACE=cluster-vending-system

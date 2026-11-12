@@ -18,7 +18,7 @@ namespaced; the tenant is the namespace.
 
 One account has many networks; one network has many clusters. Both
 references are required and immutable. The controller sets a controller
-owner reference along the chain (`internal/owner`), with
+owner reference along the chain (`owner`), with
 `blockOwnerDeletion`.
 
 Deletion rule: an owner is not deleted while it has dependents. Each kind
@@ -27,9 +27,13 @@ left. Deleting an account never deletes its networks and clusters by
 cascade.
 
 The specs mirror the `cloud.v1` contract in `idl/cloud/v1`, with Kubernetes
-conventions (camelCase, string enums, `metav1.Condition`). `pkg/apis/platform`
-is a different group: the storage rows of the Kubernetes-backed repository
-store, which this API will replace.
+conventions (camelCase, string enums, `metav1.Condition`). `convert`
+translates between the two, both ways without loss.
+
+With `--store=kubernetes` the API server keeps its state in these kinds
+(`pkg/database/cloudstore`): a tenant is its namespace, and every account,
+network and cluster the API knows is an object here, written through the
+same repository interface the database store has.
 
 ## Layout
 
@@ -37,7 +41,7 @@ store, which this API will replace.
 PROJECT                 kubebuilder project file
 api/v1alpha1/           the types (edit these), generated deepcopy
 internal/controller/    the three reconcilers: empty stubs
-internal/owner/         the ownership chain as owner references and labels
+owner/                  the ownership chain as owner references and labels
 manager.go              Run: the manager with the reconcilers and probes
 config/crd/bases/       generated CRDs
 config/rbac/            generated role, and the scaffolded ones

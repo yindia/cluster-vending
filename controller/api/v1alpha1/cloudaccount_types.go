@@ -14,10 +14,11 @@ type AWSAccount struct {
 	AccountID string `json:"accountID"`
 	// role is the name (no path) of the IAM role the platform assumes in
 	// the account, e.g. "cluster-vending-provisioner". The tenant creates
-	// it, trusting the platform's management role.
-	// +required
+	// it, trusting the platform's management role. Empty until the account
+	// is bootstrapped.
+	// +optional
 	// +kubebuilder:validation:Pattern=`^[\w+=,.@-]{1,64}$`
-	Role string `json:"role"`
+	Role string `json:"role,omitempty"`
 }
 
 // CloudAccountSpec is a cloud account of the tenant, as the platform

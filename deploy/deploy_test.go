@@ -235,7 +235,7 @@ func TestRolesCoverTheKindsThePlatformRenders(t *testing.T) {
 		{"pkg.crossplane.io", "providers", "create"}, {"pkg.crossplane.io", "deploymentruntimeconfigs", "create"},
 		{"apiextensions.crossplane.io", "managedresourceactivationpolicies", "update"},
 		{"apiextensions.k8s.io", "customresourcedefinitions", "patch"},
-		{"cloud.cluster-vending.io", "networks", "update"}, {"platform.cluster-vending.io", "clusters", "update"},
+		{"cloud.cluster-vending.io", "networks", "update"}, {"cloud.cluster-vending.io", "clusters", "update"},
 	} {
 		if !allows(server, need[0], need[1], need[2]) {
 			t.Errorf("server role: no %s on %s.%s", need[2], need[1], need[0])

@@ -5,7 +5,7 @@
 // built-ins, Crossplane's package types (Provider, DeploymentRuntimeConfig)
 // and the provider-upjet-aws namespaced types (ProviderConfig and the ec2,
 // eks, iam, cloudwatchlogs and kms managed resources). pkg/crossplane builds those objects.
-// The platform's own kinds (pkg/apis/platform/v1alpha1) are registered
+// The platform's own kinds (controller/api/v1alpha1) are registered
 // too: they are the store when no database is used.
 // Adding a provider (GCP, Azure) means adding its Go API module and
 // registering its groups in Scheme.
@@ -30,7 +30,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	platformv1alpha1 "github.com/yindia/cluster-vending/pkg/apis/platform/v1alpha1"
+	cloudv1alpha1 "github.com/yindia/cluster-vending/controller/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/version"
 )
 
@@ -86,7 +86,7 @@ func Scheme() (*runtime.Scheme, error) {
 		awskms.AddToScheme,
 		awseks.AddToScheme,
 		awsiam.AddToScheme,
-		platformv1alpha1.AddToScheme,
+		cloudv1alpha1.AddToScheme,
 	} {
 		if err := add(s); err != nil {
 			return nil, fmt.Errorf("kubernetes scheme: %w", err)

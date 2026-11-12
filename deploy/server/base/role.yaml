@@ -193,11 +193,9 @@ rules:
   - create
   - update
   - patch
-# With --store=kubernetes: the state itself. platform.cluster-vending.io is
-# the store of pkg/database/kubestore; cloud.cluster-vending.io are the
-# controller's kinds, which replace it.
+# With --store=kubernetes: the state itself, as objects of the
+# controller's kinds in the tenant namespaces (pkg/database/cloudstore).
 - apiGroups:
-  - platform.cluster-vending.io
   - cloud.cluster-vending.io
   resources:
   - "*"

@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/controller/api/v1alpha1"
-	"github.com/yindia/cluster-vending/controller/internal/owner"
+	"github.com/yindia/cluster-vending/controller/owner"
 )
 
 const tenant = "tenant-acme"

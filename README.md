@@ -30,7 +30,7 @@ decided but not built, and what is not verified.
 | `make test` | Unit tests with the race detector. They use SQLite and a fake API server; no cluster is needed. |
 | `make test-postgres` | The database tests against a throwaway Postgres in docker. |
 | `make generate` | Regenerates `pkg/gen` from `idl/`. |
-| `make apis`, `make controller-apis` | Regenerate deepcopy code and CRDs for `pkg/apis` and `controller/`. |
+| `make controller-apis` | Regenerate deepcopy code, CRDs and RBAC for the kinds in `controller/`. |
 | `make mocks` | Regenerates the repository mocks. |
 | `make help` | Lists every target. |
 

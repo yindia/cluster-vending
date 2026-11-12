@@ -269,7 +269,7 @@ spec:
                 - message: zonal subnets already define the zones; availabilityZoneCount
                     only combines with regional subnets (no zoneID)
                   rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
-                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
+                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == ”)'
                 - message: subnet cidrBlock values must be unique
                   rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
                     b.cidrBlock == a.cidrBlock))'
@@ -388,6 +388,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              contractStatus:
+                description: |-
+                  contractStatus is the status as the cloud.v1 API returns it
+                  (protojson), kept verbatim: the fields above are read from it, and it
+                  carries what they leave out (the state of every object). Written by
+                  the platform; not meant to be edited.
+                x-kubernetes-preserve-unknown-fields: true
               importPlan:
                 description: |-
                   importPlan is set for an imported network: the plan of the import,
@@ -477,11 +484,29 @@ spec:
                         cluster needs to adopt the resource instead of creating a new one.
                         Empty until the provider created the resource.
                       type: string
+                    goneAt:
+                      description: |-
+                        goneAt is when the object was first seen gone from the management
+                        cluster after its owner's deletion was requested.
+                      format: date-time
+                      type: string
                     kind:
                       description: kind of the object.
                       type: string
                     name:
-                      description: name of the object, in the owner's namespace.
+                      description: name of the object.
+                      type: string
+                    namespace:
+                      description: |-
+                        namespace of the object. Empty for a cluster-scoped object (the
+                        tenant's namespace itself, recorded for its account).
+                      type: string
+                    recordedAt:
+                      description: |-
+                        recordedAt is when the object was first recorded as the owner's. An
+                        object recorded a moment ago and not in the management cluster yet
+                        is being created, not missing.
+                      format: date-time
                       type: string
                   required:
                   - apiVersion
@@ -560,7 +585,7 @@ spec:
                 - message: zonal subnets already define the zones; availabilityZoneCount
                     only combines with regional subnets (no zoneID)
                   rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
-                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
+                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == ”)'
                 - message: subnet cidrBlock values must be unique
                   rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
                     b.cidrBlock == a.cidrBlock))'

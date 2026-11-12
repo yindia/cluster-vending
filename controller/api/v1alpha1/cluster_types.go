@@ -205,7 +205,7 @@ type NodePoolSpec struct {
 	CapacityType CapacityType `json:"capacityType,omitempty"`
 	// scaling is the size of the pool.
 	// +required
-	Scaling ScalingConfig `json:"scaling"`
+	Scaling *ScalingConfig `json:"scaling"`
 	// diskSizeGB is the root volume size of a node. Unset: the provider's
 	// default. Not with a launch template: the template decides.
 	// +optional
@@ -680,6 +680,14 @@ type ClusterStatus struct {
 	// plane is ready.
 	// +optional
 	KubeconfigSecret string `json:"kubeconfigSecret,omitempty"`
+	// contractStatus is the status as the cloud.v1 API returns it
+	// (protojson), kept verbatim: the fields above are read from it, and it
+	// carries what they leave out (the state of every object). Written by
+	// the platform; not meant to be edited.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +optional
+	ContractStatus *runtime.RawExtension `json:"contractStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true

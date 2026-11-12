@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/database/kubestore"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
@@ -81,13 +81,14 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 	return kube.NewManager(cfg, cached, o.LeaderElection)
 }
 
-// ConnectStore returns the store that keeps its rows as custom resources
-// in the management cluster (pkg/database/kubestore), in namespace: it
-// installs the platform's CustomResourceDefinitions, creates the
-// namespace when it is missing and waits until the kinds are served. The
-// store's client reads from the API server, not from the manager's cache:
-// a row is read right after it was written.
-func ConnectStore(ctx context.Context, o ManagementOptions, namespace string) (repository.Store, error) {
+// ConnectStore returns the store that keeps its rows as CloudAccount,
+// Network and Cluster objects in the tenants' namespaces of the
+// management cluster (pkg/database/cloudstore): it installs the
+// CustomResourceDefinitions of the cloud.cluster-vending.io kinds and
+// waits until they are served. The store's client reads from the API
+// server, not from the manager's cache: a row is read right after it was
+// written.
+func ConnectStore(ctx context.Context, o ManagementOptions) (repository.Store, error) {
 	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
 	if err != nil {
 		return nil, err
@@ -96,18 +97,18 @@ func ConnectStore(ctx context.Context, o ManagementOptions, namespace string) (r
 	if err != nil {
 		return nil, err
 	}
-	if err := kubestore.Install(ctx, direct, namespace); err != nil {
+	if err := cloudstore.Install(ctx, direct); err != nil {
 		return nil, err
 	}
 	mapper, err := kube.NewRESTMapper(cfg)
 	if err != nil {
 		return nil, err
 	}
-	o.Logger.Info("waiting for the platform's kinds", "namespace", namespace)
-	if err := kube.WaitForKinds(ctx, mapper, kubestore.Kinds(), kindsTimeout); err != nil {
+	o.Logger.Info("waiting for the platform's kinds")
+	if err := kube.WaitForKinds(ctx, mapper, cloudstore.Kinds(), kindsTimeout); err != nil {
 		return nil, err
 	}
-	return kubestore.New(direct, namespace), nil
+	return cloudstore.New(direct), nil
 }
 
 // CachedObjects are the kinds the informer cache holds: the managed

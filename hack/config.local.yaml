@@ -16,7 +16,7 @@ aws:
 database:
   driver: sqlite
   dsn: bin/cluster-vending.db
-# Without a database: the state is kept as custom resources in the
-# management cluster (namespace platform-namespace, created when missing).
+# Without a database: the state is kept as CloudAccount, Network and
+# Cluster objects (cloud.cluster-vending.io) in the tenants' namespaces of
+# the management cluster.
 # store: kubernetes
-# platform-namespace: cluster-vending-system

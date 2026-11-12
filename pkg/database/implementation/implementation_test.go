@@ -70,7 +70,7 @@ func postgresSchema(t *testing.T, dsn string) string {
 }
 
 // The behaviour every store has (pkg/database/storetest), on the database.
-func TestStore(t *testing.T) { storetest.Run(t, newStore) }
+func TestStore(t *testing.T) { storetest.Run(t, storetest.Backend{New: newStore}) }
 
 // Deleting is a soft delete here: the row stays, marked deleted.
 func TestDeleteIsSoft(t *testing.T) {

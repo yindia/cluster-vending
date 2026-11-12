@@ -138,7 +138,7 @@ func newServeCmd(g *globals) *cobra.Command {
 // cluster, for which no database is opened. The returned func closes it.
 func openStore(ctx context.Context, cfg config.Serve, management server.ManagementOptions) (repository.Store, func(), error) {
 	if cfg.Store == config.StoreKubernetes {
-		store, err := server.ConnectStore(ctx, management, cfg.PlatformNamespace)
+		store, err := server.ConnectStore(ctx, management)
 		return store, func() {}, err
 	}
 	db, err := database.Open(ctx, cfg.Database)

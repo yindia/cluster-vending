@@ -21,7 +21,7 @@ last column were checked with `go list -deps`.
 | `pkg/server/network`, `pkg/server/cluster` | RPC handlers only: validate, read and write rows, call the reconciler, map errors to Connect codes. | May import everything above. |
 | `pkg/server/tenant` | Handlers and the account bootstrap logic together; it has not been split yet. | As the other server packages. |
 | `pkg/server/service` | What handlers share: request validation, `ToConnect` (repository errors and faults to Connect codes), the `Faults` interceptor. | The only shared package that imports the RPC library. |
-| `pkg/database` | `repository` is the storage interface. `implementation` is the GORM backend (SQLite, Postgres). `kubestore` is the Kubernetes-backed backend. `storetest` is the behaviour suite both run. | `repository` and `model` import nothing else from the repository. |
+| `pkg/database` | `repository` is the storage interface. `implementation` is the GORM backend (SQLite, Postgres). `cloudstore` is the Kubernetes-backed backend, on the controller's kinds. `storetest` is the behaviour suite both run. | `repository` and `model` import nothing else from the repository. |
 | `pkg/loop` | The background loop: every interval it calls `Reconcile` for rows that are not settled. | Imports only `pkg/database`. It is handed the reconcilers. |
 | `pkg/cloud/aws` | Read-only AWS lookups for imports and checks. | Imports only `pkg/constant/aws`. |
 | `pkg/kube` | Client, scheme and server-side apply. | No storage, no RPC library. |
@@ -33,7 +33,7 @@ Two things the table would otherwise hide:
 - `pkg/database/model` uses GORM for its hooks, so every package that imports
   the models (`pkg/reconcile` and above) links GORM even when no database is
   opened.
-- `pkg/kube` registers the storage kinds of `pkg/apis/platform/v1alpha1` in
+- `pkg/kube` registers the controller's kinds (`controller/api/v1alpha1`) in
   its scheme, so `pkg/crossplane/sequence` and everything above it depend on
   that package through `pkg/kube`.
 
@@ -146,7 +146,7 @@ row's etag; recording a status does not change it.
 | Backend | Selected with | Notes |
 |---|---|---|
 | Database (GORM: SQLite or Postgres) | `--store=database`, the default | Deletes are soft deletes. Uniqueness is enforced by partial unique indexes. |
-| Kubernetes custom resources | `--store=kubernetes`, with `--platform-namespace` | Rows are objects of the `platform.cluster-vending.io` kinds in one namespace. Uniqueness is enforced with claim objects. Deletes are real deletes. Its one "transaction" undoes on failure and is not atomic. |
+| Kubernetes custom resources | `--store=kubernetes` | Rows are CloudAccount, Network and Cluster objects of the `cloud.cluster-vending.io` kinds in the tenant's namespace (`pkg/database/cloudstore`), with the typed spec converted to and from the contract (`controller/convert`). Names are unique per tenant. Deletes are real deletes. Its one "transaction" undoes created rows on failure and is not atomic. There are no node pools. |
 
 Both run the same behaviour suite (`pkg/database/storetest`).
 

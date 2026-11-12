@@ -84,12 +84,12 @@ spec:
                     description: |-
                       role is the name (no path) of the IAM role the platform assumes in
                       the account, e.g. "cluster-vending-provisioner". The tenant creates
-                      it, trusting the platform's management role.
+                      it, trusting the platform's management role. Empty until the account
+                      is bootstrapped.
                     pattern: ^[\w+=,.@-]{1,64}$
                     type: string
                 required:
                 - accountID
-                - role
                 type: object
             type: object
             x-kubernetes-validations:
@@ -188,11 +188,29 @@ spec:
                         cluster needs to adopt the resource instead of creating a new one.
                         Empty until the provider created the resource.
                       type: string
+                    goneAt:
+                      description: |-
+                        goneAt is when the object was first seen gone from the management
+                        cluster after its owner's deletion was requested.
+                      format: date-time
+                      type: string
                     kind:
                       description: kind of the object.
                       type: string
                     name:
-                      description: name of the object, in the owner's namespace.
+                      description: name of the object.
+                      type: string
+                    namespace:
+                      description: |-
+                        namespace of the object. Empty for a cluster-scoped object (the
+                        tenant's namespace itself, recorded for its account).
+                      type: string
+                    recordedAt:
+                      description: |-
+                        recordedAt is when the object was first recorded as the owner's. An
+                        object recorded a moment ago and not in the management cluster yet
+                        is being created, not missing.
+                      format: date-time
                       type: string
                   required:
                   - apiVersion

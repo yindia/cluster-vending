@@ -254,6 +254,14 @@ type NetworkStatus struct {
 	// +listType=atomic
 	// +optional
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
+	// contractStatus is the status as the cloud.v1 API returns it
+	// (protojson), kept verbatim: the fields above are read from it, and it
+	// carries what they leave out (the state of every object). Written by
+	// the platform; not meant to be edited.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +optional
+	ContractStatus *runtime.RawExtension `json:"contractStatus,omitempty"`
 }
 
 // +kubebuilder:object:root=true

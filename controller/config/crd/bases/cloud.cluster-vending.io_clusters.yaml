@@ -782,7 +782,7 @@ spec:
             - message: AWS pods take IPs from the VPC subnets; network.podCIDR must
                 be empty
               rule: '!has(self.aws) || !has(self.network.podCIDR) || self.network.podCIDR
-                == '''''
+                == ”'
             - message: AWS clusters need at least two zoneIDs, given as zone IDs like
                 use1-az1
               rule: '!has(self.aws) || !has(self.network.zoneIDs) || size(self.network.zoneIDs)
@@ -790,7 +790,7 @@ spec:
                 z.matches(''^[a-z]+[0-9]-az[0-9]+$'')))'
             - message: EKS serviceCIDR must be /12 to /24
               rule: '!has(self.aws) || !has(self.network.serviceCIDR) || self.network.serviceCIDR
-                == '''' || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
+                == ” || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
             - message: 'defaultNodePool.diskSizeGB cannot be set with a launch template:
                 EKS takes the disk from the template'
               rule: '!has(self.defaultNodePool) || !has(self.defaultNodePool.diskSizeGB)
@@ -903,6 +903,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              contractStatus:
+                description: |-
+                  contractStatus is the status as the cloud.v1 API returns it
+                  (protojson), kept verbatim: the fields above are read from it, and it
+                  carries what they leave out (the state of every object). Written by
+                  the platform; not meant to be edited.
+                x-kubernetes-preserve-unknown-fields: true
               currentKubernetesVersion:
                 description: currentKubernetesVersion is the version the control plane
                   runs.
@@ -1010,11 +1017,29 @@ spec:
                         cluster needs to adopt the resource instead of creating a new one.
                         Empty until the provider created the resource.
                       type: string
+                    goneAt:
+                      description: |-
+                        goneAt is when the object was first seen gone from the management
+                        cluster after its owner's deletion was requested.
+                      format: date-time
+                      type: string
                     kind:
                       description: kind of the object.
                       type: string
                     name:
-                      description: name of the object, in the owner's namespace.
+                      description: name of the object.
+                      type: string
+                    namespace:
+                      description: |-
+                        namespace of the object. Empty for a cluster-scoped object (the
+                        tenant's namespace itself, recorded for its account).
+                      type: string
+                    recordedAt:
+                      description: |-
+                        recordedAt is when the object was first recorded as the owner's. An
+                        object recorded a moment ago and not in the management cluster yet
+                        is being created, not missing.
+                      format: date-time
                       type: string
                   required:
                   - apiVersion

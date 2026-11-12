@@ -10,8 +10,8 @@ import (
 
 // A deleted row is gone for every read, deleting it again finds nothing,
 // and what it held alone (a create request ID) can be used again.
-func testDeletedRowsAreGoneAndTheirNamesFree(t *testing.T, newStore Factory) {
-	s := newStore(t)
+func testDeletedRowsAreGoneAndTheirNamesFree(t *testing.T, b Backend) {
+	s := b.New(t)
 	ctx := t.Context()
 	MustTenant(t, s, "acme")
 	key := "3f2b8c1e-4a5d-4e6f-9a7b-1c2d3e4f5a6b"
@@ -48,8 +48,8 @@ func testDeletedRowsAreGoneAndTheirNamesFree(t *testing.T, newStore Factory) {
 // The background loop sees rows in one of its states, rows whose
 // generation is not applied and rows rendered by an older renderer,
 // across tenants, oldest first.
-func testListPendingAndCountByState(t *testing.T, newStore Factory) {
-	s := newStore(t)
+func testListPendingAndCountByState(t *testing.T, b Backend) {
+	s := b.New(t)
 	ctx := t.Context()
 	MustTenant(t, s, "acme")
 	MustTenant(t, s, "globex")
@@ -93,8 +93,8 @@ func testListPendingAndCountByState(t *testing.T, newStore Factory) {
 // Records keep the order they were made in, also across calls; what is
 // known of an object later (its cloud ID, when it went away) is stored on
 // its record, and a record can be forgotten alone.
-func testManagedResourceRecords(t *testing.T, newStore Factory) {
-	s := newStore(t)
+func testManagedResourceRecords(t *testing.T, b Backend) {
+	s := b.New(t)
 	ctx := t.Context()
 	MustTenant(t, s, "acme")
 	account := MustAccount(t, s, "acme")
@@ -160,8 +160,8 @@ func testManagedResourceRecords(t *testing.T, newStore Factory) {
 
 // Clusters are found by their create request ID, their name and their
 // network, each within what it is unique in.
-func testClusterLookups(t *testing.T, newStore Factory) {
-	s := newStore(t)
+func testClusterLookups(t *testing.T, b Backend) {
+	s := b.New(t)
 	ctx := t.Context()
 	MustTenant(t, s, "acme")
 	MustTenant(t, s, "globex")
@@ -206,11 +206,17 @@ func testClusterLookups(t *testing.T, newStore Factory) {
 
 // Node pools are addressed by cluster and name, listed by name, and
 // updated like every row.
-func testNodePools(t *testing.T, newStore Factory) {
-	s := newStore(t)
+func testNodePools(t *testing.T, b Backend) {
+	s := b.New(t)
 	ctx := t.Context()
 	MustTenant(t, s, "acme")
 	c := MustCluster(t, s, "acme", "prod", MustNetwork(t, s, "acme", "n"))
+	if b.NoNodePools != nil {
+		_, err := s.NodePools().Get(ctx, c.ID, "default")
+		RequireErr(t, err, b.NoNodePools)
+		RequireErr(t, s.NodePools().Update(ctx, &model.NodePool{ClusterID: c.ID, Name: "default"}), b.NoNodePools)
+		return
+	}
 	for _, name := range []string{"gpu", "default", "spot"} {
 		MustPool(t, s, c, name)
 	}

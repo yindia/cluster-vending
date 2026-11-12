@@ -331,15 +331,6 @@ func TestBootstrapTenantUsesRequestedRole(t *testing.T) {
 	}
 }
 
-func TestRoleNameFromIdentity(t *testing.T) {
-	if got := roleName(roleARN(account)); got != "cluster-vending-provisioner" {
-		t.Errorf("roleName = %q", got)
-	}
-	if got := roleName(""); got != "" {
-		t.Errorf("roleName of a legacy row = %q", got)
-	}
-}
-
 func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 	f := newFixture(t)
 	f.expectNewTenant()

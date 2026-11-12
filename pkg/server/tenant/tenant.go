@@ -1,4 +1,6 @@
-// Package tenant implements the cloud.v1 TenantService.
+// Package tenant implements the cloud.v1 TenantService: the RPC handlers.
+// What they apply to and read from the management cluster is
+// pkg/reconcile/account.
 package tenant
 
 import (
@@ -6,33 +8,23 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"connectrpc.com/connect/v2"
-	"google.golang.org/protobuf/types/known/timestamppb"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/config"
-	"github.com/yindia/cluster-vending/pkg/crossplane"
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // Condition types of CloudAccountStatus.
 const (
-	// ConditionBootstrapped: the namespace and the account's ProviderConfig
-	// are applied.
-	ConditionBootstrapped = "Bootstrapped"
-	// ConditionAccessVerified: the tenant role was assumed successfully.
-	ConditionAccessVerified = "AccessVerified"
+	ConditionBootstrapped   = accountreconcile.ConditionBootstrapped
+	ConditionAccessVerified = accountreconcile.ConditionAccessVerified
 )
 
 // TenantService implements cloud.v1.TenantService.
@@ -43,9 +35,14 @@ var _ cloudv1connect.TenantServiceHandler = (*TenantService)(nil)
 // NewTenantService returns the TenantService.
 func NewTenantService(d service.Deps) *TenantService { return &TenantService{deps: d} }
 
+// rec is the account Reconciler on the service's dependencies: what
+// applies and reads the account's objects in the management cluster.
+func (s *TenantService) rec() *accountreconcile.Reconciler { return accountreconcile.New(s.deps) }
+
 // BootstrapTenant records the tenant and its account, then applies what the
-// management cluster needs to reach the account. Every step is idempotent,
-// so a failed call is fixed by calling again.
+// management cluster needs to reach the account
+// (account.Reconciler.Apply). Every step is idempotent, so a failed call
+// is fixed by calling again.
 func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -60,7 +57,7 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 	}
 
 	namespace := kube.TenantNamespace(req.GetTenantId())
-	account, err := s.record(ctx, &model.CloudAccount{
+	stored, err := s.record(ctx, &model.CloudAccount{
 		TenantID:    req.GetTenantId(),
 		Provider:    model.ProviderAWS,
 		AccountID:   accountID,
@@ -71,8 +68,8 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 	if err != nil {
 		return nil, err
 	}
-	if err := s.applyAWS(ctx, account); err != nil {
-		return nil, err
+	if err := s.rec().Apply(ctx, stored); err != nil {
+		return nil, service.ToConnect(err)
 	}
 
 	// Account access check, disabled for now: assume the tenant role once,
@@ -90,10 +87,10 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 
 	s.logger().InfoContext(ctx, "tenant bootstrapped",
 		"tenant_id", req.GetTenantId(), "provider", model.ProviderAWS,
-		"cloud_account_id", account.ID, "account_id", accountID, "namespace", account.Namespace,
-		"provider_config", account.ProviderConfigName, "identity", account.Identity)
-	out, err := s.view(ctx, account)
-	return &cloudv1.BootstrapTenantResponse{Account: out}, err
+		"cloud_account_id", stored.ID, "account_id", accountID, "namespace", stored.Namespace,
+		"provider_config", stored.ProviderConfigName, "identity", stored.Identity)
+	out, err := s.rec().View(ctx, stored)
+	return &cloudv1.BootstrapTenantResponse{Account: out}, service.ToConnect(err)
 }
 
 // GetCloudAccount returns the tenant's account with the given bootstrap ID.
@@ -109,8 +106,8 @@ func (s *TenantService) GetCloudAccount(ctx context.Context, req *cloudv1.GetClo
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	out, err := s.view(ctx, a)
-	return &cloudv1.GetCloudAccountResponse{Account: out}, err
+	out, err := s.rec().View(ctx, a)
+	return &cloudv1.GetCloudAccountResponse{Account: out}, service.ToConnect(err)
 }
 
 // ListCloudAccounts returns the tenant's accounts, ordered by provider. An
@@ -125,9 +122,9 @@ func (s *TenantService) ListCloudAccounts(ctx context.Context, req *cloudv1.List
 	}
 	out := make([]*cloudv1.CloudAccount, 0, len(accounts))
 	for i := range accounts {
-		v, err := s.view(ctx, &accounts[i])
+		v, err := s.rec().View(ctx, &accounts[i])
 		if err != nil {
-			return nil, err
+			return nil, service.ToConnect(err)
 		}
 		out = append(out, v)
 	}
@@ -138,19 +135,19 @@ func (s *TenantService) ListCloudAccounts(ctx context.Context, req *cloudv1.List
 // account, in one transaction. A new account gets a generated
 // ProviderConfig name; an existing one keeps it and updates the rest. The
 // tenant's other accounts are not touched.
-func (s *TenantService) record(ctx context.Context, account *model.CloudAccount) (*model.CloudAccount, error) {
+func (s *TenantService) record(ctx context.Context, a *model.CloudAccount) (*model.CloudAccount, error) {
 	var stored *model.CloudAccount
 	err := s.deps.Store.WithinTransaction(ctx, func(tx repository.Store) error {
-		if err := ensureTenant(ctx, tx.Tenants(), account.TenantID); err != nil {
+		if err := ensureTenant(ctx, tx.Tenants(), a.TenantID); err != nil {
 			return err
 		}
-		if err := tx.Tenants().PutCloudAccount(ctx, account); err != nil {
+		if err := tx.Tenants().PutCloudAccount(ctx, a); err != nil {
 			return err
 		}
 		// Read back: the stored ID, ProviderConfig name and timestamps, also
 		// when the account already existed.
 		var err error
-		stored, err = tx.Tenants().GetCloudAccount(ctx, account.TenantID, account.Provider, account.AccountID)
+		stored, err = tx.Tenants().GetCloudAccount(ctx, a.TenantID, a.Provider, a.AccountID)
 		return err
 	})
 	if err != nil {
@@ -169,85 +166,6 @@ func ensureTenant(ctx context.Context, tenants repository.Tenants, tenantID stri
 		return nil // created concurrently
 	}
 	return err
-}
-
-// applyAWS applies the tenant namespace and the account's ProviderConfig,
-// from the stored account. The providers and their runtime config are the
-// platform's, installed beforehand: without them the ProviderConfig kind
-// does not exist and the call fails with FAILED_PRECONDITION.
-func (s *TenantService) applyAWS(ctx context.Context, a *model.CloudAccount) error {
-	objects := []client.Object{
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: a.Namespace, Labels: crossplane.Labels(a.TenantID)}},
-		crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity),
-	}
-	for _, obj := range objects {
-		err := kube.Apply(ctx, s.deps.Kube, obj)
-		switch {
-		case err == nil:
-		case meta.IsNoMatchError(err):
-			return connect.NewError(connect.CodeFailedPrecondition,
-				"the Crossplane AWS provider is not installed in the management cluster (no aws.m.upbound.io ProviderConfig kind)")
-		default:
-			s.logger().ErrorContext(ctx, "bootstrap apply failed", "tenant_id", a.TenantID, "error", err)
-			return connect.NewError(connect.CodeInternal, "could not configure the management cluster")
-		}
-	}
-	owner := service.Owner{TenantID: a.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCloudAccount, ID: a.ID}
-	if err := s.deps.Record(ctx, owner, objects); err != nil {
-		s.logger().ErrorContext(ctx, "record bootstrap resources", "tenant_id", a.TenantID, "error", err)
-		return connect.NewError(connect.CodeInternal, "could not record the bootstrap's resources")
-	}
-	return nil
-}
-
-// view is the API view of a stored account with every object created
-// under it (its own, and its networks', clusters' and node pools').
-func (s *TenantService) view(ctx context.Context, a *model.CloudAccount) (*cloudv1.CloudAccount, error) {
-	records, err := s.deps.Store.ManagedResources().ListByAccount(ctx, a.TenantID, a.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	views, err := s.deps.Observe(ctx, records)
-	if err != nil {
-		return nil, err
-	}
-	out := response(a)
-	out.Status.ManagedResources = views
-	return out, nil
-}
-
-// response is the API view of a stored account. Only AWS can be
-// bootstrapped so far; the status is what bootstrap applies (it is not
-// stored).
-func response(a *model.CloudAccount) *cloudv1.CloudAccount {
-	return &cloudv1.CloudAccount{
-		Id:          a.ID,
-		TenantId:    a.TenantID,
-		AccountName: a.AccountName,
-		Provider:    &cloudv1.CloudAccount_Aws{Aws: &cloudv1.AwsAccount{AccountId: a.AccountID, Role: roleName(a.Identity)}},
-		CreateTime:  timestamppb.New(a.CreatedAt),
-		UpdateTime:  timestamppb.New(a.UpdatedAt),
-		Status: &cloudv1.CloudAccountStatus{
-			State:              cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_READY,
-			Namespace:          a.Namespace,
-			ProviderConfigName: a.ProviderConfigName,
-			Identity:           a.Identity,
-			Conditions: []*cloudv1.Condition{
-				{Type: ConditionBootstrapped, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, Reason: "Applied"},
-				{Type: ConditionAccessVerified, Status: cloudv1.ConditionStatus_CONDITION_STATUS_UNKNOWN, Reason: "VerificationDisabled",
-					Message: "the tenant role is not assumed at bootstrap yet; errors show up on the managed resources"},
-			},
-		},
-	}
-}
-
-// roleName is the role of an AWS identity, arn:aws:iam::<account>:role/<name>;
-// empty for accounts bootstrapped before identities were stored.
-func roleName(identity string) string {
-	if i := strings.LastIndex(identity, ":role/"); i >= 0 {
-		return identity[i+len(":role/"):]
-	}
-	return ""
 }
 
 func (s *TenantService) logger() *slog.Logger {

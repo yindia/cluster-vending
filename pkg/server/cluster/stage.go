@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"slices"
+	"time"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
@@ -11,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
 // afterActive are the kinds created only once the EKS cluster is ACTIVE.
@@ -91,25 +94,69 @@ func (s *ClusterService) withoutAfterActive(objects []client.Object) ([]client.O
 	return out, nil
 }
 
+// resumeAfter is how long a cluster row must have been left alone before
+// an interrupted create is resumed: a CreateCluster still applying (or
+// rolling back) must not be raced.
+var resumeAfter = 2 * time.Minute
+
+// resumeCreate reports whether a cluster whose EKS cluster is not ACTIVE
+// must be applied again: a new cluster still before its EKS cluster (what
+// must exist first is being created), or a create that stopped half-way
+// (the server went away between the applies): still in its first stage,
+// no call touched its row for resumeAfter, and objects of that stage are
+// not in the management cluster (none recorded yet, or recorded and
+// missing).
+func (s *ClusterService) resumeCreate(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (bool, error) {
+	if row.State != stateProvisioning || createdAfterActive(records) {
+		return false, nil
+	}
+	if len(records) > 0 && !slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "Cluster" }) {
+		// The stage before the EKS cluster (its log group, its encryption
+		// key): apply renders the cluster once they exist.
+		return true, nil
+	}
+	if time.Since(row.UpdatedAt) < resumeAfter {
+		return false, nil
+	}
+	views, err := s.deps.Observe(ctx, records)
+	if err != nil {
+		return false, err
+	}
+	return len(records) == 0 || slices.ContainsFunc(views, func(v *cloudv1.ManagedResource) bool {
+		return v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING
+	}), nil
+}
+
 // advance applies a cluster again until its generation is applied in
 // full with the target renderer: after a failed apply, for the objects
 // held back until EKS is ACTIVE (add-ons, access entries), during an
 // upgrade for the node groups and add-ons once the control plane reports
 // the target version (gateUpgrade), and when the renderer changed
-// (Deps.RenderBehind). The background loop calls it; it does nothing while
-// EKS is not ACTIVE.
+// (Deps.RenderBehind). The background loop calls it.
+//
+// While EKS is not ACTIVE it only resumes an interrupted create
+// (resumeCreate): the objects of the first stage are applied again, the
+// later ones stay held back (apply, holdBack). A cluster past its first
+// stage (an update or upgrade in progress) waits for ACTIVE.
 func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error {
 	if row.State == stateDeleting ||
 		(row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID)) {
 		return nil
 	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil || len(records) == 0 {
+	if err != nil {
 		return err
 	}
 	active, err := s.eksActive(ctx, records)
-	if err != nil || !active {
+	if err != nil {
 		return err
+	}
+	if !active {
+		resume, err := s.resumeCreate(ctx, row, records)
+		if err != nil || !resume {
+			return err
+		}
+		s.logger().InfoContext(ctx, "resuming an interrupted cluster create", "cluster_id", row.ID, "recorded", len(records))
 	}
 	spec, err := specOf(row)
 	if err != nil {

@@ -8,8 +8,11 @@ import (
 	"slices"
 
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
+	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
@@ -80,6 +83,85 @@ type ClusterPlan struct {
 	// SubnetObjects are the network's Subnet objects of SubnetIDs: the
 	// cluster's Usages keep them while the EKS cluster exists.
 	SubnetObjects []string
+
+	// Everything below is optional; the zero value renders what a cluster
+	// rendered before these existed.
+
+	// EndpointPrivateAccess and EndpointPublicAccess turn the API server's
+	// endpoints on or off; nil is on.
+	EndpointPrivateAccess, EndpointPublicAccess *bool
+	// AdditionalSecurityGroupIDs are extra security groups on the control
+	// plane's network interfaces.
+	AdditionalSecurityGroupIDs []string
+	// LogGroupRetentionDays, above 0, renders the control plane's log group
+	// with that retention.
+	LogGroupRetentionDays int
+	// CreateEncryptionKey renders a KMS key and its alias for the secrets
+	// encryption. EncryptionKeyARN is the key the EKS cluster encrypts
+	// secrets with: an existing key's ARN, or the rendered key's once it
+	// exists (the provider has no reference for it). Empty with
+	// CreateEncryptionKey: the EKS cluster is not rendered yet (Pending).
+	CreateEncryptionKey bool
+	EncryptionKeyARN    string
+	// ClusterHeld leaves the EKS cluster out until what must exist before
+	// it does (the log group, the key).
+	ClusterHeld bool
+	// AccessEntries are the access entries beyond AdminPrincipals.
+	AccessEntries []AccessEntryPlan
+	// IRSA renders the IAM OIDC provider of the cluster's issuer, once
+	// OIDCIssuer (the EKS cluster's, known when it is ACTIVE) is set.
+	IRSA       bool
+	OIDCIssuer string
+	// ClusterSecurityGroupID is the security group EKS created for the
+	// cluster (known once it is ACTIVE): a rendered launch template with
+	// security groups lists it next to them.
+	ClusterSecurityGroupID string
+	// ClusterRoleName and NodeRoleName are the IAM names of the cluster and
+	// node roles (their external names); empty is the object's name,
+	// "<prefix>-cluster-role" and "<prefix>-node-role".
+	ClusterRoleName, NodeRoleName string
+}
+
+// AccessEntryPlan is one access entry with its policies.
+type AccessEntryPlan struct {
+	Principal string
+	// Type is the EKS spelling: STANDARD, EC2_LINUX, ...
+	Type     string
+	Policies []AccessPolicyPlan
+}
+
+// AccessPolicyPlan associates an access policy with an entry. Scope is
+// "cluster" or "namespace" (then with Namespaces).
+type AccessPolicyPlan struct {
+	PolicyARN, Scope string
+	Namespaces       []string
+}
+
+// LaunchTemplatePlan is the node group's launch template: an existing one
+// (ID or Name, and Version) or a rendered one (SecurityGroupIDs, ImageID
+// with UserData).
+type LaunchTemplatePlan struct {
+	ID, Name, Version string
+	SecurityGroupIDs  []string
+	ImageID, UserData string
+}
+
+// Rendered reports whether the platform renders the template.
+func (l *LaunchTemplatePlan) Rendered() bool { return l != nil && l.ID == "" && l.Name == "" }
+
+// identity is what a node group cannot change in place about its launch
+// template: which existing template, or the rendered one's content.
+func (l *LaunchTemplatePlan) identity() string {
+	switch {
+	case l == nil:
+		return ""
+	case !l.Rendered():
+		return "existing:" + l.ID + l.Name
+	}
+	groups := slices.Clone(l.SecurityGroupIDs)
+	slices.Sort(groups)
+	sum := sha256.Sum256(fmt.Appendf(nil, "%v|%s|%s", groups, l.ImageID, l.UserData))
+	return "rendered:" + hex.EncodeToString(sum[:])[:12]
 }
 
 // NodePoolPlan is the default node group.
@@ -90,6 +172,8 @@ type NodePoolPlan struct {
 	MinSize, MaxSize, Desired int
 	Labels                    map[string]string
 	Taints                    []TaintPlan
+	// LaunchTemplate, when set, is the node group's launch template.
+	LaunchTemplate *LaunchTemplatePlan
 }
 
 // TaintPlan is a node taint; Effect is the EKS spelling (NO_SCHEDULE, ...).
@@ -100,30 +184,50 @@ func ClusterPrefix(tenantID, clusterID, name string) string {
 	return NetworkPrefix(tenantID, clusterID, name)
 }
 
-// ClusterResources renders the plan, in creation order: the cluster and
-// node roles with their policies, the EKS cluster, the default node group,
-// the add-ons, the EBS CSI driver's role and pod identity, and one access
-// entry with cluster-admin per admin principal.
+// ClusterResources renders the plan, in creation order: what must exist
+// before the EKS cluster (its log group, its encryption key), the cluster
+// and node roles with their policies, the EKS cluster, the default node
+// group (after its launch template), the add-ons, the EBS CSI driver's
+// role and pod identity, one access entry with cluster-admin per admin
+// principal, the other access entries and the IAM OIDC provider. Objects
+// that cannot be rendered yet (Pending) are left out, with the Usages that
+// refer to them.
 func ClusterResources(p ClusterPlan) []client.Object {
 	b := clusterBuilder{p: p}
 	addons := b.addons()
 	out := make([]client.Object, 0, 8+len(addons)+2*len(p.AdminPrincipals))
+	out = append(out, b.beforeCluster()...)
 	out = append(out,
-		b.role("cluster-role", trustEKS), b.attach("cluster-policy", "cluster-role", policyEKSCluster),
-		b.role("node-role", trustEC2),
+		b.roleNamed("cluster-role", trustEKS, p.ClusterRoleName), b.attach("cluster-policy", "cluster-role", policyEKSCluster),
+		b.roleNamed("node-role", trustEC2, p.NodeRoleName),
 		b.attach("node-worker", "node-role", policyWorkerNode), b.attach("node-cni", "node-role", policyCNI),
 		b.attach("node-ecr", "node-role", policyECRRead),
-		b.cluster(), b.nodeGroup(),
+		b.cluster(),
 	)
+	if lt := b.launchTemplate(); lt != nil {
+		out = append(out, lt)
+	}
+	out = append(out, b.nodeGroup())
 	out = append(out, addons...)
 	out = append(out, b.clusterAuth())
 	for i, principal := range p.AdminPrincipals {
 		entry := fmt.Sprintf("admin-%d", i+1)
 		out = append(out, b.accessEntry(entry, principal), b.accessPolicy(entry, principal))
 	}
+	out = append(out, b.accessEntries()...)
+	if p.IRSA {
+		out = append(out, b.oidcProvider())
+	}
+	out = b.withoutPending(out)
 	// Last: Usages refer to the objects above.
+	rendered := map[string]bool{}
+	for _, obj := range out {
+		rendered[obj.GetName()] = true
+	}
 	for _, u := range Usages(p.Namespace, p.Prefix, crossplane.ClusterLabels(p.TenantID, p.ClusterID), b.usagePairs()) {
-		out = append(out, u)
+		if rendered[u.Spec.Of.ResourceRef.Name] && rendered[u.Spec.By.ResourceRef.Name] || isSubnetUsage(u) && rendered[u.Spec.By.ResourceRef.Name] {
+			out = append(out, u)
+		}
 	}
 	return out
 }
@@ -185,9 +289,9 @@ func (b clusterBuilder) cluster() *awseks.Cluster {
 		RoleArnRef: b.ref(b.name("cluster-role")),
 		VPCConfig: &awseks.VPCConfigParameters{
 			SubnetIds:             ptrs(p.SubnetIDs),
-			EndpointPrivateAccess: ptr.To(true),
-			EndpointPublicAccess:  ptr.To(true),
-			PublicAccessCidrs:     ptrs(p.PublicAccessCIDRs),
+			EndpointPrivateAccess: ptr.To(ptr.Deref(p.EndpointPrivateAccess, true)),
+			EndpointPublicAccess:  ptr.To(ptr.Deref(p.EndpointPublicAccess, true)),
+			SecurityGroupIds:      ptrs(p.AdditionalSecurityGroupIDs),
 		},
 		AccessConfig: &awseks.AccessConfigParameters{
 			AuthenticationMode:                      ptr.To(p.AuthenticationMode),
@@ -195,6 +299,13 @@ func (b clusterBuilder) cluster() *awseks.Cluster {
 		},
 		EnabledClusterLogTypes: ptrs(p.LogTypes),
 		Tags:                   b.tags(p.ClusterName),
+	}
+	if ptr.Deref(p.EndpointPublicAccess, true) {
+		params.VPCConfig.PublicAccessCidrs = ptrs(p.PublicAccessCIDRs)
+	}
+	if p.EncryptionKeyARN != "" {
+		params.EncryptionConfig = &awseks.EncryptionConfigParameters{
+			Provider: &awseks.ProviderParameters{KeyArn: ptr.To(p.EncryptionKeyARN)}, Resources: ptrs([]string{"secrets"})}
 	}
 	if p.KubernetesVersion != "" {
 		params.Version = ptr.To(p.KubernetesVersion)
@@ -247,9 +358,18 @@ func DefaultNodeGroupName(prefix string) string { return prefix + "-default" }
 func ReplacementNodeGroupName(prefix string, n NodePoolPlan) string {
 	types := slices.Clone(n.InstanceTypes)
 	slices.Sort(types)
-	sum := sha256.Sum256(fmt.Appendf(nil, "%v|%s|%s|%d", types, n.CapacityType, n.AMIType, n.DiskSizeGB))
+	settings := fmt.Appendf(nil, "%v|%s|%s|%d", types, n.CapacityType, n.AMIType, n.DiskSizeGB)
+	if lt := n.LaunchTemplate.identity(); lt != "" {
+		settings = fmt.Appendf(settings, "|%s", lt)
+	}
+	sum := sha256.Sum256(settings)
 	return DefaultNodeGroupName(prefix) + "-" + hex.EncodeToString(sum[:])[:6]
 }
+
+// LaunchTemplateAnnotation, on a NodeGroup object, is the identity of the
+// launch template it was rendered with (which existing template, or the
+// rendered one's content): what tells a template change from the object.
+const LaunchTemplateAnnotation = "cluster-vending.io/launch-template"
 
 // SameNodeGroup reports whether a node group's settings EKS cannot change
 // in place equal n's.
@@ -267,7 +387,8 @@ func SameNodeGroup(ng *awseks.NodeGroup, n NodePoolPlan) bool {
 		disk = int(*fp.DiskSize)
 	}
 	return slices.Equal(have, want) && ptr.Deref(fp.CapacityType, "") == n.CapacityType &&
-		ptr.Deref(fp.AMIType, "") == n.AMIType && disk == n.DiskSizeGB
+		ptr.Deref(fp.AMIType, "") == n.AMIType && disk == n.DiskSizeGB &&
+		ng.Annotations[LaunchTemplateAnnotation] == n.LaunchTemplate.identity()
 }
 
 func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
@@ -289,8 +410,19 @@ func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 		Labels: strPtrs(n.Labels),
 		Tags:   b.tags(name),
 	}
-	if v := b.nodeVersion(); v != "" {
+	// A custom AMI brings its own Kubernetes version: EKS refuses one here.
+	if v := b.nodeVersion(); v != "" && n.AMIType != amiTypeCustom {
 		params.Version = ptr.To(v)
+	}
+	meta := b.meta(name)
+	if lt := n.LaunchTemplate; lt != nil {
+		meta.Annotations = map[string]string{LaunchTemplateAnnotation: lt.identity()}
+		params.LaunchTemplate = &awseks.LaunchTemplateParameters{ID: optional(lt.ID), Name: optional(lt.Name), Version: ptr.To(lt.Version)}
+		if lt.Rendered() {
+			// A rendered template is never changed (a change renders a new
+			// one, with a new node group): its only version is 1.
+			params.LaunchTemplate = &awseks.LaunchTemplateParameters{Name: ptr.To(LaunchTemplateName(name)), Version: ptr.To("1")}
+		}
 	}
 	if n.DiskSizeGB > 0 {
 		params.DiskSize = ptr.To(float64(n.DiskSizeGB))
@@ -299,18 +431,22 @@ func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 		params.Taint = append(params.Taint, awseks.TaintParameters{Key: ptr.To(t.Key), Value: ptr.To(t.Value), Effect: ptr.To(t.Effect)})
 	}
 	return &awseks.NodeGroup{
-		ObjectMeta: b.meta(name),
+		ObjectMeta: meta,
 		Spec:       awseks.NodeGroupSpec{ManagedResourceSpec: b.spec(), ForProvider: params},
 	}
 }
 
 func (b clusterBuilder) accessEntry(suffix, principal string) *awseks.AccessEntry {
+	return b.accessEntryOf(suffix, principal, accessEntryStandard)
+}
+
+func (b clusterBuilder) accessEntryOf(suffix, principal, entryType string) *awseks.AccessEntry {
 	name := b.name(suffix)
 	return &awseks.AccessEntry{
 		ObjectMeta: b.meta(name),
 		Spec: awseks.AccessEntrySpec{ManagedResourceSpec: b.spec(), ForProvider: awseks.AccessEntryParameters{
 			Region: ptr.To(b.p.Region), ClusterNameRef: b.ref(b.p.Prefix), PrincipalArn: ptr.To(principal),
-			Type: ptr.To("STANDARD"), Tags: b.tags(name),
+			Type: ptr.To(entryType), Tags: b.tags(name),
 		}},
 	}
 }
@@ -352,8 +488,10 @@ func strPtrs(in map[string]string) map[string]*string {
 func ClusterLists() []client.ObjectList {
 	return []client.ObjectList{
 		&awseks.AccessPolicyAssociationList{}, &awseks.AccessEntryList{}, &awseks.PodIdentityAssociationList{},
-		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awseks.ClusterList{},
+		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awsec2.LaunchTemplateList{},
+		&awsiam.OpenIDConnectProviderList{}, &awseks.ClusterList{},
 		&awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
+		&awskms.AliasList{}, &awskms.KeyList{}, &awscwl.GroupList{},
 	}
 }
 

@@ -120,6 +120,8 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | `spec.region` | `region` | `location` | `location` |
 | `control_plane.kubernetes_version` | `Cluster.version`, `NodeGroup.version` | `Cluster.minMasterVersion` (a floor), `NodePool.version` | `kubernetesVersion`, `orchestratorVersion` |
 | `control_plane.secrets_encryption.enabled` | `kms` `Key` + `Alias`; `Cluster.encryptionConfig` | Cloud KMS key; `Cluster.databaseEncryption` | Key Vault key; `keyManagementService` |
+| `control_plane.secrets_encryption.kms_key_arn` | an existing key: `Cluster.encryptionConfig` only, no `Key` / `Alias` | - | - |
+| `control_plane.endpoint_access.endpoint_private_access` / `endpoint_public_access` | `Cluster.vpcConfig.endpointPrivateAccess` / `endpointPublicAccess` (default true / true) | - | - |
 | `endpoint_access.public_access_cidrs` | `vpcConfig.publicAccessCidrs` | `masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock` | `apiServerAccessProfile.authorizedIpRanges` (+ the cluster's egress IPs) |
 | private nodes, public endpoint (fixed) | `endpointPrivateAccess`, `endpointPublicAccess` = true | `enablePrivateNodes` = true, `enablePrivateEndpoint` = false, `gcpPublicCidrsAccessEnabled` = false | `privateClusterEnabled` = false |
 | `NetworkSpec.layout.cidr_block` | `VPC.cidrBlock` | carved into `Subnetwork.ipCidrRange` | `VirtualNetwork.addressSpace` |
@@ -141,6 +143,11 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | pool `taints` | `taint[]` | `nodeConfig.taint[]` | `nodeTaints` |
 | `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
 | `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds` |
+| `spec.access.access_entries` | `AccessEntry` (any type) + one `AccessPolicyAssociation` per policy (cluster or namespace scope) | - | - |
+| `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` | - | - |
+| `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer | - | - |
+| `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` (immutable) | - | - |
+| `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate`: an existing template, or a rendered ec2 `LaunchTemplate` (extra security groups, custom AMI) | - | - |
 | `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
 
 Per-provider settings that stay out of the common spec and land in the
@@ -273,7 +280,7 @@ Carried over (AWS):
 
 | Import | Resources |
 |---|---|
-| Network | routes other than `0.0.0.0/0` in imported route tables (peering, Transit Gateway, VPN; the targets are `NOT_IMPORTED`); VPC endpoints on imported subnets / route tables; flow logs with their log group and IAM role; the default security group and default network ACL (`DefaultSecurityGroup`, `DefaultNetworkACL`, rules inline) |
+| Network | flow logs on the VPC that deliver to CloudWatch Logs, with their log group and delivery role (`FlowLog`, cloudwatchlogs `Group`, iam `Role`; a log group or role other VPCs' flow logs use too is owned without `Delete`); the default network ACL (`DefaultNetworkACL`, rules inline, never deleted); custom network ACLs associated with an imported subnet, with their rules (`NetworkACL` with every associated subnet in `subnetIds`, `NetworkACLRule`; the provider has no association kind); routes of specific CIDRs to the internet gateway in imported route tables. `NOT_IMPORTED` today: the main route table, other routes (peering, Transit Gateway, VPN), VPC endpoints, the default security group, flow logs to S3 or Firehose, network ACLs of other subnets |
 | Cluster | security groups referenced by the cluster or node groups, transitively through their rules, with every rule (`SecurityGroupIngressRule` / `SecurityGroupEgressRule` by `sgr-` ID; avoid the legacy `SecurityGroupRule`, its ID is composite), plus rules added to the EKS-managed cluster group (the group stays with EKS); the KMS key in `encryptionConfig` and its aliases (EKS can never turn encryption off); the log group `/aws/eks/<name>/cluster`; the IAM OIDC provider of the cluster's issuer; IAM roles of add-ons and pod identity associations; node groups with launch templates or custom AMIs, with their launch templates |
 
 `BLOCKING` today (the layout can't express them): secondary VPC CIDRs (e.g.
@@ -288,7 +295,10 @@ the provider builds them from (needed even for Observe-only):
 |---|---|---|
 | VPC, Subnet, InternetGateway, EIP, NATGateway, RouteTable, DefaultRouteTable, DefaultNetworkACL, DefaultSecurityGroup, SecurityGroup, VPCEndpoint, FlowLog, LaunchTemplate | cloud ID (`vpc-…`, `subnet-…`, `eipalloc-…`, `rtb-…`, `acl-…`, `sg-…`, `vpce-…`, `fl-…`, `lt-…`) | `region` (+ `vpcId` for the default kinds) |
 | SecurityGroupIngressRule, SecurityGroupEgressRule | `sgr-…` | `region`, `securityGroupId` |
-| Route | `<rtb-id>_<destination cidr>` | `routeTableId`, `destinationCidrBlock` |
+| NetworkACL | `acl-…` | `region`, `vpcId` |
+| NetworkACLRule | `nacl-<crc32 of "<acl-id>-<rule number>-<egress>-<protocol>-">` | `networkAclId`, `ruleNumber`, `egress`, `protocol` |
+| Group (cloudwatchlogs) | log group name | `region` |
+| Route | `r-<rtb-id><crc32 of the destination cidr>` | `routeTableId`, `destinationCidrBlock` |
 | RouteTableAssociation | association ID `rtbassoc-…` (not Terraform's `subnet/rtb` import shorthand) | `subnetId`, `routeTableId` |
 | Role | role name | — |
 | OpenIDConnectProvider | provider ARN | — |
@@ -386,7 +396,7 @@ tenants sharing a cloud account; the tenant stays visible through the
 - Add-on versions (AWS `Addon.addonVersion`) are set explicitly to the
   default for the cluster's Kubernetes version and bumped on every upgrade.
   An omitted version would be late-initialized and pinned.
-- `secrets_encryption.enabled` can go from false to true, never back.
+- `secrets_encryption` can be turned on (`enabled`, or `kms_key_arn` for an existing key), never off, and its key never changes.
 - GKE `deletionProtection` defaults to true: the server sets it to false, or
   `DeleteCluster` could never finish.
 - Azure needs a second pass for values that exist only after creation:

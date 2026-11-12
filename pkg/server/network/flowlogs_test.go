@@ -28,7 +28,7 @@ func TestCreateNetworkWithoutFlowLogs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		n := res.GetNetwork()
+		n := f.attachGateway(t, res.GetNetwork().GetId())
 		if f.count(t, &awsec2.FlowLogList{}, n.GetId())+f.count(t, &awscwl.GroupList{}, n.GetId())+
 			f.count(t, &awsiam.RoleList{}, n.GetId())+f.count(t, &protectionv1beta1.UsageList{}, n.GetId()) != 0 {
 			t.Errorf("%s: flow log resources rendered", name)
@@ -48,7 +48,7 @@ func TestCreateNetworkWithFlowLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNetwork: %v", err)
 	}
-	n := res.GetNetwork()
+	n := f.attachGateway(t, res.GetNetwork().GetId())
 	// The stored spec holds the defaults.
 	if fl := n.GetSpec().GetFlowLogs(); fl.GetTrafficType() != cloudv1.FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_ALL ||
 		fl.GetRetentionDays() != 30 || fl.GetAggregationIntervalSeconds() != 600 {
@@ -89,7 +89,7 @@ func TestDeleteNetworkWithFlowLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := res.GetNetwork()
+	n := f.attachGateway(t, res.GetNetwork().GetId())
 	ctx := t.Context()
 	count := func(list client.ObjectList) int { return f.count(t, list, n.GetId()) }
 	if _, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {

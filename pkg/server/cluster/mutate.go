@@ -27,6 +27,7 @@ const (
 const (
 	pathKubernetesVersion = "spec.control_plane.kubernetes_version"
 	pathAddons            = "spec.aws.addons"
+	pathSecretsEncryption = "spec.control_plane.secrets_encryption"
 )
 
 // specPaths are the spec paths UpdateCluster changes, each copying one
@@ -79,6 +80,43 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 		}
 		dst.Access.AdminPrincipals = src.GetAccess().GetAdminPrincipals()
 	},
+	// Entries and their policies are objects of their own: added, removed
+	// and replaced without touching the cluster.
+	"spec.access.access_entries": func(dst, src *cloudv1.ClusterSpec) {
+		if dst.Access == nil {
+			dst.Access = &cloudv1.AccessSpec{}
+		}
+		dst.Access.AccessEntries = src.GetAccess().GetAccessEntries()
+	},
+	"spec.control_plane.endpoint_access.endpoint_private_access": func(dst, src *cloudv1.ClusterSpec) {
+		dst.ControlPlane.EndpointAccess.EndpointPrivateAccess = src.GetControlPlane().GetEndpointAccess().EndpointPrivateAccess
+	},
+	"spec.control_plane.endpoint_access.endpoint_public_access": func(dst, src *cloudv1.ClusterSpec) {
+		dst.ControlPlane.EndpointAccess.EndpointPublicAccess = src.GetControlPlane().GetEndpointAccess().EndpointPublicAccess
+	},
+	// Can be turned on, never off (UpdateCluster checks: encryptionKept).
+	pathSecretsEncryption: func(dst, src *cloudv1.ClusterSpec) {
+		dst.ControlPlane.SecretsEncryption = src.GetControlPlane().GetSecretsEncryption()
+	},
+	"spec.aws.control_plane_log_group": func(dst, src *cloudv1.ClusterSpec) {
+		dst.GetAws().ControlPlaneLogGroup = src.GetAws().GetControlPlaneLogGroup()
+	},
+	// EKS cannot swap a node group's launch template or AMI type in place:
+	// the node group is replaced. A new version of the same template is
+	// rolled out in place.
+	"spec.aws.default_node_pool.launch_template": func(dst, src *cloudv1.ClusterSpec) {
+		awsNodePool(dst).LaunchTemplate = src.GetAws().GetDefaultNodePool().GetLaunchTemplate()
+	},
+	"spec.aws.default_node_pool.ami_type": func(dst, src *cloudv1.ClusterSpec) {
+		awsNodePool(dst).AmiType = src.GetAws().GetDefaultNodePool().GetAmiType()
+	},
+}
+
+func awsNodePool(spec *cloudv1.ClusterSpec) *cloudv1.AwsNodePoolSpec {
+	if spec.GetAws().DefaultNodePool == nil {
+		spec.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{}
+	}
+	return spec.GetAws().DefaultNodePool
 }
 
 func scaling(spec *cloudv1.ClusterSpec) *cloudv1.ScalingConfig {
@@ -114,10 +152,15 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	versionBefore := spec.GetControlPlane().GetKubernetesVersion()
+	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), encryption(spec)
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
+	}
+	// A plan shows the refusal (REJECTED_IMMUTABLE); an update fails.
+	if !encryptionKept(encryptionBefore, encryption(spec)) && !req.GetValidateOnly() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			"secrets encryption cannot be turned off or moved to another key once it is on: EKS cannot change it")
 	}
 	if slices.Contains(paths, pathKubernetesVersion) {
 		if err := s.checkVersionStep(ctx, row, versionBefore, spec.GetControlPlane().GetKubernetesVersion()); err != nil {
@@ -240,8 +283,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 			row.Labels = model.Labels(in.GetLabels())
 		case ok:
 			copyField(spec, in.GetSpec())
-		case strings.HasPrefix(p, "spec.existing_cluster"), p == "spec.control_plane.secrets_encryption.enabled",
-			p == "spec.aws.access_config.authentication_mode":
+		case strings.HasPrefix(p, "spec.existing_cluster"), p == "spec.aws.access_config.authentication_mode":
 			return false, connect.NewError(connect.CodeUnimplemented, fmt.Sprintf("updating %s is not implemented yet", p))
 		default:
 			return false, connect.NewError(connect.CodeInvalidArgument,
@@ -250,6 +292,9 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	}
 	merged := &cloudv1.Cluster{Name: row.Name, DisplayName: row.DisplayName, Labels: row.Labels, Spec: spec}
 	if err := protovalidate.Validate(merged); err != nil {
+		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
+	if err := resolveOptions(spec); err != nil {
 		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
 	if err := service.CheckAWSLabels(row.Labels); err != nil {

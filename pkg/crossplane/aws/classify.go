@@ -21,6 +21,10 @@ const (
 	// ChangeImmutable: the cloud cannot change it; the resource would have
 	// to be replaced.
 	ChangeImmutable
+	// ChangeAddOnly: can be set on an existing resource that has none (in
+	// place), never changed or removed afterwards (EKS secrets
+	// encryption).
+	ChangeAddOnly
 )
 
 // fieldClasses classifies the spec.forProvider fields of every kind the
@@ -40,6 +44,8 @@ var fieldClasses = map[string]map[string]ChangeClass{
 		"vpcConfig.endpointPrivateAccess":                      ChangeInPlace,
 		"vpcConfig.endpointPublicAccess":                       ChangeInPlace,
 		"vpcConfig.publicAccessCidrs":                          ChangeInPlace,
+		"vpcConfig.securityGroupIds":                           ChangeImmutable,
+		"encryptionConfig":                                     ChangeAddOnly,
 		"accessConfig.authenticationMode":                      ChangeInPlace,
 		"accessConfig.bootstrapClusterCreatorAdminPermissions": ChangeImmutable,
 		"enabledClusterLogTypes":                               ChangeInPlace,
@@ -51,6 +57,7 @@ var fieldClasses = map[string]map[string]ChangeClass{
 		"region": ChangeImmutable, "clusterName": ChangeImmutable, "nodeRoleArn": ChangeImmutable,
 		"subnetIds": ChangeImmutable, "instanceTypes": ChangeImmutable, "capacityType": ChangeImmutable,
 		"amiType": ChangeImmutable, "diskSize": ChangeImmutable,
+		"launchTemplate": ChangeImmutable, "launchTemplate.version": ChangeDisruptive,
 		"scalingConfig": ChangeInPlace, "labels": ChangeInPlace, "taint": ChangeInPlace, "tags": ChangeInPlace,
 		"version": ChangeDisruptive,
 	},
@@ -59,7 +66,20 @@ var fieldClasses = map[string]map[string]ChangeClass{
 		"addonVersion": ChangeDisruptive, "configurationValues": ChangeDisruptive,
 		"resolveConflictsOnCreate": ChangeInPlace, "resolveConflictsOnUpdate": ChangeInPlace, "tags": ChangeInPlace,
 	},
-	"Role":                 {"assumeRolePolicy": ChangeInPlace, "tags": ChangeInPlace},
+	"Role":  {"assumeRolePolicy": ChangeInPlace, "tags": ChangeInPlace},
+	"Group": {"region": ChangeImmutable, "retentionInDays": ChangeInPlace, "tags": ChangeInPlace},
+	"Key": {
+		"region": ChangeImmutable, "description": ChangeInPlace, "enableKeyRotation": ChangeInPlace, "tags": ChangeInPlace,
+	},
+	"Alias":                 {"region": ChangeImmutable, "targetKeyId": ChangeInPlace},
+	"OpenIDConnectProvider": {"url": ChangeImmutable, "clientIdList": ChangeInPlace, "thumbprintList": ChangeInPlace, "tags": ChangeInPlace},
+	// A rendered launch template is never changed: a change renders a new
+	// one (and a new node group).
+	"LaunchTemplate": {
+		"region": ChangeImmutable, "name": ChangeImmutable, "description": ChangeInPlace, "imageId": ChangeImmutable,
+		"userData": ChangeImmutable, "vpcSecurityGroupIds": ChangeImmutable, "tags": ChangeInPlace,
+		"tagSpecifications": ChangeInPlace,
+	},
 	"RolePolicyAttachment": {"policyArn": ChangeImmutable, "role": ChangeImmutable},
 	"Policy":               {"policy": ChangeInPlace, "description": ChangeImmutable, "tags": ChangeInPlace},
 	"PodIdentityAssociation": {

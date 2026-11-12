@@ -72,4 +72,11 @@ message PlannedChange {
 
   // The change as a unified diff of the resource's spec (YAML paths).
   string unified_diff = 9;
+
+  // Set when the change is not made by the update's first apply but in a
+  // later step: what it waits for, e.g. "the control plane runs Kubernetes
+  // 1.35" (node groups and add-ons during an upgrade), "the encryption key
+  // exists", "node group <name> is ready". The server makes the change by
+  // itself once that holds. Empty: made at once.
+  string waits_for = 10;
 }

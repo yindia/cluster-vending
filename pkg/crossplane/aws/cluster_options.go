@@ -46,25 +46,67 @@ func EncryptionAliasName(clusterName string) string { return "alias/" + clusterN
 // object's name and the template's.
 func LaunchTemplateName(nodeGroup string) string { return nodeGroup + "-lt" }
 
-// Pending are the kinds ClusterResources leaves out because something
-// they need does not exist yet; the plan is rendered again later. The EKS
-// cluster (with its node group and kubeconfig) waits for ClusterHeld and
-// for the encryption key's ARN; the OIDC provider for the cluster's
-// issuer; a rendered launch template with security groups (and its node
-// group) for the cluster security group.
-func (p ClusterPlan) Pending() []string {
-	var kinds []string
-	if p.ClusterHeld || (p.CreateEncryptionKey && p.EncryptionKeyARN == "") {
-		kinds = append(kinds, awseks.Cluster_Kind, awseks.NodeGroup_Kind, awseks.ClusterAuth_Kind, awsec2.LaunchTemplate_Kind)
+// KnownAfterApply stands, in a plan, for a value that only exists once
+// another resource does (the encryption key's ARN, the cluster's issuer).
+const KnownAfterApply = "(known after apply)"
+
+// Waits are the kinds ClusterResources leaves out because something they
+// need does not exist yet, each with what it waits for; the plan is
+// rendered again later. The EKS cluster (with its node group and
+// kubeconfig) waits for ClusterHeld and for the encryption key's ARN; the
+// OIDC provider for the cluster's issuer; a rendered launch template with
+// security groups (and its node group) for the cluster security group.
+func (p ClusterPlan) Waits() map[string]string {
+	waits := map[string]string{}
+	var cluster []string
+	if p.ClusterHeld {
+		cluster = append(cluster, "the control plane's log group is ready")
+	}
+	if p.CreateEncryptionKey && p.EncryptionKeyARN == "" {
+		cluster = append(cluster, "the encryption key exists")
+	}
+	if len(cluster) > 0 {
+		for _, kind := range []string{awseks.Cluster_Kind, awseks.NodeGroup_Kind, awseks.ClusterAuth_Kind, awsec2.LaunchTemplate_Kind} {
+			waits[kind] = strings.Join(cluster, " and ")
+		}
 	}
 	if p.IRSA && p.OIDCIssuer == "" {
-		kinds = append(kinds, awsiam.OpenIDConnectProvider_Kind)
+		waits[awsiam.OpenIDConnectProvider_Kind] = "the EKS cluster is ACTIVE (its OIDC issuer is known then)"
 	}
 	if lt := p.NodePool.LaunchTemplate; lt.Rendered() && len(lt.SecurityGroupIDs) > 0 && p.ClusterSecurityGroupID == "" {
-		kinds = append(kinds, awsec2.LaunchTemplate_Kind, awseks.NodeGroup_Kind)
+		for _, kind := range []string{awsec2.LaunchTemplate_Kind, awseks.NodeGroup_Kind} {
+			if waits[kind] == "" {
+				waits[kind] = "the EKS cluster is ACTIVE (its security group is known then)"
+			}
+		}
+	}
+	return waits
+}
+
+// Pending are the kinds of Waits, sorted.
+func (p ClusterPlan) Pending() []string {
+	waits := p.Waits()
+	kinds := make([]string, 0, len(waits))
+	for kind := range waits {
+		kinds = append(kinds, kind)
 	}
 	slices.Sort(kinds)
-	return slices.Compact(kinds)
+	return kinds
+}
+
+// AssumeLive fills what the plan waits for with KnownAfterApply, so that
+// it renders in full: the cluster as it ends up, for a plan.
+func (p *ClusterPlan) AssumeLive() {
+	p.ClusterHeld = false
+	if p.CreateEncryptionKey && p.EncryptionKeyARN == "" {
+		p.EncryptionKeyARN = KnownAfterApply
+	}
+	if p.IRSA && p.OIDCIssuer == "" {
+		p.OIDCIssuer = KnownAfterApply
+	}
+	if lt := p.NodePool.LaunchTemplate; lt.Rendered() && len(lt.SecurityGroupIDs) > 0 && p.ClusterSecurityGroupID == "" {
+		p.ClusterSecurityGroupID = KnownAfterApply
+	}
 }
 
 // withoutPending drops the objects of the plan's Pending kinds.

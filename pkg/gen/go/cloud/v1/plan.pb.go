@@ -193,7 +193,13 @@ type PlannedChange struct {
 	// whose instance types changed).
 	RequiresReplacement bool `protobuf:"varint,8,opt,name=requires_replacement,json=requiresReplacement,proto3" json:"requires_replacement,omitempty"`
 	// The change as a unified diff of the resource's spec (YAML paths).
-	UnifiedDiff   string `protobuf:"bytes,9,opt,name=unified_diff,json=unifiedDiff,proto3" json:"unified_diff,omitempty"`
+	UnifiedDiff string `protobuf:"bytes,9,opt,name=unified_diff,json=unifiedDiff,proto3" json:"unified_diff,omitempty"`
+	// Set when the change is not made by the update's first apply but in a
+	// later step: what it waits for, e.g. "the control plane runs Kubernetes
+	// 1.35" (node groups and add-ons during an upgrade), "the encryption key
+	// exists", "node group <name> is ready". The server makes the change by
+	// itself once that holds. Empty: made at once.
+	WaitsFor      string `protobuf:"bytes,10,opt,name=waits_for,json=waitsFor,proto3" json:"waits_for,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -291,6 +297,13 @@ func (x *PlannedChange) GetUnifiedDiff() string {
 	return ""
 }
 
+func (x *PlannedChange) GetWaitsFor() string {
+	if x != nil {
+		return x.WaitsFor
+	}
+	return ""
+}
+
 var File_cloud_v1_plan_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_plan_proto_rawDesc = "" +
@@ -302,7 +315,7 @@ const file_cloud_v1_plan_proto_rawDesc = "" +
 	"applicable\x18\x02 \x01(\bR\n" +
 	"applicable\x121\n" +
 	"\achanges\x18\x03 \x03(\v2\x17.cloud.v1.PlannedChangeR\achanges\x12\x1a\n" +
-	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xb9\x02\n" +
+	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xd6\x02\n" +
 	"\rPlannedChange\x12\x1f\n" +
 	"\vapi_version\x18\x01 \x01(\tR\n" +
 	"apiVersion\x12\x12\n" +
@@ -313,7 +326,9 @@ const file_cloud_v1_plan_proto_rawDesc = "" +
 	"\x06action\x18\x06 \x01(\x0e2\x17.cloud.v1.PlannedActionR\x06action\x12\x16\n" +
 	"\x06detail\x18\a \x01(\tR\x06detail\x121\n" +
 	"\x14requires_replacement\x18\b \x01(\bR\x13requiresReplacement\x12!\n" +
-	"\funified_diff\x18\t \x01(\tR\vunifiedDiff*\xcf\x01\n" +
+	"\funified_diff\x18\t \x01(\tR\vunifiedDiff\x12\x1b\n" +
+	"\twaits_for\x18\n" +
+	" \x01(\tR\bwaitsFor*\xcf\x01\n" +
 	"\rPlannedAction\x12\x1e\n" +
 	"\x1aPLANNED_ACTION_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PLANNED_ACTION_CREATE\x10\x01\x12\"\n" +

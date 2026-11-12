@@ -85,8 +85,8 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 
 func (r networks) Update(ctx context.Context, n *model.Network) error { return update(ctx, r.db, n) }
 
-func (r networks) SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error {
-	return setStatus[model.Network](ctx, r.db, tenantID, id, status)
+func (r networks) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
+	return setStatus[model.Network](ctx, r.db, tenantID, id, etag, status)
 }
 
 func (r networks) Get(ctx context.Context, tenantID, id string) (*model.Network, error) {
@@ -123,7 +123,9 @@ const networkDeleting = "NETWORK_STATE_DELETING"
 // claims the network: the network must not be DELETING, and its etag
 // changes. DeleteNetwork marks the network DELETING with the etag it read
 // before it checked for clusters, so of a create and a delete that race
-// exactly one wins: the other fails with ErrConflict.
+// exactly one wins: the create fails with ErrConflict when the network is
+// DELETING, the delete when a cluster was stored since it read the
+// network.
 func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		n, err := first[model.Network](ctx, tx, map[string]any{"id": c.NetworkID})
@@ -134,13 +136,14 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 			return fmt.Errorf("%w: network %s belongs to tenant %s on %s, cluster to tenant %s on %s",
 				repository.ErrInvalid, n.Name, n.TenantID, n.Provider, c.TenantID, c.Provider)
 		}
-		claim := tx.Model(&model.Network{}).Where("id = ? AND etag = ? AND state <> ?", n.ID, n.ETag, networkDeleting).
-			UpdateColumn("etag", newETag())
+		// Not conditional on the etag read above: two creates in one network,
+		// or the loop touching the network meanwhile, must not fail each other.
+		claim := tx.Model(&model.Network{}).Where("id = ? AND state <> ?", n.ID, networkDeleting).UpdateColumn("etag", newETag())
 		if claim.Error != nil {
 			return translate(claim.Error, opWrite)
 		}
 		if claim.RowsAffected != 1 {
-			return fmt.Errorf("%w: network %s is being deleted or changed", repository.ErrConflict, n.ID)
+			return fmt.Errorf("%w: network %s is being deleted", repository.ErrConflict, n.ID)
 		}
 		// The network's account is the cluster's: with it the unique index on
 		// (account, region, name) refuses a second cluster of the name.
@@ -151,20 +154,29 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 
 func (r clusters) Update(ctx context.Context, c *model.Cluster) error { return update(ctx, r.db, c) }
 
-func (r clusters) SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error {
-	return setStatus[model.Cluster](ctx, r.db, tenantID, id, status)
+func (r clusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
+	return setStatus[model.Cluster](ctx, r.db, tenantID, id, etag, status)
 }
 
-// setStatus writes the status column only (no etag, no update time).
-func setStatus[T any](ctx context.Context, db *gorm.DB, tenantID, id string, status model.JSON) error {
-	res := db.WithContext(ctx).Model(new(T)).Where("tenant_id = ? AND id = ?", tenantID, id).UpdateColumn("status", status)
+// setStatus writes the status column only (no etag, no update time), and
+// only while the row has etag.
+func setStatus[T any](ctx context.Context, db *gorm.DB, tenantID, id, etag string, status model.JSON) error {
+	res := db.WithContext(ctx).Model(new(T)).Where("tenant_id = ? AND id = ? AND etag = ?", tenantID, id, etag).
+		UpdateColumn("status", status)
 	if res.Error != nil {
 		return translate(res.Error, opWrite)
 	}
-	if res.RowsAffected == 0 {
+	if res.RowsAffected == 1 {
+		return nil
+	}
+	var n int64
+	if err := db.WithContext(ctx).Model(new(T)).Where("tenant_id = ? AND id = ?", tenantID, id).Count(&n).Error; err != nil {
+		return translate(err, opWrite)
+	}
+	if n == 0 {
 		return repository.ErrNotFound
 	}
-	return nil
+	return repository.ErrConflict
 }
 
 func (r clusters) Get(ctx context.Context, tenantID, id string) (*model.Cluster, error) {

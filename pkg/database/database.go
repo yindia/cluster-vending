@@ -126,6 +126,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 			}
 		}
 	}
+	if err := backfillClusterAccounts(ctx, db); err != nil {
+		return err
+	}
 	// Accounts from before ProviderConfig names were stored: derive one from
 	// the row ID (hex), "<provider>-<8 hex>" like model.CloudAccount.
 	err := db.WithContext(ctx).Exec(
@@ -193,4 +196,28 @@ func sqliteDSN(dsn string) string {
 		sep = "&"
 	}
 	return dsn
+}
+
+// backfillClusterAccounts gives clusters stored before
+// clusters.cloud_account_id existed their network's account, so the unique
+// index on (account, region, name) covers them too. Row by row: a cluster
+// whose name another one of the account and region already has (allowed
+// back then) keeps an empty account and stays outside the index.
+func backfillClusterAccounts(ctx context.Context, db *gorm.DB) error {
+	var rows []struct{ ID, CloudAccountID string }
+	err := db.WithContext(ctx).Table("clusters").
+		Select("clusters.id AS id, networks.cloud_account_id AS cloud_account_id").
+		Joins("JOIN networks ON networks.id = clusters.network_id").
+		Where("clusters.cloud_account_id = '' AND clusters.deleted_at IS NULL").
+		Order("clusters.id").Scan(&rows).Error
+	if err != nil {
+		return fmt.Errorf("migrate database: clusters without an account: %w", err)
+	}
+	for _, r := range rows {
+		err := db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", r.ID).UpdateColumn("cloud_account_id", r.CloudAccountID).Error
+		if err != nil && !errors.Is(err, gorm.ErrDuplicatedKey) {
+			return fmt.Errorf("migrate database: account of cluster %s: %w", r.ID, err)
+		}
+	}
+	return nil
 }

@@ -822,17 +822,17 @@ func (c *MockNetworksListPendingCall) DoAndReturn(f func(context.Context, []stri
 }
 
 // SetStatus mocks base method.
-func (m *MockNetworks) SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error {
+func (m *MockNetworks) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SetStatus", ctx, tenantID, id, status)
+	ret := m.ctrl.Call(m, "SetStatus", ctx, tenantID, id, etag, status)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SetStatus indicates an expected call of SetStatus.
-func (mr *MockNetworksMockRecorder) SetStatus(ctx, tenantID, id, status any) *MockNetworksSetStatusCall {
+func (mr *MockNetworksMockRecorder) SetStatus(ctx, tenantID, id, etag, status any) *MockNetworksSetStatusCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetStatus", reflect.TypeOf((*MockNetworks)(nil).SetStatus), ctx, tenantID, id, status)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetStatus", reflect.TypeOf((*MockNetworks)(nil).SetStatus), ctx, tenantID, id, etag, status)
 	return &MockNetworksSetStatusCall{Call: call}
 }
 
@@ -848,13 +848,13 @@ func (c *MockNetworksSetStatusCall) Return(arg0 error) *MockNetworksSetStatusCal
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockNetworksSetStatusCall) Do(f func(context.Context, string, string, model.JSON) error) *MockNetworksSetStatusCall {
+func (c *MockNetworksSetStatusCall) Do(f func(context.Context, string, string, string, model.JSON) error) *MockNetworksSetStatusCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockNetworksSetStatusCall) DoAndReturn(f func(context.Context, string, string, model.JSON) error) *MockNetworksSetStatusCall {
+func (c *MockNetworksSetStatusCall) DoAndReturn(f func(context.Context, string, string, string, model.JSON) error) *MockNetworksSetStatusCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1271,17 +1271,17 @@ func (c *MockClustersListPendingCall) DoAndReturn(f func(context.Context, []stri
 }
 
 // SetStatus mocks base method.
-func (m *MockClusters) SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error {
+func (m *MockClusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SetStatus", ctx, tenantID, id, status)
+	ret := m.ctrl.Call(m, "SetStatus", ctx, tenantID, id, etag, status)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // SetStatus indicates an expected call of SetStatus.
-func (mr *MockClustersMockRecorder) SetStatus(ctx, tenantID, id, status any) *MockClustersSetStatusCall {
+func (mr *MockClustersMockRecorder) SetStatus(ctx, tenantID, id, etag, status any) *MockClustersSetStatusCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetStatus", reflect.TypeOf((*MockClusters)(nil).SetStatus), ctx, tenantID, id, status)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetStatus", reflect.TypeOf((*MockClusters)(nil).SetStatus), ctx, tenantID, id, etag, status)
 	return &MockClustersSetStatusCall{Call: call}
 }
 
@@ -1297,13 +1297,13 @@ func (c *MockClustersSetStatusCall) Return(arg0 error) *MockClustersSetStatusCal
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockClustersSetStatusCall) Do(f func(context.Context, string, string, model.JSON) error) *MockClustersSetStatusCall {
+func (c *MockClustersSetStatusCall) Do(f func(context.Context, string, string, string, model.JSON) error) *MockClustersSetStatusCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockClustersSetStatusCall) DoAndReturn(f func(context.Context, string, string, model.JSON) error) *MockClustersSetStatusCall {
+func (c *MockClustersSetStatusCall) DoAndReturn(f func(context.Context, string, string, string, model.JSON) error) *MockClustersSetStatusCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

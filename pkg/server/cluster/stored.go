@@ -50,7 +50,9 @@ func stored(row *model.Cluster) (*cloudv1.Cluster, error) {
 func storedState(rowState string, recorded cloudv1.ClusterState) cloudv1.ClusterState {
 	own := cloudv1.ClusterState(cloudv1.ClusterState_value[rowState])
 	switch {
-	case recorded == cloudv1.ClusterState_CLUSTER_STATE_UNSPECIFIED, rowState == stateDeleting:
+	case recorded == cloudv1.ClusterState_CLUSTER_STATE_UNSPECIFIED, rowState == stateDeleting, rowState == stateRunning:
+		// RUNNING is stored only once the loop saw the cluster converged; it
+		// holds even if recording that pass's status failed.
 		return own
 	case recorded == cloudv1.ClusterState_CLUSTER_STATE_RUNNING && (rowState == stateUpdating || rowState == stateProvisioning):
 		return own
@@ -63,7 +65,8 @@ func storedState(rowState string, recorded cloudv1.ClusterState) cloudv1.Cluster
 
 // remember records a cluster's status as observed now, for GetCluster and
 // ListClusters. It writes the status column only: the etag does not
-// change. A cluster that is gone has nothing to record.
+// change. A cluster that is gone has nothing to record, and one that a
+// call changed since row was read keeps what that call stored.
 func (s *ClusterService) remember(ctx context.Context, row *model.Cluster, st *cloudv1.ClusterStatus) error {
 	raw, err := encode(st)
 	if err != nil {
@@ -72,9 +75,9 @@ func (s *ClusterService) remember(ctx context.Context, row *model.Cluster, st *c
 	if string(raw) == string(row.Status) {
 		return nil
 	}
-	err = s.deps.Store.Clusters().SetStatus(ctx, row.TenantID, row.ID, raw)
-	if errors.Is(err, repository.ErrNotFound) {
-		return nil
+	err = s.deps.Store.Clusters().SetStatus(ctx, row.TenantID, row.ID, row.ETag, raw)
+	if errors.Is(err, repository.ErrNotFound) || errors.Is(err, repository.ErrConflict) {
+		return nil // gone, or changed since it was read: the next pass records it
 	}
 	if err == nil {
 		row.Status = raw

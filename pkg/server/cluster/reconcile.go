@@ -58,7 +58,9 @@ func (s *ClusterService) moveOn(ctx context.Context, row *model.Cluster) error {
 		return err
 	}
 	if row.State == stateImported || row.State == stateBlocked {
-		return nil // observed only, until TakeOverCluster
+		// Observed only, until TakeOverCluster. Counted as applied with this
+		// renderer, or a renderer change would list it as pending forever.
+		return s.markApplied(ctx, row)
 	}
 	if err := s.advance(ctx, row); err != nil {
 		return fmt.Errorf("apply: %w", err)

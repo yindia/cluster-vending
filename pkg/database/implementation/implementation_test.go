@@ -677,3 +677,64 @@ func TestManagedResourcesByOwnerAndAccount(t *testing.T) {
 		t.Errorf("unknown owner kind = %v, want ErrInvalid", err)
 	}
 }
+
+// A recorded status is written only for the row as it was observed: one a
+// call changed since keeps what that call stored. The etag never changes.
+func TestSetStatusOnlyForTheRowItWasObservedFor(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	mustTenant(t, s, "acme")
+	n := mustNetwork(t, s, "acme", "n")
+	c := mustCluster(t, s, "acme", "prod", n)
+	observed := c.ETag
+
+	if err := s.Clusters().SetStatus(ctx, "acme", c.ID, observed, model.JSON(`{"state":"CLUSTER_STATE_RUNNING"}`)); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	got, err := s.Clusters().Get(ctx, "acme", c.ID)
+	if err != nil || string(got.Status) == "" || got.ETag != observed {
+		t.Fatalf("status %s, etag %s -> %s (%v); want the status stored and the etag unchanged", got.Status, observed, got.ETag, err)
+	}
+	// A call changes the row (a takeover, an update).
+	got.State = "CLUSTER_STATE_UPDATING"
+	got.Status = model.JSON(`{"import":{"phase":"IMPORT_PHASE_CONVERGING"}}`)
+	if err := s.Clusters().Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	requireErr(t, s.Clusters().SetStatus(ctx, "acme", c.ID, observed, model.JSON(`{"state":"CLUSTER_STATE_IMPORTED"}`)), repository.ErrConflict)
+	after, err := s.Clusters().Get(ctx, "acme", c.ID)
+	if err != nil || !strings.Contains(string(after.Status), "CONVERGING") {
+		t.Errorf("status after a stale write = %s (%v), want what the call stored", after.Status, err)
+	}
+	requireErr(t, s.Clusters().SetStatus(ctx, "acme", "0190f1a2-0000-7000-8000-00000000dead", observed, model.JSON(`{}`)), repository.ErrNotFound)
+	requireErr(t, s.Networks().SetStatus(ctx, "acme", n.ID, "stale", model.JSON(`{}`)), repository.ErrConflict)
+
+	// Two creates in one network do not fail each other, whatever each
+	// read of the network before.
+	for _, name := range []string{"a", "b"} {
+		mustCluster(t, s, "acme", name, n)
+	}
+}
+
+// Clusters stored before they recorded their account get it on the next
+// migration, so the name index covers them.
+func TestMigrateGivesOldClustersTheirAccount(t *testing.T) {
+	s, db := newStoreDB(t)
+	ctx := t.Context()
+	mustTenant(t, s, "acme")
+	n := mustNetwork(t, s, "acme", "n")
+	c := mustCluster(t, s, "acme", "prod", n)
+	if err := db.Exec("UPDATE clusters SET cloud_account_id = '' WHERE id = ?", c.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	got, err := s.Clusters().Get(ctx, "acme", c.ID)
+	if err != nil || got.CloudAccountID != n.CloudAccountID {
+		t.Fatalf("account after the migration = %q (%v), want the network's %q", got.CloudAccountID, err, n.CloudAccountID)
+	}
+	again := &model.Cluster{TenantID: "acme", Name: "prod", NetworkID: n.ID, Provider: "aws", Region: "us-east-1",
+		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING", Spec: spec("cluster")}}
+	requireErr(t, s.Clusters().Create(ctx, again), repository.ErrAlreadyExists)
+}

@@ -194,11 +194,11 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 // createError maps a failed insert: a duplicate is a second cluster of the
 // name in the account and region (the name check passed, but another
 // create won the race) or a reused request_id; a conflict is the network
-// being deleted or changed at the same moment.
+// being deleted at the same moment.
 func createError(err error, row *model.Cluster) error {
 	if errors.Is(err, repository.ErrConflict) {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
-			"network %s changed while the cluster was being stored (is it being deleted?); get the network and retry", row.NetworkID))
+			"network %s is being deleted; a cluster cannot be created in it", row.NetworkID))
 	}
 	if errors.Is(err, repository.ErrAlreadyExists) {
 		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
@@ -262,6 +262,10 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
 	if err := s.deps.Record(ctx, owner, objects); err != nil {
 		return connect.NewError(connect.CodeInternal, "could not record the cluster's resources: "+err.Error())
+	}
+	if err := s.ownCarriedOver(ctx, row); err != nil {
+		s.logger().ErrorContext(ctx, "take over carried-over resources", "cluster_id", row.ID, "error", err)
+		return connect.NewError(connect.CodeInternal, "could not take over the cluster's carried-over resources")
 	}
 	for _, obj := range objects {
 		if err := s.applyOne(ctx, obj); err != nil {

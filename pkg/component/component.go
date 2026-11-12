@@ -4,14 +4,16 @@
 // sections 4.4, 5 and 8):
 //
 //   - Merge builds the effective values: chart defaults, then the
-//     definition's defaults, then the platform-computed values, then the
-//     tenant's overrides; maps merge key by key, lists replace, an explicit
-//     null removes a default, and every protected key ends with the value
-//     the platform layers give it.
-//   - ProtectedPaths names every tenant value that sets a protected key, a
-//     key below one, or replaces a parent of one.
+//     definition's userValues file, then the tenant's overrides, then the
+//     definition's platformValues; maps merge key by key, lists replace,
+//     an explicit null removes a default.
+//   - LockedPathsTouched names every tenant value that touches a locked
+//     path (a leaf path of platformValues): at it, below it, or replacing
+//     a parent of it. PruneUnchanged keeps only the tenant's edits of the
+//     userValues file.
 //   - ValidateSchema checks the tenant's values against the definition's
-//     values schema (a JSON Schema subset, see schema.go).
+//     values schema (a JSON Schema subset, see schema.go); CheckDefinition
+//     checks a definition's own values for its Valid condition.
 //   - CheckEnable runs the twelve request checks of section 4.4 and
 //     returns one error listing every problem; CheckDisable and
 //     CheckAddons are the reverse checks of section 8.
@@ -48,12 +50,16 @@ type Definition struct {
 	// ConflictsWithAddons are EKS add-on names the cluster must not have
 	// while this component is enabled.
 	ConflictsWithAddons []string
-	// Defaults are the platform's values for every tenant.
-	Defaults Values
-	// ValuesSchema is what a tenant may override; nil: no overrides.
+	// PlatformValues are the platform team's values for every tenant,
+	// locked: every leaf path in them wins, and a tenant who touches one
+	// is refused.
+	PlatformValues Values
+	// UserValues is the values file tenants pull, edit and send back:
+	// YAML with the platform team's comments (ParseUserValues).
+	UserValues string
+	// ValuesSchema is what a tenant may override, written by hand; nil: no
+	// overrides.
 	ValuesSchema Values
-	// ProtectedKeys are dotted paths only the platform sets.
-	ProtectedKeys []string
 }
 
 // ParseValues reads a tenant's values from JSON: an object of at most

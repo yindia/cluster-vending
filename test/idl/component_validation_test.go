@@ -133,6 +133,9 @@ func TestComponentByIDRequestsValidation(t *testing.T) {
 		{name: "catalog of a cluster", msg: &cloudv1.ListComponentDefinitionsRequest{TenantId: "acme", ClusterId: componentClusterID}},
 		{name: "catalog cluster not a uuid", wantErr: true, msg: &cloudv1.ListComponentDefinitionsRequest{TenantId: "acme", ClusterId: "prod"}},
 		{name: "catalog without tenant", wantErr: true, msg: &cloudv1.ListComponentDefinitionsRequest{}},
+		{name: "values file", msg: &cloudv1.GetComponentValuesRequest{Name: "karpenter"}},
+		{name: "values file without name", wantErr: true, msg: &cloudv1.GetComponentValuesRequest{}},
+		{name: "values file name not a DNS label", wantErr: true, msg: &cloudv1.GetComponentValuesRequest{Name: "Karpenter"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -149,7 +152,7 @@ func TestComponentServiceIdempotency(t *testing.T) {
 		t.Fatal("no ComponentService")
 	}
 	want := map[protoreflect.Name]bool{
-		"ListComponentDefinitions": true, "GetComponent": true, "ListComponents": true,
+		"ListComponentDefinitions": true, "GetComponentValues": true, "GetComponent": true, "ListComponents": true,
 		"EnableComponent": false, "UpdateComponent": false, "DisableComponent": false,
 	}
 	methods := service.Methods()

@@ -112,10 +112,12 @@ type Component struct {
 	// channel. Empty: the version the release that applies to the cluster
 	// gives its Kubernetes minor.
 	Version string `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
-	// The tenant's overrides only: a JSON object of at most 64 KiB, merged
-	// over the platform's defaults (maps key by key, lists as a whole, null
-	// removes a default). Keys the platform sets (ComponentDefinition
-	// .protected_keys) are refused. Not for secrets.
+	// The tenant's values: a JSON object of at most 64 KiB, usually the
+	// definition's user_values file as edited. Keys equal to that file are
+	// dropped, so only the tenant's edits are stored and returned. Merged
+	// as user_values < these < platform_values (maps key by key, lists as a
+	// whole, null removes a value). Values that touch a platform_values
+	// path are refused. Not for secrets.
 	Values *structpb.Struct `protobuf:"bytes,6,opt,name=values,proto3" json:"values,omitempty"`
 	// Observed state. Output only; ignored on enable and update.
 	Status *ComponentStatus `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
@@ -356,11 +358,19 @@ type ComponentDefinition struct {
 	ConflictsWithAddons []string `protobuf:"bytes,4,rep,name=conflicts_with_addons,json=conflictsWithAddons,proto3" json:"conflicts_with_addons,omitempty"`
 	// JSON Schema of the values a tenant may set. Unset: none.
 	ValuesSchema *structpb.Struct `protobuf:"bytes,5,opt,name=values_schema,json=valuesSchema,proto3" json:"values_schema,omitempty"`
-	// Dotted paths of values only the platform sets.
-	ProtectedKeys []string `protobuf:"bytes,6,rep,name=protected_keys,json=protectedKeys,proto3" json:"protected_keys,omitempty"`
 	// Versions offered, by Kubernetes minor ("1.34"), by the release that
 	// applies to the cluster named in the request; empty without one.
-	Versions      map[string]string `protobuf:"bytes,7,rep,name=versions,proto3" json:"versions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Versions map[string]string `protobuf:"bytes,7,rep,name=versions,proto3" json:"versions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Values the platform sets for every tenant. Locked: an enable or update
+	// whose values touch any of their leaf paths (the path, a path inside
+	// it, or one above it) fails with INVALID_ARGUMENT naming the path.
+	PlatformValues *structpb.Struct `protobuf:"bytes,8,opt,name=platform_values,json=platformValues,proto3" json:"platform_values,omitempty"`
+	// The starting values file (YAML, comments kept): the keys a tenant may
+	// change, with the platform's suggested values. Tenants pull it
+	// (GetComponentValues), edit it and send it as Component.values; keys
+	// left as in this file are not stored, so later changes to the file
+	// still reach them. Empty when the component takes no values.
+	UserValues    string `protobuf:"bytes,9,opt,name=user_values,json=userValues,proto3" json:"user_values,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -430,18 +440,25 @@ func (x *ComponentDefinition) GetValuesSchema() *structpb.Struct {
 	return nil
 }
 
-func (x *ComponentDefinition) GetProtectedKeys() []string {
-	if x != nil {
-		return x.ProtectedKeys
-	}
-	return nil
-}
-
 func (x *ComponentDefinition) GetVersions() map[string]string {
 	if x != nil {
 		return x.Versions
 	}
 	return nil
+}
+
+func (x *ComponentDefinition) GetPlatformValues() *structpb.Struct {
+	if x != nil {
+		return x.PlatformValues
+	}
+	return nil
+}
+
+func (x *ComponentDefinition) GetUserValues() string {
+	if x != nil {
+		return x.UserValues
+	}
+	return ""
 }
 
 var File_cloud_v1_component_proto protoreflect.FileDescriptor
@@ -473,18 +490,20 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\x11installed_version\x18\x06 \x01(\tR\x10installedVersion\x12%\n" +
 	"\x0etarget_version\x18\a \x01(\tR\rtargetVersion\x12\x18\n" +
 	"\arelease\x18\b \x01(\tR\arelease\x12B\n" +
-	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\"\x86\x03\n" +
+	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\"\xd8\x03\n" +
 	"\x13ComponentDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +
 	"\brequires\x18\x03 \x03(\tR\brequires\x122\n" +
 	"\x15conflicts_with_addons\x18\x04 \x03(\tR\x13conflictsWithAddons\x12<\n" +
-	"\rvalues_schema\x18\x05 \x01(\v2\x17.google.protobuf.StructR\fvaluesSchema\x12%\n" +
-	"\x0eprotected_keys\x18\x06 \x03(\tR\rprotectedKeys\x12G\n" +
-	"\bversions\x18\a \x03(\v2+.cloud.v1.ComponentDefinition.VersionsEntryR\bversions\x1a;\n" +
+	"\rvalues_schema\x18\x05 \x01(\v2\x17.google.protobuf.StructR\fvaluesSchema\x12G\n" +
+	"\bversions\x18\a \x03(\v2+.cloud.v1.ComponentDefinition.VersionsEntryR\bversions\x12@\n" +
+	"\x0fplatform_values\x18\b \x01(\v2\x17.google.protobuf.StructR\x0eplatformValues\x12\x1f\n" +
+	"\vuser_values\x18\t \x01(\tR\n" +
+	"userValues\x1a;\n" +
 	"\rVersionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xe1\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10\aR\x0eprotected_keys*\xe1\x01\n" +
 	"\x0eComponentPhase\x12\x1f\n" +
 	"\x1bCOMPONENT_PHASE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17COMPONENT_PHASE_PENDING\x10\x01\x12\x1e\n" +
@@ -526,11 +545,12 @@ var file_cloud_v1_component_proto_depIdxs = []int32{
 	5, // 4: cloud.v1.ComponentStatus.effective_values:type_name -> google.protobuf.Struct
 	5, // 5: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
 	4, // 6: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 7: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_component_proto_init() }

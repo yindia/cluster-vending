@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	apiextensionsinternal "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/component"
 )
 
 // componentSamples are the component sample files and the kind of each.
@@ -195,5 +197,89 @@ spec:
 	}
 	if errs, _ := v.cel.Validate(t.Context(), nil, v.s, moved, old, celconfig.RuntimeCELCostBudget); len(errs) == 0 {
 		t.Error("a component moved to another cluster")
+	}
+}
+
+// catalogEntry is a sample definition as pkg/component reads it.
+func catalogEntry(t *testing.T, def *cloudv1alpha1.ComponentDefinition) component.Definition {
+	t.Helper()
+	object := func(raw *runtime.RawExtension) component.Values {
+		if raw == nil {
+			return nil
+		}
+		var v component.Values
+		if err := yaml.Unmarshal(raw.Raw, &v); err != nil {
+			t.Fatalf("%s: %v", def.Name, err)
+		}
+		return v
+	}
+	return component.Definition{Name: def.Name, Valid: true, Requires: def.Spec.Requires,
+		ConflictsWithAddons: def.Spec.ConflictsWithAddons, PlatformValues: object(def.Spec.PlatformValues),
+		UserValues: def.Spec.UserValues, ValuesSchema: object(def.Spec.ValuesSchema)}
+}
+
+// sampleDefinitions are the sample definitions by name.
+func sampleDefinitions(t *testing.T) map[string]component.Definition {
+	t.Helper()
+	out := map[string]component.Definition{}
+	for _, doc := range sampleDocuments(t, "cloud_v1alpha1_componentdefinition.yaml") {
+		def := &cloudv1alpha1.ComponentDefinition{}
+		if err := yaml.UnmarshalStrict(doc, def); err != nil {
+			t.Fatal(err)
+		}
+		out[def.Name] = catalogEntry(t, def)
+	}
+	return out
+}
+
+// Every sample definition is valid as pkg/component judges it: a
+// supported values schema, and a userValues file a tenant can send back as
+// it is (an object, no platformValues path, valid against the schema).
+func TestSampleDefinitionsAreValid(t *testing.T) {
+	files := 0
+	for name, d := range sampleDefinitions(t) {
+		if d.UserValues != "" {
+			files++
+		}
+		if problems := component.CheckDefinition(d); len(problems) > 0 {
+			t.Errorf("%s: %v", name, problems)
+		}
+	}
+	if files == 0 {
+		t.Error("no sample definition has a userValues file")
+	}
+}
+
+// The sample Component is one EnableComponent accepts: its values are real
+// edits of the userValues file, touch no platformValues path and validate
+// against the values schema.
+func TestSampleComponentValuesAreAccepted(t *testing.T) {
+	definitions := sampleDefinitions(t)
+	for _, doc := range sampleDocuments(t, "cloud_v1alpha1_component.yaml") {
+		c := &cloudv1alpha1.Component{}
+		if err := yaml.UnmarshalStrict(doc, c); err != nil {
+			t.Fatal(err)
+		}
+		d, ok := definitions[c.Spec.Component]
+		if !ok {
+			t.Fatalf("%s: no sample definition %s", c.Name, c.Spec.Component)
+		}
+		var values component.Values
+		if err := yaml.Unmarshal(c.Spec.Values.Raw, &values); err != nil {
+			t.Fatal(err)
+		}
+		file, err := component.ParseUserValues(d.UserValues)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pruned := component.PruneUnchanged(values, file); !reflect.DeepEqual(pruned, values) {
+			t.Errorf("%s stores %v, want only edits %v", c.Name, values, pruned)
+		}
+		if locked := component.LockedPathsTouched(values, d.PlatformValues); len(locked) > 0 {
+			t.Errorf("%s sets locked paths %v", c.Name, locked)
+		}
+		if problems := component.ValidateSchema(d.ValuesSchema, values); len(problems) > 0 {
+			t.Errorf("%s: %v", c.Name, problems)
+		}
 	}
 }

@@ -26,19 +26,30 @@ func asJSONString(v any) string {
 	return string(raw)
 }
 
+// karpenterUserValues is the design's Karpenter values file (section 6.1).
+const karpenterUserValues = `# Controller replicas, 1 to 3.
+replicas: 2
+# error, info or debug.
+logLevel: info
+settings:
+  batchMaxDuration: 10s
+defaultNodePool:
+  enabled: true
+  limits: {cpu: "64"}
+  requirements:
+  - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
+`
+
 // karpenterDefinition is the design's Karpenter definition (section 6.1).
 func karpenterDefinition() Definition {
 	return Definition{
 		Name: "karpenter", Valid: true,
-		Defaults: parseValues(`{"replicas":2,"controller":{"resources":{"requests":{"cpu":"250m","memory":"512Mi"}}},
-			"defaultNodePool":{"enabled":true,"limits":{"cpu":"64"},
-				"requirements":[{"key":"karpenter.sh/capacity-type","operator":"In","values":["on-demand"]}]}}`),
-		ProtectedKeys: []string{"settings.clusterName", "settings.clusterEndpoint", "settings.interruptionQueue",
-			"serviceAccount.name", "serviceAccount.annotations", "defaultNodeClass"},
+		PlatformValues: parseValues(`{"controller":{"resources":{"requests":{"cpu":"250m","memory":"512Mi"}}},
+			"podSecurityContext":{"fsGroup":65532}}`),
+		UserValues: karpenterUserValues,
 		ValuesSchema: parseValues(`{"type":"object","additionalProperties":false,"properties":{
 			"replicas":{"type":"integer","minimum":1,"maximum":3},
 			"logLevel":{"type":"string","enum":["error","info","debug"]},
-			"controller":{"type":"object"},
 			"settings":{"type":"object","properties":{
 				"featureGates":{"type":"object","additionalProperties":{"type":"boolean"}},
 				"batchMaxDuration":{"type":"string"}}},
@@ -128,9 +139,15 @@ func TestCheckEnable(t *testing.T) {
 		{"8 without the add-on", request("cert-manager", nil), nil, "", 0},
 		{"9 too large", request("kyverno", func(r *Request) { r.Values = Values{"a": strings.Repeat("x", MaxValuesSize)} }), []int{9},
 			"at most 65536", fault.Invalid},
-		{"10 protected keys, every one named", request("karpenter", func(r *Request) {
-			r.Values = parseValues(`{"settings":{"clusterName":"x","interruptionQueue":"q"},"defaultNodeClass":{"role":"r"}}`)
-		}), []int{10}, "only the platform sets defaultNodeClass, settings.clusterName, settings.interruptionQueue", fault.Invalid},
+		{"10 locked paths, every one named", request("karpenter", func(r *Request) {
+			r.Values = parseValues(`{"controller":{"resources":{"requests":{"cpu":"1"}}},"podSecurityContext":null}`)
+		}), []int{10}, "only the platform sets controller.resources.requests.cpu, podSecurityContext", fault.Invalid},
+		{"10 a parent of a locked path replaced", request("karpenter", func(r *Request) {
+			r.Values = parseValues(`{"controller":{"resources":null}}`)
+		}), []int{10}, "only the platform sets controller.resources", fault.Invalid},
+		{"10 a sibling of a locked path is not locked", request("karpenter", func(r *Request) {
+			r.Values = parseValues(`{"replicas":3}`)
+		}), nil, "", 0},
 		{"11 schema", request("karpenter", func(r *Request) { r.Values = parseValues(`{"replicas":9,"logLevel":"trace"}`) }), []int{11, 11},
 			"replicas: must be at most 3", fault.Invalid},
 		{"11 no schema accepts no values", request("cert-manager", func(r *Request) { r.Values = Values{"a": 1} }), []int{11},

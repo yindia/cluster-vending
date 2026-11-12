@@ -22,7 +22,16 @@ service ComponentService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Enables a component on a cluster. Fails with NOT_FOUND when the
+  // Returns a catalog entry's user_values file as written (YAML with its
+  // comments), for a tenant to edit and send with EnableComponent or
+  // UpdateComponent. NOT_FOUND when the component is not in the catalog.
+  rpc GetComponentValues(GetComponentValuesRequest) returns (GetComponentValuesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Enables a component on a cluster. Keys of component.values equal to
+  // the definition's user_values file are dropped before the checks, so only
+  // the tenant's edits are stored. Fails with NOT_FOUND when the
   // component is not in the catalog or the cluster is not the tenant's;
   // FAILED_PRECONDITION when the cluster is not RUNNING, is imported and not
   // taken over, its release does not offer the component for its
@@ -30,8 +39,8 @@ service ComponentService {
   // conflicting add-on is in the cluster's spec; ALREADY_EXISTS when the
   // cluster has the component, unless request_id matches the original
   // request; INVALID_ARGUMENT when the values are not an object of at most
-  // 64 KiB, set a protected key (every such key is named) or fail the
-  // definition's values schema.
+  // 64 KiB, touch a platform_values path (every such path is named) or
+  // fail the definition's values schema.
   rpc EnableComponent(EnableComponentRequest) returns (EnableComponentResponse);
 
   // Changes a component's values or pinned version, with the same checks
@@ -72,6 +81,20 @@ message ListComponentDefinitionsRequest {
 
 message ListComponentDefinitionsResponse {
   repeated ComponentDefinition definitions = 1;
+}
+
+message GetComponentValuesRequest {
+  // ComponentDefinition.name, e.g. "karpenter".
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 63
+    pattern: "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+  }];
+}
+
+message GetComponentValuesResponse {
+  // The user_values file, YAML with comments; empty when there is none.
+  string user_values = 1;
 }
 
 message EnableComponentRequest {

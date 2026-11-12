@@ -213,7 +213,9 @@ func checkDependencies(r Request) []Problem {
 	return out
 }
 
-// checkValues: checks 9, 10 and 11.
+// checkValues: checks 9 (size), 10 (no locked path: a leaf path of
+// platformValues) and 11 (valuesSchema). v are the tenant's overrides,
+// after PruneUnchanged.
 func checkValues(d *Definition, v Values) []Problem {
 	if len(v) == 0 {
 		return nil
@@ -226,7 +228,7 @@ func checkValues(d *Definition, v Values) []Problem {
 		return []Problem{{Check: 9, Kind: fault.Invalid, Message: fmt.Sprintf("values are %d bytes; at most %d are accepted", size, MaxValuesSize)}}
 	}
 	var out []Problem
-	paths := ProtectedPaths(v, d.ProtectedKeys)
+	paths := LockedPathsTouched(v, d.PlatformValues)
 	if len(paths) > 0 {
 		out = append(out, Problem{Check: 10, Kind: fault.Invalid,
 			Message: "only the platform sets " + strings.Join(paths, ", ")})
@@ -234,8 +236,8 @@ func checkValues(d *Definition, v Values) []Problem {
 	if d.ValuesSchema == nil {
 		return append(out, Problem{Check: 11, Kind: fault.Invalid, Message: fmt.Sprintf("component %s accepts no values", d.Name)})
 	}
-	// A refused key is reported once, as protected, not again by the
-	// schema (which usually does not list platform keys).
+	// A refused key is reported once, as locked, not again by the schema
+	// (which usually does not list platform keys).
 	rest := clone(v)
 	for _, p := range paths {
 		remove(rest, splitPath(p))

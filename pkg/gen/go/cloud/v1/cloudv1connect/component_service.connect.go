@@ -27,6 +27,9 @@ const (
 	// ComponentServiceListComponentDefinitionsProcedure is the procedure name of the ComponentService's
 	// ListComponentDefinitions RPC.
 	ComponentServiceListComponentDefinitionsProcedure = "/cloud.v1.ComponentService/ListComponentDefinitions"
+	// ComponentServiceGetComponentValuesProcedure is the procedure name of the ComponentService's
+	// GetComponentValues RPC.
+	ComponentServiceGetComponentValuesProcedure = "/cloud.v1.ComponentService/GetComponentValues"
 	// ComponentServiceEnableComponentProcedure is the procedure name of the ComponentService's
 	// EnableComponent RPC.
 	ComponentServiceEnableComponentProcedure = "/cloud.v1.ComponentService/EnableComponent"
@@ -50,6 +53,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_component_service_proto.Services().ByName("ComponentService").Methods().ByName("ListComponentDefinitions"),
 			Procedure:        ComponentServiceListComponentDefinitionsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	componentServiceGetComponentValuesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_component_service_proto.Services().ByName("ComponentService").Methods().ByName("GetComponentValues"),
+			Procedure:        ComponentServiceGetComponentValuesProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -97,7 +108,13 @@ type ComponentServiceClient interface {
 	// Lists the catalog. With cluster_id, versions holds what that cluster's
 	// release offers for its Kubernetes minor.
 	ListComponentDefinitions(context.Context, *v1.ListComponentDefinitionsRequest) (*v1.ListComponentDefinitionsResponse, error)
-	// Enables a component on a cluster. Fails with NOT_FOUND when the
+	// Returns a catalog entry's user_values file as written (YAML with its
+	// comments), for a tenant to edit and send with EnableComponent or
+	// UpdateComponent. NOT_FOUND when the component is not in the catalog.
+	GetComponentValues(context.Context, *v1.GetComponentValuesRequest) (*v1.GetComponentValuesResponse, error)
+	// Enables a component on a cluster. Keys of component.values equal to
+	// the definition's user_values file are dropped before the checks, so only
+	// the tenant's edits are stored. Fails with NOT_FOUND when the
 	// component is not in the catalog or the cluster is not the tenant's;
 	// FAILED_PRECONDITION when the cluster is not RUNNING, is imported and not
 	// taken over, its release does not offer the component for its
@@ -105,8 +122,8 @@ type ComponentServiceClient interface {
 	// conflicting add-on is in the cluster's spec; ALREADY_EXISTS when the
 	// cluster has the component, unless request_id matches the original
 	// request; INVALID_ARGUMENT when the values are not an object of at most
-	// 64 KiB, set a protected key (every such key is named) or fail the
-	// definition's values schema.
+	// 64 KiB, touch a platform_values path (every such path is named) or
+	// fail the definition's values schema.
 	EnableComponent(context.Context, *v1.EnableComponentRequest) (*v1.EnableComponentResponse, error)
 	// Changes a component's values or pinned version, with the same checks
 	// as EnableComponent. A values change rolls out at once; it does not wait
@@ -132,7 +149,13 @@ type ComponentServiceHandler interface {
 	// Lists the catalog. With cluster_id, versions holds what that cluster's
 	// release offers for its Kubernetes minor.
 	ListComponentDefinitions(context.Context, *v1.ListComponentDefinitionsRequest) (*v1.ListComponentDefinitionsResponse, error)
-	// Enables a component on a cluster. Fails with NOT_FOUND when the
+	// Returns a catalog entry's user_values file as written (YAML with its
+	// comments), for a tenant to edit and send with EnableComponent or
+	// UpdateComponent. NOT_FOUND when the component is not in the catalog.
+	GetComponentValues(context.Context, *v1.GetComponentValuesRequest) (*v1.GetComponentValuesResponse, error)
+	// Enables a component on a cluster. Keys of component.values equal to
+	// the definition's user_values file are dropped before the checks, so only
+	// the tenant's edits are stored. Fails with NOT_FOUND when the
 	// component is not in the catalog or the cluster is not the tenant's;
 	// FAILED_PRECONDITION when the cluster is not RUNNING, is imported and not
 	// taken over, its release does not offer the component for its
@@ -140,8 +163,8 @@ type ComponentServiceHandler interface {
 	// conflicting add-on is in the cluster's spec; ALREADY_EXISTS when the
 	// cluster has the component, unless request_id matches the original
 	// request; INVALID_ARGUMENT when the values are not an object of at most
-	// 64 KiB, set a protected key (every such key is named) or fail the
-	// definition's values schema.
+	// 64 KiB, touch a platform_values path (every such path is named) or
+	// fail the definition's values schema.
 	EnableComponent(context.Context, *v1.EnableComponentRequest) (*v1.EnableComponentResponse, error)
 	// Changes a component's values or pinned version, with the same checks
 	// as EnableComponent. A values change rolls out at once; it does not wait
@@ -162,6 +185,7 @@ func RegisterComponentServiceHandler(server *connect.Server, svc ComponentServic
 	adapter := componentServiceHandler{svc: svc}
 	server.Register(
 		connect.Method{Spec: componentServiceListComponentDefinitionsSpec(), Handler: adapter.listComponentDefinitions},
+		connect.Method{Spec: componentServiceGetComponentValuesSpec(), Handler: adapter.getComponentValues},
 		connect.Method{Spec: componentServiceEnableComponentSpec(), Handler: adapter.enableComponent},
 		connect.Method{Spec: componentServiceUpdateComponentSpec(), Handler: adapter.updateComponent},
 		connect.Method{Spec: componentServiceDisableComponentSpec(), Handler: adapter.disableComponent},
@@ -175,6 +199,10 @@ type UnimplementedComponentServiceHandler struct{}
 
 func (UnimplementedComponentServiceHandler) ListComponentDefinitions(context.Context, *v1.ListComponentDefinitionsRequest) (*v1.ListComponentDefinitionsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ComponentService.ListComponentDefinitions is not implemented")
+}
+
+func (UnimplementedComponentServiceHandler) GetComponentValues(context.Context, *v1.GetComponentValuesRequest) (*v1.GetComponentValuesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ComponentService.GetComponentValues is not implemented")
 }
 
 func (UnimplementedComponentServiceHandler) EnableComponent(context.Context, *v1.EnableComponentRequest) (*v1.EnableComponentResponse, error) {
@@ -204,6 +232,14 @@ type componentServiceClient struct {
 func (c *componentServiceClient) ListComponentDefinitions(ctx context.Context, req *v1.ListComponentDefinitionsRequest) (*v1.ListComponentDefinitionsResponse, error) {
 	var res v1.ListComponentDefinitionsResponse
 	if err := c.client.CallUnary(ctx, componentServiceListComponentDefinitionsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *componentServiceClient) GetComponentValues(ctx context.Context, req *v1.GetComponentValuesRequest) (*v1.GetComponentValuesResponse, error) {
+	var res v1.GetComponentValuesResponse
+	if err := c.client.CallUnary(ctx, componentServiceGetComponentValuesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -257,6 +293,18 @@ func (h componentServiceHandler) listComponentDefinitions(ctx context.Context, _
 		return err
 	}
 	res, err := h.svc.ListComponentDefinitions(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h componentServiceHandler) getComponentValues(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetComponentValuesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetComponentValues(ctx, &req)
 	if err != nil {
 		return err
 	}

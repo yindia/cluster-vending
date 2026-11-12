@@ -1,6 +1,11 @@
 # The component catalog (docs/design/component-usage.md), written by the
 # release-admin role. Chart versions are not here: each release pins them
 # per Kubernetes minor.
+#
+# Values, later wins: userValues (the commented file tenants pull, edit and
+# send back) < the tenant's edits < platformValues (locked: a tenant who
+# touches one of their paths is refused) < computed values (a later step).
+# valuesSchema is written by hand and says what a tenant may set.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: ComponentDefinition
 metadata:
@@ -12,8 +17,13 @@ spec:
     helm:
       repository: https://kyverno.github.io/kyverno
       chart: kyverno
-  defaults:
+  platformValues:
+    features:
+      policyExceptions:
+        enabled: true
+  userValues: |
     admissionController:
+      # Admission webhook replicas, 1 to 5. Three survive a zone outage.
       replicas: 3
   valuesSchema:
     type: object
@@ -39,8 +49,12 @@ spec:
     helm:
       repository: https://kyverno.github.io/kyverno
       chart: kyverno-policies
-  defaults:
+  platformValues:
+    failurePolicy: Ignore
+  userValues: |
+    # baseline, restricted or privileged.
     podSecurityStandard: baseline
+    # Audit reports violations; Enforce refuses them.
     validationFailureAction: Audit
   valuesSchema:
     type: object
@@ -67,36 +81,50 @@ spec:
       - name: karpenter-defaults
         repository: oci://ghcr.io/yindia/cluster-vending/charts
         chart: karpenter-defaults
-  defaults:
-    replicas: 2
+  # Locked for every tenant. The cluster name, endpoint, interruption queue
+  # and service account are computed per cluster (a later step) and locked
+  # the same way.
+  platformValues:
     controller:
-      resources: {requests: {cpu: 250m, memory: 512Mi}}
+      resources:
+        requests: {cpu: 250m, memory: 512Mi}
+  # The file tenants pull (cluster-vending component values karpenter),
+  # edit and send back. Comments stay; keys left as they are here are not
+  # stored, so a later change to this file reaches those tenants.
+  userValues: |
+    # Controller replicas, 1 to 3. Two keep Karpenter up while its node drains.
+    replicas: 2
+    # error, info or debug.
+    logLevel: info
+    settings:
+      # How long Karpenter collects pending pods before it launches nodes.
+      batchMaxDuration: 10s
+      # featureGates:
+      #   spotToSpotConsolidation: true
     defaultNodePool:
+      # false: no default NodePool; bring your own.
       enabled: true
-      limits: {cpu: "64"}
+      # The most CPU the default NodePool may launch.
+      limits:
+        cpu: "64"
+      # Replaced as a whole when you set it. Add spot to save money.
       requirements:
       - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
-  protectedKeys:
-  - settings.clusterName
-  - settings.clusterEndpoint
-  - settings.interruptionQueue
-  - serviceAccount.name
-  - serviceAccount.annotations
-  - defaultNodeClass
   valuesSchema:
     type: object
     additionalProperties: false
     properties:
       replicas: {type: integer, minimum: 1, maximum: 3}
       logLevel: {type: string, enum: [error, info, debug]}
-      controller: {type: object}
       settings:
         type: object
+        additionalProperties: false
         properties:
           featureGates: {type: object, additionalProperties: {type: boolean}}
           batchMaxDuration: {type: string}
       defaultNodePool:
         type: object
+        additionalProperties: false
         properties:
           enabled: {type: boolean}
           limits: {type: object}
@@ -105,7 +133,8 @@ spec:
 ---
 # A chart in a private OCI registry (ECR). The operator keeps a
 # kubernetes.io/dockerconfigjson Secret fresh in the platform namespace (ECR
-# tokens last 12 hours); the definition only names it.
+# tokens last 12 hours); the definition only names it. No userValues and no
+# valuesSchema: tenants change nothing.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: ComponentDefinition
 metadata:

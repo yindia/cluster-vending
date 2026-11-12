@@ -87,10 +87,6 @@ spec:
                   type: string
                 type: array
                 x-kubernetes-list-type: set
-              defaults:
-                description: defaults are the platform's values for every tenant.
-                type: object
-                x-kubernetes-preserve-unknown-fields: true
               description:
                 description: description shown to tenants.
                 maxLength: 1024
@@ -262,16 +258,14 @@ spec:
                 description: namespace in the workload cluster.
                 pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
                 type: string
-              protectedKeys:
+              platformValues:
                 description: |-
-                  protectedKeys are dotted paths (settings.clusterName) only the
-                  platform sets.
-                items:
-                  pattern: ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$
-                  type: string
-                maxItems: 64
-                type: array
-                x-kubernetes-list-type: set
+                  platformValues are set by the platform team for every tenant, and
+                  locked: every leaf path in them wins over the tenant's values, and
+                  an enable or update whose overrides touch one is refused, naming the
+                  path. Tenants never see them in the values file.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               requires:
                 description: requires lists other components that must be Ready first.
                 items:
@@ -280,10 +274,24 @@ spec:
                 maxItems: 16
                 type: array
                 x-kubernetes-list-type: set
+              userValues:
+                description: |-
+                  userValues is the starting values file tenants pull (cluster-vending
+                  component values <name>), edit and send with enable/update; only keys
+                  a tenant may change. YAML kept as written, so the platform team's
+                  comments survive as they do in a chart's values.yaml. The definition
+                  is Valid only when it parses into an object, shares no path with
+                  platformValues (neither the same leaf nor one inside the other) and
+                  validates against valuesSchema. A tenant's keys equal to the file's
+                  are not stored (pkg/component PruneUnchanged), so a later change to
+                  the file reaches tenants who did not edit that key.
+                maxLength: 65536
+                type: string
               valuesSchema:
                 description: |-
-                  valuesSchema is a JSON Schema of what a tenant may override. Unset:
-                  no overrides are accepted.
+                  valuesSchema is a JSON Schema, written by the platform team, of what
+                  a tenant may override; userValues must validate against it too.
+                  Unset: no overrides are accepted (and userValues must be empty).
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
             required:

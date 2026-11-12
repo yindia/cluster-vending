@@ -31,8 +31,9 @@ type ComponentSpec struct {
 	// +kubebuilder:validation:MaxLength=64
 	Version string `json:"version,omitempty"`
 	// values are the tenant's overrides only, a JSON object of at most
-	// 64 KiB. Platform defaults and computed values are never copied here.
-	// Not for secrets.
+	// 64 KiB: what differs from the definition's userValues file. The
+	// definition's platformValues and computed values are never copied
+	// here, and may not be set. Not for secrets.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
@@ -269,26 +270,35 @@ type ComponentDefinitionSpec struct {
 	// +optional
 	// +kubebuilder:validation:Enum=Karpenter;LoadBalancerController
 	CloudResources string `json:"cloudResources,omitempty"`
-	// defaults are the platform's values for every tenant.
+	// platformValues are set by the platform team for every tenant, and
+	// locked: every leaf path in them wins over the tenant's values, and
+	// an enable or update whose overrides touch one is refused, naming the
+	// path. Tenants never see them in the values file.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:validation:Type=object
-	Defaults *runtime.RawExtension `json:"defaults,omitempty"`
-	// valuesSchema is a JSON Schema of what a tenant may override. Unset:
-	// no overrides are accepted.
+	PlatformValues *runtime.RawExtension `json:"platformValues,omitempty"`
+	// userValues is the starting values file tenants pull (cluster-vending
+	// component values <name>), edit and send with enable/update; only keys
+	// a tenant may change. YAML kept as written, so the platform team's
+	// comments survive as they do in a chart's values.yaml. The definition
+	// is Valid only when it parses into an object, shares no path with
+	// platformValues (neither the same leaf nor one inside the other) and
+	// validates against valuesSchema. A tenant's keys equal to the file's
+	// are not stored (pkg/component PruneUnchanged), so a later change to
+	// the file reaches tenants who did not edit that key.
+	// +optional
+	// +kubebuilder:validation:MaxLength=65536
+	UserValues string `json:"userValues,omitempty"`
+	// valuesSchema is a JSON Schema, written by the platform team, of what
+	// a tenant may override; userValues must validate against it too.
+	// Unset: no overrides are accepted (and userValues must be empty).
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:validation:Type=object
 	ValuesSchema *runtime.RawExtension `json:"valuesSchema,omitempty"`
-	// protectedKeys are dotted paths (settings.clusterName) only the
-	// platform sets.
-	// +optional
-	// +listType=set
-	// +kubebuilder:validation:MaxItems=64
-	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`
-	ProtectedKeys []string `json:"protectedKeys,omitempty"`
 }
 
 // ComponentDefinitionStatus is written by the controller.

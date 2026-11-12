@@ -6,23 +6,18 @@ import (
 )
 
 // Merge returns the effective values of a component (design section 5),
-// later layers winning: the chart's defaults, the definition's defaults,
-// the platform-computed values, then the tenant's values. Maps merge key
-// by key, everything else (lists included) replaces, and an explicit null
-// removes what the layers below set. Every protected key then has the
-// value the first three layers give it, or none: a tenant value there
-// never survives, even one a stored object somehow carries. No input is
-// modified; the result shares nothing with them.
-func Merge(chart, defaults, platform, tenant Values, protected []string) Values {
-	base := mergeInto(mergeInto(mergeInto(Values{}, chart), defaults), platform)
-	out := mergeInto(clone(base), tenant)
-	for _, key := range protected {
-		path := splitPath(key)
-		if v, ok := lookup(base, path); ok {
-			set(out, path, deepCopy(v))
-		} else {
-			remove(out, path)
-		}
+// later layers winning: the chart's defaults, the definition's userValues
+// file, the tenant's overrides, then the definition's platformValues
+// (computed values, a later step, will go last). Maps merge key by key,
+// everything else (lists included) replaces, and an explicit null removes
+// what the layers below set. platformValues always win; that a tenant's
+// overrides never touch them is checked before (LockedPathsTouched, check
+// 10), so the merge never overrides a tenant silently through the API. No
+// input is modified; the result shares nothing with them.
+func Merge(chart, userValues, tenant, platformValues Values) Values {
+	out := Values{}
+	for _, layer := range []Values{chart, userValues, tenant, platformValues} {
+		out = mergeInto(out, layer)
 	}
 	return out
 }
@@ -74,50 +69,27 @@ func deepCopy(v any) any {
 	}
 }
 
-// splitPath is a protected key's path: dotted, without empty segments.
+// splitPath is a dotted path's segments, without empty ones.
 func splitPath(key string) []string {
 	return slices.DeleteFunc(strings.Split(key, "."), func(s string) bool { return s == "" })
 }
 
-// lookup is the value at path, and whether there is one.
-func lookup(v Values, path []string) (any, bool) {
-	var cur any = v
-	for _, k := range path {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		if cur, ok = m[k]; !ok {
-			return nil, false
-		}
-	}
-	return cur, len(path) > 0
-}
-
-// set puts value at path, creating maps on the way (and replacing what is
-// not a map there).
-func set(v Values, path []string, value any) {
-	cur := v
-	for _, k := range path[:len(path)-1] {
-		next, ok := cur[k].(map[string]any)
-		if !ok {
-			next = Values{}
-			cur[k] = next
-		}
-		cur = next
-	}
-	cur[path[len(path)-1]] = value
-}
-
-// remove deletes the value at path, if there is one.
+// remove deletes the value at path, if there is one, and the maps above it
+// that are left empty: what is left is what the tenant set besides it.
 func remove(v Values, path []string) {
-	cur := v
-	for _, k := range path[:len(path)-1] {
-		next, ok := cur[k].(map[string]any)
-		if !ok {
-			return
-		}
-		cur = next
+	if len(path) == 0 {
+		return
 	}
-	delete(cur, path[len(path)-1])
+	if len(path) == 1 {
+		delete(v, path[0])
+		return
+	}
+	next, ok := v[path[0]].(map[string]any)
+	if !ok {
+		return
+	}
+	remove(next, path[1:])
+	if len(next) == 0 {
+		delete(v, path[0])
+	}
 }

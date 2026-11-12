@@ -39,10 +39,12 @@ message Component {
   // gives its Kubernetes minor.
   string version = 5 [(buf.validate.field).string.max_len = 64];
 
-  // The tenant's overrides only: a JSON object of at most 64 KiB, merged
-  // over the platform's defaults (maps key by key, lists as a whole, null
-  // removes a default). Keys the platform sets (ComponentDefinition
-  // .protected_keys) are refused. Not for secrets.
+  // The tenant's values: a JSON object of at most 64 KiB, usually the
+  // definition's user_values file as edited. Keys equal to that file are
+  // dropped, so only the tenant's edits are stored and returned. Merged
+  // as user_values < these < platform_values (maps key by key, lists as a
+  // whole, null removes a value). Values that touch a platform_values
+  // path are refused. Not for secrets.
   google.protobuf.Struct values = 6;
 
   // Observed state. Output only; ignored on enable and update.
@@ -110,6 +112,11 @@ message ComponentStatus {
 // ComponentDefinition is what tenants see of a catalog entry. How the
 // platform installs it is not part of the answer.
 message ComponentDefinition {
+  // protected_keys (repeated string): replaced by platform_values, whose
+  // leaf paths are the locked keys.
+  reserved 6;
+  reserved "protected_keys";
+
   // Catalog name, e.g. "karpenter": Component.component.
   string name = 1;
 
@@ -125,10 +132,19 @@ message ComponentDefinition {
   // JSON Schema of the values a tenant may set. Unset: none.
   google.protobuf.Struct values_schema = 5;
 
-  // Dotted paths of values only the platform sets.
-  repeated string protected_keys = 6;
-
   // Versions offered, by Kubernetes minor ("1.34"), by the release that
   // applies to the cluster named in the request; empty without one.
   map<string, string> versions = 7;
+
+  // Values the platform sets for every tenant. Locked: an enable or update
+  // whose values touch any of their leaf paths (the path, a path inside
+  // it, or one above it) fails with INVALID_ARGUMENT naming the path.
+  google.protobuf.Struct platform_values = 8;
+
+  // The starting values file (YAML, comments kept): the keys a tenant may
+  // change, with the platform's suggested values. Tenants pull it
+  // (GetComponentValues), edit it and send it as Component.values; keys
+  // left as in this file are not stored, so later changes to the file
+  // still reach them. Empty when the component takes no values.
+  string user_values = 9;
 }

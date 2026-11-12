@@ -101,7 +101,8 @@ unknown procedure. The store behind it (`Components` in
 
 | RPC | What it does |
 |---|---|
-| `ListComponentDefinitions` | Lists the catalog: name, description, `requires`, `conflicts_with_addons`, values schema and protected keys. With `cluster_id`, `versions` holds what that cluster's release offers. How a component is installed is never returned. |
+| `ListComponentDefinitions` | Lists the catalog: name, description, `requires`, `conflicts_with_addons`, values schema, `platform_values` (locked) and the `user_values` file. With `cluster_id`, `versions` holds what that cluster's release offers. How a component is installed is never returned. |
+| `GetComponentValues` | Returns a catalog entry's `user_values` file as written (YAML with comments), for the tenant to edit and send as `Component.values`; values that touch a `platform_values` path are refused. Keys left as in the file are not stored, so later changes to the file still reach the tenant. |
 | `EnableComponent` | Stores a component on a cluster (at most one of each per cluster; `request_id` makes a retry return the first result). `validate_only` answers with the effective values and stores nothing. |
 | `UpdateComponent` | Changes `values` (replaced as a whole) or `version`, the only paths `update_mask` accepts. |
 | `DisableComponent` | Deletes the component from the cluster; `force` lets the Helm release go without an uninstall. |

@@ -75,8 +75,9 @@ type ComponentSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=64
 	Version string `json:"version,omitempty"`
-	// Values are the tenant's overrides only (section 5). Platform
-	// defaults and computed values are never copied here.
+	// Values are the tenant's edits of the definition's userValues file
+	// only (section 5). platformValues and computed values are never
+	// copied here, and may not be set.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
@@ -166,23 +167,27 @@ type ComponentDefinitionSpec struct {
 	// +optional
 	// +kubebuilder:validation:Enum=Karpenter;LoadBalancerController
 	CloudResources string `json:"cloudResources,omitempty"`
-	// Defaults are the platform's values for every tenant.
+	// PlatformValues are set by the platform team for every tenant and
+	// locked: every leaf path in them wins, and a tenant who touches one
+	// is refused. Tenants never see them in the values file.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:validation:Type=object
-	Defaults *apiextensionsv1.JSON `json:"defaults,omitempty"`
-	// ValuesSchema is a JSON Schema of what a tenant may override. Absent:
-	// no overrides are accepted.
+	PlatformValues *apiextensionsv1.JSON `json:"platformValues,omitempty"`
+	// UserValues is the starting values file tenants pull (cluster-vending
+	// component values <name>), edit and send with enable/update; only
+	// keys a tenant may change. YAML in a string, so comments survive.
+	// +optional
+	// +kubebuilder:validation:MaxLength=65536
+	UserValues string `json:"userValues,omitempty"`
+	// ValuesSchema is a JSON Schema, written by hand by the platform team,
+	// of what a tenant may override. Absent: no overrides are accepted.
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:validation:Type=object
 	ValuesSchema *apiextensionsv1.JSON `json:"valuesSchema,omitempty"`
-	// ProtectedKeys are dotted paths only the platform sets.
-	// +optional
-	// +listType=set
-	ProtectedKeys []string `json:"protectedKeys,omitempty"`
 }
 
 // ComponentInstall: exactly one mechanism.
@@ -337,10 +342,15 @@ message ComponentDefinition {           // what tenants see of a catalog entry
   repeated string requires = 3;
   repeated string conflicts_with_addons = 4;
   google.protobuf.Struct values_schema = 5;
-  repeated string protected_keys = 6;
+  reserved 6; reserved "protected_keys";    // published, then replaced
+  google.protobuf.Struct platform_values = 8;  // locked for tenants
   // versions offered, per Kubernetes minor, by the cluster's release
   map<string, string> versions = 7;
+  string user_values = 9;                // the values file, YAML with comments
 }
+
+rpc GetComponentValues(GetComponentValuesRequest{string name})
+    returns (GetComponentValuesResponse{string user_values});  // NO_SIDE_EFFECTS
 ```
 
 `ListComponentDefinitionsRequest` takes an optional `cluster_id`; with it,
@@ -354,6 +364,7 @@ cloud resources around and blur what the tenant pays for.
 
 ```sh
 cluster-vending component catalog [--cluster <cluster-id>]
+cluster-vending component values karpenter > karpenter.yaml
 cluster-vending component enable karpenter --cluster <cluster-id> [-f values.yaml] [--validate-only]
 cluster-vending component update <component-id> -f values.yaml --update-mask values [--validate-only]
 cluster-vending component update <component-id> --version 1.8.1 --update-mask version
@@ -364,6 +375,23 @@ cluster-vending component list --cluster <cluster-id>
 
 `-f` takes the values only, as YAML or JSON. `--validate-only` prints the
 effective values and every refused key without storing anything.
+
+**The values file.** A definition carries a values file
+(`ComponentDefinition.spec.userValues`, YAML with the platform team's
+comments, only the keys a tenant may change). A tenant starts from it:
+
+```sh
+cluster-vending component values karpenter > karpenter.yaml   # GetComponentValues
+$EDITOR karpenter.yaml
+cluster-vending component enable karpenter --cluster <cluster-id> -f karpenter.yaml
+```
+
+The definition is `Valid` only when its file parses as YAML into an object,
+shares no path with `platformValues` (the same leaf, or one inside the
+other) and validates against `valuesSchema` (`pkg/component`
+`CheckDefinition`), so the file as pulled is always accepted.
+`platformValues` are what every tenant gets, locked, without seeing them in
+the file.
 
 ### 4.3 The same through kubectl
 
@@ -401,9 +429,19 @@ All of it reads the store and the release objects; nothing calls AWS
 | 7 | Every `requires` entry is enabled on the cluster. | `FAILED_PRECONDITION`: "enable kyverno first" |
 | 8 | No `conflictsWithAddons` entry is in the cluster's `spec.aws.addons`. | `FAILED_PRECONDITION`: "remove the cert-manager add-on first" |
 | 9 | The values parse, are an object, are at most 64 KiB. | `INVALID_ARGUMENT` |
-| 10 | No protected key is set (section 5). | `INVALID_ARGUMENT`, naming every such key |
+| 10 | No value touches a `platformValues` path (or, later, a computed one): the same leaf, a path inside it, or one above it (section 5). | `INVALID_ARGUMENT`, naming every such path |
 | 11 | The values validate against `valuesSchema`. | `INVALID_ARGUMENT`, with the schema's error and path |
 | 12 | The cluster is supported (its minor is in the release). | `FAILED_PRECONDITION` (rollouts.md: enabling on an unsupported cluster is refused) |
+
+Before these checks, `EnableComponent` and `UpdateComponent` call
+`component.PruneUnchanged(sent, file)` with the definition's `userValues` file:
+every key whose value equals the file's at the same path is dropped
+(maps key by key, recursively; lists whole), and the checks and the store
+see only what is left. So only real edits are stored, and a later change to
+the file reaches every tenant who did not touch that key. **The tradeoff:**
+a tenant cannot pin a value that equals today's file; when the file changes,
+so does the value. To keep a value whatever the file says later, the
+platform has to move it to a key the file does not carry.
 
 Then the handler stores the component, and the controller installs it
 (write-only handlers, as for networks and clusters).
@@ -423,27 +461,32 @@ refers to a Secret in the workload cluster by name.
 
 | # | Layer | Who sets it | Changes when |
 |---|---|---|---|
-| 1 | The chart's own defaults | the chart's authors | the version changes |
-| 2 | `ComponentDefinition.spec.defaults` | operator | the operator edits the definition |
-| 3 | Platform-computed values (cluster name, endpoint, region, queue names, service account names) | the renderer | the cluster's cloud resources change |
-| 4 | `Component.spec.values` | tenant | `UpdateComponent` |
+| 0 | The chart's own defaults (under everything, inside Helm) | the chart's authors | the version changes |
+| 1 | `ComponentDefinition.spec.userValues`, the values file | platform team | the definition is edited |
+| 2 | `Component.spec.values`, the tenant's edits of that file | tenant | `UpdateComponent` |
+| 3 | `ComponentDefinition.spec.platformValues`, locked | platform team | the definition is edited |
+| 4 | Computed values (cluster name, endpoint, region, queue names, service account names), locked (later step) | the renderer | the cluster's cloud resources change |
 
-Layer 3 is applied after layer 4 for every protected key, so a protected key
-always has the platform's value even if a stored object somehow carries a
-tenant value for it. The release adds no values layer: it pins versions only
+`component.Merge(chart, userValues, overrides, platformValues)` merges
+layers 0 to 3. Layers 3 and 4 always win, but not silently: a request
+whose values touch a locked path is refused (check 10), so a stored
+component never carries one through the API. `valuesSchema` stays written by
+hand; the platform does not derive it. The release adds no values layer: it pins versions only
 (release-admin.md, section 3.1). Rejected: release-level defaults per minor
 (components.md section 7 step 2), which would make a release change behaviour
 as well as versions and complicate "what changed in this release".
 
 **Decided (proposed): maps merge key by key; lists replace as a whole; an
 explicit `null` removes a default.** This is Helm's own behaviour, so what a
-tenant reads in the chart's documentation holds. A `null` on a protected key
+tenant reads in the chart's documentation holds. A `null` on a locked path
 is refused like any other value on it.
 
-**Protected keys** are dotted paths (`settings.clusterName`). A tenant value at
-the path or below it is refused, and so is a value above it that would replace
-it (`settings: {...}` with a `clusterName` inside). Every refused path is
-named in one answer.
+**Locked paths** are every leaf path of `platformValues` (and later the
+computed values), dotted (`controller.resources.requests.cpu`). A tenant
+value at the path or below it is refused, and so is a value above it that
+would replace it (`controller: null`). Every refused path is named in one
+answer. A definition whose `userValues` share a path with its
+`platformValues` is not `Valid`.
 
 **Seeing the result.** `--validate-only` returns the effective values and the
 refused keys without storing. After an apply, `status.effectiveValues` is
@@ -453,8 +496,9 @@ what was given to the install object.
 install object, and provider-helm runs an upgrade with the new values. It does
 not wait for a release or a tier, on manual or automatic clusters: values are
 the tenant's own configuration, not a platform version. A change to the
-definition's `defaults` is a platform change and reaches every cluster, manual
-ones included (manual protects versions, not configuration fixes).
+definition's `platformValues`, or of a key of its `userValues` file a tenant
+did not edit, is a platform change and reaches every cluster, manual ones
+included (manual protects versions, not configuration fixes).
 
 ## 6. Karpenter, end to end
 
@@ -477,29 +521,31 @@ spec:
         - name: karpenter-defaults          # platform chart: EC2NodeClass "default" (+ optional NodePool)
           repository: oci://<platform registry>/charts
           chart: karpenter-defaults
-  defaults:
+  platformValues:                         # locked; settings.clusterName, clusterEndpoint,
+    controller:                           # interruptionQueue, serviceAccount and
+      resources: {requests: {cpu: 250m, memory: 512Mi}}   # defaultNodeClass are computed and locked too
+  userValues: |
+    # Controller replicas, 1 to 3. Two keep Karpenter up while its node drains.
     replicas: 2
-    controller:
-      resources: {requests: {cpu: 250m, memory: 512Mi}}
+    # error, info or debug.
+    logLevel: info
+    settings:
+      # How long Karpenter collects pending pods before it launches nodes.
+      batchMaxDuration: 10s
     defaultNodePool:
+      # false: no default NodePool; bring your own.
       enabled: true
+      # The most CPU the default NodePool may launch.
       limits: {cpu: "64"}
+      # Replaced as a whole when you set it. Add spot to save money.
       requirements:
         - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
-  protectedKeys:
-    - settings.clusterName
-    - settings.clusterEndpoint
-    - settings.interruptionQueue
-    - serviceAccount.name
-    - serviceAccount.annotations
-    - defaultNodeClass
   valuesSchema:
     type: object
     additionalProperties: false
     properties:
       replicas: {type: integer, minimum: 1, maximum: 3}
       logLevel: {type: string, enum: [error, info, debug]}
-      controller: {type: object}
       settings:
         type: object
         properties:
@@ -534,10 +580,11 @@ list, all three.
 ### 6.3 A tenant's request
 
 ```yaml
-# values.yaml
+# karpenter.yaml: from `cluster-vending component values karpenter`, edited
 replicas: 2
 logLevel: info
 settings:
+  batchMaxDuration: 10s
   featureGates: {spotToSpotConsolidation: true}
 defaultNodePool:
   limits: {cpu: "128"}
@@ -547,24 +594,29 @@ defaultNodePool:
 ```
 
 ```sh
-cluster-vending component enable karpenter --cluster 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33 -f values.yaml --validate-only
-cluster-vending component enable karpenter --cluster 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33 -f values.yaml
+cluster-vending component enable karpenter --cluster 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33 -f karpenter.yaml --validate-only
+cluster-vending component enable karpenter --cluster 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33 -f karpenter.yaml
 ```
+
+Of that file only `settings.featureGates` and `defaultNodePool` (`limits`,
+`requirements`) differ from `userValues`; they are what is stored in
+`Component.spec.values`.
 
 Effective values after the merge (what lands in `status.effectiveValues`):
 
 ```yaml
 replicas: 2
 logLevel: info
-controller:
+controller:                                  # platformValues, locked
   resources: {requests: {cpu: 250m, memory: 512Mi}}
 settings:
-  clusterName: prod-eks                      # computed, protected
-  clusterEndpoint: https://<eks endpoint>    # computed (late value), protected
-  interruptionQueue: prod-eks-8f819a1f-karpenter   # computed, protected
+  batchMaxDuration: 10s                      # userValues file
+  clusterName: prod-eks                      # computed, locked
+  clusterEndpoint: https://<eks endpoint>    # computed (late value), locked
+  interruptionQueue: prod-eks-8f819a1f-karpenter   # computed, locked
   featureGates: {spotToSpotConsolidation: true}
-serviceAccount: {name: karpenter}            # computed, protected (pod identity names it)
-defaultNodeClass:                            # computed, protected; given to the companion chart
+serviceAccount: {name: karpenter}            # computed, locked (pod identity names it)
+defaultNodeClass:                            # computed, locked; given to the companion chart
   role: prod-eks-8f819a1f-karpenter-node
   subnetSelector: {karpenter.sh/discovery: prod-eks}
   securityGroupSelector: {aws:eks:cluster-name: prod-eks}
@@ -579,7 +631,7 @@ defaultNodePool:
 ### 6.4 NodePools and EC2NodeClasses
 
 **Decided (proposed):** the component ships one `EC2NodeClass` named
-`default`, with the protected role and selectors above, and optionally one
+`default`, with the locked role and selectors above, and optionally one
 `NodePool` named `default` driven by `defaultNodePool` values, both through
 the platform's companion chart. Any further NodePool or EC2NodeClass is the
 tenant's own object, applied inside their cluster with `kubectl`, and may
@@ -624,7 +676,7 @@ billed, and blocks deleting the node role.
 | Manual cluster, no pin | The version the release that applies to it lists for its minor at the moment it is enabled (release-admin.md, section 5: the newest release's pins), then fixed. It changes only when the tenant updates the component or the cluster's minor. |
 | Manual cluster, pin | Allowed if any `Valid`, not withdrawn release lists that version for the cluster's minor. Anything else is refused, so nothing untested by a release is installed. |
 | Manual cluster changes its Kubernetes minor | Unpinned components move to the version listed for the new minor after the control plane reports it, as add-ons do (`GateUpgrade`). A pinned component whose version is not listed for the new minor blocks the cluster update, naming the component. |
-| Platform fix (renderer or definition defaults) | Reaches every cluster, manual included; versions do not change. |
+| Platform fix (renderer, or the definition's platformValues or userValues) | Reaches every cluster, manual included; versions do not change. |
 | Any cluster outside the support window | Installed components stay; enabling new ones is refused. |
 
 The tier and channel are the cluster's; a component has none of its own.
@@ -672,7 +724,7 @@ in parallel with it.
 | # | Delivers | Touches | Parallel with releases? |
 |---|---|---|---|
 | 1 | `Component` and `ComponentDefinition` kinds and CRDs; RBAC (tenants none, controller status, API server read/write components, read definitions) | `api/v1alpha1`, `config/crd`, `config/rbac`, `config/server` | Yes |
-| 2 | A pure package `pkg/component`: values merge, protected-key check, schema validation, request checks of section 4.4 given plain inputs | `pkg/component` (new) | Yes |
+| 2 | A pure package `pkg/component`: values merge, locked-path check, schema validation, request checks of section 4.4 given plain inputs | `pkg/component` (new) | Yes |
 | 3 | Contract: `component.proto`, `component_service.proto`; store methods for components (cloudstore) | `idl/cloud/v1`, `pkg/database/repository`, `pkg/database/cloudstore` | Yes |
 | 4 | Write-only handlers and CLI; `DeleteCluster` and `UpdateCluster` reverse checks | `pkg/server/component` (new), `pkg/server/cluster`, `pkg/cli`, `cmd` | After 1-3 |
 | 5 | Workload-cluster access for provider-helm: a `ProviderConfig` per cluster from the kubeconfig Secret | `pkg/crossplane` | Yes |
@@ -686,7 +738,7 @@ in parallel with it.
 
 Where the code differs from the sketches above:
 
-- Schemaless JSON (`values`, `effectiveValues`, `defaults`, `valuesSchema`)
+- Schemaless JSON (`values`, `effectiveValues`, `platformValues`, `valuesSchema`)
   is `*runtime.RawExtension`, as `contractStatus` is elsewhere in the API
   package, not `*apiextensionsv1.JSON`; the CRD is the same.
 - The CRD cannot measure schemaless JSON, so the 64 KiB bound on values is
@@ -705,7 +757,19 @@ Where the code differs from the sketches above:
   for a new cluster, so a component create and a cluster delete cannot both
   win; `Clusters.Delete` refuses with `ErrInUse` naming the components.
 - The contract's `ComponentStatus` has no inventory; the kind's status
-  keeps it. `ComponentService` is declared and not registered in the
+  keeps it.
+- The values model changed after the sketches: `defaults` became
+  `platformValues` (locked), `protectedKeys` is gone (every platformValues
+  leaf path is locked, computed keys later), and `userValues` (the values
+  file, a YAML string) and the `GetComponentValues` RPC were added. The RPC
+  takes only the definition's name, as the catalog is the same for every
+  tenant. On the contract `protected_keys` (field 6) is reserved and the
+  new fields take 8 and 9. In `pkg/component`: `CheckDefinition` (for the
+  definition's `Valid` condition, set by the definition reconciler of step
+  6: `CheckSchema`, the userValues file, its overlap with platformValues,
+  `ValidateSchema`), and for the handlers of step 4 `PruneUnchanged`, then
+  `CheckEnable` (check 10 is `LockedPathsTouched`), then `Merge`. One
+  schema validator, the hand-written subset in `schema.go`. `ComponentService` is declared and not registered in the
   server until step 4.
 
 ## 11. Open questions

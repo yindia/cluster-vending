@@ -1,6 +1,7 @@
-# Karpenter enabled on the cluster prod-eks of tenant acme, with the
-# tenant's overrides only: defaults and computed values (cluster name,
-# endpoint, interruption queue) come from the platform. Named
+# Karpenter enabled on the cluster prod-eks of tenant acme. values holds the
+# tenant's edits of the definition's userValues file only (keys left as in
+# the file are not stored); platformValues and computed values (cluster
+# name, endpoint, interruption queue) come from the platform. Named
 # <cluster name>-<component>.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: Component
@@ -11,8 +12,7 @@ spec:
   clusterID: 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33
   component: karpenter
   values:
-    replicas: 2
-    logLevel: info
+    replicas: 3
     settings:
       batchMaxDuration: 15s
     defaultNodePool:

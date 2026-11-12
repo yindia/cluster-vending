@@ -122,6 +122,96 @@ func (x *ListComponentDefinitionsResponse) GetDefinitions() []*ComponentDefiniti
 	return nil
 }
 
+type GetComponentValuesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ComponentDefinition.name, e.g. "karpenter".
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetComponentValuesRequest) Reset() {
+	*x = GetComponentValuesRequest{}
+	mi := &file_cloud_v1_component_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetComponentValuesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetComponentValuesRequest) ProtoMessage() {}
+
+func (x *GetComponentValuesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_component_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetComponentValuesRequest.ProtoReflect.Descriptor instead.
+func (*GetComponentValuesRequest) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetComponentValuesRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type GetComponentValuesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The user_values file, YAML with comments; empty when there is none.
+	UserValues    string `protobuf:"bytes,1,opt,name=user_values,json=userValues,proto3" json:"user_values,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetComponentValuesResponse) Reset() {
+	*x = GetComponentValuesResponse{}
+	mi := &file_cloud_v1_component_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetComponentValuesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetComponentValuesResponse) ProtoMessage() {}
+
+func (x *GetComponentValuesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_component_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetComponentValuesResponse.ProtoReflect.Descriptor instead.
+func (*GetComponentValuesResponse) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetComponentValuesResponse) GetUserValues() string {
+	if x != nil {
+		return x.UserValues
+	}
+	return ""
+}
+
 type EnableComponentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Tenant scope. DNS label, at most 56 chars so the tenant namespace
@@ -142,7 +232,7 @@ type EnableComponentRequest struct {
 
 func (x *EnableComponentRequest) Reset() {
 	*x = EnableComponentRequest{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[2]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -154,7 +244,7 @@ func (x *EnableComponentRequest) String() string {
 func (*EnableComponentRequest) ProtoMessage() {}
 
 func (x *EnableComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[2]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -167,7 +257,7 @@ func (x *EnableComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnableComponentRequest.ProtoReflect.Descriptor instead.
 func (*EnableComponentRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *EnableComponentRequest) GetTenantId() string {
@@ -207,7 +297,7 @@ type EnableComponentResponse struct {
 
 func (x *EnableComponentResponse) Reset() {
 	*x = EnableComponentResponse{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[3]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -219,7 +309,7 @@ func (x *EnableComponentResponse) String() string {
 func (*EnableComponentResponse) ProtoMessage() {}
 
 func (x *EnableComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[3]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -232,7 +322,7 @@ func (x *EnableComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnableComponentResponse.ProtoReflect.Descriptor instead.
 func (*EnableComponentResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *EnableComponentResponse) GetComponent() *Component {
@@ -263,7 +353,7 @@ type UpdateComponentRequest struct {
 
 func (x *UpdateComponentRequest) Reset() {
 	*x = UpdateComponentRequest{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[4]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -275,7 +365,7 @@ func (x *UpdateComponentRequest) String() string {
 func (*UpdateComponentRequest) ProtoMessage() {}
 
 func (x *UpdateComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[4]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -288,7 +378,7 @@ func (x *UpdateComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateComponentRequest.ProtoReflect.Descriptor instead.
 func (*UpdateComponentRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *UpdateComponentRequest) GetTenantId() string {
@@ -329,7 +419,7 @@ type UpdateComponentResponse struct {
 
 func (x *UpdateComponentResponse) Reset() {
 	*x = UpdateComponentResponse{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[5]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -341,7 +431,7 @@ func (x *UpdateComponentResponse) String() string {
 func (*UpdateComponentResponse) ProtoMessage() {}
 
 func (x *UpdateComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[5]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -354,7 +444,7 @@ func (x *UpdateComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateComponentResponse.ProtoReflect.Descriptor instead.
 func (*UpdateComponentResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{5}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UpdateComponentResponse) GetComponent() *Component {
@@ -384,7 +474,7 @@ type DisableComponentRequest struct {
 
 func (x *DisableComponentRequest) Reset() {
 	*x = DisableComponentRequest{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[6]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -396,7 +486,7 @@ func (x *DisableComponentRequest) String() string {
 func (*DisableComponentRequest) ProtoMessage() {}
 
 func (x *DisableComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[6]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -409,7 +499,7 @@ func (x *DisableComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisableComponentRequest.ProtoReflect.Descriptor instead.
 func (*DisableComponentRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{6}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DisableComponentRequest) GetTenantId() string {
@@ -450,7 +540,7 @@ type DisableComponentResponse struct {
 
 func (x *DisableComponentResponse) Reset() {
 	*x = DisableComponentResponse{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[7]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -462,7 +552,7 @@ func (x *DisableComponentResponse) String() string {
 func (*DisableComponentResponse) ProtoMessage() {}
 
 func (x *DisableComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[7]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -475,7 +565,7 @@ func (x *DisableComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisableComponentResponse.ProtoReflect.Descriptor instead.
 func (*DisableComponentResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{7}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DisableComponentResponse) GetComponent() *Component {
@@ -498,7 +588,7 @@ type GetComponentRequest struct {
 
 func (x *GetComponentRequest) Reset() {
 	*x = GetComponentRequest{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[8]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -510,7 +600,7 @@ func (x *GetComponentRequest) String() string {
 func (*GetComponentRequest) ProtoMessage() {}
 
 func (x *GetComponentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[8]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -523,7 +613,7 @@ func (x *GetComponentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetComponentRequest.ProtoReflect.Descriptor instead.
 func (*GetComponentRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{8}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetComponentRequest) GetTenantId() string {
@@ -549,7 +639,7 @@ type GetComponentResponse struct {
 
 func (x *GetComponentResponse) Reset() {
 	*x = GetComponentResponse{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[9]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -561,7 +651,7 @@ func (x *GetComponentResponse) String() string {
 func (*GetComponentResponse) ProtoMessage() {}
 
 func (x *GetComponentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[9]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -574,7 +664,7 @@ func (x *GetComponentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetComponentResponse.ProtoReflect.Descriptor instead.
 func (*GetComponentResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{9}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetComponentResponse) GetComponent() *Component {
@@ -603,7 +693,7 @@ type ListComponentsRequest struct {
 
 func (x *ListComponentsRequest) Reset() {
 	*x = ListComponentsRequest{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -615,7 +705,7 @@ func (x *ListComponentsRequest) String() string {
 func (*ListComponentsRequest) ProtoMessage() {}
 
 func (x *ListComponentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -628,7 +718,7 @@ func (x *ListComponentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListComponentsRequest.ProtoReflect.Descriptor instead.
 func (*ListComponentsRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{10}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListComponentsRequest) GetTenantId() string {
@@ -670,7 +760,7 @@ type ListComponentsResponse struct {
 
 func (x *ListComponentsResponse) Reset() {
 	*x = ListComponentsResponse{}
-	mi := &file_cloud_v1_component_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -682,7 +772,7 @@ func (x *ListComponentsResponse) String() string {
 func (*ListComponentsResponse) ProtoMessage() {}
 
 func (x *ListComponentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_component_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_component_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -695,7 +785,7 @@ func (x *ListComponentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListComponentsResponse.ProtoReflect.Descriptor instead.
 func (*ListComponentsResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{11}
+	return file_cloud_v1_component_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListComponentsResponse) GetComponents() []*Component {
@@ -722,7 +812,12 @@ const file_cloud_v1_component_service_proto_rawDesc = "" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\"c\n" +
 	" ListComponentDefinitionsResponse\x12?\n" +
-	"\vdefinitions\x18\x01 \x03(\v2\x1d.cloud.v1.ComponentDefinitionR\vdefinitions\"\x86\x04\n" +
+	"\vdefinitions\x18\x01 \x03(\v2\x1d.cloud.v1.ComponentDefinitionR\vdefinitions\"`\n" +
+	"\x19GetComponentValuesRequest\x12C\n" +
+	"\x04name\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x18?2$^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$R\x04name\"=\n" +
+	"\x1aGetComponentValuesResponse\x12\x1f\n" +
+	"\vuser_values\x18\x01 \x01(\tR\n" +
+	"userValues\"\x86\x04\n" +
 	"\x16EnableComponentRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x129\n" +
 	"\tcomponent\x18\x02 \x01(\v2\x13.cloud.v1.ComponentB\x06\xbaH\x03\xc8\x01\x01R\tcomponent\x12*\n" +
@@ -766,9 +861,10 @@ const file_cloud_v1_component_service_proto_rawDesc = "" +
 	"\n" +
 	"components\x18\x01 \x03(\v2\x13.cloud.v1.ComponentR\n" +
 	"components\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xc3\x04\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xa9\x05\n" +
 	"\x10ComponentService\x12v\n" +
-	"\x18ListComponentDefinitions\x12).cloud.v1.ListComponentDefinitionsRequest\x1a*.cloud.v1.ListComponentDefinitionsResponse\"\x03\x90\x02\x01\x12V\n" +
+	"\x18ListComponentDefinitions\x12).cloud.v1.ListComponentDefinitionsRequest\x1a*.cloud.v1.ListComponentDefinitionsResponse\"\x03\x90\x02\x01\x12d\n" +
+	"\x12GetComponentValues\x12#.cloud.v1.GetComponentValuesRequest\x1a$.cloud.v1.GetComponentValuesResponse\"\x03\x90\x02\x01\x12V\n" +
 	"\x0fEnableComponent\x12 .cloud.v1.EnableComponentRequest\x1a!.cloud.v1.EnableComponentResponse\x12V\n" +
 	"\x0fUpdateComponent\x12 .cloud.v1.UpdateComponentRequest\x1a!.cloud.v1.UpdateComponentResponse\x12Y\n" +
 	"\x10DisableComponent\x12!.cloud.v1.DisableComponentRequest\x1a\".cloud.v1.DisableComponentResponse\x12R\n" +
@@ -788,48 +884,52 @@ func file_cloud_v1_component_service_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_component_service_proto_rawDescData
 }
 
-var file_cloud_v1_component_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_cloud_v1_component_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_cloud_v1_component_service_proto_goTypes = []any{
 	(*ListComponentDefinitionsRequest)(nil),  // 0: cloud.v1.ListComponentDefinitionsRequest
 	(*ListComponentDefinitionsResponse)(nil), // 1: cloud.v1.ListComponentDefinitionsResponse
-	(*EnableComponentRequest)(nil),           // 2: cloud.v1.EnableComponentRequest
-	(*EnableComponentResponse)(nil),          // 3: cloud.v1.EnableComponentResponse
-	(*UpdateComponentRequest)(nil),           // 4: cloud.v1.UpdateComponentRequest
-	(*UpdateComponentResponse)(nil),          // 5: cloud.v1.UpdateComponentResponse
-	(*DisableComponentRequest)(nil),          // 6: cloud.v1.DisableComponentRequest
-	(*DisableComponentResponse)(nil),         // 7: cloud.v1.DisableComponentResponse
-	(*GetComponentRequest)(nil),              // 8: cloud.v1.GetComponentRequest
-	(*GetComponentResponse)(nil),             // 9: cloud.v1.GetComponentResponse
-	(*ListComponentsRequest)(nil),            // 10: cloud.v1.ListComponentsRequest
-	(*ListComponentsResponse)(nil),           // 11: cloud.v1.ListComponentsResponse
-	(*ComponentDefinition)(nil),              // 12: cloud.v1.ComponentDefinition
-	(*Component)(nil),                        // 13: cloud.v1.Component
-	(*fieldmaskpb.FieldMask)(nil),            // 14: google.protobuf.FieldMask
+	(*GetComponentValuesRequest)(nil),        // 2: cloud.v1.GetComponentValuesRequest
+	(*GetComponentValuesResponse)(nil),       // 3: cloud.v1.GetComponentValuesResponse
+	(*EnableComponentRequest)(nil),           // 4: cloud.v1.EnableComponentRequest
+	(*EnableComponentResponse)(nil),          // 5: cloud.v1.EnableComponentResponse
+	(*UpdateComponentRequest)(nil),           // 6: cloud.v1.UpdateComponentRequest
+	(*UpdateComponentResponse)(nil),          // 7: cloud.v1.UpdateComponentResponse
+	(*DisableComponentRequest)(nil),          // 8: cloud.v1.DisableComponentRequest
+	(*DisableComponentResponse)(nil),         // 9: cloud.v1.DisableComponentResponse
+	(*GetComponentRequest)(nil),              // 10: cloud.v1.GetComponentRequest
+	(*GetComponentResponse)(nil),             // 11: cloud.v1.GetComponentResponse
+	(*ListComponentsRequest)(nil),            // 12: cloud.v1.ListComponentsRequest
+	(*ListComponentsResponse)(nil),           // 13: cloud.v1.ListComponentsResponse
+	(*ComponentDefinition)(nil),              // 14: cloud.v1.ComponentDefinition
+	(*Component)(nil),                        // 15: cloud.v1.Component
+	(*fieldmaskpb.FieldMask)(nil),            // 16: google.protobuf.FieldMask
 }
 var file_cloud_v1_component_service_proto_depIdxs = []int32{
-	12, // 0: cloud.v1.ListComponentDefinitionsResponse.definitions:type_name -> cloud.v1.ComponentDefinition
-	13, // 1: cloud.v1.EnableComponentRequest.component:type_name -> cloud.v1.Component
-	13, // 2: cloud.v1.EnableComponentResponse.component:type_name -> cloud.v1.Component
-	13, // 3: cloud.v1.UpdateComponentRequest.component:type_name -> cloud.v1.Component
-	14, // 4: cloud.v1.UpdateComponentRequest.update_mask:type_name -> google.protobuf.FieldMask
-	13, // 5: cloud.v1.UpdateComponentResponse.component:type_name -> cloud.v1.Component
-	13, // 6: cloud.v1.DisableComponentResponse.component:type_name -> cloud.v1.Component
-	13, // 7: cloud.v1.GetComponentResponse.component:type_name -> cloud.v1.Component
-	13, // 8: cloud.v1.ListComponentsResponse.components:type_name -> cloud.v1.Component
+	14, // 0: cloud.v1.ListComponentDefinitionsResponse.definitions:type_name -> cloud.v1.ComponentDefinition
+	15, // 1: cloud.v1.EnableComponentRequest.component:type_name -> cloud.v1.Component
+	15, // 2: cloud.v1.EnableComponentResponse.component:type_name -> cloud.v1.Component
+	15, // 3: cloud.v1.UpdateComponentRequest.component:type_name -> cloud.v1.Component
+	16, // 4: cloud.v1.UpdateComponentRequest.update_mask:type_name -> google.protobuf.FieldMask
+	15, // 5: cloud.v1.UpdateComponentResponse.component:type_name -> cloud.v1.Component
+	15, // 6: cloud.v1.DisableComponentResponse.component:type_name -> cloud.v1.Component
+	15, // 7: cloud.v1.GetComponentResponse.component:type_name -> cloud.v1.Component
+	15, // 8: cloud.v1.ListComponentsResponse.components:type_name -> cloud.v1.Component
 	0,  // 9: cloud.v1.ComponentService.ListComponentDefinitions:input_type -> cloud.v1.ListComponentDefinitionsRequest
-	2,  // 10: cloud.v1.ComponentService.EnableComponent:input_type -> cloud.v1.EnableComponentRequest
-	4,  // 11: cloud.v1.ComponentService.UpdateComponent:input_type -> cloud.v1.UpdateComponentRequest
-	6,  // 12: cloud.v1.ComponentService.DisableComponent:input_type -> cloud.v1.DisableComponentRequest
-	8,  // 13: cloud.v1.ComponentService.GetComponent:input_type -> cloud.v1.GetComponentRequest
-	10, // 14: cloud.v1.ComponentService.ListComponents:input_type -> cloud.v1.ListComponentsRequest
-	1,  // 15: cloud.v1.ComponentService.ListComponentDefinitions:output_type -> cloud.v1.ListComponentDefinitionsResponse
-	3,  // 16: cloud.v1.ComponentService.EnableComponent:output_type -> cloud.v1.EnableComponentResponse
-	5,  // 17: cloud.v1.ComponentService.UpdateComponent:output_type -> cloud.v1.UpdateComponentResponse
-	7,  // 18: cloud.v1.ComponentService.DisableComponent:output_type -> cloud.v1.DisableComponentResponse
-	9,  // 19: cloud.v1.ComponentService.GetComponent:output_type -> cloud.v1.GetComponentResponse
-	11, // 20: cloud.v1.ComponentService.ListComponents:output_type -> cloud.v1.ListComponentsResponse
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
+	2,  // 10: cloud.v1.ComponentService.GetComponentValues:input_type -> cloud.v1.GetComponentValuesRequest
+	4,  // 11: cloud.v1.ComponentService.EnableComponent:input_type -> cloud.v1.EnableComponentRequest
+	6,  // 12: cloud.v1.ComponentService.UpdateComponent:input_type -> cloud.v1.UpdateComponentRequest
+	8,  // 13: cloud.v1.ComponentService.DisableComponent:input_type -> cloud.v1.DisableComponentRequest
+	10, // 14: cloud.v1.ComponentService.GetComponent:input_type -> cloud.v1.GetComponentRequest
+	12, // 15: cloud.v1.ComponentService.ListComponents:input_type -> cloud.v1.ListComponentsRequest
+	1,  // 16: cloud.v1.ComponentService.ListComponentDefinitions:output_type -> cloud.v1.ListComponentDefinitionsResponse
+	3,  // 17: cloud.v1.ComponentService.GetComponentValues:output_type -> cloud.v1.GetComponentValuesResponse
+	5,  // 18: cloud.v1.ComponentService.EnableComponent:output_type -> cloud.v1.EnableComponentResponse
+	7,  // 19: cloud.v1.ComponentService.UpdateComponent:output_type -> cloud.v1.UpdateComponentResponse
+	9,  // 20: cloud.v1.ComponentService.DisableComponent:output_type -> cloud.v1.DisableComponentResponse
+	11, // 21: cloud.v1.ComponentService.GetComponent:output_type -> cloud.v1.GetComponentResponse
+	13, // 22: cloud.v1.ComponentService.ListComponents:output_type -> cloud.v1.ListComponentsResponse
+	16, // [16:23] is the sub-list for method output_type
+	9,  // [9:16] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -847,7 +947,7 @@ func file_cloud_v1_component_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_component_service_proto_rawDesc), len(file_cloud_v1_component_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

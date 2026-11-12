@@ -805,8 +805,8 @@ func (in *ComponentDefinitionSpec) DeepCopyInto(out *ComponentDefinitionSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.Defaults != nil {
-		in, out := &in.Defaults, &out.Defaults
+	if in.PlatformValues != nil {
+		in, out := &in.PlatformValues, &out.PlatformValues
 		*out = new(runtime.RawExtension)
 		(*in).DeepCopyInto(*out)
 	}
@@ -814,11 +814,6 @@ func (in *ComponentDefinitionSpec) DeepCopyInto(out *ComponentDefinitionSpec) {
 		in, out := &in.ValuesSchema, &out.ValuesSchema
 		*out = new(runtime.RawExtension)
 		(*in).DeepCopyInto(*out)
-	}
-	if in.ProtectedKeys != nil {
-		in, out := &in.ProtectedKeys, &out.ProtectedKeys
-		*out = make([]string, len(*in))
-		copy(*out, *in)
 	}
 }
 

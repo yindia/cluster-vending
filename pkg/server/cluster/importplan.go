@@ -87,10 +87,12 @@ const eksAPIVersion = "eks.aws.m.upbound.io/v1beta1"
 //	              object, default add-ons the cluster lacks, ...)
 //	CARRIED_OVER  no spec field describes it (extra role policies, the OIDC
 //	              provider, the log group, the KMS key, identity provider
-//	              configs, other add-ons and pod identities): imported as
-//	              it is
+//	              configs, other add-ons and pod identities, the control
+//	              plane's additional security groups with their rules):
+//	              imported as it is
 //	NOT_IMPORTED  stays unmanaged (other node groups, EKS-managed access
-//	              entries, the node group's launch template)
+//	              entries, the node group's launch template and security
+//	              groups)
 //	BLOCKING      not expressible: a field EKS cannot change differs from
 //	              the render, or the spec is not valid
 func planClusterImport(in importInput) clusterImport {
@@ -504,6 +506,18 @@ func (p *importPlanner) carryOver(render crossplaneaws.ClusterPlan) {
 			ClientID: idp.ClientID, GroupsClaim: idp.GroupsClaim, GroupsPrefix: idp.GroupsPrefix, UsernameClaim: idp.UsernameClaim,
 			UsernamePrefix: idp.UsernamePrefix, RequiredClaims: idp.RequiredClaims})
 	}
+	for _, g := range d.SecurityGroups {
+		if g.Unreadable != "" {
+			continue // listed NOT_IMPORTED (leftAlone)
+		}
+		sg := crossplaneaws.SecurityGroupPlan{ID: g.ID, Name: g.Name, Description: g.Description, VPCID: g.VPCID, Tags: g.Tags, Shared: g.Shared}
+		for _, r := range g.Rules {
+			sg.Rules = append(sg.Rules, crossplaneaws.SecurityGroupRulePlan{ID: r.ID, Egress: r.Egress, Protocol: r.Protocol,
+				FromPort: r.FromPort, ToPort: r.ToPort, CIDRIPv4: r.CIDRIPv4, CIDRIPv6: r.CIDRIPv6, PrefixListID: r.PrefixListID,
+				ReferencedGroupID: r.ReferencedGroupID, Description: r.Description, Tags: r.Tags})
+		}
+		c.SecurityGroups = append(c.SecurityGroups, sg)
+	}
 	for _, obj := range crossplaneaws.CarriedOver(render, c) {
 		u, err := kube.ApplyObject(obj, p.in.scheme)
 		if err != nil {
@@ -511,7 +525,7 @@ func (p *importPlanner) carryOver(render crossplaneaws.ClusterPlan) {
 		}
 		detail := ""
 		if obj.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" {
-			detail = "owned without Delete: the platform cannot tell what else uses it, so it stays when the cluster is deleted"
+			detail = "owned without Delete: something else uses it too, or the platform cannot tell, so it stays when the cluster is deleted"
 		}
 		p.plan.objects = append(p.plan.objects, obj)
 		p.line(u.GetAPIVersion(), u.GetKind(), u.GetName(), obj.GetAnnotations()[crossplaneaws.ExternalNameAnnotation], "",
@@ -532,6 +546,12 @@ func (p *importPlanner) leftAlone(g awscloud.NodeGroup) {
 		if p.eksManaged(e) {
 			p.line(eksAPIVersion, "AccessEntry", "", d.Name+":"+e.PrincipalARN, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
 				"EKS manages the access entries of node group roles and service-linked roles")
+		}
+	}
+	for _, sg := range d.SecurityGroups {
+		if sg.Unreadable != "" {
+			p.line("ec2.aws.m.upbound.io/v1beta1", "SecurityGroup", "", sg.ID, "spec.aws.additional_security_group_ids",
+				cloudv1.Disposition_DISPOSITION_NOT_IMPORTED, "the cluster uses it, but "+sg.Unreadable)
 		}
 	}
 	if g.LaunchTemplateID != "" {

@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
+	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+	"k8s.io/utils/ptr"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -93,6 +95,22 @@ func TestAdoptExternalNames(t *testing.T) {
 	}
 }
 
+// A security group something else uses too is never deleted with the
+// cluster, and neither are its rules.
+func TestSharedSecurityGroupIsRetained(t *testing.T) {
+	objects := crossplaneaws.CarriedOver(clusterPlan(), crossplaneaws.CarriedOverResources{
+		SecurityGroups: []crossplaneaws.SecurityGroupPlan{{ID: "sg-1", Name: "shared", Shared: true,
+			Rules: []crossplaneaws.SecurityGroupRulePlan{{ID: "sgr-1", Protocol: "-1", CIDRIPv4: "10.0.0.0/8"}}}}})
+	if len(objects) != 2 {
+		t.Fatalf("%d objects, want the group and its rule", len(objects))
+	}
+	for _, obj := range objects {
+		if obj.GetAnnotations()[crossplaneaws.RetainAnnotation] != "true" {
+			t.Errorf("%T of a shared group is not retained: %v", obj, obj.GetAnnotations())
+		}
+	}
+}
+
 func TestCarriedOverClusterResources(t *testing.T) {
 	objects := crossplaneaws.CarriedOver(clusterPlan(), crossplaneaws.CarriedOverResources{
 		RoleNames:         map[string]string{"cluster-role": "tf-cluster", "node-role": "tf-node"},
@@ -104,11 +122,16 @@ func TestCarriedOverClusterResources(t *testing.T) {
 		IdentityProviders: []crossplaneaws.IdentityProviderPlan{{Name: "okta", IssuerURL: "https://example.okta.com", ClientID: "k8s"}},
 		Addons:            []crossplaneaws.AddonPlan{{Name: "adot", Version: "v1"}},
 		PodIdentities:     []crossplaneaws.PodIdentityPlan{{ID: "a-9", Namespace: "apps", ServiceAccount: "api"}},
+		SecurityGroups: []crossplaneaws.SecurityGroupPlan{{ID: "sg-1", Name: "tf-cluster", Description: "control plane", VPCID: "vpc-1",
+			Rules: []crossplaneaws.SecurityGroupRulePlan{
+				{ID: "sgr-1", Protocol: "tcp", FromPort: ptr.To(443), ToPort: ptr.To(443), ReferencedGroupID: "sg-nodes"},
+				{ID: "sgr-2", Egress: true, Protocol: "-1", CIDRIPv4: "0.0.0.0/0"}}}},
 	})
 	want := []string{
 		"tf-node/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
 		"arn:aws:iam::444455556666:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABC",
-		"/aws/eks/prod/cluster", "1234abcd-12ab-34cd-56ef-1234567890ab", "okta", "prod:adot", "a-9",
+		"/aws/eks/prod/cluster", "1234abcd-12ab-34cd-56ef-1234567890ab", "okta", "prod:adot",
+		"sg-1", "sgr-1", "sgr-2", "a-9",
 	}
 	if len(objects) != len(want) {
 		t.Fatalf("%d objects, want %d", len(objects), len(want))
@@ -120,7 +143,7 @@ func TestCarriedOverClusterResources(t *testing.T) {
 		}
 		_, isKey := obj.(*awskms.Key)
 		if (a[crossplaneaws.RetainAnnotation] == "true") != isKey {
-			t.Errorf("%T retained = %q: only the KMS key is never deleted", obj, a[crossplaneaws.RetainAnnotation])
+			t.Errorf("%T retained = %q: only the KMS key is never deleted here", obj, a[crossplaneaws.RetainAnnotation])
 		}
 	}
 	for _, obj := range objects {
@@ -129,6 +152,19 @@ func TestCarriedOverClusterResources(t *testing.T) {
 		case *awscwl.Group:
 			if o.Spec.ForProvider.RetentionInDays != nil {
 				t.Errorf("log group without retention rendered one: %v", *o.Spec.ForProvider.RetentionInDays)
+			}
+		case *awsec2.SecurityGroupIngressRule:
+			fp := o.Spec.ForProvider
+			if *fp.SecurityGroupID != "sg-1" || *fp.IPProtocol != "tcp" || *fp.FromPort != 443 || *fp.ReferencedSecurityGroupID != "sg-nodes" || fp.CidrIPv4 != nil {
+				t.Errorf("ingress rule = %+v", fp)
+			}
+		case *awsec2.SecurityGroupEgressRule:
+			if fp := o.Spec.ForProvider; fp.FromPort != nil || *fp.IPProtocol != "-1" || *fp.CidrIPv4 != "0.0.0.0/0" {
+				t.Errorf("egress rule = %+v", fp)
+			}
+		case *awsec2.SecurityGroup:
+			if fp := o.Spec.ForProvider; *fp.Name != "tf-cluster" || *fp.VPCID != "vpc-1" || *fp.Description != "control plane" {
+				t.Errorf("security group = %+v", fp)
 			}
 		case *awsiam.OpenIDConnectProvider:
 			for _, p := range o.Spec.ManagementPolicies {

@@ -33,7 +33,8 @@ func TestActivationPolicy(t *testing.T) {
 		"podidentityassociations.eks.aws.m.upbound.io",
 		"policies.iam.aws.m.upbound.io", "releases.helm.m.crossplane.io", "rolepolicyattachments.iam.aws.m.upbound.io",
 		"roles.iam.aws.m.upbound.io", "routes.ec2.aws.m.upbound.io", "routetableassociations.ec2.aws.m.upbound.io",
-		"routetables.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io", "vpcs.ec2.aws.m.upbound.io",
+		"routetables.ec2.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
+		"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io", "vpcs.ec2.aws.m.upbound.io",
 	}
 	if strings.Join(slices.Sorted(slices.Values(got)), ",") != strings.Join(want, ",") {
 		t.Errorf("activations\n got %v\nwant %v", got, want)

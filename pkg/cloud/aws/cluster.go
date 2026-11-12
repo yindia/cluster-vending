@@ -40,8 +40,10 @@ type IAMImportAPI interface {
 type Cluster struct {
 	Name, ARN, Version, Status string
 	// SubnetIDs are the control plane's subnets; SecurityGroupIDs the
-	// additional security groups (not the one EKS created).
+	// additional security groups (not the one EKS created), and
+	// SecurityGroups those groups with their rules.
 	SubnetIDs, SecurityGroupIDs                 []string
+	SecurityGroups                              []ClusterSecurityGroup
 	EndpointPrivateAccess, EndpointPublicAccess bool
 	PublicAccessCIDRs                           []string
 	// LogTypes are the enabled control plane log types.
@@ -157,7 +159,8 @@ func (c *Client) DiscoverCluster(ctx context.Context, access Access, region, nam
 // ListAssociatedAccessPolicies, ListPodIdentityAssociations,
 // ListIdentityProviderConfigs, DescribeIdentityProviderConfig; iam:GetRole,
 // ListAttachedRolePolicies, ListOpenIDConnectProviders;
-// logs:DescribeLogGroups, ListTagsForResource.
+// logs:DescribeLogGroups, ListTagsForResource; and, for the cluster's
+// additional security groups, those of clusterSecurityGroups.
 func (t *Tenant) DiscoverCluster(ctx context.Context, name, defaultNodeGroup string) (*Cluster, error) {
 	out, err := t.eks.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: awssdk.String(name)})
 	if err != nil {
@@ -165,6 +168,7 @@ func (t *Tenant) DiscoverCluster(ctx context.Context, name, defaultNodeGroup str
 	}
 	c := eksCluster(out.Cluster)
 	c.Role = t.clusterRole(ctx, awssdk.ToString(out.Cluster.RoleArn))
+	c.SecurityGroups = t.clusterSecurityGroups(ctx, c.SecurityGroupIDs, c.Name)
 	steps := []func(context.Context, *Cluster) error{
 		t.nodeGroups, t.addons, t.accessEntries, t.podIdentityAssociations, t.identityProviderConfigs,
 	}

@@ -121,7 +121,8 @@ func (importIAM) ListOpenIDConnectProviders(context.Context, *iam.ListOpenIDConn
 }
 
 func importTenant(api importEKS) *Tenant {
-	return &Tenant{AccountID: tenantAccount, Region: "us-east-1", eks: api, eksImport: api, iam: fakeIAM{}, iamImport: importIAM{}, logs: fakeLogs{}}
+	return &Tenant{AccountID: tenantAccount, Region: "us-east-1", eks: api, eksImport: api, iam: fakeIAM{}, iamImport: importIAM{},
+		logs: fakeLogs{}, ec2: &fakeEC2{interfaces: []string{"Amazon EKS tf"}}}
 }
 
 func TestDiscoverCluster(t *testing.T) {
@@ -158,6 +159,10 @@ func TestDiscoverCluster(t *testing.T) {
 	}
 	if c.OIDCProviderARN != "arn:aws:iam::"+tenantAccount+":oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF" {
 		t.Errorf("OIDC provider = %q, want the one of the cluster's issuer", c.OIDCProviderARN)
+	}
+	// The control plane's additional security group, with its rules.
+	if len(c.SecurityGroups) != 1 || c.SecurityGroups[0].ID != "sg-extra" || len(c.SecurityGroups[0].Rules) != 2 || c.SecurityGroups[0].Shared {
+		t.Errorf("security groups = %+v", c.SecurityGroups)
 	}
 	// fakeLogs has no /aws/eks/tf/cluster: no log group, not an error.
 	if c.LogGroup != nil {

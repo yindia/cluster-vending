@@ -11,6 +11,7 @@ import (
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -70,6 +71,10 @@ func terraformCluster() *awscloud.Cluster {
 		IdentityProviderConfigs: []awscloud.IdentityProviderConfig{{Name: "okta", IssuerURL: "https://example.okta.com", ClientID: "kubernetes"}},
 		OIDCProviderARN:         "arn:aws:iam::444455556666:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF",
 		LogGroup:                &awscloud.LogGroup{Name: "/aws/eks/tf/cluster", RetentionDays: 30},
+		SecurityGroups: []awscloud.ClusterSecurityGroup{{ID: "sg-0123456789abcdef0", Name: "tf-cluster", Description: "EKS control plane",
+			VPCID: "vpc-1", Rules: []awscloud.SecurityGroupRule{
+				{ID: "sgr-in", Protocol: "tcp", FromPort: ptr.To(443), ToPort: ptr.To(443), ReferencedGroupID: "sg-nodes"},
+				{ID: "sgr-out", Egress: true, Protocol: "-1", CIDRIPv4: "0.0.0.0/0"}}}},
 	}
 }
 
@@ -181,14 +186,26 @@ func TestImportClusterPlan(t *testing.T) {
 			t.Errorf("no CARRIED_OVER line %s in %v", want, keys(carried))
 		}
 	}
-	extraPolicies, idps := 0, 0
+	extraPolicies, idps, groups, rules := 0, 0, 0, 0
 	for k, l := range carried {
+		switch l.GetKind() {
+		case "SecurityGroup":
+			groups++
+			if l.GetExternalName() != "sg-0123456789abcdef0" || l.GetDetail() != "" {
+				t.Errorf("security group line = %v, want it owned in full (only the cluster uses it)", l)
+			}
+		case "SecurityGroupIngressRule", "SecurityGroupEgressRule":
+			rules++
+		}
 		if strings.HasPrefix(k, "RolePolicyAttachment/") {
 			extraPolicies++
 		}
 		if l.GetKind() == "IdentityProviderConfig" && l.GetExternalName() == "okta" {
 			idps++
 		}
+	}
+	if groups != 1 || rules != 2 {
+		t.Errorf("carried over: %d security groups, %d rules; want the control plane's group with its 2 rules", groups, rules)
 	}
 	if extraPolicies != 2 || idps != 1 || !strings.Contains(carried["Key/1234abcd-12ab-34cd-56ef-1234567890ab"+prefix+"-secrets-key"].GetDetail(), "without Delete") {
 		t.Errorf("carried over: %d extra role policies (want 2), %d identity providers (want 1); lines %v", extraPolicies, idps, keys(carried))
@@ -388,8 +405,8 @@ func TestTakeOverCluster(t *testing.T) {
 			}
 		}
 	}
-	if carried != 8 {
-		t.Errorf("%d carried-over records, want 8 (2 role policies, OIDC provider, log group, key, identity provider, add-on, pod identity)", carried)
+	if carried != 11 {
+		t.Errorf("%d carried-over records, want 11 (2 role policies, OIDC provider, log group, key, identity provider, add-on, pod identity, security group and its 2 rules)", carried)
 	}
 	if _, err := w.svc.TakeOverCluster(ctx, req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("second takeover = %v, want FAILED_PRECONDITION", err)
@@ -421,6 +438,41 @@ func TestTakeOverCluster(t *testing.T) {
 	if st := got.GetCluster().GetStatus(); st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_RUNNING ||
 		st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_CONVERGED {
 		t.Errorf("after converging: %s (%s) / %s", st.GetState(), st.GetMessage(), st.GetImport().GetPhase())
+	}
+}
+
+// A security group other things use too is carried over without Delete;
+// one that cannot be read is NOT_IMPORTED. Neither blocks the import.
+func TestImportClusterSecurityGroups(t *testing.T) {
+	found := terraformCluster()
+	found.SecurityGroups[0].Shared = true
+	found.SecurityGroups = append(found.SecurityGroups, awscloud.ClusterSecurityGroup{ID: "sg-0ffffffffffffffff", Unreadable: "access denied"})
+	w := importWorld(t, found)
+	c := importTF(t, w)
+	if c.GetStatus().GetState() != cloudv1.ClusterState_CLUSTER_STATE_IMPORTED {
+		t.Fatalf("state %s (%s)", c.GetStatus().GetState(), c.GetStatus().GetMessage())
+	}
+	shared := 0
+	for _, l := range linesBy(c, cloudv1.Disposition_DISPOSITION_CARRIED_OVER) {
+		if strings.HasPrefix(l.GetKind(), "SecurityGroup") {
+			shared++
+			if !strings.Contains(l.GetDetail(), "without Delete") {
+				t.Errorf("%s %s of a shared group: %q, want it owned without Delete", l.GetKind(), l.GetExternalName(), l.GetDetail())
+			}
+		}
+	}
+	if left := linesBy(c, cloudv1.Disposition_DISPOSITION_NOT_IMPORTED)["SecurityGroup/sg-0ffffffffffffffff"]; shared != 3 ||
+		left == nil || !strings.Contains(left.GetDetail(), "access denied") {
+		t.Errorf("%d shared lines (want the group and 2 rules), unreadable group line %v", shared, left)
+	}
+	if _, err := w.svc.TakeOverCluster(t.Context(), &cloudv1.TakeOverClusterRequest{TenantId: worldTenant, ClusterId: c.GetId(),
+		AcknowledgeNotImported: true}); err != nil {
+		t.Fatal(err)
+	}
+	for name, u := range objectsOf(t, w, c.GetId()) {
+		if strings.HasPrefix(u.GetKind(), "SecurityGroup") && (slices.Contains(policies(u), "Delete") || slices.Contains(policies(u), "*")) {
+			t.Errorf("%s of a shared group can be deleted: %v", name, policies(u))
+		}
 	}
 }
 

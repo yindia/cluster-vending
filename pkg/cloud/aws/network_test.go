@@ -24,6 +24,9 @@ type fakeEC2 struct {
 	subnetCalls int
 	// flowLogs are the region's flow logs.
 	flowLogs []types.FlowLog
+	// interfaces are the descriptions of the network interfaces
+	// DescribeNetworkInterfaces returns.
+	interfaces []string
 }
 
 func (f *fakeEC2) record(filters []types.Filter) {

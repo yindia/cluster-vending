@@ -43,7 +43,8 @@ var managedMRDs = []string{
 	"keys.kms.aws.m.upbound.io", "aliases.kms.aws.m.upbound.io",
 	"openidconnectproviders.iam.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
 	// Carried over from an imported cluster.
-	"identityproviderconfigs.eks.aws.m.upbound.io",
+	"identityproviderconfigs.eks.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io",
+	"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
 	// provider-helm.
 	"releases.helm.m.crossplane.io",
 }
@@ -76,7 +77,8 @@ func ManagedObjects() []client.Object {
 		&awseks.Cluster{}, &awseks.NodeGroup{}, &awseks.Addon{}, &awseks.PodIdentityAssociation{},
 		&awseks.AccessEntry{}, &awseks.AccessPolicyAssociation{}, &awseks.ClusterAuth{},
 		&awscwl.Group{}, &awskms.Key{}, &awskms.Alias{}, &awsiam.OpenIDConnectProvider{}, &awsec2.LaunchTemplate{},
-		&awseks.IdentityProviderConfig{},
+		&awseks.IdentityProviderConfig{}, &awsec2.SecurityGroup{}, &awsec2.SecurityGroupIngressRule{},
+		&awsec2.SecurityGroupEgressRule{},
 	)
 	// Networks and clusters share kinds (IAM): each once.
 	out := make([]client.Object, 0, len(all))

@@ -526,6 +526,7 @@ func ClusterLists() []client.ObjectList {
 		&awseks.AccessPolicyAssociationList{}, &awseks.AccessEntryList{}, &awseks.PodIdentityAssociationList{},
 		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awsec2.LaunchTemplateList{},
 		&awsiam.OpenIDConnectProviderList{}, &awseks.IdentityProviderConfigList{}, &awseks.ClusterList{},
+		&awsec2.SecurityGroupIngressRuleList{}, &awsec2.SecurityGroupEgressRuleList{}, &awsec2.SecurityGroupList{},
 		&awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
 		&awskms.AliasList{}, &awskms.KeyList{}, &awscwl.GroupList{},
 	}

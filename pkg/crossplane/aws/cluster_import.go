@@ -6,6 +6,7 @@ import (
 
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
+	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
@@ -152,6 +153,31 @@ type CarriedOverResources struct {
 	Addons []AddonPlan
 	// PodIdentities are the associations that are not an add-on's.
 	PodIdentities []PodIdentityPlan
+	// SecurityGroups are the control plane's additional security groups,
+	// with their rules. Node groups' security groups are not imported.
+	SecurityGroups []SecurityGroupPlan
+}
+
+// SecurityGroupPlan is a security group with its rules. Shared: something
+// other than the cluster uses it, so it (and its rules) is never deleted
+// with the cluster.
+type SecurityGroupPlan struct {
+	ID, Name, Description, VPCID string
+	Tags                         map[string]string
+	Shared                       bool
+	Rules                        []SecurityGroupRulePlan
+}
+
+// SecurityGroupRulePlan is one rule of a security group; FromPort and
+// ToPort are nil for rules without a port range.
+type SecurityGroupRulePlan struct {
+	ID                                                  string
+	Egress                                              bool
+	Protocol                                            string
+	FromPort, ToPort                                    *int
+	CIDRIPv4, CIDRIPv6, PrefixListID, ReferencedGroupID string
+	Description                                         string
+	Tags                                                map[string]string
 }
 
 // IdentityProviderPlan is an OIDC identity provider config of the cluster.
@@ -174,6 +200,9 @@ type PodIdentityPlan struct{ ID, Namespace, ServiceAccount string }
 //	IdentityProviderConfig "<prefix>-idp-<hash8>"      the config's name
 //	Addon "<prefix>-addon-<name>"                      <cluster>:<add-on>
 //	PodIdentityAssociation "<prefix>-identity-<id>"    the association ID
+//	SecurityGroup "<prefix>-sg-<hash8>"                the group ID (sg-...)
+//	SecurityGroupIngressRule / EgressRule
+//	  "<prefix>-sg-<hash8>-<in|out>-<hash8>"           the rule ID (sgr-...)
 func CarriedOver(p ClusterPlan, c CarriedOverResources) []client.Object {
 	b := clusterBuilder{p: p}
 	var out []client.Object
@@ -215,6 +244,9 @@ func CarriedOver(p ClusterPlan, c CarriedOverResources) []client.Object {
 		addon.Spec.ForProvider.Tags = nil
 		out = append(out, addon)
 	}
+	for _, g := range c.SecurityGroups {
+		out = append(out, b.securityGroup(g)...)
+	}
 	for _, pi := range c.PodIdentities {
 		out = append(out, &awseks.PodIdentityAssociation{ObjectMeta: b.carried(b.name("identity-"+pi.ID), pi.ID, false),
 			Spec: awseks.PodIdentityAssociationSpec{ManagedResourceSpec: b.observe(), ForProvider: awseks.PodIdentityAssociationParameters_2{
@@ -235,6 +267,35 @@ func (b clusterBuilder) identityProvider(idp IdentityProviderPlan) *awseks.Ident
 				RequiredClaims: strPtrs(idp.RequiredClaims),
 			},
 		}}}
+}
+
+// securityGroup is a carried-over security group, then its rules.
+func (b clusterBuilder) securityGroup(g SecurityGroupPlan) []client.Object {
+	name := b.name("sg-" + shortHash(g.ID))
+	out := []client.Object{&awsec2.SecurityGroup{ObjectMeta: b.carried(name, g.ID, g.Shared),
+		Spec: awsec2.SecurityGroupSpec{ManagedResourceSpec: b.observe(), ForProvider: awsec2.SecurityGroupParameters_2{
+			Region: ptr.To(b.p.Region), Name: ptr.To(g.Name), Description: ptr.To(g.Description), VPCID: ptr.To(g.VPCID), Tags: tagPtrs(g.Tags),
+		}}}}
+	for _, r := range g.Rules {
+		if r.Egress {
+			out = append(out, &awsec2.SecurityGroupEgressRule{ObjectMeta: b.carried(name+"-out-"+shortHash(r.ID), r.ID, g.Shared),
+				Spec: awsec2.SecurityGroupEgressRuleSpec{ManagedResourceSpec: b.observe(), ForProvider: awsec2.SecurityGroupEgressRuleParameters{
+					Region: ptr.To(b.p.Region), SecurityGroupID: ptr.To(g.ID), IPProtocol: ptr.To(r.Protocol),
+					FromPort: floatPtr(r.FromPort), ToPort: floatPtr(r.ToPort), CidrIPv4: optional(r.CIDRIPv4), CidrIPv6: optional(r.CIDRIPv6),
+					PrefixListID: optional(r.PrefixListID), ReferencedSecurityGroupID: optional(r.ReferencedGroupID),
+					Description: optional(r.Description), Tags: tagPtrs(r.Tags),
+				}}})
+			continue
+		}
+		out = append(out, &awsec2.SecurityGroupIngressRule{ObjectMeta: b.carried(name+"-in-"+shortHash(r.ID), r.ID, g.Shared),
+			Spec: awsec2.SecurityGroupIngressRuleSpec{ManagedResourceSpec: b.observe(), ForProvider: awsec2.SecurityGroupIngressRuleParameters{
+				Region: ptr.To(b.p.Region), SecurityGroupID: ptr.To(g.ID), IPProtocol: ptr.To(r.Protocol),
+				FromPort: floatPtr(r.FromPort), ToPort: floatPtr(r.ToPort), CidrIPv4: optional(r.CIDRIPv4), CidrIPv6: optional(r.CIDRIPv6),
+				PrefixListID: optional(r.PrefixListID), ReferencedSecurityGroupID: optional(r.ReferencedGroupID),
+				Description: optional(r.Description), Tags: tagPtrs(r.Tags),
+			}}})
+	}
+	return out
 }
 
 // carried is the metadata of a carried-over object; retained marks one

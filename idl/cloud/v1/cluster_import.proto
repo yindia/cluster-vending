@@ -15,9 +15,11 @@ import "buf/validate/validate.proto";
 //
 // Differences of what is implemented from the text below: only the node
 // group named in the request is imported, the others are NOT_IMPORTED;
-// security groups and launch templates are not imported; the KMS key is
-// carried over by its ARN and never deleted with the cluster; a cluster in
-// CONFIG_MAP mode is imported without its aws-auth entries.
+// of the security groups only the control plane's additional ones are
+// imported (with their rules), node groups' and launch templates are not;
+// the KMS key is carried over by its ARN and never deleted with the
+// cluster; a cluster in CONFIG_MAP mode is imported without its aws-auth
+// entries (new clusters use access entries).
 //
 // Earlier design: importing clusters built with Terraform, so the platform
 // becomes their source of truth and Terraform can be removed. Networks are

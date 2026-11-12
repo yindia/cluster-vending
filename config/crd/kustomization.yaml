@@ -8,6 +8,8 @@ resources:
 - bases/cloud.cluster-vending.io_releases.yaml
 - bases/cloud.cluster-vending.io_releasechannels.yaml
 - bases/cloud.cluster-vending.io_releaseholds.yaml
+- bases/cloud.cluster-vending.io_components.yaml
+- bases/cloud.cluster-vending.io_componentdefinitions.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

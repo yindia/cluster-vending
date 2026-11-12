@@ -40,11 +40,14 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `conditions.proto` | `Condition`, `ConditionStatus` |
 | `options.proto` | The `(cloud.v1.crossplane)` enum value option |
 | `admin_service.proto` | `AdminService` (operators only) |
+| `component_service.proto` | `ComponentService` and its request and response messages |
+| `component.proto` | `Component`, `ComponentStatus`, `ComponentPhase`; `ComponentDefinition` (what tenants see of a catalog entry) |
 
 ## Services and RPCs
 
-Every RPC of every service is implemented; none returns `UNIMPLEMENTED` as a
-whole. What individual fields and values are refused is listed under
+Every RPC of every service is implemented except `ComponentService`, which
+is declared and not served yet (see below); none returns `UNIMPLEMENTED` as
+a whole. What individual fields and values are refused is listed under
 [Declared but not implemented](#declared-but-not-implemented).
 
 All tenant-facing RPCs carry `tenant_id` (a DNS label of at most 56
@@ -85,6 +88,26 @@ service comments say so.
 | `WatchCluster` | Streams the cluster and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |
 | `DeleteCluster` | Marks the cluster `DELETING` and deletes its resources. `force` also releases Helm releases without uninstalling them. |
+
+### ComponentService
+
+Catalog components (Karpenter, Kyverno, ...) enabled on a tenant's
+clusters, installed by the platform with Helm and versioned by its
+releases (docs/design/component-usage.md). Components are never EKS
+add-ons; those are `spec.aws.addons`. **Declared, not served yet**: the
+server does not register the service, so every call is answered as an
+unknown procedure. The store behind it (`Components` in
+`pkg/database/repository`) exists.
+
+| RPC | What it does |
+|---|---|
+| `ListComponentDefinitions` | Lists the catalog: name, description, `requires`, `conflicts_with_addons`, values schema and protected keys. With `cluster_id`, `versions` holds what that cluster's release offers. How a component is installed is never returned. |
+| `EnableComponent` | Stores a component on a cluster (at most one of each per cluster; `request_id` makes a retry return the first result). `validate_only` answers with the effective values and stores nothing. |
+| `UpdateComponent` | Changes `values` (replaced as a whole) or `version`, the only paths `update_mask` accepts. |
+| `DisableComponent` | Deletes the component from the cluster; `force` lets the Helm release go without an uninstall. |
+| `GetComponent`, `ListComponents` | Return the stored component(s), optionally of one cluster. |
+
+A cluster cannot be deleted while it has components.
 
 ### AdminService
 
@@ -660,5 +683,6 @@ region and zone catalog next to `pkg/constant/aws`.
 | `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
 | `spec.release_channel`, `spec.tier`, `spec.upgrade_mode` | Stored, returned and updatable; releases do not act on them yet. |
 | `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set, as their comments say: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
+| `ComponentService` | Declared only: the server does not register it yet. |
 | Caller authorization of `tenant_id` | Not implemented, as the service comments say: the server trusts the `tenant_id` of the request. |
 | `NetworkStatus.carried_over`, `ClusterStatus.carried_over` | Never filled, as their comments say. Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |

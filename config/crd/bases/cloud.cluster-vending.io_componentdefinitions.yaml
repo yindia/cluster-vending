@@ -1,0 +1,374 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: componentdefinitions.cloud.cluster-vending.io
+spec:
+  group: cloud.cluster-vending.io
+  names:
+    kind: ComponentDefinition
+    listKind: ComponentDefinitionList
+    plural: componentdefinitions
+    shortNames:
+    - cvcompdef
+    singular: componentdefinition
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.requires
+      name: Requires
+      type: string
+    - jsonPath: .spec.cloudResources
+      name: CloudResources
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Valid")].status
+      name: Valid
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ComponentDefinition is an operator-owned catalog entry: what a tenant
+          may enable and how the platform installs it. Written by release-admin.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ComponentDefinitionSpec is one entry of the catalog.
+            properties:
+              cloudResources:
+                description: |-
+                  cloudResources names the renderer that creates what the component
+                  needs in the tenant's account (IAM roles, queues). Unset: none. Only
+                  renderers the running build has are accepted (condition Valid).
+                enum:
+                - Karpenter
+                - LoadBalancerController
+                type: string
+              conflictsWithAddons:
+                description: |-
+                  conflictsWithAddons lists EKS add-ons the cluster must not have in
+                  spec.aws.addons while this component is enabled. The names are the
+                  add-ons AWSAddon.name accepts.
+                items:
+                  enum:
+                  - vpc-cni
+                  - coredns
+                  - kube-proxy
+                  - eks-pod-identity-agent
+                  - aws-ebs-csi-driver
+                  - aws-efs-csi-driver
+                  - aws-fsx-csi-driver
+                  - aws-mountpoint-s3-csi-driver
+                  - snapshot-controller
+                  - cert-manager
+                  - metrics-server
+                  - kube-state-metrics
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+              defaults:
+                description: defaults are the platform's values for every tenant.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              description:
+                description: description shown to tenants.
+                maxLength: 1024
+                minLength: 1
+                type: string
+              install:
+                description: |-
+                  install is how the component reaches a workload cluster. Opaque to
+                  tenants: the API never returns it.
+                properties:
+                  helm:
+                    description: helm installs the component with provider-helm.
+                    properties:
+                      chart:
+                        description: chart name in the repository (provider-helm forProvider.chart.name).
+                        maxLength: 128
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$
+                        type: string
+                      companions:
+                        description: |-
+                          companions are charts the platform owns, installed in order after the
+                          main chart is Ready (e.g. Karpenter's default node class).
+                        items:
+                          description: |-
+                            HelmCompanion is a chart the platform owns, installed after the main
+                            chart is Ready.
+                          properties:
+                            chart:
+                              description: chart name in the repository (provider-helm
+                                forProvider.chart.name).
+                              maxLength: 128
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$
+                              type: string
+                            credentials:
+                              description: 'credentials for a private repository.
+                                Unset: a public one.'
+                              properties:
+                                secretRef:
+                                  description: secretRef is the Secret holding them.
+                                  properties:
+                                    name:
+                                      description: name of the Secret.
+                                      maxLength: 253
+                                      minLength: 1
+                                      pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                                      type: string
+                                    namespace:
+                                      description: |-
+                                        namespace of the Secret: the platform's own namespace, where the
+                                        operator creates it. Never a tenant namespace.
+                                      minLength: 1
+                                      pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                                      type: string
+                                  required:
+                                  - name
+                                  - namespace
+                                  type: object
+                                type:
+                                  description: type of the Secret.
+                                  enum:
+                                  - BasicAuth
+                                  - DockerConfigJSON
+                                  type: string
+                              required:
+                              - secretRef
+                              - type
+                              type: object
+                            insecureSkipTLSVerify:
+                              description: |-
+                                insecureSkipTLSVerify skips the check of the repository's TLS
+                                certificate (provider-helm forProvider.insecureSkipTLSVerify). For
+                                test registries only.
+                              type: boolean
+                            name:
+                              description: name of the companion's Helm release.
+                              pattern: ^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$
+                              type: string
+                            plainHTTP:
+                              description: |-
+                                plainHTTP fetches the chart over HTTP (provider-helm
+                                forProvider.plainHTTP), oci:// only. For test registries only.
+                              type: boolean
+                            repository:
+                              description: |-
+                                repository is an https:// Helm repository URL or an oci:// registry
+                                path (provider-helm forProvider.chart.repository).
+                              maxLength: 512
+                              pattern: ^(https|oci)://[^ ]+$
+                              type: string
+                          required:
+                          - chart
+                          - name
+                          - repository
+                          type: object
+                          x-kubernetes-validations:
+                          - message: plainHTTP is for oci:// registries
+                            rule: '!has(self.plainHTTP) || !self.plainHTTP || self.repository.startsWith(''oci://'')'
+                        maxItems: 8
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      credentials:
+                        description: 'credentials for a private repository. Unset:
+                          a public one.'
+                        properties:
+                          secretRef:
+                            description: secretRef is the Secret holding them.
+                            properties:
+                              name:
+                                description: name of the Secret.
+                                maxLength: 253
+                                minLength: 1
+                                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                                type: string
+                              namespace:
+                                description: |-
+                                  namespace of the Secret: the platform's own namespace, where the
+                                  operator creates it. Never a tenant namespace.
+                                minLength: 1
+                                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                                type: string
+                            required:
+                            - name
+                            - namespace
+                            type: object
+                          type:
+                            description: type of the Secret.
+                            enum:
+                            - BasicAuth
+                            - DockerConfigJSON
+                            type: string
+                        required:
+                        - secretRef
+                        - type
+                        type: object
+                      insecureSkipTLSVerify:
+                        description: |-
+                          insecureSkipTLSVerify skips the check of the repository's TLS
+                          certificate (provider-helm forProvider.insecureSkipTLSVerify). For
+                          test registries only.
+                        type: boolean
+                      plainHTTP:
+                        description: |-
+                          plainHTTP fetches the chart over HTTP (provider-helm
+                          forProvider.plainHTTP), oci:// only. For test registries only.
+                        type: boolean
+                      repository:
+                        description: |-
+                          repository is an https:// Helm repository URL or an oci:// registry
+                          path (provider-helm forProvider.chart.repository).
+                        maxLength: 512
+                        pattern: ^(https|oci)://[^ ]+$
+                        type: string
+                    required:
+                    - chart
+                    - repository
+                    type: object
+                    x-kubernetes-validations:
+                    - message: plainHTTP is for oci:// registries
+                      rule: '!has(self.plainHTTP) || !self.plainHTTP || self.repository.startsWith(''oci://'')'
+                type: object
+                x-kubernetes-validations:
+                - message: helm is the only install mechanism so far
+                  rule: has(self.helm)
+              namespace:
+                description: namespace in the workload cluster.
+                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                type: string
+              protectedKeys:
+                description: |-
+                  protectedKeys are dotted paths (settings.clusterName) only the
+                  platform sets.
+                items:
+                  pattern: ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$
+                  type: string
+                maxItems: 64
+                type: array
+                x-kubernetes-list-type: set
+              requires:
+                description: requires lists other components that must be Ready first.
+                items:
+                  pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                  type: string
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: set
+              valuesSchema:
+                description: |-
+                  valuesSchema is a JSON Schema of what a tenant may override. Unset:
+                  no overrides are accepted.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - description
+            - install
+            - namespace
+            type: object
+          status:
+            description: ComponentDefinitionStatus is written by the controller.
+            properties:
+              conditions:
+                description: 'Conditions: Valid.'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the spec generation the status
+                  describes.
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: a component definition is named as a DNS label
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
+        - message: a component cannot require itself
+          rule: '!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)'
+    served: true
+    storage: true
+    subresources:
+      status: {}

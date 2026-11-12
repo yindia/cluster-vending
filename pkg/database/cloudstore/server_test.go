@@ -169,7 +169,7 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := fake.NewClientBuilder().WithScheme(scheme).
-		WithStatusSubresource(&cloudv1alpha1.CloudAccount{}, &cloudv1alpha1.Network{}, &cloudv1alpha1.Cluster{}, &awseks.Cluster{}).
+		WithStatusSubresource(&cloudv1alpha1.CloudAccount{}, &cloudv1alpha1.Network{}, &cloudv1alpha1.Cluster{}, &cloudv1alpha1.Component{}, &awseks.Cluster{}).
 		WithInterceptorFuncs(interceptor.Funcs{Apply: tagSubnetsQuietly}).Build()
 	store := cloudstore.New(k)
 	ctx := t.Context()

@@ -1,5 +1,5 @@
 # Read the release objects: which releases exist, what each channel
-# offers, which clusters are held.
+# offers, which clusters are held, and the component catalog.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -14,9 +14,11 @@ rules:
   - releases
   - releasechannels
   - releaseholds
+  - componentdefinitions
   - releases/status
   - releasechannels/status
   - releaseholds/status
+  - componentdefinitions/status
   verbs:
   - get
   - list

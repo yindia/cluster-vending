@@ -1,0 +1,230 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/component.proto";
+import "google/protobuf/field_mask.proto";
+
+// ComponentService enables catalog components (ComponentDefinition) on a
+// tenant's clusters: Karpenter, Kyverno and the like, installed and
+// versioned by the platform. Components are never EKS add-ons; those are
+// Cluster.spec.aws.addons.
+//
+// Every RPC is scoped by tenant_id. Mutations are asynchronous, as for
+// clusters: they return once the desired state is stored, and callers poll
+// GetComponent until status.observed_generation catches up with generation
+// and status.phase is READY (or the component is gone, after a disable).
+service ComponentService {
+  // Lists the catalog. With cluster_id, versions holds what that cluster's
+  // release offers for its Kubernetes minor.
+  rpc ListComponentDefinitions(ListComponentDefinitionsRequest) returns (ListComponentDefinitionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Enables a component on a cluster. Fails with NOT_FOUND when the
+  // component is not in the catalog or the cluster is not the tenant's;
+  // FAILED_PRECONDITION when the cluster is not RUNNING, is imported and not
+  // taken over, its release does not offer the component for its
+  // Kubernetes minor, a required component is not enabled, or a
+  // conflicting add-on is in the cluster's spec; ALREADY_EXISTS when the
+  // cluster has the component, unless request_id matches the original
+  // request; INVALID_ARGUMENT when the values are not an object of at most
+  // 64 KiB, set a protected key (every such key is named) or fail the
+  // definition's values schema.
+  rpc EnableComponent(EnableComponentRequest) returns (EnableComponentResponse);
+
+  // Changes a component's values or pinned version, with the same checks
+  // as EnableComponent. A values change rolls out at once; it does not wait
+  // for a release.
+  rpc UpdateComponent(UpdateComponentRequest) returns (UpdateComponentResponse);
+
+  // Removes a component from its cluster: it is deleted, not stopped.
+  // FAILED_PRECONDITION while another enabled component requires it.
+  rpc DisableComponent(DisableComponentRequest) returns (DisableComponentResponse);
+
+  // Returns one component, or NOT_FOUND.
+  rpc GetComponent(GetComponentRequest) returns (GetComponentResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the tenant's components, optionally of one cluster.
+  rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message ListComponentDefinitionsRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Optional: the cluster whose release fills ComponentDefinition.versions.
+  string cluster_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message ListComponentDefinitionsResponse {
+  repeated ComponentDefinition definitions = 1;
+}
+
+message EnableComponentRequest {
+  option (buf.validate.message).cel = {
+    id: "enable_component.cluster_id_required"
+    message: "component.cluster_id is required"
+    expression: "!has(this.component) || size(this.component.cluster_id) > 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "enable_component.component_required"
+    message: "component.component is required"
+    expression: "!has(this.component) || size(this.component.component) > 0"
+  };
+
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // The component to enable. cluster_id and component are required; id and
+  // the other output-only fields are ignored.
+  Component component = 2 [(buf.validate.field).required = true];
+
+  // Optional idempotency key. Retrying with the same key returns the
+  // original result instead of ALREADY_EXISTS.
+  string request_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // Check only: answer with the component as it would be stored (its
+  // effective values in status.effective_values), storing nothing.
+  bool validate_only = 4;
+}
+
+message EnableComponentResponse {
+  Component component = 1;
+}
+
+message UpdateComponentRequest {
+  option (buf.validate.message).cel = {
+    id: "update_component.id_required"
+    message: "component.id is required"
+    expression: "!has(this.component) || size(this.component.id) > 0"
+  };
+
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // The new state. component.id identifies the target; component.etag,
+  // when set, must match the current etag or the call fails with ABORTED.
+  // cluster_id and component cannot change.
+  Component component = 2 [(buf.validate.field).required = true];
+
+  // Fields to update: "values" (replaced as a whole) and "version". Any
+  // other path fails validation.
+  google.protobuf.FieldMask update_mask = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "update_component.mask_paths"
+      message: "update_mask paths are values and version"
+      expression: "size(this.paths) > 0 && this.paths.all(p, p in ['values', 'version'])"
+    }
+  ];
+
+  // Check only: answer with the component as it would be after the update,
+  // storing nothing.
+  bool validate_only = 4;
+}
+
+message UpdateComponentResponse {
+  // The component: after the update, or as it would be for validate_only.
+  Component component = 1;
+}
+
+message DisableComponentRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Component.id.
+  string component_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // When set, must match the current etag or the call fails with ABORTED.
+  string etag = 3;
+
+  // Removes the component even when the cluster's Kubernetes API is
+  // unreachable or what it runs cannot be drained (Karpenter's nodes): the
+  // Helm release is let go without an uninstall. The platform's own cloud
+  // resources for the component are still deleted.
+  bool force = 4;
+}
+
+message DisableComponentResponse {
+  // The component in phase DELETING.
+  Component component = 1;
+}
+
+message GetComponentRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Component.id.
+  string component_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetComponentResponse {
+  Component component = 1;
+}
+
+message ListComponentsRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Optional: only the components of this cluster.
+  string cluster_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // Maximum results per page. Defaults to 50; values above 200 are coerced to
+  // 200.
+  int32 page_size = 3 [(buf.validate.field).int32.gte = 0];
+
+  // next_page_token from a previous call. All other fields must match the
+  // call that produced it.
+  string page_token = 4;
+}
+
+message ListComponentsResponse {
+  repeated Component components = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+}

@@ -65,6 +65,9 @@ func Run(t *testing.T, b Backend) {
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.test(t, b) })
 	}
+	for _, tc := range componentTests {
+		t.Run(tc.name, func(t *testing.T) { tc.test(t, b) })
+	}
 }
 
 // Spec is a stand-in for a protojson spec document.

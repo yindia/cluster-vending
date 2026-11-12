@@ -1,5 +1,6 @@
 // Package owner expresses the ownership chain of the platform's kinds in
-// the management cluster: CloudAccount owns Network owns Cluster.
+// the management cluster: CloudAccount owns Network owns Cluster owns
+// Component.
 package owner
 
 import (
@@ -13,11 +14,13 @@ import (
 )
 
 // Set makes owner the controller owner of dependent and labels dependent
-// with the chain it belongs to (cloudv1alpha1.LabelAccount, LabelNetwork),
+// with the chain it belongs to (cloudv1alpha1.LabelAccount, LabelNetwork,
+// LabelCluster),
 // so an owner's dependents are a label selection. The owner reference
 // blocks the owner's deletion while the dependent exists. The pairs are a
-// CloudAccount and one of its Networks, or a Network and one of its
-// Clusters, in the same namespace and matching the dependent's spec
+// CloudAccount and one of its Networks, a Network and one of its
+// Clusters, or a Cluster and one of its Components (named
+// <cluster>-<component>), in the same namespace and matching the dependent's spec
 // reference; anything else is an error. It changes dependent in memory
 // only.
 func Set(owner, dependent client.Object, scheme *runtime.Scheme) error {
@@ -40,6 +43,16 @@ func Set(owner, dependent client.Object, scheme *runtime.Scheme) error {
 		}
 		labels[cloudv1alpha1.LabelNetwork] = network.Name
 		labels[cloudv1alpha1.LabelAccount] = network.Spec.AccountRef.Name
+	case *cloudv1alpha1.Component:
+		cluster, ok := owner.(*cloudv1alpha1.Cluster)
+		if !ok || d.Name != cluster.Name+"-"+d.Spec.Component {
+			return mismatch(owner, dependent, "component "+d.Spec.Component)
+		}
+		labels[cloudv1alpha1.LabelCluster] = cluster.Name
+		labels[cloudv1alpha1.LabelNetwork] = cluster.Spec.Network.NetworkRef.Name
+		if account := cluster.Labels[cloudv1alpha1.LabelAccount]; account != "" {
+			labels[cloudv1alpha1.LabelAccount] = account
+		}
 	default:
 		return fmt.Errorf("%T has no owner in this API", dependent)
 	}
@@ -71,6 +84,8 @@ func kindOf(obj client.Object) string {
 		return "Network"
 	case *cloudv1alpha1.Cluster:
 		return "Cluster"
+	case *cloudv1alpha1.Component:
+		return "Component"
 	}
 	return fmt.Sprintf("%T", obj)
 }

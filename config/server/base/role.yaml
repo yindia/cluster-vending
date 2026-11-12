@@ -12,8 +12,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: server-role
 rules:
-# The state itself: CloudAccount, Network and Cluster objects in the
-# tenants' namespaces (pkg/database/cloudstore).
+# The state itself: CloudAccount, Network, Cluster and Component objects
+# in the tenants' namespaces (pkg/database/cloudstore).
 - apiGroups:
   - cloud.cluster-vending.io
   resources:
@@ -23,6 +23,8 @@ rules:
   - networks/status
   - clusters
   - clusters/status
+  - components
+  - components/status
   verbs:
   - get
   - list
@@ -32,14 +34,16 @@ rules:
   - patch
   - delete
   - deletecollection
-# The operator's release objects: read only (they are written by people
-# with the release-admin role, and their status by the controller).
+# The operator's release objects and component catalog: read only (they
+# are written by people with the release-admin role, and their status by
+# the controller).
 - apiGroups:
   - cloud.cluster-vending.io
   resources:
   - releases
   - releasechannels
   - releaseholds
+  - componentdefinitions
   verbs:
   - get
   - list

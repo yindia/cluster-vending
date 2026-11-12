@@ -366,11 +366,25 @@ func (r clusters) SetStatus(ctx context.Context, tenantID, id, etag string, stat
 	}))
 }
 
-// Delete removes the cluster.
+// Delete removes the cluster; ErrInUse while it has components (they are
+// disabled first, there is no cascade).
 func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	obj, err := r.find(ctx, tenantID, id)
 	if err != nil {
 		return err
+	}
+	enabled, err := items[*cloudv1alpha1.Component](ctx, r.store, &cloudv1alpha1.ComponentList{}, obj.Namespace,
+		map[string]string{LabelClusterID: id})
+	if err != nil {
+		return err
+	}
+	if len(enabled) > 0 {
+		names := make([]string, 0, len(enabled))
+		for _, c := range enabled {
+			names = append(names, c.Spec.Component)
+		}
+		sort.Strings(names)
+		return fmt.Errorf("%w: cluster %s has components %v", repository.ErrInUse, obj.Name, names)
 	}
 	row, err := r.row(obj)
 	if err != nil {

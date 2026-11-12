@@ -1,0 +1,19 @@
+# Karpenter enabled on the cluster prod-eks of tenant acme, with the
+# tenant's overrides only: defaults and computed values (cluster name,
+# endpoint, interruption queue) come from the platform. Named
+# <cluster name>-<component>.
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: Component
+metadata:
+  name: prod-eks-karpenter
+  namespace: tenant-acme
+spec:
+  clusterID: 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33
+  component: karpenter
+  values:
+    replicas: 2
+    logLevel: info
+    settings:
+      batchMaxDuration: 15s
+    defaultNodePool:
+      limits: {cpu: "128"}

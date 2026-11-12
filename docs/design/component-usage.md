@@ -193,14 +193,54 @@ type ComponentInstall struct {
 
 // HelmInstall: a chart, and optional companion charts installed after it.
 type HelmInstall struct {
-	Repository string `json:"repository"` // an https or oci:// URL
-	Chart      string `json:"chart"`
+	HelmChartSource `json:",inline"`
 	// Companions are charts the platform owns, installed after the main
 	// chart is Ready (e.g. Karpenter's default node class, section 6).
 	// +optional
 	Companions []HelmCompanion `json:"companions,omitempty"`
 }
+
+// HelmCompanion: name (its Helm release) plus a HelmChartSource.
+
+// HelmChartSource is where a chart comes from. No version: the release
+// pins it per Kubernetes minor (section 7).
+// +kubebuilder:validation:XValidation:rule="!has(self.plainHTTP) || !self.plainHTTP || self.repository.startsWith('oci://')",message="plainHTTP is for oci:// registries"
+type HelmChartSource struct {
+	Repository string `json:"repository"` // ^(https|oci)://
+	Chart      string `json:"chart"`
+	// Credentials of a private repository; unset: public.
+	Credentials *HelmCredentials `json:"credentials,omitempty"`
+	// For test registries only.
+	InsecureSkipTLSVerify bool `json:"insecureSkipTLSVerify,omitempty"`
+	PlainHTTP             bool `json:"plainHTTP,omitempty"`
+}
+
+// HelmCredentials: a reference, never the secret. There is no field for
+// a username, password or token.
+type HelmCredentials struct {
+	Type      HelmCredentialsType `json:"type"`      // BasicAuth | DockerConfigJSON
+	SecretRef SecretReference     `json:"secretRef"` // namespace and name, both required
+}
 ```
+
+**Decided (with the user): private chart repositories are reached with a
+Secret the operator creates in the platform namespace, referenced by the
+definition.** `BasicAuth` is a `kubernetes.io/basic-auth` Secret (keys
+`username`, `password`) for https repositories and OCI registries that take
+basic auth; `DockerConfigJSON` is a `kubernetes.io/dockerconfigjson` Secret,
+for OCI registries such as ECR whose pull secret a job outside the platform
+refreshes. provider-helm v1.5.0 (`helm.m.crossplane.io/v1beta1` `Release`)
+has one credential field, `spec.forProvider.chart.pullSecretRef`, a
+`LocalSecretReference` to a Secret with `username` and `password` in the
+Release's own (tenant) namespace. So the step that installs charts (step 6)
+copies a `BasicAuth` Secret into the tenant namespace and, for
+`DockerConfigJSON`, writes the username and password of the repository's
+registry host from `.dockerconfigjson` into such a Secret; without
+credentials provider-helm uses its default credential chain.
+`insecureSkipTLSVerify` and `plainHTTP` map to the Release's
+`spec.forProvider.insecureSkipTLSVerify` and `spec.forProvider.plainHTTP`.
+That step also gives the controller `get` on Secrets in the platform
+namespace only; step 1 adds no Secret access.
 
 Print columns: `Requires`, `CloudResources`, `Valid`.
 
@@ -636,11 +676,37 @@ in parallel with it.
 | 3 | Contract: `component.proto`, `component_service.proto`; store methods for components (cloudstore) | `idl/cloud/v1`, `pkg/database/repository`, `pkg/database/cloudstore` | Yes |
 | 4 | Write-only handlers and CLI; `DeleteCluster` and `UpdateCluster` reverse checks | `pkg/server/component` (new), `pkg/server/cluster`, `pkg/cli`, `cmd` | After 1-3 |
 | 5 | Workload-cluster access for provider-helm: a `ProviderConfig` per cluster from the kubeconfig Secret | `pkg/crossplane` | Yes |
-| 6 | First catalog component end to end: kyverno, then kyverno-policies (`requires`) | `pkg/crossplane/component` (new renderer), `pkg/reconcile/component`, `pkg/controller` | After 4-5 |
+| 6 | First catalog component end to end: kyverno, then kyverno-policies (`requires`); chart credentials passed to provider-helm (section 3.2), with `get` on Secrets in the platform namespace | `pkg/crossplane/component` (new renderer), `pkg/reconcile/component`, `pkg/controller`, `config/rbac` | After 4-5 |
 | 7 | Versions from releases: components read `Release` pins through `pkg/release` | `pkg/reconcile/component` | After release steps 3-5 |
 | 8 | SQS and CloudWatch Events provider families (install, activation, cache) | `pkg/crossplane/aws` | Yes |
 | 9 | The `Karpenter` renderer, the companion chart, and disable with the node wait | `pkg/crossplane/aws`, charts | After 6-8 |
 | 10 | cert-manager with its add-on conflict; the AWS load balancer controller | definitions, renderer | After 6 |
+
+### 10.1 Steps 1 and 3 as built
+
+Where the code differs from the sketches above:
+
+- Schemaless JSON (`values`, `effectiveValues`, `defaults`, `valuesSchema`)
+  is `*runtime.RawExtension`, as `contractStatus` is elsewhere in the API
+  package, not `*apiextensionsv1.JSON`; the CRD is the same.
+- The CRD cannot measure schemaless JSON, so the 64 KiB bound on values is
+  enforced by the store (`ErrInvalid`) and will be by the API; the CRD
+  checks that values are an object.
+- `ComponentDefinition` has a status (`conditions`, with `Valid`, and
+  `observedGeneration`) and the print column `Valid` reads it; the
+  definition's name must be a DNS label and may not be in its own
+  `requires`. `conflictsWithAddons` takes exactly the names
+  `AWSAddon.name` accepts (a test keeps the two lists equal).
+- A `Component` must be named `<cluster name>-<component>` (CEL), and is
+  owned by its `Cluster` object (`pkg/owner`), labelled with the cluster,
+  network and account names.
+- The store claims the cluster when it stores a component (a new cluster
+  etag, refused while the cluster is `DELETING`), as it claims a network
+  for a new cluster, so a component create and a cluster delete cannot both
+  win; `Clusters.Delete` refuses with `ErrInUse` naming the components.
+- The contract's `ComponentStatus` has no inventory; the kind's status
+  keeps it. `ComponentService` is declared and not registered in the
+  server until step 4.
 
 ## 11. Open questions
 

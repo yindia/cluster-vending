@@ -25,7 +25,8 @@ func NewClient(t *testing.T) client.Client {
 		t.Fatal(err)
 	}
 	return fake.NewClientBuilder().WithScheme(scheme).
-		WithStatusSubresource(&cloudv1alpha1.CloudAccount{}, &cloudv1alpha1.Network{}, &cloudv1alpha1.Cluster{}).Build()
+		WithStatusSubresource(&cloudv1alpha1.CloudAccount{}, &cloudv1alpha1.Network{}, &cloudv1alpha1.Cluster{},
+			&cloudv1alpha1.Component{}).Build()
 }
 
 // NewStore returns the store on the platform's kinds (pkg/database/

@@ -275,6 +275,59 @@ func TestReleaseObjectRoles(t *testing.T) {
 	}
 }
 
+// The component kinds: the operator writes the catalog (release-admin),
+// anyone may read it, the controller and the API server only read it; the
+// API server writes tenants' Components, the controller reconciles them
+// (status and finalizer). The operator never writes their status.
+func TestComponentRoles(t *testing.T) {
+	const group = "cloud.cluster-vending.io"
+	admin, viewer := clusterRole(t, "rbac/release_admin_role.yaml"), clusterRole(t, "rbac/release_viewer_role.yaml")
+	controller, server := clusterRole(t, "rbac/role.yaml"), clusterRole(t, filepath.Join(serverBase, "role.yaml"))
+	writes := []string{"create", "update", "patch", "delete"}
+	reads := []string{"get", "list", "watch"}
+	for _, verb := range append(reads, writes...) {
+		if !allows(admin, group, "componentdefinitions", verb) {
+			t.Errorf("release-admin: no %s on componentdefinitions", verb)
+		}
+		if !allows(server, group, "components", verb) {
+			t.Errorf("server: no %s on components", verb)
+		}
+		if !allows(controller, group, "components", verb) {
+			t.Errorf("controller: no %s on components", verb)
+		}
+	}
+	for _, verb := range reads {
+		for name, role := range map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "controller": controller, "server": server} {
+			if !allows(role, group, "componentdefinitions", verb) {
+				t.Errorf("%s: no %s on componentdefinitions", name, verb)
+			}
+		}
+	}
+	for _, verb := range writes {
+		for name, role := range map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "controller": controller, "server": server} {
+			if allows(role, group, "componentdefinitions", verb) {
+				t.Errorf("%s: may %s componentdefinitions; only the operator writes the catalog", name, verb)
+			}
+		}
+		for name, role := range map[string]*rbacv1.ClusterRole{"release-admin": admin, "release-viewer": viewer} {
+			if allows(role, group, "components", verb) {
+				t.Errorf("%s: may %s components; they are tenants' objects", name, verb)
+			}
+		}
+	}
+	for _, kind := range []string{"components", "componentdefinitions"} {
+		if !allows(controller, group, kind+"/status", "update") {
+			t.Errorf("controller: cannot update %s/status", kind)
+		}
+		if allows(admin, group, kind+"/status", "update") {
+			t.Errorf("release-admin: may update %s/status; status is the controller's", kind)
+		}
+	}
+	if !allows(controller, group, "components/finalizers", "update") {
+		t.Error("controller: cannot keep the finalizer on components")
+	}
+}
+
 // allows reports whether role lets verb be used on resource of group.
 func allows(role *rbacv1.ClusterRole, group, resource, verb string) bool {
 	return slices.ContainsFunc(role.Rules, func(r rbacv1.PolicyRule) bool {

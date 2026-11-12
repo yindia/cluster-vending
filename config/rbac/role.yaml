@@ -9,6 +9,7 @@ rules:
   resources:
   - cloudaccounts
   - clusters
+  - components
   - networks
   verbs:
   - create
@@ -23,6 +24,7 @@ rules:
   resources:
   - cloudaccounts/finalizers
   - clusters/finalizers
+  - components/finalizers
   - networks/finalizers
   - releases/finalizers
   verbs:
@@ -32,6 +34,8 @@ rules:
   resources:
   - cloudaccounts/status
   - clusters/status
+  - componentdefinitions/status
+  - components/status
   - networks/status
   - releasechannels/status
   - releaseholds/status
@@ -43,6 +47,15 @@ rules:
 - apiGroups:
   - cloud.cluster-vending.io
   resources:
+  - componentdefinitions
+  - releaseholds
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
   - releasechannels
   - releases
   verbs:
@@ -51,12 +64,4 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - cloud.cluster-vending.io
-  resources:
-  - releaseholds
-  verbs:
-  - get
-  - list
   - watch

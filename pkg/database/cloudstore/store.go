@@ -95,6 +95,8 @@ const (
 	LabelAccountID = group + "account-id"
 	// LabelNetworkID is the row ID of the network a cluster runs in.
 	LabelNetworkID = group + "network-id"
+	// LabelClusterID is the row ID of the cluster a component is enabled on.
+	LabelClusterID = group + "cluster-id"
 	// LabelClaim marks the ConfigMaps that are claims.
 	LabelClaim = group + "claim"
 )
@@ -121,8 +123,9 @@ const (
 
 // Kinds of rows, as a claim names its holder.
 const (
-	kindNetwork = "Network"
-	kindCluster = "Cluster"
+	kindNetwork   = "Network"
+	kindCluster   = "Cluster"
+	kindComponent = "Component"
 )
 
 // writeAttempts bounds how often a write is retried when another writer
@@ -138,8 +141,8 @@ var claimGrace = time.Minute
 // now is the clock; tests replace it.
 var now = time.Now
 
-// New returns a Store that keeps its rows as CloudAccount, Network and
-// Cluster objects in the tenants' namespaces. c must read from the API
+// New returns a Store that keeps its rows as CloudAccount, Network,
+// Cluster and Component objects in the tenants' namespaces. c must read from the API
 // server (not from a cache) and know the kinds
 // (cloudv1alpha1.AddToScheme).
 func New(c client.Client) repository.Store { return store{c: c} }
@@ -151,14 +154,16 @@ type store struct {
 	undo *[]func(context.Context) error
 }
 
-func (s store) Tenants() repository.Tenants   { return tenants{s} }
-func (s store) Networks() repository.Networks { return networks{s} }
-func (s store) Clusters() repository.Clusters { return clusters{s} }
+func (s store) Tenants() repository.Tenants       { return tenants{s} }
+func (s store) Networks() repository.Networks     { return networks{s} }
+func (s store) Clusters() repository.Clusters     { return clusters{s} }
+func (s store) Components() repository.Components { return components{s} }
 
 func (s store) ManagedResources() repository.ManagedResources { return managedResources{s} }
 
 // WithinTransaction runs fn and, when it fails, deletes what fn created
-// (tenants, accounts, networks, clusters and their claims), newest first.
+// (tenants, accounts, networks, clusters, components and their claims),
+// newest first.
 // That is all it can do: there is no transaction in Kubernetes. Updates
 // and deletes fn made stay, other readers see fn's objects while it runs,
 // and a server that dies inside fn leaves what fn did so far.
@@ -377,7 +382,8 @@ func (s store) remove(ctx context.Context, obj client.Object) error {
 // whether it had any: a row the repository deletes is gone, whatever a
 // controller holds it for.
 func dropFinalizers(obj client.Object) bool {
-	own := []string{cloudv1alpha1.CloudAccountFinalizer, cloudv1alpha1.NetworkFinalizer, cloudv1alpha1.ClusterFinalizer}
+	own := []string{cloudv1alpha1.CloudAccountFinalizer, cloudv1alpha1.NetworkFinalizer, cloudv1alpha1.ClusterFinalizer,
+		cloudv1alpha1.ComponentFinalizer}
 	kept := slices.DeleteFunc(slices.Clone(obj.GetFinalizers()), func(f string) bool { return slices.Contains(own, f) })
 	if len(kept) == len(obj.GetFinalizers()) {
 		return false
@@ -453,6 +459,8 @@ func (s store) abandoned(ctx context.Context, c *corev1.ConfigMap) (bool, error)
 		_, err = byID[*cloudv1alpha1.Network](ctx, s, &cloudv1alpha1.NetworkList{}, c.Namespace, c.Data[claimHolder])
 	case kindCluster:
 		_, err = byID[*cloudv1alpha1.Cluster](ctx, s, &cloudv1alpha1.ClusterList{}, c.Namespace, c.Data[claimHolder])
+	case kindComponent:
+		_, err = byID[*cloudv1alpha1.Component](ctx, s, &cloudv1alpha1.ComponentList{}, c.Namespace, c.Data[claimHolder])
 	default:
 		return false, nil
 	}

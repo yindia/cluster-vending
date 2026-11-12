@@ -1,0 +1,124 @@
+# The component catalog (docs/design/component-usage.md), written by the
+# release-admin role. Chart versions are not here: each release pins them
+# per Kubernetes minor.
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: kyverno
+spec:
+  description: Policy engine. Validates, mutates and generates Kubernetes resources.
+  namespace: kyverno
+  install:
+    helm:
+      repository: https://kyverno.github.io/kyverno
+      chart: kyverno
+  defaults:
+    admissionController:
+      replicas: 3
+  valuesSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      admissionController:
+        type: object
+        properties:
+          replicas: {type: integer, minimum: 1, maximum: 5}
+      features:
+        type: object
+---
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: kyverno-policies
+spec:
+  description: The Kubernetes Pod Security Standards as Kyverno policies.
+  namespace: kyverno
+  requires:
+  - kyverno
+  install:
+    helm:
+      repository: https://kyverno.github.io/kyverno
+      chart: kyverno-policies
+  defaults:
+    podSecurityStandard: baseline
+    validationFailureAction: Audit
+  valuesSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      podSecurityStandard: {type: string, enum: [baseline, restricted, privileged]}
+      validationFailureAction: {type: string, enum: [Audit, Enforce]}
+---
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: karpenter
+spec:
+  description: Node autoscaling. Launches EC2 instances for pending pods.
+  namespace: kube-system
+  cloudResources: Karpenter
+  install:
+    helm:
+      repository: oci://public.ecr.aws/karpenter
+      chart: karpenter
+      companions:
+      # The platform's own chart: EC2NodeClass "default" and, unless turned
+      # off, a default NodePool. In the operator's OCI registry.
+      - name: karpenter-defaults
+        repository: oci://ghcr.io/yindia/cluster-vending/charts
+        chart: karpenter-defaults
+  defaults:
+    replicas: 2
+    controller:
+      resources: {requests: {cpu: 250m, memory: 512Mi}}
+    defaultNodePool:
+      enabled: true
+      limits: {cpu: "64"}
+      requirements:
+      - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
+  protectedKeys:
+  - settings.clusterName
+  - settings.clusterEndpoint
+  - settings.interruptionQueue
+  - serviceAccount.name
+  - serviceAccount.annotations
+  - defaultNodeClass
+  valuesSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      replicas: {type: integer, minimum: 1, maximum: 3}
+      logLevel: {type: string, enum: [error, info, debug]}
+      controller: {type: object}
+      settings:
+        type: object
+        properties:
+          featureGates: {type: object, additionalProperties: {type: boolean}}
+          batchMaxDuration: {type: string}
+      defaultNodePool:
+        type: object
+        properties:
+          enabled: {type: boolean}
+          limits: {type: object}
+          requirements: {type: array}
+          disruption: {type: object}
+---
+# A chart in a private OCI registry (ECR). The operator keeps a
+# kubernetes.io/dockerconfigjson Secret fresh in the platform namespace (ECR
+# tokens last 12 hours); the definition only names it.
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: internal-dashboards
+spec:
+  description: The platform team's Grafana dashboards and alerts for workload clusters.
+  namespace: monitoring
+  install:
+    helm:
+      repository: oci://444455556666.dkr.ecr.us-east-1.amazonaws.com/charts
+      chart: internal-dashboards
+      credentials:
+        type: DockerConfigJSON
+        secretRef:
+          namespace: cluster-vending-system
+          name: ecr-charts-pull

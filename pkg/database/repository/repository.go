@@ -11,7 +11,7 @@
 // repository/mock (go generate ./pkg/database/repository, or make mocks).
 package repository
 
-//go:generate go tool mockgen -typed -destination=mock/repository.go -package=mock . Store,Tenants,Networks,Clusters,ManagedResources
+//go:generate go tool mockgen -typed -destination=mock/repository.go -package=mock . Store,Tenants,Networks,Clusters,Components,ManagedResources
 
 import (
 	"context"
@@ -113,6 +113,32 @@ type Clusters interface {
 	Update(ctx context.Context, c *model.Cluster) error
 	// SetStatus is Networks.SetStatus for clusters.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
+	// Delete fails with ErrInUse while the cluster has components.
+	Delete(ctx context.Context, tenantID, id string) error
+}
+
+// Components stores the components enabled on a tenant's clusters: at
+// most one of each catalog component per cluster.
+type Components interface {
+	// Create assigns ID, ETag and generation 1. It fails with ErrNotFound
+	// when the cluster is missing, ErrConflict when it is being deleted,
+	// ErrAlreadyExists when the cluster has the component or the create
+	// request ID is taken, and ErrInvalid when the values are not a JSON
+	// object of at most 64 KiB.
+	Create(ctx context.Context, c *model.Component) error
+	// Get finds a component by row ID (the API's Component.id).
+	Get(ctx context.Context, tenantID, id string) (*model.Component, error)
+	GetByCreateRequest(ctx context.Context, tenantID, requestID string) (*model.Component, error)
+	// List orders by ID (time-ordered: oldest first); page.After is an ID.
+	List(ctx context.Context, tenantID string, page Page) ([]model.Component, error)
+	// ListByCluster returns a cluster's components, oldest first.
+	ListByCluster(ctx context.Context, tenantID, clusterID string) ([]model.Component, error)
+	// Update writes version, values, state, generations and the force flag
+	// if the stored etag equals c.ETag, and assigns a new ETag. The cluster
+	// and the component cannot change (ErrInvalid).
+	Update(ctx context.Context, c *model.Component) error
+	// SetStatus is Networks.SetStatus for components.
+	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
 	Delete(ctx context.Context, tenantID, id string) error
 }
 
@@ -149,6 +175,7 @@ type Store interface {
 	Tenants() Tenants
 	Networks() Networks
 	Clusters() Clusters
+	Components() Components
 	ManagedResources() ManagedResources
 	WithinTransaction(ctx context.Context, fn func(Store) error) error
 }

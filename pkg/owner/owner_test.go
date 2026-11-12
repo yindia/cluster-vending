@@ -38,6 +38,45 @@ func cluster(name, networkName string) *cloudv1alpha1.Cluster {
 		Spec: cloudv1alpha1.ClusterSpec{Network: cloudv1alpha1.ClusterNetwork{NetworkRef: cloudv1alpha1.LocalReference{Name: networkName}}}}
 }
 
+func component(clusterName, name string) *cloudv1alpha1.Component {
+	return &cloudv1alpha1.Component{ObjectMeta: metav1.ObjectMeta{Namespace: tenant, Name: clusterName + "-" + name},
+		Spec: cloudv1alpha1.ComponentSpec{Component: name}}
+}
+
+// A Cluster owns its Components: each named <cluster>-<component>, labelled
+// with the chain above it.
+func TestSetClusterOwnsItsComponents(t *testing.T) {
+	s := scheme(t)
+	c := cluster("prod", "net")
+	c.UID = types.UID("uid-prod")
+	c.Labels = map[string]string{cloudv1alpha1.LabelAccount: "production"}
+	karpenter := component("prod", "karpenter")
+	if err := owner.Set(c, karpenter, s); err != nil {
+		t.Fatal(err)
+	}
+	refs := karpenter.GetOwnerReferences()
+	if len(refs) != 1 || refs[0].Kind != "Cluster" || refs[0].Name != "prod" || refs[0].Controller == nil || !*refs[0].Controller {
+		t.Errorf("owner references = %+v, want the Cluster prod as controller", refs)
+	}
+	want := map[string]string{cloudv1alpha1.LabelCluster: "prod", cloudv1alpha1.LabelNetwork: "net", cloudv1alpha1.LabelAccount: "production"}
+	for k, v := range want {
+		if karpenter.Labels[k] != v {
+			t.Errorf("label %s = %q, want %q", k, karpenter.Labels[k], v)
+		}
+	}
+	for name, tt := range map[string]struct {
+		owner     client.Object
+		dependent *cloudv1alpha1.Component
+	}{
+		"another cluster's name": {cluster("prod", "net"), component("staging", "karpenter")},
+		"network -> component":   {network("net", "production"), component("net", "karpenter")},
+	} {
+		if err := owner.Set(tt.owner, tt.dependent, s); err == nil || !strings.Contains(err.Error(), "is not the owner") {
+			t.Errorf("%s: %v, want a refusal", name, err)
+		}
+	}
+}
+
 // The chain is CloudAccount -> Network -> Cluster: each dependent gets one
 // controller owner reference that blocks its owner's deletion, and the
 // labels its owners are found by.

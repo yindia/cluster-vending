@@ -35,11 +35,13 @@ func Install(ctx context.Context, c client.Client) error {
 }
 
 // Kinds are the platform's kinds: those the store reads and writes, and
-// the operator's release kinds (Release, ReleaseChannel, ReleaseHold) the
-// controller reconciles and the server reads. All are installed together
+// the operator's kinds (Release, ReleaseChannel, ReleaseHold and the
+// component catalog, ComponentDefinition) the controller reconciles and
+// the server reads. All are installed together
 // (Install) and served once their definitions are.
 func Kinds() []schema.GroupVersionKind {
-	kinds := []string{"CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold"}
+	kinds := []string{"CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold",
+		"Component", "ComponentDefinition"}
 	out := make([]schema.GroupVersionKind, 0, len(kinds))
 	for _, kind := range kinds {
 		out = append(out, cloudv1alpha1.GroupVersion.WithKind(kind))

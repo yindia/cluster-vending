@@ -36,6 +36,8 @@ const (
 	LabelAccount = "cloud.cluster-vending.io/account"
 	// LabelNetwork is the name of the Network a Cluster runs in.
 	LabelNetwork = "cloud.cluster-vending.io/network"
+	// LabelCluster is the name of the Cluster a Component is enabled on.
+	LabelCluster = "cloud.cluster-vending.io/cluster"
 )
 
 // Condition types every kind reports.

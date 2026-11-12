@@ -62,6 +62,7 @@ func (d Deps) Record(ctx context.Context, owner Owner, objects []client.Object) 
 		rows = append(rows, model.ManagedResource{
 			TenantID: owner.TenantID, CloudAccountID: owner.CloudAccountID, OwnerKind: owner.Kind, OwnerID: owner.ID,
 			APIVersion: apiVersion, Kind: kind, Namespace: obj.GetNamespace(), Name: obj.GetName(),
+			CarriedOver: obj.GetAnnotations()[crossplane.CarriedOverAnnotation] == "true",
 		})
 	}
 	return d.Store.ManagedResources().Put(ctx, rows)
@@ -244,6 +245,8 @@ func (d Deps) DeleteRecorded(ctx context.Context, records []model.ManagedResourc
 
 // Prune deletes the objects recorded for an owner that keep no longer
 // contains (e.g. the access entry of a removed admin), and forgets them.
+// Objects carried over from an import are never in keep (no spec field
+// renders them) and are left alone.
 func (d Deps) Prune(ctx context.Context, owner Owner, keep []client.Object) error {
 	records, err := d.Store.ManagedResources().ListByOwner(ctx, owner.Kind, owner.ID)
 	if err != nil {
@@ -258,7 +261,7 @@ func (d Deps) Prune(ctx context.Context, owner Owner, keep []client.Object) erro
 		kept[gvk.Kind+"/"+obj.GetNamespace()+"/"+obj.GetName()] = true
 	}
 	for _, r := range records {
-		if kept[r.Kind+"/"+r.Namespace+"/"+r.Name] {
+		if r.CarriedOver || kept[r.Kind+"/"+r.Namespace+"/"+r.Name] {
 			continue
 		}
 		if err := d.deletePruned(ctx, r); err != nil {

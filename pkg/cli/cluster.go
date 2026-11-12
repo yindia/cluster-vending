@@ -109,6 +109,45 @@ func ClusterDelete(ctx context.Context, c Clients, o Options) (proto.Message, er
 	return res, nil
 }
 
+// ClusterImport calls ClusterService.ImportCluster with the ClusterImport
+// manifest. It returns the imported cluster with its plan (status.import).
+func ClusterImport(ctx context.Context, c Clients, o Options) (proto.Message, error) {
+	m, err := LoadManifest(o.Input, KindClusterImport)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := m.tenant(o.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	req, err := m.ClusterImport()
+	if err != nil {
+		return nil, err
+	}
+	req.TenantId = tenant
+	if req.GetRequestId() == "" {
+		if req.RequestId, err = requestID(tenant, req); err != nil {
+			return nil, err
+		}
+	}
+	return call(ctx, req, c.Cluster.ImportCluster)
+}
+
+// ClusterTakeOver calls ClusterService.TakeOverCluster. With --wait it
+// returns once the cluster is RUNNING under the platform.
+func ClusterTakeOver(ctx context.Context, c Clients, o Options) (proto.Message, error) {
+	if err := o.requireTenant(); err != nil {
+		return nil, err
+	}
+	res, err := call(ctx, &cloudv1.TakeOverClusterRequest{
+		TenantId: o.Tenant, ClusterId: o.ID, Etag: o.ETag, AcknowledgeNotImported: o.AcknowledgeNotImported,
+	}, c.Cluster.TakeOverCluster)
+	if err != nil || !o.Wait {
+		return res, err
+	}
+	return waitCluster(ctx, c, o, o.Tenant, o.ID, false)
+}
+
 // waitCluster waits until the cluster is RUNNING (gone: deleted) and
 // returns its last read.
 func waitCluster(ctx context.Context, c Clients, o Options, tenant, id string, gone bool) (proto.Message, error) {

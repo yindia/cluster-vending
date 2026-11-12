@@ -38,6 +38,9 @@ const (
 	ClusterState_CLUSTER_STATE_DELETING ClusterState = 4
 	// Reconciliation failed; see `message` and `conditions`.
 	ClusterState_CLUSTER_STATE_FAILED ClusterState = 5
+	// Imported and read-only (ImportCluster); waiting for TakeOverCluster.
+	// See status.import for the plan.
+	ClusterState_CLUSTER_STATE_IMPORTED ClusterState = 6
 )
 
 // Enum value maps for ClusterState.
@@ -49,6 +52,7 @@ var (
 		3: "CLUSTER_STATE_UPDATING",
 		4: "CLUSTER_STATE_DELETING",
 		5: "CLUSTER_STATE_FAILED",
+		6: "CLUSTER_STATE_IMPORTED",
 	}
 	ClusterState_value = map[string]int32{
 		"CLUSTER_STATE_UNSPECIFIED":  0,
@@ -57,6 +61,7 @@ var (
 		"CLUSTER_STATE_UPDATING":     3,
 		"CLUSTER_STATE_DELETING":     4,
 		"CLUSTER_STATE_FAILED":       5,
+		"CLUSTER_STATE_IMPORTED":     6,
 	}
 )
 
@@ -266,10 +271,9 @@ type ClusterSpec struct {
 	DefaultNodePool *NodePoolSpec `protobuf:"bytes,4,opt,name=default_node_pool,json=defaultNodePool,proto3" json:"default_node_pool,omitempty"`
 	// Who administers the cluster. Mutable.
 	Access *AccessSpec `protobuf:"bytes,6,opt,name=access,proto3" json:"access,omitempty"`
-	// TEMPORARY (see cluster_import.proto): import a cluster built outside the
-	// platform instead of creating one. network.network_id is the imported
-	// Network of its VPC. The rest of the spec is the desired state after the
-	// takeover. Cleared through UpdateCluster to finish the import.
+	// Not implemented: clusters built outside the platform are imported with
+	// ClusterService.ImportCluster and TakeOverCluster. CreateCluster and
+	// UpdateCluster refuse this field.
 	ExistingCluster *ExistingCluster `protobuf:"bytes,7,opt,name=existing_cluster,json=existingCluster,proto3" json:"existing_cluster,omitempty"`
 	// The cloud the cluster runs on. Exactly one must be set, even if empty
 	// (e.g. `aws: {}`).
@@ -416,8 +420,8 @@ type ClusterStatus struct {
 	//
 	//	*ClusterStatus_Aws
 	Provider isClusterStatus_Provider `protobuf_oneof:"provider"`
-	// TEMPORARY (see cluster_import.proto): the import plan while
-	// spec.existing_cluster is set.
+	// Set for imported clusters: the plan from ImportCluster, kept as a
+	// record after the takeover.
 	Import *ImportStatus `protobuf:"bytes,13,opt,name=import,proto3" json:"import,omitempty"`
 	// Resources carried over from an import (disposition CARRIED_OVER, e.g.
 	// security groups, the KMS key, the OIDC provider, launch-template node
@@ -704,14 +708,15 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\bprovider\"a\n" +
 	"\x0fClusterEndpoint\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12<\n" +
-	"\x1acertificate_authority_data\x18\x02 \x01(\fR\x18certificateAuthorityData*\xba\x01\n" +
+	"\x1acertificate_authority_data\x18\x02 \x01(\fR\x18certificateAuthorityData*\xd6\x01\n" +
 	"\fClusterState\x12\x1d\n" +
 	"\x19CLUSTER_STATE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCLUSTER_STATE_PROVISIONING\x10\x01\x12\x19\n" +
 	"\x15CLUSTER_STATE_RUNNING\x10\x02\x12\x1a\n" +
 	"\x16CLUSTER_STATE_UPDATING\x10\x03\x12\x1a\n" +
 	"\x16CLUSTER_STATE_DELETING\x10\x04\x12\x18\n" +
-	"\x14CLUSTER_STATE_FAILED\x10\x05B\x9c\x01\n" +
+	"\x14CLUSTER_STATE_FAILED\x10\x05\x12\x1a\n" +
+	"\x16CLUSTER_STATE_IMPORTED\x10\x06B\x9c\x01\n" +
 	"\fcom.cloud.v1B\fClusterProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (

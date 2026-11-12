@@ -1,0 +1,142 @@
+package aws_test
+
+import (
+	"testing"
+
+	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+
+	"github.com/yindia/cluster-vending/pkg/crossplane"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+)
+
+// External names per kind, as provider-upjet-aws v2.9.0 builds them
+// (config/externalname.go; see crossplaneaws.Adopt).
+func TestAdoptExternalNames(t *testing.T) {
+	const dev, policy = "arn:aws:iam::444455556666:role/dev", viewPolicy
+	p := clusterPlan()
+	p.AdminPrincipals = nil
+	p.AccessEntries = []crossplaneaws.AccessEntryPlan{{Principal: dev, Type: "STANDARD",
+		Policies: []crossplaneaws.AccessPolicyPlan{{PolicyARN: policy, Scope: "cluster"}}}}
+	ids := crossplaneaws.ClusterIdentities{ClusterName: "prod", NodeGroupName: "tf-ng",
+		RoleNames:        map[string]string{"prod-1a2b3c4d-cluster-role": "tf-cluster", "prod-1a2b3c4d-node-role": "tf-node"},
+		AttachedPolicies: map[string][]string{"tf-node": {"arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"}},
+		Addons:           []string{"coredns"},
+		AccessEntries:    map[string][]crossplaneaws.AccessPolicyPlan{dev: {{PolicyARN: policy, Scope: "cluster"}}},
+		PodIdentities:    map[string]string{"kube-system/ebs-csi-controller-sa": "a-0123"},
+	}
+	want := map[string]string{
+		"*v1beta1.Cluster/prod-1a2b3c4d":                                 "prod",
+		"*v1beta1.NodeGroup/prod-1a2b3c4d-default":                       "tf-ng",
+		"*v1beta1.Role/prod-1a2b3c4d-cluster-role":                       "tf-cluster",
+		"*v1beta1.Role/prod-1a2b3c4d-node-role":                          "tf-node",
+		"*v1beta1.RolePolicyAttachment/prod-1a2b3c4d-node-cni":           "tf-node/arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+		"*v1beta1.Addon/prod-1a2b3c4d-addon-coredns":                     "prod:coredns",
+		"*v1beta1.PodIdentityAssociation/prod-1a2b3c4d-ebs-csi-identity": "a-0123",
+	}
+	got := map[string]string{}
+	var entry, association string
+	for _, obj := range crossplaneaws.ClusterResources(p) {
+		name, ok := crossplaneaws.Adopt(obj, ids)
+		if !ok {
+			continue
+		}
+		switch o := obj.(type) {
+		case *awseks.AccessEntry:
+			entry = name
+		case *awseks.AccessPolicyAssociation:
+			association = name
+		case *awseks.Cluster:
+			got["*v1beta1.Cluster/"+o.Name] = name
+			if len(o.Spec.ManagementPolicies) != 2 || o.Spec.ManagementPolicies[0] != "Observe" || o.Spec.ManagementPolicies[1] != "LateInitialize" {
+				t.Errorf("adopted cluster policies = %v", o.Spec.ManagementPolicies)
+			}
+		case *awseks.NodeGroup:
+			got["*v1beta1.NodeGroup/"+o.Name] = name
+		case *awsiam.Role:
+			got["*v1beta1.Role/"+o.Name] = name
+		case *awsiam.RolePolicyAttachment:
+			got["*v1beta1.RolePolicyAttachment/"+o.Name] = name
+		case *awseks.Addon:
+			got["*v1beta1.Addon/"+o.Name] = name
+		case *awseks.PodIdentityAssociation:
+			got["*v1beta1.PodIdentityAssociation/"+o.Name] = name
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("adopted %v, want %v (objects the cloud does not have are not adopted)", got, want)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s external name = %q, want %q", k, got[k], w)
+		}
+	}
+	if entry != "prod:"+dev || association != "prod#"+dev+"#"+policy {
+		t.Errorf("access entry %q, association %q", entry, association)
+	}
+	// A policy with another scope is not the one the object describes.
+	ids.AccessEntries[dev][0].Scope = "namespace"
+	for _, obj := range crossplaneaws.ClusterResources(p) {
+		if _, isAssociation := obj.(*awseks.AccessPolicyAssociation); isAssociation {
+			if _, ok := crossplaneaws.Adopt(obj, ids); ok {
+				t.Error("an association with another scope was adopted")
+			}
+		}
+	}
+
+	// The external names found are part of every later render.
+	p.ExternalNames = map[string]string{"prod-1a2b3c4d-default": "tf-ng"}
+	if ng := byName(crossplaneaws.ClusterResources(p))["prod-1a2b3c4d-default"]; ng.GetAnnotations()[crossplaneaws.ExternalNameAnnotation] != "tf-ng" {
+		t.Errorf("node group annotations = %v", ng.GetAnnotations())
+	}
+}
+
+func TestCarriedOverClusterResources(t *testing.T) {
+	objects := crossplaneaws.CarriedOver(clusterPlan(), crossplaneaws.CarriedOverResources{
+		RoleNames:         map[string]string{"cluster-role": "tf-cluster", "node-role": "tf-node"},
+		ExtraPolicies:     map[string][]string{"node-role": {"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"}},
+		OIDCProviderARN:   "arn:aws:iam::444455556666:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABC",
+		OIDCIssuer:        testIssuer,
+		LogGroupName:      "/aws/eks/prod/cluster",
+		EncryptionKeyARN:  testKeyARN,
+		IdentityProviders: []crossplaneaws.IdentityProviderPlan{{Name: "okta", IssuerURL: "https://example.okta.com", ClientID: "k8s"}},
+		Addons:            []crossplaneaws.AddonPlan{{Name: "adot", Version: "v1"}},
+		PodIdentities:     []crossplaneaws.PodIdentityPlan{{ID: "a-9", Namespace: "apps", ServiceAccount: "api"}},
+	})
+	want := []string{
+		"tf-node/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+		"arn:aws:iam::444455556666:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABC",
+		"/aws/eks/prod/cluster", "1234abcd-12ab-34cd-56ef-1234567890ab", "okta", "prod:adot", "a-9",
+	}
+	if len(objects) != len(want) {
+		t.Fatalf("%d objects, want %d", len(objects), len(want))
+	}
+	for i, obj := range objects {
+		a := obj.GetAnnotations()
+		if a[crossplaneaws.ExternalNameAnnotation] != want[i] || a[crossplane.CarriedOverAnnotation] != "true" {
+			t.Errorf("object %d (%T) annotations = %v, want external name %s, carried over", i, obj, a, want[i])
+		}
+		_, isKey := obj.(*awskms.Key)
+		if (a[crossplaneaws.RetainAnnotation] == "true") != isKey {
+			t.Errorf("%T retained = %q: only the KMS key is never deleted", obj, a[crossplaneaws.RetainAnnotation])
+		}
+	}
+	for _, obj := range objects {
+		var policies []string
+		switch o := obj.(type) {
+		case *awscwl.Group:
+			if o.Spec.ForProvider.RetentionInDays != nil {
+				t.Errorf("log group without retention rendered one: %v", *o.Spec.ForProvider.RetentionInDays)
+			}
+		case *awsiam.OpenIDConnectProvider:
+			for _, p := range o.Spec.ManagementPolicies {
+				policies = append(policies, string(p))
+			}
+			if len(policies) != 2 || o.Spec.ForProvider.ThumbprintList != nil {
+				t.Errorf("OIDC provider policies %v, thumbprints %v", policies, o.Spec.ForProvider.ThumbprintList)
+			}
+		}
+	}
+}

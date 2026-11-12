@@ -142,7 +142,13 @@ func newAdminCmd() *cobra.Command {
 func newClusterCmd() *cobra.Command {
 	verbs := crud("cluster", cli.KindCluster, cli.ClusterCreate, cli.ClusterGet, cli.ClusterList, cli.ClusterUpdate, cli.ClusterDelete)
 	verbs[3].plan, verbs[4].force = true, true
-	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", append(verbs, watchVerb("cluster", cli.ClusterWatch)))
+	verbs = append(verbs,
+		verb{use: "import", short: "Import an existing EKS cluster read-only from a ClusterImport manifest (-f)",
+			run: cli.ClusterImport, args: cobra.NoArgs, input: true},
+		verb{use: "takeover <id>", short: "Take over an imported cluster: the platform becomes its owner",
+			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
+		watchVerb("cluster", cli.ClusterWatch))
+	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
 }
 
 // watchVerb streams a resource's state and its managed resources' events.

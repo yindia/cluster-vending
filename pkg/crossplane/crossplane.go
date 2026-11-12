@@ -20,6 +20,11 @@ const (
 	managedBy       = "cluster-vending"
 )
 
+// CarriedOverAnnotation marks an imported object that no spec field
+// describes: it is not rendered from the spec, kept when its owner is
+// rendered again, and deleted with its owner.
+const CarriedOverAnnotation = "cluster-vending.io/carried-over"
+
 // Labels returns the labels the server puts on what it creates; tenantID
 // is empty for cluster-wide objects shared by every tenant.
 func Labels(tenantID string) map[string]string {

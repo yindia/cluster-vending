@@ -39,6 +39,10 @@ type ManagedResource struct {
 	// resource's ID (vpc-..., subnet-..., a-...) or name. Empty until the
 	// provider created the resource; kept current by Deps.Observe.
 	ExternalName string `gorm:"size:512;not null;default:''"`
+	// CarriedOver marks an object imported with its owner that the owner's
+	// spec does not describe (crossplane.CarriedOverAnnotation): it is kept
+	// when the owner is rendered again (Deps.Prune) and deleted with it.
+	CarriedOver bool `gorm:"not null;default:false"`
 	// GoneAt is when the object was first seen gone from the management
 	// cluster after its owner's deletion was requested (Deps.MarkGone).
 	GoneAt *time.Time

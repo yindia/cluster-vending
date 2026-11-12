@@ -247,6 +247,10 @@ func checkMutable(row *model.Cluster, etag string) error {
 	if row.State == stateDeleting {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("cluster %s is being deleted", row.ID))
 	}
+	if row.State == stateImported || row.State == stateBlocked {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("cluster %s is imported read-only; take it over first", row.ID))
+	}
 	if etag != "" && etag != row.ETag {
 		return connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
 	}

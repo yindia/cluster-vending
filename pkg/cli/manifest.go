@@ -23,6 +23,7 @@ const (
 	KindNetwork       = "Network"
 	KindNetworkImport = "NetworkImport"
 	KindCluster       = "Cluster"
+	KindClusterImport = "ClusterImport"
 )
 
 // Manifest is the Kubernetes-style input of create, update and import:
@@ -164,6 +165,26 @@ func (m *Manifest) NetworkImport() (*cloudv1.ImportNetworkRequest, error) {
 		spec["displayName"] = m.Metadata.DisplayName
 	}
 	req := &cloudv1.ImportNetworkRequest{}
+	return req, m.decode(spec, req)
+}
+
+// ClusterImport is the manifest as an ImportClusterRequest: metadata.name
+// is the EKS cluster's name, spec holds networkId and
+// aws: {defaultNodeGroupName}. An imported cluster takes no labels until
+// it is taken over.
+func (m *Manifest) ClusterImport() (*cloudv1.ImportClusterRequest, error) {
+	if len(m.Metadata.Labels) > 0 {
+		return nil, errors.New("metadata.labels cannot be set on import; update the cluster after the takeover")
+	}
+	spec, err := m.spec()
+	if err != nil {
+		return nil, err
+	}
+	spec["name"] = m.Metadata.Name
+	if m.Metadata.DisplayName != "" {
+		spec["displayName"] = m.Metadata.DisplayName
+	}
+	req := &cloudv1.ImportClusterRequest{}
 	return req, m.decode(spec, req)
 }
 

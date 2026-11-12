@@ -19,10 +19,26 @@ import "google/protobuf/field_mask.proto";
 // gone, after a delete).
 service ClusterService {
   // Creates a cluster. Returns ALREADY_EXISTS if (tenant_id, cluster.id) is
-  // taken, unless request_id matches the original request. With
-  // spec.existing_cluster (temporary) it imports a cluster built outside the
-  // platform instead; see cluster_import.proto.
+  // taken, unless request_id matches the original request. Clusters built
+  // outside the platform are imported with ImportCluster;
+  // spec.existing_cluster is refused.
   rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
+
+  // Imports an existing cluster read-only and computes the plan
+  // (status.import): the server looks the cluster's resources up once, with
+  // the tenant's credentials, derives the spec from them and creates a
+  // managed resource for each with managementPolicies
+  // ["Observe", "LateInitialize"]. Nothing changes in the cloud. The
+  // cluster is IMPORTED, or FAILED when the plan is BLOCKED (then nothing is
+  // imported). Its network must be a Network of the tenant, imported or
+  // owned, that holds the cluster's subnets.
+  rpc ImportCluster(ImportClusterRequest) returns (ImportClusterResponse);
+
+  // Takes over an IMPORTED cluster: the platform becomes its owner and
+  // converges the plan (WILL_UPDATE, WILL_CREATE). Call it only after the
+  // previous tool stopped managing the cluster, and after its network was
+  // taken over. From then on it is a cluster like any other.
+  rpc TakeOverCluster(TakeOverClusterRequest) returns (TakeOverClusterResponse);
 
   // Returns one cluster, or NOT_FOUND.
   rpc GetCluster(GetClusterRequest) returns (GetClusterResponse) {
@@ -54,6 +70,83 @@ service ClusterService {
   rpc DeleteCluster(DeleteClusterRequest) returns (DeleteClusterResponse) {
     option idempotency_level = IDEMPOTENT;
   }
+}
+
+message ImportClusterRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // The cluster's name in the cloud (AWS: the EKS cluster name), which
+  // becomes Cluster.name. Clusters whose name is not a lowercase DNS label
+  // of at most 40 characters cannot be imported yet.
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$"
+  }];
+
+  string display_name = 3 [(buf.validate.field).string.max_len = 128];
+
+  // Network.id of the Network (imported or owned) the cluster runs in. Its
+  // account and region are the cluster's.
+  string network_id = 4 [(buf.validate.field).string.uuid = true];
+
+  // A retry with the same request_id returns the cluster imported by the
+  // first call.
+  string request_id = 5 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+    AwsImportCluster aws = 10;
+  }
+}
+
+// AwsImportCluster says how an EKS cluster maps onto the contract.
+message AwsImportCluster {
+  // The node group that becomes spec.default_node_pool. Required: the
+  // contract has one node group per cluster. The cluster's other node
+  // groups are NOT_IMPORTED: they stay unmanaged and block deleting the
+  // cluster until they are removed. No node group is created or replaced
+  // by the import.
+  string default_node_group_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 63
+    pattern: "^[0-9A-Za-z][A-Za-z0-9_-]*$"
+  }];
+}
+
+message ImportClusterResponse {
+  // spec derived from the imported resources; status.import holds the
+  // plan.
+  Cluster cluster = 1;
+}
+
+message TakeOverClusterRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // When set, must match the cluster's etag or the call fails with ABORTED.
+  string etag = 3;
+
+  // Confirms that every NOT_IMPORTED resource has another owner (or was
+  // deleted) and the previous tool no longer manages anything here.
+  bool acknowledge_not_imported = 4;
+}
+
+message TakeOverClusterResponse {
+  Cluster cluster = 1;
 }
 
 message CreateClusterRequest {

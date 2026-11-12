@@ -42,6 +42,9 @@ type Deps struct {
 	RenderTarget  int64
 	RenderRollout []string
 	AWSDiscovery  awscloud.NetworkDiscoverer
+	// AWSClusterDiscovery looks an existing EKS cluster up (ImportCluster);
+	// nil: imports are unavailable.
+	AWSClusterDiscovery awscloud.ClusterDiscoverer
 	// AWSClusters checks EKS cluster names before CreateCluster; nil skips
 	// the check (tests).
 	AWSClusters awscloud.ClusterLookup

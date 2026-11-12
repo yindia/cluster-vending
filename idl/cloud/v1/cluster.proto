@@ -186,10 +186,9 @@ message ClusterSpec {
   // Who administers the cluster. Mutable.
   AccessSpec access = 6;
 
-  // TEMPORARY (see cluster_import.proto): import a cluster built outside the
-  // platform instead of creating one. network.network_id is the imported
-  // Network of its VPC. The rest of the spec is the desired state after the
-  // takeover. Cleared through UpdateCluster to finish the import.
+  // Not implemented: clusters built outside the platform are imported with
+  // ClusterService.ImportCluster and TakeOverCluster. CreateCluster and
+  // UpdateCluster refuse this field.
   ExistingCluster existing_cluster = 7;
 
   // The cloud the cluster runs on. Exactly one must be set, even if empty
@@ -218,6 +217,9 @@ enum ClusterState {
   CLUSTER_STATE_DELETING = 4;
   // Reconciliation failed; see `message` and `conditions`.
   CLUSTER_STATE_FAILED = 5;
+  // Imported and read-only (ImportCluster); waiting for TakeOverCluster.
+  // See status.import for the plan.
+  CLUSTER_STATE_IMPORTED = 6;
 }
 
 // ClusterStatus is the observed state, aggregated from the Crossplane
@@ -261,8 +263,8 @@ message ClusterStatus {
     // gcp = 11, azure = 12 (see ClusterSpec.provider).
   }
 
-  // TEMPORARY (see cluster_import.proto): the import plan while
-  // spec.existing_cluster is set.
+  // Set for imported clusters: the plan from ImportCluster, kept as a
+  // record after the takeover.
   ImportStatus import = 13;
 
   // Resources carried over from an import (disposition CARRIED_OVER, e.g.

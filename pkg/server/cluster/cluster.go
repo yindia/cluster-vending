@@ -112,7 +112,8 @@ func supported(spec *cloudv1.ClusterSpec) error {
 	case spec.GetAws() == nil:
 		return connect.NewError(connect.CodeUnimplemented, "only aws clusters are supported")
 	case spec.GetExistingCluster() != nil:
-		return connect.NewError(connect.CodeUnimplemented, "importing an existing cluster is not implemented yet")
+		return connect.NewError(connect.CodeUnimplemented,
+			"spec.existing_cluster is not implemented; import a cluster with ImportCluster and TakeOverCluster")
 	}
 	return nil
 }
@@ -202,7 +203,7 @@ func (s *ClusterService) base(row *model.Cluster, a *model.CloudAccount) crosspl
 	return crossplaneaws.ClusterPlan{
 		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: row.TenantID,
 		ClusterID: row.ID, ClusterName: row.Name, Prefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
-		Tags: row.Labels,
+		Tags: row.Labels, Adoption: adoption(row),
 	}
 }
 

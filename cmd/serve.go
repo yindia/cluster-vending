@@ -104,9 +104,9 @@ func newServeCmd(g *globals) *cobra.Command {
 				KubeReader:   mgr.GetAPIReader(),
 				AWS:          cfg.AWS,
 				RenderTarget: renderTarget, RenderRollout: cfg.RenderRollout,
-				AWSDiscovery: discovery,
-				AWSClusters:  discovery,
-				Logger:       g.logger,
+				AWSDiscovery: discovery, AWSClusterDiscovery: discovery,
+				AWSClusters: discovery,
+				Logger:      g.logger,
 			}
 			err = mgr.Add(&loop.Loop{
 				Store: deps.Store, Networks: network.NewNetworkService(deps), Clusters: cluster.NewClusterService(deps),

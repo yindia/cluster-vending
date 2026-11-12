@@ -160,8 +160,9 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 	case a.RoleARN != "":
 		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
 	}
+	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
 	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
-		eks: eks.NewFromConfig(cfg), logs: cloudwatchlogs.NewFromConfig(cfg), iam: iam.NewFromConfig(cfg)}, nil
+		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
 }
 
 func staticProvider(s StaticCredentials) awssdk.CredentialsProvider {
@@ -221,6 +222,8 @@ type Tenant struct {
 	eks       EKSAPI
 	logs      LogsAPI
 	iam       IAMAPI
+	eksImport EKSImportAPI
+	iamImport IAMImportAPI
 }
 
 // STSAPI is the part of the STS client VerifyAccess uses.
@@ -243,6 +246,9 @@ func (t *Tenant) VerifyAccess(ctx context.Context) error {
 	}
 	return nil
 }
+
+// asError is errors.As.
+func asError(err error, target any) bool { return errors.As(err, target) }
 
 // translate wraps AWS errors in the package errors; others pass through.
 func translate(err error, what string) error {

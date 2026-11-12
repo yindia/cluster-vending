@@ -4,7 +4,22 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 
-// TEMPORARY: importing clusters built with Terraform, so the platform
+// NOT IMPLEMENTED. Clusters built outside the platform are imported with
+// ClusterService.ImportCluster and TakeOverCluster (cluster_service.proto),
+// the same way networks are: one call imports the cluster read-only and
+// stores the plan, the takeover makes the platform its owner. The contract
+// below (CreateCluster with spec.existing_cluster and a policy moved by
+// UpdateCluster) was the earlier design; the server refuses the field. It
+// stays so the wire format does not change; it can be reserved once no
+// client sends it.
+//
+// Differences of what is implemented from the text below: only the node
+// group named in the request is imported, the others are NOT_IMPORTED;
+// security groups and launch templates are not imported; the KMS key is
+// carried over by its ARN and never deleted with the cluster; a cluster in
+// CONFIG_MAP mode is imported without its aws-auth entries.
+//
+// Earlier design: importing clusters built with Terraform, so the platform
 // becomes their source of truth and Terraform can be removed. Networks are
 // imported permanently through NetworkService; this file only covers the
 // cluster side (IAM roles and policy attachments, the control plane, node

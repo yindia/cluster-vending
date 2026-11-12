@@ -281,7 +281,23 @@ Carried over (AWS):
 | Import | Resources |
 |---|---|
 | Network | flow logs on the VPC that deliver to CloudWatch Logs, with their log group and delivery role (`FlowLog`, cloudwatchlogs `Group`, iam `Role`; a log group or role other VPCs' flow logs use too is owned without `Delete`); the default network ACL (`DefaultNetworkACL`, rules inline, never deleted); custom network ACLs associated with an imported subnet, with their rules (`NetworkACL` with every associated subnet in `subnetIds`, `NetworkACLRule`; the provider has no association kind); routes of specific CIDRs to the internet gateway in imported route tables. `NOT_IMPORTED` today: the main route table, other routes (peering, Transit Gateway, VPN), VPC endpoints, the default security group, flow logs to S3 or Firehose, network ACLs of other subnets |
-| Cluster | security groups referenced by the cluster or node groups, transitively through their rules, with every rule (`SecurityGroupIngressRule` / `SecurityGroupEgressRule` by `sgr-` ID; avoid the legacy `SecurityGroupRule`, its ID is composite), plus rules added to the EKS-managed cluster group (the group stays with EKS); the KMS key in `encryptionConfig` and its aliases (EKS can never turn encryption off); the log group `/aws/eks/<name>/cluster`; the IAM OIDC provider of the cluster's issuer; IAM roles of add-ons and pod identity associations; node groups with launch templates or custom AMIs, with their launch templates |
+| Cluster | managed policies on the cluster and node roles beyond the platform's (`RolePolicyAttachment`); the IAM OIDC provider of the cluster's issuer; the log group `/aws/eks/<name>/cluster`; the KMS key in `encryptionConfig` (owned without `Delete`: the platform cannot tell what else uses it); OIDC identity provider configs (`IdentityProviderConfig`); add-ons the contract has no name for; pod identity associations that are not an add-on's. `NOT_IMPORTED` today: every node group but the one named as the default, access entries EKS manages (node group roles, service-linked roles), the default node group's launch template, security groups |
+
+How a cluster import works (`ImportCluster`, `TakeOverCluster`): the spec is
+derived from the cluster, rendered like any cluster's, and each rendered
+object adopts the cloud resource it describes (external name in the
+provider's format, `managementPolicies: [Observe, LateInitialize]`). The plan
+compares that render with the cloud: `MATCHES`, `WILL_UPDATE` (the platform's
+tags, mostly), `WILL_CREATE` (what the platform adds: the kubeconfig object,
+default add-ons the cluster lacks, Usages), `BLOCKING` when a field EKS
+cannot change differs. The takeover drops the Observe-only policy by
+rendering the cluster the normal way, so nothing is created or replaced that
+the plan did not list. The cluster's network must be imported for the import
+and taken over for the takeover.
+
+Known limit: the platform does not clean up inside the workload cluster.
+`LoadBalancer` Services and PersistentVolumeClaims must be removed before
+`DeleteCluster`, or their load balancers and volumes stay in the account.
 
 `BLOCKING` today (the layout can't express them): secondary VPC CIDRs (e.g.
 `100.64.0.0/16` for EKS custom networking), IPv6 / dual-stack, private
@@ -299,6 +315,17 @@ the provider builds them from (needed even for Observe-only):
 | NetworkACLRule | `nacl-<crc32 of "<acl-id>-<rule number>-<egress>-<protocol>-">` | `networkAclId`, `ruleNumber`, `egress`, `protocol` |
 | Group (cloudwatchlogs) | log group name | `region` |
 | Route | `r-<rtb-id><crc32 of the destination cidr>` | `routeTableId`, `destinationCidrBlock` |
+| Role | role name | - |
+| RolePolicyAttachment | `<role name>/<policy arn>` | `role`, `policyArn` |
+| Cluster (eks) | cluster name | `region` |
+| NodeGroup | node group name | `region`, `clusterName` |
+| Addon | `<cluster>:<add-on>` | `region`, `clusterName`, `addonName` |
+| AccessEntry | `<cluster>:<principal arn>` | `region`, `clusterName`, `principalArn` |
+| AccessPolicyAssociation | `<cluster>#<principal arn>#<policy arn>` | `region`, `clusterName`, `principalArn`, `policyArn` |
+| PodIdentityAssociation | association ID `a-…` | `region`, `clusterName` |
+| IdentityProviderConfig | config name | `region`, `clusterName` |
+| OpenIDConnectProvider | provider ARN | - |
+| Key (kms) | key ID | `region` |
 | RouteTableAssociation | association ID `rtbassoc-…` (not Terraform's `subnet/rtb` import shorthand) | `subnetId`, `routeTableId` |
 | Role | role name | — |
 | OpenIDConnectProvider | provider ARN | — |
@@ -415,7 +442,7 @@ part of the admin access granted at onboarding.
 | When | AWS calls |
 |---|---|
 | `ImportNetwork` | `ec2:DescribeSubnets`, `DescribeRouteTables`, `DescribeInternetGateways`, `DescribeNatGateways`, `DescribeAddresses`, `DescribeSecurityGroups`, `DescribeNetworkAcls`, `DescribeVpcEndpoints`, `DescribeFlowLogs`; `logs:DescribeLogGroups`, `ListTagsForResource`; `iam:GetRole` |
-| Cluster import (temporary) | `eks:DescribeCluster`, `ListNodegroups`, `DescribeNodegroup`, `ListAddons`, `DescribeAddon`, `ListAccessEntries`, `ListAssociatedAccessPolicies`, `ListPodIdentityAssociations`; `iam:ListAttachedRolePolicies`, `ListOpenIDConnectProviders`; `kms:DescribeKey`, `ListAliases`; `logs:DescribeLogGroups`; `ec2:DescribeSecurityGroups`, `DescribeSecurityGroupRules`, `DescribeLaunchTemplateVersions`; Kubernetes `kube-system/aws-auth` for `CONFIG_MAP` clusters |
+| `ImportCluster` | `eks:DescribeCluster`, `ListNodegroups`, `DescribeNodegroup`, `ListAddons`, `DescribeAddon`, `ListAccessEntries`, `DescribeAccessEntry`, `ListAssociatedAccessPolicies`, `ListPodIdentityAssociations`, `ListIdentityProviderConfigs`, `DescribeIdentityProviderConfig`; `iam:GetRole`, `ListAttachedRolePolicies`, `ListOpenIDConnectProviders`; `logs:DescribeLogGroups`, `ListTagsForResource` |
 
 ## Always created (not in the contract)
 

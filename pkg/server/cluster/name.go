@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect/v2"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -18,26 +19,8 @@ import (
 // existing cluster. Checked twice: the platform's own clusters (also those
 // EKS has not created yet), then AWS (clusters made elsewhere).
 func (s *ClusterService) checkName(ctx context.Context, tenantID, name, region string, t target) error {
-	rows, err := s.deps.Store.Clusters().ListByName(ctx, tenantID, name)
-	if err != nil {
-		return service.ToConnect(err)
-	}
-	for _, c := range rows {
-		if c.Region != region {
-			continue
-		}
-		n, err := s.deps.Store.Networks().Get(ctx, tenantID, c.NetworkID)
-		if errors.Is(err, repository.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return service.ToConnect(err)
-		}
-		if n.CloudAccountID == t.account.ID {
-			return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
-				"cluster %s (%s) already uses the EKS name %q in account %s, %s; choose another name",
-				c.ID, c.State, name, t.account.AccountID, region))
-		}
+	if err := s.nameTaken(ctx, tenantID, name, region, t.account); err != nil {
+		return err
 	}
 	if s.deps.AWSClusters == nil {
 		return nil
@@ -58,6 +41,33 @@ func (s *ClusterService) checkName(ctx context.Context, tenantID, name, region s
 		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
 			"account %s already has an EKS cluster named %q in %s (not created by the platform); choose another name",
 			t.account.AccountID, name, region))
+	}
+	return nil
+}
+
+// nameTaken fails with ALREADY_EXISTS when a cluster of the tenant already
+// has the EKS name in the account and region.
+func (s *ClusterService) nameTaken(ctx context.Context, tenantID, name, region string, account *model.CloudAccount) error {
+	rows, err := s.deps.Store.Clusters().ListByName(ctx, tenantID, name)
+	if err != nil {
+		return service.ToConnect(err)
+	}
+	for _, c := range rows {
+		if c.Region != region {
+			continue
+		}
+		n, err := s.deps.Store.Networks().Get(ctx, tenantID, c.NetworkID)
+		if errors.Is(err, repository.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return service.ToConnect(err)
+		}
+		if n.CloudAccountID == account.ID {
+			return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
+				"cluster %s (%s) already uses the EKS name %q in account %s, %s; choose another name",
+				c.ID, c.State, name, account.AccountID, region))
+		}
 	}
 	return nil
 }

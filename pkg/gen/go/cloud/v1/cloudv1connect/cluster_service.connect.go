@@ -27,6 +27,12 @@ const (
 	// ClusterServiceCreateClusterProcedure is the procedure name of the ClusterService's CreateCluster
 	// RPC.
 	ClusterServiceCreateClusterProcedure = "/cloud.v1.ClusterService/CreateCluster"
+	// ClusterServiceImportClusterProcedure is the procedure name of the ClusterService's ImportCluster
+	// RPC.
+	ClusterServiceImportClusterProcedure = "/cloud.v1.ClusterService/ImportCluster"
+	// ClusterServiceTakeOverClusterProcedure is the procedure name of the ClusterService's
+	// TakeOverCluster RPC.
+	ClusterServiceTakeOverClusterProcedure = "/cloud.v1.ClusterService/TakeOverCluster"
 	// ClusterServiceGetClusterProcedure is the procedure name of the ClusterService's GetCluster RPC.
 	ClusterServiceGetClusterProcedure = "/cloud.v1.ClusterService/GetCluster"
 	// ClusterServiceListClustersProcedure is the procedure name of the ClusterService's ListClusters
@@ -49,6 +55,20 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("CreateCluster"),
 			Procedure:  ClusterServiceCreateClusterProcedure,
+		}
+	})
+	clusterServiceImportClusterSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ImportCluster"),
+			Procedure:  ClusterServiceImportClusterProcedure,
+		}
+	})
+	clusterServiceTakeOverClusterSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("TakeOverCluster"),
+			Procedure:  ClusterServiceTakeOverClusterProcedure,
 		}
 	})
 	clusterServiceGetClusterSpec = sync.OnceValue(func() connect.Spec {
@@ -95,10 +115,24 @@ var (
 // ClusterServiceClient is a client for the cloud.v1.ClusterService service.
 type ClusterServiceClient interface {
 	// Creates a cluster. Returns ALREADY_EXISTS if (tenant_id, cluster.id) is
-	// taken, unless request_id matches the original request. With
-	// spec.existing_cluster (temporary) it imports a cluster built outside the
-	// platform instead; see cluster_import.proto.
+	// taken, unless request_id matches the original request. Clusters built
+	// outside the platform are imported with ImportCluster;
+	// spec.existing_cluster is refused.
 	CreateCluster(context.Context, *v1.CreateClusterRequest) (*v1.CreateClusterResponse, error)
+	// Imports an existing cluster read-only and computes the plan
+	// (status.import): the server looks the cluster's resources up once, with
+	// the tenant's credentials, derives the spec from them and creates a
+	// managed resource for each with managementPolicies
+	// ["Observe", "LateInitialize"]. Nothing changes in the cloud. The
+	// cluster is IMPORTED, or FAILED when the plan is BLOCKED (then nothing is
+	// imported). Its network must be a Network of the tenant, imported or
+	// owned, that holds the cluster's subnets.
+	ImportCluster(context.Context, *v1.ImportClusterRequest) (*v1.ImportClusterResponse, error)
+	// Takes over an IMPORTED cluster: the platform becomes its owner and
+	// converges the plan (WILL_UPDATE, WILL_CREATE). Call it only after the
+	// previous tool stopped managing the cluster, and after its network was
+	// taken over. From then on it is a cluster like any other.
+	TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error)
 	// Returns one cluster, or NOT_FOUND.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs).
@@ -149,10 +183,24 @@ func (s ClusterServiceWatchClusterClientStream) Close() error {
 // ClusterServiceHandler is an implementation of the cloud.v1.ClusterService service.
 type ClusterServiceHandler interface {
 	// Creates a cluster. Returns ALREADY_EXISTS if (tenant_id, cluster.id) is
-	// taken, unless request_id matches the original request. With
-	// spec.existing_cluster (temporary) it imports a cluster built outside the
-	// platform instead; see cluster_import.proto.
+	// taken, unless request_id matches the original request. Clusters built
+	// outside the platform are imported with ImportCluster;
+	// spec.existing_cluster is refused.
 	CreateCluster(context.Context, *v1.CreateClusterRequest) (*v1.CreateClusterResponse, error)
+	// Imports an existing cluster read-only and computes the plan
+	// (status.import): the server looks the cluster's resources up once, with
+	// the tenant's credentials, derives the spec from them and creates a
+	// managed resource for each with managementPolicies
+	// ["Observe", "LateInitialize"]. Nothing changes in the cloud. The
+	// cluster is IMPORTED, or FAILED when the plan is BLOCKED (then nothing is
+	// imported). Its network must be a Network of the tenant, imported or
+	// owned, that holds the cluster's subnets.
+	ImportCluster(context.Context, *v1.ImportClusterRequest) (*v1.ImportClusterResponse, error)
+	// Takes over an IMPORTED cluster: the platform becomes its owner and
+	// converges the plan (WILL_UPDATE, WILL_CREATE). Call it only after the
+	// previous tool stopped managing the cluster, and after its network was
+	// taken over. From then on it is a cluster like any other.
+	TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error)
 	// Returns one cluster, or NOT_FOUND.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs).
@@ -179,6 +227,8 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 	adapter := clusterServiceHandler{svc: svc}
 	server.Register(
 		connect.Method{Spec: clusterServiceCreateClusterSpec(), Handler: adapter.createCluster},
+		connect.Method{Spec: clusterServiceImportClusterSpec(), Handler: adapter.importCluster},
+		connect.Method{Spec: clusterServiceTakeOverClusterSpec(), Handler: adapter.takeOverCluster},
 		connect.Method{Spec: clusterServiceGetClusterSpec(), Handler: adapter.getCluster},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
@@ -210,6 +260,14 @@ func (UnimplementedClusterServiceHandler) CreateCluster(context.Context, *v1.Cre
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.CreateCluster is not implemented")
 }
 
+func (UnimplementedClusterServiceHandler) ImportCluster(context.Context, *v1.ImportClusterRequest) (*v1.ImportClusterResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ImportCluster is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.TakeOverCluster is not implemented")
+}
+
 func (UnimplementedClusterServiceHandler) GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetCluster is not implemented")
 }
@@ -237,6 +295,22 @@ type clusterServiceClient struct {
 func (c *clusterServiceClient) CreateCluster(ctx context.Context, req *v1.CreateClusterRequest) (*v1.CreateClusterResponse, error) {
 	var res v1.CreateClusterResponse
 	if err := c.client.CallUnary(ctx, clusterServiceCreateClusterSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) ImportCluster(ctx context.Context, req *v1.ImportClusterRequest) (*v1.ImportClusterResponse, error) {
+	var res v1.ImportClusterResponse
+	if err := c.client.CallUnary(ctx, clusterServiceImportClusterSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) TakeOverCluster(ctx context.Context, req *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error) {
+	var res v1.TakeOverClusterResponse
+	if err := c.client.CallUnary(ctx, clusterServiceTakeOverClusterSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -290,6 +364,30 @@ func (h clusterServiceHandler) createCluster(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.CreateCluster(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) importCluster(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ImportClusterRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ImportCluster(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) takeOverCluster(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TakeOverClusterRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.TakeOverCluster(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -42,6 +42,8 @@ var managedMRDs = []string{
 	// (the control plane's log group is groups.cloudwatchlogs, above).
 	"keys.kms.aws.m.upbound.io", "aliases.kms.aws.m.upbound.io",
 	"openidconnectproviders.iam.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
+	// Carried over from an imported cluster.
+	"identityproviderconfigs.eks.aws.m.upbound.io",
 	// provider-helm.
 	"releases.helm.m.crossplane.io",
 }
@@ -74,6 +76,7 @@ func ManagedObjects() []client.Object {
 		&awseks.Cluster{}, &awseks.NodeGroup{}, &awseks.Addon{}, &awseks.PodIdentityAssociation{},
 		&awseks.AccessEntry{}, &awseks.AccessPolicyAssociation{}, &awseks.ClusterAuth{},
 		&awscwl.Group{}, &awskms.Key{}, &awskms.Alias{}, &awsiam.OpenIDConnectProvider{}, &awsec2.LaunchTemplate{},
+		&awseks.IdentityProviderConfig{},
 	)
 	// Networks and clusters share kinds (IAM): each once.
 	out := make([]client.Object, 0, len(all))

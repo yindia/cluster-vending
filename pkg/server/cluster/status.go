@@ -198,21 +198,31 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	}
 	readyCond := &cloudv1.Condition{Type: conditionReady, Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE,
 		Reason: "ResourcesNotReady", Message: progress}
+	st.Import = storedImport(row)
 	switch {
 	case row.State == stateDeleting:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_DELETING
 		st.Message = deletingMessage(views, left)
+	case row.State == stateBlocked:
+		st.State = cloudv1.ClusterState_CLUSTER_STATE_FAILED
+		st.Message = "import blocked: " + firstBlocking(st.GetImport())
 	case failed != nil:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_FAILED
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
 		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: conditionSynced,
 			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
+	case row.State == stateImported:
+		st.State = cloudv1.ClusterState_CLUSTER_STATE_IMPORTED
+		st.Message = "imported read-only (" + progress + "); review status.import, then TakeOverCluster"
 	case awaitingEKS:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING
 		st.Message = "creating the EKS cluster (" + progress + "); add-ons and access entries follow once it is ACTIVE"
 	case len(views) > 0 && ready == len(views) && converged:
 		st.State = cloudv1.ClusterState_CLUSTER_STATE_RUNNING
 		readyCond.Status, readyCond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, "AllResourcesReady"
+		if imp := st.GetImport(); imp.GetPhase() == cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING {
+			imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGED
+		}
 	case len(views) > 0 && ready == len(views):
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING,
 			fmt.Sprintf("applying generation %d (%s)", row.Generation, progress)
@@ -223,6 +233,15 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	}
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)
 	return st
+}
+
+func firstBlocking(imp *cloudv1.ImportStatus) string {
+	for _, l := range imp.GetResources() {
+		if l.GetDisposition() == cloudv1.Disposition_DISPOSITION_BLOCKING {
+			return l.GetDetail()
+		}
+	}
+	return "see status.import"
 }
 
 func decodeCA(b64 string) []byte {

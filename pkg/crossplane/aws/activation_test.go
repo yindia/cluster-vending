@@ -26,7 +26,7 @@ func TestActivationPolicy(t *testing.T) {
 		"accessentries.eks.aws.m.upbound.io", "accesspolicyassociations.eks.aws.m.upbound.io",
 		"addons.eks.aws.m.upbound.io", "aliases.kms.aws.m.upbound.io", "clusterauths.eks.aws.m.upbound.io", "clusters.eks.aws.m.upbound.io",
 		"defaultnetworkacls.ec2.aws.m.upbound.io", "eips.ec2.aws.m.upbound.io", "flowlogs.ec2.aws.m.upbound.io", "groups.cloudwatchlogs.aws.m.upbound.io",
-		"internetgateways.ec2.aws.m.upbound.io", "keys.kms.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
+		"identityproviderconfigs.eks.aws.m.upbound.io", "internetgateways.ec2.aws.m.upbound.io", "keys.kms.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
 		"natgateways.ec2.aws.m.upbound.io",
 		"networkaclrules.ec2.aws.m.upbound.io", "networkacls.ec2.aws.m.upbound.io",
 		"nodegroups.eks.aws.m.upbound.io", "openidconnectproviders.iam.aws.m.upbound.io",

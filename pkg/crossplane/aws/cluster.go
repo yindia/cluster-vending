@@ -116,10 +116,28 @@ type ClusterPlan struct {
 	// cluster (known once it is ACTIVE): a rendered launch template with
 	// security groups lists it next to them.
 	ClusterSecurityGroupID string
+	// Adoption is what an imported cluster keeps of its IAM roles; zero for
+	// a cluster the platform created.
+	Adoption
+}
+
+// Adoption is what an imported cluster keeps of the resources it was
+// imported from that its spec cannot say. Stored with the cluster.
+type Adoption struct {
 	// ClusterRoleName and NodeRoleName are the IAM names of the cluster and
 	// node roles (their external names); empty is the object's name,
 	// "<prefix>-cluster-role" and "<prefix>-node-role".
-	ClusterRoleName, NodeRoleName string
+	ClusterRoleName string `json:"clusterRoleName,omitempty"`
+	NodeRoleName    string `json:"nodeRoleName,omitempty"`
+	// ClusterRoleTrust and NodeRoleTrust are the roles' trust policies;
+	// empty is the platform's (EKS, EC2).
+	ClusterRoleTrust string `json:"clusterRoleTrust,omitempty"`
+	NodeRoleTrust    string `json:"nodeRoleTrust,omitempty"`
+	// ExternalNames are the external names of the rendered objects that
+	// adopted an existing cloud resource, by object name: the node group's
+	// name, "<cluster>:<add-on>", ... Rendered with every apply, or the
+	// object would lose its cloud resource.
+	ExternalNames map[string]string `json:"externalNames,omitempty"`
 }
 
 // AccessEntryPlan is one access entry with its policies.
@@ -198,8 +216,9 @@ func ClusterResources(p ClusterPlan) []client.Object {
 	out := make([]client.Object, 0, 8+len(addons)+2*len(p.AdminPrincipals))
 	out = append(out, b.beforeCluster()...)
 	out = append(out,
-		b.roleNamed("cluster-role", trustEKS, p.ClusterRoleName), b.attach("cluster-policy", "cluster-role", policyEKSCluster),
-		b.roleNamed("node-role", trustEC2, p.NodeRoleName),
+		b.roleNamed("cluster-role", orDefault(p.ClusterRoleTrust, trustEKS), p.ClusterRoleName),
+		b.attach("cluster-policy", "cluster-role", policyEKSCluster),
+		b.roleNamed("node-role", orDefault(p.NodeRoleTrust, trustEC2), p.NodeRoleName),
 		b.attach("node-worker", "node-role", policyWorkerNode), b.attach("node-cni", "node-role", policyCNI),
 		b.attach("node-ecr", "node-role", policyECRRead),
 		b.cluster(),
@@ -219,6 +238,16 @@ func ClusterResources(p ClusterPlan) []client.Object {
 		out = append(out, b.oidcProvider())
 	}
 	out = b.withoutPending(out)
+	for _, obj := range out {
+		if name, ok := p.ExternalNames[obj.GetName()]; ok {
+			annotations := obj.GetAnnotations()
+			if annotations == nil {
+				annotations = map[string]string{}
+			}
+			annotations[ExternalNameAnnotation] = name
+			obj.SetAnnotations(annotations)
+		}
+	}
 	// Last: Usages refer to the objects above.
 	rendered := map[string]bool{}
 	for _, obj := range out {
@@ -461,6 +490,13 @@ func (b clusterBuilder) accessPolicy(suffix, principal string) *awseks.AccessPol
 	}
 }
 
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
 func ptrs(in []string) []*string {
 	if len(in) == 0 {
 		return nil
@@ -489,7 +525,7 @@ func ClusterLists() []client.ObjectList {
 	return []client.ObjectList{
 		&awseks.AccessPolicyAssociationList{}, &awseks.AccessEntryList{}, &awseks.PodIdentityAssociationList{},
 		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awsec2.LaunchTemplateList{},
-		&awsiam.OpenIDConnectProviderList{}, &awseks.ClusterList{},
+		&awsiam.OpenIDConnectProviderList{}, &awseks.IdentityProviderConfigList{}, &awseks.ClusterList{},
 		&awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
 		&awskms.AliasList{}, &awskms.KeyList{}, &awscwl.GroupList{},
 	}

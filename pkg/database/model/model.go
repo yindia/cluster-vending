@@ -212,7 +212,12 @@ type Cluster struct {
 	Region   string   `gorm:"size:64;not null"`
 	// Imported is true while spec.existing_cluster is set (temporary
 	// cluster import).
-	Imported        bool    `gorm:"not null;default:false"`
+	Imported bool `gorm:"not null;default:false"`
+	// Adoption is what an imported cluster keeps of the resources it was
+	// imported from that its spec cannot say (JSON
+	// crossplaneaws.Adoption: the IAM role names and trust policies). NULL
+	// for clusters the platform created.
+	Adoption        JSON
 	CreateRequestID *string `gorm:"size:36;uniqueIndex:idx_clusters_tenant_request,where:deleted_at IS NULL"`
 	// DeleteForce: the deletion was requested with force (DeleteClusterRequest.force);
 	// every later step of it skips the in-cluster cleanup.

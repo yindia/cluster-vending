@@ -32,6 +32,9 @@ func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) err
 		_, err := s.driveDelete(ctx, row)
 		return err
 	}
+	if row.State == stateImported || row.State == stateBlocked {
+		return nil // observed only, until TakeOverCluster
+	}
 	if err := s.advance(ctx, row); err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}

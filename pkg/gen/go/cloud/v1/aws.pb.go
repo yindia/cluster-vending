@@ -192,8 +192,8 @@ func (AwsSupportType) EnumDescriptor() ([]byte, []int) {
 }
 
 // AwsAmiType is NodeGroup.amiType: the EKS AMI types a new managed node
-// group can use (no end-of-support AL2, no CUSTOM / launch templates).
-// Values may be added over time.
+// group can use (no end-of-support AL2). CUSTOM is for a launch template
+// that names its own AMI. Values may be added over time.
 type AwsAmiType int32
 
 const (
@@ -218,6 +218,7 @@ const (
 	AwsAmiType_AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64        AwsAmiType = 17
 	AwsAmiType_AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64        AwsAmiType = 18
 	AwsAmiType_AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64        AwsAmiType = 19
+	AwsAmiType_AWS_AMI_TYPE_CUSTOM                          AwsAmiType = 20
 )
 
 // Enum value maps for AwsAmiType.
@@ -243,6 +244,7 @@ var (
 		17: "AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64",
 		18: "AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64",
 		19: "AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64",
+		20: "AWS_AMI_TYPE_CUSTOM",
 	}
 	AwsAmiType_value = map[string]int32{
 		"AWS_AMI_TYPE_UNSPECIFIED":                     0,
@@ -265,6 +267,7 @@ var (
 		"AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64":        17,
 		"AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64":        18,
 		"AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64":        19,
+		"AWS_AMI_TYPE_CUSTOM":                          20,
 	}
 )
 
@@ -329,9 +332,24 @@ type AwsClusterSpec struct {
 	// association for its service account (EKS creates the service account).
 	// vpc-cni's policy is on the node role. What the add-ons use is the
 	// tenant's: file systems (EFS, FSx) and S3 buckets are not created.
-	Addons        []*AwsAddon `protobuf:"bytes,5,rep,name=addons,proto3" json:"addons,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Addons []*AwsAddon `protobuf:"bytes,5,rep,name=addons,proto3" json:"addons,omitempty"`
+	// The CloudWatch Logs log group of the control plane logs
+	// ("/aws/eks/<cluster name>/cluster"). Unset: EKS creates it itself when
+	// logging is on, unmanaged and kept forever, as before.
+	ControlPlaneLogGroup *AwsControlPlaneLogGroup `protobuf:"bytes,6,opt,name=control_plane_log_group,json=controlPlaneLogGroup,proto3" json:"control_plane_log_group,omitempty"`
+	// IAM roles for service accounts: an IAM OIDC provider for the cluster's
+	// issuer (iam OpenIDConnectProvider, client ID sts.amazonaws.com),
+	// created once the cluster is ACTIVE. Unset or false: none; EKS Pod
+	// Identity, which every cluster has, needs none. Immutable for now.
+	Irsa *bool `protobuf:"varint,7,opt,name=irsa,proto3,oneof" json:"irsa,omitempty"`
+	// Extra security groups on the control plane's network interfaces, next
+	// to the cluster security group EKS creates
+	// (Cluster.vpcConfig.securityGroupIds). The groups are the client's: the
+	// platform does not create or delete them. Immutable: EKS cannot change
+	// them on an existing cluster.
+	AdditionalSecurityGroupIds []string `protobuf:"bytes,8,rep,name=additional_security_group_ids,json=additionalSecurityGroupIds,proto3" json:"additional_security_group_ids,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *AwsClusterSpec) Reset() {
@@ -399,6 +417,87 @@ func (x *AwsClusterSpec) GetAddons() []*AwsAddon {
 	return nil
 }
 
+func (x *AwsClusterSpec) GetControlPlaneLogGroup() *AwsControlPlaneLogGroup {
+	if x != nil {
+		return x.ControlPlaneLogGroup
+	}
+	return nil
+}
+
+func (x *AwsClusterSpec) GetIrsa() bool {
+	if x != nil && x.Irsa != nil {
+		return *x.Irsa
+	}
+	return false
+}
+
+func (x *AwsClusterSpec) GetAdditionalSecurityGroupIds() []string {
+	if x != nil {
+		return x.AdditionalSecurityGroupIds
+	}
+	return nil
+}
+
+// AwsControlPlaneLogGroup makes the platform own the control plane's log
+// group: created before the EKS cluster (so EKS does not create it), with
+// a retention, and deleted with the cluster.
+//
+//	AWS   cloudwatchlogs Group, external name "/aws/eks/<cluster name>/cluster"
+type AwsControlPlaneLogGroup struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Unset or false: the platform creates no log group.
+	Enabled *bool `protobuf:"varint,1,opt,name=enabled,proto3,oneof" json:"enabled,omitempty"`
+	// Days the log group keeps the logs (Group.retentionInDays): one of the
+	// retention periods CloudWatch Logs has. Defaults to 90. Mutable.
+	RetentionDays uint32 `protobuf:"varint,2,opt,name=retention_days,json=retentionDays,proto3" json:"retention_days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AwsControlPlaneLogGroup) Reset() {
+	*x = AwsControlPlaneLogGroup{}
+	mi := &file_cloud_v1_aws_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AwsControlPlaneLogGroup) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AwsControlPlaneLogGroup) ProtoMessage() {}
+
+func (x *AwsControlPlaneLogGroup) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_aws_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AwsControlPlaneLogGroup.ProtoReflect.Descriptor instead.
+func (*AwsControlPlaneLogGroup) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AwsControlPlaneLogGroup) GetEnabled() bool {
+	if x != nil && x.Enabled != nil {
+		return *x.Enabled
+	}
+	return false
+}
+
+func (x *AwsControlPlaneLogGroup) GetRetentionDays() uint32 {
+	if x != nil {
+		return x.RetentionDays
+	}
+	return 0
+}
+
 // AwsAddon is one EKS add-on (Addon.spec.forProvider).
 type AwsAddon struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -420,7 +519,7 @@ type AwsAddon struct {
 
 func (x *AwsAddon) Reset() {
 	*x = AwsAddon{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[1]
+	mi := &file_cloud_v1_aws_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -432,7 +531,7 @@ func (x *AwsAddon) String() string {
 func (*AwsAddon) ProtoMessage() {}
 
 func (x *AwsAddon) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[1]
+	mi := &file_cloud_v1_aws_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -445,7 +544,7 @@ func (x *AwsAddon) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsAddon.ProtoReflect.Descriptor instead.
 func (*AwsAddon) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{1}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AwsAddon) GetName() string {
@@ -491,7 +590,7 @@ type AwsAddonStatus struct {
 
 func (x *AwsAddonStatus) Reset() {
 	*x = AwsAddonStatus{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[2]
+	mi := &file_cloud_v1_aws_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -503,7 +602,7 @@ func (x *AwsAddonStatus) String() string {
 func (*AwsAddonStatus) ProtoMessage() {}
 
 func (x *AwsAddonStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[2]
+	mi := &file_cloud_v1_aws_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -516,7 +615,7 @@ func (x *AwsAddonStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsAddonStatus.ProtoReflect.Descriptor instead.
 func (*AwsAddonStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AwsAddonStatus) GetName() string {
@@ -604,7 +703,7 @@ type AwsImportNetwork struct {
 
 func (x *AwsImportNetwork) Reset() {
 	*x = AwsImportNetwork{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[3]
+	mi := &file_cloud_v1_aws_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +715,7 @@ func (x *AwsImportNetwork) String() string {
 func (*AwsImportNetwork) ProtoMessage() {}
 
 func (x *AwsImportNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[3]
+	mi := &file_cloud_v1_aws_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +728,7 @@ func (x *AwsImportNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsImportNetwork.ProtoReflect.Descriptor instead.
 func (*AwsImportNetwork) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AwsImportNetwork) GetVpcId() string {
@@ -656,7 +755,7 @@ type AwsAccessConfig struct {
 
 func (x *AwsAccessConfig) Reset() {
 	*x = AwsAccessConfig{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[4]
+	mi := &file_cloud_v1_aws_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +767,7 @@ func (x *AwsAccessConfig) String() string {
 func (*AwsAccessConfig) ProtoMessage() {}
 
 func (x *AwsAccessConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[4]
+	mi := &file_cloud_v1_aws_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +780,7 @@ func (x *AwsAccessConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsAccessConfig.ProtoReflect.Descriptor instead.
 func (*AwsAccessConfig) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AwsAccessConfig) GetAuthenticationMode() AwsAuthenticationMode {
@@ -701,7 +800,7 @@ type AwsUpgradePolicy struct {
 
 func (x *AwsUpgradePolicy) Reset() {
 	*x = AwsUpgradePolicy{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[5]
+	mi := &file_cloud_v1_aws_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -713,7 +812,7 @@ func (x *AwsUpgradePolicy) String() string {
 func (*AwsUpgradePolicy) ProtoMessage() {}
 
 func (x *AwsUpgradePolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[5]
+	mi := &file_cloud_v1_aws_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -726,7 +825,7 @@ func (x *AwsUpgradePolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsUpgradePolicy.ProtoReflect.Descriptor instead.
 func (*AwsUpgradePolicy) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{5}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AwsUpgradePolicy) GetSupportType() AwsSupportType {
@@ -739,15 +838,22 @@ func (x *AwsUpgradePolicy) GetSupportType() AwsSupportType {
 // AwsNodePoolSpec carries NodeGroup fields with no cross-cloud equivalent.
 type AwsNodePoolSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// NodeGroup.amiType.
-	AmiType       AwsAmiType `protobuf:"varint,1,opt,name=ami_type,json=amiType,proto3,enum=cloud.v1.AwsAmiType" json:"ami_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// NodeGroup.amiType. With launch_template.image_id it is CUSTOM.
+	AmiType AwsAmiType `protobuf:"varint,1,opt,name=ami_type,json=amiType,proto3,enum=cloud.v1.AwsAmiType" json:"ami_type,omitempty"`
+	// An EC2 launch template for the node group (NodeGroup.launchTemplate).
+	// Unset: none, as before. With one, disk_size_gb must be unset (EKS takes
+	// the disk from the template). Setting, removing or switching the
+	// template replaces the node group (a new one is created, the old one
+	// deleted once it is ready); a new version of the same template is
+	// rolled out in place.
+	LaunchTemplate *AwsLaunchTemplate `protobuf:"bytes,2,opt,name=launch_template,json=launchTemplate,proto3" json:"launch_template,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AwsNodePoolSpec) Reset() {
 	*x = AwsNodePoolSpec{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[6]
+	mi := &file_cloud_v1_aws_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -759,7 +865,7 @@ func (x *AwsNodePoolSpec) String() string {
 func (*AwsNodePoolSpec) ProtoMessage() {}
 
 func (x *AwsNodePoolSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[6]
+	mi := &file_cloud_v1_aws_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -772,7 +878,7 @@ func (x *AwsNodePoolSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsNodePoolSpec.ProtoReflect.Descriptor instead.
 func (*AwsNodePoolSpec) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{6}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AwsNodePoolSpec) GetAmiType() AwsAmiType {
@@ -780,6 +886,110 @@ func (x *AwsNodePoolSpec) GetAmiType() AwsAmiType {
 		return x.AmiType
 	}
 	return AwsAmiType_AWS_AMI_TYPE_UNSPECIFIED
+}
+
+func (x *AwsNodePoolSpec) GetLaunchTemplate() *AwsLaunchTemplate {
+	if x != nil {
+		return x.LaunchTemplate
+	}
+	return nil
+}
+
+// AwsLaunchTemplate is either an existing launch template (id or name, and
+// version) or one the platform renders (security_group_ids and / or
+// image_id + user_data).
+type AwsLaunchTemplate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// An existing template: its ID ("lt-...") or its name, one of the two.
+	// The template is the client's: the platform does not change or delete
+	// it.
+	Id   string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// The version number of the existing template to use, e.g. "3".
+	// "$Latest" and "$Default" are refused: EKS resolves them to a number,
+	// which would read as a change on every reconcile.
+	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	// A rendered template (ec2 LaunchTemplate, owned by the cluster): extra
+	// security groups for the nodes, next to the cluster security group.
+	SecurityGroupIds []string `protobuf:"bytes,4,rep,name=security_group_ids,json=securityGroupIds,proto3" json:"security_group_ids,omitempty"`
+	// A rendered template: a custom AMI (ami_type becomes CUSTOM) and the
+	// base64 user data that makes its nodes join the cluster.
+	ImageId       string `protobuf:"bytes,5,opt,name=image_id,json=imageId,proto3" json:"image_id,omitempty"`
+	UserData      string `protobuf:"bytes,6,opt,name=user_data,json=userData,proto3" json:"user_data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AwsLaunchTemplate) Reset() {
+	*x = AwsLaunchTemplate{}
+	mi := &file_cloud_v1_aws_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AwsLaunchTemplate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AwsLaunchTemplate) ProtoMessage() {}
+
+func (x *AwsLaunchTemplate) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_aws_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AwsLaunchTemplate.ProtoReflect.Descriptor instead.
+func (*AwsLaunchTemplate) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AwsLaunchTemplate) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AwsLaunchTemplate) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AwsLaunchTemplate) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *AwsLaunchTemplate) GetSecurityGroupIds() []string {
+	if x != nil {
+		return x.SecurityGroupIds
+	}
+	return nil
+}
+
+func (x *AwsLaunchTemplate) GetImageId() string {
+	if x != nil {
+		return x.ImageId
+	}
+	return ""
+}
+
+func (x *AwsLaunchTemplate) GetUserData() string {
+	if x != nil {
+		return x.UserData
+	}
+	return ""
 }
 
 // AwsClusterStatus is AWS-only observed state, read from
@@ -802,7 +1012,7 @@ type AwsClusterStatus struct {
 
 func (x *AwsClusterStatus) Reset() {
 	*x = AwsClusterStatus{}
-	mi := &file_cloud_v1_aws_proto_msgTypes[7]
+	mi := &file_cloud_v1_aws_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -814,7 +1024,7 @@ func (x *AwsClusterStatus) String() string {
 func (*AwsClusterStatus) ProtoMessage() {}
 
 func (x *AwsClusterStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_aws_proto_msgTypes[7]
+	mi := &file_cloud_v1_aws_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -827,7 +1037,7 @@ func (x *AwsClusterStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsClusterStatus.ProtoReflect.Descriptor instead.
 func (*AwsClusterStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{7}
+	return file_cloud_v1_aws_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AwsClusterStatus) GetClusterArn() string {
@@ -869,14 +1079,23 @@ var File_cloud_v1_aws_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\n" +
-	"\x12cloud/v1/aws.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\"\xf6\x03\n" +
+	"\x12cloud/v1/aws.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\"\xda\x05\n" +
 	"\x0eAwsClusterSpec\x12>\n" +
 	"\raccess_config\x18\x01 \x01(\v2\x19.cloud.v1.AwsAccessConfigR\faccessConfig\x12i\n" +
 	"\x19enabled_cluster_log_types\x18\x02 \x03(\x0e2\x1b.cloud.v1.AwsClusterLogTypeB\x11\xbaH\x0e\x92\x01\v\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x16enabledClusterLogTypes\x12A\n" +
 	"\x0eupgrade_policy\x18\x03 \x01(\v2\x1a.cloud.v1.AwsUpgradePolicyR\rupgradePolicy\x12E\n" +
 	"\x11default_node_pool\x18\x04 \x01(\v2\x19.cloud.v1.AwsNodePoolSpecR\x0fdefaultNodePool\x124\n" +
-	"\x06addons\x18\x05 \x03(\v2\x12.cloud.v1.AwsAddonB\b\xbaH\x05\x92\x01\x02\x10\fR\x06addons:y\xbaHv\x1at\n" +
-	"\raddons.unique\x12\x1aaddon names must be unique\x1aGthis.addons.all(a, this.addons.filter(b, b.name == a.name).size() == 1)\"\x9d\x05\n" +
+	"\x06addons\x18\x05 \x03(\v2\x12.cloud.v1.AwsAddonB\b\xbaH\x05\x92\x01\x02\x10\fR\x06addons\x12X\n" +
+	"\x17control_plane_log_group\x18\x06 \x01(\v2!.cloud.v1.AwsControlPlaneLogGroupR\x14controlPlaneLogGroup\x12\x17\n" +
+	"\x04irsa\x18\a \x01(\bH\x00R\x04irsa\x88\x01\x01\x12f\n" +
+	"\x1dadditional_security_group_ids\x18\b \x03(\tB#\xbaH \x92\x01\x1d\x10\x04\x18\x01\"\x17r\x152\x13^sg-[0-9a-f]{8,17}$R\x1aadditionalSecurityGroupIds:y\xbaHv\x1at\n" +
+	"\raddons.unique\x12\x1aaddon names must be unique\x1aGthis.addons.all(a, this.addons.filter(b, b.name == a.name).size() == 1)B\a\n" +
+	"\x05_irsa\"\xae\x01\n" +
+	"\x17AwsControlPlaneLogGroup\x12\x1d\n" +
+	"\aenabled\x18\x01 \x01(\bH\x00R\aenabled\x88\x01\x01\x12h\n" +
+	"\x0eretention_days\x18\x02 \x01(\rBA\xbaH>\xd8\x01\x01*90\x010\x030\x050\a0\x0e0\x1e0<0Z0x0\x96\x010\xb4\x010\xed\x020\x90\x030\xa1\x040\xdb\x050\xc8\b0\xa3\x0e0\x90\x110\xfd\x130\xea\x160\xd8\x190\xc5\x1cR\rretentionDaysB\n" +
+	"\n" +
+	"\b_enabled\"\x9d\x05\n" +
 	"\bAwsAddon\x12\xf3\x01\n" +
 	"\x04name\x18\x01 \x01(\tB\xde\x01\xbaH\xda\x01r\xd7\x01R\avpc-cniR\acorednsR\n" +
 	"kube-proxyR\x16eks-pod-identity-agentR\x12aws-ebs-csi-driverR\x12aws-efs-csi-driverR\x12aws-fsx-csi-driverR\x1caws-mountpoint-s3-csi-driverR\x13snapshot-controllerR\fcert-managerR\x0emetrics-serverR\x12kube-state-metricsR\x04name\x12=\n" +
@@ -896,9 +1115,20 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\x0fAwsAccessConfig\x12Z\n" +
 	"\x13authentication_mode\x18\x01 \x01(\x0e2\x1f.cloud.v1.AwsAuthenticationModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x12authenticationMode\"Y\n" +
 	"\x10AwsUpgradePolicy\x12E\n" +
-	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"L\n" +
+	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"\xca\x02\n" +
 	"\x0fAwsNodePoolSpec\x129\n" +
-	"\bami_type\x18\x01 \x01(\x0e2\x14.cloud.v1.AwsAmiTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aamiType\"\xf1\x01\n" +
+	"\bami_type\x18\x01 \x01(\x0e2\x14.cloud.v1.AwsAmiTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aamiType\x12D\n" +
+	"\x0flaunch_template\x18\x02 \x01(\v2\x1b.cloud.v1.AwsLaunchTemplateR\x0elaunchTemplate:\xb5\x01\xbaH\xb1\x01\x1a\xae\x01\n" +
+	"\x19node_pool.custom_ami_type\x12_ami_type CUSTOM needs a launch_template that brings the AMI (image_id, or an existing template)\x1a0this.ami_type != 20 || has(this.launch_template)\"\xbc\a\n" +
+	"\x11AwsLaunchTemplate\x12-\n" +
+	"\x02id\x18\x01 \x01(\tB\x1d\xbaH\x1a\xd8\x01\x01r\x152\x13^lt-[0-9a-f]{8,17}$R\x02id\x12\x1c\n" +
+	"\x04name\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x04name\x121\n" +
+	"\aversion\x18\x03 \x01(\tB\x17\xbaH\x14\xd8\x01\x01r\x0f2\r^[1-9][0-9]*$R\aversion\x12Q\n" +
+	"\x12security_group_ids\x18\x04 \x03(\tB#\xbaH \x92\x01\x1d\x10\x04\x18\x01\"\x17r\x152\x13^sg-[0-9a-f]{8,17}$R\x10securityGroupIds\x129\n" +
+	"\bimage_id\x18\x05 \x01(\tB\x1e\xbaH\x1b\xd8\x01\x01r\x162\x14^ami-[0-9a-f]{8,17}$R\aimageId\x12&\n" +
+	"\tuser_data\x18\x06 \x01(\tB\t\xbaH\x06r\x04\x18ت\x01R\buserData:\xf0\x04\xbaH\xec\x04\x1a\xb5\x03\n" +
+	"$launch_template.existing_or_rendered\x12\x7fgive an existing template (id or name, with version) or a rendered one (security_group_ids, image_id), not both and not neither\x1a\x8b\x02((this.id != '') != (this.name != '') && this.version != '' && size(this.security_group_ids) == 0 && this.image_id == '' && this.user_data == '') || (this.id == '' && this.name == '' && this.version == '' && (size(this.security_group_ids) > 0 || this.image_id != ''))\x1a\xb1\x01\n" +
+	"\x1alaunch_template.custom_ami\x12bimage_id and user_data go together: nodes of a custom AMI join the cluster through their user data\x1a/(this.image_id != '') == (this.user_data != '')\"\xf1\x01\n" +
 	"\x10AwsClusterStatus\x12\x1f\n" +
 	"\vcluster_arn\x18\x01 \x01(\tR\n" +
 	"clusterArn\x129\n" +
@@ -934,7 +1164,7 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\bSTANDARD\x12-\n" +
 	"\x19AWS_SUPPORT_TYPE_EXTENDED\x10\x02\x1a\x0e\x8a\xb5\x18\n" +
 	"\n" +
-	"\bEXTENDED*\xab\v\n" +
+	"\bEXTENDED*\xd2\v\n" +
 	"\n" +
 	"AwsAmiType\x12\x1c\n" +
 	"\x18AWS_AMI_TYPE_UNSPECIFIED\x10\x00\x12E\n" +
@@ -976,7 +1206,9 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"%AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64\x10\x12\x1a\x1e\x8a\xb5\x18\x1a\n" +
 	"\x18WINDOWS_CORE_2025_x86_64\x12I\n" +
 	"%AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64\x10\x13\x1a\x1e\x8a\xb5\x18\x1a\n" +
-	"\x18WINDOWS_FULL_2025_x86_64B\x98\x01\n" +
+	"\x18WINDOWS_FULL_2025_x86_64\x12%\n" +
+	"\x13AWS_AMI_TYPE_CUSTOM\x10\x14\x1a\f\x8a\xb5\x18\b\n" +
+	"\x06CUSTOMB\x98\x01\n" +
 	"\fcom.cloud.v1B\bAwsProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -992,38 +1224,42 @@ func file_cloud_v1_aws_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_aws_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_cloud_v1_aws_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_cloud_v1_aws_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_cloud_v1_aws_proto_goTypes = []any{
-	(AwsAuthenticationMode)(0), // 0: cloud.v1.AwsAuthenticationMode
-	(AwsClusterLogType)(0),     // 1: cloud.v1.AwsClusterLogType
-	(AwsSupportType)(0),        // 2: cloud.v1.AwsSupportType
-	(AwsAmiType)(0),            // 3: cloud.v1.AwsAmiType
-	(*AwsClusterSpec)(nil),     // 4: cloud.v1.AwsClusterSpec
-	(*AwsAddon)(nil),           // 5: cloud.v1.AwsAddon
-	(*AwsAddonStatus)(nil),     // 6: cloud.v1.AwsAddonStatus
-	(*AwsImportNetwork)(nil),   // 7: cloud.v1.AwsImportNetwork
-	(*AwsAccessConfig)(nil),    // 8: cloud.v1.AwsAccessConfig
-	(*AwsUpgradePolicy)(nil),   // 9: cloud.v1.AwsUpgradePolicy
-	(*AwsNodePoolSpec)(nil),    // 10: cloud.v1.AwsNodePoolSpec
-	(*AwsClusterStatus)(nil),   // 11: cloud.v1.AwsClusterStatus
-	(ManagedResourceState)(0),  // 12: cloud.v1.ManagedResourceState
+	(AwsAuthenticationMode)(0),      // 0: cloud.v1.AwsAuthenticationMode
+	(AwsClusterLogType)(0),          // 1: cloud.v1.AwsClusterLogType
+	(AwsSupportType)(0),             // 2: cloud.v1.AwsSupportType
+	(AwsAmiType)(0),                 // 3: cloud.v1.AwsAmiType
+	(*AwsClusterSpec)(nil),          // 4: cloud.v1.AwsClusterSpec
+	(*AwsControlPlaneLogGroup)(nil), // 5: cloud.v1.AwsControlPlaneLogGroup
+	(*AwsAddon)(nil),                // 6: cloud.v1.AwsAddon
+	(*AwsAddonStatus)(nil),          // 7: cloud.v1.AwsAddonStatus
+	(*AwsImportNetwork)(nil),        // 8: cloud.v1.AwsImportNetwork
+	(*AwsAccessConfig)(nil),         // 9: cloud.v1.AwsAccessConfig
+	(*AwsUpgradePolicy)(nil),        // 10: cloud.v1.AwsUpgradePolicy
+	(*AwsNodePoolSpec)(nil),         // 11: cloud.v1.AwsNodePoolSpec
+	(*AwsLaunchTemplate)(nil),       // 12: cloud.v1.AwsLaunchTemplate
+	(*AwsClusterStatus)(nil),        // 13: cloud.v1.AwsClusterStatus
+	(ManagedResourceState)(0),       // 14: cloud.v1.ManagedResourceState
 }
 var file_cloud_v1_aws_proto_depIdxs = []int32{
-	8,  // 0: cloud.v1.AwsClusterSpec.access_config:type_name -> cloud.v1.AwsAccessConfig
+	9,  // 0: cloud.v1.AwsClusterSpec.access_config:type_name -> cloud.v1.AwsAccessConfig
 	1,  // 1: cloud.v1.AwsClusterSpec.enabled_cluster_log_types:type_name -> cloud.v1.AwsClusterLogType
-	9,  // 2: cloud.v1.AwsClusterSpec.upgrade_policy:type_name -> cloud.v1.AwsUpgradePolicy
-	10, // 3: cloud.v1.AwsClusterSpec.default_node_pool:type_name -> cloud.v1.AwsNodePoolSpec
-	5,  // 4: cloud.v1.AwsClusterSpec.addons:type_name -> cloud.v1.AwsAddon
-	12, // 5: cloud.v1.AwsAddonStatus.state:type_name -> cloud.v1.ManagedResourceState
-	0,  // 6: cloud.v1.AwsAccessConfig.authentication_mode:type_name -> cloud.v1.AwsAuthenticationMode
-	2,  // 7: cloud.v1.AwsUpgradePolicy.support_type:type_name -> cloud.v1.AwsSupportType
-	3,  // 8: cloud.v1.AwsNodePoolSpec.ami_type:type_name -> cloud.v1.AwsAmiType
-	6,  // 9: cloud.v1.AwsClusterStatus.addons:type_name -> cloud.v1.AwsAddonStatus
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 2: cloud.v1.AwsClusterSpec.upgrade_policy:type_name -> cloud.v1.AwsUpgradePolicy
+	11, // 3: cloud.v1.AwsClusterSpec.default_node_pool:type_name -> cloud.v1.AwsNodePoolSpec
+	6,  // 4: cloud.v1.AwsClusterSpec.addons:type_name -> cloud.v1.AwsAddon
+	5,  // 5: cloud.v1.AwsClusterSpec.control_plane_log_group:type_name -> cloud.v1.AwsControlPlaneLogGroup
+	14, // 6: cloud.v1.AwsAddonStatus.state:type_name -> cloud.v1.ManagedResourceState
+	0,  // 7: cloud.v1.AwsAccessConfig.authentication_mode:type_name -> cloud.v1.AwsAuthenticationMode
+	2,  // 8: cloud.v1.AwsUpgradePolicy.support_type:type_name -> cloud.v1.AwsSupportType
+	3,  // 9: cloud.v1.AwsNodePoolSpec.ami_type:type_name -> cloud.v1.AwsAmiType
+	12, // 10: cloud.v1.AwsNodePoolSpec.launch_template:type_name -> cloud.v1.AwsLaunchTemplate
+	7,  // 11: cloud.v1.AwsClusterStatus.addons:type_name -> cloud.v1.AwsAddonStatus
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_aws_proto_init() }
@@ -1033,13 +1269,15 @@ func file_cloud_v1_aws_proto_init() {
 	}
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_options_proto_init()
+	file_cloud_v1_aws_proto_msgTypes[0].OneofWrappers = []any{}
+	file_cloud_v1_aws_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_aws_proto_rawDesc), len(file_cloud_v1_aws_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -22,6 +22,127 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// AccessEntryType is AccessEntry.type: what kind of principal the entry is
+// for. Only STANDARD entries take access policies; the node types let
+// self-managed nodes of that kind join the cluster.
+type AccessEntryType int32
+
+const (
+	// Server default: STANDARD.
+	AccessEntryType_ACCESS_ENTRY_TYPE_UNSPECIFIED    AccessEntryType = 0
+	AccessEntryType_ACCESS_ENTRY_TYPE_STANDARD       AccessEntryType = 1
+	AccessEntryType_ACCESS_ENTRY_TYPE_EC2_LINUX      AccessEntryType = 2
+	AccessEntryType_ACCESS_ENTRY_TYPE_EC2_WINDOWS    AccessEntryType = 3
+	AccessEntryType_ACCESS_ENTRY_TYPE_FARGATE_LINUX  AccessEntryType = 4
+	AccessEntryType_ACCESS_ENTRY_TYPE_EC2            AccessEntryType = 5
+	AccessEntryType_ACCESS_ENTRY_TYPE_HYBRID_LINUX   AccessEntryType = 6
+	AccessEntryType_ACCESS_ENTRY_TYPE_HYPERPOD_LINUX AccessEntryType = 7
+)
+
+// Enum value maps for AccessEntryType.
+var (
+	AccessEntryType_name = map[int32]string{
+		0: "ACCESS_ENTRY_TYPE_UNSPECIFIED",
+		1: "ACCESS_ENTRY_TYPE_STANDARD",
+		2: "ACCESS_ENTRY_TYPE_EC2_LINUX",
+		3: "ACCESS_ENTRY_TYPE_EC2_WINDOWS",
+		4: "ACCESS_ENTRY_TYPE_FARGATE_LINUX",
+		5: "ACCESS_ENTRY_TYPE_EC2",
+		6: "ACCESS_ENTRY_TYPE_HYBRID_LINUX",
+		7: "ACCESS_ENTRY_TYPE_HYPERPOD_LINUX",
+	}
+	AccessEntryType_value = map[string]int32{
+		"ACCESS_ENTRY_TYPE_UNSPECIFIED":    0,
+		"ACCESS_ENTRY_TYPE_STANDARD":       1,
+		"ACCESS_ENTRY_TYPE_EC2_LINUX":      2,
+		"ACCESS_ENTRY_TYPE_EC2_WINDOWS":    3,
+		"ACCESS_ENTRY_TYPE_FARGATE_LINUX":  4,
+		"ACCESS_ENTRY_TYPE_EC2":            5,
+		"ACCESS_ENTRY_TYPE_HYBRID_LINUX":   6,
+		"ACCESS_ENTRY_TYPE_HYPERPOD_LINUX": 7,
+	}
+)
+
+func (x AccessEntryType) Enum() *AccessEntryType {
+	p := new(AccessEntryType)
+	*p = x
+	return p
+}
+
+func (x AccessEntryType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccessEntryType) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_access_proto_enumTypes[0].Descriptor()
+}
+
+func (AccessEntryType) Type() protoreflect.EnumType {
+	return &file_cloud_v1_access_proto_enumTypes[0]
+}
+
+func (x AccessEntryType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccessEntryType.Descriptor instead.
+func (AccessEntryType) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{0}
+}
+
+// AccessPolicyScope is AccessPolicyAssociation.accessScope.type.
+type AccessPolicyScope int32
+
+const (
+	// Server default: CLUSTER.
+	AccessPolicyScope_ACCESS_POLICY_SCOPE_UNSPECIFIED AccessPolicyScope = 0
+	// The whole cluster.
+	AccessPolicyScope_ACCESS_POLICY_SCOPE_CLUSTER AccessPolicyScope = 1
+	// The namespaces listed in AccessPolicy.namespaces.
+	AccessPolicyScope_ACCESS_POLICY_SCOPE_NAMESPACE AccessPolicyScope = 2
+)
+
+// Enum value maps for AccessPolicyScope.
+var (
+	AccessPolicyScope_name = map[int32]string{
+		0: "ACCESS_POLICY_SCOPE_UNSPECIFIED",
+		1: "ACCESS_POLICY_SCOPE_CLUSTER",
+		2: "ACCESS_POLICY_SCOPE_NAMESPACE",
+	}
+	AccessPolicyScope_value = map[string]int32{
+		"ACCESS_POLICY_SCOPE_UNSPECIFIED": 0,
+		"ACCESS_POLICY_SCOPE_CLUSTER":     1,
+		"ACCESS_POLICY_SCOPE_NAMESPACE":   2,
+	}
+)
+
+func (x AccessPolicyScope) Enum() *AccessPolicyScope {
+	p := new(AccessPolicyScope)
+	*p = x
+	return p
+}
+
+func (x AccessPolicyScope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccessPolicyScope) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_access_proto_enumTypes[1].Descriptor()
+}
+
+func (AccessPolicyScope) Type() protoreflect.EnumType {
+	return &file_cloud_v1_access_proto_enumTypes[1]
+}
+
+func (x AccessPolicyScope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccessPolicyScope.Descriptor instead.
+func (AccessPolicyScope) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{1}
+}
+
 // AccessSpec controls who can use the Kubernetes API. The server's own
 // provisioning identity is always an admin (AWS:
 // accessConfig.bootstrapClusterCreatorAdminPermissions = true); it is not
@@ -40,8 +161,17 @@ type AccessSpec struct {
 	//	Azure Entra ID group object ID:
 	//	      azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds.
 	AdminPrincipals []string `protobuf:"bytes,1,rep,name=admin_principals,json=adminPrincipals,proto3" json:"admin_principals,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// AWS: EKS access entries beyond the admins, each a principal with the
+	// access policies it gets. Mutable: entries and policies are added,
+	// removed and changed without touching the cluster. A principal listed
+	// here must not be in admin_principals. Needs authenticationMode API or
+	// API_AND_CONFIG_MAP.
+	//
+	//	AWS   one AccessEntry each, plus one AccessPolicyAssociation per
+	//	      policy
+	AccessEntries []*AccessEntry `protobuf:"bytes,2,rep,name=access_entries,json=accessEntries,proto3" json:"access_entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AccessSpec) Reset() {
@@ -81,14 +211,190 @@ func (x *AccessSpec) GetAdminPrincipals() []string {
 	return nil
 }
 
+func (x *AccessSpec) GetAccessEntries() []*AccessEntry {
+	if x != nil {
+		return x.AccessEntries
+	}
+	return nil
+}
+
+// AccessEntry is one EKS access entry.
+type AccessEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// IAM role or user ARN (AccessEntry.principalArn). Service-linked roles
+	// are refused: EKS manages their entries.
+	PrincipalArn string `protobuf:"bytes,1,opt,name=principal_arn,json=principalArn,proto3" json:"principal_arn,omitempty"`
+	// AccessEntry.type. Defaults to STANDARD.
+	Type AccessEntryType `protobuf:"varint,2,opt,name=type,proto3,enum=cloud.v1.AccessEntryType" json:"type,omitempty"`
+	// The access policies of the entry (AccessPolicyAssociation).
+	Policies      []*AccessPolicy `protobuf:"bytes,3,rep,name=policies,proto3" json:"policies,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessEntry) Reset() {
+	*x = AccessEntry{}
+	mi := &file_cloud_v1_access_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessEntry) ProtoMessage() {}
+
+func (x *AccessEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_access_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessEntry.ProtoReflect.Descriptor instead.
+func (*AccessEntry) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AccessEntry) GetPrincipalArn() string {
+	if x != nil {
+		return x.PrincipalArn
+	}
+	return ""
+}
+
+func (x *AccessEntry) GetType() AccessEntryType {
+	if x != nil {
+		return x.Type
+	}
+	return AccessEntryType_ACCESS_ENTRY_TYPE_UNSPECIFIED
+}
+
+func (x *AccessEntry) GetPolicies() []*AccessPolicy {
+	if x != nil {
+		return x.Policies
+	}
+	return nil
+}
+
+// AccessPolicy associates an EKS access policy with an access entry.
+type AccessPolicy struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// EKS access policy ARN, e.g.
+	// "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy".
+	PolicyArn string `protobuf:"bytes,1,opt,name=policy_arn,json=policyArn,proto3" json:"policy_arn,omitempty"`
+	// Defaults to CLUSTER.
+	Scope AccessPolicyScope `protobuf:"varint,2,opt,name=scope,proto3,enum=cloud.v1.AccessPolicyScope" json:"scope,omitempty"`
+	// Kubernetes namespaces the policy applies to (scope NAMESPACE).
+	Namespaces    []string `protobuf:"bytes,3,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessPolicy) Reset() {
+	*x = AccessPolicy{}
+	mi := &file_cloud_v1_access_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessPolicy) ProtoMessage() {}
+
+func (x *AccessPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_access_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessPolicy.ProtoReflect.Descriptor instead.
+func (*AccessPolicy) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_access_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AccessPolicy) GetPolicyArn() string {
+	if x != nil {
+		return x.PolicyArn
+	}
+	return ""
+}
+
+func (x *AccessPolicy) GetScope() AccessPolicyScope {
+	if x != nil {
+		return x.Scope
+	}
+	return AccessPolicyScope_ACCESS_POLICY_SCOPE_UNSPECIFIED
+}
+
+func (x *AccessPolicy) GetNamespaces() []string {
+	if x != nil {
+		return x.Namespaces
+	}
+	return nil
+}
+
 var File_cloud_v1_access_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_access_proto_rawDesc = "" +
 	"\n" +
-	"\x15cloud/v1/access.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\"L\n" +
+	"\x15cloud/v1/access.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/options.proto\"\x92\x02\n" +
 	"\n" +
 	"AccessSpec\x12>\n" +
-	"\x10admin_principals\x18\x01 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10\x14\x18\x01\"\ar\x05\x10\x01\x18\x80\x10R\x0fadminPrincipalsB\x9b\x01\n" +
+	"\x10admin_principals\x18\x01 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10\x14\x18\x01\"\ar\x05\x10\x01\x18\x80\x10R\x0fadminPrincipals\x12F\n" +
+	"\x0eaccess_entries\x18\x02 \x03(\v2\x15.cloud.v1.AccessEntryB\b\xbaH\x05\x92\x01\x02\x102R\raccessEntries:|\xbaHy\x1aw\n" +
+	"\x15access_entries.unique\x12(access_entries principals must be unique\x1a4this.access_entries.map(e, e.principal_arn).unique()\"\x9b\x04\n" +
+	"\vAccessEntry\x12\x86\x01\n" +
+	"\rprincipal_arn\x18\x01 \x01(\tBa\xbaH^r\\2@^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$\xba\x01\x17:role/aws-service-role/R\fprincipalArn\x127\n" +
+	"\x04type\x18\x02 \x01(\x0e2\x19.cloud.v1.AccessEntryTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04type\x12<\n" +
+	"\bpolicies\x18\x03 \x03(\v2\x16.cloud.v1.AccessPolicyB\b\xbaH\x05\x92\x01\x02\x10\x14R\bpolicies:\x8b\x02\xbaH\x87\x02\x1a\x8f\x01\n" +
+	"#access_entry.policies_standard_only\x12*only STANDARD access entries take policies\x1a<size(this.policies) == 0 || this.type == 0 || this.type == 1\x1as\n" +
+	"\x1caccess_entry.unique_policies\x12&an access entry lists each policy once\x1a+this.policies.map(p, p.policy_arn).unique()\"\xfd\x02\n" +
+	"\fAccessPolicy\x12b\n" +
+	"\n" +
+	"policy_arn\x18\x01 \x01(\tBC\xbaH@r>2<^arn:aws[a-z-]*:eks::aws:cluster-access-policy/[A-Za-z0-9]+$R\tpolicyArn\x12;\n" +
+	"\x05scope\x18\x02 \x01(\x0e2\x1b.cloud.v1.AccessPolicyScopeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05scope\x122\n" +
+	"\n" +
+	"namespaces\x18\x03 \x03(\tB\x12\xbaH\x0f\x92\x01\f\x102\x18\x01\"\x06r\x04\x10\x01\x18?R\n" +
+	"namespaces:\x97\x01\xbaH\x93\x01\x1a\x90\x01\n" +
+	"\x18access_policy.namespaces\x12Bnamespaces are required for scope NAMESPACE and only allowed there\x1a0(this.scope == 2) == (size(this.namespaces) > 0)*\xa0\x03\n" +
+	"\x0fAccessEntryType\x12!\n" +
+	"\x1dACCESS_ENTRY_TYPE_UNSPECIFIED\x10\x00\x12.\n" +
+	"\x1aACCESS_ENTRY_TYPE_STANDARD\x10\x01\x1a\x0e\x8a\xb5\x18\n" +
+	"\n" +
+	"\bSTANDARD\x120\n" +
+	"\x1bACCESS_ENTRY_TYPE_EC2_LINUX\x10\x02\x1a\x0f\x8a\xb5\x18\v\n" +
+	"\tEC2_LINUX\x124\n" +
+	"\x1dACCESS_ENTRY_TYPE_EC2_WINDOWS\x10\x03\x1a\x11\x8a\xb5\x18\r\n" +
+	"\vEC2_WINDOWS\x128\n" +
+	"\x1fACCESS_ENTRY_TYPE_FARGATE_LINUX\x10\x04\x1a\x13\x8a\xb5\x18\x0f\n" +
+	"\rFARGATE_LINUX\x12$\n" +
+	"\x15ACCESS_ENTRY_TYPE_EC2\x10\x05\x1a\t\x8a\xb5\x18\x05\n" +
+	"\x03EC2\x126\n" +
+	"\x1eACCESS_ENTRY_TYPE_HYBRID_LINUX\x10\x06\x1a\x12\x8a\xb5\x18\x0e\n" +
+	"\fHYBRID_LINUX\x12:\n" +
+	" ACCESS_ENTRY_TYPE_HYPERPOD_LINUX\x10\a\x1a\x14\x8a\xb5\x18\x10\n" +
+	"\x0eHYPERPOD_LINUX*\x9c\x01\n" +
+	"\x11AccessPolicyScope\x12#\n" +
+	"\x1fACCESS_POLICY_SCOPE_UNSPECIFIED\x10\x00\x12.\n" +
+	"\x1bACCESS_POLICY_SCOPE_CLUSTER\x10\x01\x1a\r\x8a\xb5\x18\t\n" +
+	"\acluster\x122\n" +
+	"\x1dACCESS_POLICY_SCOPE_NAMESPACE\x10\x02\x1a\x0f\x8a\xb5\x18\v\n" +
+	"\tnamespaceB\x9b\x01\n" +
 	"\fcom.cloud.v1B\vAccessProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -103,16 +409,25 @@ func file_cloud_v1_access_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_access_proto_rawDescData
 }
 
-var file_cloud_v1_access_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_cloud_v1_access_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_cloud_v1_access_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_cloud_v1_access_proto_goTypes = []any{
-	(*AccessSpec)(nil), // 0: cloud.v1.AccessSpec
+	(AccessEntryType)(0),   // 0: cloud.v1.AccessEntryType
+	(AccessPolicyScope)(0), // 1: cloud.v1.AccessPolicyScope
+	(*AccessSpec)(nil),     // 2: cloud.v1.AccessSpec
+	(*AccessEntry)(nil),    // 3: cloud.v1.AccessEntry
+	(*AccessPolicy)(nil),   // 4: cloud.v1.AccessPolicy
 }
 var file_cloud_v1_access_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	3, // 0: cloud.v1.AccessSpec.access_entries:type_name -> cloud.v1.AccessEntry
+	0, // 1: cloud.v1.AccessEntry.type:type_name -> cloud.v1.AccessEntryType
+	4, // 2: cloud.v1.AccessEntry.policies:type_name -> cloud.v1.AccessPolicy
+	1, // 3: cloud.v1.AccessPolicy.scope:type_name -> cloud.v1.AccessPolicyScope
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_access_proto_init() }
@@ -120,18 +435,20 @@ func file_cloud_v1_access_proto_init() {
 	if File_cloud_v1_access_proto != nil {
 		return
 	}
+	file_cloud_v1_options_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_access_proto_rawDesc), len(file_cloud_v1_access_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   1,
+			NumEnums:      2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_cloud_v1_access_proto_goTypes,
 		DependencyIndexes: file_cloud_v1_access_proto_depIdxs,
+		EnumInfos:         file_cloud_v1_access_proto_enumTypes,
 		MessageInfos:      file_cloud_v1_access_proto_msgTypes,
 	}.Build()
 	File_cloud_v1_access_proto = out.File

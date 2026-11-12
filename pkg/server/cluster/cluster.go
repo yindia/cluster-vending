@@ -113,8 +113,6 @@ func supported(spec *cloudv1.ClusterSpec) error {
 		return connect.NewError(connect.CodeUnimplemented, "only aws clusters are supported")
 	case spec.GetExistingCluster() != nil:
 		return connect.NewError(connect.CodeUnimplemented, "importing an existing cluster is not implemented yet")
-	case spec.GetControlPlane().GetSecretsEncryption().GetEnabled():
-		return connect.NewError(connect.CodeUnimplemented, "secrets encryption is not supported yet (needs the KMS provider)")
 	}
 	return nil
 }
@@ -224,6 +222,13 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 		s.logger().ErrorContext(ctx, "read EKS cluster version", "cluster_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's EKS cluster")
 	}
+	if err := s.fillLive(ctx, row, &plan); err != nil {
+		s.logger().ErrorContext(ctx, "read the cluster's resources", "cluster_id", row.ID, "error", err)
+		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's resources")
+	}
+	// Objects that wait for another resource are not rendered yet; the
+	// cluster is applied again (advance) until none is pending.
+	pending := plan.Pending()
 	objects := crossplaneaws.ClusterResources(plan)
 	hold, err := s.holdBack(ctx, row)
 	if err != nil {
@@ -246,6 +251,12 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 			s.logger().ErrorContext(ctx, "apply cluster resource", "cluster_id", row.ID, "object", obj.GetName(), "error", err)
 			return applyError(err)
 		}
+	}
+	if len(pending) > 0 {
+		// Nothing is pruned from a partial render: an object left out
+		// because it waits (the EKS cluster of a cluster that turns
+		// encryption on, while its key is created) is not a dropped one.
+		return nil
 	}
 	if err := s.deps.Prune(ctx, owner, append(slices.Clone(objects), retiring...)); err != nil {
 		return connect.NewError(connect.CodeInternal, "could not remove the cluster's dropped resources: "+err.Error())
@@ -272,7 +283,7 @@ func (s *ClusterService) markApplied(ctx context.Context, row *model.Cluster) er
 func applyError(err error) error {
 	if meta.IsNoMatchError(err) {
 		return connect.NewError(connect.CodeFailedPrecondition,
-			"the Crossplane AWS eks / iam providers are not installed in the management cluster")
+			"a Crossplane AWS provider the cluster needs (eks, iam, ec2, kms, cloudwatchlogs) is not installed in the management cluster")
 	}
 	return connect.NewError(connect.CodeInternal, "could not create the cluster's resources")
 }

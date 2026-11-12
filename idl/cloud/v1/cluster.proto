@@ -137,7 +137,18 @@ message ClusterSpec {
   option (buf.validate.message).cel = {
     id: "public_access_cidrs_required"
     message: "control_plane.endpoint_access.public_access_cidrs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)"
-    expression: "has(this.control_plane) && has(this.control_plane.endpoint_access) && size(this.control_plane.endpoint_access.public_access_cidrs) > 0"
+    expression: "has(this.control_plane) && has(this.control_plane.endpoint_access) && (size(this.control_plane.endpoint_access.public_access_cidrs) > 0 || (has(this.control_plane.endpoint_access.endpoint_public_access) && !this.control_plane.endpoint_access.endpoint_public_access))"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "aws.access_entries_auth_mode"
+    message: "access_entries need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)"
+    expression: "!has(this.aws) || size(this.access.access_entries) == 0 || this.aws.access_config.authentication_mode != 3"
+  };
+  option (buf.validate.message).cel = {
+    id: "aws.access_entries_not_admins"
+    message: "a principal is either in admin_principals or in access_entries, not both"
+    expression: "this.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))"
   };
 
   // --- Constraints for every non-AWS provider ---

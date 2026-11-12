@@ -120,6 +120,8 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | `spec.region` | `region` | `location` | `location` |
 | `control_plane.kubernetes_version` | `Cluster.version`, `NodeGroup.version` | `Cluster.minMasterVersion` (a floor), `NodePool.version` | `kubernetesVersion`, `orchestratorVersion` |
 | `control_plane.secrets_encryption.enabled` | `kms` `Key` + `Alias`; `Cluster.encryptionConfig` | Cloud KMS key; `Cluster.databaseEncryption` | Key Vault key; `keyManagementService` |
+| `control_plane.secrets_encryption.kms_key_arn` | an existing key: `Cluster.encryptionConfig` only, no `Key` / `Alias` | - | - |
+| `control_plane.endpoint_access.endpoint_private_access` / `endpoint_public_access` | `Cluster.vpcConfig.endpointPrivateAccess` / `endpointPublicAccess` (default true / true) | - | - |
 | `endpoint_access.public_access_cidrs` | `vpcConfig.publicAccessCidrs` | `masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock` | `apiServerAccessProfile.authorizedIpRanges` (+ the cluster's egress IPs) |
 | private nodes, public endpoint (fixed) | `endpointPrivateAccess`, `endpointPublicAccess` = true | `enablePrivateNodes` = true, `enablePrivateEndpoint` = false, `gcpPublicCidrsAccessEnabled` = false | `privateClusterEnabled` = false |
 | `NetworkSpec.layout.cidr_block` | `VPC.cidrBlock` | carved into `Subnetwork.ipCidrRange` | `VirtualNetwork.addressSpace` |
@@ -141,6 +143,11 @@ always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
 | pool `taints` | `taint[]` | `nodeConfig.taint[]` | `nodeTaints` |
 | `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
 | `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds` |
+| `spec.access.access_entries` | `AccessEntry` (any type) + one `AccessPolicyAssociation` per policy (cluster or namespace scope) | - | - |
+| `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` | - | - |
+| `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer | - | - |
+| `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` (immutable) | - | - |
+| `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate`: an existing template, or a rendered ec2 `LaunchTemplate` (extra security groups, custom AMI) | - | - |
 | `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
 
 Per-provider settings that stay out of the common spec and land in the
@@ -389,7 +396,7 @@ tenants sharing a cloud account; the tenant stays visible through the
 - Add-on versions (AWS `Addon.addonVersion`) are set explicitly to the
   default for the cluster's Kubernetes version and bumped on every upgrade.
   An omitted version would be late-initialized and pinned.
-- `secrets_encryption.enabled` can go from false to true, never back.
+- `secrets_encryption` can be turned on (`enabled`, or `kms_key_arn` for an existing key), never off, and its key never changes.
 - GKE `deletionProtection` defaults to true: the server sets it to false, or
   `DeleteCluster` could never finish.
 - Azure needs a second pass for values that exist only after creation:

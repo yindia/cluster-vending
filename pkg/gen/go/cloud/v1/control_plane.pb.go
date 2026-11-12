@@ -114,8 +114,15 @@ func (x *ControlPlaneSpec) GetSecretsEncryption() *SecretsEncryption {
 //
 // An imported cluster keeps its existing key (CARRIED_OVER).
 type SecretsEncryption struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Turns encryption on with a key the platform creates for the cluster
+	// (AWS: kms Key with rotation on, Alias "alias/<cluster name>-eks"),
+	// unless kms_key_arn names an existing one.
+	Enabled bool `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// AWS: ARN of an existing KMS key to encrypt with instead. The platform
+	// does not create, change or delete it. Implies enabled. Immutable once
+	// set.
+	KmsKeyArn     string `protobuf:"bytes,2,opt,name=kms_key_arn,json=kmsKeyArn,proto3" json:"kms_key_arn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -157,9 +164,16 @@ func (x *SecretsEncryption) GetEnabled() bool {
 	return false
 }
 
+func (x *SecretsEncryption) GetKmsKeyArn() string {
+	if x != nil {
+		return x.KmsKeyArn
+	}
+	return ""
+}
+
 // EndpointAccess configures the Kubernetes API server endpoints. Nodes are
-// private and the API server always has a public endpoint, restricted by
-// public_access_cidrs:
+// private. By default the API server has a private and a public endpoint,
+// the public one restricted by public_access_cidrs:
 //
 //	AWS   vpcConfig.endpointPrivateAccess = true,
 //	      vpcConfig.endpointPublicAccess = true
@@ -173,9 +187,10 @@ func (x *SecretsEncryption) GetEnabled() bool {
 type EndpointAccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// IPv4 CIDRs allowed to reach the public endpoint. At least one is
-	// required (ClusterSpec rule public_access_cidrs_required): who may reach
-	// the API is the client's choice, there is no default. ["0.0.0.0/0"]
-	// allows any address.
+	// required while the public endpoint is on (ClusterSpec rule
+	// public_access_cidrs_required): who may reach the API is the client's
+	// choice, there is no default. ["0.0.0.0/0"] allows any address. Ignored
+	// when endpoint_public_access is false.
 	//
 	//	AWS   vpcConfig.publicAccessCidrs
 	//	GCP   masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock
@@ -186,8 +201,20 @@ type EndpointAccess struct {
 	// IPs (ClusterStatus.network.egress_ips), or nodes could not reach the API.
 	// Capped at 40, the lowest provider limit (EKS).
 	PublicAccessCidrs []string `protobuf:"bytes,1,rep,name=public_access_cidrs,json=publicAccessCidrs,proto3" json:"public_access_cidrs,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The API server's endpoint inside the network. Defaults to true. At
+	// least one of the two endpoints must be on. Mutable.
+	//
+	//	AWS   vpcConfig.endpointPrivateAccess
+	EndpointPrivateAccess *bool `protobuf:"varint,2,opt,name=endpoint_private_access,json=endpointPrivateAccess,proto3,oneof" json:"endpoint_private_access,omitempty"`
+	// The API server's public endpoint. Defaults to true. Without it the
+	// API is reachable from the cluster's network only: tooling that runs
+	// elsewhere (the management cluster's Helm provider included) cannot
+	// reach it. Mutable.
+	//
+	//	AWS   vpcConfig.endpointPublicAccess
+	EndpointPublicAccess *bool `protobuf:"varint,3,opt,name=endpoint_public_access,json=endpointPublicAccess,proto3,oneof" json:"endpoint_public_access,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *EndpointAccess) Reset() {
@@ -227,6 +254,20 @@ func (x *EndpointAccess) GetPublicAccessCidrs() []string {
 	return nil
 }
 
+func (x *EndpointAccess) GetEndpointPrivateAccess() bool {
+	if x != nil && x.EndpointPrivateAccess != nil {
+		return *x.EndpointPrivateAccess
+	}
+	return false
+}
+
+func (x *EndpointAccess) GetEndpointPublicAccess() bool {
+	if x != nil && x.EndpointPublicAccess != nil {
+		return *x.EndpointPublicAccess
+	}
+	return false
+}
+
 var File_cloud_v1_control_plane_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_control_plane_proto_rawDesc = "" +
@@ -235,11 +276,18 @@ const file_cloud_v1_control_plane_proto_rawDesc = "" +
 	"\x10ControlPlaneSpec\x12F\n" +
 	"\x12kubernetes_version\x18\x01 \x01(\tB\x17\xbaH\x14\xd8\x01\x01r\x0f2\r^1\\.[0-9]{2}$R\x11kubernetesVersion\x12A\n" +
 	"\x0fendpoint_access\x18\x02 \x01(\v2\x18.cloud.v1.EndpointAccessR\x0eendpointAccess\x12J\n" +
-	"\x12secrets_encryption\x18\x03 \x01(\v2\x1b.cloud.v1.SecretsEncryptionR\x11secretsEncryption\"-\n" +
+	"\x12secrets_encryption\x18\x03 \x01(\v2\x1b.cloud.v1.SecretsEncryptionR\x11secretsEncryption\"\x94\x01\n" +
 	"\x11SecretsEncryption\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\"S\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12e\n" +
+	"\vkms_key_arn\x18\x02 \x01(\tBE\xbaHB\xd8\x01\x01r=2;^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$R\tkmsKeyArn\"\x80\x06\n" +
 	"\x0eEndpointAccess\x12A\n" +
-	"\x13public_access_cidrs\x18\x01 \x03(\tB\x11\xbaH\x0e\x92\x01\v\x10(\x18\x01\"\x05r\x03\xf0\x01\x01R\x11publicAccessCidrsB\xa1\x01\n" +
+	"\x13public_access_cidrs\x18\x01 \x03(\tB\x11\xbaH\x0e\x92\x01\v\x10(\x18\x01\"\x05r\x03\xf0\x01\x01R\x11publicAccessCidrs\x12;\n" +
+	"\x17endpoint_private_access\x18\x02 \x01(\bH\x00R\x15endpointPrivateAccess\x88\x01\x01\x129\n" +
+	"\x16endpoint_public_access\x18\x03 \x01(\bH\x01R\x14endpointPublicAccess\x88\x01\x01:\xfb\x03\xbaH\xf7\x03\x1a\xf0\x01\n" +
+	"\x1cendpoint_access.one_endpoint\x12Gendpoint_private_access and endpoint_public_access cannot both be false\x1a\x86\x01!has(this.endpoint_private_access) || !has(this.endpoint_public_access) || this.endpoint_private_access || this.endpoint_public_access\x1a\x81\x02\n" +
+	"'endpoint_access.private_when_not_public\x12Mendpoint_public_access false needs endpoint_private_access true (its default)\x1a\x86\x01!has(this.endpoint_public_access) || this.endpoint_public_access || !has(this.endpoint_private_access) || this.endpoint_private_accessB\x1a\n" +
+	"\x18_endpoint_private_accessB\x19\n" +
+	"\x17_endpoint_public_accessB\xa1\x01\n" +
 	"\fcom.cloud.v1B\x11ControlPlaneProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -275,6 +323,7 @@ func file_cloud_v1_control_plane_proto_init() {
 	if File_cloud_v1_control_plane_proto != nil {
 		return
 	}
+	file_cloud_v1_control_plane_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -1,6 +1,9 @@
 package aws_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"testing"
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
@@ -67,5 +70,21 @@ func TestClusterResources(t *testing.T) {
 	}
 	if _, ok := byName["prod-1a2b3c4d-admin-1-policy"].(*awseks.AccessPolicyAssociation); !ok {
 		t.Error("missing the admin access policy association")
+	}
+}
+
+// The options added since (endpoint access, log group, encryption, access
+// entries, IRSA, security groups, launch template, role names) default to
+// what a cluster rendered before they existed: this is the sha256 of that
+// render, taken before they were added. A change here needs a
+// RenderVersion bump.
+func TestClusterResourcesDefaultRenderUnchanged(t *testing.T) {
+	raw, err := json.Marshal(crossplaneaws.ClusterResources(clusterPlan()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	if got := hex.EncodeToString(sum[:]); got != "16dd6e22414f86f49e5eac6a597fd84bd0409532a8c19f9d94070fe0fba606f1" {
+		t.Errorf("the default render changed (sha256 %s, %d bytes)", got, len(raw))
 	}
 }

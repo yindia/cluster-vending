@@ -24,11 +24,13 @@ func TestActivationPolicy(t *testing.T) {
 	// The MRD names as the providers publish them (kubectl get mrd).
 	want := []string{
 		"accessentries.eks.aws.m.upbound.io", "accesspolicyassociations.eks.aws.m.upbound.io",
-		"addons.eks.aws.m.upbound.io", "clusterauths.eks.aws.m.upbound.io", "clusters.eks.aws.m.upbound.io",
+		"addons.eks.aws.m.upbound.io", "aliases.kms.aws.m.upbound.io", "clusterauths.eks.aws.m.upbound.io", "clusters.eks.aws.m.upbound.io",
 		"defaultnetworkacls.ec2.aws.m.upbound.io", "eips.ec2.aws.m.upbound.io", "flowlogs.ec2.aws.m.upbound.io", "groups.cloudwatchlogs.aws.m.upbound.io",
-		"internetgateways.ec2.aws.m.upbound.io", "natgateways.ec2.aws.m.upbound.io",
+		"internetgateways.ec2.aws.m.upbound.io", "keys.kms.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
+		"natgateways.ec2.aws.m.upbound.io",
 		"networkaclrules.ec2.aws.m.upbound.io", "networkacls.ec2.aws.m.upbound.io",
-		"nodegroups.eks.aws.m.upbound.io", "podidentityassociations.eks.aws.m.upbound.io",
+		"nodegroups.eks.aws.m.upbound.io", "openidconnectproviders.iam.aws.m.upbound.io",
+		"podidentityassociations.eks.aws.m.upbound.io",
 		"policies.iam.aws.m.upbound.io", "releases.helm.m.crossplane.io", "rolepolicyattachments.iam.aws.m.upbound.io",
 		"roles.iam.aws.m.upbound.io", "routes.ec2.aws.m.upbound.io", "routetableassociations.ec2.aws.m.upbound.io",
 		"routetables.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io", "vpcs.ec2.aws.m.upbound.io",
@@ -42,6 +44,9 @@ func TestActivationPolicy(t *testing.T) {
 	plan := clusterPlan()
 	plan.Addons = []crossplaneaws.AddonPlan{{Name: "aws-ebs-csi-driver"},
 		{Name: "aws-mountpoint-s3-csi-driver", S3BucketNames: []string{"b"}}}
+	plan.LogGroupRetentionDays, plan.CreateEncryptionKey, plan.EncryptionKeyARN = 90, true, "arn:aws:kms:us-east-1:111122223333:key/k"
+	plan.IRSA, plan.OIDCIssuer = true, "https://oidc.eks.us-east-1.amazonaws.com/id/ABC"
+	plan.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ImageID: "ami-0123456789abcdef0", UserData: "Zm9v"}
 	built := append(crossplaneaws.ClusterResources(plan), crossplaneaws.NetworkObjects()...)
 	for _, obj := range built {
 		gvk, err := apiutil.GVKForObject(obj, scheme)
@@ -64,8 +69,12 @@ func TestActivationPolicy(t *testing.T) {
 	}
 }
 
-// singular undoes the providers' plurals: policies, accessentries, vpcs.
+// singular undoes the providers' plurals: policies, accessentries, vpcs,
+// aliases.
 func singular(plural string) string {
+	if s, ok := strings.CutSuffix(plural, "ases"); ok {
+		return s + "as"
+	}
 	if s, ok := strings.CutSuffix(plural, "ies"); ok {
 		return s + "y"
 	}

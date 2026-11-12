@@ -100,12 +100,22 @@ func (s *ClusterService) withoutAfterActive(objects []client.Object) ([]client.O
 var resumeAfter = 2 * time.Minute
 
 // resumeCreate reports whether a cluster whose EKS cluster is not ACTIVE
-// is a create that stopped half-way (the server went away between the
-// applies): it is still in its first stage, no call touched its row for
-// resumeAfter, and objects of that stage are not in the management cluster
-// (none recorded yet, or recorded and missing).
+// must be applied again: a new cluster still before its EKS cluster (what
+// must exist first is being created), or a create that stopped half-way
+// (the server went away between the applies): still in its first stage,
+// no call touched its row for resumeAfter, and objects of that stage are
+// not in the management cluster (none recorded yet, or recorded and
+// missing).
 func (s *ClusterService) resumeCreate(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (bool, error) {
-	if row.State != stateProvisioning || createdAfterActive(records) || time.Since(row.UpdatedAt) < resumeAfter {
+	if row.State != stateProvisioning || createdAfterActive(records) {
+		return false, nil
+	}
+	if len(records) > 0 && !slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "Cluster" }) {
+		// The stage before the EKS cluster (its log group, its encryption
+		// key): apply renders the cluster once they exist.
+		return true, nil
+	}
+	if time.Since(row.UpdatedAt) < resumeAfter {
 		return false, nil
 	}
 	views, err := s.deps.Observe(ctx, records)

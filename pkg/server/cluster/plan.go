@@ -64,13 +64,12 @@ func chooseSubnets(subnets []privateSubnet, zoneIDs []string) ([]string, []strin
 }
 
 // resolveSpec fills the spec's defaults (zones, auth mode, node pool
-// capacity and AMI) so the stored spec says what was built. The public
+// capacity and AMI, and those of the optional settings in use:
+// resolveOptions) so the stored spec says what was built. The public
 // endpoint's CIDRs have no default: who may reach the API is the
-// client's choice (the contract requires at least one).
+// client's choice (the contract requires at least one while that endpoint
+// is on).
 func resolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
-	if len(in.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()) == 0 {
-		return nil, errNoPublicAccessCIDRs
-	}
 	spec := cloneSpec(in)
 	spec.Network.ZoneIds = zones
 	pool := spec.DefaultNodePool
@@ -91,7 +90,7 @@ func resolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD
 	}
 	aws.Addons = mergeAddons(aws.GetAddons())
-	return spec, nil
+	return spec, resolveOptions(spec)
 }
 
 // errNoPublicAccessCIDRs: the spec does not say who may reach the API.
@@ -162,6 +161,7 @@ func clusterPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplanea
 		p.NodePool.Taints = append(p.NodePool.Taints, crossplaneaws.TaintPlan{Key: t.GetKey(), Value: t.GetValue(),
 			Effect: crossplaneName(t.GetEffect(), "")})
 	}
+	optionsPlan(spec, &p)
 	return p
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -27,6 +28,10 @@ var apiFields = map[string]map[string]string{
 	"Cluster": {
 		"version":                         "spec.control_plane.kubernetes_version",
 		"vpcConfig.publicAccessCidrs":     "spec.control_plane.endpoint_access.public_access_cidrs",
+		"vpcConfig.endpointPrivateAccess": "spec.control_plane.endpoint_access.endpoint_private_access",
+		"vpcConfig.endpointPublicAccess":  "spec.control_plane.endpoint_access.endpoint_public_access",
+		"vpcConfig.securityGroupIds":      "spec.aws.additional_security_group_ids",
+		"encryptionConfig":                "spec.control_plane.secrets_encryption",
 		"enabledClusterLogTypes":          "spec.aws.enabled_cluster_log_types",
 		"upgradePolicy":                   "spec.aws.upgrade_policy.support_type",
 		"accessConfig.authenticationMode": "spec.aws.access_config.authentication_mode",
@@ -42,9 +47,11 @@ var apiFields = map[string]map[string]string{
 		"capacityType":          "spec.default_node_pool.capacity_type",
 		"diskSize":              "spec.default_node_pool.disk_size_gb",
 		"amiType":               "spec.aws.default_node_pool.ami_type",
+		"launchTemplate":        "spec.aws.default_node_pool.launch_template",
 		"tags":                  "labels",
 	},
 	"Addon": {"addonVersion": "spec.aws.addons", "configurationValues": "spec.aws.addons", "tags": "labels"},
+	"Group": {"retentionInDays": "spec.aws.control_plane_log_group.retention_days", "tags": "labels"},
 }
 
 // apiField is the API field of a kind's forProvider path, else the path
@@ -81,11 +88,20 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster's node group")
 	}
 	render.NodeGroupName = name
+	if err := s.fillLive(ctx, row, &render); err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster's resources")
+	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
 	plan := &cloudv1.Plan{Applicable: true}
+	pending := render.Pending()
+	if len(pending) > 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("%s: planned and applied once what they need exists "+
+			"(the encryption key, the cluster's issuer or security group); this plan does not list their changes",
+			strings.Join(pending, ", ")))
+	}
 	versions := []string{}
 	rendered := map[string]bool{}
 	replacing := len(retiring) > 0
@@ -122,7 +138,7 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 		plan.Changes = append(plan.Changes, fieldChanges(live, dry)...)
 	}
 	for _, r := range records {
-		if rendered[r.Kind+"/"+r.Name] || r.Kind == "Usage" {
+		if rendered[r.Kind+"/"+r.Name] || r.Kind == "Usage" || slices.Contains(pending, r.Kind) {
 			continue
 		}
 		versions = append(versions, r.Kind+"/"+r.Name+"=recorded")
@@ -132,6 +148,9 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 			change.RequiresReplacement = true
 			change.Detail = "replaced by " + name + "; deleted once the replacement is ready"
 		}
+		plan.Changes = append(plan.Changes, change)
+	}
+	if change := s.encryptionChange(row, spec, render, plan.Changes); change != nil {
 		plan.Changes = append(plan.Changes, change)
 	}
 	for _, c := range plan.Changes {
@@ -151,6 +170,28 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	return plan, nil
+}
+
+// encryptionChange is the refusal of an update that turns the secrets
+// encryption off or moves it to another key, unless the field comparison
+// already lists one: UpdateCluster refuses such an update whatever the
+// objects' comparison shows.
+func (s *ClusterService) encryptionChange(row *model.Cluster, spec *cloudv1.ClusterSpec, render crossplaneaws.ClusterPlan,
+	changes []*cloudv1.PlannedChange,
+) *cloudv1.PlannedChange {
+	stored, err := specOf(row)
+	if err != nil || encryptionKept(encryption(stored), encryption(spec)) {
+		return nil
+	}
+	for _, c := range changes {
+		if c.GetSpecPath() == pathSecretsEncryption && c.GetAction() == cloudv1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE {
+			return nil
+		}
+	}
+	return &cloudv1.PlannedChange{ApiVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "Cluster", Name: render.Prefix,
+		ExternalName: render.ClusterName, SpecPath: pathSecretsEncryption,
+		Action: cloudv1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE,
+		Detail: "secrets encryption cannot be turned off or moved to another key once it is on: EKS cannot change it"}
 }
 
 func createDetail(body *unstructured.Unstructured, replacing bool) string {
@@ -178,12 +219,12 @@ func fieldChanges(live, dry *unstructured.Unstructured) []*cloudv1.PlannedChange
 	for _, path := range sortedKeys(was, will) {
 		before, after := crossplaneaws.FieldString(was[path]), crossplaneaws.FieldString(will[path])
 		if before != after {
-			change(path, actionFor(dry.GetKind(), path), fmt.Sprintf("forProvider.%s: %s -> %s", path, before, after),
+			change(path, actionFor(dry.GetKind(), path, was[path] == nil), fmt.Sprintf("forProvider.%s: %s -> %s", path, before, after),
 				fmt.Sprintf("%s-forProvider.%s: %s\n+forProvider.%s: %s\n", header, path, before, path, after))
 			continue
 		}
 		if actual, ok := cloud[path]; ok && isScalar(actual) && isScalar(will[path]) && crossplaneaws.FieldString(actual) != after {
-			change(path, actionFor(dry.GetKind(), path),
+			change(path, actionFor(dry.GetKind(), path, false),
 				fmt.Sprintf("forProvider.%s: the cloud has %s (changed outside the platform), set back to %s", path,
 					crossplaneaws.FieldString(actual), after), "")
 		}
@@ -229,12 +270,16 @@ func isScalar(v any) bool {
 }
 
 // actionFor is the planned action of changing a field of an existing
-// resource. A field not classified is treated as immutable: refused
-// rather than guessed.
-func actionFor(kind, path string) cloudv1.PlannedAction {
+// resource; unset says the resource has no value for it yet. A field not
+// classified is treated as immutable: refused rather than guessed. An
+// add-only field (secrets encryption) can be set where there is none, and
+// is refused otherwise.
+func actionFor(kind, path string, unset bool) cloudv1.PlannedAction {
 	class, ok := crossplaneaws.ClassifyField(kind, path)
 	switch {
-	case !ok, class == crossplaneaws.ChangeImmutable:
+	case class == crossplaneaws.ChangeAddOnly && unset:
+		return cloudv1.PlannedAction_PLANNED_ACTION_UPDATE_IN_PLACE
+	case !ok, class == crossplaneaws.ChangeImmutable, class == crossplaneaws.ChangeAddOnly:
 		return cloudv1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE
 	case class == crossplaneaws.ChangeDisruptive:
 		return cloudv1.PlannedAction_PLANNED_ACTION_DISRUPTIVE

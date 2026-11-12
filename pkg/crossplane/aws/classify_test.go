@@ -22,6 +22,7 @@ func TestEveryRenderedFieldIsClassified(t *testing.T) {
 	plan.SupportType = "STANDARD"
 	plan.Tags = map[string]string{"team": "platform"}
 	plan.NodePool.DiskSizeGB = 50
+	allOptions(&plan)
 	plan.Addons = []crossplaneaws.AddonPlan{
 		{Name: "coredns", Version: "v1.12.0-eksbuild.1", ConfigurationValues: `{"replicaCount":3}`},
 		{Name: crossplaneaws.AddonEBSCSI}, {Name: crossplaneaws.AddonEFSCSI}, {Name: crossplaneaws.AddonFSxCSI},
@@ -60,7 +61,12 @@ func TestClassifyField(t *testing.T) {
 		{"NodeGroup", "instanceTypes", crossplaneaws.ChangeImmutable, true},
 		{"NodeGroup", "scalingConfig.maxSize", crossplaneaws.ChangeInPlace, true},
 		{"Addon", "addonVersion", crossplaneaws.ChangeDisruptive, true},
-		{"NodeGroup", "launchTemplate.id", 0, false},
+		{"NodeGroup", "launchTemplate.id", crossplaneaws.ChangeImmutable, true},
+		{"NodeGroup", "launchTemplate.version", crossplaneaws.ChangeDisruptive, true},
+		{"Cluster", "encryptionConfig.provider.keyArn", crossplaneaws.ChangeAddOnly, true},
+		{"Cluster", "vpcConfig.securityGroupIds", crossplaneaws.ChangeImmutable, true},
+		{"AccessPolicyAssociation", "accessScope.namespaces", crossplaneaws.ChangeImmutable, true},
+		{"NodeGroup", "remoteAccess.ec2SshKey", 0, false},
 		{"Unknown", "x", 0, false},
 	} {
 		got, ok := crossplaneaws.ClassifyField(tt.kind, tt.path)

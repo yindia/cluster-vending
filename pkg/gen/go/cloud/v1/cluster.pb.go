@@ -660,7 +660,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc9\x12\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf5\x16\n" +
 	"\vClusterSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x12:\n" +
 	"\anetwork\x18\x02 \x01(\v2\x18.cloud.v1.ClusterNetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12?\n" +
@@ -669,7 +669,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x06access\x18\x06 \x01(\v2\x14.cloud.v1.AccessSpecR\x06access\x12D\n" +
 	"\x10existing_cluster\x18\a \x01(\v2\x19.cloud.v1.ExistingClusterR\x0fexistingCluster\x12,\n" +
 	"\x03aws\x18\n" +
-	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\xfe\x0e\xbaH\xfa\x0e\x1a\x8f\x01\n" +
+	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\xaa\x13\xbaH\xa6\x13\x1a\x8f\x01\n" +
 	"\n" +
 	"aws.region\x12,region must be an AWS region, e.g. us-east-1\x1aS!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')\x1a\xa8\x01\n" +
 	"\x12aws.instance_types\x12&AWS instance types look like m6i.large\x1aj!has(this.aws) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))\x1a\xd4\x02\n" +
@@ -677,8 +677,10 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x1aaws.admin_access_auth_mode\x12Xadmin_principals need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)\x1al!has(this.aws) || size(this.access.admin_principals) == 0 || this.aws.access_config.authentication_mode != 3\x1a\x92\x01\n" +
 	"\x0faws.no_pod_cidr\x12PAWS pods take IPs from the VPC subnets (VPC CNI); network.pod_cidr must be empty\x1a-!has(this.aws) || this.network.pod_cidr == ''\x1a\xfe\x01\n" +
 	"\faws.zone_ids\x12NAWS clusters need at least two zone_ids (EKS), given as zone IDs like use1-az1\x1a\x9d\x01!has(this.aws) || size(this.network.zone_ids) == 0 || (size(this.network.zone_ids) >= 2 && this.network.zone_ids.all(z, z.matches('^[a-z]+[0-9]-az[0-9]+$')))\x1a\xa9\x01\n" +
-	"\x15aws.service_cidr_size\x12#EKS service_cidr must be /12 to /24\x1ak!has(this.aws) || this.network.service_cidr == '' || this.network.service_cidr.matches('/(1[2-9]|2[0-4])$')\x1a\xb0\x02\n" +
-	"\x1cpublic_access_cidrs_required\x12\x86\x01control_plane.endpoint_access.public_access_cidrs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)\x1a\x86\x01has(this.control_plane) && has(this.control_plane.endpoint_access) && size(this.control_plane.endpoint_access.public_access_cidrs) > 0\x1a\x87\x01\n" +
+	"\x15aws.service_cidr_size\x12#EKS service_cidr must be /12 to /24\x1ak!has(this.aws) || this.network.service_cidr == '' || this.network.service_cidr.matches('/(1[2-9]|2[0-4])$')\x1a\xb4\x03\n" +
+	"\x1cpublic_access_cidrs_required\x12\x86\x01control_plane.endpoint_access.public_access_cidrs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)\x1a\x8a\x02has(this.control_plane) && has(this.control_plane.endpoint_access) && (size(this.control_plane.endpoint_access.public_access_cidrs) > 0 || (has(this.control_plane.endpoint_access.endpoint_public_access) && !this.control_plane.endpoint_access.endpoint_public_access))\x1a\xe2\x01\n" +
+	"\x1caws.access_entries_auth_mode\x12Vaccess_entries need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)\x1aj!has(this.aws) || size(this.access.access_entries) == 0 || this.aws.access_config.authentication_mode != 3\x1a\xc0\x01\n" +
+	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1a\x87\x01\n" +
 	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aAhas(this.aws) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
 	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06R\x04tags\"\xb0\x05\n" +
 	"\rClusterStatus\x12,\n" +

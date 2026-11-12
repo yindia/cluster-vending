@@ -189,3 +189,19 @@ func TestResolveOptions(t *testing.T) {
 		t.Errorf("private-only endpoint without CIDRs: %v", err)
 	}
 }
+
+// A cluster nobody classified is tier 0; a chosen tier is kept.
+func TestResolveSpecDefaultsTheTier(t *testing.T) {
+	for in, want := range map[cloudv1.ClusterTier]cloudv1.ClusterTier{
+		cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED: cloudv1.ClusterTier_CLUSTER_TIER_0,
+		cloudv1.ClusterTier_CLUSTER_TIER_0:           cloudv1.ClusterTier_CLUSTER_TIER_0,
+		cloudv1.ClusterTier_CLUSTER_TIER_2:           cloudv1.ClusterTier_CLUSTER_TIER_2,
+	} {
+		spec := minimalSpec()
+		spec.Tier = in
+		got, err := ResolveSpec(spec, []string{"use1-az1", "use1-az2"})
+		if err != nil || got.GetTier() != want {
+			t.Errorf("tier %s resolved to %s (%v), want %s", in, got.GetTier(), err, want)
+		}
+	}
+}

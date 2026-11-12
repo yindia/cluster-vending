@@ -89,7 +89,9 @@ func (ReleaseChannel) EnumDescriptor() ([]byte, []int) {
 type ClusterTier int32
 
 const (
-	// Not chosen. What that means is decided with the rollout itself.
+	// Not chosen: the cluster counts as tier 0, the most sensitive, so one
+	// nobody classified is the last of its channel to receive a release. A
+	// created cluster is stored as CLUSTER_TIER_0.
 	ClusterTier_CLUSTER_TIER_UNSPECIFIED ClusterTier = 0
 	// Most sensitive: receives a release of its channel last.
 	ClusterTier_CLUSTER_TIER_0 ClusterTier = 1

@@ -110,6 +110,10 @@ func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD
 	}
 	aws.Addons = MergeAddons(aws.GetAddons())
+	if spec.GetTier() == cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
+		// Nobody classified it: the most sensitive, last to receive a release.
+		spec.Tier = cloudv1.ClusterTier_CLUSTER_TIER_0
+	}
 	return spec, ResolveOptions(spec)
 }
 

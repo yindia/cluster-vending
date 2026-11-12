@@ -1,4 +1,10 @@
-# go run ./main.go network create -f examples/network.yaml [--wait]
+# Step 2 of the walkthrough (README.md): a network in tenant acme's account.
+#
+#   cluster-vending network create -f examples/network.yaml [--wait]
+#
+# Replace spec.bootstrapId with the BOOTSTRAP_ID that `bootstrap create -f
+# examples/cloudaccount.yaml` returned. The answer has the network's id:
+# the NETWORK_ID that examples/cluster.yaml refers to.
 apiVersion: cluster-vending.io/v1
 kind: Network
 metadata:
@@ -8,7 +14,7 @@ metadata:
   labels: {env: prod, team: platform}   # filtering, and AWS tags on every resource
 spec:
   region: us-east-1
-  bootstrapId: 00000000-0000-0000-0000-000000000000   # bootstrap list
+  bootstrapId: 00000000-0000-0000-0000-000000000001   # BOOTSTRAP_ID
   # layout is optional: default 10.0.0.0/16, 3 zones, one NAT gateway.
   layout:
     cidrBlock: 10.1.0.0/16

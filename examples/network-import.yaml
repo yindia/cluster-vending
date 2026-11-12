@@ -1,5 +1,15 @@
-# go run ./main.go network import -f examples/network-import.yaml [--wait]
-# then: network takeover <id> [--wait]
+# Step 4 of the walkthrough (README.md), instead of step 2: import an
+# existing VPC of tenant acme's account read-only, review the plan in
+# status.import, then take it over.
+#
+#   cluster-vending network import -f examples/network-import.yaml [--wait]
+#   cluster-vending network takeover IMPORTED_NETWORK_ID --tenant acme [--wait]
+#
+# Replace spec.bootstrapId with the BOOTSTRAP_ID that `bootstrap create -f
+# examples/cloudaccount.yaml` returned, and the VPC and subnet IDs with
+# yours (these are AWS's documentation placeholders). The answer has the
+# imported network's id: the IMPORTED_NETWORK_ID that takeover and
+# examples/cluster-import.yaml refer to.
 apiVersion: cluster-vending.io/v1
 kind: NetworkImport
 metadata:
@@ -8,7 +18,7 @@ metadata:
   displayName: Terraform prod VPC
 spec:
   region: us-east-1
-  bootstrapId: 00000000-0000-0000-0000-000000000000
+  bootstrapId: 00000000-0000-0000-0000-000000000001   # BOOTSTRAP_ID
   aws:
     vpcId: vpc-0123456789abcdef0
     subnetIds:               # the subnets the platform will use

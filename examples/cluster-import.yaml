@@ -1,0 +1,22 @@
+# Importing an existing EKS cluster that runs in an imported network
+# (examples/network-import.yaml): read-only, review the plan in
+# status.import, then take it over.
+#
+#   cluster-vending cluster import -f examples/cluster-import.yaml
+#   cluster-vending cluster takeover IMPORTED_CLUSTER_ID --tenant acme [--wait]
+#
+# metadata.name is the existing EKS cluster's name. Replace
+# spec.networkId with the IMPORTED_NETWORK_ID that `network import -f
+# examples/network-import.yaml` returned, and the node group name with the
+# one that becomes the cluster's default node pool. The answer has the
+# imported cluster's id: IMPORTED_CLUSTER_ID.
+apiVersion: cluster-vending.io/v1
+kind: ClusterImport
+metadata:
+  name: tf-prod-eks
+  tenant: acme
+  displayName: Terraform prod EKS
+spec:
+  networkId: 00000000-0000-0000-0000-000000000003   # IMPORTED_NETWORK_ID
+  aws:
+    defaultNodeGroupName: default

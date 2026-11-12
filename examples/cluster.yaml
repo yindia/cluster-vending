@@ -1,15 +1,20 @@
-# go run ./main.go cluster create -f examples/cluster.yaml [--wait]
+# Step 3 of the walkthrough (README.md): an EKS cluster in network prod.
+#
+#   cluster-vending cluster create -f examples/cluster.yaml [--wait]
+#
+# Replace spec.network.networkId with the NETWORK_ID that `network create -f
+# examples/network.yaml` returned (`network list --tenant acme` shows it).
 apiVersion: cluster-vending.io/v1
 kind: Cluster
 metadata:
   name: prod-eks             # the EKS cluster name (unique per account and region)
   tenant: acme
   displayName: Prod EKS
-  labels: {env: prod, ring: "3", team: platform}   # filtering, and AWS tags on every resource
+  labels: {env: prod, team: platform}   # filtering, and AWS tags on every resource
 spec:
-  region: us-east-1
+  region: us-east-1          # the network's region
   network:
-    networkId: 00000000-0000-0000-0000-000000000000   # network list
+    networkId: 00000000-0000-0000-0000-000000000002   # NETWORK_ID
   controlPlane:
     # kubernetesVersion: "1.34"   # omitted: the EKS default
     endpointAccess:
@@ -19,9 +24,9 @@ spec:
     diskSizeGb: 30
     scalingConfig: {minSize: 2, maxSize: 3}
   # releaseChannel: RELEASE_CHANNEL_STABLE   # ALPHA | BETA | STABLE: stored, not acted on yet
-  # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2: a release reaches tier 2 first
+  # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2; unset is tier 0
   access:
-    adminPrincipals: []      # IAM role/user ARNs; the creator is admin already
+    adminPrincipals: []      # IAM role/user ARNs, e.g. arn:aws:iam::111122223333:role/platform-admin; the creator is admin already
   aws:
     upgradePolicy:
       supportType: AWS_SUPPORT_TYPE_STANDARD

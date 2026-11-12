@@ -1,10 +1,15 @@
+# Tenant acme's AWS account: the same account as examples/cloudaccount.yaml.
+# The tenant is the namespace. The object's name is what the API server
+# gives an account it stores (aws-<account ID>), so this sample and an
+# account onboarded through the API are the same object. 111122223333 is
+# AWS's documentation account ID: replace it and the role with your own.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: CloudAccount
 metadata:
-  name: production
+  name: aws-111122223333
   namespace: tenant-acme
 spec:
-  accountName: acme-production
+  accountName: acme-prod
   aws:
     accountID: "111122223333"
     role: cluster-vending-provisioner

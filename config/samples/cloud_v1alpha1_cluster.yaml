@@ -1,12 +1,15 @@
+# EKS cluster prod-eks in network prod of tenant acme: the same cluster as
+# examples/cluster.yaml.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: Cluster
 metadata:
   # The EKS cluster's name.
-  name: prod
+  name: prod-eks
   namespace: tenant-acme
 spec:
-  displayName: Production
+  displayName: Prod EKS
   tags:
+    env: prod
     team: platform
   region: us-east-1
   network:
@@ -14,21 +17,26 @@ spec:
     networkRef:
       name: prod
   controlPlane:
-    kubernetesVersion: "1.33"
     endpointAccess:
       publicAccessCIDRs:
-        - 203.0.113.0/24
+        - 0.0.0.0/0
   defaultNodePool:
     instanceTypes:
-      - m6i.large
+      - m7i-flex.large
+    diskSizeGB: 30
     scaling:
       minSize: 2
-      maxSize: 6
+      maxSize: 3
   access:
-    adminPrincipals:
-      - arn:aws:iam::111122223333:role/platform-admin
+    # IAM role/user ARNs; the creator is admin already.
+    adminPrincipals: []
   # Stored only for now: a release reaches Alpha, then Beta, then Stable,
-  # and within a channel Tier2, then Tier1, then Tier0.
+  # and within a channel Tier2, then Tier1, then Tier0. Unset tier is Tier0.
   releaseChannel: Stable
   tier: Tier0
-  aws: {}
+  aws:
+    upgradePolicy:
+      supportType: STANDARD
+    addons:
+      - name: metrics-server
+      - name: kube-state-metrics

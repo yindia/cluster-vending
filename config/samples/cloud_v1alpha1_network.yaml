@@ -1,3 +1,4 @@
+# Network prod of tenant acme: the same network as examples/network.yaml.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: Network
 metadata:
@@ -6,15 +7,17 @@ metadata:
 spec:
   # The CloudAccount that owns this network (cloud_v1alpha1_cloudaccount.yaml).
   accountRef:
-    name: production
-  displayName: Production network
+    name: aws-111122223333
+  displayName: Prod network
   tags:
+    env: prod
     team: platform
   region: us-east-1
   layout:
-    cidrBlock: 10.0.0.0/16
-    availabilityZoneCount: 3
-    natGatewayMode: Single
-  flowLogs:
-    enabled: true
-    retentionDays: 30
+    cidrBlock: 10.1.0.0/16
+    natGatewayMode: PerZone
+    subnets:
+      - {role: Public, cidrBlock: 10.1.0.0/24, zoneID: use1-az1}
+      - {role: Public, cidrBlock: 10.1.1.0/24, zoneID: use1-az2}
+      - {role: Private, cidrBlock: 10.1.16.0/20, zoneID: use1-az1}
+      - {role: Private, cidrBlock: 10.1.32.0/20, zoneID: use1-az2}

@@ -1,9 +1,17 @@
-# go run ./main.go bootstrap create -f examples/cloudaccount.yaml
+# Step 1 of the walkthrough (README.md): onboard tenant acme's AWS account.
+#
+#   cluster-vending bootstrap create -f examples/cloudaccount.yaml
+#
+# The answer has the account's id: the BOOTSTRAP_ID the network manifests
+# refer to (spec.bootstrapId). `bootstrap list --tenant acme` shows it too.
+#
+# Placeholders: 111122223333 is AWS's documentation account ID; replace it
+# and the role with your own.
 apiVersion: cluster-vending.io/v1
 kind: CloudAccount
 metadata:
   name: acme-prod            # account name (not unique)
-  tenant: sakshi
+  tenant: acme
 spec:
   aws:
     accountId: "111122223333"

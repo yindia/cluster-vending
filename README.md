@@ -72,38 +72,45 @@ without the controller). See [docs/controller.md](docs/controller.md).
 ## CLI walkthrough
 
 The CLI talks to the server at `--server` (default
-`http://127.0.0.1:8080`). Manifests are YAML or JSON; the examples are in
-`examples/`. Replace the placeholder account ID, tenant and IDs with your
-own.
+`http://127.0.0.1:8080`). Manifests are YAML or JSON; the examples in
+`examples/` are one chain for the tenant `acme`. A server-assigned id that a
+later manifest needs is a placeholder in it, named in the file's header:
+`BOOTSTRAP_ID`, `NETWORK_ID`, `IMPORTED_NETWORK_ID`. Replace the account ID
+`111122223333`, the role and the VPC and subnet IDs with your own.
 
 ```sh
-# 1. Onboard a tenant's AWS account. The answer has the account's id
-#    (the bootstrap id that networks refer to).
+# 1. Onboard acme's AWS account. The answer has the account's id
+#    (BOOTSTRAP_ID, the bootstrap id that networks refer to).
 bin/cluster-vending bootstrap create -f examples/cloudaccount.yaml
-bin/cluster-vending bootstrap list --tenant <tenant>
+bin/cluster-vending bootstrap list --tenant acme
 
-# 2. Create a network in it (set spec.bootstrapId in the manifest first).
+# 2. Create a network in it (set spec.bootstrapId to BOOTSTRAP_ID first).
+#    The answer has its id: NETWORK_ID.
 bin/cluster-vending network create -f examples/network.yaml --wait
-bin/cluster-vending network get <network-id> --tenant <tenant>      # status last recorded
-bin/cluster-vending network status <network-id> --tenant <tenant>   # status read live
+bin/cluster-vending network get NETWORK_ID --tenant acme      # status last recorded
+bin/cluster-vending network status NETWORK_ID --tenant acme   # status read live
 
-# 3. Create a cluster in the network (set spec.network.networkId first).
+# 3. Create a cluster in the network (set spec.network.networkId to
+#    NETWORK_ID first). The answer has its id: CLUSTER_ID.
 bin/cluster-vending cluster create -f examples/cluster.yaml --wait
 
-# 4. Or import an existing VPC read-only, review the plan in
-#    status.import, then take it over.
+# 4. Or import an existing VPC read-only (set spec.bootstrapId and the VPC
+#    and subnet IDs first), review the plan in status.import, then take
+#    it over. The answer has its id: IMPORTED_NETWORK_ID.
 bin/cluster-vending network import -f examples/network-import.yaml
-bin/cluster-vending network takeover <network-id> --tenant <tenant> --wait
+bin/cluster-vending network takeover IMPORTED_NETWORK_ID --tenant acme --wait
 
 # 5. Delete, in order: clusters before their network.
-bin/cluster-vending cluster delete <cluster-id> --tenant <tenant> --wait
-bin/cluster-vending network delete <network-id> --tenant <tenant> --wait
+bin/cluster-vending cluster delete CLUSTER_ID --tenant acme --wait
+bin/cluster-vending network delete NETWORK_ID --tenant acme --wait
 ```
 
 `cluster import` and `cluster takeover` work the same way for an existing
-EKS cluster. `update` changes the fields named in `--update-mask`, `watch`
-streams state and resource events, and `list` lists. Each command has
-`--help`.
+EKS cluster in an imported network (`examples/cluster-import.yaml`).
+`update` changes the fields named in `--update-mask`, `watch` streams state
+and resource events, and `list` lists. Each command has `--help`. The
+controller's samples (`config/samples`) are the same account, network and
+cluster as objects of its kinds.
 
 ## Where to read more
 

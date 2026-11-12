@@ -153,6 +153,11 @@ message ClusterSpec {
 
   // --- Constraints for every non-AWS provider ---
   option (buf.validate.message).cel = {
+    id: "oidc_aws_only"
+    message: "only AWS takes access.oidc"
+    expression: "has(this.aws) || !has(this.access.oidc)"
+  };
+  option (buf.validate.message).cel = {
     id: "single_instance_type"
     message: "only AWS accepts more than one instance type"
     expression: "has(this.aws) || size(this.default_node_pool.instance_types) == 1"

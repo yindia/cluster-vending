@@ -94,6 +94,10 @@ var fieldClasses = map[string]map[string]ChangeClass{
 		"region": ChangeImmutable, "clusterName": ChangeImmutable, "principalArn": ChangeImmutable,
 		"policyArn": ChangeImmutable, "accessScope": ChangeImmutable,
 	},
+	// EKS cannot change an association: a change renders a new object.
+	"IdentityProviderConfig": {
+		"region": ChangeImmutable, "clusterName": ChangeImmutable, "oidc": ChangeImmutable, "tags": ChangeInPlace,
+	},
 	"ClusterAuth": {"region": ChangeImmutable, "clusterName": ChangeImmutable, "refreshPeriod": ChangeInPlace},
 }
 

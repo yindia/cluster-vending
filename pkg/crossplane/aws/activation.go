@@ -44,7 +44,8 @@ var managedMRDs = []string{
 	// (the control plane's log group is groups.cloudwatchlogs, above).
 	"keys.kms.aws.m.upbound.io", "aliases.kms.aws.m.upbound.io",
 	"openidconnectproviders.iam.aws.m.upbound.io", "launchtemplates.ec2.aws.m.upbound.io",
-	// Carried over from an imported cluster.
+	// The OIDC identity provider (spec.access.oidc, and carried over from
+	// an imported cluster); security groups carried over from one.
 	"identityproviderconfigs.eks.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io",
 	"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
 	// Karpenter's interruption queue and the EventBridge rules feeding it

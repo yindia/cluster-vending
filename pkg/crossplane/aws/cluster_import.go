@@ -259,13 +259,7 @@ func CarriedOver(p ClusterPlan, c CarriedOverResources) []client.Object {
 func (b clusterBuilder) identityProvider(idp IdentityProviderPlan) *awseks.IdentityProviderConfig {
 	return &awseks.IdentityProviderConfig{ObjectMeta: b.carried(b.name("idp-"+shortHash(idp.Name)), idp.Name, false),
 		Spec: awseks.IdentityProviderConfigSpec{ManagedResourceSpec: b.observe(), ForProvider: awseks.IdentityProviderConfigParameters{
-			Region: ptr.To(b.p.Region), ClusterNameRef: b.ref(b.p.Prefix),
-			Oidc: &awseks.IdentityProviderConfigOidcParameters{
-				ClientID: ptr.To(idp.ClientID), IssuerURL: ptr.To(idp.IssuerURL), // the config's name is its external name
-				GroupsClaim: optional(idp.GroupsClaim), GroupsPrefix: optional(idp.GroupsPrefix),
-				UsernameClaim: optional(idp.UsernameClaim), UsernamePrefix: optional(idp.UsernamePrefix),
-				RequiredClaims: strPtrs(idp.RequiredClaims),
-			},
+			Region: ptr.To(b.p.Region), ClusterNameRef: b.ref(b.p.Prefix), Oidc: idp.oidc(),
 		}}}
 }
 

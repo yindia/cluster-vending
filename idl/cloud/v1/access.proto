@@ -41,11 +41,84 @@ message AccessSpec {
   //         policy
   repeated AccessEntry access_entries = 2 [(buf.validate.field).repeated.max_items = 50];
 
+  // AWS: an OIDC identity provider the Kubernetes API accepts tokens from,
+  // next to IAM. Unset: IAM only. A cluster takes one. Mutable: set,
+  // changed or removed without touching the cluster; EKS cannot change an
+  // association in place, so a change removes it and associates the new
+  // one (each takes EKS several minutes, and tokens are refused in
+  // between). Works with every authentication_mode. A user it
+  // authenticates has no permissions until a (Cluster)RoleBinding names
+  // the user or one of its groups: the platform creates none.
+  //   AWS   one IdentityProviderConfig, created once the cluster is ACTIVE
+  OidcIdentityProvider oidc = 3;
+
   option (buf.validate.message).cel = {
     id: "access_entries.unique"
     message: "access_entries principals must be unique"
     expression: "this.access_entries.map(e, e.principal_arn).unique()"
   };
+}
+
+// OidcIdentityProvider is an OIDC identity provider of the Kubernetes API
+// (EKS: IdentityProviderConfig.oidc).
+message OidcIdentityProvider {
+  // Name of the association (identityProviderConfigName).
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+  }];
+
+  // The issuer: the "iss" claim of its tokens, e.g.
+  // "https://example.okta.com". HTTPS, and reachable from the internet:
+  // EKS reads its discovery document.
+  string issuer_url = 2 [(buf.validate.field).string = {
+    max_len: 2048
+    pattern: "^https://[^\\s?#]+$"
+  }];
+
+  // The client the tokens are issued to: their "aud" claim.
+  string client_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
+  // The claim that is the Kubernetes user name. Unset: EKS uses "sub".
+  string username_claim = 4 [(buf.validate.field).string.max_len = 255];
+
+  // Put in front of the user name, e.g. "oidc:". Unset: EKS prefixes the
+  // issuer URL, unless username_claim is "email". "-" for none.
+  string username_prefix = 5 [(buf.validate.field).string = {
+    max_len: 255
+    not_contains: "system:"
+  }];
+
+  // The claim that lists the user's groups, e.g. "groups". Unset: no
+  // groups.
+  string groups_claim = 6 [(buf.validate.field).string.max_len = 255];
+
+  // Put in front of every group, e.g. "oidc:".
+  string groups_prefix = 7 [(buf.validate.field).string = {
+    max_len: 255
+    not_contains: "system:"
+  }];
+
+  // Claims a token must carry, with their values.
+  map<string, string> required_claims = 8 [(buf.validate.field).map = {
+    max_pairs: 50
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 63
+      }
+    }
+    values: {
+      string: {
+        min_len: 1
+        max_len: 253
+      }
+    }
+  }];
 }
 
 // AccessEntryType is AccessEntry.type: what kind of principal the entry is

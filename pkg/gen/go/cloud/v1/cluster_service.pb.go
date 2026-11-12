@@ -935,6 +935,7 @@ type UpdateClusterRequest struct {
 	//	spec.aws.control_plane_log_group
 	//	spec.access.admin_principals
 	//	spec.access.access_entries
+	//	spec.access.oidc
 	//
 	// spec.aws.access_config.authentication_mode fails with UNIMPLEMENTED.
 	// Any other path (region, network, ...) fails with INVALID_ARGUMENT. A

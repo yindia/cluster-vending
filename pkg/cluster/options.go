@@ -76,6 +76,11 @@ func optionsPlan(spec *cloudv1.ClusterSpec, p *crossplaneaws.ClusterPlan) {
 		}
 		p.AccessEntries = append(p.AccessEntries, entry)
 	}
+	if o := spec.GetAccess().GetOidc(); o != nil {
+		p.IdentityProvider = &crossplaneaws.IdentityProviderPlan{Name: o.GetName(), IssuerURL: o.GetIssuerUrl(), ClientID: o.GetClientId(),
+			GroupsClaim: o.GetGroupsClaim(), GroupsPrefix: o.GetGroupsPrefix(),
+			UsernameClaim: o.GetUsernameClaim(), UsernamePrefix: o.GetUsernamePrefix(), RequiredClaims: o.GetRequiredClaims()}
+	}
 	if lt := aws.GetDefaultNodePool().GetLaunchTemplate(); lt != nil {
 		p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ID: lt.GetId(), Name: lt.GetName(), Version: lt.GetVersion(),
 			SecurityGroupIDs: lt.GetSecurityGroupIds(), ImageID: lt.GetImageId(), UserData: lt.GetUserData()}

@@ -27,6 +27,13 @@ spec:
   # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2; unset is tier 0
   access:
     adminPrincipals: []      # IAM role/user ARNs, e.g. arn:aws:iam::111122223333:role/platform-admin; the creator is admin already
+    # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (one per cluster)
+    #   name: okta
+    #   issuerUrl: https://example.okta.com/oauth2/default   # HTTPS, reachable from the internet
+    #   clientId: kubernetes
+    #   usernameClaim: email
+    #   groupsClaim: groups
+    #   groupsPrefix: "oidc:"  # bind RBAC to oidc:<group>; its users have no permissions until you do
   aws:
     upgradePolicy:
       supportType: AWS_SUPPORT_TYPE_STANDARD

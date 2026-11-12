@@ -39,6 +39,7 @@ Checked against the code at the time of writing:
 | Add-ons that need AWS permissions get an IAM role, a policy attachment and a pod identity association for a fixed service account. | `addonSetups` in `pkg/crossplane/aws/addons.go` |
 | A cluster tags the private subnets it uses with `kubernetes.io/cluster/<name>=shared` and, unless another cluster of the network has it, `karpenter.sh/discovery=<name>`. The cluster security group carries `aws:eks:cluster-name`, set by EKS. | `TagSubnets` in `pkg/reconcile/cluster/subnets.go`; `TagKarpenterDiscovery` in `pkg/crossplane/aws/network.go` |
 | Access entries are rendered for admin principals and `spec.access.accessEntries`. | `accessEntries` in `pkg/crossplane/aws/cluster_options.go` |
+| An OIDC identity provider of the Kubernetes API is rendered for `spec.access.oidc`. | `managedIdentityProvider` in `pkg/crossplane/aws/cluster_options.go` |
 | The AWS provider families installed are ec2, eks, iam, cloudwatchlogs and kms. SQS and EventBridge are not. | `ProviderPackages` in `pkg/crossplane/aws/aws.go` |
 | Every platform object a store keeps carries the label `cloud.cluster-vending.io/id` with its API ID. | `cloudstore.LabelID` |
 

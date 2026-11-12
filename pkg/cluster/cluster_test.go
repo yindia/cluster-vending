@@ -144,7 +144,7 @@ func TestResolveOptions(t *testing.T) {
 	}
 	base := crossplaneaws.ClusterPlan{Prefix: "prod", ClusterName: "prod"}
 	if p := RenderPlan(plain, []string{"subnet-a"}, base); len(p.Pending()) != 0 || p.LogGroupRetentionDays != 0 ||
-		p.CreateEncryptionKey || p.EncryptionKeyARN != "" || p.IRSA || p.NodePool.LaunchTemplate != nil || p.AccessEntries != nil ||
+		p.CreateEncryptionKey || p.EncryptionKeyARN != "" || p.IRSA || p.NodePool.LaunchTemplate != nil || p.AccessEntries != nil || p.IdentityProvider != nil ||
 		p.EndpointPublicAccess != nil || p.AdditionalSecurityGroupIDs != nil {
 		t.Errorf("plan of a spec without options = %+v", p)
 	}
@@ -152,7 +152,9 @@ func TestResolveOptions(t *testing.T) {
 	in := minimalSpec()
 	in.GetAws().ControlPlaneLogGroup = &cloudv1.AwsControlPlaneLogGroup{Enabled: ptr.To(true)}
 	in.Access = &cloudv1.AccessSpec{AccessEntries: []*cloudv1.AccessEntry{{PrincipalArn: devRole,
-		Policies: []*cloudv1.AccessPolicy{{PolicyArn: viewPolicy}}}}}
+		Policies: []*cloudv1.AccessPolicy{{PolicyArn: viewPolicy}}}},
+		Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com", ClientId: "kubernetes",
+			GroupsClaim: "groups", RequiredClaims: map[string]string{"hd": "example.com"}}}
 	in.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{ImageId: "ami-0123456789abcdef0", UserData: "Zm9v"}}
 	in.ControlPlane.SecretsEncryption = &cloudv1.SecretsEncryption{Enabled: true}
 	got := mustResolve(t, in, zones)
@@ -167,6 +169,10 @@ func TestResolveOptions(t *testing.T) {
 	if p.LogGroupRetentionDays != 90 || !p.CreateEncryptionKey || p.NodePool.AMIType != "CUSTOM" || !p.NodePool.LaunchTemplate.Rendered() ||
 		p.AccessEntries[0].Type != "STANDARD" || p.AccessEntries[0].Policies[0].Scope != "cluster" {
 		t.Errorf("plan = %+v", p)
+	}
+	if idp := p.IdentityProvider; idp == nil || idp.Name != "okta" || idp.IssuerURL != "https://example.okta.com" ||
+		idp.ClientID != "kubernetes" || idp.GroupsClaim != "groups" || idp.UsernameClaim != "" || idp.RequiredClaims["hd"] != "example.com" {
+		t.Errorf("identity provider of the plan = %+v", idp)
 	}
 
 	for name, change := range map[string]func(*cloudv1.ClusterSpec){

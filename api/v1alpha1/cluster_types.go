@@ -315,6 +315,60 @@ type AccessSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=50
 	AccessEntries []AccessEntry `json:"accessEntries,omitempty"`
+	// oidc is an OIDC identity provider the Kubernetes API accepts tokens
+	// from, next to IAM (AWS only; a cluster takes one). Mutable: a change
+	// removes the association and makes a new one. The users it
+	// authenticates have no permissions until a (Cluster)RoleBinding
+	// names them or their groups.
+	// +optional
+	OIDC *OIDCIdentityProvider `json:"oidc,omitempty"`
+}
+
+// OIDCIdentityProvider is an OIDC identity provider of the Kubernetes API
+// (EKS: IdentityProviderConfig.oidc).
+type OIDCIdentityProvider struct {
+	// name of the association.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=100
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*$`
+	Name string `json:"name"`
+	// issuerURL is the "iss" claim of the provider's tokens: HTTPS, and
+	// reachable from the internet.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https://[^\s?#]+$`
+	IssuerURL string `json:"issuerURL"`
+	// clientID is the client the tokens are issued to: their "aud" claim.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	ClientID string `json:"clientID"`
+	// usernameClaim is the claim that is the user name. Unset: "sub".
+	// +optional
+	// +kubebuilder:validation:MaxLength=255
+	UsernameClaim string `json:"usernameClaim,omitempty"`
+	// usernamePrefix is put in front of the user name; "-" for none.
+	// Unset: the issuer URL, unless usernameClaim is "email".
+	// +optional
+	// +kubebuilder:validation:MaxLength=255
+	// +kubebuilder:validation:XValidation:rule="!self.contains('system:')",message="a prefix cannot contain system:"
+	UsernamePrefix string `json:"usernamePrefix,omitempty"`
+	// groupsClaim is the claim that lists the user's groups. Unset: no
+	// groups.
+	// +optional
+	// +kubebuilder:validation:MaxLength=255
+	GroupsClaim string `json:"groupsClaim,omitempty"`
+	// groupsPrefix is put in front of every group.
+	// +optional
+	// +kubebuilder:validation:MaxLength=255
+	// +kubebuilder:validation:XValidation:rule="!self.contains('system:')",message="a prefix cannot contain system:"
+	GroupsPrefix string `json:"groupsPrefix,omitempty"`
+	// requiredClaims are claims a token must carry, with their values.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=50
+	// +kubebuilder:validation:XValidation:rule="self.all(k, size(k) >= 1 && size(k) <= 63 && size(self[k]) >= 1 && size(self[k]) <= 253)",message="a required claim is 1 to 63 characters, its value 1 to 253"
+	RequiredClaims map[string]string `json:"requiredClaims,omitempty"`
 }
 
 // AWSAuthenticationMode is the EKS cluster's authentication mode (AWS's

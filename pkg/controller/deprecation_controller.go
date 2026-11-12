@@ -1,0 +1,150 @@
+package controller
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/convert"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/deprecation"
+	"github.com/yindia/cluster-vending/pkg/reconcile/deprecations"
+)
+
+// notScannableDelay is how long until a cluster that cannot be scanned
+// yet (not running, being deleted) is looked at again.
+const notScannableDelay = 5 * time.Minute
+
+// defaultChannel is the channel of a cluster that names none.
+const defaultChannel = "stable"
+
+// DeprecationReconciler scans running clusters for objects written with
+// deprecated or removed API versions and records what it finds in
+// status.deprecations (pkg/reconcile/deprecations). It reads the workload
+// cluster with the kubeconfig its ClusterAuth wrote and changes nothing
+// there. It is apart from the cluster's own controller: a scan that
+// fails never fails the cluster.
+type DeprecationReconciler struct {
+	deps    Deps
+	scanner deprecations.Scanner
+}
+
+// NewDeprecationReconciler returns the scanner of Clusters.
+func NewDeprecationReconciler(d Deps) (*DeprecationReconciler, error) {
+	rules, err := deprecation.Default()
+	if err != nil {
+		return nil, err
+	}
+	return &DeprecationReconciler{deps: d, scanner: deprecations.Scanner{Rules: rules}}, nil
+}
+
+// The kubeconfig of a workload cluster is a Secret its ClusterAuth writes
+// in the tenant's namespace; RBAC cannot select Secrets by name suffix,
+// so this is get on Secrets (never list or watch).
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
+
+// SetupWithManager registers the scanner: one cluster at a time, woken by
+// a change of a cluster's spec and by its own schedule.
+func (r *DeprecationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).Named("cluster-deprecations").
+		For(&cloudv1alpha1.Cluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Complete(r)
+}
+
+// Reconcile scans the cluster when a scan is due and comes back when the
+// next one is.
+func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	obj := &cloudv1alpha1.Cluster{}
+	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	tenant, id := obj.Labels[cloudstore.LabelTenant], obj.Labels[cloudstore.LabelID]
+	if id == "" || !scannable(obj) {
+		return ctrl.Result{RequeueAfter: notScannableDelay}, nil
+	}
+	current := obj.Status.CurrentKubernetesVersion
+	if current == "" && obj.Spec.ControlPlane != nil {
+		current = obj.Spec.ControlPlane.KubernetesVersion
+	}
+	scanner := r.scanner
+	scanner.Recorder = r.deps.Store.Clusters()
+	next, err := scanner.Run(ctx, deprecations.Cluster{
+		TenantID: tenant, ID: id, Current: current, UpgradeTo: r.upgradeTo(ctx, obj, current),
+		Last:       convert.DeprecationsFromAPI(obj.Status.Deprecations),
+		Kubeconfig: func(ctx context.Context) ([]byte, error) { return r.kubeconfig(ctx, obj) },
+	})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: next}, nil
+}
+
+// scannable: the cluster runs (created by the platform, or imported) and
+// is not being deleted.
+func scannable(obj *cloudv1alpha1.Cluster) bool {
+	if !obj.DeletionTimestamp.IsZero() {
+		return false
+	}
+	return obj.Status.Phase == cloudv1alpha1.ClusterPhaseRunning || obj.Status.Phase == cloudv1alpha1.ClusterPhaseImported
+}
+
+// kubeconfig reads the cluster's kubeconfig Secret at the API server.
+func (r *DeprecationReconciler) kubeconfig(ctx context.Context, obj *cloudv1alpha1.Cluster) ([]byte, error) {
+	name := obj.Status.KubeconfigSecret
+	if name == "" {
+		return nil, fmt.Errorf("the cluster has no kubeconfig Secret yet")
+	}
+	secret := &corev1.Secret{}
+	err := r.deps.Direct.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: name}, secret)
+	if apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("secret %s not found", name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("secret %s: %w", name, err)
+	}
+	kubeconfig := secret.Data[crossplaneaws.KubeconfigSecretKey]
+	if len(kubeconfig) == 0 {
+		return nil, fmt.Errorf("secret %s has no %q key", name, crossplaneaws.KubeconfigSecretKey)
+	}
+	return kubeconfig, nil
+}
+
+// upgradeTo is the minor the release of the cluster's channel moves the
+// cluster's minor to; "" when the channel offers no release, or the
+// release does not move that minor (the scan then judges against the next
+// minor).
+func (r *DeprecationReconciler) upgradeTo(ctx context.Context, obj *cloudv1alpha1.Cluster, current string) string {
+	channel := strings.ToLower(string(obj.Spec.ReleaseChannel))
+	if channel == "" {
+		channel = defaultChannel
+	}
+	ch := &cloudv1alpha1.ReleaseChannel{}
+	if err := r.deps.Direct.Get(ctx, client.ObjectKey{Name: channel}, ch); err != nil || ch.Status.Release == "" {
+		return ""
+	}
+	release := &cloudv1alpha1.Release{}
+	if err := r.deps.Direct.Get(ctx, client.ObjectKey{Name: ch.Status.Release}, release); err != nil {
+		return ""
+	}
+	// Two versions are of one minor when the same minor follows them.
+	mine, err := deprecation.NextMinor(current)
+	if err != nil {
+		return ""
+	}
+	for _, k := range release.Spec.Content.Kubernetes {
+		if next, err := deprecation.NextMinor(k.Minor); err == nil && next == mine {
+			return k.UpgradeTo
+		}
+	}
+	return ""
+}

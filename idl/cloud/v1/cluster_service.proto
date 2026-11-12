@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
+import "cloud/v1/deprecation.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/plan.proto";
 import "google/protobuf/field_mask.proto";
@@ -68,6 +69,15 @@ service ClusterService {
   // endpoint, versions, ...). UNAVAILABLE when the management cluster
   // cannot be read.
   rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the objects of a cluster that were written with an API version
+  // that is deprecated or removed at the Kubernetes version the cluster
+  // moves to next, removed first: what the controller's last scan found
+  // (it scans every six hours), read from the platform's store. Empty,
+  // with no scanned_at, for a cluster that was not scanned yet.
+  rpc ListClusterDeprecations(ListClusterDeprecationsRequest) returns (ListClusterDeprecationsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

@@ -8,6 +8,7 @@ import "cloud/v1/aws.proto";
 import "cloud/v1/component.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
+import "cloud/v1/deprecation.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
@@ -376,6 +377,11 @@ message ClusterStatus {
   // cluster's channel offered when they were first installed. A cluster
   // keeps it until it is moved to another release.
   string platform_release = 19;
+
+  // deprecations is the summary of the controller's last scan for objects
+  // written with deprecated or removed API versions (no findings here:
+  // ListClusterDeprecations). Unset until the cluster was scanned.
+  ClusterDeprecations deprecations = 40;
 }
 
 // PlatformComponent is one component the platform installed with a

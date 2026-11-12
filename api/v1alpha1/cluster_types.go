@@ -789,6 +789,9 @@ type ClusterStatus struct {
 	// +listType=atomic
 	// +optional
 	ComponentInventory []InventoryEntry `json:"componentInventory,omitempty"`
+	// deprecations is what the last scan for deprecated API versions found.
+	// +optional
+	Deprecations *ClusterDeprecations `json:"deprecations,omitempty"`
 	// contractStatus is the status as the cloud.v1 API returns it
 	// (protojson), kept verbatim: the fields above are read from it, and it
 	// carries what they leave out (the state of every object). Written by

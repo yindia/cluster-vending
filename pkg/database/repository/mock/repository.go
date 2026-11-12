@@ -1153,6 +1153,44 @@ func (c *MockClustersListByNetworkCall) DoAndReturn(f func(context.Context, stri
 	return c
 }
 
+// SetDeprecations mocks base method.
+func (m *MockClusters) SetDeprecations(ctx context.Context, tenantID, id string, deprecations model.JSON) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetDeprecations", ctx, tenantID, id, deprecations)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetDeprecations indicates an expected call of SetDeprecations.
+func (mr *MockClustersMockRecorder) SetDeprecations(ctx, tenantID, id, deprecations any) *MockClustersSetDeprecationsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetDeprecations", reflect.TypeOf((*MockClusters)(nil).SetDeprecations), ctx, tenantID, id, deprecations)
+	return &MockClustersSetDeprecationsCall{Call: call}
+}
+
+// MockClustersSetDeprecationsCall wrap *gomock.Call
+type MockClustersSetDeprecationsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersSetDeprecationsCall) Return(arg0 error) *MockClustersSetDeprecationsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersSetDeprecationsCall) Do(f func(context.Context, string, string, model.JSON) error) *MockClustersSetDeprecationsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersSetDeprecationsCall) DoAndReturn(f func(context.Context, string, string, model.JSON) error) *MockClustersSetDeprecationsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetStatus mocks base method.
 func (m *MockClusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()

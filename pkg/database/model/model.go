@@ -208,4 +208,9 @@ type Cluster struct {
 	// the reconciler makes them before it renders anything. A call that
 	// changes nothing they depend on moves it along with Generation.
 	ResolvedGeneration int64
+	// Deprecations is what the controller's last scan for deprecated API
+	// versions found (protojson cloud.v1 ClusterDeprecations, findings
+	// included). Not part of Status: the scan writes it on its own, with
+	// Clusters.SetDeprecations. Empty: never scanned.
+	Deprecations JSON
 }

@@ -17,6 +17,9 @@ GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo $(BIN_DIR)
 KIND_CLUSTER ?= cluster-vending
 KUBE_CONTEXT ?= kind-$(KIND_CLUSTER)
 
+# The Pluto release the deprecated-API rules are taken from (make deprecation-rules).
+PLUTO_VERSION ?= v5.24.5
+
 # Buf breaking-change baseline, e.g. make breaking AGAINST='.git#branch=main'
 AGAINST ?= .git\#branch=main
 
@@ -84,6 +87,23 @@ controller-apis: ## Generate the deepcopy code, CRDs and RBAC of the controller'
 	go tool controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/...
 	go tool controller-gen crd paths=./api/... output:crd:dir=config/crd/bases
 	go tool controller-gen rbac:roleName=manager-role paths=./pkg/controller/... output:rbac:dir=config/rbac
+
+.PHONY: deprecation-rules
+deprecation-rules: ## Refresh the deprecated-API rules (pkg/deprecation/data/versions.yaml) from Pluto at PLUTO_VERSION
+	{ printf '%s\n' \
+	  '# Deprecated and removed API versions, by the release that deprecates and' \
+	  '# removes them.' \
+	  '#' \
+	  '# Source:  https://github.com/FairwindsOps/pluto/blob/$(PLUTO_VERSION)/versions.yaml' \
+	  '# License: Apache-2.0 (Copyright FairwindsOps Inc)' \
+	  '# Refresh: make deprecation-rules PLUTO_VERSION=<tag>' \
+	  '#' \
+	  '# The content below this header is that file, unchanged. Do not edit it' \
+	  '# here: pkg/deprecation reads it as it is.'; \
+	  curl -fsSL https://raw.githubusercontent.com/FairwindsOps/pluto/$(PLUTO_VERSION)/versions.yaml; \
+	} > pkg/deprecation/data/versions.yaml.new
+	mv pkg/deprecation/data/versions.yaml.new pkg/deprecation/data/versions.yaml
+	@echo "Now set DataSource in pkg/deprecation/deprecation.go to $(PLUTO_VERSION) and run: go test ./pkg/deprecation/ ./pkg/controller/"
 
 .PHONY: tidy
 tidy: ## Run go mod tidy

@@ -130,6 +130,8 @@ cluster as objects of its kinds.
   direction the project is moving in.
 - [idl/README.md](idl/README.md): the `cloud.v1` contract and how its fields
   map to AWS.
+- [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
+  API versions in workload clusters are found and shown.
 - [docs/controller.md](docs/controller.md): the kubebuilder project and
   its kinds.
 - [docs/design/rollouts.md](docs/design/rollouts.md): the design for

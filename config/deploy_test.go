@@ -359,7 +359,8 @@ func managedKinds() []string {
 
 // What reconciles can do, on every managed resource kind the platform
 // uses, what the code does with them, and can install the providers: the
-// controller. It reads no Secret.
+// controller. This role reads no Secret (see
+// TestControllerOnlyGetsSecrets for the one read the controller has).
 func TestReconcilerRolesCoverTheKindsThePlatformRenders(t *testing.T) {
 	roles := map[string]*rbacv1.ClusterRole{
 		"controller": clusterRole(t, controllerRole),
@@ -390,6 +391,22 @@ func TestReconcilerRolesCoverTheKindsThePlatformRenders(t *testing.T) {
 	}
 	if !allows(roles["controller"], "apiextensions.k8s.io", "customresourcedefinitions", "patch") {
 		t.Error("controller role: cannot install the CRDs of the platform's kinds")
+	}
+}
+
+// Of Secrets the controller may only get one by name: a workload
+// cluster's kubeconfig, for the read-only scan for deprecated API versions
+// (pkg/controller DeprecationReconciler; RBAC cannot select Secrets by a
+// name suffix). It can neither list nor watch nor write them.
+func TestControllerOnlyGetsSecrets(t *testing.T) {
+	role := clusterRole(t, "rbac/role.yaml")
+	if !allows(role, "", "secrets", "get") {
+		t.Error("controller role: cannot get the kubeconfig Secret of a workload cluster (the deprecation scan)")
+	}
+	for _, verb := range []string{"list", "watch", "create", "update", "patch", "delete", "deletecollection", "*"} {
+		if allows(role, "", "secrets", verb) || allows(role, "", "*", verb) {
+			t.Errorf("controller role: may %s Secrets; it only gets a kubeconfig by name", verb)
+		}
 	}
 }
 

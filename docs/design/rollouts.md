@@ -397,6 +397,26 @@ clusters.
 The four numbers are defaults and can be set per release. The owner has not
 confirmed the starting values: Open question 1.
 
+**A gate before a Kubernetes upgrade starts: removed API versions.** The
+controller scans every running cluster for objects written with API
+versions that the minor it moves to next removes
+([deprecations](../deprecations.md)) and keeps the result in
+`status.deprecations`. `deprecation.BlocksUpgrade(findings, target)` says
+whether a cluster may move: it is true when any finding is removed at the
+target, and gives the reason to show.
+
+- An **automatic** cluster with such a finding is held: its Kubernetes
+  upgrade does not start, and it counts as skipped for the stage (like a
+  hold, section 11) until a later scan finds nothing removed. Platform
+  fixes that do not change the Kubernetes version still reach it.
+- A **manual** cluster is never held by it: the plan of the update that
+  changes its version carries the findings as a warning, and the tenant
+  decides.
+- Deprecated-only findings never hold anything.
+
+The scan, the status and the function exist; no upgrade flow calls the
+function yet.
+
 ## 9. Pause, resume, rollback
 
 | Action | What the operator does | What happens |

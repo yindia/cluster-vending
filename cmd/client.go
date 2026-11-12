@@ -21,6 +21,9 @@ type verb struct {
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
+	// table: the verb prints a table unless --output says otherwise;
+	// removed adds --only-removed.
+	table, removed bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -66,6 +69,10 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				if len(args) > 0 {
 					opts.ID = args[0]
 				}
+				output := output
+				if v.table && !cmd.Flags().Changed("output") {
+					output = cli.OutputTable
+				}
 				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil), opts, cmd.OutOrStdout(), output)
 			},
 		}
@@ -98,6 +105,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.force {
 			f.BoolVar(&o.Force, "force", false, "tear the cluster down even if its API is unreachable: Helm releases are released without uninstalling")
+		}
+		if v.removed {
+			f.BoolVar(&o.OnlyRemoved, "only-removed", false, "only the objects whose API version is removed at the target version")
 		}
 		if v.cluster {
 			f.StringVar(&o.Cluster, "cluster", "", "only this cluster's resources (cluster ID); default: all the tenant's")
@@ -151,6 +161,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
 		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
+		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
+			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, table: true, removed: true},
 		watchVerb("cluster", cli.ClusterWatch))
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
 }

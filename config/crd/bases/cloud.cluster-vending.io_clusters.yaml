@@ -992,6 +992,109 @@ spec:
                 description: currentKubernetesVersion is the version the control plane
                   runs.
                 type: string
+              deprecations:
+                description: deprecations is what the last scan for deprecated API
+                  versions found.
+                properties:
+                  attemptedAt:
+                    description: attemptedAt is when the cluster was last scanned,
+                      or tried to.
+                    format: date-time
+                    type: string
+                  error:
+                    description: |-
+                      error is why the last scan failed; empty when it worked. The counts
+                      and findings are those of the last scan that worked.
+                    maxLength: 1024
+                    type: string
+                  findings:
+                    description: findings, removed first; at most 200.
+                    items:
+                      description: |-
+                        DeprecationFinding is one object of the cluster that was written with an
+                        API version that is deprecated or removed at the target version.
+                      properties:
+                        apiVersion:
+                          description: apiVersion the object was written with, e.g.
+                            policy/v1beta1.
+                          type: string
+                        component:
+                          description: |-
+                            component the API version belongs to: k8s, or a project such as
+                            cert-manager or istio. deprecatedIn and removedIn are its releases.
+                          type: string
+                        deprecatedIn:
+                          description: deprecatedIn is the release that deprecates
+                            the API version.
+                          type: string
+                        helmRelease:
+                          description: |-
+                            helmRelease is <namespace>/<name> of the Helm release, for source
+                            HelmRelease.
+                          type: string
+                        kind:
+                          description: kind of the object.
+                          type: string
+                        name:
+                          description: name of the object.
+                          type: string
+                        namespace:
+                          description: namespace of the object; empty for a cluster-scoped
+                            one.
+                          type: string
+                        removed:
+                          description: |-
+                            removed: the API version is gone at the target version. False:
+                            deprecated only.
+                          type: boolean
+                        removedIn:
+                          description: removedIn is the release that removes it; empty
+                            when none does yet.
+                          type: string
+                        replacementAPI:
+                          description: replacementAPI is the API version to write
+                            the object with instead.
+                          type: string
+                        replacementAvailableIn:
+                          description: replacementAvailableIn is the release the replacement
+                            exists from.
+                          type: string
+                        source:
+                          description: source is where the object's manifest was read.
+                          enum:
+                          - Manifest
+                          - HelmRelease
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      type: object
+                    maxItems: 200
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  removed:
+                    description: |-
+                      removed is how many of them use an API version removed at
+                      targetVersion.
+                    format: int32
+                    type: integer
+                  scannedAt:
+                    description: scannedAt is when the last scan that worked ran.
+                    format: date-time
+                    type: string
+                  targetVersion:
+                    description: |-
+                      targetVersion is the Kubernetes minor the cluster was judged
+                      against, e.g. 1.37.
+                    type: string
+                  total:
+                    description: total is how many objects were found in all.
+                    format: int32
+                    type: integer
+                  truncated:
+                    description: 'truncated: more were found than findings holds.'
+                    type: boolean
+                type: object
               endpoint:
                 description: |-
                   endpoint of the Kubernetes API server, once the control plane is

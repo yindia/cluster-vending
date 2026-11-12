@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// DeprecationSource is where the manifest of a finding was read.
+enum DeprecationSource {
+  DEPRECATION_SOURCE_UNSPECIFIED = 0;
+  // The kubectl last-applied-configuration annotation of a live object.
+  DEPRECATION_SOURCE_MANIFEST = 1;
+  // The manifest of a deployed Helm release.
+  DEPRECATION_SOURCE_HELM_RELEASE = 2;
+}
+
+// DeprecationFinding is one object of a cluster that was written with an
+// API version that is deprecated or removed at the target version.
+message DeprecationFinding {
+  // Namespace of the object; empty for a cluster-scoped one.
+  string namespace = 1;
+  string kind = 2;
+  string name = 3;
+  // The API version the object was written with, e.g. "policy/v1beta1".
+  string api_version = 4;
+  // What the API version belongs to: "k8s", or a project such as
+  // "cert-manager" or "istio". deprecated_in and removed_in are releases
+  // of it.
+  string component = 5;
+  // The release that deprecates the API version, e.g. "v1.21.0".
+  string deprecated_in = 6;
+  // The release that removes it; empty when none does yet.
+  string removed_in = 7;
+  // The API version to write the object with instead; empty for none.
+  string replacement_api = 8;
+  // The release the replacement exists from.
+  string replacement_available_in = 9;
+  DeprecationSource source = 10;
+  // "<namespace>/<name>" of the Helm release, for HELM_RELEASE.
+  string helm_release = 11;
+  // The API version is gone at the target version: the object cannot be
+  // applied again as written. False: deprecated only.
+  bool removed = 12;
+}
+
+// ClusterDeprecations is what the controller's last scan of a cluster
+// found. The controller scans a running cluster every six hours and when
+// its target version changes; the API never reads the cluster itself.
+//
+// Only objects whose original manifest is kept are seen: those applied
+// with kubectl apply (client-side) and those of Helm releases.
+message ClusterDeprecations {
+  // The Kubernetes minor the cluster was judged against: the one it
+  // moves to next ("1.37").
+  string target_version = 1;
+  // When the last scan that worked ran. Unset: never scanned.
+  google.protobuf.Timestamp scanned_at = 2;
+  // How many objects were found in all, and how many of them use an API
+  // version removed at target_version.
+  int32 total = 3;
+  int32 removed = 4;
+  // The findings, removed first. Not set in Cluster.status (see
+  // ListClusterDeprecations).
+  repeated DeprecationFinding findings = 5;
+  // More were found than are kept (at most 200).
+  bool truncated = 6;
+  // Why the last scan failed; empty when it worked. The counts are those
+  // of the last scan that worked.
+  string error = 7;
+  // When the cluster was last scanned, or tried to.
+  google.protobuf.Timestamp attempted_at = 8;
+}
+
+message ListClusterDeprecationsRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // Maximum results per page. Defaults to 50; values above 200 are coerced
+  // to 200.
+  int32 page_size = 3 [(buf.validate.field).int32.gte = 0];
+
+  // next_page_token from a previous call. All other fields must match the
+  // call that produced it.
+  string page_token = 4 [(buf.validate.field).string = {
+    max_len: 8
+    pattern: "^[0-9]*$"
+  }];
+
+  // Only the findings whose API version is removed at the target version.
+  bool only_removed = 5;
+}
+
+message ListClusterDeprecationsResponse {
+  repeated DeprecationFinding findings = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+  // The scan the findings are of: see ClusterDeprecations.
+  string target_version = 3;
+  google.protobuf.Timestamp scanned_at = 4;
+  int32 total = 5;
+  int32 removed = 6;
+  bool truncated = 7;
+  string error = 8;
+}

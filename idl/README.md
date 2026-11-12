@@ -85,6 +85,7 @@ service comments say so.
 | `TakeOverCluster` | Makes the platform the owner of an `IMPORTED` cluster. |
 | `GetCluster`, `ListClusters` | Return the stored cluster: its spec and the status last recorded. |
 | `GetClusterStatus` | Returns the cluster with its status read now from the management cluster. |
+| `ListClusterDeprecations` | Returns the objects of the cluster written with API versions that are deprecated or removed at the Kubernetes version it moves to next: what the controller's last scan found, read from the store. `GetCluster` carries only the counts (`status.deprecations`). |
 | `WatchCluster` | Streams the cluster and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |
 | `DeleteCluster` | Marks the cluster `DELETING` and deletes its resources. `force` also releases Helm releases without uninstalling them. |

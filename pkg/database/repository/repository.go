@@ -113,6 +113,10 @@ type Clusters interface {
 	Update(ctx context.Context, c *model.Cluster) error
 	// SetStatus is Networks.SetStatus for clusters.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
+	// SetDeprecations records the last scan for deprecated API versions
+	// (protojson cloud.v1 ClusterDeprecations) and nothing else: the etag,
+	// the generation and the status stay.
+	SetDeprecations(ctx context.Context, tenantID, id string, deprecations model.JSON) error
 	// Delete fails with ErrInUse while the cluster has components.
 	Delete(ctx context.Context, tenantID, id string) error
 }

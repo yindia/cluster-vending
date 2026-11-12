@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -102,19 +103,51 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 	if adoption := obj.Annotations[AnnotationAdoption]; adoption != "" {
 		c.Adoption = model.JSON(adoption)
 	}
+	if d := convert.DeprecationsFromAPI(obj.Status.Deprecations); d != nil {
+		if c.Deprecations, err = protojson.Marshal(d); err != nil {
+			return nil, err
+		}
+	}
 	m.into(&c.Resource)
 	return c, nil
 }
 
 // setStatus writes a row's status onto obj.Status: the contract status
-// verbatim, and the typed fields read from it. The inventory stays.
+// verbatim, and the typed fields read from it. The inventory and the
+// deprecation scan (its result and its condition) stay.
 func (r clusters) setStatus(obj *cloudv1alpha1.Cluster, raw model.JSON, state string) {
 	p := &cloudv1.ClusterStatus{}
 	_ = decode(raw, p) // a status this build cannot read is still kept verbatim
 	st := &obj.Status
+	scan := meta.FindStatusCondition(st.Conditions, cloudv1alpha1.ConditionDeprecationScan)
 	st.ContractStatus = keepStatus(st.ContractStatus, raw)
 	convert.ClusterStatusInto(p, state, metav1.NewTime(now()), st)
+	if scan != nil {
+		meta.SetStatusCondition(&st.Conditions, *scan)
+	}
 	st.ObservedGeneration = obj.Generation
+}
+
+// SetDeprecations writes the scan result and its DeprecationScan
+// condition; no change when it says what is stored.
+func (r clusters) SetDeprecations(ctx context.Context, tenantID, id string, deprecations model.JSON) error {
+	p := &cloudv1.ClusterDeprecations{}
+	if err := decode(deprecations, p); err != nil {
+		return fmt.Errorf("%w: cluster deprecations: %w", repository.ErrInvalid, err)
+	}
+	return translate(retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		before := obj.Status.DeepCopy()
+		obj.Status.Deprecations = convert.DeprecationsToAPI(p)
+		meta.SetStatusCondition(&obj.Status.Conditions, convert.DeprecationCondition(obj.Status.Deprecations, obj.Generation))
+		if equality.Semantic.DeepEqual(before, &obj.Status) {
+			return nil
+		}
+		return r.c.Status().Update(ctx, obj)
+	}))
 }
 
 // find is the cluster of the tenant with the row ID.

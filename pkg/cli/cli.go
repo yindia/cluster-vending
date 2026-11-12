@@ -72,6 +72,8 @@ type Options struct {
 	// PageSize and PageToken page list results.
 	PageSize  int32
 	PageToken string
+	// OnlyRemoved is --only-removed of cluster deprecations.
+	OnlyRemoved bool
 }
 
 func (o Options) requireTenant() error {

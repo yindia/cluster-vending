@@ -31,6 +31,7 @@ func stored(row *model.Cluster) (*cloudv1.Cluster, error) {
 	if st.GetObservedGeneration() == 0 {
 		st.ObservedGeneration = row.ObservedGeneration
 	}
+	st.Deprecations = deprecationSummary(row)
 	return reconcilecluster.ClusterProto(row, spec, st), nil
 }
 

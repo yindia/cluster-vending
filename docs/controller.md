@@ -72,6 +72,13 @@ make controller-apis
 It runs `go tool controller-gen` (deepcopy, CRDs, RBAC role). `make check`
 covers these packages like any other.
 
+The generated role (`config/rbac/role.yaml`) has one rule on Secrets:
+`get`. The scan for deprecated API versions reads a workload cluster with
+the kubeconfig Secret its ClusterAuth writes
+([deprecations](deprecations.md)); RBAC cannot select Secrets by a name
+suffix, so the rule is on Secrets as a whole, without `list`, `watch` or
+any write.
+
 ## Run
 
 ```

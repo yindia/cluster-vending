@@ -5,6 +5,10 @@ context: kind-cluster-vending
 log-format: text
 log-level: debug
 http-addr: 127.0.0.1:8080
+# One local server: the background loop runs without a leader election
+# Lease. With it, a server that was killed leaves the Lease behind and the
+# next start waits 15 seconds for it to expire ("failed to acquire lease").
+leader-elect: false
 aws:
   # Placeholders: nothing calls AWS with these yet.
   management-account-id: "111122223333"

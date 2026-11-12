@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -60,10 +61,12 @@ type planner struct {
 // is (spec), the Observe-only resources that import it, and one plan line
 // per resource. Lines are MATCHES, WILL_UPDATE (subnets missing their load
 // balancer tag), CARRIED_OVER (the VPC's flow logs to CloudWatch Logs with
-// their log group and delivery role), NOT_IMPORTED (outside this version:
-// the main route table, extra routes, unused NAT gateways, the default
-// security group, other flow logs) or BLOCKING (not expressible in the
-// contract).
+// their log group and delivery role, the default network ACL and the
+// network ACLs of the imported subnets with their rules, routes of specific
+// CIDRs to the internet gateway), NOT_IMPORTED (outside this version: the
+// main route table, other routes, unused NAT gateways, the default security
+// group, other flow logs and network ACLs) or BLOCKING (not expressible in
+// the contract).
 func planAWSImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) importPlan {
 	p := &planner{d: d, base: base, subnetNames: map[string]string{}, natKeys: map[string]string{}}
 	p.plan.layout = &cloudv1.NetworkLayout{CidrBlock: d.VPC.CIDRBlock}
@@ -72,6 +75,7 @@ func planAWSImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) impo
 	p.subnets()
 	p.routeTables()
 	p.natMode()
+	p.networkACLs()
 	p.flowLogs()
 	p.extras()
 	return p.plan
@@ -227,6 +231,12 @@ func (p *planner) routeTable(rt awscloud.RouteTable, assocs []crossplaneaws.Impo
 			if r.NATGatewayID != "" {
 				p.useNAT(r.NATGatewayID)
 			}
+		case r.DestinationCIDRBlock != "" && r.DestinationCIDRBlock != "0.0.0.0/0" && strings.HasPrefix(r.GatewayID, "igw-"):
+			// A public table that routes specific CIDRs: kept as it is.
+			t.GatewayRoutes = append(t.GatewayRoutes, crossplaneaws.ImportedRoute{GatewayID: r.GatewayID, Destination: r.DestinationCIDRBlock})
+			p.line("Route", fmt.Sprintf("%s-route-%s-%d", p.base.Prefix, key, len(t.GatewayRoutes)),
+				crossplaneaws.RouteExternalName(rt.ID, r.DestinationCIDRBlock), "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
+				fmt.Sprintf("route %s to the internet gateway, kept as it is", r.DestinationCIDRBlock))
 		default:
 			p.line("Route", "", rt.ID+"_"+routeDestination(r), "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
 				fmt.Sprintf("route %s -> %s is not imported yet", routeDestination(r), routeTarget(r)))
@@ -317,6 +327,50 @@ func (p *planner) natMode() {
 	p.plan.layout.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE
 	if len(p.natKeys) > 1 {
 		p.plan.layout.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
+	}
+}
+
+// networkACLs imports, as CARRIED_OVER, the VPC's default network ACL (a
+// DefaultNetworkACL with its rules inline, never deleted) and the custom
+// network ACLs associated with an imported subnet, each with a
+// NetworkACLRule per rule. Subnet associations are the ACL's subnetIds,
+// all of them: the provider has no association kind. Other network ACLs
+// are NOT_IMPORTED.
+func (p *planner) networkACLs() {
+	custom := 0
+	for _, a := range p.d.NetworkACLs {
+		acl := crossplaneaws.ImportedNetworkACL{ID: a.ID, Default: a.Default, SubnetIDs: a.SubnetIDs, Tags: a.Tags}
+		switch {
+		case a.Default:
+			acl.Name = p.base.Prefix + "-default-nacl"
+			p.line("DefaultNetworkACL", acl.Name, a.ID, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
+				"the VPC's default network ACL with its rules: owned without Delete, it goes with the VPC")
+		case !slices.ContainsFunc(a.SubnetIDs, func(id string) bool { return p.subnetNames[id] != "" }):
+			p.line("NetworkACL", "", a.ID, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,
+				"no imported subnet is associated with this network ACL")
+			continue
+		default:
+			custom++
+			acl.Name = numbered(p.base.Prefix+"-nacl", custom)
+			p.line("NetworkACL", acl.Name, a.ID, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
+				fmt.Sprintf("associated with %d subnets", len(a.SubnetIDs)))
+		}
+		for _, r := range a.Rules {
+			rule := crossplaneaws.ImportedNetworkACLRule{Number: r.Number, Egress: r.Egress, Protocol: r.Protocol, Action: r.Action,
+				CIDRBlock: r.CIDRBlock, IPv6CIDRBlock: r.IPv6CIDRBlock, FromPort: r.FromPort, ToPort: r.ToPort,
+				ICMPType: r.ICMPType, ICMPCode: r.ICMPCode}
+			if !a.Default {
+				direction := "in"
+				if r.Egress {
+					direction = "out"
+				}
+				rule.Name = fmt.Sprintf("%s-%s-%d", acl.Name, direction, r.Number)
+				p.line("NetworkACLRule", rule.Name, crossplaneaws.NetworkACLRuleExternalName(a.ID, r.Number, r.Egress, r.Protocol),
+					"", cloudv1.Disposition_DISPOSITION_CARRIED_OVER, "")
+			}
+			acl.Rules = append(acl.Rules, rule)
+		}
+		p.plan.resources.NetworkACLs = append(p.plan.resources.NetworkACLs, acl)
 	}
 }
 

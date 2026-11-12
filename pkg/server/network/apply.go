@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -67,10 +68,78 @@ func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
 	}
-	return s.applyObjects(ctx, row, a, objects)
+	hold, err := s.holdNAT(ctx, row)
+	if err != nil {
+		return err
+	}
+	if hold {
+		// Created in sequence: the NAT gateways follow once the internet
+		// gateway is attached (Reconcile applies the network again).
+		if objects, err = s.withoutKind(objects, natGatewayKind); err != nil {
+			return connect.NewError(connect.CodeInternal, err.Error())
+		}
+	}
+	if err := s.applyObjects(ctx, row, a, objects); err != nil || hold {
+		return err // held back: not applied in full yet
+	}
+	return s.markApplied(ctx, row)
+}
+
+// Kinds of the NAT gateway stage.
+const (
+	natGatewayKind      = "NATGateway"
+	internetGatewayKind = "InternetGateway"
+)
+
+// holdNAT reports whether apply must leave out the NAT gateways: a public
+// NAT gateway can only be created in a VPC whose internet gateway is
+// attached, and created earlier it fails and turns the network FAILED.
+// They are held back until the InternetGateway is Ready (the provider
+// creates and attaches it in one step), and never again once they were
+// created.
+func (s *NetworkService) holdNAT(ctx context.Context, row *model.Network) (bool, error) {
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
+	if err != nil {
+		return false, service.ToConnect(err)
+	}
+	var gateways []model.ManagedResource
+	for _, r := range records {
+		switch r.Kind {
+		case natGatewayKind:
+			return false, nil
+		case internetGatewayKind:
+			gateways = append(gateways, r)
+		}
+	}
+	views, err := s.deps.Observe(ctx, gateways)
+	if err != nil {
+		return false, err
+	}
+	for _, v := range views {
+		if v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// withoutKind drops the objects of one kind.
+func (s *NetworkService) withoutKind(objects []client.Object, kind string) ([]client.Object, error) {
+	out := make([]client.Object, 0, len(objects))
+	for _, obj := range objects {
+		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
+		if err != nil {
+			return nil, err
+		}
+		if gvk.Kind != kind {
+			out = append(out, obj)
+		}
+	}
+	return out, nil
 }
 
 // applyObjects applies objects in order and records them as the network's.
+// The caller marks the row applied once nothing is held back.
 func (s *NetworkService) applyObjects(ctx context.Context, row *model.Network, a *model.CloudAccount, objects []client.Object) error {
 	if a.Namespace == "" || a.ProviderConfigName == "" {
 		return connect.NewError(connect.CodeFailedPrecondition,
@@ -94,7 +163,7 @@ func (s *NetworkService) applyObjects(ctx context.Context, row *model.Network, a
 		s.logger().ErrorContext(ctx, "record network resources", "network_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeInternal, "could not record the network's resources")
 	}
-	return s.markApplied(ctx, row)
+	return nil
 }
 
 // markApplied records that every object of the row's generation was
@@ -156,20 +225,22 @@ func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
 }
 
 // deleteOrder deletes a network from the inside out, the order AWS
-// accepts: the flow log, routes and subnet associations; then the flow
-// log's log group and its role's policy attachment, route tables and NAT
-// gateways; then the delivery role and its policy and the NAT gateways'
-// EIPs; then subnets and the internet gateway (it detaches only once no
-// public IP is left); then the VPC.
+// accepts: the flow log, network ACL rules, routes and subnet
+// associations; then the flow log's log group and its role's policy
+// attachment, network ACLs, route tables and NAT gateways; then the
+// delivery role and its policy and the NAT gateways' EIPs; then subnets,
+// the internet gateway (it detaches only once no public IP is left) and
+// the default network ACL (only its object goes: it is owned without
+// Delete); then the VPC.
 //
 // The flow log's Usages (they hold its log group and role while it
 // exists) sit in the tier after it: Kubernetes garbage-collects them with
 // the flow log, and DeleteRecorded never deletes a Usage itself.
 var deleteOrder = service.DeleteOrder{
-	{"FlowLog", "RouteTableAssociation", "Route"},
-	{"Usage", "Group", "RolePolicyAttachment", "RouteTable", "NATGateway"},
+	{"FlowLog", "NetworkACLRule", "RouteTableAssociation", "Route"},
+	{"Usage", "Group", "RolePolicyAttachment", "NetworkACL", "RouteTable", "NATGateway"},
 	{"Role", "Policy", "EIP"},
-	{"Subnet", "InternetGateway"},
+	{"Subnet", "InternetGateway", "DefaultNetworkACL"},
 	{"VPC"},
 }
 

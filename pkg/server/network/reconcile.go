@@ -15,7 +15,8 @@ func PendingStates() []string { return []string{stateDeleting} }
 // Reconcile moves one network on; the background loop calls it, so no read
 // has to. It moves a deletion on (the next tier, then the row), and
 // applies the network again while its generation or renderer version is
-// behind. Imported networks are observed only: nothing is applied for
+// behind: after a change, and for the NAT gateways held back until the
+// internet gateway is attached (holdNAT). Imported networks are observed only: nothing is applied for
 // them. Every step is idempotent. A network that does not exist is done.
 func (s *NetworkService) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Networks().Get(ctx, tenantID, id)

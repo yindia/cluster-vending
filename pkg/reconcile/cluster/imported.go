@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -45,18 +44,18 @@ func importSet(objects []client.Object) sequence.Set {
 	return set
 }
 
-// ApplyImport records and applies the import's objects (sequence.Engine).
-// Pod identity associations then get their external name (an ID only the
-// cloud knows) set once, outside the apply: it is not part of any later
-// render.
-func (s *Reconciler) ApplyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan corecluster.ImportPlan) error {
+// applyImport records and applies an import's objects (sequence.Engine).
+// Pod identity associations then get their external name (identities: an
+// ID only the cloud knows, by object name) set once, outside the apply: it
+// is not part of any later render.
+func (s *Reconciler) applyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, objects []client.Object, identities map[string]string) error {
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	if _, err := s.deps.Sequence().Apply(ctx, importSet(plan.Objects), s.deps.Inventory(owner)); err != nil {
+	if _, err := s.deps.Sequence().Apply(ctx, importSet(objects), s.deps.Inventory(owner)); err != nil {
 		s.logger().ErrorContext(ctx, "apply imported resources", "cluster_id", row.ID, "error", err)
 		return applyError(err)
 	}
-	for _, obj := range plan.Objects {
-		id, ok := plan.PodIdentities[obj.GetName()]
+	for _, obj := range objects {
+		id, ok := identities[obj.GetName()]
 		if !ok {
 			continue
 		}

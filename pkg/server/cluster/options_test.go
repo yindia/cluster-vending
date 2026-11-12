@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"connectrpc.com/connect/v2"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
@@ -88,8 +87,6 @@ func markReady(t *testing.T, w world, obj client.Object, name string) {
 // applied only once the log group is Ready and the key has an ARN, and
 // then encrypts with that key.
 func TestLogGroupAndKeyStageBeforeTheCluster(t *testing.T) {
-	reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 0, 0
-	t.Cleanup(func() { reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 2*time.Minute, 15*time.Second })
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
@@ -166,7 +163,7 @@ func TestSecretsEncryptionCannotBeRemoved(t *testing.T) {
 
 	plan := proto.CloneOf(updateRequest(w, on, pathSecretsEncryption))
 	plan.ValidateOnly = true
-	planned, err := w.svc.UpdateCluster(ctx, plan)
+	planned, err := update(t, w, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +171,7 @@ func TestSecretsEncryptionCannotBeRemoved(t *testing.T) {
 		got[0].GetSpecPath() != pathSecretsEncryption || !planned.GetPlan().GetApplicable() {
 		t.Fatalf("plan to turn encryption on = %v, want it in place", planned.GetPlan().GetChanges())
 	}
-	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, on, pathSecretsEncryption)); err != nil {
+	if _, err := update(t, w, updateRequest(w, on, pathSecretsEncryption)); err != nil {
 		t.Fatalf("turn encryption on: %v", err)
 	}
 	eks := &awseks.Cluster{}
@@ -194,13 +191,13 @@ func TestSecretsEncryptionCannotBeRemoved(t *testing.T) {
 		"another key": {ControlPlane: &cloudv1.ControlPlaneSpec{SecretsEncryption: &cloudv1.SecretsEncryption{KmsKeyArn: strings.Replace(existingKey, "1234abcd", "9999abcd", 1)}}},
 		"a new key":   {ControlPlane: &cloudv1.ControlPlaneSpec{SecretsEncryption: &cloudv1.SecretsEncryption{Enabled: true}}},
 	} {
-		if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, pathSecretsEncryption)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		if _, err := update(t, w, updateRequest(w, spec, pathSecretsEncryption)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 			t.Errorf("%s: %v, want FAILED_PRECONDITION", name, err)
 		}
 	}
 	off := updateRequest(w, &cloudv1.ClusterSpec{ControlPlane: &cloudv1.ControlPlaneSpec{SecretsEncryption: &cloudv1.SecretsEncryption{}}}, pathSecretsEncryption)
 	off.ValidateOnly = true
-	planned, err = w.svc.UpdateCluster(ctx, off)
+	planned, err = update(t, w, off)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +257,7 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 	before := eksSpec()
 
 	// Add an entry with a cluster-wide policy.
-	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, entries(&cloudv1.AccessPolicy{PolicyArn: viewPolicy}), path)); err != nil {
+	if _, err := update(t, w, updateRequest(w, entries(&cloudv1.AccessPolicy{PolicyArn: viewPolicy}), path)); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	e, p := list()
@@ -274,7 +271,7 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 	scoped := entries(&cloudv1.AccessPolicy{PolicyArn: viewPolicy, Scope: cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_NAMESPACE, Namespaces: []string{"team-a"}})
 	plan := updateRequest(w, scoped, path)
 	plan.ValidateOnly = true
-	planned, err := w.svc.UpdateCluster(ctx, plan)
+	planned, err := update(t, w, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +286,7 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 			t.Errorf("an access entry change plans %s %s: %s", c.GetKind(), c.GetName(), c.GetDetail())
 		}
 	}
-	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, scoped, path)); err != nil {
+	if _, err := update(t, w, updateRequest(w, scoped, path)); err != nil {
 		t.Fatalf("change: %v", err)
 	}
 	e, p = list()
@@ -298,7 +295,7 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 	}
 
 	// Remove the entry.
-	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{}}, path)); err != nil {
+	if _, err := update(t, w, updateRequest(w, &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{}}, path)); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if e, p = list(); len(e) != 0 || len(p) != 0 {
@@ -311,7 +308,7 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 	// A principal cannot be an admin and an entry.
 	dup := &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{AdminPrincipals: []string{devRole},
 		AccessEntries: []*cloudv1.AccessEntry{{PrincipalArn: devRole}}}}
-	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, dup, path, "spec.access.admin_principals")); connect.CodeOf(err) != connect.CodeInvalidArgument {
+	if _, err := update(t, w, updateRequest(w, dup, path, "spec.access.admin_principals")); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("admin and entry for one principal: %v, want INVALID_ARGUMENT", err)
 	}
 }
@@ -337,7 +334,7 @@ func TestUpdateIRSA(t *testing.T) {
 	irsa := func(on bool) {
 		t.Helper()
 		spec := &cloudv1.ClusterSpec{Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: ptr.To(on)}}}
-		if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, "spec.aws.irsa")); err != nil {
+		if _, err := update(t, w, updateRequest(w, spec, "spec.aws.irsa")); err != nil {
 			t.Fatalf("irsa %t: %v", on, err)
 		}
 	}

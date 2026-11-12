@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"connectrpc.com/connect/v2"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
@@ -26,51 +25,49 @@ func TestUpdateWithAMaskedFieldLeftOut(t *testing.T) {
 	for _, path := range []string{"spec.aws.irsa", "spec.control_plane.endpoint_access.endpoint_private_access",
 		"spec.control_plane.endpoint_access.endpoint_public_access"} {
 		for name, spec := range map[string]*cloudv1.ClusterSpec{"no spec": nil, "empty spec": {}} {
-			if _, err := w.svc.UpdateCluster(t.Context(), updateRequest(w, spec, path)); err != nil {
+			if _, err := update(t, w, updateRequest(w, spec, path)); err != nil {
 				t.Errorf("%s with %s: %v", path, name, err)
 			}
 		}
 	}
 }
 
-// The loop does not move a create on to its next stage while the call
-// that stored it may still be applying or rolling back.
-func TestStageWaitsForTheCreateToFinish(t *testing.T) {
-	reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 0, time.Hour
-	t.Cleanup(func() { reconcilecluster.ResumeAfter, reconcilecluster.StageAfter = 2*time.Minute, 15*time.Second })
+// A stored cluster is applied by the very next pass, and so is each of its
+// stages: nothing waits for the call that stored it, which applies
+// nothing.
+func TestStagesMoveOnWithEveryPass(t *testing.T) {
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
 	newCluster(t, w, func(s *cloudv1.ClusterSpec) {
 		s.GetAws().ControlPlaneLogGroup = &cloudv1.AwsControlPlaneLogGroup{Enabled: ptr.To(true)}
 	})
-	// The create's own first apply (records exist, the EKS cluster is held).
-	reconcilecluster.StageAfter = 0
+	eks := client.ObjectKey{Namespace: worldNS, Name: prefix}
+	// The first pass: the stage before the EKS cluster.
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
+	}
+	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix + "-logs"}, &awscwl.Group{}); err != nil {
+		t.Fatalf("the first pass did not apply the log group: %v", err)
+	}
+	if err := w.kube.Get(ctx, eks, &awseks.Cluster{}); err == nil {
+		t.Fatal("the EKS cluster was applied before its log group is Ready")
 	}
 	markReady(t, w, &awscwl.Group{}, prefix+"-logs")
-	reconcilecluster.StageAfter = time.Hour
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix}, &awseks.Cluster{}); err == nil {
-		t.Fatal("the next stage was applied although the row was written a moment ago")
-	}
-	reconcilecluster.StageAfter = 0
-	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix}, &awseks.Cluster{}); err != nil {
-		t.Fatalf("the next stage was not applied once the row was left alone: %v", err)
+	if err := w.kube.Get(ctx, eks, &awseks.Cluster{}); err != nil {
+		t.Fatalf("the next stage was not applied by the next pass: %v", err)
 	}
 }
 
-// A takeover that fails half-way leaves a cluster that is no longer
-// "imported, read-only" (deleting that must leave the cloud alone), and
-// the loop finishes it.
+// A takeover is stored first and carried out by the reconciler. One that
+// fails half-way leaves a cluster that is no longer "imported, read-only"
+// (deleting that must leave the cloud alone): the failure is its status,
+// and the next pass finishes it.
 func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
-	fail := true
+	fail := false
 	w := newWorld(t, interceptor.Funcs{
 		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
 			if fail && obj.GetObjectKind().GroupVersionKind().Kind == "Group" {
@@ -82,24 +79,23 @@ func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 	ctx := t.Context()
 	c := importTF(t, w)
 	if _, err := w.svc.TakeOverCluster(ctx, &cloudv1.TakeOverClusterRequest{TenantId: worldTenant, ClusterId: c.GetId(),
-		AcknowledgeNotImported: true}); err == nil {
-		t.Fatal("the takeover succeeded although an object could not be taken over")
+		AcknowledgeNotImported: true}); err != nil {
+		t.Fatalf("TakeOverCluster only stores the takeover: %v", err)
+	}
+	fail = true
+	if err := w.svc.Reconcile(ctx, worldTenant, c.GetId()); err == nil {
+		t.Fatal("the pass succeeded although an object could not be taken over")
 	}
 	row, err := w.store.Clusters().Get(ctx, worldTenant, c.GetId())
-	if err != nil || row.State == reconcilecluster.StateImported {
-		t.Fatalf("state %s (%v): a cluster with objects already owned must not read as imported, read-only", row.State, err)
+	if err != nil || row.State == reconcilecluster.StateImported || row.AppliedGeneration >= row.Generation {
+		t.Fatalf("state %s, applied %d of %d (%v): a cluster with objects already owned must not read as imported, read-only",
+			row.State, row.AppliedGeneration, row.Generation, err)
+	}
+	st, err := w.svc.GetClusterStatus(ctx, &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: c.GetId()})
+	if err != nil || st.GetCluster().GetStatus().GetMessage() != "retrying: could not take over the cluster's carried-over resources" {
+		t.Errorf("status after the failed pass = %q (%v), want the failure being retried", st.GetCluster().GetStatus().GetMessage(), err)
 	}
 	fail = false
-	// The imported EKS cluster is ACTIVE, as its provider reports.
-	eks := &awseks.Cluster{}
-	eksKey := client.ObjectKey{Namespace: worldNS, Name: crossplaneaws.ClusterPrefix(worldTenant, c.GetId(), "tf")}
-	if err := w.kube.Get(ctx, eksKey, eks); err != nil {
-		t.Fatal(err)
-	}
-	eks.Status.AtProvider.Status = ptr.To("ACTIVE")
-	if err := w.kube.Update(ctx, eks); err != nil {
-		t.Fatal(err)
-	}
 	if err := w.svc.Reconcile(ctx, worldTenant, c.GetId()); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +109,7 @@ func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 	req := &cloudv1.UpdateClusterRequest{TenantId: worldTenant, UpdateMask: updateRequest(w, nil, "spec.aws.irsa").GetUpdateMask(),
 		Cluster: &cloudv1.Cluster{Id: c.GetId(), Spec: &cloudv1.ClusterSpec{
 			Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: ptr.To(true)}}}}}
-	if _, err := w.svc.UpdateCluster(ctx, req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+	if _, err := update(t, w, req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("irsa on a cluster that carries its OIDC provider over = %v, want FAILED_PRECONDITION", err)
 	}
 }
@@ -145,5 +141,6 @@ func TestImportKeepsTheClusterCreatorSetting(t *testing.T) {
 		AcknowledgeNotImported: true}); err != nil {
 		t.Fatal(err)
 	}
+	reconcile(t, w, c.GetId())
 	check("after the takeover")
 }

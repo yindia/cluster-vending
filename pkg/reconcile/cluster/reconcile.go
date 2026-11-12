@@ -18,11 +18,14 @@ func PendingStates() []string {
 }
 
 // Reconcile moves one cluster on; the background loop calls it, so no read
-// has to. It applies the cluster again while its generation or renderer
+// has to, and no API call does: the handlers only store what was asked
+// for. It applies the cluster again while its generation or renderer
 // version is behind (advance), retires node groups a replacement
 // superseded, moves a deletion on and removes the row when everything is
 // gone, stores a converged generation, and records the cluster's status
-// (what GetCluster returns). Every step is idempotent. A cluster that
+// (what GetCluster returns). What fails is recorded as the cluster's
+// status (ConditionReconciled) and tried again on the next pass. Every
+// step is idempotent. A cluster that
 // does not exist is done.
 func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
@@ -32,23 +35,23 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.moveOn(ctx, row); err != nil {
-		return err
-	}
+	// What went wrong is the cluster's status (below) and the error of the
+	// pass: the loop logs it and comes back.
+	failed := s.moveOn(ctx, row)
 	// What GetCluster returns: the status as it is after this pass. A
 	// cluster that is gone has none.
 	current, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
-		return nil
+		return failed
 	}
 	if err != nil {
-		return err
+		return errors.Join(failed, err)
 	}
-	c, err := s.View(ctx, current)
+	c, err := s.view(ctx, current, FailureCondition(failed))
 	if err != nil {
-		return fmt.Errorf("observe: %w", err)
+		return errors.Join(failed, fmt.Errorf("observe: %w", err))
 	}
-	return s.remember(ctx, current, c.GetStatus())
+	return errors.Join(failed, s.remember(ctx, current, c.GetStatus()))
 }
 
 // moveOn is Reconcile without recording the status.
@@ -58,6 +61,12 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 		return err
 	}
 	if row.State == StateImported || row.State == StateBlocked {
+		if row.State == StateImported && row.AppliedGeneration < row.Generation {
+			// The import was stored; its Observe-only objects are created here.
+			if err := s.applyStoredImport(ctx, row); err != nil {
+				return fmt.Errorf("apply: %w", err)
+			}
+		}
 		// Observed only, until TakeOverCluster. Counted as applied with this
 		// renderer, or a renderer change would list it as pending forever.
 		return s.markApplied(ctx, row)

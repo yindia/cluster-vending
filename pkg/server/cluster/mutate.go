@@ -151,11 +151,12 @@ func scaling(spec *cloudv1.ClusterSpec) *cloudv1.ScalingConfig {
 	return spec.DefaultNodePool.ScalingConfig
 }
 
-// UpdateCluster changes the fields named in update_mask and rolls spec
-// changes out by applying the cluster's resources again; resources the new
-// spec no longer has (a removed admin's access entry) are deleted. With
-// validate_only it only returns the plan of that (planUpdate); with
-// plan_id it applies only if the plan is still the same.
+// UpdateCluster changes the fields named in update_mask in the stored
+// cluster. The reconciler rolls spec changes out by applying the cluster's
+// resources again; resources the new spec no longer has (a removed admin's
+// access entry) are deleted. With validate_only it only returns the plan
+// of that (planUpdate); with plan_id it stores the change only if the plan
+// is still the same.
 func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateClusterRequest) (_ *cloudv1.UpdateClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -174,7 +175,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	paths := req.GetUpdateMask().GetPaths()
-	stored, err := reconcilecluster.Encode(spec) // the spec as stored, to tell what the update changes
+	specBefore, err := reconcilecluster.Encode(spec) // the spec as stored, to tell what the update changes
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -213,7 +214,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err.Error())
 		}
-		specChanged = specChanged || string(resolved) != string(stored)
+		specChanged = specChanged || string(resolved) != string(specBefore)
 	}
 	var plan *cloudv1.Plan
 	if req.GetValidateOnly() || req.GetPlanId() != "" {
@@ -237,6 +238,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if specChanged {
 		row.Generation++
 		row.State = reconcilecluster.StateUpdating
+		reconcilecluster.ClearFailure(row) // of the generation before: the next pass reports on this one
 	}
 	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -245,18 +247,9 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return nil, service.ToConnect(err)
 	}
 	if specChanged {
-		plan := s.RenderPlan(spec, row, t)
-		if err := s.Apply(ctx, row, t.Account, plan); err != nil {
-			return nil, err
-		}
-		s.logger().InfoContext(ctx, "cluster updated", "cluster_id", row.ID, "paths", paths)
+		s.logger().InfoContext(ctx, "cluster update stored", "cluster_id", row.ID, "paths", paths)
 	}
-	// Idempotent: also tags the subnets of clusters created before the
-	// platform tagged them.
-	if err := s.TagSubnets(ctx, row, t); err != nil {
-		return nil, err
-	}
-	c, err := s.Respond(ctx, row)
+	c, err := stored(row)
 	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
 }
 
@@ -385,8 +378,8 @@ func ensureSpec(c *cloudv1.Cluster) {
 	}
 }
 
-// DeleteCluster deletes the cluster's resources; the cluster is removed
-// once they are gone (until then it is DELETING).
+// DeleteCluster stores the cluster as DELETING. The reconciler deletes its
+// resources and removes the cluster once they are gone.
 func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteClusterRequest) (_ *cloudv1.DeleteClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -402,19 +395,12 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 	if row.State != reconcilecluster.StateDeleting || (req.GetForce() && !row.DeleteForce) {
 		row.State = reconcilecluster.StateDeleting
 		row.DeleteForce = row.DeleteForce || req.GetForce()
+		reconcilecluster.ClearFailure(row)
 		if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 			return nil, service.ToConnect(err)
 		}
+		s.logger().InfoContext(ctx, "cluster deleting", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	}
-	c, err := s.Respond(ctx, row)
-	if err != nil {
-		return nil, err
-	}
-	// Starts the deletion now; the background loop moves it on until the
-	// cluster is gone.
-	if _, err := s.Finalize(ctx, row); err != nil {
-		return nil, err
-	}
-	s.logger().InfoContext(ctx, "cluster deleting", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
-	return &cloudv1.DeleteClusterResponse{Cluster: c}, nil
+	c, err := stored(row)
+	return &cloudv1.DeleteClusterResponse{Cluster: c}, err
 }

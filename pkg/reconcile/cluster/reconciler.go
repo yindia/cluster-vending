@@ -1,9 +1,11 @@
 // Package cluster moves an AWS (EKS) cluster towards its stored spec: it
 // applies the cluster's Crossplane managed resources in order, stages what
 // must wait, replaces node groups, deletes, and reads the cluster's status
-// from its resources. The stored row is the source of truth. The API
-// handlers (pkg/server/cluster) and the background loop call it; it knows
-// no RPC library: failures a caller can act on are faults (pkg/fault).
+// from its resources. The stored row is the source of truth: the API
+// handlers (pkg/server/cluster) only store what was asked for and read;
+// the background loop calls Reconcile, which applies it and records what
+// goes wrong as the cluster's status. It knows no RPC library: failures a
+// caller can act on are faults (pkg/fault).
 package cluster
 
 import (
@@ -107,8 +109,8 @@ func (s *Reconciler) Base(row *model.Cluster, a *model.CloudAccount) crossplanea
 
 // Apply makes the cluster's managed resources match plan, in order
 // (crossplaneaws.ClusterSet, sequence.Engine): what the cluster has is
-// recorded before it is applied, so a failed apply can always be rolled
-// back; add-ons and access entries are held back until EKS is ACTIVE;
+// recorded before it is applied, so nothing is ever in the management
+// cluster without the cluster knowing of it; add-ons and access entries are held back until EKS is ACTIVE;
 // recorded objects the plan no longer has (e.g. a removed admin) are
 // removed once nothing is held back. The generation is marked applied
 // once the whole set is; until then the cluster is applied again
@@ -175,8 +177,8 @@ func (s *Reconciler) markApplied(ctx context.Context, row *model.Cluster) error 
 	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
 	err := s.deps.Store.Clusters().Update(ctx, row)
 	if errors.Is(err, repository.ErrConflict) {
-		// The row changed while it was applied: whoever changed it applies
-		// it, or the loop does (recheck).
+		// A call changed the row while it was applied: it is behind again
+		// (calls only store), and the next pass applies it as it is now.
 		row.AppliedGeneration, row.RenderVersion = before, version
 		return nil
 	}
@@ -186,60 +188,12 @@ func (s *Reconciler) markApplied(ctx context.Context, row *model.Cluster) error 
 	return nil
 }
 
-// recheck is called by the loop after it applied row: when a call changed
-// the row meanwhile, what the loop applied may be older than what that
-// call applied, and may have been written over it (an update silently
-// reverted). The row is marked as not applied, so the next pass applies
-// it as it is now.
-func (s *Reconciler) recheck(ctx context.Context, row *model.Cluster) {
-	current, err := s.deps.Store.Clusters().Get(ctx, row.TenantID, row.ID)
-	if errors.Is(err, repository.ErrNotFound) || (err == nil && (current.ETag == row.ETag || current.State == StateDeleting)) {
-		return
-	}
-	if err == nil {
-		err = s.deps.Store.Clusters().MarkBehind(ctx, row.TenantID, row.ID)
-	}
-	if err != nil {
-		s.logger().ErrorContext(ctx, "recheck a cluster applied while it changed", "cluster_id", row.ID, "error", err)
-		return
-	}
-	s.logger().InfoContext(ctx, "cluster changed while it was applied; it is applied again", "cluster_id", row.ID)
-}
-
 func applyError(err error) error {
 	if meta.IsNoMatchError(err) {
 		return fault.New(fault.FailedPrecondition,
 			"a Crossplane AWS provider the cluster needs (eks, iam, ec2, kms, cloudwatchlogs) is not installed in the management cluster")
 	}
 	return fault.New(fault.Internal, "could not create the cluster's resources")
-}
-
-// Rollback undoes a create whose resources could not be applied.
-func (s *Reconciler) Rollback(ctx context.Context, row *model.Cluster, namespace string) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err == nil {
-		err = s.deps.DeleteRecorded(ctx, records)
-	}
-	err = errors.Join(err, s.untagSubnets(ctx, row, namespace))
-	err = errors.Join(err, s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerCluster, row.ID),
-		s.deps.Store.Clusters().Delete(ctx, row.TenantID, row.ID))
-	if err != nil {
-		s.logger().ErrorContext(ctx, "rollback cluster", "cluster_id", row.ID, "error", err)
-	}
-}
-
-// Finalize moves a DELETING cluster's deletion on (driveDelete) and
-// reports whether the cluster is gone.
-func (s *Reconciler) Finalize(ctx context.Context, row *model.Cluster) (bool, error) {
-	if row.State != StateDeleting {
-		return false, nil
-	}
-	gone, err := s.driveDelete(ctx, row)
-	if err != nil {
-		s.logger().ErrorContext(ctx, "delete cluster", "cluster_id", row.ID, "error", err)
-		return false, fault.New(fault.Unavailable, "could not continue deleting the cluster: "+err.Error())
-	}
-	return gone, nil
 }
 
 func (s *Reconciler) logger() *slog.Logger {

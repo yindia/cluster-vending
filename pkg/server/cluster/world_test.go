@@ -106,6 +106,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	if funcs.Apply == nil {
 		funcs.Apply = dryRunApply(scheme)
 	}
+	funcs.Apply = withoutSubnetTags(funcs.Apply)
 	k := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(funcs).Build()
 	deps := service.Deps{Store: store, Kube: k, KubeReader: reader}
 	for _, opt := range opts {
@@ -121,6 +122,22 @@ func (w world) cluster(t *testing.T) *model.Cluster {
 		t.Fatal(err)
 	}
 	return row
+}
+
+// withoutSubnetTags leaves out the applies of the cluster's tags on the
+// network's subnets (TagSubnets, which every apply of a cluster starts
+// with): the fake round-trips applies through the Go types, which send
+// forProvider.region as null and conflict; the API server does not (see
+// subnets_test.go).
+func withoutSubnetTags(apply func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error) func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+	return func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+		ao := &client.ApplyOptions{}
+		ao.ApplyOptions(opts)
+		if strings.HasPrefix(ao.FieldManager, kube.FieldOwner+"/cluster-") {
+			return nil
+		}
+		return apply(ctx, c, obj, opts...)
+	}
 }
 
 // dryRunApply makes the fake client honour dry-run applies like the API

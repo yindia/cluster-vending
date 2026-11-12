@@ -97,6 +97,7 @@ func TestDeleteNetworkWithFlowLogs(t *testing.T) {
 	if _, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
 		t.Fatalf("DeleteNetwork: %v", err)
 	}
+	f.reconcile(t, n.GetId())
 	if count(&awsec2.FlowLogList{}) != 0 || count(&awscwl.GroupList{}) != 1 || count(&awsiam.RoleList{}) != 1 {
 		t.Fatalf("after delete: flow logs %d, groups %d, roles %d; want the flow log gone first",
 			count(&awsec2.FlowLogList{}), count(&awscwl.GroupList{}), count(&awsiam.RoleList{}))
@@ -158,11 +159,7 @@ func TestImportNetworkFlowLogs(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: vpcWithFlowLogs()}
 	f.svc.deps.AWS.StaticKeys = testKeys
-	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
-	if err != nil {
-		t.Fatalf("ImportNetwork: %v", err)
-	}
-	n := res.GetNetwork()
+	n := f.imported(t)
 	lines := map[string]*cloudv1.ImportedResource{}
 	for _, l := range n.GetStatus().GetImport().GetResources() {
 		lines[l.GetKind()+"/"+l.GetExternalName()] = l
@@ -210,6 +207,7 @@ func TestImportNetworkFlowLogs(t *testing.T) {
 		AcknowledgeNotImported: true}); err != nil {
 		t.Fatalf("TakeOverNetwork: %v", err)
 	}
+	f.reconcile(t, n.GetId())
 	for name, obj := range map[string]client.Object{"flow-logs": group, "flow-logs-role": role, "flow-log": flowLog} {
 		if err := f.kube.Get(t.Context(), key(n, name), obj); err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -232,9 +230,13 @@ func TestUpdateNetworkFlowLogs(t *testing.T) {
 	ctx := t.Context()
 	count := func(list client.ObjectList) int { return f.count(t, list, n.GetId()) }
 	update := func(flowLogs *cloudv1.NetworkFlowLogs) (*cloudv1.Network, error) {
-		res, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant, UpdateMask: mask("spec.flow_logs"),
+		_, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant, UpdateMask: mask("spec.flow_logs"),
 			Network: &cloudv1.Network{Id: n.GetId(), Spec: &cloudv1.NetworkSpec{FlowLogs: flowLogs}}})
-		return res.GetNetwork(), err
+		if err != nil {
+			return nil, err
+		}
+		f.reconcile(t, n.GetId()) // the call stored the change; this applies it
+		return f.status(t, n.GetId()), nil
 	}
 
 	on, err := update(&cloudv1.NetworkFlowLogs{Enabled: ptr.To(true)})
@@ -282,24 +284,16 @@ func TestUpdateImportedNetworkLabels(t *testing.T) {
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
 	f.svc.deps.AWS.StaticKeys = testKeys
 	ctx := t.Context()
-	res, err := f.svc.ImportNetwork(ctx, importRequest(f.accountID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := res.GetNetwork()
-	if _, err := f.svc.TakeOverNetwork(ctx, &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: n.GetId(),
-		AcknowledgeNotImported: true}); err != nil {
-		t.Fatal(err)
-	}
+	n := f.takenOver(t)
 	before := len(n.GetStatus().GetManagedResources())
 	label := func(labels map[string]string) *cloudv1.Network {
 		t.Helper()
-		out, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
-			Network: &cloudv1.Network{Id: n.GetId(), Labels: labels}, UpdateMask: mask("labels")})
-		if err != nil {
+		if _, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+			Network: &cloudv1.Network{Id: n.GetId(), Labels: labels}, UpdateMask: mask("labels")}); err != nil {
 			t.Fatalf("UpdateNetwork: %v", err)
 		}
-		return out.GetNetwork()
+		f.reconcile(t, n.GetId()) // the call stored the labels; this tags
+		return f.status(t, n.GetId())
 	}
 	tags := func() map[string]*string {
 		t.Helper()

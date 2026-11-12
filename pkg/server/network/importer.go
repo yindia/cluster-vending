@@ -15,7 +15,6 @@ import (
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -24,11 +23,12 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
-// ImportNetwork looks an existing VPC up once, read-only, and imports it:
-// Observe-only managed resources for what the contract models, the spec
-// derived from them, and the plan (status.import). Nothing changes in the
-// cloud. The network is IMPORTED, or FAILED when the plan is BLOCKED (then
-// nothing is imported).
+// ImportNetwork looks an existing VPC up once, read-only, and stores the
+// import: the spec derived from the VPC, the plan (status.import) and what
+// was discovered. The reconciler creates the Observe-only managed
+// resources from that, without looking the cloud up again. Nothing changes
+// in the cloud. The network is IMPORTED, or FAILED when the plan is
+// BLOCKED (then nothing is imported).
 func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportNetworkRequest) (*cloudv1.ImportNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -41,7 +41,7 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	}
 	if id := req.GetRequestId(); id != "" {
 		if row, err := s.deps.Store.Networks().GetByCreateRequest(ctx, req.GetTenantId(), id); err == nil {
-			n, err := s.rec().View(ctx, row)
+			n, err := s.stored(ctx, row)
 			return &cloudv1.ImportNetworkResponse{Network: n}, service.ToConnect(err)
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
@@ -50,6 +50,9 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	account, err := s.rec().Account(ctx, req.GetTenantId(), req.GetBootstrapId())
 	if err != nil {
 		return nil, service.ToConnect(err)
+	}
+	if err := bootstrapped(account); err != nil {
+		return nil, err
 	}
 	if err := s.refuseOwnedVPC(ctx, account, req.GetAws().GetVpcId()); err != nil {
 		return nil, service.ToConnect(err)
@@ -62,19 +65,9 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if !plan.Blocked() {
-		_, err := s.rec().ApplySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(plan.Resources)...))
-		if err == nil {
-			err = s.rec().MarkApplied(ctx, row)
-		}
-		if err != nil {
-			s.rec().Rollback(ctx, row)
-			return nil, service.ToConnect(err)
-		}
-	}
-	s.logger().InfoContext(ctx, "network imported", "tenant_id", row.TenantID, "network_id", row.ID,
+	s.logger().InfoContext(ctx, "network import stored", "tenant_id", row.TenantID, "network_id", row.ID,
 		"vpc_id", req.GetAws().GetVpcId(), "blocked", plan.Blocked(), "plan_lines", len(plan.Lines))
-	n, err := s.rec().Respond(ctx, row)
+	n, err := s.stored(ctx, row)
 	return &cloudv1.ImportNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
@@ -105,8 +98,10 @@ func (s *NetworkService) discover(ctx context.Context, a *model.CloudAccount, re
 }
 
 // insertImport plans the import and stores the network: the derived spec,
-// the request as sent (input) and the plan (status), IMPORTED or, when
-// blocked, FAILED. The ID is chosen first: it names the resources.
+// the request as sent with what was discovered (input: the reconciler
+// renders the network's objects from it), and the plan (status), IMPORTED
+// or, when blocked, FAILED. The ID is chosen first: it names the
+// resources.
 func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNetworkRequest, a *model.CloudAccount, found *awscloud.Network) (*model.Network, corenetwork.ImportPlan, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -125,6 +120,9 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 	rawSpec, err1 := netreconcile.Encode(spec)
 	input, err2 := netreconcile.Encode(req)
 	stored, err3 := netreconcile.Encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
+	if err2 == nil && !plan.Blocked() {
+		input, err2 = netreconcile.WithImportedResources(input, plan.Resources)
+	}
 	if err := errors.Join(err1, err2, err3); err != nil {
 		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -153,10 +151,11 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 	return row, plan, nil
 }
 
-// TakeOverNetwork makes the platform the owner of an IMPORTED network: every
-// managed resource switches from Observe to full management, and subnets
-// get their load balancer tag (the plan's WILL_UPDATE lines). The network
-// then provisions like a created one.
+// TakeOverNetwork stores an IMPORTED network as taken over. The reconciler
+// then makes the platform its owner: every managed resource switches from
+// Observe to full management, and subnets get their load balancer tag (the
+// plan's WILL_UPDATE lines). The network then provisions like a created
+// one.
 func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeOverNetworkRequest) (*cloudv1.TakeOverNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -169,9 +168,9 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	// The row first: a network whose objects are owned (deleting them
-	// deletes the cloud resources) must never be stored as read-only. A
-	// takeover that stops half-way is finished by the loop (moveOn).
+	// The row only: a network whose objects are owned (deleting them
+	// deletes the cloud resources) must never be stored as read-only, so
+	// the reconciler owns them once the row says so (moveOn).
 	imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING
 	if row.Status, err = netreconcile.Encode(&cloudv1.NetworkStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -181,14 +180,8 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := s.rec().OwnAll(ctx, row); err != nil {
-		return nil, service.ToConnect(err)
-	}
-	if err := s.rec().MarkApplied(ctx, row); err != nil {
-		return nil, service.ToConnect(err)
-	}
-	s.logger().InfoContext(ctx, "network taken over", "tenant_id", row.TenantID, "network_id", row.ID)
-	n, err := s.rec().Respond(ctx, row)
+	s.logger().InfoContext(ctx, "network takeover stored", "tenant_id", row.TenantID, "network_id", row.ID)
+	n, err := s.stored(ctx, row)
 	return &cloudv1.TakeOverNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
@@ -201,6 +194,11 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 	}
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the network changed; get it again and retry")
+	}
+	if row.AppliedGeneration < row.Generation {
+		// Its Observe-only objects are not there yet: there is nothing to own.
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("network %s is still being imported; retry once its resources are observed (network status)", row.ID))
 	}
 	imp := netreconcile.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {

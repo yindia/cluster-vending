@@ -45,19 +45,6 @@ func (s *Reconciler) remember(ctx context.Context, row *model.Cluster, st *cloud
 	return err
 }
 
-// Respond is the answer of a call that changed the cluster: its view with
-// the live status, which is recorded on the way.
-func (s *Reconciler) Respond(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
-	c, err := s.View(ctx, row)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.remember(ctx, row, c.GetStatus()); err != nil {
-		s.logger().WarnContext(ctx, "record cluster status", "cluster_id", row.ID, "error", err)
-	}
-	return c, nil
-}
-
 // LiveKubernetesVersion is the version the EKS cluster reports; empty
 // before EKS created it.
 func (s *Reconciler) LiveKubernetesVersion(ctx context.Context, row *model.Cluster) (string, error) {

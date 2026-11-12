@@ -20,12 +20,27 @@ import (
 
 // View is the API view of a stored network: spec, observed status, the
 // clusters using it.
+//
+// A failed attempt to apply the network is part of it (the failure the
+// last pass recorded with the row): nothing else says so while there are
+// no resources to observe.
 func (s *Reconciler) View(ctx context.Context, row *model.Network) (*cloudv1.Network, error) {
+	return s.view(ctx, row, storedFailure(row))
+}
+
+// view is View with the failure to report: the recorded one for a read,
+// this pass's for the reconciler.
+func (s *Reconciler) view(ctx context.Context, row *model.Network, failure *cloudv1.Condition) (*cloudv1.Network, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
 	if err != nil {
 		return nil, err
 	}
-	return s.viewOf(ctx, row, records)
+	n, err := s.viewOf(ctx, row, records)
+	if err != nil {
+		return nil, err
+	}
+	withFailure(n.GetStatus(), failure)
+	return n, nil
 }
 
 // viewOf is view with the network's records at hand. It only reads.
@@ -149,25 +164,12 @@ func (s *Reconciler) remember(ctx context.Context, row *model.Network, st *cloud
 	return err
 }
 
-// Respond is the answer of a call that changed the network: its view with
-// the live status, which is recorded on the way.
-func (s *Reconciler) Respond(ctx context.Context, row *model.Network) (*cloudv1.Network, error) {
-	n, err := s.View(ctx, row)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.remember(ctx, row, n.GetStatus()); err != nil {
-		s.logger().WarnContext(ctx, "record network status", "network_id", row.ID, "error", err)
-	}
-	return n, nil
-}
-
 // settle records what the loop observed of a network that is not being
 // deleted: its status, and READY as its stored state once every resource
 // is ready and its generation is applied, so the loop leaves it alone
-// until it changes.
-func (s *Reconciler) settle(ctx context.Context, row *model.Network) error {
-	n, err := s.View(ctx, row)
+// until it changes. failed is what went wrong applying it in this pass.
+func (s *Reconciler) settle(ctx context.Context, row *model.Network, failed error) error {
+	n, err := s.view(ctx, row, FailureCondition(failed))
 	if err != nil {
 		return err
 	}

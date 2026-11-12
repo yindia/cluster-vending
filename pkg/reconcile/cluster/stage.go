@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"time"
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"k8s.io/utils/ptr"
@@ -61,54 +60,38 @@ func (s *Reconciler) FillLive(ctx context.Context, row *model.Cluster, plan *cro
 	return plan.FillLive(ctx, seen)
 }
 
-// ResumeAfter is how long a cluster row must have been left alone before
-// an interrupted create is resumed: a CreateCluster still applying (or
-// rolling back) must not be raced.
-var ResumeAfter = 2 * time.Minute
-
-// StageAfter is how long after a cluster row was last written the loop
-// moves a create on to its next stage. CreateCluster applies its first
-// stage within a second or two; a pass that started in that window would
-// apply alongside it, and after its rollback re-create what it removed.
-var StageAfter = 15 * time.Second
-
 // resumeCreate reports whether a cluster whose EKS cluster is not ACTIVE
-// must be applied again: a new cluster still before its EKS cluster (what
-// must exist first is being created), or a create that stopped half-way
-// (the server went away between the applies): still in its first stage,
-// no call touched its row for ResumeAfter, and objects of that stage are
-// not in the management cluster (none recorded yet, or recorded and
-// missing).
+// must be applied: a new cluster still before its EKS cluster (nothing is
+// recorded yet: calls only store the cluster; or what must exist first,
+// its log group or encryption key, is being created), or a create that
+// stopped half-way (the server went away between the applies): still in
+// its first stage, and objects of that stage are recorded but not in the
+// management cluster. A cluster whose first stage is all there waits for
+// EKS.
 func (s *Reconciler) resumeCreate(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (bool, error) {
 	if row.State != StateProvisioning || createdAfterActive(records) {
 		return false, nil
 	}
-	if len(records) > 0 && !slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "Cluster" }) {
-		// The stage before the EKS cluster (its log group, its encryption
-		// key): apply renders the cluster once they exist. Not while the
-		// create that stored the row may still be applying or rolling back.
-		return time.Since(row.UpdatedAt) >= StageAfter, nil
-	}
-	if time.Since(row.UpdatedAt) < ResumeAfter {
-		return false, nil
+	if !slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "Cluster" }) {
+		return true, nil
 	}
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
 		return false, err
 	}
-	return len(records) == 0 || slices.ContainsFunc(views, func(v *cloudv1.ManagedResource) bool {
+	return slices.ContainsFunc(views, func(v *cloudv1.ManagedResource) bool {
 		return v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING
 	}), nil
 }
 
-// advance applies a cluster again until its generation is applied in
-// full with the target renderer: after a failed apply, for the objects
+// advance applies a cluster until its generation is applied in full with
+// the target renderer: once a call stored it, after a failed apply, for the objects
 // held back until EKS is ACTIVE (add-ons, access entries), during an
 // upgrade for the node groups and add-ons once the control plane reports
 // the target version (gateUpgrade), and when the renderer changed
 // (Deps.RenderBehind). The background loop calls it.
 //
-// While EKS is not ACTIVE it only resumes an interrupted create
+// While EKS is not ACTIVE it only starts or resumes a create
 // (resumeCreate): the objects of the first stage are applied again, the
 // later ones stay held back (crossplaneaws.ClusterSet). A cluster past its first
 // stage (an update or upgrade in progress) waits for ACTIVE.
@@ -130,7 +113,7 @@ func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
 		if err != nil || !resume {
 			return err
 		}
-		s.logger().InfoContext(ctx, "resuming an interrupted cluster create", "cluster_id", row.ID, "recorded", len(records))
+		s.logger().InfoContext(ctx, "applying a cluster before its EKS cluster is active", "cluster_id", row.ID, "recorded", len(records))
 	}
 	spec, err := SpecOf(row)
 	if err != nil {
@@ -140,7 +123,12 @@ func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
 	if err != nil {
 		return err
 	}
-	defer s.recheck(ctx, row)
+	// Before the apply, which marks the generation applied: a failure here
+	// is tried again. Idempotent; it also tags the subnets of clusters
+	// created before the platform tagged them.
+	if err := s.TagSubnets(ctx, row, t); err != nil {
+		return err
+	}
 	if err := s.Apply(ctx, row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
 		return err
 	}

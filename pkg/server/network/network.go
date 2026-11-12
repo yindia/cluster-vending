@@ -1,8 +1,9 @@
 // Package network implements the cloud.v1 NetworkService: the RPC
-// handlers. They validate a request, store what was asked for (the row is
-// the source of truth) and call pkg/reconcile/network, which builds the
-// network from Crossplane managed resources in the tenant namespace and
-// reads its status from them.
+// handlers. They validate a request and store what was asked for (the row
+// is the source of truth); they change nothing in the management cluster.
+// pkg/reconcile/network, called by the background loop, builds the network
+// from Crossplane managed resources in the tenant namespace, and reports
+// what goes wrong doing so as the network's status.
 package network
 
 import (
@@ -37,8 +38,9 @@ var _ cloudv1connect.NetworkServiceHandler = (*NetworkService)(nil)
 // NewNetworkService returns the NetworkService.
 func NewNetworkService(d service.Deps) *NetworkService { return &NetworkService{deps: d} }
 
-// rec is what moves networks towards their spec (pkg/reconcile/network);
-// the handlers store what was asked for and call it.
+// rec is what moves networks towards their spec (pkg/reconcile/network).
+// The handlers use it to check a request and to read; the background loop
+// to apply.
 func (s *NetworkService) rec() *netreconcile.Reconciler { return netreconcile.New(s.deps) }
 
 // Reconcile moves one network on (netreconcile.Reconciler.Reconcile); the
@@ -59,8 +61,9 @@ func (s *NetworkService) logger() *slog.Logger {
 }
 
 // CreateNetwork stores the network with its resolved layout (defaults
-// filled in) and applies its managed resources. A retry with the same
-// request_id returns the network created by the first call.
+// filled in), PROVISIONING. Its managed resources are created by the
+// reconciler; a failure there is the network's status. A retry with the
+// same request_id returns the network created by the first call.
 func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateNetworkRequest) (*cloudv1.CreateNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -68,7 +71,7 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	if id := req.GetRequestId(); id != "" {
 		row, err := s.deps.Store.Networks().GetByCreateRequest(ctx, req.GetTenantId(), id)
 		if err == nil {
-			n, err := s.rec().View(ctx, row)
+			n, err := s.stored(ctx, row)
 			return &cloudv1.CreateNetworkResponse{Network: n}, service.ToConnect(err)
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
@@ -82,25 +85,33 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
+	if err := bootstrapped(account); err != nil {
+		return nil, err
+	}
 	row, err := s.insert(ctx, req, account, layout)
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	plan := netreconcile.RenderPlan(row, req.GetNetwork().GetSpec(), account, layout)
-	if err := s.rec().Apply(ctx, row, account, plan); err != nil {
-		s.rec().Rollback(ctx, row)
-		return nil, service.ToConnect(err)
-	}
-	s.logger().InfoContext(ctx, "network created", "tenant_id", row.TenantID, "network_id", row.ID,
-		"name", row.Name, "prefix", plan.Prefix, "bootstrap_id", account.ID, "region", plan.Region,
-		"cidr", plan.CIDRBlock, "subnets", len(plan.Subnets))
-	n, err := s.rec().Respond(ctx, row)
+	s.logger().InfoContext(ctx, "network stored", "tenant_id", row.TenantID, "network_id", row.ID,
+		"name", row.Name, "bootstrap_id", account.ID, "region", row.Region,
+		"cidr", layout.CIDRBlock, "subnets", len(layout.Subnets))
+	n, err := s.stored(ctx, row)
 	return &cloudv1.CreateNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
+// bootstrapped refuses an account that cannot hold managed resources yet:
+// nothing could ever be applied for a network in it.
+func bootstrapped(a *model.CloudAccount) error {
+	if a.Namespace == "" || a.ProviderConfigName == "" {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("account %s is not fully bootstrapped; run BootstrapTenant again", a.ID))
+	}
+	return nil
+}
+
 // insert stores the network as sent (input) and resolved (spec with the
-// layout's defaults filled in), state PROVISIONING. The row ID becomes
-// Network.id.
+// layout's defaults filled in), state PROVISIONING, its generation not
+// applied yet: the reconciler applies it. The row ID becomes Network.id.
 func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkRequest, a *model.CloudAccount, l corenetwork.Layout) (*model.Network, error) {
 	in := req.GetNetwork()
 	input, err := netreconcile.Encode(in)

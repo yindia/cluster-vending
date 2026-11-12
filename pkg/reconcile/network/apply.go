@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -69,8 +68,8 @@ func (s *Reconciler) MarkApplied(ctx context.Context, row *model.Network) error 
 	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
 	err := s.deps.Store.Networks().Update(ctx, row)
 	if errors.Is(err, repository.ErrConflict) {
-		// The row changed while it was applied: whoever changed it applies
-		// it, or the loop does (recheck).
+		// A call changed the row while it was applied: it is behind again
+		// (calls only store), and the next pass applies it as it is now.
 		row.AppliedGeneration, row.RenderVersion = before, version
 		return nil
 	}
@@ -78,25 +77,6 @@ func (s *Reconciler) MarkApplied(ctx context.Context, row *model.Network) error 
 		return fault.New(fault.Internal, "could not record the applied generation: "+err.Error())
 	}
 	return nil
-}
-
-// Recheck is called by the loop after it applied row: when a call changed
-// the row meanwhile, what the loop applied may be older than what that
-// call applied, and may have been written over it. The row is marked as
-// not applied, so the next pass applies it as it is now.
-func (s *Reconciler) Recheck(ctx context.Context, row *model.Network) {
-	current, err := s.deps.Store.Networks().Get(ctx, row.TenantID, row.ID)
-	if errors.Is(err, repository.ErrNotFound) || (err == nil && (current.ETag == row.ETag || current.State == StateDeleting)) {
-		return
-	}
-	if err == nil {
-		err = s.deps.Store.Networks().MarkBehind(ctx, row.TenantID, row.ID)
-	}
-	if err != nil {
-		s.logger().ErrorContext(ctx, "recheck a network applied while it changed", "network_id", row.ID, "error", err)
-		return
-	}
-	s.logger().InfoContext(ctx, "network changed while it was applied; it is applied again", "network_id", row.ID)
 }
 
 // liveObjects counts the network's objects the API server still has (by
@@ -117,48 +97,10 @@ func (s *Reconciler) liveObjects(ctx context.Context, row *model.Network) (int, 
 	return n, nil
 }
 
-// deleteResources deletes every managed resource of the network. Crossplane
-// deletes the cloud resources and removes the objects when done.
-func (s *Reconciler) deleteResources(ctx context.Context, tenantID, networkID string) error {
-	var errs []error
-	for _, obj := range crossplaneaws.NetworkObjects() {
-		err := s.deps.Kube.DeleteAllOf(ctx, obj,
-			client.InNamespace(kube.TenantNamespace(tenantID)),
-			client.MatchingLabels{crossplane.LabelNetwork: networkID})
-		// A 409 is the Usage webhook holding an object that is still in use:
-		// Crossplane deletes it once its user is gone. Every kind is tried,
-		// whatever one of them answers: stopping would leave the rest behind.
-		if err != nil && !meta.IsNoMatchError(err) && !apierrors.IsConflict(err) {
-			errs = append(errs, fmt.Errorf("delete %T: %w", obj, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// Rollback undoes a create whose resources could not be applied: the
-// recorded objects one by one (a refused one does not stop the others),
-// then whatever else carries the network's label.
-func (s *Reconciler) Rollback(ctx context.Context, row *model.Network) {
-	if records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID); err == nil {
-		if err := s.deps.DeleteRecorded(ctx, records); err != nil {
-			s.logger().ErrorContext(ctx, "rollback recorded network resources", "network_id", row.ID, "error", err)
-		}
-	}
-	if err := s.deleteResources(ctx, row.TenantID, row.ID); err != nil {
-		s.logger().ErrorContext(ctx, "rollback network resources", "network_id", row.ID, "error", err)
-	}
-	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil {
-		s.logger().ErrorContext(ctx, "rollback network row", "network_id", row.ID, "error", err)
-	}
-	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {
-		s.logger().ErrorContext(ctx, "rollback network records", "network_id", row.ID, "error", err)
-	}
-}
-
 // Finalize moves a DELETING network's deletion on (sequence.Engine.Delete
 // with crossplaneaws.NetworkDeleteOrder: the next
 // tier once the previous one is gone) and removes its row once all its
-// resources are gone. DeleteNetwork and the background loop call it.
+// resources are gone.
 func (s *Reconciler) Finalize(ctx context.Context, row *model.Network) error {
 	if row.State != StateDeleting {
 		return nil

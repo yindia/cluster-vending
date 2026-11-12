@@ -87,11 +87,7 @@ func TestImportNetwork(t *testing.T) {
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
 	f.svc.deps.AWS.StaticKeys = testKeys
 
-	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
-	if err != nil {
-		t.Fatalf("ImportNetwork: %v", err)
-	}
-	n := res.GetNetwork()
+	n := f.imported(t)
 	if n.GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED || n.GetName() != "tf" {
 		t.Errorf("state = %s (%s)", n.GetStatus().GetState(), n.GetStatus().GetMessage())
 	}
@@ -130,7 +126,7 @@ func TestImportNetwork(t *testing.T) {
 	}
 
 	// Imported networks are read-only until taken over.
-	_, err = f.svc.UpdateNetwork(t.Context(), &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+	_, err := f.svc.UpdateNetwork(t.Context(), &cloudv1.UpdateNetworkRequest{TenantId: tenant,
 		Network: &cloudv1.Network{Id: n.GetId(), DisplayName: "x"}, UpdateMask: mask("display_name")})
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("update imported = %v, want FAILED_PRECONDITION", err)
@@ -146,7 +142,14 @@ func TestTakeOverNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := res.GetNetwork()
-	req := &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}
+	req := &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), AcknowledgeNotImported: true}
+	// Nothing to own before the import's objects are there.
+	if _, err := f.svc.TakeOverNetwork(t.Context(), req); connect.CodeOf(err) != connect.CodeFailedPrecondition ||
+		!strings.Contains(err.Error(), "still being imported") {
+		t.Fatalf("takeover before the import is applied = %v, want FAILED_PRECONDITION", err)
+	}
+	f.reconcile(t, n.GetId())
+	req.AcknowledgeNotImported = false
 
 	if _, err := f.svc.TakeOverNetwork(t.Context(), req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("takeover without acknowledgement = %v, want FAILED_PRECONDITION", err)
@@ -160,7 +163,12 @@ func TestTakeOverNetwork(t *testing.T) {
 	if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_PROVISIONING || st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING {
 		t.Errorf("after takeover: %s / %s", st.GetState(), st.GetImport().GetPhase())
 	}
+	// The call stored the takeover; the reconciler owns the objects.
 	sub := &awsec2.Subnet{}
+	if err := f.kube.Get(t.Context(), key(n, "public-use1-az1"), sub); err != nil || sub.Spec.ManagementPolicies[0] != "Observe" {
+		t.Fatalf("subnet right after the call = %v (%v): the call must not own", sub.Spec.ManagementPolicies, err)
+	}
+	f.reconcile(t, n.GetId())
 	if err := f.kube.Get(t.Context(), key(n, "public-use1-az1"), sub); err != nil {
 		t.Fatal(err)
 	}
@@ -242,6 +250,7 @@ func TestImportRefusesAVPCThatHasANetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.reconcile(t, first.GetNetwork().GetId())
 	// The import request names vpc-0a1b2c3d4e5f60718; the fake discovery
 	// returns vpc-1. Point the request at the VPC now owned.
 	again := importRequest(f.accountID)

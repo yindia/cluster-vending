@@ -56,7 +56,7 @@ func TestPlanKubernetesUpgradeIsDisruptive(t *testing.T) {
 	before := w.cluster(t)
 	req := planRequest(w, &cloudv1.ClusterSpec{ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.35"}},
 		"spec.control_plane.kubernetes_version")
-	res, err := w.svc.UpdateCluster(ctx, req)
+	res, err := update(t, w, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestPlanKubernetesUpgradeIsDisruptive(t *testing.T) {
 func TestPlanInstanceTypeChangeReplacesTheNodeGroup(t *testing.T) {
 	w := appliedWorld(t)
 	spec := &cloudv1.ClusterSpec{DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m7i.xlarge"}}}
-	res, err := w.svc.UpdateCluster(t.Context(), planRequest(w, spec, "spec.default_node_pool.instance_types"))
+	res, err := update(t, w, planRequest(w, spec, "spec.default_node_pool.instance_types"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestUpdateWithAStalePlanIsRefused(t *testing.T) {
 	ctx := t.Context()
 	spec := &cloudv1.ClusterSpec{DefaultNodePool: &cloudv1.NodePoolSpec{ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 9}}}
 	req := planRequest(w, spec, "spec.default_node_pool.scaling_config.max_size")
-	planned, err := w.svc.UpdateCluster(ctx, req)
+	planned, err := update(t, w, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,18 +134,18 @@ func TestUpdateWithAStalePlanIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.ValidateOnly, req.PlanId = false, planned.GetPlan().GetPlanId()
-	if _, err := w.svc.UpdateCluster(ctx, req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+	if _, err := update(t, w, req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("stale plan: %v, want FAILED_PRECONDITION", err)
 	}
 
 	// Planned again, the same request applies.
 	req.ValidateOnly, req.PlanId = true, ""
-	planned, err = w.svc.UpdateCluster(ctx, req)
+	planned, err = update(t, w, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.ValidateOnly, req.PlanId = false, planned.GetPlan().GetPlanId()
-	res, err := w.svc.UpdateCluster(ctx, req)
+	res, err := update(t, w, req)
 	if err != nil || res.GetPlan().GetPlanId() != req.GetPlanId() {
 		t.Fatalf("apply with a fresh plan: %v, plan %q", err, res.GetPlan().GetPlanId())
 	}
@@ -182,7 +182,7 @@ func TestPlanShowsUpgradeStaging(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	res, err := w.svc.UpdateCluster(ctx, planRequest(w, &cloudv1.ClusterSpec{ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: target}},
+	res, err := update(t, w, planRequest(w, &cloudv1.ClusterSpec{ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: target}},
 		"spec.control_plane.kubernetes_version"))
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestPlanShowsWhatWaitsForAnotherResource(t *testing.T) {
 	w := appliedWorld(t)
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
 	on := &cloudv1.ClusterSpec{ControlPlane: &cloudv1.ControlPlaneSpec{SecretsEncryption: &cloudv1.SecretsEncryption{Enabled: true}}}
-	res, err := w.svc.UpdateCluster(t.Context(), planRequest(w, on, pathSecretsEncryption))
+	res, err := update(t, w, planRequest(w, on, pathSecretsEncryption))
 	if err != nil {
 		t.Fatal(err)
 	}

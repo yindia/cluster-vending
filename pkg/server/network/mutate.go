@@ -32,10 +32,10 @@ var updatable = strings.Join([]string{pathDisplayName, pathLabels, pathFlowLogs}
 type changes struct{ labels, flowLogs bool }
 
 // UpdateNetwork changes the fields named in update_mask: display_name,
-// labels and spec.flow_logs. Labels are the AWS tags of every resource: an
-// update re-tags (an imported network's resources keep their other tags).
-// Flow logs are turned on or off and their retention changed by rendering
-// the network again.
+// labels and spec.flow_logs, in the stored network. The reconciler rolls
+// the change out: labels are the AWS tags of every resource (an imported
+// network's resources keep their other tags), flow logs are turned on or
+// off and their retention changed by rendering the network again.
 func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateNetworkRequest) (*cloudv1.UpdateNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -82,23 +82,14 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	if tagsChanged && row.State == netreconcile.StateReady {
 		row.State = netreconcile.StateUpdating // the loop records the status until it is READY again
 	}
+	netreconcile.ClearFailure(row) // of the generation before: the next pass reports on this one
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return nil, connect.NewError(connect.CodeAborted, "the network changed; get it again and retry with its etag")
 		}
 		return nil, service.ToConnect(err)
 	}
-	switch {
-	case imported && changed.labels:
-		if err := s.rec().Retag(ctx, row); err != nil {
-			return nil, service.ToConnect(err)
-		}
-	case tagsChanged:
-		if err := s.rec().Reapply(ctx, row, spec); err != nil {
-			return nil, service.ToConnect(err)
-		}
-	}
-	n, err := s.rec().Respond(ctx, row)
+	n, err := s.stored(ctx, row)
 	return &cloudv1.UpdateNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
@@ -174,12 +165,18 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 			input.Spec.FlowLogs = in.GetSpec().GetFlowLogs()
 		}
 	}
-	return netreconcile.Encode(input)
+	next, err := netreconcile.Encode(input)
+	if err != nil {
+		return nil, err
+	}
+	// What an import discovered stays with the input: the network's objects
+	// are rendered from it.
+	return netreconcile.KeepImportedResources(row.Input, next)
 }
 
-// DeleteNetwork deletes the network's resources; the network is removed
-// once they are gone (until then it is DELETING). It fails while clusters
-// use the network.
+// DeleteNetwork stores the network as DELETING. The reconciler deletes its
+// resources, tier by tier, and removes the network once they are gone. It
+// fails while clusters use the network.
 func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteNetworkRequest) (*cloudv1.DeleteNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -196,21 +193,14 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 	}
 	if row.State != netreconcile.StateDeleting {
 		row.State = netreconcile.StateDeleting
+		netreconcile.ClearFailure(row)
 		if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 			return nil, service.ToConnect(err)
 		}
+		s.logger().InfoContext(ctx, "network deleting", "tenant_id", row.TenantID, "network_id", row.ID, "name", row.Name)
 	}
-	n, err := s.rec().Respond(ctx, row)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	// Deletes the first tier now; the background loop moves it on, tier by
-	// tier, until the network is gone.
-	if err := s.rec().Finalize(ctx, row); err != nil {
-		return nil, service.ToConnect(err)
-	}
-	s.logger().InfoContext(ctx, "network deleting", "tenant_id", row.TenantID, "network_id", row.ID, "name", row.Name)
-	return &cloudv1.DeleteNetworkResponse{Network: n}, nil
+	n, err := s.stored(ctx, row)
+	return &cloudv1.DeleteNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
 // refuseInUse fails while clusters use the network, also clusters still

@@ -84,9 +84,10 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	}, c.Network.UpdateNetwork)
 }
 
-// NetworkDelete calls NetworkService.DeleteNetwork. The server deletes the
-// network's resources in order, one step per read; --wait reads until the
-// network is gone.
+// NetworkDelete calls NetworkService.DeleteNetwork, which stores the
+// deletion (the answer is the network, DELETING). The server then deletes
+// the network's resources in order; --wait reads until the network is
+// gone.
 func NetworkDelete(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
@@ -153,8 +154,10 @@ func NetworkStatus(ctx context.Context, c Clients, o Options) (proto.Message, er
 	return call(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: o.Tenant, NetworkId: o.ID}, c.Network.GetNetworkStatus)
 }
 
-// waitNetwork waits until the network is READY or IMPORTED (gone: deleted)
-// and returns its last read.
+// waitNetwork waits until the network is READY, or IMPORTED with its
+// resources observed (gone: deleted), and returns its last read. A call
+// only stores what was asked for; what goes wrong applying it is the
+// network's status: FAILED ends the wait with its message as the error.
 func waitNetwork(ctx context.Context, c Clients, o Options, tenant, id string, gone bool) (proto.Message, error) {
 	var last proto.Message
 	err := waitUntil(ctx, o, "network "+id, gone, func(ctx context.Context) (observation, error) {
@@ -168,7 +171,10 @@ func waitNetwork(ctx context.Context, c Clients, o Options, tenant, id string, g
 		state := st.GetState()
 		return observation{
 			state: state.String(), message: st.GetMessage(),
-			done:   !gone && (state == cloudv1.NetworkState_NETWORK_STATE_READY || state == cloudv1.NetworkState_NETWORK_STATE_IMPORTED),
+			// An import is stored IMPORTED at once; it is done when the server
+			// created its (Observe-only) resources.
+			done: !gone && (state == cloudv1.NetworkState_NETWORK_STATE_READY ||
+				(state == cloudv1.NetworkState_NETWORK_STATE_IMPORTED && len(st.GetManagedResources()) > 0)),
 			failed: state == cloudv1.NetworkState_NETWORK_STATE_FAILED && !gone,
 		}, nil
 	})

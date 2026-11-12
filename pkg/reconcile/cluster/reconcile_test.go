@@ -110,6 +110,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	if funcs.Apply == nil {
 		funcs.Apply = dryRunApply(scheme)
 	}
+	funcs.Apply = withoutSubnetTags(funcs.Apply)
 	k := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(funcs).Build()
 	deps := reconcile.Deps{Store: store, Kube: k, KubeReader: reader}
 	for _, opt := range opts {
@@ -248,6 +249,22 @@ func TestFreshlyRecordedObjectsAreNotFailed(t *testing.T) {
 	}
 }
 
+// withoutSubnetTags leaves out the applies of the cluster's tags on the
+// network's subnets (TagSubnets, which every apply of a cluster starts
+// with): the fake round-trips applies through the Go types, which send
+// forProvider.region as null and conflict; the API server does not (see
+// subnets_test.go).
+func withoutSubnetTags(apply func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error) func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+	return func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+		ao := &client.ApplyOptions{}
+		ao.ApplyOptions(opts)
+		if strings.HasPrefix(ao.FieldManager, kube.FieldOwner+"/cluster-") {
+			return nil
+		}
+		return apply(ctx, c, obj, opts...)
+	}
+}
+
 // dryRunApply makes the fake client honour dry-run applies like the API
 // server (the fake persists them): the apply runs against a scratch copy
 // of the live object, so the result is the merged object and nothing is
@@ -372,8 +389,6 @@ func TestReconcileStaysPendingWhileANodeGroupIsRetired(t *testing.T) {
 // is applied again while EKS is still creating, the later stage (add-ons,
 // access entries) only once it is ACTIVE, and the cluster reaches RUNNING.
 func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
-	ResumeAfter = 0
-	t.Cleanup(func() { ResumeAfter = 2 * time.Minute })
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
@@ -473,22 +488,18 @@ func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
 	}
 }
 
-// What must not be resumed: a create another call is still working on, and
-// a cluster past its first stage whose EKS cluster is updating.
+// What must not be resumed: a cluster past its first stage, or being
+// updated, whose EKS cluster is updating.
 func TestReconcileDoesNotResumeOtherClusters(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
-		grace      time.Duration
 		state      string
 		laterStage bool
 	}{
-		{"row written a moment ago", time.Hour, StateProvisioning, false},
-		{"past the first stage", 0, StateProvisioning, true},
-		{"an update", 0, StateUpdating, false},
+		{"past the first stage", StateProvisioning, true},
+		{"an update", StateUpdating, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ResumeAfter = tt.grace
-			t.Cleanup(func() { ResumeAfter = 2 * time.Minute })
 			w := newWorld(t, interceptor.Funcs{}, nil)
 			ctx := t.Context()
 			prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
@@ -525,31 +536,27 @@ func TestReconcileDoesNotResumeOtherClusters(t *testing.T) {
 	}
 }
 
-// What the loop applied while a call changed the cluster may be older
-// than what the call applied (an update silently reverted): the cluster
-// is applied again.
-func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
+// A pass that applied the cluster as it was before a call changed it does
+// not record the new generation as applied: the next pass applies it.
+func TestStaleApplyDoesNotHideAChange(t *testing.T) {
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
-	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
-		t.Fatal(err)
-	}
-	seen := w.cluster(t) // the row as the loop read it
-	w.svc.recheck(ctx, seen)
-	if w.cluster(t).ETag != seen.ETag {
-		t.Fatal("a cluster nobody changed was marked behind")
-	}
-	changed := w.cluster(t) // a call stores and applies a change
-	changed.Generation++
-	changed.AppliedGeneration = changed.Generation
+	seen := w.cluster(t) // the row as the loop read it, its generation not applied yet
+	changed := w.cluster(t)
+	changed.Generation++ // a call stores a change
 	if err := w.store.Clusters().Update(ctx, changed); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.svc.markApplied(ctx, seen); err != nil {
 		t.Errorf("markApplied on a changed row: %v", err)
 	}
-	w.svc.recheck(ctx, seen)
 	if got := w.cluster(t); got.AppliedGeneration >= got.Generation {
-		t.Fatalf("applied %d of %d; want the cluster applied again", got.AppliedGeneration, got.Generation)
+		t.Fatalf("applied %d of %d: a stale apply recorded the generation as applied", got.AppliedGeneration, got.Generation)
+	}
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.cluster(t); got.AppliedGeneration != got.Generation {
+		t.Errorf("applied %d of %d after the next pass", got.AppliedGeneration, got.Generation)
 	}
 }

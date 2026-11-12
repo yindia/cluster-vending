@@ -30,7 +30,7 @@ import (
 // recorded object is gone it deletes objects labelled with the cluster but
 // never recorded, removes the network subnet tags and the cluster's rows.
 // It reports whether the cluster is gone. Every step is idempotent: the
-// background loop and DeleteCluster both call it.
+// background loop calls it; DeleteCluster only stores the deletion.
 func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {

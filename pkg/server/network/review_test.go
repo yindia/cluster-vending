@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
@@ -27,10 +28,12 @@ func TestLoopFinishesTaggingAnImportedNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := res.GetNetwork()
+	f.reconcile(t, n.GetId())
 	if _, err := f.svc.TakeOverNetwork(ctx, &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: n.GetId(),
 		AcknowledgeNotImported: true}); err != nil {
 		t.Fatal(err)
 	}
+	f.reconcile(t, n.GetId())
 	// The labels were stored, the tagging did not happen (it failed).
 	row, err := f.store.Networks().Get(ctx, tenant, n.GetId())
 	if err != nil {
@@ -66,11 +69,12 @@ func TestLoopFinishesTaggingAnImportedNetwork(t *testing.T) {
 	}
 }
 
-// A takeover that stops half-way leaves no read-only network with owned
-// objects (deleting it would delete the VPC): the row is taken over first
-// and the loop finishes the rest.
+// A takeover is stored first and owned by the reconciler. One that stops
+// half-way leaves no read-only network with owned objects (deleting it
+// would delete the VPC): the failure is the network's status, and the
+// next pass finishes the rest.
 func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
-	fail := true
+	fail := false
 	f := newFixture(t, interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
 		if fail && obj.GetObjectKind().GroupVersionKind().Kind == "Subnet" {
 			return errors.New("the API server went away")
@@ -85,19 +89,25 @@ func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := res.GetNetwork().GetId()
+	f.reconcile(t, id)
+	fail = true
 	if _, err := f.svc.TakeOverNetwork(ctx, &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: id,
-		AcknowledgeNotImported: true}); err == nil {
-		t.Fatal("the takeover succeeded although a subnet could not be updated")
+		AcknowledgeNotImported: true}); err != nil {
+		t.Fatalf("TakeOverNetwork only stores the takeover: %v", err)
+	}
+	if err := f.svc.Reconcile(ctx, tenant, id); err == nil {
+		t.Fatal("the pass succeeded although a subnet could not be updated")
 	}
 	row, err := f.store.Networks().Get(ctx, tenant, id)
 	if err != nil || row.State == netreconcile.StateImported || row.AppliedGeneration >= row.Generation {
 		t.Fatalf("state %s, applied %d of %d (%v); want a taken-over network that is not applied yet",
 			row.State, row.AppliedGeneration, row.Generation, err)
 	}
-	fail = false
-	if err := f.svc.Reconcile(ctx, tenant, id); err != nil {
-		t.Fatal(err)
+	if st := f.status(t, id).GetStatus(); !strings.HasPrefix(st.GetMessage(), "retrying: could not take over Subnet ") {
+		t.Errorf("status after the failed pass = %s %q, want the failure being retried", st.GetState(), st.GetMessage())
 	}
+	fail = false
+	f.reconcile(t, id)
 	subnets := &awsec2.SubnetList{}
 	if err := f.kube.List(ctx, subnets); err != nil || len(subnets.Items) == 0 {
 		t.Fatalf("subnets: %d (%v)", len(subnets.Items), err)
@@ -110,11 +120,14 @@ func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
 	if row, err = f.store.Networks().Get(ctx, tenant, id); err != nil || row.AppliedGeneration != row.Generation {
 		t.Errorf("applied %d of %d (%v)", row.AppliedGeneration, row.Generation, err)
 	}
+	if st := f.status(t, id).GetStatus(); strings.Contains(st.GetMessage(), "retrying") {
+		t.Errorf("status after the pass that worked still reports the failure: %q", st.GetMessage())
+	}
 }
 
-// What the loop applied while a call changed the network may be older
-// than what the call applied: the network is applied again.
-func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
+// A pass that applied the network as it was before a call changed it does
+// not record the new generation as applied: the next pass applies it.
+func TestStaleApplyDoesNotHideAChange(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	n := f.create(t, "prod", nil)
@@ -122,25 +135,22 @@ func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.svc.rec().Recheck(ctx, seen)
-	if same, _ := f.store.Networks().Get(ctx, tenant, n.GetId()); same.ETag != seen.ETag {
-		t.Fatal("a network nobody changed was marked behind")
-	}
 	if _, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
 		Network: &cloudv1.Network{Id: n.GetId(), Labels: map[string]string{"team": "net"}}, UpdateMask: mask("labels")}); err != nil {
 		t.Fatal(err)
 	}
-	f.svc.rec().Recheck(ctx, seen)
-	got, err := f.store.Networks().Get(ctx, tenant, n.GetId())
-	if err != nil || got.AppliedGeneration >= got.Generation {
-		t.Fatalf("applied %d of %d (%v); want the network applied again", got.AppliedGeneration, got.Generation, err)
-	}
-	// Recording the applied generation for the row as it was does not fail
-	// the caller, and does not hide the change either.
+	seen.AppliedGeneration = seen.Generation - 1 // the pass has something to record
 	if err := f.svc.rec().MarkApplied(ctx, seen); err != nil {
 		t.Errorf("markApplied on a changed row: %v", err)
 	}
-	if got, _ = f.store.Networks().Get(ctx, tenant, n.GetId()); got.AppliedGeneration >= got.Generation {
-		t.Error("a stale apply recorded the generation as applied")
+	got, err := f.store.Networks().Get(ctx, tenant, n.GetId())
+	if err != nil || got.AppliedGeneration >= got.Generation {
+		t.Fatalf("applied %d of %d (%v): a stale apply recorded the generation as applied", got.AppliedGeneration, got.Generation, err)
+	}
+	f.reconcile(t, n.GetId())
+	vpc := &awsec2.VPC{}
+	if err := f.kube.Get(ctx, key(n, "vpc"), vpc); err != nil || vpc.Spec.ForProvider.Tags["team"] == nil ||
+		*vpc.Spec.ForProvider.Tags["team"] != "net" {
+		t.Errorf("VPC tags after the next pass = %v (%v), want the new label", vpc.Spec.ForProvider.Tags, err)
 	}
 }

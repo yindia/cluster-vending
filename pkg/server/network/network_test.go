@@ -105,13 +105,60 @@ func (f fixture) create(t *testing.T, name string, layout *cloudv1.NetworkLayout
 	return f.attachGateway(t, res.GetNetwork().GetId())
 }
 
-// attachGateway reports the network's internet gateway Ready, as the
-// provider does once it is attached, and runs the loop's Reconcile: the
-// NAT gateways, held back until then, are applied. It returns the network
-// as it is afterwards.
+// imported imports the fixture's VPC (importRequest) and runs the loop's
+// Reconcile, which creates its Observe-only objects. It returns the
+// network as it is afterwards.
+func (f fixture) imported(t *testing.T) *cloudv1.Network {
+	t.Helper()
+	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
+	if err != nil {
+		t.Fatalf("ImportNetwork: %v", err)
+	}
+	f.reconcile(t, res.GetNetwork().GetId())
+	return f.status(t, res.GetNetwork().GetId())
+}
+
+// takenOver is imported, then taken over and reconciled once: the
+// reconciler owns its objects.
+func (f fixture) takenOver(t *testing.T) *cloudv1.Network {
+	t.Helper()
+	n := f.imported(t)
+	if _, err := f.svc.TakeOverNetwork(t.Context(), &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: n.GetId(),
+		AcknowledgeNotImported: true}); err != nil {
+		t.Fatalf("TakeOverNetwork: %v", err)
+	}
+	f.reconcile(t, n.GetId())
+	return f.status(t, n.GetId())
+}
+
+// reconcile runs one pass of the background loop for the network: a call
+// only stores what was asked for, this applies it.
+func (f fixture) reconcile(t *testing.T, id string) {
+	t.Helper()
+	if err := f.svc.Reconcile(t.Context(), tenant, id); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+// status is the network as GetNetworkStatus returns it: read live.
+func (f fixture) status(t *testing.T, id string) *cloudv1.Network {
+	t.Helper()
+	res, err := f.svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id})
+	if err != nil {
+		t.Fatalf("GetNetworkStatus: %v", err)
+	}
+	return res.GetNetwork()
+}
+
+// attachGateway runs the loop's Reconcile (a call only stores the network:
+// this applies it), reports the network's internet gateway Ready, as the
+// provider does once it is attached, and runs Reconcile again: the NAT
+// gateways, held back until then, are applied. It returns the network as
+// it is afterwards.
 func (f fixture) attachGateway(t *testing.T, id string) *cloudv1.Network {
 	t.Helper()
 	ctx := t.Context()
+	f.reconcile(t, id)
 	gateways := &awsec2.InternetGatewayList{}
 	if err := f.kube.List(ctx, gateways, client.MatchingLabels{crossplane.LabelNetwork: id}); err != nil {
 		t.Fatal(err)
@@ -433,18 +480,42 @@ func TestCreateNetworkIsIdempotentByRequestID(t *testing.T) {
 	}
 }
 
-func TestCreateNetworkWithoutProviderRollsBack(t *testing.T) {
+// A network whose resources cannot be applied is stored all the same: the
+// failure is its status, and the next pass tries again.
+func TestCreateNetworkWithoutProviderIsFailedNotRefused(t *testing.T) {
+	missing := true
 	f := newFixture(t, interceptor.Funcs{
 		Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
-			return &meta.NoKindMatchError{GroupKind: awsec2.VPC_GroupVersionKind.GroupKind()}
+			if missing {
+				return &meta.NoKindMatchError{GroupKind: awsec2.VPC_GroupVersionKind.GroupKind()}
+			}
+			return c.Apply(ctx, obj, opts...)
 		},
 	})
-	_, err := f.svc.CreateNetwork(t.Context(), f.request("prod", nil))
-	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
+	ctx := t.Context()
+	res, err := f.svc.CreateNetwork(ctx, f.request("prod", nil))
+	if err != nil || res.GetNetwork().GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_PROVISIONING {
+		t.Fatalf("CreateNetwork = %s, %v; want the network stored as PROVISIONING", res.GetNetwork().GetStatus().GetState(), err)
 	}
-	if rows, err := f.store.Networks().List(t.Context(), tenant, repository.Page{Limit: 10}); err != nil || len(rows) != 0 {
-		t.Errorf("rows after rollback: %d, %v; want none", len(rows), err)
+	id := res.GetNetwork().GetId()
+	if err := f.svc.Reconcile(ctx, tenant, id); err == nil {
+		t.Fatal("the pass reported no error although the provider is not installed")
+	}
+	const want = "a Crossplane AWS provider the network needs (ec2, iam, cloudwatchlogs) is not installed in the management cluster"
+	get, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, st := range map[string]*cloudv1.NetworkStatus{"stored": get.GetNetwork().GetStatus(), "live": f.status(t, id).GetStatus()} {
+		if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_FAILED || st.GetMessage() != want {
+			t.Errorf("%s status = %s %q, want FAILED with the missing provider", name, st.GetState(), st.GetMessage())
+		}
+	}
+	// It is still tried: once the provider is there the network is built.
+	missing = false
+	n := f.attachGateway(t, id)
+	if st := n.GetStatus(); st.GetState() == cloudv1.NetworkState_NETWORK_STATE_FAILED || len(st.GetManagedResources()) != 20 {
+		t.Errorf("after the provider is installed: %s %q, %d resources", st.GetState(), st.GetMessage(), len(st.GetManagedResources()))
 	}
 }
 
@@ -465,7 +536,12 @@ func TestUpdateNetwork(t *testing.T) {
 		res.GetNetwork().GetGeneration() != n.GetGeneration()+1 {
 		t.Errorf("updated = %v", res.GetNetwork())
 	}
+	// The call stored the change; the reconciler applies it.
 	vpc := &awsec2.VPC{}
+	if err := f.kube.Get(ctx, key(n, "vpc"), vpc); err != nil || *vpc.Spec.ForProvider.Tags["team"] == "network" {
+		t.Fatalf("vpc tags right after the call = %v (%v): the call must not apply", vpc.Spec.ForProvider.Tags, err)
+	}
+	f.reconcile(t, n.GetId())
 	if err := f.kube.Get(ctx, key(n, "vpc"), vpc); err != nil {
 		t.Fatal(err)
 	}
@@ -501,9 +577,14 @@ func TestDeleteNetwork(t *testing.T) {
 	if res.GetNetwork().GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_DELETING {
 		t.Errorf("state = %s", res.GetNetwork().GetStatus().GetState())
 	}
-	// Deleted in order, one tier per call (the fake client deletes at once):
-	// the delete removed the routes and associations only.
+	// The call only stores the deletion.
 	count := func(list client.ObjectList) int { return f.count(t, list, n.GetId()) }
+	if count(&awsec2.RouteList{}) == 0 || count(&awsec2.VPCList{}) != 1 {
+		t.Fatalf("right after the call: routes %d, VPC %d; the call must not delete", count(&awsec2.RouteList{}), count(&awsec2.VPCList{}))
+	}
+	// Deleted in order, one tier per pass (the fake client deletes at once):
+	// the first pass removes the routes and associations only.
+	f.reconcile(t, n.GetId())
 	if count(&awsec2.RouteList{}) != 0 || count(&awsec2.RouteTableAssociationList{}) != 0 ||
 		count(&awsec2.NATGatewayList{}) == 0 || count(&awsec2.SubnetList{}) == 0 || count(&awsec2.VPCList{}) != 1 {
 		t.Fatalf("after delete: routes %d, associations %d, NATs %d, subnets %d, VPC %d", count(&awsec2.RouteList{}),
@@ -609,6 +690,7 @@ func TestDeleteNetworkRecordsUnrecordedResources(t *testing.T) {
 	if _, err := f.svc.DeleteNetwork(t.Context(), &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
 		t.Fatal(err)
 	}
+	f.reconcile(t, n.GetId())
 	recorded, err := f.store.ManagedResources().ListByOwner(t.Context(), model.OwnerNetwork, n.GetId())
 	if err != nil || len(recorded) != 20 || recorded[0].Kind != "VPC" || recorded[len(recorded)-1].Kind != "RouteTableAssociation" {
 		t.Fatalf("recorded = %d, %v; want all 20 in creation order", len(recorded), err)

@@ -1,9 +1,12 @@
 // Package cluster implements the cloud.v1 ClusterService for AWS (EKS). It
 // holds the request handling only: validation, preconditions, update
 // masks, the stored row and the mapping of failures to Connect codes. The
-// stored row is the source of truth; what builds the cluster from it
-// (Crossplane managed resources in the tenant namespace) and reads its
-// status is pkg/reconcile/cluster, which the handlers call.
+// handlers store what was asked for (the row is the source of truth) and
+// change nothing in the management cluster. What builds the cluster from
+// the row (Crossplane managed resources in the tenant namespace) is
+// pkg/reconcile/cluster, called by the background loop; what goes wrong
+// there is the cluster's status. The handlers use it to check a request
+// and to read.
 package cluster
 
 import (
@@ -16,7 +19,6 @@ import (
 	"github.com/google/uuid"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
@@ -35,8 +37,8 @@ const (
 // ClusterService implements cloud.v1.ClusterService.
 //
 // It holds the request handling only. What moves a cluster towards its
-// spec is the embedded Reconciler (pkg/reconcile/cluster), which the
-// background loop calls too.
+// spec is the embedded Reconciler (pkg/reconcile/cluster): the background
+// loop calls its Reconcile; the handlers only its checks and reads.
 type ClusterService struct {
 	*reconcilecluster.Reconciler
 	deps service.Deps
@@ -56,9 +58,10 @@ func (s *ClusterService) logger() *slog.Logger {
 	return s.deps.Logger
 }
 
-// CreateCluster stores the cluster with its defaults filled in and applies
-// its managed resources. A retry with the same request_id returns the
-// cluster created by the first call.
+// CreateCluster stores the cluster with its defaults filled in,
+// PROVISIONING. Its managed resources are created by the reconciler; a
+// failure there is the cluster's status. A retry with the same request_id
+// returns the cluster created by the first call.
 func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateClusterRequest) (_ *cloudv1.CreateClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -66,7 +69,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	}
 	if rid := req.GetRequestId(); rid != "" {
 		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
-			c, err := s.View(ctx, row)
+			c, err := stored(row)
 			return &cloudv1.CreateClusterResponse{Cluster: c}, err
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
@@ -86,21 +89,13 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	if err := s.checkName(ctx, req.GetTenantId(), req.GetCluster().GetName(), spec.GetRegion(), t); err != nil {
 		return nil, err
 	}
-	row, plan, err := s.insert(ctx, req, t)
+	row, err := s.insert(ctx, req, t)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Apply(ctx, row, t.Account, plan); err != nil {
-		s.Rollback(ctx, row, t.Account.Namespace)
-		return nil, err
-	}
-	if err := s.TagSubnets(ctx, row, t); err != nil {
-		s.Rollback(ctx, row, t.Account.Namespace)
-		return nil, err
-	}
-	s.logger().InfoContext(ctx, "cluster created", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
-		"eks_name", plan.ClusterName, "network_id", t.Network.ID, "zones", t.Zones)
-	c, err := s.Respond(ctx, row)
+	s.logger().InfoContext(ctx, "cluster stored", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
+		"network_id", t.Network.ID, "zones", t.Zones)
+	c, err := stored(row)
 	return &cloudv1.CreateClusterResponse{Cluster: c}, err
 }
 
@@ -116,25 +111,26 @@ func supported(spec *cloudv1.ClusterSpec) error {
 	return nil
 }
 
-// insert stores the cluster as sent (input) and resolved (spec); the ID is
-// chosen first, it names the resources.
-func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterRequest, t reconcilecluster.Target) (*model.Cluster, crossplaneaws.ClusterPlan, error) {
+// insert stores the cluster as sent (input) and resolved (spec),
+// PROVISIONING, its generation not applied yet: the reconciler applies
+// it. The ID is chosen first, it names the resources.
+func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterRequest, t reconcilecluster.Target) (*model.Cluster, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInternal, err.Error())
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	in := req.GetCluster()
 	spec, err := corecluster.ResolveSpec(in.GetSpec(), t.Zones)
 	if err != nil {
-		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
 	if err := s.resolveVersions(ctx, t.Account, spec, pinnedAddons(in.GetSpec())); err != nil {
-		return nil, crossplaneaws.ClusterPlan{}, err
+		return nil, err
 	}
 	input, err1 := reconcilecluster.Encode(in)
 	raw, err2 := reconcilecluster.Encode(spec)
 	if err := errors.Join(err1, err2); err != nil {
-		return nil, crossplaneaws.ClusterPlan{}, connect.NewError(connect.CodeInternal, err.Error())
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	row := &model.Cluster{
 		Resource: model.Resource{Base: model.Base{ID: id.String()}, DisplayName: in.GetDisplayName(),
@@ -146,9 +142,9 @@ func (s *ClusterService) insert(ctx context.Context, req *cloudv1.CreateClusterR
 		row.CreateRequestID = &rid
 	}
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
-		return nil, crossplaneaws.ClusterPlan{}, createError(err, row)
+		return nil, createError(err, row)
 	}
-	return row, s.RenderPlan(spec, row, t), nil
+	return row, nil
 }
 
 // createError maps a failed insert: a duplicate is a second cluster of the

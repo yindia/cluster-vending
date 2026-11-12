@@ -33,11 +33,7 @@ func TestImportNetworkACLs(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: d}
 	f.svc.deps.AWS.StaticKeys = testKeys
-	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
-	if err != nil {
-		t.Fatalf("ImportNetwork: %v", err)
-	}
-	n := res.GetNetwork()
+	n := f.imported(t)
 	lines := planLines(n)
 	carried, notImported := cloudv1.Disposition_DISPOSITION_CARRIED_OVER, cloudv1.Disposition_DISPOSITION_NOT_IMPORTED
 	for line, want := range map[string]cloudv1.Disposition{
@@ -73,6 +69,7 @@ func TestImportNetworkACLs(t *testing.T) {
 		AcknowledgeNotImported: true}); err != nil {
 		t.Fatalf("TakeOverNetwork: %v", err)
 	}
+	f.reconcile(t, n.GetId())
 	def := &awsec2.DefaultNetworkACL{}
 	if err := f.kube.Get(t.Context(), key(n, "default-nacl"), def); err != nil {
 		t.Fatal(err)
@@ -90,6 +87,7 @@ func TestImportNetworkACLs(t *testing.T) {
 	if _, err := f.svc.DeleteNetwork(ctx, &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
 		t.Fatalf("DeleteNetwork: %v", err)
 	}
+	f.reconcile(t, n.GetId())
 	if f.count(t, &awsec2.NetworkACLRuleList{}, n.GetId()) != 0 || f.count(t, &awsec2.NetworkACLList{}, n.GetId()) != 1 {
 		t.Errorf("after delete: %d rules, %d network ACLs; want the rules gone first",
 			f.count(t, &awsec2.NetworkACLRuleList{}, n.GetId()), f.count(t, &awsec2.NetworkACLList{}, n.GetId()))
@@ -126,11 +124,7 @@ func TestImportPublicRouteTableWithSpecificRoutes(t *testing.T) {
 	f := newFixture(t)
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: d}
 	f.svc.deps.AWS.StaticKeys = testKeys
-	res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
-	if err != nil {
-		t.Fatalf("ImportNetwork: %v", err)
-	}
-	n := res.GetNetwork()
+	n := f.imported(t)
 	if n.GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED ||
 		dispositions(n.GetStatus().GetImport())[cloudv1.Disposition_DISPOSITION_BLOCKING] != 0 {
 		t.Fatalf("state = %s (%s), want IMPORTED without BLOCKING lines", n.GetStatus().GetState(), n.GetStatus().GetMessage())
@@ -165,13 +159,17 @@ func TestNATGatewayWaitsForInternetGateway(t *testing.T) {
 		t.Fatalf("CreateNetwork: %v", err)
 	}
 	id := res.GetNetwork().GetId()
+	if f.count(t, &awsec2.VPCList{}, id) != 0 {
+		t.Fatal("CreateNetwork applied the network: it only stores it")
+	}
+	f.reconcile(t, id) // the first pass applies what can be applied
 	row, err := f.store.Networks().Get(t.Context(), tenant, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f.count(t, &awsec2.NATGatewayList{}, id) != 0 || f.count(t, &awsec2.EIPList{}, id) != 1 ||
 		f.count(t, &awsec2.InternetGatewayList{}, id) != 1 || row.AppliedGeneration >= row.Generation {
-		t.Fatalf("after create: %d NAT gateways, applied generation %d of %d; want none yet and the network pending",
+		t.Fatalf("after the first pass: %d NAT gateways, applied generation %d of %d; want none yet and the network pending",
 			f.count(t, &awsec2.NATGatewayList{}, id), row.AppliedGeneration, row.Generation)
 	}
 	// The gateway is not Ready: another pass still holds them back.
@@ -204,6 +202,7 @@ func TestNATGatewayWaitsForInternetGateway(t *testing.T) {
 		Network: &cloudv1.Network{Id: id, Labels: map[string]string{"team": "net"}}, UpdateMask: mask("labels")}); err != nil {
 		t.Fatal(err)
 	}
+	f.reconcile(t, id)
 	nat := &awsec2.NATGateway{}
 	if err := f.kube.Get(t.Context(), key(n, "nat-use1-az1"), nat); err != nil || *nat.Spec.ForProvider.Tags["team"] != "net" {
 		t.Errorf("NAT gateway after a label update: %v, %v", nat.Spec.ForProvider.Tags, err)

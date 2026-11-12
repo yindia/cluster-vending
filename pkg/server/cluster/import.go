@@ -20,10 +20,12 @@ import (
 )
 
 // ImportCluster looks an existing EKS cluster up once, read-only, and
-// imports it: the spec derived from it, a managed resource for each of its
-// resources that only observes, and the plan (status.import). Nothing
-// changes in the cloud. The cluster is IMPORTED, or FAILED when the plan is
-// BLOCKED (then nothing is imported).
+// stores the import: the spec derived from the cluster, the plan
+// (status.import) and the objects planned for it. The reconciler creates
+// those (a managed resource for each of the cluster's resources that only
+// observes), without looking the cloud up again. Nothing changes in the
+// cloud. The cluster is IMPORTED, or FAILED when the plan is BLOCKED (then
+// nothing is imported).
 func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportClusterRequest) (_ *cloudv1.ImportClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -34,7 +36,7 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	}
 	if rid := req.GetRequestId(); rid != "" {
 		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
-			c, err := s.View(ctx, row)
+			c, err := stored(row)
 			return &cloudv1.ImportClusterResponse{Cluster: c}, err
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
@@ -63,15 +65,9 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	if err := s.insertImport(ctx, req, row, plan); err != nil {
 		return nil, err
 	}
-	if !plan.Blocked() {
-		if err := s.ApplyImport(ctx, row, account, plan); err != nil {
-			s.Rollback(ctx, row, account.Namespace)
-			return nil, err
-		}
-	}
-	s.logger().InfoContext(ctx, "cluster imported", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
+	s.logger().InfoContext(ctx, "cluster import stored", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
 		"network_id", network.ID, "blocked", plan.Blocked(), "plan_lines", len(plan.Lines), "objects", len(plan.Objects))
-	c, err := s.Respond(ctx, row)
+	c, err := stored(row)
 	return &cloudv1.ImportClusterResponse{Cluster: c}, err
 }
 
@@ -132,9 +128,10 @@ func (s *ClusterService) discover(ctx context.Context, a *model.CloudAccount, re
 }
 
 // insertImport stores the imported cluster: the derived spec, the request
-// as sent (input), the plan (status) and what it keeps of the roles it
-// adopts, IMPORTED or, when blocked, FAILED. Its generation counts as
-// applied: the loop leaves it alone until the takeover.
+// as sent (input), the plan (status), and what it keeps of the roles it
+// adopts together with the objects planned for it (adoption: the
+// reconciler applies them), IMPORTED or, when blocked, FAILED. Its
+// generation is not applied yet; a blocked import has nothing to apply.
 func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportClusterRequest, row *model.Cluster, plan corecluster.ImportPlan) error {
 	phase := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED
 	row.State = reconcilecluster.StateImported
@@ -149,12 +146,17 @@ func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportCl
 	rawSpec, err1 := reconcilecluster.Encode(spec)
 	input, err2 := reconcilecluster.Encode(req)
 	status, err3 := reconcilecluster.Encode(&cloudv1.ClusterStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
-	adoption, err4 := json.Marshal(plan.Adoption)
+	raw, err4 := json.Marshal(plan.Adoption)
+	adoption := model.JSON(raw)
+	row.Generation, row.AppliedGeneration, row.RenderVersion = 1, 1, crossplaneaws.RenderVersion
+	if err4 == nil && !plan.Blocked() {
+		adoption, err4 = reconcilecluster.WithImportObjects(adoption, plan, s.deps.Kube.Scheme())
+		row.AppliedGeneration, row.RenderVersion = 0, 0 // the reconciler applies the objects
+	}
 	if err := errors.Join(err1, err2, err3, err4); err != nil {
 		return connect.NewError(connect.CodeInternal, err.Error())
 	}
-	row.Spec, row.Input, row.Status, row.Adoption = rawSpec, input, status, model.JSON(adoption)
-	row.Generation, row.AppliedGeneration, row.RenderVersion = 1, 1, crossplaneaws.RenderVersion
+	row.Spec, row.Input, row.Status, row.Adoption = rawSpec, input, status, adoption
 	if rid := req.GetRequestId(); rid != "" {
 		row.CreateRequestID = &rid
 	}
@@ -164,11 +166,12 @@ func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportCl
 	return nil
 }
 
-// TakeOverCluster makes the platform the owner of an IMPORTED cluster. The
-// objects carried over switch to full management (without Delete where
-// marked); the rest is rendered from the spec like any cluster's, which
-// drops their Observe-only policy, adds the platform's tags and creates
-// what the plan lists as WILL_CREATE. The network must be owned by then.
+// TakeOverCluster stores an IMPORTED cluster as taken over. The reconciler
+// then makes the platform its owner: the objects carried over switch to
+// full management (without Delete where marked); the rest is rendered from
+// the spec like any cluster's, which drops their Observe-only policy, adds
+// the platform's tags and creates what the plan lists as WILL_CREATE. The
+// network must be owned by then.
 func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeOverClusterRequest) (_ *cloudv1.TakeOverClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -187,14 +190,13 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	// Refuses a network that is still imported read-only.
-	t, err := s.Target(ctx, row.TenantID, spec)
-	if err != nil {
+	if _, err := s.Target(ctx, row.TenantID, spec); err != nil {
 		return nil, err
 	}
-	// The row first: once anything is owned the cluster is no longer an
-	// imported, read-only one (deleting that leaves the cloud alone). The
-	// apply then owns the carried-over objects and renders the rest; what
-	// fails is finished by the loop.
+	// The row only: once anything is owned the cluster is no longer an
+	// imported, read-only one (deleting that leaves the cloud alone), so
+	// the reconciler owns the carried-over objects and renders the rest
+	// once the row says so.
 	imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING
 	if row.Status, err = reconcilecluster.Encode(&cloudv1.ClusterStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -204,14 +206,8 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := s.Apply(ctx, row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
-		return nil, err
-	}
-	if err := s.TagSubnets(ctx, row, t); err != nil {
-		return nil, err
-	}
-	s.logger().InfoContext(ctx, "cluster taken over", "tenant_id", row.TenantID, "cluster_id", row.ID)
-	c, err := s.Respond(ctx, row)
+	s.logger().InfoContext(ctx, "cluster takeover stored", "tenant_id", row.TenantID, "cluster_id", row.ID)
+	c, err := stored(row)
 	return &cloudv1.TakeOverClusterResponse{Cluster: c}, err
 }
 
@@ -224,6 +220,11 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 	}
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
+	}
+	if row.AppliedGeneration < row.Generation {
+		// Its Observe-only objects are not there yet: there is nothing to own.
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Sprintf("cluster %s is still being imported; retry once its resources are observed (cluster status)", row.ID))
 	}
 	imp := reconcilecluster.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {

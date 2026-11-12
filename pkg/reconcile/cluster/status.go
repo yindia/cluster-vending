@@ -51,12 +51,27 @@ func SpecOf(row *model.Cluster) (*cloudv1.ClusterSpec, error) {
 
 // View is the API view of a stored cluster: spec, the live state of its
 // managed resources, and what EKS reports (endpoint, version, ARNs).
+//
+// A failed attempt to apply the cluster is part of it (the failure the
+// last pass recorded with the row): nothing else says so while there are
+// no resources to observe.
 func (s *Reconciler) View(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
+	return s.view(ctx, row, storedFailure(row))
+}
+
+// view is View with the failure to report: the recorded one for a read,
+// this pass's for the reconciler.
+func (s *Reconciler) view(ctx context.Context, row *model.Cluster, failure *cloudv1.Condition) (*cloudv1.Cluster, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return nil, storeError(err)
 	}
-	return s.viewOf(ctx, row, records)
+	c, err := s.viewOf(ctx, row, records)
+	if err != nil {
+		return nil, err
+	}
+	withFailure(c.GetStatus(), failure)
+	return c, nil
 }
 
 // viewOf is view with the cluster's records at hand. It only reads.

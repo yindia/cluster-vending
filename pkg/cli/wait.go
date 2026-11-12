@@ -9,8 +9,9 @@ import (
 	"connectrpc.com/connect/v2"
 )
 
-// pollInterval is how often --wait reads the resource. Each read also
-// moves the server's work on (e.g. the next tier of a delete).
+// pollInterval is how often --wait reads the resource. A call only stores
+// what was asked for and reads change nothing: the server's background
+// loop does the work, and --wait watches it.
 const pollInterval = 15 * time.Second
 
 // DefaultWaitTimeout bounds --wait: an EKS cluster takes ~15 minutes, a

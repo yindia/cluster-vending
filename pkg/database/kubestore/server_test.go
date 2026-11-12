@@ -60,6 +60,10 @@ func TestNetworkServiceRunsOnCustomResources(t *testing.T) {
 	if err := k.List(ctx, rows, client.InNamespace(platform)); err != nil || len(rows.Items) != 1 || rows.Items[0].Name != id {
 		t.Fatalf("%d Network objects (%v), want the created one", len(rows.Items), err)
 	}
+	// The call only stored the network; a pass of the loop applies it.
+	if err := svc.Reconcile(ctx, tenant, id); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
 	if err := k.List(ctx, records, client.InNamespace(platform)); err != nil || len(records.Items) == 0 {
 		t.Fatalf("%d ManagedResource objects (%v), want the network's records", len(records.Items), err)
 	}

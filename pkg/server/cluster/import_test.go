@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
@@ -91,6 +92,49 @@ func importTF(t *testing.T, w world) *cloudv1.Cluster {
 		Provider: &cloudv1.ImportClusterRequest_Aws{Aws: &cloudv1.AwsImportCluster{DefaultNodeGroupName: "default-ng"}}})
 	if err != nil {
 		t.Fatalf("ImportCluster: %v", err)
+	}
+	// The call stored the import; a pass of the loop creates its objects.
+	id := res.GetCluster().GetId()
+	reconcile(t, w, id)
+	// The imported EKS cluster is ACTIVE, as its provider reports once it
+	// observed it (a blocked import has no object).
+	eks := &awseks.Cluster{}
+	key := client.ObjectKey{Namespace: worldNS, Name: crossplaneaws.ClusterPrefix(worldTenant, id, "tf")}
+	if err := w.kube.Get(t.Context(), key, eks); err == nil {
+		eks.Status.AtProvider.Status = ptr.To("ACTIVE")
+		if err := w.kube.Update(t.Context(), eks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return live(t, w, id)
+}
+
+// update stores an update of a cluster and, when it was stored, runs the
+// pass of the loop that applies it.
+func update(t *testing.T, w world, req *cloudv1.UpdateClusterRequest) (*cloudv1.UpdateClusterResponse, error) {
+	t.Helper()
+	res, err := w.svc.UpdateCluster(t.Context(), req)
+	if err == nil && !req.GetValidateOnly() {
+		reconcile(t, w, req.GetCluster().GetId())
+	}
+	return res, err
+}
+
+// reconcile runs one pass of the background loop for the cluster: a call
+// only stores what was asked for, this applies it.
+func reconcile(t *testing.T, w world, id string) {
+	t.Helper()
+	if err := w.svc.Reconcile(t.Context(), worldTenant, id); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+// live is the cluster as GetClusterStatus returns it: read live.
+func live(t *testing.T, w world, id string) *cloudv1.Cluster {
+	t.Helper()
+	res, err := w.svc.GetClusterStatus(t.Context(), &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: id})
+	if err != nil {
+		t.Fatalf("GetClusterStatus: %v", err)
 	}
 	return res.GetCluster()
 }
@@ -284,7 +328,7 @@ func TestImportClusterPlan(t *testing.T) {
 	imported := &cloudv1.Cluster{Id: c.GetId(), DisplayName: "x"}
 	req := updateRequest(w, nil, "display_name")
 	req.Cluster = imported
-	if _, err := w.svc.UpdateCluster(t.Context(), req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+	if _, err := update(t, w, req); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("update of an imported cluster = %v, want FAILED_PRECONDITION", err)
 	}
 	if err := w.svc.Reconcile(t.Context(), worldTenant, c.GetId()); err != nil {
@@ -364,6 +408,13 @@ func TestTakeOverCluster(t *testing.T) {
 		st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_IMPORTED {
 		t.Errorf("after takeover: %s / %s", st.GetState(), st.GetImport().GetPhase())
 	}
+	// The call stored the takeover and owned nothing; the pass does.
+	for name, u := range objectsOf(t, w, c.GetId()) {
+		if got := policies(u); len(got) == 0 || got[0] != "Observe" {
+			t.Fatalf("%s managementPolicies right after the call = %v: the call must not own", name, got)
+		}
+	}
+	reconcile(t, w, c.GetId())
 	after := objectsOf(t, w, c.GetId())
 	// No diff: what existed keeps its settings and its cloud identity, is
 	// fully managed now, and no node group was added or replaced.
@@ -479,6 +530,7 @@ func TestImportClusterSecurityGroups(t *testing.T) {
 		AcknowledgeNotImported: true}); err != nil {
 		t.Fatal(err)
 	}
+	reconcile(t, w, c.GetId())
 	for name, u := range objectsOf(t, w, c.GetId()) {
 		if strings.HasPrefix(u.GetKind(), "SecurityGroup") && (slices.Contains(policies(u), "Delete") || slices.Contains(policies(u), "*")) {
 			t.Errorf("%s of a shared group can be deleted: %v", name, policies(u))

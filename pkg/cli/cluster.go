@@ -100,9 +100,10 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	return waitCluster(ctx, c, o, tenant, cl.GetId(), false)
 }
 
-// ClusterDelete calls ClusterService.DeleteCluster. The server deletes the
-// cluster's resources in order (add-ons, node groups, the EKS cluster, IAM),
-// one step per read; --wait reads until the cluster is gone.
+// ClusterDelete calls ClusterService.DeleteCluster, which stores the
+// deletion (the answer is the cluster, DELETING). The server then deletes
+// the cluster's resources in order (add-ons, node groups, the EKS cluster,
+// IAM); --wait reads until the cluster is gone.
 func ClusterDelete(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
@@ -158,7 +159,9 @@ func ClusterTakeOver(ctx context.Context, c Clients, o Options) (proto.Message, 
 }
 
 // waitCluster waits until the cluster is RUNNING (gone: deleted) and
-// returns its last read.
+// returns its last read. A call only stores what was asked for; what goes
+// wrong applying it is the cluster's status: FAILED ends the wait with its
+// message as the error.
 func waitCluster(ctx context.Context, c Clients, o Options, tenant, id string, gone bool) (proto.Message, error) {
 	var last proto.Message
 	err := waitUntil(ctx, o, "cluster "+id, gone, func(ctx context.Context) (observation, error) {

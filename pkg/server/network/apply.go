@@ -37,6 +37,8 @@ func newResolved(row *model.Network, spec *cloudv1.NetworkSpec, a *model.CloudAc
 			Subnets:            l.Subnets,
 			NAT:                l.NAT,
 			Tags:               row.Labels,
+			AccountID:          a.AccountID,
+			FlowLogs:           flowLogPlan(spec.GetFlowLogs()),
 		},
 	}
 }
@@ -80,7 +82,7 @@ func (s *NetworkService) applyObjects(ctx context.Context, row *model.Network, a
 		case err == nil:
 		case meta.IsNoMatchError(err):
 			return connect.NewError(connect.CodeFailedPrecondition,
-				"the Crossplane AWS ec2 provider is not installed in the management cluster")
+				"a Crossplane AWS provider the network needs (ec2, iam, cloudwatchlogs) is not installed in the management cluster")
 		default:
 			s.logger().ErrorContext(ctx, "apply network resource", "tenant_id", row.TenantID,
 				"network_id", row.ID, "object", obj.GetName(), "error", err)
@@ -154,13 +156,19 @@ func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
 }
 
 // deleteOrder deletes a network from the inside out, the order AWS
-// accepts: routes and subnet associations, then route tables and NAT
-// gateways, then the NAT gateways' EIPs, then subnets and the internet
-// gateway (it detaches only once no public IP is left), then the VPC.
+// accepts: the flow log, routes and subnet associations; then the flow
+// log's log group and its role's policy attachment, route tables and NAT
+// gateways; then the delivery role and its policy and the NAT gateways'
+// EIPs; then subnets and the internet gateway (it detaches only once no
+// public IP is left); then the VPC.
+//
+// The flow log's Usages (they hold its log group and role while it
+// exists) sit in the tier after it: Kubernetes garbage-collects them with
+// the flow log, and DeleteRecorded never deletes a Usage itself.
 var deleteOrder = service.DeleteOrder{
-	{"RouteTableAssociation", "Route"},
-	{"RouteTable", "NATGateway"},
-	{"EIP"},
+	{"FlowLog", "RouteTableAssociation", "Route"},
+	{"Usage", "Group", "RolePolicyAttachment", "RouteTable", "NATGateway"},
+	{"Role", "Policy", "EIP"},
 	{"Subnet", "InternetGateway"},
 	{"VPC"},
 }
@@ -187,6 +195,9 @@ func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error
 		return err
 	}
 	if err := s.deps.MarkGone(ctx, records, views); err != nil {
+		return connect.NewError(connect.CodeInternal, err.Error())
+	}
+	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
 		return connect.NewError(connect.CodeInternal, err.Error())
 	}
 	left, err := s.deps.DeleteNext(ctx, records, views, deleteOrder)

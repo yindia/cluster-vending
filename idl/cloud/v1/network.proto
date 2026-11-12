@@ -17,7 +17,8 @@ import "google/protobuf/timestamp.proto";
 //
 // Crossplane mapping:
 //   AWS   ec2.aws.m.upbound.io       VPC, Subnet, InternetGateway, NATGateway,
-//                                    EIP, RouteTable, RouteTableAssociation, Route
+//                                    EIP, RouteTable, RouteTableAssociation, Route,
+//                                    FlowLog (+ cloudwatchlogs Group, iam Role)
 //   GCP   compute.gcp.m.upbound.io   Network, Subnetwork, Router, RouterNAT,
 //                                    Address
 //   Azure network.azure.m.upbound.io VirtualNetwork, Subnet, NATGateway,
@@ -102,6 +103,11 @@ message NetworkSpec {
   // network's account.
   string bootstrap_id = 4 [(buf.validate.field).string.uuid = true];
 
+  // Flow logs of the network's IP traffic. Unset: none, as before.
+  // Immutable for now. An imported network keeps the flow logs it has
+  // (status.import, CARRIED_OVER); this field stays unset for it.
+  NetworkFlowLogs flow_logs = 5;
+
   // Cloud tags are the network's labels.
   reserved 3;
   reserved "tags";
@@ -160,6 +166,73 @@ message ClusterNetwork {
   string service_cidr = 4 [
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string.ipv4_prefix = true
+  ];
+}
+
+// FlowLogTrafficType is the traffic a flow log records.
+enum FlowLogTrafficType {
+  // Server default: ALL.
+  FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED = 0;
+  FLOW_LOG_TRAFFIC_TYPE_ALL = 1 [(crossplane) = {aws: "ALL"}];
+  FLOW_LOG_TRAFFIC_TYPE_ACCEPT = 2 [(crossplane) = {aws: "ACCEPT"}];
+  FLOW_LOG_TRAFFIC_TYPE_REJECT = 3 [(crossplane) = {aws: "REJECT"}];
+}
+
+// NetworkFlowLogs records the network's IP traffic in the cloud's log
+// service, with what delivering it needs.
+//   AWS   ec2 FlowLog on the VPC, to a CloudWatch Logs log group
+//         (cloudwatchlogs Group) through a delivery role (iam Role, Policy,
+//         RolePolicyAttachment)
+// The stored spec holds the resolved defaults.
+message NetworkFlowLogs {
+  // Turns flow logs on. Unset or false: no flow log resources.
+  optional bool enabled = 1;
+
+  // FlowLog.trafficType. Defaults to ALL.
+  FlowLogTrafficType traffic_type = 2 [(buf.validate.field).enum.defined_only = true];
+
+  // Days the log group keeps the records (Group.retentionInDays): one of
+  // the retention periods CloudWatch Logs has. Defaults to 30.
+  uint32 retention_days = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).uint32 = {
+      in: [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653
+      ]
+    }
+  ];
+
+  // Seconds of traffic one record aggregates
+  // (FlowLog.maxAggregationInterval): 60 or 600. Defaults to 600.
+  uint32 aggregation_interval_seconds = 4 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).uint32 = {
+      in: [
+        60,
+        600
+      ]
+    }
   ];
 }
 

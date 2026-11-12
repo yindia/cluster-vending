@@ -22,6 +22,7 @@ type EC2API interface {
 	DescribeInternetGateways(context.Context, *ec2.DescribeInternetGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
 	DescribeNatGateways(context.Context, *ec2.DescribeNatGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
 	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+	DescribeFlowLogs(context.Context, *ec2.DescribeFlowLogsInput, ...func(*ec2.Options)) (*ec2.DescribeFlowLogsOutput, error)
 }
 
 // Network is what an existing VPC is made of: the input of an import plan.
@@ -38,6 +39,9 @@ type Network struct {
 	// DefaultSecurityGroup is the VPC's "default" group. Other groups
 	// belong to whatever uses them and are not imported.
 	DefaultSecurityGroup SecurityGroup
+	// FlowLogs are the flow logs on the VPC itself (not on its subnets or
+	// network interfaces).
+	FlowLogs []FlowLog
 }
 
 // VPC is an ec2 VPC.
@@ -148,7 +152,7 @@ var (
 //
 // Calls: ec2:DescribeVpcs, DescribeSubnets (by ID), DescribeRouteTables,
 // DescribeInternetGateways, DescribeNatGateways, DescribeSecurityGroups
-// (the default group only).
+// (the default group only), and those of flowLogs.
 func (t *Tenant) DiscoverNetwork(ctx context.Context, vpcID string, subnetIDs []string) (*Network, error) {
 	if err := validateIDs(vpcID, subnetIDs); err != nil {
 		return nil, err
@@ -179,7 +183,12 @@ func (t *Tenant) DiscoverNetwork(ctx context.Context, vpcID string, subnetIDs []
 	if err != nil {
 		return nil, err
 	}
+	flowLogs, err := t.flowLogs(ctx, vpcID)
+	if err != nil {
+		return nil, err
+	}
 	return &Network{
+		FlowLogs:             flowLogs,
 		AccountID:            t.AccountID,
 		Region:               t.Region,
 		VPC:                  vpc,

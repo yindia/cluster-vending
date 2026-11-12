@@ -22,6 +22,8 @@ type fakeEC2 struct {
 	// filters records the filters of every call that has them.
 	filters     []string
 	subnetCalls int
+	// flowLogs are the region's flow logs.
+	flowLogs []types.FlowLog
 }
 
 func (f *fakeEC2) record(filters []types.Filter) {
@@ -153,7 +155,7 @@ func (f *fakeEC2) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecu
 }
 
 func fakeTenant(api EC2API) *Tenant {
-	return &Tenant{AccountID: tenantAccount, Region: "us-east-1", ec2: api}
+	return &Tenant{AccountID: tenantAccount, Region: "us-east-1", ec2: api, logs: fakeLogs{}, iam: fakeIAM{}}
 }
 
 var platformSubnets = []string{

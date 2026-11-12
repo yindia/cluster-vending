@@ -33,6 +33,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -307,40 +308,6 @@ func TestGetNetworkReportsResources(t *testing.T) {
 	// still creating.
 	if byState[cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY] != 10 {
 		t.Errorf("states = %v", byState)
-	}
-}
-
-func TestNetworkStateFromResources(t *testing.T) {
-	mr := func(state cloudv1.ManagedResourceState, msg string) *cloudv1.ManagedResource {
-		return &cloudv1.ManagedResource{Kind: "Route", Name: "r", State: state, Message: msg}
-	}
-	ready := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY, "")
-	waiting := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, "cannot resolve references")
-	failed := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, "UnauthorizedOperation")
-	missing := mr(cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING, "not found")
-	live := &model.Network{Resource: model.Resource{State: stateProvisioning}}
-	for name, tc := range map[string]struct {
-		row   *model.Network
-		views []*cloudv1.ManagedResource
-		want  cloudv1.NetworkState
-	}{
-		"all ready":             {live, []*cloudv1.ManagedResource{ready, ready}, cloudv1.NetworkState_NETWORK_STATE_READY},
-		"waiting is not failed": {live, []*cloudv1.ManagedResource{ready, waiting}, cloudv1.NetworkState_NETWORK_STATE_PROVISIONING},
-		"one failed":            {live, []*cloudv1.ManagedResource{ready, waiting, failed}, cloudv1.NetworkState_NETWORK_STATE_FAILED},
-		"one missing":           {live, []*cloudv1.ManagedResource{ready, missing}, cloudv1.NetworkState_NETWORK_STATE_FAILED},
-		"nothing yet":           {live, nil, cloudv1.NetworkState_NETWORK_STATE_PROVISIONING},
-		"deleting":              {&model.Network{Resource: model.Resource{State: stateDeleting}}, []*cloudv1.ManagedResource{failed}, cloudv1.NetworkState_NETWORK_STATE_DELETING},
-	} {
-		if got := status(tc.row, tc.views, nil, nil); got.GetState() != tc.want {
-			t.Errorf("%s: state = %s, want %s", name, got.GetState(), tc.want)
-		}
-	}
-	st := status(live, []*cloudv1.ManagedResource{ready, waiting, failed}, nil, nil)
-	if st.GetMessage() != "Route r: UnauthorizedOperation" || len(st.GetConditions()) != 2 || len(st.GetManagedResources()) != 3 {
-		t.Errorf("failed status = %v", st)
-	}
-	if st := status(live, []*cloudv1.ManagedResource{ready, waiting}, nil, nil); st.GetMessage() != "1 of 2 resources ready, 1 waiting on others" {
-		t.Errorf("progress = %q", st.GetMessage())
 	}
 }
 
@@ -683,7 +650,7 @@ func TestReconcileDoesNotRenderAnImportedNetwork(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	row := &model.Network{TenantID: tenant, Name: "tf", CloudAccountID: f.accountID, Provider: model.ProviderAWS, Region: "us-east-1",
-		Resource: model.Resource{State: stateProvisioning, Generation: 1,
+		Resource: model.Resource{State: netreconcile.StateProvisioning, Generation: 1,
 			Spec: model.JSON(`{"region":"us-east-1","bootstrapId":"` + f.accountID +
 				`","layout":{"cidrBlock":"10.0.0.0/16","availabilityZoneCount":2}}`),
 			Status: model.JSON(`{"import":{"phase":"IMPORT_PHASE_CONVERGING"}}`)}}

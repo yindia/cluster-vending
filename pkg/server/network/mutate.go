@@ -13,6 +13,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	corenetwork "github.com/yindia/cluster-vending/pkg/network"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -37,17 +38,17 @@ type changes struct{ labels, flowLogs bool }
 // the network again.
 func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateNetworkRequest) (*cloudv1.UpdateNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	in := req.GetNetwork()
 	row, err := s.get(ctx, req.GetTenantId(), in.GetId())
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	if err := checkMutable(row, in.GetEtag()); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
-	spec, err := specOf(row)
+	spec, err := netreconcile.SpecOf(row)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -57,18 +58,18 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	}
 	changed, err := applyMask(row, spec, in, paths)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	// A taken-over network's objects come from the discovered VPC, not from
 	// the spec: it is never rendered again (that would create a second
 	// network). Its labels are set on the objects it has.
-	imported := storedImport(row) != nil
+	imported := netreconcile.StoredImport(row) != nil
 	if imported && changed.flowLogs {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			"spec.flow_logs cannot be set on an imported network: it keeps the flow logs it was imported with")
 	}
 	tagsChanged := changed.labels || changed.flowLogs
-	if row.Spec, err = encode(spec); err != nil {
+	if row.Spec, err = netreconcile.Encode(spec); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	if row.Input, err = updatedInput(row, in, req.GetUpdateMask().GetPaths()); err != nil {
@@ -78,8 +79,8 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	if !tagsChanged && row.AppliedGeneration == row.Generation-1 {
 		row.AppliedGeneration = row.Generation // nothing to apply for this change
 	}
-	if tagsChanged && row.State == stateReady {
-		row.State = stateUpdating // the loop records the status until it is READY again
+	if tagsChanged && row.State == netreconcile.StateReady {
+		row.State = netreconcile.StateUpdating // the loop records the status until it is READY again
 	}
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -89,24 +90,24 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	}
 	switch {
 	case imported && changed.labels:
-		if err := s.retag(ctx, row); err != nil {
-			return nil, err
+		if err := s.rec().Retag(ctx, row); err != nil {
+			return nil, service.ToConnect(err)
 		}
 	case tagsChanged:
-		if err := s.reapply(ctx, row, spec); err != nil {
-			return nil, err
+		if err := s.rec().Reapply(ctx, row, spec); err != nil {
+			return nil, service.ToConnect(err)
 		}
 	}
-	n, err := s.respond(ctx, row)
-	return &cloudv1.UpdateNetworkResponse{Network: n}, err
+	n, err := s.rec().Respond(ctx, row)
+	return &cloudv1.UpdateNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
 // checkMutable refuses updates of deleting networks and stale etags.
 func checkMutable(row *model.Network, etag string) error {
-	if row.State == stateDeleting {
+	if row.State == netreconcile.StateDeleting {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("network %s is being deleted", row.ID))
 	}
-	if row.State == stateImported || row.State == stateBlocked {
+	if row.State == netreconcile.StateImported || row.State == netreconcile.StateBlocked {
 		return connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Sprintf("network %s is imported read-only; take it over first", row.ID))
 	}
@@ -157,7 +158,7 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 		return row.Input, nil
 	}
 	input := &cloudv1.Network{}
-	if err := lenient.Unmarshal(row.Input, input); err != nil {
+	if err := netreconcile.Lenient.Unmarshal(row.Input, input); err != nil {
 		return nil, fmt.Errorf("network %s: stored input: %w", row.ID, err)
 	}
 	for _, p := range paths {
@@ -173,16 +174,7 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 			input.Spec.FlowLogs = in.GetSpec().GetFlowLogs()
 		}
 	}
-	return encode(input)
-}
-
-// reapply renders the stored network again and applies it.
-func (s *NetworkService) reapply(ctx context.Context, row *model.Network, spec *cloudv1.NetworkSpec) error {
-	account, layout, err := s.plan(ctx, row.TenantID, spec)
-	if err != nil {
-		return err
-	}
-	return s.apply(ctx, row, account, renderPlan(row, spec, account, layout))
+	return netreconcile.Encode(input)
 }
 
 // DeleteNetwork deletes the network's resources; the network is removed
@@ -190,32 +182,32 @@ func (s *NetworkService) reapply(ctx context.Context, row *model.Network, spec *
 // use the network.
 func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteNetworkRequest) (*cloudv1.DeleteNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	row, err := s.get(ctx, req.GetTenantId(), req.GetNetworkId())
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the network changed; get it again and retry")
 	}
 	if err := s.refuseInUse(ctx, row); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
-	if row.State != stateDeleting {
-		row.State = stateDeleting
+	if row.State != netreconcile.StateDeleting {
+		row.State = netreconcile.StateDeleting
 		if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 			return nil, service.ToConnect(err)
 		}
 	}
-	n, err := s.respond(ctx, row)
+	n, err := s.rec().Respond(ctx, row)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	// Deletes the first tier now; the background loop moves it on, tier by
 	// tier, until the network is gone.
-	if err := s.finalize(ctx, row); err != nil {
-		return nil, err
+	if err := s.rec().Finalize(ctx, row); err != nil {
+		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network deleting", "tenant_id", row.TenantID, "network_id", row.ID, "name", row.Name)
 	return &cloudv1.DeleteNetworkResponse{Network: n}, nil

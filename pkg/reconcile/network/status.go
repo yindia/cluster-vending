@@ -20,19 +20,19 @@ import (
 // Lifecycle states stored on the network row. FAILED is observed from the
 // managed resources, not stored (but for a blocked import).
 const (
-	stateProvisioning = "NETWORK_STATE_PROVISIONING"
-	// stateUpdating: a change (labels, flow logs) is being applied.
-	stateUpdating = "NETWORK_STATE_UPDATING"
-	// stateReady: the loop saw every resource ready (settle) and leaves the
+	StateProvisioning = "NETWORK_STATE_PROVISIONING"
+	// StateUpdating: a change (labels, flow logs) is being applied.
+	StateUpdating = "NETWORK_STATE_UPDATING"
+	// StateReady: the loop saw every resource ready (settle) and leaves the
 	// network alone until it changes.
-	stateReady    = "NETWORK_STATE_READY"
-	stateDeleting = "NETWORK_STATE_DELETING"
-	// stateImported: ImportNetwork created Observe-only resources; nothing
+	StateReady    = "NETWORK_STATE_READY"
+	StateDeleting = "NETWORK_STATE_DELETING"
+	// StateImported: ImportNetwork created Observe-only resources; nothing
 	// is managed until TakeOverNetwork.
-	stateImported = "NETWORK_STATE_IMPORTED"
-	// stateBlocked: the import plan has BLOCKING lines; nothing was
+	StateImported = "NETWORK_STATE_IMPORTED"
+	// StateBlocked: the import plan has BLOCKING lines; nothing was
 	// imported.
-	stateBlocked = "NETWORK_STATE_FAILED"
+	StateBlocked = "NETWORK_STATE_FAILED"
 )
 
 // Condition types of NetworkStatus.
@@ -52,7 +52,7 @@ type observed struct {
 
 // observe reads the network's managed resources (by label, in the tenant
 // namespace) for their readiness and cloud IDs.
-func (s *NetworkService) observe(ctx context.Context, tenantID, networkID string) (observed, error) {
+func (s *Reconciler) observe(ctx context.Context, tenantID, networkID string) (observed, error) {
 	out := observed{resources: &cloudv1.NetworkResources{}}
 	opts := []client.ListOption{
 		client.InNamespace(kube.TenantNamespace(tenantID)),
@@ -126,7 +126,7 @@ func deref(s *string) string {
 //	PROVISIONING  otherwise (CREATING / WAITING resources)
 func status(row *model.Network, views []*cloudv1.ManagedResource, resources *cloudv1.NetworkResources, clusterIDs []string) *cloudv1.NetworkStatus {
 	st := &cloudv1.NetworkStatus{Resources: resources, ClusterIds: clusterIDs, ManagedResources: views,
-		Import: storedImport(row)}
+		Import: StoredImport(row)}
 	ready, waiting := 0, 0
 	var failed *cloudv1.ManagedResource
 	for _, v := range views {
@@ -149,13 +149,13 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 	readyCond := &cloudv1.Condition{Type: ConditionReady, Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE,
 		Reason: "ResourcesNotReady", Message: progress}
 	switch {
-	case row.State == stateDeleting:
+	case row.State == StateDeleting:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_DELETING
 		st.Message = fmt.Sprintf("deleting; %d resources left", resourcesLeft(views))
 		if kinds := crossplaneaws.NetworkDeleteOrder.Current(views); len(kinds) > 0 {
 			st.Message = fmt.Sprintf("deleting %s; %d resources left", strings.Join(kinds, ", "), resourcesLeft(views))
 		}
-	case row.State == stateBlocked:
+	case row.State == StateBlocked:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_FAILED
 		st.Message = "import blocked: " + firstBlocking(st.GetImport())
 	case failed != nil:
@@ -163,7 +163,7 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 		st.Message = fmt.Sprintf("%s %s: %s", failed.GetKind(), failed.GetName(), failed.GetMessage())
 		st.Conditions = append(st.Conditions, &cloudv1.Condition{Type: ConditionSynced,
 			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: "ReconcileError", Message: st.Message})
-	case row.State == stateImported:
+	case row.State == StateImported:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_IMPORTED
 		st.Message = "imported read-only (" + progress + "); review status.import, then TakeOverNetwork"
 	case len(views) > 0 && ready == len(views) && caughtUp(row, views):
@@ -172,7 +172,7 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 		if imp := st.GetImport(); imp != nil && imp.GetPhase() == cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING {
 			imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGED
 		}
-	case row.State == stateUpdating || row.State == stateReady: // was ready: reconciling a change
+	case row.State == StateUpdating || row.State == StateReady: // was ready: reconciling a change
 		st.State = cloudv1.NetworkState_NETWORK_STATE_UPDATING
 		st.Message = progress
 	default:
@@ -212,9 +212,9 @@ func resourcesLeft(views []*cloudv1.ManagedResource) int {
 	return n
 }
 
-// storedImport is the import plan kept on the row (imported networks), or
+// StoredImport is the import plan kept on the row (imported networks), or
 // nil.
-func storedImport(row *model.Network) *cloudv1.ImportStatus {
+func StoredImport(row *model.Network) *cloudv1.ImportStatus {
 	if len(row.Status) == 0 {
 		return nil
 	}
@@ -222,7 +222,7 @@ func storedImport(row *model.Network) *cloudv1.ImportStatus {
 	// Lenient: whether a network is imported decides if it may ever be
 	// rendered from its spec. A field the contract dropped must not turn
 	// an imported network into one that is.
-	if err := lenient.Unmarshal(row.Status, st); err != nil {
+	if err := Lenient.Unmarshal(row.Status, st); err != nil {
 		return nil
 	}
 	return st.GetImport()

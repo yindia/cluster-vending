@@ -15,6 +15,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 )
 
 // countReads counts every read of the management cluster.
@@ -109,8 +110,8 @@ func TestGetNetworkReadsOnlyTheDatabase(t *testing.T) {
 		t.Errorf("after the loop's pass GetNetwork says %s (%s)", st.GetState(), st.GetMessage())
 	}
 	// READY is stored: the loop leaves the network alone from here on.
-	if r := row(); r.State != stateReady {
-		t.Errorf("stored state %s, want %s", r.State, stateReady)
+	if r := row(); r.State != netreconcile.StateReady {
+		t.Errorf("stored state %s, want %s", r.State, netreconcile.StateReady)
 	}
 	pending, err := f.store.Networks().ListPending(ctx, PendingStates(), crossplaneaws.RenderVersion)
 	if err != nil || len(pending) != 0 {

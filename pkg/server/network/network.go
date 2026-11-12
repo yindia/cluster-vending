@@ -1,7 +1,8 @@
-// Package network implements the cloud.v1 NetworkService for networks the
-// platform creates: the stored row is the source of truth, and Crossplane
-// managed resources in the tenant namespace build it in the tenant's
-// account. Status is read live from those resources.
+// Package network implements the cloud.v1 NetworkService: the RPC
+// handlers. They validate a request, store what was asked for (the row is
+// the source of truth) and call pkg/reconcile/network, which builds the
+// network from Crossplane managed resources in the tenant namespace and
+// reads its status from them.
 package network
 
 import (
@@ -9,21 +10,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
-	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	corenetwork "github.com/yindia/cluster-vending/pkg/network"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -41,44 +37,65 @@ var _ cloudv1connect.NetworkServiceHandler = (*NetworkService)(nil)
 // NewNetworkService returns the NetworkService.
 func NewNetworkService(d service.Deps) *NetworkService { return &NetworkService{deps: d} }
 
+// rec is what moves networks towards their spec (pkg/reconcile/network);
+// the handlers store what was asked for and call it.
+func (s *NetworkService) rec() *netreconcile.Reconciler { return netreconcile.New(s.deps) }
+
+// Reconcile moves one network on (netreconcile.Reconciler.Reconcile); the
+// background loop calls it.
+func (s *NetworkService) Reconcile(ctx context.Context, tenantID, id string) error {
+	return s.rec().Reconcile(ctx, tenantID, id)
+}
+
+// PendingStates are the stored states of networks the background loop
+// looks at every pass.
+func PendingStates() []string { return netreconcile.PendingStates() }
+
+func (s *NetworkService) logger() *slog.Logger {
+	if s.deps.Logger == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return s.deps.Logger
+}
+
 // CreateNetwork stores the network with its resolved layout (defaults
 // filled in) and applies its managed resources. A retry with the same
 // request_id returns the network created by the first call.
 func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateNetworkRequest) (*cloudv1.CreateNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	if id := req.GetRequestId(); id != "" {
 		row, err := s.deps.Store.Networks().GetByCreateRequest(ctx, req.GetTenantId(), id)
 		if err == nil {
-			n, err := s.view(ctx, row)
-			return &cloudv1.CreateNetworkResponse{Network: n}, err
+			n, err := s.rec().View(ctx, row)
+			return &cloudv1.CreateNetworkResponse{Network: n}, service.ToConnect(err)
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
 		}
 	}
 	if err := service.CheckAWSLabels(req.GetNetwork().GetLabels()); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
-	account, layout, err := s.plan(ctx, req.GetTenantId(), req.GetNetwork().GetSpec())
+	account, layout, err := s.rec().Plan(ctx, req.GetTenantId(), req.GetNetwork().GetSpec())
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	row, err := s.insert(ctx, req, account, layout)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
-	plan := renderPlan(row, req.GetNetwork().GetSpec(), account, layout)
-	if err := s.apply(ctx, row, account, plan); err != nil {
-		s.rollback(ctx, row)
-		return nil, err
+	plan := netreconcile.RenderPlan(row, req.GetNetwork().GetSpec(), account, layout)
+	if err := s.rec().Apply(ctx, row, account, plan); err != nil {
+		s.rec().Rollback(ctx, row)
+		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network created", "tenant_id", row.TenantID, "network_id", row.ID,
 		"name", row.Name, "prefix", plan.Prefix, "bootstrap_id", account.ID, "region", plan.Region,
 		"cidr", plan.CIDRBlock, "subnets", len(plan.Subnets))
-	n, err := s.respond(ctx, row)
-	return &cloudv1.CreateNetworkResponse{Network: n}, err
+	n, err := s.rec().Respond(ctx, row)
+	return &cloudv1.CreateNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
 // insert stores the network as sent (input) and resolved (spec with the
@@ -86,20 +103,20 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 // Network.id.
 func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkRequest, a *model.CloudAccount, l corenetwork.Layout) (*model.Network, error) {
 	in := req.GetNetwork()
-	input, err := encode(in)
+	input, err := netreconcile.Encode(in)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	spec := proto.CloneOf(in.GetSpec())
 	spec.Layout = corenetwork.LayoutProto(l)
 	spec.FlowLogs = corenetwork.ResolveFlowLogs(spec.GetFlowLogs())
-	raw, err := encode(spec)
+	raw, err := netreconcile.Encode(spec)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	row := &model.Network{
 		Resource: model.Resource{
-			DisplayName: in.GetDisplayName(), Labels: in.GetLabels(), State: stateProvisioning, Spec: raw,
+			DisplayName: in.GetDisplayName(), Labels: in.GetLabels(), State: netreconcile.StateProvisioning, Spec: raw,
 		},
 		TenantID: req.GetTenantId(), Name: in.GetName(), Input: input, CloudAccountID: a.ID,
 		Provider: model.ProviderAWS, Region: spec.GetRegion(),
@@ -113,77 +130,26 @@ func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkR
 	return row, nil
 }
 
-// plan checks the account and region and resolves the layout. The cloud
-// is the account's: a network has no provider of its own.
-func (s *NetworkService) plan(ctx context.Context, tenantID string, spec *cloudv1.NetworkSpec) (*model.CloudAccount, corenetwork.Layout, error) {
-	account, err := s.account(ctx, tenantID, spec.GetBootstrapId())
-	if err != nil {
-		return nil, corenetwork.Layout{}, err
-	}
-	if account.Provider != model.ProviderAWS {
-		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeUnimplemented,
-			fmt.Sprintf("account %s is %s; only aws networks are supported", account.ID, account.Provider))
-	}
-	if !awscatalog.IsRegion(spec.GetRegion()) {
-		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Sprintf("spec.region %q is not a known AWS region", spec.GetRegion()))
-	}
-	layout, err := corenetwork.PlanLayout(spec.GetRegion(), spec.GetLayout())
-	switch {
-	case errors.Is(err, corenetwork.ErrUnsupported):
-		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeUnimplemented, "spec.layout: "+err.Error())
-	case err != nil:
-		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
-	}
-	return account, layout, nil
-}
-
-// renderPlan is the plan a stored network's managed resources are rendered
-// from (corenetwork.RenderPlan).
-func renderPlan(row *model.Network, spec *cloudv1.NetworkSpec, a *model.CloudAccount, l corenetwork.Layout) crossplaneaws.NetworkPlan {
-	return corenetwork.RenderPlan(
-		corenetwork.Identity{TenantID: row.TenantID, ID: row.ID, Name: row.Name, Labels: row.Labels}, spec, l,
-		corenetwork.Account{Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, AccountID: a.AccountID})
-}
-
-// account returns the bootstrapped AWS account the network lives in.
-func (s *NetworkService) account(ctx context.Context, tenantID, cloudAccountID string) (*model.CloudAccount, error) {
-	a, err := s.deps.Store.Tenants().GetCloudAccountByID(ctx, tenantID, cloudAccountID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
-			"spec.bootstrap_id %s is not a bootstrapped account of tenant %s; run BootstrapTenant first",
-			cloudAccountID, tenantID))
-	}
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	if a.Provider != model.ProviderAWS {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Sprintf("account %s is a %s account; this network is aws", cloudAccountID, a.Provider))
-	}
-	return a, nil
-}
-
 // GetNetwork returns one network from the database: its spec and the
 // status last recorded for it (stored). It does not read the management
 // cluster; GetNetworkStatus does.
 func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetworkRequest) (*cloudv1.GetNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	row, err := s.get(ctx, req.GetTenantId(), req.GetNetworkId())
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	n, err := s.stored(ctx, row)
-	return &cloudv1.GetNetworkResponse{Network: n}, err
+	return &cloudv1.GetNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
 // ListNetworks returns a page of the tenant's networks, ordered by id,
 // from the database like GetNetwork.
 func (s *NetworkService) ListNetworks(ctx context.Context, req *cloudv1.ListNetworksRequest) (*cloudv1.ListNetworksResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	size := int(req.GetPageSize())
 	if size <= 0 {
@@ -202,7 +168,7 @@ func (s *NetworkService) ListNetworks(ctx context.Context, req *cloudv1.ListNetw
 	for i := range rows {
 		n, err := s.stored(ctx, &rows[i])
 		if err != nil {
-			return nil, err
+			return nil, service.ToConnect(err)
 		}
 		res.Networks = append(res.Networks, n)
 	}
@@ -222,113 +188,4 @@ func (s *NetworkService) get(ctx context.Context, tenantID, networkID string) (*
 
 func notFound(tenantID, networkID string) error {
 	return connect.NewError(connect.CodeNotFound, fmt.Sprintf("tenant %s has no network %s", tenantID, networkID))
-}
-
-// view is the API view of a stored network: spec, observed status, the
-// clusters using it.
-func (s *NetworkService) view(ctx context.Context, row *model.Network) (*cloudv1.Network, error) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	return s.viewOf(ctx, row, records)
-}
-
-// viewOf is view with the network's records at hand. It only reads.
-func (s *NetworkService) viewOf(ctx context.Context, row *model.Network, records []model.ManagedResource) (*cloudv1.Network, error) {
-	spec, err := specOf(row)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err.Error())
-	}
-	o, err := s.observe(ctx, row.TenantID, row.ID)
-	if err != nil {
-		s.logger().ErrorContext(ctx, "observe network", "network_id", row.ID, "error", err)
-		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
-	}
-	views, err := s.deps.Observe(ctx, records)
-	if err != nil {
-		return nil, err
-	}
-	if row.State == stateProvisioning || row.State == stateUpdating {
-		service.SettleMissing(records, views)
-	}
-	clusters, err := s.deps.Store.Clusters().ListByNetwork(ctx, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	ids := make([]string, 0, len(clusters))
-	for _, c := range clusters {
-		ids = append(ids, c.Name)
-	}
-	return toProto(row, spec, status(row, views, o.resources, ids)), nil
-}
-
-func (s *NetworkService) logger() *slog.Logger {
-	if s.deps.Logger == nil {
-		return slog.New(slog.DiscardHandler)
-	}
-	return s.deps.Logger
-}
-
-// records returns the network's recorded objects, first recording any live
-// object of the network (by label) that has no record yet: networks created
-// before recording existed, or a record write that failed. The view so
-// always covers every resource Crossplane has for the network.
-func (s *NetworkService) records(ctx context.Context, row *model.Network, live []client.Object) ([]model.ManagedResource, error) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	known := make(map[string]bool, len(records))
-	for _, r := range records {
-		known[r.Kind+"/"+r.Name] = true
-	}
-	var missing []client.Object
-	for _, obj := range live {
-		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err.Error())
-		}
-		if !known[gvk.Kind+"/"+obj.GetName()] {
-			missing = append(missing, obj)
-		}
-	}
-	if len(missing) == 0 {
-		return records, nil
-	}
-	sortByCreation(s.deps.Kube.Scheme(), missing)
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerNetwork, ID: row.ID}
-	if err := s.deps.Record(ctx, owner, missing); err != nil {
-		return nil, service.ToConnect(err)
-	}
-	s.logger().InfoContext(ctx, "recorded network resources found in the cluster", "network_id", row.ID, "count", len(missing))
-	records, err = s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	return records, nil
-}
-
-// sortByCreation orders objects as NetworkResources creates them: VPC,
-// internet gateway, subnets, EIPs, NAT gateways, route tables, routes,
-// associations; by name within a kind.
-func sortByCreation(scheme *runtime.Scheme, objects []client.Object) {
-	rank := map[string]int{}
-	kinds := crossplaneaws.NetworkObjects() // deletion order: reversed creation order
-	for i, o := range kinds {
-		if gvk, err := apiutil.GVKForObject(o, scheme); err == nil {
-			rank[gvk.Kind] = len(kinds) - i
-		}
-	}
-	kindOf := func(o client.Object) string {
-		gvk, _ := apiutil.GVKForObject(o, scheme)
-		return gvk.Kind
-	}
-	sort.SliceStable(objects, func(i, j int) bool {
-		ri, rj := rank[kindOf(objects[i])], rank[kindOf(objects[j])]
-		if ri != rj {
-			return ri < rj
-		}
-		return objects[i].GetName() < objects[j].GetName()
-	})
 }

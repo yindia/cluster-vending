@@ -11,20 +11,21 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// lenient reads stored JSON: fields the contract dropped since (e.g.
+// Lenient reads stored JSON: fields the contract dropped since (e.g.
 // spec.tags, now labels; spec.aws) are skipped, not errors.
-var lenient = protojson.UnmarshalOptions{DiscardUnknown: true}
+var Lenient = protojson.UnmarshalOptions{DiscardUnknown: true}
 
-// specOf decodes the stored spec.
-func specOf(row *model.Network) (*cloudv1.NetworkSpec, error) {
+// SpecOf decodes the stored spec.
+func SpecOf(row *model.Network) (*cloudv1.NetworkSpec, error) {
 	spec := &cloudv1.NetworkSpec{}
-	if err := lenient.Unmarshal(row.Spec, spec); err != nil {
+	if err := Lenient.Unmarshal(row.Spec, spec); err != nil {
 		return nil, fmt.Errorf("network %s: stored spec: %w", row.ID, err)
 	}
 	return spec, nil
 }
 
-func encode(m proto.Message) (model.JSON, error) {
+// Encode is m as stored JSON (protojson).
+func Encode(m proto.Message) (model.JSON, error) {
 	raw, err := protojson.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("encode %T: %w", m, err)
@@ -32,8 +33,8 @@ func encode(m proto.Message) (model.JSON, error) {
 	return model.JSON(raw), nil
 }
 
-// toProto is the API view of a stored network with its observed status.
-func toProto(row *model.Network, spec *cloudv1.NetworkSpec, st *cloudv1.NetworkStatus) *cloudv1.Network {
+// ToProto is the API view of a stored network with its observed status.
+func ToProto(row *model.Network, spec *cloudv1.NetworkSpec, st *cloudv1.NetworkStatus) *cloudv1.Network {
 	return &cloudv1.Network{
 		TenantId:    row.TenantID,
 		Id:          row.ID,

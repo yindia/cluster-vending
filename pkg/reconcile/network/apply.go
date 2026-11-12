@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"connectrpc.com/connect/v2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -16,52 +15,53 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
-// apply makes the network's managed resources match plan, in order
+// Apply makes the network's managed resources match plan, in order
 // (crossplaneaws.NetworkSet), and marks the generation applied once the
 // whole set is: while NAT gateways wait for the internet gateway,
 // Reconcile applies the network again.
-func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model.CloudAccount, plan crossplaneaws.NetworkPlan) error {
+func (s *Reconciler) Apply(ctx context.Context, row *model.Network, a *model.CloudAccount, plan crossplaneaws.NetworkPlan) error {
 	set, err := crossplaneaws.NetworkSet(plan)
 	if err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
+		return fault.New(fault.Invalid, "spec.layout: "+err.Error())
 	}
-	res, err := s.applySet(ctx, row, a, set)
+	res, err := s.ApplySet(ctx, row, a, set)
 	if err != nil || !res.Complete() {
 		return err // held back: not applied in full yet
 	}
-	return s.markApplied(ctx, row)
+	return s.MarkApplied(ctx, row)
 }
 
-// applySet applies set as the network's objects (sequence.Engine: what
+// ApplySet applies set as the network's objects (sequence.Engine: what
 // the network has is recorded, what waits is held back, what the set
 // dropped is removed). The caller marks the row applied once the result
 // is complete.
-func (s *NetworkService) applySet(ctx context.Context, row *model.Network, a *model.CloudAccount, set sequence.Set) (sequence.Result, error) {
+func (s *Reconciler) ApplySet(ctx context.Context, row *model.Network, a *model.CloudAccount, set sequence.Set) (sequence.Result, error) {
 	if a.Namespace == "" || a.ProviderConfigName == "" {
-		return sequence.Result{}, connect.NewError(connect.CodeFailedPrecondition,
+		return sequence.Result{}, fault.New(fault.FailedPrecondition,
 			fmt.Sprintf("account %s is not fully bootstrapped; run BootstrapTenant again", a.ID))
 	}
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
+	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
 	res, err := s.deps.Sequence().Apply(ctx, set, s.deps.Inventory(owner))
 	switch {
 	case err == nil:
 		return res, nil
 	case meta.IsNoMatchError(err):
-		return res, connect.NewError(connect.CodeFailedPrecondition,
+		return res, fault.New(fault.FailedPrecondition,
 			"a Crossplane AWS provider the network needs (ec2, iam, cloudwatchlogs) is not installed in the management cluster")
 	default:
 		s.logger().ErrorContext(ctx, "apply network resources", "tenant_id", row.TenantID, "network_id", row.ID, "error", err)
-		return res, connect.NewError(connect.CodeInternal, "could not create the network's resources")
+		return res, fault.New(fault.Internal, "could not create the network's resources")
 	}
 }
 
-// markApplied records that every object of the row's generation was
+// MarkApplied records that every object of the row's generation was
 // applied without error, with this build's renderer.
-func (s *NetworkService) markApplied(ctx context.Context, row *model.Network) error {
+func (s *Reconciler) MarkApplied(ctx context.Context, row *model.Network) error {
 	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion {
 		return nil
 	}
@@ -75,18 +75,18 @@ func (s *NetworkService) markApplied(ctx context.Context, row *model.Network) er
 		return nil
 	}
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, "could not record the applied generation: "+err.Error())
+		return fault.New(fault.Internal, "could not record the applied generation: "+err.Error())
 	}
 	return nil
 }
 
-// recheck is called by the loop after it applied row: when a call changed
+// Recheck is called by the loop after it applied row: when a call changed
 // the row meanwhile, what the loop applied may be older than what that
 // call applied, and may have been written over it. The row is marked as
 // not applied, so the next pass applies it as it is now.
-func (s *NetworkService) recheck(ctx context.Context, row *model.Network) {
+func (s *Reconciler) Recheck(ctx context.Context, row *model.Network) {
 	current, err := s.deps.Store.Networks().Get(ctx, row.TenantID, row.ID)
-	if errors.Is(err, repository.ErrNotFound) || (err == nil && (current.ETag == row.ETag || current.State == stateDeleting)) {
+	if errors.Is(err, repository.ErrNotFound) || (err == nil && (current.ETag == row.ETag || current.State == StateDeleting)) {
 		return
 	}
 	if err == nil {
@@ -101,7 +101,7 @@ func (s *NetworkService) recheck(ctx context.Context, row *model.Network) {
 
 // liveObjects counts the network's objects the API server still has (by
 // label, uncached).
-func (s *NetworkService) liveObjects(ctx context.Context, row *model.Network) (int, error) {
+func (s *Reconciler) liveObjects(ctx context.Context, row *model.Network) (int, error) {
 	n := 0
 	for _, list := range crossplaneaws.NetworkLists() {
 		err := s.deps.Reader().List(ctx, list, client.InNamespace(kube.TenantNamespace(row.TenantID)),
@@ -119,7 +119,7 @@ func (s *NetworkService) liveObjects(ctx context.Context, row *model.Network) (i
 
 // deleteResources deletes every managed resource of the network. Crossplane
 // deletes the cloud resources and removes the objects when done.
-func (s *NetworkService) deleteResources(ctx context.Context, tenantID, networkID string) error {
+func (s *Reconciler) deleteResources(ctx context.Context, tenantID, networkID string) error {
 	var errs []error
 	for _, obj := range crossplaneaws.NetworkObjects() {
 		err := s.deps.Kube.DeleteAllOf(ctx, obj,
@@ -135,10 +135,10 @@ func (s *NetworkService) deleteResources(ctx context.Context, tenantID, networkI
 	return errors.Join(errs...)
 }
 
-// rollback undoes a create whose resources could not be applied: the
+// Rollback undoes a create whose resources could not be applied: the
 // recorded objects one by one (a refused one does not stop the others),
 // then whatever else carries the network's label.
-func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
+func (s *Reconciler) Rollback(ctx context.Context, row *model.Network) {
 	if records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID); err == nil {
 		if err := s.deps.DeleteRecorded(ctx, records); err != nil {
 			s.logger().ErrorContext(ctx, "rollback recorded network resources", "network_id", row.ID, "error", err)
@@ -155,17 +155,17 @@ func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
 	}
 }
 
-// finalize moves a DELETING network's deletion on (sequence.Engine.Delete
+// Finalize moves a DELETING network's deletion on (sequence.Engine.Delete
 // with crossplaneaws.NetworkDeleteOrder: the next
 // tier once the previous one is gone) and removes its row once all its
 // resources are gone. DeleteNetwork and the background loop call it.
-func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error {
-	if row.State != stateDeleting {
+func (s *Reconciler) Finalize(ctx context.Context, row *model.Network) error {
+	if row.State != StateDeleting {
 		return nil
 	}
 	o, err := s.observe(ctx, row.TenantID, row.ID)
 	if err != nil {
-		return connect.NewError(connect.CodeUnavailable, "cannot read the network's resources from the management cluster")
+		return fault.New(fault.Unavailable, "cannot read the network's resources from the management cluster")
 	}
 	// records also records live objects that were never recorded (by
 	// label), so every resource of the network is deleted in order.
@@ -173,19 +173,19 @@ func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error
 	if err != nil {
 		return err
 	}
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerNetwork, ID: row.ID}
+	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerNetwork, ID: row.ID}
 	deletion, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.NetworkDeleteOrder)
 	var unreadable *managed.ReadError
 	switch {
 	case errors.As(err, &unreadable):
-		return connect.NewError(connect.CodeUnavailable,
+		return fault.New(fault.Unavailable,
 			fmt.Sprintf("cannot read %s %s from the management cluster", unreadable.Ref.Kind, unreadable.Ref.Name))
 	case err != nil:
 		s.logger().ErrorContext(ctx, "delete network resources", "network_id", row.ID, "error", err)
-		return connect.NewError(connect.CodeInternal, "could not delete the network's resources")
+		return fault.New(fault.Internal, "could not delete the network's resources")
 	}
 	if err := s.deps.MarkGone(ctx, records, deletion.Views); err != nil {
-		return connect.NewError(connect.CodeInternal, err.Error())
+		return fault.New(fault.Internal, err.Error())
 	}
 	if !deletion.Done() || o.total > 0 {
 		return nil
@@ -195,17 +195,17 @@ func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error
 	// the platform forget cloud resources).
 	if live, err := s.liveObjects(ctx, row); err != nil || live > 0 {
 		if err != nil {
-			return connect.NewError(connect.CodeUnavailable, "cannot confirm the network's resources are gone: "+err.Error())
+			return fault.New(fault.Unavailable, "cannot confirm the network's resources are gone: "+err.Error())
 		}
 		return nil
 	}
 	// Records first: a failure after it is retried on the next pass (the
 	// row is still there), never leaving records without a network.
 	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerNetwork, row.ID); err != nil {
-		return connect.NewError(connect.CodeInternal, "could not forget the deleted network's resources: "+err.Error())
+		return fault.New(fault.Internal, "could not forget the deleted network's resources: "+err.Error())
 	}
 	if err := s.deps.Store.Networks().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return connect.NewError(connect.CodeInternal, "could not remove the deleted network: "+err.Error())
+		return fault.New(fault.Internal, "could not remove the deleted network: "+err.Error())
 	}
 	return nil
 }

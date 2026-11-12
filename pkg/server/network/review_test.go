@@ -12,45 +12,8 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 )
-
-// Whether a network is imported decides if it may ever be rendered from
-// its spec: a status with a field this build does not know still says so.
-func TestStoredImportSurvivesUnknownFields(t *testing.T) {
-	row := &model.Network{Resource: model.Resource{
-		Status: model.JSON(`{"import":{"phase":"IMPORT_PHASE_CONVERGED"},"aFieldFromAnotherVersion":{"x":1}}`)}}
-	if imp := storedImport(row); imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_CONVERGED {
-		t.Fatalf("storedImport = %v, want the import plan", imp)
-	}
-	if storedImport(&model.Network{}) != nil {
-		t.Error("a created network has an import plan")
-	}
-}
-
-// Ready resources are not READY while a provider has not looked at the
-// latest change.
-func TestReadyNeedsTheProvidersToHaveCaughtUp(t *testing.T) {
-	view := func(generation, observed int64) *cloudv1.ManagedResource {
-		return &cloudv1.ManagedResource{Kind: "Group", Name: "g", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY,
-			Synced: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, Generation: generation, ObservedGeneration: observed}
-	}
-	row := &model.Network{Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 2}}
-	for _, tt := range []struct {
-		name string
-		row  *model.Network
-		view *cloudv1.ManagedResource
-		want cloudv1.NetworkState
-	}{
-		{"caught up", row, view(3, 3), cloudv1.NetworkState_NETWORK_STATE_READY},
-		{"change not seen yet", row, view(3, 2), cloudv1.NetworkState_NETWORK_STATE_UPDATING},
-		{"generation not applied yet", &model.Network{Resource: model.Resource{State: stateUpdating, Generation: 2, AppliedGeneration: 1}},
-			view(3, 3), cloudv1.NetworkState_NETWORK_STATE_UPDATING},
-	} {
-		if got := status(tt.row, []*cloudv1.ManagedResource{tt.view}, nil, nil).GetState(); got != tt.want {
-			t.Errorf("%s: %s, want %s", tt.name, got, tt.want)
-		}
-	}
-}
 
 // A label update that failed half-way is finished by the loop, and shared
 // log groups are not the network's to tag.
@@ -127,7 +90,7 @@ func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
 		t.Fatal("the takeover succeeded although a subnet could not be updated")
 	}
 	row, err := f.store.Networks().Get(ctx, tenant, id)
-	if err != nil || row.State == stateImported || row.AppliedGeneration >= row.Generation {
+	if err != nil || row.State == netreconcile.StateImported || row.AppliedGeneration >= row.Generation {
 		t.Fatalf("state %s, applied %d of %d (%v); want a taken-over network that is not applied yet",
 			row.State, row.AppliedGeneration, row.Generation, err)
 	}
@@ -159,7 +122,7 @@ func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.svc.recheck(ctx, seen)
+	f.svc.rec().Recheck(ctx, seen)
 	if same, _ := f.store.Networks().Get(ctx, tenant, n.GetId()); same.ETag != seen.ETag {
 		t.Fatal("a network nobody changed was marked behind")
 	}
@@ -167,14 +130,14 @@ func TestLoopAppliesAgainWhatChangedWhileItApplied(t *testing.T) {
 		Network: &cloudv1.Network{Id: n.GetId(), Labels: map[string]string{"team": "net"}}, UpdateMask: mask("labels")}); err != nil {
 		t.Fatal(err)
 	}
-	f.svc.recheck(ctx, seen)
+	f.svc.rec().Recheck(ctx, seen)
 	got, err := f.store.Networks().Get(ctx, tenant, n.GetId())
 	if err != nil || got.AppliedGeneration >= got.Generation {
 		t.Fatalf("applied %d of %d (%v); want the network applied again", got.AppliedGeneration, got.Generation, err)
 	}
 	// Recording the applied generation for the row as it was does not fail
 	// the caller, and does not hide the change either.
-	if err := f.svc.markApplied(ctx, seen); err != nil {
+	if err := f.svc.rec().MarkApplied(ctx, seen); err != nil {
 		t.Errorf("markApplied on a changed row: %v", err)
 	}
 	if got, _ = f.store.Networks().Get(ctx, tenant, n.GetId()); got.AppliedGeneration >= got.Generation {

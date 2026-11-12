@@ -9,8 +9,6 @@ import (
 	"github.com/google/uuid"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
@@ -22,6 +20,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	corenetwork "github.com/yindia/cluster-vending/pkg/network"
+	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -32,7 +31,7 @@ import (
 // nothing is imported).
 func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportNetworkRequest) (*cloudv1.ImportNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	if req.GetAws() == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, "only aws networks can be imported")
@@ -42,41 +41,41 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	}
 	if id := req.GetRequestId(); id != "" {
 		if row, err := s.deps.Store.Networks().GetByCreateRequest(ctx, req.GetTenantId(), id); err == nil {
-			n, err := s.view(ctx, row)
-			return &cloudv1.ImportNetworkResponse{Network: n}, err
+			n, err := s.rec().View(ctx, row)
+			return &cloudv1.ImportNetworkResponse{Network: n}, service.ToConnect(err)
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
 		}
 	}
-	account, err := s.account(ctx, req.GetTenantId(), req.GetBootstrapId())
+	account, err := s.rec().Account(ctx, req.GetTenantId(), req.GetBootstrapId())
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	if err := s.refuseOwnedVPC(ctx, account, req.GetAws().GetVpcId()); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	found, err := s.discover(ctx, account, req)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	row, plan, err := s.insertImport(ctx, req, account, found)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	if !plan.Blocked() {
-		_, err := s.applySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(plan.Resources)...))
+		_, err := s.rec().ApplySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(plan.Resources)...))
 		if err == nil {
-			err = s.markApplied(ctx, row)
+			err = s.rec().MarkApplied(ctx, row)
 		}
 		if err != nil {
-			s.rollback(ctx, row)
-			return nil, err
+			s.rec().Rollback(ctx, row)
+			return nil, service.ToConnect(err)
 		}
 	}
 	s.logger().InfoContext(ctx, "network imported", "tenant_id", row.TenantID, "network_id", row.ID,
 		"vpc_id", req.GetAws().GetVpcId(), "blocked", plan.Blocked(), "plan_lines", len(plan.Lines))
-	n, err := s.respond(ctx, row)
-	return &cloudv1.ImportNetworkResponse{Network: n}, err
+	n, err := s.rec().Respond(ctx, row)
+	return &cloudv1.ImportNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
 // discover makes the read-only AWS lookup.
@@ -86,7 +85,7 @@ func (s *NetworkService) discover(ctx context.Context, a *model.CloudAccount, re
 	}
 	access, err := s.deps.AWSAccess(ctx, a)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	found, err := s.deps.AWSDiscovery.DiscoverNetwork(ctx, access, req.GetRegion(),
 		req.GetAws().GetVpcId(), req.GetAws().GetSubnetIds())
@@ -118,14 +117,14 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 		NetworkID: id.String(), NetworkName: req.GetName(), Region: req.GetRegion(),
 		Prefix: crossplaneaws.NetworkPrefix(req.GetTenantId(), id.String(), req.GetName()),
 	})
-	phase, state := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED, stateImported
+	phase, state := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED, netreconcile.StateImported
 	if plan.Blocked() {
-		phase, state = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, stateBlocked
+		phase, state = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, netreconcile.StateBlocked
 	}
 	spec := &cloudv1.NetworkSpec{Region: req.GetRegion(), BootstrapId: a.ID, Layout: plan.Layout}
-	rawSpec, err1 := encode(spec)
-	input, err2 := encode(req)
-	stored, err3 := encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
+	rawSpec, err1 := netreconcile.Encode(spec)
+	input, err2 := netreconcile.Encode(req)
+	stored, err3 := netreconcile.Encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
 	if err := errors.Join(err1, err2, err3); err != nil {
 		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -160,50 +159,50 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 // then provisions like a created one.
 func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeOverNetworkRequest) (*cloudv1.TakeOverNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	row, err := s.get(ctx, req.GetTenantId(), req.GetNetworkId())
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	imp, err := takeOverAllowed(row, req)
 	if err != nil {
-		return nil, err
+		return nil, service.ToConnect(err)
 	}
 	// The row first: a network whose objects are owned (deleting them
 	// deletes the cloud resources) must never be stored as read-only. A
 	// takeover that stops half-way is finished by the loop (moveOn).
 	imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING
-	if row.Status, err = encode(&cloudv1.NetworkStatus{Import: imp}); err != nil {
+	if row.Status, err = netreconcile.Encode(&cloudv1.NetworkStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	row.State = stateProvisioning
+	row.State = netreconcile.StateProvisioning
 	row.Generation++
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := s.ownAll(ctx, row); err != nil {
-		return nil, err
+	if err := s.rec().OwnAll(ctx, row); err != nil {
+		return nil, service.ToConnect(err)
 	}
-	if err := s.markApplied(ctx, row); err != nil {
-		return nil, err
+	if err := s.rec().MarkApplied(ctx, row); err != nil {
+		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network taken over", "tenant_id", row.TenantID, "network_id", row.ID)
-	n, err := s.respond(ctx, row)
-	return &cloudv1.TakeOverNetworkResponse{Network: n}, err
+	n, err := s.rec().Respond(ctx, row)
+	return &cloudv1.TakeOverNetworkResponse{Network: n}, service.ToConnect(err)
 }
 
 // takeOverAllowed checks state, etag, phase and the acknowledgement of
 // NOT_IMPORTED resources, and returns the stored plan.
 func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*cloudv1.ImportStatus, error) {
-	if row.State != stateImported {
+	if row.State != netreconcile.StateImported {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Sprintf("network %s is not IMPORTED (only imported networks are taken over)", row.ID))
 	}
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the network changed; get it again and retry")
 	}
-	imp := storedImport(row)
+	imp := netreconcile.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("import phase is %s, want PLANNED", imp.GetPhase()))
 	}
@@ -214,55 +213,6 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 			len(notImported), notImported[0].GetKind(), notImported[0].GetExternalName(), notImported[0].GetDetail()))
 	}
 	return imp, nil
-}
-
-// ownAll switches every recorded object of a taken-over network to full
-// management. It is safe to repeat.
-func (s *NetworkService) ownAll(ctx context.Context, row *model.Network) error {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
-	if err != nil {
-		return service.ToConnect(err)
-	}
-	for _, r := range records {
-		if err := s.own(ctx, r); err != nil {
-			s.logger().ErrorContext(ctx, "take over resource", "network_id", row.ID, "object", r.Name, "error", err)
-			return connect.NewError(connect.CodeInternal, fmt.Sprintf("could not take over %s %s", r.Kind, r.Name))
-		}
-	}
-	return nil
-}
-
-// own switches one recorded object to full management (without Delete for
-// one marked crossplaneaws.RetainAnnotation) and adds the ELB role tags the
-// platform's subnets carry.
-func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
-	// From the API server: a read-modify-write needs the current object.
-	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
-		return err
-	}
-	policies := []string{"*"}
-	if u.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" {
-		// Shared with resources outside the network: owned, never deleted.
-		policies = policies[:0]
-		for _, action := range crossplaneaws.PolicyNoDelete {
-			policies = append(policies, string(action))
-		}
-	}
-	if err := unstructured.SetNestedStringSlice(u.Object, policies, "spec", "managementPolicies"); err != nil {
-		return err
-	}
-	if r.Kind == "Subnet" {
-		tag := crossplaneaws.TagInternalELB
-		if u.GetLabels()[crossplane.LabelSubnetRole] == string(crossplaneaws.SubnetPublic) {
-			tag = crossplaneaws.TagELB
-		}
-		if err := unstructured.SetNestedField(u.Object, "1", "spec", "forProvider", "tags", tag); err != nil {
-			return err
-		}
-	}
-	return s.deps.Kube.Update(ctx, u)
 }
 
 // refuseOwnedVPC fails with ALREADY_EXISTS when a network of the tenant

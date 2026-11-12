@@ -5,14 +5,13 @@ import (
 	"slices"
 	"strings"
 
-	"connectrpc.com/connect/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
-	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
 // taggable are the kinds of a network's resources that take tags.
@@ -27,7 +26,7 @@ var taggable = map[string]bool{
 // platform's to touch.
 const labelTagsAnnotation = "cluster-vending.io/label-tags"
 
-// retag sets an imported (taken-over) network's labels as tags on the
+// Retag sets an imported (taken-over) network's labels as tags on the
 // objects it has, and marks the generation applied once all are done. The
 // labels are added or changed, tags that were labels before and are not
 // any more (labelTagsAnnotation) are removed, and every other tag is left
@@ -35,10 +34,10 @@ const labelTagsAnnotation = "cluster-vending.io/label-tags"
 // VPCs use: crossplaneaws.RetainAnnotation) are not the network's to tag.
 // The network is not rendered again. It is safe to repeat: the loop calls
 // it again after a failure, until every object carries the labels.
-func (s *NetworkService) retag(ctx context.Context, row *model.Network) error {
+func (s *Reconciler) Retag(ctx context.Context, row *model.Network) error {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
 	if err != nil {
-		return service.ToConnect(err)
+		return err
 	}
 	for _, r := range records {
 		if !taggable[r.Kind] {
@@ -51,17 +50,17 @@ func (s *NetworkService) retag(ctx context.Context, row *model.Network) error {
 			if client.IgnoreNotFound(err) == nil {
 				continue
 			}
-			return connect.NewError(connect.CodeUnavailable, "cannot read "+r.Kind+" "+r.Name+" from the management cluster")
+			return fault.New(fault.Unavailable, "cannot read "+r.Kind+" "+r.Name+" from the management cluster")
 		}
 		if u.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" || !setLabelTags(u, row.Labels) {
 			continue
 		}
 		if err := s.deps.Kube.Update(ctx, u); err != nil {
 			s.logger().ErrorContext(ctx, "tag imported network resource", "network_id", row.ID, "object", r.Name, "error", err)
-			return connect.NewError(connect.CodeInternal, "could not tag "+r.Kind+" "+r.Name)
+			return fault.New(fault.Internal, "could not tag "+r.Kind+" "+r.Name)
 		}
 	}
-	return s.markApplied(ctx, row)
+	return s.MarkApplied(ctx, row)
 }
 
 // setLabelTags makes labels the label tags of u and reports whether u

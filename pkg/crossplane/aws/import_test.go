@@ -53,3 +53,40 @@ func TestImportedNetworkResources(t *testing.T) {
 		t.Errorf("route = %+v", route)
 	}
 }
+
+// A private NAT gateway has no Elastic IP and stays private; the routes of
+// specific CIDRs of one table never share a name with another table's
+// default route.
+func TestImportedPrivateNATAndRouteNames(t *testing.T) {
+	objects := crossplaneaws.ImportedNetworkResources(crossplaneaws.ImportedNetwork{
+		Namespace: "tenant-acme", ProviderConfigName: "aws-1", TenantID: "acme", NetworkID: "id1", Prefix: "tf", Region: "us-east-1",
+		VPC:         crossplaneaws.ImportedVPC{ID: "vpc-1", CIDRBlock: "10.0.0.0/16"},
+		NATGateways: []crossplaneaws.ImportedNAT{{Key: "use1-az1", ID: "nat-1", SubnetID: "subnet-1", Private: true}},
+		RouteTables: []crossplaneaws.ImportedRouteTable{
+			{Key: "public", ID: "rtb-1", GatewayRoutes: []crossplaneaws.ImportedRoute{
+				{GatewayID: "igw-1", Destination: "203.0.113.0/24"}, {GatewayID: "igw-1", Destination: "198.51.100.0/24"}}},
+			{Key: "public-2", ID: "rtb-2", DefaultRoute: &crossplaneaws.ImportedRoute{GatewayID: "igw-1"}},
+		},
+	})
+	names := map[string]bool{}
+	for _, o := range objects {
+		if names[o.GetName()] {
+			t.Errorf("two objects are named %s", o.GetName())
+		}
+		names[o.GetName()] = true
+		if _, isEIP := o.(*awsec2.EIP); isEIP {
+			t.Error("an Elastic IP was rendered for a private NAT gateway")
+		}
+		if nat, ok := o.(*awsec2.NATGateway); ok {
+			if *nat.Spec.ForProvider.ConnectivityType != "private" || nat.Spec.ForProvider.AllocationID != nil {
+				t.Errorf("private NAT gateway = %+v", nat.Spec.ForProvider)
+			}
+		}
+		if o.GetAnnotations()["cluster-vending.io/carried-over"] != "true" {
+			t.Errorf("%s is not marked carried over: an imported object must never be pruned", o.GetName())
+		}
+	}
+	if len(objects) != 7 { // vpc, nat, 2 route tables, 3 routes
+		t.Errorf("%d objects, want 7", len(objects))
+	}
+}

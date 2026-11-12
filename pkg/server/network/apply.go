@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect/v2"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -207,19 +208,30 @@ func (s *NetworkService) liveObjects(ctx context.Context, row *model.Network) (i
 // deleteResources deletes every managed resource of the network. Crossplane
 // deletes the cloud resources and removes the objects when done.
 func (s *NetworkService) deleteResources(ctx context.Context, tenantID, networkID string) error {
+	var errs []error
 	for _, obj := range crossplaneaws.NetworkObjects() {
 		err := s.deps.Kube.DeleteAllOf(ctx, obj,
 			client.InNamespace(kube.TenantNamespace(tenantID)),
 			client.MatchingLabels{crossplane.LabelNetwork: networkID})
-		if err != nil && !meta.IsNoMatchError(err) {
-			return fmt.Errorf("delete %T: %w", obj, err)
+		// A 409 is the Usage webhook holding an object that is still in use:
+		// Crossplane deletes it once its user is gone. Every kind is tried,
+		// whatever one of them answers: stopping would leave the rest behind.
+		if err != nil && !meta.IsNoMatchError(err) && !apierrors.IsConflict(err) {
+			errs = append(errs, fmt.Errorf("delete %T: %w", obj, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
-// rollback undoes a create whose resources could not be applied.
+// rollback undoes a create whose resources could not be applied: the
+// recorded objects one by one (a refused one does not stop the others),
+// then whatever else carries the network's label.
 func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
+	if records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID); err == nil {
+		if err := s.deps.DeleteRecorded(ctx, records); err != nil {
+			s.logger().ErrorContext(ctx, "rollback recorded network resources", "network_id", row.ID, "error", err)
+		}
+	}
 	if err := s.deleteResources(ctx, row.TenantID, row.ID); err != nil {
 		s.logger().ErrorContext(ctx, "rollback network resources", "network_id", row.ID, "error", err)
 	}

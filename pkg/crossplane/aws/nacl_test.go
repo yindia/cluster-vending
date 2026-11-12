@@ -51,7 +51,7 @@ func TestImportedNetworkACLs(t *testing.T) {
 	want := []struct{ name, externalName string }{
 		{"tf-vpc", "vpc-1"},
 		{"tf-rt-public", "rtb-1"},
-		{"tf-route-public-1", crossplaneaws.RouteExternalName("rtb-1", "203.0.113.0/24")},
+		{"tf-route-public-gw-1", crossplaneaws.RouteExternalName("rtb-1", "203.0.113.0/24")},
 		{"tf-default-nacl", "acl-default"},
 		{"tf-nacl", "acl-0abc"},
 		{"tf-nacl-in-100", "nacl-4001095323"},

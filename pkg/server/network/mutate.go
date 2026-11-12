@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 
 	"buf.build/go/protovalidate"
@@ -55,7 +54,6 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	if len(paths) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "update_mask is empty; updatable: "+updatable)
 	}
-	labelsBefore := maps.Clone(row.Labels)
 	changed, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
@@ -90,7 +88,7 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	}
 	switch {
 	case imported && changed.labels:
-		if err := s.retag(ctx, row, labelsBefore); err != nil {
+		if err := s.retag(ctx, row); err != nil {
 			return nil, err
 		}
 	case tagsChanged:

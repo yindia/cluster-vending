@@ -242,7 +242,9 @@ func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error
 // same cloud resources.
 func (s *NetworkService) refuseOwnedVPC(ctx context.Context, a *model.CloudAccount, vpcID string) error {
 	vpcs := &awsec2.VPCList{}
-	if err := s.deps.List(ctx, vpcs, client.InNamespace(a.Namespace)); err != nil {
+	// From the API server, not the cache: an import a moment ago must be
+	// seen. Two imports in the very same instant can still both pass.
+	if err := s.deps.Reader().List(ctx, vpcs, client.InNamespace(a.Namespace)); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil
 		}

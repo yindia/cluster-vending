@@ -145,7 +145,7 @@ func TestImportPublicRouteTableWithSpecificRoutes(t *testing.T) {
 		t.Error("a default route was planned for the public table; it has none")
 	}
 	route := &awsec2.Route{}
-	if err := f.kube.Get(t.Context(), key(n, "route-public-2"), route); err != nil {
+	if err := f.kube.Get(t.Context(), key(n, "route-public-gw-2"), route); err != nil {
 		t.Fatal(err)
 	}
 	if *route.Spec.ForProvider.DestinationCidrBlock != "198.51.100.0/24" || *route.Spec.ForProvider.GatewayID != "igw-1" {

@@ -69,7 +69,9 @@ type ImportedSubnet struct {
 // ("<prefix>-nat-<key>", "<prefix>-eip-<key>").
 type ImportedNAT struct {
 	Key, ID, SubnetID, AllocationID string
-	Tags                            map[string]string
+	// Private: a private NAT gateway, which has no Elastic IP.
+	Private bool
+	Tags    map[string]string
 }
 
 // ImportedRouteTable is a route table with its subnet associations, its
@@ -80,7 +82,8 @@ type ImportedRouteTable struct {
 	Tags         map[string]string
 	Associations []ImportedAssociation
 	DefaultRoute *ImportedRoute
-	// GatewayRoutes are named "<prefix>-route-<key>-<n>", n from 1.
+	// GatewayRoutes are named "<prefix>-route-<key>-gw-<n>", n from 1 (not
+	// "-<n>": a second table of the kind has the key "<key>-2").
 	GatewayRoutes []ImportedRoute
 }
 
@@ -110,7 +113,10 @@ func ImportedNetworkResources(n ImportedNetwork) []client.Object {
 		out = append(out, b.subnet(s))
 	}
 	for _, g := range n.NATGateways {
-		out = append(out, b.eip(g), b.nat(g))
+		if !g.Private {
+			out = append(out, b.eip(g))
+		}
+		out = append(out, b.nat(g))
 	}
 	for _, rt := range n.RouteTables {
 		out = append(out, b.routeTable(rt))
@@ -120,7 +126,7 @@ func ImportedNetworkResources(n ImportedNetwork) []client.Object {
 			out = append(out, b.route(rt, "route-"+rt.Key, *rt.DefaultRoute))
 		}
 		for i, r := range rt.GatewayRoutes {
-			out = append(out, b.route(rt, fmt.Sprintf("route-%s-%d", rt.Key, i+1), r))
+			out = append(out, b.route(rt, fmt.Sprintf("route-%s-gw-%d", rt.Key, i+1), r))
 		}
 	}
 	for _, rt := range n.RouteTables {
@@ -137,8 +143,10 @@ type importBuilder struct{ n ImportedNetwork }
 func (b importBuilder) meta(name, externalName string, extra map[string]string) metav1.ObjectMeta {
 	labels := crossplane.NetworkLabels(b.n.TenantID, b.n.NetworkID)
 	maps.Copy(labels, extra)
+	// Carried over: never pruned. An imported network is not rendered from
+	// its spec, and nothing may delete its objects for not being in one.
 	return metav1.ObjectMeta{Name: name, Namespace: b.n.Namespace, Labels: labels,
-		Annotations: map[string]string{ExternalNameAnnotation: externalName}}
+		Annotations: map[string]string{ExternalNameAnnotation: externalName, crossplane.CarriedOverAnnotation: "true"}}
 }
 
 func (b importBuilder) spec() xpv2.ManagedResourceSpec {
@@ -198,11 +206,15 @@ func (b importBuilder) eip(g ImportedNAT) *awsec2.EIP {
 }
 
 func (b importBuilder) nat(g ImportedNAT) *awsec2.NATGateway {
+	connectivity := "public"
+	if g.Private {
+		connectivity = "private"
+	}
 	return &awsec2.NATGateway{
 		ObjectMeta: b.meta(b.name("nat-"+g.Key), g.ID, nil),
 		Spec: awsec2.NATGatewaySpec{ManagedResourceSpec: b.spec(), ForProvider: awsec2.NATGatewayParameters_2{
-			Region: ptr.To(b.n.Region), SubnetID: ptr.To(g.SubnetID), AllocationID: ptr.To(g.AllocationID),
-			ConnectivityType: ptr.To("public"), Tags: tagPtrs(g.Tags),
+			Region: ptr.To(b.n.Region), SubnetID: ptr.To(g.SubnetID), AllocationID: optional(g.AllocationID),
+			ConnectivityType: ptr.To(connectivity), Tags: tagPtrs(g.Tags),
 		}},
 	}
 }

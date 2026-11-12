@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
-	"google.golang.org/protobuf/encoding/protojson"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -167,7 +166,7 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 	case row.State == stateImported:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_IMPORTED
 		st.Message = "imported read-only (" + progress + "); review status.import, then TakeOverNetwork"
-	case len(views) > 0 && ready == len(views):
+	case len(views) > 0 && ready == len(views) && caughtUp(row, views):
 		st.State = cloudv1.NetworkState_NETWORK_STATE_READY
 		readyCond.Status, readyCond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, "AllResourcesReady"
 		if imp := st.GetImport(); imp != nil && imp.GetPhase() == cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING {
@@ -182,6 +181,25 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 	}
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)
 	return st
+}
+
+// caughtUp reports whether the network's generation is applied and every
+// resource's provider has seen the object as it is now. A resource that
+// was Ready before a change stays Ready while the provider has not looked
+// at the change yet: that is not READY.
+func caughtUp(row *model.Network, views []*cloudv1.ManagedResource) bool {
+	if row.AppliedGeneration < row.Generation {
+		return false
+	}
+	for _, v := range views {
+		if v.GetSynced() == cloudv1.ConditionStatus_CONDITION_STATUS_UNSPECIFIED { // no provider status: not a managed resource
+			continue
+		}
+		if v.GetGeneration() != 0 && v.GetObservedGeneration() != v.GetGeneration() {
+			return false
+		}
+	}
+	return true
 }
 
 func resourcesLeft(views []*cloudv1.ManagedResource) int {
@@ -201,7 +219,10 @@ func storedImport(row *model.Network) *cloudv1.ImportStatus {
 		return nil
 	}
 	st := &cloudv1.NetworkStatus{}
-	if err := protojson.Unmarshal(row.Status, st); err != nil {
+	// Lenient: whether a network is imported decides if it may ever be
+	// rendered from its spec. A field the contract dropped must not turn
+	// an imported network into one that is.
+	if err := lenient.Unmarshal(row.Status, st); err != nil {
 		return nil
 	}
 	return st.GetImport()

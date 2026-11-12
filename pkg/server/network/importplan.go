@@ -234,7 +234,7 @@ func (p *planner) routeTable(rt awscloud.RouteTable, assocs []crossplaneaws.Impo
 		case r.DestinationCIDRBlock != "" && r.DestinationCIDRBlock != "0.0.0.0/0" && strings.HasPrefix(r.GatewayID, "igw-"):
 			// A public table that routes specific CIDRs: kept as it is.
 			t.GatewayRoutes = append(t.GatewayRoutes, crossplaneaws.ImportedRoute{GatewayID: r.GatewayID, Destination: r.DestinationCIDRBlock})
-			p.line("Route", fmt.Sprintf("%s-route-%s-%d", p.base.Prefix, key, len(t.GatewayRoutes)),
+			p.line("Route", fmt.Sprintf("%s-route-%s-gw-%d", p.base.Prefix, key, len(t.GatewayRoutes)),
 				crossplaneaws.RouteExternalName(rt.ID, r.DestinationCIDRBlock), "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
 				fmt.Sprintf("route %s to the internet gateway, kept as it is", r.DestinationCIDRBlock))
 		default:
@@ -292,9 +292,13 @@ func (p *planner) useNAT(id string) {
 		if len(g.AllocationIDs) > 0 {
 			alloc = g.AllocationIDs[0]
 		}
+		// A private NAT gateway has no Elastic IP.
+		private := g.ConnectivityType == "private" || alloc == ""
 		p.plan.resources.NATGateways = append(p.plan.resources.NATGateways,
-			crossplaneaws.ImportedNAT{Key: key, ID: g.ID, SubnetID: g.SubnetID, AllocationID: alloc, Tags: g.Tags})
-		p.line("EIP", p.base.Prefix+"-eip-"+key, alloc, "", cloudv1.Disposition_DISPOSITION_MATCHES, "")
+			crossplaneaws.ImportedNAT{Key: key, ID: g.ID, SubnetID: g.SubnetID, AllocationID: alloc, Private: private, Tags: g.Tags})
+		if !private {
+			p.line("EIP", p.base.Prefix+"-eip-"+key, alloc, "", cloudv1.Disposition_DISPOSITION_MATCHES, "")
+		}
 		p.line("NATGateway", p.base.Prefix+"-nat-"+key, g.ID, "spec.layout.nat_gateway_mode", cloudv1.Disposition_DISPOSITION_MATCHES, "")
 		for _, extra := range g.AllocationIDs[min(1, len(g.AllocationIDs)):] {
 			p.line("EIP", "", extra, "", cloudv1.Disposition_DISPOSITION_NOT_IMPORTED,

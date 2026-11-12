@@ -62,11 +62,16 @@ func (s *NetworkService) moveOn(ctx context.Context, row *model.Network) error {
 	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
 		return nil
 	}
-	if row.State == stateImported || row.State == stateBlocked || storedImport(row) != nil {
-		// Imported (also after takeover): its objects were rendered from the
-		// discovered VPC, not from the spec. Rendering the spec would create
-		// a second set of resources.
+	// Imported (also after takeover): its objects were rendered from the
+	// discovered VPC, not from the spec. Rendering the spec would create a
+	// second set of resources.
+	if row.State == stateImported || row.State == stateBlocked {
 		return s.markApplied(ctx, row)
+	}
+	if storedImport(row) != nil {
+		// Taken over: what a change can touch is its labels, as tags on the
+		// objects it has (also the rest of an update that failed half-way).
+		return s.retag(ctx, row)
 	}
 	spec, err := specOf(row)
 	if err != nil {

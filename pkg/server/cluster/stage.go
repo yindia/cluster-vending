@@ -6,34 +6,25 @@ import (
 	"slices"
 	"time"
 
-	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// afterActive are the kinds created only once the EKS cluster is ACTIVE.
-// Their references resolve as soon as the cluster has a name (set at
-// create), so applied together with it they would fail for the 10+
-// minutes EKS takes and turn the cluster FAILED. Node groups and the
-// ClusterAuth wait for ACTIVE by themselves.
-var afterActive = map[string]bool{
-	"Addon": true, "PodIdentityAssociation": true, "AccessEntry": true, "AccessPolicyAssociation": true,
-}
-
 // eksActiveStatus is the EKS cluster status once it can be used.
-const eksActiveStatus = "ACTIVE"
+const eksActiveStatus = crossplaneaws.EKSActive
 
-// createdAfterActive reports whether the afterActive objects were created:
+// createdAfterActive reports whether objects created only once the EKS
+// cluster is ACTIVE (crossplaneaws.AfterActiveKinds) were created:
 // once they were, they are always applied (an EKS cluster UPDATING during
 // an upgrade must not prune its add-ons).
 func createdAfterActive(records []model.ManagedResource) bool {
 	for _, r := range records {
-		if afterActive[r.Kind] {
+		if crossplaneaws.AfterActiveKinds[r.Kind] {
 			return true
 		}
 	}
@@ -53,45 +44,6 @@ func (s *ClusterService) eksActive(ctx context.Context, records []model.ManagedR
 		return ptr.Deref(c.Status.AtProvider.Status, "") == eksActiveStatus, nil
 	}
 	return false, nil
-}
-
-// holdBack reports whether apply must leave out the afterActive objects:
-// they were never created and the EKS cluster is not ACTIVE yet.
-func (s *ClusterService) holdBack(ctx context.Context, row *model.Cluster) (bool, error) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil {
-		return false, err
-	}
-	if createdAfterActive(records) {
-		return false, nil
-	}
-	active, err := s.eksActive(ctx, records)
-	return !active, err
-}
-
-// withoutAfterActive drops the afterActive objects, and the Usages whose
-// "by" object is one of them: a Usage whose user never exists is never
-// garbage-collected and would block its object's deletion for good.
-func (s *ClusterService) withoutAfterActive(objects []client.Object) ([]client.Object, error) {
-	out := make([]client.Object, 0, len(objects))
-	kept := map[string]bool{}
-	for _, obj := range objects {
-		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
-		if err != nil {
-			return nil, err
-		}
-		if afterActive[gvk.Kind] {
-			continue
-		}
-		if u, ok := obj.(*protectionv1beta1.Usage); ok {
-			if by := u.Spec.By; by == nil || by.ResourceRef == nil || !kept[by.Kind+"/"+by.ResourceRef.Name] {
-				continue
-			}
-		}
-		kept[gvk.Kind+"/"+obj.GetName()] = true
-		out = append(out, obj)
-	}
-	return out, nil
 }
 
 // resumeAfter is how long a cluster row must have been left alone before
@@ -143,7 +95,7 @@ func (s *ClusterService) resumeCreate(ctx context.Context, row *model.Cluster, r
 //
 // While EKS is not ACTIVE it only resumes an interrupted create
 // (resumeCreate): the objects of the first stage are applied again, the
-// later ones stay held back (apply, holdBack). A cluster past its first
+// later ones stay held back (crossplaneaws.ClusterSet). A cluster past its first
 // stage (an update or upgrade in progress) waits for ACTIVE.
 func (s *ClusterService) advance(ctx context.Context, row *model.Cluster) error {
 	if row.State == stateDeleting ||

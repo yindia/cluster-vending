@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 
 	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
@@ -18,6 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -223,10 +224,14 @@ func (s *ClusterService) base(row *model.Cluster, a *model.CloudAccount) crosspl
 	}
 }
 
-// apply records the plan's objects as the cluster's, applies them, and
-// prunes recorded objects the plan no longer has (e.g. a removed admin).
-// Recording comes first so a failed apply can always be rolled back: an
-// object is never in the management cluster without a record.
+// apply makes the cluster's managed resources match plan, in order
+// (crossplaneaws.ClusterSet, sequence.Engine): what the cluster has is
+// recorded before it is applied, so a failed apply can always be rolled
+// back; add-ons and access entries are held back until EKS is ACTIVE;
+// recorded objects the plan no longer has (e.g. a removed admin) are
+// removed once nothing is held back. The generation is marked applied
+// once the whole set is; until then the cluster is applied again
+// (advance).
 func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan crossplaneaws.ClusterPlan) error {
 	name, retiring, err := s.nodeGroupName(ctx, row, plan)
 	if err != nil {
@@ -243,49 +248,46 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 		s.logger().ErrorContext(ctx, "read the cluster's resources", "cluster_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's resources")
 	}
-	// Objects that wait for another resource are not rendered yet; the
-	// cluster is applied again (advance) until none is pending.
-	pending := plan.Pending()
-	objects := crossplaneaws.ClusterResources(plan)
-	hold, err := s.holdBack(ctx, row)
+	// Objects that wait for a value of another resource are not rendered
+	// yet; the cluster is applied again (advance) until none is pending.
+	partial := len(plan.Pending()) > 0
+	keep, err := s.kept(retiring, partial)
 	if err != nil {
-		s.logger().ErrorContext(ctx, "read EKS cluster state", "cluster_id", row.ID, "error", err)
-		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's EKS cluster")
-	}
-	if hold {
-		// Created in sequence: add-ons and access entries follow once EKS
-		// is ACTIVE (advance).
-		if objects, err = s.withoutAfterActive(objects); err != nil {
-			return connect.NewError(connect.CodeInternal, err.Error())
-		}
-	}
-	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	if err := s.deps.Record(ctx, owner, objects); err != nil {
-		return connect.NewError(connect.CodeInternal, "could not record the cluster's resources: "+err.Error())
+		return connect.NewError(connect.CodeInternal, err.Error())
 	}
 	if err := s.ownCarriedOver(ctx, row); err != nil {
 		s.logger().ErrorContext(ctx, "take over carried-over resources", "cluster_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeInternal, "could not take over the cluster's carried-over resources")
 	}
-	for _, obj := range objects {
-		if err := s.applyOne(ctx, obj); err != nil {
-			s.logger().ErrorContext(ctx, "apply cluster resource", "cluster_id", row.ID, "object", obj.GetName(), "error", err)
-			return applyError(err)
-		}
+	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
+	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.ClusterSet(plan), sequence.Keeping(s.deps.Inventory(owner), keep))
+	if err != nil {
+		s.logger().ErrorContext(ctx, "apply cluster resources", "cluster_id", row.ID, "error", err)
+		return applyError(err)
 	}
-	if len(pending) > 0 {
-		// Nothing is pruned from a partial render: an object left out
-		// because it waits (the EKS cluster of a cluster that turns
-		// encryption on, while its key is created) is not a dropped one.
-		return nil
-	}
-	if err := s.deps.Prune(ctx, owner, append(slices.Clone(objects), retiring...)); err != nil {
-		return connect.NewError(connect.CodeInternal, "could not remove the cluster's dropped resources: "+err.Error())
-	}
-	if hold || upgrading {
-		return nil // partly rendered: applied again (advance) until complete
+	if partial || !res.Complete() || upgrading {
+		return nil // partly rendered or held back: applied again (advance) until complete
 	}
 	return s.markApplied(ctx, row)
+}
+
+// kept selects the recorded objects that stay although the set applied
+// now does not have them: the node groups being retired, with their launch
+// templates; and every object while the render is partial (an object left
+// out because it waits, like the EKS cluster of a cluster that turns
+// encryption on while its key is created, is not a dropped one).
+func (s *ClusterService) kept(retiring []client.Object, partial bool) (func(sequence.Entry) bool, error) {
+	refs := make(map[managed.Ref]bool, len(retiring))
+	for _, obj := range retiring {
+		ref, err := managed.RefOf(obj, s.deps.Kube.Scheme())
+		if err != nil {
+			return nil, err
+		}
+		refs[ref] = true
+	}
+	return func(e sequence.Entry) bool {
+		return partial || refs[managed.Ref{APIVersion: e.APIVersion, Kind: e.Kind, Namespace: e.Namespace, Name: e.Name}]
+	}, nil
 }
 
 // markApplied records that every object of the row's generation was

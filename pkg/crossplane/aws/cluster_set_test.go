@@ -9,9 +9,10 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
-// The set is the rendered objects in their order. Add-ons, pod identities
-// and access entries wait for the EKS cluster, and so do the Usages they
-// are the user of; everything else waits for nothing. Only the node group
+// The set is the rendered objects in their order. Node groups, the
+// ClusterAuth, add-ons, pod identities and access entries wait for the EKS
+// cluster, and so do the Usages they are the user of; everything else
+// waits for nothing. Only the node group
 // is adjusted before it is sent.
 func TestClusterSetHoldsWhatNeedsAnActiveCluster(t *testing.T) {
 	plan := clusterPlan()
@@ -35,6 +36,10 @@ func TestClusterSetHoldsWhatNeedsAnActiveCluster(t *testing.T) {
 			wants, kind = true, awseks.AccessEntry_Kind
 		case *awseks.AccessPolicyAssociation:
 			wants, kind = true, awseks.AccessPolicyAssociation_Kind
+		case *awseks.NodeGroup:
+			wants, kind = true, awseks.NodeGroup_Kind
+		case *awseks.ClusterAuth:
+			wants, kind = true, awseks.ClusterAuth_Kind
 		case *protectionv1beta1.Usage:
 			wants, kind = crossplaneaws.AfterActiveKinds[obj.Spec.By.Kind], "Usage by "+obj.Spec.By.Kind
 		}

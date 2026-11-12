@@ -17,16 +17,18 @@ const EKSActive = "ACTIVE"
 // ACTIVE. Their references resolve as soon as the cluster has a name (set
 // at create), so applied together with it they would fail for the 10+
 // minutes EKS takes and turn the cluster FAILED. Node groups and the
-// ClusterAuth wait for ACTIVE by themselves.
+// ClusterAuth wait too: they would only report errors until then.
 var AfterActiveKinds = map[string]bool{
 	awseks.Addon_Kind: true, awseks.PodIdentityAssociation_Kind: true,
 	awseks.AccessEntry_Kind: true, awseks.AccessPolicyAssociation_Kind: true,
+	awseks.NodeGroup_Kind: true, awseks.ClusterAuth_Kind: true,
 }
 
 // afterActive reports whether obj is of one of AfterActiveKinds.
 func afterActive(obj client.Object) bool {
 	switch obj.(type) {
-	case *awseks.Addon, *awseks.PodIdentityAssociation, *awseks.AccessEntry, *awseks.AccessPolicyAssociation:
+	case *awseks.Addon, *awseks.PodIdentityAssociation, *awseks.AccessEntry, *awseks.AccessPolicyAssociation,
+		*awseks.NodeGroup, *awseks.ClusterAuth:
 		return true
 	}
 	return false
@@ -67,6 +69,7 @@ func ClusterSet(p ClusterPlan) sequence.Set {
 		switch obj := item.Object.(type) {
 		case *awseks.NodeGroup:
 			set[i].Adjust = DesiredSizeAtCreateOnly
+			set[i].After = active
 		case *protectionv1beta1.Usage:
 			if by := obj.Spec.By; by == nil || by.ResourceRef == nil || AfterActiveKinds[by.Kind] {
 				set[i].After = active

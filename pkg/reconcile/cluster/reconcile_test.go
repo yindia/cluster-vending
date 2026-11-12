@@ -403,8 +403,8 @@ func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
 		return len(items)
 	}
 	// The interrupted create: a new cluster whose EKS cluster was applied
-	// and is still creating; the node group is recorded (records are
-	// written before the applies) but was never applied.
+	// and is still creating; a role of the first stage is recorded
+	// (records are written before the applies) but was never applied.
 	setEKS("CREATING")
 	row := w.cluster(t)
 	row.State, row.Generation, row.AppliedGeneration = StateProvisioning, 1, 0
@@ -412,17 +412,18 @@ func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := w.store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: worldTenant, OwnerKind: model.OwnerCluster,
-		OwnerID: w.row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "NodeGroup", Namespace: worldNS, Name: prefix + "-default"}}); err != nil {
+		OwnerID: w.row.ID, APIVersion: "iam.aws.m.upbound.io/v1beta1", Kind: "Role", Namespace: worldNS, Name: prefix + "-node-role"}}); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if count(&awseks.NodeGroupList{}) != 1 || count(&awsiam.RoleList{}) == 0 {
-		t.Fatalf("first stage not applied again: %d node groups, %d roles", count(&awseks.NodeGroupList{}), count(&awsiam.RoleList{}))
+	if count(&awsiam.RoleList{}) == 0 {
+		t.Fatalf("first stage not applied again: %d roles", count(&awsiam.RoleList{}))
 	}
-	if n := count(&awseks.AddonList{}) + count(&awseks.AccessEntryList{}) + count(&awseks.PodIdentityAssociationList{}); n != 0 {
+	if n := count(&awseks.NodeGroupList{}) + count(&awseks.AddonList{}) + count(&awseks.AccessEntryList{}) +
+		count(&awseks.PodIdentityAssociationList{}); n != 0 {
 		t.Fatalf("%d later-stage objects applied while EKS is still creating", n)
 	}
 	if got := w.cluster(t); got.AppliedGeneration != 0 || got.State != StateProvisioning {

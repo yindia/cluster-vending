@@ -137,8 +137,11 @@ func TestLogGroupAndKeyStageBeforeTheCluster(t *testing.T) {
 	}
 	reconcile()
 	eks := &awseks.Cluster{}
-	if !exists(eks, prefix) || !exists(&awseks.NodeGroup{}, prefix+"-default") {
+	if !exists(eks, prefix) {
 		t.Fatal("the EKS cluster was not applied once its log group and key exist")
+	}
+	if exists(&awseks.NodeGroup{}, prefix+"-default") {
+		t.Fatal("the node group was applied before the EKS cluster is ACTIVE")
 	}
 	if enc := eks.Spec.ForProvider.EncryptionConfig; enc == nil || *enc.Provider.KeyArn != existingKey {
 		t.Errorf("encryption config = %+v, want the rendered key's ARN", enc)

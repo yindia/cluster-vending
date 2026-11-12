@@ -3,7 +3,9 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"slices"
 
+	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,9 +61,32 @@ func (s *ClusterService) nodeGroupName(ctx context.Context, row *model.Cluster, 
 	for _, g := range groups {
 		if g.Name != name {
 			keep = append(keep, &awseks.NodeGroup{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: g.Name}})
+			// With its rendered launch template, if it has one: the node
+			// group runs on it until it is retired.
+			lt := crossplaneaws.LaunchTemplateName(g.Name)
+			if slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "LaunchTemplate" && r.Name == lt }) {
+				keep = append(keep, &awsec2.LaunchTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: g.Namespace, Name: lt}})
+			}
 		}
 	}
 	return name, keep, nil
+}
+
+// retireLaunchTemplate deletes and forgets the rendered launch template of
+// a node group that is gone.
+func (s *ClusterService) retireLaunchTemplate(ctx context.Context, records []model.ManagedResource, group model.ManagedResource) error {
+	for _, r := range records {
+		if r.Kind != "LaunchTemplate" || r.Name != crossplaneaws.LaunchTemplateName(group.Name) {
+			continue
+		}
+		if err := s.deps.DeleteRecorded(ctx, []model.ManagedResource{r}); err != nil {
+			return err
+		}
+		if err := s.deps.Store.ManagedResources().Delete(ctx, r.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // retireNodeGroups deletes the node groups a replacement superseded once
@@ -81,6 +106,9 @@ func (s *ClusterService) retireNodeGroups(ctx context.Context, records []model.M
 	}
 	for _, old := range groups[:len(groups)-1] {
 		if state[kindNodeGroup+"/"+old.Name] == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			if err := s.retireLaunchTemplate(ctx, records, old); err != nil {
+				return err
+			}
 			if err := s.deps.Store.ManagedResources().Delete(ctx, old.ID); err != nil {
 				return err
 			}

@@ -62,6 +62,13 @@ func (s *Reconciler) View(ctx context.Context, row *model.Cluster) (*cloudv1.Clu
 // view is View with the failure to report: the recorded one for a read,
 // this pass's for the reconciler.
 func (s *Reconciler) view(ctx context.Context, row *model.Cluster, failure *cloudv1.Condition) (*cloudv1.Cluster, error) {
+	return s.viewWith(ctx, row, failure, nil)
+}
+
+// viewWith is view with the platform components this pass found; nil
+// reports those recorded with the row (a read, or a pass that did not
+// look).
+func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *cloudv1.Condition, installed *platform) (*cloudv1.Cluster, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return nil, storeError(err)
@@ -71,6 +78,10 @@ func (s *Reconciler) view(ctx context.Context, row *model.Cluster, failure *clou
 		return nil, err
 	}
 	withFailure(c.GetStatus(), failure)
+	if installed == nil {
+		installed = storedPlatform(row)
+	}
+	withPlatform(c.GetStatus(), installed)
 	return c, nil
 }
 

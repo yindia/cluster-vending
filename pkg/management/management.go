@@ -140,13 +140,16 @@ func ConnectStore(ctx context.Context, o Options) (repository.Store, error) {
 
 // CachedObjects are the kinds the informer cache holds: the managed
 // resources and Usages of networks and clusters, the accounts'
-// ProviderConfigs, each cluster's Helm ProviderConfig and the tenant
-// namespaces. The cache refuses reads of any other kind, so every kind a
-// network or cluster records must be here.
+// ProviderConfigs, each cluster's Helm ProviderConfig, the Helm Releases
+// of its platform components and the tenant namespaces. The cache refuses
+// reads of any other kind, so every kind a network or cluster records
+// must be here.
 func CachedObjects() []client.Object {
 	helm := &unstructured.Unstructured{}
 	helm.SetGroupVersionKind(crossplaneaws.HelmProviderConfigGVK)
-	return append(crossplaneaws.ManagedObjects(), &awsv1beta1.ProviderConfig{}, helm, &corev1.Namespace{})
+	release := &unstructured.Unstructured{}
+	release.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
+	return append(crossplaneaws.ManagedObjects(), &awsv1beta1.ProviderConfig{}, helm, release, &corev1.Namespace{})
 }
 
 // Start starts mgr (its informers and controllers) in the

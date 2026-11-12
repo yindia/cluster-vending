@@ -41,6 +41,11 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 			return false, err
 		}
 	}
+	// The platform's components first: their charts are uninstalled while
+	// the cluster and its nodes are still there.
+	if gone, err := s.deletePlatform(ctx, row, records); err != nil || !gone {
+		return false, err
+	}
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerCluster, ID: row.ID}
 	if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.ClusterDeleteOrder); err != nil {
 		return false, deleteError(err)

@@ -52,11 +52,18 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return errors.Join(failed, err)
 	}
-	c, err := s.view(ctx, current, FailureCondition(failed))
-	if err != nil {
-		return errors.Join(failed, fmt.Errorf("observe: %w", err))
+	// The components the platform installs with the cluster: after the
+	// cluster's own pass, and never in its way. What fails here is logged
+	// and tried again; the recorded components stay as they were.
+	installed, perr := s.installPlatform(ctx, current)
+	if perr != nil {
+		perr = fmt.Errorf("platform components: %w", perr)
 	}
-	return errors.Join(failed, s.remember(ctx, current, c.GetStatus()))
+	c, err := s.viewWith(ctx, current, FailureCondition(failed), installed)
+	if err != nil {
+		return errors.Join(failed, perr, fmt.Errorf("observe: %w", err))
+	}
+	return errors.Join(failed, perr, s.remember(ctx, current, c.GetStatus()))
 }
 
 // moveOn is Reconcile without recording the status.

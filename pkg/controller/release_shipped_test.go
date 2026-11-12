@@ -36,8 +36,13 @@ func TestShippedReleasePinsTheShippedCatalog(t *testing.T) {
 	for _, d := range defs {
 		if d.Spec.Install != nil {
 			want = append(want, d.Name)
+			// A companion chart is pinned under its own name.
+			for _, c := range d.Spec.Install.Helm.Companions {
+				want = append(want, c.Name)
+			}
 		}
 	}
+	slices.Sort(want)
 	rel := DefaultRelease()
 	for _, k := range rel.Spec.Content.Kubernetes {
 		var got []string

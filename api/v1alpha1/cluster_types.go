@@ -690,6 +690,27 @@ type ClusterUpgrade struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ConditionPlatformComponentsReady is a Cluster's condition that every
+// component the platform installs with it is installed.
+const ConditionPlatformComponentsReady = "PlatformComponentsReady"
+
+// PlatformComponentStatus is one component the platform installed with a
+// cluster.
+type PlatformComponentStatus struct {
+	// name in the catalog, e.g. karpenter.
+	// +required
+	Name string `json:"name"`
+	// version of the chart the cluster's release pins.
+	// +optional
+	Version string `json:"version,omitempty"`
+	// phase: Pending (waits), Installing, Ready or Failed.
+	// +optional
+	Phase string `json:"phase,omitempty"`
+	// message says what it waits for or why it failed.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // ClusterStatus is the observed state of a Cluster, aggregated from its
 // Crossplane objects.
 type ClusterStatus struct {
@@ -746,6 +767,28 @@ type ClusterStatus struct {
 	// plane is ready.
 	// +optional
 	KubeconfigSecret string `json:"kubeconfigSecret,omitempty"`
+	// platformComponents are the components the platform installs with
+	// the cluster (the Platform definitions of the catalog), in install
+	// order: installed once the node group is ready and the kubeconfig
+	// exists. Read-only for tenants. The cluster's phase does not wait for
+	// them; the condition PlatformComponentsReady says whether all are
+	// installed.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	PlatformComponents []PlatformComponentStatus `json:"platformComponents,omitempty"`
+	// platformRelease is the release the platform components' versions
+	// come from: the one the cluster's channel offered when they were
+	// first installed.
+	// +optional
+	PlatformRelease string `json:"platformRelease,omitempty"`
+	// componentInventory lists the Crossplane objects of the cluster's
+	// platform components (their IAM roles and Helm releases), in creation
+	// order. Kept apart from inventory: the cluster's own state is read
+	// from that one only.
+	// +listType=atomic
+	// +optional
+	ComponentInventory []InventoryEntry `json:"componentInventory,omitempty"`
 	// contractStatus is the status as the cloud.v1 API returns it
 	// (protojson), kept verbatim: the fields above are read from it, and it
 	// carries what they leave out (the state of every object). Written by

@@ -24,6 +24,7 @@ spec:
           - {name: istio-ingress-gateway, version: "0.1.0"}
           - {name: istiod, version: "1.32.0"}
           - {name: karpenter, version: "1.15.1"}
+          - {name: karpenter-nodeclass, version: "0.1.0"}
           - {name: kyverno, version: "3.10.0"}
           - {name: kyverno-policies, version: "3.10.0"}
           - {name: ztunnel, version: "1.32.0"}
@@ -40,6 +41,7 @@ spec:
           - {name: istio-ingress-gateway, version: "0.1.0"}
           - {name: istiod, version: "1.32.0"}
           - {name: karpenter, version: "1.15.1"}
+          - {name: karpenter-nodeclass, version: "0.1.0"}
           - {name: kyverno, version: "3.10.0"}
           - {name: kyverno-policies, version: "3.10.0"}
           - {name: ztunnel, version: "1.32.0"}
@@ -56,6 +58,7 @@ spec:
           - {name: istio-ingress-gateway, version: "0.1.0"}
           - {name: istiod, version: "1.32.0"}
           - {name: karpenter, version: "1.15.1"}
+          - {name: karpenter-nodeclass, version: "0.1.0"}
           - {name: kyverno, version: "3.10.0"}
           - {name: kyverno-policies, version: "3.10.0"}
           - {name: ztunnel, version: "1.32.0"}

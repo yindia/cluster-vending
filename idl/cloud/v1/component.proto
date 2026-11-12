@@ -58,6 +58,21 @@ message Component {
   // Incremented by the server on every change of version or values. Output
   // only.
   int64 generation = 9;
+
+  // Who controls the component. Output only. PLATFORM: installed with
+  // the cluster by the platform, listed read-only (it has no id, etag or
+  // values; EnableComponent, UpdateComponent and DisableComponent refuse
+  // its name). TENANT: enabled by the tenant.
+  ComponentManagement management = 10;
+}
+
+// ComponentManagement says who controls a component on a cluster.
+enum ComponentManagement {
+  COMPONENT_MANAGEMENT_UNSPECIFIED = 0;
+  // Enabled, changed and disabled by the tenant.
+  COMPONENT_MANAGEMENT_TENANT = 1;
+  // Installed with the cluster by the platform; read-only for tenants.
+  COMPONENT_MANAGEMENT_PLATFORM = 2;
 }
 
 // ComponentPhase summarises a component's state.

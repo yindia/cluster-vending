@@ -11,15 +11,24 @@ The components this build ships, as `ComponentDefinition` files in
 | `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `karpenter`, `kyverno`, `istio` (a bundle of six charts) | Installed with every cluster, as part of creating it, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
 | `Tenant` (default) | `gpu-operator`, `kyverno-policies` | A tenant enables and disables them on a cluster (a `Component`), and may set the values the schema allows. |
 
-**Platform components are part of the cluster.** The cluster's reconcile
-renders them into the cluster's own sequence once the workload cluster can
-be reached (the `<prefix>-helm` ProviderConfig is Ready): for each
-component, its IAM role, then its CRD chart, its chart and its companions;
-components in `requires` order (`component.PlatformComponents`), versions
-from the cluster's release. Their state is reported on the Cluster (a
-`PlatformComponentsReady` condition and a phase per component in its
-status) and does not hold back the cluster's own Ready. The renderer is not
-written yet; the definitions are its data.
+**Platform components are part of the cluster.** Once a cluster is
+RUNNING (its node group is ready and its kubeconfig exists), its reconcile
+installs them: for each component its IAM role, then its CRD chart, its
+chart and its companions; components in `requires` order
+(`component.PlatformComponents`), versions from the release the cluster's
+channel offered at that moment (`status.platformRelease`). Their state is
+on the Cluster: `status.platformComponents` (name, version, phase, message)
+and the condition `PlatformComponentsReady`; it does not hold back the
+cluster's own Ready. They are removed, in reverse, before the cluster is
+deleted. Nothing is installed on imported clusters. The details are in
+[design/component-usage.md](design/component-usage.md), section 7.2.
+
+See what a cluster has:
+
+```sh
+kubectl get cluster prod-eks -n tenant-acme \
+  -o jsonpath='{range .status.platformComponents[*]}{.name}{"\t"}{.version}{"\t"}{.phase}{"\t"}{.message}{"\n"}{end}'
+```
 
 **Bundles.** `istio` has no chart of its own: `includes` lists six
 definitions marked `internal: true`, each with its chart, namespace,
@@ -139,7 +148,18 @@ The four platform charts (`karpenter-nodeclass`,
 `aws-load-balancer-controller-crds`, `gateway-api-crds`,
 `istio-ingress-gateway`) have their source in `charts/` and must
 be published to `oci://ghcr.io/yindia/cluster-vending/charts`; nothing
-publishes them yet.
+publishes them yet. Until they are, on every cluster:
+
+- `karpenter` installs, but its companion `karpenter-nodeclass` fails (no
+  EC2NodeClass or NodePool: Karpenter launches nothing), so `karpenter`
+  reports `Failed`;
+- `aws-load-balancer-controller` stays `Failed` at its CRD chart
+  (`aws-load-balancer-controller-crds`), and `istio-ingress-gateway`,
+  which requires it, waits;
+- `gateway-api-crds` stays `Failed`, and `istiod`, `istio-cni`, `ztunnel`
+  and `istio-ingress-gateway`, which come after it, wait;
+- `cluster-autoscaler`, `kyverno` and `istio-base` install: their charts
+  are upstream.
 
 ## Versions that move together, and upgrade order
 

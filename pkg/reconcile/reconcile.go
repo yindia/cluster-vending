@@ -8,11 +8,13 @@
 package reconcile
 
 import (
+	"context"
 	"log/slog"
 	"slices"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 
@@ -55,7 +57,24 @@ type Deps struct {
 	// kind cluster). The tenant role is assumed either way. Nil in
 	// production.
 	ProviderCredentials *crossplaneaws.CredentialsSecret
-	Logger              *slog.Logger
+	// Platform reads what the platform installs with every cluster: the
+	// component catalog and the releases that pin its versions. Only what
+	// reconciles has it; nil installs nothing (the API handlers, tests).
+	Platform PlatformSource
+	Logger   *slog.Logger
+}
+
+// PlatformSource is where the cluster reconcile reads the component
+// catalog and the releases from (the management cluster's
+// ComponentDefinitions, Releases and ReleaseChannels).
+type PlatformSource interface {
+	// Definitions are the catalog's definitions.
+	Definitions(ctx context.Context) ([]cloudv1alpha1.ComponentDefinition, error)
+	// Offered is the name of the release the channel (alpha, beta,
+	// stable) offers now; "" when it offers none.
+	Offered(ctx context.Context, channel string) (string, error)
+	// Release reads a release; nil when there is none of that name.
+	Release(ctx context.Context, name string) (*cloudv1alpha1.Release, error)
 }
 
 // RenderBehind reports whether a resource last applied with renderer

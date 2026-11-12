@@ -27,7 +27,9 @@ func date(year int, month time.Month, day int) metav1.Time {
 // definition was checked against, the same on the three minors. The
 // cluster autoscaler's image must be of the cluster's Kubernetes minor,
 // and no single chart ships all three, so its pin sets the image tag
-// (autoscalerImage) over chart 9.60.0.
+// (autoscalerImage) over chart 9.60.0. A companion chart is pinned under
+// its own name (karpenter-nodeclass): a companion without a pin is not
+// installed.
 func defaultPins(autoscalerImage string) []cloudv1alpha1.ComponentPin {
 	pin := func(name, version string) cloudv1alpha1.ComponentPin {
 		return cloudv1alpha1.ComponentPin{Name: name, Version: version}
@@ -44,6 +46,7 @@ func defaultPins(autoscalerImage string) []cloudv1alpha1.ComponentPin {
 		pin("istio-ingress-gateway", "0.1.0"),
 		pin("istiod", "1.32.0"),
 		pin("karpenter", "1.15.1"),
+		pin("karpenter-nodeclass", "0.1.0"),
 		pin("kyverno", "3.10.0"),
 		pin("kyverno-policies", "3.10.0"),
 		pin("ztunnel", "1.32.0"),

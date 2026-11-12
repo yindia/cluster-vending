@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/access.proto";
 import "cloud/v1/aws.proto";
+import "cloud/v1/component.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
 import "cloud/v1/import.proto";
@@ -361,6 +362,41 @@ message ClusterStatus {
   // when no upgrade is in progress. state stays UPDATING meanwhile; this
   // says which step the upgrade is at.
   ClusterUpgrade upgrade = 17;
+
+  // The components the platform installs with the cluster (the Platform
+  // definitions of the catalog), in install order: installed once the
+  // cluster's node group is ready and its kubeconfig exists, with fixed
+  // values. Read-only: a tenant cannot enable, change or disable them.
+  // The cluster's own state does not wait for them; the condition
+  // PlatformComponentsReady says whether all of them are installed. Empty
+  // for an imported cluster: nothing is installed on those.
+  repeated PlatformComponent platform_components = 18;
+
+  // The release the platform components' versions come from: the one the
+  // cluster's channel offered when they were first installed. A cluster
+  // keeps it until it is moved to another release.
+  string platform_release = 19;
+}
+
+// PlatformComponent is one component the platform installed with a
+// cluster, as the cluster reports it.
+message PlatformComponent {
+  // The catalog name, e.g. "karpenter".
+  string name = 1;
+
+  // The chart version the cluster's release pins. Empty for a component
+  // the release does not pin.
+  string version = 2;
+
+  // PENDING: waits (for the node group, the kubeconfig, a component it
+  // requires, or a value that does not exist yet; message says which).
+  // INSTALLING: its charts are being installed. READY: every chart is
+  // deployed. FAILED: an install failed, or the component cannot be
+  // installed on this cluster (message says why).
+  ComponentPhase phase = 3;
+
+  // What it waits for, or why it failed. Empty when READY.
+  string message = 4;
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in

@@ -70,7 +70,12 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if rerr != nil {
 		return ctrl.Result{}, rerr
 	}
-	return next(&row.Resource, reconcilecluster.PendingStates(), reconcilecluster.StateImported, err), nil
+	res := next(&row.Resource, reconcilecluster.PendingStates(), reconcilecluster.StateImported, err)
+	if reconcilecluster.PlatformPending(row) && res.RequeueAfter > pendingDelay {
+		// RUNNING, but its platform components are still being installed.
+		res.RequeueAfter = pendingDelay
+	}
+	return res, nil
 }
 
 // bump makes the reconciler apply a spec that was edited on the object:

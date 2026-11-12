@@ -23,6 +23,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ComponentManagement says who controls a component on a cluster.
+type ComponentManagement int32
+
+const (
+	ComponentManagement_COMPONENT_MANAGEMENT_UNSPECIFIED ComponentManagement = 0
+	// Enabled, changed and disabled by the tenant.
+	ComponentManagement_COMPONENT_MANAGEMENT_TENANT ComponentManagement = 1
+	// Installed with the cluster by the platform; read-only for tenants.
+	ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM ComponentManagement = 2
+)
+
+// Enum value maps for ComponentManagement.
+var (
+	ComponentManagement_name = map[int32]string{
+		0: "COMPONENT_MANAGEMENT_UNSPECIFIED",
+		1: "COMPONENT_MANAGEMENT_TENANT",
+		2: "COMPONENT_MANAGEMENT_PLATFORM",
+	}
+	ComponentManagement_value = map[string]int32{
+		"COMPONENT_MANAGEMENT_UNSPECIFIED": 0,
+		"COMPONENT_MANAGEMENT_TENANT":      1,
+		"COMPONENT_MANAGEMENT_PLATFORM":    2,
+	}
+)
+
+func (x ComponentManagement) Enum() *ComponentManagement {
+	p := new(ComponentManagement)
+	*p = x
+	return p
+}
+
+func (x ComponentManagement) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ComponentManagement) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_component_proto_enumTypes[0].Descriptor()
+}
+
+func (ComponentManagement) Type() protoreflect.EnumType {
+	return &file_cloud_v1_component_proto_enumTypes[0]
+}
+
+func (x ComponentManagement) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ComponentManagement.Descriptor instead.
+func (ComponentManagement) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_component_proto_rawDescGZIP(), []int{0}
+}
+
 // ComponentPhase summarises a component's state.
 type ComponentPhase int32
 
@@ -76,11 +128,11 @@ func (x ComponentPhase) String() string {
 }
 
 func (ComponentPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_component_proto_enumTypes[0].Descriptor()
+	return file_cloud_v1_component_proto_enumTypes[1].Descriptor()
 }
 
 func (ComponentPhase) Type() protoreflect.EnumType {
-	return &file_cloud_v1_component_proto_enumTypes[0]
+	return &file_cloud_v1_component_proto_enumTypes[1]
 }
 
 func (x ComponentPhase) Number() protoreflect.EnumNumber {
@@ -89,7 +141,7 @@ func (x ComponentPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ComponentPhase.Descriptor instead.
 func (ComponentPhase) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_component_proto_rawDescGZIP(), []int{0}
+	return file_cloud_v1_component_proto_rawDescGZIP(), []int{1}
 }
 
 // Component is one catalog component enabled on one cluster of a tenant
@@ -126,7 +178,12 @@ type Component struct {
 	Etag string `protobuf:"bytes,8,opt,name=etag,proto3" json:"etag,omitempty"`
 	// Incremented by the server on every change of version or values. Output
 	// only.
-	Generation    int64 `protobuf:"varint,9,opt,name=generation,proto3" json:"generation,omitempty"`
+	Generation int64 `protobuf:"varint,9,opt,name=generation,proto3" json:"generation,omitempty"`
+	// Who controls the component. Output only. PLATFORM: installed with
+	// the cluster by the platform, listed read-only (it has no id, etag or
+	// values; EnableComponent, UpdateComponent and DisableComponent refuse
+	// its name). TENANT: enabled by the tenant.
+	Management    ComponentManagement `protobuf:"varint,10,opt,name=management,proto3,enum=cloud.v1.ComponentManagement" json:"management,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -222,6 +279,13 @@ func (x *Component) GetGeneration() int64 {
 		return x.Generation
 	}
 	return 0
+}
+
+func (x *Component) GetManagement() ComponentManagement {
+	if x != nil {
+		return x.Management
+	}
+	return ComponentManagement_COMPONENT_MANAGEMENT_UNSPECIFIED
 }
 
 // ComponentStatus is written by the controller.
@@ -475,7 +539,7 @@ var File_cloud_v1_component_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_component_proto_rawDesc = "" +
 	"\n" +
-	"\x18cloud/v1/component.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ecloud/v1/component_cloud.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xef\x02\n" +
+	"\x18cloud/v1/component.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ecloud/v1/component_cloud.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xae\x03\n" +
 	"\tComponent\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12*\n" +
@@ -488,7 +552,11 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\x04etag\x18\b \x01(\tR\x04etag\x12\x1e\n" +
 	"\n" +
 	"generation\x18\t \x01(\x03R\n" +
-	"generation\"\x96\x03\n" +
+	"generation\x12=\n" +
+	"\n" +
+	"management\x18\n" +
+	" \x01(\x0e2\x1d.cloud.v1.ComponentManagementR\n" +
+	"management\"\x96\x03\n" +
 	"\x0fComponentStatus\x12.\n" +
 	"\x05phase\x18\x01 \x01(\x0e2\x18.cloud.v1.ComponentPhaseR\x05phase\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -514,7 +582,11 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\x0fcloud_resources\x18\x10 \x01(\v2!.cloud.v1.ComponentCloudResourcesR\x0ecloudResources\x1a;\n" +
 	"\rVersionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10\aR\x0eprotected_keys*\xe1\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10\aR\x0eprotected_keys*\x7f\n" +
+	"\x13ComponentManagement\x12$\n" +
+	" COMPONENT_MANAGEMENT_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bCOMPONENT_MANAGEMENT_TENANT\x10\x01\x12!\n" +
+	"\x1dCOMPONENT_MANAGEMENT_PLATFORM\x10\x02*\xe1\x01\n" +
 	"\x0eComponentPhase\x12\x1f\n" +
 	"\x1bCOMPONENT_PHASE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17COMPONENT_PHASE_PENDING\x10\x01\x12\x1e\n" +
@@ -537,33 +609,35 @@ func file_cloud_v1_component_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_component_proto_rawDescData
 }
 
-var file_cloud_v1_component_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_cloud_v1_component_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_cloud_v1_component_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cloud_v1_component_proto_goTypes = []any{
-	(ComponentPhase)(0),             // 0: cloud.v1.ComponentPhase
-	(*Component)(nil),               // 1: cloud.v1.Component
-	(*ComponentStatus)(nil),         // 2: cloud.v1.ComponentStatus
-	(*ComponentDefinition)(nil),     // 3: cloud.v1.ComponentDefinition
-	nil,                             // 4: cloud.v1.ComponentDefinition.VersionsEntry
-	(*structpb.Struct)(nil),         // 5: google.protobuf.Struct
-	(*Condition)(nil),               // 6: cloud.v1.Condition
-	(*ComponentCloudResources)(nil), // 7: cloud.v1.ComponentCloudResources
+	(ComponentManagement)(0),        // 0: cloud.v1.ComponentManagement
+	(ComponentPhase)(0),             // 1: cloud.v1.ComponentPhase
+	(*Component)(nil),               // 2: cloud.v1.Component
+	(*ComponentStatus)(nil),         // 3: cloud.v1.ComponentStatus
+	(*ComponentDefinition)(nil),     // 4: cloud.v1.ComponentDefinition
+	nil,                             // 5: cloud.v1.ComponentDefinition.VersionsEntry
+	(*structpb.Struct)(nil),         // 6: google.protobuf.Struct
+	(*Condition)(nil),               // 7: cloud.v1.Condition
+	(*ComponentCloudResources)(nil), // 8: cloud.v1.ComponentCloudResources
 }
 var file_cloud_v1_component_proto_depIdxs = []int32{
-	5, // 0: cloud.v1.Component.values:type_name -> google.protobuf.Struct
-	2, // 1: cloud.v1.Component.status:type_name -> cloud.v1.ComponentStatus
-	0, // 2: cloud.v1.ComponentStatus.phase:type_name -> cloud.v1.ComponentPhase
-	6, // 3: cloud.v1.ComponentStatus.conditions:type_name -> cloud.v1.Condition
-	5, // 4: cloud.v1.ComponentStatus.effective_values:type_name -> google.protobuf.Struct
-	5, // 5: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
-	4, // 6: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
-	5, // 7: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
-	7, // 8: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	6,  // 0: cloud.v1.Component.values:type_name -> google.protobuf.Struct
+	3,  // 1: cloud.v1.Component.status:type_name -> cloud.v1.ComponentStatus
+	0,  // 2: cloud.v1.Component.management:type_name -> cloud.v1.ComponentManagement
+	1,  // 3: cloud.v1.ComponentStatus.phase:type_name -> cloud.v1.ComponentPhase
+	7,  // 4: cloud.v1.ComponentStatus.conditions:type_name -> cloud.v1.Condition
+	6,  // 5: cloud.v1.ComponentStatus.effective_values:type_name -> google.protobuf.Struct
+	6,  // 6: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
+	5,  // 7: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
+	6,  // 8: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
+	8,  // 9: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_component_proto_init() }
@@ -578,7 +652,7 @@ func file_cloud_v1_component_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_component_proto_rawDesc), len(file_cloud_v1_component_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,

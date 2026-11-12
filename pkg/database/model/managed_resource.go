@@ -10,6 +10,11 @@ const (
 	OwnerCloudAccount OwnerKind = "cloud_account"
 	OwnerNetwork      OwnerKind = "network"
 	OwnerCluster      OwnerKind = "cluster"
+	// OwnerClusterComponents owns the objects of a cluster's platform
+	// components (their IAM roles and Helm releases); OwnerID is the
+	// cluster's. Kept apart from the cluster's own objects: the cluster's
+	// state is read from those only.
+	OwnerClusterComponents OwnerKind = "cluster_components"
 )
 
 // ManagedResource is one Kubernetes object the platform created in the

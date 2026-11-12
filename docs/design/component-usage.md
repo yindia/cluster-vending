@@ -903,15 +903,74 @@ equal the cluster's.
 - `ListComponentDefinitions` (handler: later) shows only Tenant, not
   internal definitions (`component.TenantCatalog`).
 
-**How Platform components are installed (decided; the renderer is a later
-step).** The cluster's reconcile renders them into the cluster's own
-sequence after the `<prefix>-helm` ProviderConfig is Ready
-(`component.PlatformComponents`: Platform definitions with a chart, bundles
-expanded to their members, in `requires` order). For each component: its
-IAM role, then its CRD chart, its chart, its companions. Versions come from
-the cluster's release. Their state is reported on the Cluster: a
-`PlatformComponentsReady` condition, and a phase per component in the
-cluster's status. It does not hold back the cluster's own Ready.
+**How Platform components are installed (built).** The cluster's
+reconcile installs them after its own pass, as a second set of objects
+recorded apart from the cluster's (`status.componentInventory`, owner
+`cluster_components`), so the cluster's state never waits for them:
+
+1. **When.** Not before the cluster is RUNNING: its node group is Ready and
+   its kubeconfig exists. Every chart also waits for the `<prefix>-helm`
+   ProviderConfig and the node group by itself (`crossplaneaws.PlatformSet`).
+   Once started, installing goes on through updates of the cluster. Nothing
+   is installed on an imported cluster, also after its takeover (later).
+2. **Which release.** The release the cluster's channel offers when its
+   components are first installed (`spec.releaseChannel`, `stable` when
+   unset), recorded as `status.platformRelease` and kept from then on, for
+   manual and automatic clusters alike; moving a cluster to another release
+   is the rollout step, later. Versions are that release's pins on the
+   cluster's Kubernetes minor. A component the release does not pin is not
+   installed ("not in release <name>"), and neither is anything requiring
+   it. A companion chart is pinned under its own name
+   (`karpenter-nodeclass`); without a pin it alone is left out.
+3. **What, per component** (`component.PlanPlatform`, then
+   `crossplaneaws.PlatformSet`), each step once the one before is Ready:
+   its IAM role (section 5.2), its CRD chart (Helm release
+   `<component>-crds`), its chart (with `skipCRDs` when it has a CRD
+   chart), its companions in order. A component starts after the last
+   chart of every component it requires. Bundles are expanded to their
+   members (`component.PlatformComponents`).
+4. **Values.** The definition's `platformValues` with the pin's values
+   merged over them, placeholders filled in (section 5.1) from the
+   cluster's recorded status (endpoint, issuer), its network and account,
+   the default node pool, and the component's own role and policy as the
+   management cluster has them. A placeholder without a value yet (the
+   role's ARN before the role exists) keeps the component's charts back,
+   and its status says which. The key named after a companion goes to that
+   companion only.
+5. **The object.** A provider-helm `Release` (`helm.m.crossplane.io/v1beta1`,
+   unstructured) in the tenant namespace, named `<prefix>-<helm release>`:
+   `crossplane.io/external-name` is the Helm release name (the component's,
+   so a chart renders as upstream documents it), `spec.providerConfigRef`
+   the cluster's ProviderConfig, `spec.rollbackLimit` 100 (a chart that
+   cannot install yet is retried, not given up),
+   `spec.forProvider.chart.{repository,name,version}`, `.namespace` (the
+   definition's; provider-helm creates it), `.values`, `.skipCRDs`. Only
+   public chart repositories: a Platform definition with `credentials` is
+   reported as not installable (private charts: later).
+6. **Ready.** A chart counts as installed when its Release is Ready and
+   `status.atProvider.state` is `deployed`. provider-helm reports that once
+   Helm applied the chart, before its workloads run; workload checks are
+   later.
+7. **Status.** `Cluster.status.platformComponents` lists each one with its
+   pinned version, a phase (`Pending`: waits, with what for; `Installing`;
+   `Ready`; `Failed`: an install failed, or it cannot be installed on this
+   cluster) and a message, and the condition `PlatformComponentsReady` sums
+   them up. While it is `Installing` the controller looks at the cluster
+   again every 20 seconds although it is RUNNING. The cluster's own phase
+   and Ready do not depend on any of it. `ListComponents` is to return them
+   too, read-only (`Component.management = PLATFORM`, no id or etag;
+   `component.Installed` merges them with the tenant's own; handlers:
+   later).
+8. **Deletion.** Before anything of the cluster itself: every chart is
+   uninstalled, a chart before the one it was installed after and a
+   component before what it requires (Usages), then the roles. Uninstalling
+   first lets the load balancer controller and Karpenter remove what they
+   created in the account while they still run. When the workload cluster
+   cannot be reached anyway (its EKS cluster is not ACTIVE, or the deletion
+   is forced), the Releases are let go without an uninstall
+   (`forceRelease`: `managementPolicies` without `Delete`), so a deletion
+   never waits for a cluster that is not there. A cluster that is ACTIVE
+   but unreachable (its endpoint closed off) needs `force`.
 
 **Bundles (built: the fields and the pure checks).** A definition with
 `includes` and no `install` is one component made of several charts. Each

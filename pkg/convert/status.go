@@ -50,6 +50,22 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.ImportPlan = importPlan(p.GetImport())
 	into.KubeconfigSecret = p.GetKubeconfigSecret()
 	into.Upgrade = upgrade(p.GetUpgrade())
+	into.PlatformRelease = p.GetPlatformRelease()
+	into.PlatformComponents = platformComponents(p.GetPlatformComponents())
+}
+
+// platformComponents are the contract's platform components as the kind
+// lists them; nil for none.
+func platformComponents(in []*cloudv1.PlatformComponent) []cloudv1alpha1.PlatformComponentStatus {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]cloudv1alpha1.PlatformComponentStatus, 0, len(in))
+	for _, c := range in {
+		out = append(out, cloudv1alpha1.PlatformComponentStatus{Name: c.GetName(), Version: c.GetVersion(),
+			Phase: camel(c.GetPhase(), prefixComponentPhase), Message: c.GetMessage()})
+	}
+	return out
 }
 
 // upgradePhases are the kind's spellings of the contract's upgrade phases.

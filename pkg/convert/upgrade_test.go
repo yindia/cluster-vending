@@ -52,3 +52,28 @@ func TestEveryUpgradePhaseHasAKindSpelling(t *testing.T) {
 		}
 	}
 }
+
+// The platform components and their release reach the kind's status, and
+// go when the contract status has none.
+func TestClusterStatusIntoCarriesThePlatformComponents(t *testing.T) {
+	var status cloudv1alpha1.ClusterStatus
+
+	convert.ClusterStatusInto(&cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING, PlatformRelease: "2026-11-a",
+		PlatformComponents: []*cloudv1.PlatformComponent{
+			{Name: "karpenter", Version: "1.15.1", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY},
+			{Name: "istiod", Version: "1.32.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, Message: "waiting for istio-base"},
+		}}, "", metav1.Now(), &status)
+
+	want := []cloudv1alpha1.PlatformComponentStatus{
+		{Name: "karpenter", Version: "1.15.1", Phase: "Ready"},
+		{Name: "istiod", Version: "1.32.0", Phase: "Pending", Message: "waiting for istio-base"},
+	}
+	if status.PlatformRelease != "2026-11-a" || len(status.PlatformComponents) != 2 ||
+		status.PlatformComponents[0] != want[0] || status.PlatformComponents[1] != want[1] {
+		t.Errorf("status = %q %+v, want %+v", status.PlatformRelease, status.PlatformComponents, want)
+	}
+	convert.ClusterStatusInto(&cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING}, "", metav1.Now(), &status)
+	if status.PlatformRelease != "" || status.PlatformComponents != nil {
+		t.Errorf("after: %q %+v, want none", status.PlatformRelease, status.PlatformComponents)
+	}
+}

@@ -861,6 +861,64 @@ spec:
                     description: platformVersion of the EKS cluster.
                     type: string
                 type: object
+              componentInventory:
+                description: |-
+                  componentInventory lists the Crossplane objects of the cluster's
+                  platform components (their IAM roles and Helm releases), in creation
+                  order. Kept apart from inventory: the cluster's own state is read
+                  from that one only.
+                items:
+                  description: |-
+                    InventoryEntry is one Crossplane object the owner has in the management
+                    cluster.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the object.
+                      type: string
+                    carriedOver:
+                      description: |-
+                        carriedOver marks an object that came with an import and that no spec
+                        field describes: it is never removed when the owner is rendered
+                        again, and is deleted with the owner.
+                      type: boolean
+                    externalName:
+                      description: |-
+                        externalName is the cloud identifier of the resource the object
+                        stands for (crossplane.io/external-name): what a rebuilt management
+                        cluster needs to adopt the resource instead of creating a new one.
+                        Empty until the provider created the resource.
+                      type: string
+                    goneAt:
+                      description: |-
+                        goneAt is when the object was first seen gone from the management
+                        cluster after its owner's deletion was requested.
+                      format: date-time
+                      type: string
+                    kind:
+                      description: kind of the object.
+                      type: string
+                    name:
+                      description: name of the object.
+                      type: string
+                    namespace:
+                      description: |-
+                        namespace of the object. Empty for a cluster-scoped object (the
+                        tenant's namespace itself, recorded for its account).
+                      type: string
+                    recordedAt:
+                      description: |-
+                        recordedAt is when the object was first recorded as the owner's. An
+                        object recorded a moment ago and not in the management cluster yet
+                        is being created, not missing.
+                      format: date-time
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
               conditions:
                 description: |-
                   conditions: Ready and Synced, and finer ones (NetworkReady,
@@ -1133,6 +1191,44 @@ spec:
                 - Updating
                 - Deleting
                 - Failed
+                type: string
+              platformComponents:
+                description: |-
+                  platformComponents are the components the platform installs with
+                  the cluster (the Platform definitions of the catalog), in install
+                  order: installed once the node group is ready and the kubeconfig
+                  exists. Read-only for tenants. The cluster's phase does not wait for
+                  them; the condition PlatformComponentsReady says whether all are
+                  installed.
+                items:
+                  description: |-
+                    PlatformComponentStatus is one component the platform installed with a
+                    cluster.
+                  properties:
+                    message:
+                      description: message says what it waits for or why it failed.
+                      type: string
+                    name:
+                      description: name in the catalog, e.g. karpenter.
+                      type: string
+                    phase:
+                      description: 'phase: Pending (waits), Installing, Ready or Failed.'
+                      type: string
+                    version:
+                      description: version of the chart the cluster's release pins.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              platformRelease:
+                description: |-
+                  platformRelease is the release the platform components' versions
+                  come from: the one the cluster's channel offered when they were
+                  first installed.
                 type: string
               upgrade:
                 description: |-

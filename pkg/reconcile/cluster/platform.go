@@ -1,0 +1,445 @@
+package cluster
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/component"
+	"github.com/yindia/cluster-vending/pkg/convert"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
+)
+
+// ConditionPlatformComponents is the condition of ClusterStatus that says
+// whether every component the platform installs with the cluster is
+// installed. The cluster's state does not depend on it.
+const ConditionPlatformComponents = cloudv1alpha1.ConditionPlatformComponentsReady
+
+// Reasons of ConditionPlatformComponents.
+const (
+	reasonPlatformInstalled  = "Installed"
+	reasonPlatformInstalling = "Installing"
+	reasonPlatformFailed     = "Failed"
+)
+
+// platform is what a pass found out about a cluster's platform
+// components: what the status reports.
+type platform struct {
+	release    string
+	components []*cloudv1.PlatformComponent
+}
+
+// storedStatus decodes the status recorded with the row; empty when there
+// is none this build can read.
+func storedStatus(row *model.Cluster) *cloudv1.ClusterStatus {
+	st := &cloudv1.ClusterStatus{}
+	if len(row.Status) > 0 {
+		if err := Lenient.Unmarshal(row.Status, st); err != nil {
+			return &cloudv1.ClusterStatus{}
+		}
+	}
+	return st
+}
+
+// storedPlatform is what the row's recorded status says about the
+// platform components: what a read returns, and what a pass that could
+// not look reports again.
+func storedPlatform(row *model.Cluster) *platform {
+	st := storedStatus(row)
+	return &platform{release: st.GetPlatformRelease(), components: st.GetPlatformComponents()}
+}
+
+// PlatformPending reports whether the row's recorded status says platform
+// components are still being installed: the cluster is looked at again
+// soon although it is RUNNING.
+func PlatformPending(row *model.Cluster) bool {
+	for _, c := range storedStatus(row).GetConditions() {
+		if c.GetType() == ConditionPlatformComponents {
+			return c.GetStatus() != cloudv1.ConditionStatus_CONDITION_STATUS_TRUE && c.GetReason() == reasonPlatformInstalling
+		}
+	}
+	return false
+}
+
+// withPlatform writes the platform components and their condition into
+// st.
+func withPlatform(st *cloudv1.ClusterStatus, p *platform) {
+	if p == nil {
+		return
+	}
+	st.PlatformRelease, st.PlatformComponents = p.release, p.components
+	if len(p.components) == 0 {
+		return
+	}
+	cond := &cloudv1.Condition{Type: ConditionPlatformComponents, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE,
+		Reason: reasonPlatformInstalled, Message: fmt.Sprintf("%d components installed", len(p.components))}
+	var failed, pending []string
+	for _, c := range p.components {
+		switch c.GetPhase() {
+		case cloudv1.ComponentPhase_COMPONENT_PHASE_READY:
+		case cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED:
+			failed = append(failed, c.GetName())
+		default:
+			pending = append(pending, c.GetName())
+		}
+	}
+	switch {
+	case len(pending) > 0:
+		cond.Status, cond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, reasonPlatformInstalling
+		cond.Message = "installing " + strings.Join(pending, ", ")
+		if len(failed) > 0 {
+			cond.Message += "; failed: " + strings.Join(failed, ", ")
+		}
+	case len(failed) > 0:
+		cond.Status, cond.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, reasonPlatformFailed
+		cond.Message = "failed: " + strings.Join(failed, ", ")
+	}
+	st.Conditions = append(st.Conditions, cond)
+}
+
+// installPlatform installs the components the platform runs on every
+// cluster (the Platform definitions of the catalog) and reports them: it
+// plans them from the catalog and the cluster's release
+// (component.PlanPlatform), applies them in order
+// (crossplaneaws.PlatformSet) and reads their state. Their objects are
+// recorded apart from the cluster's own (model.OwnerClusterComponents), so
+// the cluster's state never waits for them.
+//
+// Nothing is installed before the cluster is RUNNING (its node group is
+// ready and its kubeconfig exists), on an imported cluster, or while the
+// cluster is being deleted. Once started it goes on through updates. nil
+// when this pass has nothing new to say: the recorded status stays.
+func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*platform, error) {
+	if s.deps.Platform == nil || row.State == StateDeleting {
+		return nil, nil
+	}
+	if row.Imported {
+		return &platform{}, nil // nothing is installed on an imported cluster
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerClusterComponents, row.ID)
+	if err != nil {
+		return nil, err
+	}
+	if row.State != StateRunning && len(records) == 0 {
+		return nil, nil
+	}
+	in, release, problem, err := s.platformInput(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	if problem != "" {
+		return unavailable(in.Entries, release, problem), nil
+	}
+	plan, skipped := component.PlanPlatform(in)
+	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
+	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.PlatformSet(plan), s.deps.Inventory(owner))
+	if err != nil {
+		s.logger().ErrorContext(ctx, "apply platform components", "cluster_id", row.ID, "error", err)
+		return nil, fault.New(fault.Internal, "could not apply the cluster's platform components")
+	}
+	records, err = s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerClusterComponents, row.ID)
+	if err != nil {
+		return nil, err
+	}
+	views, err := s.deps.Observe(ctx, records)
+	if err != nil {
+		return nil, err
+	}
+	return &platform{release: release, components: platformStatus(in, plan, skipped, res, views)}, nil
+}
+
+// unavailable reports every Platform component as not installable for one
+// reason (the release cannot be used).
+func unavailable(entries []component.PlatformEntry, release, problem string) *platform {
+	out := &platform{release: release}
+	for _, e := range entries {
+		out.components = append(out.components, &cloudv1.PlatformComponent{Name: e.Name,
+			Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: problem})
+	}
+	return out
+}
+
+// platformStatus is the state of each Platform component, in install
+// order: left out (FAILED, why), waiting (PENDING, what for), being
+// installed (INSTALLING) or with every chart deployed (READY). A chart
+// whose install failed makes its component FAILED.
+func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan, skipped []component.NotInstalled,
+	res sequence.Result, views []*cloudv1.ManagedResource) []*cloudv1.PlatformComponent {
+	reasons := map[string]string{}
+	for _, sk := range skipped {
+		reasons[sk.Name] = sk.Reason
+	}
+	planned := map[string]crossplaneaws.PlatformComponentPlan{}
+	for _, c := range plan.Components {
+		planned[c.Name] = c
+	}
+	state := map[string]*cloudv1.ManagedResource{}
+	for _, v := range views {
+		if v.GetKind() == crossplaneaws.HelmReleaseGVK.Kind {
+			state[v.GetName()] = v
+		}
+	}
+	waiting := map[string][]string{}
+	for _, w := range res.Waiting {
+		if w.Ref.Kind == crossplaneaws.HelmReleaseGVK.Kind {
+			waiting[w.Ref.Name] = w.For
+		}
+	}
+	out := make([]*cloudv1.PlatformComponent, 0, len(in.Entries))
+	for _, e := range in.Entries {
+		pc := &cloudv1.PlatformComponent{Name: e.Name, Version: in.Pins[e.Name].Version}
+		c, ok := planned[e.Name]
+		if !ok {
+			pc.Phase, pc.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, reasons[e.Name]
+			out = append(out, pc)
+			continue
+		}
+		pc.Phase, pc.Message = componentPhase(plan.ReleaseObjectNames(c), state, waiting)
+		if missing := component.MissingCompanions(e, in.Pins); len(missing) > 0 && pc.Phase == cloudv1.ComponentPhase_COMPONENT_PHASE_READY {
+			pc.Message = fmt.Sprintf("without %s: not in release %s", strings.Join(missing, ", "), in.Release)
+		}
+		out = append(out, pc)
+	}
+	return out
+}
+
+// componentPhase reads a component's phase from its Release objects
+// (names, in install order).
+func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, waiting map[string][]string) (cloudv1.ComponentPhase, string) {
+	ready, started := 0, false
+	for _, name := range names {
+		v, recorded := state[name]
+		if recorded && v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			started = true
+		}
+		switch {
+		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED:
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, fmt.Sprintf("chart %s: %s", v.GetExternalName(), v.GetMessage())
+		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
+			ready++
+		case len(waiting[name]) > 0:
+			phase := cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING
+			if started {
+				phase = cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING
+			}
+			return phase, "waiting for " + strings.Join(waiting[name], ", ")
+		case recorded:
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, v.GetMessage()
+		default:
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, ""
+		}
+	}
+	if ready == len(names) {
+		return cloudv1.ComponentPhase_COMPONENT_PHASE_READY, ""
+	}
+	return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, ""
+}
+
+// platformInput gathers what the cluster's platform components are planned
+// from. problem, when set, says why none can be installed now (the
+// release cannot be used); the entries are still returned, to report.
+func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster) (in component.PlatformInput, release, problem string, err error) {
+	spec, err := SpecOf(row)
+	if err != nil {
+		return in, "", "", err
+	}
+	t, err := s.Target(ctx, row.TenantID, spec)
+	if err != nil {
+		return in, "", "", err
+	}
+	defs, err := s.deps.Platform.Definitions(ctx)
+	if err != nil {
+		return in, "", "", fmt.Errorf("read the component catalog: %w", err)
+	}
+	in.Entries, err = component.PlatformEntries(defs)
+	if err != nil {
+		return in, "", "", fault.New(fault.FailedPrecondition, "the component catalog is inconsistent: "+err.Error())
+	}
+	clusterPlan := s.RenderPlan(spec, row, t)
+	in.Plan = crossplaneaws.PlatformPlan{Namespace: clusterPlan.Namespace, TenantID: row.TenantID, ClusterID: row.ID,
+		ClusterPrefix: clusterPlan.Prefix}
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
+	if err != nil {
+		return in, "", "", err
+	}
+	if groups := nodeGroupRecords(records); len(groups) > 0 {
+		in.Plan.NodeGroupName = groups[len(groups)-1].Name
+	}
+	in.IAM = crossplaneaws.ComponentIAMPlan{Namespace: clusterPlan.Namespace, ProviderConfigName: clusterPlan.ProviderConfigName,
+		TenantID: row.TenantID, ClusterID: row.ID, ClusterName: row.Name, ClusterPrefix: clusterPlan.Prefix,
+		Region: spec.GetRegion(), Tags: row.Labels}
+	in.Cluster = component.Cluster{Name: row.Name, State: row.State, Running: row.State == StateRunning,
+		KubernetesMinor: kubernetesMinor(spec.GetControlPlane().GetKubernetesVersion()), IRSA: spec.GetAws().GetIrsa()}
+	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM)
+
+	release = storedStatus(row).GetPlatformRelease()
+	if release == "" {
+		channel := channelOf(spec)
+		if release, err = s.deps.Platform.Offered(ctx, channel); err != nil {
+			return in, "", "", fmt.Errorf("read release channel %s: %w", channel, err)
+		}
+		if release == "" {
+			return in, "", fmt.Sprintf("release channel %s offers no release yet", channel), nil
+		}
+	}
+	in.Release = release
+	rel, err := s.deps.Platform.Release(ctx, release)
+	if err != nil {
+		return in, release, "", fmt.Errorf("read release %s: %w", release, err)
+	}
+	if rel == nil {
+		return in, release, fmt.Sprintf("release %s does not exist", release), nil
+	}
+	in.Pins, problem = pinsOf(rel, in.Cluster.KubernetesMinor)
+	return in, release, problem, nil
+}
+
+// pinsOf are the release's pins on the Kubernetes minor, by name; problem
+// says why the release cannot be used for it.
+func pinsOf(rel *cloudv1alpha1.Release, minor string) (pins map[string]component.Pin, problem string) {
+	for _, k := range rel.Spec.Content.Kubernetes {
+		if k.Minor != minor {
+			continue
+		}
+		pins = map[string]component.Pin{}
+		for _, c := range k.Components {
+			values, err := component.PinValues(c.Values)
+			if err != nil {
+				continue // a pin with unusable values is no pin: its component reports it
+			}
+			pins[c.Name] = component.Pin{Version: c.Version, Values: values}
+		}
+		return pins, ""
+	}
+	return nil, fmt.Sprintf("release %s does not offer Kubernetes %s", rel.Name, minor)
+}
+
+// channelOf is the name of the release channel the cluster takes its
+// platform components from: its own, or stable when it names none.
+func channelOf(spec *cloudv1.ClusterSpec) string {
+	switch spec.GetReleaseChannel() {
+	case cloudv1.ReleaseChannel_RELEASE_CHANNEL_ALPHA:
+		return cloudv1alpha1.ChannelAlpha
+	case cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA:
+		return cloudv1alpha1.ChannelBeta
+	default:
+		return cloudv1alpha1.ChannelStable
+	}
+}
+
+// kubernetesMinor is the Kubernetes minor of a version: "1.37" of "1.37" and of
+// "1.37.2".
+func kubernetesMinor(version string) string {
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return version
+	}
+	return parts[0] + "." + parts[1]
+}
+
+// platformVars are a component's placeholder values: the cluster's, as
+// its recorded status has them (endpoint, issuer), its network's VPC, its
+// account, the default node pool's labels and taints, and the component's
+// own role and policy as the management cluster has them now. What does
+// not exist yet is left empty: the component then waits.
+func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, t Target,
+	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan) func(string) component.Vars {
+	recorded := storedStatus(row)
+	kindSpec, _ := convert.ClusterSpecToAPI(spec, "")
+	cluster := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: row.Name}, Spec: kindSpec}
+	cluster.Status.OIDCIssuerURL = recorded.GetOidcIssuerUrl()
+	if e := recorded.GetEndpoint(); e.GetUrl() != "" {
+		cluster.Status.Endpoint = &cloudv1alpha1.ClusterEndpoint{URL: e.GetUrl()}
+	}
+	account := &cloudv1alpha1.CloudAccount{Spec: cloudv1alpha1.CloudAccountSpec{AWS: &cloudv1alpha1.AWSAccount{AccountID: t.Account.AccountID}}}
+	network := &cloudv1alpha1.Network{}
+	if vpc := vpcOf(t.Network); vpc != "" {
+		network.Status.Resources = &cloudv1alpha1.NetworkResources{CloudNetworkID: vpc}
+	}
+	nodeRole := crossplaneaws.NodeRoleName(clusterPlan)
+	return func(name string) component.Vars {
+		p := iam
+		p.Component = name
+		out := component.IAMOutputs{RoleName: crossplaneaws.ComponentRoleName(p), NodeRoleName: nodeRole}
+		role := &awsiam.Role{}
+		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: p.Namespace, Name: out.RoleName}, role); err == nil {
+			out.RoleARN = ptr.Deref(role.Status.AtProvider.Arn, "")
+		}
+		policy := &awsiam.Policy{}
+		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: p.Namespace, Name: crossplaneaws.ComponentPolicyName(p)}, policy); err == nil {
+			out.PolicyARN = ptr.Deref(policy.Status.AtProvider.Arn, "")
+		}
+		return component.VarsFor(cluster, network, account, out)
+	}
+}
+
+// vpcOf is the network's VPC ID as its recorded status has it.
+func vpcOf(n *model.Network) string {
+	st := &cloudv1.NetworkStatus{}
+	if n == nil || len(n.Status) == 0 || Lenient.Unmarshal(n.Status, st) != nil {
+		return ""
+	}
+	return st.GetResources().GetCloudNetworkId()
+}
+
+// deletePlatform removes the cluster's platform components before the
+// cluster itself, and reports whether they are gone: every chart is
+// uninstalled, a chart before the one it was installed after (the Usages
+// of crossplaneaws.PlatformSet), then the roles. The charts are
+// uninstalled so that what they created in the account (load balancers,
+// nodes) goes while its controller still runs. When the workload cluster
+// cannot be reached anyway (its EKS cluster is not ACTIVE, or the deletion
+// is forced) the Releases are let go without an uninstall (forceRelease):
+// the deletion never waits for a cluster that is not there.
+func (s *Reconciler) deletePlatform(ctx context.Context, row *model.Cluster, clusterRecords []model.ManagedResource) (bool, error) {
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerClusterComponents, row.ID)
+	if err != nil {
+		return false, fmt.Errorf("list platform component resources: %w", err)
+	}
+	if len(records) == 0 {
+		return true, nil
+	}
+	if !row.DeleteForce {
+		active, err := s.eksActive(ctx, clusterRecords)
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			if err := s.forceRelease(ctx, row); err != nil {
+				return false, err
+			}
+		}
+	}
+	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
+	if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.PlatformDeleteOrder); err != nil {
+		return false, deleteError(err)
+	}
+	views, err := s.deps.Observe(ctx, records)
+	if err != nil {
+		return false, err
+	}
+	if err := s.deps.MarkGone(ctx, records, views); err != nil {
+		return false, err
+	}
+	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
+		return false, err
+	}
+	if !reconcile.AllGone(views) {
+		return false, nil
+	}
+	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerClusterComponents, row.ID); err != nil {
+		return false, fmt.Errorf("forget the platform components' resources: %w", err)
+	}
+	return true, nil
+}

@@ -33,8 +33,16 @@ type owned struct {
 	inventory *[]cloudv1alpha1.InventoryEntry
 }
 
-// ownedBy wraps an owner object.
-func ownedBy(obj client.Object) *owned {
+// ownedBy wraps an owner object: its own inventory.
+func ownedBy(obj client.Object) *owned { return ownedAs(obj, "") }
+
+// ownedAs wraps an owner object for the owner kind: a Cluster holds two
+// inventories, its own (OwnerCluster) and that of its platform components
+// (OwnerClusterComponents). An empty kind is the object's own.
+func ownedAs(obj client.Object, kind model.OwnerKind) *owned {
+	if c, ok := obj.(*cloudv1alpha1.Cluster); ok && kind == model.OwnerClusterComponents {
+		return &owned{obj: c, kind: kind, inventory: &c.Status.ComponentInventory}
+	}
 	switch o := obj.(type) {
 	case *cloudv1alpha1.CloudAccount:
 		return &owned{obj: o, kind: model.OwnerCloudAccount, inventory: &o.Status.Inventory}
@@ -54,7 +62,7 @@ func ownerList(kind model.OwnerKind) (client.ObjectList, error) {
 		return &cloudv1alpha1.CloudAccountList{}, nil
 	case model.OwnerNetwork:
 		return &cloudv1alpha1.NetworkList{}, nil
-	case model.OwnerCluster:
+	case model.OwnerCluster, model.OwnerClusterComponents:
 		return &cloudv1alpha1.ClusterList{}, nil
 	}
 	return nil, fmt.Errorf("%w: owner kind %q", repository.ErrInvalid, kind)
@@ -71,7 +79,7 @@ func (r managedResources) owner(ctx context.Context, kind model.OwnerKind, names
 	if err != nil {
 		return nil, err
 	}
-	return ownedBy(obj), nil
+	return ownedAs(obj, kind), nil
 }
 
 // accountID is the row ID of the account the owner belongs to: its own
@@ -231,6 +239,9 @@ func (r managedResources) ListByAccount(ctx context.Context, tenantID, cloudAcco
 		slices.SortFunc(objects, func(a, b client.Object) int { return strings.Compare(a.GetLabels()[LabelID], b.GetLabels()[LabelID]) })
 		for _, obj := range objects {
 			out = append(out, ownedBy(obj).records()...)
+			if _, cluster := obj.(*cloudv1alpha1.Cluster); cluster {
+				out = append(out, ownedAs(obj, model.OwnerClusterComponents).records()...)
+			}
 		}
 	}
 	return out, nil
@@ -267,7 +278,7 @@ func (r managedResources) byRecord(ctx context.Context, id string) (*owned, stri
 		obj = &cloudv1alpha1.CloudAccount{}
 	case model.OwnerNetwork:
 		obj = &cloudv1alpha1.Network{}
-	case model.OwnerCluster:
+	case model.OwnerCluster, model.OwnerClusterComponents:
 		obj = &cloudv1alpha1.Cluster{}
 	default:
 		return nil, "", nil
@@ -275,7 +286,7 @@ func (r managedResources) byRecord(ctx context.Context, id string) (*owned, stri
 	if err := r.c.Get(ctx, client.ObjectKey{Namespace: parts[1], Name: parts[2]}, obj); err != nil {
 		return nil, "", client.IgnoreNotFound(err)
 	}
-	return ownedBy(obj), parts[3], nil
+	return ownedAs(obj, model.OwnerKind(parts[0])), parts[3], nil
 }
 
 // change edits the record with the ID and reports whether there was one.

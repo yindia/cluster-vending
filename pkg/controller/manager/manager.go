@@ -152,7 +152,10 @@ func Run(ctx context.Context, o Options) error {
 		KubeReader:          mgr.GetAPIReader(),
 		RenderTarget:        renderTarget,
 		ProviderCredentials: management.CredentialsSecret(o.AWS.ProviderCredentials),
-		Logger:              logger,
+		// The catalog and the releases, read at the API server: what the
+		// platform installs with every cluster.
+		Platform: management.PlatformSource(direct),
+		Logger:   logger,
 	})
 	if err != nil {
 		return err

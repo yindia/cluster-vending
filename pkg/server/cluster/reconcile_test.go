@@ -13,6 +13,7 @@ import (
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -363,5 +364,163 @@ func TestReconcileStaysPendingWhileANodeGroupIsRetired(t *testing.T) {
 	}
 	if got := w.cluster(t); got.State == stateRunning {
 		t.Fatalf("cluster is %s with two node groups recorded, want it pending", got.State)
+	}
+}
+
+// A create the server left half-way (it went away after applying the EKS
+// Cluster, before the node group) is resumed by the loop: the first stage
+// is applied again while EKS is still creating, the later stage (add-ons,
+// access entries) only once it is ACTIVE, and the cluster reaches RUNNING.
+func TestReconcileResumesAnInterruptedCreate(t *testing.T) {
+	resumeAfter = 0
+	t.Cleanup(func() { resumeAfter = 2 * time.Minute })
+	w := newWorld(t, interceptor.Funcs{}, nil)
+	ctx := t.Context()
+	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
+	eksKey := client.ObjectKey{Namespace: worldNS, Name: prefix}
+	setEKS := func(status string) {
+		t.Helper()
+		eks := &awseks.Cluster{}
+		if err := w.kube.Get(ctx, eksKey, eks); err != nil {
+			t.Fatal(err)
+		}
+		eks.Status.AtProvider.Status = ptr.To(status)
+		if err := w.kube.Update(ctx, eks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(list client.ObjectList) int {
+		t.Helper()
+		if err := w.kube.List(ctx, list, client.InNamespace(worldNS), client.MatchingLabels{crossplane.LabelCluster: w.row.ID}); err != nil {
+			t.Fatal(err)
+		}
+		items, _ := meta.ExtractList(list)
+		return len(items)
+	}
+	// The interrupted create: a new cluster whose EKS cluster was applied
+	// and is still creating; the node group is recorded (records are
+	// written before the applies) but was never applied.
+	setEKS("CREATING")
+	row := w.cluster(t)
+	row.State, row.Generation, row.AppliedGeneration = stateProvisioning, 1, 0
+	if err := w.store.Clusters().Update(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: worldTenant, OwnerKind: model.OwnerCluster,
+		OwnerID: w.row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "NodeGroup", Namespace: worldNS, Name: prefix + "-default"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if count(&awseks.NodeGroupList{}) != 1 || count(&awsiam.RoleList{}) == 0 {
+		t.Fatalf("first stage not applied again: %d node groups, %d roles", count(&awseks.NodeGroupList{}), count(&awsiam.RoleList{}))
+	}
+	if n := count(&awseks.AddonList{}) + count(&awseks.AccessEntryList{}) + count(&awseks.PodIdentityAssociationList{}); n != 0 {
+		t.Fatalf("%d later-stage objects applied while EKS is still creating", n)
+	}
+	if got := w.cluster(t); got.AppliedGeneration != 0 || got.State != stateProvisioning {
+		t.Fatalf("applied generation %d, state %s: the create is not complete yet", got.AppliedGeneration, got.State)
+	}
+	// Nothing is missing any more: further passes leave the cluster alone
+	// until EKS is ACTIVE.
+	applies := 0
+	w2 := w.svc.deps.Kube
+	w.svc.deps.Kube = interceptor.NewClient(w2.(client.WithWatch), interceptor.Funcs{
+		Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+			applies++
+			return c.Apply(ctx, obj, opts...)
+		}})
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil || applies != 0 {
+		t.Fatalf("a complete first stage was applied again (%d applies, %v)", applies, err)
+	}
+	w.svc.deps.Kube = w2
+
+	setEKS("ACTIVE")
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.cluster(t); count(&awseks.AddonList{}) == 0 || got.AppliedGeneration != got.Generation {
+		t.Fatalf("after ACTIVE: %d add-ons, applied generation %d of %d", count(&awseks.AddonList{}), got.AppliedGeneration, got.Generation)
+	}
+	// Every object READY: the cluster is RUNNING.
+	records, err := w.store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, w.row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion(r.APIVersion)
+		u.SetKind(r.Kind)
+		if err := w.kube.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
+			t.Fatal(err)
+		}
+		conds := []any{map[string]any{"type": "Ready", "status": "True"},
+			map[string]any{"type": "Synced", "status": "True", "observedGeneration": u.GetGeneration()}}
+		if err := unstructured.SetNestedSlice(u.Object, conds, "status", "conditions"); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.kube.Update(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.cluster(t); got.State != stateRunning {
+		t.Errorf("state = %s, want %s", got.State, stateRunning)
+	}
+}
+
+// What must not be resumed: a create another call is still working on, and
+// a cluster past its first stage whose EKS cluster is updating.
+func TestReconcileDoesNotResumeOtherClusters(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		grace      time.Duration
+		state      string
+		laterStage bool
+	}{
+		{"row written a moment ago", time.Hour, stateProvisioning, false},
+		{"past the first stage", 0, stateProvisioning, true},
+		{"an update", 0, stateUpdating, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resumeAfter = tt.grace
+			t.Cleanup(func() { resumeAfter = 2 * time.Minute })
+			w := newWorld(t, interceptor.Funcs{}, nil)
+			ctx := t.Context()
+			prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
+			eks := &awseks.Cluster{}
+			if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix}, eks); err != nil {
+				t.Fatal(err)
+			}
+			eks.Status.AtProvider.Status = ptr.To("UPDATING")
+			if err := w.kube.Update(ctx, eks); err != nil {
+				t.Fatal(err)
+			}
+			row := w.cluster(t)
+			row.State = tt.state
+			if err := w.store.Clusters().Update(ctx, row); err != nil {
+				t.Fatal(err)
+			}
+			missing := []model.ManagedResource{{TenantID: worldTenant, OwnerKind: model.OwnerCluster, OwnerID: w.row.ID,
+				APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "NodeGroup", Namespace: worldNS, Name: prefix + "-default"}}
+			if tt.laterStage {
+				missing = append(missing, model.ManagedResource{TenantID: worldTenant, OwnerKind: model.OwnerCluster, OwnerID: w.row.ID,
+					APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "Addon", Namespace: worldNS, Name: prefix + "-addon-coredns"})
+			}
+			if err := w.store.ManagedResources().Put(ctx, missing); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+				t.Fatal(err)
+			}
+			groups := &awseks.NodeGroupList{}
+			if err := w.kube.List(ctx, groups, client.InNamespace(worldNS)); err != nil || len(groups.Items) != 0 {
+				t.Errorf("%d node groups applied (%v), want none", len(groups.Items), err)
+			}
+		})
 	}
 }

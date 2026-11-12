@@ -49,6 +49,10 @@ type Cluster struct {
 	// LogTypes are the enabled control plane log types.
 	LogTypes                                               []string
 	AuthenticationMode, SupportType, ServiceCIDR, IPFamily string
+	// BootstrapAdmin is accessConfig.bootstrapClusterCreatorAdminPermissions
+	// (whether the identity that created the cluster is an admin): set at
+	// creation, never changeable. Nil when EKS does not report it.
+	BootstrapAdmin *bool
 	// EncryptionKeyARN is the KMS key of the secrets encryption, if on.
 	EncryptionKeyARN string
 	OIDCIssuer       string
@@ -218,6 +222,7 @@ func eksCluster(c *ekstypes.Cluster) *Cluster {
 	}
 	if c.AccessConfig != nil {
 		out.AuthenticationMode = string(c.AccessConfig.AuthenticationMode)
+		out.BootstrapAdmin = c.AccessConfig.BootstrapClusterCreatorAdminPermissions
 	}
 	if c.UpgradePolicy != nil {
 		out.SupportType = string(c.UpgradePolicy.SupportType)

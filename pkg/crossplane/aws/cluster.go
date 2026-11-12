@@ -138,6 +138,11 @@ type Adoption struct {
 	// name, "<cluster>:<add-on>", ... Rendered with every apply, or the
 	// object would lose its cloud resource.
 	ExternalNames map[string]string `json:"externalNames,omitempty"`
+	// BootstrapAdmin is the EKS cluster's
+	// accessConfig.bootstrapClusterCreatorAdminPermissions as it was
+	// created (EKS cannot change it); nil is true, what the platform
+	// creates clusters with.
+	BootstrapAdmin *bool `json:"bootstrapAdmin,omitempty"`
 }
 
 // AccessEntryPlan is one access entry with its policies.
@@ -324,7 +329,7 @@ func (b clusterBuilder) cluster() *awseks.Cluster {
 		},
 		AccessConfig: &awseks.AccessConfigParameters{
 			AuthenticationMode:                      ptr.To(p.AuthenticationMode),
-			BootstrapClusterCreatorAdminPermissions: ptr.To(true),
+			BootstrapClusterCreatorAdminPermissions: ptr.To(ptr.Deref(p.BootstrapAdmin, true)),
 		},
 		EnabledClusterLogTypes: ptrs(p.LogTypes),
 		Tags:                   b.tags(p.ClusterName),

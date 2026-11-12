@@ -144,8 +144,8 @@ func markReady(t *testing.T, w world, obj client.Object, name string) {
 // applied only once the log group is Ready and the key has an ARN, and
 // then encrypts with that key.
 func TestLogGroupAndKeyStageBeforeTheCluster(t *testing.T) {
-	resumeAfter = 0
-	t.Cleanup(func() { resumeAfter = 2 * time.Minute })
+	resumeAfter, stageAfter = 0, 0
+	t.Cleanup(func() { resumeAfter, stageAfter = 2*time.Minute, 15*time.Second })
 	w := newWorld(t, interceptor.Funcs{}, nil)
 	ctx := t.Context()
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)

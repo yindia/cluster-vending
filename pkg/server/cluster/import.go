@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
@@ -258,19 +259,10 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, err
 	}
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	for _, r := range records {
-		if !r.CarriedOver {
-			continue // rendered: the apply below takes it over
-		}
-		if err := s.own(ctx, r); err != nil {
-			s.logger().ErrorContext(ctx, "take over resource", "cluster_id", row.ID, "object", r.Name, "error", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Sprintf("could not take over %s %s", r.Kind, r.Name))
-		}
-	}
+	// The row first: once anything is owned the cluster is no longer an
+	// imported, read-only one (deleting that leaves the cloud alone). The
+	// apply then owns the carried-over objects and renders the rest; what
+	// fails is finished by the loop.
 	imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING
 	if row.Status, err = encode(&cloudv1.ClusterStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -286,7 +278,7 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if err := s.tagSubnets(ctx, row, t); err != nil {
 		return nil, err
 	}
-	s.logger().InfoContext(ctx, "cluster taken over", "tenant_id", row.TenantID, "cluster_id", row.ID, "resources", len(records))
+	s.logger().InfoContext(ctx, "cluster taken over", "tenant_id", row.TenantID, "cluster_id", row.ID)
 	c, err := s.respond(ctx, row)
 	return &cloudv1.TakeOverClusterResponse{Cluster: c}, err
 }
@@ -314,6 +306,58 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 	return imp, nil
 }
 
+// ownCarriedOver switches the carried-over objects of a taken-over cluster
+// to full management (own). Every apply of such a cluster does it, so a
+// takeover that failed half-way is finished by the next one; an object
+// already owned is left alone. Clusters the platform created, and
+// imported ones before their takeover, have nothing to own.
+func (s *ClusterService) ownCarriedOver(ctx context.Context, row *model.Cluster) error {
+	if !row.Imported || row.State == stateImported || row.State == stateBlocked {
+		return nil
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
+	if err != nil {
+		return err
+	}
+	for _, r := range records {
+		if !r.CarriedOver {
+			continue // rendered: the apply takes it over
+		}
+		if err := s.own(ctx, r); err != nil {
+			return fmt.Errorf("%s %s: %w", r.Kind, r.Name, err)
+		}
+	}
+	return nil
+}
+
+// carriedOverConflict refuses to turn on a setting that renders an object
+// the cluster already carries over from its import: the IAM OIDC provider
+// (spec.aws.irsa) and the control plane's log group. Both would be
+// rendered under the carried-over object's name, without its cloud
+// identity.
+func (s *ClusterService) carriedOverConflict(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec) error {
+	irsa, logGroup := spec.GetAws().GetIrsa(), spec.GetAws().GetControlPlaneLogGroup().GetEnabled()
+	if !row.Imported || (!irsa && !logGroup) {
+		return nil
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
+	if err != nil {
+		return service.ToConnect(err)
+	}
+	for _, r := range records {
+		switch {
+		case !r.CarriedOver:
+		case irsa && r.Kind == "OpenIDConnectProvider":
+			return connect.NewError(connect.CodeFailedPrecondition,
+				"spec.aws.irsa: the cluster already has the IAM OIDC provider it was imported with ("+r.Name+"); it stays as it is")
+		case logGroup && r.Kind == "Group":
+			return connect.NewError(connect.CodeFailedPrecondition,
+				"spec.aws.control_plane_log_group: the cluster already has the log group it was imported with ("+r.Name+"); it stays as it is")
+		}
+	}
+	return nil
+}
+
 // own switches one carried-over object to full management, without Delete
 // for one marked crossplaneaws.RetainAnnotation.
 func (s *ClusterService) own(ctx context.Context, r model.ManagedResource) error {
@@ -332,6 +376,9 @@ func (s *ClusterService) own(ctx context.Context, r model.ManagedResource) error
 		for _, action := range crossplaneaws.PolicyNoDelete {
 			policies = append(policies, string(action))
 		}
+	}
+	if have, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "managementPolicies"); slices.Equal(have, policies) {
+		return nil
 	}
 	if err := unstructured.SetNestedStringSlice(u.Object, policies, "spec", "managementPolicies"); err != nil {
 		return err

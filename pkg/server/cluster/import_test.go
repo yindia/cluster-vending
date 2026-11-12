@@ -228,9 +228,19 @@ func TestImportClusterPlan(t *testing.T) {
 			t.Errorf("no WILL_CREATE line %s in %v", want, keys(created))
 		}
 	}
-	matches := linesBy(c, cloudv1.Disposition_DISPOSITION_MATCHES)
-	if matches["AccessEntry/tf:"+devRole+prefix+"-access-"+strings.TrimPrefix(accessEntryName(t, w, c.GetId()), prefix+"-access-")] == nil {
-		t.Errorf("the dev role's access entry is not adopted as it is: %v", keys(matches))
+	// Nothing is listed as unchanged that the takeover touches: the roles
+	// and the access entry get the platform's tags, add-ons its conflict
+	// resolution.
+	updated := linesBy(c, cloudv1.Disposition_DISPOSITION_WILL_UPDATE)
+	entry := accessEntryName(t, w, c.GetId())
+	for _, want := range []string{"Role/tf-cluster" + prefix + "-cluster-role", "Role/tf-node" + prefix + "-node-role",
+		"AccessEntry/tf:" + devRole + entry, "Addon/tf:vpc-cni" + prefix + "-addon-vpc-cni"} {
+		if updated[want] == nil {
+			t.Errorf("no WILL_UPDATE line %s in %v", want, keys(updated))
+		}
+	}
+	if l := updated["Addon/tf:vpc-cni"+prefix+"-addon-vpc-cni"]; !strings.Contains(l.GetDetail(), "OVERWRITE") {
+		t.Errorf("add-on line = %q, want it to say conflicts are overwritten", l.GetDetail())
 	}
 
 	// Observe mode: every object only reads, has its cloud identity, and

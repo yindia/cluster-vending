@@ -39,6 +39,7 @@ func TestClusterSecurityGroups(t *testing.T) {
 		{"only the cluster's interfaces", []string{"Amazon EKS tf", "Amazon EKS tf"}, false},
 		{"unused", nil, false},
 		{"another cluster's interface", []string{"Amazon EKS tf", "Amazon EKS other"}, true},
+		{"a cluster whose name starts with this one's", []string{"Amazon EKS tf", "Amazon EKS tf-2"}, true},
 		{"a load balancer", []string{"ELB app/x/1"}, true},
 	} {
 		api := &fakeEC2{interfaces: tt.interfaces}

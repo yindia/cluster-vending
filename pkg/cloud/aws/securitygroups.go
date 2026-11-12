@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"sort"
-	"strings"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -112,7 +111,8 @@ func (t *Tenant) usedByOthers(ctx context.Context, byGroup []types.Filter, clust
 			return true
 		}
 		for _, eni := range page.NetworkInterfaces {
-			if !strings.HasPrefix(awssdk.ToString(eni.Description), eksInterfacePrefix+clusterName) {
+			// Exactly: "Amazon EKS prod-2" is another cluster's, not prod's.
+			if awssdk.ToString(eni.Description) != eksInterfacePrefix+clusterName {
 				return true
 			}
 		}

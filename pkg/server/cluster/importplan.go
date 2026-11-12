@@ -116,7 +116,8 @@ func planClusterImport(in importInput) clusterImport {
 	}
 	p.plan.spec = spec
 	p.plan.adoption = crossplaneaws.Adoption{ClusterRoleName: d.Role.Name, ClusterRoleTrust: d.Role.AssumeRolePolicy,
-		NodeRoleName: d.NodeRole.Name, NodeRoleTrust: d.NodeRole.AssumeRolePolicy, ExternalNames: map[string]string{}}
+		NodeRoleName: d.NodeRole.Name, NodeRoleTrust: d.NodeRole.AssumeRolePolicy, ExternalNames: map[string]string{},
+		BootstrapAdmin: d.BootstrapAdmin}
 	base := in.base
 	base.Adoption = p.plan.adoption
 	render := clusterPlan(spec, subnetIDs, base)
@@ -393,6 +394,11 @@ func (p *importPlanner) compare(rendered *unstructured.Unstructured, g awscloud.
 	if tags > 0 {
 		changes = append(changes, fmt.Sprintf("adds %d tags (the platform's and the cluster's labels); existing tags are kept", tags))
 	}
+	if rendered.GetKind() == "Addon" {
+		// Not readable from EKS, so always said: the platform's add-ons
+		// resolve conflicts by overwriting.
+		changes = append(changes, "managed with conflict resolution OVERWRITE from now on: add-on settings changed by hand in the cluster are reset when the add-on is next updated")
+	}
 	switch {
 	case len(refused) > 0:
 		return cloudv1.Disposition_DISPOSITION_BLOCKING, "EKS cannot change " + strings.Join(refused, "; ")
@@ -422,6 +428,9 @@ func (p *importPlanner) actual(rendered *unstructured.Unstructured, g awscloud.N
 		out["vpcConfig.publicAccessCidrs"] = list(d.PublicAccessCIDRs)
 		out["vpcConfig.securityGroupIds"] = list(d.SecurityGroupIDs)
 		out["accessConfig.authenticationMode"] = d.AuthenticationMode
+		if d.BootstrapAdmin != nil {
+			out["accessConfig.bootstrapClusterCreatorAdminPermissions"] = *d.BootstrapAdmin
+		}
 		out["enabledClusterLogTypes"] = list(d.LogTypes)
 		out["upgradePolicy.supportType"] = d.SupportType
 		out["kubernetesNetworkConfig.serviceIpv4Cidr"] = d.ServiceCIDR
@@ -454,6 +463,21 @@ func (p *importPlanner) actual(rendered *unstructured.Unstructured, g awscloud.N
 				tags(a.Tags)
 			}
 		}
+	case "Role":
+		for _, role := range []awscloud.ClusterRole{d.Role, d.NodeRole} {
+			if role.Name != "" && role.Name == rendered.GetAnnotations()[crossplaneaws.ExternalNameAnnotation] {
+				tags(role.Tags)
+			}
+		}
+	case "AccessEntry":
+		principal, _, _ := unstructured.NestedString(rendered.Object, "spec", "forProvider", "principalArn")
+		for _, e := range d.AccessEntries {
+			if e.PrincipalARN == principal {
+				tags(e.Tags)
+			}
+		}
+	case "PodIdentityAssociation":
+		// Its tags are not looked up: the ones rendered count as added.
 	default:
 		return nil
 	}

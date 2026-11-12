@@ -89,10 +89,10 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 		dst.Access.AccessEntries = src.GetAccess().GetAccessEntries()
 	},
 	"spec.control_plane.endpoint_access.endpoint_private_access": func(dst, src *cloudv1.ClusterSpec) {
-		dst.ControlPlane.EndpointAccess.EndpointPrivateAccess = src.GetControlPlane().GetEndpointAccess().EndpointPrivateAccess
+		endpointAccess(dst).EndpointPrivateAccess = optionalBool(src.GetControlPlane().GetEndpointAccess(), func(a *cloudv1.EndpointAccess) *bool { return a.EndpointPrivateAccess })
 	},
 	"spec.control_plane.endpoint_access.endpoint_public_access": func(dst, src *cloudv1.ClusterSpec) {
-		dst.ControlPlane.EndpointAccess.EndpointPublicAccess = src.GetControlPlane().GetEndpointAccess().EndpointPublicAccess
+		endpointAccess(dst).EndpointPublicAccess = optionalBool(src.GetControlPlane().GetEndpointAccess(), func(a *cloudv1.EndpointAccess) *bool { return a.EndpointPublicAccess })
 	},
 	// Can be turned on, never off (UpdateCluster checks: encryptionKept).
 	pathSecretsEncryption: func(dst, src *cloudv1.ClusterSpec) {
@@ -100,7 +100,7 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	},
 	// Turned on, the OIDC provider is created; turned off, deleted.
 	"spec.aws.irsa": func(dst, src *cloudv1.ClusterSpec) {
-		dst.GetAws().Irsa = src.GetAws().Irsa
+		dst.GetAws().Irsa = optionalBool(src.GetAws(), func(a *cloudv1.AwsClusterSpec) *bool { return a.Irsa })
 	},
 	"spec.aws.control_plane_log_group": func(dst, src *cloudv1.ClusterSpec) {
 		dst.GetAws().ControlPlaneLogGroup = src.GetAws().GetControlPlaneLogGroup()
@@ -114,6 +114,25 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	"spec.aws.default_node_pool.ami_type": func(dst, src *cloudv1.ClusterSpec) {
 		awsNodePool(dst).AmiType = src.GetAws().GetDefaultNodePool().GetAmiType()
 	},
+}
+
+// optionalBool reads an optional bool of a message the request may have
+// left out altogether: then it is unset, not a nil dereference.
+func optionalBool[M any](m *M, field func(*M) *bool) *bool {
+	if m == nil {
+		return nil
+	}
+	return field(m)
+}
+
+func endpointAccess(spec *cloudv1.ClusterSpec) *cloudv1.EndpointAccess {
+	if spec.ControlPlane == nil {
+		spec.ControlPlane = &cloudv1.ControlPlaneSpec{}
+	}
+	if spec.ControlPlane.EndpointAccess == nil {
+		spec.ControlPlane.EndpointAccess = &cloudv1.EndpointAccess{}
+	}
+	return spec.ControlPlane.EndpointAccess
 }
 
 func awsNodePool(spec *cloudv1.ClusterSpec) *cloudv1.AwsNodePoolSpec {
@@ -159,6 +178,9 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), encryption(spec)
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.carriedOverConflict(ctx, row, spec); err != nil {
 		return nil, err
 	}
 	// A plan shows the refusal (REJECTED_IMMUTABLE); an update fails.

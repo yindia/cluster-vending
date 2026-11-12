@@ -99,6 +99,12 @@ func (s *ClusterService) withoutAfterActive(objects []client.Object) ([]client.O
 // rolling back) must not be raced.
 var resumeAfter = 2 * time.Minute
 
+// stageAfter is how long after a cluster row was last written the loop
+// moves a create on to its next stage. CreateCluster applies its first
+// stage within a second or two; a pass that started in that window would
+// apply alongside it, and after its rollback re-create what it removed.
+var stageAfter = 15 * time.Second
+
 // resumeCreate reports whether a cluster whose EKS cluster is not ACTIVE
 // must be applied again: a new cluster still before its EKS cluster (what
 // must exist first is being created), or a create that stopped half-way
@@ -112,8 +118,9 @@ func (s *ClusterService) resumeCreate(ctx context.Context, row *model.Cluster, r
 	}
 	if len(records) > 0 && !slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.Kind == "Cluster" }) {
 		// The stage before the EKS cluster (its log group, its encryption
-		// key): apply renders the cluster once they exist.
-		return true, nil
+		// key): apply renders the cluster once they exist. Not while the
+		// create that stored the row may still be applying or rolling back.
+		return time.Since(row.UpdatedAt) >= stageAfter, nil
 	}
 	if time.Since(row.UpdatedAt) < resumeAfter {
 		return false, nil

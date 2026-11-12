@@ -106,10 +106,8 @@ func TestNetworkSpecRoundTrips(t *testing.T) {
 }
 
 // Every field and enum value of a cluster spec comes back from the kind's
-// spec; existing_cluster, which the kind has no field for, through the
-// remainder.
+// spec, with no remainder.
 func TestClusterSpecRoundTrips(t *testing.T) {
-	sawRemainder := false
 	for k := range variants {
 		want := &cloudv1.ClusterSpec{}
 		fill(want.ProtoReflect(), k)
@@ -120,14 +118,10 @@ func TestClusterSpecRoundTrips(t *testing.T) {
 		if spec.Network.NetworkRef.Name != "shared" {
 			t.Fatalf("variant %d: networkRef %q", k, spec.Network.NetworkRef.Name)
 		}
-		if (remainder != nil) != (want.GetExistingCluster() != nil) {
-			t.Errorf("variant %d: remainder %v for existing_cluster %v", k, remainder, want.GetExistingCluster())
+		if remainder != nil {
+			t.Errorf("variant %d: remainder %v", k, remainder)
 		}
-		sawRemainder = sawRemainder || remainder != nil
 		diff(t, fmt.Sprintf("cluster spec %d", k), convert.ClusterSpecFromAPI(spec, want.GetNetwork().GetNetworkId(), remainder), want)
-	}
-	if !sawRemainder {
-		t.Error("no variant had an existing_cluster")
 	}
 }
 

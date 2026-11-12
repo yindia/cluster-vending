@@ -5,7 +5,6 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/access.proto";
 import "cloud/v1/aws.proto";
-import "cloud/v1/cluster_import.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
 import "cloud/v1/import.proto";
@@ -26,10 +25,13 @@ message Cluster {
 
   // Name chosen by the client: DNS-label safe. It is the cloud cluster's
   // name (AWS: the EKS cluster name), so it must be unique per account and
-  // region: CreateCluster fails with ALREADY_EXISTS when the platform or
-  // anyone else already has a cluster of that name there. The cluster's
-  // other cloud and Kubernetes resources are named "<name>-<hash8>-...".
-  // Immutable.
+  // region. CreateCluster fails with ALREADY_EXISTS when a cluster of the
+  // platform already has it (the database store checks the account and
+  // region; the Kubernetes store, where the name is the Cluster object's,
+  // the tenant). A cluster of the name that the platform did not create is
+  // found by the controller before anything is created: the new cluster
+  // becomes FAILED. The cluster's other cloud and Kubernetes resources are
+  // named "<name>-<hash8>-...". Immutable.
   string name = 11 [(buf.validate.field).string = {
     min_len: 1
     max_len: 40
@@ -186,10 +188,12 @@ message ClusterSpec {
   // Who administers the cluster. Mutable.
   AccessSpec access = 6;
 
-  // Not implemented: clusters built outside the platform are imported with
-  // ClusterService.ImportCluster and TakeOverCluster. CreateCluster and
-  // UpdateCluster refuse this field.
-  ExistingCluster existing_cluster = 7;
+  // existing_cluster was an import mode that was never implemented;
+  // clusters built outside the platform are imported with
+  // ClusterService.ImportCluster and TakeOverCluster. A binary request
+  // that still carries field 7 is refused (UNIMPLEMENTED); JSON drops it.
+  reserved 7;
+  reserved "existing_cluster";
 
   // Which platform releases the cluster receives: how early it gets a new
   // version of what the platform runs on its clusters. It is not the
@@ -277,8 +281,10 @@ message ClusterStatus {
   // means the latest change has not been observed yet.
   int64 observed_generation = 3;
 
-  // Fine-grained conditions ("NetworkReady", "ControlPlaneReady",
-  // "NodePoolReady"), derived from Crossplane Ready/Synced conditions.
+  // Conditions derived from the managed resources' Crossplane conditions:
+  // "Ready" (every resource is ready) and "Synced" (false when a resource
+  // failed, with its error), plus "Reconciled" (false when the platform's
+  // last attempt to apply the spec failed, with the reason).
   repeated Condition conditions = 4;
 
   // Kubernetes API server connection details, once the control plane is
@@ -309,11 +315,10 @@ message ClusterStatus {
   // record after the takeover.
   ImportStatus import = 13;
 
-  // Resources carried over from an import (disposition CARRIED_OVER, e.g.
-  // security groups, the KMS key, the OIDC provider, launch-template node
-  // groups): owned with the cluster and deleted with it, but not editable
-  // through the API. Permanent: it outlives the import. Empty for clusters
-  // the platform created.
+  // Not filled. Carried-over resources (disposition CARRIED_OVER, e.g.
+  // security groups, the KMS key, the OIDC provider: owned with the cluster
+  // and deleted with it, not editable through the API) are listed in
+  // import.resources and in managed_resources.
   repeated ImportedResource carried_over = 14;
 
   // Every managed resource of the cluster (IAM roles, the EKS cluster, the

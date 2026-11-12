@@ -9,7 +9,8 @@ import "google/protobuf/timestamp.proto";
 
 // TenantService onboards tenants' cloud accounts. A tenant can have any
 // number of accounts, on any provider; an account must be bootstrapped
-// before a network is created or imported in it (NetworkSpec.account_id).
+// before a network is created or imported in it (NetworkSpec.bootstrap_id
+// is the account's CloudAccount.id).
 service TenantService {
   // Registers one of the tenant's cloud accounts, stores it, and creates in
   //   the management cluster:
@@ -21,15 +22,18 @@ service TenantService {
   //     (status.provider_config_name).
   //
   // The Crossplane providers and their runtime config (AWS: IRSA as the
-  // management role) are installed by the platform, not here; without them
-  // the call fails with FAILED_PRECONDITION. The tenant must already have
-  // given the platform admin access to the account (AWS: the tenant role
-  // exists and trusts the management role).
+  // management role) are installed by the controller, not here; while the
+  // provider's ProviderConfig kind is missing the call fails with
+  // FAILED_PRECONDITION. The tenant must already have given the platform
+  // admin access to the account (AWS: the tenant role exists and trusts the
+  // management role); the call does not check it.
   //
   // Idempotent: calling it again for the same account updates its name and
   // converges the resources again. Another account ID adds an account. The
-  // result is asynchronous: account.status.state becomes READY once the
-  // credential works.
+  // account is READY once the namespace and ProviderConfig are applied;
+  // whether the tenant role can be assumed is not verified here (condition
+  // AccessVerified is UNKNOWN): a role that cannot be assumed shows up as
+  // errors on the managed resources of the account's networks.
   rpc BootstrapTenant(BootstrapTenantRequest) returns (BootstrapTenantResponse) {
     option idempotency_level = IDEMPOTENT;
   }
@@ -142,11 +146,12 @@ message AwsAccount {
 // CloudAccountState is the coarse state of a tenant's cloud account.
 enum CloudAccountState {
   CLOUD_ACCOUNT_STATE_UNSPECIFIED = 0;
-  // The namespace, runtime config and credential are being created.
+  // Not reported yet: bootstrap is applied by the call itself.
   CLOUD_ACCOUNT_STATE_BOOTSTRAPPING = 1;
-  // The credential is in place and works.
+  // The namespace and the credential (AWS: ProviderConfig) are applied.
+  // The credential itself is not verified (condition AccessVerified).
   CLOUD_ACCOUNT_STATE_READY = 2;
-  // See status.conditions; typically the tenant role cannot be assumed.
+  // Not reported yet: a failed bootstrap is the call's error.
   CLOUD_ACCOUNT_STATE_FAILED = 3;
 }
 

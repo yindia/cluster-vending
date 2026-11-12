@@ -27,7 +27,8 @@ type CreateNetworkRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Same rules as CreateClusterRequest.tenant_id.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// id and spec are required; output-only fields are ignored.
+	// name and spec are required; id and the other output-only fields are
+	// assigned by the server and ignored here.
 	Network *Network `protobuf:"bytes,2,opt,name=network,proto3" json:"network,omitempty"`
 	// Optional idempotency key.
 	RequestId     string `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -254,8 +255,9 @@ func (*ImportNetworkRequest_Aws) isImportNetworkRequest_Provider() {}
 
 type ImportNetworkResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// spec derived from the imported resources; status.import holds the plan
-	// (phase DISCOVERING until discovery finishes).
+	// The stored import: state IMPORTED, status.import.phase DISCOVERING.
+	// The controller then fills spec from the imported resources and
+	// status.import with the plan.
 	Network       *Network `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

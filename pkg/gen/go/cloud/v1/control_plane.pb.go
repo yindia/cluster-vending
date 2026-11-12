@@ -24,13 +24,14 @@ const (
 
 // ControlPlaneSpec is the provider-neutral control plane contract.
 //
-//	AWS   eks.aws.upbound.io/v1beta2 Cluster
+//	AWS   eks.aws.m.upbound.io/v1beta1 Cluster (namespaced)
 //	GCP   container.gcp.upbound.io Cluster
 //	Azure containerservice.azure.upbound.io KubernetesCluster
 type ControlPlaneSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Kubernetes minor version, e.g. "1.33". Defaults to the newest version the
-	// server supports for the provider. Can only be increased. The server pins
+	// Kubernetes minor version, e.g. "1.33". Defaults to the provider's
+	// default version (AWS: the version EKS marks as default, looked up by
+	// the controller before the cluster is created). Can only be increased. The server pins
 	// the default node pool to the same version, so an upgrade rolls the
 	// control plane first, then the nodes.
 	//

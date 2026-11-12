@@ -274,8 +274,10 @@ type Network struct {
 	// Output only. Assigned by the server on create (UUID); every other call
 	// and ClusterNetwork.network_id refer to the network by it.
 	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	// Name chosen by the client: DNS-label safe, not unique. Prefix of the
-	// network's cloud and Kubernetes resource names
+	// Name chosen by the client: DNS-label safe. The database store allows
+	// two networks of a name; the Kubernetes store, where the name is the
+	// Network object's, makes it unique per tenant (ALREADY_EXISTS). Prefix
+	// of the network's cloud and Kubernetes resource names
 	// ("<name>-<hash8>-<suffix>"). Immutable.
 	Name        string `protobuf:"bytes,11,opt,name=name,proto3" json:"name,omitempty"`
 	DisplayName string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
@@ -512,8 +514,9 @@ type ClusterNetwork struct {
 	//	GCP   Subnetwork.secondaryIpRange "pods" (+ Cluster.ipAllocationPolicy)
 	//	Azure networkProfile.podCidr (Azure CNI Overlay)
 	PodCidr string `protobuf:"bytes,3,opt,name=pod_cidr,json=podCidr,proto3" json:"pod_cidr,omitempty"`
-	// IPv4 range for Kubernetes Service IPs. Immutable, per cluster. Defaults
-	// to a server-chosen range that does not overlap the network.
+	// IPv4 range for Kubernetes Service IPs. Immutable, per cluster. Empty
+	// leaves it to the provider (AWS: EKS picks 10.100.0.0/16 or
+	// 172.20.0.0/16, whichever does not overlap the VPC).
 	//
 	//	AWS   Cluster.kubernetesNetworkConfig.serviceIpv4Cidr (/12 to /24)
 	//	GCP   Subnetwork.secondaryIpRange "services"
@@ -830,7 +833,8 @@ type NetworkStatus struct {
 	State              NetworkState           `protobuf:"varint,1,opt,name=state,proto3,enum=cloud.v1.NetworkState" json:"state,omitempty"`
 	Message            string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	ObservedGeneration int64                  `protobuf:"varint,3,opt,name=observed_generation,json=observedGeneration,proto3" json:"observed_generation,omitempty"`
-	Conditions         []*Condition           `protobuf:"bytes,4,rep,name=conditions,proto3" json:"conditions,omitempty"`
+	// "Ready", "Synced" and "Reconciled", as ClusterStatus.conditions.
+	Conditions []*Condition `protobuf:"bytes,4,rep,name=conditions,proto3" json:"conditions,omitempty"`
 	// Cloud IDs and egress IPs, read from the managed resources'
 	// status.atProvider.
 	Resources *NetworkResources `protobuf:"bytes,5,opt,name=resources,proto3" json:"resources,omitempty"`
@@ -840,9 +844,9 @@ type NetworkStatus struct {
 	// Set for imported networks: the plan from ImportNetwork, kept as a
 	// record after the takeover.
 	Import *ImportStatus `protobuf:"bytes,7,opt,name=import,proto3" json:"import,omitempty"`
-	// Resources carried over from an import (disposition CARRIED_OVER): owned
-	// with the network and deleted with it, but not editable through the API.
-	// Empty for networks the platform created.
+	// Not filled. Carried-over resources (disposition CARRIED_OVER: owned with
+	// the network and deleted with it, not editable through the API) are
+	// listed in import.resources and in managed_resources.
 	CarriedOver []*ImportedResource `protobuf:"bytes,8,rep,name=carried_over,json=carriedOver,proto3" json:"carried_over,omitempty"`
 	// Every managed resource of the network (VPC, subnets, NAT gateways,
 	// routes, ...) with its Kubernetes name, cloud ID and state, in creation

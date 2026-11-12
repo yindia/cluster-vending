@@ -13,9 +13,9 @@ import "google/protobuf/field_mask.proto";
 // built with Terraform) and takes it over so the previous tool can be
 // removed. Clusters reference networks through ClusterSpec.network.network_id.
 //
-// Like ClusterService, every RPC is scoped by tenant_id (authorized against
-// the caller), and mutations are asynchronous: poll GetNetwork until
-// status.observed_generation catches up and status.state is READY.
+// Like ClusterService, every RPC is scoped by tenant_id (not authenticated
+// yet, see ClusterService), and mutations are asynchronous: poll GetNetwork
+// until status.observed_generation catches up and status.state is READY.
 service NetworkService {
   // Creates a network.
   rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
@@ -60,8 +60,9 @@ service NetworkService {
   // ADDED event per managed resource, then a message whenever something
   // changes (the network's state or message, or a resource's), until the
   // network is deleted (deleted: true) or the client cancels. NOT_FOUND
-  // when the network does not exist. Like GetNetwork, reading a deleting
-  // network moves its deletion on.
+  // when the network does not exist. It reads the stored network (what
+  // GetNetwork returns) every five seconds and changes nothing; the
+  // controller moves the network on, also a deletion.
   rpc WatchNetwork(WatchNetworkRequest) returns (stream WatchNetworkResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -90,7 +91,8 @@ message CreateNetworkRequest {
     max_len: 56
     pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
   }];
-  // id and spec are required; output-only fields are ignored.
+  // name and spec are required; id and the other output-only fields are
+  // assigned by the server and ignored here.
   Network network = 2 [(buf.validate.field).required = true];
   // Optional idempotency key.
   string request_id = 3 [
@@ -153,8 +155,9 @@ message ImportNetworkRequest {
 }
 
 message ImportNetworkResponse {
-  // spec derived from the imported resources; status.import holds the plan
-  // (phase DISCOVERING until discovery finishes).
+  // The stored import: state IMPORTED, status.import.phase DISCOVERING.
+  // The controller then fills spec from the imported resources and
+  // status.import with the plan.
   Network network = 1;
 }
 

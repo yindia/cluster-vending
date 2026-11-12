@@ -51,7 +51,8 @@ func TestApplyMask(t *testing.T) {
 		t.Errorf("max < min: err = %v, want invalid_argument", err)
 	}
 	for path, code := range map[string]connect.Code{"spec.region": connect.CodeInvalidArgument,
-		"spec.existing_cluster": connect.CodeUnimplemented} {
+		"spec.existing_cluster":                      connect.CodeInvalidArgument,
+		"spec.aws.access_config.authentication_mode": connect.CodeUnimplemented} {
 		if _, err := applyMask(row, newSpec(), in, []string{path}); connect.CodeOf(err) != code {
 			t.Errorf("%s: err = %v, want %v", path, err, code)
 		}

@@ -40,7 +40,6 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `conditions.proto` | `Condition`, `ConditionStatus` |
 | `options.proto` | The `(cloud.v1.crossplane)` enum value option |
 | `admin_service.proto` | `AdminService` (operators only) |
-| `cluster_import.proto` | `ExistingCluster`: declared, not implemented (see [Declared but not implemented](#declared-but-not-implemented)) |
 
 ## Services and RPCs
 
@@ -49,9 +48,9 @@ whole. What individual fields and values are refused is listed under
 [Declared but not implemented](#declared-but-not-implemented).
 
 All tenant-facing RPCs carry `tenant_id` (a DNS label of at most 56
-characters, so the namespace `tenant-<tenant_id>` fits 63). The contract
-says the server must authorize it against the caller; the server does not
-authenticate callers yet.
+characters, so the namespace `tenant-<tenant_id>` fits 63). Callers are
+not authenticated yet: the server takes `tenant_id` as given, and the
+service comments say so.
 
 ### TenantService
 
@@ -281,8 +280,8 @@ spec.aws.default_node_pool.ami_type
 ```
 
 `pkg/server/cluster/mutate.go` (`specPaths`) is the source of this list. Any
-other path is `INVALID_ARGUMENT`, except `spec.existing_cluster...` and
-`spec.aws.access_config.authentication_mode`, which are `UNIMPLEMENTED`.
+other path is `INVALID_ARGUMENT`, except
+`spec.aws.access_config.authentication_mode`, which is `UNIMPLEMENTED`.
 The merged cluster is validated against the contract again. An `IMPORTED`
 cluster cannot be updated until it is taken over.
 
@@ -402,7 +401,13 @@ for (for example node groups during a Kubernetes upgrade).
    names mirror the provider's `spec.forProvider`.
 2. **Additive only.** Fields are added with the next free number; nothing is
    renumbered or retyped. A removed field has its number and name
-   `reserved` (`ClusterSpec` 5 `tags`, `NetworkSpec` 3 `tags` and 10 `aws`).
+   `reserved` (`ClusterSpec` 5 `tags` and 7 `existing_cluster`,
+   `NetworkSpec` 3 `tags` and 10 `aws`). `existing_cluster` was an import
+   mode that was never implemented; clusters import with `ImportCluster`
+   and `TakeOverCluster`. A binary request that still sends field 7 is
+   refused with `UNIMPLEMENTED` rather than creating a new cluster; the
+   JSON codec drops unknown fields, so a JSON request that sends it is
+   treated as a plain create.
    `buf breaking` runs with `WIRE_JSON`, which protects binary and JSON
    clients and allows deleting a reserved field.
 3. **New booleans are `optional`** when unset must differ from false
@@ -455,7 +460,7 @@ interceptor map to the same codes.
 | `ALREADY_EXISTS` | A cluster of the platform with that name in the account and region; a VPC that a network already stands for (also a blocked or failed import); a reused `request_id`. |
 | `ABORTED` | The `etag` does not match, or the resource changed while the call ran. Get it again and retry. |
 | `UNAVAILABLE` | The management cluster cannot be reached. |
-| `UNIMPLEMENTED` | Valid in the contract and not built: a provider other than AWS, `REGIONAL` NAT, `spec.existing_cluster`, updating the authentication mode. |
+| `UNIMPLEMENTED` | Valid in the contract and not built: a provider other than AWS, `REGIONAL` NAT, updating the authentication mode. Also a binary `CreateCluster` that still carries the removed `ClusterSpec` field 7 (`existing_cluster`). |
 | `INTERNAL` | The platform failed. The message carries no detail; the cause is in the server log. |
 
 No call fails because of the cloud. These are a resource's status after the
@@ -638,12 +643,11 @@ region and zone catalog next to `pkg/constant/aws`.
 
 | In the contract | What the server does |
 |---|---|
-| `ClusterSpec.existing_cluster` and `cluster_import.proto` (`ExistingCluster`, its policies) | `CreateCluster` and `UpdateCluster` refuse the field with `UNIMPLEMENTED`. Clusters are imported with `ImportCluster` and `TakeOverCluster`. The messages stay so the wire format does not change; they can be reserved once no client sends them (`ClusterSpec` 7, as `cluster_import.proto` describes). |
 | Updating `spec.aws.access_config.authentication_mode` | `UNIMPLEMENTED`. It can be set at creation. |
 | `NAT_GATEWAY_MODE_REGIONAL` | `UNIMPLEMENTED` for AWS. |
 | Providers other than AWS (`gcp`, `azure`) | No message exists; only `aws` can be set. Accounts, networks and clusters of another provider are refused. |
 | `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
 | `spec.release_channel`, `spec.tier` | Stored and returned; nothing acts on them and they cannot be updated. |
-| `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
-| Caller authorization of `tenant_id` | Not implemented: the server trusts the `tenant_id` of the request. |
-| `ImportedResource` lists in `NetworkStatus.carried_over` and `ClusterStatus.carried_over` | Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |
+| `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set, as their comments say: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
+| Caller authorization of `tenant_id` | Not implemented, as the service comments say: the server trusts the `tenant_id` of the request. |
+| `NetworkStatus.carried_over`, `ClusterStatus.carried_over` | Never filled, as their comments say. Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |

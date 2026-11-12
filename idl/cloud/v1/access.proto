@@ -5,10 +5,11 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/options.proto";
 
-// AccessSpec controls who can use the Kubernetes API. The server's own
-// provisioning identity is always an admin (AWS:
+// AccessSpec controls who can use the Kubernetes API. On a cluster the
+// platform creates, its own provisioning identity is an admin (AWS:
 // accessConfig.bootstrapClusterCreatorAdminPermissions = true); it is not
-// listed here.
+// listed here. An imported cluster keeps the value it had (EKS cannot
+// change it).
 message AccessSpec {
   // Principals granted cluster-admin, in the provider's native form. Mutable;
   // removing a principal revokes its access.

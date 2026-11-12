@@ -188,8 +188,9 @@ func (x *AwsImportCluster) GetDefaultNodeGroupName() string {
 
 type ImportClusterResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// spec derived from the imported resources; status.import holds the
-	// plan.
+	// The stored import: state IMPORTED, status.import.phase DISCOVERING.
+	// The controller then fills spec from the imported resources and
+	// status.import with the plan.
 	Cluster       *Cluster `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -353,8 +354,8 @@ type CreateClusterRequest struct {
 	// Tenant scope. DNS label, at most 56 chars so the tenant namespace
 	// "tenant-<id>" fits the 63-char Kubernetes limit.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// The cluster to create. id and spec are required; output-only fields are
-	// ignored.
+	// The cluster to create. name and spec are required; id and the other
+	// output-only fields are assigned by the server and ignored here.
 	Cluster *Cluster `protobuf:"bytes,2,opt,name=cluster,proto3" json:"cluster,omitempty"`
 	// Optional idempotency key. Retrying with the same key returns the
 	// original result instead of ALREADY_EXISTS.
@@ -909,9 +910,13 @@ type UpdateClusterRequest struct {
 	//
 	//	display_name
 	//	labels         (also re-tags every cloud resource)
-	//	spec.control_plane.kubernetes_version
+	//	spec.control_plane.kubernetes_version          (one minor at a time, up only)
 	//	spec.control_plane.endpoint_access.public_access_cidrs
-	//	spec.control_plane.secrets_encryption.enabled   (false -> true only)
+	//	spec.control_plane.endpoint_access.endpoint_private_access
+	//	spec.control_plane.endpoint_access.endpoint_public_access
+	//	spec.control_plane.secrets_encryption  (the whole message; it can be
+	//	                                        turned on, never off or moved
+	//	                                        to another key)
 	//	spec.default_node_pool.scaling_config.min_size
 	//	spec.default_node_pool.scaling_config.max_size
 	//	spec.default_node_pool.labels
@@ -919,21 +924,22 @@ type UpdateClusterRequest struct {
 	//	spec.default_node_pool.instance_types
 	//	spec.default_node_pool.capacity_type
 	//	spec.default_node_pool.disk_size_gb
-	//	  (EKS cannot change these in place: a new node group is created and
-	//	  the old one is deleted once the new one is ready)
+	//	spec.aws.default_node_pool.ami_type
+	//	spec.aws.default_node_pool.launch_template
+	//	  (EKS cannot change these five in place: a new node group is created
+	//	  and the old one is deleted once the new one is ready)
 	//	spec.aws.addons                                 (the whole list)
 	//	spec.aws.enabled_cluster_log_types
 	//	spec.aws.upgrade_policy.support_type
-	//	spec.aws.access_config.authentication_mode  (API_AND_CONFIG_MAP -> API only)
+	//	spec.aws.irsa
+	//	spec.aws.control_plane_log_group
 	//	spec.access.admin_principals
-	//	spec.existing_cluster.policy                    (temporary)
-	//	spec.existing_cluster.acknowledge_not_imported  (temporary)
-	//	spec.existing_cluster  cleared, to finish an import: needs policy FULL
-	//	                       and status.import.phase CONVERGED (temporary)
+	//	spec.access.access_entries
 	//
-	// Any other path (region, network, instance types, ...) fails with
-	// INVALID_ARGUMENT. A listed path can still fail with FAILED_PRECONDITION
-	// when the cluster's current state does not allow the change.
+	// spec.aws.access_config.authentication_mode fails with UNIMPLEMENTED.
+	// Any other path (region, network, ...) fails with INVALID_ARGUMENT. A
+	// listed path can still fail with FAILED_PRECONDITION when the cluster's
+	// current state does not allow the change.
 	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,3,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	// Plan only: validate the update and return what it would do
 	// (UpdateClusterResponse.plan), changing nothing.

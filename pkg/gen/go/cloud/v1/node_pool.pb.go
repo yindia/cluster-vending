@@ -132,7 +132,7 @@ func (TaintEffect) EnumDescriptor() ([]byte, []int) {
 // NodePoolSpec is the provider-neutral node pool contract. It is always a
 // separate node pool resource, never a pool embedded in the cluster:
 //
-//	AWS   eks.aws.upbound.io NodeGroup
+//	AWS   eks.aws.m.upbound.io NodeGroup (namespaced)
 //	GCP   container.gcp.upbound.io NodePool (the Cluster is created with
 //	      removeDefaultNodePool = true)
 //	Azure containerservice.azure.upbound.io KubernetesClusterNodePool,

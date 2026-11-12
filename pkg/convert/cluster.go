@@ -15,8 +15,10 @@ import (
 // of the kind that are not in the contract's spec (displayName, tags,
 // importFrom) are the caller's to set.
 //
-// The remainder is what the kind has no field for: existing_cluster (an
-// import mode the API does not implement). It is nil when there is none.
+// The remainder is what the kind has no field for. Every field of the
+// contract's ClusterSpec has one now, so it is always nil; it stays in the
+// signature so the store's remainder annotation keeps one shape for
+// networks and clusters.
 func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1.ClusterSpec, *cloudv1.ClusterSpec) {
 	n := p.GetNetwork()
 	spec := cloudv1alpha1.ClusterSpec{
@@ -32,16 +34,14 @@ func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1
 		Tier:            cloudv1alpha1.ClusterTier(camel(p.GetTier(), prefixTier)),
 		AWS:             awsToAPI(p.GetAws()),
 	}
-	if p.GetExistingCluster() == nil {
-		return spec, nil
-	}
-	return spec, &cloudv1.ClusterSpec{ExistingCluster: p.GetExistingCluster()}
+	return spec, nil
 }
 
 // ClusterSpecFromAPI is the contract spec of a kind's spec. networkID is
-// the row ID of the network the spec's networkRef names; remainder is
-// what ClusterSpecToAPI returned for the stored spec (nil for none).
-func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, remainder *cloudv1.ClusterSpec) *cloudv1.ClusterSpec {
+// the row ID of the network the spec's networkRef names. The last
+// argument is what ClusterSpecToAPI returned as the remainder; it has
+// nothing to carry (see there) and is ignored.
+func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, _ *cloudv1.ClusterSpec) *cloudv1.ClusterSpec {
 	p := &cloudv1.ClusterSpec{
 		Region: s.Region,
 		Network: &cloudv1.ClusterNetwork{
@@ -51,7 +51,6 @@ func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, remainder
 		ControlPlane:    controlPlaneFromAPI(s.ControlPlane),
 		DefaultNodePool: nodePoolFromAPI(s.DefaultNodePool),
 		Access:          accessFromAPI(s.Access),
-		ExistingCluster: remainder.GetExistingCluster(),
 		ReleaseChannel: cloudv1.ReleaseChannel(uncamel(
 			cloudv1.ReleaseChannel(0).Descriptor(), prefixReleaseChannel, string(s.ReleaseChannel))),
 		Tier: cloudv1.ClusterTier(uncamel(cloudv1.ClusterTier(0).Descriptor(), prefixTier, string(s.Tier))),

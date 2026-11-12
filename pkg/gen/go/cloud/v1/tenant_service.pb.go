@@ -28,11 +28,12 @@ type CloudAccountState int32
 
 const (
 	CloudAccountState_CLOUD_ACCOUNT_STATE_UNSPECIFIED CloudAccountState = 0
-	// The namespace, runtime config and credential are being created.
+	// Not reported yet: bootstrap is applied by the call itself.
 	CloudAccountState_CLOUD_ACCOUNT_STATE_BOOTSTRAPPING CloudAccountState = 1
-	// The credential is in place and works.
+	// The namespace and the credential (AWS: ProviderConfig) are applied.
+	// The credential itself is not verified (condition AccessVerified).
 	CloudAccountState_CLOUD_ACCOUNT_STATE_READY CloudAccountState = 2
-	// See status.conditions; typically the tenant role cannot be assumed.
+	// Not reported yet: a failed bootstrap is the call's error.
 	CloudAccountState_CLOUD_ACCOUNT_STATE_FAILED CloudAccountState = 3
 )
 

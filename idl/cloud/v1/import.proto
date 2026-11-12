@@ -22,17 +22,16 @@ package cloud.v1;
 //     never the server default. Only fields that are set can change.
 //   - Tags are kept. Every existing tag (e.g. Name, karpenter.sh/discovery,
 //     kubernetes.io/cluster/<name>) survives the takeover; the platform only
-//     adds its own ownership tags and spec.tags on top. Removing a key from
-//     spec.tags later removes only that key, never a tag the platform did
-//     not add.
+//     adds its own ownership tags and the resource's labels (the tags it
+//     manages) on top. Removing a label later removes only that tag,
+//     never a tag that came with the import.
 //   - Closure: everything an imported resource references is imported too.
 //     What the contract models becomes part of the spec; the rest is
 //     CARRIED_OVER (verbatim, owned, not editable through the API), so the
 //     previous tool has nothing left to manage. Resources that only
 //     reference the imported ones (e.g. a database security group allowing
 //     the node group) stay with their owner and are listed as NOT_IMPORTED.
-// Used by NetworkService.ImportNetwork (permanent) and by
-// ClusterSpec.existing_cluster (temporary, see cluster_import.proto).
+// Used by NetworkService.ImportNetwork and ClusterService.ImportCluster.
 
 // ImportPhase is where an import stands.
 enum ImportPhase {

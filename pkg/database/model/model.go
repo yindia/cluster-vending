@@ -223,8 +223,8 @@ type Cluster struct {
 	// Provider must match the network's; the repository checks it.
 	Provider Provider `gorm:"size:16;not null;check:chk_clusters_provider,provider IN ('aws','gcp','azure')"`
 	Region   string   `gorm:"size:64;not null;uniqueIndex:idx_clusters_account_region_name,where:deleted_at IS NULL AND cloud_account_id <> ''"`
-	// Imported is true while spec.existing_cluster is set (temporary
-	// cluster import).
+	// Imported is true for a cluster that came in through ImportCluster,
+	// also after its takeover.
 	Imported bool `gorm:"not null;default:false"`
 	// Adoption is what an imported cluster keeps of the resources it was
 	// imported from that its spec cannot say (JSON

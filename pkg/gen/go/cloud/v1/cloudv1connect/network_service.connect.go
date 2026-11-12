@@ -159,8 +159,9 @@ type NetworkServiceClient interface {
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the network's state or message, or a resource's), until the
 	// network is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the network does not exist. Like GetNetwork, reading a deleting
-	// network moves its deletion on.
+	// when the network does not exist. It reads the stored network (what
+	// GetNetwork returns) every five seconds and changes nothing; the
+	// controller moves the network on, also a deletion.
 	WatchNetwork(context.Context, *v1.WatchNetworkRequest) (NetworkServiceWatchNetworkClientStream, error)
 	// Lists a tenant's networks, oldest first (ids are time-ordered UUIDs).
 	ListNetworks(context.Context, *v1.ListNetworksRequest) (*v1.ListNetworksResponse, error)
@@ -236,8 +237,9 @@ type NetworkServiceHandler interface {
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the network's state or message, or a resource's), until the
 	// network is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the network does not exist. Like GetNetwork, reading a deleting
-	// network moves its deletion on.
+	// when the network does not exist. It reads the stored network (what
+	// GetNetwork returns) every five seconds and changes nothing; the
+	// controller moves the network on, also a deletion.
 	WatchNetwork(context.Context, *v1.WatchNetworkRequest, NetworkServiceWatchNetworkServerStream) error
 	// Lists a tenant's networks, oldest first (ids are time-ordered UUIDs).
 	ListNetworks(context.Context, *v1.ListNetworksRequest) (*v1.ListNetworksResponse, error)

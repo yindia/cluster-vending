@@ -300,8 +300,8 @@ func (AwsAmiType) EnumDescriptor() ([]byte, []int) {
 
 // AWS-only settings. Everything with a cross-cloud equivalent lives in the
 // common ClusterSpec; this message only carries EKS knobs that have none.
-// Field names and nesting mirror provider-upjet-aws eks.aws.upbound.io/v1beta2
-// Cluster and NodeGroup `spec.forProvider`.
+// Field names and nesting mirror provider-upjet-aws's namespaced
+// eks.aws.m.upbound.io/v1beta1 Cluster and NodeGroup `spec.forProvider`.
 type AwsClusterSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Cluster.accessConfig

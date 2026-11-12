@@ -127,8 +127,8 @@ var (
 type ClusterServiceClient interface {
 	// Creates a cluster. The call stores it (PROVISIONING) and returns; the
 	// API server does not look at the cloud. Returns ALREADY_EXISTS if a
-	// cluster of the platform already has the name in the account and
-	// region, unless request_id matches the original request. Whether EKS
+	// cluster of the platform already has the name (see Cluster.name for
+	// where), unless request_id matches the original request. Whether EKS
 	// has a cluster of the name that the platform did not create, and which
 	// Kubernetes and add-on versions EKS offers, is checked by the
 	// controller before it creates anything: a taken name or a version EKS
@@ -136,7 +136,7 @@ type ClusterServiceClient interface {
 	// with the reason in status.message. The versions the controller
 	// resolved are written to spec (control_plane.kubernetes_version, the
 	// add-ons' versions). Clusters built outside the platform are imported
-	// with ImportCluster; spec.existing_cluster is refused.
+	// with ImportCluster and TakeOverCluster.
 	CreateCluster(context.Context, *v1.CreateClusterRequest) (*v1.CreateClusterResponse, error)
 	// Imports an existing cluster read-only. The call only stores the import
 	// and returns: the cluster is IMPORTED with status.import.phase
@@ -186,14 +186,16 @@ type ClusterServiceClient interface {
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the cluster's state or message, or a resource's), until the
 	// cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the cluster does not exist. It reads the live status, like
-	// GetClusterStatus, and changes nothing: the background loop moves the
-	// cluster on.
+	// when the cluster does not exist. It reads the stored cluster (what
+	// GetCluster returns) every five seconds and changes nothing; the
+	// controller moves the cluster on and records its status.
 	WatchCluster(context.Context, *v1.WatchClusterRequest) (ClusterServiceWatchClusterClientStream, error)
 	// Removes the cluster, all its node pools, and every cloud resource the
-	// platform owns for it. A shared Network (network.network_id) is not deleted. For
-	// an imported cluster, spec.existing_cluster.policy decides whether the
-	// imported resources are deleted (FULL) or left in place.
+	// platform owns for it. A shared Network (network.network_id) is not
+	// deleted. An imported cluster that was not taken over owns nothing: its
+	// Observe-only objects are removed and the cloud resources stay. A
+	// taken-over cluster is deleted like a created one, except for resources
+	// the import marked as shared (retained), which stay.
 	DeleteCluster(context.Context, *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error)
 }
 
@@ -228,8 +230,8 @@ func (s ClusterServiceWatchClusterClientStream) Close() error {
 type ClusterServiceHandler interface {
 	// Creates a cluster. The call stores it (PROVISIONING) and returns; the
 	// API server does not look at the cloud. Returns ALREADY_EXISTS if a
-	// cluster of the platform already has the name in the account and
-	// region, unless request_id matches the original request. Whether EKS
+	// cluster of the platform already has the name (see Cluster.name for
+	// where), unless request_id matches the original request. Whether EKS
 	// has a cluster of the name that the platform did not create, and which
 	// Kubernetes and add-on versions EKS offers, is checked by the
 	// controller before it creates anything: a taken name or a version EKS
@@ -237,7 +239,7 @@ type ClusterServiceHandler interface {
 	// with the reason in status.message. The versions the controller
 	// resolved are written to spec (control_plane.kubernetes_version, the
 	// add-ons' versions). Clusters built outside the platform are imported
-	// with ImportCluster; spec.existing_cluster is refused.
+	// with ImportCluster and TakeOverCluster.
 	CreateCluster(context.Context, *v1.CreateClusterRequest) (*v1.CreateClusterResponse, error)
 	// Imports an existing cluster read-only. The call only stores the import
 	// and returns: the cluster is IMPORTED with status.import.phase
@@ -287,14 +289,16 @@ type ClusterServiceHandler interface {
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the cluster's state or message, or a resource's), until the
 	// cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the cluster does not exist. It reads the live status, like
-	// GetClusterStatus, and changes nothing: the background loop moves the
-	// cluster on.
+	// when the cluster does not exist. It reads the stored cluster (what
+	// GetCluster returns) every five seconds and changes nothing; the
+	// controller moves the cluster on and records its status.
 	WatchCluster(context.Context, *v1.WatchClusterRequest, ClusterServiceWatchClusterServerStream) error
 	// Removes the cluster, all its node pools, and every cloud resource the
-	// platform owns for it. A shared Network (network.network_id) is not deleted. For
-	// an imported cluster, spec.existing_cluster.policy decides whether the
-	// imported resources are deleted (FULL) or left in place.
+	// platform owns for it. A shared Network (network.network_id) is not
+	// deleted. An imported cluster that was not taken over owns nothing: its
+	// Observe-only objects are removed and the cloud resources stay. A
+	// taken-over cluster is deleted like a created one, except for resources
+	// the import marked as shared (retained), which stay.
 	DeleteCluster(context.Context, *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error)
 }
 

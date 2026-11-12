@@ -317,7 +317,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 			row.Labels = model.Labels(in.GetLabels())
 		case ok:
 			copyField(spec, in.GetSpec())
-		case strings.HasPrefix(p, "spec.existing_cluster"), p == "spec.aws.access_config.authentication_mode":
+		case p == "spec.aws.access_config.authentication_mode":
 			return false, connect.NewError(connect.CodeUnimplemented, fmt.Sprintf("updating %s is not implemented yet", p))
 		default:
 			return false, connect.NewError(connect.CodeInvalidArgument,

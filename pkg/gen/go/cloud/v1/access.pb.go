@@ -143,10 +143,11 @@ func (AccessPolicyScope) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_access_proto_rawDescGZIP(), []int{1}
 }
 
-// AccessSpec controls who can use the Kubernetes API. The server's own
-// provisioning identity is always an admin (AWS:
+// AccessSpec controls who can use the Kubernetes API. On a cluster the
+// platform creates, its own provisioning identity is an admin (AWS:
 // accessConfig.bootstrapClusterCreatorAdminPermissions = true); it is not
-// listed here.
+// listed here. An imported cluster keeps the value it had (EKS cannot
+// change it).
 type AccessSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Principals granted cluster-admin, in the provider's native form. Mutable;

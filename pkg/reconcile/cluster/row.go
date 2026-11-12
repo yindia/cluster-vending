@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -15,16 +16,44 @@ import (
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
+// existingClusterField is the number of ClusterSpec's removed
+// existing_cluster (reserved in the contract).
+const existingClusterField = 7
+
 // supported rejects what this version cannot build.
 func supported(spec *cloudv1.ClusterSpec) error {
 	switch {
 	case spec.GetAws() == nil:
 		return fault.New(fault.Unimplemented, "only aws clusters are supported")
-	case spec.GetExistingCluster() != nil:
+	case hasUnknownField(spec.ProtoReflect().GetUnknown(), existingClusterField):
+		// A client built against the old contract asks for an import:
+		// creating a new cluster of the name instead would be wrong.
 		return fault.New(fault.Unimplemented,
-			"spec.existing_cluster is not implemented; import a cluster with ImportCluster and TakeOverCluster")
+			"spec.existing_cluster is not supported; import a cluster with ImportCluster and TakeOverCluster")
 	}
 	return nil
+}
+
+// hasUnknownField reports whether raw (a message's unknown fields, in the
+// binary wire format) holds field number. JSON requests never get here:
+// the JSON codec drops unknown fields.
+func hasUnknownField(raw []byte, number protowire.Number) bool {
+	for len(raw) > 0 {
+		n, typ, size := protowire.ConsumeTag(raw)
+		if size < 0 {
+			return false
+		}
+		if n == number {
+			return true
+		}
+		raw = raw[size:]
+		size = protowire.ConsumeFieldValue(n, typ, raw)
+		if size < 0 {
+			return false
+		}
+		raw = raw[size:]
+	}
+	return false
 }
 
 // NewRow checks a create request (the contract's rules, what this version

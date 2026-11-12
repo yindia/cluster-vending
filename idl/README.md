@@ -1,503 +1,606 @@
 # cloud.v1 API contract
 
-The Cluster API is one provider-neutral contract. The server translates it
-into Crossplane managed resources for the chosen cloud, and the platform is
-their source of truth.
+`idl/cloud/v1` is the contract of the platform: the Protobuf messages and
+Connect services through which tenants' cloud accounts, networks and
+Kubernetes clusters are described, created, imported and deleted. It is one
+provider-neutral contract with a provider block for what has no cross-cloud
+equivalent. Only AWS is implemented.
 
-| Provider | Crossplane package | Version checked |
+It is read by:
+
+- API clients, over Connect, gRPC or gRPC-Web (JSON or binary);
+- the CLI (`pkg/cli`), whose manifests are the messages as JSON or YAML;
+- the server (`pkg/server`), which validates requests against it and stores
+  specs and statuses as its JSON form;
+- the code that turns a spec into Crossplane managed resources
+  (`pkg/network`, `pkg/cluster`, `pkg/crossplane/aws`);
+- the controller's kinds (`controller/api/v1alpha1`), which mirror it.
+
+The server translates the contract into Crossplane managed resources of
+`crossplane-contrib/provider-upjet-aws` v2.9.0 (namespaced kinds,
+`*.aws.m.upbound.io`). The GCP and Azure columns in this document and in the
+proto comments are the intended mapping for providers that do not exist yet.
+
+## Layout
+
+| File | Holds |
+|---|---|
+| `tenant_service.proto` | `TenantService`; `CloudAccount`, `AwsAccount`, `CloudAccountStatus`, `CloudAccountState` |
+| `network_service.proto` | `NetworkService` and its request and response messages |
+| `network.proto` | `Network`, `NetworkSpec`, `NetworkLayout`, `Subnet`, `NetworkFlowLogs`, `NetworkStatus`, `NetworkResources`; `ClusterNetwork` (a cluster's reference to a network) |
+| `cluster_service.proto` | `ClusterService` and its request and response messages; `AwsImportCluster` |
+| `cluster.proto` | `Cluster`, `ClusterSpec` with its CEL rules, `ReleaseChannel`, `ClusterTier`, `ClusterState`, `ClusterStatus`, `ClusterEndpoint` |
+| `control_plane.proto` | `ControlPlaneSpec`, `SecretsEncryption`, `EndpointAccess` |
+| `node_pool.proto` | `NodePoolSpec`, `ScalingConfig`, `Taint`, `CapacityType`, `TaintEffect` |
+| `access.proto` | `AccessSpec`, `AccessEntry`, `AccessPolicy` and their enums |
+| `aws.proto` | The AWS provider block: `AwsClusterSpec`, add-ons, control plane log group, launch template, AMI types, `AwsClusterStatus`; `AwsImportNetwork` |
+| `import.proto` | Import plans: `ImportStatus`, `ImportedResource`, `ImportPhase`, `Disposition` |
+| `plan.proto` | Update plans: `Plan`, `PlannedChange`, `PlannedAction` |
+| `managed_resource.proto` | `ManagedResource`, `ManagedResourceState`, `ManagedResourceEvent` |
+| `conditions.proto` | `Condition`, `ConditionStatus` |
+| `options.proto` | The `(cloud.v1.crossplane)` enum value option |
+| `admin_service.proto` | `AdminService` (operators only) |
+| `cluster_import.proto` | `ExistingCluster`: declared, not implemented (see [Declared but not implemented](#declared-but-not-implemented)) |
+
+## Services and RPCs
+
+Every RPC of every service is implemented; none returns `UNIMPLEMENTED` as a
+whole. What individual fields and values are refused is listed under
+[Declared but not implemented](#declared-but-not-implemented).
+
+All tenant-facing RPCs carry `tenant_id` (a DNS label of at most 56
+characters, so the namespace `tenant-<tenant_id>` fits 63). The contract
+says the server must authorize it against the caller; the server does not
+authenticate callers yet.
+
+### TenantService
+
+| RPC | What it does |
+|---|---|
+| `BootstrapTenant` | Registers one cloud account of the tenant (creating the tenant if needed), stores it, and creates the tenant namespace and the account's `ProviderConfig` in the management cluster. Idempotent per account. |
+| `GetCloudAccount` | Returns one account by its bootstrap ID (`CloudAccount.id`). |
+| `ListCloudAccounts` | Lists the tenant's accounts, ordered by provider then account ID. Not paginated. |
+
+### NetworkService
+
+| RPC | What it does |
+|---|---|
+| `CreateNetwork` | Stores a network with its defaults resolved and creates its managed resources. |
+| `ImportNetwork` | Looks an existing VPC up once, read-only, creates Observe-only managed resources for it, derives the spec and stores the plan (`status.import`). |
+| `TakeOverNetwork` | Makes the platform the owner of an `IMPORTED` network. |
+| `GetNetwork`, `ListNetworks` | Return the stored network: its spec and the status last recorded. They do not read the management cluster. |
+| `GetNetworkStatus` | Returns the network with its status read now from the management cluster. |
+| `WatchNetwork` | Streams the network and the changes of its managed resources until it is deleted or the client cancels. |
+| `UpdateNetwork` | Changes the fields named in `update_mask`. |
+| `DeleteNetwork` | Marks the network `DELETING` and deletes its resources in order; refused while clusters use it. |
+
+### ClusterService
+
+| RPC | What it does |
+|---|---|
+| `CreateCluster` | Stores a cluster with its defaults and versions resolved and creates its managed resources. |
+| `ImportCluster` | Looks an existing EKS cluster up once, read-only, derives the spec, creates managed resources that only observe it, and stores the plan (`status.import`). |
+| `TakeOverCluster` | Makes the platform the owner of an `IMPORTED` cluster. |
+| `GetCluster`, `ListClusters` | Return the stored cluster: its spec and the status last recorded. |
+| `GetClusterStatus` | Returns the cluster with its status read now from the management cluster. |
+| `WatchCluster` | Streams the cluster and the changes of its managed resources until it is deleted or the client cancels. |
+| `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |
+| `DeleteCluster` | Marks the cluster `DELETING` and deletes its resources. `force` also releases Helm releases without uninstalling them. |
+
+### AdminService
+
+| RPC | What it does |
+|---|---|
+| `PauseReconcile` | Sets `crossplane.io/paused` on a tenant's managed resources, or on one cluster's. |
+| `ResumeReconcile` | Removes it. |
+
+### Stored status and live status
+
+| Call | Source | Status returned |
 |---|---|---|
-| AWS | `crossplane-contrib/provider-upjet-aws` | v2.9.0 |
-| GCP | `crossplane-contrib/provider-upjet-gcp` | v3.1.0 |
-| Azure | `crossplane-contrib/provider-upjet-azure` | v2.8.0 |
+| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters`, `WatchNetwork`, `WatchCluster` | the platform's store | the status last recorded: by the background loop on every pass while the resource is being created, changed or deleted, or is imported, and by every call that changes it. A converged resource keeps the status it converged on. |
+| `GetNetworkStatus`, `GetClusterStatus` | the management cluster, now | live: the conditions of every managed resource, cloud IDs, the EKS endpoint and versions |
 
-## Resources and services
+A stored change shows in `Get*` at once (`DELETING`, `UPDATING`). What the
+cloud did since the last pass of the loop shows in the status calls first.
+The watch RPCs read the stored resource every five seconds and send what
+changed. The CLI's `--wait` polls the status call.
 
-| Resource | Service | Notes |
-|---|---|---|
-| `CloudAccount` | `TenantService` | A tenant's cloud account, one per provider. `BootstrapTenant` registers it and prepares the management cluster to reach it; required before any network or cluster. |
-| `Network` | `NetworkService` | VPC / VNet with subnets, NAT, routing. Created, or imported and taken over. Shared by clusters. |
-| `Cluster` | `ClusterService` | Kubernetes control plane + its default node pool (platform workloads; user workloads run on Karpenter nodes). References a Network by id. |
+Mutations are asynchronous: a call returns once the desired state is stored
+and the first apply was made. A resource has converged when
+`status.observed_generation` equals `generation` and `status.state` is
+`READY` (network) or `RUNNING` (cluster).
 
-All RPCs are scoped by `tenant_id` (one rule everywhere: DNS label, ≤ 56
-chars, so the namespace `tenant-<tenant_id>` fits 63) and are asynchronous:
-poll until `status.observed_generation` catches up.
+## Resources
 
-Two ways to read a network or cluster:
+### Identity, shared by `Network` and `Cluster`
 
-| Call | Source | Status |
-|---|---|---|
-| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters` | the platform's database only | the status last recorded: by the background loop on every pass while the resource is being created, changed, deleted or is imported, and by every call that changes it. A converged resource keeps the status it converged on. |
-| `GetNetworkStatus`, `GetClusterStatus`, `WatchNetwork`, `WatchCluster` | the management cluster, now | live: the conditions of every managed resource, cloud IDs, the EKS endpoint and versions |
+| Field | Meaning |
+|---|---|
+| `tenant_id` | Output only: from the request. |
+| `id` | Output only: a time-ordered UUID assigned by the server on create. Every other call refers to the resource by it. |
+| `name` | Chosen by the client: a lowercase DNS label of at most 40 characters. Immutable. A network's name is not unique. A cluster's name is the EKS cluster name and is unique per account and region. |
+| `display_name` | Free text, at most 128 characters. Mutable. |
+| `labels` | At most 40 pairs. They are also the cloud tags of every resource (AWS tag character rules; keys starting with `aws:` are refused by the server). Mutable: an update re-tags. |
+| `generation` | Output only: incremented by the server when the spec or labels change. |
+| `etag` | Output only: changes with every stored change. Sent back on update, delete or takeover, it must match. |
+| `create_time`, `update_time` | Output only. |
 
-A stored change shows in `Get*` at once (`DELETING`, `UPDATING`); what the
-cloud did since the last pass shows in the status calls first. The CLI's
-`--wait` polls the status call.
+### CloudAccount (`tenant_service.proto`)
 
-## Prerequisites
+A tenant has any number of accounts. An account must be bootstrapped before
+a network is created or imported in it.
 
-### Account access
+| Field | Notes |
+|---|---|
+| `id` | Output only: the bootstrap ID. `NetworkSpec.bootstrap_id` and `ImportNetworkRequest.bootstrap_id` refer to it. |
+| `account_name` | Informational, at most 128 characters. Bootstrapping the same account again updates it. |
+| `aws.account_id` | Required: the 12-digit account ID. Unique within the tenant; it identifies the account on a repeated bootstrap. |
+| `aws.role` | Required: the name of the IAM role the platform assumes in the account. The tenant creates it, outside this API. |
+| `status.state` | Always `READY` once bootstrap returned. |
+| `status.namespace` | `tenant-<tenant_id>`. |
+| `status.provider_config_name` | Generated on the first bootstrap, then fixed (for example `aws-0a1b2c3d`). |
+| `status.identity` | The role ARN the `ProviderConfig` assumes. |
+| `status.conditions` | `Bootstrapped`, and `AccessVerified` with status `UNKNOWN`: the role is not assumed at bootstrap. |
+| `status.managed_resources` | The namespace and `ProviderConfig`, and the objects of the account's networks and clusters. |
 
-A tenant has any number of cloud accounts. For each, the tenant gives the
-platform admin access (outside this API: e.g. the tenant creates the IAM
-role), then the account is onboarded with `TenantService.BootstrapTenant`
-before a network is created or imported in it. Bootstrap takes the tenant
-ID, the account's provider ID (AWS: account ID) and its name, stores the
-account (bootstrap ID, namespace, ProviderConfig name, identity) and creates
-in the management cluster:
-- the tenant namespace `tenant-<tenant_id>`, if it does not exist;
-- one provider credential per account in the tenant namespace, named with a
-  generated, stored name (`status.provider_config_name`, e.g.
-  `aws-0a1b2c3d`), assuming `status.identity` (AWS: the tenant role ARN):
-
-| Provider | Credential | Access granted by the tenant |
-|---|---|---|
-| AWS | `ProviderConfig` (aws.m.upbound.io): IRSA + `assumeRoleChain` | IAM role with admin rights, trusted by the platform |
-| GCP | `ProviderConfig` (gcp.m.upbound.io): `projectID` + `ImpersonateServiceAccount` | provisioner service account with admin roles |
-| Azure | `ProviderConfig` (azure.m.upbound.io): `subscriptionID`, `tenantID`, `clientID`, `OIDCTokenFile` | app registration with Owner (or Contributor + User Access Administrator) |
-
-No static credentials are stored. Each account's bootstrap names the role
-to assume in it (AWS: `aws.role`, with `aws.accountId`); its ARN is
-stored as the account's identity.
-
-Bootstrap does not install the Crossplane providers or their runtime config:
-they are the platform's, installed once per management cluster (AWS:
-`provider-aws-ec2`, `-eks`, `-iam` with a `DeploymentRuntimeConfig` whose
-service account carries the management role, for IRSA; builders in
-`pkg/crossplane/aws`). Without them bootstrap fails with
+Bootstrap creates the namespace and one `ProviderConfig`
+(`aws.m.upbound.io`) that uses the provider pods' own identity (IRSA) and an
+`assumeRoleChain` into the tenant role. No static credentials are stored.
+The Crossplane provider packages (`provider-aws-ec2`, `-eks`, `-iam`,
+`-cloudwatchlogs`, `-kms`) are installed by the server at startup, not by
+bootstrap; without the AWS `ProviderConfig` kind bootstrap fails with
 `FAILED_PRECONDITION`.
 
-How AWS calls are made: the runtime config gives the provider pods the
-platform's management role (IRSA); for each managed resource the provider
-assumes the tenant role of the resource's ProviderConfig and creates the
-resource in that account. One provider install and one runtime config serve
-every tenant and account; ProviderConfigs separate them.
+### Network (`network.proto`)
 
-Every account has a server-assigned bootstrap ID (`CloudAccount.id`, the
-database row ID). Its AWS account ID is unique within the tenant, its name
-is free text. A network refers to its account by bootstrap ID
-(`NetworkSpec.bootstrap_id`, immutable; for imports
-`ImportNetworkRequest.bootstrap_id`); any number of networks can share
-an account. A cluster runs in its network's account, a node pool in its
-cluster's.
+Spec:
 
-### Before retiring Terraform
-
-The contract owns cloud resources only. Retiring Terraform for a cluster
-also needs, outside this API:
-- In-cluster software Terraform installed (Helm releases such as the load
-  balancer controller, cluster-autoscaler, Karpenter, external-dns,
-  metrics-server; Kubernetes manifests) moved to GitOps or Crossplane
-  `provider-helm`. These are `NOT_IMPORTED`.
-- An owner for every `NOT_IMPORTED` resource in the import plans (e.g.
-  application IRSA roles, RDS security groups, Transit Gateway attachments).
-
-## Rules
-
-1. **Common first.** A concept that exists in all three clouds is a field of
-   the common spec (`ClusterSpec`, `NetworkSpec`, `ControlPlaneSpec`,
-   `NodePoolSpec`), with a neutral name. Each field's comment lists its
-   Crossplane path for every provider.
-2. **Provider blocks hold only what has no equivalent.** The `provider` oneof
-   (`aws`, later `gcp` / `azure`) selects the cloud. Its message carries only
-   provider-only knobs, and its field names mirror the Crossplane
-   `spec.forProvider` names and nesting (e.g. `access_config.authentication_mode`,
-   `upgrade_policy.support_type`).
-3. **Enums carry their Crossplane spelling.** Every enum value that ends up
-   in a Crossplane string field declares it with
-   `[(cloud.v1.crossplane) = {aws: "...", gcp: "...", azure: "..."}]`.
-   The server reads the option and never derives a value from the proto name.
-   `test/idl/crossplane_contract_test.go` enforces this.
-4. **Provider-specific constraints on common fields** are CEL rules on
-   `ClusterSpec` and `NetworkSpec`, with IDs prefixed by provider
-   (`aws.region`, `aws.subnets_zonal`, ...). Rules that apply to every
-   non-AWS provider use `has(this.aws) || ...`.
-5. **Units and shapes follow the majority.** `disk_size_gb` (GCP/Azure
-   spelling; AWS `diskSize` is also GiB), `scaling_config` with min/max/desired,
-   `instance_types` as a list (only AWS accepts more than one).
-6. **Zones are zone IDs** (`use1-az1`), never zone names (`us-east-1a`): a
-   zone name maps to a different physical zone in each AWS account, a zone ID
-   is the same everywhere. The known IDs are in `pkg/constant/aws`.
-
-## Field mapping
-
-Node pool paths are relative to the pool resource. The contract's pool is
-always a separate resource: AWS `NodeGroup`, GCP `NodePool` (cluster has
-`removeDefaultNodePool: true`), Azure `KubernetesClusterNodePool` in mode User
-(AKS's built-in `defaultNodePool` becomes a platform-managed system pool).
-`NodePoolSpec` maps this way for `ClusterSpec.default_node_pool`.
-
-| Common field | AWS | GCP | Azure |
+| Field | Required | Default | After creation |
 |---|---|---|---|
-| `spec.region` | `region` | `location` | `location` |
-| `control_plane.kubernetes_version` | `Cluster.version`, `NodeGroup.version` | `Cluster.minMasterVersion` (a floor), `NodePool.version` | `kubernetesVersion`, `orchestratorVersion` |
-| `control_plane.secrets_encryption.enabled` | `kms` `Key` + `Alias`; `Cluster.encryptionConfig` | Cloud KMS key; `Cluster.databaseEncryption` | Key Vault key; `keyManagementService` |
-| `control_plane.secrets_encryption.kms_key_arn` | an existing key: `Cluster.encryptionConfig` only, no `Key` / `Alias` | - | - |
-| `control_plane.endpoint_access.endpoint_private_access` / `endpoint_public_access` | `Cluster.vpcConfig.endpointPrivateAccess` / `endpointPublicAccess` (default true / true) | - | - |
-| `endpoint_access.public_access_cidrs` | `vpcConfig.publicAccessCidrs` | `masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock` | `apiServerAccessProfile.authorizedIpRanges` (+ the cluster's egress IPs) |
-| private nodes, public endpoint (fixed) | `endpointPrivateAccess`, `endpointPublicAccess` = true | `enablePrivateNodes` = true, `enablePrivateEndpoint` = false, `gcpPublicCidrsAccessEnabled` = false | `privateClusterEnabled` = false |
-| `NetworkSpec.layout.cidr_block` | `VPC.cidrBlock` | carved into `Subnetwork.ipCidrRange` | `VirtualNetwork.addressSpace` |
-| layout `subnets[].cidr_block` | `Subnet.cidrBlock` | `Subnetwork.ipCidrRange` | `Subnet.addressPrefixes` |
-| layout `subnets[].role` | PUBLIC / PRIVATE | PRIVATE only | PRIVATE only |
-| layout `subnets[].zone_id` | `Subnet.availabilityZoneId` (required) | empty (regional) | empty (regional) |
-| layout `availability_zone_count` | subnet pairs per zone | `Cluster.nodeLocations` | pool `zones` |
-| layout `nat_gateway_mode` | `NATGateway.availabilityMode` + `EIP` | `Router` + `RouterNAT` + `Address` (REGIONAL only) | `NATGateway` + `PublicIP` + associations (SINGLE) |
-| `network.network_id` | the Network's private `Subnet`s → `vpcConfig.subnetIds`, `NodeGroup.subnetIds` | its `Subnetwork` → `Cluster.subnetwork` | its `Subnet` → `vnetSubnetId` |
-| `network.zone_ids` | private subnets of those zones only (≥ 2) | `Cluster.nodeLocations` | pool `zones` |
-| `network.pod_cidr` | must be empty (VPC CNI) | `Subnetwork.secondaryIpRange` "pods" | `networkProfile.podCidr` (overlay) |
-| `network.service_cidr` | `kubernetesNetworkConfig.serviceIpv4Cidr` | `Subnetwork.secondaryIpRange` "services" | `networkProfile.serviceCidr`, `dnsServiceIp` |
-| pool `instance_types` | `instanceTypes` | `nodeConfig.machineType` | `vmSize` |
-| pool `capacity_type` | `capacityType` | `nodeConfig.spot` | `priority` |
-| pool `scaling_config.{min,max}_size` | `scalingConfig.{min,max}Size` | `autoscaling.total{Min,Max}NodeCount` | `{min,max}Count`, `autoScalingEnabled` |
-| pool `scaling_config.desired_size` (create-only) | `initProvider.scalingConfig.desiredSize` | `initProvider.initialNodeCount` (per zone) | `initProvider.nodeCount` |
-| pool `disk_size_gb` | `diskSize` | `nodeConfig.diskSizeGb` | `osDiskSizeGb` |
-| pool `labels` | `labels` | `nodeConfig.labels` | `nodeLabels` |
-| pool `taints` | `taint[]` | `nodeConfig.taint[]` | `nodeTaints` |
-| `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
-| `spec.release_channel`, `spec.tier` | stored and returned only (see below) | - | - |
-| `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `azureActiveDirectoryRoleBasedAccessControl.adminGroupObjectIds` |
-| `spec.access.access_entries` | `AccessEntry` (any type) + one `AccessPolicyAssociation` per policy (cluster or namespace scope) | - | - |
-| `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` | - | - |
-| `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer | - | - |
-| `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` (immutable) | - | - |
-| `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate`: an existing template, or a rendered ec2 `LaunchTemplate` (extra security groups, custom AMI) | - | - |
-| `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
+| `spec.region` | yes | - | immutable |
+| `spec.bootstrap_id` | yes | - | immutable |
+| `spec.layout` | yes (may be empty: `{}`) | see below | immutable |
+| `spec.layout.cidr_block` | no | `10.0.0.0/16` | immutable |
+| `spec.layout.subnets` | no | one `PUBLIC` and one `PRIVATE` subnet per zone, carved from `cidr_block` (needs /22 or larger) | immutable |
+| `spec.layout.availability_zone_count` | no; not with zonal subnets | 3: the first zone IDs of the region in `pkg/constant/aws` | immutable |
+| `spec.layout.nat_gateway_mode` | no | `SINGLE` | immutable |
+| `spec.flow_logs.enabled` | no | off | can be turned on and off |
+| `spec.flow_logs.traffic_type` | no | `ALL` | fixed while flow logs are on |
+| `spec.flow_logs.retention_days` | no | 30 | mutable |
+| `spec.flow_logs.aggregation_interval_seconds` | no | 600 | fixed while flow logs are on |
 
-`spec.release_channel` (ALPHA, BETA, STABLE) and `spec.tier` (0, 1, 2; 0 is
-the most sensitive) say when a cluster receives a platform release: the
-channels in the order ALPHA, BETA, STABLE, and within a channel tier 2
-first, then tier 1, then tier 0. Both are accepted on create, stored and
-returned; nothing acts on them yet, and they render no Crossplane field.
+The stored spec holds the resolved layout (explicit subnets) and the
+resolved flow log settings, so later renders do not depend on defaults. The
+request as sent is stored too.
 
-Per-provider settings that stay out of the common spec and land in the
-provider block (`gcp` / `azure`) when those providers ship: GCP release
-channel, image type; Azure `sku_tier`, system pool size, upgrade channels.
+`UpdateNetwork` accepts these `update_mask` paths: `display_name`, `labels`,
+`spec.flow_logs`. Any other path is `INVALID_ARGUMENT`. An `IMPORTED`
+network cannot be updated until it is taken over; a taken-over network
+accepts `display_name` and `labels`, and refuses `spec.flow_logs` with
+`FAILED_PRECONDITION` (it keeps the flow logs it was imported with).
 
-## Networks
+Layout rules the server checks for AWS, beyond the schema: subnets inside
+`cidr_block` and not overlapping, each /16 to /28; zone IDs of the region;
+`PRIVATE` subnets in at least two zones; at least one `PUBLIC` subnet; with
+`PER_ZONE` a `PUBLIC` subnet in every zone that has a `PRIVATE` one.
+`REGIONAL` NAT is refused with `UNIMPLEMENTED`.
 
-The platform is the source of truth for every network it serves; there is
-no read-only "bring your own network".
+Status (`NetworkStatus`): `state`, `message`, `observed_generation`,
+`conditions` (`Ready`, and `Synced` when a resource failed), `resources`
+(VPC ID, subnet IDs, NAT gateway IDs, egress IPs), `cluster_ids`, `import`
+(the import plan, kept after the takeover), `managed_resources`.
 
-| How | Call | Owner |
+A network is imported with `ImportNetworkRequest`: `name`, `region`,
+`bootstrap_id`, and `aws.vpc_id` with `aws.subnet_ids` (required: the
+subnets the platform uses). What is modelled, carried over and left alone
+is listed in the comment of `AwsImportNetwork` and under
+[Imports](#imports).
+
+### Cluster (`cluster.proto` and the files it imports)
+
+Common spec:
+
+| Field | Required | Default | After creation |
+|---|---|---|---|
+| `spec.region` | yes | - | immutable |
+| `spec.network.network_id` | yes | - | immutable |
+| `spec.network.zone_ids` | no | every zone of the network with a private subnet (at least two) | immutable |
+| `spec.network.pod_cidr` | must be empty on AWS | - | - |
+| `spec.network.service_cidr` | no | left to EKS | immutable |
+| `spec.control_plane.kubernetes_version` | no | the EKS default version, resolved at creation and stored | can only move up, one minor at a time |
+| `spec.control_plane.endpoint_access.public_access_cidrs` | at least one while the public endpoint is on | none | mutable |
+| `spec.control_plane.endpoint_access.endpoint_private_access` | no | true | mutable |
+| `spec.control_plane.endpoint_access.endpoint_public_access` | no | true | mutable |
+| `spec.control_plane.secrets_encryption.enabled` | no | off | can be turned on, never off |
+| `spec.control_plane.secrets_encryption.kms_key_arn` | no | the platform creates a key | can be set on a cluster without encryption; then fixed |
+| `spec.default_node_pool.instance_types` | yes | - | mutable: replaces the node group |
+| `spec.default_node_pool.capacity_type` | no | `ON_DEMAND` | mutable: replaces the node group |
+| `spec.default_node_pool.scaling_config.min_size`, `max_size` | yes | - | mutable |
+| `spec.default_node_pool.scaling_config.desired_size` | no | `max(min_size, 1)` | create-only; the autoscaler owns the count |
+| `spec.default_node_pool.disk_size_gb` | no; not with a launch template | the provider default | mutable: replaces the node group |
+| `spec.default_node_pool.labels`, `taints` | no | none | mutable |
+| `spec.access.admin_principals` | no | none | mutable |
+| `spec.access.access_entries` | no | none; an entry's `type` defaults to `STANDARD`, a policy's `scope` to `CLUSTER` | mutable |
+| `spec.release_channel` | no | stays unset | cannot be updated today |
+| `spec.tier` | no | `CLUSTER_TIER_0` | cannot be updated today |
+
+AWS block (`spec.aws`, required, may be empty: `aws: {}`):
+
+| Field | Default | After creation |
 |---|---|---|
-| Created by the platform | `CreateNetwork` | the platform; `DeleteNetwork` refused while clusters use it |
-| Built elsewhere (e.g. Terraform) | `ImportNetwork` → review `status.import` → `terraform state rm` → `TakeOverNetwork` | the platform, after the takeover |
+| `access_config.authentication_mode` | `API` | declared mutable, refused today (`UNIMPLEMENTED`) |
+| `enabled_cluster_log_types` | none | mutable |
+| `upgrade_policy.support_type` | left to EKS | mutable |
+| `addons` | `vpc-cni`, `coredns`, `kube-proxy`, `eks-pod-identity-agent`, `aws-ebs-csi-driver`; an empty `version` is the one EKS recommends for the Kubernetes version | mutable (the whole list) |
+| `control_plane_log_group.enabled` | off: EKS creates the group itself when logging is on | mutable |
+| `control_plane_log_group.retention_days` | 90 | mutable |
+| `irsa` | off | mutable: turning it off deletes the IAM OIDC provider |
+| `additional_security_group_ids` | none | immutable |
+| `default_node_pool.ami_type` | `AL2023_X86_64_STANDARD`; `CUSTOM` with `launch_template.image_id` | mutable: replaces the node group |
+| `default_node_pool.launch_template` | none | mutable: setting, removing or switching it replaces the node group; a new version of the same template rolls out in place |
 
-Clusters only reference a network: `ClusterSpec.network.network_id`, the
-zones to use (`zone_ids`, default all) and the cluster's own `pod_cidr` /
-`service_cidr`. The layout is never repeated in a cluster request, and one
-network can serve several clusters.
+A launch template is either an existing one (`id` or `name`, with a numeric
+`version`) or one the platform renders (`security_group_ids`, and for a
+custom AMI `image_id` with `user_data`).
 
-- `Network.id` is assigned by the server (time-ordered UUID) and every
-  call uses it; the client names the network (`Network.name`, not unique,
-  the prefix of its resource names). The request as sent is stored too.
-- Network resources carry the label `cluster-vending.io/network: <id>`;
-  clusters select the network's private subnets (in `zone_ids`) by it.
-- `ImportNetwork` takes the VPC ID (and optionally which subnets). The
-  server looks the network up once, read-only, with the tenant's
-  credentials, because Crossplane has no lookup kinds, and creates one
-  Observe-only managed resource per result (`managementPolicies: [Observe]`,
-  `crossplane.io/external-name` = cloud ID). Nothing changes in the cloud.
-  From then on status comes from `status.atProvider`; the lookup never runs
-  again. The spec is derived from `atProvider` (VPC CIDR, subnets with role
-  from routing, NAT mode). What is modelled and what is carried over is
-  listed in `AwsImportNetwork` (`aws.proto`).
-- The VPC's main route table is imported as `DefaultRouteTable`: a
-  `RouteTable` resource could never be deleted, so `DeleteNetwork` would hang.
-- `TakeOverNetwork` fills `forProvider` from `status.atProvider`, switches
-  to `["*"]` and converges the plan, e.g. adding the
-  `kubernetes.io/role/elb` / `internal-elb` subnet tags. Imported resources
-  keep their cloud names and tags. From then on Crossplane reverts any
-  change made outside the platform.
-- Egress IPs, NAT gateways and subnet IDs come from the platform's own
-  resources: `Network.status.resources`, and per cluster
-  `ClusterStatus.network`.
+`UpdateCluster` accepts these `update_mask` paths:
 
-## Node pools
+```
+display_name
+labels
+spec.control_plane.kubernetes_version
+spec.control_plane.endpoint_access.public_access_cidrs
+spec.control_plane.endpoint_access.endpoint_private_access
+spec.control_plane.endpoint_access.endpoint_public_access
+spec.control_plane.secrets_encryption
+spec.default_node_pool.scaling_config.min_size
+spec.default_node_pool.scaling_config.max_size
+spec.default_node_pool.instance_types
+spec.default_node_pool.capacity_type
+spec.default_node_pool.disk_size_gb
+spec.default_node_pool.labels
+spec.default_node_pool.taints
+spec.access.admin_principals
+spec.access.access_entries
+spec.aws.addons
+spec.aws.enabled_cluster_log_types
+spec.aws.upgrade_policy.support_type
+spec.aws.irsa
+spec.aws.control_plane_log_group
+spec.aws.default_node_pool.launch_template
+spec.aws.default_node_pool.ami_type
+```
 
-- A cluster has one node pool: `ClusterSpec.default_node_pool`, created with
-  the cluster and changed through `UpdateCluster`. It runs platform
-  workloads; user workloads run on Karpenter nodes, so there is no
-  node pool API.
-- Changing instance types, capacity type or disk size replaces the node
-  group: a new one is created and the old one deleted once the new one is
-  ready.
-- Other node groups of an imported cluster are carried over verbatim
-  (`status.carried_over`) and deleted with the cluster.
-- `DeleteCluster` deletes every node group.
+`pkg/server/cluster/mutate.go` (`specPaths`) is the source of this list. Any
+other path is `INVALID_ARGUMENT`, except `spec.existing_cluster...` and
+`spec.aws.access_config.authentication_mode`, which are `UNIMPLEMENTED`.
+The merged cluster is validated against the contract again. An `IMPORTED`
+cluster cannot be updated until it is taken over.
 
-## How changes roll out
+Release channel and tier: `spec.release_channel` (`ALPHA`, `BETA`,
+`STABLE`) and `spec.tier` (`CLUSTER_TIER_0`, `_1`, `_2`; tier 0 is the most
+sensitive) say when a cluster receives a platform release: the channels in
+the order `ALPHA`, `BETA`, `STABLE`, and within a channel tier 2 first, then
+tier 1, then tier 0. Both are accepted on create, stored and returned.
+Nothing acts on them yet and they render no Crossplane field. An unset tier
+is stored as `CLUSTER_TIER_0` on create; what an unset channel means is not
+decided. An imported cluster has both unset.
 
-- **Reads change nothing.** `Get*`, `List*` and `Watch*` only read (managed
-  resources from the server's informer cache). A background loop in the
-  server (every 30 s, one replica at a time through leader election) moves
-  on what is not settled: it applies a generation again until every object
-  of it was applied, creates add-ons and access entries once EKS is ACTIVE,
-  retires a replaced node group, continues deletions and removes the row
-  when everything is gone.
-- **Status.** `status.observed_generation` is the last generation that
-  converged: all of it applied, and every managed resource's provider has
-  reconciled its latest spec (`ManagedResource.generation` =
-  `observed_generation`). `RUNNING` needs that and every resource Ready.
-- **Kubernetes upgrades** are staged: the control plane first; node groups
-  and add-ons render at the version the control plane reports until it
-  reports the target. The version-skew errors EKS returns meanwhile are
-  `UPDATING`, not `FAILED`.
-- **Node count.** `scaling_config.desired_size` is sent at creation only
-  (`initProvider`); afterwards the node count is the autoscaler's.
-- **Plan before update.** `UpdateCluster` with `validate_only` returns a
-  `Plan` and changes nothing: every resource that would be created,
-  changed in place, changed disruptively, deleted, or that the cloud cannot
-  change (`REJECTED_IMMUTABLE`; the plan is then not `applicable`), with a
-  diff, including fields changed outside the platform that would be set
-  back. Passing `plan_id` back applies only if nothing changed since.
-- **Deletion order** of a cluster is enforced by Crossplane `Usage`
-  objects rendered with it (the EKS cluster is used by its node groups,
-  the IAM roles by the cluster and node groups, the network's subnets by
-  the cluster, ...): all objects are deleted at once, each cloud resource
-  goes only when its users are gone. `DeleteClusterRequest.force` also
-  releases Helm releases without uninstalling, for a cluster whose API is
-  unreachable. A deleting cluster's `status.message` names what it waits
-  for and what is stuck, with the error and for how long.
-- **Renderer changes** roll out resource by resource: every row stores the
-  renderer version it was applied with; the loop re-applies rows below the
-  server's target (`--render-target`, limited by `--render-rollout`).
-- **Provider upgrades**: `AdminService.PauseReconcile` /
-  `ResumeReconcile` set or remove `crossplane.io/paused` on a tenant's or
-  one cluster's managed resources.
+Status (`ClusterStatus`): `state`, `message`, `observed_generation`,
+`conditions` (`Ready`, and `Synced` when a resource failed), `endpoint`
+(URL and CA), `current_kubernetes_version`, `oidc_issuer_url`, `network`
+(the network's cloud IDs), `aws` (cluster ARN, cluster security group,
+platform version, node group ARN, add-ons with the version each runs),
+`import`, `managed_resources`, `kubeconfig_secret`.
 
-## Imports
+A cluster is imported with `ImportClusterRequest`: `name` (the EKS cluster
+name), `network_id` (a network of the tenant, imported or owned, that holds
+the cluster's subnets) and `aws.default_node_group_name` (the node group
+that becomes `spec.default_node_pool`).
 
-`ImportStatus` (`cloud/v1/import.proto`) is the plan of a network import
-(permanent) and of a cluster import (temporary). The rules, for both:
+## States and status
 
-- **Keep current.** An optional spec field left empty keeps the current
-  value (Crossplane late-initialization), never the server default. An
-  imported cluster without `kubernetes_version` stays on its version; the
-  same for authentication mode, support type, log types, encryption,
-  endpoint access and add-ons. Only fields that are set can change.
-- **Tags are kept.** Every existing tag survives the takeover (`Name`,
-  `karpenter.sh/discovery`, `kubernetes.io/cluster/<name>`, ...); the
-  platform only adds its own ownership tags and the labels on top. Removing
-  a label later removes only that tag.
-- **Closure.** Everything an imported resource references is imported too.
-  What the contract models becomes part of the spec; the rest is
-  `CARRIED_OVER`. Resources that only reference ours stay with their owner
-  (`NOT_IMPORTED`). After a takeover, the previous tool has nothing left to
-  manage for the imported stack.
+### Network states (`NetworkState`)
+
+| State | Meaning |
+|---|---|
+| `PROVISIONING` | Being created, or taken over and converging. |
+| `IMPORTED` | Imported read-only; waiting for `TakeOverNetwork`. |
+| `READY` | Every resource is ready and the latest generation is applied and seen by the providers. |
+| `UPDATING` | A change is being applied. |
+| `DELETING` | `DeleteNetwork` ran; resources are going away tier by tier. |
+| `FAILED` | A resource failed or is missing, or the import plan is blocked. |
+
+### Cluster states (`ClusterState`)
+
+| State | Meaning |
+|---|---|
+| `PROVISIONING` | Accepted; resources are being created. |
+| `RUNNING` | Every resource is ready and the latest generation has converged. |
+| `UPDATING` | A change is being rolled out. Version-skew errors during a Kubernetes upgrade count as `UPDATING`. |
+| `DELETING` | Teardown in progress; `status.message` names what it waits for. |
+| `FAILED` | A resource failed; see `message` and `conditions`. Also an import whose plan is blocked. |
+| `IMPORTED` | Imported read-only; waiting for `TakeOverCluster`. |
+
+### Managed resource states (`ManagedResourceState`)
+
+| State | Meaning |
+|---|---|
+| `CREATING` | Being created or updated; also a resource failing for less than two minutes after its creation. |
+| `WAITING` | Waits for a resource it references. |
+| `READY` | Exists and matches its spec. |
+| `FAILED` | The provider cannot reconcile it; `reason` and `message` say why. |
+| `DELETING` | Deletion requested. |
+| `MISSING` | Recorded, but not in the management cluster. |
+
+A `ManagedResource` also carries the Crossplane `Ready` and `Synced`
+conditions, the cloud ID (`external_name`), `generation` and
+`observed_generation` (the provider has reconciled the latest change when
+they are equal), and for zonal resources `zone_id` and `role`.
+
+### Import phases and dispositions (`import.proto`)
+
+| Phase | Meaning |
+|---|---|
+| `PLANNED` | Imported; the plan is ready and nothing changed. |
+| `BLOCKED` | The plan has `BLOCKING` lines; nothing was imported. |
+| `CONVERGING` | Taken over; the plan is being applied. |
+| `CONVERGED` | Taken over; the cloud matches the spec. |
 
 | Disposition | Meaning |
 |---|---|
 | `MATCHES` | Imported; already what the spec says. |
-| `WILL_UPDATE` | Imported; the takeover changes it (`detail` has the diff). `requires_replacement` marks changes that delete and recreate the resource (e.g. node group instance types): review those first. |
-| `WILL_CREATE` | Missing; created at the takeover (tags, add-ons, access entries, Usages, a new node pool). |
-| `NOT_IMPORTED` | Found next to the imported resources but outside the contract and not referenced by them. Needs another owner or deletion before the previous tool goes. |
-| `BLOCKING` | Can't be expressed in the contract; phase `BLOCKED`. |
-| `CARRIED_OVER` | Imported and taken over verbatim although no spec field describes it: owned and deleted with the Network / cluster, listed in `status.carried_over`, not editable through the API. |
+| `WILL_UPDATE` | Imported; the takeover changes it (`detail` has the difference). `requires_replacement` marks changes that delete and recreate the resource. |
+| `WILL_CREATE` | Missing; created at the takeover. |
+| `NOT_IMPORTED` | Found next to the imported resources but outside the contract. It needs another owner. A takeover with such lines needs `acknowledge_not_imported`. |
+| `BLOCKING` | Cannot be expressed in the contract. |
+| `CARRIED_OVER` | Imported and taken over as it is although no spec field describes it: owned and deleted with the network or cluster, not editable through the API. |
 
-Carried over (AWS):
+### Planned actions (`plan.proto`)
 
-| Import | Resources |
+| Action | Meaning |
 |---|---|
-| Network | flow logs on the VPC that deliver to CloudWatch Logs, with their log group and delivery role (`FlowLog`, cloudwatchlogs `Group`, iam `Role`; a log group or role other VPCs' flow logs use too is owned without `Delete`); the default network ACL (`DefaultNetworkACL`, rules inline, never deleted); custom network ACLs associated with an imported subnet, with their rules (`NetworkACL` with every associated subnet in `subnetIds`, `NetworkACLRule`; the provider has no association kind); routes of specific CIDRs to the internet gateway in imported route tables. `NOT_IMPORTED` today: the main route table, other routes (peering, Transit Gateway, VPN), VPC endpoints, the default security group, flow logs to S3 or Firehose, network ACLs of other subnets |
-| Cluster | managed policies on the cluster and node roles beyond the platform's (`RolePolicyAttachment`); the IAM OIDC provider of the cluster's issuer; the log group `/aws/eks/<name>/cluster`; the KMS key in `encryptionConfig` (owned without `Delete`: the platform cannot tell what else uses it); OIDC identity provider configs (`IdentityProviderConfig`); add-ons the contract has no name for; pod identity associations that are not an add-on's; the control plane's additional security groups with their rules (`SecurityGroup`, `SecurityGroupIngressRule` / `SecurityGroupEgressRule` by `sgr-` ID; a group other network interfaces use too is owned without `Delete`). `NOT_IMPORTED` today: every node group but the one named as the default, access entries EKS manages (node group roles, service-linked roles), the default node group's launch template and security groups |
+| `CREATE` | The resource does not exist yet and is created. |
+| `UPDATE_IN_PLACE` | The field changes without interruption. |
+| `DISRUPTIVE` | The field changes in place, and workloads are affected while it rolls out. |
+| `DELETE` | The resource is deleted. |
+| `REJECTED_IMMUTABLE` | The cloud cannot change the field; the plan is not `applicable`. |
 
-How a cluster import works (`ImportCluster`, `TakeOverCluster`): the spec is
-derived from the cluster, rendered like any cluster's, and each rendered
-object adopts the cloud resource it describes (external name in the
-provider's format, `managementPolicies: [Observe, LateInitialize]`). The plan
-compares that render with the cloud: `MATCHES`, `WILL_UPDATE` (the platform's
-tags, mostly), `WILL_CREATE` (what the platform adds: the kubeconfig object,
-default add-ons the cluster lacks, Usages), `BLOCKING` when a field EKS
-cannot change differs. The takeover drops the Observe-only policy by
-rendering the cluster the normal way, so nothing is created or replaced that
-the plan did not list. The cluster's network must be imported for the import
-and taken over for the takeover.
+A `PlannedChange` also has `requires_replacement`, a `unified_diff`, and
+`waits_for`: set when the change is made in a later step, with what it waits
+for (for example node groups during a Kubernetes upgrade).
 
-Known limit: the platform does not clean up inside the workload cluster.
-`LoadBalancer` Services and PersistentVolumeClaims must be removed before
-`DeleteCluster`, or their load balancers and volumes stay in the account.
+## Conventions
 
-`BLOCKING` today (the layout can't express them): secondary VPC CIDRs (e.g.
-`100.64.0.0/16` for EKS custom networking), IPv6 / dual-stack, private
-egress through a Transit Gateway or firewall instead of a NAT gateway, a VPC
-CIDR outside /16-/24, private subnets in a single zone.
+1. **Common first.** A concept that exists in all three clouds is a field of
+   the common spec, with a neutral name; its comment lists the Crossplane
+   path per provider. The `provider` oneof (`aws`; `gcp` = 11 and `azure` =
+   12 are kept free) carries only what has no equivalent, and its field
+   names mirror the provider's `spec.forProvider`.
+2. **Additive only.** Fields are added with the next free number; nothing is
+   renumbered or retyped. A removed field has its number and name
+   `reserved` (`ClusterSpec` 5 `tags`, `NetworkSpec` 3 `tags` and 10 `aws`).
+   `buf breaking` runs with `WIRE_JSON`, which protects binary and JSON
+   clients and allows deleting a reserved field.
+3. **New booleans are `optional`** when unset must differ from false
+   (`irsa`, `endpoint_private_access`, `flow_logs.enabled`). An optional
+   feature that is unset leaves the rendered resources as they were before
+   it existed.
+4. **Enums** have an `_UNSPECIFIED` zero value, which means "the server
+   default" where the comment says so. Enum fields are `defined_only`.
+5. **Enums carry their Crossplane spelling.** A value that ends up in a
+   Crossplane string field declares it with
+   `[(cloud.v1.crossplane) = {aws: "..."}]` (`options.proto`). The server
+   reads the option and never derives a value from the proto name.
+   `test/idl/crossplane_contract_test.go` lists the enums that must declare
+   it and checks spellings.
+6. **Validation** is `buf.validate` on fields and CEL rules on messages:
+   provider constraints on common fields are rules on `ClusterSpec` with IDs
+   prefixed by provider (`aws.region`, `aws.zone_ids`, ...), and
+   cross-field rules sit on the message they concern
+   (`scaling_config.bounds`, `launch_template.existing_or_rendered`,
+   `network_layout.*`). The server runs `protovalidate` on every request.
+   What needs data the schema does not have (subnets inside the network,
+   zones of a region, EKS versions) is checked by the server.
+7. **Update masks.** `UpdateNetworkRequest` and `UpdateClusterRequest` skip
+   field rules on the resource (`IGNORE_ALWAYS`): only masked paths are
+   copied onto the stored resource and the merged result is validated. In
+   JSON the mask is a comma-separated string of lowerCamelCase paths, for
+   example `"spec.controlPlane.kubernetesVersion,labels"`.
+8. **Etags.** An `etag` sent with an update, delete or takeover must match
+   the stored one, or the call fails with `ABORTED`. Without one the call
+   applies to the current state.
+9. **Request IDs.** `request_id` (a UUID) on create and import makes a retry
+   return the resource of the first call.
+10. **Pagination.** `page_size` defaults to 50 and is capped at 200.
+    `next_page_token` is the ID of the last resource returned; lists are
+    ordered by ID, oldest first.
+11. **Zones are zone IDs** (`use1-az1`), never zone names: a zone name maps
+    to a different physical zone in each AWS account.
 
-AWS import IDs (`crossplane.io/external-name`) and the `forProvider` fields
-the provider builds them from (needed even for Observe-only):
+## Errors
 
-| Kind | external-name | forProvider |
-|---|---|---|
-| VPC, Subnet, InternetGateway, EIP, NATGateway, RouteTable, DefaultRouteTable, DefaultNetworkACL, DefaultSecurityGroup, SecurityGroup, VPCEndpoint, FlowLog, LaunchTemplate | cloud ID (`vpc-…`, `subnet-…`, `eipalloc-…`, `rtb-…`, `acl-…`, `sg-…`, `vpce-…`, `fl-…`, `lt-…`) | `region` (+ `vpcId` for the default kinds) |
-| SecurityGroupIngressRule, SecurityGroupEgressRule | `sgr-…` | `region`, `securityGroupId` |
-| NetworkACL | `acl-…` | `region`, `vpcId` |
-| NetworkACLRule | `nacl-<crc32 of "<acl-id>-<rule number>-<egress>-<protocol>-">` | `networkAclId`, `ruleNumber`, `egress`, `protocol` |
-| Group (cloudwatchlogs) | log group name | `region` |
-| Route | `r-<rtb-id><crc32 of the destination cidr>` | `routeTableId`, `destinationCidrBlock` |
-| Role | role name | - |
-| RolePolicyAttachment | `<role name>/<policy arn>` | `role`, `policyArn` |
-| Cluster (eks) | cluster name | `region` |
-| NodeGroup | node group name | `region`, `clusterName` |
-| Addon | `<cluster>:<add-on>` | `region`, `clusterName`, `addonName` |
-| AccessEntry | `<cluster>:<principal arn>` | `region`, `clusterName`, `principalArn` |
-| AccessPolicyAssociation | `<cluster>#<principal arn>#<policy arn>` | `region`, `clusterName`, `principalArn`, `policyArn` |
-| PodIdentityAssociation | association ID `a-…` | `region`, `clusterName` |
-| IdentityProviderConfig | config name | `region`, `clusterName` |
-| OpenIDConnectProvider | provider ARN | - |
-| Key (kms) | key ID | `region` |
-| RouteTableAssociation | association ID `rtbassoc-…` (not Terraform's `subnet/rtb` import shorthand) | `subnetId`, `routeTableId` |
-| Role | role name | — |
-| OpenIDConnectProvider | provider ARN | — |
-| Key (KMS) | key ID | `region` |
-| Alias (KMS) | `alias/<name>` | `region` |
-| Group (CloudWatch Logs) | log group name | `region` |
-| Cluster | cluster name | `region` |
-| NodeGroup | node group name | `region`, `clusterName` |
-| Addon | `<cluster>:<addon>` | `clusterName`, `addonName` |
-| AccessEntry | `<cluster>:<principal arn>` | `clusterName`, `principalArn` |
-| AccessPolicyAssociation | `<cluster>#<principal arn>#<policy arn>` | `clusterName`, `principalArn`, `policyArn` |
-| PodIdentityAssociation | association ID | `clusterName` |
+The server answers with these Connect codes. Code outside the handlers
+returns faults (`pkg/fault`), which `service.ToConnect` and the `Faults`
+interceptor map to the same codes.
 
-### Cluster import (temporary)
-
-Clusters built with Terraform are imported with one temporary field,
-`ClusterSpec.existing_cluster` (`cloud/v1/cluster_import.proto`), through
-the normal `ClusterService`.
-
-| Step | Call | Crossplane on the imported resources |
-|---|---|---|
-| 0. Network | `ImportNetwork` + `TakeOverNetwork` for the cluster's VPC | see [Networks](#networks) |
-| 1. Import + plan | `CreateCluster` with `spec.existing_cluster` and `network.network_id` | one read-only lookup, then Observe-only resources for everything modelled and carried over. Nothing changes. |
-| 2. Review | `GetCluster` (`status.import`) | check `requires_replacement` and `NOT_IMPORTED` |
-| 3. Hand off | `terraform state rm` | — |
-| 4. Take over | `UpdateCluster` `spec.existingCluster.policy` = `MANAGE_NO_DELETE` | `[Observe, Create, Update, LateInitialize]`; `forProvider` filled from `atProvider` first, then the plan converges |
-| 5. Own | `UpdateCluster` policy `FULL` + `acknowledgeNotImported` | `["*"]` |
-| 6. Finish | `UpdateCluster` clearing `spec.existingCluster` | needs phase `CONVERGED`; Terraform can be removed |
-
-- The node group named in `existing_cluster.default_node_pool_name` must be
-  representable (AWS: no launch template, no custom AMI); otherwise leave it
-  empty and `default_node_pool` is created as a new pool.
-- Access: the platform's account access lets it grant itself cluster-admin
-  (an `AccessEntry` + `AccessPolicyAssociation` for the provisioner role,
-  `WILL_CREATE`); nothing is needed on the Terraform side.
-- A cluster in `CONFIG_MAP` mode: the platform reads `kube-system/aws-auth`
-  through the Kubernetes API and plans an access entry per mapped role and
-  user (`WILL_CREATE`), plus the switch to `API_AND_CONFIG_MAP`
-  (`WILL_UPDATE`; EKS only allows that direction).
-
-**Dropping cluster import** once no cluster has `spec.existing_cluster` set:
-1. Delete `cloud/v1/cluster_import.proto` and the fields
-   `ClusterSpec.existing_cluster` (7) and `ClusterStatus.import` (13); add
-   `reserved 7; reserved "existing_cluster";` to `ClusterSpec` and
-   `reserved 13; reserved "import";` to `ClusterStatus`. Remove the import of
-   `cluster_import.proto` from `cluster.proto` (keep `import.proto`:
-   `ClusterStatus.carried_over` and network imports use it).
-2. Delete `test/idl/cluster_import_test.go` and this section.
-3. `buf lint` and `buf breaking` pass: `buf.yaml` uses `WIRE_JSON`, which
-   allows deleting a field whose number and name are reserved.
-
-## Naming
-
-Kubernetes and cloud names are derived by the server, never taken from the
-caller verbatim, so they always fit the provider limits. `hash8` is the first
-8 hex chars of `sha256(tenant_id/cluster_id)`: it keeps names unique across
-tenants sharing a cloud account; the tenant stays visible through the
-`cluster-vending.io/tenant` tag or label.
-
-| Object | Name | Limit |
-|---|---|---|
-| Namespace | `tenant-<tenant_id>` (tenant_id ≤ 56) | 63 |
-| Managed resource `metadata.name` (networks) | `<network name>-<hash8 of tenant_id/network id>-<suffix>`; `Network.id` is server-assigned, the name is the client's (not unique) | 253 |
-| Managed resource `metadata.name` (clusters) | `<cluster_id>-<suffix>` | 253 |
-| AWS: EKS cluster, IAM roles | `<cluster_id>-<hash8>[-role]` | EKS 100, IAM 64 |
-| AWS: node groups | `default`, or the NodePool id | 63 |
-| GCP: GKE cluster | `<cluster_id truncated to 31>-<hash8>` | 40, lowercase, starts with a letter |
-| GCP: service account ID | `cv-<hash8>-nodes` | 6-30 |
-| Azure: AKS cluster, `dnsPrefix` | `<cluster_id>-<hash8>` | 63, 54 |
-| Azure: resource groups | `rg-<cluster_id>-<hash8>[-nodes]` | 90 |
-| Azure: node pools | `system`, `user`, or the NodePool id truncated | 12, lowercase alphanumeric |
-| Imported resources | unchanged cloud names | — |
-
-## Server-side rules the schema can't express
-
-- Subnet CIDRs inside the layout's `cidr_block` and non-overlapping;
-  `pod_cidr` / `service_cidr` not overlapping the network.
-- A cluster on `network.network_id`: the Network exists in the tenant, is
-  `READY` (an `IMPORTED` one only for a cluster import), and has the
-  cluster's region and provider; every `zone_ids` entry is a zone of the
-  network with a private subnet.
-- Default zones for `availability_zone_count` are the first zone IDs of the
-  region in `pkg/constant/aws`. A zone the account cannot use (constrained
-  zones, e.g. one of us-west-1's three for newer accounts) shows up as a
-  subnet creation error; the server then moves on to the next zone ID.
-- `endpoint_access.public_access_cidrs` has no default: at least one CIDR
-  is required (`["0.0.0.0/0"]` for any address), so who can reach a
-  cluster's API is always an explicit choice.
-- `kubernetes_version` is resolved to a concrete version and written to the
-  control plane and every node pool.
-- `UpdateCluster` ignores `scaling_config.desired_size`: it
-  is create-only (`initProvider`) and the cluster autoscaler owns the node
-  count afterwards. GCP `initialNodeCount` is per zone:
-  `ceil(desired_size / zones)`.
-- Add-on versions (AWS `Addon.addonVersion`) are set explicitly to the
-  default for the cluster's Kubernetes version and bumped on every upgrade.
-  An omitted version would be late-initialized and pinned.
-- `secrets_encryption` can be turned on (`enabled`, or `kms_key_arn` for an existing key), never off, and its key never changes.
-- GKE `deletionProtection` defaults to true: the server sets it to false, or
-  `DeleteCluster` could never finish.
-- Azure needs a second pass for values that exist only after creation:
-  `RoleAssignment.principalId` (from the identity's `atProvider.principalId`)
-  and the NAT egress IP appended to `authorizedIpRanges` (from
-  `PublicIP.atProvider.ipAddress`).
-- GCP label charset for `labels` (`[a-z0-9_-]`, key starts with a letter):
-  a `gcp.*` CEL rule when GCP ships.
-
-### Read-only lookups the server makes
-
-Crossplane has no lookup kinds, so the server reads these itself, once, with
-the tenant's credentials; everything else goes through Crossplane. They are
-part of the admin access granted at onboarding.
-
-| When | AWS calls |
+| Code | Used for |
 |---|---|
-| `ImportNetwork` | `ec2:DescribeSubnets`, `DescribeRouteTables`, `DescribeInternetGateways`, `DescribeNatGateways`, `DescribeAddresses`, `DescribeSecurityGroups`, `DescribeNetworkAcls`, `DescribeVpcEndpoints`, `DescribeFlowLogs`; `logs:DescribeLogGroups`, `ListTagsForResource`; `iam:GetRole` |
-| `ImportCluster` | `eks:DescribeCluster`, `ListNodegroups`, `DescribeNodegroup`, `ListAddons`, `DescribeAddon`, `ListAccessEntries`, `DescribeAccessEntry`, `ListAssociatedAccessPolicies`, `ListPodIdentityAssociations`, `ListIdentityProviderConfigs`, `DescribeIdentityProviderConfig`; `iam:GetRole`, `ListAttachedRolePolicies`, `ListOpenIDConnectProviders`; `logs:DescribeLogGroups`, `ListTagsForResource`; `ec2:DescribeSecurityGroups`, `DescribeSecurityGroupRules`, `DescribeNetworkInterfaces` |
+| `INVALID_ARGUMENT` | A request that fails the contract's validation; an `update_mask` path that cannot be updated or an empty mask; a layout, region, version or add-on the cloud does not accept; a label key starting with `aws:`. |
+| `FAILED_PRECONDITION` | The state does not allow the call: the account is not bootstrapped; the network is not ready, or is used by clusters on delete; the resource is being deleted or is imported read-only; a takeover when the phase is not `PLANNED` or `NOT_IMPORTED` lines are not acknowledged; encryption turned off; a stale or inapplicable plan; a provider package that is not installed; credentials that cannot read the cloud. |
+| `NOT_FOUND` | The network, cluster or account does not exist in the tenant. |
+| `ALREADY_EXISTS` | A cluster of that name in the account and region (in the platform or in EKS); a VPC that is already imported; a reused `request_id`. |
+| `ABORTED` | The `etag` does not match, or the resource changed while the call ran. Get it again and retry. |
+| `UNAVAILABLE` | The management cluster or an AWS lookup cannot be reached. |
+| `UNIMPLEMENTED` | Valid in the contract and not built: a provider other than AWS, `REGIONAL` NAT, `spec.existing_cluster`, updating the authentication mode. |
+| `INTERNAL` | The platform failed. The message carries no detail; the cause is in the server log. |
 
-## Always created (not in the contract)
+## Field mapping
 
-| | AWS | GCP | Azure |
+Paths are relative to the Crossplane resource. The node pool is always a
+separate resource: AWS `NodeGroup`.
+
+| Common field | AWS | GCP (planned) | Azure (planned) |
 |---|---|---|---|
-| Control-plane identity | IAM role + `AmazonEKSClusterPolicy` | (Google-managed) | `UserAssignedIdentity` + `RoleAssignment` Network Contributor |
-| Node identity | IAM role + worker / CNI / ECR policies | `ServiceAccount` + `ProjectIAMMember` (defaultNodeServiceAccount, artifactregistry.reader) | (managed) |
-| Add-ons | `Addon` x5: vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver | built in | built in |
-| Block storage driver | `aws-ebs-csi-driver` with its IAM role (`AmazonEBSCSIDriverPolicy`) and a `PodIdentityAssociation` for `kube-system/ebs-csi-controller-sa`: EBS persistent volumes need it since Kubernetes 1.23 | built in | built in |
-| Secrets encryption key (when enabled) | `kms` `Key` + `Alias` | Cloud KMS key | Key Vault key |
-| Extra pools / groups | — | — | `ResourceGroup`, system `defaultNodePool` |
-| Platform access | `bootstrapClusterCreatorAdminPermissions: true` | provisioner SA (`roles/container.admin`) | provisioner app registration |
-| Delete order | `Usage`: node pools → control plane → identity, NAT, subnets, network | same | same |
+| `spec.region` | `region` | `location` | `location` |
+| `control_plane.kubernetes_version` | `Cluster.version`, `NodeGroup.version` | `Cluster.minMasterVersion`, `NodePool.version` | `kubernetesVersion`, `orchestratorVersion` |
+| `control_plane.secrets_encryption.enabled` | `kms` `Key` + `Alias`; `Cluster.encryptionConfig` | Cloud KMS key; `Cluster.databaseEncryption` | Key Vault key; `keyManagementService` |
+| `control_plane.secrets_encryption.kms_key_arn` | an existing key: `Cluster.encryptionConfig` only | - | - |
+| `endpoint_access.endpoint_private_access` / `endpoint_public_access` | `Cluster.vpcConfig.endpointPrivateAccess` / `endpointPublicAccess` | - | - |
+| `endpoint_access.public_access_cidrs` | `vpcConfig.publicAccessCidrs` | `masterAuthorizedNetworksConfig.cidrBlocks[].cidrBlock` | `apiServerAccessProfile.authorizedIpRanges` |
+| `NetworkSpec.layout.cidr_block` | `VPC.cidrBlock` | carved into `Subnetwork.ipCidrRange` | `VirtualNetwork.addressSpace` |
+| layout `subnets[].cidr_block` | `Subnet.cidrBlock` | `Subnetwork.ipCidrRange` | `Subnet.addressPrefixes` |
+| layout `subnets[].role` | `PUBLIC` / `PRIVATE` | `PRIVATE` only | `PRIVATE` only |
+| layout `subnets[].zone_id` | `Subnet.availabilityZoneId` (required) | empty (regional) | empty (regional) |
+| layout `nat_gateway_mode` | `NATGateway` + `EIP`, one or one per zone | `Router` + `RouterNAT` + `Address` | `NATGateway` + `PublicIP` |
+| `NetworkSpec.flow_logs` | `FlowLog` on the VPC, cloudwatchlogs `Group`, iam `Role` + `Policy` + `RolePolicyAttachment` | - | - |
+| `network.network_id` | the network's private `Subnet`s: `vpcConfig.subnetIds`, `NodeGroup.subnetIds` | `Cluster.subnetwork` | `vnetSubnetId` |
+| `network.zone_ids` | private subnets of those zones only | `Cluster.nodeLocations` | pool `zones` |
+| `network.service_cidr` | `kubernetesNetworkConfig.serviceIpv4Cidr` | secondary range "services" | `networkProfile.serviceCidr` |
+| pool `instance_types` | `instanceTypes` | `nodeConfig.machineType` | `vmSize` |
+| pool `capacity_type` | `capacityType` | `nodeConfig.spot` | `priority` |
+| pool `scaling_config.{min,max}_size` | `scalingConfig.{min,max}Size` | `autoscaling.total{Min,Max}NodeCount` | `{min,max}Count` |
+| pool `scaling_config.desired_size` | `scalingConfig.desiredSize`, sent at creation only | `initialNodeCount` | `nodeCount` |
+| pool `disk_size_gb` | `diskSize` | `nodeConfig.diskSizeGb` | `osDiskSizeGb` |
+| pool `labels`, `taints` | `labels`, `taint[]` | `nodeConfig.labels`, `nodeConfig.taint[]` | `nodeLabels`, `nodeTaints` |
+| `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
+| `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `adminGroupObjectIds` |
+| `spec.access.access_entries` | `AccessEntry` + one `AccessPolicyAssociation` per policy | - | - |
+| `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` | - | - |
+| `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer | - | - |
+| `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` | - | - |
+| `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate`: an existing template, or a rendered ec2 `LaunchTemplate` | - | - |
+| `spec.release_channel`, `spec.tier` | none: stored and returned only | - | - |
+| `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
 
-## Adding a provider
+Created for every AWS cluster without a spec field: the cluster and node
+IAM roles with their policies, the five default add-ons, the EBS CSI
+driver's role and pod identity association, the `ClusterAuth` object behind
+`status.kubeconfig_secret`, and `Usage` objects that order deletion.
 
-1. Add `cloud/v1/<provider>.proto` with `<Provider>ClusterSpec`,
-   `<Provider>ClusterStatus` and `<Provider>NodePoolSpec`, holding only
-   settings missing from the common
-   spec (e.g. GCP `release_channel`, `image_type`; Azure `sku_tier`).
-2. Add the arm to the `ClusterSpec.provider`, `ClusterStatus.provider`,
-   `NetworkSpec.provider` and `ImportNetworkRequest.provider` oneofs (11 =
-   gcp, 12 = azure). They are not `reserved`, because un-reserving is a
-   breaking change for buf.
-3. Fill in the provider's `crossplane` value on the common enums
-   (`CapacityType`, `TaintEffect`, `NatGatewayMode`) and extend the contract
-   test.
-4. Add `<provider>.*` CEL rules on `ClusterSpec` and `NetworkSpec`
-   for its constraints on the common fields (region format, layout, zones,
-   GCP label charset, ...).
-5. Add its region / zone catalog next to `pkg/constant/aws`.
+Names are derived by the server so they fit the provider limits:
 
-## Codegen
+| Object | Name |
+|---|---|
+| Namespace | `tenant-<tenant_id>` |
+| Managed resources of a network or cluster | `<name>-<hash8>-<suffix>`, `hash8` being the first 8 hex characters of `sha256(tenant_id/id)` |
+| EKS cluster | `Cluster.name` |
+| Default node group | `<name>-<hash8>-default`; a replacement is `<name>-<hash8>-default-<hash6>` |
+| Imported resources | their cloud names, unchanged |
 
-`buf generate` writes Go code to `pkg/gen/go` (import path
-`github.com/yindia/cluster-vending/pkg/gen/go/...`) with remote plugins on the
-Buf Schema Registry, pinned to the runtime versions in `go.mod`
-(`protocolbuffers/go` ↔ `google.golang.org/protobuf`, `connectrpc/go` ↔
-`connectrpc.com/connect/v2`). Bump both together. Unauthenticated BSR use is
-rate-limited; run `buf registry login` in CI.
+## Imports
+
+`ImportStatus` is the plan of a network import and of a cluster import. The
+rules, for both:
+
+- **Nothing changes at import.** The server looks the resources up once,
+  read-only, with the tenant's credentials, because Crossplane has no lookup
+  kinds. Network objects are created with `managementPolicies: [Observe]`,
+  cluster objects with `[Observe, LateInitialize]`, each with the cloud ID
+  as `crossplane.io/external-name`. The lookup does not run again.
+- **Tags are kept.** Every existing tag survives the takeover; the platform
+  adds its ownership tags and the labels on top.
+- **Closure.** What the contract models becomes part of the spec; what an
+  imported resource needs and the contract does not model is
+  `CARRIED_OVER`; what only stands next to it is `NOT_IMPORTED` and needs
+  another owner before the previous tool is retired.
+- **Order.** A cluster's network must be imported before the cluster is
+  imported, and taken over before the cluster is taken over.
+
+| Import | Carried over | Not imported |
+|---|---|---|
+| Network | flow logs on the VPC that deliver to CloudWatch Logs, with their log group and delivery role (one shared with other VPCs is owned without `Delete`); the default network ACL (never deleted); custom network ACLs of imported subnets, with their rules; routes of specific CIDRs to the internet gateway | the main route table, other routes (peering, Transit Gateway, VPN), the default security group, flow logs to S3 or Firehose, network ACLs of other subnets, unused NAT gateways, the VPC's other subnets |
+| Cluster | managed policies on the cluster and node roles beyond the platform's; the IAM OIDC provider of the cluster's issuer; the log group `/aws/eks/<name>/cluster`; the KMS key in `encryptionConfig` (owned without `Delete`); OIDC identity provider configs; add-ons the contract has no name for; pod identity associations that are not an add-on's; the control plane's additional security groups with their rules | every node group but the one named as the default; access entries EKS manages; the default node group's launch template and security groups |
+
+`BLOCKING` for a network: secondary VPC CIDRs, IPv6 or dual-stack, private
+egress through something other than a NAT gateway, a VPC CIDR outside /16
+to /24, private subnets in a single zone. `BLOCKING` for a cluster: a field
+EKS cannot change that differs from what the platform renders.
+
+The platform does not clean up inside the workload cluster: `LoadBalancer`
+Services and PersistentVolumeClaims must be removed before `DeleteCluster`,
+or their load balancers and volumes stay in the account.
+
+External names the provider expects (also needed for Observe-only objects):
+
+| Kind | external-name |
+|---|---|
+| VPC, Subnet, InternetGateway, EIP, NATGateway, RouteTable, NetworkACL, DefaultNetworkACL, SecurityGroup, FlowLog, LaunchTemplate | the cloud ID (`vpc-…`, `subnet-…`, `igw-…`, `eipalloc-…`, `nat-…`, `rtb-…`, `acl-…`, `sg-…`, `fl-…`, `lt-…`) |
+| SecurityGroupIngressRule, SecurityGroupEgressRule | `sgr-…` |
+| NetworkACLRule | `nacl-<crc32 of "<acl-id>-<rule number>-<egress>-<protocol>-">` |
+| Route | `r-<rtb-id><crc32 of the destination CIDR>` |
+| RouteTableAssociation | `rtbassoc-…` |
+| Group (cloudwatchlogs) | the log group name |
+| Role | the role name |
+| RolePolicyAttachment | `<role name>/<policy arn>` |
+| OpenIDConnectProvider | the provider ARN |
+| Key (kms) | the key ID |
+| Alias (kms) | `alias/<name>` |
+| Cluster (eks) | the cluster name |
+| NodeGroup | the node group name |
+| Addon | `<cluster>:<add-on>` |
+| AccessEntry | `<cluster>:<principal arn>` |
+| AccessPolicyAssociation | `<cluster>#<principal arn>#<policy arn>` |
+| PodIdentityAssociation | the association ID (`a-…`) |
+| IdentityProviderConfig | the config name |
+
+## Working on the contract
+
+| Task | Command |
+|---|---|
+| Generate Go code | `make generate` (`buf dep update`, `buf generate`) |
+| Lint and check formatting | `make buf-lint` (`buf format --diff --exit-code`, `buf lint` with `STANDARD`); part of `make check` |
+| Format in place | `make buf-format` |
+| Check for breaking changes | `make breaking` (`buf breaking` against `.git#branch=main`; set `AGAINST` for another baseline). Not part of `make check`. |
+| Contract tests | `go test ./test/idl/...`; part of `make check` |
+
+Generated code goes to `pkg/gen/go/cloud/v1` (messages) and
+`pkg/gen/go/cloud/v1/cloudv1connect` (services) and is committed.
+`buf.gen.yaml` uses remote plugins on the Buf Schema Registry, pinned to
+the runtime versions in `go.mod` (`protocolbuffers/go` with
+`google.golang.org/protobuf`, `connectrpc/go` with
+`connectrpc.com/connect/v2`); bump both together.
+
+Adding a field:
+
+1. Add it to the message with the next free number. Use `optional` for a
+   boolean whose unset state must differ from false.
+2. Write the comment: what it means, its default, whether it can change
+   after creation, and the Crossplane path it maps to.
+3. Add validation: `buf.validate` on the field, a CEL rule on the message
+   for cross-field constraints, `defined_only` for enums. An enum value that
+   becomes a Crossplane string gets `(cloud.v1.crossplane)`, and the enum is
+   added to the list in `test/idl/crossplane_contract_test.go`.
+4. `make generate`, and commit the generated code with the proto.
+5. Add a contract test under `test/idl`: valid values pass, invalid ones
+   are rejected.
+6. Handle it in the server: resolve its default (`pkg/network`,
+   `pkg/cluster`), map it to the render plan, and, if it can change, add
+   its path to the update handler (`pkg/server/*/mutate.go`). A field that
+   is unset must leave the rendered resources byte-identical.
+7. Update this readme: the resource table, the update paths and the field
+   mapping.
+8. `make check`, and `make breaking` before merging.
+
+Adding a provider: add `cloud/v1/<provider>.proto` with its spec and status
+messages holding only what the common spec lacks; add the arm to the
+`provider` oneofs (11 = gcp, 12 = azure); fill in the provider's
+`crossplane` value on the common enums and extend the contract test; add
+`<provider>.*` CEL rules for its constraints on common fields; add its
+region and zone catalog next to `pkg/constant/aws`.
+
+## Declared but not implemented
+
+| In the contract | What the server does |
+|---|---|
+| `ClusterSpec.existing_cluster` and `cluster_import.proto` (`ExistingCluster`, its policies) | `CreateCluster` and `UpdateCluster` refuse the field with `UNIMPLEMENTED`. Clusters are imported with `ImportCluster` and `TakeOverCluster`. The messages stay so the wire format does not change; they can be reserved once no client sends them (`ClusterSpec` 7, as `cluster_import.proto` describes). |
+| Updating `spec.aws.access_config.authentication_mode` | `UNIMPLEMENTED`. It can be set at creation. |
+| `NAT_GATEWAY_MODE_REGIONAL` | `UNIMPLEMENTED` for AWS. |
+| Providers other than AWS (`gcp`, `azure`) | No message exists; only `aws` can be set. Accounts, networks and clusters of another provider are refused. |
+| `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
+| `spec.release_channel`, `spec.tier` | Stored and returned; nothing acts on them and they cannot be updated. |
+| `IMPORT_PHASE_DISCOVERING` | Never set: an import looks the resources up within the call and answers with `PLANNED` or `BLOCKED`. |
+| `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
+| Caller authorization of `tenant_id` | Not implemented: the server trusts the `tenant_id` of the request. |
+| `ImportedResource` lists in `NetworkStatus.carried_over` and `ClusterStatus.carried_over` | Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |

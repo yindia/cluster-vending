@@ -26,7 +26,9 @@ func TestLocalRunFilesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hack/controller.local.yaml: %v", err)
 	}
-	if controller.LeaderElect || controller.AWS.ManagementAccountID != "111122223333" || controller.AWS.ProviderCredentials != nil {
+	// The credentials Secret line is the developer's to uncomment and point
+	// at their own Secret: either way the file loads.
+	if controller.LeaderElect || controller.AWS.ManagementRoleARN == "" {
 		t.Errorf("controller: %+v", controller)
 	}
 	withSecret, err := config.LoadController(nil,

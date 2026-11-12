@@ -787,16 +787,16 @@ spec:
                 || self.access.accessEntries.all(e, !(e.principalARN in self.access.adminPrincipals))'
             - message: AWS pods take IPs from the VPC subnets; network.podCIDR must
                 be empty
-              rule: '!has(self.aws) || !has(self.network.podCIDR) || self.network.podCIDR
-                == '''''
+              rule: '!has(self.aws) || !has(self.network.podCIDR) || size(self.network.podCIDR)
+                == 0'
             - message: AWS clusters need at least two zoneIDs, given as zone IDs like
                 use1-az1
               rule: '!has(self.aws) || !has(self.network.zoneIDs) || size(self.network.zoneIDs)
                 == 0 || (size(self.network.zoneIDs) >= 2 && self.network.zoneIDs.all(z,
                 z.matches(''^[a-z]+[0-9]-az[0-9]+$'')))'
             - message: EKS serviceCIDR must be /12 to /24
-              rule: '!has(self.aws) || !has(self.network.serviceCIDR) || self.network.serviceCIDR
-                == '''' || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
+              rule: '!has(self.aws) || !has(self.network.serviceCIDR) || size(self.network.serviceCIDR)
+                == 0 || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
             - message: 'defaultNodePool.diskSizeGB cannot be set with a launch template:
                 EKS takes the disk from the template'
               rule: '!has(self.defaultNodePool) || !has(self.defaultNodePool.diskSizeGB)

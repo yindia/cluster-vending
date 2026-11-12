@@ -269,7 +269,7 @@ spec:
                 - message: zonal subnets already define the zones; availabilityZoneCount
                     only combines with regional subnets (no zoneID)
                   rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
-                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
+                    || self.subnets.all(s, !has(s.zoneID) || size(s.zoneID) == 0)'
                 - message: subnet cidrBlock values must be unique
                   rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
                     b.cidrBlock == a.cidrBlock))'
@@ -583,7 +583,7 @@ spec:
                 - message: zonal subnets already define the zones; availabilityZoneCount
                     only combines with regional subnets (no zoneID)
                   rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
-                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
+                    || self.subnets.all(s, !has(s.zoneID) || size(s.zoneID) == 0)'
                 - message: subnet cidrBlock values must be unique
                   rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
                     b.cidrBlock == a.cidrBlock))'

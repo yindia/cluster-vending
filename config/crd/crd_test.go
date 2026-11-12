@@ -39,8 +39,10 @@ func TestEmbeddedDefinitions(t *testing.T) {
 	}
 }
 
-// Every CEL rule is plain ASCII: a typographic quote (”) where CEL needs ''
-// compiles nowhere, and only a real API server reports it.
+// Every CEL rule is plain ASCII. gofmt rewrites two single quotes in a doc
+// comment, where the markers live, into a typographic quote, which CEL
+// cannot compile and only a real API server reports: rules test for an
+// empty string with size(x) == 0 instead.
 func TestValidationRulesAreASCII(t *testing.T) {
 	defs, err := crd.All()
 	if err != nil {

@@ -1,3 +1,8 @@
+// Package network is the network logic that needs neither the API nor the
+// database: resolving a layout, mapping a spec onto the render plan, and
+// planning the import of a discovered VPC. It returns plain values and
+// plain errors; the server (and later the controller) decides what to do
+// with them.
 package network
 
 import (
@@ -28,27 +33,30 @@ const (
 	maxSubnetPrefix = 28
 )
 
-// errUnsupported marks layouts that are valid in the contract but not
-// implemented yet (UNIMPLEMENTED).
-var errUnsupported = errors.New("not supported yet")
+// ErrUnsupported marks layouts that are valid in the contract but not
+// implemented yet.
+var ErrUnsupported = errors.New("not supported yet")
 
-// awsLayout is a NetworkLayout resolved for AWS.
-type awsLayout struct {
+// Layout is a NetworkLayout resolved for AWS: defaults filled in, subnets
+// explicit.
+type Layout struct {
 	CIDRBlock string
 	Subnets   []crossplaneaws.SubnetPlan
 	NAT       crossplaneaws.NATMode
 }
 
-// planAWSLayout applies the layout defaults and checks what the schema
+// PlanLayout applies the layout defaults and checks what the schema
 // cannot: subnets inside cidr_block without overlap, zones of the region.
-func planAWSLayout(region string, l *cloudv1.NetworkLayout) (awsLayout, error) {
-	out := awsLayout{CIDRBlock: l.GetCidrBlock()}
+// A layout the contract allows and this version does not implement is
+// ErrUnsupported.
+func PlanLayout(region string, l *cloudv1.NetworkLayout) (Layout, error) {
+	out := Layout{CIDRBlock: l.GetCidrBlock()}
 	if out.CIDRBlock == "" {
 		out.CIDRBlock = DefaultCIDRBlock
 	}
 	network, err := netip.ParsePrefix(out.CIDRBlock)
 	if err != nil {
-		return awsLayout{}, fmt.Errorf("cidr_block %q: %w", out.CIDRBlock, err)
+		return Layout{}, fmt.Errorf("cidr_block %q: %w", out.CIDRBlock, err)
 	}
 
 	switch l.GetNatGatewayMode() {
@@ -57,12 +65,12 @@ func planAWSLayout(region string, l *cloudv1.NetworkLayout) (awsLayout, error) {
 	case cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE:
 		out.NAT = crossplaneaws.NATPerZone
 	default:
-		return awsLayout{}, fmt.Errorf("nat_gateway_mode %s: %w", l.GetNatGatewayMode(), errUnsupported)
+		return Layout{}, fmt.Errorf("nat_gateway_mode %s: %w", l.GetNatGatewayMode(), ErrUnsupported)
 	}
 
 	regionZones := awscatalog.ZoneIDs(awscatalog.RegionCode(region))
 	if len(regionZones) == 0 {
-		return awsLayout{}, fmt.Errorf("region %q has no known availability zones", region)
+		return Layout{}, fmt.Errorf("region %q has no known availability zones", region)
 	}
 	if len(l.GetSubnets()) > 0 {
 		out.Subnets, err = explicitSubnets(network, region, l.GetSubnets())
@@ -73,7 +81,7 @@ func planAWSLayout(region string, l *cloudv1.NetworkLayout) (awsLayout, error) {
 		out.Subnets, err = defaultSubnets(network, regionZones, int(l.GetAvailabilityZoneCount()))
 	}
 	if err != nil {
-		return awsLayout{}, err
+		return Layout{}, err
 	}
 	return out, nil
 }
@@ -169,4 +177,17 @@ func nthSubnet(p netip.Prefix, newBits, i int) netip.Prefix {
 	base := binary.BigEndian.Uint32(a[:]) + uint32(i)<<(32-bits) //nolint:gosec // i < 2^newBits, bits <= 28
 	binary.BigEndian.PutUint32(a[:], base)
 	return netip.PrefixFrom(netip.AddrFrom4(a), bits)
+}
+
+// LayoutProto is the resolved layout as stored in the spec: explicit
+// subnets, so later renders do not depend on defaults.
+func LayoutProto(r Layout) *cloudv1.NetworkLayout {
+	l := &cloudv1.NetworkLayout{CidrBlock: r.CIDRBlock, NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE}
+	if r.NAT == crossplaneaws.NATPerZone {
+		l.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
+	}
+	for _, s := range r.Subnets {
+		l.Subnets = append(l.Subnets, &cloudv1.Subnet{Role: subnetRole(s.Role), CidrBlock: s.CIDR, ZoneId: s.ZoneID})
+	}
+	return l
 }

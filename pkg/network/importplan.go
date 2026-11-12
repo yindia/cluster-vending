@@ -11,34 +11,42 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
+// API versions of the resources a plan line names.
 const (
-	ec2APIVersion  = "ec2.aws.m.upbound.io/v1beta1"
-	logsAPIVersion = "cloudwatchlogs.aws.m.upbound.io/v1beta1"
-	iamAPIVersion  = "iam.aws.m.upbound.io/v1beta1"
-	minVPCPrefix   = 16
-	maxVPCPrefix   = 24
-	routeLocal     = "local"
+	EC2APIVersion  = "ec2.aws.m.upbound.io/v1beta1"
+	LogsAPIVersion = "cloudwatchlogs.aws.m.upbound.io/v1beta1"
+	IAMAPIVersion  = "iam.aws.m.upbound.io/v1beta1"
 )
 
-// importPlan is what ImportNetwork does with a discovered network.
-type importPlan struct {
-	layout    *cloudv1.NetworkLayout
-	resources crossplaneaws.ImportedNetwork
-	lines     []*cloudv1.ImportedResource
+const (
+	minVPCPrefix = 16
+	maxVPCPrefix = 24
+	routeLocal   = "local"
+)
+
+// ImportPlan is what importing a discovered network does.
+type ImportPlan struct {
+	// Layout is the layout the discovered network is (the spec's).
+	Layout *cloudv1.NetworkLayout
+	// Resources are the Observe-only resources that import it
+	// (crossplaneaws.ImportedNetworkResources renders them).
+	Resources crossplaneaws.ImportedNetwork
+	// Lines is the plan: one line per discovered resource.
+	Lines []*cloudv1.ImportedResource
 }
 
-// blocked reports whether a BLOCKING line prevents the import.
-func (p importPlan) blocked() bool {
-	return slices.ContainsFunc(p.lines, func(l *cloudv1.ImportedResource) bool {
+// Blocked reports whether a BLOCKING line prevents the import.
+func (p ImportPlan) Blocked() bool {
+	return slices.ContainsFunc(p.Lines, func(l *cloudv1.ImportedResource) bool {
 		return l.GetDisposition() == cloudv1.Disposition_DISPOSITION_BLOCKING
 	})
 }
 
-// notImported lists the NOT_IMPORTED lines (TakeOverNetwork needs them
+// NotImported lists the NOT_IMPORTED lines (a takeover needs them
 // acknowledged).
-func (p importPlan) notImported() []*cloudv1.ImportedResource {
+func (p ImportPlan) NotImported() []*cloudv1.ImportedResource {
 	var out []*cloudv1.ImportedResource
-	for _, l := range p.lines {
+	for _, l := range p.Lines {
 		if l.GetDisposition() == cloudv1.Disposition_DISPOSITION_NOT_IMPORTED {
 			out = append(out, l)
 		}
@@ -46,18 +54,18 @@ func (p importPlan) notImported() []*cloudv1.ImportedResource {
 	return out
 }
 
-// planner builds an importPlan; base carries the namespace, names and
+// planner builds an ImportPlan; base carries the namespace, names and
 // account of the network.
 type planner struct {
 	d    *awscloud.Network
 	base crossplaneaws.ImportedNetwork
-	plan importPlan
+	plan ImportPlan
 	// subnetNames maps subnet IDs to managed resource names.
 	subnetNames map[string]string
 	natKeys     map[string]string
 }
 
-// planAWSImport maps a discovered network onto the contract: the layout it
+// PlanImport maps a discovered network onto the contract: the layout it
 // is (spec), the Observe-only resources that import it, and one plan line
 // per resource. Lines are MATCHES, WILL_UPDATE (subnets missing their load
 // balancer tag), CARRIED_OVER (the VPC's flow logs to CloudWatch Logs with
@@ -67,10 +75,10 @@ type planner struct {
 // main route table, other routes, unused NAT gateways, the default security
 // group, other flow logs and network ACLs) or BLOCKING (not expressible in
 // the contract).
-func planAWSImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) importPlan {
+func PlanImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) ImportPlan {
 	p := &planner{d: d, base: base, subnetNames: map[string]string{}, natKeys: map[string]string{}}
-	p.plan.layout = &cloudv1.NetworkLayout{CidrBlock: d.VPC.CIDRBlock}
-	p.plan.resources = base
+	p.plan.Layout = &cloudv1.NetworkLayout{CidrBlock: d.VPC.CIDRBlock}
+	p.plan.Resources = base
 	p.vpc()
 	p.subnets()
 	p.routeTables()
@@ -82,17 +90,17 @@ func planAWSImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) impo
 }
 
 func (p *planner) line(kind, name, externalName, specPath string, disposition cloudv1.Disposition, detail string) {
-	p.lineOf(ec2APIVersion, kind, name, externalName, specPath, disposition, detail)
+	p.lineOf(EC2APIVersion, kind, name, externalName, specPath, disposition, detail)
 }
 
 func (p *planner) lineOf(apiVersion, kind, name, externalName, specPath string, disposition cloudv1.Disposition, detail string) {
-	p.plan.lines = append(p.plan.lines, &cloudv1.ImportedResource{ApiVersion: apiVersion, Kind: kind, Name: name,
+	p.plan.Lines = append(p.plan.Lines, &cloudv1.ImportedResource{ApiVersion: apiVersion, Kind: kind, Name: name,
 		ExternalName: externalName, SpecPath: specPath, Disposition: disposition, Detail: detail})
 }
 
 func (p *planner) vpc() {
 	v := p.d.VPC
-	p.plan.resources.VPC = crossplaneaws.ImportedVPC{ID: v.ID, CIDRBlock: v.CIDRBlock, Tags: v.Tags}
+	p.plan.Resources.VPC = crossplaneaws.ImportedVPC{ID: v.ID, CIDRBlock: v.CIDRBlock, Tags: v.Tags}
 	disposition, detail := cloudv1.Disposition_DISPOSITION_MATCHES, ""
 	if prefix, err := netip.ParsePrefix(v.CIDRBlock); err != nil || prefix.Bits() < minVPCPrefix || prefix.Bits() > maxVPCPrefix {
 		disposition, detail = cloudv1.Disposition_DISPOSITION_BLOCKING,
@@ -105,7 +113,7 @@ func (p *planner) vpc() {
 	}
 	if len(p.d.InternetGateways) > 0 {
 		g := p.d.InternetGateways[0]
-		p.plan.resources.InternetGateway = &crossplaneaws.ImportedInternetGateway{ID: g.ID, Tags: g.Tags}
+		p.plan.Resources.InternetGateway = &crossplaneaws.ImportedInternetGateway{ID: g.ID, Tags: g.Tags}
 		p.line("InternetGateway", p.base.Prefix+"-igw", g.ID, "", cloudv1.Disposition_DISPOSITION_MATCHES, "")
 	}
 }
@@ -131,10 +139,10 @@ func (p *planner) subnets() {
 		}
 		name := p.base.Prefix + "-" + suffix
 		p.subnetNames[s.ID] = name
-		p.plan.resources.Subnets = append(p.plan.resources.Subnets, crossplaneaws.ImportedSubnet{
+		p.plan.Resources.Subnets = append(p.plan.Resources.Subnets, crossplaneaws.ImportedSubnet{
 			Name: name, ID: s.ID, CIDRBlock: s.CIDRBlock, ZoneID: s.ZoneID, Role: role,
 			MapPublicIPOnLaunch: s.MapPublicIPOnLaunch, Tags: s.Tags})
-		p.plan.layout.Subnets = append(p.plan.layout.Subnets, &cloudv1.Subnet{Role: subnetRole(role), CidrBlock: s.CIDRBlock, ZoneId: s.ZoneID})
+		p.plan.Layout.Subnets = append(p.plan.Layout.Subnets, &cloudv1.Subnet{Role: subnetRole(role), CidrBlock: s.CIDRBlock, ZoneId: s.ZoneID})
 		p.subnetLine(name, s, role, path)
 		if role == crossplaneaws.SubnetPublic {
 			public++
@@ -242,13 +250,13 @@ func (p *planner) routeTable(rt awscloud.RouteTable, assocs []crossplaneaws.Impo
 				fmt.Sprintf("route %s -> %s is not imported yet", routeDestination(r), routeTarget(r)))
 		}
 	}
-	p.plan.resources.RouteTables = append(p.plan.resources.RouteTables, t)
+	p.plan.Resources.RouteTables = append(p.plan.Resources.RouteTables, t)
 }
 
 // routeTableKey is "public" for a public table, else "private-<zone of its
 // first subnet>".
 func (p *planner) routeTableKey(assocs []crossplaneaws.ImportedAssociation) string {
-	for _, s := range p.plan.resources.Subnets {
+	for _, s := range p.plan.Resources.Subnets {
 		if s.ID == assocs[0].SubnetID {
 			if s.Role == crossplaneaws.SubnetPublic {
 				return "public"
@@ -294,7 +302,7 @@ func (p *planner) useNAT(id string) {
 		}
 		// A private NAT gateway has no Elastic IP.
 		private := g.ConnectivityType == "private" || alloc == ""
-		p.plan.resources.NATGateways = append(p.plan.resources.NATGateways,
+		p.plan.Resources.NATGateways = append(p.plan.Resources.NATGateways,
 			crossplaneaws.ImportedNAT{Key: key, ID: g.ID, SubnetID: g.SubnetID, AllocationID: alloc, Private: private, Tags: g.Tags})
 		if !private {
 			p.line("EIP", p.base.Prefix+"-eip-"+key, alloc, "", cloudv1.Disposition_DISPOSITION_MATCHES, "")
@@ -311,7 +319,7 @@ func (p *planner) useNAT(id string) {
 // imported, else its ID; "-2", "-3", ... for a second NAT in one zone.
 func (p *planner) natKey(g awscloud.NATGateway) string {
 	key := g.ID
-	for _, s := range p.plan.resources.Subnets {
+	for _, s := range p.plan.Resources.Subnets {
 		if s.ID == g.SubnetID {
 			key = s.ZoneID
 		}
@@ -328,9 +336,9 @@ func (p *planner) natKey(g awscloud.NATGateway) string {
 
 // natMode is SINGLE with one NAT gateway in use, PER_ZONE with more.
 func (p *planner) natMode() {
-	p.plan.layout.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE
+	p.plan.Layout.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE
 	if len(p.natKeys) > 1 {
-		p.plan.layout.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
+		p.plan.Layout.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
 	}
 }
 
@@ -374,7 +382,7 @@ func (p *planner) networkACLs() {
 			}
 			acl.Rules = append(acl.Rules, rule)
 		}
-		p.plan.resources.NetworkACLs = append(p.plan.resources.NetworkACLs, acl)
+		p.plan.Resources.NetworkACLs = append(p.plan.Resources.NetworkACLs, acl)
 	}
 }
 

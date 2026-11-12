@@ -1,6 +1,7 @@
 package network
 
 import (
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
@@ -10,9 +11,9 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// resolvedFlowLogs is spec.flow_logs as stored: with its defaults when
+// ResolveFlowLogs is spec.flow_logs as stored: with its defaults when
 // enabled, so later renders do not depend on them; unchanged otherwise.
-func resolvedFlowLogs(in *cloudv1.NetworkFlowLogs) *cloudv1.NetworkFlowLogs {
+func ResolveFlowLogs(in *cloudv1.NetworkFlowLogs) *cloudv1.NetworkFlowLogs {
 	if !in.GetEnabled() {
 		return in
 	}
@@ -29,12 +30,12 @@ func resolvedFlowLogs(in *cloudv1.NetworkFlowLogs) *cloudv1.NetworkFlowLogs {
 	return out
 }
 
-// flowLogPlan is the render plan of spec.flow_logs: nil unless enabled.
-func flowLogPlan(in *cloudv1.NetworkFlowLogs) *crossplaneaws.FlowLogPlan {
+// FlowLogPlan is the render plan of spec.flow_logs: nil unless enabled.
+func FlowLogPlan(in *cloudv1.NetworkFlowLogs) *crossplaneaws.FlowLogPlan {
 	if !in.GetEnabled() {
 		return nil
 	}
-	in = resolvedFlowLogs(in)
+	in = ResolveFlowLogs(in)
 	traffic := map[cloudv1.FlowLogTrafficType]string{
 		cloudv1.FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_ACCEPT: "ACCEPT",
 		cloudv1.FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_REJECT: "REJECT",
@@ -75,17 +76,17 @@ func (p *planner) flowLogs() {
 		g, r := *f.LogGroup, *f.Role
 		if groups[g.Name] == "" {
 			groups[g.Name] = numbered(p.base.Prefix+"-flow-logs", len(groups)+1)
-			p.lineOf(logsAPIVersion, "Group", groups[g.Name], g.Name, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
+			p.lineOf(LogsAPIVersion, "Group", groups[g.Name], g.Name, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
 				sharedDetail(g.Shared, "log group"))
 		}
 		if roles[r.Name] == "" {
 			roles[r.Name] = numbered(p.base.Prefix+"-flow-logs-role", len(roles)+1)
-			p.lineOf(iamAPIVersion, "Role", roles[r.Name], r.Name, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
+			p.lineOf(IAMAPIVersion, "Role", roles[r.Name], r.Name, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER,
 				sharedDetail(r.Shared, "role"))
 		}
-		name := numbered(p.base.Prefix+"-flow-log", len(p.plan.resources.FlowLogs)+1)
+		name := numbered(p.base.Prefix+"-flow-log", len(p.plan.Resources.FlowLogs)+1)
 		p.line("FlowLog", name, f.ID, "", cloudv1.Disposition_DISPOSITION_CARRIED_OVER, "")
-		p.plan.resources.FlowLogs = append(p.plan.resources.FlowLogs, crossplaneaws.ImportedFlowLog{
+		p.plan.Resources.FlowLogs = append(p.plan.Resources.FlowLogs, crossplaneaws.ImportedFlowLog{
 			Name: name, ID: f.ID, TrafficType: f.TrafficType, LogFormat: f.LogFormat,
 			MaxAggregationInterval: f.MaxAggregationInterval, Tags: f.Tags,
 			Group: crossplaneaws.ImportedLogGroup{Name: groups[g.Name], LogGroupName: g.Name, ARN: g.ARN, KMSKeyID: g.KMSKeyID,
@@ -103,4 +104,18 @@ func sharedDetail(shared bool, what string) string {
 		return ""
 	}
 	return "flow logs of other VPCs use this " + what + " too: it is owned without Delete and stays when the network is deleted"
+}
+
+// FlowLogsChangeable refuses what AWS cannot change on a flow log that
+// exists: its traffic type and aggregation interval.
+func FlowLogsChangeable(before, after *cloudv1.NetworkFlowLogs) error {
+	if !before.GetEnabled() || !after.GetEnabled() {
+		return nil // turned on or off: created or deleted
+	}
+	if before.GetTrafficType() != after.GetTrafficType() ||
+		before.GetAggregationIntervalSeconds() != after.GetAggregationIntervalSeconds() {
+		return errors.New(
+			"the traffic type and aggregation interval of existing flow logs cannot be changed; turn flow logs off, then on with the new settings")
+	}
+	return nil
 }

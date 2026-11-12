@@ -16,59 +16,16 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
-	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
-
-// resolved is a stored network ready to render.
-type resolved struct {
-	crossplaneaws.NetworkPlan
-}
-
-func newResolved(row *model.Network, spec *cloudv1.NetworkSpec, a *model.CloudAccount, l awsLayout) resolved {
-	return resolved{
-		NetworkPlan: crossplaneaws.NetworkPlan{
-			Namespace:          a.Namespace,
-			ProviderConfigName: a.ProviderConfigName,
-			TenantID:           row.TenantID,
-			NetworkID:          row.ID,
-			NetworkName:        row.Name,
-			Prefix:             crossplaneaws.NetworkPrefix(row.TenantID, row.ID, row.Name),
-			Region:             spec.GetRegion(),
-			CIDRBlock:          l.CIDRBlock,
-			Subnets:            l.Subnets,
-			NAT:                l.NAT,
-			Tags:               row.Labels,
-			AccountID:          a.AccountID,
-			FlowLogs:           flowLogPlan(spec.GetFlowLogs()),
-		},
-	}
-}
-
-// layoutProto is the resolved layout as stored in the spec: explicit
-// subnets, so later renders do not depend on defaults.
-func layoutProto(r awsLayout) *cloudv1.NetworkLayout {
-	l := &cloudv1.NetworkLayout{CidrBlock: r.CIDRBlock, NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE}
-	if r.NAT == crossplaneaws.NATPerZone {
-		l.NatGatewayMode = cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE
-	}
-	for _, s := range r.Subnets {
-		role := cloudv1.SubnetRole_SUBNET_ROLE_PRIVATE
-		if s.Role == crossplaneaws.SubnetPublic {
-			role = cloudv1.SubnetRole_SUBNET_ROLE_PUBLIC
-		}
-		l.Subnets = append(l.Subnets, &cloudv1.Subnet{Role: role, CidrBlock: s.CIDR, ZoneId: s.ZoneID})
-	}
-	return l
-}
 
 // apply makes the network's managed resources match plan, in order
 // (crossplaneaws.NetworkSet), and marks the generation applied once the
 // whole set is: while NAT gateways wait for the internet gateway,
 // Reconcile applies the network again.
-func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model.CloudAccount, plan resolved) error {
-	set, err := crossplaneaws.NetworkSet(plan.NetworkPlan)
+func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model.CloudAccount, plan crossplaneaws.NetworkPlan) error {
+	set, err := crossplaneaws.NetworkSet(plan)
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
 	}

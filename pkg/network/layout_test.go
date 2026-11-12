@@ -9,7 +9,7 @@ import (
 )
 
 func TestDefaultLayout(t *testing.T) {
-	got, err := planAWSLayout("us-east-1", &cloudv1.NetworkLayout{})
+	got, err := PlanLayout("us-east-1", &cloudv1.NetworkLayout{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestDefaultLayout(t *testing.T) {
 }
 
 func TestLayoutChoices(t *testing.T) {
-	got, err := planAWSLayout("eu-west-1", &cloudv1.NetworkLayout{
+	got, err := PlanLayout("eu-west-1", &cloudv1.NetworkLayout{
 		CidrBlock: "172.16.0.0/22", AvailabilityZoneCount: 2,
 		NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE,
 	})
@@ -56,7 +56,7 @@ func TestExplicitSubnets(t *testing.T) {
 	ok := &cloudv1.NetworkLayout{CidrBlock: "10.1.0.0/16", Subnets: []*cloudv1.Subnet{
 		sub(pub, "10.1.0.0/24", "use1-az1"), sub(priv, "10.1.16.0/20", "use1-az1"), sub(priv, "10.1.32.0/20", "use1-az2"),
 	}}
-	got, err := planAWSLayout("us-east-1", ok)
+	got, err := PlanLayout("us-east-1", ok)
 	if err != nil || len(got.Subnets) != 3 || got.Subnets[0].Role != crossplaneaws.SubnetPublic {
 		t.Fatalf("explicit = %+v, %v", got, err)
 	}
@@ -69,16 +69,16 @@ func TestExplicitSubnets(t *testing.T) {
 		"too small":              {Subnets: []*cloudv1.Subnet{sub(priv, "10.0.0.0/29", "use1-az1")}},
 		"default carve on /24":   {CidrBlock: "10.0.0.0/24"},
 	} {
-		if _, err := planAWSLayout("us-east-1", l); err == nil {
+		if _, err := PlanLayout("us-east-1", l); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}
-	if _, err := planAWSLayout("eu-west-1", &cloudv1.NetworkLayout{AvailabilityZoneCount: 6}); err == nil {
+	if _, err := PlanLayout("eu-west-1", &cloudv1.NetworkLayout{AvailabilityZoneCount: 6}); err == nil {
 		t.Error("more zones than eu-west-1 has accepted")
 	}
-	_, err = planAWSLayout("us-east-1", &cloudv1.NetworkLayout{NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_REGIONAL})
-	if !errors.Is(err, errUnsupported) {
-		t.Errorf("regional NAT = %v, want errUnsupported", err)
+	_, err = PlanLayout("us-east-1", &cloudv1.NetworkLayout{NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_REGIONAL})
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("regional NAT = %v, want ErrUnsupported", err)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestAWSSubnetRules(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := planAWSLayout("us-east-1", &cloudv1.NetworkLayout{CidrBlock: "10.0.0.0/16", NatGatewayMode: tt.nat, Subnets: tt.subnets})
+			_, err := PlanLayout("us-east-1", &cloudv1.NetworkLayout{CidrBlock: "10.0.0.0/16", NatGatewayMode: tt.nat, Subnets: tt.subnets})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("err = %v, wantErr %v", err, tt.wantErr)
 			}

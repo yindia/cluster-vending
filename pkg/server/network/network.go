@@ -23,6 +23,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
+	corenetwork "github.com/yindia/cluster-vending/pkg/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -68,7 +69,7 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	if err != nil {
 		return nil, err
 	}
-	plan := newResolved(row, req.GetNetwork().GetSpec(), account, layout)
+	plan := renderPlan(row, req.GetNetwork().GetSpec(), account, layout)
 	if err := s.apply(ctx, row, account, plan); err != nil {
 		s.rollback(ctx, row)
 		return nil, err
@@ -83,15 +84,15 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 // insert stores the network as sent (input) and resolved (spec with the
 // layout's defaults filled in), state PROVISIONING. The row ID becomes
 // Network.id.
-func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkRequest, a *model.CloudAccount, l awsLayout) (*model.Network, error) {
+func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkRequest, a *model.CloudAccount, l corenetwork.Layout) (*model.Network, error) {
 	in := req.GetNetwork()
 	input, err := encode(in)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	spec := proto.CloneOf(in.GetSpec())
-	spec.Layout = layoutProto(l)
-	spec.FlowLogs = resolvedFlowLogs(spec.GetFlowLogs())
+	spec.Layout = corenetwork.LayoutProto(l)
+	spec.FlowLogs = corenetwork.ResolveFlowLogs(spec.GetFlowLogs())
 	raw, err := encode(spec)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -114,27 +115,35 @@ func (s *NetworkService) insert(ctx context.Context, req *cloudv1.CreateNetworkR
 
 // plan checks the account and region and resolves the layout. The cloud
 // is the account's: a network has no provider of its own.
-func (s *NetworkService) plan(ctx context.Context, tenantID string, spec *cloudv1.NetworkSpec) (*model.CloudAccount, awsLayout, error) {
+func (s *NetworkService) plan(ctx context.Context, tenantID string, spec *cloudv1.NetworkSpec) (*model.CloudAccount, corenetwork.Layout, error) {
 	account, err := s.account(ctx, tenantID, spec.GetBootstrapId())
 	if err != nil {
-		return nil, awsLayout{}, err
+		return nil, corenetwork.Layout{}, err
 	}
 	if account.Provider != model.ProviderAWS {
-		return nil, awsLayout{}, connect.NewError(connect.CodeUnimplemented,
+		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeUnimplemented,
 			fmt.Sprintf("account %s is %s; only aws networks are supported", account.ID, account.Provider))
 	}
 	if !awscatalog.IsRegion(spec.GetRegion()) {
-		return nil, awsLayout{}, connect.NewError(connect.CodeInvalidArgument,
+		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Sprintf("spec.region %q is not a known AWS region", spec.GetRegion()))
 	}
-	layout, err := planAWSLayout(spec.GetRegion(), spec.GetLayout())
+	layout, err := corenetwork.PlanLayout(spec.GetRegion(), spec.GetLayout())
 	switch {
-	case errors.Is(err, errUnsupported):
-		return nil, awsLayout{}, connect.NewError(connect.CodeUnimplemented, "spec.layout: "+err.Error())
+	case errors.Is(err, corenetwork.ErrUnsupported):
+		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeUnimplemented, "spec.layout: "+err.Error())
 	case err != nil:
-		return nil, awsLayout{}, connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
+		return nil, corenetwork.Layout{}, connect.NewError(connect.CodeInvalidArgument, "spec.layout: "+err.Error())
 	}
 	return account, layout, nil
+}
+
+// renderPlan is the plan a stored network's managed resources are rendered
+// from (corenetwork.RenderPlan).
+func renderPlan(row *model.Network, spec *cloudv1.NetworkSpec, a *model.CloudAccount, l corenetwork.Layout) crossplaneaws.NetworkPlan {
+	return corenetwork.RenderPlan(
+		corenetwork.Identity{TenantID: row.TenantID, ID: row.ID, Name: row.Name, Labels: row.Labels}, spec, l,
+		corenetwork.Account{Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, AccountID: a.AccountID})
 }
 
 // account returns the bootstrapped AWS account the network lives in.

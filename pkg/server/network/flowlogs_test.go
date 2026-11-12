@@ -16,6 +16,7 @@ import (
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	corenetwork "github.com/yindia/cluster-vending/pkg/network"
 )
 
 func TestCreateNetworkWithoutFlowLogs(t *testing.T) {
@@ -172,12 +173,12 @@ func TestImportNetworkFlowLogs(t *testing.T) {
 		disposition      cloudv1.Disposition
 		detail           string
 	}{
-		{"FlowLog/fl-accept", ec2APIVersion, carried, ""},
-		{"FlowLog/fl-reject", ec2APIVersion, carried, ""},
-		{"Group//vpc/tf", logsAPIVersion, carried, "owned without Delete"},
-		{"Role/tf-flow-logs", iamAPIVersion, carried, ""},
-		{"FlowLog/fl-s3", ec2APIVersion, notImported, "delivers to s3"},
-		{"FlowLog/fl-denied", ec2APIVersion, notImported, "delivery role cannot be read"},
+		{"FlowLog/fl-accept", corenetwork.EC2APIVersion, carried, ""},
+		{"FlowLog/fl-reject", corenetwork.EC2APIVersion, carried, ""},
+		{"Group//vpc/tf", corenetwork.LogsAPIVersion, carried, "owned without Delete"},
+		{"Role/tf-flow-logs", corenetwork.IAMAPIVersion, carried, ""},
+		{"FlowLog/fl-s3", corenetwork.EC2APIVersion, notImported, "delivers to s3"},
+		{"FlowLog/fl-denied", corenetwork.EC2APIVersion, notImported, "delivery role cannot be read"},
 	} {
 		l := lines[w.line]
 		if l.GetDisposition() != w.disposition || l.GetApiVersion() != w.apiVersion || !strings.Contains(l.GetDetail(), w.detail) ||

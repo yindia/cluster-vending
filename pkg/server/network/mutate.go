@@ -12,6 +12,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	corenetwork "github.com/yindia/cluster-vending/pkg/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -130,9 +131,9 @@ func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Networ
 			// platform introduced after the network was created.
 			changed.labels = true
 		case pathFlowLogs:
-			next := resolvedFlowLogs(in.GetSpec().GetFlowLogs())
-			if err := flowLogsChangeable(spec.GetFlowLogs(), next); err != nil {
-				return changes{}, err
+			next := corenetwork.ResolveFlowLogs(in.GetSpec().GetFlowLogs())
+			if err := corenetwork.FlowLogsChangeable(spec.GetFlowLogs(), next); err != nil {
+				return changes{}, connect.NewError(connect.CodeFailedPrecondition, err.Error())
 			}
 			spec.FlowLogs, changed.flowLogs = next, true
 		default:
@@ -145,20 +146,6 @@ func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Networ
 		return changes{}, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
 	return changed, service.CheckAWSLabels(row.Labels)
-}
-
-// flowLogsChangeable refuses what AWS cannot change on a flow log that
-// exists: its traffic type and aggregation interval.
-func flowLogsChangeable(before, after *cloudv1.NetworkFlowLogs) error {
-	if !before.GetEnabled() || !after.GetEnabled() {
-		return nil // turned on or off: created or deleted
-	}
-	if before.GetTrafficType() != after.GetTrafficType() ||
-		before.GetAggregationIntervalSeconds() != after.GetAggregationIntervalSeconds() {
-		return connect.NewError(connect.CodeFailedPrecondition,
-			"the traffic type and aggregation interval of existing flow logs cannot be changed; turn flow logs off, then on with the new settings")
-	}
-	return nil
 }
 
 // updatedInput is the stored input with the masked fields of in copied
@@ -195,7 +182,7 @@ func (s *NetworkService) reapply(ctx context.Context, row *model.Network, spec *
 	if err != nil {
 		return err
 	}
-	return s.apply(ctx, row, account, newResolved(row, spec, account, layout))
+	return s.apply(ctx, row, account, renderPlan(row, spec, account, layout))
 }
 
 // DeleteNetwork deletes the network's resources; the network is removed

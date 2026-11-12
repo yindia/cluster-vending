@@ -21,6 +21,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	corenetwork "github.com/yindia/cluster-vending/pkg/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -62,8 +63,8 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	if err != nil {
 		return nil, err
 	}
-	if !plan.blocked() {
-		_, err := s.applySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(plan.resources)...))
+	if !plan.Blocked() {
+		_, err := s.applySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(plan.Resources)...))
 		if err == nil {
 			err = s.markApplied(ctx, row)
 		}
@@ -73,7 +74,7 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 		}
 	}
 	s.logger().InfoContext(ctx, "network imported", "tenant_id", row.TenantID, "network_id", row.ID,
-		"vpc_id", req.GetAws().GetVpcId(), "blocked", plan.blocked(), "plan_lines", len(plan.lines))
+		"vpc_id", req.GetAws().GetVpcId(), "blocked", plan.Blocked(), "plan_lines", len(plan.Lines))
 	n, err := s.respond(ctx, row)
 	return &cloudv1.ImportNetworkResponse{Network: n}, err
 }
@@ -107,26 +108,26 @@ func (s *NetworkService) discover(ctx context.Context, a *model.CloudAccount, re
 // insertImport plans the import and stores the network: the derived spec,
 // the request as sent (input) and the plan (status), IMPORTED or, when
 // blocked, FAILED. The ID is chosen first: it names the resources.
-func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNetworkRequest, a *model.CloudAccount, found *awscloud.Network) (*model.Network, importPlan, error) {
+func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNetworkRequest, a *model.CloudAccount, found *awscloud.Network) (*model.Network, corenetwork.ImportPlan, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return nil, importPlan{}, connect.NewError(connect.CodeInternal, err.Error())
+		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	plan := planAWSImport(found, crossplaneaws.ImportedNetwork{
+	plan := corenetwork.PlanImport(found, crossplaneaws.ImportedNetwork{
 		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: req.GetTenantId(),
 		NetworkID: id.String(), NetworkName: req.GetName(), Region: req.GetRegion(),
 		Prefix: crossplaneaws.NetworkPrefix(req.GetTenantId(), id.String(), req.GetName()),
 	})
 	phase, state := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED, stateImported
-	if plan.blocked() {
+	if plan.Blocked() {
 		phase, state = cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED, stateBlocked
 	}
-	spec := &cloudv1.NetworkSpec{Region: req.GetRegion(), BootstrapId: a.ID, Layout: plan.layout}
+	spec := &cloudv1.NetworkSpec{Region: req.GetRegion(), BootstrapId: a.ID, Layout: plan.Layout}
 	rawSpec, err1 := encode(spec)
 	input, err2 := encode(req)
-	stored, err3 := encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.lines}})
+	stored, err3 := encode(&cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
 	if err := errors.Join(err1, err2, err3); err != nil {
-		return nil, importPlan{}, connect.NewError(connect.CodeInternal, err.Error())
+		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	row := &model.Network{
 		Resource: model.Resource{Base: model.Base{ID: id.String()}, DisplayName: req.GetDisplayName(),
@@ -137,18 +138,18 @@ func (s *NetworkService) insertImport(ctx context.Context, req *cloudv1.ImportNe
 	if rid := req.GetRequestId(); rid != "" {
 		row.CreateRequestID = &rid
 	}
-	if vpc := req.GetAws().GetVpcId(); !plan.blocked() {
+	if vpc := req.GetAws().GetVpcId(); !plan.Blocked() {
 		// Unique per account and region: of two imports of one VPC at the
 		// same moment (refuseOwnedVPC lets both pass), one is stored.
 		row.ExternalID = &vpc
 	}
 	err = s.deps.Store.Networks().Create(ctx, row)
 	if errors.Is(err, repository.ErrAlreadyExists) {
-		return nil, importPlan{}, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
+		return nil, corenetwork.ImportPlan{}, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
 			"VPC %s is already imported (or request_id %q was used before)", req.GetAws().GetVpcId(), req.GetRequestId()))
 	}
 	if err != nil {
-		return nil, importPlan{}, service.ToConnect(err)
+		return nil, corenetwork.ImportPlan{}, service.ToConnect(err)
 	}
 	return row, plan, nil
 }
@@ -206,7 +207,7 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("import phase is %s, want PLANNED", imp.GetPhase()))
 	}
-	notImported := importPlan{lines: imp.GetResources()}.notImported()
+	notImported := corenetwork.ImportPlan{Lines: imp.GetResources()}.NotImported()
 	if len(notImported) > 0 && !req.GetAcknowledgeNotImported() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
 			"%d resources are NOT_IMPORTED (first: %s %s: %s); give them another owner, then retry with acknowledge_not_imported",

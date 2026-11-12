@@ -34,19 +34,26 @@ const ProviderVersion = "v2.9.0"
 //	1  Usages order deletions; desiredSize in initProvider only
 //	2  Usages of the EKS cluster are named "...-cluster-..." (they ended in
 //	   "-by-", a name the API server refuses)
-const RenderVersion = 2
+//	3  a provider-helm ProviderConfig per cluster (<prefix>-helm, through
+//	   the ClusterAuth's kubeconfig), with a Usage keeping the ClusterAuth
+//	   while it exists
+const RenderVersion = 3
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.
+// provider-aws-sqs and provider-aws-cloudwatchevents are for Karpenter's
+// interruption queue and the EventBridge rules feeding it (components).
 var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam", "provider-aws-cloudwatchlogs",
-	"provider-aws-kms"}
+	"provider-aws-kms", "provider-aws-sqs", "provider-aws-cloudwatchevents"}
 
 const (
 	// RuntimeConfigName is the DeploymentRuntimeConfig the AWS providers
-	// run with; RuntimeConfigEC2Name the one of provider-aws-ec2.
-	RuntimeConfigName    = "cluster-vending-aws"
-	RuntimeConfigEC2Name = "cluster-vending-aws-ec2"
-	providerEC2          = "provider-aws-ec2"
+	// run with; RuntimeConfigEC2Name the one of provider-aws-ec2;
+	// RuntimeConfigHelmName the one of provider-helm.
+	RuntimeConfigName     = "cluster-vending-aws"
+	RuntimeConfigEC2Name  = "cluster-vending-aws-ec2"
+	RuntimeConfigHelmName = "cluster-vending-helm"
+	providerEC2           = "provider-aws-ec2"
 
 	// irsaRoleAnnotation is read by the EKS pod identity webhook.
 	irsaRoleAnnotation = "eks.amazonaws.com/role-arn"
@@ -77,44 +84,71 @@ type ProviderRuntime struct {
 	// Resource requests and limits of a provider's container (quantities;
 	// empty: none).
 	CPURequest, MemoryRequest, CPULimit, MemoryLimit string
+	// Replicas of each provider's Deployment (0: Crossplane's default,
+	// one). The providers run with leader election (--leader-election), so
+	// only one replica reconciles; the others are hot standbys that take
+	// over the lease when it dies, without waiting for a new pod.
+	Replicas int32
 }
 
-// DefaultProviderRuntime is the providers' runtime for ~100 clusters on
-// one management cluster.
+// DefaultProviderRuntime is the providers' runtime for ~100 clusters of
+// ~80 managed resources each on one management cluster. Poll 10m (the
+// providers' own default) and 30m for EC2's many, rarely changing network
+// resources; at most 10 reconciles a second per provider (the providers
+// default to 100, which AWS API throttling punishes at this size). Two
+// replicas with leader election: one active, one hot standby.
 func DefaultProviderRuntime() ProviderRuntime {
 	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
-		CPURequest: "100m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"}
+		CPURequest: "1", MemoryRequest: "2Gi", CPULimit: "4", MemoryLimit: "4Gi", Replicas: 2}
 }
 
-// RuntimeConfigs are the DeploymentRuntimeConfigs of the AWS providers:
-// RuntimeConfigName for all, RuntimeConfigEC2Name (its own poll interval)
-// for provider-aws-ec2. Cluster-scoped and shared by every tenant.
+// leaderElectionArg turns on leader election in provider-upjet-aws
+// (v2.9.0) and provider-helm (v1.5.0): both read the same flag (default
+// false). Without it two replicas would both reconcile every resource.
+const leaderElectionArg = "--leader-election"
+
+// RuntimeConfigs are the DeploymentRuntimeConfigs of the providers:
+// RuntimeConfigName for the AWS providers, RuntimeConfigEC2Name (its own
+// poll interval) for provider-aws-ec2, and RuntimeConfigHelmName for
+// provider-helm (no AWS identity: it reaches the workload clusters with
+// their kubeconfigs). Cluster-scoped and shared by every tenant.
 func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, error) {
 	resources, err := rt.resources()
 	if err != nil {
 		return nil, err
 	}
-	config := func(name string, poll time.Duration) *pkgv1beta1.DeploymentRuntimeConfig {
+	config := func(name string, poll time.Duration, irsa bool) *pkgv1beta1.DeploymentRuntimeConfig {
+		spec := &appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{}, // required by the type; Crossplane sets it
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Name: runtimeContainer, Resources: resources,
+				Args: []string{"--poll=" + poll.String(), fmt.Sprintf("--max-reconcile-rate=%d", rt.MaxReconcileRate), leaderElectionArg},
+			}}}},
+		}
+		if rt.Replicas > 0 {
+			spec.Replicas = ptr.To(rt.Replicas)
+		}
 		c := &pkgv1beta1.DeploymentRuntimeConfig{
 			TypeMeta:   metav1.TypeMeta{APIVersion: pkgv1beta1.SchemeGroupVersion.String(), Kind: pkgv1beta1.DeploymentRuntimeConfigKind},
 			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: crossplane.Labels("")},
-			Spec: pkgv1beta1.DeploymentRuntimeConfigSpec{DeploymentTemplate: &pkgv1beta1.DeploymentTemplate{
-				Spec: &appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{}, // required by the type; Crossplane sets it
-					Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
-						Name: runtimeContainer, Resources: resources,
-						Args: []string{"--poll=" + poll.String(), fmt.Sprintf("--max-reconcile-rate=%d", rt.MaxReconcileRate)},
-					}}}},
-				},
-			}},
+			Spec:       pkgv1beta1.DeploymentRuntimeConfigSpec{DeploymentTemplate: &pkgv1beta1.DeploymentTemplate{Spec: spec}},
 		}
-		if rt.ManagementRoleARN != "" {
+		if irsa && rt.ManagementRoleARN != "" {
 			c.Spec.ServiceAccountTemplate = &pkgv1beta1.ServiceAccountTemplate{Metadata: &pkgv1beta1.ObjectMeta{
 				Annotations: map[string]string{irsaRoleAnnotation: rt.ManagementRoleARN}}}
 		}
 		return c
 	}
-	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll), config(RuntimeConfigEC2Name, rt.EC2Poll)}, nil
+	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll, true), config(RuntimeConfigEC2Name, rt.EC2Poll, true),
+		config(RuntimeConfigHelmName, rt.Poll, false)}, nil
+}
+
+// HelmProvider is provider-helm (crossplane.HelmProvider) running with
+// RuntimeConfigHelmName.
+func HelmProvider() *pkgv1.Provider {
+	p := crossplane.HelmProvider()
+	p.Spec.RuntimeConfigReference = &pkgv1.RuntimeConfigReference{Name: RuntimeConfigHelmName}
+	return p
 }
 
 func (rt ProviderRuntime) resources() (corev1.ResourceRequirements, error) {

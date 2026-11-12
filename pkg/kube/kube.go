@@ -18,11 +18,13 @@ import (
 	pkgv1 "github.com/crossplane/crossplane/apis/v2/pkg/v1"
 	pkgv1beta1 "github.com/crossplane/crossplane/apis/v2/pkg/v1beta1"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -84,6 +86,8 @@ func Scheme() (*runtime.Scheme, error) {
 		awsec2.AddToScheme,
 		awscwl.AddToScheme,
 		awskms.AddToScheme,
+		awssqs.AddToScheme,
+		awsevents.AddToScheme,
 		awseks.AddToScheme,
 		awsiam.AddToScheme,
 		cloudv1alpha1.AddToScheme,

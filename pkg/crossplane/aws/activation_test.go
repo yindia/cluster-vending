@@ -31,10 +31,12 @@ func TestActivationPolicy(t *testing.T) {
 		"networkaclrules.ec2.aws.m.upbound.io", "networkacls.ec2.aws.m.upbound.io",
 		"nodegroups.eks.aws.m.upbound.io", "openidconnectproviders.iam.aws.m.upbound.io",
 		"podidentityassociations.eks.aws.m.upbound.io",
-		"policies.iam.aws.m.upbound.io", "releases.helm.m.crossplane.io", "rolepolicyattachments.iam.aws.m.upbound.io",
+		"policies.iam.aws.m.upbound.io", "queuepolicies.sqs.aws.m.upbound.io", "queues.sqs.aws.m.upbound.io",
+		"releases.helm.m.crossplane.io", "rolepolicyattachments.iam.aws.m.upbound.io",
 		"roles.iam.aws.m.upbound.io", "routes.ec2.aws.m.upbound.io", "routetableassociations.ec2.aws.m.upbound.io",
-		"routetables.ec2.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
-		"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io", "vpcs.ec2.aws.m.upbound.io",
+		"routetables.ec2.aws.m.upbound.io", "rules.cloudwatchevents.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
+		"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io",
+		"targets.cloudwatchevents.aws.m.upbound.io", "vpcs.ec2.aws.m.upbound.io",
 	}
 	if strings.Join(slices.Sorted(slices.Values(got)), ",") != strings.Join(want, ",") {
 		t.Errorf("activations\n got %v\nwant %v", got, want)
@@ -55,6 +57,9 @@ func TestActivationPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		if gvk.Group == "protection.crossplane.io" { // Usage: a core kind, no MRD
+			continue
+		}
+		if gvk == crossplaneaws.HelmProviderConfigGVK { // installed with provider-helm, not a managed resource
 			continue
 		}
 		covered := false

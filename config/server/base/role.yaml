@@ -140,6 +140,41 @@ rules:
   - watch
   - create
   - patch
+- apiGroups:
+  - sqs.aws.m.upbound.io
+  resources:
+  - queues
+  - queuepolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - cloudwatchevents.aws.m.upbound.io
+  resources:
+  - rules
+  - targets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+# provider-helm: a cluster's ProviderConfig is part of its render (the dry
+# run above); Releases are read for their status.
+- apiGroups:
+  - helm.m.crossplane.io
+  resources:
+  - providerconfigs
+  - releases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
 # Usages, read for a deletion that waits on one.
 - apiGroups:
   - protection.crossplane.io

@@ -71,13 +71,45 @@ func ClusterSet(p ClusterPlan) sequence.Set {
 			set[i].Adjust = DesiredSizeAtCreateOnly
 			set[i].After = active
 		case *protectionv1beta1.Usage:
-			if by := obj.Spec.By; by == nil || by.ResourceRef == nil || AfterActiveKinds[by.Kind] {
-				set[i].After = active
-			}
+			// After its "by" object, below.
 		default:
-			if afterActive(obj) {
+			switch {
+			case afterActive(obj):
 				set[i].After = active
+			case isHelmProviderConfig(obj):
+				set[i].After = clusterBuilder{p: p}.afterAuth()
 			}
+		}
+	}
+	return usagesAfterTheirUsers(set, active)
+}
+
+// usagesAfterTheirUsers holds each Usage back as long as its "by" object
+// is: a Usage whose user never exists is never garbage-collected and would
+// block its object's deletion for good. A Usage whose user the set does
+// not have waits for the EKS cluster, as before this rule was general.
+func usagesAfterTheirUsers(set sequence.Set, active []sequence.Condition) sequence.Set {
+	after := map[string][]sequence.Condition{}
+	for _, item := range set {
+		if _, usage := item.Object.(*protectionv1beta1.Usage); !usage {
+			after[item.Object.GetObjectKind().GroupVersionKind().Kind+"/"+item.Object.GetName()] = item.After
+			after[kindName(item.Object)+"/"+item.Object.GetName()] = item.After
+		}
+	}
+	for i, item := range set {
+		u, ok := item.Object.(*protectionv1beta1.Usage)
+		if !ok {
+			continue
+		}
+		by := u.Spec.By
+		if by == nil || by.ResourceRef == nil {
+			set[i].After = active
+			continue
+		}
+		if conds, found := after[by.Kind+"/"+by.ResourceRef.Name]; found {
+			set[i].After = conds
+		} else if AfterActiveKinds[by.Kind] {
+			set[i].After = active
 		}
 	}
 	return set

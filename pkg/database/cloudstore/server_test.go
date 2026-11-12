@@ -217,6 +217,10 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 	must(k.Create(ctx, eks))
 	eks.Status.AtProvider.Status = ptr.To("ACTIVE")
 	must(k.Status().Update(ctx, eks))
+	// Its ClusterAuth is Ready: the helm ProviderConfig can be applied.
+	auth := &awseks.ClusterAuth{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: prefix + "-auth", Labels: crossplane.ClusterLabels(tenant, row.ID)}}
+	auth.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+	must(k.Create(ctx, auth))
 	must(store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: tenant, CloudAccountID: account.ID, OwnerKind: model.OwnerCluster,
 		OwnerID: row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "Cluster", Namespace: namespace, Name: prefix}}))
 

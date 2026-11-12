@@ -97,12 +97,21 @@ It installs the CRDs of the three kinds and the Crossplane AWS providers
 server installs nothing; it waits for the kinds the controller installs, so
 start the controller first.
 
-How the providers run is the platform's: a drift check every 10 minutes (30
-for provider-aws-ec2), at most 10 reconciles per second, 100m CPU and 512Mi
-memory requested, 2Gi memory limit (`crossplaneaws.DefaultProviderRuntime`).
-There is no setting for these. To run the providers otherwise, set
-`--install-providers=false` and manage the `Provider` and
+How the providers run is the platform's, sized for ~100 clusters of ~80
+managed resources each: a drift check every 10 minutes (30 for
+provider-aws-ec2), at most 10 reconciles per second, 1 CPU and 2Gi memory
+requested, 4 CPU and 4Gi limits, and 2 replicas with leader election (one
+reconciles, the other is a hot standby) (`crossplaneaws.DefaultProviderRuntime`).
+The AWS providers run with the `DeploymentRuntimeConfig`s
+`cluster-vending-aws` and `cluster-vending-aws-ec2`, provider-helm with
+`cluster-vending-helm`. There is no setting for these. To run the providers
+otherwise, set `--install-providers=false` and manage the `Provider` and
 `DeploymentRuntimeConfig` objects yourself.
+
+The controller creates these objects only when they are missing: a
+management cluster installed by an older build keeps its runtime configs
+(and provider-helm keeps running without one) until they are deleted, so
+the controller recreates them on its next start, or edited by hand.
 
 The controller always brings every resource to this build's renderer. The
 former `--render-target` and `--render-rollout` settings are gone; release

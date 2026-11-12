@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
@@ -93,6 +95,12 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	eks.Spec.ForProvider.Region = ptr.To("us-east-1")
 	eks.Status.AtProvider.Status = ptr.To("ACTIVE")
 	objects = append(objects, eks)
+	// Its ClusterAuth is Ready (the kubeconfig Secret exists), as it is
+	// soon after the EKS cluster is ACTIVE.
+	auth := &awseks.ClusterAuth{ObjectMeta: metav1.ObjectMeta{Namespace: worldNS, Name: prefix + "-auth",
+		Labels: crossplane.ClusterLabels(worldTenant, row.ID)}}
+	auth.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+	objects = append(objects, auth)
 	must(store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: worldTenant, CloudAccountID: account.ID,
 		OwnerKind: model.OwnerCluster, OwnerID: row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "Cluster",
 		Namespace: worldNS, Name: prefix}}))
@@ -151,8 +159,8 @@ func TestReconcileAppliesAgainAfterAFailedApply(t *testing.T) {
 		t.Errorf("node group not applied: %v", err)
 	}
 	usages := &protectionv1beta1.UsageList{}
-	if err := w.kube.List(ctx, usages, client.InNamespace(worldNS)); err != nil || len(usages.Items) != 13 {
-		t.Errorf("%d usages (%v), want 13 (11 + the 2 subnets)", len(usages.Items), err)
+	if err := w.kube.List(ctx, usages, client.InNamespace(worldNS)); err != nil || len(usages.Items) != 14 {
+		t.Errorf("%d usages (%v), want 14 (12 + the 2 subnets)", len(usages.Items), err)
 	}
 }
 

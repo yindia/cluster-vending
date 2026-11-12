@@ -233,7 +233,7 @@ func ClusterResources(p ClusterPlan) []client.Object {
 	}
 	out = append(out, b.nodeGroup())
 	out = append(out, addons...)
-	out = append(out, b.clusterAuth())
+	out = append(out, b.clusterAuth(), b.helmProviderConfig())
 	for i, principal := range p.AdminPrincipals {
 		entry := fmt.Sprintf("admin-%d", i+1)
 		out = append(out, b.accessEntry(entry, principal), b.accessPolicy(entry, principal))

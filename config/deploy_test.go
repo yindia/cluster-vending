@@ -283,15 +283,15 @@ func allows(role *rbacv1.ClusterRole, group, resource, verb string) bool {
 	})
 }
 
-// managedKinds are the kinds the platform renders, as "resource.group":
-// what the activation policy lists (provider-helm's Release is activated
-// but not rendered yet), Usages and ProviderConfigs.
+// managedKinds are the kinds the platform renders or cleans up, as
+// "resource.group": what the activation policy lists (provider-helm's
+// Release among them: the controller releases stuck ones when a cluster is
+// deleted), Usages, the accounts' AWS ProviderConfigs and the clusters'
+// provider-helm ProviderConfigs.
 func managedKinds() []string {
-	kinds := []string{"usages.protection.crossplane.io", "providerconfigs.aws.m.upbound.io"}
+	kinds := []string{"usages.protection.crossplane.io", "providerconfigs.aws.m.upbound.io", "providerconfigs.helm.m.crossplane.io"}
 	for _, activation := range crossplaneaws.ActivationPolicy().Spec.Activations {
-		if name := string(activation); !strings.HasSuffix(name, ".helm.m.crossplane.io") {
-			kinds = append(kinds, name)
-		}
+		kinds = append(kinds, string(activation))
 	}
 	return kinds
 }

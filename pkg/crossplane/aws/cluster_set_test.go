@@ -5,6 +5,7 @@ import (
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
@@ -40,8 +41,12 @@ func TestClusterSetHoldsWhatNeedsAnActiveCluster(t *testing.T) {
 			wants, kind = true, awseks.NodeGroup_Kind
 		case *awseks.ClusterAuth:
 			wants, kind = true, awseks.ClusterAuth_Kind
+		case *unstructured.Unstructured: // the helm ProviderConfig: after the ClusterAuth is Ready
+			wants, kind = obj.GroupVersionKind() == crossplaneaws.HelmProviderConfigGVK, "helm ProviderConfig"
 		case *protectionv1beta1.Usage:
-			wants, kind = crossplaneaws.AfterActiveKinds[obj.Spec.By.Kind], "Usage by "+obj.Spec.By.Kind
+			// A Usage waits as its "by" object does.
+			wants = crossplaneaws.AfterActiveKinds[obj.Spec.By.Kind] || obj.Spec.By.APIVersion == crossplaneaws.HelmProviderConfigGVK.GroupVersion().String()
+			kind = "Usage by " + obj.Spec.By.Kind
 		}
 		if (len(item.After) == 1) != wants {
 			t.Errorf("%T %s waits for %d conditions, want waiting = %t", item.Object, item.Object.GetName(), len(item.After), wants)

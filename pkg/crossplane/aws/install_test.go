@@ -39,14 +39,18 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Created) != 8 || len(got.Existing) != 1 {
-		t.Fatalf("created %v, existing %v; want the activation policy, 2 runtime configs, ec2, iam, cloudwatchlogs, kms and helm created, eks existing", got.Created, got.Existing)
+	if len(got.Created) != 11 || len(got.Existing) != 1 {
+		t.Fatalf("created %v, existing %v; want the activation policy, 3 runtime configs, ec2, iam, cloudwatchlogs, kms, sqs, cloudwatchevents and helm created, eks existing", got.Created, got.Existing)
 	}
 	helm := &pkgv1.Provider{}
 	if err := k.Get(ctx, client.ObjectKey{Name: crossplane.HelmProviderName}, helm); err != nil ||
 		helm.Spec.Package != "xpkg.crossplane.io/crossplane-contrib/provider-helm:"+crossplane.HelmProviderVersion ||
-		helm.Spec.RuntimeConfigReference != nil {
-		t.Errorf("provider-helm = %+v, %v; want the default runtime config (no AWS identity)", helm.Spec, err)
+		helm.Spec.RuntimeConfigReference == nil || helm.Spec.RuntimeConfigReference.Name != crossplaneaws.RuntimeConfigHelmName {
+		t.Errorf("provider-helm = %+v, %v; want its own runtime config (no AWS identity)", helm.Spec, err)
+	}
+	helmConfig := &pkgv1beta1.DeploymentRuntimeConfig{}
+	if err := k.Get(ctx, client.ObjectKey{Name: crossplaneaws.RuntimeConfigHelmName}, helmConfig); err != nil || helmConfig.Spec.ServiceAccountTemplate != nil {
+		t.Errorf("provider-helm runtime config: %v, service account template %+v; want one without IRSA", err, helmConfig.Spec.ServiceAccountTemplate)
 	}
 	eks := &pkgv1.Provider{}
 	if err := k.Get(ctx, client.ObjectKey{Name: "provider-aws-eks"}, eks); err != nil || eks.Spec.Package != pinned.Spec.Package {
@@ -61,7 +65,7 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 
 	// Second start: nothing to create.
 	again, err := crossplaneaws.InstallProviders(ctx, k, withRole)
-	if err != nil || len(again.Created) != 0 || len(again.Existing) != 9 || len(again.Updated) != 0 {
+	if err != nil || len(again.Created) != 0 || len(again.Existing) != 12 || len(again.Updated) != 0 {
 		t.Errorf("second run: %+v, %v", again, err)
 	}
 }

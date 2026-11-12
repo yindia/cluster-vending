@@ -8,8 +8,6 @@ import (
 	apiextv1alpha1 "github.com/crossplane/crossplane/apis/v2/apiextensions/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/yindia/cluster-vending/pkg/crossplane"
 )
 
 // InstallResult is what InstallProviders did with each object.
@@ -21,9 +19,9 @@ type InstallResult struct {
 
 // InstallProviders creates, in the management cluster, the platform's
 // activation policy (ActivationPolicy: only the managed resource kinds it
-// uses), the AWS providers' runtime configs (RuntimeConfigs: poll
-// intervals, reconcile rate, resources, IRSA role), the AWS providers
-// (Providers) and provider-helm (crossplane.HelmProvider). Objects that
+// uses), the providers' runtime configs (RuntimeConfigs: poll intervals,
+// reconcile rate, resources, replicas and leader election, IRSA role), the
+// AWS providers (Providers) and provider-helm (HelmProvider). Objects that
 // exist are left as they are: the call never overwrites a provider or
 // runtime config someone pinned or tuned. The one exception is an existing
 // activation policy that lacks kinds this build uses (a server upgrade):
@@ -40,7 +38,7 @@ func InstallProviders(ctx context.Context, c client.Client, rt ProviderRuntime) 
 	for _, p := range Providers() {
 		objects = append(objects, p)
 	}
-	objects = append(objects, crossplane.HelmProvider())
+	objects = append(objects, HelmProvider())
 	var out InstallResult
 	for _, obj := range objects {
 		name := fmt.Sprintf("%s/%s", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName())

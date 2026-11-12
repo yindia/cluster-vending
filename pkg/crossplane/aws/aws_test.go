@@ -18,25 +18,43 @@ func TestAWSRuntimeConfigs(t *testing.T) {
 	rt := crossplaneaws.DefaultProviderRuntime()
 	rt.ManagementRoleARN = mgmtRole
 	configs, err := crossplaneaws.RuntimeConfigs(rt)
-	if err != nil || len(configs) != 2 {
+	if err != nil || len(configs) != 3 {
 		t.Fatalf("configs = %d, %v", len(configs), err)
 	}
-	wantPoll := map[string]string{crossplaneaws.RuntimeConfigName: "--poll=10m0s", crossplaneaws.RuntimeConfigEC2Name: "--poll=30m0s"}
+	wantPoll := map[string]string{crossplaneaws.RuntimeConfigName: "--poll=10m0s", crossplaneaws.RuntimeConfigEC2Name: "--poll=30m0s",
+		crossplaneaws.RuntimeConfigHelmName: "--poll=10m0s"}
 	for _, rc := range configs {
 		if rc.Namespace != "" || wantPoll[rc.Name] == "" {
 			t.Errorf("metadata = %+v", rc.ObjectMeta)
 		}
-		if got := rc.Spec.ServiceAccountTemplate.Metadata.Annotations["eks.amazonaws.com/role-arn"]; got != mgmtRole {
+		// provider-helm has no AWS identity.
+		if rc.Name == crossplaneaws.RuntimeConfigHelmName {
+			if rc.Spec.ServiceAccountTemplate != nil {
+				t.Errorf("%s: service account template %+v, want none", rc.Name, rc.Spec.ServiceAccountTemplate)
+			}
+		} else if got := rc.Spec.ServiceAccountTemplate.Metadata.Annotations["eks.amazonaws.com/role-arn"]; got != mgmtRole {
 			t.Errorf("%s: IRSA annotation = %q", rc.Name, got)
 		}
+		// Two replicas, one active through leader election.
+		if r := rc.Spec.DeploymentTemplate.Spec.Replicas; r == nil || *r != 2 {
+			t.Errorf("%s: replicas = %v, want 2", rc.Name, r)
+		}
 		c := rc.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0]
-		if c.Name != "package-runtime" || len(c.Args) != 2 || c.Args[0] != wantPoll[rc.Name] || c.Args[1] != "--max-reconcile-rate=10" {
+		if c.Name != "package-runtime" || len(c.Args) != 3 || c.Args[0] != wantPoll[rc.Name] || c.Args[1] != "--max-reconcile-rate=10" ||
+			c.Args[2] != "--leader-election" {
 			t.Errorf("%s: container %s args %v", rc.Name, c.Name, c.Args)
 		}
-		if c.Resources.Requests.Memory().String() != "512Mi" || c.Resources.Limits.Memory().String() != "2Gi" ||
-			!c.Resources.Limits.Cpu().IsZero() {
+		if c.Resources.Requests.Cpu().String() != "1" || c.Resources.Requests.Memory().String() != "2Gi" ||
+			c.Resources.Limits.Cpu().String() != "4" || c.Resources.Limits.Memory().String() != "4Gi" {
 			t.Errorf("%s: resources = %+v", rc.Name, c.Resources)
 		}
+	}
+
+	// No replicas set: Crossplane's default.
+	one := rt
+	one.Replicas = 0
+	if configs, err := crossplaneaws.RuntimeConfigs(one); err != nil || configs[0].Spec.DeploymentTemplate.Spec.Replicas != nil {
+		t.Errorf("without replicas: %v, %v", configs[0].Spec.DeploymentTemplate.Spec.Replicas, err)
 	}
 
 	// No management role (local): no IRSA annotation; a bad quantity fails.

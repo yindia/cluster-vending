@@ -28,9 +28,10 @@ func clusterPlan() crossplaneaws.ClusterPlan {
 func TestClusterResources(t *testing.T) {
 	objects := crossplaneaws.ClusterResources(clusterPlan())
 	// 3 roles + 5 attachments, cluster, node group, 5 add-ons, pod identity,
-	// cluster auth, access entry + policy association, 11 Usages.
-	if len(objects) != 30 {
-		t.Fatalf("got %d objects, want 30", len(objects))
+	// cluster auth, the helm ProviderConfig, access entry + policy
+	// association, 12 Usages.
+	if len(objects) != 32 {
+		t.Fatalf("got %d objects, want 32", len(objects))
 	}
 	byName := map[string]any{}
 	for _, o := range objects {
@@ -77,14 +78,15 @@ func TestClusterResources(t *testing.T) {
 // entries, IRSA, security groups, launch template, role names) default to
 // what a cluster rendered before they existed: this is the sha256 of that
 // render, taken before they were added. A change here needs a
-// RenderVersion bump (render version 2 renamed the EKS cluster's Usages).
+// RenderVersion bump (render version 2 renamed the EKS cluster's Usages;
+// 3 added the helm ProviderConfig and its Usage).
 func TestClusterResourcesDefaultRenderUnchanged(t *testing.T) {
 	raw, err := json.Marshal(crossplaneaws.ClusterResources(clusterPlan()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
-	if got := hex.EncodeToString(sum[:]); got != "5fec67b48929eadee0f477f7bfb13071597652d4f6011ebefcc6fe2bbb6d8d0d" {
+	if got := hex.EncodeToString(sum[:]); got != "56af08b3ed3caed9e16e5bd15541c071eafb0e1b1a7b4151c221ab427d46b0d8" {
 		t.Errorf("the default render changed (sha256 %s, %d bytes)", got, len(raw))
 	}
 }

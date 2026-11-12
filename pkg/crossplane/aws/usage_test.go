@@ -41,8 +41,8 @@ func TestUsagesReferToRenderedObjects(t *testing.T) {
 	for _, s := range plan.SubnetObjects {
 		seen[key("Subnet", s)] = -1 // the network's
 	}
-	if len(usages) != 13 { // 11 + 2 subnets
-		t.Fatalf("%d usages, want 13", len(usages))
+	if len(usages) != 14 { // 12 + 2 subnets
+		t.Fatalf("%d usages, want 14", len(usages))
 	}
 	names := map[string]bool{}
 	for _, u := range usages {

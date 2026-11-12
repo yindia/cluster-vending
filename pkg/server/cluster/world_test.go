@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -89,6 +91,12 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	eks.Spec.ForProvider.Region = ptr.To("us-east-1")
 	eks.Status.AtProvider.Status = ptr.To("ACTIVE")
 	objects = append(objects, eks)
+	// Its ClusterAuth is Ready (the kubeconfig Secret exists), as it is
+	// soon after the EKS cluster is ACTIVE.
+	auth := &awseks.ClusterAuth{ObjectMeta: metav1.ObjectMeta{Namespace: worldNS, Name: prefix + "-auth",
+		Labels: crossplane.ClusterLabels(worldTenant, row.ID)}}
+	auth.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+	objects = append(objects, auth)
 	must(store.ManagedResources().Put(ctx, []model.ManagedResource{{TenantID: worldTenant, CloudAccountID: account.ID,
 		OwnerKind: model.OwnerCluster, OwnerID: row.ID, APIVersion: "eks.aws.m.upbound.io/v1beta1", Kind: "Cluster",
 		Namespace: worldNS, Name: prefix}}))

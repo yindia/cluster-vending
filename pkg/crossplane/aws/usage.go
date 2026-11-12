@@ -109,6 +109,11 @@ func (b clusterBuilder) usagePairs() []UsagePair {
 		{Of: attachmentKind.named(b.name("cluster-policy")), By: eks},
 		{Of: roleKind.named(b.name("node-role")), By: nodeGroup},
 		{Of: clusterAuthKind.named(b.name("auth")), By: nodeGroup},
+		// The kubeconfig Secret the ClusterAuth writes is what the helm
+		// ProviderConfig reaches the cluster with: it stays while the
+		// ProviderConfig (and, through its in-use finalizer, any Release)
+		// exists.
+		{Of: clusterAuthKind.named(b.name("auth")), By: helmProviderConfigKind.named(HelmProviderConfigName(p.Prefix))},
 	}
 	for _, a := range []string{"node-worker", "node-cni", "node-ecr"} {
 		pairs = append(pairs, UsagePair{Of: attachmentKind.named(b.name(a)), By: nodeGroup})

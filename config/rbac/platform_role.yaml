@@ -134,6 +134,54 @@ rules:
   - patch
   - delete
   - deletecollection
+# Karpenter's interruption queue and the EventBridge rules feeding it
+# (components; activated, nothing renders them yet).
+- apiGroups:
+  - sqs.aws.m.upbound.io
+  resources:
+  - queues
+  - queuepolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - cloudwatchevents.aws.m.upbound.io
+  resources:
+  - rules
+  - targets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# provider-helm: a cluster's ProviderConfig (<prefix>-helm, reaching the
+# workload cluster through its ClusterAuth's kubeconfig) is applied with the
+# cluster; Releases are installed through it, and stuck ones are released
+# when a cluster is deleted (pkg/reconcile/cluster cleanup.go).
+- apiGroups:
+  - helm.m.crossplane.io
+  resources:
+  - providerconfigs
+  - releases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
 # Usages order the deletion of managed resources (pkg/crossplane/aws
 # usage.go); orphaned ones are released (pkg/crossplane/managed).
 - apiGroups:

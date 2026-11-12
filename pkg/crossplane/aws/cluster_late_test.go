@@ -178,3 +178,33 @@ func keys(objects map[string]client.Object) []string {
 	}
 	return out
 }
+
+// The set names its items from the render of the finished cluster. An
+// object the render has at any stage and the finished render lacks would
+// never be applied, and would be removed as dropped: there must be none,
+// whichever of the late values exist.
+func TestEveryStageOfALateRenderIsInTheSet(t *testing.T) {
+	inSet := map[string]bool{}
+	for _, item := range crossplaneaws.ClusterSet(latePlan()) {
+		inSet[seenKey(item.Object)] = true
+	}
+	for name, fill := range map[string]func(*crossplaneaws.ClusterPlan){
+		"nothing yet":    func(*crossplaneaws.ClusterPlan) {},
+		"cluster held":   func(p *crossplaneaws.ClusterPlan) { p.ClusterHeld = true },
+		"key":            func(p *crossplaneaws.ClusterPlan) { p.EncryptionKeyARN = "arn:aws:kms:us-east-1:444455556666:key/k" },
+		"issuer":         func(p *crossplaneaws.ClusterPlan) { p.OIDCIssuer = "https://oidc.eks.us-east-1.amazonaws.com/id/A" },
+		"security group": func(p *crossplaneaws.ClusterPlan) { p.ClusterSecurityGroupID = "sg-0aaa" },
+		"everything exists": func(p *crossplaneaws.ClusterPlan) {
+			p.EncryptionKeyARN = "arn:aws:kms:us-east-1:444455556666:key/k"
+			p.OIDCIssuer, p.ClusterSecurityGroupID = "https://oidc.eks.us-east-1.amazonaws.com/id/A", "sg-0aaa"
+		},
+	} {
+		p := latePlan()
+		fill(&p)
+		for _, obj := range crossplaneaws.ClusterResources(p) {
+			if !inSet[seenKey(obj)] {
+				t.Errorf("%s: %T %s is rendered but not in the set", name, obj, obj.GetName())
+			}
+		}
+	}
+}

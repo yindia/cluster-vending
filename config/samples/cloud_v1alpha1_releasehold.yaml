@@ -1,0 +1,8 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ReleaseHold
+metadata:
+  name: prod-eks
+spec:
+  clusterID: 01a1d0a6-69d5-7e15-965e-fc6a53fa3d33
+  release: 2026-11-a
+  reason: "Keep prod on the first release while the new one soaks."

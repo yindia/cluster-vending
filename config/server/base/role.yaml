@@ -17,7 +17,12 @@ rules:
 - apiGroups:
   - cloud.cluster-vending.io
   resources:
-  - "*"
+  - cloudaccounts
+  - cloudaccounts/status
+  - networks
+  - networks/status
+  - clusters
+  - clusters/status
   verbs:
   - get
   - list
@@ -27,6 +32,18 @@ rules:
   - patch
   - delete
   - deletecollection
+# The operator's release objects: read only (they are written by people
+# with the release-admin role, and their status by the controller).
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releases
+  - releasechannels
+  - releaseholds
+  verbs:
+  - get
+  - list
+  - watch
 # A tenant is its namespace: created or adopted when the tenant is, never
 # deleted by the server.
 - apiGroups:

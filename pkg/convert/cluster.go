@@ -30,7 +30,7 @@ func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1
 		ControlPlane:    controlPlaneToAPI(p.GetControlPlane()),
 		DefaultNodePool: nodePoolToAPI(p.GetDefaultNodePool()),
 		Access:          accessToAPI(p.GetAccess()),
-		ReleaseChannel:  cloudv1alpha1.ReleaseChannel(camel(p.GetReleaseChannel(), prefixReleaseChannel)),
+		ReleaseChannel:  cloudv1alpha1.ReleaseChannelName(camel(p.GetReleaseChannel(), prefixReleaseChannel)),
 		Tier:            cloudv1alpha1.ClusterTier(camel(p.GetTier(), prefixTier)),
 		UpgradeMode:     cloudv1alpha1.UpgradeMode(camel(p.GetUpgradeMode(), prefixUpgradeMode)),
 		AWS:             awsToAPI(p.GetAws()),

@@ -108,7 +108,8 @@ func (d Deps) logger() *slog.Logger {
 	return d.Logger
 }
 
-// SetupAll registers the three controllers with mgr.
+// SetupAll registers the controllers with mgr: the three of the rows
+// (accounts, networks, clusters) and those of the release objects.
 func SetupAll(mgr ctrl.Manager, d Deps) error {
 	setups := []struct {
 		name  string
@@ -122,6 +123,9 @@ func SetupAll(mgr ctrl.Manager, d Deps) error {
 		if err := s.setup(mgr); err != nil {
 			return fmt.Errorf("set up the %s controller: %w", s.name, err)
 		}
+	}
+	if err := setupReleases(mgr, d); err != nil {
+		return fmt.Errorf("set up the release controllers: %w", err)
 	}
 	return nil
 }

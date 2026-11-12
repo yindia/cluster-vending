@@ -24,6 +24,7 @@ rules:
   - cloudaccounts/finalizers
   - clusters/finalizers
   - networks/finalizers
+  - releases/finalizers
   verbs:
   - update
 - apiGroups:
@@ -32,7 +33,30 @@ rules:
   - cloudaccounts/status
   - clusters/status
   - networks/status
+  - releasechannels/status
+  - releaseholds/status
+  - releases/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releasechannels
+  - releases
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releaseholds
+  verbs:
+  - get
+  - list
+  - watch

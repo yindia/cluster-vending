@@ -1,0 +1,18 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: Release
+metadata:
+  name: 2026-11-a
+spec:
+  notes: "Shipped with the controller. End-of-support dates are placeholders: publish your own release."
+  content:
+    renderVersion: 2
+    kubernetes:
+      - minor: "1.37"
+        default: true
+        endOfSupport: "2028-01-31T00:00:00Z"
+      - minor: "1.36"
+        upgradeTo: "1.37"
+        endOfSupport: "2027-09-30T00:00:00Z"
+      - minor: "1.35"
+        upgradeTo: "1.36"
+        endOfSupport: "2027-05-31T00:00:00Z"

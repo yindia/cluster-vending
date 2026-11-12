@@ -1,0 +1,21 @@
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ReleaseChannel
+metadata:
+  name: alpha
+spec:
+  promotion: Pinned
+  release: 2026-11-a
+---
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ReleaseChannel
+metadata:
+  name: beta
+spec:
+  promotion: Automatic
+---
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ReleaseChannel
+metadata:
+  name: stable
+spec:
+  promotion: Automatic

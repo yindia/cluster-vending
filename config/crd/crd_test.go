@@ -20,8 +20,25 @@ func TestEmbeddedDefinitions(t *testing.T) {
 		kind, _, _ := unstructured.NestedString(d.Object, "spec", "names", "kind")
 		kinds[kind] = d
 	}
-	if len(definitions) != 3 || kinds["CloudAccount"] == nil || kinds["Network"] == nil || kinds["Cluster"] == nil {
-		t.Fatalf("%d definitions of kinds %v, want CloudAccount, Network and Cluster", len(definitions), kinds)
+	want := []string{"CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold"}
+	for _, kind := range want {
+		if kinds[kind] == nil {
+			t.Errorf("no definition of %s", kind)
+		}
+	}
+	if len(definitions) != len(want) {
+		t.Fatalf("%d definitions of kinds %v, want %v", len(definitions), kinds, want)
+	}
+	// The operator's release objects are cluster-scoped, with a status
+	// the controller writes.
+	for _, kind := range []string{"Release", "ReleaseChannel", "ReleaseHold"} {
+		if scope, _, _ := unstructured.NestedString(kinds[kind].Object, "spec", "scope"); scope != "Cluster" {
+			t.Errorf("%s scope = %s, want Cluster", kind, scope)
+		}
+		versions, _, _ := unstructured.NestedSlice(kinds[kind].Object, "spec", "versions")
+		if _, served, _ := unstructured.NestedMap(versions[0].(map[string]any), "subresources", "status"); !served {
+			t.Errorf("%s has no status subresource", kind)
+		}
 	}
 	for _, kind := range []string{"Network", "Cluster"} {
 		versions, _, _ := unstructured.NestedSlice(kinds[kind].Object, "spec", "versions")

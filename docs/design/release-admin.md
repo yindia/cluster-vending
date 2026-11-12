@@ -1,7 +1,20 @@
 # Release administration: locking versions and channels
 
-Status: design, not implemented. Nothing below exists in code except where
-a file or identifier is named. This is the first step of building release
+Status: steps 1 and 4 of section 9 are implemented
+(`api/v1alpha1/release_types.go`, `pkg/controller/release_*.go`); the rest
+is design. Implemented as decided, with three changes the project owner
+made, recorded where they apply:
+
+- A release does not mention EKS add-ons at all. Which add-ons exist is
+  defined in code (the contract's `AwsAddon.name` list and the Cluster
+  kind's enum) and their versions come from AWS. A release pins only the
+  components the platform installs itself, each with a required version.
+- A `ReleaseHold` names its cluster by the cluster's ID (`spec.clusterID`,
+  the API's `Cluster.id`), not by namespace and name.
+- The open questions of section 10 are answered as recommended.
+
+Where this document says "Decided (proposed)" for something not
+implemented yet, it is still a proposal. This is the first step of building release
 channels, tiers and manual/automatic upgrades: it fixes how a platform
 operator locks what clusters run, before any rollout logic is written.
 
@@ -74,31 +87,15 @@ which adds a namespace to every reference for no isolation gain.
 ### 3.1 Release
 
 ```go
-// ComponentSource says where a component's version comes from.
-// +kubebuilder:validation:Enum=EKSAddon;Platform
-type ComponentSource string
-
-const (
-	// ComponentSourceEKSAddon: installed as an EKS add-on. AWS decides the
-	// version for the cluster's Kubernetes version; the release only says
-	// the component is offered on that minor.
-	ComponentSourceEKSAddon ComponentSource = "EKSAddon"
-	// ComponentSourcePlatform: installed by the platform (Helm or Argo CD).
-	// The release pins the version.
-	ComponentSourcePlatform ComponentSource = "Platform"
-)
-
-// ComponentPin is one component offered on one Kubernetes minor.
-// +kubebuilder:validation:XValidation:rule="self.source == 'EKSAddon' ? !has(self.version) : has(self.version)",message="an EKSAddon component has no version (AWS decides); a Platform component needs one"
+// ComponentPin is one component the platform installs itself (Helm or
+// Argo CD) at a fixed version, on one Kubernetes minor.
 type ComponentPin struct {
-	// Name of the component (ComponentDefinition name, components.md).
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	Name string `json:"name"`
-	Source ComponentSource `json:"source"`
-	// Version for a Platform component, e.g. the chart version.
-	// +optional
+	// Version installed, e.g. the chart version. Required.
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
-	Version string `json:"version,omitempty"`
+	Version string `json:"version"`
 }
 
 // KubernetesRelease is what clusters on one supported minor run.
@@ -194,36 +191,31 @@ spec:
         default: true
         endOfSupport: "2027-12-01T00:00:00Z"
         components:
-          - {name: cert-manager, source: EKSAddon}
-          - {name: karpenter, source: Platform, version: "1.8.1"}
+          - {name: karpenter, version: "1.8.1"}
       - minor: "1.34"
         endOfSupport: "2027-08-01T00:00:00Z"
         components:
-          - {name: cert-manager, source: EKSAddon}
-          - {name: karpenter, source: Platform, version: "1.8.1"}
+          - {name: karpenter, version: "1.8.1"}
       - minor: "1.33"
         upgradeTo: "1.34"
         endOfSupport: "2027-04-01T00:00:00Z"
         components:
-          - {name: cert-manager, source: EKSAddon}
-          - {name: karpenter, source: Platform, version: "1.6.3"}
+          - {name: karpenter, version: "1.6.3"}
 ```
 
 Versions and dates are placeholders.
 
-**The version-source rule, made unambiguous by the type:**
+**Where versions come from (decided by the project owner):**
 
 | Kind of thing | Version comes from | In a release |
 |---|---|---|
-| The default EKS add-ons (vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver) | AWS, as today (`ResolveEKSVersions`) | Not listed. They are part of every cluster, not components. |
-| Other EKS add-ons a tenant lists in `spec.aws.addons` today (EFS/FSx CSI, cert-manager, metrics-server...) | AWS | Not listed while they stay add-ons in the cluster spec. |
-| A component installed as an EKS add-on | AWS | Listed with `source: EKSAddon` and no version: "offered on this minor". |
-| A component installed by Helm or Argo CD | The release | Listed with `source: Platform` and a version. |
+| EKS add-ons: the defaults (vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver) and those a tenant lists in `spec.aws.addons` (EFS/FSx CSI, cert-manager, metrics-server...) | AWS (`ResolveEKSVersions`) | Never. Which add-ons exist is defined in code: the contract's `AwsAddon.name` list and the Cluster kind's enum. |
+| A component the platform installs itself (Helm or Argo CD) | The release | Listed with its version, which is required. |
 
-**Decided (proposed): the source is per entry, and CEL forbids a version on
-an `EKSAddon` entry.** Rejected: a release field `eksAddons` with versions.
-That would contradict the decision that AWS decides add-on versions, and the
-operator could pin something AWS no longer offers.
+Rejected: a source per entry (`EKSAddon` or `Platform`) with CEL forbidding
+a version on an add-on entry. It put add-ons into an object whose purpose
+is to lock versions the platform controls, for a list the code already
+holds.
 
 ### 3.2 ReleaseChannel
 
@@ -273,7 +265,7 @@ type ReleaseChannelStatus struct {
 	Tiers  []TierStatus `json:"tiers,omitempty"`
 	// History: the releases the channel offered, newest first, at most 20.
 	History    []ChannelHistoryEntry `json:"history,omitempty"`
-	Conditions []metav1.Condition    `json:"conditions,omitempty"` // Progressing, Halted, Complete
+	Conditions []metav1.Condition    `json:"conditions,omitempty"` // Offering (implemented); Progressing, Halted, Complete with rollouts
 }
 
 // +kubebuilder:object:root=true
@@ -316,8 +308,12 @@ order.
 ```go
 // ReleaseHoldSpec keeps one cluster out of rollouts.
 type ReleaseHoldSpec struct {
-	// Cluster held: namespace (the tenant's) and name of the Cluster.
-	ClusterRef NamespacedRef `json:"clusterRef"`
+	// ClusterID is the held cluster's ID (the API's Cluster.id): a UUID,
+	// immutable. The controller resolves it to the Cluster object (by the
+	// store's ID label) and shows that namespace and name in the status.
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterID is immutable; create another hold"
+	ClusterID string `json:"clusterID"`
 	// Release, when set, keeps the cluster on exactly this release (a
 	// lock); unset, the cluster stays on whatever it has now (a freeze).
 	// +optional
@@ -337,6 +333,15 @@ or annotation on `Cluster` (anyone who can edit the cluster could lift it,
 and the decision is that only the operator holds), and status written by an
 RPC (rollouts.md section 11; status belongs to the controller, and an RPC
 needs caller authentication the platform does not have yet).
+
+**Implemented status of channels (before rollouts exist):**
+`status.release` is the release the channel offers (Pinned and Manual:
+`spec.release`; Automatic: the release its upstream offers, because there
+is no rollout progress yet to say a release completed upstream), with an
+`Offering` condition. A release that is missing, withdrawn, being deleted
+or not `Valid` is not offered: the channel keeps offering what it did and
+`Offering=False` says why. `history` records each change. `stage` and
+`tiers` stay empty until step 6.
 
 ### 3.4 How locking works
 
@@ -361,7 +366,7 @@ How immutability is enforced:
   end of support; `renderVersion` is not above the running build's
   `RenderVersion`; every component is a known `ComponentDefinition`. A
   channel never offers a release that is not `Valid=True`; pointing one at
-  it shows `Progressing=False` with the reason.
+  it shows `Offering=False` with the reason.
 - Deleting a `Release` that a channel offers or a cluster has is refused:
   the controller adds a finalizer while it is referenced.
 
@@ -419,8 +424,7 @@ message KubernetesRelease {
 }
 message ComponentPin {
   string name = 1;
-  ComponentSource source = 2;  // COMPONENT_SOURCE_EKS_ADDON | COMPONENT_SOURCE_PLATFORM
-  string version = 3;          // required for PLATFORM, empty for EKS_ADDON
+  string version = 2;          // required
 }
 message SetChannelReleaseRequest {
   ReleaseChannelName channel = 1;   // ALPHA | BETA | STABLE
@@ -463,7 +467,7 @@ type Input struct {
 type Desired struct {
 	KubernetesVersion string
 	RenderVersion     int64
-	Components        map[string]ComponentPin // Platform: version; EKSAddon: AWS decides
+	Components        map[string]ComponentPin // the platform's components and their versions
 	Release           string                  // the release this follows ("" for manual)
 	Supported         bool
 	EndOfSupport      *time.Time
@@ -533,6 +537,15 @@ rollouts.md section 12:
 
 ## 7. Bootstrapping
 
+**Implemented:** the defaults are Go values in the controller
+(`pkg/controller/release_defaults.go`: release `2026-11-a` with 1.37
+default, 1.36 and 1.35 upgrading one minor at a time, placeholder
+end-of-support dates, this build's renderer, no components; alpha `Pinned`
+to it, beta and stable `Automatic`), created by the controller at start
+when absent and never updated. `config/samples` holds the same objects plus
+an example hold. Not `go:embed`ded YAML as first proposed below: the values
+are typed and a test keeps the samples equal to them.
+
 **Decided (proposed): the platform ships a default release and the three
 channels, embedded in the controller binary** (`config/releases/*.yaml`,
 `go:embed`, installed at start next to the CRDs by `cloudstore.Install`).
@@ -593,6 +606,8 @@ Steps 1 to 3 can be done in parallel.
 
 ## 10. Open questions
 
+All six were answered as recommended by the project owner.
+
 1. **Per-cluster component versions outside any release.** A hold can lock
    a cluster to a release, not to an arbitrary version. *Recommendation:*
    keep it that way; a one-off version is a new release offered to that
@@ -604,11 +619,8 @@ Steps 1 to 3 can be done in parallel.
 4. **Embedded release updates.** A new build with a new embedded release:
    should alpha move to it automatically? *Recommendation:* no; the operator
    points alpha at it, so a controller upgrade never starts a rollout.
-5. **`EKSAddon` components and today's `spec.aws.addons`.** cert-manager,
-   metrics-server and the CSI drivers are EKS add-ons a tenant lists today.
-   *Recommendation:* leave them as add-ons in the cluster spec (AWS decides
-   versions) until the Component resource exists; list them in releases
-   only once they are offered as components.
+5. **EKS add-ons and releases.** Settled by the project owner: releases
+   never list EKS add-ons (see section 3.1).
 6. **Hold expiry.** `until` ends a hold by itself. *Recommendation:* keep it
    optional; holds without it show on the channel's `held` count so they are
    not forgotten.

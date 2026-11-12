@@ -5,20 +5,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// ReleaseChannel is the channel a cluster takes platform releases from.
-// Channels are ordered: a release goes to Alpha first, then Beta, then
-// Stable. Stored only for now: nothing acts on it yet.
+// ReleaseChannelName is the channel a cluster takes platform releases
+// from (the ReleaseChannel object of that name, in lower case). Channels
+// are ordered: a release goes to Alpha first, then Beta, then Stable.
+// Stored only for now: nothing acts on it yet.
 // +kubebuilder:validation:Enum=Alpha;Beta;Stable
-type ReleaseChannel string
+type ReleaseChannelName string
 
 // Release channels.
 const (
 	// ReleaseChannelAlpha gets a release first.
-	ReleaseChannelAlpha ReleaseChannel = "Alpha"
+	ReleaseChannelAlpha ReleaseChannelName = "Alpha"
 	// ReleaseChannelBeta gets a release once Alpha has it.
-	ReleaseChannelBeta ReleaseChannel = "Beta"
+	ReleaseChannelBeta ReleaseChannelName = "Beta"
 	// ReleaseChannelStable gets a release last.
-	ReleaseChannelStable ReleaseChannel = "Stable"
+	ReleaseChannelStable ReleaseChannelName = "Stable"
 )
 
 // ClusterTier is how sensitive a cluster is. Within a release channel a
@@ -560,7 +561,7 @@ type ClusterSpec struct {
 	// releaseChannel is the channel the cluster takes platform releases
 	// from: Alpha, then Beta, then Stable. Stored only for now.
 	// +optional
-	ReleaseChannel ReleaseChannel `json:"releaseChannel,omitempty"`
+	ReleaseChannel ReleaseChannelName `json:"releaseChannel,omitempty"`
 	// tier is how sensitive the cluster is. Within a release channel a
 	// release reaches Tier2 first, then Tier1, then Tier0. Stored only for
 	// now.

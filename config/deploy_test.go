@@ -232,6 +232,49 @@ func TestOnlyTheControllerHasAnIAMRole(t *testing.T) {
 	}
 }
 
+// The release objects: the operator writes them (release-admin), anyone
+// may read them (release-viewer), the controller reads them and writes
+// their status and the release finalizer, the API server only reads them.
+func TestReleaseObjectRoles(t *testing.T) {
+	kinds := []string{"releases", "releasechannels", "releaseholds"}
+	const group = "cloud.cluster-vending.io"
+	admin, viewer := clusterRole(t, "rbac/release_admin_role.yaml"), clusterRole(t, "rbac/release_viewer_role.yaml")
+	controller, server := clusterRole(t, "rbac/role.yaml"), clusterRole(t, filepath.Join(serverBase, "role.yaml"))
+	for _, kind := range kinds {
+		for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
+			if !allows(admin, group, kind, verb) {
+				t.Errorf("release-admin: no %s on %s", verb, kind)
+			}
+		}
+		for _, verb := range []string{"get", "list", "watch"} {
+			for name, role := range map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "controller": controller, "server": server} {
+				if !allows(role, group, kind, verb) {
+					t.Errorf("%s: no %s on %s", name, verb, kind)
+				}
+			}
+		}
+		for _, verb := range []string{"create", "update", "patch", "delete"} {
+			for name, role := range map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "server": server} {
+				if allows(role, group, kind, verb) {
+					t.Errorf("%s: may %s %s; only the operator writes release objects", name, verb, kind)
+				}
+			}
+		}
+		if allows(admin, group, kind+"/status", "update") {
+			t.Errorf("release-admin: may update %s/status; status is the controller's", kind)
+		}
+		if !allows(controller, group, kind+"/status", "update") {
+			t.Errorf("controller: cannot update %s/status", kind)
+		}
+		if allows(controller, group, kind, "delete") {
+			t.Errorf("controller: may delete %s; only the operator deletes release objects", kind)
+		}
+	}
+	if !allows(controller, group, "releases/finalizers", "update") || !allows(controller, group, "releases", "update") {
+		t.Error("controller: cannot keep the finalizer on releases")
+	}
+}
+
 // allows reports whether role lets verb be used on resource of group.
 func allows(role *rbacv1.ClusterRole, group, resource, verb string) bool {
 	return slices.ContainsFunc(role.Rules, func(r rbacv1.PolicyRule) bool {

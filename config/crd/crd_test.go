@@ -38,3 +38,39 @@ func TestEmbeddedDefinitions(t *testing.T) {
 		}
 	}
 }
+
+// Every CEL rule is plain ASCII: a typographic quote (”) where CEL needs ''
+// compiles nowhere, and only a real API server reports it.
+func TestValidationRulesAreASCII(t *testing.T) {
+	defs, err := crd.All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range defs {
+		var walk func(path string, v any)
+		walk = func(path string, v any) {
+			switch x := v.(type) {
+			case map[string]any:
+				for k, child := range x {
+					if k == "rule" {
+						if s, ok := child.(string); ok {
+							for i, r := range s {
+								if r > 0x7e {
+									t.Errorf("%s: %s.rule has %q at %d: %s", def.GetName(), path, r, i, s)
+									break
+								}
+							}
+						}
+						continue
+					}
+					walk(path+"."+k, child)
+				}
+			case []any:
+				for _, child := range x {
+					walk(path+"[]", child)
+				}
+			}
+		}
+		walk("", def.Object)
+	}
+}

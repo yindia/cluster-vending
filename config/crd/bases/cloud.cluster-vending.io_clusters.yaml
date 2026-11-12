@@ -734,11 +734,9 @@ spec:
                 maxProperties: 40
                 type: object
                 x-kubernetes-validations:
-                - message: tag keys are 1-128 and values 0-256 characters of letters,
-                    digits, space and _.:/=+@-
-                  rule: self.all(k, size(k) >= 1 && size(k) <= 128 && k.matches('^[A-Za-z0-9
-                    _.:/=+@-]+$') && size(self[k]) <= 256 && self[k].matches('^[A-Za-z0-9
-                    _.:/=+@-]*$'))
+                - message: tag keys are 1-128 and values 0-256 characters
+                  rule: self.all(k, size(k) >= 1 && size(k) <= 128 && size(self[k])
+                    <= 256)
               tier:
                 description: |-
                   tier is how sensitive the cluster is. Within a release channel a
@@ -790,7 +788,7 @@ spec:
             - message: AWS pods take IPs from the VPC subnets; network.podCIDR must
                 be empty
               rule: '!has(self.aws) || !has(self.network.podCIDR) || self.network.podCIDR
-                == ”'
+                == '''''
             - message: AWS clusters need at least two zoneIDs, given as zone IDs like
                 use1-az1
               rule: '!has(self.aws) || !has(self.network.zoneIDs) || size(self.network.zoneIDs)
@@ -798,7 +796,7 @@ spec:
                 z.matches(''^[a-z]+[0-9]-az[0-9]+$'')))'
             - message: EKS serviceCIDR must be /12 to /24
               rule: '!has(self.aws) || !has(self.network.serviceCIDR) || self.network.serviceCIDR
-                == ” || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
+                == '''' || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
             - message: 'defaultNodePool.diskSizeGB cannot be set with a launch template:
                 EKS takes the disk from the template'
               rule: '!has(self.defaultNodePool) || !has(self.defaultNodePool.diskSizeGB)

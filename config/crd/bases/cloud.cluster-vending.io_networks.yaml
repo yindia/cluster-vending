@@ -269,7 +269,7 @@ spec:
                 - message: zonal subnets already define the zones; availabilityZoneCount
                     only combines with regional subnets (no zoneID)
                   rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
-                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == ”)'
+                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
                 - message: subnet cidrBlock values must be unique
                   rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
                     b.cidrBlock == a.cidrBlock))'
@@ -295,11 +295,9 @@ spec:
                 maxProperties: 40
                 type: object
                 x-kubernetes-validations:
-                - message: tag keys are 1-128 and values 0-256 characters of letters,
-                    digits, space and _.:/=+@-
-                  rule: self.all(k, size(k) >= 1 && size(k) <= 128 && k.matches('^[A-Za-z0-9
-                    _.:/=+@-]+$') && size(self[k]) <= 256 && self[k].matches('^[A-Za-z0-9
-                    _.:/=+@-]*$'))
+                - message: tag keys are 1-128 and values 0-256 characters
+                  rule: self.all(k, size(k) >= 1 && size(k) <= 128 && size(self[k])
+                    <= 256)
             required:
             - accountRef
             - region
@@ -585,7 +583,7 @@ spec:
                 - message: zonal subnets already define the zones; availabilityZoneCount
                     only combines with regional subnets (no zoneID)
                   rule: '!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount)
-                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == ”)'
+                    || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '''')'
                 - message: subnet cidrBlock values must be unique
                   rule: '!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b,
                     b.cidrBlock == a.cidrBlock))'

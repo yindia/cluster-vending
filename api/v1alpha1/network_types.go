@@ -55,7 +55,7 @@ type Subnet struct {
 }
 
 // NetworkLayout is the address space, subnets and NAT of a network.
-// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount) || self.subnets.all(s, !has(s.zoneID) || s.zoneID == ”)",message="zonal subnets already define the zones; availabilityZoneCount only combines with regional subnets (no zoneID)"
+// +kubebuilder:validation:XValidation:rule="!has(self.subnets) || size(self.subnets) == 0 || !has(self.availabilityZoneCount) || self.subnets.all(s, !has(s.zoneID) || s.zoneID == '')",message="zonal subnets already define the zones; availabilityZoneCount only combines with regional subnets (no zoneID)"
 // +kubebuilder:validation:XValidation:rule="!has(self.subnets) || self.subnets.all(a, self.subnets.exists_one(b, b.cidrBlock == a.cidrBlock))",message="subnet cidrBlock values must be unique"
 // +kubebuilder:validation:XValidation:rule="!has(self.subnets) || size(self.subnets) == 0 || self.subnets.exists(s, s.role == 'Private')",message="subnets, when set, must include at least one Private subnet"
 type NetworkLayout struct {

@@ -62,7 +62,11 @@ type LocalReference struct {
 // labels do not (spaces, 256-character values): hence a spec field and not
 // metadata.labels.
 // +kubebuilder:validation:MaxProperties=40
-// +kubebuilder:validation:XValidation:rule="self.all(k, size(k) >= 1 && size(k) <= 128 && k.matches('^[A-Za-z0-9 _.:/=+@-]+$') && size(self[k]) <= 256 && self[k].matches('^[A-Za-z0-9 _.:/=+@-]*$'))",message="tag keys are 1-128 and values 0-256 characters of letters, digits, space and _.:/=+@-"
+// Only the lengths are checked here: the character rules are the API's
+// (protovalidate on the contract), which also checks objects the
+// controller adopts. A regular expression per key and value exceeds the
+// API server's CEL cost budget.
+// +kubebuilder:validation:XValidation:rule="self.all(k, size(k) >= 1 && size(k) <= 128 && size(self[k]) <= 256)",message="tag keys are 1-128 and values 0-256 characters"
 type Tags map[string]string
 
 // InventoryEntry is one Crossplane object the owner has in the management

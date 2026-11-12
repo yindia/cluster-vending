@@ -110,14 +110,30 @@ A **carried-over** object is one that came with the import and that no spec
 field describes (for example a VPC's existing flow log). It is marked, never
 removed when the owner is rendered again, and deleted with its owner.
 
-**Takeover** makes the platform the owner. The row leaves the imported state
-first; then the objects are switched to full management. For a network each
-recorded object is updated in place; a log group or role that other VPCs
-also use is owned without the right to delete it. For a cluster the normal
-apply renders the spec with the adopted names and takes ownership of the
-carried-over objects. A takeover that stops half-way is finished by the
-loop. An imported network is never rendered from its spec, also after
-takeover: that would create a second VPC.
+**Takeover** makes the platform the owner, and it is the same operation as
+the import with other management policies: the set the import rendered is
+rendered again, as owned, and applied through the sequence engine. Nothing
+is read and edited in place, and AWS is not looked up again; what the import
+discovered is kept with the row for this (a network's discovered resources
+in its stored input, a cluster's planned objects in its stored adoption).
+The row leaves the imported state first, so a takeover that stops half-way
+is finished by the loop.
+
+- **Network**: `crossplaneaws.OwnedNetworkResources` renders every imported
+  object with full management, or without the right to delete for a log
+  group or role that other VPCs also use. Subnets get the load balancer
+  role tag, and the network's labels become tags on top of the tags the
+  import had. A later label update is the same render with other labels:
+  a label that goes is no tag any more, and a tag the import had under
+  that key is back. An imported network is never rendered from its spec,
+  also after takeover: that would create a second VPC.
+- **Cluster**: the normal apply renders the spec with the adopted names;
+  the carried-over objects are added to the same set from the import's
+  stored objects, owned (`crossplaneaws.Own`).
+
+A network or cluster that was imported before its import was kept with it
+has nothing to render from. Its takeover fails with a status that says to
+import it again; it is never rendered from something else.
 
 ## Deletion
 
@@ -192,9 +208,6 @@ it exists, that is said.
 - **Moving upgrade gating onto the engine.** The upgrade's step is now a
   status field (`status.upgrade`) computed by the same rule that gates the
   apply; the rule itself still lives in the reconciler.
-- **Takeover becomes a re-apply** of the imported set without its
-  Observe-only policies. This needs what was discovered to be kept in full,
-  which it is not today.
 - **Rollouts by channel and tier.** Only the two fields exist. See
   [design/rollouts.md](design/rollouts.md).
 

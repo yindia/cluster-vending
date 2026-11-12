@@ -2,12 +2,14 @@ package network
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -75,11 +77,11 @@ func TestLoopFinishesTaggingAnImportedNetwork(t *testing.T) {
 // next pass finishes the rest.
 func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
 	fail := false
-	f := newFixture(t, interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-		if fail && obj.GetObjectKind().GroupVersionKind().Kind == "Subnet" {
+	f := newFixture(t, interceptor.Funcs{Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+		if body, err := json.Marshal(obj); fail && err == nil && strings.Contains(string(body), `"kind":"Subnet"`) {
 			return errors.New("the API server went away")
 		}
-		return c.Update(ctx, obj, opts...)
+		return c.Apply(ctx, obj, opts...)
 	}})
 	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
 	f.svc.deps.AWS.StaticKeys = testKeys
@@ -96,14 +98,14 @@ func TestTakeoverStoppedHalfWayIsFinishedByTheLoop(t *testing.T) {
 		t.Fatalf("TakeOverNetwork only stores the takeover: %v", err)
 	}
 	if err := f.svc.Reconcile(ctx, tenant, id); err == nil {
-		t.Fatal("the pass succeeded although a subnet could not be updated")
+		t.Fatal("the pass succeeded although a subnet could not be applied")
 	}
 	row, err := f.store.Networks().Get(ctx, tenant, id)
 	if err != nil || row.State == netreconcile.StateImported || row.AppliedGeneration >= row.Generation {
 		t.Fatalf("state %s, applied %d of %d (%v); want a taken-over network that is not applied yet",
 			row.State, row.AppliedGeneration, row.Generation, err)
 	}
-	if st := f.status(t, id).GetStatus(); !strings.HasPrefix(st.GetMessage(), "retrying: could not take over Subnet ") {
+	if st := f.status(t, id).GetStatus(); !strings.HasPrefix(st.GetMessage(), "retrying: could not create the network's resources") {
 		t.Errorf("status after the failed pass = %s %q, want the failure being retried", st.GetState(), st.GetMessage())
 	}
 	fail = false

@@ -514,7 +514,15 @@ rules, for both:
   cluster objects with `[Observe, LateInitialize]`, each with the cloud ID
   as `crossplane.io/external-name`. The lookup does not run again.
 - **Tags are kept.** Every existing tag survives the takeover; the platform
-  adds its ownership tags and the labels on top.
+  adds its ownership tags and the labels on top. A label with the key of an
+  existing tag replaces its value while the label is there; when the label
+  goes, the tag the import had is back.
+- **Takeover applies the import again, as owned.** What the import found is
+  kept with the network or cluster; the takeover renders the same objects
+  with full management (without Delete for a resource others share) and
+  applies them. Nothing is looked up in AWS again. A network or cluster
+  imported before that was kept reports `FAILED_PRECONDITION` in its status
+  and must be imported again.
 - **Closure.** What the contract models becomes part of the spec; what an
   imported resource needs and the contract does not model is
   `CARRIED_OVER`; what only stands next to it is `NOT_IMPORTED` and needs

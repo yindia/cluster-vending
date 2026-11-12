@@ -1,6 +1,7 @@
 // Package network moves networks towards their stored spec: it applies a
 // network's managed resources (in order, through the sequence engine),
-// takes over and re-tags imported ones, deletes them tier by tier,
+// applies imported ones as observed and, after a takeover, as owned (the
+// same set, rendered again), deletes them tier by tier,
 // observes them for the network's status, and records what it saw,
 // including what went wrong. The background loop calls Reconcile; the API
 // handlers (pkg/server/network) only store what was asked for, and use
@@ -91,14 +92,13 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		return s.MarkApplied(ctx, row)
 	}
 	if StoredImport(row) != nil {
-		// Taken over: its objects are owned (the rest of a takeover that
-		// stopped half-way), and what a change can touch is its labels, as
-		// tags on the objects it has (also the rest of an update that
-		// failed half-way).
-		if err := s.OwnAll(ctx, row); err != nil {
-			return err
+		// Taken over: the set its import discovered, applied as owned, with
+		// the network's labels as tags (also the rest of a takeover or an
+		// update that stopped half-way).
+		if err := s.applyOwned(ctx, row); err != nil {
+			return fmt.Errorf("apply: %w", err)
 		}
-		return s.Retag(ctx, row)
+		return s.MarkApplied(ctx, row)
 	}
 	spec, err := SpecOf(row)
 	if err != nil {

@@ -8,11 +8,9 @@ import (
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"google.golang.org/protobuf/encoding/protojson"
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -97,26 +95,58 @@ func Adoption(row *model.Cluster) crossplaneaws.Adoption {
 	return a
 }
 
-// ownCarriedOver switches the carried-over objects of a taken-over cluster
-// to full management (own). Every apply of such a cluster does it, so a
-// takeover that failed half-way is finished by the next one; an object
-// already owned is left alone. Clusters the platform created, and
-// imported ones before their takeover, have nothing to own.
-func (s *Reconciler) ownCarriedOver(ctx context.Context, row *model.Cluster) error {
+// withCarriedOver is set (what the cluster's spec renders) preceded by the
+// carried-over objects of a taken-over cluster: the objects of its import
+// that no spec field describes (crossplane.CarriedOverAnnotation), from
+// the import's stored objects, owned (crossplaneaws.Own: full management,
+// without Delete for a retained one) and otherwise exactly as they were
+// imported. A takeover therefore applies them as it applies everything
+// else: nothing is read and edited in place, and nothing is looked up in
+// the cloud. They are in the cluster's inventory as kept, so they are
+// never removed for not being rendered, and are deleted with the cluster.
+// An object the spec renders under the same name wins.
+//
+// Clusters the platform created, and imported ones before their takeover,
+// carry nothing over. A cluster imported before its import's objects were
+// kept with it, and that has carried-over objects, has nothing to render
+// them from: it must be imported again.
+func (s *Reconciler) withCarriedOver(ctx context.Context, row *model.Cluster, set sequence.Set) (sequence.Set, error) {
 	if !row.Imported || row.State == StateImported || row.State == StateBlocked {
-		return nil
+		return set, nil
 	}
+	objects, _, ok, err := storedImportObjects(row, s.deps.Kube.Scheme())
+	if err != nil {
+		s.logger().ErrorContext(ctx, "read the import's stored objects", "cluster_id", row.ID, "error", err)
+		return nil, fault.New(fault.Internal, "could not read the objects the cluster was imported with")
+	}
+	if !ok {
+		return set, s.nothingCarriedOver(ctx, row)
+	}
+	rendered := make(map[string]bool, len(set))
+	for _, item := range set {
+		rendered[fmt.Sprintf("%T/%s", item.Object, item.Object.GetName())] = true
+	}
+	var carried []client.Object
+	for _, obj := range objects {
+		if obj.GetAnnotations()[crossplane.CarriedOverAnnotation] != "true" || rendered[fmt.Sprintf("%T/%s", obj, obj.GetName())] {
+			continue
+		}
+		crossplaneaws.Own(obj)
+		carried = append(carried, obj)
+	}
+	return append(importSet(carried), set...), nil
+}
+
+// nothingCarriedOver fails for a taken-over cluster that has carried-over
+// objects and no stored import to render them from.
+func (s *Reconciler) nothingCarriedOver(ctx context.Context, row *model.Cluster) error {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
-		return err
+		return storeError(err)
 	}
-	for _, r := range records {
-		if !r.CarriedOver {
-			continue // rendered: the apply takes it over
-		}
-		if err := s.own(ctx, r); err != nil {
-			return fmt.Errorf("%s %s: %w", r.Kind, r.Name, err)
-		}
+	if slices.ContainsFunc(records, func(r model.ManagedResource) bool { return r.CarriedOver }) {
+		return fault.Newf(fault.FailedPrecondition,
+			"cluster %s was imported before the objects of its import were kept with it; delete it and import the cluster again", row.ID)
 	}
 	return nil
 }
@@ -147,32 +177,4 @@ func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster
 		}
 	}
 	return nil
-}
-
-// own switches one carried-over object to full management, without Delete
-// for one marked crossplaneaws.RetainAnnotation.
-func (s *Reconciler) own(ctx context.Context, r model.ManagedResource) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
-	// From the API server: a read-modify-write needs the current object.
-	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
-		if meta.IsNoMatchError(err) {
-			return nil
-		}
-		return err
-	}
-	policies := []string{"*"}
-	if u.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" {
-		policies = policies[:0]
-		for _, action := range crossplaneaws.PolicyNoDelete {
-			policies = append(policies, string(action))
-		}
-	}
-	if have, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "managementPolicies"); slices.Equal(have, policies) {
-		return nil
-	}
-	if err := unstructured.SetNestedStringSlice(u.Object, policies, "spec", "managementPolicies"); err != nil {
-		return err
-	}
-	return s.deps.Kube.Update(ctx, u)
 }

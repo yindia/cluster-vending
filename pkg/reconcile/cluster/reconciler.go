@@ -131,12 +131,12 @@ func (s *Reconciler) Apply(ctx context.Context, row *model.Cluster, a *model.Clo
 	if err != nil {
 		return fault.New(fault.Internal, err.Error())
 	}
-	if err := s.ownCarriedOver(ctx, row); err != nil {
-		s.logger().ErrorContext(ctx, "take over carried-over resources", "cluster_id", row.ID, "error", err)
-		return fault.New(fault.Internal, "could not take over the cluster's carried-over resources")
+	set, err := s.withCarriedOver(ctx, row, crossplaneaws.ClusterSet(plan))
+	if err != nil {
+		return err
 	}
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.ClusterSet(plan), sequence.Keeping(s.deps.Inventory(owner), keep))
+	res, err := s.deps.Sequence().Apply(ctx, set, sequence.Keeping(s.deps.Inventory(owner), keep))
 	if err != nil {
 		s.logger().ErrorContext(ctx, "apply cluster resources", "cluster_id", row.ID, "error", err)
 		return applyError(err)

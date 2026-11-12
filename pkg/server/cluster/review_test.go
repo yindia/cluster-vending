@@ -2,12 +2,15 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect/v2"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -69,11 +72,11 @@ func TestStagesMoveOnWithEveryPass(t *testing.T) {
 func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 	fail := false
 	w := newWorld(t, interceptor.Funcs{
-		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-			if fail && obj.GetObjectKind().GroupVersionKind().Kind == "Group" {
-				return errors.New("conflict with the provider's write")
+		Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+			if body, err := json.Marshal(obj); fail && err == nil && strings.Contains(string(body), `"kind":"Group"`) {
+				return errors.New("the API server went away")
 			}
-			return c.Update(ctx, obj, opts...)
+			return c.Apply(ctx, obj, opts...)
 		},
 	}, nil, withVersions, func(d *service.Deps) { d.AWSClusterDiscovery = fakeClusterDiscoverer{cluster: terraformCluster()} })
 	ctx := t.Context()
@@ -92,7 +95,7 @@ func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 			row.State, row.AppliedGeneration, row.Generation, err)
 	}
 	st, err := w.svc.GetClusterStatus(ctx, &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: c.GetId()})
-	if err != nil || st.GetCluster().GetStatus().GetMessage() != "retrying: could not take over the cluster's carried-over resources" {
+	if err != nil || st.GetCluster().GetStatus().GetMessage() != "retrying: could not create the cluster's resources" {
 		t.Errorf("status after the failed pass = %q (%v), want the failure being retried", st.GetCluster().GetStatus().GetMessage(), err)
 	}
 	fail = false

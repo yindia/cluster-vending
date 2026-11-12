@@ -8,6 +8,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
 // importedKey is the key of the stored input (a JSON object) under which
@@ -84,5 +85,31 @@ func (s *Reconciler) applyImported(ctx context.Context, row *model.Network) erro
 		return err
 	}
 	_, err = s.ApplySet(ctx, row, account, sequence.Of(crossplaneaws.ImportedNetworkResources(*resources)...))
+	return err
+}
+
+// applyOwned applies the managed resources of a taken-over network: the
+// set its import discovered (kept with the row), rendered as owned
+// (crossplaneaws.OwnedNetworkResources) with the network's labels as
+// tags. A takeover and every later change of the labels are this one
+// operation: nothing is read and edited in place, and nothing is looked
+// up in the cloud. It is safe to repeat.
+//
+// A network imported before its discovered resources were kept with it
+// has nothing to render from: it must be imported again.
+func (s *Reconciler) applyOwned(ctx context.Context, row *model.Network) error {
+	resources, ok, err := importedResources(row.Input)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fault.Newf(fault.FailedPrecondition,
+			"network %s was imported before what its import discovered was kept with it; delete it and import the VPC again", row.ID)
+	}
+	account, err := s.Account(ctx, row.TenantID, row.CloudAccountID)
+	if err != nil {
+		return err
+	}
+	_, err = s.ApplySet(ctx, row, account, sequence.Of(crossplaneaws.OwnedNetworkResources(*resources, row.Labels)...))
 	return err
 }

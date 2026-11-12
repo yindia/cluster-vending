@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect/v2"
@@ -30,6 +31,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
+	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -728,6 +730,8 @@ func TestDeleteNetworkWaitsForDeletingClusters(t *testing.T) {
 
 // A taken-over network is never rendered from its spec: its objects came
 // from the discovered VPC, and rendering would create a second network.
+// One that has nothing kept from its import (it was imported before that
+// was kept) has nothing to render from: it says so and renders nothing.
 func TestReconcileDoesNotRenderAnImportedNetwork(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
@@ -739,16 +743,16 @@ func TestReconcileDoesNotRenderAnImportedNetwork(t *testing.T) {
 	if err := f.store.Networks().Create(ctx, row); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.svc.Reconcile(ctx, tenant, row.ID); err != nil {
-		t.Fatal(err)
+	err := f.svc.Reconcile(ctx, tenant, row.ID)
+	if !fault.Is(err, fault.FailedPrecondition) || !strings.Contains(err.Error(), "import the VPC again") {
+		t.Fatalf("Reconcile = %v, want the fault that says to import again", err)
 	}
 	vpcs := &awsec2.VPCList{}
 	if err := f.kube.List(ctx, vpcs); err != nil || len(vpcs.Items) != 0 {
 		t.Errorf("%d VPCs rendered (%v), want none", len(vpcs.Items), err)
 	}
-	got, err := f.store.Networks().Get(ctx, tenant, row.ID)
-	if err != nil || got.AppliedGeneration != got.Generation {
-		t.Errorf("applied generation %d of %d (%v), want it settled", got.AppliedGeneration, got.Generation, err)
+	if st := f.status(t, row.ID).GetStatus(); !strings.Contains(st.GetMessage(), "import the VPC again") {
+		t.Errorf("status = %s %q, want it to say why nothing is applied", st.GetState(), st.GetMessage())
 	}
 	// A label update does not render it either (see
 	// TestUpdateImportedNetworkLabels), and it takes no flow logs.

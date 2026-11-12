@@ -23,6 +23,8 @@ Terms used below:
 - **Management cluster.** The cluster the platform itself runs in. A
   tenant's cluster is a *workload cluster*.
 
+How an operator locks component versions in releases and channels: [release-admin.md](release-admin.md).
+
 ## 1. Summary
 
 A component is its own resource, owned by one cluster. A tenant enables it

@@ -8,7 +8,9 @@ reopened here), **Proposed** (this document's recommendation) or **Open**
 (needs an answer; collected in section 17).
 
 Components installed on clusters (Karpenter, Kyverno and so on) have their
-own design: [components.md](components.md).
+own design: [components.md](components.md). How an operator locks versions
+and channels (the `Release`, `ReleaseChannel` and `ReleaseHold` objects) is
+in [release-admin.md](release-admin.md).
 
 Terms used below:
 

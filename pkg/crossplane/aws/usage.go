@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
@@ -77,6 +78,8 @@ var (
 	roleKind        = UsageRef{APIVersion: awsiam.CRDGroupVersion.String(), Kind: awsiam.Role_Kind}
 	attachmentKind  = UsageRef{APIVersion: awsiam.CRDGroupVersion.String(), Kind: awsiam.RolePolicyAttachment_Kind}
 	subnetKind      = UsageRef{APIVersion: awsec2.CRDGroupVersion.String(), Kind: awsec2.Subnet_Kind}
+	flowLogKind     = UsageRef{APIVersion: awsec2.CRDGroupVersion.String(), Kind: awsec2.FlowLog_Kind}
+	logGroupKind    = UsageRef{APIVersion: awscwl.CRDGroupVersion.String(), Kind: awscwl.Group_Kind}
 )
 
 func (r UsageRef) named(name string) UsageRef { r.Name = name; return r }

@@ -7,7 +7,9 @@ import (
 	"maps"
 
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
+	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -87,6 +89,11 @@ type NetworkPlan struct {
 	NAT       NATMode
 	// Tags are the network's own tags (NetworkSpec.tags).
 	Tags map[string]string
+	// AccountID is the AWS account of the network; only flow logs need it.
+	AccountID string
+	// FlowLogs, when set, adds a flow log on the VPC with its log group and
+	// delivery role. Nil renders none.
+	FlowLogs *FlowLogPlan
 }
 
 // Zones returns the plan's zones, in order of first appearance.
@@ -121,6 +128,7 @@ func NetworkPrefix(tenantID, networkID, name string) string {
 //	RouteTable "public" + Route 0.0.0.0/0 -> igw + association per public subnet
 //	RouteTable per private route (one, or one per zone) + Route 0.0.0.0/0 -> nat
 //	  + association per private subnet
+//	with FlowLogs: the flow log, its log group and delivery role (flowLogs)
 func NetworkResources(p NetworkPlan) ([]client.Object, error) {
 	b := networkBuilder{p: p}
 	vpc := b.vpc()
@@ -176,6 +184,13 @@ func NetworkResources(p NetworkPlan) ([]client.Object, error) {
 		for _, sub := range privates {
 			objects = append(objects, b.association(sub, rt.Name))
 		}
+	}
+	if p.FlowLogs != nil {
+		flowLogs, err := b.flowLogs()
+		if err != nil {
+			return nil, err
+		}
+		objects = append(objects, flowLogs...)
 	}
 	return objects, nil
 }
@@ -377,20 +392,25 @@ func (b networkBuilder) association(subnet, routeTable string) *awsec2.RouteTabl
 	}
 }
 
-// NetworkLists are empty lists of every kind NetworkResources creates, for
-// listing (status) and deleting a network's resources by label.
+// NetworkLists are empty lists of every managed resource kind a network
+// has (NetworkResources, ImportedNetworkResources), for listing (status)
+// and deleting a network's resources by label.
 func NetworkLists() []client.ObjectList {
 	return []client.ObjectList{
+		&awsec2.FlowLogList{}, &awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
+		&awscwl.GroupList{},
 		&awsec2.RouteTableAssociationList{}, &awsec2.RouteList{}, &awsec2.RouteTableList{},
 		&awsec2.NATGatewayList{}, &awsec2.EIPList{}, &awsec2.SubnetList{},
 		&awsec2.InternetGatewayList{}, &awsec2.VPCList{},
 	}
 }
 
-// NetworkObjects are empty objects of every kind NetworkResources creates,
-// in the same order as NetworkLists, for DeleteAllOf.
+// NetworkObjects are empty objects of the kinds in NetworkLists, in the
+// same order, for DeleteAllOf.
 func NetworkObjects() []client.Object {
 	return []client.Object{
+		&awsec2.FlowLog{}, &awsiam.RolePolicyAttachment{}, &awsiam.Policy{}, &awsiam.Role{},
+		&awscwl.Group{},
 		&awsec2.RouteTableAssociation{}, &awsec2.Route{}, &awsec2.RouteTable{},
 		&awsec2.NATGateway{}, &awsec2.EIP{}, &awsec2.Subnet{},
 		&awsec2.InternetGateway{}, &awsec2.VPC{},

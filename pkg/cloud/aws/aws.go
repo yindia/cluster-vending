@@ -26,8 +26,10 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
@@ -159,7 +161,7 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
 	}
 	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
-		eks: eks.NewFromConfig(cfg)}, nil
+		eks: eks.NewFromConfig(cfg), logs: cloudwatchlogs.NewFromConfig(cfg), iam: iam.NewFromConfig(cfg)}, nil
 }
 
 func staticProvider(s StaticCredentials) awssdk.CredentialsProvider {
@@ -217,6 +219,8 @@ type Tenant struct {
 	ec2       EC2API
 	sts       STSAPI
 	eks       EKSAPI
+	logs      LogsAPI
+	iam       IAMAPI
 }
 
 // STSAPI is the part of the STS client VerifyAccess uses.

@@ -56,7 +56,7 @@ func ConnectManagement(ctx context.Context, o ManagementOptions) (manager.Manage
 		if err != nil {
 			return nil, fmt.Errorf("install the Crossplane providers (is Crossplane installed?): %w", err)
 		}
-		o.Logger.Info("crossplane providers", "created", res.Created, "existing", res.Existing)
+		o.Logger.Info("crossplane providers", "created", res.Created, "existing", res.Existing, "updated", res.Updated)
 	}
 	scheme, err := kube.Scheme()
 	if err != nil {

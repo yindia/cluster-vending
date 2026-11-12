@@ -23,6 +23,60 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// FlowLogTrafficType is the traffic a flow log records.
+type FlowLogTrafficType int32
+
+const (
+	// Server default: ALL.
+	FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED FlowLogTrafficType = 0
+	FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_ALL         FlowLogTrafficType = 1
+	FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_ACCEPT      FlowLogTrafficType = 2
+	FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_REJECT      FlowLogTrafficType = 3
+)
+
+// Enum value maps for FlowLogTrafficType.
+var (
+	FlowLogTrafficType_name = map[int32]string{
+		0: "FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED",
+		1: "FLOW_LOG_TRAFFIC_TYPE_ALL",
+		2: "FLOW_LOG_TRAFFIC_TYPE_ACCEPT",
+		3: "FLOW_LOG_TRAFFIC_TYPE_REJECT",
+	}
+	FlowLogTrafficType_value = map[string]int32{
+		"FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED": 0,
+		"FLOW_LOG_TRAFFIC_TYPE_ALL":         1,
+		"FLOW_LOG_TRAFFIC_TYPE_ACCEPT":      2,
+		"FLOW_LOG_TRAFFIC_TYPE_REJECT":      3,
+	}
+)
+
+func (x FlowLogTrafficType) Enum() *FlowLogTrafficType {
+	p := new(FlowLogTrafficType)
+	*p = x
+	return p
+}
+
+func (x FlowLogTrafficType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FlowLogTrafficType) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_network_proto_enumTypes[0].Descriptor()
+}
+
+func (FlowLogTrafficType) Type() protoreflect.EnumType {
+	return &file_cloud_v1_network_proto_enumTypes[0]
+}
+
+func (x FlowLogTrafficType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FlowLogTrafficType.Descriptor instead.
+func (FlowLogTrafficType) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{0}
+}
+
 // SubnetRole decides routing and placement for a subnet.
 type SubnetRole int32
 
@@ -63,11 +117,11 @@ func (x SubnetRole) String() string {
 }
 
 func (SubnetRole) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_network_proto_enumTypes[0].Descriptor()
+	return file_cloud_v1_network_proto_enumTypes[1].Descriptor()
 }
 
 func (SubnetRole) Type() protoreflect.EnumType {
-	return &file_cloud_v1_network_proto_enumTypes[0]
+	return &file_cloud_v1_network_proto_enumTypes[1]
 }
 
 func (x SubnetRole) Number() protoreflect.EnumNumber {
@@ -76,7 +130,7 @@ func (x SubnetRole) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SubnetRole.Descriptor instead.
 func (SubnetRole) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{0}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{1}
 }
 
 // NatGatewayMode controls NAT redundancy. The crossplane option is AWS
@@ -127,11 +181,11 @@ func (x NatGatewayMode) String() string {
 }
 
 func (NatGatewayMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_network_proto_enumTypes[1].Descriptor()
+	return file_cloud_v1_network_proto_enumTypes[2].Descriptor()
 }
 
 func (NatGatewayMode) Type() protoreflect.EnumType {
-	return &file_cloud_v1_network_proto_enumTypes[1]
+	return &file_cloud_v1_network_proto_enumTypes[2]
 }
 
 func (x NatGatewayMode) Number() protoreflect.EnumNumber {
@@ -140,7 +194,7 @@ func (x NatGatewayMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NatGatewayMode.Descriptor instead.
 func (NatGatewayMode) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{1}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{2}
 }
 
 // NetworkState is the coarse lifecycle state of a network.
@@ -194,11 +248,11 @@ func (x NetworkState) String() string {
 }
 
 func (NetworkState) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_network_proto_enumTypes[2].Descriptor()
+	return file_cloud_v1_network_proto_enumTypes[3].Descriptor()
 }
 
 func (NetworkState) Type() protoreflect.EnumType {
-	return &file_cloud_v1_network_proto_enumTypes[2]
+	return &file_cloud_v1_network_proto_enumTypes[3]
 }
 
 func (x NetworkState) Number() protoreflect.EnumNumber {
@@ -207,7 +261,7 @@ func (x NetworkState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NetworkState.Descriptor instead.
 func (NetworkState) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{3}
 }
 
 // Network is a tenant network (AWS VPC, GCP VPC network, Azure VNet) with its
@@ -362,7 +416,11 @@ type NetworkSpec struct {
 	// (CloudAccount.id) returned by TenantService.BootstrapTenant. Its
 	// provider must be the network's. Immutable. Clusters run in their
 	// network's account.
-	BootstrapId   string `protobuf:"bytes,4,opt,name=bootstrap_id,json=bootstrapId,proto3" json:"bootstrap_id,omitempty"`
+	BootstrapId string `protobuf:"bytes,4,opt,name=bootstrap_id,json=bootstrapId,proto3" json:"bootstrap_id,omitempty"`
+	// Flow logs of the network's IP traffic. Unset: none, as before.
+	// Immutable for now. An imported network keeps the flow logs it has
+	// (status.import, CARRIED_OVER); this field stays unset for it.
+	FlowLogs      *NetworkFlowLogs `protobuf:"bytes,5,opt,name=flow_logs,json=flowLogs,proto3" json:"flow_logs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -416,6 +474,13 @@ func (x *NetworkSpec) GetBootstrapId() string {
 		return x.BootstrapId
 	}
 	return ""
+}
+
+func (x *NetworkSpec) GetFlowLogs() *NetworkFlowLogs {
+	if x != nil {
+		return x.FlowLogs
+	}
+	return nil
 }
 
 // ClusterNetwork is where a cluster runs: a reference to a platform Network
@@ -514,6 +579,88 @@ func (x *ClusterNetwork) GetServiceCidr() string {
 	return ""
 }
 
+// NetworkFlowLogs records the network's IP traffic in the cloud's log
+// service, with what delivering it needs.
+//
+//	AWS   ec2 FlowLog on the VPC, to a CloudWatch Logs log group
+//	      (cloudwatchlogs Group) through a delivery role (iam Role, Policy,
+//	      RolePolicyAttachment)
+//
+// The stored spec holds the resolved defaults.
+type NetworkFlowLogs struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Turns flow logs on. Unset or false: no flow log resources.
+	Enabled *bool `protobuf:"varint,1,opt,name=enabled,proto3,oneof" json:"enabled,omitempty"`
+	// FlowLog.trafficType. Defaults to ALL.
+	TrafficType FlowLogTrafficType `protobuf:"varint,2,opt,name=traffic_type,json=trafficType,proto3,enum=cloud.v1.FlowLogTrafficType" json:"traffic_type,omitempty"`
+	// Days the log group keeps the records (Group.retentionInDays): one of
+	// the retention periods CloudWatch Logs has. Defaults to 30.
+	RetentionDays uint32 `protobuf:"varint,3,opt,name=retention_days,json=retentionDays,proto3" json:"retention_days,omitempty"`
+	// Seconds of traffic one record aggregates
+	// (FlowLog.maxAggregationInterval): 60 or 600. Defaults to 600.
+	AggregationIntervalSeconds uint32 `protobuf:"varint,4,opt,name=aggregation_interval_seconds,json=aggregationIntervalSeconds,proto3" json:"aggregation_interval_seconds,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *NetworkFlowLogs) Reset() {
+	*x = NetworkFlowLogs{}
+	mi := &file_cloud_v1_network_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkFlowLogs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkFlowLogs) ProtoMessage() {}
+
+func (x *NetworkFlowLogs) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_network_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkFlowLogs.ProtoReflect.Descriptor instead.
+func (*NetworkFlowLogs) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *NetworkFlowLogs) GetEnabled() bool {
+	if x != nil && x.Enabled != nil {
+		return *x.Enabled
+	}
+	return false
+}
+
+func (x *NetworkFlowLogs) GetTrafficType() FlowLogTrafficType {
+	if x != nil {
+		return x.TrafficType
+	}
+	return FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED
+}
+
+func (x *NetworkFlowLogs) GetRetentionDays() uint32 {
+	if x != nil {
+		return x.RetentionDays
+	}
+	return 0
+}
+
+func (x *NetworkFlowLogs) GetAggregationIntervalSeconds() uint32 {
+	if x != nil {
+		return x.AggregationIntervalSeconds
+	}
+	return 0
+}
+
 // NetworkLayout is the address space, subnets and NAT of a Network.
 type NetworkLayout struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -549,7 +696,7 @@ type NetworkLayout struct {
 
 func (x *NetworkLayout) Reset() {
 	*x = NetworkLayout{}
-	mi := &file_cloud_v1_network_proto_msgTypes[3]
+	mi := &file_cloud_v1_network_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -561,7 +708,7 @@ func (x *NetworkLayout) String() string {
 func (*NetworkLayout) ProtoMessage() {}
 
 func (x *NetworkLayout) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_proto_msgTypes[3]
+	mi := &file_cloud_v1_network_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -574,7 +721,7 @@ func (x *NetworkLayout) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkLayout.ProtoReflect.Descriptor instead.
 func (*NetworkLayout) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *NetworkLayout) GetCidrBlock() string {
@@ -626,7 +773,7 @@ type Subnet struct {
 
 func (x *Subnet) Reset() {
 	*x = Subnet{}
-	mi := &file_cloud_v1_network_proto_msgTypes[4]
+	mi := &file_cloud_v1_network_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -638,7 +785,7 @@ func (x *Subnet) String() string {
 func (*Subnet) ProtoMessage() {}
 
 func (x *Subnet) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_proto_msgTypes[4]
+	mi := &file_cloud_v1_network_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -651,7 +798,7 @@ func (x *Subnet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subnet.ProtoReflect.Descriptor instead.
 func (*Subnet) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Subnet) GetRole() SubnetRole {
@@ -706,7 +853,7 @@ type NetworkStatus struct {
 
 func (x *NetworkStatus) Reset() {
 	*x = NetworkStatus{}
-	mi := &file_cloud_v1_network_proto_msgTypes[5]
+	mi := &file_cloud_v1_network_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +865,7 @@ func (x *NetworkStatus) String() string {
 func (*NetworkStatus) ProtoMessage() {}
 
 func (x *NetworkStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_proto_msgTypes[5]
+	mi := &file_cloud_v1_network_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,7 +878,7 @@ func (x *NetworkStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkStatus.ProtoReflect.Descriptor instead.
 func (*NetworkStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{5}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *NetworkStatus) GetState() NetworkState {
@@ -819,7 +966,7 @@ type NetworkResources struct {
 
 func (x *NetworkResources) Reset() {
 	*x = NetworkResources{}
-	mi := &file_cloud_v1_network_proto_msgTypes[6]
+	mi := &file_cloud_v1_network_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -831,7 +978,7 @@ func (x *NetworkResources) String() string {
 func (*NetworkResources) ProtoMessage() {}
 
 func (x *NetworkResources) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_proto_msgTypes[6]
+	mi := &file_cloud_v1_network_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -844,7 +991,7 @@ func (x *NetworkResources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkResources.ProtoReflect.Descriptor instead.
 func (*NetworkResources) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_proto_rawDescGZIP(), []int{6}
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *NetworkResources) GetCloudNetworkId() string {
@@ -906,18 +1053,27 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbb\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf3\x01\n" +
 	"\vNetworkSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x127\n" +
 	"\x06layout\x18\x02 \x01(\v2\x17.cloud.v1.NetworkLayoutB\x06\xbaH\x03\xc8\x01\x01R\x06layout\x12+\n" +
-	"\fbootstrap_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\vbootstrapIdJ\x04\b\x03\x10\x04J\x04\b\n" +
+	"\fbootstrap_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\vbootstrapId\x126\n" +
+	"\tflow_logs\x18\x05 \x01(\v2\x19.cloud.v1.NetworkFlowLogsR\bflowLogsJ\x04\b\x03\x10\x04J\x04\b\n" +
 	"\x10\vR\x04tagsR\x03aws\"\xce\x01\n" +
 	"\x0eClusterNetwork\x12'\n" +
 	"\n" +
 	"network_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\x12;\n" +
 	"\bzone_ids\x18\x05 \x03(\tB \xbaH\x1d\x92\x01\x1a\x10\x06\x18\x01\"\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\azoneIds\x12&\n" +
 	"\bpod_cidr\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xf0\x01\x01R\apodCidr\x12.\n" +
-	"\fservice_cidr\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xf0\x01\x01R\vserviceCidr\"\xca\x06\n" +
+	"\fservice_cidr\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xf0\x01\x01R\vserviceCidr\"\xc2\x02\n" +
+	"\x0fNetworkFlowLogs\x12\x1d\n" +
+	"\aenabled\x18\x01 \x01(\bH\x00R\aenabled\x88\x01\x01\x12I\n" +
+	"\ftraffic_type\x18\x02 \x01(\x0e2\x1c.cloud.v1.FlowLogTrafficTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vtrafficType\x12h\n" +
+	"\x0eretention_days\x18\x03 \x01(\rBA\xbaH>\xd8\x01\x01*90\x010\x030\x050\a0\x0e0\x1e0<0Z0x0\x96\x010\xb4\x010\xed\x020\x90\x030\xa1\x040\xdb\x050\xc8\b0\xa3\x0e0\x90\x110\xfd\x130\xea\x160\xd8\x190\xc5\x1cR\rretentionDays\x12O\n" +
+	"\x1caggregation_interval_seconds\x18\x04 \x01(\rB\r\xbaH\n" +
+	"\xd8\x01\x01*\x050<0\xd8\x04R\x1aaggregationIntervalSecondsB\n" +
+	"\n" +
+	"\b_enabled\"\xca\x06\n" +
 	"\rNetworkLayout\x12=\n" +
 	"\n" +
 	"cidr_block\x18\x01 \x01(\tB\x1e\xbaH\x1b\xd8\x01\x01r\x162\x11/(1[6-9]|2[0-4])$\xf0\x01\x01R\tcidrBlock\x124\n" +
@@ -952,7 +1108,15 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"\x12private_subnet_ids\x18\x03 \x03(\tR\x10privateSubnetIds\x12&\n" +
 	"\x0fnat_gateway_ids\x18\x04 \x03(\tR\rnatGatewayIds\x12\x1d\n" +
 	"\n" +
-	"egress_ips\x18\x05 \x03(\tR\tegressIps*Z\n" +
+	"egress_ips\x18\x05 \x03(\tR\tegressIps*\xc5\x01\n" +
+	"\x12FlowLogTrafficType\x12%\n" +
+	"!FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED\x10\x00\x12(\n" +
+	"\x19FLOW_LOG_TRAFFIC_TYPE_ALL\x10\x01\x1a\t\x8a\xb5\x18\x05\n" +
+	"\x03ALL\x12.\n" +
+	"\x1cFLOW_LOG_TRAFFIC_TYPE_ACCEPT\x10\x02\x1a\f\x8a\xb5\x18\b\n" +
+	"\x06ACCEPT\x12.\n" +
+	"\x1cFLOW_LOG_TRAFFIC_TYPE_REJECT\x10\x03\x1a\f\x8a\xb5\x18\b\n" +
+	"\x06REJECT*Z\n" +
 	"\n" +
 	"SubnetRole\x12\x1b\n" +
 	"\x17SUBNET_ROLE_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -989,47 +1153,51 @@ func file_cloud_v1_network_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_network_proto_rawDescData
 }
 
-var file_cloud_v1_network_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_cloud_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_cloud_v1_network_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_cloud_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_cloud_v1_network_proto_goTypes = []any{
-	(SubnetRole)(0),               // 0: cloud.v1.SubnetRole
-	(NatGatewayMode)(0),           // 1: cloud.v1.NatGatewayMode
-	(NetworkState)(0),             // 2: cloud.v1.NetworkState
-	(*Network)(nil),               // 3: cloud.v1.Network
-	(*NetworkSpec)(nil),           // 4: cloud.v1.NetworkSpec
-	(*ClusterNetwork)(nil),        // 5: cloud.v1.ClusterNetwork
-	(*NetworkLayout)(nil),         // 6: cloud.v1.NetworkLayout
-	(*Subnet)(nil),                // 7: cloud.v1.Subnet
-	(*NetworkStatus)(nil),         // 8: cloud.v1.NetworkStatus
-	(*NetworkResources)(nil),      // 9: cloud.v1.NetworkResources
-	nil,                           // 10: cloud.v1.Network.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
-	(*Condition)(nil),             // 12: cloud.v1.Condition
-	(*ImportStatus)(nil),          // 13: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),      // 14: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),       // 15: cloud.v1.ManagedResource
+	(FlowLogTrafficType)(0),       // 0: cloud.v1.FlowLogTrafficType
+	(SubnetRole)(0),               // 1: cloud.v1.SubnetRole
+	(NatGatewayMode)(0),           // 2: cloud.v1.NatGatewayMode
+	(NetworkState)(0),             // 3: cloud.v1.NetworkState
+	(*Network)(nil),               // 4: cloud.v1.Network
+	(*NetworkSpec)(nil),           // 5: cloud.v1.NetworkSpec
+	(*ClusterNetwork)(nil),        // 6: cloud.v1.ClusterNetwork
+	(*NetworkFlowLogs)(nil),       // 7: cloud.v1.NetworkFlowLogs
+	(*NetworkLayout)(nil),         // 8: cloud.v1.NetworkLayout
+	(*Subnet)(nil),                // 9: cloud.v1.Subnet
+	(*NetworkStatus)(nil),         // 10: cloud.v1.NetworkStatus
+	(*NetworkResources)(nil),      // 11: cloud.v1.NetworkResources
+	nil,                           // 12: cloud.v1.Network.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*Condition)(nil),             // 14: cloud.v1.Condition
+	(*ImportStatus)(nil),          // 15: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),      // 16: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),       // 17: cloud.v1.ManagedResource
 }
 var file_cloud_v1_network_proto_depIdxs = []int32{
-	10, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
-	4,  // 1: cloud.v1.Network.spec:type_name -> cloud.v1.NetworkSpec
-	8,  // 2: cloud.v1.Network.status:type_name -> cloud.v1.NetworkStatus
-	11, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
-	11, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
-	6,  // 5: cloud.v1.NetworkSpec.layout:type_name -> cloud.v1.NetworkLayout
-	7,  // 6: cloud.v1.NetworkLayout.subnets:type_name -> cloud.v1.Subnet
-	1,  // 7: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
-	0,  // 8: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
-	2,  // 9: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
-	12, // 10: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
-	9,  // 11: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
-	13, // 12: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
-	14, // 13: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	15, // 14: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	12, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
+	5,  // 1: cloud.v1.Network.spec:type_name -> cloud.v1.NetworkSpec
+	10, // 2: cloud.v1.Network.status:type_name -> cloud.v1.NetworkStatus
+	13, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
+	13, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
+	8,  // 5: cloud.v1.NetworkSpec.layout:type_name -> cloud.v1.NetworkLayout
+	7,  // 6: cloud.v1.NetworkSpec.flow_logs:type_name -> cloud.v1.NetworkFlowLogs
+	0,  // 7: cloud.v1.NetworkFlowLogs.traffic_type:type_name -> cloud.v1.FlowLogTrafficType
+	9,  // 8: cloud.v1.NetworkLayout.subnets:type_name -> cloud.v1.Subnet
+	2,  // 9: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
+	1,  // 10: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
+	3,  // 11: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
+	14, // 12: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
+	11, // 13: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
+	15, // 14: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
+	16, // 15: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	17, // 16: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_proto_init() }
@@ -1041,13 +1209,14 @@ func file_cloud_v1_network_proto_init() {
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_options_proto_init()
+	file_cloud_v1_network_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_network_proto_rawDesc), len(file_cloud_v1_network_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   8,
+			NumEnums:      4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

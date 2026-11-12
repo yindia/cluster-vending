@@ -200,8 +200,9 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 	return imp, nil
 }
 
-// own switches one recorded object to full management and adds the ELB
-// role tags the platform's subnets carry.
+// own switches one recorded object to full management (without Delete for
+// one marked crossplaneaws.RetainAnnotation) and adds the ELB role tags the
+// platform's subnets carry.
 func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.FromAPIVersionAndKind(r.APIVersion, r.Kind))
@@ -209,7 +210,15 @@ func (s *NetworkService) own(ctx context.Context, r model.ManagedResource) error
 	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
 		return err
 	}
-	if err := unstructured.SetNestedStringSlice(u.Object, []string{"*"}, "spec", "managementPolicies"); err != nil {
+	policies := []string{"*"}
+	if u.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true" {
+		// Shared with resources outside the network: owned, never deleted.
+		policies = policies[:0]
+		for _, action := range crossplaneaws.PolicyNoDelete {
+			policies = append(policies, string(action))
+		}
+	}
+	if err := unstructured.SetNestedStringSlice(u.Object, policies, "spec", "managementPolicies"); err != nil {
 		return err
 	}
 	if r.Kind == "Subnet" {

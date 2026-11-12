@@ -38,6 +38,8 @@ type ImportedNetwork struct {
 	Subnets         []ImportedSubnet
 	NATGateways     []ImportedNAT
 	RouteTables     []ImportedRouteTable
+	// FlowLogs are the VPC's flow logs to CloudWatch Logs (CARRIED_OVER).
+	FlowLogs []ImportedFlowLog
 }
 
 // ImportedVPC is the network's VPC.
@@ -116,7 +118,7 @@ func ImportedNetworkResources(n ImportedNetwork) []client.Object {
 			out = append(out, b.association(rt, a))
 		}
 	}
-	return out
+	return append(out, b.flowLogs()...)
 }
 
 type importBuilder struct{ n ImportedNetwork }

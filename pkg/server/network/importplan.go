@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	ec2APIVersion = "ec2.aws.m.upbound.io/v1beta1"
-	minVPCPrefix  = 16
-	maxVPCPrefix  = 24
-	routeLocal    = "local"
+	ec2APIVersion  = "ec2.aws.m.upbound.io/v1beta1"
+	logsAPIVersion = "cloudwatchlogs.aws.m.upbound.io/v1beta1"
+	iamAPIVersion  = "iam.aws.m.upbound.io/v1beta1"
+	minVPCPrefix   = 16
+	maxVPCPrefix   = 24
+	routeLocal     = "local"
 )
 
 // importPlan is what ImportNetwork does with a discovered network.
@@ -57,9 +59,11 @@ type planner struct {
 // planAWSImport maps a discovered network onto the contract: the layout it
 // is (spec), the Observe-only resources that import it, and one plan line
 // per resource. Lines are MATCHES, WILL_UPDATE (subnets missing their load
-// balancer tag), NOT_IMPORTED (outside this version: the main route table,
-// extra routes, unused NAT gateways, the default security group) or
-// BLOCKING (not expressible in the contract).
+// balancer tag), CARRIED_OVER (the VPC's flow logs to CloudWatch Logs with
+// their log group and delivery role), NOT_IMPORTED (outside this version:
+// the main route table, extra routes, unused NAT gateways, the default
+// security group, other flow logs) or BLOCKING (not expressible in the
+// contract).
 func planAWSImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) importPlan {
 	p := &planner{d: d, base: base, subnetNames: map[string]string{}, natKeys: map[string]string{}}
 	p.plan.layout = &cloudv1.NetworkLayout{CidrBlock: d.VPC.CIDRBlock}
@@ -68,12 +72,17 @@ func planAWSImport(d *awscloud.Network, base crossplaneaws.ImportedNetwork) impo
 	p.subnets()
 	p.routeTables()
 	p.natMode()
+	p.flowLogs()
 	p.extras()
 	return p.plan
 }
 
 func (p *planner) line(kind, name, externalName, specPath string, disposition cloudv1.Disposition, detail string) {
-	p.plan.lines = append(p.plan.lines, &cloudv1.ImportedResource{ApiVersion: ec2APIVersion, Kind: kind, Name: name,
+	p.lineOf(ec2APIVersion, kind, name, externalName, specPath, disposition, detail)
+}
+
+func (p *planner) lineOf(apiVersion, kind, name, externalName, specPath string, disposition cloudv1.Disposition, detail string) {
+	p.plan.lines = append(p.plan.lines, &cloudv1.ImportedResource{ApiVersion: apiVersion, Kind: kind, Name: name,
 		ExternalName: externalName, SpecPath: specPath, Disposition: disposition, Detail: detail})
 }
 

@@ -4,7 +4,7 @@
 // The client is a controller-runtime client with typed APIs: the Kubernetes
 // built-ins, Crossplane's package types (Provider, DeploymentRuntimeConfig)
 // and the provider-upjet-aws namespaced types (ProviderConfig and the ec2,
-// eks and iam managed resources). pkg/crossplane builds those objects.
+// eks, iam and cloudwatchlogs managed resources). pkg/crossplane builds those objects.
 // Adding a provider (GCP, Azure) means adding its Go API module and
 // registering its groups in Scheme.
 package kube
@@ -16,6 +16,7 @@ import (
 	pkgv1 "github.com/crossplane/crossplane/apis/v2/pkg/v1"
 	pkgv1beta1 "github.com/crossplane/crossplane/apis/v2/pkg/v1beta1"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
@@ -77,6 +78,7 @@ func Scheme() (*runtime.Scheme, error) {
 		protectionv1beta1.AddToScheme,
 		awsv1beta1.SchemeBuilder.AddToScheme,
 		awsec2.AddToScheme,
+		awscwl.AddToScheme,
 		awseks.AddToScheme,
 		awsiam.AddToScheme,
 	} {

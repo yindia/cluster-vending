@@ -34,8 +34,8 @@ with an API call, optionally with override values, and disables it by
 deleting it. The platform operator keeps a catalog entry per component that
 says which versions go with which Kubernetes version, what the component
 depends on, and which values a tenant may override. How a component is
-installed into the workload cluster is not decided; three ways are compared
-in section 8.
+installed into the workload cluster is decided: Helm charts through the
+Crossplane Helm provider (section 9).
 
 ## 2. What is decided
 
@@ -53,8 +53,10 @@ in section 8.
   a cluster on an older Kubernetes version gets the versions listed for it.
   The platform supports the last three Kubernetes minors
   ([rollouts.md](rollouts.md), sections 2 and 5).
-- How a component is installed is **not decided**: an EKS add-on where one
-  exists, otherwise the Crossplane Helm provider or Argo CD.
+- How a component is installed: **the Crossplane Helm provider** (decided
+  2026-11-13). Anything available as an EKS add-on stays an add-on in the
+  cluster spec, not a component ([component-usage.md](component-usage.md)).
+  Argo CD and Flux were considered; see section 9 for when to revisit.
 - EKS add-on versions come from the AWS API, not from platform
   configuration. Only the platform's own components take their versions
   from the per-Kubernetes-version map in a release.
@@ -272,9 +274,18 @@ be checked against `aws eks describe-addon-versions` before it is relied on.
 
 ## 9. Install mechanisms
 
-**Not decided.** The owner's rule: if a component is available as an EKS
-add-on, use the add-on; otherwise the Crossplane Helm provider or Argo CD.
-The three compared:
+**Decided (2026-11-13): the Crossplane Helm provider.** It is already
+installed by the platform, and its releases are ordinary managed resources,
+so ordering (the sequence engine), the inventory, deletion order and status
+work as for every other resource. Its known weak spots have workarounds the
+component controller applies: a large `rollbackLimit` on every release
+(provider-helm #193: a failed release is otherwise not retried), and
+readiness judged by the controller in the workload cluster rather than only
+from the release's status (provider-helm #329). Revisit Argo CD if operators
+need a UI across clusters or the releases outgrow one provider pod; Flux, run
+in each workload cluster, if clusters must keep reconciling while the
+management cluster is down. The tenant API does not name the mechanism, so a
+change later only affects the controller. The comparison as it was made:
 
 | | EKS add-on | Crossplane Helm / Kubernetes provider | Argo CD |
 |---|---|---|---|

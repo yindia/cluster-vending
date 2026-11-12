@@ -76,7 +76,7 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	s.logger().InfoContext(ctx, "network created", "tenant_id", row.TenantID, "network_id", row.ID,
 		"name", row.Name, "prefix", plan.Prefix, "bootstrap_id", account.ID, "region", plan.Region,
 		"cidr", plan.CIDRBlock, "subnets", len(plan.Subnets))
-	n, err := s.view(ctx, row)
+	n, err := s.respond(ctx, row)
 	return &cloudv1.CreateNetworkResponse{Network: n}, err
 }
 
@@ -155,7 +155,9 @@ func (s *NetworkService) account(ctx context.Context, tenantID, cloudAccountID s
 	return a, nil
 }
 
-// GetNetwork returns one network with its observed status.
+// GetNetwork returns one network from the database: its spec and the
+// status last recorded for it (stored). It does not read the management
+// cluster; GetNetworkStatus does.
 func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetworkRequest) (*cloudv1.GetNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -164,11 +166,12 @@ func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetwork
 	if err != nil {
 		return nil, err
 	}
-	n, err := s.view(ctx, row)
+	n, err := s.stored(ctx, row)
 	return &cloudv1.GetNetworkResponse{Network: n}, err
 }
 
-// ListNetworks returns a page of the tenant's networks, ordered by id.
+// ListNetworks returns a page of the tenant's networks, ordered by id,
+// from the database like GetNetwork.
 func (s *NetworkService) ListNetworks(ctx context.Context, req *cloudv1.ListNetworksRequest) (*cloudv1.ListNetworksResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -187,16 +190,8 @@ func (s *NetworkService) ListNetworks(ctx context.Context, req *cloudv1.ListNetw
 		rows = rows[:size]
 		res.NextPageToken = rows[size-1].ID
 	}
-	ids := make([]string, 0, len(rows))
 	for i := range rows {
-		ids = append(ids, rows[i].ID)
-	}
-	records, err := s.deps.Store.ManagedResources().ListByOwners(ctx, model.OwnerNetwork, ids) // one query per page
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	for i := range rows {
-		n, err := s.viewOf(ctx, &rows[i], records[rows[i].ID])
+		n, err := s.stored(ctx, &rows[i])
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +240,7 @@ func (s *NetworkService) viewOf(ctx context.Context, row *model.Network, records
 	if err != nil {
 		return nil, err
 	}
-	if row.State == stateProvisioning {
+	if row.State == stateProvisioning || row.State == stateUpdating {
 		service.SettleMissing(records, views)
 	}
 	clusters, err := s.deps.Store.Clusters().ListByNetwork(ctx, row.ID)

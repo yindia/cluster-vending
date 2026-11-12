@@ -127,6 +127,8 @@ func newNetworkCmd() *cobra.Command {
 			run: cli.NetworkImport, args: cobra.NoArgs, input: true, wait: true},
 		verb{use: "takeover <id>", short: "Take over an imported network: the platform becomes its owner",
 			run: cli.NetworkTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
+		verb{use: "status <id>", short: "Show a network with its live status (get shows the status last recorded)",
+			run: cli.NetworkStatus, args: cobra.ExactArgs(1)},
 		watchVerb("network", cli.NetworkWatch))
 	return newResourceCmd("network", "Manage networks (NetworkService)", verbs)
 }
@@ -147,6 +149,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterImport, args: cobra.NoArgs, input: true},
 		verb{use: "takeover <id>", short: "Take over an imported cluster: the platform becomes its owner",
 			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
+		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",
+			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		watchVerb("cluster", cli.ClusterWatch))
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
 }

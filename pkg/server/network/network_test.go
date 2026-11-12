@@ -125,7 +125,7 @@ func (f fixture) attachGateway(t *testing.T, id string) *cloudv1.Network {
 	if err := f.svc.Reconcile(ctx, tenant, id); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	res, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id})
+	res, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestGetNetworkReportsResources(t *testing.T) {
 	n := f.create(t, "prod", nil)
 	f.markReady(t, "")
 
-	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	res, err := f.svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +546,7 @@ func TestDeleteNetwork(t *testing.T) {
 	// Reads change nothing: the loop's Reconcile moves the deletion on,
 	// tier by tier; dependencies outlive their dependents.
 	for i := 0; ; i++ {
-		_, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+		_, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
 		if connect.CodeOf(err) == connect.CodeNotFound {
 			break
 		}
@@ -555,7 +555,7 @@ func TestDeleteNetwork(t *testing.T) {
 		}
 		before := count(&awsec2.RouteTableList{}) + count(&awsec2.NATGatewayList{}) + count(&awsec2.EIPList{}) +
 			count(&awsec2.SubnetList{}) + count(&awsec2.VPCList{})
-		if _, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
+		if _, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
 			t.Fatal(err)
 		}
 		if after := count(&awsec2.RouteTableList{}) + count(&awsec2.NATGatewayList{}) + count(&awsec2.EIPList{}) +
@@ -593,7 +593,7 @@ func TestDeleteNetworkInUse(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
 	}
-	got, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
+	got, err := f.svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
 	if err != nil || got.GetNetwork().GetStatus().GetClusterIds()[0] != "eks" {
 		t.Errorf("cluster_ids = %v, %v", got.GetNetwork().GetStatus().GetClusterIds(), err)
 	}
@@ -623,7 +623,7 @@ func TestDatabaseErrorsAreInternal(t *testing.T) {
 	networks.EXPECT().Get(gomock.Any(), tenant, unknownID).Return(nil, errors.New("connection refused"))
 	svc := NewNetworkService(service.Deps{Store: store, Kube: fakeKube(t)})
 
-	_, err := svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: unknownID})
+	_, err := svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: unknownID})
 	if connect.CodeOf(err) != connect.CodeInternal {
 		t.Fatalf("err = %v, want INTERNAL", err)
 	}

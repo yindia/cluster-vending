@@ -35,6 +35,9 @@ const (
 	NetworkServiceTakeOverNetworkProcedure = "/cloud.v1.NetworkService/TakeOverNetwork"
 	// NetworkServiceGetNetworkProcedure is the procedure name of the NetworkService's GetNetwork RPC.
 	NetworkServiceGetNetworkProcedure = "/cloud.v1.NetworkService/GetNetwork"
+	// NetworkServiceGetNetworkStatusProcedure is the procedure name of the NetworkService's
+	// GetNetworkStatus RPC.
+	NetworkServiceGetNetworkStatusProcedure = "/cloud.v1.NetworkService/GetNetworkStatus"
 	// NetworkServiceWatchNetworkProcedure is the procedure name of the NetworkService's WatchNetwork
 	// RPC.
 	NetworkServiceWatchNetworkProcedure = "/cloud.v1.NetworkService/WatchNetwork"
@@ -76,6 +79,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_network_service_proto.Services().ByName("NetworkService").Methods().ByName("GetNetwork"),
 			Procedure:        NetworkServiceGetNetworkProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	networkServiceGetNetworkStatusSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_network_service_proto.Services().ByName("NetworkService").Methods().ByName("GetNetworkStatus"),
+			Procedure:        NetworkServiceGetNetworkStatusProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -128,8 +139,14 @@ type NetworkServiceClient interface {
 	// FAILED_PRECONDITION unless the phase is PLANNED, and when NOT_IMPORTED
 	// resources exist but acknowledge_not_imported is false.
 	TakeOverNetwork(context.Context, *v1.TakeOverNetworkRequest) (*v1.TakeOverNetworkResponse, error)
-	// Returns one network, or NOT_FOUND.
+	// Returns one network, or NOT_FOUND, from the platform's database: its
+	// spec and the status the platform last recorded for it. It does not
+	// read the management cluster. GetNetworkStatus reads the live status.
 	GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error)
+	// Returns one network with its live status, read now from its managed
+	// resources in the management cluster. UNAVAILABLE when the management
+	// cluster cannot be read.
+	GetNetworkStatus(context.Context, *v1.GetNetworkStatusRequest) (*v1.GetNetworkStatusResponse, error)
 	// Streams one network's state: a first message with the network and an
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the network's state or message, or a resource's), until the
@@ -191,8 +208,14 @@ type NetworkServiceHandler interface {
 	// FAILED_PRECONDITION unless the phase is PLANNED, and when NOT_IMPORTED
 	// resources exist but acknowledge_not_imported is false.
 	TakeOverNetwork(context.Context, *v1.TakeOverNetworkRequest) (*v1.TakeOverNetworkResponse, error)
-	// Returns one network, or NOT_FOUND.
+	// Returns one network, or NOT_FOUND, from the platform's database: its
+	// spec and the status the platform last recorded for it. It does not
+	// read the management cluster. GetNetworkStatus reads the live status.
 	GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error)
+	// Returns one network with its live status, read now from its managed
+	// resources in the management cluster. UNAVAILABLE when the management
+	// cluster cannot be read.
+	GetNetworkStatus(context.Context, *v1.GetNetworkStatusRequest) (*v1.GetNetworkStatusResponse, error)
 	// Streams one network's state: a first message with the network and an
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the network's state or message, or a resource's), until the
@@ -220,6 +243,7 @@ func RegisterNetworkServiceHandler(server *connect.Server, svc NetworkServiceHan
 		connect.Method{Spec: networkServiceImportNetworkSpec(), Handler: adapter.importNetwork},
 		connect.Method{Spec: networkServiceTakeOverNetworkSpec(), Handler: adapter.takeOverNetwork},
 		connect.Method{Spec: networkServiceGetNetworkSpec(), Handler: adapter.getNetwork},
+		connect.Method{Spec: networkServiceGetNetworkStatusSpec(), Handler: adapter.getNetworkStatus},
 		connect.Method{Spec: networkServiceWatchNetworkSpec(), Handler: adapter.watchNetwork},
 		connect.Method{Spec: networkServiceListNetworksSpec(), Handler: adapter.listNetworks},
 		connect.Method{Spec: networkServiceUpdateNetworkSpec(), Handler: adapter.updateNetwork},
@@ -260,6 +284,10 @@ func (UnimplementedNetworkServiceHandler) TakeOverNetwork(context.Context, *v1.T
 
 func (UnimplementedNetworkServiceHandler) GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.NetworkService.GetNetwork is not implemented")
+}
+
+func (UnimplementedNetworkServiceHandler) GetNetworkStatus(context.Context, *v1.GetNetworkStatusRequest) (*v1.GetNetworkStatusResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.NetworkService.GetNetworkStatus is not implemented")
 }
 
 func (UnimplementedNetworkServiceHandler) WatchNetwork(context.Context, *v1.WatchNetworkRequest, NetworkServiceWatchNetworkServerStream) error {
@@ -309,6 +337,14 @@ func (c *networkServiceClient) TakeOverNetwork(ctx context.Context, req *v1.Take
 func (c *networkServiceClient) GetNetwork(ctx context.Context, req *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error) {
 	var res v1.GetNetworkResponse
 	if err := c.client.CallUnary(ctx, networkServiceGetNetworkSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *networkServiceClient) GetNetworkStatus(ctx context.Context, req *v1.GetNetworkStatusRequest) (*v1.GetNetworkStatusResponse, error) {
+	var res v1.GetNetworkStatusResponse
+	if err := c.client.CallUnary(ctx, networkServiceGetNetworkStatusSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -390,6 +426,18 @@ func (h networkServiceHandler) getNetwork(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	res, err := h.svc.GetNetwork(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h networkServiceHandler) getNetworkStatus(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetNetworkStatusRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetNetworkStatus(ctx, &req)
 	if err != nil {
 		return err
 	}

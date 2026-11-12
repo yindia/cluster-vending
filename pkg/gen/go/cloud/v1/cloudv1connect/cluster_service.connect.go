@@ -35,6 +35,9 @@ const (
 	ClusterServiceTakeOverClusterProcedure = "/cloud.v1.ClusterService/TakeOverCluster"
 	// ClusterServiceGetClusterProcedure is the procedure name of the ClusterService's GetCluster RPC.
 	ClusterServiceGetClusterProcedure = "/cloud.v1.ClusterService/GetCluster"
+	// ClusterServiceGetClusterStatusProcedure is the procedure name of the ClusterService's
+	// GetClusterStatus RPC.
+	ClusterServiceGetClusterStatusProcedure = "/cloud.v1.ClusterService/GetClusterStatus"
 	// ClusterServiceListClustersProcedure is the procedure name of the ClusterService's ListClusters
 	// RPC.
 	ClusterServiceListClustersProcedure = "/cloud.v1.ClusterService/ListClusters"
@@ -76,6 +79,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetCluster"),
 			Procedure:        ClusterServiceGetClusterProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	clusterServiceGetClusterStatusSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetClusterStatus"),
+			Procedure:        ClusterServiceGetClusterStatusProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -133,9 +144,20 @@ type ClusterServiceClient interface {
 	// previous tool stopped managing the cluster, and after its network was
 	// taken over. From then on it is a cluster like any other.
 	TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error)
-	// Returns one cluster, or NOT_FOUND.
+	// Returns one cluster, or NOT_FOUND, from the platform's database: its
+	// spec and the status the platform last recorded for it (while a cluster
+	// is being created, changed or deleted that is at most one pass of the
+	// background loop old; afterwards it is the status it converged on). It
+	// does not read the management cluster. GetClusterStatus reads the live
+	// status.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
-	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs).
+	// Returns one cluster with its live status, read now from its managed
+	// resources in the management cluster (their conditions, the EKS
+	// endpoint, versions, ...). UNAVAILABLE when the management cluster
+	// cannot be read.
+	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
+	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
+	// from the database like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Updates the mutable fields named in update_mask.
 	UpdateCluster(context.Context, *v1.UpdateClusterRequest) (*v1.UpdateClusterResponse, error)
@@ -143,8 +165,9 @@ type ClusterServiceClient interface {
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the cluster's state or message, or a resource's), until the
 	// cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the cluster does not exist. Like GetCluster, reading moves the
-	// cluster's creation (add-ons once EKS is ACTIVE) and deletion on.
+	// when the cluster does not exist. It reads the live status, like
+	// GetClusterStatus, and changes nothing: the background loop moves the
+	// cluster on.
 	WatchCluster(context.Context, *v1.WatchClusterRequest) (ClusterServiceWatchClusterClientStream, error)
 	// Removes the cluster, all its node pools, and every cloud resource the
 	// platform owns for it. A shared Network (network.network_id) is not deleted. For
@@ -201,9 +224,20 @@ type ClusterServiceHandler interface {
 	// previous tool stopped managing the cluster, and after its network was
 	// taken over. From then on it is a cluster like any other.
 	TakeOverCluster(context.Context, *v1.TakeOverClusterRequest) (*v1.TakeOverClusterResponse, error)
-	// Returns one cluster, or NOT_FOUND.
+	// Returns one cluster, or NOT_FOUND, from the platform's database: its
+	// spec and the status the platform last recorded for it (while a cluster
+	// is being created, changed or deleted that is at most one pass of the
+	// background loop old; afterwards it is the status it converged on). It
+	// does not read the management cluster. GetClusterStatus reads the live
+	// status.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
-	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs).
+	// Returns one cluster with its live status, read now from its managed
+	// resources in the management cluster (their conditions, the EKS
+	// endpoint, versions, ...). UNAVAILABLE when the management cluster
+	// cannot be read.
+	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
+	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
+	// from the database like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
 	// Updates the mutable fields named in update_mask.
 	UpdateCluster(context.Context, *v1.UpdateClusterRequest) (*v1.UpdateClusterResponse, error)
@@ -211,8 +245,9 @@ type ClusterServiceHandler interface {
 	// ADDED event per managed resource, then a message whenever something
 	// changes (the cluster's state or message, or a resource's), until the
 	// cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the cluster does not exist. Like GetCluster, reading moves the
-	// cluster's creation (add-ons once EKS is ACTIVE) and deletion on.
+	// when the cluster does not exist. It reads the live status, like
+	// GetClusterStatus, and changes nothing: the background loop moves the
+	// cluster on.
 	WatchCluster(context.Context, *v1.WatchClusterRequest, ClusterServiceWatchClusterServerStream) error
 	// Removes the cluster, all its node pools, and every cloud resource the
 	// platform owns for it. A shared Network (network.network_id) is not deleted. For
@@ -230,6 +265,7 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceImportClusterSpec(), Handler: adapter.importCluster},
 		connect.Method{Spec: clusterServiceTakeOverClusterSpec(), Handler: adapter.takeOverCluster},
 		connect.Method{Spec: clusterServiceGetClusterSpec(), Handler: adapter.getCluster},
+		connect.Method{Spec: clusterServiceGetClusterStatusSpec(), Handler: adapter.getClusterStatus},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
 		connect.Method{Spec: clusterServiceWatchClusterSpec(), Handler: adapter.watchCluster},
@@ -270,6 +306,10 @@ func (UnimplementedClusterServiceHandler) TakeOverCluster(context.Context, *v1.T
 
 func (UnimplementedClusterServiceHandler) GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetCluster is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetClusterStatus is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
@@ -319,6 +359,14 @@ func (c *clusterServiceClient) TakeOverCluster(ctx context.Context, req *v1.Take
 func (c *clusterServiceClient) GetCluster(ctx context.Context, req *v1.GetClusterRequest) (*v1.GetClusterResponse, error) {
 	var res v1.GetClusterResponse
 	if err := c.client.CallUnary(ctx, clusterServiceGetClusterSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) GetClusterStatus(ctx context.Context, req *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error) {
+	var res v1.GetClusterStatusResponse
+	if err := c.client.CallUnary(ctx, clusterServiceGetClusterStatusSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -400,6 +448,18 @@ func (h clusterServiceHandler) getCluster(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	res, err := h.svc.GetCluster(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) getClusterStatus(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetClusterStatusRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetClusterStatus(ctx, &req)
 	if err != nil {
 		return err
 	}

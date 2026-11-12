@@ -40,12 +40,26 @@ service ClusterService {
   // taken over. From then on it is a cluster like any other.
   rpc TakeOverCluster(TakeOverClusterRequest) returns (TakeOverClusterResponse);
 
-  // Returns one cluster, or NOT_FOUND.
+  // Returns one cluster, or NOT_FOUND, from the platform's database: its
+  // spec and the status the platform last recorded for it (while a cluster
+  // is being created, changed or deleted that is at most one pass of the
+  // background loop old; afterwards it is the status it converged on). It
+  // does not read the management cluster. GetClusterStatus reads the live
+  // status.
   rpc GetCluster(GetClusterRequest) returns (GetClusterResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs).
+  // Returns one cluster with its live status, read now from its managed
+  // resources in the management cluster (their conditions, the EKS
+  // endpoint, versions, ...). UNAVAILABLE when the management cluster
+  // cannot be read.
+  rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
+  // from the database like GetCluster.
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -57,8 +71,9 @@ service ClusterService {
   // ADDED event per managed resource, then a message whenever something
   // changes (the cluster's state or message, or a resource's), until the
   // cluster is deleted (deleted: true) or the client cancels. NOT_FOUND
-  // when the cluster does not exist. Like GetCluster, reading moves the
-  // cluster's creation (add-ons once EKS is ACTIVE) and deletion on.
+  // when the cluster does not exist. It reads the live status, like
+  // GetClusterStatus, and changes nothing: the background loop moves the
+  // cluster on.
   rpc WatchCluster(WatchClusterRequest) returns (stream WatchClusterResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -184,6 +199,22 @@ message GetClusterRequest {
   }];
   // Cluster.id.
   string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetClusterStatusRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetClusterStatusResponse {
+  // The cluster as GetCluster returns it, with status read live.
+  Cluster cluster = 1;
 }
 
 message WatchClusterRequest {

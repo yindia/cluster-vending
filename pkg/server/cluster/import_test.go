@@ -431,7 +431,7 @@ func TestTakeOverCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := w.svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: worldTenant, ClusterId: c.GetId()})
+	got, err := w.svc.GetClusterStatus(ctx, &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: c.GetId()})
 	if err != nil {
 		t.Fatal(err)
 	}

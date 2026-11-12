@@ -73,7 +73,7 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	}
 	s.logger().InfoContext(ctx, "network imported", "tenant_id", row.TenantID, "network_id", row.ID,
 		"vpc_id", req.GetAws().GetVpcId(), "blocked", plan.blocked(), "plan_lines", len(plan.lines))
-	n, err := s.view(ctx, row)
+	n, err := s.respond(ctx, row)
 	return &cloudv1.ImportNetworkResponse{Network: n}, err
 }
 
@@ -177,7 +177,7 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 		return nil, service.ToConnect(err)
 	}
 	s.logger().InfoContext(ctx, "network taken over", "tenant_id", row.TenantID, "network_id", row.ID, "resources", len(records))
-	n, err := s.view(ctx, row)
+	n, err := s.respond(ctx, row)
 	return &cloudv1.TakeOverNetworkResponse{Network: n}, err
 }
 

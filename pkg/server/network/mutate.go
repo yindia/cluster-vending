@@ -79,6 +79,9 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	if !tagsChanged && row.AppliedGeneration == row.Generation-1 {
 		row.AppliedGeneration = row.Generation // nothing to apply for this change
 	}
+	if tagsChanged && row.State == stateReady {
+		row.State = stateUpdating // the loop records the status until it is READY again
+	}
 	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return nil, connect.NewError(connect.CodeAborted, "the network changed; get it again and retry with its etag")
@@ -95,7 +98,7 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 			return nil, err
 		}
 	}
-	n, err := s.view(ctx, row)
+	n, err := s.respond(ctx, row)
 	return &cloudv1.UpdateNetworkResponse{Network: n}, err
 }
 
@@ -220,7 +223,7 @@ func (s *NetworkService) DeleteNetwork(ctx context.Context, req *cloudv1.DeleteN
 			return nil, service.ToConnect(err)
 		}
 	}
-	n, err := s.view(ctx, row)
+	n, err := s.respond(ctx, row)
 	if err != nil {
 		return nil, err
 	}

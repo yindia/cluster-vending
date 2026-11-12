@@ -231,7 +231,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err := s.tagSubnets(ctx, row, t); err != nil {
 		return nil, err
 	}
-	c, err := s.view(ctx, row)
+	c, err := s.respond(ctx, row)
 	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
 }
 
@@ -380,7 +380,7 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 			return nil, service.ToConnect(err)
 		}
 	}
-	c, err := s.view(ctx, row)
+	c, err := s.respond(ctx, row)
 	if err != nil {
 		return nil, err
 	}

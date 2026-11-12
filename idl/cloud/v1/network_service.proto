@@ -34,8 +34,17 @@ service NetworkService {
   // resources exist but acknowledge_not_imported is false.
   rpc TakeOverNetwork(TakeOverNetworkRequest) returns (TakeOverNetworkResponse);
 
-  // Returns one network, or NOT_FOUND.
+  // Returns one network, or NOT_FOUND, from the platform's database: its
+  // spec and the status the platform last recorded for it. It does not
+  // read the management cluster. GetNetworkStatus reads the live status.
   rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Returns one network with its live status, read now from its managed
+  // resources in the management cluster. UNAVAILABLE when the management
+  // cluster cannot be read.
+  rpc GetNetworkStatus(GetNetworkStatusRequest) returns (GetNetworkStatusResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -171,6 +180,22 @@ message GetNetworkRequest {
 }
 
 message GetNetworkResponse {
+  Network network = 1;
+}
+
+message GetNetworkStatusRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+
+  // Network.id.
+  string network_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetNetworkStatusResponse {
+  // The network as GetNetwork returns it, with status read live.
   Network network = 1;
 }
 

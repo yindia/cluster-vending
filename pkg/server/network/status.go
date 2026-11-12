@@ -18,11 +18,16 @@ import (
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
-// Lifecycle states stored on the network row. The others (READY, FAILED)
-// are observed from the managed resources, not stored.
+// Lifecycle states stored on the network row. FAILED is observed from the
+// managed resources, not stored (but for a blocked import).
 const (
 	stateProvisioning = "NETWORK_STATE_PROVISIONING"
-	stateDeleting     = "NETWORK_STATE_DELETING"
+	// stateUpdating: a change (labels, flow logs) is being applied.
+	stateUpdating = "NETWORK_STATE_UPDATING"
+	// stateReady: the loop saw every resource ready (settle) and leaves the
+	// network alone until it changes.
+	stateReady    = "NETWORK_STATE_READY"
+	stateDeleting = "NETWORK_STATE_DELETING"
 	// stateImported: ImportNetwork created Observe-only resources; nothing
 	// is managed until TakeOverNetwork.
 	stateImported = "NETWORK_STATE_IMPORTED"
@@ -168,6 +173,9 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 		if imp := st.GetImport(); imp != nil && imp.GetPhase() == cloudv1.ImportPhase_IMPORT_PHASE_CONVERGING {
 			imp.Phase = cloudv1.ImportPhase_IMPORT_PHASE_CONVERGED
 		}
+	case row.State == stateUpdating || row.State == stateReady: // was ready: reconciling a change
+		st.State = cloudv1.NetworkState_NETWORK_STATE_UPDATING
+		st.Message = progress
 	default:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_PROVISIONING
 		st.Message = progress

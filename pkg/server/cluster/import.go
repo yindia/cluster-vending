@@ -84,7 +84,7 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	}
 	s.logger().InfoContext(ctx, "cluster imported", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
 		"network_id", network.ID, "blocked", plan.blocked(), "plan_lines", len(plan.lines), "objects", len(plan.objects))
-	c, err := s.view(ctx, row)
+	c, err := s.respond(ctx, row)
 	return &cloudv1.ImportClusterResponse{Cluster: c}, err
 }
 
@@ -287,7 +287,7 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 		return nil, err
 	}
 	s.logger().InfoContext(ctx, "cluster taken over", "tenant_id", row.TenantID, "cluster_id", row.ID, "resources", len(records))
-	c, err := s.view(ctx, row)
+	c, err := s.respond(ctx, row)
 	return &cloudv1.TakeOverClusterResponse{Cluster: c}, err
 }
 

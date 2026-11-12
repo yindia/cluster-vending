@@ -85,6 +85,10 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 
 func (r networks) Update(ctx context.Context, n *model.Network) error { return update(ctx, r.db, n) }
 
+func (r networks) SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error {
+	return setStatus[model.Network](ctx, r.db, tenantID, id, status)
+}
+
 func (r networks) Get(ctx context.Context, tenantID, id string) (*model.Network, error) {
 	return first[model.Network](ctx, r.db, map[string]any{"tenant_id": tenantID, "id": id})
 }
@@ -146,6 +150,22 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 }
 
 func (r clusters) Update(ctx context.Context, c *model.Cluster) error { return update(ctx, r.db, c) }
+
+func (r clusters) SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error {
+	return setStatus[model.Cluster](ctx, r.db, tenantID, id, status)
+}
+
+// setStatus writes the status column only (no etag, no update time).
+func setStatus[T any](ctx context.Context, db *gorm.DB, tenantID, id string, status model.JSON) error {
+	res := db.WithContext(ctx).Model(new(T)).Where("tenant_id = ? AND id = ?", tenantID, id).UpdateColumn("status", status)
+	if res.Error != nil {
+		return translate(res.Error, opWrite)
+	}
+	if res.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
 
 func (r clusters) Get(ctx context.Context, tenantID, id string) (*model.Cluster, error) {
 	return first[model.Cluster](ctx, r.db, map[string]any{"tenant_id": tenantID, "id": id})

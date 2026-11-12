@@ -102,7 +102,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	}
 	s.logger().InfoContext(ctx, "cluster created", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
 		"eks_name", plan.ClusterName, "network_id", t.network.ID, "zones", t.zones)
-	c, err := s.view(ctx, row)
+	c, err := s.respond(ctx, row)
 	return &cloudv1.CreateClusterResponse{Cluster: c}, err
 }
 
@@ -319,8 +319,9 @@ func (s *ClusterService) rollback(ctx context.Context, row *model.Cluster, names
 	}
 }
 
-// GetCluster returns one cluster with its observed status. Reads change
-// nothing: the background loop (Reconcile) moves clusters on.
+// GetCluster returns one cluster from the database: its spec and the
+// status last recorded for it (stored). It does not read the management
+// cluster; GetClusterStatus does.
 func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -329,14 +330,15 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
-	c, err := s.view(ctx, row)
+	c, err := stored(row)
 	if err != nil {
 		return nil, err
 	}
 	return &cloudv1.GetClusterResponse{Cluster: c}, nil
 }
 
-// ListClusters returns a page of the tenant's clusters, oldest first.
+// ListClusters returns a page of the tenant's clusters, oldest first, from
+// the database like GetCluster.
 func (s *ClusterService) ListClusters(ctx context.Context, req *cloudv1.ListClustersRequest) (*cloudv1.ListClustersResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -355,16 +357,8 @@ func (s *ClusterService) ListClusters(ctx context.Context, req *cloudv1.ListClus
 		rows = rows[:size]
 		res.NextPageToken = rows[size-1].ID
 	}
-	ids := make([]string, 0, len(rows))
 	for i := range rows {
-		ids = append(ids, rows[i].ID)
-	}
-	records, err := s.deps.Store.ManagedResources().ListByOwners(ctx, model.OwnerCluster, ids) // one query per page
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	for i := range rows {
-		c, err := s.viewOf(ctx, &rows[i], records[rows[i].ID])
+		c, err := stored(&rows[i])
 		if err != nil {
 			return nil, err
 		}

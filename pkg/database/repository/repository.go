@@ -84,6 +84,11 @@ type Networks interface {
 	// Update writes every column of n if the stored etag equals n.ETag, and
 	// assigns a new ETag.
 	Update(ctx context.Context, n *model.Network) error
+	// SetStatus stores the status last recorded for the row (what Get and
+	// List return) and nothing else: the etag and update time do not
+	// change, so recording a status never invalidates a client's etag.
+	// ErrNotFound when the row is gone.
+	SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error
 	// Delete fails with ErrInUse while clusters use the network.
 	Delete(ctx context.Context, tenantID, id string) error
 	// ListPending returns, across tenants, the networks the background loop
@@ -108,6 +113,8 @@ type Clusters interface {
 	// ListByName returns the tenant's clusters with this name, oldest first.
 	ListByName(ctx context.Context, tenantID, name string) ([]model.Cluster, error)
 	Update(ctx context.Context, c *model.Cluster) error
+	// SetStatus is Networks.SetStatus for clusters.
+	SetStatus(ctx context.Context, tenantID, id string, status model.JSON) error
 	// Delete also deletes the cluster's node pools.
 	Delete(ctx context.Context, tenantID, id string) error
 	// ListPending is Networks.ListPending for clusters.

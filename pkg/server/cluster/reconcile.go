@@ -12,14 +12,18 @@ import (
 
 // PendingStates are the stored states of clusters the background loop
 // looks at every pass.
-func PendingStates() []string { return []string{stateProvisioning, stateUpdating, stateDeleting} }
+// Imported clusters are only observed: the loop records their status.
+func PendingStates() []string {
+	return []string{stateProvisioning, stateUpdating, stateDeleting, stateImported}
+}
 
 // Reconcile moves one cluster on; the background loop calls it, so no read
 // has to. It applies the cluster again while its generation or renderer
 // version is behind (advance), retires node groups a replacement
 // superseded, moves a deletion on and removes the row when everything is
-// gone, and stores a converged generation. Every step is idempotent. A
-// cluster that does not exist is done.
+// gone, stores a converged generation, and records the cluster's status
+// (what GetCluster returns). Every step is idempotent. A cluster that
+// does not exist is done.
 func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
@@ -28,6 +32,27 @@ func (s *ClusterService) Reconcile(ctx context.Context, tenantID, id string) err
 	if err != nil {
 		return err
 	}
+	if err := s.moveOn(ctx, row); err != nil {
+		return err
+	}
+	// What GetCluster returns: the status as it is after this pass. A
+	// cluster that is gone has none.
+	current, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	c, err := s.view(ctx, current)
+	if err != nil {
+		return fmt.Errorf("observe: %w", err)
+	}
+	return s.remember(ctx, current, c.GetStatus())
+}
+
+// moveOn is Reconcile without recording the status.
+func (s *ClusterService) moveOn(ctx context.Context, row *model.Cluster) error {
 	if row.State == stateDeleting {
 		_, err := s.driveDelete(ctx, row)
 		return err

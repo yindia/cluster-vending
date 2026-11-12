@@ -95,7 +95,7 @@ func TestImportNetworkACLs(t *testing.T) {
 			f.count(t, &awsec2.NetworkACLRuleList{}, n.GetId()), f.count(t, &awsec2.NetworkACLList{}, n.GetId()))
 	}
 	for i := 0; ; i++ {
-		if _, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}); connect.CodeOf(err) == connect.CodeNotFound {
+		if _, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()}); connect.CodeOf(err) == connect.CodeNotFound {
 			break
 		} else if err != nil || i > 10 {
 			t.Fatalf("get %d: %v", i, err)

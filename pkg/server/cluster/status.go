@@ -10,7 +10,6 @@ import (
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -78,11 +77,7 @@ func (s *ClusterService) viewOf(ctx context.Context, row *model.Cluster, records
 		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster from the management cluster")
 	}
-	return &cloudv1.Cluster{
-		TenantId: row.TenantID, Id: row.ID, Name: row.Name, DisplayName: row.DisplayName, Labels: row.Labels,
-		Spec: spec, Status: st, Generation: row.Generation, Etag: row.ETag,
-		CreateTime: timestamppb.New(row.CreatedAt), UpdateTime: timestamppb.New(row.UpdatedAt),
-	}, nil
+	return clusterProto(row, spec, st), nil
 }
 
 // observeEKS copies what the EKS Cluster and NodeGroup report into st.

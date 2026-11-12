@@ -20,7 +20,18 @@ their source of truth.
 
 All RPCs are scoped by `tenant_id` (one rule everywhere: DNS label, ≤ 56
 chars, so the namespace `tenant-<tenant_id>` fits 63) and are asynchronous:
-poll `Get*` until `status.observed_generation` catches up.
+poll until `status.observed_generation` catches up.
+
+Two ways to read a network or cluster:
+
+| Call | Source | Status |
+|---|---|---|
+| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters` | the platform's database only | the status last recorded: by the background loop on every pass while the resource is being created, changed, deleted or is imported, and by every call that changes it. A converged resource keeps the status it converged on. |
+| `GetNetworkStatus`, `GetClusterStatus`, `WatchNetwork`, `WatchCluster` | the management cluster, now | live: the conditions of every managed resource, cloud IDs, the EKS endpoint and versions |
+
+A stored change shows in `Get*` at once (`DELETING`, `UPDATING`); what the
+cloud did since the last pass shows in the status calls first. The CLI's
+`--wait` polls the status call.
 
 ## Prerequisites
 

@@ -25,6 +25,8 @@ Terms used below:
 
 How an operator locks component versions in releases and channels: [release-admin.md](release-admin.md).
 
+How a tenant enables a component and overrides its values: [component-usage.md](component-usage.md).
+
 ## 1. Summary
 
 A component is its own resource, owned by one cluster. A tenant enables it

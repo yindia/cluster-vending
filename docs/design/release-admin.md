@@ -6,7 +6,8 @@ channels, tiers and manual/automatic upgrades: it fixes how a platform
 operator locks what clusters run, before any rollout logic is written.
 
 It builds on [rollouts.md](rollouts.md) and [components.md](components.md)
-and keeps every decision recorded there. It refines two proposals of
+and keeps every decision recorded there. How tenants enable components and
+override their values: [component-usage.md](component-usage.md). It refines two proposals of
 rollouts.md, said so where it happens:
 
 - rollouts.md section 5 put the rollout strategy and `paused` on the

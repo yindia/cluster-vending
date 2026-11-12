@@ -701,10 +701,19 @@ func TestReconcileDoesNotRenderAnImportedNetwork(t *testing.T) {
 	if err != nil || got.AppliedGeneration != got.Generation {
 		t.Errorf("applied generation %d of %d (%v), want it settled", got.AppliedGeneration, got.Generation, err)
 	}
-	_, err = f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
-		Network: &cloudv1.Network{Id: row.ID, Labels: map[string]string{"team": "a"}}, UpdateMask: mask("labels")})
-	if connect.CodeOf(err) != connect.CodeUnimplemented {
-		t.Errorf("label update of an imported network: %v, want UNIMPLEMENTED", err)
+	// A label update does not render it either (see
+	// TestUpdateImportedNetworkLabels), and it takes no flow logs.
+	if _, err = f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+		Network: &cloudv1.Network{Id: row.ID, Labels: map[string]string{"team": "a"}}, UpdateMask: mask("labels")}); err != nil {
+		t.Errorf("label update of an imported network: %v", err)
+	}
+	if err := f.kube.List(ctx, vpcs); err != nil || len(vpcs.Items) != 0 {
+		t.Errorf("%d VPCs rendered by a label update (%v), want none", len(vpcs.Items), err)
+	}
+	_, err = f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant, UpdateMask: mask("spec.flow_logs"),
+		Network: &cloudv1.Network{Id: row.ID, Spec: &cloudv1.NetworkSpec{FlowLogs: &cloudv1.NetworkFlowLogs{Enabled: ptr.To(true)}}}})
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("flow logs on an imported network: %v, want FAILED_PRECONDITION", err)
 	}
 }
 

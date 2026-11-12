@@ -221,3 +221,112 @@ func TestImportNetworkFlowLogs(t *testing.T) {
 		t.Errorf("after takeover: role %v, flow log %v", role.Spec.ManagementPolicies, flowLog.Spec.ManagementPolicies)
 	}
 }
+
+// Flow logs are turned on and off, and their retention changed, on a
+// network that exists.
+func TestUpdateNetworkFlowLogs(t *testing.T) {
+	f := newFixture(t)
+	n := f.create(t, "prod", nil)
+	ctx := t.Context()
+	count := func(list client.ObjectList) int { return f.count(t, list, n.GetId()) }
+	update := func(flowLogs *cloudv1.NetworkFlowLogs) (*cloudv1.Network, error) {
+		res, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant, UpdateMask: mask("spec.flow_logs"),
+			Network: &cloudv1.Network{Id: n.GetId(), Spec: &cloudv1.NetworkSpec{FlowLogs: flowLogs}}})
+		return res.GetNetwork(), err
+	}
+
+	on, err := update(&cloudv1.NetworkFlowLogs{Enabled: ptr.To(true)})
+	if err != nil {
+		t.Fatalf("turn on: %v", err)
+	}
+	if count(&awsec2.FlowLogList{}) != 1 || count(&awscwl.GroupList{}) != 1 || on.GetSpec().GetFlowLogs().GetRetentionDays() != 30 ||
+		len(on.GetStatus().GetManagedResources()) != 27 {
+		t.Fatalf("after turning on: %d flow logs, %d groups, spec %v, %d resources", count(&awsec2.FlowLogList{}), count(&awscwl.GroupList{}),
+			on.GetSpec().GetFlowLogs(), len(on.GetStatus().GetManagedResources()))
+	}
+	if _, err := update(&cloudv1.NetworkFlowLogs{Enabled: ptr.To(true), RetentionDays: 90}); err != nil {
+		t.Fatalf("change retention: %v", err)
+	}
+	group := &awscwl.Group{}
+	if err := f.kube.Get(ctx, key(n, "flow-logs"), group); err != nil || *group.Spec.ForProvider.RetentionInDays != 90 {
+		t.Errorf("retention = %v (%v), want 90", group.Spec.ForProvider.RetentionInDays, err)
+	}
+	// What AWS cannot change on an existing flow log is refused.
+	if _, err := update(&cloudv1.NetworkFlowLogs{Enabled: ptr.To(true), RetentionDays: 90,
+		TrafficType: cloudv1.FlowLogTrafficType_FLOW_LOG_TRAFFIC_TYPE_REJECT}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("traffic type change = %v, want FAILED_PRECONDITION", err)
+	}
+
+	off, err := update(nil)
+	if err != nil {
+		t.Fatalf("turn off: %v", err)
+	}
+	if left := count(&awsec2.FlowLogList{}) + count(&awscwl.GroupList{}) + count(&awsiam.RoleList{}) + count(&awsiam.PolicyList{}) +
+		count(&awsiam.RolePolicyAttachmentList{}) + count(&protectionv1beta1.UsageList{}); left != 0 {
+		t.Errorf("%d flow log objects left after turning off", left)
+	}
+	// The network itself is untouched.
+	if count(&awsec2.VPCList{}) != 1 || count(&awsec2.NATGatewayList{}) != 1 || len(off.GetStatus().GetManagedResources()) != 20 ||
+		off.GetSpec().GetFlowLogs() != nil {
+		t.Errorf("after turning off: %d VPCs, %d NAT gateways, %d resources, spec %v", count(&awsec2.VPCList{}),
+			count(&awsec2.NATGatewayList{}), len(off.GetStatus().GetManagedResources()), off.GetSpec().GetFlowLogs())
+	}
+}
+
+// An imported network's labels are set as tags on the objects it has; its
+// other tags stay, and it is not rendered again.
+func TestUpdateImportedNetworkLabels(t *testing.T) {
+	f := newFixture(t)
+	f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC()}
+	f.svc.deps.AWS.StaticKeys = testKeys
+	ctx := t.Context()
+	res, err := f.svc.ImportNetwork(ctx, importRequest(f.accountID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := res.GetNetwork()
+	if _, err := f.svc.TakeOverNetwork(ctx, &cloudv1.TakeOverNetworkRequest{TenantId: tenant, NetworkId: n.GetId(),
+		AcknowledgeNotImported: true}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(n.GetStatus().GetManagedResources())
+	label := func(labels map[string]string) *cloudv1.Network {
+		t.Helper()
+		out, err := f.svc.UpdateNetwork(ctx, &cloudv1.UpdateNetworkRequest{TenantId: tenant,
+			Network: &cloudv1.Network{Id: n.GetId(), Labels: labels}, UpdateMask: mask("labels")})
+		if err != nil {
+			t.Fatalf("UpdateNetwork: %v", err)
+		}
+		return out.GetNetwork()
+	}
+	tags := func() map[string]*string {
+		t.Helper()
+		vpc := &awsec2.VPC{}
+		if err := f.kube.Get(ctx, key(n, "vpc"), vpc); err != nil {
+			t.Fatal(err)
+		}
+		return vpc.Spec.ForProvider.Tags
+	}
+
+	got := label(map[string]string{"team": "net", "env": "prod"})
+	if vpcTags := tags(); *vpcTags["team"] != "net" || *vpcTags["env"] != "prod" || *vpcTags["Name"] != "tf" {
+		t.Errorf("VPC tags = %v, want the labels next to the tags it was imported with", vpcTags)
+	}
+	if len(got.GetStatus().GetManagedResources()) != before {
+		t.Errorf("%d resources after a label update, want the %d it was imported with", len(got.GetStatus().GetManagedResources()), before)
+	}
+	// A removed label is removed; the imported tags stay.
+	label(map[string]string{"team": "net"})
+	if vpcTags := tags(); vpcTags["env"] != nil || *vpcTags["team"] != "net" || *vpcTags["Name"] != "tf" {
+		t.Errorf("VPC tags after removing a label = %v", vpcTags)
+	}
+	// Kinds without tags are left alone.
+	route := &awsec2.Route{}
+	if err := f.kube.Get(ctx, key(n, "route-public"), route); err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.store.Networks().Get(ctx, tenant, n.GetId())
+	if err != nil || row.AppliedGeneration != row.Generation {
+		t.Errorf("applied generation %d of %d (%v), want it settled", row.AppliedGeneration, row.Generation, err)
+	}
+}

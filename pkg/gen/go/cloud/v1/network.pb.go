@@ -418,8 +418,10 @@ type NetworkSpec struct {
 	// network's account.
 	BootstrapId string `protobuf:"bytes,4,opt,name=bootstrap_id,json=bootstrapId,proto3" json:"bootstrap_id,omitempty"`
 	// Flow logs of the network's IP traffic. Unset: none, as before.
-	// Immutable for now. An imported network keeps the flow logs it has
-	// (status.import, CARRIED_OVER); this field stays unset for it.
+	// Mutable: they can be turned on and off and the retention changed; the
+	// traffic type and aggregation interval of existing flow logs cannot
+	// (turn them off, then on). An imported network keeps the flow logs it
+	// has (status.import, CARRIED_OVER); this field cannot be set for it.
 	FlowLogs      *NetworkFlowLogs `protobuf:"bytes,5,opt,name=flow_logs,json=flowLogs,proto3" json:"flow_logs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

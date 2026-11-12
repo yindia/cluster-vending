@@ -82,6 +82,13 @@ func (s *NetworkService) apply(ctx context.Context, row *model.Network, a *model
 	if err := s.applyObjects(ctx, row, a, objects); err != nil || hold {
 		return err // held back: not applied in full yet
 	}
+	// What the spec no longer has (flow logs turned off) is deleted. Only
+	// after a full render: an object held back is not a dropped one.
+	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
+	if err := s.deps.Prune(ctx, owner, objects); err != nil {
+		s.logger().ErrorContext(ctx, "prune network resources", "network_id", row.ID, "error", err)
+		return connect.NewError(connect.CodeInternal, "could not remove the network's dropped resources")
+	}
 	return s.markApplied(ctx, row)
 }
 

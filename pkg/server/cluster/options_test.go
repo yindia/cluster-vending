@@ -375,3 +375,36 @@ func TestAccessEntriesChangeInPlace(t *testing.T) {
 func objectMeta(name string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Namespace: worldNS, Name: name}
 }
+
+// IRSA can be turned on for a cluster that exists (the OIDC provider is
+// created with the cluster's issuer) and off again (it is deleted).
+func TestUpdateIRSA(t *testing.T) {
+	w := appliedWorld(t)
+	ctx := t.Context()
+	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
+	eks := &awseks.Cluster{}
+	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix}, eks); err != nil {
+		t.Fatal(err)
+	}
+	eks.Status.AtProvider.Identity = []awseks.ClusterIdentityObservation{{Oidc: []awseks.OidcObservation{{Issuer: ptr.To("https://oidc.eks.us-east-1.amazonaws.com/id/ABC")}}}}
+	if err := w.kube.Update(ctx, eks); err != nil {
+		t.Fatal(err)
+	}
+	irsa := func(on bool) {
+		t.Helper()
+		spec := &cloudv1.ClusterSpec{Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: ptr.To(on)}}}
+		if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, "spec.aws.irsa")); err != nil {
+			t.Fatalf("irsa %t: %v", on, err)
+		}
+	}
+	key := client.ObjectKey{Namespace: worldNS, Name: prefix + "-oidc"}
+	irsa(true)
+	provider := &awsiam.OpenIDConnectProvider{}
+	if err := w.kube.Get(ctx, key, provider); err != nil || *provider.Spec.ForProvider.URL != "https://oidc.eks.us-east-1.amazonaws.com/id/ABC" {
+		t.Fatalf("OIDC provider after turning IRSA on: %+v, %v", provider.Spec.ForProvider, err)
+	}
+	irsa(false)
+	if err := w.kube.Get(ctx, key, provider); client.IgnoreNotFound(err) != nil || err == nil {
+		t.Errorf("OIDC provider after turning IRSA off: %v, want it deleted", err)
+	}
+}

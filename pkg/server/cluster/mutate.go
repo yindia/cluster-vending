@@ -98,6 +98,10 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	pathSecretsEncryption: func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.SecretsEncryption = src.GetControlPlane().GetSecretsEncryption()
 	},
+	// Turned on, the OIDC provider is created; turned off, deleted.
+	"spec.aws.irsa": func(dst, src *cloudv1.ClusterSpec) {
+		dst.GetAws().Irsa = src.GetAws().Irsa
+	},
 	"spec.aws.control_plane_log_group": func(dst, src *cloudv1.ClusterSpec) {
 		dst.GetAws().ControlPlaneLogGroup = src.GetAws().GetControlPlaneLogGroup()
 	},

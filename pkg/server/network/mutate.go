@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"buf.build/go/protovalidate"
@@ -20,10 +21,20 @@ import (
 const (
 	pathDisplayName = "display_name"
 	pathLabels      = "labels"
+	pathFlowLogs    = "spec.flow_logs"
 )
 
-// UpdateNetwork changes the fields named in update_mask: display_name and
-// labels. Labels are the AWS tags of every resource: an update re-tags.
+// updatable are the update mask paths, for error messages.
+var updatable = strings.Join([]string{pathDisplayName, pathLabels, pathFlowLogs}, ", ")
+
+// changes is what an update changed that needs the resources touched.
+type changes struct{ labels, flowLogs bool }
+
+// UpdateNetwork changes the fields named in update_mask: display_name,
+// labels and spec.flow_logs. Labels are the AWS tags of every resource: an
+// update re-tags (an imported network's resources keep their other tags).
+// Flow logs are turned on or off and their retention changed by rendering
+// the network again.
 func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateNetworkRequest) (*cloudv1.UpdateNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -42,19 +53,22 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 	}
 	paths := req.GetUpdateMask().GetPaths()
 	if len(paths) == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			"update_mask is empty; updatable: "+strings.Join([]string{pathDisplayName, pathLabels}, ", "))
+		return nil, connect.NewError(connect.CodeInvalidArgument, "update_mask is empty; updatable: "+updatable)
 	}
-	tagsChanged, err := applyMask(row, spec, in, paths)
+	labelsBefore := maps.Clone(row.Labels)
+	changed, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
 	}
-	if tagsChanged && storedImport(row) != nil {
-		// A taken-over network's objects come from the discovered VPC, not
-		// from the spec: re-rendering it would create a second network.
-		return nil, connect.NewError(connect.CodeUnimplemented,
-			"labels of an imported network cannot be changed yet (its resources are not re-tagged)")
+	// A taken-over network's objects come from the discovered VPC, not from
+	// the spec: it is never rendered again (that would create a second
+	// network). Its labels are set on the objects it has.
+	imported := storedImport(row) != nil
+	if imported && changed.flowLogs {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			"spec.flow_logs cannot be set on an imported network: it keeps the flow logs it was imported with")
 	}
+	tagsChanged := changed.labels || changed.flowLogs
 	if row.Spec, err = encode(spec); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -71,7 +85,12 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 		}
 		return nil, service.ToConnect(err)
 	}
-	if tagsChanged {
+	switch {
+	case imported && changed.labels:
+		if err := s.retag(ctx, row, labelsBefore); err != nil {
+			return nil, err
+		}
+	case tagsChanged:
 		if err := s.reapply(ctx, row, spec); err != nil {
 			return nil, err
 		}
@@ -95,11 +114,11 @@ func checkMutable(row *model.Network, etag string) error {
 	return nil
 }
 
-// applyMask copies the masked fields of in onto row, and checks the result
-// against the contract. It reports whether the resources must be applied
-// again (labels: they are the AWS tags).
-func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Network, paths []string) (bool, error) {
-	reapply := false
+// applyMask copies the masked fields of in onto row and spec, and checks
+// the result against the contract. It reports what must be applied to the
+// resources: labels (they are the AWS tags) and flow logs.
+func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Network, paths []string) (changes, error) {
+	var changed changes
 	for _, p := range paths {
 		switch p {
 		case pathDisplayName:
@@ -108,18 +127,37 @@ func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Networ
 			row.Labels = model.Labels(in.GetLabels())
 			// Always re-applied, even unchanged: that also adds tags the
 			// platform introduced after the network was created.
-			reapply = true
+			changed.labels = true
+		case pathFlowLogs:
+			next := resolvedFlowLogs(in.GetSpec().GetFlowLogs())
+			if err := flowLogsChangeable(spec.GetFlowLogs(), next); err != nil {
+				return changes{}, err
+			}
+			spec.FlowLogs, changed.flowLogs = next, true
 		default:
-			return false, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
-				"update_mask path %q cannot be updated; updatable: %s", p,
-				strings.Join([]string{pathDisplayName, pathLabels}, ", ")))
+			return changes{}, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
+				"update_mask path %q cannot be updated; updatable: %s", p, updatable))
 		}
 	}
 	merged := &cloudv1.Network{Name: row.Name, DisplayName: row.DisplayName, Labels: row.Labels, Spec: spec}
 	if err := protovalidate.Validate(merged); err != nil {
-		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		return changes{}, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
-	return reapply, service.CheckAWSLabels(row.Labels)
+	return changed, service.CheckAWSLabels(row.Labels)
+}
+
+// flowLogsChangeable refuses what AWS cannot change on a flow log that
+// exists: its traffic type and aggregation interval.
+func flowLogsChangeable(before, after *cloudv1.NetworkFlowLogs) error {
+	if !before.GetEnabled() || !after.GetEnabled() {
+		return nil // turned on or off: created or deleted
+	}
+	if before.GetTrafficType() != after.GetTrafficType() ||
+		before.GetAggregationIntervalSeconds() != after.GetAggregationIntervalSeconds() {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			"the traffic type and aggregation interval of existing flow logs cannot be changed; turn flow logs off, then on with the new settings")
+	}
+	return nil
 }
 
 // updatedInput is the stored input with the masked fields of in copied
@@ -140,6 +178,11 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 			input.DisplayName = in.GetDisplayName()
 		case pathLabels:
 			input.Labels = in.GetLabels()
+		case pathFlowLogs:
+			if input.Spec == nil {
+				input.Spec = &cloudv1.NetworkSpec{}
+			}
+			input.Spec.FlowLogs = in.GetSpec().GetFlowLogs()
 		}
 	}
 	return encode(input)

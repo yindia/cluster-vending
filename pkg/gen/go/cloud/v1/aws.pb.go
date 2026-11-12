@@ -340,7 +340,8 @@ type AwsClusterSpec struct {
 	// IAM roles for service accounts: an IAM OIDC provider for the cluster's
 	// issuer (iam OpenIDConnectProvider, client ID sts.amazonaws.com),
 	// created once the cluster is ACTIVE. Unset or false: none; EKS Pod
-	// Identity, which every cluster has, needs none. Immutable for now.
+	// Identity, which every cluster has, needs none. Mutable: turning it off
+	// deletes the provider, and IAM roles that trust it stop working.
 	Irsa *bool `protobuf:"varint,7,opt,name=irsa,proto3,oneof" json:"irsa,omitempty"`
 	// Extra security groups on the control plane's network interfaces, next
 	// to the cluster security group EKS creates

@@ -16,6 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -139,9 +140,13 @@ func ConnectStore(ctx context.Context, o Options) (repository.Store, error) {
 
 // CachedObjects are the kinds the informer cache holds: the managed
 // resources and Usages of networks and clusters, the accounts'
-// ProviderConfigs and the tenant namespaces.
+// ProviderConfigs, each cluster's Helm ProviderConfig and the tenant
+// namespaces. The cache refuses reads of any other kind, so every kind a
+// network or cluster records must be here.
 func CachedObjects() []client.Object {
-	return append(crossplaneaws.ManagedObjects(), &awsv1beta1.ProviderConfig{}, &corev1.Namespace{})
+	helm := &unstructured.Unstructured{}
+	helm.SetGroupVersionKind(crossplaneaws.HelmProviderConfigGVK)
+	return append(crossplaneaws.ManagedObjects(), &awsv1beta1.ProviderConfig{}, helm, &corev1.Namespace{})
 }
 
 // Start starts mgr (its informers and controllers) in the

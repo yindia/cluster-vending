@@ -57,11 +57,17 @@ func Usages(namespace, prefix string, labels map[string]string, pairs []UsagePai
 }
 
 // UsageName is a pair's Usage name: "<prefix>-usage-<of>-by-<by>", the
-// object names without prefix; longer than 63 characters it is cut and
-// suffixed with a hash of the full name, so it stays unique.
+// object names without prefix (an object named the prefix itself, the EKS
+// cluster, is its kind in lower case); longer than 63 characters it is cut
+// and suffixed with a hash of the full name, so it stays unique.
 func UsageName(prefix string, p UsagePair) string {
-	short := func(name string) string { return strings.TrimPrefix(strings.TrimPrefix(name, prefix), "-") }
-	name := prefix + "-usage-" + short(p.Of.Name) + "-by-" + short(p.By.Name)
+	short := func(r UsageRef) string {
+		if r.Name == prefix {
+			return strings.ToLower(r.Kind)
+		}
+		return strings.TrimPrefix(strings.TrimPrefix(r.Name, prefix), "-")
+	}
+	name := prefix + "-usage-" + short(p.Of) + "-by-" + short(p.By)
 	if len(name) <= maxUsageName {
 		return name
 	}

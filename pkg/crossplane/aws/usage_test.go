@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
@@ -86,4 +87,32 @@ func TestUsageNameIsBoundedAndDeterministic(t *testing.T) {
 	if got := crossplaneaws.UsageName("p", short); got != "p-usage-node-role-by-default" {
 		t.Errorf("short name = %q", got)
 	}
+}
+
+// Every object a cluster or a network renders has a name the API server
+// accepts, with every option on: the fake client of the other tests does
+// not check names.
+func TestRenderedNamesAreValidObjectNames(t *testing.T) {
+	plans := map[string][]client.Object{"default cluster": crossplaneaws.ClusterResources(clusterPlanForNames())}
+	full := clusterPlanForNames()
+	full.LogGroupRetentionDays, full.CreateEncryptionKey, full.IRSA = 90, true, true
+	full.EncryptionKeyARN, full.OIDCIssuer, full.ClusterSecurityGroupID = "arn:aws:kms:us-east-1:444455556666:key/k", "https://oidc.eks.us-east-1.amazonaws.com/id/A", "sg-0aaa"
+	full.AccessEntries = []crossplaneaws.AccessEntryPlan{{Principal: "arn:aws:iam::444455556666:role/dev", Type: "STANDARD",
+		Policies: []crossplaneaws.AccessPolicyPlan{{PolicyARN: "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy", Scope: "cluster"}}}}
+	plans["cluster with every option"] = crossplaneaws.ClusterResources(full)
+	for name, objects := range plans {
+		for _, obj := range objects {
+			if errs := validation.IsDNS1123Subdomain(obj.GetName()); len(errs) > 0 {
+				t.Errorf("%s: %T %q: %v", name, obj, obj.GetName(), errs)
+			}
+		}
+	}
+}
+
+// clusterPlanForNames is a plan whose prefix is the EKS cluster's name, as
+// in production (ClusterPrefix).
+func clusterPlanForNames() crossplaneaws.ClusterPlan {
+	p := clusterPlan()
+	p.Prefix = crossplaneaws.ClusterPrefix(p.TenantID, p.ClusterID, p.ClusterName)
+	return p
 }

@@ -32,7 +32,9 @@ const ProviderVersion = "v2.9.0"
 // version (see reconcile.Deps.RenderTarget).
 //
 //	1  Usages order deletions; desiredSize in initProvider only
-const RenderVersion = 1
+//	2  Usages of the EKS cluster are named "...-cluster-..." (they ended in
+//	   "-by-", a name the API server refuses)
+const RenderVersion = 2
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.

@@ -77,14 +77,14 @@ func TestClusterResources(t *testing.T) {
 // entries, IRSA, security groups, launch template, role names) default to
 // what a cluster rendered before they existed: this is the sha256 of that
 // render, taken before they were added. A change here needs a
-// RenderVersion bump.
+// RenderVersion bump (render version 2 renamed the EKS cluster's Usages).
 func TestClusterResourcesDefaultRenderUnchanged(t *testing.T) {
 	raw, err := json.Marshal(crossplaneaws.ClusterResources(clusterPlan()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
-	if got := hex.EncodeToString(sum[:]); got != "16dd6e22414f86f49e5eac6a597fd84bd0409532a8c19f9d94070fe0fba606f1" {
+	if got := hex.EncodeToString(sum[:]); got != "5fec67b48929eadee0f477f7bfb13071597652d4f6011ebefcc6fe2bbb6d8d0d" {
 		t.Errorf("the default render changed (sha256 %s, %d bytes)", got, len(raw))
 	}
 }

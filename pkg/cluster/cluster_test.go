@@ -191,6 +191,26 @@ func TestResolveOptions(t *testing.T) {
 }
 
 // A cluster nobody classified is tier 0; a chosen tier is kept.
+// An unset upgrade mode is manual; a chosen one is kept. An unset release
+// channel stays unset: it only means STABLE for an automatic cluster.
+func TestResolveSpecDefaultsTheUpgradeMode(t *testing.T) {
+	for in, want := range map[cloudv1.UpgradeMode]cloudv1.UpgradeMode{
+		cloudv1.UpgradeMode_UPGRADE_MODE_UNSPECIFIED: cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL,
+		cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL:      cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL,
+		cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC:   cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
+	} {
+		spec := minimalSpec()
+		spec.UpgradeMode = in
+		got, err := ResolveSpec(spec, []string{"use1-az1", "use1-az2"})
+		if err != nil || got.GetUpgradeMode() != want {
+			t.Errorf("mode %s resolved to %s (%v), want %s", in, got.GetUpgradeMode(), err, want)
+		}
+		if got.GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED {
+			t.Errorf("mode %s: release channel resolved to %s, want it left unset", in, got.GetReleaseChannel())
+		}
+	}
+}
+
 func TestResolveSpecDefaultsTheTier(t *testing.T) {
 	for in, want := range map[cloudv1.ClusterTier]cloudv1.ClusterTier{
 		cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED: cloudv1.ClusterTier_CLUSTER_TIER_0,

@@ -32,10 +32,35 @@ const (
 	pathSecretsEncryption = "spec.control_plane.secrets_encryption"
 )
 
+// Spec paths that only say how platform releases treat the cluster: no
+// rendered object depends on them, so no cloud resource changes.
+const (
+	pathUpgradeMode    = "spec.upgrade_mode"
+	pathReleaseChannel = "spec.release_channel"
+	pathTier           = "spec.tier"
+)
+
+// releasePaths are the paths of releaseOnly updates.
+var releasePaths = []string{pathUpgradeMode, pathReleaseChannel, pathTier}
+
+// releaseOnly reports whether every path of an update is one of
+// releasePaths: the update changes no cloud resource.
+func releaseOnly(paths []string) bool {
+	for _, p := range paths {
+		if !slices.Contains(releasePaths, p) {
+			return false
+		}
+	}
+	return len(paths) > 0
+}
+
 // specPaths are the spec paths UpdateCluster changes, each copying one
-// field of the request's spec onto the stored one. Every one of them is
-// rolled out by applying the cluster's resources again.
+// field of the request's spec onto the stored one. Every one of them but
+// releasePaths is rolled out by applying the cluster's resources again.
 var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
+	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
+	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
+	pathTier:           func(dst, src *cloudv1.ClusterSpec) { dst.Tier = src.GetTier() },
 	pathKubernetesVersion: func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.KubernetesVersion = src.GetControlPlane().GetKubernetesVersion()
 	},
@@ -245,8 +270,17 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		if !unresolved && row.ResolvedGeneration == row.Generation-1 {
 			row.ResolvedGeneration = row.Generation // nothing to look up for this change
 		}
-		row.State = reconcilecluster.StateUpdating
-		reconcilecluster.ClearFailure(row) // of the generation before: the next pass reports on this one
+		if releaseOnly(paths) {
+			// Nothing of the cloud changes: the new generation counts as
+			// applied as soon as the one before it was, and the cluster's
+			// state stays what it is.
+			if row.AppliedGeneration == row.Generation-1 {
+				row.AppliedGeneration = row.Generation
+			}
+		} else {
+			row.State = reconcilecluster.StateUpdating
+			reconcilecluster.ClearFailure(row) // of the generation before: the next pass reports on this one
+		}
 	}
 	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
@@ -331,6 +365,7 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 	if err := corecluster.ResolveOptions(spec); err != nil {
 		return false, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
+	corecluster.ResolveReleaseFields(spec) // an unset mode or tier is stored as its default
 	if err := service.CheckAWSLabels(row.Labels); err != nil {
 		return false, err
 	}

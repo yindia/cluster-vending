@@ -229,8 +229,9 @@ Common spec:
 | `spec.default_node_pool.labels`, `taints` | no | none | mutable |
 | `spec.access.admin_principals` | no | none | mutable |
 | `spec.access.access_entries` | no | none; an entry's `type` defaults to `STANDARD`, a policy's `scope` to `CLUSTER` | mutable |
-| `spec.release_channel` | no | stays unset | cannot be updated today |
-| `spec.tier` | no | `CLUSTER_TIER_0` | cannot be updated today |
+| `spec.release_channel` | no | stays unset | yes; changes no cloud resource |
+| `spec.tier` | no | `CLUSTER_TIER_0` | yes; changes no cloud resource |
+| `spec.upgrade_mode` | no | `UPGRADE_MODE_MANUAL` | yes; changes no cloud resource |
 
 AWS block (`spec.aws`, required, may be empty: `aws: {}`):
 
@@ -277,6 +278,9 @@ spec.aws.irsa
 spec.aws.control_plane_log_group
 spec.aws.default_node_pool.launch_template
 spec.aws.default_node_pool.ami_type
+spec.upgrade_mode
+spec.release_channel
+spec.tier
 ```
 
 `pkg/server/cluster/mutate.go` (`specPaths`) is the source of this list. Any
@@ -289,10 +293,17 @@ Release channel and tier: `spec.release_channel` (`ALPHA`, `BETA`,
 `STABLE`) and `spec.tier` (`CLUSTER_TIER_0`, `_1`, `_2`; tier 0 is the most
 sensitive) say when a cluster receives a platform release: the channels in
 the order `ALPHA`, `BETA`, `STABLE`, and within a channel tier 2 first, then
-tier 1, then tier 0. Both are accepted on create, stored and returned.
-Nothing acts on them yet and they render no Crossplane field. An unset tier
-is stored as `CLUSTER_TIER_0` on create; what an unset channel means is not
-decided. An imported cluster has both unset.
+tier 1, then tier 0. `spec.upgrade_mode` says whether releases move the
+cluster at all: `UPGRADE_MODE_MANUAL` (the default) means the tenant chooses
+the versions and channels do not apply; `UPGRADE_MODE_AUTOMATIC` means the
+cluster follows its channel (an unset channel is `STABLE`) by tier. All
+three are accepted on create and update, stored and returned. Nothing acts
+on them yet and they render no Crossplane field: an update of only these
+paths changes no cloud resource, counts as applied at once and leaves the
+cluster's state as it is. An unset tier is stored as `CLUSTER_TIER_0` and an
+unset mode as `UPGRADE_MODE_MANUAL`, on create and on update; an unset
+channel stays unset. An imported cluster has all three unset until it is
+taken over.
 
 Status (`ClusterStatus`): `state`, `message`, `observed_generation`,
 `conditions` (`Ready`, and `Synced` when a resource failed), `endpoint`
@@ -511,7 +522,7 @@ separate resource: AWS `NodeGroup`.
 | `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer | - | - |
 | `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` | - | - |
 | `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate`: an existing template, or a rendered ec2 `LaunchTemplate` | - | - |
-| `spec.release_channel`, `spec.tier` | none: stored and returned only | - | - |
+| `spec.release_channel`, `spec.tier`, `spec.upgrade_mode` | none: stored and returned only | - | - |
 | `status.network.egress_ips` | `EIP.atProvider.publicIp` | `Address.atProvider.address` | `PublicIP.atProvider.ipAddress` |
 
 Created for every AWS cluster without a spec field: the cluster and node
@@ -647,7 +658,7 @@ region and zone catalog next to `pkg/constant/aws`.
 | `NAT_GATEWAY_MODE_REGIONAL` | `UNIMPLEMENTED` for AWS. |
 | Providers other than AWS (`gcp`, `azure`) | No message exists; only `aws` can be set. Accounts, networks and clusters of another provider are refused. |
 | `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
-| `spec.release_channel`, `spec.tier` | Stored and returned; nothing acts on them and they cannot be updated. |
+| `spec.release_channel`, `spec.tier`, `spec.upgrade_mode` | Stored, returned and updatable; releases do not act on them yet. |
 | `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set, as their comments say: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
 | Caller authorization of `tenant_id` | Not implemented, as the service comments say: the server trusts the `tenant_id` of the request. |
 | `NetworkStatus.carried_over`, `ClusterStatus.carried_over` | Never filled, as their comments say. Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |

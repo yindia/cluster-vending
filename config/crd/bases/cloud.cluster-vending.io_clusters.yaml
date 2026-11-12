@@ -43,6 +43,9 @@ spec:
     - jsonPath: .spec.tier
       name: Tier
       type: string
+    - jsonPath: .spec.upgradeMode
+      name: Mode
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -746,6 +749,17 @@ spec:
                 - Tier0
                 - Tier1
                 - Tier2
+                type: string
+              upgradeMode:
+                default: Manual
+                description: |-
+                  upgradeMode is whether platform releases move the cluster: Manual
+                  (the default; the tenant chooses versions, channels do not apply) or
+                  Automatic (the cluster follows its release channel by tier). Mutable.
+                  Stored only for now.
+                enum:
+                - Manual
+                - Automatic
                 type: string
             required:
             - network

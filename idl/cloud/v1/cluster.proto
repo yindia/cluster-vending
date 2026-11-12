@@ -204,6 +204,11 @@ message ClusterSpec {
   // tier 0. Stored and returned; nothing acts on it yet.
   ClusterTier tier = 9 [(buf.validate.field).enum.defined_only = true];
 
+  // Whether platform releases move the cluster (UpgradeMode). Unset is
+  // stored as UPGRADE_MODE_MANUAL. Mutable, like release_channel and tier.
+  // Stored and returned; releases do not act on it yet.
+  UpgradeMode upgrade_mode = 13 [(buf.validate.field).enum.defined_only = true];
+
   // The cloud the cluster runs on. Exactly one must be set, even if empty
   // (e.g. `aws: {}`).
   oneof provider {
@@ -221,7 +226,9 @@ message ClusterSpec {
 // release goes to the channels in order: ALPHA, then BETA, then STABLE.
 // Within a channel it goes to the clusters tier by tier (ClusterTier).
 enum ReleaseChannel {
-  // Not chosen. What that means is decided with the rollout itself.
+  // Not chosen: an automatic cluster (UPGRADE_MODE_AUTOMATIC) follows
+  // STABLE; a manual cluster follows no channel. Kept unset in the stored
+  // spec, so a later choice of mode decides.
   RELEASE_CHANNEL_UNSPECIFIED = 0;
   // First to receive a release: clusters that exist to find its problems.
   RELEASE_CHANNEL_ALPHA = 1;
@@ -246,6 +253,21 @@ enum ClusterTier {
   CLUSTER_TIER_1 = 2;
   // Least sensitive: receives a release of its channel first.
   CLUSTER_TIER_2 = 3;
+}
+
+// UpgradeMode is whether platform releases move a cluster.
+enum UpgradeMode {
+  // Not chosen: stored as UPGRADE_MODE_MANUAL.
+  UPGRADE_MODE_UNSPECIFIED = 0;
+  // The tenant chooses the versions (control_plane.kubernetes_version, the
+  // add-on versions) and changes them with UpdateCluster. Release channels
+  // do not apply: a release never moves the cluster. The default.
+  UPGRADE_MODE_MANUAL = 1;
+  // The cluster follows its release channel (an unset release_channel is
+  // STABLE) and, within the channel, its tier: a release moves it, without
+  // an UpdateCluster. Not acted on yet: releases come in later steps
+  // (docs/design/release-admin.md).
+  UPGRADE_MODE_AUTOMATIC = 2;
 }
 
 // ClusterState is the coarse lifecycle state of a cluster.

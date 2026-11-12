@@ -37,6 +37,20 @@ const (
 	ClusterTier2 ClusterTier = "Tier2"
 )
 
+// UpgradeMode is whether platform releases move a cluster.
+// +kubebuilder:validation:Enum=Manual;Automatic
+type UpgradeMode string
+
+// Upgrade modes.
+const (
+	// UpgradeModeManual: the tenant chooses the versions; release channels
+	// do not apply and a release never moves the cluster. The default.
+	UpgradeModeManual UpgradeMode = "Manual"
+	// UpgradeModeAutomatic: the cluster follows its release channel (unset
+	// is Stable) and, within it, its tier. Not acted on yet.
+	UpgradeModeAutomatic UpgradeMode = "Automatic"
+)
+
 // ClusterNetwork is where a cluster runs: its Network and the cluster's
 // own address ranges. Immutable as a whole.
 type ClusterNetwork struct {
@@ -552,6 +566,13 @@ type ClusterSpec struct {
 	// now.
 	// +optional
 	Tier ClusterTier `json:"tier,omitempty"`
+	// upgradeMode is whether platform releases move the cluster: Manual
+	// (the default; the tenant chooses versions, channels do not apply) or
+	// Automatic (the cluster follows its release channel by tier). Mutable.
+	// Stored only for now.
+	// +optional
+	// +kubebuilder:default=Manual
+	UpgradeMode UpgradeMode `json:"upgradeMode,omitempty"`
 	// aws selects AWS (EKS) and carries its settings.
 	// +optional
 	AWS *AWSClusterSpec `json:"aws,omitempty"`
@@ -744,6 +765,7 @@ type ClusterStatus struct {
 // +kubebuilder:printcolumn:name="Upgrading-To",type=string,JSONPath=`.status.upgrade.toVersion`,priority=1
 // +kubebuilder:printcolumn:name="Channel",type=string,JSONPath=`.spec.releaseChannel`
 // +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
+// +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.upgradeMode`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

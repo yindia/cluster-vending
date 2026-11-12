@@ -110,11 +110,22 @@ func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD
 	}
 	aws.Addons = MergeAddons(aws.GetAddons())
+	ResolveReleaseFields(spec)
+	return spec, ResolveOptions(spec)
+}
+
+// ResolveReleaseFields stores the defaults of the fields that say how
+// platform releases treat the cluster: an unset tier is tier 0 (nobody
+// classified it: the most sensitive, last to receive a release) and an
+// unset upgrade mode is manual (releases never move it). An unset release
+// channel stays unset: it only means STABLE once the cluster is automatic.
+func ResolveReleaseFields(spec *cloudv1.ClusterSpec) {
 	if spec.GetTier() == cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
-		// Nobody classified it: the most sensitive, last to receive a release.
 		spec.Tier = cloudv1.ClusterTier_CLUSTER_TIER_0
 	}
-	return spec, ResolveOptions(spec)
+	if spec.GetUpgradeMode() == cloudv1.UpgradeMode_UPGRADE_MODE_UNSPECIFIED {
+		spec.UpgradeMode = cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL
+	}
 }
 
 // ErrNoPublicAccessCIDRs: the spec does not say who may reach the API.

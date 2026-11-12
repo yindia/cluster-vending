@@ -13,6 +13,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // eksActiveStatus is the EKS cluster status once it can be used.
@@ -44,6 +45,20 @@ func (s *ClusterService) eksActive(ctx context.Context, records []model.ManagedR
 		return ptr.Deref(c.Status.AtProvider.Status, "") == eksActiveStatus, nil
 	}
 	return false, nil
+}
+
+// fillLive sets the plan's values that only exist once other resources do
+// (crossplaneaws.ClusterPlan.FillLive), from the cluster's objects as the
+// management cluster has them. An apply does not need it: the set reads
+// the same values when it is applied (crossplaneaws.ClusterSet). It is
+// for a plan of an update, which renders without applying.
+func (s *ClusterService) fillLive(ctx context.Context, row *model.Cluster, plan *crossplaneaws.ClusterPlan) error {
+	owner := service.Owner{TenantID: row.TenantID, Kind: model.OwnerCluster, ID: row.ID}
+	seen, err := s.deps.Sequence().Observe(ctx, s.deps.Inventory(owner))
+	if err != nil {
+		return err
+	}
+	return plan.FillLive(ctx, seen)
 }
 
 // resumeAfter is how long a cluster row must have been left alone before

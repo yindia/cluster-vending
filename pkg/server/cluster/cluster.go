@@ -243,14 +243,7 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 		s.logger().ErrorContext(ctx, "read EKS cluster version", "cluster_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's EKS cluster")
 	}
-	if err := s.fillLive(ctx, row, &plan); err != nil {
-		s.logger().ErrorContext(ctx, "read the cluster's resources", "cluster_id", row.ID, "error", err)
-		return connect.NewError(connect.CodeUnavailable, "cannot read the cluster's resources")
-	}
-	// Objects that wait for a value of another resource are not rendered
-	// yet; the cluster is applied again (advance) until none is pending.
-	partial := len(plan.Pending()) > 0
-	keep, err := s.kept(retiring, partial)
+	keep, err := s.kept(retiring)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err.Error())
 	}
@@ -264,18 +257,19 @@ func (s *ClusterService) apply(ctx context.Context, row *model.Cluster, a *model
 		s.logger().ErrorContext(ctx, "apply cluster resources", "cluster_id", row.ID, "error", err)
 		return applyError(err)
 	}
-	if partial || !res.Complete() || upgrading {
-		return nil // partly rendered or held back: applied again (advance) until complete
+	if !res.Complete() || upgrading {
+		// Held back (for EKS to be ACTIVE, or for a value of another
+		// resource: nothing is removed meanwhile) or upgrading: applied
+		// again (advance) until complete.
+		return nil
 	}
 	return s.markApplied(ctx, row)
 }
 
 // kept selects the recorded objects that stay although the set applied
 // now does not have them: the node groups being retired, with their launch
-// templates; and every object while the render is partial (an object left
-// out because it waits, like the EKS cluster of a cluster that turns
-// encryption on while its key is created, is not a dropped one).
-func (s *ClusterService) kept(retiring []client.Object, partial bool) (func(sequence.Entry) bool, error) {
+// templates.
+func (s *ClusterService) kept(retiring []client.Object) (func(sequence.Entry) bool, error) {
 	refs := make(map[managed.Ref]bool, len(retiring))
 	for _, obj := range retiring {
 		ref, err := managed.RefOf(obj, s.deps.Kube.Scheme())
@@ -285,7 +279,7 @@ func (s *ClusterService) kept(retiring []client.Object, partial bool) (func(sequ
 		refs[ref] = true
 	}
 	return func(e sequence.Entry) bool {
-		return partial || refs[managed.Ref{APIVersion: e.APIVersion, Kind: e.Kind, Namespace: e.Namespace, Name: e.Name}]
+		return refs[managed.Ref{APIVersion: e.APIVersion, Kind: e.Kind, Namespace: e.Namespace, Name: e.Name}]
 	}, nil
 }
 

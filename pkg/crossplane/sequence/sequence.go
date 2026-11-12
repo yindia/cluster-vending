@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,6 +59,15 @@ type Item struct {
 	// waited for too. A dependency that is briefly not Ready during an
 	// update neither takes its dependents away nor keeps new ones out.
 	After []Condition
+	// Build, when set, makes the object from what the management cluster
+	// has now: for an object that needs a value which only exists once
+	// another object does (a key's ARN, a cluster's issuer). It returns
+	// the object to apply, with the namespace and name of Object, or nil
+	// and what it waits for. Object is then only the item's identity and
+	// is never applied itself. Unlike After, a Build that waits holds the
+	// item back even when the owner already has the object: it cannot be
+	// rendered at all.
+	Build func(ctx context.Context, seen Observed) (obj client.Object, waitsFor string, err error)
 	// Adjust, when set, changes the apply body (the object as
 	// kube.ApplyObject makes it) before it is sent: for fields the
 	// provider's Go type always serializes and that must not be applied.
@@ -124,6 +135,63 @@ func (k keeping) List(ctx context.Context) ([]Entry, error) {
 	return entries, err
 }
 
+// Observed is what a Build may read: the objects as the management
+// cluster has them, and which of them the owner has.
+type Observed interface {
+	// Get reads the object with obj's namespace and name into obj (a typed
+	// object) and reports whether it exists.
+	Get(ctx context.Context, obj client.Object) (bool, error)
+	// Ready reports whether the object with obj's namespace and name is
+	// Ready.
+	Ready(ctx context.Context, obj client.Object) (bool, error)
+	// Owned reports whether the owner's inventory has the object.
+	Owned(obj client.Object) bool
+}
+
+// Observe is the Observed of an owner, as Apply gives it to the Builds of
+// a set: for callers that need the same values without applying (a plan).
+func (e Engine) Observe(ctx context.Context, inv Inventory) (Observed, error) {
+	entries, err := inv.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list the owner's objects: %w", err)
+	}
+	return e.observed(entries), nil
+}
+
+func (e Engine) observed(entries []Entry) observed {
+	has := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		has[key(entry.Ref)] = true
+	}
+	return observed{engine: e, has: has}
+}
+
+type observed struct {
+	engine Engine
+	has    map[string]bool
+}
+
+func (o observed) Get(ctx context.Context, obj client.Object) (bool, error) {
+	err := o.engine.Objects.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (o observed) Ready(ctx context.Context, obj client.Object) (bool, error) {
+	ref, err := managed.RefOf(obj, o.engine.scheme())
+	if err != nil {
+		return false, err
+	}
+	return o.engine.met(ctx, Ready(obj), ref)
+}
+
+func (o observed) Owned(obj client.Object) bool {
+	ref, err := managed.RefOf(obj, o.engine.scheme())
+	return err == nil && o.has[key(ref)]
+}
+
 // Waiting is an item that was held back, and what for.
 type Waiting struct {
 	Ref managed.Ref
@@ -161,10 +229,8 @@ func (e Engine) Apply(ctx context.Context, set Set, inv Inventory) (Result, erro
 	if err != nil {
 		return Result{}, fmt.Errorf("list the owner's objects: %w", err)
 	}
-	has := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		has[key(entry.Ref)] = true
-	}
+	seen := e.observed(entries)
+	has := seen.has
 	var res Result
 	var ready Set
 	wanted := make(map[string]bool, len(set))
@@ -178,6 +244,16 @@ func (e Engine) Apply(ctx context.Context, set Set, inv Inventory) (Result, erro
 			return Result{}, err
 		}
 		wanted[key(ref)] = true
+		if item.Build != nil {
+			waitsFor, err := e.build(ctx, &item, ref, seen)
+			if err != nil {
+				return Result{}, err
+			}
+			if waitsFor != "" {
+				res.Waiting = append(res.Waiting, Waiting{Ref: ref, For: []string{waitsFor}})
+				continue
+			}
+		}
 		if unmet, err := checked.unmet(ctx, item, has[key(ref)]); err != nil {
 			return Result{}, err
 		} else if len(unmet) > 0 {
@@ -213,6 +289,30 @@ func (e Engine) Apply(ctx context.Context, set Set, inv Inventory) (Result, erro
 		res.Removed = append(res.Removed, entry.Ref)
 	}
 	return res, nil
+}
+
+// build replaces item's object with what its Build makes, or says what
+// the item waits for. The built object must be the one the item names.
+func (e Engine) build(ctx context.Context, item *Item, ref managed.Ref, seen Observed) (string, error) {
+	obj, waitsFor, err := item.Build(ctx, seen)
+	if err != nil {
+		return "", fmt.Errorf("build %s %s: %w", ref.Kind, ref.Name, err)
+	}
+	if obj == nil {
+		if waitsFor == "" {
+			waitsFor = "a value that does not exist yet"
+		}
+		return waitsFor, nil
+	}
+	built, err := managed.RefOf(obj, e.scheme())
+	if err != nil {
+		return "", err
+	}
+	if key(built) != key(ref) {
+		return "", fmt.Errorf("build %s %s: it made %s %s", ref.Kind, ref.Name, built.Kind, built.Name)
+	}
+	item.Object = obj
+	return "", nil
 }
 
 // applyItem server-side applies one item, through its Adjust when it has

@@ -40,14 +40,30 @@ func afterActive(obj client.Object) bool {
 //     user never exists is never garbage-collected and would block its
 //     object's deletion for good;
 //   - the node group is applied with its desired size at creation only
-//     (DesiredSizeAtCreateOnly).
+//     (DesiredSizeAtCreateOnly);
+//   - a plan with objects that need a value of another resource (the
+//     encryption key's ARN, the cluster's issuer or security group, a log
+//     group that must exist first: FillLive) lists every object it will
+//     have, and each is built at apply time from what exists then: an
+//     object the render leaves out so far (Waits) waits, and says what
+//     for. p's own late values are not used: the apply reads them.
 func ClusterSet(p ClusterPlan) sequence.Set {
-	set := sequence.Of(ClusterResources(p)...)
+	full := p
+	var late *lateRender
+	if p.late() {
+		// The cluster as it ends up: the identities of all its objects.
+		full.AssumeLive()
+		late = &lateRender{plan: p}
+	}
+	set := sequence.Of(ClusterResources(full)...)
 	// Named, not looked up in the set: while the EKS cluster itself is
 	// not rendered yet (ClusterPlan.Pending) what waits for it still does.
 	eks := &awseks.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: p.Namespace, Name: clusterBuilder{p: p}.cluster().Name}}
 	active := []sequence.Condition{sequence.Field(eks, EKSActive, "status", "atProvider", "status")}
 	for i, item := range set {
+		if late != nil {
+			set[i].Build = late.build(item.Object)
+		}
 		switch obj := item.Object.(type) {
 		case *awseks.NodeGroup:
 			set[i].Adjust = DesiredSizeAtCreateOnly

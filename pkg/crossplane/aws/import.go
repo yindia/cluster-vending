@@ -40,6 +40,9 @@ type ImportedNetwork struct {
 	RouteTables     []ImportedRouteTable
 	// FlowLogs are the VPC's flow logs to CloudWatch Logs (CARRIED_OVER).
 	FlowLogs []ImportedFlowLog
+	// NetworkACLs are the VPC's default network ACL and the custom ones of
+	// the imported subnets (CARRIED_OVER).
+	NetworkACLs []ImportedNetworkACL
 }
 
 // ImportedVPC is the network's VPC.
@@ -69,21 +72,25 @@ type ImportedNAT struct {
 	Tags                            map[string]string
 }
 
-// ImportedRouteTable is a route table with its subnet associations and its
-// default route; Key names it ("<prefix>-rt-<key>").
+// ImportedRouteTable is a route table with its subnet associations, its
+// default route and its routes of specific CIDRs to the internet gateway;
+// Key names it ("<prefix>-rt-<key>").
 type ImportedRouteTable struct {
 	Key, ID      string
 	Tags         map[string]string
 	Associations []ImportedAssociation
 	DefaultRoute *ImportedRoute
+	// GatewayRoutes are named "<prefix>-route-<key>-<n>", n from 1.
+	GatewayRoutes []ImportedRoute
 }
 
 // ImportedAssociation associates SubnetName (an ImportedSubnet) with the
 // table.
 type ImportedAssociation struct{ ID, SubnetID, SubnetName string }
 
-// ImportedRoute is a 0.0.0.0/0 route to an internet or NAT gateway.
-type ImportedRoute struct{ GatewayID, NATGatewayID string }
+// ImportedRoute is a route to an internet or NAT gateway. Destination is
+// its IPv4 CIDR; empty means 0.0.0.0/0.
+type ImportedRoute struct{ GatewayID, NATGatewayID, Destination string }
 
 // RouteExternalName is the provider's ID of a route:
 // "r-<route table ID><crc32 of the destination>".
@@ -110,7 +117,10 @@ func ImportedNetworkResources(n ImportedNetwork) []client.Object {
 	}
 	for _, rt := range n.RouteTables {
 		if rt.DefaultRoute != nil {
-			out = append(out, b.route(rt))
+			out = append(out, b.route(rt, "route-"+rt.Key, *rt.DefaultRoute))
+		}
+		for i, r := range rt.GatewayRoutes {
+			out = append(out, b.route(rt, fmt.Sprintf("route-%s-%d", rt.Key, i+1), r))
 		}
 	}
 	for _, rt := range n.RouteTables {
@@ -118,6 +128,7 @@ func ImportedNetworkResources(n ImportedNetwork) []client.Object {
 			out = append(out, b.association(rt, a))
 		}
 	}
+	out = append(out, b.networkACLs()...)
 	return append(out, b.flowLogs()...)
 }
 
@@ -205,18 +216,22 @@ func (b importBuilder) routeTable(rt ImportedRouteTable) *awsec2.RouteTable {
 	}
 }
 
-func (b importBuilder) route(rt ImportedRouteTable) *awsec2.Route {
-	params := awsec2.RouteParameters_2{
-		Region: ptr.To(b.n.Region), RouteTableID: ptr.To(rt.ID), DestinationCidrBlock: ptr.To(anyIPv4),
+func (b importBuilder) route(rt ImportedRouteTable, suffix string, r ImportedRoute) *awsec2.Route {
+	destination := r.Destination
+	if destination == "" {
+		destination = anyIPv4
 	}
-	if id := rt.DefaultRoute.GatewayID; id != "" {
+	params := awsec2.RouteParameters_2{
+		Region: ptr.To(b.n.Region), RouteTableID: ptr.To(rt.ID), DestinationCidrBlock: ptr.To(destination),
+	}
+	if id := r.GatewayID; id != "" {
 		params.GatewayID = ptr.To(id)
 	}
-	if id := rt.DefaultRoute.NATGatewayID; id != "" {
+	if id := r.NATGatewayID; id != "" {
 		params.NATGatewayID = ptr.To(id)
 	}
 	return &awsec2.Route{
-		ObjectMeta: b.meta(b.name("route-"+rt.Key), RouteExternalName(rt.ID, anyIPv4), nil),
+		ObjectMeta: b.meta(b.name(suffix), RouteExternalName(rt.ID, destination), nil),
 		Spec:       awsec2.RouteSpec{ManagedResourceSpec: b.spec(), ForProvider: params},
 	}
 }

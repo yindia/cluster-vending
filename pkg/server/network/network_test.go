@@ -101,6 +101,34 @@ func (f fixture) create(t *testing.T, name string, layout *cloudv1.NetworkLayout
 	if err != nil {
 		t.Fatalf("CreateNetwork: %v", err)
 	}
+	return f.attachGateway(t, res.GetNetwork().GetId())
+}
+
+// attachGateway reports the network's internet gateway Ready, as the
+// provider does once it is attached, and runs the loop's Reconcile: the
+// NAT gateways, held back until then, are applied. It returns the network
+// as it is afterwards.
+func (f fixture) attachGateway(t *testing.T, id string) *cloudv1.Network {
+	t.Helper()
+	ctx := t.Context()
+	gateways := &awsec2.InternetGatewayList{}
+	if err := f.kube.List(ctx, gateways, client.MatchingLabels{crossplane.LabelNetwork: id}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range gateways.Items {
+		g := &gateways.Items[i]
+		g.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+		if err := f.kube.Status().Update(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.svc.Reconcile(ctx, tenant, id); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	res, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return res.GetNetwork()
 }
 
@@ -275,8 +303,9 @@ func TestGetNetworkReportsResources(t *testing.T) {
 			t.Errorf("subnet %s without zone or role", v.GetName())
 		}
 	}
-	// VPC, 6 subnets, NAT and EIP are ready; the rest are still creating.
-	if byState[cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY] != 9 {
+	// VPC, internet gateway, 6 subnets, NAT and EIP are ready; the rest are
+	// still creating.
+	if byState[cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY] != 10 {
 		t.Errorf("states = %v", byState)
 	}
 }

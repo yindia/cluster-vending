@@ -22,6 +22,7 @@ type EC2API interface {
 	DescribeInternetGateways(context.Context, *ec2.DescribeInternetGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
 	DescribeNatGateways(context.Context, *ec2.DescribeNatGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
 	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+	DescribeNetworkAcls(context.Context, *ec2.DescribeNetworkAclsInput, ...func(*ec2.Options)) (*ec2.DescribeNetworkAclsOutput, error)
 	DescribeFlowLogs(context.Context, *ec2.DescribeFlowLogsInput, ...func(*ec2.Options)) (*ec2.DescribeFlowLogsOutput, error)
 }
 
@@ -39,6 +40,8 @@ type Network struct {
 	// DefaultSecurityGroup is the VPC's "default" group. Other groups
 	// belong to whatever uses them and are not imported.
 	DefaultSecurityGroup SecurityGroup
+	// NetworkACLs are the VPC's network ACLs, the default one included.
+	NetworkACLs []NetworkACL
 	// FlowLogs are the flow logs on the VPC itself (not on its subnets or
 	// network interfaces).
 	FlowLogs []FlowLog
@@ -55,14 +58,17 @@ type VPC struct {
 }
 
 // SubnetRole is how a subnet routes to the internet, derived from its
-// route table's default route (0.0.0.0/0).
+// route table: the default route (0.0.0.0/0) first, else any route to an
+// internet gateway.
 type SubnetRole string
 
 // Subnet roles.
 const (
-	SubnetRolePublic   SubnetRole = "public"   // default route to an internet gateway
+	// SubnetRolePublic: a route to an internet gateway, the default route
+	// or routes for specific CIDRs only.
+	SubnetRolePublic   SubnetRole = "public"
 	SubnetRolePrivate  SubnetRole = "private"  // default route to a NAT gateway
-	SubnetRoleIsolated SubnetRole = "isolated" // no default route, or another target
+	SubnetRoleIsolated SubnetRole = "isolated" // neither
 )
 
 // Subnet is an ec2 Subnet.
@@ -152,7 +158,7 @@ var (
 //
 // Calls: ec2:DescribeVpcs, DescribeSubnets (by ID), DescribeRouteTables,
 // DescribeInternetGateways, DescribeNatGateways, DescribeSecurityGroups
-// (the default group only), and those of flowLogs.
+// (the default group only), DescribeNetworkAcls, and those of flowLogs.
 func (t *Tenant) DiscoverNetwork(ctx context.Context, vpcID string, subnetIDs []string) (*Network, error) {
 	if err := validateIDs(vpcID, subnetIDs); err != nil {
 		return nil, err
@@ -187,7 +193,12 @@ func (t *Tenant) DiscoverNetwork(ctx context.Context, vpcID string, subnetIDs []
 	if err != nil {
 		return nil, err
 	}
+	acls, err := t.networkACLs(ctx, byVPC)
+	if err != nil {
+		return nil, err
+	}
 	return &Network{
+		NetworkACLs:          acls,
 		FlowLogs:             flowLogs,
 		AccountID:            t.AccountID,
 		Region:               t.Region,
@@ -344,14 +355,23 @@ func effectiveRouteTable(tables []RouteTable, subnetID string) RouteTable {
 }
 
 func role(rt RouteTable) SubnetRole {
+	hasDefault := false
 	for _, r := range rt.Routes {
 		if r.DestinationCIDRBlock != "0.0.0.0/0" {
 			continue
 		}
+		hasDefault = true
 		switch {
 		case r.NATGatewayID != "":
 			return SubnetRolePrivate
 		case strings.HasPrefix(r.GatewayID, "igw-"):
+			return SubnetRolePublic
+		}
+	}
+	// No default route: a table that sends only specific CIDRs to the
+	// internet gateway is still a public one.
+	for _, r := range rt.Routes {
+		if !hasDefault && r.DestinationCIDRBlock != "" && strings.HasPrefix(r.GatewayID, "igw-") {
 			return SubnetRolePublic
 		}
 	}

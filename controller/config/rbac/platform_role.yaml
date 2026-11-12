@@ -1,0 +1,169 @@
+# Hand-written (role.yaml is the generated one). What the controller needs
+# in the management cluster once its reconcilers are implemented: they will
+# call the same packages the server's background loop calls today
+# (pkg/reconcile, pkg/crossplane), so this is that code's footprint.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: platform-role
+rules:
+# The managed resources the platform renders for networks and clusters:
+# the kinds of pkg/crossplane/aws ActivationPolicy (managedMRDs). Applied
+# (create, patch), read through the informer cache (list, watch), changed
+# at takeover, retag and pause (update, patch), deleted one by one and by
+# label (delete, deletecollection).
+- apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - vpcs
+  - internetgateways
+  - subnets
+  - eips
+  - natgateways
+  - routetables
+  - routes
+  - routetableassociations
+  - flowlogs
+  - defaultnetworkacls
+  - networkacls
+  - networkaclrules
+  - launchtemplates
+  - securitygroups
+  - securitygroupingressrules
+  - securitygroupegressrules
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - eks.aws.m.upbound.io
+  resources:
+  - clusters
+  - nodegroups
+  - addons
+  - podidentityassociations
+  - accessentries
+  - accesspolicyassociations
+  - clusterauths
+  - identityproviderconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - iam.aws.m.upbound.io
+  resources:
+  - roles
+  - rolepolicyattachments
+  - policies
+  - openidconnectproviders
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - kms.aws.m.upbound.io
+  resources:
+  - keys
+  - aliases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - cloudwatchlogs.aws.m.upbound.io
+  resources:
+  - groups
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Usages order the deletion of managed resources (pkg/crossplane/aws
+# usage.go); orphaned ones are released (pkg/crossplane/managed).
+- apiGroups:
+  - protection.crossplane.io
+  resources:
+  - usages
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# An account's ProviderConfig, applied at bootstrap and read for the
+# account's access (pkg/reconcile/access.go).
+- apiGroups:
+  - aws.m.upbound.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Tenant namespaces, applied at bootstrap and cached.
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+# The credentials Secret an account's ProviderConfig names, for the
+# platform's own read-only AWS lookups (pkg/reconcile/access.go). It can be
+# in any namespace, so this is cluster-wide; read only, never listed.
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+# Events on the platform's objects.
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch

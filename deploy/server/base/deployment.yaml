@@ -1,0 +1,88 @@
+# `cluster-vending serve` (cmd/serve.go). Settings come from the
+# server-config ConfigMap as CV_* environment variables; flags win over
+# them, so an overlay can also add args.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-server
+    app.kubernetes.io/managed-by: kustomize
+  name: server
+  namespace: system
+spec:
+  # More than one replica serves the API; leader election lets one run the
+  # background loop.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-vending-server
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: server
+      labels:
+        app.kubernetes.io/name: cluster-vending-server
+    spec:
+      securityContext:
+        # The "restricted" Pod Security Standard.
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: server
+      # Longer than --shutdown-timeout (30s): in-flight requests drain.
+      terminationGracePeriodSeconds: 45
+      containers:
+      - name: server
+        # Set by the kustomization's images: (make deploy-manifests IMAGE=...).
+        image: server:latest
+        command:
+        - /cluster-vending
+        - serve
+        envFrom:
+        - configMapRef:
+            name: server-config
+        env:
+        # The leader election Lease of the background loop lives in the
+        # server's own namespace (--lease-namespace).
+        - name: CV_LEASE_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        ports:
+        # The Connect API (Connect, gRPC, gRPC-Web; cleartext HTTP/1.1 and
+        # HTTP/2), the probes and /metrics share this port.
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        # /healthz: the process is up. /readyz: the management cluster cache
+        # has synced (pkg/server/server.go).
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          periodSeconds: 10
+        # On a fresh management cluster the server installs the providers
+        # and waits up to 5 minutes for their kinds before it listens.
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 10
+          failureThreshold: 36
+        resources:
+          limits:
+            memory: 512Mi
+          requests:
+            cpu: 50m
+            memory: 128Mi

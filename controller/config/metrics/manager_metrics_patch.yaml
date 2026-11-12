@@ -1,0 +1,11 @@
+# Replaces --metrics-addr=0 (the third argument in ../manager/manager.yaml)
+# and names the port.
+- op: replace
+  path: /spec/template/spec/containers/0/args/2
+  value: --metrics-addr=:8080
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value:
+    containerPort: 8080
+    name: metrics
+    protocol: TCP

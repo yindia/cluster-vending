@@ -1,0 +1,14 @@
+# Optional: turns the controller's Prometheus metrics on and exposes them.
+# The manager serves them as plain HTTP without authentication
+# (controller/manager.go: metricsserver.Options{BindAddress}), so this is
+# for in-cluster scraping only; add ../network-policy to restrict who can
+# reach the port, and ../prometheus for a ServiceMonitor.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- metrics_service.yaml
+patches:
+- path: manager_metrics_patch.yaml
+  target:
+    kind: Deployment
+    name: controller-manager

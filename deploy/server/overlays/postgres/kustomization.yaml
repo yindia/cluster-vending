@@ -1,0 +1,28 @@
+# The server with its state in a database (--store=database, the server's
+# default backend). In a cluster that means an external Postgres: the
+# SQLite default writes a local file, which a read-only, replaceable pod
+# cannot keep. No Postgres is shipped here. Create the Secret yourself:
+#
+#   kubectl -n cluster-vending-system create secret generic \
+#     cluster-vending-server-database --from-literal=dsn='postgres://...'
+#
+# The DSN holds a password: it is read from the Secret, never from the
+# ConfigMap, and the server never logs it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../base
+
+configMapGenerator:
+- name: server-config
+  behavior: merge
+  literals:
+  - CV_STORE=database
+  - CV_DATABASE_DRIVER=postgres
+
+patches:
+- path: database_dsn_patch.yaml
+  target:
+    kind: Deployment
+    name: server

@@ -1,0 +1,49 @@
+# The API server (`cluster-vending serve`) in the management cluster. This
+# base does not say where the server keeps its state: use one of the
+# overlays.
+#
+#   ../overlays/kubernetes-store   custom resources in the management cluster,
+#                                  no database (--store=kubernetes)
+#   ../overlays/postgres           an external Postgres (--store=database)
+#
+#   make deploy-manifests          # render both, nothing is applied
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The platform's own namespace (--platform-namespace's default).
+namespace: cluster-vending-system
+namePrefix: cluster-vending-
+
+resources:
+- namespace.yaml
+- service_account.yaml
+- role.yaml
+- role_binding.yaml
+- leader_election_role.yaml
+- leader_election_role_binding.yaml
+- deployment.yaml
+- service.yaml
+
+# The server's settings, as the CV_* environment variables of its flags
+# (pkg/config). Edit here or patch in an overlay.
+configMapGenerator:
+- name: server-config
+  literals:
+  - CV_HTTP_ADDR=:8080
+  - CV_LOG_FORMAT=json
+  - CV_LOG_LEVEL=info
+  - CV_LEADER_ELECT=true
+  - CV_LOOP_INTERVAL=30s
+  # Creates the Crossplane AWS providers, provider-helm and the activation
+  # policy when missing. false when they are managed elsewhere (then the
+  # providers-install rules in role.yaml can go).
+  - CV_INSTALL_PROVIDERS=true
+  # REQUIRED, placeholders: the AWS account the management cluster runs in
+  # and the IAM role the AWS providers assume (IRSA).
+  - CV_AWS_MANAGEMENT_ACCOUNT_ID=111122223333
+  - CV_AWS_MANAGEMENT_ROLE_ARN=arn:aws:iam::111122223333:role/crossplane-provider-aws
+
+images:
+- name: server
+  newName: ghcr.io/yindia/cluster-vending
+  newTag: latest

@@ -1,0 +1,16 @@
+# The server with its state in custom resources of the management cluster
+# (--store=kubernetes): no database to run. This is the overlay meant for
+# in-cluster use.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../base
+
+configMapGenerator:
+- name: server-config
+  behavior: merge
+  literals:
+  - CV_STORE=kubernetes
+  # Where the custom resources live; the server creates it when missing.
+  - CV_PLATFORM_NAMESPACE=cluster-vending-system

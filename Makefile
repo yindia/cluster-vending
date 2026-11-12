@@ -163,3 +163,29 @@ run: build ## Run the server against the kind cluster (hack/config.local.yaml)
 clean: ## Remove build output and the local database
 	go clean -testcache
 	rm -f bin/cluster-vending bin/coverage.out bin/coverage.html bin/cluster-vending.db
+
+##@ Image and deploy manifests
+
+# The image of the single binary (serve and controller). A placeholder
+# registry: override it, e.g. make docker-build IMAGE=registry.example.com/cluster-vending
+IMAGE    ?= ghcr.io/yindia/cluster-vending
+TAG      ?= $(VERSION)
+# The Go version of go.mod, for the build stage of the Dockerfile.
+GO_IMAGE_VERSION ?= $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
+# kustomize, or the one built into kubectl.
+KUSTOMIZE ?= $(shell command -v kustomize >/dev/null 2>&1 && echo 'kustomize build' || echo 'kubectl kustomize')
+DEPLOY_DIRS := controller/config/default deploy/server/overlays/kubernetes-store deploy/server/overlays/postgres
+
+.PHONY: docker-build
+docker-build: ## Build the container image IMAGE:TAG (needs Docker; nothing is pushed)
+	docker build --build-arg GO_VERSION=$(GO_IMAGE_VERSION) \
+	  --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(IMAGE):$(TAG) .
+
+.PHONY: deploy-manifests
+deploy-manifests: ## Render the controller's and the server's manifests into bin/deploy (nothing is applied)
+	@mkdir -p $(BIN_DIR)/deploy
+	@for dir in $(DEPLOY_DIRS); do \
+	  out=$(BIN_DIR)/deploy/$$(echo $$dir | tr '/' '-').yaml; \
+	  $(KUSTOMIZE) $$dir | sed 's|ghcr.io/yindia/cluster-vending:latest|$(IMAGE):$(TAG)|' > $$out; \
+	  echo "$$dir -> $$out"; \
+	done

@@ -1,0 +1,10 @@
+# CV_DATABASE_DSN from the Secret cluster-vending-server-database, key dsn
+# (the name as it is after the base's namePrefix).
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: CV_DATABASE_DSN
+    valueFrom:
+      secretKeyRef:
+        name: cluster-vending-server-database
+        key: dsn

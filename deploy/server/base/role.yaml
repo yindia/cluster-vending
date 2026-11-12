@@ -1,0 +1,221 @@
+# What `cluster-vending serve` does in the management cluster today,
+# derived from the code named at each rule. Kept in step with it by
+# deploy/deploy_test.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-server
+    app.kubernetes.io/managed-by: kustomize
+  name: server-role
+rules:
+# Installing the providers at startup (--install-providers,
+# pkg/crossplane/aws InstallProviders): the AWS providers, provider-helm and
+# their runtime configs are created when missing, never changed.
+- apiGroups:
+  - pkg.crossplane.io
+  resources:
+  - providers
+  - deploymentruntimeconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+# The platform's activation policy: created, and kinds a newer build uses are
+# added to an existing one (addActivations).
+- apiGroups:
+  - apiextensions.crossplane.io
+  resources:
+  - managedresourceactivationpolicies
+  verbs:
+  - get
+  - create
+  - update
+# The managed resources the platform renders for networks and clusters:
+# the kinds of pkg/crossplane/aws ActivationPolicy (managedMRDs). Applied
+# (create, patch), read through the informer cache (list, watch), changed
+# at takeover, retag and pause (update, patch), deleted one by one and by
+# label (delete, deletecollection).
+- apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - vpcs
+  - internetgateways
+  - subnets
+  - eips
+  - natgateways
+  - routetables
+  - routes
+  - routetableassociations
+  - flowlogs
+  - defaultnetworkacls
+  - networkacls
+  - networkaclrules
+  - launchtemplates
+  - securitygroups
+  - securitygroupingressrules
+  - securitygroupegressrules
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - eks.aws.m.upbound.io
+  resources:
+  - clusters
+  - nodegroups
+  - addons
+  - podidentityassociations
+  - accessentries
+  - accesspolicyassociations
+  - clusterauths
+  - identityproviderconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - iam.aws.m.upbound.io
+  resources:
+  - roles
+  - rolepolicyattachments
+  - policies
+  - openidconnectproviders
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - kms.aws.m.upbound.io
+  resources:
+  - keys
+  - aliases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - cloudwatchlogs.aws.m.upbound.io
+  resources:
+  - groups
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Usages order the deletion of managed resources (pkg/crossplane/aws
+# usage.go); orphaned ones are released (pkg/crossplane/managed).
+- apiGroups:
+  - protection.crossplane.io
+  resources:
+  - usages
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# An account's ProviderConfig, applied at bootstrap and read for the
+# account's access (pkg/reconcile/access.go).
+- apiGroups:
+  - aws.m.upbound.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Tenant namespaces, applied at bootstrap and cached.
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+# The credentials Secret an account's ProviderConfig names, for the
+# platform's own read-only AWS lookups (pkg/reconcile/access.go). It can be
+# in any namespace, so this is cluster-wide; read only, never listed.
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+# With --store=kubernetes the server installs the CustomResourceDefinitions
+# of the kinds it keeps its state in (pkg/server/management.go ConnectStore).
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+# With --store=kubernetes: the state itself. platform.cluster-vending.io is
+# the store of pkg/database/kubestore; cloud.cluster-vending.io are the
+# controller's kinds, which replace it.
+- apiGroups:
+  - platform.cluster-vending.io
+  - cloud.cluster-vending.io
+  resources:
+  - "*"
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Events of the leader election.
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch

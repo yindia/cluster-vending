@@ -1,3 +1,6 @@
+# The controller manager: `cluster-vending controller` (cmd/controller.go).
+# Its settings are the flags of that command (pkg/config/controller.go);
+# every one can also be given as a CV_* environment variable.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -21,6 +24,7 @@ spec:
     matchLabels:
       control-plane: controller-manager
       app.kubernetes.io/name: cluster-vending-controller
+  # More than one replica is fine: leader election lets one reconcile.
   replicas: 1
   template:
     metadata:
@@ -30,43 +34,31 @@ spec:
         control-plane: controller-manager
         app.kubernetes.io/name: cluster-vending-controller
     spec:
-      # TODO(user): Uncomment the following code to configure the nodeAffinity expression
-      # according to the platforms which are supported by your solution.
-      # It is considered best practice to support multiple architectures. You can
-      # build your manager image using the makefile target docker-buildx.
-      # affinity:
-      #   nodeAffinity:
-      #     requiredDuringSchedulingIgnoredDuringExecution:
-      #       nodeSelectorTerms:
-      #         - matchExpressions:
-      #           - key: kubernetes.io/arch
-      #             operator: In
-      #             values:
-      #               - amd64
-      #               - arm64
-      #               - ppc64le
-      #               - s390x
-      #           - key: kubernetes.io/os
-      #             operator: In
-      #             values:
-      #               - linux
       securityContext:
-        # Projects are configured by default to adhere to the "restricted" Pod Security Standards.
-        # This ensures that deployments meet the highest security requirements for Kubernetes.
-        # For more details, see: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
+        # The "restricted" Pod Security Standard.
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - command:
+      - name: manager
+        # Set by the kustomization's images: (make deploy-manifests IMAGE=...).
+        image: controller:latest
+        command:
         - /cluster-vending
         - controller
         args:
-          - --leader-elect=true
-          - --lease-namespace=cluster-vending-controller-system
-          - --health-probe-addr=:8081
-        image: controller:latest
-        name: manager
+        - --leader-elect=true
+        - --health-probe-addr=:8081
+        # Metrics are off unless the ../metrics component turns them on.
+        - --metrics-addr=0
+        - --log-format=json
+        env:
+        # The leader election Lease lives in the controller's own namespace
+        # (--lease-namespace), whatever namespace the kustomization sets.
+        - name: CV_LEASE_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         ports:
         - containerPort: 8081
           name: health
@@ -80,25 +72,23 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 8081
+            port: health
           initialDelaySeconds: 15
           periodSeconds: 20
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 8081
+            port: health
           initialDelaySeconds: 5
           periodSeconds: 10
-        # TODO(user): Configure the resources accordingly based on the project requirements.
-        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+        # Sized for an idle manager; revisit once the reconcilers do work
+        # (the server's informer cache for ~100 clusters is the reference).
         resources:
           limits:
             cpu: 500m
-            memory: 128Mi
+            memory: 256Mi
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
-      volumes: []
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

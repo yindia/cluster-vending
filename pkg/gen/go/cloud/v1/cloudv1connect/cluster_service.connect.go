@@ -38,6 +38,9 @@ const (
 	// ClusterServiceGetClusterStatusProcedure is the procedure name of the ClusterService's
 	// GetClusterStatus RPC.
 	ClusterServiceGetClusterStatusProcedure = "/cloud.v1.ClusterService/GetClusterStatus"
+	// ClusterServiceListDeprecatedResourcesProcedure is the procedure name of the ClusterService's
+	// ListDeprecatedResources RPC.
+	ClusterServiceListDeprecatedResourcesProcedure = "/cloud.v1.ClusterService/ListDeprecatedResources"
 	// ClusterServiceListClustersProcedure is the procedure name of the ClusterService's ListClusters
 	// RPC.
 	ClusterServiceListClustersProcedure = "/cloud.v1.ClusterService/ListClusters"
@@ -87,6 +90,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetClusterStatus"),
 			Procedure:        ClusterServiceGetClusterStatusProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	clusterServiceListDeprecatedResourcesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListDeprecatedResources"),
+			Procedure:        ClusterServiceListDeprecatedResourcesProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -168,6 +179,15 @@ type ClusterServiceClient interface {
 	// endpoint, versions, ...). UNAVAILABLE when the management cluster
 	// cannot be read.
 	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
+	// Lists the objects in the cluster that were written with a deprecated or
+	// removed Kubernetes API version (see DeprecatedResourceScan for where
+	// they are found, and what is not), so they can be moved before an
+	// upgrade removes the version. Like GetCluster it reads the platform's
+	// store: what the controller found at its last scan of the cluster, which
+	// it repeats every six hours while the cluster is RUNNING. The API server
+	// does not reach into the cluster. NOT_FOUND when the cluster does not
+	// exist; a cluster that was not scanned yet returns no scan.
+	ListDeprecatedResources(context.Context, *v1.ListDeprecatedResourcesRequest) (*v1.ListDeprecatedResourcesResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -270,6 +290,15 @@ type ClusterServiceHandler interface {
 	// endpoint, versions, ...). UNAVAILABLE when the management cluster
 	// cannot be read.
 	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
+	// Lists the objects in the cluster that were written with a deprecated or
+	// removed Kubernetes API version (see DeprecatedResourceScan for where
+	// they are found, and what is not), so they can be moved before an
+	// upgrade removes the version. Like GetCluster it reads the platform's
+	// store: what the controller found at its last scan of the cluster, which
+	// it repeats every six hours while the cluster is RUNNING. The API server
+	// does not reach into the cluster. NOT_FOUND when the cluster does not
+	// exist; a cluster that was not scanned yet returns no scan.
+	ListDeprecatedResources(context.Context, *v1.ListDeprecatedResourcesRequest) (*v1.ListDeprecatedResourcesResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -310,6 +339,7 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceTakeOverClusterSpec(), Handler: adapter.takeOverCluster},
 		connect.Method{Spec: clusterServiceGetClusterSpec(), Handler: adapter.getCluster},
 		connect.Method{Spec: clusterServiceGetClusterStatusSpec(), Handler: adapter.getClusterStatus},
+		connect.Method{Spec: clusterServiceListDeprecatedResourcesSpec(), Handler: adapter.listDeprecatedResources},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
 		connect.Method{Spec: clusterServiceWatchClusterSpec(), Handler: adapter.watchCluster},
@@ -354,6 +384,10 @@ func (UnimplementedClusterServiceHandler) GetCluster(context.Context, *v1.GetClu
 
 func (UnimplementedClusterServiceHandler) GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetClusterStatus is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) ListDeprecatedResources(context.Context, *v1.ListDeprecatedResourcesRequest) (*v1.ListDeprecatedResourcesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListDeprecatedResources is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
@@ -411,6 +445,14 @@ func (c *clusterServiceClient) GetCluster(ctx context.Context, req *v1.GetCluste
 func (c *clusterServiceClient) GetClusterStatus(ctx context.Context, req *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error) {
 	var res v1.GetClusterStatusResponse
 	if err := c.client.CallUnary(ctx, clusterServiceGetClusterStatusSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) ListDeprecatedResources(ctx context.Context, req *v1.ListDeprecatedResourcesRequest) (*v1.ListDeprecatedResourcesResponse, error) {
+	var res v1.ListDeprecatedResourcesResponse
+	if err := c.client.CallUnary(ctx, clusterServiceListDeprecatedResourcesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -504,6 +546,18 @@ func (h clusterServiceHandler) getClusterStatus(ctx context.Context, _ connect.S
 		return err
 	}
 	res, err := h.svc.GetClusterStatus(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) listDeprecatedResources(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListDeprecatedResourcesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListDeprecatedResources(ctx, &req)
 	if err != nil {
 		return err
 	}

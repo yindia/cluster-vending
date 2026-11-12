@@ -56,6 +56,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return errors.Join(failed, fmt.Errorf("observe: %w", err))
 	}
+	s.scanDeprecations(ctx, current, c.GetStatus())
 	return errors.Join(failed, s.remember(ctx, current, c.GetStatus()))
 }
 

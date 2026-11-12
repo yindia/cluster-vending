@@ -50,6 +50,7 @@ setting, no AWS credentials and no IAM role.
 | Looking up the EKS cluster of an imported cluster | `pkg/reconcile/cluster` (`discoverImport`), once | The same, on the cluster. |
 | Is the EKS name of a new cluster taken by a cluster made elsewhere | `pkg/reconcile/cluster` (`resolve`), before anything is created | The cluster is `FAILED`: "account ... already has an EKS cluster named ...". |
 | Which Kubernetes and add-on versions EKS offers | `pkg/reconcile/cluster` (`resolve`), for a new cluster and after an update of the version or the add-ons, before anything is rendered | The cluster is `FAILED` with what EKS refused; nothing is applied. |
+| Reaching into a cluster's own Kubernetes API, to find objects written with deprecated API versions | `pkg/reconcile/cluster` (`scanDeprecations`), every six hours while the cluster is `RUNNING` | Nothing fails: `status.deprecated_resources.message` says why the scan did not work, next to what the last one found. |
 | Installing the Crossplane AWS providers | `pkg/management`, at the controller's start | The controller does not start. |
 
 The controller's lookups have one way into a tenant's account
@@ -61,6 +62,39 @@ credentials themselves.
 
 The API server has no AWS setting, credentials or role: it only stores the
 desired state.
+
+## Deprecated API versions in a cluster
+
+`ClusterService.ListDeprecatedResources` (`cluster-vending cluster
+deprecations <id>`) lists the objects in a cluster that were written with a
+Kubernetes API version that is deprecated or no longer served, the way
+[kube-no-trouble](https://github.com/doitintl/kube-no-trouble) does, so
+they can be moved before an upgrade removes the version.
+
+- **Who scans.** The controller, not the API server: every six hours while
+  the cluster is `RUNNING` (`scanInterval`), in the reconcile pass. The
+  result is a part of the cluster's status (`status.deprecated_resources`,
+  at most 100 findings and their total), so `GetCluster` returns it too;
+  the RPC reads the stored status and narrows it to a target version.
+- **How the cluster is reached.** As the tenant role, the identity that
+  created the cluster and that EKS therefore knows as its admin:
+  `eks:DescribeCluster` says where the Kubernetes API is, and the role's
+  credentials sign a token for it that lasts a minute (what `aws eks
+  get-token` does; `pkg/cloud/aws` `KubernetesAccess`). The cluster's
+  kubeconfig Secret is not read: neither the controller nor the API server
+  may read a Secret (`config/deploy_test.go`). The controller must be able
+  to reach the cluster's endpoint; a cluster with a private-only endpoint
+  outside the controller's network is not scanned, and its scan says so.
+- **What is read there** (`pkg/deprecation`, read-only): the metadata of the
+  kinds that ever had a deprecated version, for the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation, and the
+  Secrets of deployed Helm releases, for their manifests. Only what matches
+  the rules (`deprecation.Rules`: the versions removed in Kubernetes 1.16
+  to 1.32) is kept.
+- **What is not found.** The API server converts an object to whatever
+  version it is asked for, so the version an object was written with is
+  only known from those two places. Objects created with server-side apply
+  or a client library, and manifests that live only in Git, are not found.
 
 ## How a create flows
 

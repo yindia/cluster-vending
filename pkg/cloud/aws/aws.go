@@ -157,8 +157,10 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
 	}
 	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
-	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
-		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
+	stsClient := sts.NewFromConfig(cfg)
+	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: stsClient,
+		presign: sts.NewPresignClient(stsClient),
+		eks:     eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
 }
 
 // tenantCredentials are the credentials of a tenant role, cached per role
@@ -193,6 +195,9 @@ type Tenant struct {
 	Region    string
 	ec2       EC2API
 	sts       STSAPI
+	// presign signs the sts:GetCallerIdentity URL an EKS token is
+	// (KubernetesAccess).
+	presign   STSPresignAPI
 	eks       EKSAPI
 	logs      LogsAPI
 	iam       IAMAPI

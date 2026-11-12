@@ -19,8 +19,8 @@ type verb struct {
 	// id adds --id, input -f (the manifest), etag --etag, mask
 	// --update-mask, page --page-size and --page-token, ack
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
-	// --plan-id, force --force, cluster --cluster.
-	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
+	// --plan-id, force --force, cluster --cluster, target --target-version.
+	id, input, etag, mask, page, ack, wait, plan, force, cluster, target bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -92,6 +92,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.Int32Var(&o.PageSize, "page-size", 0, "maximum results per page; 0 uses the server default")
 			f.StringVar(&o.PageToken, "page-token", "", "next_page_token of the previous page")
 		}
+		if v.target {
+			f.StringVar(&o.TargetVersion, "target-version", "", "Kubernetes version to check against, e.g. 1.33: API versions deprecated in it or before are listed (default: the version the cluster ran when it was scanned)")
+		}
 		if v.plan {
 			f.BoolVar(&o.Plan, "plan", false, "only show what the update would do (a plan: creates, in-place and disruptive changes, deletes); nothing changes")
 			f.StringVar(&o.PlanID, "plan-id", "", "apply only if this plan (planId of --plan) still holds")
@@ -151,6 +154,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
 		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
+		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed Kubernetes API versions, as the controller last found them (kubectl last-applied annotations and Helm release manifests)",
+			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), target: true},
 		watchVerb("cluster", cli.ClusterWatch))
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
 }

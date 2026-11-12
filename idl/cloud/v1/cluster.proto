@@ -7,6 +7,7 @@ import "cloud/v1/access.proto";
 import "cloud/v1/aws.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
+import "cloud/v1/deprecation.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
@@ -361,6 +362,12 @@ message ClusterStatus {
   // when no upgrade is in progress. state stays UPDATING meanwhile; this
   // says which step the upgrade is at.
   ClusterUpgrade upgrade = 17;
+
+  // The objects in the cluster written with a deprecated or removed
+  // Kubernetes API version, as the controller last found them. Unset until
+  // the first scan: the cluster must be RUNNING. ListDeprecatedResources
+  // returns the same, checked against a target version.
+  DeprecatedResourceScan deprecated_resources = 18;
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in

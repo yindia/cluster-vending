@@ -58,6 +58,18 @@ func ClusterStatus(ctx context.Context, c Clients, o Options) (proto.Message, er
 	return call(ctx, &cloudv1.GetClusterStatusRequest{TenantId: o.Tenant, ClusterId: o.ID}, c.Cluster.GetClusterStatus)
 }
 
+// ClusterDeprecations calls ClusterService.ListDeprecatedResources: the
+// objects in the cluster written with deprecated Kubernetes API versions,
+// as the controller last found them.
+func ClusterDeprecations(ctx context.Context, c Clients, o Options) (proto.Message, error) {
+	if err := o.requireTenant(); err != nil {
+		return nil, err
+	}
+	return call(ctx, &cloudv1.ListDeprecatedResourcesRequest{
+		TenantId: o.Tenant, ClusterId: o.ID, TargetVersion: o.TargetVersion,
+	}, c.Cluster.ListDeprecatedResources)
+}
+
 // ClusterList calls ClusterService.ListClusters.
 func ClusterList(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {

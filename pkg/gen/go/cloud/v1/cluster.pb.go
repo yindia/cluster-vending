@@ -711,9 +711,14 @@ type ClusterStatus struct {
 	// plane runs until the node group and the add-ons have followed. Unset
 	// when no upgrade is in progress. state stays UPDATING meanwhile; this
 	// says which step the upgrade is at.
-	Upgrade       *ClusterUpgrade `protobuf:"bytes,17,opt,name=upgrade,proto3" json:"upgrade,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Upgrade *ClusterUpgrade `protobuf:"bytes,17,opt,name=upgrade,proto3" json:"upgrade,omitempty"`
+	// The objects in the cluster written with a deprecated or removed
+	// Kubernetes API version, as the controller last found them. Unset until
+	// the first scan: the cluster must be RUNNING. ListDeprecatedResources
+	// returns the same, checked against a target version.
+	DeprecatedResources *DeprecatedResourceScan `protobuf:"bytes,18,opt,name=deprecated_resources,json=deprecatedResources,proto3" json:"deprecated_resources,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ClusterStatus) Reset() {
@@ -849,6 +854,13 @@ func (x *ClusterStatus) GetKubeconfigSecret() string {
 func (x *ClusterStatus) GetUpgrade() *ClusterUpgrade {
 	if x != nil {
 		return x.Upgrade
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetDeprecatedResources() *DeprecatedResourceScan {
+	if x != nil {
+		return x.DeprecatedResources
 	}
 	return nil
 }
@@ -1009,7 +1021,7 @@ var File_cloud_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
+	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aCluster\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
@@ -1053,7 +1065,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x1caws.access_entries_auth_mode\x12Vaccess_entries need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)\x1aj!has(this.aws) || size(this.access.access_entries) == 0 || this.aws.access_config.authentication_mode != 3\x1a\xc0\x01\n" +
 	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1a\x87\x01\n" +
 	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aAhas(this.aws) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
-	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xe4\x05\n" +
+	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xb9\x06\n" +
 	"\rClusterStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1071,7 +1083,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\fcarried_over\x18\x0e \x03(\v2\x1a.cloud.v1.ImportedResourceR\vcarriedOver\x12F\n" +
 	"\x11managed_resources\x18\x0f \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources\x12+\n" +
 	"\x11kubeconfig_secret\x18\x10 \x01(\tR\x10kubeconfigSecret\x122\n" +
-	"\aupgrade\x18\x11 \x01(\v2\x18.cloud.v1.ClusterUpgradeR\aupgradeB\n" +
+	"\aupgrade\x18\x11 \x01(\v2\x18.cloud.v1.ClusterUpgradeR\aupgrade\x12S\n" +
+	"\x14deprecated_resources\x18\x12 \x01(\v2 .cloud.v1.DeprecatedResourceScanR\x13deprecatedResourcesB\n" +
 	"\n" +
 	"\bprovider\"\xdc\x01\n" +
 	"\x0eClusterUpgrade\x12!\n" +
@@ -1128,29 +1141,30 @@ func file_cloud_v1_cluster_proto_rawDescGZIP() []byte {
 var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_cloud_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_cloud_v1_cluster_proto_goTypes = []any{
-	(ReleaseChannel)(0),           // 0: cloud.v1.ReleaseChannel
-	(ClusterTier)(0),              // 1: cloud.v1.ClusterTier
-	(UpgradeMode)(0),              // 2: cloud.v1.UpgradeMode
-	(ClusterState)(0),             // 3: cloud.v1.ClusterState
-	(ClusterUpgradePhase)(0),      // 4: cloud.v1.ClusterUpgradePhase
-	(*Cluster)(nil),               // 5: cloud.v1.Cluster
-	(*ClusterSpec)(nil),           // 6: cloud.v1.ClusterSpec
-	(*ClusterStatus)(nil),         // 7: cloud.v1.ClusterStatus
-	(*ClusterUpgrade)(nil),        // 8: cloud.v1.ClusterUpgrade
-	(*ClusterEndpoint)(nil),       // 9: cloud.v1.ClusterEndpoint
-	nil,                           // 10: cloud.v1.Cluster.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
-	(*ClusterNetwork)(nil),        // 12: cloud.v1.ClusterNetwork
-	(*ControlPlaneSpec)(nil),      // 13: cloud.v1.ControlPlaneSpec
-	(*NodePoolSpec)(nil),          // 14: cloud.v1.NodePoolSpec
-	(*AccessSpec)(nil),            // 15: cloud.v1.AccessSpec
-	(*AwsClusterSpec)(nil),        // 16: cloud.v1.AwsClusterSpec
-	(*Condition)(nil),             // 17: cloud.v1.Condition
-	(*NetworkResources)(nil),      // 18: cloud.v1.NetworkResources
-	(*AwsClusterStatus)(nil),      // 19: cloud.v1.AwsClusterStatus
-	(*ImportStatus)(nil),          // 20: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),      // 21: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),       // 22: cloud.v1.ManagedResource
+	(ReleaseChannel)(0),            // 0: cloud.v1.ReleaseChannel
+	(ClusterTier)(0),               // 1: cloud.v1.ClusterTier
+	(UpgradeMode)(0),               // 2: cloud.v1.UpgradeMode
+	(ClusterState)(0),              // 3: cloud.v1.ClusterState
+	(ClusterUpgradePhase)(0),       // 4: cloud.v1.ClusterUpgradePhase
+	(*Cluster)(nil),                // 5: cloud.v1.Cluster
+	(*ClusterSpec)(nil),            // 6: cloud.v1.ClusterSpec
+	(*ClusterStatus)(nil),          // 7: cloud.v1.ClusterStatus
+	(*ClusterUpgrade)(nil),         // 8: cloud.v1.ClusterUpgrade
+	(*ClusterEndpoint)(nil),        // 9: cloud.v1.ClusterEndpoint
+	nil,                            // 10: cloud.v1.Cluster.LabelsEntry
+	(*timestamppb.Timestamp)(nil),  // 11: google.protobuf.Timestamp
+	(*ClusterNetwork)(nil),         // 12: cloud.v1.ClusterNetwork
+	(*ControlPlaneSpec)(nil),       // 13: cloud.v1.ControlPlaneSpec
+	(*NodePoolSpec)(nil),           // 14: cloud.v1.NodePoolSpec
+	(*AccessSpec)(nil),             // 15: cloud.v1.AccessSpec
+	(*AwsClusterSpec)(nil),         // 16: cloud.v1.AwsClusterSpec
+	(*Condition)(nil),              // 17: cloud.v1.Condition
+	(*NetworkResources)(nil),       // 18: cloud.v1.NetworkResources
+	(*AwsClusterStatus)(nil),       // 19: cloud.v1.AwsClusterStatus
+	(*ImportStatus)(nil),           // 20: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),       // 21: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),        // 22: cloud.v1.ManagedResource
+	(*DeprecatedResourceScan)(nil), // 23: cloud.v1.DeprecatedResourceScan
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	10, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
@@ -1175,13 +1189,14 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	21, // 19: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
 	22, // 20: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
 	8,  // 21: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
-	4,  // 22: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	11, // 23: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	23, // 22: cloud.v1.ClusterStatus.deprecated_resources:type_name -> cloud.v1.DeprecatedResourceScan
+	4,  // 23: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	11, // 24: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -1193,6 +1208,7 @@ func file_cloud_v1_cluster_proto_init() {
 	file_cloud_v1_aws_proto_init()
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_control_plane_proto_init()
+	file_cloud_v1_deprecation_proto_init()
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_network_proto_init()

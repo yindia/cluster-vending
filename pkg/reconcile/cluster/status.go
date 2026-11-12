@@ -98,6 +98,9 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
 	st.Upgrade = u.status(row, views, storedUpgrade(row))
+	// Not observed here: the reconciler scans the cluster for it every
+	// scanInterval (scanDeprecations), and every view carries the last scan.
+	st.DeprecatedResources = storedScan(row)
 	return ClusterProto(row, spec, st), nil
 }
 

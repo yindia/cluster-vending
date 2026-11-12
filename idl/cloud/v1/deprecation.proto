@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// DeprecatedResourceScan is what the controller last found in a cluster of
+// objects written with a deprecated or removed Kubernetes API version, so
+// they can be moved before an upgrade removes the version.
+//
+// The controller reads the cluster's own Kubernetes API for it, as the
+// tenant role (the identity that created the cluster), every six hours
+// while the cluster is RUNNING. It changes nothing there.
+//
+// The API server converts every object to the version it is asked for, so
+// the version an object was written with is not on the object itself. It
+// is found in two places: the
+// kubectl.kubernetes.io/last-applied-configuration annotation (objects
+// applied with kubectl apply, or by tools that write it) and the manifests
+// of deployed Helm releases. Objects created another way (server-side
+// apply, a client library) are not found.
+message DeprecatedResourceScan {
+  // When the controller last scanned, or tried to.
+  google.protobuf.Timestamp scan_time = 1;
+
+  // The Kubernetes minor version the cluster ran at the scan that found
+  // resources, "1.x".
+  string kubernetes_version = 2;
+
+  // The objects found, at most 100: ordered by removed_in, kind, namespace
+  // and name, so what breaks first is kept. An object found in both places
+  // is listed once per place.
+  repeated DeprecatedResource resources = 3;
+
+  // How many were found; above 100, resources holds the first 100.
+  int32 total = 4;
+
+  // Why the last scan failed (the cluster's Kubernetes API cannot be
+  // reached from the platform, the tenant role was refused, ...); empty
+  // when it succeeded. kubernetes_version, resources and total are then of
+  // the last scan that succeeded, if there was one.
+  string message = 5;
+}
+
+// DeprecatedResource is one object written with a deprecated API version.
+message DeprecatedResource {
+  // The deprecated version the object was written with, e.g.
+  // "policy/v1beta1".
+  string api_version = 1;
+  string kind = 2;
+  // Empty for cluster-scoped kinds, and for an object of a Helm manifest
+  // that names none (it is installed into the release's namespace).
+  string namespace = 3;
+  string name = 4;
+  // The version to move to, e.g. "policy/v1". Empty: the kind was removed
+  // without a replacement.
+  string replacement_api_version = 5;
+  // The Kubernetes minor version that deprecated api_version, "1.x".
+  string deprecated_in = 6;
+  // The Kubernetes minor version that no longer serves api_version, "1.x":
+  // an upgrade to it (or past it) breaks whatever applies the object.
+  string removed_in = 7;
+  // Where the object was found.
+  DeprecatedResourceSource source = 8;
+  // The Helm release whose manifest holds the object, "<namespace>/<name>";
+  // set when source is HELM_RELEASE.
+  string helm_release = 9;
+}
+
+// DeprecatedResourceSource is where a deprecated API version was found.
+enum DeprecatedResourceSource {
+  DEPRECATED_RESOURCE_SOURCE_UNSPECIFIED = 0;
+  // The object's kubectl.kubernetes.io/last-applied-configuration
+  // annotation.
+  DEPRECATED_RESOURCE_SOURCE_LAST_APPLIED_CONFIGURATION = 1;
+  // The manifest of a deployed Helm release.
+  DEPRECATED_RESOURCE_SOURCE_HELM_RELEASE = 2;
+}

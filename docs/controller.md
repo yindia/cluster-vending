@@ -121,7 +121,9 @@ objects take their place (docs/design/rollouts.md).
 
 The controller is the only command that looks at AWS: it discovers the VPC
 or EKS cluster of an import, checks a new cluster's name against EKS, and
-resolves the Kubernetes and add-on versions EKS offers. The API server makes
+resolves the Kubernetes and add-on versions EKS offers, and signs the token
+it reads a running cluster's Kubernetes API with (to find objects written
+with deprecated API versions, see architecture.md). The API server makes
 no AWS call and has no AWS setting or credentials.
 
 There is one rule, for the controller's lookups and for the Crossplane

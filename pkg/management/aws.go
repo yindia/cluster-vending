@@ -9,7 +9,8 @@ import (
 
 // WithAWS is d with what the reconcilers look the cloud up with: the
 // discovery of a VPC or EKS cluster that is imported, the check of an EKS
-// cluster name, and the versions EKS offers. Only what reconciles needs
+// cluster name, the versions EKS offers, and the way into a cluster's
+// Kubernetes API (to scan it for deprecated API versions). Only what reconciles needs
 // it (the controller, or the server while it still runs the background
 // loop); the API handlers make no AWS call.
 //
@@ -22,6 +23,6 @@ func WithAWS(ctx context.Context, d reconcile.Deps) (reconcile.Deps, error) {
 	if err != nil {
 		return reconcile.Deps{}, err
 	}
-	d.AWSDiscovery, d.AWSClusterDiscovery, d.AWSClusters = lookups, lookups, lookups
+	d.AWSDiscovery, d.AWSClusterDiscovery, d.AWSClusters, d.AWSClusterAPI = lookups, lookups, lookups, lookups
 	return d, nil
 }

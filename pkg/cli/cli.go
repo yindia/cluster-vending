@@ -66,6 +66,9 @@ type Options struct {
 	Force bool
 	// Cluster is --cluster of admin pause / resume: one cluster only.
 	Cluster string
+	// TargetVersion is --target-version of cluster deprecations: the
+	// Kubernetes version ("1.x") to check against.
+	TargetVersion string
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.
 	AcknowledgeNotImported bool

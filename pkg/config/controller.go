@@ -44,6 +44,8 @@ var controllerSettings = []Setting{
 	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
 		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere, also to run the providers with other settings than the platform's"},
 	providerCredentialsSetting,
+	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
+		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
 }
 
 // ControllerSettings returns the settings of the controller command.
@@ -78,6 +80,16 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 		errs = append(errs, err)
 	}
 	cfg.AWS.ProviderCredentials = creds
+	skip, err := strconv.ParseBool(v[FlagSkipTenantRole])
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagSkipTenantRole), v[FlagSkipTenantRole]))
+	case skip && creds == nil:
+		errs = append(errs, fmt.Errorf("%s needs %s: without a credentials Secret there are no keys to act with directly",
+			setting(FlagSkipTenantRole), setting(FlagProviderCredentialsSecret)))
+	case skip:
+		creds.Direct = true
+	}
 	if cfg.InstallProviders, err = strconv.ParseBool(v[FlagInstallProviders]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallProviders), v[FlagInstallProviders]))
 	}

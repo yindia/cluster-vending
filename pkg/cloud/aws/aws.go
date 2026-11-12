@@ -115,8 +115,13 @@ func NewFromConfig(base awssdk.Config, cfg Config) (*Client, error) {
 // role. There is no way to a tenant's account around its role.
 type Access struct {
 	AccountID string
-	// RoleARN is the tenant role, a role of AccountID. Required.
+	// RoleARN is the tenant role, a role of AccountID. Required unless
+	// Direct.
 	RoleARN string
+	// Direct: the client's own credentials are used as they are, without
+	// assuming a role (local testing, --skip-tenant-role). RoleARN must
+	// then be empty.
+	Direct bool
 }
 
 // Tenant is TenantFor(Access{accountID, roleARN}, region).
@@ -134,10 +139,13 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 	if !accountIDPattern.MatchString(a.AccountID) {
 		return nil, fmt.Errorf("%w: account ID must be 12 digits, got %q", ErrInvalid, a.AccountID)
 	}
-	if a.RoleARN == "" {
+	switch {
+	case a.Direct && a.RoleARN != "":
+		return nil, fmt.Errorf("%w: account %s: a direct access assumes no role, got %q", ErrInvalid, a.AccountID, a.RoleARN)
+	case !a.Direct && a.RoleARN == "":
 		return nil, fmt.Errorf("%w: account %s has no tenant role: a tenant's account is only reached through its role", ErrInvalid, a.AccountID)
 	}
-	if !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
+	if !a.Direct && !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
 		return nil, fmt.Errorf("%w: %q is not a role of account %s", ErrInvalid, a.RoleARN, a.AccountID)
 	}
 	if !awscatalog.IsRegion(region) {
@@ -145,7 +153,9 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 	}
 	cfg := c.base.Copy()
 	cfg.Region = region
-	cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
+	if !a.Direct {
+		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
+	}
 	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
 	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
 		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil

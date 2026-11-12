@@ -35,5 +35,10 @@ func (d Deps) AWSAccess(_ context.Context, a *model.CloudAccount) (awscloud.Acce
 		return awscloud.Access{}, fault.Newf(fault.FailedPrecondition,
 			"account %s: its tenant role %s is not a role of AWS account %s; bootstrap it again", a.ID, a.Identity, a.AccountID)
 	}
+	if d.ProviderCredentials != nil && d.ProviderCredentials.Direct {
+		// Local testing (--skip-tenant-role): the controller's own keys,
+		// as they are.
+		return awscloud.Access{AccountID: a.AccountID, Direct: true}, nil
+	}
 	return awscloud.Access{AccountID: a.AccountID, RoleARN: a.Identity}, nil
 }

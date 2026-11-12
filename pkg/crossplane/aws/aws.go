@@ -170,6 +170,10 @@ func Providers() []*pkgv1.Provider {
 // cluster). The providers read it themselves; the platform never does.
 type CredentialsSecret struct {
 	Namespace, Name, Key string
+	// Direct: the providers act with these keys as they are, without
+	// assuming the tenant role (local testing, for an account whose
+	// policies forbid assuming roles).
+	Direct bool
 }
 
 // ProviderConfig is the ProviderConfig of a tenant's AWS account: the
@@ -199,9 +203,18 @@ func ProviderConfig(namespace, name, tenantID, tenantRoleARN string, secret *Cre
 		},
 		Spec: awsv1beta1.ProviderConfigSpec{
 			Credentials:     credentials,
-			AssumeRoleChain: []awsv1beta1.AssumeRoleOptions{{RoleARN: ptr.To(tenantRoleARN)}},
+			AssumeRoleChain: assumeRoleChain(tenantRoleARN, secret),
 		},
 	}
+}
+
+// assumeRoleChain is the tenant role, unless the credentials Secret is
+// used directly.
+func assumeRoleChain(tenantRoleARN string, secret *CredentialsSecret) []awsv1beta1.AssumeRoleOptions {
+	if secret != nil && secret.Direct {
+		return nil
+	}
+	return []awsv1beta1.AssumeRoleOptions{{RoleARN: ptr.To(tenantRoleARN)}}
 }
 
 // ProviderConfigRef is the spec.providerConfigRef of a namespaced managed

@@ -257,3 +257,25 @@ func TestDiscoverNetworkRefusesOtherAccounts(t *testing.T) {
 		t.Fatalf("DiscoverNetwork = %v, want ErrAccessDenied naming the other account", err)
 	}
 }
+
+// A direct access (--skip-tenant-role) uses the client's own credentials
+// as they are: no role is assumed, and a role given with it is refused.
+func TestDirectAccessAssumesNoRole(t *testing.T) {
+	sts := &fakeSTS{callerAccount: tenantAccount}
+	c := envClient(t, sts, Config{})
+	tenant, err := c.TenantFor(Access{AccountID: tenantAccount, Direct: true}, "us-west-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.VerifyAccess(t.Context()); err != nil {
+		t.Fatalf("VerifyAccess: %v", err)
+	}
+	for _, call := range sts.recorded() {
+		if call.role != "" {
+			t.Errorf("STS call %+v assumed a role, want none", call)
+		}
+	}
+	if _, err := c.TenantFor(Access{AccountID: tenantAccount, RoleARN: tenantRole, Direct: true}, "us-west-1"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("direct access with a role: %v, want ErrInvalid", err)
+	}
+}

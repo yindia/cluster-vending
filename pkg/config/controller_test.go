@@ -71,7 +71,7 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	}
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
-		config.FlagProviderCredentialsSecret}
+		config.FlagProviderCredentialsSecret, config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)
 	}
@@ -101,5 +101,24 @@ func TestProviderCredentialsSecret(t *testing.T) {
 	cfg, err := config.LoadController(nil, lookupIn(management(nil)), nil)
 	if err != nil || cfg.AWS.ProviderCredentials != nil {
 		t.Errorf("unset: %+v (%v), want none (IRSA)", cfg.AWS.ProviderCredentials, err)
+	}
+}
+
+// --skip-tenant-role marks the credentials Secret direct, and needs one.
+func TestSkipTenantRole(t *testing.T) {
+	cfg, err := config.LoadController(lookupIn(map[string]string{
+		config.FlagProviderCredentialsSecret: "crossplane-system/aws-local", config.FlagSkipTenantRole: "true",
+	}), lookupIn(management(nil)), nil)
+	if err != nil || cfg.AWS.ProviderCredentials == nil || !cfg.AWS.ProviderCredentials.Direct {
+		t.Errorf("with a Secret: %+v (%v), want it direct", cfg.AWS.ProviderCredentials, err)
+	}
+	_, err = config.LoadController(lookupIn(map[string]string{config.FlagSkipTenantRole: "true"}), lookupIn(management(nil)), nil)
+	if err == nil || !strings.Contains(err.Error(), "--"+config.FlagSkipTenantRole) {
+		t.Errorf("without a Secret: %v, want an error naming the flag", err)
+	}
+	cfg, err = config.LoadController(lookupIn(map[string]string{config.FlagProviderCredentialsSecret: "crossplane-system/aws-local"}),
+		lookupIn(management(nil)), nil)
+	if err != nil || cfg.AWS.ProviderCredentials.Direct {
+		t.Errorf("default: %+v (%v), want the tenant role assumed", cfg.AWS.ProviderCredentials, err)
 	}
 }

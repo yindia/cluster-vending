@@ -90,6 +90,7 @@ and `--log-level`, and only these:
 | `--aws-management-role-arn` | required: the IAM role the Crossplane AWS providers run as (IRSA); the management account is taken from it |
 | `--install-providers` | create the providers, provider-helm and their runtime config when missing |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
+| `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 
 It installs the CRDs of the three kinds and the Crossplane AWS providers
 (unless `--install-providers=false`) and waits for their kinds. The API
@@ -200,6 +201,15 @@ copied again on the next reconcile), and deletes the copy with the account.
 It never logs the keys. A missing Secret or key shows on each CloudAccount's
 `Ready` condition, and nothing is applied until it is fixed. You create only
 the source Secret; the copies are the platform's.
+
+If the account's own policies forbid assuming roles (for example an AWS
+Organizations service control policy that denies `sts:AssumeRole` in the
+regions you use, as some free or sandbox accounts have), add
+`skip-tenant-role: true`. The ProviderConfigs then have no
+`assumeRoleChain`, and the controller's own lookups use its keys as they
+are: every account is reached as that one identity, so the tenant role and
+its permissions are not exercised. Local testing only; it is refused
+without `--provider-credentials-secret`.
 
 In a cluster without IRSA that runs the controller as a Deployment, enable
 `config/local-credentials` (read on that one Secret, and write on Secrets in

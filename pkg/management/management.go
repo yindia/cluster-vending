@@ -176,5 +176,5 @@ func CredentialsSecret(ref *config.SecretKeyRef) *crossplaneaws.CredentialsSecre
 	if ref == nil {
 		return nil
 	}
-	return &crossplaneaws.CredentialsSecret{Namespace: ref.Namespace, Name: ref.Name, Key: ref.Key}
+	return &crossplaneaws.CredentialsSecret{Namespace: ref.Namespace, Name: ref.Name, Key: ref.Key, Direct: ref.Direct}
 }

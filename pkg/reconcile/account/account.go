@@ -63,14 +63,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, tenantID, cloudAccountID str
 // Secret (local runs), the account's copy of it, then the account's
 // ProviderConfig (it assumes the tenant role, a.Identity, with the
 // providers' IRSA credentials or the keys in that copy).
-func objects(a *model.CloudAccount, keys *corev1.Secret) []client.Object {
+func objects(a *model.CloudAccount, keys *corev1.Secret, direct bool) []client.Object {
 	objs := []client.Object{
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: a.Namespace, Labels: crossplane.Labels(a.TenantID)}},
 	}
 	var ref *crossplaneaws.CredentialsSecret
 	if keys != nil {
 		objs = append(objs, keys)
-		ref = &crossplaneaws.CredentialsSecret{Namespace: keys.Namespace, Name: keys.Name, Key: credentialsKey(keys)}
+		ref = &crossplaneaws.CredentialsSecret{Namespace: keys.Namespace, Name: keys.Name, Key: credentialsKey(keys),
+			Direct: direct}
 	}
 	return append(objs, crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, ref))
 }
@@ -162,7 +163,7 @@ func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
 	if err != nil {
 		return err
 	}
-	objs := objects(a, keys)
+	objs := objects(a, keys, r.deps.ProviderCredentials != nil && r.deps.ProviderCredentials.Direct)
 	for _, obj := range objs {
 		err := kube.Apply(ctx, r.deps.Kube, obj)
 		switch {

@@ -122,3 +122,16 @@ func TestAWSProviderConfig(t *testing.T) {
 		t.Errorf("ref = %+v", ref)
 	}
 }
+
+// With a direct credentials Secret (--skip-tenant-role) the ProviderConfig
+// uses the keys as they are: no role is assumed.
+func TestAWSProviderConfigDirectCredentials(t *testing.T) {
+	direct := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole,
+		&crossplaneaws.CredentialsSecret{Namespace: "tenant-acme", Name: "aws-0a1b2c3d-credentials", Key: "credentials", Direct: true})
+	if direct.Spec.Credentials.Source != "Secret" || direct.Spec.Credentials.SecretRef == nil {
+		t.Errorf("credentials = %+v, want the Secret", direct.Spec.Credentials)
+	}
+	if len(direct.Spec.AssumeRoleChain) != 0 {
+		t.Errorf("assumeRoleChain = %+v, want none", direct.Spec.AssumeRoleChain)
+	}
+}

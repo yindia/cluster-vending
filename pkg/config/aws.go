@@ -16,6 +16,8 @@ const (
 	// providers authenticate with instead of IRSA (local testing).
 	FlagProviderCredentialsSecret = "provider-credentials-secret"
 	EnvProviderCredentialsSecret  = "CV_PROVIDER_CREDENTIALS_SECRET" //nolint:gosec // a variable name, not a credential
+	FlagSkipTenantRole            = "skip-tenant-role"
+	EnvSkipTenantRole             = "CV_SKIP_TENANT_ROLE"
 )
 
 // DefaultCredentialsKey is the key of a credentials Secret when the
@@ -30,6 +32,9 @@ var providerCredentialsSetting = Setting{Flag: FlagProviderCredentialsSecret, En
 // SecretKeyRef names one key of a Secret.
 type SecretKeyRef struct {
 	Namespace, Name, Key string
+	// Direct: the keys are used as they are, without assuming the tenant
+	// role (FlagSkipTenantRole; local testing only).
+	Direct bool
 }
 
 // String is the setting's own spelling of the reference.

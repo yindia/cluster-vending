@@ -152,7 +152,7 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 	case row.State == stateDeleting:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_DELETING
 		st.Message = fmt.Sprintf("deleting; %d resources left", resourcesLeft(views))
-		if kinds := deleteOrder.Current(views); len(kinds) > 0 {
+		if kinds := crossplaneaws.NetworkDeleteOrder.Current(views); len(kinds) > 0 {
 			st.Message = fmt.Sprintf("deleting %s; %d resources left", strings.Join(kinds, ", "), resourcesLeft(views))
 		}
 	case row.State == stateBlocked:

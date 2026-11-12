@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
@@ -122,7 +123,7 @@ func TestDeleteNetworkWithFlowLogs(t *testing.T) {
 
 func TestDeleteOrderTiers(t *testing.T) {
 	tier := func(kind string) int {
-		return slices.IndexFunc(deleteOrder, func(kinds []string) bool { return slices.Contains(kinds, kind) })
+		return slices.IndexFunc(crossplaneaws.NetworkDeleteOrder, func(kinds []string) bool { return slices.Contains(kinds, kind) })
 	}
 	for _, o := range []struct{ first, then string }{
 		{"FlowLog", "Group"}, {"FlowLog", "Role"}, {"FlowLog", "Usage"}, {"RolePolicyAttachment", "Role"},

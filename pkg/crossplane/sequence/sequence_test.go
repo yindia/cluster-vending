@@ -151,3 +151,33 @@ func TestApplyKeepsWhatIsMarkedKept(t *testing.T) {
 		t.Error("a kept object was removed")
 	}
 }
+
+// Objects are deleted tier by tier: the next tier only once the previous
+// one is gone.
+func TestDeleteGoesTierByTier(t *testing.T) {
+	e, inv, k := world(t)
+	ctx := t.Context()
+	vpc, subnet := &awsec2.VPC{ObjectMeta: meta("vpc")}, &awsec2.Subnet{ObjectMeta: meta("subnet")}
+	if _, err := e.Apply(ctx, sequence.Of(vpc, subnet), inv); err != nil {
+		t.Fatal(err)
+	}
+	order := sequence.DeleteOrder{{"Subnet"}, {"VPC"}}
+	for step, want := range []struct {
+		left        int
+		vpc, subnet bool
+	}{{2, true, false}, {1, false, false}, {0, false, false}} {
+		d, err := e.Delete(ctx, inv, order)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Left != want.left || d.Done() != (want.left == 0) || len(d.Views) != 2 {
+			t.Errorf("step %d: %d left, done %t, %d views; want %d left", step, d.Left, d.Done(), len(d.Views), want.left)
+		}
+		if got := exists(t, k, &awsec2.VPC{ObjectMeta: meta("vpc")}); got != want.vpc {
+			t.Errorf("step %d: VPC exists = %t", step, got)
+		}
+		if got := exists(t, k, &awsec2.Subnet{ObjectMeta: meta("subnet")}); got != want.subnet {
+			t.Errorf("step %d: subnet exists = %t", step, got)
+		}
+	}
+}

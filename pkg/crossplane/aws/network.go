@@ -196,6 +196,26 @@ func NetworkResources(p NetworkPlan) ([]client.Object, error) {
 	return objects, nil
 }
 
+// NetworkDeleteOrder deletes a network from the inside out, the order AWS
+// accepts: the flow log, network ACL rules, routes and subnet
+// associations; then the flow log's log group and its role's policy
+// attachment, network ACLs, route tables and NAT gateways; then the
+// delivery role and its policy and the NAT gateways' EIPs; then subnets,
+// the internet gateway (it detaches only once no public IP is left) and
+// the default network ACL (only its object goes: it is owned without
+// Delete); then the VPC.
+//
+// The flow log's Usages (they hold its log group and role while it
+// exists) sit in the tier after it: Kubernetes garbage-collects them with
+// the flow log, and a Usage is never deleted before its user.
+var NetworkDeleteOrder = sequence.DeleteOrder{
+	{"FlowLog", "NetworkACLRule", "RouteTableAssociation", "Route"},
+	{"Usage", "Group", "RolePolicyAttachment", "NetworkACL", "RouteTable", "NATGateway"},
+	{"Role", "Policy", "EIP"},
+	{"Subnet", "InternetGateway", "DefaultNetworkACL"},
+	{"VPC"},
+}
+
 // NetworkSet is NetworkResources as a set to apply in order: a public NAT
 // gateway can only be created in a VPC whose internet gateway is attached
 // (created earlier it fails), so the NAT gateways wait for the

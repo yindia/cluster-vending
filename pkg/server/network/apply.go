@@ -12,6 +12,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -197,27 +198,8 @@ func (s *NetworkService) rollback(ctx context.Context, row *model.Network) {
 	}
 }
 
-// deleteOrder deletes a network from the inside out, the order AWS
-// accepts: the flow log, network ACL rules, routes and subnet
-// associations; then the flow log's log group and its role's policy
-// attachment, network ACLs, route tables and NAT gateways; then the
-// delivery role and its policy and the NAT gateways' EIPs; then subnets,
-// the internet gateway (it detaches only once no public IP is left) and
-// the default network ACL (only its object goes: it is owned without
-// Delete); then the VPC.
-//
-// The flow log's Usages (they hold its log group and role while it
-// exists) sit in the tier after it: Kubernetes garbage-collects them with
-// the flow log, and DeleteRecorded never deletes a Usage itself.
-var deleteOrder = service.DeleteOrder{
-	{"FlowLog", "NetworkACLRule", "RouteTableAssociation", "Route"},
-	{"Usage", "Group", "RolePolicyAttachment", "NetworkACL", "RouteTable", "NATGateway"},
-	{"Role", "Policy", "EIP"},
-	{"Subnet", "InternetGateway", "DefaultNetworkACL"},
-	{"VPC"},
-}
-
-// finalize moves a DELETING network's deletion on (deleteOrder: the next
+// finalize moves a DELETING network's deletion on (sequence.Engine.Delete
+// with crossplaneaws.NetworkDeleteOrder: the next
 // tier once the previous one is gone) and removes its row once all its
 // resources are gone. DeleteNetwork and the background loop call it.
 func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error {
@@ -234,22 +216,21 @@ func (s *NetworkService) finalize(ctx context.Context, row *model.Network) error
 	if err != nil {
 		return err
 	}
-	views, err := s.deps.Observe(ctx, records)
-	if err != nil {
-		return err
-	}
-	if err := s.deps.MarkGone(ctx, records, views); err != nil {
-		return connect.NewError(connect.CodeInternal, err.Error())
-	}
-	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
-		return connect.NewError(connect.CodeInternal, err.Error())
-	}
-	left, err := s.deps.DeleteNext(ctx, records, views, deleteOrder)
-	if err != nil {
+	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerNetwork, ID: row.ID}
+	deletion, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.NetworkDeleteOrder)
+	var unreadable *managed.ReadError
+	switch {
+	case errors.As(err, &unreadable):
+		return connect.NewError(connect.CodeUnavailable,
+			fmt.Sprintf("cannot read %s %s from the management cluster", unreadable.Ref.Kind, unreadable.Ref.Name))
+	case err != nil:
 		s.logger().ErrorContext(ctx, "delete network resources", "network_id", row.ID, "error", err)
 		return connect.NewError(connect.CodeInternal, "could not delete the network's resources")
 	}
-	if left > 0 || o.total > 0 {
+	if err := s.deps.MarkGone(ctx, records, deletion.Views); err != nil {
+		return connect.NewError(connect.CodeInternal, err.Error())
+	}
+	if !deletion.Done() || o.total > 0 {
 		return nil
 	}
 	// The cache says everything is gone: confirm with the API server before

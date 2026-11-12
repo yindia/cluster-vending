@@ -12,7 +12,6 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
-	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -23,7 +22,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
-	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -435,19 +433,4 @@ func (s *ClusterService) logger() *slog.Logger {
 		return slog.New(slog.DiscardHandler)
 	}
 	return s.deps.Logger
-}
-
-// applyOne server-side applies one object. A NodeGroup's desired size goes
-// in initProvider only (crossplaneaws.DesiredSizeAtCreateOnly), on create
-// and update alike.
-func (s *ClusterService) applyOne(ctx context.Context, obj client.Object) error {
-	if _, ok := obj.(*awseks.NodeGroup); !ok {
-		return kube.Apply(ctx, s.deps.Kube, obj)
-	}
-	u, err := kube.ApplyObject(obj, s.deps.Kube.Scheme())
-	if err != nil {
-		return err
-	}
-	crossplaneaws.DesiredSizeAtCreateOnly(u)
-	return kube.Apply(ctx, s.deps.Kube, u)
 }

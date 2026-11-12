@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"connectrpc.com/connect/v2"
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -19,8 +21,9 @@ import (
 )
 
 // driveDelete moves a DELETING cluster on: its recorded objects are
-// deleted all at once (a forced deletion first releases its Helm
-// Releases, forceRelease); the Usages
+// deleted all at once (sequence.Engine.Delete with
+// crossplaneaws.ClusterDeleteOrder; a forced deletion first releases its
+// Helm Releases, forceRelease); the Usages
 // rendered with them (see crossplaneaws.ClusterResources) make the webhook
 // hold each object until what uses it is gone, and replay its deletion
 // then: node groups before the EKS cluster before its IAM. Once every
@@ -38,9 +41,11 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 			return false, err
 		}
 	}
-	if err := s.deps.DeleteRecorded(ctx, records); err != nil {
-		return false, err
+	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerCluster, ID: row.ID}
+	if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.ClusterDeleteOrder); err != nil {
+		return false, deleteError(err)
 	}
+	// As they are after the step: what it deleted may be gone already.
 	views, err := s.deps.Observe(ctx, records)
 	if err != nil {
 		return false, err
@@ -48,6 +53,8 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	if err := s.deps.MarkGone(ctx, records, views); err != nil {
 		return false, err
 	}
+	// Again, with what the step left: a Usage whose user went away in this
+	// very step is released now, not a pass later.
 	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
 		return false, err
 	}
@@ -72,6 +79,17 @@ func (s *ClusterService) driveDelete(ctx context.Context, row *model.Cluster) (b
 	}
 	s.logger().InfoContext(ctx, "cluster deleted", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	return true, nil
+}
+
+// deleteError maps an object the deletion could not read to UNAVAILABLE;
+// other errors pass as they are.
+func deleteError(err error) error {
+	var unreadable *managed.ReadError
+	if errors.As(err, &unreadable) {
+		return connect.NewError(connect.CodeUnavailable,
+			fmt.Sprintf("cannot read %s %s from the management cluster", unreadable.Ref.Kind, unreadable.Ref.Name))
+	}
+	return err
 }
 
 // deleteUnrecorded confirms with the API server (by label, uncached) that

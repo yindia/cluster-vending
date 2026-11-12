@@ -13,9 +13,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
+
+// noInventory remembers nothing.
+type noInventory struct{}
+
+func (noInventory) List(context.Context) ([]sequence.Entry, error) { return nil, nil }
+func (noInventory) Add(context.Context, []client.Object) error     { return nil }
+func (noInventory) Remove(context.Context, sequence.Entry) error   { return nil }
 
 // The node count is the autoscaler's after creation: the apply body sets
 // desiredSize in initProvider, never in forProvider.
@@ -38,8 +46,10 @@ func TestApplyNodeGroupSendsDesiredSizeAtCreateOnly(t *testing.T) {
 	ng.Spec.ForProvider.Region = ptr.To("us-east-1")
 	ng.Spec.ForProvider.ScalingConfig = &awseks.ScalingConfigParameters{
 		MinSize: ptr.To(1.0), MaxSize: ptr.To(3.0), DesiredSize: ptr.To(2.0)}
-	if err := NewClusterService(service.Deps{Kube: k}).applyOne(context.Background(), ng); err != nil {
-		t.Fatal(err)
+	// An imported node group, like a rendered one (crossplaneaws.ClusterSet).
+	res, err := service.Deps{Kube: k}.Sequence().Apply(context.Background(), importSet([]client.Object{ng}), noInventory{})
+	if err != nil || res.Applied != 1 {
+		t.Fatalf("apply = %+v (%v)", res, err)
 	}
 	spec := body["spec"].(map[string]any)
 	forProvider := spec["forProvider"].(map[string]any)["scalingConfig"].(map[string]any)

@@ -18,6 +18,7 @@ import (
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -178,19 +179,30 @@ func (s *ClusterService) insertImport(ctx context.Context, req *cloudv1.ImportCl
 	return nil
 }
 
-// applyImport records and applies the import's objects. Pod identity
-// associations get their external name (an ID only the cloud knows) set
-// once, outside the apply: it is not part of any later render.
+// importSet is an import's objects as a set: nothing waits (they only
+// observe what exists), and a node group is applied with its desired size
+// at creation only, like every node group (crossplaneaws.ClusterSet).
+func importSet(objects []client.Object) sequence.Set {
+	set := sequence.Of(objects...)
+	for i, item := range set {
+		if _, ok := item.Object.(*awseks.NodeGroup); ok {
+			set[i].Adjust = crossplaneaws.DesiredSizeAtCreateOnly
+		}
+	}
+	return set
+}
+
+// applyImport records and applies the import's objects (sequence.Engine).
+// Pod identity associations then get their external name (an ID only the
+// cloud knows) set once, outside the apply: it is not part of any later
+// render.
 func (s *ClusterService) applyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan clusterImport) error {
 	owner := service.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	if err := s.deps.Record(ctx, owner, plan.objects); err != nil {
-		return connect.NewError(connect.CodeInternal, "could not record the cluster's resources: "+err.Error())
+	if _, err := s.deps.Sequence().Apply(ctx, importSet(plan.objects), s.deps.Inventory(owner)); err != nil {
+		s.logger().ErrorContext(ctx, "apply imported resources", "cluster_id", row.ID, "error", err)
+		return applyError(err)
 	}
 	for _, obj := range plan.objects {
-		if err := s.applyOne(ctx, obj); err != nil {
-			s.logger().ErrorContext(ctx, "apply imported resource", "cluster_id", row.ID, "object", obj.GetName(), "error", err)
-			return applyError(err)
-		}
 		id, ok := plan.podIdentities[obj.GetName()]
 		if !ok {
 			continue

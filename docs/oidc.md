@@ -161,8 +161,11 @@ users:
   what your provider needs.
 - [Azure/kubelogin](https://github.com/Azure/kubelogin) is an alternative
   for Entra. It sends access tokens: see "Token version" above.
-- Without `--oidc` the command prints nothing: for IAM access use
-  `aws eks update-kubeconfig`.
+- Without `--oidc` the command is for IAM access: it reads the cluster's
+  EKS name and region from the server and runs
+  `aws eks update-kubeconfig` with them, adding the cluster to your
+  kubeconfig (`--kubeconfig-file` for another file). `--print` prints that
+  kubeconfig instead of installing it.
 
 ## Giving users permissions
 

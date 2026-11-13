@@ -3,6 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -23,13 +27,17 @@ const (
 	awsCLIHint = "the AWS CLI is not installed: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
 )
 
-// ClusterKubeconfig prints a kubeconfig for the cluster's Kubernetes API.
-// The endpoint and the CA are the cluster's recorded status, and the file
-// carries no credential: its user is an exec entry. By default that is
-// `aws eks get-token` (IAM, with the caller's own AWS credentials); with
-// --oidc it is kubelogin (kubectl oidc-login) for the cluster's OIDC
-// identity provider (spec.access.oidc), which opens the provider's
-// sign-in page and keeps the token on the user's machine.
+// ClusterKubeconfig gives the caller access to the cluster's Kubernetes
+// API from the cluster ID alone: it reads the EKS name and the region from
+// the server and runs `aws eks update-kubeconfig` with them, which adds
+// the cluster to the caller's kubeconfig (IAM, with their own AWS
+// credentials).
+//
+// --print prints that kubeconfig instead of installing it; --oidc prints
+// one whose user signs in through the cluster's OIDC identity provider
+// (spec.access.oidc) with kubelogin (kubectl oidc-login). A printed file
+// has the cluster's recorded endpoint and CA, and no credential: its user
+// is an exec entry.
 func ClusterKubeconfig(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
@@ -38,17 +46,82 @@ func ClusterKubeconfig(ctx context.Context, c Clients, o Options) (proto.Message
 	if err != nil {
 		return nil, err
 	}
+	cluster := res.(*cloudv1.GetClusterResponse).GetCluster()
+	if !o.OIDC && !o.Print {
+		return nil, updateKubeconfig(ctx, cluster, o)
+	}
 	build := IAMKubeconfig
 	if o.OIDC {
 		build = OIDCKubeconfig
 	}
-	raw, err := build(res.(*cloudv1.GetClusterResponse).GetCluster())
+	raw, err := build(cluster)
 	if err != nil {
 		return nil, err
 	}
 	_, err = o.Out.Write(raw)
 	return nil, err
 }
+
+// updateKubeconfig runs `aws eks update-kubeconfig` for cluster, with the
+// EKS name and the region the server recorded: the AWS CLI adds the
+// cluster to the caller's kubeconfig (o.KubeconfigFile, or its default)
+// and makes it the current context.
+func updateKubeconfig(ctx context.Context, cluster *cloudv1.Cluster, o Options) error {
+	name, region, err := eksNameAndRegion(cluster)
+	if err != nil {
+		return err
+	}
+	args := []string{"eks", "update-kubeconfig", "--name", name, "--region", region}
+	if o.KubeconfigFile != "" {
+		args = append(args, "--kubeconfig", o.KubeconfigFile)
+	}
+	run := o.Exec
+	if run == nil {
+		run = runLocal
+	}
+	if err := run(ctx, o.Out, "aws", args...); err != nil {
+		return fmt.Errorf("aws %s: %w (is the AWS CLI installed and signed in to the cluster's account? --print prints the kubeconfig instead)",
+			strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// runLocal runs a command of the caller's machine, attached to their
+// terminal (the AWS CLI may ask for an MFA code).
+func runLocal(ctx context.Context, w io.Writer, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // "aws" with a name and a region checked by eksNameAndRegion; no shell
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, w, os.Stderr
+	return cmd.Run()
+}
+
+// eksNameAndRegion are what the AWS CLI needs to find the cluster: the EKS
+// name in the cluster's ARN (the platform's name before the ARN is known)
+// and the cluster's region.
+func eksNameAndRegion(cluster *cloudv1.Cluster) (name, region string, err error) {
+	name, region = cluster.GetName(), cluster.GetSpec().GetRegion()
+	if region == "" {
+		return "", "", fmt.Errorf("cluster %s has no region", name)
+	}
+	if arn := cluster.GetStatus().GetAws().GetClusterArn(); arn != "" {
+		if _, after, ok := strings.Cut(arn, ":cluster/"); ok && after != "" {
+			name = after
+		}
+	}
+	// They become arguments of a local command: only what an EKS name and
+	// an AWS region can be is passed on, whatever the server answered.
+	if !eksNamePattern.MatchString(name) {
+		return "", "", fmt.Errorf("cluster name %q is not an EKS cluster name", name)
+	}
+	if !regionPattern.MatchString(region) {
+		return "", "", fmt.Errorf("region %q is not an AWS region", region)
+	}
+	return name, region, nil
+}
+
+var (
+	eksNamePattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z_-]{0,99}$`)
+	regionPattern  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]$`)
+)
 
 // OIDCKubeconfig is the kubeconfig of cluster for users of its OIDC
 // identity provider.
@@ -73,18 +146,11 @@ func OIDCKubeconfig(cluster *cloudv1.Cluster) ([]byte, error) {
 // name is the one in the cluster's ARN (the platform's name before the ARN
 // is known) and the region is the cluster's.
 func IAMKubeconfig(cluster *cloudv1.Cluster) ([]byte, error) {
-	name := cluster.GetName()
-	region := cluster.GetSpec().GetRegion()
-	if region == "" {
-		return nil, fmt.Errorf("cluster %s has no region", name)
+	eksName, region, err := eksNameAndRegion(cluster)
+	if err != nil {
+		return nil, err
 	}
-	eksName := name
-	if arn := cluster.GetStatus().GetAws().GetClusterArn(); arn != "" {
-		if _, after, ok := strings.Cut(arn, ":cluster/"); ok && after != "" {
-			eksName = after
-		}
-	}
-	return kubeconfigWith(cluster, name+"-iam", &clientcmdapi.ExecConfig{
+	return kubeconfigWith(cluster, cluster.GetName()+"-iam", &clientcmdapi.ExecConfig{
 		APIVersion: execAPIVersion, Command: "aws",
 		Args:            []string{"eks", "get-token", "--cluster-name", eksName, "--region", region, "--output", "json"},
 		InteractiveMode: clientcmdapi.IfAvailableExecInteractiveMode, InstallHint: awsCLIHint,

@@ -111,7 +111,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.BoolVar(&o.OnlyRemoved, "only-removed", false, "only the objects whose API version is removed at the target version")
 		}
 		if v.oidc {
-			f.BoolVar(&o.OIDC, "oidc", false, "the user signs in through the cluster's OIDC identity provider (spec.access.oidc), with kubectl oidc-login")
+			f.BoolVar(&o.OIDC, "oidc", false, "print a kubeconfig whose user signs in through the cluster's OIDC identity provider (spec.access.oidc), with kubectl oidc-login")
+			f.BoolVar(&o.Print, "print", false, "print the IAM kubeconfig instead of installing it with the AWS CLI")
+			f.StringVar(&o.KubeconfigFile, "kubeconfig-file", "", "the kubeconfig the AWS CLI writes to (default: its own, ~/.kube/config)")
 		}
 		if v.cluster {
 			f.StringVar(&o.Cluster, "cluster", "", "only this cluster's resources (cluster ID); default: all the tenant's")
@@ -169,7 +171,7 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, table: true, removed: true},
 		verb{use: "components <id>", short: "List the components the platform installed with the cluster, and why one is not ready (chart, Helm state, last error); -o table, yaml or json",
 			run: cli.ClusterComponents, args: cobra.ExactArgs(1), table: true},
-		verb{use: "kubeconfig <id>", short: "Print a kubeconfig for the cluster's Kubernetes API; --oidc: users sign in through its OIDC identity provider (no credential in the file)",
+		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		watchVerb("cluster", cli.ClusterWatch))
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)

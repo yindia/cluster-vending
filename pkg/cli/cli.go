@@ -97,6 +97,15 @@ type Options struct {
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
 	// cluster's OIDC identity provider.
 	OIDC bool
+	// Print is --print of cluster kubeconfig: print the kubeconfig instead
+	// of installing it with the AWS CLI.
+	Print bool
+	// KubeconfigFile is --kubeconfig-file of cluster kubeconfig: the file
+	// the AWS CLI writes to. Empty: its default (~/.kube/config).
+	KubeconfigFile string
+	// Exec runs a local command with its output to w. Nil: the real one
+	// (os/exec, with the caller's stdin, stdout and stderr).
+	Exec func(ctx context.Context, w io.Writer, name string, args ...string) error
 }
 
 func (o Options) requireTenant() error {

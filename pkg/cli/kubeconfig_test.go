@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -141,7 +142,7 @@ func TestClusterKubeconfigFailures(t *testing.T) {
 	}
 }
 
-// Without --oidc the kubeconfig signs in with IAM: the EKS name and the
+// With --print the IAM kubeconfig is printed, not installed: the EKS name and the
 // region come from the cluster, so its ID is all the caller gives.
 func TestClusterKubeconfigIAM(t *testing.T) {
 	cluster := runningCluster(nil)
@@ -150,7 +151,7 @@ func TestClusterKubeconfigIAM(t *testing.T) {
 	var out bytes.Buffer
 
 	err := Run(t.Context(), ClusterKubeconfig, Clients{Cluster: &oneCluster{cluster: cluster}},
-		Options{Tenant: "acme", ID: kubeconfigCluster}, &out, OutputYAML)
+		Options{Tenant: "acme", ID: kubeconfigCluster, Print: true}, &out, OutputYAML)
 
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -179,5 +180,78 @@ func TestClusterKubeconfigIAMBeforeTheARN(t *testing.T) {
 
 	if err != nil || !strings.Contains(string(raw), "prod-eks") {
 		t.Fatalf("IAMKubeconfig = %s, %v", raw, err)
+	}
+}
+
+// By default the command runs the AWS CLI itself, with the EKS name and the
+// region the server knows: the caller gives only the cluster ID.
+func TestClusterKubeconfigRunsTheAWSCLI(t *testing.T) {
+	cluster := runningCluster(nil)
+	cluster.Spec.Region = "us-west-1"
+	cluster.Status.Provider = &cloudv1.ClusterStatus_Aws{Aws: &cloudv1.AwsClusterStatus{ClusterArn: "arn:aws:eks:us-west-1:111122223333:cluster/prod-eks-live"}}
+	tests := []struct {
+		name string
+		opts Options
+		want []string
+	}{
+		{"into the default kubeconfig", Options{Tenant: "acme", ID: kubeconfigCluster},
+			[]string{"aws", "eks", "update-kubeconfig", "--name", "prod-eks-live", "--region", "us-west-1"}},
+		{"into a named file", Options{Tenant: "acme", ID: kubeconfigCluster, KubeconfigFile: "/tmp/k"},
+			[]string{"aws", "eks", "update-kubeconfig", "--name", "prod-eks-live", "--region", "us-west-1", "--kubeconfig", "/tmp/k"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ran []string
+			tt.opts.Exec = func(_ context.Context, _ io.Writer, name string, args ...string) error {
+				ran = append([]string{name}, args...)
+				return nil
+			}
+			var out bytes.Buffer
+
+			err := Run(t.Context(), ClusterKubeconfig, Clients{Cluster: &oneCluster{cluster: cluster}}, tt.opts, &out, OutputYAML)
+
+			if err != nil || !slices.Equal(ran, tt.want) {
+				t.Fatalf("ran %v, %v; want %v", ran, err, tt.want)
+			}
+		})
+	}
+}
+
+// A failing AWS CLI is reported with the command, so it can be run by hand.
+func TestClusterKubeconfigReportsTheCommandThatFailed(t *testing.T) {
+	cluster := runningCluster(nil)
+	cluster.Spec.Region = "us-west-1"
+	opts := Options{Tenant: "acme", ID: kubeconfigCluster,
+		Exec: func(context.Context, io.Writer, string, ...string) error { return errors.New("exit status 255") }}
+
+	err := Run(t.Context(), ClusterKubeconfig, Clients{Cluster: &oneCluster{cluster: cluster}}, opts, &bytes.Buffer{}, OutputYAML)
+
+	if err == nil || !strings.Contains(err.Error(), "aws eks update-kubeconfig --name prod-eks --region us-west-1") {
+		t.Fatalf("Run = %v, want the failed command", err)
+	}
+}
+
+// The name and the region become arguments of a local command: anything
+// that is not an EKS name or an AWS region is refused, and nothing runs.
+func TestClusterKubeconfigRefusesOddNamesAndRegions(t *testing.T) {
+	tests := []struct{ name, arn, region, want string }{
+		{"a flag as the name", "arn:aws:eks:us-west-1:111122223333:cluster/--profile=x", "us-west-1", "not an EKS cluster name"},
+		{"a region with a space", "", "us-west-1 --debug", "not an AWS region"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster := runningCluster(nil)
+			cluster.Spec.Region = tt.region
+			cluster.Status.Provider = &cloudv1.ClusterStatus_Aws{Aws: &cloudv1.AwsClusterStatus{ClusterArn: tt.arn}}
+			ran := false
+			opts := Options{Tenant: "acme", ID: kubeconfigCluster,
+				Exec: func(context.Context, io.Writer, string, ...string) error { ran = true; return nil }}
+
+			err := Run(t.Context(), ClusterKubeconfig, Clients{Cluster: &oneCluster{cluster: cluster}}, opts, &bytes.Buffer{}, OutputYAML)
+
+			if err == nil || !strings.Contains(err.Error(), tt.want) || ran {
+				t.Fatalf("Run = %v (ran: %v), want a refusal naming %q", err, ran, tt.want)
+			}
+		})
 	}
 }

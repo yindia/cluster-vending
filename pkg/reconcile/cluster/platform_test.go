@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -278,6 +280,30 @@ func TestPlatformReleaseIsKept(t *testing.T) {
 
 	if err != nil || p.release != "2026-11-a" {
 		t.Fatalf("release %q, %v", p.release, err)
+	}
+}
+
+// A kept release that is not valid any more (the catalog changed under it)
+// cannot be installed from: the cluster goes to what its channel offers.
+func TestPlatformReleaseIsLeftWhenInvalid(t *testing.T) {
+	w, src := platformWorld(t)
+	w.helmConfig(t)
+	row := w.cluster(t)
+	st := &cloudv1.ClusterStatus{}
+	withPlatform(st, w.install(t))
+	raw, err := Encode(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Status = raw
+	meta.SetStatusCondition(&src.release.Status.Conditions, metav1.Condition{Type: cloudv1alpha1.ReleaseConditionValid,
+		Status: metav1.ConditionFalse, Reason: "Invalid", Message: "pins disagree"})
+	src.offered = "2026-12-a"
+
+	p, err := w.svc.installPlatform(t.Context(), row)
+
+	if err != nil || p.release != "2026-12-a" {
+		t.Fatalf("release %q, %v; want the offered 2026-12-a", p.release, err)
 	}
 }
 

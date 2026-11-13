@@ -105,3 +105,29 @@ func TestChannelRefusesSkippingAMinor(t *testing.T) {
 		t.Errorf("alpha offers %q, want %s (one minor up)", ch.Status.Release, step.Name)
 	}
 }
+
+// A channel leaves a release that is no longer valid, whatever the step:
+// nothing can be installed from it, so it is not a version to step from.
+func TestChannelLeavesAnInvalidRelease(t *testing.T) {
+	ctx := t.Context()
+	current := withIstio("2026-11-a", "1.30.8", "1.30.8")
+	meta.SetStatusCondition(&current.Status.Conditions, metav1.Condition{Type: cloudv1alpha1.ReleaseConditionValid,
+		Status: metav1.ConditionFalse, Reason: "Invalid", Message: "version group istio is pinned at more than one version"})
+	next := withIstio("2026-12-a", "1.32.0", "1.32.0")
+	alpha := DefaultChannels()[0]
+	alpha.Spec.Release = next.Name
+	alpha.Status.Release = current.Name
+	c := releaseClient(t, append(istioDefinitions(), current, next, alpha)...)
+	r := &ReleaseChannelReconciler{c: c}
+
+	reconcileOnce(t, r, "alpha")
+
+	ch := &cloudv1alpha1.ReleaseChannel{}
+	if err := c.Get(ctx, client.ObjectKey{Name: "alpha"}, ch); err != nil {
+		t.Fatal(err)
+	}
+	if ch.Status.Release != next.Name {
+		cond := meta.FindStatusCondition(ch.Status.Conditions, cloudv1alpha1.ChannelConditionOffering)
+		t.Fatalf("alpha offers %q with %+v, want %s", ch.Status.Release, cond, next.Name)
+	}
+}

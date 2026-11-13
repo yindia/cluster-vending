@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -62,7 +64,7 @@ func listCatalog(ctx context.Context, c client.Client) ([]release.Definition, er
 // stepProblem says why a channel may not move from the release it offers
 // (current) to next: a pin of next skips a minor of a component that
 // upgrades one minor at a time. "" when it may, or when either release
-// cannot be read (unusable reports that).
+// cannot be read (unusable reports that), or when current is not valid.
 func stepProblem(ctx context.Context, c client.Client, current, next string) (string, error) {
 	if current == "" || current == next {
 		return "", nil
@@ -73,6 +75,12 @@ func stepProblem(ctx context.Context, c client.Client, current, next string) (st
 	}
 	if err := c.Get(ctx, client.ObjectKey{Name: next}, to); err != nil {
 		return "", client.IgnoreNotFound(err)
+	}
+	if meta.IsStatusConditionFalse(from.Status.Conditions, cloudv1alpha1.ReleaseConditionValid) {
+		// Nothing can be installed from a release that is not valid (any
+		// more): it is not a version to step from, and the channel must be
+		// able to leave it.
+		return "", nil
 	}
 	catalog, err := listCatalog(ctx, c)
 	if err != nil {

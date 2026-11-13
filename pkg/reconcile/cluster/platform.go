@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -288,6 +290,18 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 	// component must not hold the cluster for ever.
 	if installed {
 		release = storedStatus(row).GetPlatformRelease()
+	}
+	if release != "" {
+		// A kept release that is not valid any more (the catalog changed
+		// under it) cannot be installed from: the cluster leaves it for
+		// what its channel offers.
+		kept, err := s.deps.Platform.Release(ctx, release)
+		if err != nil {
+			return in, release, "", fmt.Errorf("read release %s: %w", release, err)
+		}
+		if kept != nil && meta.IsStatusConditionFalse(kept.Status.Conditions, cloudv1alpha1.ReleaseConditionValid) {
+			release = ""
+		}
 	}
 	if release == "" {
 		channel := channelOf(spec)

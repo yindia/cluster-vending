@@ -23,6 +23,62 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// AccessRole is what a caller may do.
+type AccessRole int32
+
+const (
+	AccessRole_ACCESS_ROLE_UNSPECIFIED AccessRole = 0
+	// Everything, for every tenant.
+	AccessRole_ACCESS_ROLE_PLATFORM_ADMIN AccessRole = 1
+	// Every tenant RPC of the grant's tenants.
+	AccessRole_ACCESS_ROLE_TENANT_ADMIN AccessRole = 2
+	// The RPCs without side effects of the grant's tenants.
+	AccessRole_ACCESS_ROLE_TENANT_VIEWER AccessRole = 3
+)
+
+// Enum value maps for AccessRole.
+var (
+	AccessRole_name = map[int32]string{
+		0: "ACCESS_ROLE_UNSPECIFIED",
+		1: "ACCESS_ROLE_PLATFORM_ADMIN",
+		2: "ACCESS_ROLE_TENANT_ADMIN",
+		3: "ACCESS_ROLE_TENANT_VIEWER",
+	}
+	AccessRole_value = map[string]int32{
+		"ACCESS_ROLE_UNSPECIFIED":    0,
+		"ACCESS_ROLE_PLATFORM_ADMIN": 1,
+		"ACCESS_ROLE_TENANT_ADMIN":   2,
+		"ACCESS_ROLE_TENANT_VIEWER":  3,
+	}
+)
+
+func (x AccessRole) Enum() *AccessRole {
+	p := new(AccessRole)
+	*p = x
+	return p
+}
+
+func (x AccessRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccessRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_tenant_service_proto_enumTypes[0].Descriptor()
+}
+
+func (AccessRole) Type() protoreflect.EnumType {
+	return &file_cloud_v1_tenant_service_proto_enumTypes[0]
+}
+
+func (x AccessRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccessRole.Descriptor instead.
+func (AccessRole) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{0}
+}
+
 // CloudAccountState is the coarse state of a tenant's cloud account.
 type CloudAccountState int32
 
@@ -64,11 +120,11 @@ func (x CloudAccountState) String() string {
 }
 
 func (CloudAccountState) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_tenant_service_proto_enumTypes[0].Descriptor()
+	return file_cloud_v1_tenant_service_proto_enumTypes[1].Descriptor()
 }
 
 func (CloudAccountState) Type() protoreflect.EnumType {
-	return &file_cloud_v1_tenant_service_proto_enumTypes[0]
+	return &file_cloud_v1_tenant_service_proto_enumTypes[1]
 }
 
 func (x CloudAccountState) Number() protoreflect.EnumNumber {
@@ -77,7 +133,188 @@ func (x CloudAccountState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CloudAccountState.Descriptor instead.
 func (CloudAccountState) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{1}
+}
+
+type WhoAmIRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WhoAmIRequest) Reset() {
+	*x = WhoAmIRequest{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WhoAmIRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WhoAmIRequest) ProtoMessage() {}
+
+func (x *WhoAmIRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WhoAmIRequest.ProtoReflect.Descriptor instead.
+func (*WhoAmIRequest) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{0}
+}
+
+type WhoAmIResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// No token was sent and the server let the request through.
+	Anonymous bool `protobuf:"varint,1,opt,name=anonymous,proto3" json:"anonymous,omitempty"`
+	// The token's "sub".
+	Subject string `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
+	// The issuer's username claim (Microsoft Entra ID: the object ID).
+	Username string `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
+	// Name of the issuer in the server's configuration.
+	Issuer string `protobuf:"bytes,4,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	// Values of the issuer's roles claim (Microsoft Entra ID: app roles).
+	Roles []string `protobuf:"bytes,5,rep,name=roles,proto3" json:"roles,omitempty"`
+	// What the server's rules grant the caller. Empty: only the calls open
+	// to every accepted caller.
+	Grants        []*AccessGrant `protobuf:"bytes,6,rep,name=grants,proto3" json:"grants,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WhoAmIResponse) Reset() {
+	*x = WhoAmIResponse{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WhoAmIResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WhoAmIResponse) ProtoMessage() {}
+
+func (x *WhoAmIResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WhoAmIResponse.ProtoReflect.Descriptor instead.
+func (*WhoAmIResponse) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *WhoAmIResponse) GetAnonymous() bool {
+	if x != nil {
+		return x.Anonymous
+	}
+	return false
+}
+
+func (x *WhoAmIResponse) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetIssuer() string {
+	if x != nil {
+		return x.Issuer
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetRoles() []string {
+	if x != nil {
+		return x.Roles
+	}
+	return nil
+}
+
+func (x *WhoAmIResponse) GetGrants() []*AccessGrant {
+	if x != nil {
+		return x.Grants
+	}
+	return nil
+}
+
+// AccessGrant is a role and the tenants it is for.
+type AccessGrant struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Role  AccessRole             `protobuf:"varint,1,opt,name=role,proto3,enum=cloud.v1.AccessRole" json:"role,omitempty"`
+	// Tenant IDs; "*" for every tenant. Empty for ACCESS_ROLE_PLATFORM_ADMIN.
+	Tenants       []string `protobuf:"bytes,2,rep,name=tenants,proto3" json:"tenants,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessGrant) Reset() {
+	*x = AccessGrant{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessGrant) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessGrant) ProtoMessage() {}
+
+func (x *AccessGrant) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessGrant.ProtoReflect.Descriptor instead.
+func (*AccessGrant) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AccessGrant) GetRole() AccessRole {
+	if x != nil {
+		return x.Role
+	}
+	return AccessRole_ACCESS_ROLE_UNSPECIFIED
+}
+
+func (x *AccessGrant) GetTenants() []string {
+	if x != nil {
+		return x.Tenants
+	}
+	return nil
 }
 
 type BootstrapTenantRequest struct {
@@ -93,7 +330,7 @@ type BootstrapTenantRequest struct {
 
 func (x *BootstrapTenantRequest) Reset() {
 	*x = BootstrapTenantRequest{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[0]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -105,7 +342,7 @@ func (x *BootstrapTenantRequest) String() string {
 func (*BootstrapTenantRequest) ProtoMessage() {}
 
 func (x *BootstrapTenantRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[0]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -118,7 +355,7 @@ func (x *BootstrapTenantRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BootstrapTenantRequest.ProtoReflect.Descriptor instead.
 func (*BootstrapTenantRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{0}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *BootstrapTenantRequest) GetTenantId() string {
@@ -144,7 +381,7 @@ type BootstrapTenantResponse struct {
 
 func (x *BootstrapTenantResponse) Reset() {
 	*x = BootstrapTenantResponse{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[1]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -156,7 +393,7 @@ func (x *BootstrapTenantResponse) String() string {
 func (*BootstrapTenantResponse) ProtoMessage() {}
 
 func (x *BootstrapTenantResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[1]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -169,7 +406,7 @@ func (x *BootstrapTenantResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BootstrapTenantResponse.ProtoReflect.Descriptor instead.
 func (*BootstrapTenantResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{1}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *BootstrapTenantResponse) GetAccount() *CloudAccount {
@@ -191,7 +428,7 @@ type GetCloudAccountRequest struct {
 
 func (x *GetCloudAccountRequest) Reset() {
 	*x = GetCloudAccountRequest{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[2]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +440,7 @@ func (x *GetCloudAccountRequest) String() string {
 func (*GetCloudAccountRequest) ProtoMessage() {}
 
 func (x *GetCloudAccountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[2]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +453,7 @@ func (x *GetCloudAccountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCloudAccountRequest.ProtoReflect.Descriptor instead.
 func (*GetCloudAccountRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetCloudAccountRequest) GetTenantId() string {
@@ -242,7 +479,7 @@ type GetCloudAccountResponse struct {
 
 func (x *GetCloudAccountResponse) Reset() {
 	*x = GetCloudAccountResponse{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[3]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -254,7 +491,7 @@ func (x *GetCloudAccountResponse) String() string {
 func (*GetCloudAccountResponse) ProtoMessage() {}
 
 func (x *GetCloudAccountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[3]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -267,7 +504,7 @@ func (x *GetCloudAccountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCloudAccountResponse.ProtoReflect.Descriptor instead.
 func (*GetCloudAccountResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetCloudAccountResponse) GetAccount() *CloudAccount {
@@ -287,7 +524,7 @@ type ListCloudAccountsRequest struct {
 
 func (x *ListCloudAccountsRequest) Reset() {
 	*x = ListCloudAccountsRequest{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[4]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -299,7 +536,7 @@ func (x *ListCloudAccountsRequest) String() string {
 func (*ListCloudAccountsRequest) ProtoMessage() {}
 
 func (x *ListCloudAccountsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[4]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -312,7 +549,7 @@ func (x *ListCloudAccountsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCloudAccountsRequest.ProtoReflect.Descriptor instead.
 func (*ListCloudAccountsRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListCloudAccountsRequest) GetTenantId() string {
@@ -332,7 +569,7 @@ type ListCloudAccountsResponse struct {
 
 func (x *ListCloudAccountsResponse) Reset() {
 	*x = ListCloudAccountsResponse{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[5]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +581,7 @@ func (x *ListCloudAccountsResponse) String() string {
 func (*ListCloudAccountsResponse) ProtoMessage() {}
 
 func (x *ListCloudAccountsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[5]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +594,7 @@ func (x *ListCloudAccountsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCloudAccountsResponse.ProtoReflect.Descriptor instead.
 func (*ListCloudAccountsResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{5}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListCloudAccountsResponse) GetAccounts() []*CloudAccount {
@@ -401,7 +638,7 @@ type CloudAccount struct {
 
 func (x *CloudAccount) Reset() {
 	*x = CloudAccount{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[6]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -413,7 +650,7 @@ func (x *CloudAccount) String() string {
 func (*CloudAccount) ProtoMessage() {}
 
 func (x *CloudAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[6]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -426,7 +663,7 @@ func (x *CloudAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudAccount.ProtoReflect.Descriptor instead.
 func (*CloudAccount) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{6}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CloudAccount) GetId() string {
@@ -513,7 +750,7 @@ type AwsAccount struct {
 
 func (x *AwsAccount) Reset() {
 	*x = AwsAccount{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +762,7 @@ func (x *AwsAccount) String() string {
 func (*AwsAccount) ProtoMessage() {}
 
 func (x *AwsAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +775,7 @@ func (x *AwsAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsAccount.ProtoReflect.Descriptor instead.
 func (*AwsAccount) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{7}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AwsAccount) GetAccountId() string {
@@ -579,7 +816,7 @@ type CloudAccountStatus struct {
 
 func (x *CloudAccountStatus) Reset() {
 	*x = CloudAccountStatus{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +828,7 @@ func (x *CloudAccountStatus) String() string {
 func (*CloudAccountStatus) ProtoMessage() {}
 
 func (x *CloudAccountStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +841,7 @@ func (x *CloudAccountStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudAccountStatus.ProtoReflect.Descriptor instead.
 func (*CloudAccountStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{8}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CloudAccountStatus) GetState() CloudAccountState {
@@ -653,7 +890,18 @@ var File_cloud_v1_tenant_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1dcloud/v1/tenant_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa0\x01\n" +
+	"\x1dcloud/v1/tenant_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x0f\n" +
+	"\rWhoAmIRequest\"\xc1\x01\n" +
+	"\x0eWhoAmIResponse\x12\x1c\n" +
+	"\tanonymous\x18\x01 \x01(\bR\tanonymous\x12\x18\n" +
+	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\x12\x16\n" +
+	"\x06issuer\x18\x04 \x01(\tR\x06issuer\x12\x14\n" +
+	"\x05roles\x18\x05 \x03(\tR\x05roles\x12-\n" +
+	"\x06grants\x18\x06 \x03(\v2\x15.cloud.v1.AccessGrantR\x06grants\"Q\n" +
+	"\vAccessGrant\x12(\n" +
+	"\x04role\x18\x01 \x01(\x0e2\x14.cloud.v1.AccessRoleR\x04role\x12\x18\n" +
+	"\atenants\x18\x02 \x03(\tR\atenants\"\xa0\x01\n" +
 	"\x16BootstrapTenantRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x128\n" +
 	"\aaccount\x18\x02 \x01(\v2\x16.cloud.v1.CloudAccountB\x06\xbaH\x03\xc8\x01\x01R\aaccount\"K\n" +
@@ -693,16 +941,23 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"conditions\x18\x04 \x03(\v2\x13.cloud.v1.ConditionR\n" +
 	"conditions\x12\x1a\n" +
 	"\bidentity\x18\x05 \x01(\tR\bidentity\x12F\n" +
-	"\x11managed_resources\x18\x06 \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources*\x9e\x01\n" +
+	"\x11managed_resources\x18\x06 \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources*\x86\x01\n" +
+	"\n" +
+	"AccessRole\x12\x1b\n" +
+	"\x17ACCESS_ROLE_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aACCESS_ROLE_PLATFORM_ADMIN\x10\x01\x12\x1c\n" +
+	"\x18ACCESS_ROLE_TENANT_ADMIN\x10\x02\x12\x1d\n" +
+	"\x19ACCESS_ROLE_TENANT_VIEWER\x10\x03*\x9e\x01\n" +
 	"\x11CloudAccountState\x12#\n" +
 	"\x1fCLOUD_ACCOUNT_STATE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!CLOUD_ACCOUNT_STATE_BOOTSTRAPPING\x10\x01\x12\x1d\n" +
 	"\x19CLOUD_ACCOUNT_STATE_READY\x10\x02\x12\x1e\n" +
-	"\x1aCLOUD_ACCOUNT_STATE_FAILED\x10\x032\xac\x02\n" +
+	"\x1aCLOUD_ACCOUNT_STATE_FAILED\x10\x032\xee\x02\n" +
 	"\rTenantService\x12[\n" +
 	"\x0fBootstrapTenant\x12 .cloud.v1.BootstrapTenantRequest\x1a!.cloud.v1.BootstrapTenantResponse\"\x03\x90\x02\x02\x12[\n" +
 	"\x0fGetCloudAccount\x12 .cloud.v1.GetCloudAccountRequest\x1a!.cloud.v1.GetCloudAccountResponse\"\x03\x90\x02\x01\x12a\n" +
-	"\x11ListCloudAccounts\x12\".cloud.v1.ListCloudAccountsRequest\x1a#.cloud.v1.ListCloudAccountsResponse\"\x03\x90\x02\x01B\xa2\x01\n" +
+	"\x11ListCloudAccounts\x12\".cloud.v1.ListCloudAccountsRequest\x1a#.cloud.v1.ListCloudAccountsResponse\"\x03\x90\x02\x01\x12@\n" +
+	"\x06WhoAmI\x12\x17.cloud.v1.WhoAmIRequest\x1a\x18.cloud.v1.WhoAmIResponse\"\x03\x90\x02\x01B\xa2\x01\n" +
 	"\fcom.cloud.v1B\x12TenantServiceProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -717,46 +972,54 @@ func file_cloud_v1_tenant_service_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_tenant_service_proto_rawDescData
 }
 
-var file_cloud_v1_tenant_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_cloud_v1_tenant_service_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_cloud_v1_tenant_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_cloud_v1_tenant_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_cloud_v1_tenant_service_proto_goTypes = []any{
-	(CloudAccountState)(0),            // 0: cloud.v1.CloudAccountState
-	(*BootstrapTenantRequest)(nil),    // 1: cloud.v1.BootstrapTenantRequest
-	(*BootstrapTenantResponse)(nil),   // 2: cloud.v1.BootstrapTenantResponse
-	(*GetCloudAccountRequest)(nil),    // 3: cloud.v1.GetCloudAccountRequest
-	(*GetCloudAccountResponse)(nil),   // 4: cloud.v1.GetCloudAccountResponse
-	(*ListCloudAccountsRequest)(nil),  // 5: cloud.v1.ListCloudAccountsRequest
-	(*ListCloudAccountsResponse)(nil), // 6: cloud.v1.ListCloudAccountsResponse
-	(*CloudAccount)(nil),              // 7: cloud.v1.CloudAccount
-	(*AwsAccount)(nil),                // 8: cloud.v1.AwsAccount
-	(*CloudAccountStatus)(nil),        // 9: cloud.v1.CloudAccountStatus
-	(*timestamppb.Timestamp)(nil),     // 10: google.protobuf.Timestamp
-	(*Condition)(nil),                 // 11: cloud.v1.Condition
-	(*ManagedResource)(nil),           // 12: cloud.v1.ManagedResource
+	(AccessRole)(0),                   // 0: cloud.v1.AccessRole
+	(CloudAccountState)(0),            // 1: cloud.v1.CloudAccountState
+	(*WhoAmIRequest)(nil),             // 2: cloud.v1.WhoAmIRequest
+	(*WhoAmIResponse)(nil),            // 3: cloud.v1.WhoAmIResponse
+	(*AccessGrant)(nil),               // 4: cloud.v1.AccessGrant
+	(*BootstrapTenantRequest)(nil),    // 5: cloud.v1.BootstrapTenantRequest
+	(*BootstrapTenantResponse)(nil),   // 6: cloud.v1.BootstrapTenantResponse
+	(*GetCloudAccountRequest)(nil),    // 7: cloud.v1.GetCloudAccountRequest
+	(*GetCloudAccountResponse)(nil),   // 8: cloud.v1.GetCloudAccountResponse
+	(*ListCloudAccountsRequest)(nil),  // 9: cloud.v1.ListCloudAccountsRequest
+	(*ListCloudAccountsResponse)(nil), // 10: cloud.v1.ListCloudAccountsResponse
+	(*CloudAccount)(nil),              // 11: cloud.v1.CloudAccount
+	(*AwsAccount)(nil),                // 12: cloud.v1.AwsAccount
+	(*CloudAccountStatus)(nil),        // 13: cloud.v1.CloudAccountStatus
+	(*timestamppb.Timestamp)(nil),     // 14: google.protobuf.Timestamp
+	(*Condition)(nil),                 // 15: cloud.v1.Condition
+	(*ManagedResource)(nil),           // 16: cloud.v1.ManagedResource
 }
 var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
-	7,  // 0: cloud.v1.BootstrapTenantRequest.account:type_name -> cloud.v1.CloudAccount
-	7,  // 1: cloud.v1.BootstrapTenantResponse.account:type_name -> cloud.v1.CloudAccount
-	7,  // 2: cloud.v1.GetCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
-	7,  // 3: cloud.v1.ListCloudAccountsResponse.accounts:type_name -> cloud.v1.CloudAccount
-	9,  // 4: cloud.v1.CloudAccount.status:type_name -> cloud.v1.CloudAccountStatus
-	10, // 5: cloud.v1.CloudAccount.create_time:type_name -> google.protobuf.Timestamp
-	10, // 6: cloud.v1.CloudAccount.update_time:type_name -> google.protobuf.Timestamp
-	8,  // 7: cloud.v1.CloudAccount.aws:type_name -> cloud.v1.AwsAccount
-	0,  // 8: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
-	11, // 9: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
-	12, // 10: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	1,  // 11: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
-	3,  // 12: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
-	5,  // 13: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
-	2,  // 14: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
-	4,  // 15: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
-	6,  // 16: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
-	14, // [14:17] is the sub-list for method output_type
-	11, // [11:14] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	4,  // 0: cloud.v1.WhoAmIResponse.grants:type_name -> cloud.v1.AccessGrant
+	0,  // 1: cloud.v1.AccessGrant.role:type_name -> cloud.v1.AccessRole
+	11, // 2: cloud.v1.BootstrapTenantRequest.account:type_name -> cloud.v1.CloudAccount
+	11, // 3: cloud.v1.BootstrapTenantResponse.account:type_name -> cloud.v1.CloudAccount
+	11, // 4: cloud.v1.GetCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
+	11, // 5: cloud.v1.ListCloudAccountsResponse.accounts:type_name -> cloud.v1.CloudAccount
+	13, // 6: cloud.v1.CloudAccount.status:type_name -> cloud.v1.CloudAccountStatus
+	14, // 7: cloud.v1.CloudAccount.create_time:type_name -> google.protobuf.Timestamp
+	14, // 8: cloud.v1.CloudAccount.update_time:type_name -> google.protobuf.Timestamp
+	12, // 9: cloud.v1.CloudAccount.aws:type_name -> cloud.v1.AwsAccount
+	1,  // 10: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
+	15, // 11: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
+	16, // 12: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	5,  // 13: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
+	7,  // 14: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
+	9,  // 15: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
+	2,  // 16: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
+	6,  // 17: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
+	8,  // 18: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
+	10, // 19: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
+	3,  // 20: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
+	17, // [17:21] is the sub-list for method output_type
+	13, // [13:17] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_tenant_service_proto_init() }
@@ -766,7 +1029,7 @@ func file_cloud_v1_tenant_service_proto_init() {
 	}
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
-	file_cloud_v1_tenant_service_proto_msgTypes[6].OneofWrappers = []any{
+	file_cloud_v1_tenant_service_proto_msgTypes[9].OneofWrappers = []any{
 		(*CloudAccount_Aws)(nil),
 	}
 	type x struct{}
@@ -774,8 +1037,8 @@ func file_cloud_v1_tenant_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_tenant_service_proto_rawDesc), len(file_cloud_v1_tenant_service_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

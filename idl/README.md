@@ -51,9 +51,15 @@ a whole. What individual fields and values are refused is listed under
 [Declared but not implemented](#declared-but-not-implemented).
 
 All tenant-facing RPCs carry `tenant_id` (a DNS label of at most 56
-characters, so the namespace `tenant-<tenant_id>` fits 63). Callers are
-not authenticated yet: the server takes `tenant_id` as given, and the
-service comments say so.
+characters, so the namespace `tenant-<tenant_id>` fits 63). Where the
+server authenticates its callers (`auth.mode` optional or required, see
+[docs/authentication.md](../docs/authentication.md)), the caller's OIDC
+bearer token must give it a role for that tenant: a viewer may call the
+RPCs marked `NO_SIDE_EFFECTS`, a tenant admin all of the tenant's, a
+platform admin everything, including `AdminService`. A call the role does
+not allow is `PERMISSION_DENIED`; one without an accepted token is
+`UNAUTHENTICATED`. With `auth.mode: none` (the default) the server takes
+`tenant_id` as given.
 
 ### TenantService
 
@@ -62,6 +68,7 @@ service comments say so.
 | `BootstrapTenant` | Registers one cloud account of the tenant (creating the tenant if needed), stores it, and creates the tenant namespace and the account's `ProviderConfig` in the management cluster. Idempotent per account. |
 | `GetCloudAccount` | Returns one account by its bootstrap ID (`CloudAccount.id`). |
 | `ListCloudAccounts` | Lists the tenant's accounts, ordered by provider then account ID. Not paginated. |
+| `WhoAmI` | Returns the caller as the server sees it: subject, username, issuer, the token's roles and the grants the server's rules give. Open to every accepted caller; anonymous where the server does not authenticate. |
 
 ### NetworkService
 
@@ -497,7 +504,9 @@ interceptor map to the same codes.
 | `NOT_FOUND` | The network, cluster or account does not exist in the tenant. |
 | `ALREADY_EXISTS` | A cluster of the platform with that name in the account and region; a VPC that a network already stands for (also a blocked or failed import); a reused `request_id`. |
 | `ABORTED` | The `etag` does not match, or the resource changed while the call ran. Get it again and retry. |
-| `UNAVAILABLE` | The management cluster cannot be reached. |
+| `UNAVAILABLE` | The management cluster cannot be reached; or, where the server authenticates, the token's issuer cannot be reached to verify it. |
+| `UNAUTHENTICATED` | Where the server authenticates: no bearer token, or one that is not accepted (expired, another issuer or audience, a bad signature). HTTP 401 with `WWW-Authenticate: Bearer`. |
+| `PERMISSION_DENIED` | Where the server authenticates: the caller's roles do not allow the call for the tenant the request names. Also a platform component a tenant tries to change. |
 | `UNIMPLEMENTED` | Valid in the contract and not built: a provider other than AWS, `REGIONAL` NAT, updating the authentication mode. Also a binary `CreateCluster` that still carries the removed `ClusterSpec` field 7 (`existing_cluster`). |
 | `INTERNAL` | The platform failed. The message carries no detail; the cause is in the server log. |
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/management"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -28,11 +29,20 @@ func newServeCmd(g *globals) *cobra.Command {
 			"CloudAccount, Network and Cluster objects in the tenants' namespaces of\n" +
 			"the management cluster. It reconciles nothing, installs nothing and\n" +
 			"makes no AWS call: `cluster-vending controller` does, and installs the\n" +
-			"custom resource definitions the server waits for at startup.",
+			"custom resource definitions the server waits for at startup.\n\n" +
+			"Who may call the API is the \"auth\" section of the settings file\n" +
+			"(--config): OIDC issuers whose bearer tokens are accepted and the rules\n" +
+			"that give their callers roles. Without it nothing is authenticated\n" +
+			"(docs/authentication.md).",
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationSettingsFile: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.LoadServe(changedFlags(cmd.Flags()), os.LookupEnv, g.file)
+			if err != nil {
+				return err
+			}
+			// Who may call the API: the "auth" section of the settings file.
+			authCfg, err := config.AuthFrom(changedFlags(cmd.Flags()), os.LookupEnv)
 			if err != nil {
 				return err
 			}
@@ -83,7 +93,9 @@ func newServeCmd(g *globals) *cobra.Command {
 					cancel()
 				}
 			}()
-			return server.Run(ctx, ln, server.NewHandler(deps, ready.Load), cfg.ShutdownTimeout, g.logger)
+			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
+			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)))
+			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}
 	addFlags(cmd.Flags(), config.ServeSettings())

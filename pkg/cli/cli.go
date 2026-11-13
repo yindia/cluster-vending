@@ -95,12 +95,21 @@ type Clients struct {
 }
 
 // NewClients returns clients of the API at server (a base URL) over
-// httpClient; nil uses a client with requestTimeout.
-func NewClients(server string, httpClient *http.Client) Clients {
+// httpClient; nil uses a client with requestTimeout. With WithToken every
+// call carries a bearer token (auth.go).
+func NewClients(server string, httpClient *http.Client, opts ...ClientOption) Clients {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: requestTimeout}
 	}
-	c := connect.NewClient(connecthttp.NewTransport(httpClient, server))
+	var o clientOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	var interceptors []connect.ClientInterceptor
+	if o.token != nil {
+		interceptors = append(interceptors, bearerToken(server, o.token))
+	}
+	c := connect.NewClient(connecthttp.NewTransport(httpClient, server), interceptors...)
 	return Clients{
 		Tenant:  cloudv1connect.NewTenantServiceClient(c),
 		Network: cloudv1connect.NewNetworkServiceClient(c),

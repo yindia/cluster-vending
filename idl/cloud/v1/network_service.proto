@@ -13,8 +13,8 @@ import "google/protobuf/field_mask.proto";
 // built with Terraform) and takes it over so the previous tool can be
 // removed. Clusters reference networks through ClusterSpec.network.network_id.
 //
-// Like ClusterService, every RPC is scoped by tenant_id (not authenticated
-// yet, see ClusterService), and mutations are asynchronous: poll GetNetwork
+// Like ClusterService, every RPC is scoped by tenant_id (and authorized
+// for it, see ClusterService), and mutations are asynchronous: poll GetNetwork
 // until status.observed_generation catches up and status.state is READY.
 service NetworkService {
   // Creates a network.

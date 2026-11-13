@@ -15,7 +15,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/iam v1.64.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.9
 	github.com/aws/smithy-go v1.28.9
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crossplane/crossplane/apis/v2 v2.4.3
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-logr/logr v1.4.4
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.24.0

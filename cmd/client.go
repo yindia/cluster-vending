@@ -73,7 +73,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				if v.table && !cmd.Flags().Changed("output") {
 					output = cli.OutputTable
 				}
-				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil), opts, cmd.OutOrStdout(), output)
+				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken)), opts, cmd.OutOrStdout(), output)
 			},
 		}
 		f := cmd.Flags()

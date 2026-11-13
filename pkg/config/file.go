@@ -21,6 +21,9 @@ import (
 // Values are scalars (strings, numbers, booleans, durations such as 30s).
 // Unknown keys, lists, null values and the "config" key itself are errors.
 // Keep secrets in the environment: it wins over the file.
+//
+// The top-level "auth" section is not a setting: it is the API server's
+// authentication, read by LoadAuth.
 func LoadFile(path string) (LookupFunc, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -71,6 +74,9 @@ func flatten(n *yaml.Node, prefix string, out map[string]string) error {
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		key := n.Content[i].Value
+		if prefix == "" && key == SectionAuth {
+			continue // not a setting: LoadAuth reads it
+		}
 		if prefix != "" {
 			key = prefix + "-" + key
 		}

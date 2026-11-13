@@ -33,6 +33,9 @@ const (
 	Unimplemented
 	// PermissionDenied: the caller may not do this, whatever the input.
 	PermissionDenied
+	// Unauthenticated: the caller did not prove who it is (no token, or one
+	// that is not accepted).
+	Unauthenticated
 )
 
 // Error is an error with a Kind and a message for the caller.

@@ -48,7 +48,7 @@ func TestToConnectMapsFaults(t *testing.T) {
 		fault.FailedPrecondition: connect.CodeFailedPrecondition, fault.Unavailable: connect.CodeUnavailable,
 		fault.NotFound: connect.CodeNotFound, fault.AlreadyExists: connect.CodeAlreadyExists,
 		fault.Aborted: connect.CodeAborted, fault.Unimplemented: connect.CodeUnimplemented,
-		fault.PermissionDenied: connect.CodePermissionDenied,
+		fault.PermissionDenied: connect.CodePermissionDenied, fault.Unauthenticated: connect.CodeUnauthenticated,
 	} {
 		err := ToConnect(fmt.Errorf("apply: %w", fault.New(kind, "what the caller reads")))
 		var codeErr *connect.Error

@@ -15,9 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/admin"
+	"github.com/yindia/cluster-vending/pkg/server/authn"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -30,6 +32,18 @@ import (
 // request because streaming RPCs are long-lived.
 const readHeaderTimeout = 10 * time.Second
 
+// Option adjusts NewHandler.
+type Option func(*options)
+
+type options struct{ auth authn.Options }
+
+// WithAuth makes the API authenticate its callers in mode, with verifier
+// checking their bearer tokens (auth.NewVerifier). Mode none needs no
+// verifier.
+func WithAuth(mode auth.Mode, verifier authn.Verifier) Option {
+	return func(o *options) { o.auth.Mode, o.auth.Verifier = mode, verifier }
+}
+
 // NewHandler registers every cloud.v1 service and returns the HTTP handler
 // that serves them over Connect, gRPC and gRPC-Web, including the
 // server-streaming Watch RPCs.
@@ -38,8 +52,16 @@ const readHeaderTimeout = 10 * time.Second
 // (ready reports true: the management cluster cache has synced; nil
 // counts as ready), and /metrics (Prometheus: controller-runtime's client
 // and cache metrics).
-func NewHandler(d reconcile.Deps, ready func() bool) http.Handler {
-	server := connect.NewServer(service.Faults)
+//
+// Without WithAuth nothing is authenticated: every caller is anonymous.
+func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	o.auth.Logger = d.Logger
+	// Faults outermost: the authentication answers with faults too.
+	server := connect.NewServer(service.Faults, authn.Interceptor(o.auth))
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d))

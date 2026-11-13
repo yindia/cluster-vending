@@ -5,7 +5,9 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 
 // AdminService holds operations of the platform's operators, not of
-// tenants. Expose it to administrators only.
+// tenants. Where the server authenticates, its RPCs need the platform
+// admin role, whatever tenant the request names; with auth.mode none,
+// expose it to administrators only.
 service AdminService {
   // Pauses Crossplane's reconciliation of a tenant's managed resources, or
   // of one cluster's: every one of them gets the crossplane.io/paused

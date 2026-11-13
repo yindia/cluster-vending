@@ -20,12 +20,15 @@ last column were checked with `go list -deps`.
 | `pkg/reconcile/network`, `pkg/reconcile/cluster`, `pkg/reconcile/account` | A `Reconciler` each: moves one stored network, cluster or account towards its spec (apply, staging, delete, takeover, status). They also build the row a create or an import stores (`NewRow`, `NewImportRow`), and they are the only code that looks at AWS: the discovery of an import, the EKS name check and the version resolution. | Same as `pkg/reconcile`. |
 | `pkg/management` | Prepares the management cluster for the two commands: the manager whose cache both read from, the store on the platform's kinds, and, for what reconciles only, the Crossplane providers, the CRDs and the AWS lookups (`WithAWS`). | No RPC library, no `pkg/server`. |
 | `pkg/server/network`, `pkg/server/cluster`, `pkg/server/tenant` | RPC handlers only: validate, read and write rows, map errors to Connect codes. They use the reconcilers to check a request against the store and to read. They make no AWS call, and the network and cluster handlers write nothing to the management cluster (the tenant handler still applies an account's namespace and ProviderConfig itself). | May import everything above. |
-| `pkg/server/service` | What handlers share: request validation, `ToConnect` (repository errors and faults to Connect codes), the `Faults` interceptor. | The only shared package that imports the RPC library. |
+| `pkg/server/service` | What handlers share: request validation, `ToConnect` (repository errors and faults to Connect codes), the `Faults` interceptor. | Imports the RPC library; nothing below the handlers does. |
+| `pkg/auth` | Who may call the API: the `auth` section of the server's settings, the verification of an OIDC bearer token (go-oidc), the caller it stands for, and what each RPC needs (read or write from its `idempotency_level`, the tenant from its `tenant_id`). See [authentication.md](authentication.md). | No RPC library, no storage. `authtest` is its fake issuer for tests. |
+| `pkg/server/authn` | The server interceptor that applies `pkg/auth` to requests: reads the bearer token, has it verified, refuses what the caller's roles do not allow, logs writes. Handlers read the caller from the context. | Imports the RPC library and `pkg/auth`. |
 | `pkg/database` | `repository` is the storage interface, `model` its rows. `cloudstore` is the one store, on the controller's kinds in the management cluster. `storetest` is the behaviour suite it runs, and the store fixture of every test that needs one. | `repository` and `model` import nothing else from the repository. |
 | `pkg/cloud/aws` | Read-only AWS lookups for imports and checks, always as the tenant role of the account they read. Called by the reconcilers only. | Imports only `pkg/constant/aws`. |
 | `pkg/kube` | Client, scheme and server-side apply. | No storage, no RPC library. |
 | `api/`, `pkg/controller`, `pkg/convert`, `pkg/owner`, `config/` | The kubebuilder project (`PROJECT` at the root): API types (`api/v1alpha1`), their conversion to the contract, the controllers and the manager (`pkg/controller/manager`), CRDs and deploy manifests for the controller and the server. | The types import nothing from `pkg/`; the controllers and the manager import `pkg/reconcile`, `pkg/database/cloudstore` and `pkg/management`. Nothing in them imports `pkg/server`. |
 | `pkg/cli`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin and has no tests. | `pkg/cli` imports only the generated client. |
+| `pkg/cli/login` | The CLI's login at an OIDC issuer (device code, or the browser with PKCE), the token file, and the token source that refreshes it. | Imports `pkg/auth` for the Entra issuer URL only. |
 
 What the table would otherwise hide:
 
@@ -269,6 +272,9 @@ it exists, that is said.
 
 ## What is not verified
 
+- Authentication has only run against a fake OIDC issuer: no real
+  Microsoft Entra ID tenant, Keycloak or Okta has issued a token the
+  server verified, and the CLI's login has not been used against one.
 - Nothing has run against a real AWS account or real Crossplane providers.
   In particular the unit tests' API server has no Usage webhook, so ordered
   cloud deletion through Usages is untested.

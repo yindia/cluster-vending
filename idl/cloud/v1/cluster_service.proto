@@ -11,9 +11,13 @@ import "google/protobuf/field_mask.proto";
 
 // ClusterService manages the lifecycle of tenant clusters.
 //
-// Every RPC is scoped by tenant_id. Callers are not authenticated yet: the
-// server takes tenant_id as given, so the API must not be reachable by
-// anyone who may not act for every tenant.
+// Every RPC is scoped by tenant_id. Where the server authenticates (its
+// auth.mode is optional or required), the caller's bearer token must give
+// it a role for that tenant: any role for the RPCs marked NO_SIDE_EFFECTS,
+// tenant admin (or platform admin) for the others; otherwise
+// PERMISSION_DENIED, or UNAUTHENTICATED without an accepted token. With
+// auth.mode none the server takes tenant_id as given, so the API must then
+// not be reachable by anyone who may not act for every tenant.
 //
 // Mutations are asynchronous: they return as soon as the desired state is
 // recorded, and callers poll GetCluster until status.observed_generation

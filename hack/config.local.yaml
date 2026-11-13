@@ -10,3 +10,15 @@ context: kind-cluster-vending
 log-format: text
 log-level: debug
 http-addr: 127.0.0.1:8080
+# Authentication is off (mode none) unless an auth section says otherwise:
+# every caller may then act for every tenant, which is what a local run
+# wants. To try it, uncomment and fill in (docs/authentication.md):
+# auth:
+#   mode: optional            # none | optional | required
+#   issuers:
+#   - name: entra
+#     audiences: ["<the API's client ID>", "api://<the API's client ID>"]
+#     entra: {tenantId: "<directory ID>", acceptV1: true}
+#   rules:
+#   - {match: {issuer: entra, role: Platform.Admin}, grant: {role: PlatformAdmin}}
+#   - {match: {issuer: entra, role: Acme.Admin}, grant: {role: TenantAdmin, tenants: [acme]}}

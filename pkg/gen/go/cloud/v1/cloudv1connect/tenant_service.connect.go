@@ -33,6 +33,8 @@ const (
 	// TenantServiceListCloudAccountsProcedure is the procedure name of the TenantService's
 	// ListCloudAccounts RPC.
 	TenantServiceListCloudAccountsProcedure = "/cloud.v1.TenantService/ListCloudAccounts"
+	// TenantServiceWhoAmIProcedure is the procedure name of the TenantService's WhoAmI RPC.
+	TenantServiceWhoAmIProcedure = "/cloud.v1.TenantService/WhoAmI"
 )
 
 var (
@@ -57,6 +59,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("ListCloudAccounts"),
 			Procedure:        TenantServiceListCloudAccountsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceWhoAmISpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("WhoAmI"),
+			Procedure:        TenantServiceWhoAmIProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -93,6 +103,11 @@ type TenantServiceClient interface {
 	// Lists the tenant's bootstrapped accounts, ordered by provider then
 	// account ID.
 	ListCloudAccounts(context.Context, *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error)
+	// Returns the caller as the server sees it: who its token stands for and
+	// what the server's rules let it do. Any accepted caller may ask. Where
+	// the server does not authenticate (auth.mode none, or optional and no
+	// token sent) the caller is anonymous and may do everything.
+	WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error)
 }
 
 // NewTenantServiceClient constructs a client for the cloud.v1.TenantService service. Multiple
@@ -132,6 +147,11 @@ type TenantServiceHandler interface {
 	// Lists the tenant's bootstrapped accounts, ordered by provider then
 	// account ID.
 	ListCloudAccounts(context.Context, *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error)
+	// Returns the caller as the server sees it: who its token stands for and
+	// what the server's rules let it do. Any accepted caller may ask. Where
+	// the server does not authenticate (auth.mode none, or optional and no
+	// token sent) the caller is anonymous and may do everything.
+	WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error)
 }
 
 // RegisterTenantServiceHandler registers svc as the cloud.v1.TenantService implementation on
@@ -142,6 +162,7 @@ func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandl
 		connect.Method{Spec: tenantServiceBootstrapTenantSpec(), Handler: adapter.bootstrapTenant},
 		connect.Method{Spec: tenantServiceGetCloudAccountSpec(), Handler: adapter.getCloudAccount},
 		connect.Method{Spec: tenantServiceListCloudAccountsSpec(), Handler: adapter.listCloudAccounts},
+		connect.Method{Spec: tenantServiceWhoAmISpec(), Handler: adapter.whoAmI},
 	)
 }
 
@@ -158,6 +179,10 @@ func (UnimplementedTenantServiceHandler) GetCloudAccount(context.Context, *v1.Ge
 
 func (UnimplementedTenantServiceHandler) ListCloudAccounts(context.Context, *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.ListCloudAccounts is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.WhoAmI is not implemented")
 }
 
 type tenantServiceClient struct {
@@ -183,6 +208,14 @@ func (c *tenantServiceClient) GetCloudAccount(ctx context.Context, req *v1.GetCl
 func (c *tenantServiceClient) ListCloudAccounts(ctx context.Context, req *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error) {
 	var res v1.ListCloudAccountsResponse
 	if err := c.client.CallUnary(ctx, tenantServiceListCloudAccountsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) WhoAmI(ctx context.Context, req *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error) {
+	var res v1.WhoAmIResponse
+	if err := c.client.CallUnary(ctx, tenantServiceWhoAmISpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -220,6 +253,18 @@ func (h tenantServiceHandler) listCloudAccounts(ctx context.Context, _ connect.S
 		return err
 	}
 	res, err := h.svc.ListCloudAccounts(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) whoAmI(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.WhoAmIRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.WhoAmI(ctx, &req)
 	if err != nil {
 		return err
 	}

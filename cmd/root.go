@@ -38,7 +38,8 @@ func NewRootCmd() *cobra.Command {
 		Short: "Vend Kubernetes clusters and networks through Crossplane",
 		Long: "cluster-vending serves the cloud.v1 Connect API (TenantService,\n" +
 			"NetworkService and ClusterService) and turns its requests into Crossplane\n" +
-			"resources (serve), and calls that API (bootstrap, network, cluster).\n\n" +
+			"resources (serve), and calls that API (bootstrap, network, cluster),\n" +
+			"as the user logged in with login where the API authenticates.\n\n" +
 			"Every flag can also be set through the environment variable shown in its\n" +
 			"help. serve also reads a YAML settings file given with --config (keys are\n" +
 			"flag names); a flag wins over the variable, which wins over the file.",
@@ -81,6 +82,9 @@ func NewRootCmd() *cobra.Command {
 		newNetworkCmd(),
 		newClusterCmd(),
 		newAdminCmd(),
+		newLoginCmd(),
+		newLogoutCmd(),
+		newWhoamiCmd(),
 	)
 	return root
 }

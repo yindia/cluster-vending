@@ -7,9 +7,10 @@ network or EKS cluster that something else built, read-only at first, and
 then take it over.
 
 The repository holds one binary with three roles: an API server (`serve`), a
-CLI that calls it (`bootstrap`, `network`, `cluster`, `admin`), and a
-controller manager (`controller`) that reconciles the same resources when
-they are kept as custom resources.
+CLI that calls it (`bootstrap`, `network`, `cluster`, `admin`, and `login`,
+`logout`, `whoami` where the server authenticates), and a controller manager
+(`controller`) that reconciles the same resources when they are kept as
+custom resources.
 
 Nothing here has run against a real AWS account. See
 [docs/architecture.md](docs/architecture.md) for what is built, what is
@@ -133,6 +134,9 @@ cluster as objects of its kinds.
 - [docs/oidc.md](docs/oidc.md): signing in to a cluster's Kubernetes API
   through an OIDC identity provider (Microsoft Entra ID or any other), and
   the kubeconfig for it.
+- [docs/authentication.md](docs/authentication.md): OIDC authentication of
+  the API (off by default), roles per tenant, Microsoft Entra ID setup and
+  the CLI's `login`.
 - [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
   API versions in workload clusters are found and shown.
 - [docs/controller.md](docs/controller.md): the kubebuilder project and

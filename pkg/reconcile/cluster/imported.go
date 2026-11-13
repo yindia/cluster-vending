@@ -155,8 +155,9 @@ func (s *Reconciler) nothingCarriedOver(ctx context.Context, row *model.Cluster)
 // the cluster already carries over from its import: the IAM OIDC provider
 // (spec.aws.irsa) and the control plane's log group, both rendered under
 // the carried-over object's name, without its cloud identity; and the
-// OIDC identity provider (spec.access.oidc), of which EKS takes one per
-// cluster.
+// OIDC identity provider (spec.access.oidc), of which the platform manages
+// one per cluster (EKS itself takes one before Kubernetes 1.32, and wants
+// issuers unique after).
 func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec) error {
 	irsa, logGroup := spec.GetAws().GetIrsa(), spec.GetAws().GetControlPlaneLogGroup().GetEnabled()
 	oidc := spec.GetAccess().GetOidc() != nil
@@ -178,7 +179,7 @@ func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster
 				"spec.aws.control_plane_log_group: the cluster already has the log group it was imported with ("+r.Name+"); it stays as it is")
 		case oidc && r.Kind == "IdentityProviderConfig":
 			return fault.New(fault.FailedPrecondition,
-				"spec.access.oidc: the cluster already has the OIDC identity provider it was imported with ("+r.Name+"), and EKS takes one per cluster; it stays as it is")
+				"spec.access.oidc: the cluster already has the OIDC identity provider it was imported with ("+r.Name+"), and the platform manages one per cluster; it stays as it is")
 		}
 	}
 	return nil

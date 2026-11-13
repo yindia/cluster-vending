@@ -22,8 +22,8 @@ type verb struct {
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
 	// table: the verb prints a table unless --output says otherwise;
-	// removed adds --only-removed.
-	table, removed bool
+	// removed adds --only-removed, oidc --oidc.
+	table, removed, oidc bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -109,6 +109,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.removed {
 			f.BoolVar(&o.OnlyRemoved, "only-removed", false, "only the objects whose API version is removed at the target version")
 		}
+		if v.oidc {
+			f.BoolVar(&o.OIDC, "oidc", false, "the user signs in through the cluster's OIDC identity provider (spec.access.oidc), with kubectl oidc-login")
+		}
 		if v.cluster {
 			f.StringVar(&o.Cluster, "cluster", "", "only this cluster's resources (cluster ID); default: all the tenant's")
 		}
@@ -163,6 +166,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
 			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, table: true, removed: true},
+		verb{use: "kubeconfig <id>", short: "Print a kubeconfig for the cluster's Kubernetes API; --oidc: users sign in through its OIDC identity provider (no credential in the file)",
+			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		watchVerb("cluster", cli.ClusterWatch))
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
 }

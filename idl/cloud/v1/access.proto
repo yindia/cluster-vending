@@ -42,11 +42,11 @@ message AccessSpec {
   repeated AccessEntry access_entries = 2 [(buf.validate.field).repeated.max_items = 50];
 
   // AWS: an OIDC identity provider the Kubernetes API accepts tokens from,
-  // next to IAM. Unset: IAM only. A cluster takes one. Mutable: set,
-  // changed or removed without touching the cluster; EKS cannot change an
-  // association in place, so a change removes it and associates the new
-  // one (each takes EKS several minutes, and tokens are refused in
-  // between). Works with every authentication_mode. A user it
+  // next to IAM. Unset: IAM only. The platform manages one per
+  // cluster. Mutable: set, changed or removed without touching the
+  // cluster; EKS cannot change an association in place, so a change
+  // removes it and associates the new one (each takes EKS several
+  // minutes, and the provider's tokens are refused in between). Works with every authentication_mode. A user it
   // authenticates has no permissions until a (Cluster)RoleBinding names
   // the user or one of its groups: the platform creates none.
   //   AWS   one IdentityProviderConfig, created once the cluster is ACTIVE
@@ -60,28 +60,46 @@ message AccessSpec {
 }
 
 // OidcIdentityProvider is an OIDC identity provider of the Kubernetes API
-// (EKS: IdentityProviderConfig.oidc).
+// (EKS: IdentityProviderConfig.oidc). Either entra (Microsoft Entra ID:
+// the platform fills in the issuer and the claims) or issuer_url and
+// client_id with the claims of any other provider.
 message OidcIdentityProvider {
-  // Name of the association (identityProviderConfigName).
-  string name = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 100
-    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
-  }];
+  option (buf.validate.message).cel = {
+    id: "oidc.generic_or_entra"
+    message: "set either entra, or name, issuer_url and client_id"
+    expression: "has(this.entra) || (this.name != '' && this.issuer_url != '' && this.client_id != '')"
+  };
+  option (buf.validate.message).cel = {
+    id: "oidc.entra_alone"
+    message: "entra fills in the issuer, the client and the claims: leave issuer_url, client_id, username_claim, username_prefix, groups_claim and groups_prefix unset"
+    expression: "!has(this.entra) || (this.issuer_url == '' && this.client_id == '' && this.username_claim == '' && this.username_prefix == '' && this.groups_claim == '' && this.groups_prefix == '')"
+  };
+
+  // Name of the provider. The EKS association is named
+  // "<name>-<hash8 of its settings>": EKS cannot change an association,
+  // so a changed provider is a new association under a new name. Required
+  // without entra; with entra it defaults to "entra".
+  string name = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 91
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    }
+  ];
 
   // The issuer: the "iss" claim of its tokens, e.g.
   // "https://example.okta.com". HTTPS, and reachable from the internet:
   // EKS reads its discovery document.
-  string issuer_url = 2 [(buf.validate.field).string = {
-    max_len: 2048
-    pattern: "^https://[^\\s?#]+$"
-  }];
+  string issuer_url = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 2048
+      pattern: "^https://[^\\s?#]+$"
+    }
+  ];
 
   // The client the tokens are issued to: their "aud" claim.
-  string client_id = 3 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
+  string client_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // The claim that is the Kubernetes user name. Unset: EKS uses "sub".
   string username_claim = 4 [(buf.validate.field).string.max_len = 255];
@@ -119,6 +137,30 @@ message OidcIdentityProvider {
       }
     }
   }];
+
+  // Microsoft Entra ID (Azure AD) as the provider, from its tenant and
+  // the app registration's client ID alone.
+  EntraIdentityProvider entra = 9;
+}
+
+// EntraIdentityProvider is Microsoft Entra ID as a cluster's OIDC identity
+// provider. The platform sets:
+//
+//   issuer      https://login.microsoftonline.com/<tenant_id>/v2.0
+//   user name   the "oid" claim (the user's object ID: immutable, the same
+//               for every application), as "entra:<oid>"
+//   groups      the "groups" claim (group object IDs), as
+//               "entra:<group object id>"
+//
+// Another user name claim (upn, email, preferred_username: all mutable) is
+// only possible with issuer_url and client_id instead of entra.
+message EntraIdentityProvider {
+  // The directory (tenant) ID.
+  string tenant_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // The application (client) ID of the app registration: the "aud" claim
+  // of its ID tokens.
+  string client_id = 2 [(buf.validate.field).string.uuid = true];
 }
 
 // AccessEntryType is AccessEntry.type: what kind of principal the entry is

@@ -49,6 +49,11 @@ func mutate(f func(s *cloudv1.ClusterSpec, r *cloudv1.CreateClusterRequest)) *cl
 // useNetwork points the cluster at a platform Network.
 func useNetwork(s *cloudv1.ClusterSpec, id string) { s.Network.NetworkId = id }
 
+// entraProvider is a Microsoft Entra ID tenant and app registration.
+func entraProvider() *cloudv1.EntraIdentityProvider {
+	return &cloudv1.EntraIdentityProvider{TenantId: "833ced3d-cb2e-41de-92f1-29e2af035ddc", ClientId: "00001111-aaaa-2222-bbbb-3333cccc4444"}
+}
+
 func TestCreateClusterRequestValidation(t *testing.T) {
 	type spec = cloudv1.ClusterSpec
 	type req = cloudv1.CreateClusterRequest
@@ -215,6 +220,42 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "oidc system: groups prefix", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com",
 				ClientId: "kubernetes", GroupsPrefix: "system:"}}
+		})},
+		{name: "oidc without an issuer", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", ClientId: "kubernetes"}}
+		})},
+		{name: "oidc name longer than 91", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: strings.Repeat("a", 92),
+				IssuerUrl: "https://example.okta.com", ClientId: "kubernetes"}}
+		})},
+		// Microsoft Entra ID: the tenant and the client alone.
+		{name: "oidc entra", req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Entra: entraProvider()}}
+		})},
+		{name: "oidc entra with a name and required claims", req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Name: "corp", Entra: entraProvider(),
+				RequiredClaims: map[string]string{"tid": entraProvider().GetTenantId()}}}
+		})},
+		{name: "oidc entra and an issuer", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Entra: entraProvider(),
+				IssuerUrl: "https://login.microsoftonline.com/common/v2.0"}}
+		})},
+		{name: "oidc entra and a client id of its own", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Entra: entraProvider(), ClientId: "kubernetes"}}
+		})},
+		{name: "oidc entra and another user name claim", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Entra: entraProvider(), UsernameClaim: "upn"}}
+		})},
+		{name: "oidc entra and a groups prefix", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{Entra: entraProvider(), GroupsPrefix: "aad:"}}
+		})},
+		{name: "oidc entra tenant is not a GUID", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{
+				Entra: &cloudv1.EntraIdentityProvider{TenantId: "contoso.onmicrosoft.com", ClientId: entraProvider().GetClientId()}}}
+		})},
+		{name: "oidc entra without a client", wantErr: true, req: mutate(func(s *spec, _ *req) {
+			s.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{
+				Entra: &cloudv1.EntraIdentityProvider{TenantId: entraProvider().GetTenantId()}}}
 		})},
 	}
 

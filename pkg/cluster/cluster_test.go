@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"reflect"
 	"testing"
 
 	"k8s.io/utils/ptr"
@@ -199,6 +200,28 @@ func TestResolveOptions(t *testing.T) {
 // A cluster nobody classified is tier 0; a chosen tier is kept.
 // An unset upgrade mode is manual; a chosen one is kept. An unset release
 // channel stays unset: it only means STABLE for an automatic cluster.
+// Microsoft Entra ID is planned as the issuer and the claims the platform
+// fills in; the stored spec keeps the tenant and the client only.
+func TestEntraIdentityProviderPlan(t *testing.T) {
+	const tenant, app = "833ced3d-cb2e-41de-92f1-29e2af035ddc", "00001111-aaaa-2222-bbbb-3333cccc4444"
+	in := minimalSpec()
+	in.Access = &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{
+		Entra: &cloudv1.EntraIdentityProvider{TenantId: tenant, ClientId: app}}}
+	got := mustResolve(t, in, []string{"use1-az1", "use1-az2"})
+
+	p := RenderPlan(got, []string{"subnet-a"}, crossplaneaws.ClusterPlan{Prefix: "prod", ClusterName: "prod"})
+
+	want := crossplaneaws.IdentityProviderPlan{Name: "entra", ClientID: app,
+		IssuerURL:     "https://login.microsoftonline.com/" + tenant + "/v2.0",
+		UsernameClaim: "oid", UsernamePrefix: "entra:", GroupsClaim: "groups", GroupsPrefix: "entra:"}
+	if p.IdentityProvider == nil || !reflect.DeepEqual(*p.IdentityProvider, want) {
+		t.Errorf("plan = %+v, want %+v", p.IdentityProvider, want)
+	}
+	if o := got.GetAccess().GetOidc(); o.GetIssuerUrl() != "" || o.GetUsernameClaim() != "" || o.GetEntra().GetTenantId() != tenant {
+		t.Errorf("the resolved spec = %v, want the tenant and the client as given", o)
+	}
+}
+
 func TestResolveSpecDefaultsTheUpgradeMode(t *testing.T) {
 	for in, want := range map[cloudv1.UpgradeMode]cloudv1.UpgradeMode{
 		cloudv1.UpgradeMode_UPGRADE_MODE_UNSPECIFIED: cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL,

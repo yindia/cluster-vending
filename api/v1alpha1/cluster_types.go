@@ -325,25 +325,36 @@ type AccessSpec struct {
 }
 
 // OIDCIdentityProvider is an OIDC identity provider of the Kubernetes API
-// (EKS: IdentityProviderConfig.oidc).
+// (EKS: IdentityProviderConfig.oidc): either entra (Microsoft Entra ID,
+// the platform fills in the issuer and the claims) or issuerURL and
+// clientID with the claims of any other provider.
+// +kubebuilder:validation:XValidation:rule="has(self.entra) || (has(self.name) && has(self.issuerURL) && has(self.clientID))",message="set either entra, or name, issuerURL and clientID"
+// +kubebuilder:validation:XValidation:rule="!has(self.entra) || (!has(self.issuerURL) && !has(self.clientID) && !has(self.usernameClaim) && !has(self.usernamePrefix) && !has(self.groupsClaim) && !has(self.groupsPrefix))",message="entra fills in the issuer, the client and the claims: leave issuerURL, clientID and the claim settings unset"
 type OIDCIdentityProvider struct {
-	// name of the association.
-	// +required
+	// name of the provider. The EKS association is named
+	// "<name>-<hash8 of its settings>". Required without entra; with
+	// entra it defaults to "entra".
+	// +optional
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=100
+	// +kubebuilder:validation:MaxLength=91
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*$`
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 	// issuerURL is the "iss" claim of the provider's tokens: HTTPS, and
 	// reachable from the internet.
-	// +required
+	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^https://[^\s?#]+$`
-	IssuerURL string `json:"issuerURL"`
+	IssuerURL string `json:"issuerURL,omitempty"`
 	// clientID is the client the tokens are issued to: their "aud" claim.
-	// +required
+	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
-	ClientID string `json:"clientID"`
+	ClientID string `json:"clientID,omitempty"`
+	// entra is Microsoft Entra ID (Azure AD) as the provider, from its
+	// tenant and the app registration's client ID alone.
+	// +optional
+	Entra *EntraIdentityProvider `json:"entra,omitempty"`
 	// usernameClaim is the claim that is the user name. Unset: "sub".
 	// +optional
 	// +kubebuilder:validation:MaxLength=255
@@ -369,6 +380,22 @@ type OIDCIdentityProvider struct {
 	// +kubebuilder:validation:MaxProperties=50
 	// +kubebuilder:validation:XValidation:rule="self.all(k, size(k) >= 1 && size(k) <= 63 && size(self[k]) >= 1 && size(self[k]) <= 253)",message="a required claim is 1 to 63 characters, its value 1 to 253"
 	RequiredClaims map[string]string `json:"requiredClaims,omitempty"`
+}
+
+// EntraIdentityProvider is Microsoft Entra ID as a cluster's OIDC identity
+// provider. The platform sets the issuer
+// (https://login.microsoftonline.com/<tenantID>/v2.0), the user name (the
+// "oid" claim, as "entra:<oid>") and the groups (the "groups" claim, group
+// object IDs, as "entra:<id>").
+type EntraIdentityProvider struct {
+	// tenantID is the directory (tenant) ID.
+	// +required
+	// +kubebuilder:validation:Format=uuid
+	TenantID string `json:"tenantID"`
+	// clientID is the application (client) ID of the app registration.
+	// +required
+	// +kubebuilder:validation:Format=uuid
+	ClientID string `json:"clientID"`
 }
 
 // AWSAuthenticationMode is the EKS cluster's authentication mode (AWS's

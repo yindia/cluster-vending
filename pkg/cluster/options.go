@@ -5,6 +5,7 @@ import (
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/oidc"
 )
 
 // ResolveOptions fills the defaults of the optional settings that are in
@@ -76,10 +77,11 @@ func optionsPlan(spec *cloudv1.ClusterSpec, p *crossplaneaws.ClusterPlan) {
 		}
 		p.AccessEntries = append(p.AccessEntries, entry)
 	}
-	if o := spec.GetAccess().GetOidc(); o != nil {
-		p.IdentityProvider = &crossplaneaws.IdentityProviderPlan{Name: o.GetName(), IssuerURL: o.GetIssuerUrl(), ClientID: o.GetClientId(),
-			GroupsClaim: o.GetGroupsClaim(), GroupsPrefix: o.GetGroupsPrefix(),
-			UsernameClaim: o.GetUsernameClaim(), UsernamePrefix: o.GetUsernamePrefix(), RequiredClaims: o.GetRequiredClaims()}
+	// Entra ID is resolved here to its issuer and claims (pkg/oidc).
+	if o := oidc.Resolve(spec.GetAccess().GetOidc()); o != nil {
+		p.IdentityProvider = &crossplaneaws.IdentityProviderPlan{Name: o.Name, IssuerURL: o.IssuerURL, ClientID: o.ClientID,
+			GroupsClaim: o.GroupsClaim, GroupsPrefix: o.GroupsPrefix,
+			UsernameClaim: o.UsernameClaim, UsernamePrefix: o.UsernamePrefix, RequiredClaims: o.RequiredClaims}
 	}
 	if lt := aws.GetDefaultNodePool().GetLaunchTemplate(); lt != nil {
 		p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ID: lt.GetId(), Name: lt.GetName(), Version: lt.GetVersion(),

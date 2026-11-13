@@ -28,7 +28,10 @@ spec:
   # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2; unset is tier 0
   access:
     adminPrincipals: []      # IAM role/user ARNs, e.g. arn:aws:iam::111122223333:role/platform-admin; the creator is admin already
-    # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (one per cluster)
+    # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (docs/oidc.md)
+    #   entra: {tenantId: 00000000-0000-0000-0000-000000000000, clientId: 00000000-0000-0000-0000-000000000000}   # Microsoft Entra ID: nothing else to set
+    # or any other provider:
+    # oidc:
     #   name: okta
     #   issuerUrl: https://example.okta.com/oauth2/default   # HTTPS, reachable from the internet
     #   clientId: kubernetes

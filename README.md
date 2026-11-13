@@ -130,6 +130,9 @@ cluster as objects of its kinds.
   direction the project is moving in.
 - [idl/README.md](idl/README.md): the `cloud.v1` contract and how its fields
   map to AWS.
+- [docs/oidc.md](docs/oidc.md): signing in to a cluster's Kubernetes API
+  through an OIDC identity provider (Microsoft Entra ID or any other), and
+  the kubeconfig for it.
 - [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
   API versions in workload clusters are found and shown.
 - [docs/controller.md](docs/controller.md): the kubebuilder project and

@@ -340,11 +340,11 @@ func TestOIDCIdentityProviderChangesInPlace(t *testing.T) {
 		t.Fatalf("set: %v", err)
 	}
 	got := list()
-	if len(got) != 1 || got[0].Annotations[crossplaneaws.ExternalNameAnnotation] != "okta" ||
+	if len(got) != 1 || !strings.HasPrefix(got[0].Annotations[crossplaneaws.ExternalNameAnnotation], "okta-") ||
 		*got[0].Spec.ForProvider.Oidc.GroupsPrefix != "oidc:" {
 		t.Fatalf("after set: %+v", got)
 	}
-	first := got[0].Name
+	first, firstAssociation := got[0].Name, got[0].Annotations[crossplaneaws.ExternalNameAnnotation]
 
 	// A change: planned as one object created and one deleted, nothing on
 	// the cluster, applicable.
@@ -368,8 +368,11 @@ func TestOIDCIdentityProviderChangesInPlace(t *testing.T) {
 	if _, err := update(t, w, updateRequest(w, oidc("sso:"), path)); err != nil {
 		t.Fatalf("change: %v", err)
 	}
-	if got = list(); len(got) != 1 || got[0].Name == first || *got[0].Spec.ForProvider.Oidc.GroupsPrefix != "sso:" {
-		t.Errorf("after the change: %+v, want only the new object", got)
+	// The new object is a new association: under the old one's name, the
+	// object being deleted would remove what its successor just made.
+	if got = list(); len(got) != 1 || got[0].Name == first || *got[0].Spec.ForProvider.Oidc.GroupsPrefix != "sso:" ||
+		got[0].Annotations[crossplaneaws.ExternalNameAnnotation] == firstAssociation {
+		t.Errorf("after the change: %+v, want only the new object, under a new association name", got)
 	}
 
 	if _, err := update(t, w, updateRequest(w, &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{}}, path)); err != nil {
@@ -383,6 +386,29 @@ func TestOIDCIdentityProviderChangesInPlace(t *testing.T) {
 	bad.Access.Oidc.IssuerUrl = "http://example.okta.com"
 	if _, err := update(t, w, updateRequest(w, bad, path)); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("an http issuer: %v, want INVALID_ARGUMENT", err)
+	}
+
+	// Microsoft Entra ID from its tenant and client alone: the platform
+	// fills in the issuer and the claims.
+	const tenant, app = "833ced3d-cb2e-41de-92f1-29e2af035ddc", "00001111-aaaa-2222-bbbb-3333cccc4444"
+	entra := &cloudv1.ClusterSpec{Access: &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{
+		Entra: &cloudv1.EntraIdentityProvider{TenantId: tenant, ClientId: app}}}}
+	if _, err := update(t, w, updateRequest(w, entra, path)); err != nil {
+		t.Fatalf("entra: %v", err)
+	}
+	got = list()
+	if len(got) != 1 {
+		t.Fatalf("after entra: %+v", got)
+	}
+	if o := got[0].Spec.ForProvider.Oidc; *o.IssuerURL != "https://login.microsoftonline.com/"+tenant+"/v2.0" || *o.ClientID != app ||
+		*o.UsernameClaim != "oid" || *o.UsernamePrefix != "entra:" || *o.GroupsClaim != "groups" || *o.GroupsPrefix != "entra:" ||
+		!strings.HasPrefix(got[0].Annotations[crossplaneaws.ExternalNameAnnotation], "entra-") {
+		t.Errorf("entra renders %+v as %s", o, got[0].Annotations[crossplaneaws.ExternalNameAnnotation])
+	}
+	mixed := proto.Clone(entra).(*cloudv1.ClusterSpec)
+	mixed.Access.Oidc.UsernameClaim = "upn"
+	if _, err := update(t, w, updateRequest(w, mixed, path)); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("entra with its own user name claim: %v, want INVALID_ARGUMENT", err)
 	}
 }
 

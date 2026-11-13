@@ -200,6 +200,24 @@ spec:
                         maxLength: 255
                         minLength: 1
                         type: string
+                      entra:
+                        description: |-
+                          entra is Microsoft Entra ID (Azure AD) as the provider, from its
+                          tenant and the app registration's client ID alone.
+                        properties:
+                          clientID:
+                            description: clientID is the application (client) ID of
+                              the app registration.
+                            format: uuid
+                            type: string
+                          tenantID:
+                            description: tenantID is the directory (tenant) ID.
+                            format: uuid
+                            type: string
+                        required:
+                        - clientID
+                        - tenantID
+                        type: object
                       groupsClaim:
                         description: |-
                           groupsClaim is the claim that lists the user's groups. Unset: no
@@ -218,11 +236,15 @@ spec:
                           issuerURL is the "iss" claim of the provider's tokens: HTTPS, and
                           reachable from the internet.
                         maxLength: 2048
+                        minLength: 1
                         pattern: ^https://[^\s?#]+$
                         type: string
                       name:
-                        description: name of the association.
-                        maxLength: 100
+                        description: |-
+                          name of the provider. The EKS association is named
+                          "<name>-<hash8 of its settings>". Required without entra; with
+                          entra it defaults to "entra".
+                        maxLength: 91
                         minLength: 1
                         pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
                         type: string
@@ -252,11 +274,16 @@ spec:
                         x-kubernetes-validations:
                         - message: 'a prefix cannot contain system:'
                           rule: '!self.contains(''system:'')'
-                    required:
-                    - clientID
-                    - issuerURL
-                    - name
                     type: object
+                    x-kubernetes-validations:
+                    - message: set either entra, or name, issuerURL and clientID
+                      rule: has(self.entra) || (has(self.name) && has(self.issuerURL)
+                        && has(self.clientID))
+                    - message: 'entra fills in the issuer, the client and the claims:
+                        leave issuerURL, clientID and the claim settings unset'
+                      rule: '!has(self.entra) || (!has(self.issuerURL) && !has(self.clientID)
+                        && !has(self.usernameClaim) && !has(self.usernamePrefix) &&
+                        !has(self.groupsClaim) && !has(self.groupsPrefix))'
                 type: object
               aws:
                 description: aws selects AWS (EKS) and carries its settings.

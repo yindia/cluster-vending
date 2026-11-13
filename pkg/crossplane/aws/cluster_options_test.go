@@ -1,7 +1,9 @@
 package aws_test
 
 import (
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
@@ -169,15 +171,19 @@ func TestClusterOptionsRender(t *testing.T) {
 	if scoped == nil || *scoped.Spec.ForProvider.AccessScope.Type != "namespace" || *scoped.Spec.ForProvider.AccessScope.Namespaces[0] != "a" {
 		t.Fatalf("namespace-scoped association = %+v", scoped)
 	}
-	// eks IdentityProviderConfig: the association's name is the external
-	// name; every setting is part of the object's name.
+	// eks IdentityProviderConfig: every setting is part of the object's
+	// name and of the association's (the external name).
 	idps := identityProviders(objects)
 	if len(idps) != 1 {
 		t.Fatalf("identity providers = %d, want 1", len(idps))
 	}
 	idp := idps[0]
-	if got := idp.Spec.ForProvider; idp.Annotations[crossplaneaws.ExternalNameAnnotation] != "okta" ||
-		*got.Oidc.IssuerURL != "https://example.okta.com" || *got.Oidc.ClientID != "kubernetes" || *got.Oidc.UsernameClaim != "email" ||
+	association := idp.Annotations[crossplaneaws.ExternalNameAnnotation]
+	if want := crossplaneaws.IdentityProviderAssociationName(*p.IdentityProvider); association != want ||
+		!regexp.MustCompile(`^okta-[0-9a-f]{8}$`).MatchString(association) || !strings.HasSuffix(idp.Name, strings.TrimPrefix(association, "okta")) {
+		t.Errorf("association %q of object %s, want %q (okta-<hash8>, the object's hash)", association, idp.Name, want)
+	}
+	if got := idp.Spec.ForProvider; *got.Oidc.IssuerURL != "https://example.okta.com" || *got.Oidc.ClientID != "kubernetes" || *got.Oidc.UsernameClaim != "email" ||
 		got.Oidc.UsernamePrefix != nil || *got.Oidc.GroupsClaim != "groups" || *got.Oidc.GroupsPrefix != "oidc:" ||
 		*got.Oidc.RequiredClaims["hd"] != "example.com" || got.ClusterNameRef.Name != "prod-1a2b3c4d" ||
 		idp.Spec.ManagementPolicies != nil || *got.Tags[crossplaneaws.TagClusterName] != "prod" {
@@ -186,8 +192,11 @@ func TestClusterOptionsRender(t *testing.T) {
 	changed := p
 	changed.IdentityProvider = ptr.To(*p.IdentityProvider)
 	changed.IdentityProvider.GroupsPrefix = "sso:"
-	if other := identityProviders(crossplaneaws.ClusterResources(changed)); len(other) != 1 || other[0].Name == idp.Name {
-		t.Errorf("a changed identity provider renders %v, want one object with a new name (not %s)", other, idp.Name)
+	// A change is a new object for a new association: the two never share
+	// a name, so the old object's deletion cannot take the new association.
+	other := identityProviders(crossplaneaws.ClusterResources(changed))
+	if len(other) != 1 || other[0].Name == idp.Name || other[0].Annotations[crossplaneaws.ExternalNameAnnotation] == association {
+		t.Errorf("a changed identity provider renders %v, want one object with a new name and association (not %s, %s)", other, idp.Name, association)
 	}
 	if again := identityProviders(crossplaneaws.ClusterResources(p)); again[0].Name != idp.Name {
 		t.Errorf("the same identity provider renders %s, then %s", idp.Name, again[0].Name)

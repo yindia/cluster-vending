@@ -254,7 +254,7 @@ Common spec:
 | `spec.default_node_pool.labels`, `taints` | no | none | mutable |
 | `spec.access.admin_principals` | no | none | mutable |
 | `spec.access.access_entries` | no | none; an entry's `type` defaults to `STANDARD`, a policy's `scope` to `CLUSTER` | mutable |
-| `spec.access.oidc` | no; with it, `name`, `issuer_url` (HTTPS) and `client_id` | none: IAM only | mutable: a change removes the association and makes a new one (EKS takes several minutes for each) |
+| `spec.access.oidc` | no; with it, either `entra` (`tenant_id` and `client_id`, both GUIDs: Microsoft Entra ID, the platform fills in the issuer and the claims) or `name`, `issuer_url` (HTTPS) and `client_id` | none: IAM only | mutable: a change removes the association and makes a new one (EKS takes several minutes for each); see [docs/oidc.md](../docs/oidc.md) |
 | `spec.release_channel` | no | stays unset | yes; changes no cloud resource |
 | `spec.tier` | no | `CLUSTER_TIER_0` | yes; changes no cloud resource |
 | `spec.upgrade_mode` | no | `UPGRADE_MODE_MANUAL` | yes; changes no cloud resource |
@@ -545,7 +545,7 @@ separate resource: AWS `NodeGroup`.
 | `labels` (as cloud tags) | `tags` | `resourceLabels` | `tags` |
 | `spec.access.admin_principals` | `AccessEntry` + `AccessPolicyAssociation` (AmazonEKSClusterAdminPolicy) | cluster-admin `ClusterRoleBinding` | `adminGroupObjectIds` |
 | `spec.access.access_entries` | `AccessEntry` + one `AccessPolicyAssociation` per policy | - | - |
-| `spec.access.oidc` | `IdentityProviderConfig` (`oidc`), created once the `Cluster` is ACTIVE; its `name` is the external name | - | - |
+| `spec.access.oidc` | `IdentityProviderConfig` (`oidc`), created once the `Cluster` is ACTIVE; its external name (the EKS association) is `<name>-<hash8 of its settings>`; `entra` is rendered as issuer `https://login.microsoftonline.com/<tenant_id>/v2.0`, user name claim `oid` and groups claim `groups`, both prefixed `entra:` | - | - |
 | `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` | - | - |
 | `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer | - | - |
 | `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` | - | - |

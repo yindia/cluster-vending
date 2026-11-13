@@ -169,6 +169,9 @@ func accessToAPI(p *cloudv1.AccessSpec) *cloudv1alpha1.AccessSpec {
 			UsernameClaim: o.GetUsernameClaim(), UsernamePrefix: o.GetUsernamePrefix(),
 			GroupsClaim: o.GetGroupsClaim(), GroupsPrefix: o.GetGroupsPrefix(),
 			RequiredClaims: maps.Clone(o.GetRequiredClaims())}
+		if e := o.GetEntra(); e != nil {
+			out.OIDC.Entra = &cloudv1alpha1.EntraIdentityProvider{TenantID: e.GetTenantId(), ClientID: e.GetClientId()}
+		}
 	}
 	return out
 }
@@ -196,6 +199,9 @@ func accessFromAPI(a *cloudv1alpha1.AccessSpec) *cloudv1.AccessSpec {
 			UsernameClaim: o.UsernameClaim, UsernamePrefix: o.UsernamePrefix,
 			GroupsClaim: o.GroupsClaim, GroupsPrefix: o.GroupsPrefix,
 			RequiredClaims: maps.Clone(o.RequiredClaims)}
+		if e := o.Entra; e != nil {
+			out.Oidc.Entra = &cloudv1.EntraIdentityProvider{TenantId: e.TenantID, ClientId: e.ClientID}
+		}
 	}
 	return out
 }

@@ -239,26 +239,44 @@ func (b clusterBuilder) accessPolicyOf(entry, principal string, policy AccessPol
 
 // managedIdentityProvider is the OIDC identity provider of the Kubernetes
 // API the plan asks for: an IdentityProviderConfig
-// "<prefix>-idp-<hash8 of all its settings>" whose external name is the
-// association's name. EKS cannot change an association, so every setting
-// is part of the object's name: a change renders a new object and the old
-// one is pruned. EKS takes one association per cluster, so the new one
-// only exists once the old one is gone: until then the new object fails
-// to create or, when the name is unchanged, observes the old association.
+// "<prefix>-idp-<hash8 of all its settings>" whose external name, the
+// EKS association's name, is "<name>-<the same hash8>"
+// (IdentityProviderAssociationName).
+//
+// EKS cannot change an association, so every setting is part of both
+// names: a change renders a new object for a new association and the old
+// one is pruned. The association's name changes too so that the old and
+// the new object never share one: under one name the object being deleted
+// would see the association its successor just made, and remove it again.
+// EKS wants issuer URLs unique per cluster (and takes one provider at all
+// before Kubernetes 1.32), so a new association with the same issuer
+// fails to create until the old one is gone, and is retried.
 func (b clusterBuilder) managedIdentityProvider(idp IdentityProviderPlan) *awseks.IdentityProviderConfig {
+	hash := idp.hash()
+	name := b.name("idp-" + hash)
+	meta := b.meta(name)
+	meta.Annotations = map[string]string{ExternalNameAnnotation: idp.Name + "-" + hash}
+	return &awseks.IdentityProviderConfig{ObjectMeta: meta,
+		Spec: awseks.IdentityProviderConfigSpec{ManagedResourceSpec: b.spec(), ForProvider: awseks.IdentityProviderConfigParameters{
+			Region: ptr.To(b.p.Region), ClusterNameRef: b.ref(b.p.Prefix), Oidc: idp.oidc(), Tags: b.tags(name),
+		}}}
+}
+
+// hash is the hash8 of every setting of the provider.
+func (idp IdentityProviderPlan) hash() string {
 	claims := make([]string, 0, len(idp.RequiredClaims))
 	for k, v := range idp.RequiredClaims {
 		claims = append(claims, k+"="+v)
 	}
 	slices.Sort(claims)
-	name := b.name("idp-" + shortHash(idp.Name, idp.IssuerURL, idp.ClientID, idp.UsernameClaim, idp.UsernamePrefix,
-		idp.GroupsClaim, idp.GroupsPrefix, strings.Join(claims, ",")))
-	meta := b.meta(name)
-	meta.Annotations = map[string]string{ExternalNameAnnotation: idp.Name}
-	return &awseks.IdentityProviderConfig{ObjectMeta: meta,
-		Spec: awseks.IdentityProviderConfigSpec{ManagedResourceSpec: b.spec(), ForProvider: awseks.IdentityProviderConfigParameters{
-			Region: ptr.To(b.p.Region), ClusterNameRef: b.ref(b.p.Prefix), Oidc: idp.oidc(), Tags: b.tags(name),
-		}}}
+	return shortHash(idp.Name, idp.IssuerURL, idp.ClientID, idp.UsernameClaim, idp.UsernamePrefix,
+		idp.GroupsClaim, idp.GroupsPrefix, strings.Join(claims, ","))
+}
+
+// IdentityProviderAssociationName is the name of the EKS association a
+// managed identity provider gets: "<name>-<hash8 of its settings>".
+func IdentityProviderAssociationName(idp IdentityProviderPlan) string {
+	return idp.Name + "-" + idp.hash()
 }
 
 // oidc is the plan as the provider's parameters; the association's name is

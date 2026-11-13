@@ -1406,6 +1406,25 @@ spec:
                     PlatformComponentStatus is one component the platform installed with a
                     cluster.
                   properties:
+                    chart:
+                      description: |-
+                        chart is the Helm release name of the component's chart that failed
+                        or is being installed; the fields below are about it.
+                      type: string
+                    failures:
+                      description: failures is how many times in a row installing
+                        that chart failed.
+                      format: int32
+                      type: integer
+                    helmState:
+                      description: |-
+                        helmState is Helm's state of that chart's release (deployed, failed,
+                        pending-install, pending-upgrade, pending-rollback, uninstalling).
+                      type: string
+                    lastError:
+                      description: lastError is the provider's last error for that
+                        chart, in full.
+                      type: string
                     message:
                       description: message says what it waits for or why it failed.
                       type: string
@@ -1414,6 +1433,16 @@ spec:
                       type: string
                     phase:
                       description: 'phase: Pending (waits), Installing, Ready or Failed.'
+                      type: string
+                    recoveries:
+                      description: |-
+                        recoveries is how many times the platform recovered a stuck Helm
+                        release of this component at this version (at most 3).
+                      format: int32
+                      type: integer
+                    since:
+                      description: since is when the component entered this phase.
+                      format: date-time
                       type: string
                     version:
                       description: version of the chart the cluster's release pins.

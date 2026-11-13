@@ -1,6 +1,7 @@
 package convert_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -75,5 +76,25 @@ func TestClusterStatusIntoCarriesThePlatformComponents(t *testing.T) {
 	convert.ClusterStatusInto(&cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING}, "", metav1.Now(), &status)
 	if status.PlatformRelease != "" || status.PlatformComponents != nil {
 		t.Errorf("after: %q %+v, want none", status.PlatformRelease, status.PlatformComponents)
+	}
+}
+
+// Why a component failed reaches the kind's status whole: the chart,
+// Helm's state, the provider's error uncut, the failures, since when and
+// the recoveries.
+func TestClusterStatusIntoCarriesWhyAComponentFailed(t *testing.T) {
+	var status cloudv1alpha1.ClusterStatus
+	since := time.Date(2026, 11, 13, 5, 0, 0, 0, time.UTC)
+	long := strings.Repeat("e", 5000)
+
+	convert.ClusterStatusInto(&cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING,
+		PlatformComponents: []*cloudv1.PlatformComponent{{Name: "kyverno", Version: "3.10.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED,
+			Message: "chart kyverno: " + long, Chart: "kyverno", HelmState: "uninstalling", LastError: long, Failures: 12,
+			Since: timestamppb.New(since), Recoveries: 2}}}, "", metav1.Now(), &status)
+
+	got := status.PlatformComponents[0]
+	if got.Chart != "kyverno" || got.HelmState != "uninstalling" || got.LastError != long || got.Message != "chart kyverno: "+long ||
+		got.Failures != 12 || got.Recoveries != 2 || got.Since == nil || !got.Since.Time.Equal(since) {
+		t.Errorf("component = %+v", got)
 	}
 }

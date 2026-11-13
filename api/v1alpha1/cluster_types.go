@@ -790,6 +790,27 @@ type PlatformComponentStatus struct {
 	// message says what it waits for or why it failed.
 	// +optional
 	Message string `json:"message,omitempty"`
+	// chart is the Helm release name of the component's chart that failed
+	// or is being installed; the fields below are about it.
+	// +optional
+	Chart string `json:"chart,omitempty"`
+	// helmState is Helm's state of that chart's release (deployed, failed,
+	// pending-install, pending-upgrade, pending-rollback, uninstalling).
+	// +optional
+	HelmState string `json:"helmState,omitempty"`
+	// lastError is the provider's last error for that chart, in full.
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+	// failures is how many times in a row installing that chart failed.
+	// +optional
+	Failures int32 `json:"failures,omitempty"`
+	// since is when the component entered this phase.
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
+	// recoveries is how many times the platform recovered a stuck Helm
+	// release of this component at this version (at most 3).
+	// +optional
+	Recoveries int32 `json:"recoveries,omitempty"`
 }
 
 // ClusterStatus is the observed state of a Cluster, aggregated from its

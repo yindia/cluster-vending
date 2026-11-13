@@ -916,7 +916,30 @@ type PlatformComponent struct {
 	// installed on this cluster (message says why).
 	Phase ComponentPhase `protobuf:"varint,3,opt,name=phase,proto3,enum=cloud.v1.ComponentPhase" json:"phase,omitempty"`
 	// What it waits for, or why it failed. Empty when READY.
-	Message       string `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	Message string `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	// The chart the phase and the fields below are about: the Helm release
+	// name of the component's chart that failed or is being installed (its
+	// main chart, its CRD chart or a companion). Empty when READY or when
+	// no chart was started.
+	Chart string `protobuf:"bytes,5,opt,name=chart,proto3" json:"chart,omitempty"`
+	// Helm's state of that chart's release, as provider-helm reports it
+	// (Release.status.atProvider.state): deployed, failed, pending-install,
+	// pending-upgrade, pending-rollback, uninstalling, ... Empty before Helm
+	// has a release.
+	HelmState string `protobuf:"bytes,6,opt,name=helm_state,json=helmState,proto3" json:"helm_state,omitempty"`
+	// The provider's last error for that chart (the message of the
+	// Release's Synced condition while it is False), in full.
+	LastError string `protobuf:"bytes,7,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	// How many times in a row the install or upgrade of that chart failed
+	// (Release.status.failed).
+	Failures int32 `protobuf:"varint,8,opt,name=failures,proto3" json:"failures,omitempty"`
+	// Since when the component is in this phase.
+	Since *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=since,proto3" json:"since,omitempty"`
+	// How many times the platform recovered a stuck Helm release of this
+	// component at this version (it removed the stuck revision's Helm
+	// record so the install could start again). At most 3; then the
+	// component stays FAILED.
+	Recoveries    int32 `protobuf:"varint,10,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -977,6 +1000,48 @@ func (x *PlatformComponent) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *PlatformComponent) GetChart() string {
+	if x != nil {
+		return x.Chart
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetHelmState() string {
+	if x != nil {
+		return x.HelmState
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetFailures() int32 {
+	if x != nil {
+		return x.Failures
+	}
+	return 0
+}
+
+func (x *PlatformComponent) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
+func (x *PlatformComponent) GetRecoveries() int32 {
+	if x != nil {
+		return x.Recoveries
+	}
+	return 0
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in
@@ -1193,12 +1258,23 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x10platform_release\x18\x13 \x01(\tR\x0fplatformRelease\x12A\n" +
 	"\fdeprecations\x18( \x01(\v2\x1d.cloud.v1.ClusterDeprecationsR\fdeprecationsB\n" +
 	"\n" +
-	"\bprovider\"\x8b\x01\n" +
+	"\bprovider\"\xcd\x02\n" +
 	"\x11PlatformComponent\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12.\n" +
 	"\x05phase\x18\x03 \x01(\x0e2\x18.cloud.v1.ComponentPhaseR\x05phase\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"\xdc\x01\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\x12\x14\n" +
+	"\x05chart\x18\x05 \x01(\tR\x05chart\x12\x1d\n" +
+	"\n" +
+	"helm_state\x18\x06 \x01(\tR\thelmState\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\a \x01(\tR\tlastError\x12\x1a\n" +
+	"\bfailures\x18\b \x01(\x05R\bfailures\x120\n" +
+	"\x05since\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x1e\n" +
+	"\n" +
+	"recoveries\x18\n" +
+	" \x01(\x05R\n" +
+	"recoveries\"\xdc\x01\n" +
 	"\x0eClusterUpgrade\x12!\n" +
 	"\ffrom_version\x18\x01 \x01(\tR\vfromVersion\x12\x1d\n" +
 	"\n" +
@@ -1306,13 +1382,14 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	8,  // 22: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
 	24, // 23: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
 	25, // 24: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	4,  // 25: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	12, // 26: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	12, // 25: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	4,  // 26: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	12, // 27: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }

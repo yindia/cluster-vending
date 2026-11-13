@@ -57,7 +57,7 @@ func platformDef(name string, requires ...string) cloudv1alpha1.ComponentDefinit
 // platformWorld is a RUNNING cluster on Kubernetes 1.37 with a catalog of
 // two Platform components (mesh requires base), a tenant one, and a
 // release pinning them.
-func platformWorld(t *testing.T) (world, *fakePlatform) {
+func platformWorld(t *testing.T, opts ...func(*reconcile.Deps)) (world, *fakePlatform) {
 	t.Helper()
 	tenant := platformDef("gpu")
 	tenant.Spec.Management = cloudv1alpha1.ComponentManagementTenant
@@ -66,7 +66,7 @@ func platformWorld(t *testing.T) (world, *fakePlatform) {
 		release: &cloudv1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "2026-11-a"},
 			Spec: cloudv1alpha1.ReleaseSpec{Content: cloudv1alpha1.ReleaseContent{Kubernetes: []cloudv1alpha1.KubernetesRelease{
 				{Minor: "1.37", Components: []cloudv1alpha1.ComponentPin{{Name: "base", Version: "1.2.0"}, {Name: "mesh", Version: "2.0.0"}}}}}}}}
-	w := newWorld(t, interceptor.Funcs{}, nil, func(d *reconcile.Deps) { d.Platform = src })
+	w := newWorld(t, interceptor.Funcs{}, nil, append([]func(*reconcile.Deps){func(d *reconcile.Deps) { d.Platform = src }}, opts...)...)
 	row := w.cluster(t)
 	spec, err := SpecOf(row)
 	if err != nil {

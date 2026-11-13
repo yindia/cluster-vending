@@ -2,12 +2,9 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -15,7 +12,6 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/deprecation"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -105,36 +101,7 @@ func scannable(obj *cloudv1alpha1.Cluster) bool {
 
 // kubeconfig reads the cluster's kubeconfig Secret at the API server.
 func (r *DeprecationReconciler) kubeconfig(ctx context.Context, obj *cloudv1alpha1.Cluster) ([]byte, error) {
-	ref := obj.Status.KubeconfigSecret
-	if ref == "" {
-		return nil, fmt.Errorf("the cluster has no kubeconfig Secret yet")
-	}
-	// The status records "<namespace>/<name>"; the Secret is always in the
-	// cluster's own namespace, and no other namespace is ever read.
-	name := ref
-	if namespace, rest, ok := strings.Cut(ref, "/"); ok {
-		if namespace != obj.Namespace {
-			return nil, fmt.Errorf("secret %s is not in the cluster's namespace", ref)
-		}
-		name = rest
-	}
-	secret := &corev1.Secret{}
-	err := r.deps.Direct.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: name}, secret)
-	if apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("secret %s not found", name)
-	}
-	if apierrors.IsForbidden(err) {
-		return nil, fmt.Errorf("the controller may not read secret %s in namespace %s: the %s RoleBinding is missing there (the cloud account's reconcile applies it; --service-account names who it binds)",
-			name, obj.Namespace, reconcile.KubeconfigReaderRole)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("secret %s: %w", name, err)
-	}
-	kubeconfig := secret.Data[crossplaneaws.KubeconfigSecretKey]
-	if len(kubeconfig) == 0 {
-		return nil, fmt.Errorf("secret %s has no %q key", name, crossplaneaws.KubeconfigSecretKey)
-	}
-	return kubeconfig, nil
+	return reconcile.ReadKubeconfig(ctx, r.deps.Direct, obj.Namespace, obj.Status.KubeconfigSecret)
 }
 
 // upgradeTo is the minor the release of the cluster's channel moves the

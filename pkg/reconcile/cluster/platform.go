@@ -141,7 +141,9 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		return nil, err
 	}
 	if problem != "" {
-		return unavailable(in.Entries, release, problem), nil
+		p := unavailable(in.Entries, release, problem)
+		s.describe(ctx, row, in.Plan.Namespace, p, nil)
+		return p, nil
 	}
 	plan, skipped := component.PlanPlatform(in)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
@@ -158,7 +160,10 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if err != nil {
 		return nil, err
 	}
-	return &platform{release: release, components: platformStatus(in, plan, skipped, res, views)}, nil
+	components, objects := platformStatus(in, plan, skipped, res, views)
+	p := &platform{release: release, components: components}
+	s.describe(ctx, row, in.Plan.Namespace, p, objects)
+	return p, nil
 }
 
 // unavailable reports every Platform component as not installable for one
@@ -175,9 +180,12 @@ func unavailable(entries []component.PlatformEntry, release, problem string) *pl
 // platformStatus is the state of each Platform component, in install
 // order: left out (FAILED, why), waiting (PENDING, what for), being
 // installed (INSTALLING) or with every chart deployed (READY). A chart
-// whose install failed makes its component FAILED.
+// whose install failed makes its component FAILED. objects names, for
+// each component that is not READY, the Release object its phase is about
+// (the chart that failed, waits or is being installed).
 func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan, skipped []component.NotInstalled,
-	res sequence.Result, views []*cloudv1.ManagedResource) []*cloudv1.PlatformComponent {
+	res sequence.Result, views []*cloudv1.ManagedResource) (components []*cloudv1.PlatformComponent, objects map[string]string) {
+	objects = map[string]string{}
 	reasons := map[string]string{}
 	for _, sk := range skipped {
 		reasons[sk.Name] = sk.Reason
@@ -207,18 +215,24 @@ func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan,
 			out = append(out, pc)
 			continue
 		}
-		pc.Phase, pc.Message = componentPhase(plan.ReleaseObjectNames(c), state, waiting)
+		var object string
+		pc.Phase, pc.Message, object = componentPhase(plan.ReleaseObjectNames(c), state, waiting)
+		if object != "" {
+			objects[e.Name] = object
+		}
 		if missing := component.MissingCompanions(e, in.Pins); len(missing) > 0 && pc.Phase == cloudv1.ComponentPhase_COMPONENT_PHASE_READY {
 			pc.Message = fmt.Sprintf("without %s: not in release %s", strings.Join(missing, ", "), in.Release)
 		}
 		out = append(out, pc)
 	}
-	return out
+	return out, objects
 }
 
 // componentPhase reads a component's phase from its Release objects
-// (names, in install order).
-func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, waiting map[string][]string) (cloudv1.ComponentPhase, string) {
+// (names, in install order). object is the Release the phase is about: the
+// one that failed or is being installed; "" when all are deployed or none
+// was started.
+func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, waiting map[string][]string) (phase cloudv1.ComponentPhase, message, object string) {
 	ready, started := 0, false
 	for _, name := range names {
 		v, recorded := state[name]
@@ -227,7 +241,7 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 		}
 		switch {
 		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED:
-			return cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, fmt.Sprintf("chart %s: %s", v.GetExternalName(), v.GetMessage())
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, fmt.Sprintf("chart %s: %s", v.GetExternalName(), v.GetMessage()), name
 		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
 			ready++
 		case len(waiting[name]) > 0:
@@ -235,17 +249,17 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 			if started {
 				phase = cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING
 			}
-			return phase, "waiting for " + strings.Join(waiting[name], ", ")
+			return phase, "waiting for " + strings.Join(waiting[name], ", "), ""
 		case recorded:
-			return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, v.GetMessage()
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, v.GetMessage(), name
 		default:
-			return cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, ""
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, "", ""
 		}
 	}
 	if ready == len(names) {
-		return cloudv1.ComponentPhase_COMPONENT_PHASE_READY, ""
+		return cloudv1.ComponentPhase_COMPONENT_PHASE_READY, "", ""
 	}
-	return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, ""
+	return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, "", ""
 }
 
 // platformInput gathers what the cluster's platform components are planned

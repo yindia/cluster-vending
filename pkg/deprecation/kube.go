@@ -47,6 +47,23 @@ func NewKubeReader(kubeconfig []byte) (*KubeReader, error) {
 	return NewKubeReaderFor(cfg)
 }
 
+// RESTConfig is the client config of the cluster a kubeconfig names, with
+// the same refusals as NewKubeReader (no exec plugin, no auth provider)
+// and the scan's request timeout: for whatever else reaches a workload
+// cluster with a kubeconfig read from a Secret.
+func RESTConfig(kubeconfig []byte) (*rest.Config, error) {
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("kubeconfig: %w", err)
+	}
+	if err := errUnsafeCredentials(cfg); err != nil {
+		return nil, err
+	}
+	cfg = rest.CopyConfig(cfg)
+	cfg.Timeout = requestTimeout
+	return cfg, nil
+}
+
 // errUnsafeCredentials names the credential kind a config must not carry.
 func errUnsafeCredentials(cfg *rest.Config) error {
 	switch {

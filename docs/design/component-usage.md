@@ -958,7 +958,11 @@ recorded apart from the cluster's (`status.componentInventory`, owner
    `Ready`; `Failed`: an install failed, or it cannot be installed on this
    cluster) and a message, and the condition `PlatformComponentsReady` sums
    them up. While it is `Installing` the controller looks at the cluster
-   again every 20 seconds although it is RUNNING. The cluster's own phase
+   again every 20 seconds although it is RUNNING. A component that is not
+   Ready also carries why (`chart`, `helmState`, `lastError`, `failures`,
+   `since`), each change of phase is logged once, and a Helm release that
+   is stuck is recovered up to three times (`recoveries`;
+   [catalog.md](../catalog.md), "When a component fails"). The cluster's own phase
    and Ready do not depend on any of it. `ListComponents` is to return them
    too, read-only (`Component.management = PLATFORM`, no id or etag;
    `component.Installed` merges them with the tenant's own; handlers:

@@ -30,7 +30,8 @@ func TestLoadController(t *testing.T) {
 	}
 	// The management account is the role's.
 	want := config.Controller{MetricsAddr: "0", ProbeAddr: ":8081", LeaderElect: true, LeaseNamespace: config.DefaultLeaseNamespace,
-		InstallProviders: true, InstallCatalog: true, AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
+		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true,
+		AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("defaults = %+v, want %+v", cfg, want)
 	}
@@ -55,6 +56,7 @@ func TestLoadController(t *testing.T) {
 		"partition":       {config.FlagAWSManagementRoleARN: "arn:aws-cn:iam::111122223333:role/x"},
 		"providers":       {config.FlagInstallProviders: "maybe"},
 		"catalog":         {config.FlagInstallCatalog: "maybe"},
+		"recover":         {config.FlagRecoverStuckReleases: "sometimes"},
 		"credentials":     {config.FlagProviderCredentialsSecret: "aws-local"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
@@ -72,7 +74,7 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	}
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
-		config.FlagInstallCatalog,
+		config.FlagInstallCatalog, config.FlagRecoverStuckReleases,
 		config.FlagProviderCredentialsSecret, config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)

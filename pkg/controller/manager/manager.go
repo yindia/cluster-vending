@@ -66,6 +66,10 @@ type Options struct {
 	// (pkg/catalog/definitions) that are missing, once the platform's kinds are
 	// served; existing ones are never changed.
 	InstallCatalog bool
+	// RecoverStuckReleases lets the cluster reconcile remove the Helm
+	// record of a platform component's stuck revision in the workload
+	// cluster (docs/catalog.md).
+	RecoverStuckReleases bool
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -160,7 +164,12 @@ func Run(ctx context.Context, o Options) error {
 		// The catalog and the releases, read at the API server: what the
 		// platform installs with every cluster.
 		Platform: management.PlatformSource(direct),
-		Logger:   logger,
+		// Workload clusters, reached with their kubeconfig Secrets (read at
+		// the API server, in tenant namespaces only): to recover a stuck
+		// Helm release of a platform component.
+		Workloads:            management.Workloads(direct),
+		RecoverStuckReleases: o.RecoverStuckReleases,
+		Logger:               logger,
 	})
 	if err != nil {
 		return err

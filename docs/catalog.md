@@ -23,12 +23,76 @@ cluster's own Ready. They are removed, in reverse, before the cluster is
 deleted. Nothing is installed on imported clusters. The details are in
 [design/component-usage.md](design/component-usage.md), section 7.2.
 
-See what a cluster has:
+See what a cluster has, through the API or on the management cluster:
 
 ```sh
+cluster-vending cluster components <cluster-id> --tenant acme        # -o json for every field
 kubectl get cluster prod-eks -n tenant-acme \
   -o jsonpath='{range .status.platformComponents[*]}{.name}{"\t"}{.version}{"\t"}{.phase}{"\t"}{.message}{"\n"}{end}'
 ```
+
+### When a component fails
+
+A component that is not Ready says why, on the cluster's status
+(`GetCluster`, `status.platform_components`) and in `cluster components`:
+
+| Field | What it is |
+|---|---|
+| `message` | what it waits for, or why it failed, in full |
+| `chart` | the Helm release the phase is about: the component's chart, its CRD chart or a companion |
+| `helmState` | Helm's state of that release (provider-helm's `status.atProvider.state`): `deployed`, `failed`, `pending-install`, `pending-upgrade`, `pending-rollback`, `uninstalling` |
+| `lastError` | provider-helm's last error for it (the Release's Synced condition), uncut |
+| `failures` | failed attempts in a row (the Release's `status.failed`) |
+| `since` | when the component entered its phase |
+| `recoveries` | how often the platform recovered a stuck release of it at this version |
+
+The controller logs each change of phase once, with the cluster and the
+component: `platform component failed` (warn, with the message),
+`platform component installing`, `platform component ready`,
+`platform component removed`, and `platform components condition changed`
+when `PlatformComponentsReady` flips. A pass that changed nothing logs
+nothing.
+
+**What recovers by itself.**
+
+- A failed install or upgrade is retried by provider-helm (up to the
+  Release's `rollbackLimit`, 100).
+- **A stuck Helm release.** When an install, upgrade, rollback or uninstall
+  is interrupted or its hooks fail, Helm leaves the release's newest
+  revision in `pending-install`, `pending-upgrade`, `pending-rollback` or
+  `uninstalling`, and every later attempt fails ("has no deployed
+  releases", "another operation (install/upgrade/rollback) is in
+  progress"): provider-helm has no option that clears it. Once a
+  component's Release has been like that for 10 minutes, and Helm has not
+  written that revision for 10 minutes, the controller removes the Helm
+  record of that one revision in the workload cluster (the Secret
+  `sh.helm.release.v1.<release>.v<revision>`), with the kubeconfig the
+  platform holds for the cluster. The revision before it is the newest
+  again: the deployed one after a stuck upgrade or rollback, none after a
+  stuck first install or uninstall, so the chart is installed anew.
+  A `deployed`, `superseded` or `failed` revision is never removed, and
+  nothing else in the workload cluster is touched. Each recovery is logged
+  (`platform component recovered`) and counted in `recoveries`. No
+  permission in the management cluster is added for this: the controller
+  already reads the kubeconfig Secret through the tenant namespace's
+  binding, and the record is removed in the workload cluster.
+- A deleted recorded object of the cluster (docs/controller.md).
+
+**What does not.**
+
+- A release that got stuck again after 3 recoveries at one version: the
+  component stays Failed and says so. Look at the chart's hook Jobs and at
+  whether the default node pool has room (a hook Job preempted on a full
+  node is how Kyverno got stuck in testing).
+- With `--recover-stuck-releases=false`, or when the workload cluster
+  cannot be reached (no kubeconfig Secret, a kubeconfig that runs a
+  command): the component is Failed and its message says which.
+- A component the cluster's release does not pin, a chart that cannot be
+  pulled, a component that needs IRSA on a cluster without it: those are
+  not Helm's state, and need the release, the definition or the cluster
+  changed.
+- Whether the chart's pods run: a component is Ready when Helm deployed
+  its charts.
 
 **Bundles.** `istio` has no chart of its own: `includes` lists six
 definitions marked `internal: true`, each with its chart, namespace,

@@ -87,6 +87,11 @@ func nextCluster(row *model.Cluster, err error) ctrl.Result {
 		// RUNNING, but its platform components are still being installed.
 		res.RequeueAfter = pendingDelay
 	}
+	if reconcilecluster.PlatformStuck(row) && res.RequeueAfter > failedDelay {
+		// A platform component's Helm release is stuck: it is recovered
+		// once it has been stuck long enough, and no event says when.
+		res.RequeueAfter = failedDelay
+	}
 	if reconcilecluster.MissingObject(row) && res.RequeueAfter > failedDelay {
 		// An object was deleted behind the platform's back: the pass that
 		// found it missing may have created it again, and the next one says

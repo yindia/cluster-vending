@@ -167,6 +167,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
 			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, table: true, removed: true},
+		verb{use: "components <id>", short: "List the components the platform installed with the cluster, and why one is not ready (chart, Helm state, last error); -o table, yaml or json",
+			run: cli.ClusterComponents, args: cobra.ExactArgs(1), table: true},
 		verb{use: "kubeconfig <id>", short: "Print a kubeconfig for the cluster's Kubernetes API; --oidc: users sign in through its OIDC identity provider (no credential in the file)",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		watchVerb("cluster", cli.ClusterWatch))

@@ -62,8 +62,14 @@ func platformComponents(in []*cloudv1.PlatformComponent) []cloudv1alpha1.Platfor
 	}
 	out := make([]cloudv1alpha1.PlatformComponentStatus, 0, len(in))
 	for _, c := range in {
-		out = append(out, cloudv1alpha1.PlatformComponentStatus{Name: c.GetName(), Version: c.GetVersion(),
-			Phase: camel(c.GetPhase(), prefixComponentPhase), Message: c.GetMessage()})
+		pc := cloudv1alpha1.PlatformComponentStatus{Name: c.GetName(), Version: c.GetVersion(),
+			Phase: camel(c.GetPhase(), prefixComponentPhase), Message: c.GetMessage(),
+			Chart: c.GetChart(), HelmState: c.GetHelmState(), LastError: c.GetLastError(),
+			Failures: c.GetFailures(), Recoveries: c.GetRecoveries()}
+		if since := c.GetSince(); since != nil {
+			pc.Since = &metav1.Time{Time: since.AsTime()}
+		}
+		out = append(out, pc)
 	}
 	return out
 }

@@ -408,6 +408,35 @@ message PlatformComponent {
 
   // What it waits for, or why it failed. Empty when READY.
   string message = 4;
+
+  // The chart the phase and the fields below are about: the Helm release
+  // name of the component's chart that failed or is being installed (its
+  // main chart, its CRD chart or a companion). Empty when READY or when
+  // no chart was started.
+  string chart = 5;
+
+  // Helm's state of that chart's release, as provider-helm reports it
+  // (Release.status.atProvider.state): deployed, failed, pending-install,
+  // pending-upgrade, pending-rollback, uninstalling, ... Empty before Helm
+  // has a release.
+  string helm_state = 6;
+
+  // The provider's last error for that chart (the message of the
+  // Release's Synced condition while it is False), in full.
+  string last_error = 7;
+
+  // How many times in a row the install or upgrade of that chart failed
+  // (Release.status.failed).
+  int32 failures = 8;
+
+  // Since when the component is in this phase.
+  google.protobuf.Timestamp since = 9;
+
+  // How many times the platform recovered a stuck Helm release of this
+  // component at this version (it removed the stuck revision's Helm
+  // record so the install could start again). At most 3; then the
+  // component stays FAILED.
+  int32 recoveries = 10;
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in

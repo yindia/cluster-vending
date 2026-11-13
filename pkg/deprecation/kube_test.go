@@ -134,6 +134,10 @@ users:
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("NewKubeReader = %v, want a refusal naming %q", err, tt.want)
 			}
+			// The same refusal for whatever else uses such a kubeconfig.
+			if _, err := deprecation.RESTConfig([]byte(base + tt.user + "\n")); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("RESTConfig = %v, want a refusal naming %q", err, tt.want)
+			}
 		})
 	}
 }

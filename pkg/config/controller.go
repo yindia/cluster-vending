@@ -47,6 +47,8 @@ var controllerSettings = []Setting{
 		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere, also to run the providers with other settings than the platform's"},
 	{Flag: FlagInstallCatalog, Env: EnvInstallCatalog, Default: "true",
 		Usage: "on startup, create the component catalog this build ships (pkg/catalog/definitions) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
+	{Flag: FlagRecoverStuckReleases, Env: EnvRecoverStuckReleases, Default: "true",
+		Usage: "recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes): remove the Helm record of the stuck revision in the workload cluster so the chart is installed again, at most 3 times per component version; false leaves such a component failed for a person to look at"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -69,6 +71,9 @@ type Controller struct {
 	// InstallCatalog: create the shipped component definitions that are
 	// missing on startup.
 	InstallCatalog bool
+	// RecoverStuckReleases: remove the Helm record of a platform
+	// component's stuck revision in the workload cluster.
+	RecoverStuckReleases bool
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -110,6 +115,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.InstallCatalog, err = strconv.ParseBool(v[FlagInstallCatalog]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagInstallCatalog), v[FlagInstallCatalog]))
+	}
+	if cfg.RecoverStuckReleases, err = strconv.ParseBool(v[FlagRecoverStuckReleases]); err != nil {
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagRecoverStuckReleases), v[FlagRecoverStuckReleases]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

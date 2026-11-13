@@ -68,7 +68,15 @@ type Deps struct {
 	// component catalog and the releases that pin its versions. Only what
 	// reconciles has it; nil installs nothing (the API handlers, tests).
 	Platform PlatformSource
-	Logger   *slog.Logger
+	// Workloads reaches workload clusters, to recover a platform
+	// component's Helm release that is stuck (RecoverStuckReleases). Nil:
+	// nothing is recovered.
+	Workloads Workloads
+	// RecoverStuckReleases lets the cluster reconcile remove the Helm
+	// record of a stuck revision in a workload cluster, so provider-helm
+	// can install again.
+	RecoverStuckReleases bool
+	Logger               *slog.Logger
 }
 
 // KubeconfigReaderRole is the ClusterRole (config/rbac) that may get

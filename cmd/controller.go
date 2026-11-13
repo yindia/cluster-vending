@@ -46,6 +46,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace, ServiceAccount: cfg.ServiceAccount,
 				AWS: cfg.AWS, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
+				RecoverStuckReleases: cfg.RecoverStuckReleases,
 			})
 		},
 	}

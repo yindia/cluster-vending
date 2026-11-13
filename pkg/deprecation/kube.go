@@ -2,6 +2,7 @@ package deprecation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -34,7 +35,10 @@ type KubeReader struct {
 	Secrets   client.Reader
 }
 
-// NewKubeReader is a KubeReader on the cluster a kubeconfig names.
+// NewKubeReader is a KubeReader on the cluster a kubeconfig names. The
+// kubeconfig comes from a Secret, so one that would run a command (an
+// exec plugin) or load an auth provider is refused: only a token or a
+// client certificate is accepted.
 func NewKubeReader(kubeconfig []byte) (*KubeReader, error) {
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
 	if err != nil {
@@ -43,8 +47,22 @@ func NewKubeReader(kubeconfig []byte) (*KubeReader, error) {
 	return NewKubeReaderFor(cfg)
 }
 
+// errUnsafeCredentials names the credential kind a config must not carry.
+func errUnsafeCredentials(cfg *rest.Config) error {
+	switch {
+	case cfg.ExecProvider != nil:
+		return errors.New("kubeconfig: an exec credential plugin is not allowed")
+	case cfg.AuthProvider != nil:
+		return errors.New("kubeconfig: an auth provider is not allowed")
+	}
+	return nil
+}
+
 // NewKubeReaderFor is a KubeReader on cfg's cluster.
 func NewKubeReaderFor(cfg *rest.Config) (*KubeReader, error) {
+	if err := errUnsafeCredentials(cfg); err != nil {
+		return nil, err
+	}
 	cfg = rest.CopyConfig(cfg)
 	cfg.Timeout = requestTimeout
 	disco, err := discovery.NewDiscoveryClientForConfig(cfg)

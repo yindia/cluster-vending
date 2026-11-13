@@ -106,3 +106,34 @@ current-context: prod
 		t.Fatalf("a bad kubeconfig: %v", err)
 	}
 }
+
+// A kubeconfig read from a Secret must never make the controller run a
+// command or load an auth plugin.
+func TestNewKubeReaderRefusesExecAndAuthProviders(t *testing.T) {
+	const base = `
+apiVersion: v1
+kind: Config
+clusters:
+- name: prod
+  cluster: {server: "https://prod.example.com"}
+contexts:
+- name: prod
+  context: {cluster: prod, user: prod}
+current-context: prod
+users:
+- name: prod
+  user: `
+	tests := []struct{ name, user, want string }{
+		{"exec plugin", `{exec: {apiVersion: client.authentication.k8s.io/v1, command: aws, args: [eks, get-token], interactiveMode: Never}}`, "exec"},
+		{"auth provider", `{auth-provider: {name: oidc}}`, "auth provider"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := deprecation.NewKubeReader([]byte(base + tt.user + "\n"))
+
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("NewKubeReader = %v, want a refusal naming %q", err, tt.want)
+			}
+		})
+	}
+}

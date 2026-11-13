@@ -105,9 +105,18 @@ func scannable(obj *cloudv1alpha1.Cluster) bool {
 
 // kubeconfig reads the cluster's kubeconfig Secret at the API server.
 func (r *DeprecationReconciler) kubeconfig(ctx context.Context, obj *cloudv1alpha1.Cluster) ([]byte, error) {
-	name := obj.Status.KubeconfigSecret
-	if name == "" {
+	ref := obj.Status.KubeconfigSecret
+	if ref == "" {
 		return nil, fmt.Errorf("the cluster has no kubeconfig Secret yet")
+	}
+	// The status records "<namespace>/<name>"; the Secret is always in the
+	// cluster's own namespace, and no other namespace is ever read.
+	name := ref
+	if namespace, rest, ok := strings.Cut(ref, "/"); ok {
+		if namespace != obj.Namespace {
+			return nil, fmt.Errorf("secret %s is not in the cluster's namespace", ref)
+		}
+		name = rest
 	}
 	secret := &corev1.Secret{}
 	err := r.deps.Direct.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: name}, secret)

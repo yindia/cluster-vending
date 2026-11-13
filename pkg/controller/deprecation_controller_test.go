@@ -45,7 +45,7 @@ func scanWorld(t *testing.T) (world, *DeprecationReconciler, *[]string) {
 	obj.Labels = map[string]string{cloudstore.LabelTenant: tenant, cloudstore.LabelID: "01a1d0a6-69d5-7e15-965e-fc6a53fa3d33"}
 	w.must(t, w.k.Create(ctx, obj))
 	obj.Status.Phase, obj.Status.CurrentKubernetesVersion = cloudv1alpha1.ClusterPhaseRunning, "1.35.4"
-	obj.Status.KubeconfigSecret = "prod-kubeconfig"
+	obj.Status.KubeconfigSecret = namespace + "/prod-kubeconfig" // as the cluster reconcile records it
 	w.must(t, w.k.Status().Update(ctx, obj))
 	w.must(t, w.k.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "prod-kubeconfig"},
 		Data: map[string][]byte{"kubeconfig": []byte("kubeconfig of prod")}}))
@@ -127,6 +127,10 @@ func TestClusterThatCannotBeScanned(t *testing.T) {
 			obj.Status.KubeconfigSecret = ""
 			w.must(t, w.k.Status().Update(t.Context(), obj))
 		}, false, "kubeconfig: the cluster has no kubeconfig Secret yet"},
+		{"a Secret of another namespace", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {
+			obj.Status.KubeconfigSecret = "kube-system/prod-kubeconfig"
+			w.must(t, w.k.Status().Update(t.Context(), obj))
+		}, false, "kubeconfig: secret kube-system/prod-kubeconfig is not in the cluster's namespace"},
 		{"the Secret is gone", func(t *testing.T, w world, _ *cloudv1alpha1.Cluster) {
 			w.must(t, w.k.Delete(t.Context(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "prod-kubeconfig"}}))
 		}, false, "kubeconfig: secret prod-kubeconfig not found"},

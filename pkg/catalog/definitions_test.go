@@ -38,7 +38,8 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "gpu-operator", "istio", "istio-base", "istio-cni",
+	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "gpu-operator", "istio", "istio-base",
+		"istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
 		t.Errorf("catalog = %v, want %v", names, want)
@@ -147,7 +148,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "istio-base", "istiod",
+	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "karpenter", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
@@ -195,6 +196,7 @@ func TestPlacementOnTheDefaultNodePool(t *testing.T) {
 		"istiod":                       {},
 		"istio-ingress-gateway":        {},
 		"kyverno":                      {"global"},
+		"external-secrets":             {"global"},
 		"gpu-operator":                 {"operator"},
 	}
 	for _, d := range catalogDefinitions(t) {

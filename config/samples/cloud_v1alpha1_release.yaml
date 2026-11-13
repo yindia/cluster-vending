@@ -22,6 +22,7 @@ spec:
         components:
           - {name: aws-load-balancer-controller, version: "3.6.2"}
           - {name: cluster-autoscaler, version: "9.60.0", values: {image: {tag: v1.37.0}}}
+          - {name: external-secrets, version: "2.15.0"}
           - {name: gpu-operator, version: "v26.7.2"}
           - {name: istio-base, version: "1.32.0"}
           - {name: istio-cni, version: "1.32.0"}
@@ -37,6 +38,7 @@ spec:
         components:
           - {name: aws-load-balancer-controller, version: "3.6.2"}
           - {name: cluster-autoscaler, version: "9.60.0", values: {image: {tag: v1.36.2}}}
+          - {name: external-secrets, version: "2.15.0"}
           - {name: gpu-operator, version: "v26.7.2"}
           - {name: istio-base, version: "1.32.0"}
           - {name: istio-cni, version: "1.32.0"}
@@ -52,6 +54,7 @@ spec:
         components:
           - {name: aws-load-balancer-controller, version: "3.6.2"}
           - {name: cluster-autoscaler, version: "9.60.0", values: {image: {tag: v1.35.3}}}
+          - {name: external-secrets, version: "2.15.0"}
           - {name: gpu-operator, version: "v26.7.2"}
           - {name: istio-base, version: "1.32.0"}
           - {name: istio-cni, version: "1.32.0"}

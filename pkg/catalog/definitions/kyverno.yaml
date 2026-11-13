@@ -57,12 +57,14 @@ spec:
             - kube-public
             - kube-node-lease
             - kyverno
+            - external-secrets
             - gpu-operator
             - istio-ingress
             - istio-system
       # The default resourceFilters already cover kube-system, kube-public, kube-node-lease and
       # kyverno; add the catalog's other namespaces so Kyverno also skips them.
       resourceFiltersIncludeNamespaces:
+      - external-secrets
       - gpu-operator
       - istio-ingress
       - istio-system

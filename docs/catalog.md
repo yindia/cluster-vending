@@ -8,7 +8,7 @@ The components this build ships, as `ComponentDefinition` files in
 
 | `management` | Components | How they reach a cluster |
 |---|---|---|
-| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `karpenter`, `kyverno`, `istio` (a bundle of six charts) | Installed with every cluster, as part of creating it, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
+| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `external-secrets`, `karpenter`, `kyverno`, `istio` (a bundle of five charts) | Installed with every cluster, as part of creating it, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
 | `Tenant` (default) | `gpu-operator`, `kyverno-policies` | A tenant enables and disables them on a cluster (a `Component`), and may set the values the schema allows. |
 
 **Platform components are part of the cluster.** Once a cluster is
@@ -71,6 +71,7 @@ against.
 |---|---|---|---|---|
 | `aws-load-balancer-controller` | `aws-load-balancer-controller` 3.6.2, `https://aws.github.io/eks-charts` | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `cluster-autoscaler` | `cluster-autoscaler` 9.60.0, `https://kubernetes.github.io/autoscaler`; image tag from the release pin | `kube-system` | none: fixed | none |
+| `external-secrets` | `external-secrets` 2.15.0 (External Secrets Operator v2.15.0), `https://charts.external-secrets.io` | `external-secrets` | none: fixed | none: the chart installs and upgrades its own CRDs (`installCRDs`) |
 | `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; no node class or node pool is shipped | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `kyverno` | `kyverno` 3.10.0 (Kyverno v1.20), `https://kyverno.github.io/kyverno/` | `kyverno` | none: fixed | none needed (subcharts, upgraded by Helm) |
 | `kyverno-policies` | `kyverno-policies` 3.10.0; requires `kyverno` | `kyverno` | yes | none |
@@ -111,6 +112,7 @@ chart's `values.yaml`:
 |---|---|
 | `aws-load-balancer-controller`, `cluster-autoscaler`, `karpenter`, `istiod` | `nodeSelector`, `tolerations` |
 | `kyverno` | `global.nodeSelector`, `global.tolerations` (all controllers and hook Jobs) |
+| `external-secrets` | `global.nodeSelector`, `global.tolerations` (the controller, webhook and cert-controller Deployments fall back to them) |
 | `istio-ingress-gateway` | `nodeSelector`, `tolerations` of Istio's gateway chart |
 | `gpu-operator` | `operator.nodeSelector`, `operator.tolerations` (the operator's Deployment only) |
 
@@ -205,6 +207,80 @@ ingress need them: install the version that goes with the Istio release
 ```sh
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
 ```
+
+## Using External Secrets
+
+The operator (two replicas of the controller and of the cert-controller with
+leader election, two of the webhook, a PodDisruptionBudget each) runs
+**without any AWS credentials**: the platform gives it no IAM role. A store
+names the service account whose IAM role it reads with, so each team's
+access is its own role, not the operator's (external-secrets.io, "AWS
+Authentication": "The big advantage of this approach is that ESO runs
+without any credentials").
+
+What the cluster's users set up:
+
+1. The cluster has `spec.aws.irsa: true` (its IAM OIDC provider; the
+   platform's own IAM components need it too).
+2. An IAM role that trusts the cluster's OIDC provider for the service
+   account below, with a policy on the secrets it may read, for example
+   `secretsmanager:GetSecretValue`, `DescribeSecret`, `GetResourcePolicy` and
+   `ListSecretVersionIds` on `arn:aws:secretsmanager:<region>:<account>:secret:<prefix>-*`.
+3. The service account, the store and an ExternalSecret:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secrets-reader
+  namespace: team-a
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/team-a-secrets
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: aws-secrets-manager
+  namespace: team-a
+spec:
+  provider:
+    aws:
+      service: SecretsManager        # ParameterStore for SSM Parameter Store
+      region: us-west-1
+      auth:
+        jwt:
+          serviceAccountRef:
+            name: secrets-reader     # a ClusterSecretStore also names its namespace
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: database
+  namespace: team-a
+spec:
+  refreshInterval: 1h0m0s
+  secretStoreRef: {name: aws-secrets-manager, kind: SecretStore}
+  target: {name: database, creationPolicy: Owner}
+  data:
+  - secretKey: password
+    remoteRef: {key: team-a-database, property: password}
+```
+
+- `serviceAccountRef` does not work with EKS Pod Identity: the operator
+  cannot act as a service account whose role is bound that way
+  (external-secrets.io). Use IRSA for the store's service account.
+- A `ClusterSecretStore` lets every namespace read with one role. Nothing
+  in the platform restricts who may create one; Kyverno policies can.
+- **Versions.** The project's support table lists 2.15 for Kubernetes 1.37
+  only; it names one Kubernetes version per release (1.36 for 2.9 to 2.13,
+  1.35 for 2.7 and 2.8, all past their end of life). The shipped release
+  pins 2.15.0 on 1.35, 1.36 and 1.37; the chart itself accepts Kubernetes
+  1.19 and later. Not installed on a real cluster yet.
+- **Release size.** Helm keeps a release as a Secret of at most 1 MiB. With
+  these values the 2.15.0 release record is 527,971 bytes gzipped (about
+  704 KB as stored), measured with a client-side dry run. It fits; the
+  chart's `crds.create*` switches drop CRDs if a later version grows past
+  the limit.
 
 ## Versions that move together, and upgrade order
 

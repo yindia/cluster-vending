@@ -73,6 +73,7 @@ func defaultPins(autoscalerImage string) []cloudv1alpha1.ComponentPin {
 	return []cloudv1alpha1.ComponentPin{
 		pin("aws-load-balancer-controller", "3.6.2"),
 		autoscaler,
+		pin("external-secrets", "2.15.0"),
 		pin("gpu-operator", "v26.7.2"),
 		pin("istio-base", "1.32.0"),
 		pin("istio-cni", "1.32.0"),

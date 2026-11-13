@@ -44,7 +44,7 @@ func TestShippedPlatformComponentsPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "istio-base", "istio-cni",
+	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "istio-base", "istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "ztunnel"}
 	for _, k := range DefaultRelease().Spec.Content.Kubernetes {
 		t.Run(k.Minor, func(t *testing.T) {

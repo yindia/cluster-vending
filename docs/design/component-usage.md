@@ -851,9 +851,7 @@ install:
   `spec.forProvider.skipCRDs: true` (present in the provider-helm v1.5.0
   `Release` CRD).
 - It gets no values and may carry `credentials` like any chart.
-- Shipped: `karpenter` (upstream `karpenter-crd`) and
-  `aws-load-balancer-controller` (the platform's
-  `charts/aws-load-balancer-controller-crds`). See [catalog.md](../catalog.md).
+- Shipped: `karpenter` (upstream `karpenter-crd`). See [catalog.md](../catalog.md).
 
 **Version groups (built).** `versionGroup: <name>` on a definition marks
 components that are versions of one product (the Istio charts; `kyverno` and
@@ -924,8 +922,8 @@ recorded apart from the cluster's (`status.componentInventory`, owner
    existed, does not tie the cluster to it. Versions are that release's pins on the
    cluster's Kubernetes minor. A component the release does not pin is not
    installed ("not in release <name>"), and neither is anything requiring
-   it. A companion chart is pinned under its own name
-   (`karpenter-nodeclass`); without a pin it alone is left out.
+   it. A companion chart is pinned under its own name;
+   without a pin it alone is left out.
 3. **What, per component** (`component.PlanPlatform`, then
    `crossplaneaws.PlatformSet`), each step once the one before is Ready:
    its IAM role (section 5.2), its CRD chart (Helm release

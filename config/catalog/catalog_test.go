@@ -40,7 +40,7 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "gateway-api-crds", "gpu-operator", "istio", "istio-base", "istio-cni",
+	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "gpu-operator", "istio", "istio-base", "istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
 		t.Errorf("catalog = %v, want %v", names, want)
@@ -160,7 +160,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "gateway-api-crds", "istio-base", "istiod",
+	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "karpenter", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
@@ -174,7 +174,7 @@ func TestWhoControlsWhat(t *testing.T) {
 	}
 }
 
-// Istio is one bundle of six internal members, installed in this order.
+// Istio is one bundle of five internal members, installed in this order.
 func TestIstioBundle(t *testing.T) {
 	defs := catalogDefinitions(t)
 	var istio component.Definition
@@ -187,7 +187,7 @@ func TestIstioBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"gateway-api-crds", "istio-base", "istiod", "istio-cni", "istio-ingress-gateway", "ztunnel"}
+	want := []string{"istio-base", "istiod", "istio-cni", "istio-ingress-gateway", "ztunnel"}
 	if !slices.Equal(order, want) {
 		t.Errorf("bundle order = %v, want %v", order, want)
 	}
@@ -254,27 +254,28 @@ func TestOnlyTwoDefinitionsAcceptOverrides(t *testing.T) {
 	}
 }
 
-// Karpenter's node class uses a pinned AMI release, never latest.
-func TestKarpenterAMIIsPinned(t *testing.T) {
-	d, err := component.DefinitionOf(byName(t)["karpenter"])
+// Karpenter ships without a node class or node pool: no companion chart,
+// and nothing of one left in its values.
+func TestKarpenterShipsNoNodeClass(t *testing.T) {
+	def := byName(t)["karpenter"]
+	if n := len(def.Spec.Install.Helm.Companions); n != 0 {
+		t.Errorf("karpenter has %d companion charts, want none", n)
+	}
+	d, err := component.DefinitionOf(def)
 	if err != nil {
 		t.Fatal(err)
 	}
-	companion, _ := d.PlatformValues["karpenter-nodeclass"].(map[string]any)
-	nodeClass, _ := companion["nodeClass"].(map[string]any)
-	alias, _ := nodeClass["amiAlias"].(string)
-	if !strings.HasPrefix(alias, "al2023@v") {
-		t.Errorf("amiAlias = %q, want a pinned al2023@v<release>", alias)
+	if _, ok := d.PlatformValues["karpenter-nodeclass"]; ok {
+		t.Error("karpenter still carries karpenter-nodeclass values")
 	}
 }
 
-// The CRD charts: Karpenter's and the load balancer controller's are
-// installed before their main charts; the others upgrade their CRDs
-// themselves (subcharts, templates or a pre-upgrade hook).
+// The CRD charts: Karpenter's is installed before its main chart. The
+// load balancer controller's upstream chart installs its own CRDs, and the
+// others upgrade theirs themselves (subcharts, templates or a hook).
 func TestCRDCharts(t *testing.T) {
 	want := map[string]string{
-		"karpenter":                    "oci://public.ecr.aws/karpenter karpenter-crd",
-		"aws-load-balancer-controller": "oci://ghcr.io/yindia/cluster-vending/charts aws-load-balancer-controller-crds",
+		"karpenter": "oci://public.ecr.aws/karpenter karpenter-crd",
 	}
 	for _, def := range definitions(t) {
 		if def.Spec.Install == nil {
@@ -323,8 +324,7 @@ func TestUpgradeOrder(t *testing.T) {
 
 // The version groups and the one-minor rule are where the research put
 // them: the four upstream Istio charts move together, one minor at a time;
-// Kyverno and its policies together. The platform's own charts
-// (gateway-api-crds, istio-ingress-gateway) have their own versions.
+// Kyverno and its policies together.
 func TestVersionGroups(t *testing.T) {
 	groups := map[string][]string{}
 	var stepped []string
@@ -336,7 +336,7 @@ func TestVersionGroups(t *testing.T) {
 			stepped = append(stepped, e.Name)
 		}
 	}
-	istio := []string{"istio-base", "istio-cni", "istiod", "ztunnel"}
+	istio := []string{"istio-base", "istio-cni", "istio-ingress-gateway", "istiod", "ztunnel"}
 	if !slices.Equal(groups["istio"], istio) || !slices.Equal(groups["kyverno"], []string{"kyverno", "kyverno-policies"}) || len(groups) != 2 {
 		t.Errorf("groups = %v", groups)
 	}
@@ -345,31 +345,28 @@ func TestVersionGroups(t *testing.T) {
 	}
 }
 
-// platformCharts is the registry of the charts the platform owns (charts/).
-const platformCharts = "oci://ghcr.io/yindia/cluster-vending/charts"
+// ownRegistry is where the platform's own charts would be published.
+// Nothing is: every chart of the catalog comes from its upstream.
+const ownRegistry = "ghcr.io/yindia/cluster-vending"
 
-// A platform-owned chart may be a component's main chart, and a definition
-// may have empty platform values: gateway-api-crds is both, and is Valid.
-func TestPlatformChartAsMainChartWithoutValues(t *testing.T) {
-	defs := byName(t)
-	for _, name := range []string{"gateway-api-crds", "istio-ingress-gateway"} {
-		helm := defs[name].Spec.Install.Helm
-		if helm.Repository != platformCharts || helm.Chart != name {
-			t.Errorf("%s installs %s %s, want the platform chart %s", name, helm.Repository, helm.Chart, name)
+func TestEveryChartIsUpstream(t *testing.T) {
+	for _, def := range definitions(t) {
+		if def.Spec.Install == nil {
+			continue
 		}
-		if _, err := os.Stat("../../charts/" + name + "/Chart.yaml"); err != nil {
-			t.Errorf("%s: the chart's source is not in charts/: %v", name, err)
+		helm := def.Spec.Install.Helm
+		repos := []string{helm.Repository}
+		if helm.CRDs != nil {
+			repos = append(repos, helm.CRDs.Repository)
 		}
-	}
-	d, err := component.DefinitionOf(defs["gateway-api-crds"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(d.PlatformValues) != 0 {
-		t.Errorf("gateway-api-crds platformValues = %v, want none", d.PlatformValues)
-	}
-	if problems := component.CheckDefinition(d); len(problems) > 0 {
-		t.Errorf("gateway-api-crds: %v", problems)
+		for _, c := range helm.Companions {
+			repos = append(repos, c.Repository)
+		}
+		for _, repo := range repos {
+			if strings.Contains(repo, ownRegistry) {
+				t.Errorf("%s pulls a chart from %s", def.Name, repo)
+			}
+		}
 	}
 }
 
@@ -380,7 +377,7 @@ func TestIngressGatewayIsInternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := lookup(d.PlatformValues, "loadBalancer", "scheme"); got != "internal" {
+	if got := lookup(d.PlatformValues, "service", "annotations", "service.beta.kubernetes.io/aws-load-balancer-scheme"); got != "internal" {
 		t.Errorf("scheme = %v, want internal", got)
 	}
 }

@@ -16,6 +16,14 @@ spec:
       repository: https://kyverno.github.io/kyverno/
       chart: kyverno
   platformValues:
+    upgrade:
+      legacyPolicyCheck:
+        # No pre-install/pre-upgrade hook Job for the legacy-policy check. The
+        # Job runs once (backoffLimit 0) with no priority class, which the
+        # chart has no value for: on a full node it is preempted and the
+        # whole install fails (seen on a real cluster). The render-time check
+        # for legacy policies stays on: Helm runs it against the live cluster.
+        enabled: false
     global:
       # Every Kyverno workload (controllers, hook Jobs). The chart always adds
       # kubernetes.io/os: linux to the node selector.
@@ -49,14 +57,12 @@ spec:
             - kube-public
             - kube-node-lease
             - kyverno
-            - gateway-system
             - gpu-operator
             - istio-ingress
             - istio-system
       # The default resourceFilters already cover kube-system, kube-public, kube-node-lease and
       # kyverno; add the catalog's other namespaces so Kyverno also skips them.
       resourceFiltersIncludeNamespaces:
-      - gateway-system
       - gpu-operator
       - istio-ingress
       - istio-system

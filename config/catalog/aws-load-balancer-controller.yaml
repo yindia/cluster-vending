@@ -11,12 +11,10 @@ spec:
     helm:
       repository: https://aws.github.io/eks-charts
       chart: aws-load-balancer-controller
-      # The controller's CRDs (crds/crds.yaml and crds/gateway-crds.yaml of
-      # chart 3.6.2) packaged by the platform as templates, so they are
-      # upgraded; installed before the main chart at the same version.
-      crds:
-        repository: oci://ghcr.io/yindia/cluster-vending/charts
-        chart: aws-load-balancer-controller-crds
+      # No CRD chart: the upstream chart installs its own CRDs (its crds/
+      # folder) with the first install. Helm never upgrades them, so a
+      # version bump that changes them needs upstream's crds.yaml applied
+      # (docs/catalog.md).
   cloudResources:
     iamRole:
       access: IRSA

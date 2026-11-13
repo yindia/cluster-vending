@@ -96,12 +96,6 @@ spec:
     helm:
       repository: oci://public.ecr.aws/karpenter
       chart: karpenter
-      companions:
-      # The platform's own chart: EC2NodeClass "default" and, unless turned
-      # off, a default NodePool. In the operator's OCI registry.
-      - name: karpenter-defaults
-        repository: oci://ghcr.io/yindia/cluster-vending/charts
-        chart: karpenter-defaults
   # Locked for every tenant. The ${...} placeholders are filled in per
   # cluster by the controller.
   platformValues:

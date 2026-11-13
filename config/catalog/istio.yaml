@@ -1,11 +1,11 @@
-# Istio in ambient mode (no sidecars): one component made of six charts,
-# each a definition of its own (internal: true) with its chart, namespace,
-# version pin and requires. Checked against Istio 1.32.0 and Gateway API
-# v1.6.1; docs/catalog.md has the caveats.
+# Istio in ambient mode (no sidecars): one component made of five charts,
+# all Istio's own, each a definition of its own (internal: true) with its
+# chart, namespace, version pin and requires. Checked against Istio 1.32.0;
+# docs/catalog.md has the caveats.
 #
 # The members are installed in requires order, each once the one before is
-# Ready: gateway-api-crds and istio-base, then istiod, istio-cni, ztunnel,
-# and the ingress gateway after istiod. A release pins every member.
+# Ready: istio-base, then istiod, istio-cni, ztunnel, and the ingress
+# gateway after istiod. A release pins every member, at one version.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: ComponentDefinition
 metadata:
@@ -15,7 +15,6 @@ spec:
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
   includes:
-  - gateway-api-crds
   - istio-base
   - istiod
   - istio-cni

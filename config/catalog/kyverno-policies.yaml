@@ -24,7 +24,6 @@ spec:
       - kube-public
       - kube-node-lease
       - kyverno
-      - gateway-system
       - gpu-operator
       - istio-ingress
       - istio-system

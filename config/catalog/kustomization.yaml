@@ -12,7 +12,6 @@ kind: Kustomization
 resources:
 - aws-load-balancer-controller.yaml
 - cluster-autoscaler.yaml
-- gateway-api-crds.yaml
 - gpu-operator.yaml
 - istio.yaml
 - istio-base.yaml

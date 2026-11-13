@@ -3,14 +3,16 @@ kind: ComponentDefinition
 metadata:
   name: istiod
 spec:
-  description: Istio control plane (istiod) with the ambient profile; also deploys Gateway API gateways and waypoints.
+  description: Istio control plane (istiod) with the ambient profile; deploys waypoints and Gateway API gateways once the Gateway API CRDs are installed.
   # A member of the istio bundle (istio.yaml): installed with it, by the
   # platform, with every cluster.
   management: Platform
   internal: true
   namespace: istio-system
-  # gateway-api-crds: the ambient guide installs the Gateway API CRDs before istiod.
-  requires: [istio-base, gateway-api-crds]
+  # The Gateway API CRDs are not installed by the platform (no upstream chart
+  # ships them): istiod runs without them, and uses them once they exist
+  # (waypoints, Gateway API ingress; docs/catalog.md).
+  requires: [istio-base]
   versionGroup: istio
   upgradeOneMinorAtATime: true
   install:

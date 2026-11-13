@@ -66,27 +66,26 @@ against.
 
 | Component | Chart (version checked) | Namespace | Tenant values | CRD chart |
 |---|---|---|---|---|
-| `aws-load-balancer-controller` | `aws-load-balancer-controller` 3.6.2, `https://aws.github.io/eks-charts` | `kube-system` | none: fixed | `aws-load-balancer-controller-crds` (platform, `charts/`) |
+| `aws-load-balancer-controller` | `aws-load-balancer-controller` 3.6.2, `https://aws.github.io/eks-charts` | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `cluster-autoscaler` | `cluster-autoscaler` 9.60.0, `https://kubernetes.github.io/autoscaler`; image tag from the release pin | `kube-system` | none: fixed | none |
-| `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; companion `karpenter-nodeclass` 0.1.0 (platform, `charts/`) | `kube-system` | none: fixed | `karpenter-crd` (upstream) |
+| `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; no node class or node pool is shipped | `kube-system` | none: fixed | `karpenter-crd` (upstream) |
 | `kyverno` | `kyverno` 3.10.0 (Kyverno v1.20), `https://kyverno.github.io/kyverno/` | `kyverno` | none: fixed | none needed (subcharts, upgraded by Helm) |
 | `kyverno-policies` | `kyverno-policies` 3.10.0; requires `kyverno` | `kyverno` | yes | none |
 | `gpu-operator` | `gpu-operator` v26.7.2, `https://helm.ngc.nvidia.com/nvidia` | `gpu-operator` | yes | none (the chart's pre-upgrade hook applies them) |
 
-`istio`, in ambient mode (no sidecars), is a bundle of six internal
-definitions:
+`istio`, in ambient mode (no sidecars), is a bundle of five internal
+definitions, all Istio's own charts:
 
 | Component | Chart (version checked) | Namespace | Requires |
 |---|---|---|---|
-| `gateway-api-crds` | `gateway-api-crds` 1.6.1 (platform, `charts/`): Gateway API v1.6.1, standard channel | `gateway-system` | |
 | `istio-base` | `base` 1.32.0, `https://blob.istio.io/istio-release/charts` | `istio-system` | |
-| `istiod` | `istiod` 1.32.0, profile `ambient` | `istio-system` | `istio-base`, `gateway-api-crds` |
+| `istiod` | `istiod` 1.32.0, profile `ambient` | `istio-system` | `istio-base` |
 | `istio-cni` | `cni` 1.32.0, profile `ambient` (DaemonSet) | `istio-system` | `istiod` |
 | `ztunnel` | `ztunnel` 1.32.0 (DaemonSet) | `istio-system` | `istio-cni` |
-| `istio-ingress-gateway` | `istio-ingress-gateway` 0.1.0 (platform, `charts/`): a Gateway API `Gateway` of class `istio` behind an internal NLB | `istio-ingress` | `istiod`, `aws-load-balancer-controller` |
+| `istio-ingress-gateway` | `gateway` 1.32.0 (Istio's gateway chart): an Envoy Deployment behind an internal NLB | `istio-ingress` | `istiod`, `aws-load-balancer-controller` |
 
-All six are fixed: no tenant values. None needs a CRD chart: `istio-base`
-and `gateway-api-crds` render their CRDs as templates, kept on uninstall.
+All five are fixed: no tenant values. None needs a CRD chart: `istio-base`
+renders Istio's CRDs as templates, kept on uninstall.
 
 **Tenant values.** Only `gpu-operator` and `kyverno-policies` have a values
 file and a schema. Every Platform component runs as the platform set it:
@@ -109,7 +108,7 @@ chart's `values.yaml`:
 |---|---|
 | `aws-load-balancer-controller`, `cluster-autoscaler`, `karpenter`, `istiod` | `nodeSelector`, `tolerations` |
 | `kyverno` | `global.nodeSelector`, `global.tolerations` (all controllers and hook Jobs) |
-| `istio-ingress-gateway` | `nodeSelector`, `tolerations` of the platform chart, which puts them on the Deployment istiod generates |
+| `istio-ingress-gateway` | `nodeSelector`, `tolerations` of Istio's gateway chart |
 | `gpu-operator` | `operator.nodeSelector`, `operator.tolerations` (the operator's Deployment only) |
 
 Not placed, on purpose or for lack of a verified key:
@@ -137,47 +136,88 @@ with `skipCRDs`.
   and annotations on them before `karpenter-crd` can adopt them (Karpenter
   troubleshooting: "Helm Error When Installing the karpenter-crd Chart"); new
   installs are not affected.
-- `aws-load-balancer-controller`: `charts/aws-load-balancer-controller-crds`,
-  the upstream chart's `crds/crds.yaml` and `crds/gateway-crds.yaml` (3.6.2)
-  unchanged, with `helm.sh/resource-policy: keep`. Its version follows the
-  upstream chart: bump both together, copying the new files.
+- `aws-load-balancer-controller`: no CRD chart. The upstream chart installs
+  the CRDs in its `crds/` folder with the first install, and Helm never
+  upgrades them: when a new chart version changes them, apply upstream's
+  `crds.yaml` for that version to the cluster first (the controller's
+  upgrade notes say when).
 - `gpu-operator`: NVIDIA ships no CRD chart; `operator.upgradeCRD` (the
   default) runs a pre-upgrade hook that applies them.
 
-The four platform charts (`karpenter-nodeclass`,
-`aws-load-balancer-controller-crds`, `gateway-api-crds`,
-`istio-ingress-gateway`) have their source in `charts/` and must
-be published to `oci://ghcr.io/yindia/cluster-vending/charts`; nothing
-publishes them yet. Until they are, on every cluster:
+Every chart comes from its upstream repository. The platform publishes
+no chart of its own, and a test fails if a definition names the platform's
+registry.
 
-- `karpenter` installs, but its companion `karpenter-nodeclass` fails (no
-  EC2NodeClass or NodePool: Karpenter launches nothing), so `karpenter`
-  reports `Failed`;
-- `aws-load-balancer-controller` stays `Failed` at its CRD chart
-  (`aws-load-balancer-controller-crds`), and `istio-ingress-gateway`,
-  which requires it, waits;
-- `gateway-api-crds` stays `Failed`, and `istiod`, `istio-cni`, `ztunnel`
-  and `istio-ingress-gateway`, which come after it, wait;
-- `cluster-autoscaler`, `kyverno` and `istio-base` install: their charts
-  are upstream.
+## What the platform does not install
+
+**Karpenter's node class and node pool.** Karpenter runs, but launches
+nothing until an `EC2NodeClass` and a `NodePool` exist: no upstream chart
+ships them, so the cluster's users create them. A starting point, with the
+cluster's node role and the tags the platform puts on the cluster's subnets
+and EKS on its security group (`<cluster>` is the EKS name, the node role
+is `<prefix>-node-role`):
+
+```yaml
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  role: <prefix>-node-role
+  amiSelectorTerms:
+  - alias: al2023@v20261107        # a pinned EKS AMI release; "latest" replaces nodes on every release
+  subnetSelectorTerms:
+  - tags: {karpenter.sh/discovery: <cluster>}
+  securityGroupSelectorTerms:
+  - tags: {aws:eks:cluster-name: <cluster>}
+  metadataOptions: {httpEndpoint: enabled, httpPutResponseHopLimit: 1, httpTokens: required}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    spec:
+      nodeClassRef: {group: karpenter.k8s.aws, kind: EC2NodeClass, name: default}
+      expireAfter: 720h
+      requirements:
+      - {key: kubernetes.io/arch, operator: In, values: [amd64]}
+      - {key: kubernetes.io/os, operator: In, values: [linux]}
+      - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
+      - {key: karpenter.k8s.aws/instance-category, operator: In, values: [c, m, r]}
+      - {key: karpenter.k8s.aws/instance-generation, operator: Gt, values: ["2"]}
+  limits: {cpu: "100", memory: 400Gi}
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m
+```
+
+**The Gateway API CRDs.** Kubernetes publishes them as a manifest, not as a
+Helm chart, so the platform does not install them. The mesh (mTLS and L4
+policy through ztunnel) and the ingress gateway work without them. Waypoints,
+which ambient mode needs for anything at L7, and `Gateway`/`HTTPRoute`
+ingress need them: install the version that goes with the Istio release
+(v1.6.1 for Istio 1.32):
+
+```sh
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
+```
 
 ## Versions that move together, and upgrade order
 
 - **Version groups** (`versionGroup`): `kyverno` and `kyverno-policies` are
-  group `kyverno`; `istio-base`, `istiod`, `istio-cni` and `ztunnel` are
-  group `istio`. A release that pins members of a group at different
-  versions on one Kubernetes minor is not Valid. The two platform charts of
-  Istio have their own versions and are outside the group.
-- **One minor at a time** (`upgradeOneMinorAtATime`): the four `istio`
-  group members. A channel does not move to a release whose pin skips a
+  group `kyverno`; `istio-base`, `istiod`, `istio-cni`, `ztunnel` and
+  the ingress gateway are group `istio`. A release that pins members of a
+  group at different versions on one Kubernetes minor is not Valid.
+- **One minor at a time** (`upgradeOneMinorAtATime`): the `istio` group
+  members. A channel does not move to a release whose pin skips a
   minor version of such a component relative to the release it offers now
   (1.31 to 1.32 is fine, 1.30 to 1.32 is not).
 - **Order**: components are installed and upgraded in `requires` order
   (`release.UpgradeOrder`): `kyverno` before `kyverno-policies`;
-  `gateway-api-crds` and `istio-base`, then `istiod`, `istio-cni`,
+  `istio-base`, then `istiod`, `istio-cni`,
   `ztunnel`, and the ingress gateway after `istiod`.
-- **Istio 1.32 goes with Gateway API v1.6.1.** Pin `gateway-api-crds` at
-  1.6.1 in the same release as Istio 1.32; no check enforces the pairing.
 
 ## Values a release sets per Kubernetes minor
 
@@ -272,8 +312,6 @@ holds that a pin's image minor is the minor it is pinned under.
 - `istio-system` runs privileged DaemonSets. A definition cannot set
   namespace labels, so if Pod Security levels are ever enforced, the
   namespace needs `pod-security.kubernetes.io/enforce=privileged`.
-- If the Gateway API CRDs already exist on a cluster, `gateway-api-crds`
-  fails with Helm's ownership error until they are adopted or removed.
 - A tenant's own `Gateway` of class `istio` also gets a LoadBalancer
   Service, without the internal annotations; nothing stops that yet.
 

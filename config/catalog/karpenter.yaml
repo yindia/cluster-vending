@@ -3,7 +3,7 @@ kind: ComponentDefinition
 metadata:
   name: karpenter
 spec:
-  description: Karpenter node autoscaler, launching EC2 nodes with the cluster's node group role and a platform EC2NodeClass and default NodePool.
+  description: Karpenter node autoscaler. It launches EC2 nodes for the NodePools and EC2NodeClasses created on the cluster; none is shipped (docs/catalog.md).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
   namespace: kube-system
@@ -16,8 +16,6 @@ spec:
       crds:
         repository: oci://public.ecr.aws/karpenter
         chart: karpenter-crd
-      companions:
-      - {name: karpenter-nodeclass, repository: oci://ghcr.io/yindia/cluster-vending/charts, chart: karpenter-nodeclass}
   cloudResources:
     iamRole:
       access: IRSA
@@ -340,58 +338,6 @@ spec:
       podAntiAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
         - topologyKey: kubernetes.io/hostname
-    karpenter-nodeclass:
-      nodeClass:
-        name: default
-        role: ${cluster.nodeRoleName}
-        # Pinned EKS AMI release (awslabs/amazon-eks-ami v20261107, AL2023 for
-        # Kubernetes 1.33 to 1.37). al2023@latest would replace every Karpenter
-        # node on each AMI release; the platform bumps this pin by publishing a
-        # new version of this definition instead.
-        amiAlias: al2023@v20261107
-        subnetSelectorTerms:
-        - tags:
-            karpenter.sh/discovery: ${cluster.name}
-        securityGroupSelectorTerms:
-        - tags:
-            aws:eks:cluster-name: ${cluster.name}
-        metadataOptions:
-          httpEndpoint: enabled
-          httpProtocolIPv6: disabled
-          httpPutResponseHopLimit: 1
-          httpTokens: required
-      # The default NodePool (karpenter.sh/v1) that launches nodes for pending
-      # pods: on-demand amd64 Linux, c/m/r generation 3 and newer.
-      nodePool:
-        enabled: true
-        # Upper bound on everything this pool launches.
-        limits:
-          cpu: "100"
-          memory: 400Gi
-        requirements:
-          - key: kubernetes.io/arch
-            operator: In
-            values: ["amd64"]
-          - key: kubernetes.io/os
-            operator: In
-            values: ["linux"]
-          - key: karpenter.sh/capacity-type
-            operator: In
-            values: ["on-demand"]
-          - key: karpenter.k8s.aws/instance-category
-            operator: In
-            values: ["c", "m", "r"]
-          - key: karpenter.k8s.aws/instance-generation
-            operator: Gt
-            values: ["2"]
-        disruption:
-          consolidationPolicy: WhenEmptyOrUnderutilized
-          consolidateAfter: 1m
-          # At most 10% of the nodes disrupted at once.
-          budgets:
-            - nodes: "10%"
-        # Nodes are replaced after 30 days (new AMIs, patches).
-        expireAfter: 720h
     # Fixed by the platform at the researched defaults.
     # Controller log verbosity: debug, info or error.
     logLevel: info

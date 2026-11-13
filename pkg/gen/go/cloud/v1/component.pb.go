@@ -11,6 +11,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -160,9 +161,9 @@ type Component struct {
 	// The catalog entry (ComponentDefinition.name), e.g. "karpenter".
 	// Required on enable. Immutable.
 	Component string `protobuf:"bytes,4,opt,name=component,proto3" json:"component,omitempty"`
-	// Pins a version on a cluster that does not take versions from its
-	// channel. Empty: the version the release that applies to the cluster
-	// gives its Kubernetes minor.
+	// Output only: the version the cluster's release gives the component on
+	// its Kubernetes minor. A tenant does not choose it: a request that sets
+	// it fails with INVALID_ARGUMENT.
 	Version string `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
 	// The tenant's values: a JSON object of at most 64 KiB, usually the
 	// definition's user_values file as edited. Keys equal to that file are
@@ -311,8 +312,11 @@ type ComponentStatus struct {
 	// The merged values that were applied, platform-computed keys included,
 	// no secrets.
 	EffectiveValues *structpb.Struct `protobuf:"bytes,9,opt,name=effective_values,json=effectiveValues,proto3" json:"effective_values,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Since when the component is in its phase; for one the platform
+	// installs, as the cluster reports it. Unset when it is not enabled.
+	Since         *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=since,proto3" json:"since,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ComponentStatus) Reset() {
@@ -408,6 +412,13 @@ func (x *ComponentStatus) GetEffectiveValues() *structpb.Struct {
 	return nil
 }
 
+func (x *ComponentStatus) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
 // ComponentDefinition is what tenants see of a catalog entry. How the
 // platform installs it is not part of the answer.
 type ComponentDefinition struct {
@@ -435,6 +446,13 @@ type ComponentDefinition struct {
 	// left as in this file are not stored, so later changes to the file
 	// still reach them. Empty when the component takes no values.
 	UserValues string `protobuf:"bytes,9,opt,name=user_values,json=userValues,proto3" json:"user_values,omitempty"`
+	// Who controls the component. PLATFORM: installed with every cluster, with
+	// fixed values; a tenant cannot enable, change or disable it. TENANT: a
+	// tenant enables it on a cluster.
+	Management ComponentManagement `protobuf:"varint,10,opt,name=management,proto3,enum=cloud.v1.ComponentManagement" json:"management,omitempty"`
+	// A tenant may set values for it: it is TENANT, and has a user_values
+	// file and a values_schema.
+	Configurable bool `protobuf:"varint,11,opt,name=configurable,proto3" json:"configurable,omitempty"`
 	// What the platform creates in the tenant's account for the component
 	// (an IAM role), shown so tenants know what the component may do there.
 	CloudResources *ComponentCloudResources `protobuf:"bytes,16,opt,name=cloud_resources,json=cloudResources,proto3" json:"cloud_resources,omitempty"`
@@ -528,6 +546,20 @@ func (x *ComponentDefinition) GetUserValues() string {
 	return ""
 }
 
+func (x *ComponentDefinition) GetManagement() ComponentManagement {
+	if x != nil {
+		return x.Management
+	}
+	return ComponentManagement_COMPONENT_MANAGEMENT_UNSPECIFIED
+}
+
+func (x *ComponentDefinition) GetConfigurable() bool {
+	if x != nil {
+		return x.Configurable
+	}
+	return false
+}
+
 func (x *ComponentDefinition) GetCloudResources() *ComponentCloudResources {
 	if x != nil {
 		return x.CloudResources
@@ -539,7 +571,7 @@ var File_cloud_v1_component_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_component_proto_rawDesc = "" +
 	"\n" +
-	"\x18cloud/v1/component.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ecloud/v1/component_cloud.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xae\x03\n" +
+	"\x18cloud/v1/component.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ecloud/v1/component_cloud.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xae\x03\n" +
 	"\tComponent\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12*\n" +
@@ -556,7 +588,7 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\n" +
 	"management\x18\n" +
 	" \x01(\x0e2\x1d.cloud.v1.ComponentManagementR\n" +
-	"management\"\x96\x03\n" +
+	"management\"\xc8\x03\n" +
 	"\x0fComponentStatus\x12.\n" +
 	"\x05phase\x18\x01 \x01(\x0e2\x18.cloud.v1.ComponentPhaseR\x05phase\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -568,7 +600,9 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\x11installed_version\x18\x06 \x01(\tR\x10installedVersion\x12%\n" +
 	"\x0etarget_version\x18\a \x01(\tR\rtargetVersion\x12\x18\n" +
 	"\arelease\x18\b \x01(\tR\arelease\x12B\n" +
-	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\"\xa4\x04\n" +
+	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\x120\n" +
+	"\x05since\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\x87\x05\n" +
 	"\x13ComponentDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +
@@ -578,7 +612,12 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\bversions\x18\a \x03(\v2+.cloud.v1.ComponentDefinition.VersionsEntryR\bversions\x12@\n" +
 	"\x0fplatform_values\x18\b \x01(\v2\x17.google.protobuf.StructR\x0eplatformValues\x12\x1f\n" +
 	"\vuser_values\x18\t \x01(\tR\n" +
-	"userValues\x12J\n" +
+	"userValues\x12=\n" +
+	"\n" +
+	"management\x18\n" +
+	" \x01(\x0e2\x1d.cloud.v1.ComponentManagementR\n" +
+	"management\x12\"\n" +
+	"\fconfigurable\x18\v \x01(\bR\fconfigurable\x12J\n" +
 	"\x0fcloud_resources\x18\x10 \x01(\v2!.cloud.v1.ComponentCloudResourcesR\x0ecloudResources\x1a;\n" +
 	"\rVersionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
@@ -620,7 +659,8 @@ var file_cloud_v1_component_proto_goTypes = []any{
 	nil,                             // 5: cloud.v1.ComponentDefinition.VersionsEntry
 	(*structpb.Struct)(nil),         // 6: google.protobuf.Struct
 	(*Condition)(nil),               // 7: cloud.v1.Condition
-	(*ComponentCloudResources)(nil), // 8: cloud.v1.ComponentCloudResources
+	(*timestamppb.Timestamp)(nil),   // 8: google.protobuf.Timestamp
+	(*ComponentCloudResources)(nil), // 9: cloud.v1.ComponentCloudResources
 }
 var file_cloud_v1_component_proto_depIdxs = []int32{
 	6,  // 0: cloud.v1.Component.values:type_name -> google.protobuf.Struct
@@ -629,15 +669,17 @@ var file_cloud_v1_component_proto_depIdxs = []int32{
 	1,  // 3: cloud.v1.ComponentStatus.phase:type_name -> cloud.v1.ComponentPhase
 	7,  // 4: cloud.v1.ComponentStatus.conditions:type_name -> cloud.v1.Condition
 	6,  // 5: cloud.v1.ComponentStatus.effective_values:type_name -> google.protobuf.Struct
-	6,  // 6: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
-	5,  // 7: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
-	6,  // 8: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
-	8,  // 9: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	8,  // 6: cloud.v1.ComponentStatus.since:type_name -> google.protobuf.Timestamp
+	6,  // 7: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
+	5,  // 8: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
+	6,  // 9: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
+	0,  // 10: cloud.v1.ComponentDefinition.management:type_name -> cloud.v1.ComponentManagement
+	9,  // 11: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_component_proto_init() }

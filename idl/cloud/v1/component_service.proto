@@ -16,8 +16,11 @@ import "google/protobuf/field_mask.proto";
 // GetComponent until status.observed_generation catches up with generation
 // and status.phase is READY (or the component is gone, after a disable).
 service ComponentService {
-  // Lists the catalog. With cluster_id, versions holds what that cluster's
-  // release offers for its Kubernetes minor.
+  // Lists the catalog: every component, the ones the platform installs with
+  // each cluster included (management says which; those cannot be enabled,
+  // changed or disabled). The members of a bundle are not listed, the
+  // bundle is. With cluster_id, versions holds what that cluster's release
+  // offers for its Kubernetes minor.
   rpc ListComponentDefinitions(ListComponentDefinitionsRequest) returns (ListComponentDefinitionsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -43,9 +46,11 @@ service ComponentService {
   // fail the definition's values schema.
   rpc EnableComponent(EnableComponentRequest) returns (EnableComponentResponse);
 
-  // Changes a component's values or pinned version, with the same checks
-  // as EnableComponent. A values change rolls out at once; it does not wait
-  // for a release.
+  // Changes a component's values, with the same checks as EnableComponent.
+  // A values change rolls out at once; it does not wait for a release. A
+  // version is not a tenant's to set: it comes from the cluster's release,
+  // and a request that sets one (component.version, or the "version" mask
+  // path) fails with INVALID_ARGUMENT.
   rpc UpdateComponent(UpdateComponentRequest) returns (UpdateComponentResponse);
 
   // Removes a component from its cluster: it is deleted, not stopped.
@@ -57,7 +62,11 @@ service ComponentService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Lists the tenant's components, optionally of one cluster.
+  // Lists the tenant's components. With cluster_id it lists everything on
+  // that cluster, by name, unpaged: the components the platform installed
+  // with it (management PLATFORM, no id, read-only), the tenant's enabled
+  // components, and the catalog's tenant components that are not enabled
+  // (no id, no phase, status.message "not enabled").
   rpc ListComponents(ListComponentsRequest) returns (ListComponentsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

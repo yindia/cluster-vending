@@ -105,8 +105,11 @@ var (
 
 // ComponentServiceClient is a client for the cloud.v1.ComponentService service.
 type ComponentServiceClient interface {
-	// Lists the catalog. With cluster_id, versions holds what that cluster's
-	// release offers for its Kubernetes minor.
+	// Lists the catalog: every component, the ones the platform installs with
+	// each cluster included (management says which; those cannot be enabled,
+	// changed or disabled). The members of a bundle are not listed, the
+	// bundle is. With cluster_id, versions holds what that cluster's release
+	// offers for its Kubernetes minor.
 	ListComponentDefinitions(context.Context, *v1.ListComponentDefinitionsRequest) (*v1.ListComponentDefinitionsResponse, error)
 	// Returns a catalog entry's user_values file as written (YAML with its
 	// comments), for a tenant to edit and send with EnableComponent or
@@ -125,16 +128,22 @@ type ComponentServiceClient interface {
 	// 64 KiB, touch a platform_values path (every such path is named) or
 	// fail the definition's values schema.
 	EnableComponent(context.Context, *v1.EnableComponentRequest) (*v1.EnableComponentResponse, error)
-	// Changes a component's values or pinned version, with the same checks
-	// as EnableComponent. A values change rolls out at once; it does not wait
-	// for a release.
+	// Changes a component's values, with the same checks as EnableComponent.
+	// A values change rolls out at once; it does not wait for a release. A
+	// version is not a tenant's to set: it comes from the cluster's release,
+	// and a request that sets one (component.version, or the "version" mask
+	// path) fails with INVALID_ARGUMENT.
 	UpdateComponent(context.Context, *v1.UpdateComponentRequest) (*v1.UpdateComponentResponse, error)
 	// Removes a component from its cluster: it is deleted, not stopped.
 	// FAILED_PRECONDITION while another enabled component requires it.
 	DisableComponent(context.Context, *v1.DisableComponentRequest) (*v1.DisableComponentResponse, error)
 	// Returns one component, or NOT_FOUND.
 	GetComponent(context.Context, *v1.GetComponentRequest) (*v1.GetComponentResponse, error)
-	// Lists the tenant's components, optionally of one cluster.
+	// Lists the tenant's components. With cluster_id it lists everything on
+	// that cluster, by name, unpaged: the components the platform installed
+	// with it (management PLATFORM, no id, read-only), the tenant's enabled
+	// components, and the catalog's tenant components that are not enabled
+	// (no id, no phase, status.message "not enabled").
 	ListComponents(context.Context, *v1.ListComponentsRequest) (*v1.ListComponentsResponse, error)
 }
 
@@ -146,8 +155,11 @@ func NewComponentServiceClient(client *connect.Client) ComponentServiceClient {
 
 // ComponentServiceHandler is an implementation of the cloud.v1.ComponentService service.
 type ComponentServiceHandler interface {
-	// Lists the catalog. With cluster_id, versions holds what that cluster's
-	// release offers for its Kubernetes minor.
+	// Lists the catalog: every component, the ones the platform installs with
+	// each cluster included (management says which; those cannot be enabled,
+	// changed or disabled). The members of a bundle are not listed, the
+	// bundle is. With cluster_id, versions holds what that cluster's release
+	// offers for its Kubernetes minor.
 	ListComponentDefinitions(context.Context, *v1.ListComponentDefinitionsRequest) (*v1.ListComponentDefinitionsResponse, error)
 	// Returns a catalog entry's user_values file as written (YAML with its
 	// comments), for a tenant to edit and send with EnableComponent or
@@ -166,16 +178,22 @@ type ComponentServiceHandler interface {
 	// 64 KiB, touch a platform_values path (every such path is named) or
 	// fail the definition's values schema.
 	EnableComponent(context.Context, *v1.EnableComponentRequest) (*v1.EnableComponentResponse, error)
-	// Changes a component's values or pinned version, with the same checks
-	// as EnableComponent. A values change rolls out at once; it does not wait
-	// for a release.
+	// Changes a component's values, with the same checks as EnableComponent.
+	// A values change rolls out at once; it does not wait for a release. A
+	// version is not a tenant's to set: it comes from the cluster's release,
+	// and a request that sets one (component.version, or the "version" mask
+	// path) fails with INVALID_ARGUMENT.
 	UpdateComponent(context.Context, *v1.UpdateComponentRequest) (*v1.UpdateComponentResponse, error)
 	// Removes a component from its cluster: it is deleted, not stopped.
 	// FAILED_PRECONDITION while another enabled component requires it.
 	DisableComponent(context.Context, *v1.DisableComponentRequest) (*v1.DisableComponentResponse, error)
 	// Returns one component, or NOT_FOUND.
 	GetComponent(context.Context, *v1.GetComponentRequest) (*v1.GetComponentResponse, error)
-	// Lists the tenant's components, optionally of one cluster.
+	// Lists the tenant's components. With cluster_id it lists everything on
+	// that cluster, by name, unpaged: the components the platform installed
+	// with it (management PLATFORM, no id, read-only), the tenant's enabled
+	// components, and the catalog's tenant components that are not enabled
+	// (no id, no phase, status.message "not enabled").
 	ListComponents(context.Context, *v1.ListComponentsRequest) (*v1.ListComponentsResponse, error)
 }
 

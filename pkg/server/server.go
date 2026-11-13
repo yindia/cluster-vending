@@ -21,6 +21,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/admin"
 	"github.com/yindia/cluster-vending/pkg/server/authn"
 	"github.com/yindia/cluster-vending/pkg/server/cluster"
+	"github.com/yindia/cluster-vending/pkg/server/component"
 	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 	"github.com/yindia/cluster-vending/pkg/server/tenant"
@@ -35,7 +36,17 @@ const readHeaderTimeout = 10 * time.Second
 // Option adjusts NewHandler.
 type Option func(*options)
 
-type options struct{ auth authn.Options }
+type options struct {
+	auth    authn.Options
+	catalog reconcile.PlatformSource
+}
+
+// WithCatalog gives the component service where it reads the component
+// catalog and the releases from (management.PlatformSource). Without it
+// ComponentService answers UNAVAILABLE.
+func WithCatalog(source reconcile.PlatformSource) Option {
+	return func(o *options) { o.catalog = source }
+}
 
 // WithAuth makes the API authenticate its callers in mode, with verifier
 // checking their bearer tokens (auth.NewVerifier). Mode none needs no
@@ -66,6 +77,7 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d))
 	cloudv1connect.RegisterAdminServiceHandler(server, admin.NewService(d))
+	cloudv1connect.RegisterComponentServiceHandler(server, component.NewService(d, o.catalog))
 
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)

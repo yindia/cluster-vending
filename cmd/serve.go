@@ -94,7 +94,10 @@ func newServeCmd(g *globals) *cobra.Command {
 				}
 			}()
 			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
-			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)))
+			// The catalog and the releases are read at the API server, not
+			// from the cache: it holds the kinds the reconcilers watch.
+			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
+				server.WithCatalog(management.PlatformSource(mgr.GetAPIReader())))
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}

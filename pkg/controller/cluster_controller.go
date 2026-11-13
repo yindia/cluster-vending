@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
@@ -70,12 +75,25 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if rerr != nil {
 		return ctrl.Result{}, rerr
 	}
+	return nextCluster(row, err), nil
+}
+
+// nextCluster decides when a cluster is looked at again: as next does,
+// and sooner while its platform components are being installed or one of
+// its recorded objects is missing, although it is RUNNING.
+func nextCluster(row *model.Cluster, err error) ctrl.Result {
 	res := next(&row.Resource, reconcilecluster.PendingStates(), reconcilecluster.StateImported, err)
 	if reconcilecluster.PlatformPending(row) && res.RequeueAfter > pendingDelay {
 		// RUNNING, but its platform components are still being installed.
 		res.RequeueAfter = pendingDelay
 	}
-	return res, nil
+	if reconcilecluster.MissingObject(row) && res.RequeueAfter > failedDelay {
+		// An object was deleted behind the platform's back: the pass that
+		// found it missing may have created it again, and the next one says
+		// so; one that cannot be created again may come back.
+		res.RequeueAfter = failedDelay
+	}
+	return res
 }
 
 // bump makes the reconciler apply a spec that was edited on the object:
@@ -173,15 +191,32 @@ func (r *ClusterReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Cluste
 }
 
 // SetupWithManager sets up the controller with the Manager: for Clusters,
-// woken by their provider objects. They own nothing of this API.
+// woken by their provider objects and by their Helm objects
+// (clusterHelmKinds). They own nothing of this API.
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&cloudv1alpha1.Cluster{}, forObject()).
 		Named("cluster")
-	b, err := providerWatches(b, mgr, ownerRequests(r.owners, r.deps.Direct, crossplane.LabelCluster,
-		func() client.ObjectList { return &cloudv1alpha1.ClusterList{} }))
+	owner := ownerRequests(r.owners, r.deps.Direct, crossplane.LabelCluster,
+		func() client.ObjectList { return &cloudv1alpha1.ClusterList{} })
+	b, err := providerWatches(b, mgr, owner)
 	if err != nil {
 		return err
 	}
+	for _, gvk := range clusterHelmKinds() {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(gvk)
+		b = b.Watches(u, handler.EnqueueRequestsFromMapFunc(owner))
+	}
 	return b.Complete(r)
+}
+
+// clusterHelmKinds are the provider-helm kinds a cluster has objects of,
+// next to the AWS ones (crossplaneaws.ManagedObjects): its Helm
+// ProviderConfig and the Releases of its platform components. A change
+// or a deletion of one wakes the cluster, as its AWS objects do: a
+// deleted ProviderConfig is created again at once, and a chart that
+// finished installing is seen without waiting for the next look.
+func clusterHelmKinds() []schema.GroupVersionKind {
+	return []schema.GroupVersionKind{crossplaneaws.HelmProviderConfigGVK, crossplaneaws.HelmReleaseGVK}
 }

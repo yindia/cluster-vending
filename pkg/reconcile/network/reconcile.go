@@ -78,9 +78,27 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 
 // moveOn applies a network again while its generation or renderer version
 // is behind.
+//
+// A network rendered from its spec whose generation is applied is applied
+// once more when recorded objects were deleted from the management
+// cluster and may be created again (Deps.Repairable): the repair. Of a
+// network that is mostly the flow logs' role, policy and log group: its
+// VPC, subnets, gateways and route tables have IDs AWS assigns, and are
+// never created again blindly. An imported network, also after its
+// takeover, is not repaired: its objects are the discovered ones.
 func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
+	var repair []model.ManagedResource
 	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
-		return nil
+		if row.State == StateImported || row.State == StateBlocked || Discovering(row) || StoredImport(row) != nil {
+			return nil
+		}
+		records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
+		if err != nil {
+			return err
+		}
+		if repair, err = s.deps.Repairable(ctx, records); err != nil || len(repair) == 0 {
+			return err
+		}
 	}
 	// Imported (also after takeover): its objects are rendered from the
 	// discovered VPC, not from the spec. Rendering the spec would create a
@@ -120,6 +138,10 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 	}
 	if err := s.Reapply(ctx, row, spec); err != nil {
 		return fmt.Errorf("apply: %w", err)
+	}
+	if len(repair) > 0 {
+		s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerNetwork, ID: row.ID}, repair)
+		return nil
 	}
 	s.logger().InfoContext(ctx, "network applied again", "network_id", row.ID, "generation", row.Generation,
 		"render_version", row.RenderVersion)

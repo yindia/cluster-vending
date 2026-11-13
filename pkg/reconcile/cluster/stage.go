@@ -84,6 +84,23 @@ func (s *Reconciler) resumeCreate(ctx context.Context, row *model.Cluster, recor
 	}), nil
 }
 
+// MissingObject reports whether the row's recorded status names an object
+// that is gone from the management cluster, on a cluster the platform
+// applies (not imported, not being deleted). Such a cluster is looked at
+// again soon: the pass that finds the object missing may be the one that
+// creates it again (advance), or the object may come back.
+func MissingObject(row *model.Cluster) bool {
+	if row.State == StateDeleting || row.State == StateImported || row.State == StateBlocked {
+		return false
+	}
+	for _, v := range storedStatus(row).GetManagedResources() {
+		if v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			return true
+		}
+	}
+	return false
+}
+
 // advance applies a cluster until its generation is applied in full with
 // the target renderer: once a call stored it, after a failed apply, for the objects
 // held back until EKS is ACTIVE (add-ons, access entries), during an
@@ -95,14 +112,27 @@ func (s *Reconciler) resumeCreate(ctx context.Context, row *model.Cluster, recor
 // (resumeCreate): the objects of the first stage are applied again, the
 // later ones stay held back (crossplaneaws.ClusterSet). A cluster past its first
 // stage (an update or upgrade in progress) waits for ACTIVE.
+//
+// A cluster whose generation is applied is applied once more when
+// recorded objects were deleted from the management cluster and may be
+// created again (Deps.Repairable): the repair. Without it the cluster
+// would report them missing until an unrelated update applied it. What
+// the render no longer has (a node group being retired) is not created;
+// an object being deleted is not missing; and nothing is repaired while
+// one missing object must not be created blindly.
 func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
-	if row.State == StateDeleting ||
-		(row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID)) {
+	if row.State == StateDeleting {
 		return nil
 	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return err
+	}
+	var repair []model.ManagedResource
+	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
+		if repair, err = s.deps.Repairable(ctx, records); err != nil || len(repair) == 0 {
+			return err
+		}
 	}
 	active, err := s.eksActive(ctx, records)
 	if err != nil {
@@ -131,6 +161,10 @@ func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
 	}
 	if err := s.Apply(ctx, row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
 		return err
+	}
+	if len(repair) > 0 {
+		s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerCluster, ID: row.ID}, repair)
+		return nil
 	}
 	s.logger().InfoContext(ctx, "cluster applied again", "cluster_id", row.ID, "generation", row.Generation,
 		"applied_generation", row.AppliedGeneration, "render_version", row.RenderVersion)

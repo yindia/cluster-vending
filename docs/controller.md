@@ -273,9 +273,30 @@ stores the desired state; it has no background loop.
   kinds' own validation rules check it, not the API's update checks.
 - **Requeue.** 5s while a generation is not applied in full, 20s while the
   cloud works on it, 1m for an import that is only observed, 30s after a
-  failed pass, and a 10m resync when settled. A change of a provider object
-  wakes its owner at once (by the `cluster-vending.io/network` or
-  `/cluster` label).
+  failed pass (and while a cluster's recorded object is missing), and a 10m
+  resync when settled. A change of a provider object wakes its owner at
+  once (by the `cluster-vending.io/network` or `/cluster` label); a cluster
+  is also woken by its Helm ProviderConfig and Releases.
+- **Repair.** An object of a network or cluster that someone deleted from
+  the management cluster is created again by the next pass, although the
+  generation is applied (`Deps.Repairable`, logged as "cluster repaired:
+  recreated <kind> <name>"). Only kinds that cannot become a second cloud
+  resource are created again (`crossplaneaws.Recreatable`): objects that
+  are no cloud resource (the cluster's Helm ProviderConfig, Usages, the
+  ClusterAuth) and resources AWS identifies by a name the platform chose
+  (IAM roles, policies and attachments, log groups, key aliases, node
+  groups, add-ons, access entries, the OIDC identity provider
+  configuration), where the provider takes a survivor over or AWS refuses
+  the duplicate. Deleting such an object deletes its cloud resource first,
+  so a node group created again is a new node group. Kinds whose ID AWS
+  assigns are not created again blindly, because a new object would be a
+  second resource next to whatever survived: the encryption key, VPCs,
+  subnets, gateways, addresses, route tables, network ACLs, flow logs,
+  security groups and rules, launch templates, pod identity associations,
+  the IAM OIDC provider; nor is the EKS cluster. While one of those is
+  missing nothing is repaired and the owner reports it, as before. Not
+  repaired either: imported networks and clusters, anything being deleted,
+  and a node group being retired.
 - **Deletion.** With dependents (a network of an account, a cluster of a
   network) nothing is deleted and the condition `DeletionBlocked=True` names
   them. Without, the row is marked DELETING and the reconciler deletes the

@@ -23,11 +23,12 @@ import (
 // and untagSubnets removes exactly them.
 func subnetManager(clusterID string) string { return kube.FieldOwner + "/cluster-" + clusterID }
 
-// TagSubnets adds the cluster's tags to the network subnets it runs in:
-// kubernetes.io/cluster/<name>=shared always, and karpenter.sh/discovery=
-// <name> unless another cluster of the network already has it (the tag
-// holds one value: that cluster's Karpenter selects the subnets by
-// kubernetes.io/cluster/<name> instead).
+// TagSubnets adds the cluster's tags to the network subnets it runs in
+// (clusterSubnetTags): kubernetes.io/cluster/<name>=shared, unless the
+// subnet came with that tag at another value (an imported network), and
+// karpenter.sh/discovery=<name> unless another cluster of the network
+// already has it (the tag holds one value: that cluster's Karpenter
+// selects the subnets by kubernetes.io/cluster/<name> instead).
 func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Target) error {
 	for _, name := range t.SubnetObjects {
 		subnet := &awsec2.Subnet{}
@@ -35,10 +36,8 @@ func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Targe
 			s.logger().ErrorContext(ctx, "read network subnet", "subnet", name, "error", err)
 			return fault.New(fault.Unavailable, "cannot read the network's subnet "+name)
 		}
-		tags := map[string]any{crossplaneaws.TagKubernetesClusterPrefix + row.Name: "shared"}
-		if v := subnet.Spec.ForProvider.Tags[crossplaneaws.TagKarpenterDiscovery]; v == nil || *v == row.Name {
-			tags[crossplaneaws.TagKarpenterDiscovery] = row.Name
-		} else {
+		tags := clusterSubnetTags(subnet.Spec.ForProvider.Tags, row.Name)
+		if v := subnet.Spec.ForProvider.Tags[crossplaneaws.TagKarpenterDiscovery]; v != nil && *v != row.Name {
 			s.logger().WarnContext(ctx, "subnet already has a karpenter discovery tag; select it by kubernetes.io/cluster/<name>",
 				"cluster_id", row.ID, "subnet", name, "karpenter.sh/discovery", *v)
 		}
@@ -53,6 +52,28 @@ func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Targe
 	}
 	s.logger().InfoContext(ctx, "tagged network subnets", "cluster_id", row.ID, "subnets", t.SubnetObjects)
 	return nil
+}
+
+// clusterSubnetTags are the tags a cluster applies to a subnet that has
+// existing as its tags: kubernetes.io/cluster/<name>=shared and
+// karpenter.sh/discovery=<name>, each only where the subnet does not
+// already have the key with another value. Such a tag is somebody else's
+// (the subnets of an imported network often carry
+// kubernetes.io/cluster/<name>=owned; another cluster's Karpenter tag):
+// applying the cluster's value next to it is a field conflict, which
+// would fail every apply of the cluster. The key is there, which is what
+// the tag is for.
+func clusterSubnetTags(existing map[string]*string, cluster string) map[string]any {
+	tags := map[string]any{}
+	for key, value := range map[string]string{
+		crossplaneaws.TagKubernetesClusterPrefix + cluster: "shared",
+		crossplaneaws.TagKarpenterDiscovery:                cluster,
+	} {
+		if v := existing[key]; v == nil || *v == value {
+			tags[key] = value
+		}
+	}
+	return tags
 }
 
 // untagSubnets removes the cluster's tags from every subnet of the

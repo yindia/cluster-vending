@@ -131,6 +131,9 @@ cluster as objects of its kinds.
   direction the project is moving in.
 - [idl/README.md](idl/README.md): the `cloud.v1` contract and how its fields
   map to AWS.
+- [docs/components.md](docs/components.md): the `component` command: the
+  catalog, enabling a component on a cluster, its values, and what is not
+  installed yet.
 - [docs/oidc.md](docs/oidc.md): signing in to a cluster's Kubernetes API
   through an OIDC identity provider (Microsoft Entra ID or any other), and
   the kubeconfig for it.

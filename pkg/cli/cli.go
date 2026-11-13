@@ -103,6 +103,22 @@ type Options struct {
 	// KubeconfigFile is --kubeconfig-file of cluster kubeconfig: the file
 	// the AWS CLI writes to. Empty: its default (~/.kube/config).
 	KubeconfigFile string
+	// Component is the argument of component enable and component values:
+	// the catalog name.
+	Component string
+	// ValidateOnly is --validate-only of component enable and update:
+	// check, say what would be stored, store nothing.
+	ValidateOnly bool
+	// Values is --values of component get: print only the stored values.
+	Values bool
+	// Edit opens a file in the caller's editor and returns when it is
+	// closed (component edit). Nil: $VISUAL, $EDITOR or vi.
+	Edit func(ctx context.Context, path string) error
+	// Terminal: a person is at the terminal, so component edit may ask
+	// whether to open the editor again; In is where the answer is read
+	// (nil: stdin).
+	Terminal bool
+	In       io.Reader
 	// Exec runs a local command with its output to w. Nil: the real one
 	// (os/exec, with the caller's stdin, stdout and stderr).
 	Exec func(ctx context.Context, w io.Writer, name string, args ...string) error
@@ -121,6 +137,8 @@ type Clients struct {
 	Network cloudv1connect.NetworkServiceClient
 	Cluster cloudv1connect.ClusterServiceClient
 	Admin   cloudv1connect.AdminServiceClient
+	// Component is the component catalog and a tenant's components.
+	Component cloudv1connect.ComponentServiceClient
 }
 
 // NewClients returns clients of the API at server (a base URL) over
@@ -140,10 +158,11 @@ func NewClients(server string, httpClient *http.Client, opts ...ClientOption) Cl
 	}
 	c := connect.NewClient(connecthttp.NewTransport(httpClient, server), interceptors...)
 	return Clients{
-		Tenant:  cloudv1connect.NewTenantServiceClient(c),
-		Network: cloudv1connect.NewNetworkServiceClient(c),
-		Cluster: cloudv1connect.NewClusterServiceClient(c),
-		Admin:   cloudv1connect.NewAdminServiceClient(c),
+		Tenant:    cloudv1connect.NewTenantServiceClient(c),
+		Network:   cloudv1connect.NewNetworkServiceClient(c),
+		Cluster:   cloudv1connect.NewClusterServiceClient(c),
+		Admin:     cloudv1connect.NewAdminServiceClient(c),
+		Component: cloudv1connect.NewComponentServiceClient(c),
 	}
 }
 

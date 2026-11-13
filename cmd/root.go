@@ -81,6 +81,7 @@ func NewRootCmd() *cobra.Command {
 		newBootstrapCmd(),
 		newNetworkCmd(),
 		newClusterCmd(),
+		newComponentCmd(),
 		newAdminCmd(),
 		newLoginCmd(),
 		newLogoutCmd(),

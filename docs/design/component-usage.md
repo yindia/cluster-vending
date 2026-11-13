@@ -366,21 +366,57 @@ rpc GetComponentValues(GetComponentValuesRequest{string name})
 Rejected: an `enabled` flag, which would leave stopped components and their
 cloud resources around and blur what the tenant pays for.
 
-### 4.2 The CLI
+### 4.2 The CLI (built)
 
 ```sh
 cluster-vending component catalog [--cluster <cluster-id>]
-cluster-vending component values karpenter > karpenter.yaml
-cluster-vending component enable karpenter --cluster <cluster-id> [-f values.yaml] [--validate-only]
-cluster-vending component update <component-id> -f values.yaml --update-mask values [--validate-only]
-cluster-vending component update <component-id> --version 1.8.1 --update-mask version
-cluster-vending component disable <component-id> [--wait] [--force]
-cluster-vending component get <component-id>
-cluster-vending component list --cluster <cluster-id>
+cluster-vending component values kyverno-policies > policies.yaml
+cluster-vending component enable kyverno-policies --cluster <cluster-id> [-f values.yaml] [--validate-only] [--wait]
+cluster-vending component update <component-id> -f values.yaml [--validate-only] [--wait]
+cluster-vending component edit <component-id>
+cluster-vending component disable <component-id> [--wait]
+cluster-vending component get <component-id> [--values]
+cluster-vending component list [--cluster <cluster-id>]
 ```
 
-`-f` takes the values only, as YAML or JSON. `--validate-only` prints the
-effective values and every refused key without storing anything.
+`-f` takes the values only, as YAML or JSON. `--validate-only` says what
+would be stored (the values that differ from the definition's file) and
+stores nothing. The user guide is [components.md](../components.md).
+
+**What the built API and CLI do, and where they differ from this design:**
+
+- **The handlers store; nothing installs a tenant's component.**
+  `pkg/server/component` runs the checks of section 4.4 (prune, check,
+  merge) and stores the `Component`, `PENDING`, with what it would run in
+  its status. No controller reconciles a `Component`, so no Helm release
+  is created for it. `--wait` says so and ends; `DisableComponent` removes
+  the stored component at once, as there is nothing to uninstall.
+  **The smallest next step:** the cluster reconcile already installs the
+  Platform definitions through `component.PlanPlatform` and
+  `crossplaneaws.PlatformSet` (IAM role, chart, companions, in `requires`
+  order, into the cluster's own component inventory). Feeding it the
+  cluster's enabled `Component`s as well (their definition as an entry,
+  their stored values as the tenant layer of `component.Merge`, their
+  status written back with `Components.SetStatus`) installs tenant
+  components with no second installer. `DisableComponent` must then only
+  mark the component `DELETING` and leave its removal to that pass.
+- **Catalog.** `ListComponentDefinitions` returns every component, the
+  Platform ones included, with `management` and `configurable`; a bundle is
+  one entry and its members are hidden (decided after this section was
+  written: a tenant sees what runs on its clusters, and cannot enable,
+  change or disable what the platform manages).
+- **List.** `ListComponents` with a cluster is everything on it: the
+  Platform components from the cluster's status, the tenant's, and the
+  tenant components that are not enabled.
+- **Versions are not a tenant's.** Section 7 lets a manual cluster pin a
+  version; the decision since is that a tenant never chooses one. The
+  contract keeps `Component.version` as an output and the `version` mask
+  path for compatibility, and the handlers refuse both
+  (`INVALID_ARGUMENT`). The CLI has no `--version`.
+- **Validity.** Nothing sets a definition's `Valid` condition yet; the
+  handlers judge a definition with `CheckDefinition` themselves, as the
+  installer does.
+- **`force` on disable** has nothing to do yet and is not a CLI flag.
 
 **The values file.** A definition carries a values file
 (`ComponentDefinition.spec.userValues`, YAML with the platform team's

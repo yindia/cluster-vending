@@ -45,9 +45,9 @@ proto comments are the intended mapping for providers that do not exist yet.
 
 ## Services and RPCs
 
-Every RPC of every service is implemented except `ComponentService`, which
-is declared and not served yet (see below); none returns `UNIMPLEMENTED` as
-a whole. What individual fields and values are refused is listed under
+Every RPC of every service is implemented; none returns `UNIMPLEMENTED` as
+a whole. `ComponentService` stores a tenant's components and does not
+install them yet (see below). What individual fields and values are refused is listed under
 [Declared but not implemented](#declared-but-not-implemented).
 
 All tenant-facing RPCs carry `tenant_id` (a DNS label of at most 56
@@ -102,19 +102,28 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 Catalog components (Karpenter, Kyverno, ...) enabled on a tenant's
 clusters, installed by the platform with Helm and versioned by its
 releases (docs/design/component-usage.md). Components are never EKS
-add-ons; those are `spec.aws.addons`. **Declared, not served yet**: the
-server does not register the service, so every call is answered as an
-unknown procedure. The store behind it (`Components` in
-`pkg/database/repository`) exists.
+add-ons; those are `spec.aws.addons`.
+
+**Served, not installed yet.** The handlers (`pkg/server/component`) check
+and store. The components the platform manages are installed with their
+cluster by the cluster reconcile and reported in the cluster's status; a
+component a tenant enables is stored `PENDING` and nothing installs it yet.
+The CLI is `cluster-vending component` ([docs/components.md](../docs/components.md)).
 
 | RPC | What it does |
 |---|---|
-| `ListComponentDefinitions` | Lists the catalog: name, description, `requires`, `conflicts_with_addons`, values schema, `platform_values` (locked) and the `user_values` file. With `cluster_id`, `versions` holds what that cluster's release offers. How a component is installed is never returned. |
-| `GetComponentValues` | Returns a catalog entry's `user_values` file as written (YAML with comments), for the tenant to edit and send as `Component.values`; values that touch a `platform_values` path are refused. Keys left as in the file are not stored, so later changes to the file still reach the tenant. |
-| `EnableComponent` | Stores a component on a cluster (at most one of each per cluster; `request_id` makes a retry return the first result). `validate_only` answers with the effective values and stores nothing. |
-| `UpdateComponent` | Changes `values` (replaced as a whole) or `version`, the only paths `update_mask` accepts. |
-| `DisableComponent` | Deletes the component from the cluster; `force` lets the Helm release go without an uninstall. |
-| `GetComponent`, `ListComponents` | Return the stored component(s), optionally of one cluster. |
+| `ListComponentDefinitions` | Lists the catalog: every component, the platform's included. Each has `management` (`PLATFORM`: installed with every cluster, not a tenant's to enable, change or disable; `TENANT`) and `configurable` (a tenant may set values). A bundle is one entry; its members are not listed. For a tenant's component it also returns `requires`, `conflicts_with_addons`, the values schema, `platform_values` (locked) and the `user_values` file; a platform component's values are not returned. With `cluster_id`, `versions` holds what that cluster's release gives the component on its Kubernetes minor. How a component is installed is never returned. |
+| `GetComponentValues` | Returns a catalog entry's `user_values` file as written (YAML with comments), for the tenant to edit and send as `Component.values`. `FAILED_PRECONDITION` for a platform component and for one that takes no values. Keys left as in the file are not stored, so later changes to the file still reach the tenant. |
+| `EnableComponent` | Checks the request and stores the component on a cluster, `PENDING` (at most one of each per cluster; `request_id` makes a retry return the first result). The values are pruned to the tenant's edits first; values that touch a `platform_values` path, or a path the cluster's release sets for the component, are refused with every path named. `validate_only` answers with what would be stored (`values`) and what would run (`status.effective_values`), and stores nothing. `PERMISSION_DENIED` for a platform component or a bundle's member. |
+| `UpdateComponent` | Replaces `values` as a whole, with the checks of an enable; `component.etag`, when set, must be current (`ABORTED`). The same values again change nothing. |
+| `DisableComponent` | Removes the component from its cluster; refused while another enabled component requires it. Nothing is installed for it yet, so it is removed from the store at once and returned as `DELETING`; `force` has nothing to do. |
+| `GetComponent` | Returns one stored component. `version` is what the cluster's release gives it. |
+| `ListComponents` | The tenant's components, paged. With `cluster_id`: everything on that cluster, by name and unpaged: the platform's components as the cluster's status reports them (`management` `PLATFORM`, no `id`), the tenant's, and the catalog's tenant components that are not enabled (no `id`, no phase, `status.message` "not enabled"). |
+
+**Versions are not a tenant's.** `Component.version` is output only. A
+request that sets it, or names the `version` path in `update_mask`, fails
+with `INVALID_ARGUMENT`: the version is the one the cluster's release gives
+the component.
 
 A cluster cannot be deleted while it has components.
 
@@ -697,6 +706,6 @@ region and zone catalog next to `pkg/constant/aws`.
 | `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
 | `spec.release_channel`, `spec.tier`, `spec.upgrade_mode` | Stored, returned and updatable; releases do not act on them yet. |
 | `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set, as their comments say: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
-| `ComponentService` | Declared only: the server does not register it yet. |
+| `ComponentService` | Served: a tenant's component is checked and stored, and stays `PENDING`. Nothing installs it yet; only the components the platform manages are installed, with their cluster. `Component.version` and the `version` mask path are refused: a tenant does not choose a version. `DisableComponent.force` has nothing to do. |
 | Caller authorization of `tenant_id` | Not implemented, as the service comments say: the server trusts the `tenant_id` of the request. |
 | `NetworkStatus.carried_over`, `ClusterStatus.carried_over` | Never filled, as their comments say. Carried-over resources appear in `status.import.resources` with disposition `CARRIED_OVER` and in `status.managed_resources`. |

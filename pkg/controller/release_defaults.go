@@ -150,9 +150,13 @@ func CreateReleaseDefaults(ctx context.Context, c client.Client) error {
 // alpha, whatever release it names: Pinned, not paused, and a rollout
 // policy nobody set (empty, or the defaults the API server fills in).
 func asShipped(spec cloudv1alpha1.ReleaseChannelSpec) bool {
+	// The counts are defaulted by the API server (5 and 1). The soak is
+	// not: the controller sends its zero value, which is stored as "0s"
+	// instead of the 24h default, so both count as nobody's choice.
 	filledIn := cloudv1alpha1.RolloutPolicy{MaxInProgress: 5, MaxFailed: 1, Soak: metav1.Duration{Duration: 24 * time.Hour}}
+	asStored := cloudv1alpha1.RolloutPolicy{MaxInProgress: 5, MaxFailed: 1}
 	policy := equality.Semantic.DeepEqual(spec.Policy, cloudv1alpha1.RolloutPolicy{}) ||
-		equality.Semantic.DeepEqual(spec.Policy, filledIn)
+		equality.Semantic.DeepEqual(spec.Policy, filledIn) || equality.Semantic.DeepEqual(spec.Policy, asStored)
 	return spec.Promotion == cloudv1alpha1.PromotionPinned && !spec.Paused && policy
 }
 

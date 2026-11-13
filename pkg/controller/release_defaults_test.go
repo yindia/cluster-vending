@@ -79,6 +79,11 @@ func TestShippedReleaseTakesOverAlpha(t *testing.T) {
 	// What the API server makes of a channel created without a policy.
 	filledIn := pinned(old)
 	filledIn.Policy = cloudv1alpha1.RolloutPolicy{MaxInProgress: 5, MaxFailed: 1, Soak: metav1.Duration{Duration: 24 * time.Hour}}
+	// What a real API server stores for a channel the controller created:
+	// the counts are defaulted, and the zero soak the controller sent stays
+	// "0s" (seen on a real management cluster).
+	asStored := pinned(old)
+	asStored.Policy = cloudv1alpha1.RolloutPolicy{MaxInProgress: 5, MaxFailed: 1}
 	ownPolicy := pinned(old)
 	ownPolicy.Policy = cloudv1alpha1.RolloutPolicy{MaxInProgress: 2, MaxFailed: 1, Soak: metav1.Duration{Duration: 24 * time.Hour}}
 	tests := []struct {
@@ -104,6 +109,8 @@ func TestShippedReleaseTakesOverAlpha(t *testing.T) {
 			alpha(cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.PromotionManual, Release: old})}, want: old, kept: old},
 		{name: "alpha paused by the operator", objects: []client.Object{release(old, true, ""), alpha(paused)}, want: old, kept: old},
 		{name: "alpha with the policy defaults the API server fills in", objects: []client.Object{release(old, true, ""), alpha(filledIn)},
+			want: DefaultReleaseName, kept: old},
+		{name: "alpha as a real API server stores it", objects: []client.Object{release(old, true, ""), alpha(asStored)},
 			want: DefaultReleaseName, kept: old},
 		{name: "alpha with a rollout policy of the operator", objects: []client.Object{release(old, true, ""), alpha(ownPolicy)}, want: old, kept: old},
 		{name: "alpha names a release that is gone", objects: []client.Object{alpha(pinned(old))}, want: old},

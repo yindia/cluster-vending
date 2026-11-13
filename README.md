@@ -147,5 +147,7 @@ cluster as objects of its kinds.
   API versions in workload clusters are found and shown.
 - [docs/controller.md](docs/controller.md): the kubebuilder project and
   its kinds.
+- [docs/design/upgrades.md](docs/design/upgrades.md): the plan for moving
+  running clusters from one release to the next (not built yet).
 - [docs/design/rollouts.md](docs/design/rollouts.md): the design for
   rollouts by release channel and tier (design only).

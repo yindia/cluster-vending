@@ -41,6 +41,9 @@ const (
 	// ClusterServiceListClusterDeprecationsProcedure is the procedure name of the ClusterService's
 	// ListClusterDeprecations RPC.
 	ClusterServiceListClusterDeprecationsProcedure = "/cloud.v1.ClusterService/ListClusterDeprecations"
+	// ClusterServiceListClusterEventsProcedure is the procedure name of the ClusterService's
+	// ListClusterEvents RPC.
+	ClusterServiceListClusterEventsProcedure = "/cloud.v1.ClusterService/ListClusterEvents"
 	// ClusterServiceListClustersProcedure is the procedure name of the ClusterService's ListClusters
 	// RPC.
 	ClusterServiceListClustersProcedure = "/cloud.v1.ClusterService/ListClusters"
@@ -98,6 +101,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListClusterDeprecations"),
 			Procedure:        ClusterServiceListClusterDeprecationsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	clusterServiceListClusterEventsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListClusterEvents"),
+			Procedure:        ClusterServiceListClusterEventsProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -185,6 +196,11 @@ type ClusterServiceClient interface {
 	// (it scans every six hours), read from the platform's store. Empty,
 	// with no scanned_at, for a cluster that was not scanned yet.
 	ListClusterDeprecations(context.Context, *v1.ListClusterDeprecationsRequest) (*v1.ListClusterDeprecationsResponse, error)
+	// Lists what the controller reported about a cluster, newest first: the
+	// Kubernetes events of the cluster's object in the management cluster,
+	// which Kubernetes keeps for about an hour. status.recent_events (in
+	// GetCluster) keeps the last ten for good.
+	ListClusterEvents(context.Context, *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -293,6 +309,11 @@ type ClusterServiceHandler interface {
 	// (it scans every six hours), read from the platform's store. Empty,
 	// with no scanned_at, for a cluster that was not scanned yet.
 	ListClusterDeprecations(context.Context, *v1.ListClusterDeprecationsRequest) (*v1.ListClusterDeprecationsResponse, error)
+	// Lists what the controller reported about a cluster, newest first: the
+	// Kubernetes events of the cluster's object in the management cluster,
+	// which Kubernetes keeps for about an hour. status.recent_events (in
+	// GetCluster) keeps the last ten for good.
+	ListClusterEvents(context.Context, *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -334,6 +355,7 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceGetClusterSpec(), Handler: adapter.getCluster},
 		connect.Method{Spec: clusterServiceGetClusterStatusSpec(), Handler: adapter.getClusterStatus},
 		connect.Method{Spec: clusterServiceListClusterDeprecationsSpec(), Handler: adapter.listClusterDeprecations},
+		connect.Method{Spec: clusterServiceListClusterEventsSpec(), Handler: adapter.listClusterEvents},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
 		connect.Method{Spec: clusterServiceWatchClusterSpec(), Handler: adapter.watchCluster},
@@ -382,6 +404,10 @@ func (UnimplementedClusterServiceHandler) GetClusterStatus(context.Context, *v1.
 
 func (UnimplementedClusterServiceHandler) ListClusterDeprecations(context.Context, *v1.ListClusterDeprecationsRequest) (*v1.ListClusterDeprecationsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListClusterDeprecations is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) ListClusterEvents(context.Context, *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListClusterEvents is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
@@ -447,6 +473,14 @@ func (c *clusterServiceClient) GetClusterStatus(ctx context.Context, req *v1.Get
 func (c *clusterServiceClient) ListClusterDeprecations(ctx context.Context, req *v1.ListClusterDeprecationsRequest) (*v1.ListClusterDeprecationsResponse, error) {
 	var res v1.ListClusterDeprecationsResponse
 	if err := c.client.CallUnary(ctx, clusterServiceListClusterDeprecationsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) ListClusterEvents(ctx context.Context, req *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error) {
+	var res v1.ListClusterEventsResponse
+	if err := c.client.CallUnary(ctx, clusterServiceListClusterEventsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -552,6 +586,18 @@ func (h clusterServiceHandler) listClusterDeprecations(ctx context.Context, _ co
 		return err
 	}
 	res, err := h.svc.ListClusterDeprecations(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) listClusterEvents(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListClusterEventsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListClusterEvents(ctx, &req)
 	if err != nil {
 		return err
 	}

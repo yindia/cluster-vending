@@ -727,7 +727,13 @@ type ClusterStatus struct {
 	// deprecations is the summary of the controller's last scan for objects
 	// written with deprecated or removed API versions (no findings here:
 	// ListClusterDeprecations). Unset until the cluster was scanned.
-	Deprecations  *ClusterDeprecations `protobuf:"bytes,40,opt,name=deprecations,proto3" json:"deprecations,omitempty"`
+	Deprecations *ClusterDeprecations `protobuf:"bytes,40,opt,name=deprecations,proto3" json:"deprecations,omitempty"`
+	// recent_events are the last things the controller reported about the
+	// cluster (at most 10, oldest first): the states it reached, steps that
+	// finished, failures. Kubernetes keeps an object's events for about an
+	// hour; these stay with the cluster. ListClusterEvents returns the
+	// events themselves while they exist.
+	RecentEvents  []*Event `protobuf:"bytes,41,rep,name=recent_events,json=recentEvents,proto3" json:"recent_events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -886,6 +892,13 @@ func (x *ClusterStatus) GetPlatformRelease() string {
 func (x *ClusterStatus) GetDeprecations() *ClusterDeprecations {
 	if x != nil {
 		return x.Deprecations
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetRecentEvents() []*Event {
+	if x != nil {
+		return x.RecentEvents
 	}
 	return nil
 }
@@ -1190,7 +1203,7 @@ var File_cloud_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x18cloud/v1/component.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
+	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x18cloud/v1/component.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aCluster\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
@@ -1235,7 +1248,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1aT\n" +
 	"\roidc_aws_only\x12\x1aonly AWS takes access.oidc\x1a'has(this.aws) || !has(this.access.oidc)\x1a\x87\x01\n" +
 	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aAhas(this.aws) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
-	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xa0\a\n" +
+	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xd6\a\n" +
 	"\rClusterStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1256,7 +1269,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\aupgrade\x18\x11 \x01(\v2\x18.cloud.v1.ClusterUpgradeR\aupgrade\x12L\n" +
 	"\x13platform_components\x18\x12 \x03(\v2\x1b.cloud.v1.PlatformComponentR\x12platformComponents\x12)\n" +
 	"\x10platform_release\x18\x13 \x01(\tR\x0fplatformRelease\x12A\n" +
-	"\fdeprecations\x18( \x01(\v2\x1d.cloud.v1.ClusterDeprecationsR\fdeprecationsB\n" +
+	"\fdeprecations\x18( \x01(\v2\x1d.cloud.v1.ClusterDeprecationsR\fdeprecations\x124\n" +
+	"\rrecent_events\x18) \x03(\v2\x0f.cloud.v1.EventR\frecentEventsB\n" +
 	"\n" +
 	"\bprovider\"\xcd\x02\n" +
 	"\x11PlatformComponent\x12\x12\n" +
@@ -1354,7 +1368,8 @@ var file_cloud_v1_cluster_proto_goTypes = []any{
 	(*ImportedResource)(nil),      // 22: cloud.v1.ImportedResource
 	(*ManagedResource)(nil),       // 23: cloud.v1.ManagedResource
 	(*ClusterDeprecations)(nil),   // 24: cloud.v1.ClusterDeprecations
-	(ComponentPhase)(0),           // 25: cloud.v1.ComponentPhase
+	(*Event)(nil),                 // 25: cloud.v1.Event
+	(ComponentPhase)(0),           // 26: cloud.v1.ComponentPhase
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	11, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
@@ -1381,15 +1396,16 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	9,  // 21: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
 	8,  // 22: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
 	24, // 23: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
-	25, // 24: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	12, // 25: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
-	4,  // 26: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	12, // 27: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	25, // 24: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
+	26, // 25: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
+	12, // 26: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	4,  // 27: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	12, // 28: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -1403,6 +1419,7 @@ func file_cloud_v1_cluster_proto_init() {
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_control_plane_proto_init()
 	file_cloud_v1_deprecation_proto_init()
+	file_cloud_v1_events_proto_init()
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_network_proto_init()

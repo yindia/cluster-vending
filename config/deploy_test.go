@@ -514,3 +514,26 @@ func TestServerRoleOnlyStoresAndReads(t *testing.T) {
 		t.Error("server role: may delete namespaces")
 	}
 }
+
+// The controller reports what happens as Kubernetes events (it writes
+// them) and the API server reads them for the events RPCs. Neither may
+// change or delete one.
+func TestEventRoles(t *testing.T) {
+	controller := clusterRole(t, "rbac/role.yaml")
+	server := clusterRole(t, filepath.Join(serverBase, "role.yaml"))
+	for _, verb := range []string{"create", "patch"} {
+		if !allows(controller, "events.k8s.io", "events", verb) {
+			t.Errorf("controller role: cannot %s events (the event recorder writes them)", verb)
+		}
+	}
+	for _, verb := range []string{"get", "list"} {
+		if !allows(server, "events.k8s.io", "events", verb) {
+			t.Errorf("server role: cannot %s events (ListClusterEvents and ListNetworkEvents read them)", verb)
+		}
+	}
+	for _, verb := range []string{"update", "delete", "deletecollection"} {
+		if allows(controller, "events.k8s.io", "events", verb) || allows(server, "events.k8s.io", "events", verb) {
+			t.Errorf("a role may %s events", verb)
+		}
+	}
+}

@@ -41,6 +41,9 @@ const (
 	// NetworkServiceWatchNetworkProcedure is the procedure name of the NetworkService's WatchNetwork
 	// RPC.
 	NetworkServiceWatchNetworkProcedure = "/cloud.v1.NetworkService/WatchNetwork"
+	// NetworkServiceListNetworkEventsProcedure is the procedure name of the NetworkService's
+	// ListNetworkEvents RPC.
+	NetworkServiceListNetworkEventsProcedure = "/cloud.v1.NetworkService/ListNetworkEvents"
 	// NetworkServiceListNetworksProcedure is the procedure name of the NetworkService's ListNetworks
 	// RPC.
 	NetworkServiceListNetworksProcedure = "/cloud.v1.NetworkService/ListNetworks"
@@ -95,6 +98,14 @@ var (
 			StreamType:       connect.StreamTypeServer,
 			Schema:           v1.File_cloud_v1_network_service_proto.Services().ByName("NetworkService").Methods().ByName("WatchNetwork"),
 			Procedure:        NetworkServiceWatchNetworkProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	networkServiceListNetworkEventsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_network_service_proto.Services().ByName("NetworkService").Methods().ByName("ListNetworkEvents"),
+			Procedure:        NetworkServiceListNetworkEventsProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -163,6 +174,11 @@ type NetworkServiceClient interface {
 	// GetNetwork returns) every five seconds and changes nothing; the
 	// controller moves the network on, also a deletion.
 	WatchNetwork(context.Context, *v1.WatchNetworkRequest) (NetworkServiceWatchNetworkClientStream, error)
+	// Lists what the controller reported about a network, newest first: the
+	// Kubernetes events of the network's object in the management cluster,
+	// which Kubernetes keeps for about an hour. status.recent_events (in
+	// GetNetwork) keeps the last ten for good.
+	ListNetworkEvents(context.Context, *v1.ListNetworkEventsRequest) (*v1.ListNetworkEventsResponse, error)
 	// Lists a tenant's networks, oldest first (ids are time-ordered UUIDs).
 	ListNetworks(context.Context, *v1.ListNetworksRequest) (*v1.ListNetworksResponse, error)
 	// Updates the mutable fields named in update_mask.
@@ -241,6 +257,11 @@ type NetworkServiceHandler interface {
 	// GetNetwork returns) every five seconds and changes nothing; the
 	// controller moves the network on, also a deletion.
 	WatchNetwork(context.Context, *v1.WatchNetworkRequest, NetworkServiceWatchNetworkServerStream) error
+	// Lists what the controller reported about a network, newest first: the
+	// Kubernetes events of the network's object in the management cluster,
+	// which Kubernetes keeps for about an hour. status.recent_events (in
+	// GetNetwork) keeps the last ten for good.
+	ListNetworkEvents(context.Context, *v1.ListNetworkEventsRequest) (*v1.ListNetworkEventsResponse, error)
 	// Lists a tenant's networks, oldest first (ids are time-ordered UUIDs).
 	ListNetworks(context.Context, *v1.ListNetworksRequest) (*v1.ListNetworksResponse, error)
 	// Updates the mutable fields named in update_mask.
@@ -263,6 +284,7 @@ func RegisterNetworkServiceHandler(server *connect.Server, svc NetworkServiceHan
 		connect.Method{Spec: networkServiceGetNetworkSpec(), Handler: adapter.getNetwork},
 		connect.Method{Spec: networkServiceGetNetworkStatusSpec(), Handler: adapter.getNetworkStatus},
 		connect.Method{Spec: networkServiceWatchNetworkSpec(), Handler: adapter.watchNetwork},
+		connect.Method{Spec: networkServiceListNetworkEventsSpec(), Handler: adapter.listNetworkEvents},
 		connect.Method{Spec: networkServiceListNetworksSpec(), Handler: adapter.listNetworks},
 		connect.Method{Spec: networkServiceUpdateNetworkSpec(), Handler: adapter.updateNetwork},
 		connect.Method{Spec: networkServiceDeleteNetworkSpec(), Handler: adapter.deleteNetwork},
@@ -310,6 +332,10 @@ func (UnimplementedNetworkServiceHandler) GetNetworkStatus(context.Context, *v1.
 
 func (UnimplementedNetworkServiceHandler) WatchNetwork(context.Context, *v1.WatchNetworkRequest, NetworkServiceWatchNetworkServerStream) error {
 	return connect.NewError(connect.CodeUnimplemented, "cloud.v1.NetworkService.WatchNetwork is not implemented")
+}
+
+func (UnimplementedNetworkServiceHandler) ListNetworkEvents(context.Context, *v1.ListNetworkEventsRequest) (*v1.ListNetworkEventsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.NetworkService.ListNetworkEvents is not implemented")
 }
 
 func (UnimplementedNetworkServiceHandler) ListNetworks(context.Context, *v1.ListNetworksRequest) (*v1.ListNetworksResponse, error) {
@@ -374,6 +400,14 @@ func (c *networkServiceClient) WatchNetwork(ctx context.Context, req *v1.WatchNe
 		return NetworkServiceWatchNetworkClientStream{}, err
 	}
 	return NetworkServiceWatchNetworkClientStream{stream: stream}, nil
+}
+
+func (c *networkServiceClient) ListNetworkEvents(ctx context.Context, req *v1.ListNetworkEventsRequest) (*v1.ListNetworkEventsResponse, error) {
+	var res v1.ListNetworkEventsResponse
+	if err := c.client.CallUnary(ctx, networkServiceListNetworkEventsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (c *networkServiceClient) ListNetworks(ctx context.Context, req *v1.ListNetworksRequest) (*v1.ListNetworksResponse, error) {
@@ -468,6 +502,18 @@ func (h networkServiceHandler) watchNetwork(ctx context.Context, _ connect.Spec,
 		return err
 	}
 	return h.svc.WatchNetwork(ctx, &req, NetworkServiceWatchNetworkServerStream{stream: stream})
+}
+
+func (h networkServiceHandler) listNetworkEvents(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListNetworkEventsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListNetworkEvents(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
 }
 
 func (h networkServiceHandler) listNetworks(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {

@@ -48,6 +48,17 @@ rules:
   - get
   - list
   - watch
+# What the controller reported about a network or a cluster: the
+# Kubernetes events in the tenants' namespaces, read for
+# ListNetworkEvents and ListClusterEvents (pkg/database/cloudstore
+# events.go).
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - get
+  - list
 # A tenant is its namespace: created or adopted when the tenant is, never
 # deleted by the server.
 - apiGroups:

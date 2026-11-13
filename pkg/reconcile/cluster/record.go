@@ -12,6 +12,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // ClusterProto is the API view of a stored cluster with status st.
@@ -27,7 +28,15 @@ func ClusterProto(row *model.Cluster, spec *cloudv1.ClusterSpec, st *cloudv1.Clu
 // ListClusters. It writes the status column only: the etag does not
 // change. A cluster that is gone has nothing to record, and one that a
 // call changed since row was read keeps what that call stored.
+//
+// What changed since the status recorded before is what happened in this
+// pass: it is kept with the status (recent_events) and, once the status
+// is stored, emitted as events of the cluster's object. A pass that found
+// things as they were records and emits nothing.
 func (s *Reconciler) remember(ctx context.Context, row *model.Cluster, st *cloudv1.ClusterStatus) error {
+	before := storedStatus(row)
+	notes := happened(ctx, before, st)
+	st.RecentEvents = reconcile.Recent(before.GetRecentEvents(), notes, now())
 	raw, err := Encode(st)
 	if err != nil {
 		return err
@@ -41,6 +50,7 @@ func (s *Reconciler) remember(ctx context.Context, row *model.Cluster, st *cloud
 	}
 	if err == nil {
 		row.Status = raw
+		s.emit(ctx, row, notes)
 	}
 	return err
 }

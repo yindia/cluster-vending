@@ -79,6 +79,11 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	scanner := r.scanner
 	scanner.Recorder = r.deps.Store.Clusters()
+	// What a scan's result means is an event of the cluster.
+	scanner.Report = func(ctx context.Context, _ deprecations.Cluster, e deprecations.Event) {
+		r.deps.Emit(ctx, reconcile.Object{Kind: reconcile.KindCluster, Namespace: obj.Namespace, Name: obj.Name},
+			e.Type, e.Reason, e.Message)
+	}
 	next, err := scanner.Run(ctx, deprecations.Cluster{
 		TenantID: tenant, ID: id, Current: current, UpgradeTo: r.upgradeTo(ctx, obj, current),
 		Last:       convert.DeprecationsFromAPI(obj.Status.Deprecations),

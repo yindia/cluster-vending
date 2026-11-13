@@ -1067,7 +1067,7 @@ var File_cloud_v1_network_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecloud/v1/network_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x12cloud/v1/aws.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a google/protobuf/field_mask.proto\"\xc5\x01\n" +
+	"\x1ecloud/v1/network_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x12cloud/v1/aws.proto\x1a\x15cloud/v1/events.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a google/protobuf/field_mask.proto\"\xc5\x01\n" +
 	"\x14CreateNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x123\n" +
 	"\anetwork\x18\x02 \x01(\v2\x11.cloud.v1.NetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12*\n" +
@@ -1139,7 +1139,7 @@ const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"network_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\x12\x12\n" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\"D\n" +
 	"\x15DeleteNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork2\x8d\x06\n" +
+	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork2\xf0\x06\n" +
 	"\x0eNetworkService\x12P\n" +
 	"\rCreateNetwork\x12\x1e.cloud.v1.CreateNetworkRequest\x1a\x1f.cloud.v1.CreateNetworkResponse\x12P\n" +
 	"\rImportNetwork\x12\x1e.cloud.v1.ImportNetworkRequest\x1a\x1f.cloud.v1.ImportNetworkResponse\x12V\n" +
@@ -1147,7 +1147,8 @@ const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"\n" +
 	"GetNetwork\x12\x1b.cloud.v1.GetNetworkRequest\x1a\x1c.cloud.v1.GetNetworkResponse\"\x03\x90\x02\x01\x12^\n" +
 	"\x10GetNetworkStatus\x12!.cloud.v1.GetNetworkStatusRequest\x1a\".cloud.v1.GetNetworkStatusResponse\"\x03\x90\x02\x01\x12T\n" +
-	"\fWatchNetwork\x12\x1d.cloud.v1.WatchNetworkRequest\x1a\x1e.cloud.v1.WatchNetworkResponse\"\x03\x90\x02\x010\x01\x12R\n" +
+	"\fWatchNetwork\x12\x1d.cloud.v1.WatchNetworkRequest\x1a\x1e.cloud.v1.WatchNetworkResponse\"\x03\x90\x02\x010\x01\x12a\n" +
+	"\x11ListNetworkEvents\x12\".cloud.v1.ListNetworkEventsRequest\x1a#.cloud.v1.ListNetworkEventsResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\fListNetworks\x12\x1d.cloud.v1.ListNetworksRequest\x1a\x1e.cloud.v1.ListNetworksResponse\"\x03\x90\x02\x01\x12P\n" +
 	"\rUpdateNetwork\x12\x1e.cloud.v1.UpdateNetworkRequest\x1a\x1f.cloud.v1.UpdateNetworkResponse\x12U\n" +
 	"\rDeleteNetwork\x12\x1e.cloud.v1.DeleteNetworkRequest\x1a\x1f.cloud.v1.DeleteNetworkResponse\"\x03\x90\x02\x02B\xa3\x01\n" +
@@ -1167,28 +1168,30 @@ func file_cloud_v1_network_service_proto_rawDescGZIP() []byte {
 
 var file_cloud_v1_network_service_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_cloud_v1_network_service_proto_goTypes = []any{
-	(*CreateNetworkRequest)(nil),     // 0: cloud.v1.CreateNetworkRequest
-	(*CreateNetworkResponse)(nil),    // 1: cloud.v1.CreateNetworkResponse
-	(*ImportNetworkRequest)(nil),     // 2: cloud.v1.ImportNetworkRequest
-	(*ImportNetworkResponse)(nil),    // 3: cloud.v1.ImportNetworkResponse
-	(*TakeOverNetworkRequest)(nil),   // 4: cloud.v1.TakeOverNetworkRequest
-	(*TakeOverNetworkResponse)(nil),  // 5: cloud.v1.TakeOverNetworkResponse
-	(*GetNetworkRequest)(nil),        // 6: cloud.v1.GetNetworkRequest
-	(*GetNetworkResponse)(nil),       // 7: cloud.v1.GetNetworkResponse
-	(*GetNetworkStatusRequest)(nil),  // 8: cloud.v1.GetNetworkStatusRequest
-	(*GetNetworkStatusResponse)(nil), // 9: cloud.v1.GetNetworkStatusResponse
-	(*WatchNetworkRequest)(nil),      // 10: cloud.v1.WatchNetworkRequest
-	(*WatchNetworkResponse)(nil),     // 11: cloud.v1.WatchNetworkResponse
-	(*ListNetworksRequest)(nil),      // 12: cloud.v1.ListNetworksRequest
-	(*ListNetworksResponse)(nil),     // 13: cloud.v1.ListNetworksResponse
-	(*UpdateNetworkRequest)(nil),     // 14: cloud.v1.UpdateNetworkRequest
-	(*UpdateNetworkResponse)(nil),    // 15: cloud.v1.UpdateNetworkResponse
-	(*DeleteNetworkRequest)(nil),     // 16: cloud.v1.DeleteNetworkRequest
-	(*DeleteNetworkResponse)(nil),    // 17: cloud.v1.DeleteNetworkResponse
-	(*Network)(nil),                  // 18: cloud.v1.Network
-	(*AwsImportNetwork)(nil),         // 19: cloud.v1.AwsImportNetwork
-	(*ManagedResourceEvent)(nil),     // 20: cloud.v1.ManagedResourceEvent
-	(*fieldmaskpb.FieldMask)(nil),    // 21: google.protobuf.FieldMask
+	(*CreateNetworkRequest)(nil),      // 0: cloud.v1.CreateNetworkRequest
+	(*CreateNetworkResponse)(nil),     // 1: cloud.v1.CreateNetworkResponse
+	(*ImportNetworkRequest)(nil),      // 2: cloud.v1.ImportNetworkRequest
+	(*ImportNetworkResponse)(nil),     // 3: cloud.v1.ImportNetworkResponse
+	(*TakeOverNetworkRequest)(nil),    // 4: cloud.v1.TakeOverNetworkRequest
+	(*TakeOverNetworkResponse)(nil),   // 5: cloud.v1.TakeOverNetworkResponse
+	(*GetNetworkRequest)(nil),         // 6: cloud.v1.GetNetworkRequest
+	(*GetNetworkResponse)(nil),        // 7: cloud.v1.GetNetworkResponse
+	(*GetNetworkStatusRequest)(nil),   // 8: cloud.v1.GetNetworkStatusRequest
+	(*GetNetworkStatusResponse)(nil),  // 9: cloud.v1.GetNetworkStatusResponse
+	(*WatchNetworkRequest)(nil),       // 10: cloud.v1.WatchNetworkRequest
+	(*WatchNetworkResponse)(nil),      // 11: cloud.v1.WatchNetworkResponse
+	(*ListNetworksRequest)(nil),       // 12: cloud.v1.ListNetworksRequest
+	(*ListNetworksResponse)(nil),      // 13: cloud.v1.ListNetworksResponse
+	(*UpdateNetworkRequest)(nil),      // 14: cloud.v1.UpdateNetworkRequest
+	(*UpdateNetworkResponse)(nil),     // 15: cloud.v1.UpdateNetworkResponse
+	(*DeleteNetworkRequest)(nil),      // 16: cloud.v1.DeleteNetworkRequest
+	(*DeleteNetworkResponse)(nil),     // 17: cloud.v1.DeleteNetworkResponse
+	(*Network)(nil),                   // 18: cloud.v1.Network
+	(*AwsImportNetwork)(nil),          // 19: cloud.v1.AwsImportNetwork
+	(*ManagedResourceEvent)(nil),      // 20: cloud.v1.ManagedResourceEvent
+	(*fieldmaskpb.FieldMask)(nil),     // 21: google.protobuf.FieldMask
+	(*ListNetworkEventsRequest)(nil),  // 22: cloud.v1.ListNetworkEventsRequest
+	(*ListNetworkEventsResponse)(nil), // 23: cloud.v1.ListNetworkEventsResponse
 }
 var file_cloud_v1_network_service_proto_depIdxs = []int32{
 	18, // 0: cloud.v1.CreateNetworkRequest.network:type_name -> cloud.v1.Network
@@ -1211,20 +1214,22 @@ var file_cloud_v1_network_service_proto_depIdxs = []int32{
 	6,  // 17: cloud.v1.NetworkService.GetNetwork:input_type -> cloud.v1.GetNetworkRequest
 	8,  // 18: cloud.v1.NetworkService.GetNetworkStatus:input_type -> cloud.v1.GetNetworkStatusRequest
 	10, // 19: cloud.v1.NetworkService.WatchNetwork:input_type -> cloud.v1.WatchNetworkRequest
-	12, // 20: cloud.v1.NetworkService.ListNetworks:input_type -> cloud.v1.ListNetworksRequest
-	14, // 21: cloud.v1.NetworkService.UpdateNetwork:input_type -> cloud.v1.UpdateNetworkRequest
-	16, // 22: cloud.v1.NetworkService.DeleteNetwork:input_type -> cloud.v1.DeleteNetworkRequest
-	1,  // 23: cloud.v1.NetworkService.CreateNetwork:output_type -> cloud.v1.CreateNetworkResponse
-	3,  // 24: cloud.v1.NetworkService.ImportNetwork:output_type -> cloud.v1.ImportNetworkResponse
-	5,  // 25: cloud.v1.NetworkService.TakeOverNetwork:output_type -> cloud.v1.TakeOverNetworkResponse
-	7,  // 26: cloud.v1.NetworkService.GetNetwork:output_type -> cloud.v1.GetNetworkResponse
-	9,  // 27: cloud.v1.NetworkService.GetNetworkStatus:output_type -> cloud.v1.GetNetworkStatusResponse
-	11, // 28: cloud.v1.NetworkService.WatchNetwork:output_type -> cloud.v1.WatchNetworkResponse
-	13, // 29: cloud.v1.NetworkService.ListNetworks:output_type -> cloud.v1.ListNetworksResponse
-	15, // 30: cloud.v1.NetworkService.UpdateNetwork:output_type -> cloud.v1.UpdateNetworkResponse
-	17, // 31: cloud.v1.NetworkService.DeleteNetwork:output_type -> cloud.v1.DeleteNetworkResponse
-	23, // [23:32] is the sub-list for method output_type
-	14, // [14:23] is the sub-list for method input_type
+	22, // 20: cloud.v1.NetworkService.ListNetworkEvents:input_type -> cloud.v1.ListNetworkEventsRequest
+	12, // 21: cloud.v1.NetworkService.ListNetworks:input_type -> cloud.v1.ListNetworksRequest
+	14, // 22: cloud.v1.NetworkService.UpdateNetwork:input_type -> cloud.v1.UpdateNetworkRequest
+	16, // 23: cloud.v1.NetworkService.DeleteNetwork:input_type -> cloud.v1.DeleteNetworkRequest
+	1,  // 24: cloud.v1.NetworkService.CreateNetwork:output_type -> cloud.v1.CreateNetworkResponse
+	3,  // 25: cloud.v1.NetworkService.ImportNetwork:output_type -> cloud.v1.ImportNetworkResponse
+	5,  // 26: cloud.v1.NetworkService.TakeOverNetwork:output_type -> cloud.v1.TakeOverNetworkResponse
+	7,  // 27: cloud.v1.NetworkService.GetNetwork:output_type -> cloud.v1.GetNetworkResponse
+	9,  // 28: cloud.v1.NetworkService.GetNetworkStatus:output_type -> cloud.v1.GetNetworkStatusResponse
+	11, // 29: cloud.v1.NetworkService.WatchNetwork:output_type -> cloud.v1.WatchNetworkResponse
+	23, // 30: cloud.v1.NetworkService.ListNetworkEvents:output_type -> cloud.v1.ListNetworkEventsResponse
+	13, // 31: cloud.v1.NetworkService.ListNetworks:output_type -> cloud.v1.ListNetworksResponse
+	15, // 32: cloud.v1.NetworkService.UpdateNetwork:output_type -> cloud.v1.UpdateNetworkResponse
+	17, // 33: cloud.v1.NetworkService.DeleteNetwork:output_type -> cloud.v1.DeleteNetworkResponse
+	24, // [24:34] is the sub-list for method output_type
+	14, // [14:24] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
 	14, // [14:14] is the sub-list for extension extendee
 	0,  // [0:14] is the sub-list for field type_name
@@ -1236,6 +1241,7 @@ func file_cloud_v1_network_service_proto_init() {
 		return
 	}
 	file_cloud_v1_aws_proto_init()
+	file_cloud_v1_events_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_network_proto_init()
 	file_cloud_v1_network_service_proto_msgTypes[2].OneofWrappers = []any{

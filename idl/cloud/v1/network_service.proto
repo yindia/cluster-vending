@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/aws.proto";
+import "cloud/v1/events.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
 import "google/protobuf/field_mask.proto";
@@ -64,6 +65,14 @@ service NetworkService {
   // GetNetwork returns) every five seconds and changes nothing; the
   // controller moves the network on, also a deletion.
   rpc WatchNetwork(WatchNetworkRequest) returns (stream WatchNetworkResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists what the controller reported about a network, newest first: the
+  // Kubernetes events of the network's object in the management cluster,
+  // which Kubernetes keeps for about an hour. status.recent_events (in
+  // GetNetwork) keeps the last ten for good.
+  rpc ListNetworkEvents(ListNetworkEventsRequest) returns (ListNetworkEventsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

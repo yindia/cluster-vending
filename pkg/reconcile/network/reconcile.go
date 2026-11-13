@@ -54,11 +54,16 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
+	// What changed in a pass is reported as events of the network's
+	// object (events.go), once: when its status is recorded.
+	ctx = reconcile.WithNotes(ctx)
 	if row.State == StateDeleting {
 		failed := s.Finalize(ctx, row)
 		// What GetNetwork returns while it goes: how far the deletion is.
 		current, err := s.deps.Store.Networks().Get(ctx, tenantID, id)
 		if errors.Is(err, repository.ErrNotFound) {
+			s.deps.Emit(ctx, object(row), reconcile.EventNormal, reconcile.ReasonDeleted,
+				"the network's resources are gone and the network is removed")
 			return failed
 		}
 		if err != nil {

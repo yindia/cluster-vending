@@ -15,6 +15,7 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/reconcile/account"
 )
 
@@ -97,7 +98,36 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 	if equality.Semantic.DeepEqual(before, &obj.Status) {
 		return nil
 	}
-	return client.IgnoreNotFound(r.deps.Direct.Status().Update(ctx, obj))
+	if err := r.deps.Direct.Status().Update(ctx, obj); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	// What changed is an event of the account, once: the status is the
+	// record of what was reported.
+	if n := accountEvent(meta.FindStatusCondition(before.Conditions, ConditionReady), cond); n != nil {
+		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
+	}
+	return nil
+}
+
+// accountObject is the object events of a CloudAccount are about.
+func accountObject(obj *cloudv1alpha1.CloudAccount) platform.Object {
+	return platform.Object{Kind: platform.KindCloudAccount, Namespace: obj.Namespace, Name: obj.Name}
+}
+
+// accountEvent says what a change of the account's Ready condition means:
+// bootstrapped when it became True, a warning when it became False or is
+// False for another reason than before. Nil when nothing changed.
+func accountEvent(was *metav1.Condition, is metav1.Condition) *platform.Note {
+	switch {
+	case is.Status == metav1.ConditionTrue && (was == nil || was.Status != metav1.ConditionTrue):
+		n := platform.Normal(platform.ReasonBootstrapped, "the tenant namespace and the account's ProviderConfig are in the management cluster")
+		return &n
+	case is.Status == metav1.ConditionFalse && (was == nil || was.Status != metav1.ConditionFalse || was.Message != is.Message):
+		n := platform.Warning(platform.ReasonProviderConfigFailed, "the account's ProviderConfig could not be applied: "+is.Message)
+		return &n
+	default:
+		return nil
+	}
 }
 
 // deleting handles an account someone asked to delete. While it has
@@ -137,7 +167,11 @@ func (r *CloudAccountReconciler) deleting(ctx context.Context, obj *cloudv1alpha
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if controllerutil.RemoveFinalizer(obj, cloudv1alpha1.CloudAccountFinalizer) {
-		return ctrl.Result{}, client.IgnoreNotFound(r.deps.Direct.Update(ctx, obj))
+		if err := r.deps.Direct.Update(ctx, obj); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		r.deps.Emit(ctx, accountObject(obj), platform.EventNormal, platform.ReasonDeleted,
+			"the account's ProviderConfig is gone and the account is removed")
 	}
 	return ctrl.Result{}, nil
 }

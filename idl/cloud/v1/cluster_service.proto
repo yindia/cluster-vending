@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
 import "cloud/v1/deprecation.proto";
+import "cloud/v1/events.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/plan.proto";
 import "google/protobuf/field_mask.proto";
@@ -82,6 +83,14 @@ service ClusterService {
   // (it scans every six hours), read from the platform's store. Empty,
   // with no scanned_at, for a cluster that was not scanned yet.
   rpc ListClusterDeprecations(ListClusterDeprecationsRequest) returns (ListClusterDeprecationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists what the controller reported about a cluster, newest first: the
+  // Kubernetes events of the cluster's object in the management cluster,
+  // which Kubernetes keeps for about an hour. status.recent_events (in
+  // GetCluster) keeps the last ten for good.
+  rpc ListClusterEvents(ListClusterEventsRequest) returns (ListClusterEventsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

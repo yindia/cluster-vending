@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/conditions.proto";
+import "cloud/v1/events.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/options.proto";
@@ -399,6 +400,12 @@ message NetworkStatus {
   // order. state is READY once all of them are READY, FAILED when one is
   // FAILED.
   repeated ManagedResource managed_resources = 9;
+
+  // recent_events are the last things the controller reported about the
+  // network (at most 10, oldest first). Kubernetes keeps an object's
+  // events for about an hour; these stay with the network.
+  // ListNetworkEvents returns the events themselves while they exist.
+  repeated Event recent_events = 10;
 }
 
 // NetworkResources lists the cloud resources of a network, all owned by the

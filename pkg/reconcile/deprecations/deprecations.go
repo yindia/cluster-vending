@@ -56,6 +56,10 @@ type Scanner struct {
 	Connect func(kubeconfig []byte) (deprecation.Reader, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+	// Report is told what a scan's result means when it changed (found
+	// removed API versions, failed, clean again): the controller emits it
+	// as an event of the cluster. Nil reports nothing.
+	Report func(ctx context.Context, c Cluster, e Event)
 }
 
 func (s Scanner) now() time.Time {
@@ -132,6 +136,10 @@ func (s Scanner) Run(ctx context.Context, c Cluster) (time.Duration, error) {
 	}
 	if err := s.Recorder.SetDeprecations(ctx, c.TenantID, c.ID, raw); err != nil {
 		return 0, fmt.Errorf("record the deprecation scan: %w", err)
+	}
+	// What the result means next to the last one, once it is recorded.
+	if e := scanEvent(c.Last, result); e != nil && s.Report != nil {
+		s.Report(ctx, c, *e)
 	}
 	return next, nil
 }

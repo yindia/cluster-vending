@@ -11,7 +11,7 @@
 // repository/mock (go generate ./pkg/database/repository, or make mocks).
 package repository
 
-//go:generate go tool mockgen -typed -destination=mock/repository.go -package=mock . Store,Tenants,Networks,Clusters,Components,ManagedResources
+//go:generate go tool mockgen -typed -destination=mock/repository.go -package=mock . Store,Tenants,Networks,Clusters,Components,ManagedResources,Events
 
 import (
 	"context"
@@ -121,6 +121,17 @@ type Clusters interface {
 	Delete(ctx context.Context, tenantID, id string) error
 }
 
+// Events reads what the controller reported about a tenant's objects:
+// the Kubernetes events of its Network and Cluster objects, which the
+// management cluster keeps for about an hour. Read-only: the controller
+// emits them through its event recorder, not through the store.
+type Events interface {
+	// ListFor returns the events about the tenant's object of kind
+	// ("Network", "Cluster") named name, newest first. A tenant without a
+	// namespace, or an object without events, has none.
+	ListFor(ctx context.Context, tenantID, kind, name string) ([]model.Event, error)
+}
+
 // Components stores the components enabled on a tenant's clusters: at
 // most one of each catalog component per cluster.
 type Components interface {
@@ -181,5 +192,6 @@ type Store interface {
 	Clusters() Clusters
 	Components() Components
 	ManagedResources() ManagedResources
+	Events() Events
 	WithinTransaction(ctx context.Context, fn func(Store) error) error
 }

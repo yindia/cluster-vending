@@ -94,6 +94,8 @@ type Options struct {
 	PageToken string
 	// OnlyRemoved is --only-removed of cluster deprecations.
 	OnlyRemoved bool
+	// OnlyWarnings is --only-warnings of cluster events and network events.
+	OnlyWarnings bool
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
 	// cluster's OIDC identity provider.
 	OIDC bool

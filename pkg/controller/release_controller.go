@@ -20,6 +20,7 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/release"
 )
 
@@ -49,14 +50,14 @@ func setupReleases(mgr ctrl.Manager, d Deps) error {
 		Watches(&cloudv1alpha1.ReleaseChannel{}, all(&cloudv1alpha1.ReleaseList{})).
 		Watches(&cloudv1alpha1.ReleaseHold{}, all(&cloudv1alpha1.ReleaseList{})).
 		Watches(&cloudv1alpha1.ComponentDefinition{}, all(&cloudv1alpha1.ReleaseList{})).
-		Complete(&ReleaseReconciler{c: c, render: crossplaneaws.RenderVersion})
+		Complete(&ReleaseReconciler{c: c, render: crossplaneaws.RenderVersion, events: d.Events})
 	if err != nil {
 		return err
 	}
 	err = ctrl.NewControllerManagedBy(mgr).Named("releasechannel").For(&cloudv1alpha1.ReleaseChannel{}).
 		Watches(&cloudv1alpha1.Release{}, all(&cloudv1alpha1.ReleaseChannelList{})).
 		Watches(&cloudv1alpha1.ComponentDefinition{}, all(&cloudv1alpha1.ReleaseChannelList{})).
-		Complete(&ReleaseChannelReconciler{c: c})
+		Complete(&ReleaseChannelReconciler{c: c, events: d.Events})
 	if err != nil {
 		return err
 	}
@@ -91,6 +92,9 @@ type ReleaseReconciler struct {
 	c client.Client
 	// render is this build's renderer version (crossplaneaws.RenderVersion).
 	render int64
+	// events is where a release becoming valid or invalid is reported;
+	// nil reports nothing.
+	events platform.Events
 }
 
 // Reconcile computes the release's status, and lets it be deleted only
@@ -130,8 +134,53 @@ func (r *ReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if equality.Semantic.DeepEqual(status, rel.Status) {
 		return ctrl.Result{}, nil
 	}
+	was := meta.FindStatusCondition(rel.Status.Conditions, cloudv1alpha1.ReleaseConditionValid)
 	rel.Status = status
-	return ctrl.Result{}, client.IgnoreNotFound(r.c.Status().Update(ctx, rel))
+	if err := r.c.Status().Update(ctx, rel); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if n := releaseEvent(was, meta.FindStatusCondition(status.Conditions, cloudv1alpha1.ReleaseConditionValid)); n != nil && r.events != nil {
+		r.events.Event(ctx, platform.Object{Kind: platform.KindRelease, Name: rel.Name}, n.Type, n.Reason, n.Message)
+	}
+	return ctrl.Result{}, nil
+}
+
+// releaseEvent says what a change of a release's Valid condition means: it
+// can be offered, or it cannot and why. Nil when nothing changed.
+func releaseEvent(was, is *metav1.Condition) *platform.Note {
+	switch {
+	case is == nil:
+		return nil
+	case is.Status == metav1.ConditionTrue && (was == nil || was.Status != metav1.ConditionTrue):
+		n := platform.Normal(platform.ReasonReleaseValid, "the release passed its checks and can be offered")
+		return &n
+	case is.Status == metav1.ConditionFalse && (was == nil || was.Status != metav1.ConditionFalse || was.Message != is.Message):
+		n := platform.Warning(platform.ReasonReleaseInvalid, "the release cannot be offered: "+is.Message)
+		return &n
+	default:
+		return nil
+	}
+}
+
+// channelEvents say what changed about a channel: the release it offers,
+// and a release it should offer but cannot (a new reason is news; the same
+// one again is not).
+func channelEvents(was, is cloudv1alpha1.ReleaseChannelStatus) []platform.Note {
+	var out []platform.Note
+	offering := meta.FindStatusCondition(is.Conditions, cloudv1alpha1.ChannelConditionOffering)
+	if is.Release != "" && is.Release != was.Release {
+		msg := "offers " + is.Release
+		if was.Release != "" {
+			msg += " (before: " + was.Release + ")"
+		}
+		out = append(out, platform.Normal(platform.ReasonChannelOffers, msg))
+	}
+	before := meta.FindStatusCondition(was.Conditions, cloudv1alpha1.ChannelConditionOffering)
+	if offering != nil && offering.Status == metav1.ConditionFalse &&
+		(before == nil || before.Status != metav1.ConditionFalse || before.Message != offering.Message) {
+		out = append(out, platform.Warning(platform.ReasonChannelCannotMove, offering.Message))
+	}
+	return out
 }
 
 // namedRelease is who names a release: channels naming it (spec.release)
@@ -262,6 +311,9 @@ func setInUse(conds *[]metav1.Condition, generation int64, live bool, channels, 
 type ReleaseChannelReconciler struct {
 	c   client.Client
 	now func() time.Time
+	// events is where the channel offering another release, or not being
+	// able to, is reported; nil reports nothing.
+	events platform.Events
 }
 
 // upstream is the channel a channel follows: beta follows alpha, stable
@@ -318,8 +370,17 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if equality.Semantic.DeepEqual(status, ch.Status) {
 		return ctrl.Result{}, nil
 	}
+	was := ch.Status
 	ch.Status = status
-	return ctrl.Result{}, client.IgnoreNotFound(r.c.Status().Update(ctx, ch))
+	if err := r.c.Status().Update(ctx, ch); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if r.events != nil {
+		for _, n := range channelEvents(was, status) {
+			r.events.Event(ctx, platform.Object{Kind: platform.KindReleaseChannel, Name: ch.Name}, n.Type, n.Reason, n.Message)
+		}
+	}
+	return ctrl.Result{}, nil
 }
 
 // target is the release the channel should offer and why ("" with the

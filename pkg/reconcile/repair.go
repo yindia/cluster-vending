@@ -61,7 +61,7 @@ func repairable(records []model.ManagedResource, views []*cloudv1.ManagedResourc
 // the owner's current render. One the render no longer has (a node group
 // being retired) was not created and is not logged.
 func (d Deps) LogRepaired(ctx context.Context, owner Owner, missing []model.ManagedResource) {
-	if d.Logger == nil || len(missing) == 0 {
+	if len(missing) == 0 {
 		return
 	}
 	views, err := d.Observe(ctx, missing)
@@ -70,6 +70,12 @@ func (d Deps) LogRepaired(ctx context.Context, owner Owner, missing []model.Mana
 	}
 	for i, v := range views {
 		if isMissing(v) {
+			continue
+		}
+		// The pass reports it as an event of the owner (AddNote).
+		AddNote(ctx, Normal(ReasonRepaired, "recreated "+missing[i].Kind+" "+missing[i].Name+
+			", which was deleted from the management cluster"))
+		if d.Logger == nil {
 			continue
 		}
 		d.Logger.InfoContext(ctx, string(owner.Kind)+" repaired: recreated "+missing[i].Kind+" "+missing[i].Name,

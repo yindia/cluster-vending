@@ -9,6 +9,7 @@ import "cloud/v1/component.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
 import "cloud/v1/deprecation.proto";
+import "cloud/v1/events.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
@@ -387,6 +388,13 @@ message ClusterStatus {
   // written with deprecated or removed API versions (no findings here:
   // ListClusterDeprecations). Unset until the cluster was scanned.
   ClusterDeprecations deprecations = 40;
+
+  // recent_events are the last things the controller reported about the
+  // cluster (at most 10, oldest first): the states it reached, steps that
+  // finished, failures. Kubernetes keeps an object's events for about an
+  // hour; these stay with the cluster. ListClusterEvents returns the
+  // events themselves while they exist.
+  repeated Event recent_events = 41;
 }
 
 // PlatformComponent is one component the platform installed with a

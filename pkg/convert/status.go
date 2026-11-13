@@ -30,6 +30,7 @@ func NetworkStatusInto(p *cloudv1.NetworkStatus, state string, at metav1.Time, i
 	into.Resources = resources(p.GetResources())
 	into.Clusters = unique(p.GetClusterIds())
 	into.ImportPlan = importPlan(p.GetImport())
+	into.RecentEvents = recentEvents(p.GetRecentEvents())
 }
 
 // ClusterStatusInto is NetworkStatusInto for a cluster: phase, message,
@@ -52,6 +53,7 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.Upgrade = upgrade(p.GetUpgrade())
 	into.PlatformRelease = p.GetPlatformRelease()
 	into.PlatformComponents = platformComponents(p.GetPlatformComponents())
+	into.RecentEvents = recentEvents(p.GetRecentEvents())
 }
 
 // platformComponents are the contract's platform components as the kind

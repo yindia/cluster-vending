@@ -175,6 +175,9 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	checkCredentialsSecret(ctx, reconciling, logger)
+	// What happens to accounts, networks, clusters and releases is also a
+	// Kubernetes event of the object (docs/events.md).
+	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
 	deps := Deps{Direct: direct, Deps: reconciling}
 	if err := Setup(mgr, deps); err != nil {
 		return err

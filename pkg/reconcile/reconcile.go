@@ -76,7 +76,11 @@ type Deps struct {
 	// record of a stuck revision in a workload cluster, so provider-helm
 	// can install again.
 	RecoverStuckReleases bool
-	Logger               *slog.Logger
+	// Events is where what happens to accounts, networks and clusters is
+	// reported as Kubernetes events (events.go). Only what reconciles has
+	// it; nil emits nothing.
+	Events Events
+	Logger *slog.Logger
 }
 
 // KubeconfigReaderRole is the ClusterRole (config/rbac) that may get

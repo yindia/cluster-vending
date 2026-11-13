@@ -1460,6 +1460,51 @@ spec:
                   come from: the one the cluster's channel offered when they were
                   first installed.
                 type: string
+              recentEvents:
+                description: |-
+                  recentEvents are the last things the controller reported about the
+                  cluster, oldest first: the states it reached, steps that finished,
+                  failures. They are also Kubernetes events of this object, which are
+                  kept for about an hour only.
+                items:
+                  description: |-
+                    RecentEvent is one thing the controller reported about a network or a
+                    cluster: a state it reached, a step that finished, a failure. The same
+                    is emitted as a Kubernetes event of the object, which Kubernetes keeps
+                    for about an hour; the status keeps the last MaxRecentEvents.
+                  properties:
+                    count:
+                      description: count is how often it happened in a row.
+                      format: int32
+                      type: integer
+                    message:
+                      description: message has the details, for people.
+                      type: string
+                    reason:
+                      description: reason is what happened, as one CamelCase word,
+                        e.g. Running.
+                      maxLength: 64
+                      type: string
+                    time:
+                      description: time is when it happened last.
+                      format: date-time
+                      type: string
+                    type:
+                      description: |-
+                        type is Normal for something that went as expected and Warning for
+                        a failure or something that needs a look.
+                      enum:
+                      - Normal
+                      - Warning
+                      type: string
+                  required:
+                  - reason
+                  - time
+                  - type
+                  type: object
+                maxItems: 10
+                type: array
+                x-kubernetes-list-type: atomic
               upgrade:
                 description: |-
                   upgrade is the Kubernetes upgrade in progress: set from the moment

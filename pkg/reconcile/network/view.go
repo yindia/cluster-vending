@@ -40,6 +40,9 @@ func (s *Reconciler) view(ctx context.Context, row *model.Network, failure *clou
 		return nil, err
 	}
 	withFailure(n.GetStatus(), failure)
+	// What the controller reported last stays with the status: a read
+	// returns it, and a pass adds to it (withEvents).
+	n.GetStatus().RecentEvents = storedStatus(row).GetRecentEvents()
 	return n, nil
 }
 
@@ -146,7 +149,13 @@ func sortByCreation(scheme *runtime.Scheme, objects []client.Object) {
 // ListNetworks. It writes the status column only: the etag does not
 // change. A network that is gone has nothing to record, and one that a
 // call changed since row was read keeps what that call stored.
+//
+// What changed since the status recorded before is what happened in this
+// pass: it is kept with the status (recent_events) and, once the status
+// is stored, emitted as events of the network's object. A pass that found
+// things as they were records and emits nothing.
 func (s *Reconciler) remember(ctx context.Context, row *model.Network, st *cloudv1.NetworkStatus) error {
+	notes := withEvents(ctx, row, st)
 	raw, err := Encode(st)
 	if err != nil {
 		return err
@@ -160,6 +169,7 @@ func (s *Reconciler) remember(ctx context.Context, row *model.Network, st *cloud
 	}
 	if err == nil {
 		row.Status = raw
+		s.emit(ctx, row, notes)
 	}
 	return err
 }
@@ -180,6 +190,7 @@ func (s *Reconciler) settle(ctx context.Context, row *model.Network, failed erro
 	}
 	// READY and its status in one write: once READY the loop does not come
 	// back, so the recorded status must not be left behind.
+	notes := withEvents(ctx, row, st)
 	raw, err := Encode(st)
 	if err != nil {
 		return err
@@ -193,5 +204,6 @@ func (s *Reconciler) settle(ctx context.Context, row *model.Network, failed erro
 		}
 		return err
 	}
+	s.emit(ctx, row, notes)
 	return nil
 }

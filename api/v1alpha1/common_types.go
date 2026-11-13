@@ -232,3 +232,31 @@ type NetworkResources struct {
 	// +optional
 	EgressIPs []string `json:"egressIPs,omitempty"`
 }
+
+// MaxRecentEvents is how many events a status keeps (recentEvents).
+const MaxRecentEvents = 10
+
+// RecentEvent is one thing the controller reported about a network or a
+// cluster: a state it reached, a step that finished, a failure. The same
+// is emitted as a Kubernetes event of the object, which Kubernetes keeps
+// for about an hour; the status keeps the last MaxRecentEvents.
+type RecentEvent struct {
+	// time is when it happened last.
+	// +required
+	Time metav1.Time `json:"time"`
+	// type is Normal for something that went as expected and Warning for
+	// a failure or something that needs a look.
+	// +required
+	// +kubebuilder:validation:Enum=Normal;Warning
+	Type string `json:"type"`
+	// reason is what happened, as one CamelCase word, e.g. Running.
+	// +required
+	// +kubebuilder:validation:MaxLength=64
+	Reason string `json:"reason"`
+	// message has the details, for people.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// count is how often it happened in a row.
+	// +optional
+	Count int32 `json:"count,omitempty"`
+}

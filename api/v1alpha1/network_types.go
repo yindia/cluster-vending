@@ -254,6 +254,14 @@ type NetworkStatus struct {
 	// +listType=atomic
 	// +optional
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
+	// recentEvents are the last things the controller reported about the
+	// network, oldest first: the states it reached, steps that finished,
+	// failures. They are also Kubernetes events of this object, which are
+	// kept for about an hour only.
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=10
+	// +optional
+	RecentEvents []RecentEvent `json:"recentEvents,omitempty"`
 	// contractStatus is the status as the cloud.v1 API returns it
 	// (protojson), kept verbatim: the fields above are read from it, and it
 	// carries what they leave out (the state of every object). Written by

@@ -214,3 +214,20 @@ type Cluster struct {
 	// Clusters.SetDeprecations. Empty: never scanned.
 	Deprecations JSON
 }
+
+// Event is one Kubernetes event about an object of a tenant, as the
+// management cluster keeps it.
+type Event struct {
+	// Time is when it happened last.
+	Time time.Time
+	// Type is "Normal" or "Warning".
+	Type string
+	// Reason is what happened, as one CamelCase word.
+	Reason string
+	// Message has the details.
+	Message string
+	// Count is how often it happened; at least 1.
+	Count int32
+	// Kind and Name are the object the event is about.
+	Kind, Name string
+}

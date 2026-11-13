@@ -8,6 +8,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // PendingStates are the stored states of clusters that are not settled:
@@ -32,6 +33,9 @@ func PendingStates() []string {
 // row: the EKS cluster of an import is discovered here (discoverImport),
 // and a new cluster's name and a generation's versions are checked
 // against EKS here (resolve), before anything is rendered.
+//
+// What changed in a pass is reported as events of the cluster's object
+// (events.go), once: when its status is recorded.
 func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	row, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
@@ -40,6 +44,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
+	ctx = reconcile.WithNotes(ctx)
 	// What went wrong is the cluster's status (below) and the error of the
 	// pass: the loop logs it and comes back.
 	failed := s.moveOn(ctx, row)
@@ -47,6 +52,10 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	// cluster that is gone has none.
 	current, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
+		if row.State == StateDeleting {
+			s.deps.Emit(ctx, object(row), reconcile.EventNormal, reconcile.ReasonDeleted,
+				"the cluster's resources are gone and the cluster is removed")
+		}
 		return failed
 	}
 	if err != nil {

@@ -66,6 +66,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				}
 				opts := o
 				opts.Progress = cmd.ErrOrStderr()
+				opts.RequestTimeout = cfg.RequestTimeout
 				if len(args) > 0 {
 					opts.ID = args[0]
 				}

@@ -113,7 +113,7 @@ func newWhoamiCmd() *cobra.Command {
 				return err
 			}
 			clients := cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken))
-			return cli.Run(cmd.Context(), cli.WhoAmI, clients, cli.Options{}, cmd.OutOrStdout(), output)
+			return cli.Run(cmd.Context(), cli.WhoAmI, clients, cli.Options{RequestTimeout: cfg.RequestTimeout}, cmd.OutOrStdout(), output)
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", cli.OutputYAML, "output format: yaml or json")

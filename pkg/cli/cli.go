@@ -24,8 +24,25 @@ import (
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 )
 
-// requestTimeout bounds one API call.
-const requestTimeout = 30 * time.Second
+// DefaultRequestTimeout bounds one API call unless Options.RequestTimeout
+// says otherwise. A watch and --wait are not bounded by it.
+const DefaultRequestTimeout = 2 * time.Minute
+
+// requestTimeoutKey carries Options.RequestTimeout to call.
+type requestTimeoutKey struct{}
+
+// requestTimeoutOf is the timeout of one API call under ctx.
+func requestTimeoutOf(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(requestTimeoutKey{}).(time.Duration); ok && d > 0 {
+		return d
+	}
+	return DefaultRequestTimeout
+}
+
+// newHTTPClient is the client of the API. It has no total timeout: that
+// would also cut a watch (a response read for as long as it is watched)
+// off; each call is bounded by its context instead (call).
+func newHTTPClient() *http.Client { return &http.Client{} }
 
 // Output formats.
 const (
@@ -47,6 +64,9 @@ type Options struct {
 	// once the resource is ready (or gone), polling it; Timeout bounds it.
 	Wait    bool
 	Timeout time.Duration
+	// RequestTimeout is --request-timeout: how long one API call may take.
+	// Zero: DefaultRequestTimeout.
+	RequestTimeout time.Duration
 	// Progress receives --wait's state changes (stderr).
 	Progress io.Writer
 	// Out and Output are where and how (--output) watch prints its stream.
@@ -95,11 +115,11 @@ type Clients struct {
 }
 
 // NewClients returns clients of the API at server (a base URL) over
-// httpClient; nil uses a client with requestTimeout. With WithToken every
+// httpClient; nil uses newHTTPClient. With WithToken every
 // call carries a bearer token (auth.go).
 func NewClients(server string, httpClient *http.Client, opts ...ClientOption) Clients {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: requestTimeout}
+		httpClient = newHTTPClient()
 	}
 	var o clientOptions
 	for _, opt := range opts {
@@ -123,9 +143,13 @@ func NewClients(server string, httpClient *http.Client, opts ...ClientOption) Cl
 type Command func(ctx context.Context, c Clients, o Options) (proto.Message, error)
 
 // Run runs cmd and prints its response to w in format. Each API call is
-// bounded by requestTimeout; --wait by o.Timeout.
+// bounded by o.RequestTimeout (DefaultRequestTimeout when unset); --wait
+// by o.Timeout.
 func Run(ctx context.Context, cmd Command, c Clients, o Options, w io.Writer, format string) error {
 	o.Out, o.Output = w, format
+	if o.RequestTimeout > 0 {
+		ctx = context.WithValue(ctx, requestTimeoutKey{}, o.RequestTimeout)
+	}
 	res, err := cmd(ctx, c, o)
 	if err != nil || res == nil { // watch prints as it goes
 		return err
@@ -140,7 +164,7 @@ func call[Req, Resp proto.Message](ctx context.Context, req Req, send func(conte
 	if err := protovalidate.Validate(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, requestTimeoutOf(ctx))
 	defer cancel()
 	return send(ctx, req)
 }

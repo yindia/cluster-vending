@@ -1,7 +1,7 @@
 # The component catalog
 
 The components this build ships, as `ComponentDefinition` files in
-`config/catalog/` (one per definition). How tenants enable theirs is in
+`pkg/catalog/definitions/` (one per definition). How tenants enable theirs is in
 [design/component-usage.md](design/component-usage.md).
 
 ## Who controls a component
@@ -54,9 +54,12 @@ add a node for it.
   (`--install-catalog`, default `true`; `pkg/catalog`). It never changes an
   existing definition, so the platform team's edits survive an upgrade of the
   controller. To take a newer shipped version of a definition, delete it and
-  restart the controller, or apply the file.
+  restart the controller, or replace it with the file
+  (`kubectl replace -f pkg/catalog/definitions/<name>.yaml`; `apply` keeps
+  fields the new file dropped).
 - **By hand.** `--install-catalog=false`, then
-  `kubectl apply -k config/catalog` once the CRDs are installed.
+  `kubectl create -f pkg/catalog/definitions/` once the CRDs are installed.
+  The catalog is not part of any kustomization.
 
 Chart versions are not in the definitions. A `Release` pins them per
 Kubernetes minor; the versions below are what each definition was checked
@@ -90,7 +93,7 @@ renders Istio's CRDs as templates, kept on uninstall.
 **Tenant values.** Only `gpu-operator` and `kyverno-policies` have a values
 file and a schema. Every Platform component runs as the platform set it:
 the values a tenant could once tune are in `platformValues`, at the
-researched defaults. Tests (`config/catalog`) hold that exactly those two
+researched defaults. Tests (`pkg/catalog`) hold that exactly those two
 are tenant components and accept overrides.
 
 All three Kubernetes minors the shipped release offers (1.35 to 1.37) are

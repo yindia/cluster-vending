@@ -1,7 +1,7 @@
 # A release as an operator publishes it, with the content of the release
 # the controller ships (pkg/controller DefaultRelease): the three newest
 # Kubernetes minors and, on each, the versions of the shipped catalog
-# (config/catalog). A pin's values are locked Helm values for that minor:
+# (pkg/catalog/definitions). A pin's values are locked Helm values for that minor:
 # the cluster autoscaler's image must be of the cluster's Kubernetes minor.
 #
 # The controller creates its own copy, named shipped-<hash of the content>

@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	shipped "github.com/yindia/cluster-vending/config/catalog"
+	shipped "github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/component"
 	"github.com/yindia/cluster-vending/pkg/release"
 )

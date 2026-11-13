@@ -46,7 +46,7 @@ var controllerSettings = []Setting{
 	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
 		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere, also to run the providers with other settings than the platform's"},
 	{Flag: FlagInstallCatalog, Env: EnvInstallCatalog, Default: "true",
-		Usage: "on startup, create the component catalog this build ships (config/catalog) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
+		Usage: "on startup, create the component catalog this build ships (pkg/catalog/definitions) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},

@@ -63,7 +63,7 @@ type Options struct {
 	// role.
 	InstallProviders bool
 	// InstallCatalog creates the shipped component definitions
-	// (config/catalog) that are missing, once the platform's kinds are
+	// (pkg/catalog/definitions) that are missing, once the platform's kinds are
 	// served; existing ones are never changed.
 	InstallCatalog bool
 	// AWS is the management role the providers run as, the providers'

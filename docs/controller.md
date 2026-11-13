@@ -112,7 +112,7 @@ and `--log-level`, and only these:
 | `--service-account` | name of the controller's own service account, in `--lease-namespace`; bound in each tenant namespace to the kubeconfig reader role. Set by the Deployment, empty outside the cluster |
 | `--aws-management-role-arn` | required: the IAM role the Crossplane AWS providers run as (IRSA); the management account is taken from it |
 | `--install-providers` | create the providers, provider-helm and their runtime config when missing |
-| `--install-catalog` | create the shipped component definitions (`config/catalog`, [catalog.md](catalog.md)) that are missing; existing ones are never changed |
+| `--install-catalog` | create the shipped component definitions (`pkg/catalog/definitions`, [catalog.md](catalog.md)) that are missing; existing ones are never changed |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 

@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	shipped "github.com/yindia/cluster-vending/config/catalog"
 	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
@@ -29,7 +28,7 @@ func newClient(t *testing.T, objects ...client.Object) client.WithWatch {
 
 func shippedNames(t *testing.T) []string {
 	t.Helper()
-	defs, err := shipped.Definitions()
+	defs, err := catalog.Definitions()
 	if err != nil {
 		t.Fatal(err)
 	}

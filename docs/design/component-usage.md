@@ -142,7 +142,7 @@ tenant needs when a value does not take effect.
 read it through `ListComponentDefinitions`; the install details are not part
 of that answer.
 
-The definitions this build ships are in `config/catalog/` and listed in
+The definitions this build ships are in `pkg/catalog/definitions/` and listed in
 [catalog.md](../catalog.md). The controller creates the missing ones on
 startup (`--install-catalog`) and never changes an existing one. The fields
 `install.helm.crds`, `versionGroup` and `upgradeOneMinorAtATime` are

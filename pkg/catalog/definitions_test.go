@@ -1,17 +1,15 @@
 package catalog_test
 
 import (
-	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/config/catalog"
 	"github.com/yindia/cluster-vending/config/crd/crdtest"
+	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/component"
 	"github.com/yindia/cluster-vending/pkg/release"
 )
@@ -47,31 +45,20 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	}
 }
 
-// Each file is named after its definition, and kustomization.yaml lists
-// every file, so kubectl apply -k installs what the controller does.
-func TestFilesMatchNamesAndKustomization(t *testing.T) {
+// Each file is named after its definition.
+func TestFilesAreNamedAfterTheirDefinitions(t *testing.T) {
 	files, err := catalog.Files()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range definitions(t) {
+	defs := definitions(t)
+	if len(files) != len(defs) {
+		t.Fatalf("%d files for %d definitions", len(files), len(defs))
+	}
+	for _, d := range defs {
 		if !slices.Contains(files, d.Name+".yaml") {
 			t.Errorf("%s is not in %s.yaml", d.Name, d.Name)
 		}
-	}
-	raw, err := os.ReadFile("kustomization.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var k struct {
-		Resources []string `json:"resources"`
-	}
-	if err := yaml.Unmarshal(raw, &k); err != nil {
-		t.Fatal(err)
-	}
-	slices.Sort(k.Resources)
-	if !slices.Equal(k.Resources, files) {
-		t.Errorf("kustomization lists %v, the directory has %v", k.Resources, files)
 	}
 }
 

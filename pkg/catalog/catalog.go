@@ -1,5 +1,5 @@
 // Package catalog installs the component catalog this build ships
-// (config/catalog) into the management cluster: each ComponentDefinition
+// (definitions/) into the management cluster: each ComponentDefinition
 // that does not exist yet is created. An existing one is never changed:
 // once the platform team has edited a definition, or published its own, a
 // new build does not undo it.
@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	shipped "github.com/yindia/cluster-vending/config/catalog"
 )
 
 // Result names the definitions created and those left as they were.
@@ -24,7 +23,7 @@ type Result struct {
 // Install creates the shipped definitions that are missing. The
 // CustomResourceDefinition of ComponentDefinition must be served.
 func Install(ctx context.Context, c client.Client) (Result, error) {
-	defs, err := shipped.Definitions()
+	defs, err := Definitions()
 	if err != nil {
 		return Result{}, fmt.Errorf("read the shipped catalog: %w", err)
 	}

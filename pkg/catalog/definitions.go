@@ -1,7 +1,3 @@
-// Package catalog holds the component catalog this build ships: one
-// ComponentDefinition per YAML file, embedded so the controller can create
-// the missing ones on startup (pkg/catalog). Each definition's chart
-// version and caveats are in docs/catalog.md.
 package catalog
 
 import (
@@ -9,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 
 	"sigs.k8s.io/yaml"
@@ -16,11 +13,13 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 )
 
-//go:embed *.yaml
-var files embed.FS
+// definitionsDir holds the shipped definitions: one ComponentDefinition per
+// YAML file, named after it. Each definition's chart version and caveats
+// are in docs/catalog.md.
+const definitionsDir = "definitions"
 
-// kustomization is the file that lists the definitions for kubectl.
-const kustomization = "kustomization.yaml"
+//go:embed definitions/*.yaml
+var files embed.FS
 
 // Definitions are the shipped definitions, ordered by name. Each file holds
 // exactly one, and decodes strictly: a field the kind does not have is an
@@ -44,26 +43,24 @@ func Definitions() ([]*cloudv1alpha1.ComponentDefinition, error) {
 
 // Files are the names of the definition files, sorted.
 func Files() ([]string, error) {
-	names, err := fs.Glob(files, "*.yaml")
+	paths, err := fs.Glob(files, definitionsDir+"/*.yaml")
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		if name != kustomization {
-			out = append(out, name)
-		}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, path.Base(p))
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
 // Raw is a definition file as shipped.
-func Raw(name string) ([]byte, error) { return files.ReadFile(name) }
+func Raw(name string) ([]byte, error) { return files.ReadFile(path.Join(definitionsDir, name)) }
 
 // read decodes one definition file.
 func read(name string) (*cloudv1alpha1.ComponentDefinition, error) {
-	raw, err := files.ReadFile(name)
+	raw, err := Raw(name)
 	if err != nil {
 		return nil, err
 	}

@@ -57,7 +57,7 @@ func date(year int, month time.Month, day int) metav1.Time {
 	return metav1.NewTime(time.Date(year, month, day, 0, 0, 0, 0, time.UTC))
 }
 
-// defaultPins are the versions of the shipped catalog (config/catalog,
+// defaultPins are the versions of the shipped catalog (pkg/catalog/definitions,
 // docs/catalog.md) on one Kubernetes minor: the chart versions each
 // definition was checked against, the same on the three minors. The
 // cluster autoscaler's image must be of the cluster's Kubernetes minor,

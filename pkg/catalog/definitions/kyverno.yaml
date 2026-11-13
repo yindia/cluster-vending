@@ -46,7 +46,7 @@ spec:
       excludeKyvernoNamespace: true
       # Webhook namespaceSelector. The chart appends the kyverno namespace itself
       # (excludeKyvernoNamespace). The system namespaces plus every catalog definition's
-      # spec.namespace; a test in config/catalog keeps it in line with the catalog.
+      # spec.namespace; a test in pkg/catalog keeps it in line with the catalog.
       webhooks:
         namespaceSelector:
           matchExpressions:

@@ -39,6 +39,8 @@ var controllerSettings = []Setting{
 		Usage: "run the controllers behind leader election (a Lease), so one replica reconciles"},
 	{Flag: FlagLeaseNamespace, Env: EnvLeaseNamespace, Default: DefaultLeaseNamespace,
 		Usage: "namespace of the leader election Lease in the management cluster: the controller's own namespace"},
+	{Flag: FlagServiceAccount, Env: EnvServiceAccount,
+		Usage: "name of the controller's own service account, in its own namespace (--lease-namespace): each tenant namespace binds it to the role that gets the kubeconfig Secrets of that tenant's workload clusters (the scan for deprecated API versions); empty outside the cluster, where no binding is made"},
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
 		Usage: "IAM role ARN the Crossplane AWS providers run as (IRSA), in the management account (the account is taken from the ARN); tenant roles trust it; required"},
 	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
@@ -59,6 +61,9 @@ type Controller struct {
 	MetricsAddr, ProbeAddr string
 	LeaderElect            bool
 	LeaseNamespace         string
+	// ServiceAccount is the controller's own service account; nil when it
+	// runs outside the cluster.
+	ServiceAccount *ServiceAccountRef
 	// InstallProviders: create the Crossplane providers on startup.
 	InstallProviders bool
 	// InstallCatalog: create the shipped component definitions that are
@@ -80,6 +85,11 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	errs = append(errs, awsErrs...)
 	cfg.AWS = aws
 	cfg.AWS.StaticKeys = staticKeysFrom(env)
+	account, err := serviceAccountRef(v[FlagLeaseNamespace], v[FlagServiceAccount])
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.ServiceAccount = account
 	creds, err := parseSecretKeyRef(v[FlagProviderCredentialsSecret])
 	if err != nil {
 		errs = append(errs, err)
@@ -117,6 +127,25 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 		return Controller{}, invalid(errs)
 	}
 	return cfg, nil
+}
+
+// ServiceAccountRef names a service account.
+type ServiceAccountRef struct{ Namespace, Name string }
+
+// serviceAccountRef is the service account name in the controller's own
+// namespace; nil for no name.
+func serviceAccountRef(namespace, name string) (*ServiceAccountRef, error) {
+	if name == "" {
+		return nil, nil
+	}
+	if !dnsSubdomainPattern.MatchString(name) {
+		return nil, fmt.Errorf("%s must be a service account name, got %q", setting(FlagServiceAccount), name)
+	}
+	if !dnsLabelPattern.MatchString(namespace) {
+		return nil, fmt.Errorf("%s must be the controller's namespace for %s, got %q",
+			setting(FlagLeaseNamespace), setting(FlagServiceAccount), namespace)
+	}
+	return &ServiceAccountRef{Namespace: namespace, Name: name}, nil
 }
 
 // managementFromRole is the management account of the role the providers

@@ -53,6 +53,10 @@ type Options struct {
 	// so one replica reconciles.
 	LeaderElect    bool
 	LeaseNamespace string
+	// ServiceAccount is the controller's own service account, bound in
+	// each tenant namespace to the kubeconfig reader role; nil outside the
+	// cluster.
+	ServiceAccount *config.ServiceAccountRef
 	// InstallProviders creates the Crossplane providers, provider-helm and
 	// the activation policy when missing, running as the platform's
 	// defaults (crossplaneaws.DefaultProviderRuntime) and as the management
@@ -147,11 +151,12 @@ func Run(ctx context.Context, o Options) error {
 	// a configurable target later (docs/design/rollouts.md).
 	renderTarget := int64(crossplaneaws.RenderVersion)
 	reconciling, err := management.WithAWS(ctx, reconcile.Deps{
-		Store:               store,
-		Kube:                mgr.GetClient(), // reads from the informer cache
-		KubeReader:          mgr.GetAPIReader(),
-		RenderTarget:        renderTarget,
-		ProviderCredentials: management.CredentialsSecret(o.AWS.ProviderCredentials),
+		Store:                    store,
+		Kube:                     mgr.GetClient(), // reads from the informer cache
+		KubeReader:               mgr.GetAPIReader(),
+		RenderTarget:             renderTarget,
+		ProviderCredentials:      management.CredentialsSecret(o.AWS.ProviderCredentials),
+		ControllerServiceAccount: serviceAccount(o.ServiceAccount),
 		// The catalog and the releases, read at the API server: what the
 		// platform installs with every cluster.
 		Platform: management.PlatformSource(direct),
@@ -202,4 +207,13 @@ func providerRuntime(a config.AWS) crossplaneaws.ProviderRuntime {
 	rt := crossplaneaws.DefaultProviderRuntime()
 	rt.ManagementRoleARN = a.ManagementRoleARN
 	return rt
+}
+
+// serviceAccount is the controller's service account as the reconcilers
+// take it; nil for none.
+func serviceAccount(ref *config.ServiceAccountRef) *reconcile.ServiceAccount {
+	if ref == nil {
+		return nil
+	}
+	return &reconcile.ServiceAccount{Namespace: ref.Namespace, Name: ref.Name}
 }

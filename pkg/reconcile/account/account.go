@@ -157,7 +157,9 @@ func owner(a *model.CloudAccount) reconcile.Owner {
 // account). The
 // providers and their runtime config are the platform's, installed
 // beforehand: without them the ProviderConfig kind does not exist and
-// Apply fails with a FailedPrecondition fault. Every step is idempotent.
+// Apply fails with a FailedPrecondition fault. In the cluster, the tenant
+// namespace also binds the controller to the kubeconfig reader role
+// (bindKubeconfigReader). Every step is idempotent.
 func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
 	keys, err := r.credentialsCopy(ctx, a)
 	if err != nil {
@@ -180,7 +182,7 @@ func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
 		r.logger().ErrorContext(ctx, "record bootstrap resources", "tenant_id", a.TenantID, "error", err)
 		return fault.New(fault.Internal, "could not record the bootstrap's resources")
 	}
-	return nil
+	return r.bindKubeconfigReader(ctx, a)
 }
 
 // Delete removes what Apply created for the account and reports whether

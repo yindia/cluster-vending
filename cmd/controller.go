@@ -44,7 +44,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 			return manager.Run(ctx, manager.Options{
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
-				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace,
+				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace, ServiceAccount: cfg.ServiceAccount,
 				AWS: cfg.AWS, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
 			})
 		},

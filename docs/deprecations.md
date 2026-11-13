@@ -73,8 +73,10 @@ The controller scans. The API server never reads a workload cluster.
   A scan that failed is tried again after 15 minutes.
 - **How it reaches the cluster:** with the kubeconfig Secret the cluster's
   ClusterAuth writes (`status.kubeconfigSecret`, key `kubeconfig`). The
-  controller's role has `get` on Secrets for this, and no `list`, `watch`
-  or write.
+  controller may `get` Secrets in tenant namespaces only: each tenant
+  namespace binds it to the `cluster-vending-kubeconfig-reader` role
+  ([controller](controller.md)). Where that binding is missing the scan
+  fails with a message naming it, and is tried again.
 - **Read-only:** discovery, then metadata-only lists of the kinds a rule
   names, and the Secrets labelled `owner=helm,status=deployed`.
 - **Bounded:** 250 objects a page (20 for Helm Secrets), 30 seconds a

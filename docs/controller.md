@@ -72,12 +72,27 @@ make controller-apis
 It runs `go tool controller-gen` (deepcopy, CRDs, RBAC role). `make check`
 covers these packages like any other.
 
-The generated role (`config/rbac/role.yaml`) has one rule on Secrets:
-`get`. The scan for deprecated API versions reads a workload cluster with
-the kubeconfig Secret its ClusterAuth writes
-([deprecations](deprecations.md)); RBAC cannot select Secrets by a name
-suffix, so the rule is on Secrets as a whole, without `list`, `watch` or
-any write.
+The controller's roles have no rule on Secrets. The scan for deprecated
+API versions reads a workload cluster with the kubeconfig Secret its
+ClusterAuth writes in the tenant's namespace
+([deprecations](deprecations.md)), and RBAC cannot select Secrets by a
+name suffix, so the narrowest scope is the tenant namespace:
+
+- `config/rbac/kubeconfig_reader_role.yaml` is a ClusterRole with `get` on
+  Secrets (deployed as `cluster-vending-kubeconfig-reader`). Nothing binds
+  it cluster-wide.
+- When a cloud account reconciles, the controller applies a RoleBinding of
+  that name in the tenant namespace, to its own service account
+  (`--service-account`). It is applied again on every account reconcile,
+  so existing tenants get it too. It belongs to the namespace, which the
+  tenant's accounts share: it is not deleted with an account.
+- To make that binding without holding the permission itself, the
+  generated role has `create` and `patch` on RoleBindings and the `bind`
+  verb on that one ClusterRole name, nothing else on RBAC kinds.
+
+So the controller can get Secrets in tenant namespaces only, and cannot
+list, watch or write them. Outside the cluster (`--service-account`
+unset, a local run with your kubeconfig) no binding is made.
 
 ## Run
 
@@ -94,6 +109,7 @@ and `--log-level`, and only these:
 | `--config` | YAML file with any of these settings |
 | `--health-probe-addr`, `--metrics-addr` | listen addresses (metrics off by default) |
 | `--leader-elect`, `--lease-namespace` | one replica reconciles |
+| `--service-account` | name of the controller's own service account, in `--lease-namespace`; bound in each tenant namespace to the kubeconfig reader role. Set by the Deployment, empty outside the cluster |
 | `--aws-management-role-arn` | required: the IAM role the Crossplane AWS providers run as (IRSA); the management account is taken from it |
 | `--install-providers` | create the providers, provider-helm and their runtime config when missing |
 | `--install-catalog` | create the shipped component definitions (`config/catalog`, [catalog.md](catalog.md)) that are missing; existing ones are never changed |

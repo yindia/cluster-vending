@@ -12,6 +12,9 @@ resources:
 # Secrets. Kept in step with the code by config/deploy_test.go.
 - platform_role.yaml
 - platform_role_binding.yaml
+# Get on Secrets, bound by the controller in tenant namespaces only (the
+# kubeconfig Secrets of workload clusters); never bound cluster-wide.
+- kubeconfig_reader_role.yaml
 # Leader election: Leases and events in the controller's namespace.
 - leader_election_role.yaml
 - leader_election_role_binding.yaml

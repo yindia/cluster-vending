@@ -2,11 +2,15 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
@@ -157,6 +161,36 @@ func TestClusterThatCannotBeScanned(t *testing.T) {
 				t.Fatalf("status.deprecations = %+v, condition %+v, again after %s", obj.Status.Deprecations, cond, res.RequeueAfter)
 			}
 		})
+	}
+}
+
+// forbidSecrets is a client whose reads of Secrets are refused, as the
+// API server refuses them in a tenant namespace without the reader binding.
+type forbidSecrets struct{ client.Client }
+
+func (c forbidSecrets) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Secret); ok {
+		return apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, key.Name, errors.New("no RBAC rule"))
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+// The controller reads a kubeconfig only where the tenant namespace binds
+// it to the reader role. Without the binding the scan fails with a message
+// that names it, and the cluster's own reconcile is not involved.
+func TestScanWithoutTheKubeconfigReaderBinding(t *testing.T) {
+	w, r, connected := scanWorld(t)
+	r.deps.Direct = forbidSecrets{r.deps.Direct}
+
+	res, err := r.Reconcile(t.Context(), request("prod"))
+
+	if err != nil || res.RequeueAfter != deprecations.RetryInterval || len(*connected) != 0 {
+		t.Fatalf("Reconcile = %+v, %v, %d connections", res, err, len(*connected))
+	}
+	want := "kubeconfig: the controller may not read secret prod-kubeconfig in namespace " + namespace +
+		": the cluster-vending-kubeconfig-reader RoleBinding is missing there (the cloud account's reconcile applies it; --service-account names who it binds)"
+	if d := w.cluster(t, "prod").Status.Deprecations; d == nil || d.Error != want {
+		t.Fatalf("status.deprecations = %+v, want error %q", d, want)
 	}
 }
 

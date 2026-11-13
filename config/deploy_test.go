@@ -9,16 +9,19 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 const (
@@ -142,13 +145,21 @@ func TestControllerDeploymentUsesTheCommandsSettings(t *testing.T) {
 			t.Errorf("%s: AWS keys do not belong in a manifest; the controller's credentials are its service account's role", e.Name)
 		}
 		env[e.Name] = e.Value
-		if e.ValueFrom != nil {
-			env[e.Name] = "cluster-vending-system" // the namespace, from the downward API
+		if e.ValueFrom != nil && e.ValueFrom.FieldRef != nil {
+			// From the downward API.
+			env[e.Name] = map[string]string{
+				"metadata.namespace":      "cluster-vending-system",
+				"spec.serviceAccountName": "cluster-vending-controller-manager",
+			}[e.ValueFrom.FieldRef.FieldPath]
 		}
 	}
 	cfg, err := config.LoadController(lookup(args), lookup(env), nil)
 	if err != nil {
 		t.Fatalf("the Deployment's settings do not load: %v", err)
+	}
+	account := config.ServiceAccountRef{Namespace: "cluster-vending-system", Name: "cluster-vending-controller-manager"}
+	if cfg.ServiceAccount == nil || *cfg.ServiceAccount != account {
+		t.Errorf("service account = %+v, want %+v (the tenant namespaces bind it to the kubeconfig reader role)", cfg.ServiceAccount, account)
 	}
 	if !cfg.LeaderElect || cfg.LeaseNamespace != "cluster-vending-system" || cfg.ProbeAddr != ":8081" || cfg.MetricsAddr != "0" {
 		t.Errorf("loaded %+v", cfg)
@@ -360,7 +371,7 @@ func managedKinds() []string {
 // What reconciles can do, on every managed resource kind the platform
 // uses, what the code does with them, and can install the providers: the
 // controller. This role reads no Secret (see
-// TestControllerOnlyGetsSecrets for the one read the controller has).
+// TestControllerReadsSecretsOnlyThroughTheTenantBinding).
 func TestReconcilerRolesCoverTheKindsThePlatformRenders(t *testing.T) {
 	roles := map[string]*rbacv1.ClusterRole{
 		"controller": clusterRole(t, controllerRole),
@@ -394,19 +405,70 @@ func TestReconcilerRolesCoverTheKindsThePlatformRenders(t *testing.T) {
 	}
 }
 
-// Of Secrets the controller may only get one by name: a workload
-// cluster's kubeconfig, for the read-only scan for deprecated API versions
-// (pkg/controller DeprecationReconciler; RBAC cannot select Secrets by a
-// name suffix). It can neither list nor watch nor write them.
-func TestControllerOnlyGetsSecrets(t *testing.T) {
+// The controller's own roles have no rule on Secrets at all. To read a
+// workload cluster's kubeconfig (the read-only scan for deprecated API
+// versions, pkg/controller DeprecationReconciler) it binds itself, in
+// each tenant namespace, to the get-only kubeconfig-reader ClusterRole:
+// it may create RoleBindings and has the bind verb on exactly that role,
+// which lets it grant a permission it does not hold (Kubernetes RBAC,
+// "Restrictions on role binding creation or update"). Nothing binds the
+// reader role cluster-wide.
+func TestControllerReadsSecretsOnlyThroughTheTenantBinding(t *testing.T) {
 	role := clusterRole(t, "rbac/role.yaml")
-	if !allows(role, "", "secrets", "get") {
-		t.Error("controller role: cannot get the kubeconfig Secret of a workload cluster (the deprecation scan)")
-	}
-	for _, verb := range []string{"list", "watch", "create", "update", "patch", "delete", "deletecollection", "*"} {
-		if allows(role, "", "secrets", verb) || allows(role, "", "*", verb) {
-			t.Errorf("controller role: may %s Secrets; it only gets a kubeconfig by name", verb)
+	for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection", "*"} {
+		if allows(role, "", "secrets", verb) || allows(role, "", "*", verb) || allows(role, "*", "secrets", verb) {
+			t.Errorf("controller role: may %s Secrets; it reads them only where a tenant namespace binds the reader role", verb)
 		}
+	}
+	for _, verb := range []string{"create", "patch"} {
+		if !allows(role, "rbac.authorization.k8s.io", "rolebindings", verb) {
+			t.Errorf("controller role: cannot %s the tenant namespaces' RoleBinding", verb)
+		}
+	}
+	var bind []rbacv1.PolicyRule
+	for _, rule := range role.Rules {
+		if slices.Contains(rule.Verbs, "bind") || slices.Contains(rule.Verbs, "escalate") || slices.Contains(rule.Verbs, "*") {
+			bind = append(bind, rule)
+		}
+	}
+	want := rbacv1.PolicyRule{APIGroups: []string{"rbac.authorization.k8s.io"}, Resources: []string{"clusterroles"},
+		ResourceNames: []string{reconcile.KubeconfigReaderRole}, Verbs: []string{"bind"}}
+	if len(bind) != 1 || !reflect.DeepEqual(bind[0], want) {
+		t.Errorf("controller role: bind rules = %+v, want only %+v", bind, want)
+	}
+	for _, kind := range []string{"clusterrolebindings", "roles", "clusterroles"} {
+		for _, verb := range []string{"create", "update", "patch"} {
+			if allows(role, "rbac.authorization.k8s.io", kind, verb) {
+				t.Errorf("controller role: may %s %s; it only binds the reader role in tenant namespaces", verb, kind)
+			}
+		}
+	}
+
+	reader := clusterRole(t, "rbac/kubeconfig_reader_role.yaml")
+	wantRules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}}}
+	if !reflect.DeepEqual(reader.Rules, wantRules) {
+		t.Errorf("kubeconfig-reader rules = %+v, want get on Secrets only", reader.Rules)
+	}
+	// ../default prefixes names with cluster-vending-: the name the code
+	// binds and the controller may bind.
+	if got := "cluster-vending-" + reader.Name; got != reconcile.KubeconfigReaderRole {
+		t.Errorf("kubeconfig-reader is deployed as %s, the code binds %s", got, reconcile.KubeconfigReaderRole)
+	}
+	for _, path := range []string{"rbac/role_binding.yaml", "rbac/platform_role_binding.yaml"} {
+		for _, doc := range documents(t, path) {
+			if strings.Contains(string(doc), reader.Name) {
+				t.Errorf("%s binds the reader role outside a tenant namespace", path)
+			}
+		}
+	}
+	// The controller is told who it is, so it can bind itself.
+	env := deployment(t, controllerDeployment).Spec.Template.Spec.Containers[0].Env
+	told := slices.ContainsFunc(env, func(e corev1.EnvVar) bool {
+		return e.Name == config.EnvServiceAccount && e.ValueFrom != nil && e.ValueFrom.FieldRef != nil &&
+			e.ValueFrom.FieldRef.FieldPath == "spec.serviceAccountName"
+	})
+	if !told {
+		t.Errorf("%s: %s is not the pod's service account name", controllerDeployment, config.EnvServiceAccount)
 	}
 }
 

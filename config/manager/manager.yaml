@@ -59,6 +59,13 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # The controller's own service account (--service-account), in
+        # the namespace above: each tenant namespace binds it to the
+        # kubeconfig-reader role (../rbac/kubeconfig_reader_role.yaml).
+        - name: CV_SERVICE_ACCOUNT
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.serviceAccountName
         # REQUIRED, placeholder: the IAM role the Crossplane AWS providers
         # run as (IRSA), in the management account (the account is taken
         # from the ARN); the tenant roles trust that role. Replace it in an

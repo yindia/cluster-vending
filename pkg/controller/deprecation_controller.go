@@ -18,6 +18,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/deprecation"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/reconcile/deprecations"
 )
 
@@ -49,9 +50,13 @@ func NewDeprecationReconciler(d Deps) (*DeprecationReconciler, error) {
 }
 
 // The kubeconfig of a workload cluster is a Secret its ClusterAuth writes
-// in the tenant's namespace; RBAC cannot select Secrets by name suffix,
-// so this is get on Secrets (never list or watch).
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
+// in the tenant's namespace. The controller has no Secret rule of its own:
+// each tenant namespace binds it to the get-only ClusterRole
+// reconcile.KubeconfigReaderRole (the account reconcile applies that
+// RoleBinding). To create a binding to a role whose permissions it does
+// not hold, it needs the bind verb on exactly that role.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=create;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=cluster-vending-kubeconfig-reader,verbs=bind
 
 // SetupWithManager registers the scanner: one cluster at a time, woken by
 // a change of a cluster's spec and by its own schedule.
@@ -108,6 +113,10 @@ func (r *DeprecationReconciler) kubeconfig(ctx context.Context, obj *cloudv1alph
 	err := r.deps.Direct.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: name}, secret)
 	if apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("secret %s not found", name)
+	}
+	if apierrors.IsForbidden(err) {
+		return nil, fmt.Errorf("the controller may not read secret %s in namespace %s: the %s RoleBinding is missing there (the cloud account's reconcile applies it; --service-account names who it binds)",
+			name, obj.Namespace, reconcile.KubeconfigReaderRole)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("secret %s: %w", name, err)

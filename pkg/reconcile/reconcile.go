@@ -57,12 +57,28 @@ type Deps struct {
 	// kind cluster). The tenant role is assumed either way. Nil in
 	// production.
 	ProviderCredentials *crossplaneaws.CredentialsSecret
+	// ControllerServiceAccount is the controller's own service account in
+	// the management cluster. Each tenant namespace binds it to
+	// KubeconfigReaderRole, so the controller can get the kubeconfig
+	// Secrets of that tenant's workload clusters and the Secrets of no
+	// other namespace. Nil outside the cluster (local runs): no binding is
+	// made.
+	ControllerServiceAccount *ServiceAccount
 	// Platform reads what the platform installs with every cluster: the
 	// component catalog and the releases that pin its versions. Only what
 	// reconciles has it; nil installs nothing (the API handlers, tests).
 	Platform PlatformSource
 	Logger   *slog.Logger
 }
+
+// KubeconfigReaderRole is the ClusterRole (config/rbac) that may get
+// Secrets. It is never bound cluster-wide: the account reconcile binds it
+// to the controller in each tenant namespace, with a RoleBinding of the
+// same name.
+const KubeconfigReaderRole = "cluster-vending-kubeconfig-reader"
+
+// ServiceAccount names a service account.
+type ServiceAccount struct{ Namespace, Name string }
 
 // PlatformSource is where the cluster reconcile reads the component
 // catalog and the releases from (the management cluster's

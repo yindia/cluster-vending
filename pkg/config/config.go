@@ -58,6 +58,8 @@ const (
 	EnvLeaderElect       = "CV_LEADER_ELECT"
 	FlagLeaseNamespace   = "lease-namespace"
 	EnvLeaseNamespace    = "CV_LEASE_NAMESPACE"
+	FlagServiceAccount   = "service-account"
+	EnvServiceAccount    = "CV_SERVICE_ACCOUNT"
 	FlagRenderTarget     = "render-target"
 	EnvRenderTarget      = "CV_RENDER_TARGET"
 	FlagRenderRollout    = "render-rollout"

@@ -166,6 +166,27 @@ func TestStaticKeysFromTheEnvironment(t *testing.T) {
 	}
 }
 
+// The controller's own service account is optional (unset outside the
+// cluster): a name, in the controller's own namespace.
+func TestControllerServiceAccount(t *testing.T) {
+	env := awsEnv()
+	cfg, err := config.LoadController(nil, lookup(env), nil)
+	if err != nil || cfg.ServiceAccount != nil {
+		t.Fatalf("unset: %+v, %v", cfg.ServiceAccount, err)
+	}
+	env[config.EnvServiceAccount], env[config.EnvLeaseNamespace] = "cluster-vending-controller-manager", "cluster-vending-system"
+	cfg, err = config.LoadController(nil, lookup(env), nil)
+	want := config.ServiceAccountRef{Namespace: "cluster-vending-system", Name: "cluster-vending-controller-manager"}
+	if err != nil || cfg.ServiceAccount == nil || *cfg.ServiceAccount != want {
+		t.Fatalf("set: %+v, %v", cfg.ServiceAccount, err)
+	}
+	for _, bad := range []string{"ns/name", "Bad_Name", "-x"} {
+		env[config.EnvServiceAccount] = bad
+		_, err := config.LoadController(nil, lookup(env), nil)
+		requireErrorNaming(t, err, config.EnvServiceAccount)
+	}
+}
+
 func TestLoadServeRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		name     string

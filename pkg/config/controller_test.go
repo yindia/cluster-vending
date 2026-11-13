@@ -71,7 +71,7 @@ func TestControllerSettingsAreFew(t *testing.T) {
 		got = append(got, s.Flag)
 	}
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
-		config.FlagLeaseNamespace, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
+		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog,
 		config.FlagProviderCredentialsSecret, config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {

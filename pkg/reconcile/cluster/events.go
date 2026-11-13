@@ -27,6 +27,7 @@ var resourcesLeftPattern = regexp.MustCompile(`; [0-9]+ resources left`)
 // things as they were gives none.
 func statusEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	out := reconcile.PassFailure(before.GetConditions(), after.GetConditions(), ConditionReconciled)
+	out = append(out, reconcile.PauseNotes(before.GetConditions(), after.GetConditions())...)
 	out = append(out, resourceEvents(before, after)...) // the steps first, then the state they led to
 	out = append(out, stateEvents(before, after)...)
 	out = append(out, upgradeEvents(before, after)...)

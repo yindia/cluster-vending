@@ -3,6 +3,8 @@ package network
 import (
 	"context"
 
+	"connectrpc.com/connect/v2"
+
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -22,7 +24,8 @@ func (s *NetworkService) ListNetworkEvents(ctx context.Context, req *cloudv1.Lis
 	}
 	events, err := s.deps.Store.Events().ListFor(ctx, row.TenantID, reconcile.KindNetwork, row.Name)
 	if err != nil {
-		return nil, service.ToConnect(err)
+		s.logger().ErrorContext(ctx, "list network events", "network_id", row.ID, "error", err)
+		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the network's events from the management cluster")
 	}
 	page, next, err := service.EventsPage(events, req.GetOnlyWarnings(), req.GetPageSize(), req.GetPageToken())
 	if err != nil {

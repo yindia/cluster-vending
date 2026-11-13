@@ -31,6 +31,8 @@ const (
 //	both          Updating                    Normal   a new generation, or a renderer change, is being applied
 //	both          Failed                      Warning  a resource failed, vanished, or the pass failed; the message says which
 //	both          Repaired                    Normal   an object deleted from the management cluster was created again
+//	both          Paused                      Normal   an operator paused its resources (admin pause): nothing changes in the cloud
+//	both          Resumed                     Normal   the pause ended
 //	both          Deleting                    Normal   deletion started, or waits for something else than before
 //	both          Deleted                     Normal   everything is gone and the object is removed
 //	both          ImportDiscovered            Normal   an import found the existing resources; it is observed, not owned
@@ -65,6 +67,8 @@ const (
 	ReasonUpdating                    = "Updating"
 	ReasonFailed                      = "Failed"
 	ReasonRepaired                    = "Repaired"
+	ReasonPaused                      = "Paused"
+	ReasonResumed                     = "Resumed"
 	ReasonDeleting                    = "Deleting"
 	ReasonDeleted                     = "Deleted"
 	ReasonImportDiscovered            = "ImportDiscovered"
@@ -129,8 +133,12 @@ func (d Deps) Emit(ctx context.Context, obj Object, eventType, reason, message s
 type Note struct{ Type, Reason, Message string }
 
 // Normal and Warning are a Note of that type.
-func Normal(reason, message string) Note  { return Note{Type: EventNormal, Reason: reason, Message: message} }
-func Warning(reason, message string) Note { return Note{Type: EventWarning, Reason: reason, Message: message} }
+func Normal(reason, message string) Note {
+	return Note{Type: EventNormal, Reason: reason, Message: message}
+}
+func Warning(reason, message string) Note {
+	return Note{Type: EventWarning, Reason: reason, Message: message}
+}
 
 type notesKey struct{}
 
@@ -278,4 +286,27 @@ func PassFailed(conditions []*cloudv1.Condition, kind, message string) bool {
 		}
 	}
 	return false
+}
+
+// PauseNotes are the Notes of a pause starting or ending: the Paused
+// condition (PausedCondition) is in after and was not in before, or the
+// other way round. A pause that goes on says nothing.
+func PauseNotes(before, after []*cloudv1.Condition) []Note {
+	find := func(conditions []*cloudv1.Condition) *cloudv1.Condition {
+		for _, c := range conditions {
+			if c.GetType() == ConditionPaused && c.GetStatus() == cloudv1.ConditionStatus_CONDITION_STATUS_TRUE {
+				return c
+			}
+		}
+		return nil
+	}
+	was, is := find(before), find(after)
+	switch {
+	case was == nil && is != nil:
+		return []Note{Normal(ReasonPaused, is.GetMessage())}
+	case was != nil && is == nil:
+		return []Note{Normal(ReasonResumed, "no resource is paused any more: the providers act on them again")}
+	default:
+		return nil
+	}
 }

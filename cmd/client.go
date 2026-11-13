@@ -22,8 +22,8 @@ type verb struct {
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
 	// table: the verb prints a table unless --output says otherwise;
-	// removed adds --only-removed, oidc --oidc.
-	table, removed, oidc bool
+	// removed adds --only-removed, oidc --oidc, warnings --only-warnings.
+	table, removed, oidc, warnings bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -110,6 +110,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.removed {
 			f.BoolVar(&o.OnlyRemoved, "only-removed", false, "only the objects whose API version is removed at the target version")
 		}
+		if v.warnings {
+			f.BoolVar(&o.OnlyWarnings, "only-warnings", false, "only the warnings: failures and what needs a look")
+		}
 		if v.oidc {
 			f.BoolVar(&o.OIDC, "oidc", false, "print a kubeconfig whose user signs in through the cluster's OIDC identity provider (spec.access.oidc), with kubectl oidc-login")
 			f.BoolVar(&o.Print, "print", false, "print the IAM kubeconfig instead of installing it with the AWS CLI")
@@ -145,6 +148,8 @@ func newNetworkCmd() *cobra.Command {
 			run: cli.NetworkTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
 		verb{use: "status <id>", short: "Show a network with its live status (get shows the status last recorded)",
 			run: cli.NetworkStatus, args: cobra.ExactArgs(1)},
+		verb{use: "events <id>", short: "List what the controller reported about the network, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
+			run: cli.NetworkEvents, args: cobra.ExactArgs(1), page: true, table: true, warnings: true},
 		watchVerb("network", cli.NetworkWatch))
 	return newResourceCmd("network", "Manage networks (NetworkService)", verbs)
 }
@@ -169,6 +174,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
 			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, table: true, removed: true},
+		verb{use: "events <id>", short: "List what the controller reported about the cluster, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
+			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, table: true, warnings: true},
 		verb{use: "components <id>", short: "List the components the platform installed with the cluster, and why one is not ready (chart, Helm state, last error); -o table, yaml or json",
 			run: cli.ClusterComponents, args: cobra.ExactArgs(1), table: true},
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",

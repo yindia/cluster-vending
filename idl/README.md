@@ -78,6 +78,7 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `ImportNetwork` | Stores the import of an existing VPC (`IMPORTED`, import phase `DISCOVERING`) without looking at the cloud. The controller looks the VPC up once, read-only, derives the spec, stores the plan (`status.import`) and creates Observe-only managed resources for it. |
 | `TakeOverNetwork` | Makes the platform the owner of an `IMPORTED` network. |
 | `GetNetwork`, `ListNetworks` | Return the stored network: its spec and the status last recorded. They do not read the management cluster. |
+| `ListNetworkEvents` | Returns what the controller reported about the network, newest first: the Kubernetes events of its object, kept for about an hour ([docs/events.md](../docs/events.md)). `status.recent_events` of `GetNetwork` keeps the last ten. |
 | `GetNetworkStatus` | Returns the network with its status read now from the management cluster. |
 | `WatchNetwork` | Streams the network and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateNetwork` | Changes the fields named in `update_mask`. |
@@ -92,6 +93,7 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `TakeOverCluster` | Makes the platform the owner of an `IMPORTED` cluster. |
 | `GetCluster`, `ListClusters` | Return the stored cluster: its spec and the status last recorded. |
 | `GetClusterStatus` | Returns the cluster with its status read now from the management cluster. |
+| `ListClusterEvents` | Returns what the controller reported about the cluster, newest first: the Kubernetes events of its object, kept for about an hour; `only_warnings` for the failures. `status.recent_events` of `GetCluster` keeps the last ten. |
 | `ListClusterDeprecations` | Returns the objects of the cluster written with API versions that are deprecated or removed at the Kubernetes version it moves to next: what the controller's last scan found, read from the store. `GetCluster` carries only the counts (`status.deprecations`). |
 | `WatchCluster` | Streams the cluster and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |

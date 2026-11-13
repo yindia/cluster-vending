@@ -1,6 +1,8 @@
 package convert
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -36,7 +38,9 @@ func recentEvents(in []*cloudv1.Event) []cloudv1alpha1.RecentEvent {
 		if len(reason) > maxEventReason {
 			reason = reason[:maxEventReason]
 		}
-		out = append(out, cloudv1alpha1.RecentEvent{Time: metav1.NewTime(e.GetTime().AsTime()), Type: kind,
+		// To the second, as the API server stores a metav1.Time: a time read
+		// back must equal the one written, or every pass writes the status.
+		out = append(out, cloudv1alpha1.RecentEvent{Time: metav1.NewTime(e.GetTime().AsTime().Truncate(time.Second)), Type: kind,
 			Reason: reason, Message: e.GetMessage(), Count: e.GetCount()})
 	}
 	return out

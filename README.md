@@ -145,6 +145,9 @@ cluster as objects of its kinds.
   upgrade, check, resume.
 - [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
   API versions in workload clusters are found and shown.
+- [docs/events.md](docs/events.md): the events the controller emits about
+  accounts, networks, clusters and releases, their reasons, and how to read
+  them (`cluster events`, `network events`, `status.recentEvents`).
 - [docs/controller.md](docs/controller.md): the kubebuilder project and
   its kinds.
 - [docs/design/upgrades.md](docs/design/upgrades.md): the plan for moving

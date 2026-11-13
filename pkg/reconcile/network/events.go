@@ -43,6 +43,7 @@ func storedStatus(row *model.Network) *cloudv1.NetworkStatus {
 // things as they were gives none.
 func statusEvents(before, after *cloudv1.NetworkStatus) []reconcile.Note {
 	out := reconcile.PassFailure(before.GetConditions(), after.GetConditions(), ConditionReconciled)
+	out = append(out, reconcile.PauseNotes(before.GetConditions(), after.GetConditions())...)
 	return append(out, stateEvents(before, after)...)
 }
 

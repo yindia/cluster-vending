@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 
+	"connectrpc.com/connect/v2"
+
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	recon "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -23,7 +25,8 @@ func (s *ClusterService) ListClusterEvents(ctx context.Context, req *cloudv1.Lis
 	}
 	events, err := s.deps.Store.Events().ListFor(ctx, row.TenantID, recon.KindCluster, row.Name)
 	if err != nil {
-		return nil, err
+		s.logger().ErrorContext(ctx, "list cluster events", "cluster_id", row.ID, "error", err)
+		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the cluster's events from the management cluster")
 	}
 	page, next, err := service.EventsPage(events, req.GetOnlyWarnings(), req.GetPageSize(), req.GetPageToken())
 	if err != nil {

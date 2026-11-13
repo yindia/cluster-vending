@@ -292,14 +292,14 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 		release = storedStatus(row).GetPlatformRelease()
 	}
 	if release != "" {
-		// A kept release that is not valid any more (the catalog changed
-		// under it) cannot be installed from: the cluster leaves it for
-		// what its channel offers.
+		// A kept release that is gone, or not valid any more (the catalog
+		// changed under it), cannot be installed from: the cluster leaves
+		// it for what its channel offers.
 		kept, err := s.deps.Platform.Release(ctx, release)
 		if err != nil {
 			return in, release, "", fmt.Errorf("read release %s: %w", release, err)
 		}
-		if kept != nil && meta.IsStatusConditionFalse(kept.Status.Conditions, cloudv1alpha1.ReleaseConditionValid) {
+		if kept == nil || meta.IsStatusConditionFalse(kept.Status.Conditions, cloudv1alpha1.ReleaseConditionValid) {
 			release = ""
 		}
 	}

@@ -307,6 +307,27 @@ func TestPlatformReleaseIsLeftWhenInvalid(t *testing.T) {
 	}
 }
 
+// A kept release that was deleted is left the same way.
+func TestPlatformReleaseIsLeftWhenGone(t *testing.T) {
+	w, src := platformWorld(t)
+	w.helmConfig(t)
+	row := w.cluster(t)
+	st := &cloudv1.ClusterStatus{}
+	withPlatform(st, w.install(t))
+	st.PlatformRelease = "2026-10-deleted"
+	raw, err := Encode(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Status = raw
+
+	p, err := w.svc.installPlatform(t.Context(), row)
+
+	if err != nil || p.release != src.offered {
+		t.Fatalf("release %q, %v; want the offered %q", p.release, err, src.offered)
+	}
+}
+
 // Until something is installed the cluster follows its channel: a release
 // recorded by a pass that installed nothing (it pinned no component) does
 // not hold the cluster back.

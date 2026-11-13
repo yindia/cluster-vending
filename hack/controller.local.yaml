@@ -24,3 +24,7 @@ aws-management-role-arn: arn:aws:iam::111122223333:role/crossplane-provider-aws
 # "credentials"), then assume each account's tenant role. Create it once
 # (docs/controller.md, "Local run"), then uncomment:
 # provider-credentials-secret: crossplane-system/aws-local-credentials
+# Local testing only: act with the Secret's keys directly, without assuming
+# the account's tenant role (for an account whose organization policy
+# forbids assuming roles). Needs provider-credentials-secret.
+# skip-tenant-role: true

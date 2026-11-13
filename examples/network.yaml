@@ -13,14 +13,14 @@ metadata:
   displayName: Prod network
   labels: {env: prod, team: platform}   # filtering, and AWS tags on every resource
 spec:
-  region: us-east-1
+  region: us-west-1
   bootstrapId: 00000000-0000-0000-0000-000000000001   # BOOTSTRAP_ID
   # layout is optional: default 10.0.0.0/16, 3 zones, one NAT gateway.
   layout:
     cidrBlock: 10.1.0.0/16
     natGatewayMode: NAT_GATEWAY_MODE_PER_ZONE
     subnets:
-      - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.1.0.0/24,  zoneId: use1-az1}
-      - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.1.1.0/24,  zoneId: use1-az2}
-      - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.1.16.0/20, zoneId: use1-az1}
-      - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.1.32.0/20, zoneId: use1-az2}
+      - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.1.0.0/24,  zoneId: usw1-az1}
+      - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.1.1.0/24,  zoneId: usw1-az3}
+      - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.1.16.0/20, zoneId: usw1-az1}
+      - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.1.32.0/20, zoneId: usw1-az3}

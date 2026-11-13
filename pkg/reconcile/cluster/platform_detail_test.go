@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -201,6 +202,9 @@ func TestStuck(t *testing.T) {
 		{"failed for another reason", &releaseDetail{HelmState: "failed", Since: old, LastError: "failed to pull chart"}, false},
 		{"deployed", &releaseDetail{HelmState: "deployed"}, false},
 		{"stuck state, since unknown", &releaseDetail{HelmState: "uninstalling"}, false},
+		// A paused Release (a provider upgrade in progress) is the operator's:
+		// nothing is removed in the workload cluster while it is paused.
+		{"uninstalling for long, but paused", &releaseDetail{HelmState: "uninstalling", Since: old, Paused: true}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -384,6 +388,20 @@ func TestPlatformStuck(t *testing.T) {
 				t.Fatalf("PlatformStuck = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetailOfReadsThePause(t *testing.T) {
+	w, _ := platformWorld(t)
+	w.helmConfig(t)
+	w.install(t)
+	u := w.release(t, "base")
+	u.SetAnnotations(map[string]string{managed.PausedAnnotation: "true"})
+
+	d := detailOf(u)
+
+	if d == nil || !d.Paused {
+		t.Fatalf("detail = %+v, want paused", d)
 	}
 }
 

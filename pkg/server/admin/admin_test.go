@@ -7,11 +7,13 @@ import (
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -69,5 +71,44 @@ func TestPauseAndResumeReconcile(t *testing.T) {
 	}
 	if _, err := s.PauseReconcile(ctx, &cloudv1.PauseReconcileRequest{TenantId: "Not_Valid"}); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("bad tenant: %v, want INVALID_ARGUMENT", err)
+	}
+}
+
+// A pause covers the cluster's Helm Releases too: provider-helm is a
+// Crossplane provider like the others, and during its upgrade it must not
+// install, upgrade or uninstall a chart either.
+func TestPauseCoversHelmReleases(t *testing.T) {
+	ctx := t.Context()
+	scheme, err := kube.Scheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := func(name, cluster string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
+		u.SetNamespace("tenant-acme")
+		u.SetName(name)
+		u.SetLabels(crossplane.ComponentLabels("acme", cluster, "kyverno"))
+		return u
+	}
+	k := fake.NewClientBuilder().WithScheme(scheme).WithObjects(release("a-kyverno", clusterA), release("b-kyverno", clusterB)).Build()
+	s := NewService(reconcile.Deps{Kube: k})
+	paused := func(name string) bool {
+		t.Helper()
+		u := release(name, "")
+		if err := k.Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+			t.Fatal(err)
+		}
+		return u.GetAnnotations()[PausedAnnotation] == "true"
+	}
+
+	res, err := s.PauseReconcile(ctx, &cloudv1.PauseReconcileRequest{TenantId: "acme", ClusterId: clusterA})
+
+	if err != nil || res.GetResources() != 1 || !paused("a-kyverno") || paused("b-kyverno") {
+		t.Fatalf("pause: %v, %d resources; a %v b %v", err, res.GetResources(), paused("a-kyverno"), paused("b-kyverno"))
+	}
+	resumed, err := s.ResumeReconcile(ctx, &cloudv1.ResumeReconcileRequest{TenantId: "acme"})
+	if err != nil || resumed.GetResources() != 2 || paused("a-kyverno") {
+		t.Fatalf("resume: %v, %d resources; a %v", err, resumed.GetResources(), paused("a-kyverno"))
 	}
 }

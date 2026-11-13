@@ -33,6 +33,23 @@ const ExternalNameAnnotation = "crossplane.io/external-name"
 // that is not ready yet: the resource waits, it did not fail.
 const waitingOnReference = "cannot resolve references"
 
+// PausedAnnotation makes a Crossplane provider stop reconciling a managed
+// resource: only the value "true" pauses, and removing it resumes
+// (docs.crossplane.io, managed resources, "Paused").
+const PausedAnnotation = "crossplane.io/paused"
+
+// ReasonPaused is the reason of a paused resource: what Crossplane puts on
+// its Synced condition.
+const ReasonPaused = "ReconcilePaused"
+
+// pausedMessage says why a paused resource makes no progress.
+const pausedMessage = "reconciliation is paused (crossplane.io/paused): its provider does not act until it is resumed"
+
+// IsPaused reports whether obj carries the paused annotation.
+func IsPaused(obj interface{ GetAnnotations() map[string]string }) bool {
+	return obj.GetAnnotations()[PausedAnnotation] == "true"
+}
+
 // failureGrace is how long after its creation a resource may report
 // Synced=False before it counts as FAILED: providers often hit transient
 // errors on the first reconciles (e.g. a ProviderConfigUsage race) that
@@ -146,7 +163,9 @@ type condition struct {
 //	DELETING  deletion requested
 //	READY     Ready=True; or, for objects that are not managed resources
 //	          (namespaces, ProviderConfigs: no spec.forProvider), existing
-//	WAITING   Synced=False because a referenced resource is not ready yet
+//	WAITING   Synced=False because a referenced resource is not ready yet;
+//	          or paused (PausedAnnotation) and not ready: an operator's
+//	          choice, never a failure, however long it lasts
 //	FAILED    Synced=False for any other reason, for longer than failureGrace
 //	          (before that: CREATING, "retrying: <error>")
 //	CREATING  otherwise
@@ -164,11 +183,17 @@ func View(r Ref, u *unstructured.Unstructured) *cloudv1.ManagedResource {
 	synced, hasSynced := conds["Synced"]
 	v.Ready, v.Synced = conditionStatus(ready.status), conditionStatus(synced.status)
 	v.ObservedGeneration = synced.observedGeneration
+	v.Paused = IsPaused(u)
 	switch {
 	case u.GetDeletionTimestamp() != nil:
 		v.State = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING
+		if v.Paused {
+			v.Reason, v.Message = ReasonPaused, pausedMessage
+		}
 	case ready.status == "True" || (!isManaged(u) && !hasReady && !hasSynced):
 		v.State = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY
+	case v.Paused:
+		v.State, v.Reason, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, ReasonPaused, pausedMessage
 	case synced.status == "False" && strings.Contains(synced.message, waitingOnReference):
 		v.State, v.Reason, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, synced.reason, synced.message
 	case synced.status == "False" && inGrace(u):

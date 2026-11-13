@@ -10,11 +10,13 @@ import (
 	"connectrpc.com/connect/v2"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -23,7 +25,7 @@ import (
 )
 
 // PausedAnnotation makes Crossplane providers skip a managed resource.
-const PausedAnnotation = "crossplane.io/paused"
+const PausedAnnotation = managed.PausedAnnotation
 
 // Service implements cloud.v1.AdminService.
 type Service struct{ deps reconcile.Deps }
@@ -55,7 +57,7 @@ func (s *Service) ResumeReconcile(ctx context.Context, req *cloudv1.ResumeReconc
 // setPaused sets or removes the paused annotation on every managed
 // resource of the tenant (of the cluster, when given) and returns how
 // many are in that state now. Objects are read from the API server and
-// patched one by one; Usages are not managed resources and are skipped.
+// patched one by one (pausedKinds).
 // The annotation is the admin's: the platform's applies do not own it,
 // so they neither set nor remove it.
 func (s *Service) setPaused(ctx context.Context, tenantID, clusterID string, paused bool) (int32, error) {
@@ -63,15 +65,12 @@ func (s *Service) setPaused(ctx context.Context, tenantID, clusterID string, pau
 	if clusterID != "" {
 		selector[crossplane.LabelCluster] = clusterID
 	}
+	kinds, err := s.pausedKinds()
+	if err != nil {
+		return 0, connect.NewError(connect.CodeInternal, err.Error())
+	}
 	var count int32
-	for _, obj := range crossplaneaws.ManagedObjects() {
-		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
-		if err != nil {
-			return count, connect.NewError(connect.CodeInternal, err.Error())
-		}
-		if gvk.Kind == "Usage" {
-			continue
-		}
+	for _, gvk := range kinds {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
 		err = s.deps.Reader().List(ctx, list, client.InNamespace(kube.TenantNamespace(tenantID)), selector)
@@ -92,6 +91,25 @@ func (s *Service) setPaused(ctx context.Context, tenantID, clusterID string, pau
 	s.logger().InfoContext(ctx, "reconciliation paused state set", "tenant_id", tenantID, "cluster_id", clusterID,
 		"paused", paused, "resources", count)
 	return count, nil
+}
+
+// pausedKinds are the kinds a pause covers: every managed resource kind of
+// the AWS providers the platform renders, and provider-helm's Release (a
+// platform component's chart). Usages are not managed resources; nor are
+// ProviderConfigs.
+func (s *Service) pausedKinds() ([]schema.GroupVersionKind, error) {
+	objects := crossplaneaws.ManagedObjects()
+	out := make([]schema.GroupVersionKind, 0, len(objects)+1)
+	for _, obj := range objects {
+		gvk, err := apiutil.GVKForObject(obj, s.deps.Kube.Scheme())
+		if err != nil {
+			return nil, err
+		}
+		if gvk.Kind != "Usage" {
+			out = append(out, gvk)
+		}
+	}
+	return append(out, crossplaneaws.HelmReleaseGVK), nil
 }
 
 func (s *Service) patch(ctx context.Context, u *unstructured.Unstructured, paused bool) error {

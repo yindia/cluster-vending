@@ -54,9 +54,14 @@ type AdminServiceClient interface {
 	// Pauses Crossplane's reconciliation of a tenant's managed resources, or
 	// of one cluster's: every one of them gets the crossplane.io/paused
 	// annotation, so the providers neither change nor delete its cloud
-	// resource until resumed. Used to upgrade providers one tenant or
+	// resource until resumed. The Helm Releases of a cluster's platform
+	// components are paused with it. Used to upgrade providers one tenant or
 	// cluster at a time: pause everything else, upgrade, check, resume step
-	// by step. Idempotent.
+	// by step (docs/runbooks/provider-upgrade.md). Idempotent.
+	//
+	// It pauses the providers, not the platform's controller: objects the
+	// controller creates afterwards are not paused. While resources are
+	// paused their network or cluster has the condition Paused.
 	PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error)
 	// Removes the pause (PauseReconcile). Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
@@ -73,9 +78,14 @@ type AdminServiceHandler interface {
 	// Pauses Crossplane's reconciliation of a tenant's managed resources, or
 	// of one cluster's: every one of them gets the crossplane.io/paused
 	// annotation, so the providers neither change nor delete its cloud
-	// resource until resumed. Used to upgrade providers one tenant or
+	// resource until resumed. The Helm Releases of a cluster's platform
+	// components are paused with it. Used to upgrade providers one tenant or
 	// cluster at a time: pause everything else, upgrade, check, resume step
-	// by step. Idempotent.
+	// by step (docs/runbooks/provider-upgrade.md). Idempotent.
+	//
+	// It pauses the providers, not the platform's controller: objects the
+	// controller creates afterwards are not paused. While resources are
+	// paused their network or cluster has the condition Paused.
 	PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error)
 	// Removes the pause (PauseReconcile). Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)

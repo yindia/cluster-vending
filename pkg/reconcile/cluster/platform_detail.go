@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -33,6 +34,9 @@ type releaseDetail struct {
 	// transition time of its Synced condition while that is False, else of
 	// its Ready condition while that is not True. Zero when it is fine.
 	Since time.Time
+	// Paused: the Release carries crossplane.io/paused (an operator paused
+	// the cluster, e.g. for a provider upgrade).
+	Paused bool
 }
 
 // releaseDetail reads the Release object name in namespace; nil when it
@@ -49,7 +53,7 @@ func (s *Reconciler) releaseDetail(ctx context.Context, namespace, name string) 
 // detailOf reads a Release object as provider-helm v1.5.0 writes it
 // (status.atProvider.state, status.failed, status.conditions).
 func detailOf(u *unstructured.Unstructured) *releaseDetail {
-	d := &releaseDetail{Chart: u.GetAnnotations()[crossplaneaws.ExternalNameAnnotation]}
+	d := &releaseDetail{Chart: u.GetAnnotations()[crossplaneaws.ExternalNameAnnotation], Paused: managed.IsPaused(u)}
 	d.TargetNamespace, _, _ = unstructured.NestedString(u.Object, "spec", "forProvider", "namespace")
 	d.HelmState, _, _ = unstructured.NestedString(u.Object, "status", "atProvider", "state")
 	if failed, ok, _ := unstructured.NestedFieldNoCopy(u.Object, "status", "failed"); ok {

@@ -75,3 +75,49 @@ func TestFreshErrorsAreRetried(t *testing.T) {
 		t.Errorf("6h old object failing with a fresh condition = %s, want FAILED", old.GetState())
 	}
 }
+
+// A paused resource (crossplane.io/paused) reports Synced=False with the
+// reason ReconcilePaused. That is an operator's choice, not a failure: it
+// must never turn its network or cluster FAILED, however long it lasts.
+func TestViewOfPausedResources(t *testing.T) {
+	paused := func(u *unstructured.Unstructured) *unstructured.Unstructured {
+		a := u.GetAnnotations()
+		a[PausedAnnotation] = "true"
+		u.SetAnnotations(a)
+		// Long past the grace a fresh error gets.
+		u.SetCreationTimestamp(metav1.Time{Time: time.Now().Add(-24 * time.Hour)})
+		return u
+	}
+	deleting := paused(managed([3]string{"Ready", "True", ""}, [3]string{"Synced", "False", ""}))
+	deleting.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
+	tests := []struct {
+		name   string
+		obj    *unstructured.Unstructured
+		want   cloudv1.ManagedResourceState
+		paused bool
+	}{
+		{"ready and paused stays ready", paused(managed([3]string{"Ready", "True", ""}, [3]string{"Synced", "False", ""})),
+			cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY, true},
+		{"not ready and paused waits", paused(managed([3]string{"Ready", "False", ""}, [3]string{"Synced", "False", ""})),
+			cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, true},
+		{"paused before the provider saw it", paused(managed()), cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, true},
+		{"deleting and paused is still deleting", deleting, cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING, true},
+		{"not paused fails as before", func() *unstructured.Unstructured {
+			u := managed([3]string{"Ready", "False", ""}, [3]string{"Synced", "False", "UnauthorizedOperation"})
+			u.SetCreationTimestamp(metav1.Time{Time: time.Now().Add(-24 * time.Hour)})
+			return u
+		}(), cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := View(Ref{Kind: "NodeGroup", Name: "ng"}, tt.obj)
+
+			if v.GetState() != tt.want || v.GetPaused() != tt.paused {
+				t.Fatalf("state %s paused %v (%s), want %s paused %v", v.GetState(), v.GetPaused(), v.GetMessage(), tt.want, tt.paused)
+			}
+			if tt.paused && v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY && v.GetReason() != ReasonPaused {
+				t.Errorf("reason %q, want %s", v.GetReason(), ReasonPaused)
+			}
+		})
+	}
+}

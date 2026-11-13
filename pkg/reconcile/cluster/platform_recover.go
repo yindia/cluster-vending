@@ -67,9 +67,11 @@ func PlatformStuck(row *model.Cluster) bool {
 
 // stuck reports whether a Release is stuck: Helm's state is one an
 // interrupted operation leaves, or Helm refuses the release with the
-// error of such a state, and it has been like that for stuckAfter.
+// error of such a state, and it has been like that for stuckAfter. A
+// paused Release is never stuck: while an operator paused the cluster
+// (a provider upgrade), nothing is removed in the workload cluster.
 func stuck(d *releaseDetail, at time.Time) bool {
-	if d == nil || d.Since.IsZero() || at.Sub(d.Since) < stuckAfter {
+	if d == nil || d.Paused || d.Since.IsZero() || at.Sub(d.Since) < stuckAfter {
 		return false
 	}
 	return stuckBy(d.HelmState, d.LastError)

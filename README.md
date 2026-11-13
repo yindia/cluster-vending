@@ -137,6 +137,9 @@ cluster as objects of its kinds.
 - [docs/authentication.md](docs/authentication.md): OIDC authentication of
   the API (off by default), roles per tenant, Microsoft Entra ID setup and
   the CLI's `login`.
+- [docs/runbooks/provider-upgrade.md](docs/runbooks/provider-upgrade.md):
+  upgrading the Crossplane providers under a running platform: pause,
+  upgrade, check, resume.
 - [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
   API versions in workload clusters are found and shown.
 - [docs/controller.md](docs/controller.md): the kubebuilder project and

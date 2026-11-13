@@ -186,8 +186,13 @@ type ManagedResource struct {
 	// observedGeneration). Lower than generation: the latest change is not
 	// applied to the cloud yet.
 	ObservedGeneration int64 `protobuf:"varint,14,opt,name=observed_generation,json=observedGeneration,proto3" json:"observed_generation,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Paused: the object carries crossplane.io/paused, so its provider does
+	// not act on it (AdminService.PauseReconcile) until it is resumed. Its
+	// state stays what it was: READY when it was ready, WAITING otherwise;
+	// a deletion waits too.
+	Paused        bool `protobuf:"varint,15,opt,name=paused,proto3" json:"paused,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ManagedResource) Reset() {
@@ -311,6 +316,13 @@ func (x *ManagedResource) GetObservedGeneration() int64 {
 	return 0
 }
 
+func (x *ManagedResource) GetPaused() bool {
+	if x != nil {
+		return x.Paused
+	}
+	return false
+}
+
 // ManagedResourceEvent is a change of one managed resource, as streamed by
 // WatchNetwork and WatchCluster.
 type ManagedResourceEvent struct {
@@ -370,7 +382,7 @@ var File_cloud_v1_managed_resource_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\n" +
-	"\x1fcloud/v1/managed_resource.proto\x12\bcloud.v1\x1a\x19cloud/v1/conditions.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x03\n" +
+	"\x1fcloud/v1/managed_resource.proto\x12\bcloud.v1\x1a\x19cloud/v1/conditions.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x81\x04\n" +
 	"\x0fManagedResource\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12#\n" +
@@ -387,7 +399,8 @@ const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\n" +
 	"generation\x18\r \x01(\x03R\n" +
 	"generation\x12/\n" +
-	"\x13observed_generation\x18\x0e \x01(\x03R\x12observedGeneration\"\xd9\x01\n" +
+	"\x13observed_generation\x18\x0e \x01(\x03R\x12observedGeneration\x12\x16\n" +
+	"\x06paused\x18\x0f \x01(\bR\x06paused\"\xd9\x01\n" +
 	"\x14ManagedResourceEvent\x127\n" +
 	"\x04type\x18\x01 \x01(\x0e2#.cloud.v1.ManagedResourceEvent.TypeR\x04type\x125\n" +
 	"\bresource\x18\x02 \x01(\v2\x19.cloud.v1.ManagedResourceR\bresource\"Q\n" +

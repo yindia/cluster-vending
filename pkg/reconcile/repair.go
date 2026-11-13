@@ -25,10 +25,23 @@ func isMissing(v *cloudv1.ManagedResource) bool {
 // is returned and the owner stays as it is, reporting what is missing. An
 // apply creates everything of the render that is not there, and must not
 // create that one.
+//
+// Nothing is repaired while any object of the owner is paused
+// (crossplane.io/paused, AdminService.PauseReconcile): an object created
+// now would not carry the pause, and its provider would act on it in the
+// middle of what the operator paused for (a provider upgrade).
 func (d Deps) Repairable(ctx context.Context, records []model.ManagedResource) ([]model.ManagedResource, error) {
 	views, err := d.Observe(ctx, records)
 	if err != nil {
 		return nil, err
+	}
+	return repairable(records, views), nil
+}
+
+// repairable is Repairable on the views of records (same order).
+func repairable(records []model.ManagedResource, views []*cloudv1.ManagedResource) []model.ManagedResource {
+	if PausedCount(views) > 0 {
+		return nil
 	}
 	var missing []model.ManagedResource
 	for i, v := range views {
@@ -36,11 +49,11 @@ func (d Deps) Repairable(ctx context.Context, records []model.ManagedResource) (
 			continue
 		}
 		if !crossplaneaws.Recreatable(records[i].APIVersion, records[i].Kind) {
-			return nil, nil
+			return nil
 		}
 		missing = append(missing, records[i])
 	}
-	return missing, nil
+	return missing
 }
 
 // LogRepaired logs which of the objects that were missing exist again

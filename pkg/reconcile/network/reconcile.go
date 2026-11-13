@@ -123,6 +123,11 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		// The import was stored without looking at the cloud: the VPC is
 		// looked up here, once, and the plan stored with the row.
 		stored, err := s.discoverImport(ctx, row)
+		if reconcile.ImportCannotSucceed(err) {
+			// No such VPC, or an ID AWS refuses: asking again changes
+			// nothing. The import stops, with the reason as its plan.
+			return s.stopImport(ctx, row, err)
+		}
 		if err != nil {
 			return fmt.Errorf("discover: %w", err)
 		}

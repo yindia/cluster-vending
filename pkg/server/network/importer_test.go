@@ -247,8 +247,6 @@ func TestImportNetworkErrorsAreStatus(t *testing.T) {
 			"retrying: the AWS lookup failed: timeout"},
 		"access denied": {fakeDiscoverer{err: awscloud.ErrAccessDenied}, cloudv1.NetworkState_NETWORK_STATE_FAILED,
 			"cannot read the VPC with the account's credentials"},
-		"vpc not found": {fakeDiscoverer{err: awscloud.ErrNotFound}, cloudv1.NetworkState_NETWORK_STATE_FAILED, "not found"},
-		"bad vpc id":    {fakeDiscoverer{err: awscloud.ErrInvalid}, cloudv1.NetworkState_NETWORK_STATE_FAILED, "invalid"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
@@ -279,6 +277,60 @@ func TestImportNetworkErrorsAreStatus(t *testing.T) {
 			if st := f.status(t, id).GetStatus(); st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED ||
 				st.GetState() != cloudv1.NetworkState_NETWORK_STATE_IMPORTED {
 				t.Errorf("after the lookup succeeded = %s / %s (%s)", st.GetState(), st.GetImport().GetPhase(), st.GetMessage())
+			}
+		})
+	}
+}
+
+// A lookup that says the import cannot succeed (no such VPC, an ID AWS
+// refuses) is the end of it: the network is FAILED with the reason, its
+// import BLOCKED, and the cloud is not asked again. The way on is to
+// delete the import and import again.
+func TestImportNetworkThatCannotSucceedStops(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err     error
+		message string
+	}{
+		"vpc not found": {awscloud.ErrNotFound, "not found"},
+		"bad vpc id":    {awscloud.ErrInvalid, "invalid"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.svc.deps.AWSDiscovery = noAWS{t}
+			res, err := f.svc.ImportNetwork(t.Context(), importRequest(f.accountID))
+			if err != nil {
+				t.Fatalf("ImportNetwork: %v", err)
+			}
+			id := res.GetNetwork().GetId()
+			f.svc.deps.AWSDiscovery = fakeDiscoverer{err: tc.err}
+
+			if err := f.svc.Reconcile(t.Context(), tenant, id); err != nil {
+				t.Fatalf("the pass failed: %v; what the lookup said is the network's status", err)
+			}
+
+			check := func(when string) {
+				t.Helper()
+				for view, n := range map[string]*cloudv1.Network{"stored": f.get(t, id), "live": f.status(t, id)} {
+					st := n.GetStatus()
+					if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_FAILED || !strings.Contains(st.GetMessage(), tc.message) ||
+						st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED {
+						t.Errorf("%s, %s status = %s %q (%s), want FAILED with %q, BLOCKED", when, view, st.GetState(), st.GetMessage(),
+							st.GetImport().GetPhase(), tc.message)
+					}
+				}
+			}
+			check("after the lookup")
+			// The cloud would answer now: it is not asked.
+			lookups := 0
+			f.svc.deps.AWSDiscovery = fakeDiscoverer{network: existingVPC(), lookups: &lookups}
+			f.reconcile(t, id)
+			f.reconcile(t, id)
+			if lookups != 0 {
+				t.Errorf("%d lookups of a VPC whose import cannot succeed, want none", lookups)
+			}
+			check("two passes later")
+			if got := f.count(t, &awsec2.VPCList{}, id); got != 0 {
+				t.Errorf("an import that cannot succeed created %d VPCs", got)
 			}
 		})
 	}

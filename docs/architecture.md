@@ -49,7 +49,7 @@ setting, no AWS credentials and no IAM role.
 
 | What needs the cloud | Where it runs | What the client sees when it fails |
 |---|---|---|
-| Looking up the VPC of an imported network | `pkg/reconcile/network` (`discoverImport`), once | The network is `FAILED` with the reason, its import still `DISCOVERING`; a lookup that did not answer is retried. |
+| Looking up the VPC of an imported network | `pkg/reconcile/network` (`discoverImport`), once | The network is `FAILED` with the reason. A VPC that does not exist, or an ID AWS refuses, ends the import (`BLOCKED`): it is not looked up again, delete it and import again. Credentials that cannot read it, and a lookup that did not answer, keep it `DISCOVERING` and are retried. |
 | Looking up the EKS cluster of an imported cluster | `pkg/reconcile/cluster` (`discoverImport`), once | The same, on the cluster. |
 | Is the EKS name of a new cluster taken by a cluster made elsewhere | `pkg/reconcile/cluster` (`resolve`), before anything is created | The cluster is `FAILED`: "account ... already has an EKS cluster named ...". |
 | Which Kubernetes and add-on versions EKS offers | `pkg/reconcile/cluster` (`resolve`), for a new cluster and after an update of the version or the add-ons, before anything is rendered | The cluster is `FAILED` with what EKS refused; nothing is applied. |
@@ -144,6 +144,13 @@ cloud up again:
 
 A plan with a `BLOCKING` line imports nothing. Otherwise the network or
 cluster is `IMPORTED`: Crossplane reads the resources and changes nothing.
+
+An import whose lookup says it cannot succeed stops the same way: when the
+VPC or EKS cluster does not exist where the import says it is (a typo,
+another region or account), or AWS refuses what was asked for, the import is
+stored as `BLOCKED` with that reason as its one plan line, and the cloud is
+not asked again. Delete it and import again. A lookup that did not answer,
+or credentials that cannot read the resource, are retried: neither is final.
 
 A **carried-over** object is one that came with the import and that no spec
 field describes (for example a VPC's existing flow log). It is marked, never

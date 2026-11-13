@@ -208,7 +208,6 @@ func TestImportClusterErrorsAreStatus(t *testing.T) {
 	}{
 		"lookup failed": {errors.New("timeout"), cloudv1.ClusterState_CLUSTER_STATE_IMPORTED, "retrying: the AWS lookup failed: timeout"},
 		"access denied": {awscloud.ErrAccessDenied, cloudv1.ClusterState_CLUSTER_STATE_FAILED, "cannot read the cluster with the account's credentials"},
-		"not found":     {awscloud.ErrNotFound, cloudv1.ClusterState_CLUSTER_STATE_FAILED, "not found"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gate := newGate(t)
@@ -255,6 +254,63 @@ func TestImportClusterErrorsAreStatus(t *testing.T) {
 			}
 			if len(objectsOf(t, w, id)) == 0 {
 				t.Error("the reconciler did not create the import's objects")
+			}
+		})
+	}
+}
+
+// A lookup that says the import cannot succeed (no such cluster, a name
+// EKS refuses) is the end of it: the cluster is FAILED with the reason,
+// its import BLOCKED, and the cloud is not asked again, whatever it would
+// say now. The way on is to delete the import and import again.
+func TestImportClusterThatCannotSucceedStops(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err     error
+		message string
+	}{
+		"not found": {awscloud.ErrNotFound, "not found"},
+		"invalid":   {awscloud.ErrInvalid, "invalid"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gate := newGate(t)
+			w := newWorld(t, interceptor.Funcs{}, nil, gate.use)
+			ctx := t.Context()
+			gate.closed = true
+			res, err := w.svc.ImportCluster(ctx, &cloudv1.ImportClusterRequest{TenantId: worldTenant, Name: "tf", NetworkId: w.row.NetworkID,
+				Provider: &cloudv1.ImportClusterRequest_Aws{Aws: &cloudv1.AwsImportCluster{DefaultNodeGroupName: "default-ng"}}})
+			gate.closed = false
+			if err != nil {
+				t.Fatalf("ImportCluster: %v", err)
+			}
+			id := res.GetCluster().GetId()
+			gate.discovery = failingDiscoverer{tc.err}
+
+			if err := w.svc.Reconcile(ctx, worldTenant, id); err != nil {
+				t.Fatalf("the pass failed: %v; what the lookup said is the cluster's status", err)
+			}
+
+			check := func(when string) {
+				t.Helper()
+				for view, st := range map[string]*cloudv1.ClusterStatus{"stored": storedCluster(t, w, id).GetStatus(), "live": live(t, w, id).GetStatus()} {
+					if st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_FAILED || !strings.Contains(st.GetMessage(), tc.message) ||
+						st.GetImport().GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_BLOCKED {
+						t.Errorf("%s, %s status = %s %q (%s), want FAILED with %q, BLOCKED", when, view, st.GetState(), st.GetMessage(),
+							st.GetImport().GetPhase(), tc.message)
+					}
+				}
+			}
+			check("after the lookup")
+			// The cloud would answer now: it is not asked.
+			gate.discovery = fakeClusterDiscoverer{cluster: terraformCluster()}
+			before := gate.discovers
+			reconcile(t, w, id)
+			reconcile(t, w, id)
+			if got := gate.discovers - before; got != 0 {
+				t.Errorf("%d lookups of a cluster whose import cannot succeed, want none", got)
+			}
+			check("two passes later")
+			if objects := objectsOf(t, w, id); len(objects) != 0 {
+				t.Errorf("an import that cannot succeed created %d objects", len(objects))
 			}
 		})
 	}

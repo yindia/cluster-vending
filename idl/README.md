@@ -528,7 +528,7 @@ codes above:
 
 | Was | Now the status of |
 |---|---|
-| `NOT_FOUND`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION` of `ImportNetwork` and `ImportCluster` (the VPC or cluster does not exist, its ID is malformed, the account's credentials cannot read it) | the imported network or cluster, its import still `DISCOVERING` |
+| `NOT_FOUND`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION` of `ImportNetwork` and `ImportCluster` (the VPC or cluster does not exist, its ID is malformed, the account's credentials cannot read it) | the imported network or cluster: `FAILED` with the reason. Not found and malformed end the import (`BLOCKED`, not looked up again: delete and import again); unreadable keeps it `DISCOVERING` and is retried |
 | `ALREADY_EXISTS` of `CreateCluster` for an EKS cluster made outside the platform | the cluster: "account ... already has an EKS cluster named ..." |
 | `INVALID_ARGUMENT` of `CreateCluster` and `UpdateCluster` for a Kubernetes or add-on version EKS does not offer | the cluster; nothing of it is created or changed |
 | `FAILED_PRECONDITION` for a provider package that is not installed | the network or cluster |

@@ -91,12 +91,17 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 // scannable: the cluster runs (created by the platform, or imported) and
-// is not being deleted.
+// is not being deleted. An imported cluster that is only observed has no
+// ClusterAuth, and so no kubeconfig Secret, until its takeover: there is
+// nothing to scan it with, which is not a failed scan.
 func scannable(obj *cloudv1alpha1.Cluster) bool {
 	if !obj.DeletionTimestamp.IsZero() {
 		return false
 	}
-	return obj.Status.Phase == cloudv1alpha1.ClusterPhaseRunning || obj.Status.Phase == cloudv1alpha1.ClusterPhaseImported
+	if obj.Status.Phase == cloudv1alpha1.ClusterPhaseImported {
+		return obj.Status.KubeconfigSecret != ""
+	}
+	return obj.Status.Phase == cloudv1alpha1.ClusterPhaseRunning
 }
 
 // kubeconfig reads the cluster's kubeconfig Secret at the API server.

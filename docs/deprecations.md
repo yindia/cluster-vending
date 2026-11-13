@@ -67,8 +67,10 @@ go test ./pkg/deprecation/ ./pkg/controller/
 
 The controller scans. The API server never reads a workload cluster.
 
-- **Which clusters:** every cluster that is `Running` or `Imported` and
-  not being deleted, one at a time.
+- **Which clusters:** every cluster that is `Running` and not being
+  deleted, one at a time. An imported cluster is scanned once it is taken
+  over: while it is only observed it has no ClusterAuth, so no kubeconfig
+  to scan it with.
 - **When:** every six hours, and at once when the target version changes.
   A scan that failed is tried again after 15 minutes.
 - **How it reaches the cluster:** with the kubeconfig Secret the cluster's

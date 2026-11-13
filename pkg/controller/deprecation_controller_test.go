@@ -123,6 +123,13 @@ func TestClusterThatCannotBeScanned(t *testing.T) {
 			obj.Status.Phase = cloudv1alpha1.ClusterPhaseProvisioning
 			w.must(t, w.k.Status().Update(t.Context(), obj))
 		}, true, ""},
+		// An imported cluster is only observed until its takeover: it has
+		// no ClusterAuth, so no kubeconfig to scan with. That is not a
+		// failed scan to record every quarter of an hour.
+		{"imported, read-only: no kubeconfig yet", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {
+			obj.Status.Phase, obj.Status.KubeconfigSecret = cloudv1alpha1.ClusterPhaseImported, ""
+			w.must(t, w.k.Status().Update(t.Context(), obj))
+		}, true, ""},
 		{"no kubeconfig Secret named", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {
 			obj.Status.KubeconfigSecret = ""
 			w.must(t, w.k.Status().Update(t.Context(), obj))

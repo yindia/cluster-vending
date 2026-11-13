@@ -35,8 +35,6 @@ func kubeconfigReaderBinding(a *model.CloudAccount, sa reconcile.ServiceAccount)
 func (r *Reconciler) bindKubeconfigReader(ctx context.Context, a *model.CloudAccount) error {
 	sa := r.deps.ControllerServiceAccount
 	if sa == nil {
-		r.logger().DebugContext(ctx, "no kubeconfig reader binding: --service-account is not set (the controller runs outside the cluster)",
-			"tenant_id", a.TenantID, "namespace", a.Namespace)
 		return nil
 	}
 	if err := kube.Apply(ctx, r.deps.Kube, kubeconfigReaderBinding(a, *sa)); err != nil {

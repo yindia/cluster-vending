@@ -15,6 +15,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // Lifecycle states stored on the network row. FAILED is observed from the
@@ -197,7 +198,7 @@ func caughtUp(row *model.Network, views []*cloudv1.ManagedResource) bool {
 		if v.GetSynced() == cloudv1.ConditionStatus_CONDITION_STATUS_UNSPECIFIED { // no provider status: not a managed resource
 			continue
 		}
-		if v.GetGeneration() != 0 && v.GetObservedGeneration() != v.GetGeneration() {
+		if reconcile.Behind(v) {
 			return false
 		}
 	}

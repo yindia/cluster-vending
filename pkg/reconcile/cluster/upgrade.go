@@ -13,6 +13,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // upgrade is what the management cluster shows of a Kubernetes upgrade.
@@ -176,7 +177,7 @@ func followersSettled(row *model.Cluster, views []*cloudv1.ManagedResource) bool
 			continue
 		}
 		if v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
-			(v.GetGeneration() != 0 && v.GetObservedGeneration() != v.GetGeneration()) {
+			reconcile.Behind(v) {
 			return false
 		}
 	}

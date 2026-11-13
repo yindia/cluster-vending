@@ -349,7 +349,7 @@ func convergedOn(row *model.Cluster, views []*cloudv1.ManagedResource) bool {
 			v.GetSynced() == cloudv1.ConditionStatus_CONDITION_STATUS_UNSPECIFIED { // no provider status (yet)
 			continue
 		}
-		if v.GetGeneration() != 0 && v.GetObservedGeneration() != v.GetGeneration() {
+		if reconcile.Behind(v) {
 			return false
 		}
 	}

@@ -34,6 +34,10 @@ func TestStatusConvergence(t *testing.T) {
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 3), mr("NodeGroup", 2, 2)}, cloudv1.ClusterState_CLUSTER_STATE_RUNNING, 2},
 		{"provider behind the spec", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 2, ObservedGeneration: 1}},
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 2), mr("NodeGroup", 2, 2)}, cloudv1.ClusterState_CLUSTER_STATE_UPDATING, 1},
+		// Some kinds (RolePolicyAttachment) carry no observedGeneration on
+		// Synced at all: that is not a provider behind its spec.
+		{"provider reports no observed generation", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 2, ObservedGeneration: 1}},
+			[]*cloudv1.ManagedResource{mr("Cluster", 3, 3), mr("RolePolicyAttachment", 2, 0)}, cloudv1.ClusterState_CLUSTER_STATE_RUNNING, 2},
 		{"generation not fully applied", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 1, ObservedGeneration: 1}},
 			[]*cloudv1.ManagedResource{mr("Cluster", 3, 3)}, cloudv1.ClusterState_CLUSTER_STATE_UPDATING, 1},
 		{"version skew during an upgrade", model.Cluster{Resource: model.Resource{State: StateUpdating, Generation: 2, AppliedGeneration: 1}},

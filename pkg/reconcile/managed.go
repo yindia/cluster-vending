@@ -165,6 +165,14 @@ func (d Deps) Prune(ctx context.Context, owner Owner, keep []client.Object) erro
 	return nil
 }
 
+// Behind reports whether v's provider has not reconciled the object's
+// latest spec yet: its Synced condition names an older generation. A kind
+// whose provider puts no observedGeneration on Synced (0: the IAM
+// RolePolicyAttachment) is never behind by this measure.
+func Behind(v *cloudv1.ManagedResource) bool {
+	return v.GetGeneration() != 0 && v.GetObservedGeneration() != 0 && v.GetObservedGeneration() != v.GetGeneration()
+}
+
 // AllGone reports whether every recorded object is gone from the cluster
 // (MISSING), i.e. a delete finished.
 func AllGone(views []*cloudv1.ManagedResource) bool { return managed.AllGone(views) }

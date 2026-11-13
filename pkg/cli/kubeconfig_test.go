@@ -120,7 +120,6 @@ func TestClusterKubeconfigFailures(t *testing.T) {
 		want string
 	}{
 		{"no tenant", &oneCluster{cluster: runningCluster(entra)}, Options{ID: kubeconfigCluster, OIDC: true}, "--tenant"},
-		{"without --oidc", &oneCluster{cluster: runningCluster(entra)}, Options{Tenant: "acme", ID: kubeconfigCluster}, "aws eks update-kubeconfig"},
 		{"no provider", &oneCluster{cluster: runningCluster(nil)}, Options{Tenant: "acme", ID: kubeconfigCluster, OIDC: true}, "spec.access.oidc"},
 		{"no endpoint yet", &oneCluster{cluster: noEndpoint}, Options{Tenant: "acme", ID: kubeconfigCluster, OIDC: true}, "endpoint"},
 		{"no CA yet", &oneCluster{cluster: noCA}, Options{Tenant: "acme", ID: kubeconfigCluster, OIDC: true}, "certificate authority"},
@@ -139,5 +138,46 @@ func TestClusterKubeconfigFailures(t *testing.T) {
 				t.Errorf("printed %q with the error", out.String())
 			}
 		})
+	}
+}
+
+// Without --oidc the kubeconfig signs in with IAM: the EKS name and the
+// region come from the cluster, so its ID is all the caller gives.
+func TestClusterKubeconfigIAM(t *testing.T) {
+	cluster := runningCluster(nil)
+	cluster.Spec.Region = "us-west-1"
+	cluster.Status.Provider = &cloudv1.ClusterStatus_Aws{Aws: &cloudv1.AwsClusterStatus{ClusterArn: "arn:aws:eks:us-west-1:111122223333:cluster/prod-eks-live"}}
+	var out bytes.Buffer
+
+	err := Run(t.Context(), ClusterKubeconfig, Clients{Cluster: &oneCluster{cluster: cluster}},
+		Options{Tenant: "acme", ID: kubeconfigCluster}, &out, OutputYAML)
+
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	cfg, err := clientcmd.Load(out.Bytes())
+	if err != nil {
+		t.Fatalf("not a kubeconfig: %v\n%s", err, out.String())
+	}
+	exec := cfg.AuthInfos[cfg.Contexts[cfg.CurrentContext].AuthInfo].Exec
+	want := []string{"eks", "get-token", "--cluster-name", "prod-eks-live", "--region", "us-west-1", "--output", "json"}
+	if exec == nil || exec.Command != "aws" || !slices.Equal(exec.Args, want) {
+		t.Fatalf("exec = %+v, want aws %v", exec, want)
+	}
+	if cfg.Clusters[cfg.Contexts[cfg.CurrentContext].Cluster].Server != cluster.Status.Endpoint.Url {
+		t.Errorf("server = %v", cfg.Clusters)
+	}
+}
+
+// Before the EKS cluster reports its ARN the platform's cluster name is
+// the EKS name.
+func TestClusterKubeconfigIAMBeforeTheARN(t *testing.T) {
+	cluster := runningCluster(nil)
+	cluster.Spec.Region = "us-west-1"
+
+	raw, err := IAMKubeconfig(cluster)
+
+	if err != nil || !strings.Contains(string(raw), "prod-eks") {
+		t.Fatalf("IAMKubeconfig = %s, %v", raw, err)
 	}
 }

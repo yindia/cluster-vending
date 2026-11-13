@@ -1,13 +1,18 @@
-# The release the controller ships (pkg/controller DefaultRelease): the three
-# newest Kubernetes minors and, on each, the versions of the shipped catalog
+# A release as an operator publishes it, with the content of the release
+# the controller ships (pkg/controller DefaultRelease): the three newest
+# Kubernetes minors and, on each, the versions of the shipped catalog
 # (config/catalog). A pin's values are locked Helm values for that minor:
 # the cluster autoscaler's image must be of the cluster's Kubernetes minor.
+#
+# The controller creates its own copy, named shipped-<hash of the content>
+# and labelled cloud.cluster-vending.io/shipped. Yours is named
+# YYYY-MM-<letter>; point a channel at it to offer it.
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: Release
 metadata:
   name: 2026-11-a
 spec:
-  notes: "Shipped with the controller. End-of-support dates are placeholders: publish your own release."
+  notes: "The shipped versions, with our end-of-support dates."
   content:
     renderVersion: 4
     kubernetes:

@@ -918,7 +918,10 @@ recorded apart from the cluster's (`status.componentInventory`, owner
    components are first installed (`spec.releaseChannel`, `stable` when
    unset), recorded as `status.platformRelease` and kept from then on, for
    manual and automatic clusters alike; moving a cluster to another release
-   is the rollout step, later. Versions are that release's pins on the
+   is the rollout step, later. "Installed" means an object of a component
+   exists (a role or a chart): until then every pass follows the channel,
+   so a release that pinned nothing, or one looked at before the kubeconfig
+   existed, does not tie the cluster to it. Versions are that release's pins on the
    cluster's Kubernetes minor. A component the release does not pin is not
    installed ("not in release <name>"), and neither is anything requiring
    it. A companion chart is pinned under its own name

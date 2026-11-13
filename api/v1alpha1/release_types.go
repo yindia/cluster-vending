@@ -35,6 +35,12 @@ const (
 // ReleaseFinalizer keeps a Release while a channel or a hold names it.
 const ReleaseFinalizer = "cloud.cluster-vending.io/release-in-use"
 
+// LabelShipped ("true") marks a Release the controller created itself: the
+// release a build ships, named shipped-<hash of its content>. A new build
+// moves the alpha channel off such a release to its own; a release the
+// operator published never carries the label.
+const LabelShipped = "cloud.cluster-vending.io/shipped"
+
 // ComponentPin is one component the platform installs itself (Helm or
 // Argo CD) at a fixed version, on one Kubernetes minor.
 type ComponentPin struct {
@@ -140,7 +146,7 @@ type ReleaseStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=cvrel
 // +kubebuilder:subresource:status
-// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[0-9]{4}-[0-9]{2}-[a-z]$')",message="a release is named YYYY-MM-<letter>, e.g. 2026-11-a"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^([0-9]{4}-[0-9]{2}-[a-z]|shipped-[0-9a-f]{8})$')",message="a release is named YYYY-MM-<letter>, e.g. 2026-11-a (shipped-<8 hex digits> is the controller's own)"
 // +kubebuilder:printcolumn:name="Render",type=integer,JSONPath=`.spec.content.renderVersion`
 // +kubebuilder:printcolumn:name="Withdrawn",type=boolean,JSONPath=`.spec.withdrawn`
 // +kubebuilder:printcolumn:name="Valid",type=string,JSONPath=`.status.conditions[?(@.type=="Valid")].status`
@@ -219,7 +225,7 @@ type ReleaseChannelSpec struct {
 	Promotion Promotion `json:"promotion,omitempty"`
 	// Release offered by a Manual or Pinned channel.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^[0-9]{4}-[0-9]{2}-[a-z]$`
+	// +kubebuilder:validation:Pattern=`^([0-9]{4}-[0-9]{2}-[a-z]|shipped-[0-9a-f]{8})$`
 	Release string `json:"release,omitempty"`
 	// Policy of the rollout through the channel's tiers.
 	// +optional
@@ -323,7 +329,7 @@ type ReleaseHoldSpec struct {
 	// Release, when set, keeps the cluster on exactly this release (a
 	// lock); unset, the cluster stays on what it has now (a freeze).
 	// +optional
-	// +kubebuilder:validation:Pattern=`^[0-9]{4}-[0-9]{2}-[a-z]$`
+	// +kubebuilder:validation:Pattern=`^([0-9]{4}-[0-9]{2}-[a-z]|shipped-[0-9a-f]{8})$`
 	Release string `json:"release,omitempty"`
 	// Reason, shown on the cluster's status.
 	// +required

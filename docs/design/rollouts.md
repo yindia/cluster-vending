@@ -109,6 +109,7 @@ question 8.
 | Default add-ons | `crossplaneaws.DefaultAddons` (`pkg/crossplane/aws/addons.go`) | The add-ons every cluster gets: vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver. |
 | Ordered apply | `sequence.Engine` (`pkg/crossplane/sequence`) | Applies one owner's objects in order. It orders objects inside one cluster, not clusters. |
 | Kinds and ownership | `api/v1alpha1`: CloudAccount owns Network owns Cluster | Status subresource with `observedGeneration`, `phase`, `conditions` (Ready, Synced), observed versions and an inventory. |
+| Shipped release | `DefaultRelease`, `ShippedReleaseName`, `CreateReleaseDefaults` (`pkg/controller/release_defaults.go`) | Each build creates its release, named `shipped-<hash of its content>` and labelled `cloud.cluster-vending.io/shipped`, and points alpha at it while alpha is still pinned to a shipped release and otherwise untouched; beta and stable (`Automatic`) follow at once, since no rollout or soak is acted on yet. A cluster with platform components installed keeps the release they came from; one without follows its channel. See release-admin.md, section 7. |
 
 Two facts follow from the code and shape the design:
 

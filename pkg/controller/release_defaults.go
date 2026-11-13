@@ -2,9 +2,13 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -14,8 +18,39 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
-// DefaultReleaseName is the release this build ships.
-const DefaultReleaseName = "2026-11-a"
+// DefaultReleaseName is the release this build ships: named after its
+// content (ShippedReleaseName), since a release's content cannot change. A
+// build that ships other versions ships another release.
+var DefaultReleaseName = ShippedReleaseName(defaultContent())
+
+const (
+	// shippedNotes are the notes of every shipped release.
+	shippedNotes = "Shipped with the controller. End-of-support dates are placeholders: publish your own release."
+	// legacyShippedName is the release builds shipped before releases were
+	// named after their content: the same name with whatever the build
+	// pinned, and without the shipped label.
+	legacyShippedName = "2026-11-a"
+)
+
+// ShippedReleaseName is the name of the release a build ships with
+// content: "shipped-" and the first 8 hex digits of the SHA-256 of the
+// content's JSON. The same content always gives the same name, and other
+// content another one.
+func ShippedReleaseName(content cloudv1alpha1.ReleaseContent) string {
+	// The JSON of a Go struct is in field order: the same for the same
+	// content. Marshalling these types cannot fail.
+	raw, _ := json.Marshal(content)
+	sum := sha256.Sum256(raw)
+	return "shipped-" + hex.EncodeToString(sum[:])[:8]
+}
+
+// isShipped reports whether the controller created rel itself: it carries
+// the shipped label, or it is the release older builds shipped (its name
+// and notes; an operator's release of that name has other notes).
+func isShipped(rel *cloudv1alpha1.Release) bool {
+	return rel.Labels[cloudv1alpha1.LabelShipped] == "true" ||
+		(rel.Name == legacyShippedName && rel.Spec.Notes == shippedNotes)
+}
 
 // date is midnight UTC of a day, for the shipped end-of-support dates.
 func date(year int, month time.Month, day int) metav1.Time {
@@ -60,18 +95,21 @@ func defaultPins(autoscalerImage string) []cloudv1alpha1.ComponentPin {
 // publishing a release of their own.
 func DefaultRelease() *cloudv1alpha1.Release {
 	return &cloudv1alpha1.Release{
-		TypeMeta:   metav1.TypeMeta{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "Release"},
-		ObjectMeta: metav1.ObjectMeta{Name: DefaultReleaseName},
-		Spec: cloudv1alpha1.ReleaseSpec{
-			Notes: "Shipped with the controller. End-of-support dates are placeholders: publish your own release.",
-			Content: cloudv1alpha1.ReleaseContent{
-				RenderVersion: crossplaneaws.RenderVersion,
-				Kubernetes: []cloudv1alpha1.KubernetesRelease{
-					{Minor: "1.37", Default: true, EndOfSupport: date(2028, time.January, 31), Components: defaultPins("v1.37.0")},
-					{Minor: "1.36", UpgradeTo: "1.37", EndOfSupport: date(2027, time.September, 30), Components: defaultPins("v1.36.2")},
-					{Minor: "1.35", UpgradeTo: "1.36", EndOfSupport: date(2027, time.May, 31), Components: defaultPins("v1.35.3")},
-				},
-			},
+		TypeMeta: metav1.TypeMeta{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "Release"},
+		ObjectMeta: metav1.ObjectMeta{Name: DefaultReleaseName,
+			Labels: map[string]string{cloudv1alpha1.LabelShipped: "true"}},
+		Spec: cloudv1alpha1.ReleaseSpec{Notes: shippedNotes, Content: defaultContent()},
+	}
+}
+
+// defaultContent is what the shipped release locks.
+func defaultContent() cloudv1alpha1.ReleaseContent {
+	return cloudv1alpha1.ReleaseContent{
+		RenderVersion: crossplaneaws.RenderVersion,
+		Kubernetes: []cloudv1alpha1.KubernetesRelease{
+			{Minor: "1.37", Default: true, EndOfSupport: date(2028, time.January, 31), Components: defaultPins("v1.37.0")},
+			{Minor: "1.36", UpgradeTo: "1.37", EndOfSupport: date(2027, time.September, 30), Components: defaultPins("v1.36.2")},
+			{Minor: "1.35", UpgradeTo: "1.36", EndOfSupport: date(2027, time.May, 31), Components: defaultPins("v1.35.3")},
 		},
 	}
 }
@@ -94,10 +132,14 @@ func DefaultChannels() []*cloudv1alpha1.ReleaseChannel {
 	}
 }
 
-// CreateReleaseDefaults creates the shipped release and channels that do
-// not exist. It never changes an existing object: once the operator has
-// edited a channel, or published releases, a new build does not undo it,
-// and it never moves alpha to a release by itself.
+// CreateReleaseDefaults creates this build's shipped release and the
+// channels that do not exist, and moves alpha to the shipped release while
+// alpha is still as a build left it (takeOverAlpha).
+//
+// It never changes anything of the operator's: a release they published,
+// a channel they edited, and the releases older builds shipped all stay
+// (clusters may still run them). beta and stable are never written: as
+// Automatic channels they follow alpha by themselves.
 func CreateReleaseDefaults(ctx context.Context, c client.Client) error {
 	channels := DefaultChannels()
 	objects := make([]client.Object, 0, len(channels)+1)
@@ -109,6 +151,45 @@ func CreateReleaseDefaults(ctx context.Context, c client.Client) error {
 		if err := c.Create(ctx, obj); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create %s %s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
 		}
+	}
+	return takeOverAlpha(ctx, c)
+}
+
+// asShipped reports whether a channel's settings are what a build gives
+// alpha, whatever release it names: Pinned, not paused, and a rollout
+// policy nobody set (empty, or the defaults the API server fills in).
+func asShipped(spec cloudv1alpha1.ReleaseChannelSpec) bool {
+	filledIn := cloudv1alpha1.RolloutPolicy{MaxInProgress: 5, MaxFailed: 1, Soak: metav1.Duration{Duration: 24 * time.Hour}}
+	policy := equality.Semantic.DeepEqual(spec.Policy, cloudv1alpha1.RolloutPolicy{}) ||
+		equality.Semantic.DeepEqual(spec.Policy, filledIn)
+	return spec.Promotion == cloudv1alpha1.PromotionPinned && !spec.Paused && policy
+}
+
+// takeOverAlpha points alpha at this build's shipped release when alpha is
+// exactly what a build made it: Pinned to a shipped release (isShipped),
+// with nothing else set. Then no operator has taken alpha over, and the
+// new build's versions must reach the channels. Anything else is the
+// operator's and stays: another promotion, a pause, a rollout policy, a
+// release they published, or a release that no longer exists.
+func takeOverAlpha(ctx context.Context, c client.Client) error {
+	alpha := &cloudv1alpha1.ReleaseChannel{}
+	if err := c.Get(ctx, client.ObjectKey{Name: cloudv1alpha1.ChannelAlpha}, alpha); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	current := alpha.Spec.Release
+	if current == "" || current == DefaultReleaseName || !asShipped(alpha.Spec) {
+		return nil
+	}
+	rel := &cloudv1alpha1.Release{}
+	if err := c.Get(ctx, client.ObjectKey{Name: current}, rel); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !isShipped(rel) {
+		return nil
+	}
+	alpha.Spec.Release = DefaultReleaseName
+	if err := c.Update(ctx, alpha); err != nil {
+		return fmt.Errorf("move channel alpha from the shipped release %s to %s: %w", current, DefaultReleaseName, err)
 	}
 	return nil
 }

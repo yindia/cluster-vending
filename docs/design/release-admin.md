@@ -538,13 +538,61 @@ rollouts.md section 12:
 ## 7. Bootstrapping
 
 **Implemented:** the defaults are Go values in the controller
-(`pkg/controller/release_defaults.go`: release `2026-11-a` with 1.37
-default, 1.36 and 1.35 upgrading one minor at a time, placeholder
-end-of-support dates, this build's renderer, no components; alpha `Pinned`
-to it, beta and stable `Automatic`), created by the controller at start
-when absent and never updated. `config/samples` holds the same objects plus
-an example hold. Not `go:embed`ded YAML as first proposed below: the values
-are typed and a test keeps the samples equal to them.
+(`pkg/controller/release_defaults.go`: a release with 1.37 default, 1.36
+and 1.35 upgrading one minor at a time, placeholder end-of-support dates,
+this build's renderer and the shipped catalog's versions; alpha `Pinned` to
+it, beta and stable `Automatic`), created by the controller at start when
+absent. `config/samples` holds the same content as an operator's release
+(`2026-11-a`) plus an example hold. Not `go:embed`ded YAML as first
+proposed below: the values are typed and a test keeps the samples' content
+equal to them.
+
+**The shipped release is named after its content.** A release's content is
+immutable, so a build that ships other versions cannot change the release
+an older build created: under one fixed name, an existing installation
+would keep the old build's pins for ever. The shipped release is therefore
+named `shipped-<first 8 hex digits of the SHA-256 of spec.content as
+JSON>` and labelled `cloud.cluster-vending.io/shipped: "true"`. The same
+content always has the same name; a build with other content creates
+another release next to the old ones, which stay (clusters may still run
+them, and a release is never deleted by the controller).
+
+**A new build takes alpha over only while alpha is a build's.** At start,
+after creating its release, the controller points alpha at it when all of
+this holds:
+
+- alpha is `Pinned`, not paused, and its rollout policy is unset (or the
+  defaults the API server fills in);
+- the release alpha names exists and is a shipped one: it carries the
+  label, or it is `2026-11-a` with the shipped notes (what builds created
+  before releases were named after their content).
+
+Anything else is the operator's and is never touched: a release they
+published (no label), alpha made `Manual`, paused, or given a policy, and
+alpha naming a release that is gone. beta and stable are never written.
+This replaces the recommendation of open question 4 below for
+installations that never published a release: there a controller upgrade
+does move alpha, because nobody else would. An operator who wants to
+decide each move pins alpha to a release of their own, once.
+
+**What the operator sees after a controller upgrade.** `kubectl get
+releases` lists the new `shipped-…` release next to the old one; alpha's
+`spec.release` and `status.release` name the new one, and its history has
+an entry for it. beta and stable are `Automatic`: each offers what its
+upstream offers on its next reconcile, which today is at once, since a
+release counts as completed upstream as soon as the upstream offers it
+(rollouts, tiers and the soak time of `spec.policy` are not acted on yet;
+rollouts.md). When they are, beta and stable take a new shipped release
+only after alpha's rollout completed and soaked, like any other release.
+A step the channel may not take (a component marked
+`upgradeOneMinorAtATime` skipping a minor) leaves the channel on the old
+release with the reason in its `Offering` condition. No cluster that has
+platform components installed changes release by this: a cluster keeps the
+release it was installed from. A cluster with none installed yet follows
+its channel.
+
+A fresh installation gets, as before, one release and the three channels,
+all offering it.
 
 **Decided (proposed): the platform ships a default release and the three
 channels, embedded in the controller binary** (`config/releases/*.yaml`,
@@ -615,10 +663,16 @@ All six were answered as recommended by the project owner.
 2. **Who may publish before authentication exists.** *Recommendation:*
    `kubectl` and Git with the `release-admin` role only, as in section 4.
 3. **Release naming.** *Recommendation:* `YYYY-MM-<letter>`, sortable,
-   checked by a CEL pattern on `metadata.name`.
+   checked by a CEL pattern on `metadata.name`. *Implemented*, with one
+   more form the pattern accepts, `shipped-<8 hex digits>`: the
+   controller's own releases (section 7).
 4. **Embedded release updates.** A new build with a new embedded release:
    should alpha move to it automatically? *Recommendation:* no; the operator
    points alpha at it, so a controller upgrade never starts a rollout.
+   *Settled otherwise for installations whose alpha is still a build's*
+   (section 7): there nobody would point alpha at the new release, and the
+   installation kept an old build's pins for ever. An alpha the operator
+   has taken over is never moved.
 5. **EKS add-ons and releases.** Settled by the project owner: releases
    never list EKS add-ons (see section 3.1).
 6. **Hold expiry.** `until` ends a hold by itself. *Recommendation:* keep it

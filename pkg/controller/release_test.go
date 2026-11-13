@@ -28,7 +28,7 @@ import (
 // Go equivalents of the CRDs' CEL rules (api/v1alpha1/release_types.go),
 // for the samples and the shipped defaults.
 var (
-	releaseName = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[a-z]$`)
+	releaseName = regexp.MustCompile(`^([0-9]{4}-[0-9]{2}-[a-z]|shipped-[0-9a-f]{8})$`)
 	minorRE     = regexp.MustCompile(`^1\.[0-9]{2}$`)
 	uuidRE      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
@@ -112,12 +112,22 @@ func readSamples[T any](t *testing.T, name string) []*T {
 	return out
 }
 
-// The admin config in config/samples is exactly what the controller ships,
-// plus a hold, and every object passes the CRDs' rules.
+// sampleRelease is the name of the release in config/samples: an
+// operator's release, named as they name theirs. The shipped release has
+// the same content under its own name (DefaultReleaseName).
+const sampleRelease = "2026-11-a"
+
+// The admin config in config/samples is what the controller ships, as an
+// operator would publish it (their own release name, no shipped label and
+// not the shipped notes, so no build ever takes it for its own), plus a
+// hold, and every object passes the CRDs' rules.
 func TestReleaseSamplesAreTheShippedDefaults(t *testing.T) {
 	rel := readSamples[cloudv1alpha1.Release](t, "cloud_v1alpha1_release.yaml")
-	if len(rel) != 1 || rel[0].Name != DefaultReleaseName || !equality.Semantic.DeepEqual(rel[0].Spec, DefaultRelease().Spec) {
-		t.Errorf("release sample differs from DefaultRelease: %+v", rel[0].Spec)
+	if len(rel) != 1 || rel[0].Name != sampleRelease || !equality.Semantic.DeepEqual(rel[0].Spec.Content, DefaultRelease().Spec.Content) {
+		t.Errorf("release sample differs from DefaultRelease: %s %+v", rel[0].Name, rel[0].Spec.Content)
+	}
+	if isShipped(rel[0]) {
+		t.Errorf("the release sample would be taken for a shipped release (labels %v, notes %q)", rel[0].Labels, rel[0].Spec.Notes)
 	}
 	if problems := releaseRules(rel[0]); len(problems) > 0 {
 		t.Errorf("release sample: %v", problems)
@@ -131,6 +141,9 @@ func TestReleaseSamplesAreTheShippedDefaults(t *testing.T) {
 		t.Fatalf("%d channel samples, want %d", len(channels), len(defaults))
 	}
 	for i, ch := range channels {
+		if defaults[i].Spec.Release != "" {
+			defaults[i].Spec.Release = sampleRelease // alpha is pinned to the sample's release
+		}
 		if ch.Name != defaults[i].Name || !equality.Semantic.DeepEqual(ch.Spec, defaults[i].Spec) {
 			t.Errorf("channel sample %s differs from the shipped %s: %+v", ch.Name, defaults[i].Name, ch.Spec)
 		}
@@ -142,8 +155,8 @@ func TestReleaseSamplesAreTheShippedDefaults(t *testing.T) {
 	if problems := holdRules(holds[0]); len(holds) != 1 || len(problems) > 0 {
 		t.Errorf("hold sample: %v", problems)
 	}
-	if holds[0].Spec.Release != DefaultReleaseName {
-		t.Errorf("hold sample names release %s, want the shipped one", holds[0].Spec.Release)
+	if holds[0].Spec.Release != sampleRelease {
+		t.Errorf("hold sample names release %s, want the sample's %s", holds[0].Spec.Release, sampleRelease)
 	}
 }
 

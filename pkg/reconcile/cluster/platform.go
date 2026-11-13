@@ -134,7 +134,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if row.State != StateRunning && len(records) == 0 {
 		return nil, nil
 	}
-	in, release, problem, err := s.platformInput(ctx, row)
+	in, release, problem, err := s.platformInput(ctx, row, len(records) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 // platformInput gathers what the cluster's platform components are planned
 // from. problem, when set, says why none can be installed now (the
 // release cannot be used); the entries are still returned, to report.
-func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster) (in component.PlatformInput, release, problem string, err error) {
+func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, installed bool) (in component.PlatformInput, release, problem string, err error) {
 	spec, err := SpecOf(row)
 	if err != nil {
 		return in, "", "", err
@@ -283,7 +283,12 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster) (in 
 		KubernetesMinor: kubernetesMinor(spec.GetControlPlane().GetKubernetesVersion()), IRSA: spec.GetAws().GetIrsa()}
 	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM)
 
-	release = storedStatus(row).GetPlatformRelease()
+	// The recorded release is kept once something is installed from it.
+	// Until then the cluster follows its channel: a release that pinned no
+	// component must not hold the cluster for ever.
+	if installed {
+		release = storedStatus(row).GetPlatformRelease()
+	}
 	if release == "" {
 		channel := channelOf(spec)
 		if release, err = s.deps.Platform.Offered(ctx, channel); err != nil {

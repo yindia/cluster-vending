@@ -281,6 +281,26 @@ func TestPlatformReleaseIsKept(t *testing.T) {
 	}
 }
 
+// Until something is installed the cluster follows its channel: a release
+// recorded by a pass that installed nothing (it pinned no component) does
+// not hold the cluster back.
+func TestPlatformReleaseFollowsTheChannelUntilInstalled(t *testing.T) {
+	w, src := platformWorld(t)
+	w.helmConfig(t)
+	row := w.cluster(t)
+	raw, err := Encode(&cloudv1.ClusterStatus{PlatformRelease: "2026-10-z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.Status = raw
+
+	p, err := w.svc.installPlatform(t.Context(), row)
+
+	if err != nil || p.release != src.offered {
+		t.Fatalf("release %q, %v; want the offered %q", p.release, err, src.offered)
+	}
+}
+
 func TestWithPlatformCondition(t *testing.T) {
 	pc := func(name string, phase cloudv1.ComponentPhase) *cloudv1.PlatformComponent {
 		return &cloudv1.PlatformComponent{Name: name, Phase: phase}

@@ -61,6 +61,18 @@ add a node for it.
   `kubectl create -f pkg/catalog/definitions/` once the CRDs are installed.
   The catalog is not part of any kustomization.
 
+## Changing a version
+
+Versions are data, in one file: `pkg/catalog/release.yaml`. It lists the
+Kubernetes minors on offer (default, upgrade target, end of support), the
+chart version of every component, per-minor Helm values (the cluster
+autoscaler's image tag), and the channels a new management cluster gets. To
+change a version, edit that file and ship the build: the controller turns it
+into the shipped `Release` (named after its content, so a change gives a new
+one) and moves `alpha` to it unless an operator took `alpha` over. No
+controller code names a version. A test fails when the file and the
+definitions disagree about which components exist.
+
 Chart versions are not in the definitions. A `Release` pins them per
 Kubernetes minor; the versions below are what each definition was checked
 against.

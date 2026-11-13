@@ -1,0 +1,49 @@
+# The versions this build ships: the one place to change a component's
+# chart version, the Kubernetes minors on offer, or the channels.
+# The controller turns it into the shipped Release (named after its content)
+# and the three ReleaseChannels; nothing else in the code names a version.
+#
+# Each component's chart, values and IAM are in definitions/<name>.yaml.
+
+# Kubernetes minors on offer, newest first. Exactly one is the default (what
+# a cluster gets when it names no version); upgradeTo is the minor an
+# automatic cluster moves to next.
+kubernetes:
+- minor: "1.37"
+  default: true
+  endOfSupport: "2028-01-31"      # placeholder: set your own
+  # Locked Helm values of a component on this minor only.
+  values:
+    cluster-autoscaler: {image: {tag: v1.37.0}}   # its image must be of the cluster's minor
+- minor: "1.36"
+  upgradeTo: "1.37"
+  endOfSupport: "2027-09-30"
+  values:
+    cluster-autoscaler: {image: {tag: v1.36.2}}
+- minor: "1.35"
+  upgradeTo: "1.36"
+  endOfSupport: "2027-05-31"
+  values:
+    cluster-autoscaler: {image: {tag: v1.35.3}}
+
+# Chart version of every component, the same on every minor above.
+components:
+  aws-load-balancer-controller: "3.6.2"
+  cluster-autoscaler: "9.60.0"
+  external-secrets: "2.15.0"
+  gpu-operator: "v26.7.2"
+  istio-base: "1.32.0"
+  istio-cni: "1.32.0"
+  istio-ingress-gateway: "1.32.0"
+  istiod: "1.32.0"
+  karpenter: "1.15.1"
+  kyverno: "3.10.0"
+  kyverno-policies: "3.10.0"
+  ztunnel: "1.32.0"
+
+# The channels created on a new management cluster. A Pinned channel offers
+# this build's release; an Automatic one follows the channel before it.
+channels:
+- {name: alpha, promotion: Pinned}
+- {name: beta, promotion: Automatic}
+- {name: stable, promotion: Automatic}

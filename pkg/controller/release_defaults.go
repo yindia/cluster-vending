@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/catalog"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
@@ -52,45 +53,19 @@ func isShipped(rel *cloudv1alpha1.Release) bool {
 		(rel.Name == legacyShippedName && rel.Spec.Notes == shippedNotes)
 }
 
-// date is midnight UTC of a day, for the shipped end-of-support dates.
-func date(year int, month time.Month, day int) metav1.Time {
-	return metav1.NewTime(time.Date(year, month, day, 0, 0, 0, 0, time.UTC))
+// shippedVersions is the versions this build ships: pkg/catalog/release.yaml, the
+// one place they are written. The file is embedded and its tests hold it
+// valid, so a failure here is a broken build.
+func shippedVersions() catalog.Release {
+	rel, err := catalog.ShippedRelease()
+	if err != nil {
+		panic(err)
+	}
+	return rel
 }
 
-// defaultPins are the versions of the shipped catalog (pkg/catalog/definitions,
-// docs/catalog.md) on one Kubernetes minor: the chart versions each
-// definition was checked against, the same on the three minors. The
-// cluster autoscaler's image must be of the cluster's Kubernetes minor,
-// and no single chart ships all three, so its pin sets the image tag
-// (autoscalerImage) over chart 9.60.0. A companion chart would be pinned
-// under its own name: a companion without a pin is not installed.
-func defaultPins(autoscalerImage string) []cloudv1alpha1.ComponentPin {
-	pin := func(name, version string) cloudv1alpha1.ComponentPin {
-		return cloudv1alpha1.ComponentPin{Name: name, Version: version}
-	}
-	autoscaler := pin("cluster-autoscaler", "9.60.0")
-	autoscaler.Values = &runtime.RawExtension{Raw: []byte(`{"image":{"tag":"` + autoscalerImage + `"}}`)}
-	return []cloudv1alpha1.ComponentPin{
-		pin("aws-load-balancer-controller", "3.6.2"),
-		autoscaler,
-		pin("external-secrets", "2.15.0"),
-		pin("gpu-operator", "v26.7.2"),
-		pin("istio-base", "1.32.0"),
-		pin("istio-cni", "1.32.0"),
-		pin("istio-ingress-gateway", "1.32.0"),
-		pin("istiod", "1.32.0"),
-		pin("karpenter", "1.15.1"),
-		pin("kyverno", "3.10.0"),
-		pin("kyverno-policies", "3.10.0"),
-		pin("ztunnel", "1.32.0"),
-	}
-}
-
-// DefaultRelease is the release this build ships: the three newest
-// Kubernetes minors, the newest the default, each older one upgrading to
-// the next, this build's renderer, and the shipped catalog's versions. The
-// end-of-support dates are placeholders for the operator to replace by
-// publishing a release of their own.
+// DefaultRelease is the release this build ships: release.yaml as a
+// Release, with this build's renderer version.
 func DefaultRelease() *cloudv1alpha1.Release {
 	return &cloudv1alpha1.Release{
 		TypeMeta: metav1.TypeMeta{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "Release"},
@@ -102,32 +77,50 @@ func DefaultRelease() *cloudv1alpha1.Release {
 
 // defaultContent is what the shipped release locks.
 func defaultContent() cloudv1alpha1.ReleaseContent {
-	return cloudv1alpha1.ReleaseContent{
-		RenderVersion: crossplaneaws.RenderVersion,
-		Kubernetes: []cloudv1alpha1.KubernetesRelease{
-			{Minor: "1.37", Default: true, EndOfSupport: date(2028, time.January, 31), Components: defaultPins("v1.37.0")},
-			{Minor: "1.36", UpgradeTo: "1.37", EndOfSupport: date(2027, time.September, 30), Components: defaultPins("v1.36.2")},
-			{Minor: "1.35", UpgradeTo: "1.36", EndOfSupport: date(2027, time.May, 31), Components: defaultPins("v1.35.3")},
-		},
-	}
+	return ContentOf(shippedVersions())
 }
 
-// DefaultChannels are the channels this build ships: alpha pinned to the
-// shipped release, beta and stable following their upstream.
-func DefaultChannels() []*cloudv1alpha1.ReleaseChannel {
-	channel := func(name string, spec cloudv1alpha1.ReleaseChannelSpec) *cloudv1alpha1.ReleaseChannel {
-		return &cloudv1alpha1.ReleaseChannel{
-			TypeMeta:   metav1.TypeMeta{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "ReleaseChannel"},
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       spec,
+// ContentOf is a release file as the content of a Release: each minor
+// pins every component at its version, sorted by name, with the minor's
+// own values for the components that have any.
+func ContentOf(rel catalog.Release) cloudv1alpha1.ReleaseContent {
+	content := cloudv1alpha1.ReleaseContent{RenderVersion: crossplaneaws.RenderVersion,
+		Kubernetes: make([]cloudv1alpha1.KubernetesRelease, 0, len(rel.Kubernetes))}
+	for _, k := range rel.Kubernetes {
+		end, _ := k.EndOfSupportTime() // checked by catalog.ParseRelease
+		minor := cloudv1alpha1.KubernetesRelease{Minor: k.Minor, Default: k.Default, UpgradeTo: k.UpgradeTo,
+			EndOfSupport: metav1.NewTime(end)}
+		for _, name := range rel.ComponentNames() {
+			pin := cloudv1alpha1.ComponentPin{Name: name, Version: rel.Components[name]}
+			if values, ok := k.Values[name]; ok {
+				raw, _ := json.Marshal(values) // YAML maps of the file: always JSON
+				pin.Values = &runtime.RawExtension{Raw: raw}
+			}
+			minor.Components = append(minor.Components, pin)
 		}
+		content.Kubernetes = append(content.Kubernetes, minor)
 	}
-	return []*cloudv1alpha1.ReleaseChannel{
-		channel(cloudv1alpha1.ChannelAlpha, cloudv1alpha1.ReleaseChannelSpec{
-			Promotion: cloudv1alpha1.PromotionPinned, Release: DefaultReleaseName}),
-		channel(cloudv1alpha1.ChannelBeta, cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.PromotionAutomatic}),
-		channel(cloudv1alpha1.ChannelStable, cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.PromotionAutomatic}),
+	return content
+}
+
+// DefaultChannels are the channels this build ships (release.yaml): a
+// Pinned one offers the shipped release, an Automatic one follows the
+// channel before it.
+func DefaultChannels() []*cloudv1alpha1.ReleaseChannel {
+	channels := shippedVersions().Channels
+	out := make([]*cloudv1alpha1.ReleaseChannel, 0, len(channels))
+	for _, ch := range channels {
+		spec := cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.Promotion(ch.Promotion)}
+		if ch.Promotion == catalog.PromotionPinned {
+			spec.Release = DefaultReleaseName
+		}
+		out = append(out, &cloudv1alpha1.ReleaseChannel{
+			TypeMeta:   metav1.TypeMeta{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "ReleaseChannel"},
+			ObjectMeta: metav1.ObjectMeta{Name: ch.Name},
+			Spec:       spec,
+		})
 	}
+	return out
 }
 
 // CreateReleaseDefaults creates this build's shipped release and the

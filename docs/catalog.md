@@ -68,7 +68,7 @@ against.
 |---|---|---|---|---|
 | `aws-load-balancer-controller` | `aws-load-balancer-controller` 3.6.2, `https://aws.github.io/eks-charts` | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `cluster-autoscaler` | `cluster-autoscaler` 9.60.0, `https://kubernetes.github.io/autoscaler`; image tag from the release pin | `kube-system` | none: fixed | none |
-| `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; no node class or node pool is shipped | `kube-system` | none: fixed | `karpenter-crd` (upstream) |
+| `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; no node class or node pool is shipped | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `kyverno` | `kyverno` 3.10.0 (Kyverno v1.20), `https://kyverno.github.io/kyverno/` | `kyverno` | none: fixed | none needed (subcharts, upgraded by Helm) |
 | `kyverno-policies` | `kyverno-policies` 3.10.0; requires `kyverno` | `kyverno` | yes | none |
 | `gpu-operator` | `gpu-operator` v26.7.2, `https://helm.ngc.nvidia.com/nvidia` | `gpu-operator` | yes | none (the chart's pre-upgrade hook applies them) |
@@ -130,12 +130,11 @@ definition can name a chart that holds only the CRDs, as templates
 the version the release pins for the component, and the main chart then runs
 with `skipCRDs`.
 
-- `karpenter`: the upstream `karpenter-crd` chart. Karpenter 1.15 changes the
-  NodePool CRD, so an upgrade from 1.14 needs it. A cluster whose CRDs were
-  first installed from the main chart's `crds/` needs Helm's ownership labels
-  and annotations on them before `karpenter-crd` can adopt them (Karpenter
-  troubleshooting: "Helm Error When Installing the karpenter-crd Chart"); new
-  installs are not affected.
+- `karpenter`: no CRD chart. The upstream chart installs the CRDs in its
+  `crds/` folder with the first install, and Helm never upgrades them: a
+  version that changes them (1.15 changed the NodePool CRD) needs that
+  version's CRDs applied to the cluster first. Upstream ships them as the
+  `karpenter-crd` chart for that purpose.
 - `aws-load-balancer-controller`: no CRD chart. The upstream chart installs
   the CRDs in its `crds/` folder with the first install, and Helm never
   upgrades them: when a new chart version changes them, apply upstream's

@@ -11,11 +11,10 @@ spec:
     helm:
       repository: oci://public.ecr.aws/karpenter
       chart: karpenter
-      # Karpenter's CRDs as templates, installed and upgraded before the main
-      # chart (which then runs with skipCRDs), at the same version.
-      crds:
-        repository: oci://public.ecr.aws/karpenter
-        chart: karpenter-crd
+      # The one upstream chart: it installs its own CRDs (its crds/ folder)
+      # with the first install. Helm never upgrades them, so a version bump
+      # that changes them needs the CRDs of that version applied first
+      # (docs/catalog.md).
   cloudResources:
     iamRole:
       access: IRSA

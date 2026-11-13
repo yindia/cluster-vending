@@ -270,24 +270,15 @@ func TestKarpenterShipsNoNodeClass(t *testing.T) {
 	}
 }
 
-// The CRD charts: Karpenter's is installed before its main chart. The
-// load balancer controller's upstream chart installs its own CRDs, and the
-// others upgrade theirs themselves (subcharts, templates or a hook).
-func TestCRDCharts(t *testing.T) {
-	want := map[string]string{
-		"karpenter": "oci://public.ecr.aws/karpenter karpenter-crd",
-	}
+// No definition splits its chart: each installs the one upstream chart,
+// which brings its own CRDs.
+func TestNoSeparateCRDCharts(t *testing.T) {
 	for _, def := range definitions(t) {
 		if def.Spec.Install == nil {
 			continue
 		}
-		crds := def.Spec.Install.Helm.CRDs
-		got := ""
-		if crds != nil {
-			got = crds.Repository + " " + crds.Chart
-		}
-		if got != want[def.Name] {
-			t.Errorf("%s crds = %q, want %q", def.Name, got, want[def.Name])
+		if crds := def.Spec.Install.Helm.CRDs; crds != nil {
+			t.Errorf("%s installs a separate CRD chart %s %s", def.Name, crds.Repository, crds.Chart)
 		}
 	}
 }

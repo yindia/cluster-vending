@@ -851,7 +851,7 @@ install:
   `spec.forProvider.skipCRDs: true` (present in the provider-helm v1.5.0
   `Release` CRD).
 - It gets no values and may carry `credentials` like any chart.
-- Shipped: `karpenter` (upstream `karpenter-crd`). See [catalog.md](../catalog.md).
+- No shipped definition uses one: each installs its one upstream chart. See [catalog.md](../catalog.md).
 
 **Version groups (built).** `versionGroup: <name>` on a definition marks
 components that are versions of one product (the Istio charts; `kyverno` and

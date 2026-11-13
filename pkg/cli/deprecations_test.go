@@ -123,8 +123,10 @@ func TestClusterDeprecationsAsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	for _, want := range []string{`"name": "site"`, `"nextPageToken": "1"`, `"targetVersion": "1.37"`} {
-		if !strings.Contains(out.String(), want) {
+	// protojson varies its whitespace on purpose: compare without it.
+	got := strings.Join(strings.Fields(out.String()), "")
+	for _, want := range []string{`"name":"site"`, `"nextPageToken":"1"`, `"targetVersion":"1.37"`} {
+		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %s:\n%s", want, out.String())
 		}
 	}

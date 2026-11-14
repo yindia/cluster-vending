@@ -243,3 +243,61 @@ func TestStatusOfAPausedRow(t *testing.T) {
 		})
 	}
 }
+
+// A pause and a resume of the cluster each emit one event, with who paused.
+func TestPauseAndResumeOfAClusterAreEvents(t *testing.T) {
+	events := &capturedEvents{}
+	w := newWorld(t, interceptor.Funcs{}, nil, func(d *reconcile.Deps) { d.Events = events })
+	ctx := t.Context()
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	w.pause(t, alice)
+	events.reasons, events.messages = nil, nil
+
+	for range 2 {
+		if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.pause(t, nil)
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := events.count(reconcile.ReasonPaused); got != 1 || !events.said(reconcile.ReasonPaused, "paused by alice") {
+		t.Errorf("Paused events %d (%v %q), want one naming alice", got, events.reasons, events.messages)
+	}
+	if got := events.count(reconcile.ReasonResumed); got != 1 {
+		t.Errorf("Resumed events %d (%v), want one", got, events.reasons)
+	}
+}
+
+type capturedEvents struct {
+	reasons  []string
+	messages []string
+}
+
+func (c *capturedEvents) Event(_ context.Context, _ reconcile.Object, _, reason, message string) {
+	c.reasons = append(c.reasons, reason)
+	c.messages = append(c.messages, message)
+}
+
+func (c *capturedEvents) count(reason string) int {
+	n := 0
+	for _, r := range c.reasons {
+		if r == reason {
+			n++
+		}
+	}
+	return n
+}
+
+func (c *capturedEvents) said(reason, text string) bool {
+	for i, r := range c.reasons {
+		if r == reason && strings.Contains(c.messages[i], text) {
+			return true
+		}
+	}
+	return false
+}

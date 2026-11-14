@@ -305,7 +305,7 @@ func PauseNotes(before, after []*cloudv1.Condition) []Note {
 	case was == nil && is != nil:
 		return []Note{Normal(ReasonPaused, is.GetMessage())}
 	case was != nil && is == nil:
-		return []Note{Normal(ReasonResumed, "no resource is paused any more: the providers act on them again")}
+		return []Note{Normal(ReasonResumed, "the pause ended: the platform and the providers act on it again")}
 	default:
 		return nil
 	}

@@ -92,3 +92,25 @@ func TestReconcileBindsNothingWithoutAServiceAccount(t *testing.T) {
 		t.Errorf("binding %+v without a service account", b)
 	}
 }
+
+// The tenant namespace also binds the controller to the usage-history
+// writer: it keeps each cluster's recorded usage (resource
+// recommendations) in a ConfigMap there, and writes ConfigMaps nowhere
+// else.
+func TestReconcileBindsTheUsageHistoryWriterInTheTenantNamespace(t *testing.T) {
+	w := newWorld(t)
+	w.rec.deps.ControllerServiceAccount = &reconcile.ServiceAccount{Namespace: "cluster-vending-system", Name: "cluster-vending-controller-manager"}
+
+	if err := w.rec.Reconcile(t.Context(), tenant, w.account.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &rbacv1.RoleBinding{}
+	if err := w.kube.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: reconcile.UsageHistoryWriterRole}, b); err != nil {
+		t.Fatalf("no usage-history RoleBinding: %v", err)
+	}
+	want := rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-vending-usage-history-writer"}
+	if b.RoleRef != want || len(b.Subjects) != 1 || b.Subjects[0].Name != "cluster-vending-controller-manager" {
+		t.Errorf("binding = %+v to %+v", b.Subjects, b.RoleRef)
+	}
+}

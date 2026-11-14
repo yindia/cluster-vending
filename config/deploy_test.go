@@ -433,7 +433,7 @@ func TestControllerReadsSecretsOnlyThroughTheTenantBinding(t *testing.T) {
 		}
 	}
 	want := rbacv1.PolicyRule{APIGroups: []string{"rbac.authorization.k8s.io"}, Resources: []string{"clusterroles"},
-		ResourceNames: []string{reconcile.KubeconfigReaderRole}, Verbs: []string{"bind"}}
+		ResourceNames: []string{reconcile.KubeconfigReaderRole, reconcile.UsageHistoryWriterRole}, Verbs: []string{"bind"}}
 	if len(bind) != 1 || !reflect.DeepEqual(bind[0], want) {
 		t.Errorf("controller role: bind rules = %+v, want only %+v", bind, want)
 	}
@@ -470,6 +470,36 @@ func TestControllerReadsSecretsOnlyThroughTheTenantBinding(t *testing.T) {
 	})
 	if !told {
 		t.Errorf("%s: %s is not the pod's service account name", controllerDeployment, config.EnvServiceAccount)
+	}
+}
+
+// The controller writes ConfigMaps only where a tenant namespace binds it
+// to the usage-history writer (recorded usage for resource
+// recommendations); its own roles have no ConfigMap rule. The API server
+// only reads them, to compute the recommendations.
+func TestConfigMapsAreWrittenOnlyThroughTheTenantBinding(t *testing.T) {
+	role := clusterRole(t, "rbac/role.yaml")
+	for _, verb := range []string{"create", "update", "patch", "delete", "*"} {
+		if allows(role, "", "configmaps", verb) || allows(role, "", "*", verb) {
+			t.Errorf("controller role: may %s ConfigMaps; it writes them only where a tenant namespace binds the writer role", verb)
+		}
+	}
+	writer := clusterRole(t, "rbac/usage_history_writer_role.yaml")
+	want := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "create", "update", "patch"}}}
+	if !reflect.DeepEqual(writer.Rules, want) {
+		t.Errorf("usage-history-writer rules = %+v, want %+v", writer.Rules, want)
+	}
+	if got := "cluster-vending-" + writer.Name; got != reconcile.UsageHistoryWriterRole {
+		t.Errorf("usage-history-writer is deployed as %s, the code binds %s", got, reconcile.UsageHistoryWriterRole)
+	}
+	server := clusterRole(t, filepath.Join(serverBase, "role.yaml"))
+	if !allows(server, "", "configmaps", "get") {
+		t.Error("server role: cannot get ConfigMaps (the recorded usage the recommendations are computed from)")
+	}
+	for _, verb := range []string{"update", "patch", "delete"} {
+		if allows(server, "", "configmaps", verb) {
+			t.Errorf("server role: may %s ConfigMaps", verb)
+		}
 	}
 }
 

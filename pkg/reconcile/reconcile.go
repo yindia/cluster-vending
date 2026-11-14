@@ -89,6 +89,12 @@ type Deps struct {
 // same name.
 const KubeconfigReaderRole = "cluster-vending-kubeconfig-reader"
 
+// UsageHistoryWriterRole is the ClusterRole (config/rbac) that may write
+// ConfigMaps: bound, like KubeconfigReaderRole, only in tenant namespaces,
+// where the controller keeps each cluster's recorded usage (resource
+// recommendations).
+const UsageHistoryWriterRole = "cluster-vending-usage-history-writer"
+
 // ServiceAccount names a service account.
 type ServiceAccount struct{ Namespace, Name string }
 

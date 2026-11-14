@@ -59,6 +59,14 @@ rules:
   verbs:
   - get
   - list
+# The recorded usage of each cluster (<cluster>-usage-history ConfigMaps,
+# written by the controller): read to compute resource recommendations.
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
 # A tenant is its namespace: created or adopted when the tenant is, never
 # deleted by the server.
 - apiGroups:

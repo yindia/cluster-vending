@@ -15,6 +15,7 @@ resources:
 # Get on Secrets, bound by the controller in tenant namespaces only (the
 # kubeconfig Secrets of workload clusters); never bound cluster-wide.
 - kubeconfig_reader_role.yaml
+- usage_history_writer_role.yaml
 # Leader election: Leases and events in the controller's namespace.
 - leader_election_role.yaml
 - leader_election_role_binding.yaml

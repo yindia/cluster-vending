@@ -19,11 +19,16 @@ import (
 // ClusterRole reconcile.KubeconfigReaderRole, which is bound nowhere else,
 // so the controller reads no Secret outside tenant namespaces.
 func kubeconfigReaderBinding(a *model.CloudAccount, sa reconcile.ServiceAccount) *rbacv1.RoleBinding {
+	return tenantBinding(a, sa, reconcile.KubeconfigReaderRole)
+}
+
+// tenantBinding binds the controller to the pre-created ClusterRole role
+// in the tenant namespace only, with a RoleBinding of the role's name.
+func tenantBinding(a *model.CloudAccount, sa reconcile.ServiceAccount, role string) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: a.Namespace, Name: reconcile.KubeconfigReaderRole,
-			Labels: crossplane.Labels(a.TenantID)},
-		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: reconcile.KubeconfigReaderRole},
-		Subjects: []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: sa.Namespace, Name: sa.Name}},
+		ObjectMeta: metav1.ObjectMeta{Namespace: a.Namespace, Name: role, Labels: crossplane.Labels(a.TenantID)},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
+		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: sa.Namespace, Name: sa.Name}},
 	}
 }
 
@@ -37,9 +42,13 @@ func (r *Reconciler) bindKubeconfigReader(ctx context.Context, a *model.CloudAcc
 	if sa == nil {
 		return nil
 	}
-	if err := kube.Apply(ctx, r.deps.Kube, kubeconfigReaderBinding(a, *sa)); err != nil {
-		r.logger().ErrorContext(ctx, "bind the kubeconfig reader role", "tenant_id", a.TenantID, "error", err)
-		return fault.New(fault.Internal, "could not configure the management cluster")
+	// The kubeconfig reader (workload cluster scans) and the usage-history
+	// writer (resource recommendations).
+	for _, b := range []*rbacv1.RoleBinding{kubeconfigReaderBinding(a, *sa), tenantBinding(a, *sa, reconcile.UsageHistoryWriterRole)} {
+		if err := kube.Apply(ctx, r.deps.Kube, b); err != nil {
+			r.logger().ErrorContext(ctx, "bind a tenant namespace role", "tenant_id", a.TenantID, "role", b.RoleRef.Name, "error", err)
+			return fault.New(fault.Internal, "could not configure the management cluster")
+		}
 	}
 	return nil
 }

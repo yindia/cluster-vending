@@ -78,6 +78,7 @@ rules:
   - rbac.authorization.k8s.io
   resourceNames:
   - cluster-vending-kubeconfig-reader
+  - cluster-vending-usage-history-writer
   resources:
   - clusterroles
   verbs:

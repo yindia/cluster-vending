@@ -1,0 +1,26 @@
+# Writes ConfigMaps, bound to nothing here. The controller binds itself to
+# this role in each tenant namespace (a RoleBinding the cloud account's
+# reconcile applies, like kubeconfig-reader), and keeps there each
+# cluster's recorded usage for resource recommendations
+# (<cluster>-usage-history). It writes the ConfigMaps of no other
+# namespace. The controller's own role only has the bind verb on this
+# role's name; the name, with ../default's namePrefix, must stay
+# cluster-vending-usage-history-writer (reconcile.UsageHistoryWriterRole).
+# Kept in step with the code by config/deploy_test.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: usage-history-writer
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - create
+  - update
+  - patch

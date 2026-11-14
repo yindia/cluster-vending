@@ -52,7 +52,7 @@ func NewDeprecationReconciler(d Deps) (*DeprecationReconciler, error) {
 // RoleBinding). To create a binding to a role whose permissions it does
 // not hold, it needs the bind verb on exactly that role.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=create;patch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=cluster-vending-kubeconfig-reader,verbs=bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=cluster-vending-kubeconfig-reader;cluster-vending-usage-history-writer,verbs=bind
 
 // SetupWithManager registers the scanner: one cluster at a time, woken by
 // a change of a cluster's spec and by its own schedule.

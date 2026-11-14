@@ -87,6 +87,13 @@ func (s *Reconciler) installTenant(ctx context.Context, row *model.Cluster, p *p
 	for _, c := range live {
 		errs = append(errs, s.installOneTenant(ctx, row, c, in, release, problem, entries, ready))
 	}
+	// TenantComponentsReady: the pass made the last one Ready. A failed
+	// read only loses the event; the components are installed either way.
+	if after, err := s.deps.Store.Components().ListByCluster(ctx, row.TenantID, row.ID); err == nil {
+		if n, ok := tenantComponentsReadyNote(rows, after); ok {
+			reconcile.AddNote(ctx, n)
+		}
+	}
 	return errors.Join(errs...)
 }
 

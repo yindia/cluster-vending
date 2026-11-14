@@ -93,6 +93,7 @@ const (
 	ReasonStuckReleaseRecovered       = "StuckReleaseRecovered"
 	ReasonRecoveryLimitReached        = "RecoveryLimitReached"
 	ReasonPlatformComponentsReady     = "PlatformComponentsReady"
+	ReasonTenantComponentsReady       = "TenantComponentsReady"
 	ReasonDeprecatedAPIs              = "DeprecatedAPIs"
 	ReasonDeprecationScanFailed       = "DeprecationScanFailed"
 	ReasonDeprecationScanClean        = "DeprecationScanClean"

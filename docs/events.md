@@ -68,6 +68,7 @@ its kind; the message has the details.
 | Cluster | `StuckReleaseRecovered` | Warning | a stuck Helm release's record was removed so it installs again |
 | Cluster | `RecoveryLimitReached` | Warning | a stuck Helm release was recovered as often as allowed (3 times) |
 | Cluster | `PlatformComponentsReady` | Normal | every platform component is installed |
+| Cluster | `TenantComponentsReady` | Normal | every tenant component enabled on the cluster is installed (told when the last one becomes Ready) |
 | Cluster | `DeprecatedAPIs` | Warning | the scan found API versions the next Kubernetes version removes |
 | Cluster | `DeprecationScanFailed` | Warning | the scan for deprecated API versions failed |
 | Cluster | `DeprecationScanClean` | Normal | a scan that had findings, or had failed, finds nothing removed now |

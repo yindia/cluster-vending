@@ -37,13 +37,7 @@ func catalogDescription(d *cloudv1.ComponentDefinition) string {
 
 // ComponentCatalog lists the catalog: every component, with who manages
 // it. With --cluster, the version that cluster's release gives each.
-// With a component name it prints that component's values template
-// instead: the file the platform wrote (comments kept) to edit and send
-// with enable -f. A component that takes no values says so.
 func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if o.Component != "" {
-		return componentValues(ctx, c, o)
-	}
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
@@ -91,9 +85,10 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// componentValues prints a component's values file as the platform wrote
-// it (YAML, comments kept), to edit and send with enable or update.
-func componentValues(ctx context.Context, c Clients, o Options) (proto.Message, error) {
+// ComponentTemplate prints a component's values template as the platform
+// wrote it (YAML, comments kept), to edit and send with enable -f or
+// update -f. A component that takes no values says so.
+func ComponentTemplate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	res, err := call(ctx, &cloudv1.GetComponentValuesRequest{Name: o.Component}, c.Component.GetComponentValues)
 	if err != nil {
 		return nil, err

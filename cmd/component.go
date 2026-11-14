@@ -61,9 +61,11 @@ func newComponentCmd() *cobra.Command {
 	}
 
 	verbs := []componentVerb{
-		{use: "catalog [name]", short: "List every component: who manages it (the platform's cannot be enabled or disabled), whether it takes values, what it requires; with a name, print its values template (YAML, with the platform's comments) to edit and send with enable -f",
-			run: cli.ComponentCatalog, args: cobra.MaximumNArgs(1), table: true, name: true,
+		{use: "catalog", short: "List every component that can be installed: who manages it (the platform's cannot be enabled or disabled), whether it takes values, what it requires",
+			run: cli.ComponentCatalog, args: cobra.NoArgs, table: true,
 			flags: cluster("also show the version this cluster's release gives each component (cluster ID)")},
+		{use: "template <name>", short: "Print a component's values template (YAML, with the platform's comments) to edit and send with enable -f",
+			run: cli.ComponentTemplate, args: cobra.ExactArgs(1), name: true},
 		{use: "enable <name>", short: "Enable a component on --cluster, with the values of -f if any; prints the component with its id",
 			run: cli.ComponentEnable, args: cobra.ExactArgs(1), name: true,
 			flags: all(cluster("the cluster to enable the component on (cluster ID, required)"), values, wait)},

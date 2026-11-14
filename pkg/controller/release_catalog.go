@@ -11,6 +11,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/component"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/release"
 )
 
@@ -30,15 +31,7 @@ func pinValueProblems(content cloudv1alpha1.ReleaseContent) []string {
 
 // releasePins is a release's component pins as pkg/release takes them.
 func releasePins(name string, content cloudv1alpha1.ReleaseContent) release.Release {
-	out := release.Release{Name: name, RenderVersion: content.RenderVersion}
-	for _, k := range content.Kubernetes {
-		m := release.Minor{Minor: k.Minor, Default: k.Default, UpgradeTo: k.UpgradeTo, Channel: k.Channel}
-		for _, c := range k.Components {
-			m.Components = append(m.Components, release.Component{Name: c.Name, Version: c.Version})
-		}
-		out.Kubernetes = append(out.Kubernetes, m)
-	}
-	return out
+	return platform.ReleaseOf(name, content)
 }
 
 // CatalogEntries are the catalog's definitions as the release checks take

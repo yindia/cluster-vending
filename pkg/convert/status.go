@@ -52,8 +52,19 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.KubeconfigSecret = p.GetKubeconfigSecret()
 	into.Upgrade = upgrade(p.GetUpgrade())
 	into.PlatformRelease = p.GetPlatformRelease()
+	into.Kubernetes = clusterKubernetes(p.GetKubernetes())
 	into.PlatformComponents = platformComponents(p.GetPlatformComponents())
 	into.RecentEvents = recentEvents(p.GetRecentEvents())
+}
+
+// clusterKubernetes is the contract's ClusterKubernetes as the kind
+// reports it; nil when unset.
+func clusterKubernetes(p *cloudv1.ClusterKubernetes) *cloudv1alpha1.ClusterKubernetesStatus {
+	if p == nil {
+		return nil
+	}
+	return &cloudv1alpha1.ClusterKubernetesStatus{Channel: p.GetChannel(), ChannelMinor: p.GetChannelMinor(),
+		Available: p.GetAvailable(), Ending: p.GetEnding(), Message: p.GetMessage()}
 }
 
 // platformComponents are the contract's platform components as the kind

@@ -777,6 +777,30 @@ const (
 	ClusterUpgradeNodesAndAddons ClusterUpgradePhase = "NodesAndAddons"
 )
 
+// ClusterKubernetesStatus is the cluster's Kubernetes version as the
+// release its channel offers sees it.
+type ClusterKubernetesStatus struct {
+	// channel is the cluster's release channel (alpha, beta, stable);
+	// empty when it names none.
+	// +optional
+	Channel string `json:"channel,omitempty"`
+	// channelMinor is the Kubernetes minor the channel offers now.
+	// +optional
+	ChannelMinor string `json:"channelMinor,omitempty"`
+	// available is the minor the cluster can be upgraded to next, one
+	// minor at a time toward channelMinor; empty when it is at or ahead of
+	// it (a cluster is never downgraded).
+	// +optional
+	Available string `json:"available,omitempty"`
+	// ending is true when the cluster's minor is on no channel any more:
+	// still supported, but the cluster should move to a newer minor.
+	// +optional
+	Ending bool `json:"ending,omitempty"`
+	// message says what this means for the cluster, in a sentence.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // ClusterUpgrade is where a Kubernetes upgrade stands.
 type ClusterUpgrade struct {
 	// fromVersion is the version the upgrade started from.
@@ -911,6 +935,11 @@ type ClusterStatus struct {
 	// first installed.
 	// +optional
 	PlatformRelease string `json:"platformRelease,omitempty"`
+	// kubernetes is what the cluster's release channel says of the
+	// Kubernetes version it runs: the channel's minor, the next minor it
+	// can move to, and whether its minor is ending.
+	// +optional
+	Kubernetes *ClusterKubernetesStatus `json:"kubernetes,omitempty"`
 	// componentInventory lists the Crossplane objects of the cluster's
 	// platform components (their IAM roles and Helm releases), in creation
 	// order. Kept apart from inventory: the cluster's own state is read

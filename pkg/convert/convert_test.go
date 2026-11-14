@@ -270,4 +270,14 @@ func TestClusterStatusInto(t *testing.T) {
 	if a := status.AWS; a.ClusterARN != "arn" || len(a.Addons) != 2 || !a.Addons[0].Ready || a.Addons[1].Ready || a.Addons[1].Message != "degraded" {
 		t.Errorf("aws = %+v, want two add-ons, the first ready", status.AWS)
 	}
+	if status.Kubernetes != nil {
+		t.Errorf("kubernetes = %+v, want unset when the contract has none", status.Kubernetes)
+	}
+
+	convert.ClusterStatusInto(&cloudv1.ClusterStatus{Kubernetes: &cloudv1.ClusterKubernetes{Channel: "beta", ChannelMinor: "1.36",
+		Available: "1.36", Ending: true, Message: "ending"}}, "", metav1.Now(), &status)
+	want := cloudv1alpha1.ClusterKubernetesStatus{Channel: "beta", ChannelMinor: "1.36", Available: "1.36", Ending: true, Message: "ending"}
+	if status.Kubernetes == nil || *status.Kubernetes != want {
+		t.Errorf("kubernetes = %+v, want %+v", status.Kubernetes, want)
+	}
 }

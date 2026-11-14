@@ -1369,6 +1369,37 @@ spec:
                   the cluster's kubeconfig (key "kubeconfig"). Empty until the control
                   plane is ready.
                 type: string
+              kubernetes:
+                description: |-
+                  kubernetes is what the cluster's release channel says of the
+                  Kubernetes version it runs: the channel's minor, the next minor it
+                  can move to, and whether its minor is ending.
+                properties:
+                  available:
+                    description: |-
+                      available is the minor the cluster can be upgraded to next, one
+                      minor at a time toward channelMinor; empty when it is at or ahead of
+                      it (a cluster is never downgraded).
+                    type: string
+                  channel:
+                    description: |-
+                      channel is the cluster's release channel (alpha, beta, stable);
+                      empty when it names none.
+                    type: string
+                  channelMinor:
+                    description: channelMinor is the Kubernetes minor the channel
+                      offers now.
+                    type: string
+                  ending:
+                    description: |-
+                      ending is true when the cluster's minor is on no channel any more:
+                      still supported, but the cluster should move to a newer minor.
+                    type: boolean
+                  message:
+                    description: message says what this means for the cluster, in
+                      a sentence.
+                    type: string
+                type: object
               message:
                 description: message summarises the state, typically the reason for
                   Failed.

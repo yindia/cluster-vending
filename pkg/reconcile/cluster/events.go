@@ -32,7 +32,16 @@ func statusEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	out = append(out, stateEvents(before, after)...)
 	out = append(out, upgradeEvents(before, after)...)
 	out = append(out, platformEvents(before, after)...)
+	out = append(out, kubernetesEvents(before, after)...)
 	return out
+}
+
+// kubernetesEvents are the cluster's Kubernetes minor becoming ending.
+func kubernetesEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
+	if after.GetKubernetes().GetEnding() && !before.GetKubernetes().GetEnding() {
+		return []reconcile.Note{reconcile.Warning(reconcile.ReasonKubernetesEnding, after.GetKubernetes().GetMessage())}
+	}
+	return nil
 }
 
 // stateEvents are the events of the cluster's state: reaching it, and,

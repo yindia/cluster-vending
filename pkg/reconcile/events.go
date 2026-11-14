@@ -50,6 +50,7 @@ const (
 //	Cluster       DeprecatedAPIs              Warning  the scan found API versions removed at the next Kubernetes version
 //	Cluster       DeprecationScanFailed       Warning  the scan for deprecated API versions failed
 //	Cluster       DeprecationScanClean        Normal   a scan that had findings, or failed, found nothing removed now
+//	Cluster       KubernetesEnding            Warning  the cluster's Kubernetes minor is on no release channel any more: it is ending
 //	CloudAccount  Bootstrapped                Normal   the tenant namespace and the account's ProviderConfig exist
 //	CloudAccount  ProviderConfigFailed        Warning  the account's ProviderConfig or credentials copy could not be applied
 //	CloudAccount  AccessVerified              Normal   the tenant role works in every region the account uses
@@ -88,6 +89,7 @@ const (
 	ReasonDeprecatedAPIs              = "DeprecatedAPIs"
 	ReasonDeprecationScanFailed       = "DeprecationScanFailed"
 	ReasonDeprecationScanClean        = "DeprecationScanClean"
+	ReasonKubernetesEnding            = "KubernetesEnding"
 	ReasonBootstrapped                = "Bootstrapped"
 	ReasonProviderConfigFailed        = "ProviderConfigFailed"
 	ReasonAccessVerified              = "AccessVerified"

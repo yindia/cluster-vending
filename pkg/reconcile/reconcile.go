@@ -72,6 +72,12 @@ type Deps struct {
 	// component catalog and the releases that pin its versions. Only what
 	// reconciles has it; nil installs nothing (the API handlers, tests).
 	Platform PlatformSource
+	// Releases reads the release channels and the releases a cluster's
+	// Kubernetes version is checked against (create and update) and
+	// reported against (its status): the API handlers have it without
+	// Platform. Nil: Platform is read; neither: nothing is checked
+	// (tests).
+	Releases ReleaseReader
 	// Workloads reaches workload clusters, to recover a platform
 	// component's Helm release that is stuck (RecoverStuckReleases). Nil:
 	// nothing is recovered.
@@ -111,6 +117,13 @@ type ServiceAccount struct{ Namespace, Name string }
 type PlatformSource interface {
 	// Definitions are the catalog's definitions.
 	Definitions(ctx context.Context) ([]cloudv1alpha1.ComponentDefinition, error)
+	ReleaseReader
+}
+
+// ReleaseReader reads the release channels and the releases: what a
+// cluster's Kubernetes version is checked and reported against (the minor
+// its channel offers).
+type ReleaseReader interface {
 	// Offered is the name of the release the channel (alpha, beta,
 	// stable) offers now; "" when it offers none.
 	Offered(ctx context.Context, channel string) (string, error)

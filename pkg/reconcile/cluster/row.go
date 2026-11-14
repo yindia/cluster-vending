@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -93,7 +94,13 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err != nil {
 		return nil, fault.New(fault.Internal, err.Error())
 	}
-	spec, err := corecluster.ResolveSpec(in.GetSpec(), t.Zones)
+	// A cluster on a channel runs the channel's minor unless it names an
+	// older one; the client's input is stored as it was sent.
+	requested := proto.CloneOf(in.GetSpec())
+	if err := s.withChannelVersion(ctx, requested); err != nil {
+		return nil, err
+	}
+	spec, err := corecluster.ResolveSpec(requested, t.Zones)
 	if err != nil {
 		return nil, fault.New(fault.Invalid, err.Error())
 	}

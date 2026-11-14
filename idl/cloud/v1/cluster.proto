@@ -454,6 +454,42 @@ message ClusterStatus {
   // recommend resource requests (the recommendations themselves:
   // ListClusterRecommendations). Unset until the cluster was sampled.
   ClusterRecommendations recommendations = 42;
+
+  // kubernetes is what the platform's releases say of the Kubernetes
+  // version the cluster runs: the minor its release channel offers, the
+  // next minor it can move to, and whether its minor is ending. Unset
+  // until the controller read the cluster's release.
+  ClusterKubernetes kubernetes = 46;
+}
+
+// ClusterKubernetes is the cluster's Kubernetes version as the release
+// its channel offers sees it (pkg/catalog/release.yaml puts one minor on
+// each of alpha, beta and stable).
+message ClusterKubernetes {
+  // The cluster's release channel (alpha, beta, stable). Empty when the
+  // cluster names none: no channel's minor applies to it, only ending.
+  string channel = 1;
+
+  // The Kubernetes minor the channel offers now, e.g. "1.36". A cluster
+  // on the channel is created on it, may not ask for a newer one, and an
+  // automatic cluster is upgraded toward it. Empty when the cluster names
+  // no channel, or the channel's release puts no minor on it.
+  string channel_minor = 2;
+
+  // The minor the cluster can be upgraded to next, one minor at a time
+  // toward channel_minor (EKS upgrades one minor at a time). Empty when
+  // the cluster is at or ahead of its channel's minor: it is never
+  // downgraded.
+  string available = 3;
+
+  // True when the cluster's minor is still supported but on no channel
+  // any more: it is ending, and the cluster should move to a newer minor.
+  bool ending = 4;
+
+  // What this means for the cluster, in a sentence: an upgrade available,
+  // ahead of the channel (it waits), or ending. Empty when the cluster
+  // runs its channel's minor.
+  string message = 5;
 }
 
 // PlatformComponent is one component the platform installed with a

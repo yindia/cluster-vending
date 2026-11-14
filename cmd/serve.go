@@ -73,11 +73,17 @@ func newServeCmd(g *globals) *cobra.Command {
 				return fmt.Errorf("listen on %s: %w", cfg.HTTPAddr, err)
 			}
 			g.logger.Info("configuration loaded", "kubeconfig", g.cfg.Kubeconfig, "context", g.cfg.KubeContext)
+			// The catalog and the releases are read at the API server, not
+			// from the cache: it holds the kinds the reconcilers watch.
+			catalog := management.PlatformSource(mgr.GetAPIReader())
 			deps := reconcile.Deps{
 				Store:      store,
 				Kube:       mgr.GetClient(), // reads from the informer cache
 				KubeReader: mgr.GetAPIReader(),
-				Logger:     g.logger,
+				// A cluster's Kubernetes version is checked against the
+				// minor its release channel offers.
+				Releases: catalog,
+				Logger:   g.logger,
 			}
 			var ready atomic.Bool
 			done, err := management.Start(ctx, mgr, &ready)
@@ -94,10 +100,8 @@ func newServeCmd(g *globals) *cobra.Command {
 				}
 			}()
 			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
-			// The catalog and the releases are read at the API server, not
-			// from the cache: it holds the kinds the reconcilers watch.
 			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
-				server.WithCatalog(management.PlatformSource(mgr.GetAPIReader())))
+				server.WithCatalog(catalog))
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}

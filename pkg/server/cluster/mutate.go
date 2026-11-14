@@ -235,6 +235,9 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		if err := s.CheckVersionStep(ctx, row, versionBefore, spec.GetControlPlane().GetKubernetesVersion()); err != nil {
 			return nil, err
 		}
+		if err := s.CheckChannelVersion(ctx, spec, versionBefore); err != nil {
+			return nil, err
+		}
 	}
 	if row.Input, err = updatedInput(row, in, paths); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())

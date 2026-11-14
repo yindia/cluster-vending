@@ -70,6 +70,7 @@ its kind; the message has the details.
 | Cluster | `DeprecatedAPIs` | Warning | the scan found API versions the next Kubernetes version removes |
 | Cluster | `DeprecationScanFailed` | Warning | the scan for deprecated API versions failed |
 | Cluster | `DeprecationScanClean` | Normal | a scan that had findings, or had failed, finds nothing removed now |
+| Cluster | `KubernetesEnding` | Warning | the cluster's Kubernetes minor is on no release channel any more: it is ending (`status.kubernetes`) |
 | CloudAccount | `Bootstrapped` | Normal | the tenant namespace and the account's ProviderConfig exist |
 | CloudAccount | `ProviderConfigFailed` | Warning | the account's ProviderConfig or credentials copy could not be applied |
 | CloudAccount | `AccessVerified` | Normal | the tenant role works in every region the account uses (the access check, docs/controller.md) |

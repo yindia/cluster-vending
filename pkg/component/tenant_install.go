@@ -8,14 +8,14 @@ import (
 )
 
 // TenantEntries are the catalog's tenant components a tenant may enable
-// (not Platform, not internal, with an install of their own), each with
-// its install. A definition that is not usable (CheckDefinition) is left
+// (not Platform, not internal, not disabled by the platform team, with an
+// install of their own), each with its install. A definition that is not usable (CheckDefinition) is left
 // out: a component of it reports that it is not in the catalog.
 func TenantEntries(defs []cloudv1alpha1.ComponentDefinition) []PlatformEntry {
 	var out []PlatformEntry
 	for i := range defs {
 		d, err := DefinitionOf(&defs[i])
-		if err != nil || len(CheckDefinition(d)) > 0 || d.IsPlatform() || d.Internal {
+		if err != nil || len(CheckDefinition(d)) > 0 || d.IsPlatform() || d.Internal || d.Disabled {
 			continue
 		}
 		install, ok := InstallOf(&defs[i])

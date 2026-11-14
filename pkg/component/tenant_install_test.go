@@ -103,6 +103,12 @@ func TestTenantEntries(t *testing.T) {
 	if len(entries) != 1 || entries[0].Name != "policies" || entries[0].Install.Main.Name != "policies" {
 		t.Fatalf("entries %+v, want only the tenant component policies", entries)
 	}
+
+	// A definition the platform team disabled installs nothing.
+	defs[1].Spec.Disabled = true
+	if entries := component.TenantEntries(defs); len(entries) != 0 {
+		t.Fatalf("a disabled definition is an entry: %+v", entries)
+	}
 }
 
 // LastRelease is the Helm release a component's install ends with: its

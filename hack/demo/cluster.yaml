@@ -26,3 +26,6 @@ spec:
   tier: CLUSTER_TIER_2                   # upgraded first
   access:
     adminPrincipals: []
+  aws:                                   # the cloud (required): AWS settings of the EKS cluster
+    upgradePolicy:
+      supportType: AWS_SUPPORT_TYPE_STANDARD

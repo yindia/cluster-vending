@@ -100,6 +100,9 @@ type Deps struct {
 	// through the informer cache: an object is read right after it was
 	// written.
 	Direct client.Client
+	// Workers is how many accounts, networks and clusters of each kind are
+	// reconciled at once (objectOptions); 0 is one.
+	Workers int
 }
 
 func (d Deps) logger() *slog.Logger {

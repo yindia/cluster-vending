@@ -73,6 +73,9 @@ type Options struct {
 	// Recommendations samples running clusters for resource
 	// recommendations.
 	Recommendations bool
+	// ReconcileWorkers is how many accounts, networks and clusters of each
+	// kind are reconciled at once (0: one).
+	ReconcileWorkers int
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -191,7 +194,7 @@ func Run(ctx context.Context, o Options) error {
 	// What happens to accounts, networks, clusters and releases is also a
 	// Kubernetes event of the object (docs/events.md).
 	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
-	deps := Deps{Direct: direct, Deps: reconciling}
+	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers}
 	if err := Setup(mgr, deps); err != nil {
 		return err
 	}
@@ -200,7 +203,8 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("controller manager started", "leader_elect", o.LeaderElect, "render_target", renderTarget)
+	logger.Info("controller manager started", "leader_elect", o.LeaderElect, "render_target", renderTarget,
+		"reconcile_workers", o.ReconcileWorkers)
 	if err := <-done; err != nil {
 		return fmt.Errorf("controller manager: %w", err)
 	}

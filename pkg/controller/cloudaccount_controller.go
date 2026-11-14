@@ -248,5 +248,6 @@ func (r *CloudAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&cloudv1alpha1.CloudAccount{}, forObject()).
 		Owns(&cloudv1alpha1.Network{}).
 		Named("cloudaccount").
+		WithOptions(objectOptions(r.deps)).
 		Complete(r)
 }

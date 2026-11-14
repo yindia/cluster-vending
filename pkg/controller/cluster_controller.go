@@ -206,7 +206,8 @@ func (r *ClusterReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Cluste
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&cloudv1alpha1.Cluster{}, forObject()).
-		Named("cluster")
+		Named("cluster").
+		WithOptions(objectOptions(r.deps))
 	owner := ownerRequests(r.owners, r.deps.Direct, crossplane.LabelCluster,
 		func() client.ObjectList { return &cloudv1alpha1.ClusterList{} })
 	b, err := providerWatches(b, mgr, owner)

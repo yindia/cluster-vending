@@ -190,7 +190,8 @@ func (r *NetworkReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&cloudv1alpha1.Network{}, forObject()).
 		Owns(&cloudv1alpha1.Cluster{}).
-		Named("network")
+		Named("network").
+		WithOptions(objectOptions(r.deps))
 	b, err := providerWatches(b, mgr, ownerRequests(r.owners, r.deps.Direct, crossplane.LabelNetwork,
 		func() client.ObjectList { return &cloudv1alpha1.NetworkList{} }))
 	if err != nil {

@@ -13,6 +13,10 @@ const (
 	EnvMetricsAddr  = "CV_METRICS_ADDR"
 	FlagProbeAddr   = "health-probe-addr"
 	EnvProbeAddr    = "CV_HEALTH_PROBE_ADDR"
+	// FlagReconcileWorkers is how many objects of each kind (accounts,
+	// networks, clusters) are reconciled at once.
+	FlagReconcileWorkers = "reconcile-workers"
+	EnvReconcileWorkers  = "CV_RECONCILE_WORKERS"
 )
 
 // Defaults of the controller command.
@@ -20,6 +24,10 @@ const (
 	// DefaultMetricsAddr turns the controller's metrics endpoint off.
 	DefaultMetricsAddr = "0"
 	DefaultProbeAddr   = ":8081"
+	// DefaultReconcileWorkers: one slow pass (a cluster waiting on its
+	// network, a Helm install) no longer holds up every other object of
+	// its kind. An object is never reconciled by two workers at once.
+	DefaultReconcileWorkers = 8
 )
 
 // controllerSettings are all the controller takes. How the providers run
@@ -51,6 +59,8 @@ var controllerSettings = []Setting{
 		Usage: "recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes): remove the Helm record of the stuck revision in the workload cluster so the chart is installed again, at most 3 times per component version; false leaves such a component failed for a person to look at"},
 	{Flag: FlagRecommendations, Env: EnvRecommendations, Default: "true",
 		Usage: "every five minutes, read each running cluster's workloads, the usage its metrics-server reports and its own Vertical Pod Autoscalers (read-only, nothing is installed there) and record a week of usage, for resource recommendations (ListClusterRecommendations); false records nothing"},
+	{Flag: FlagReconcileWorkers, Env: EnvReconcileWorkers, Default: strconv.Itoa(DefaultReconcileWorkers),
+		Usage: "how many cloud accounts, networks and clusters of each kind are reconciled at once (at least 1); one object is never reconciled twice at the same time"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -79,6 +89,9 @@ type Controller struct {
 	// Recommendations: sample running clusters for resource
 	// recommendations.
 	Recommendations bool
+	// ReconcileWorkers is how many objects of each kind are reconciled at
+	// once (at least 1).
+	ReconcileWorkers int
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -126,6 +139,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.Recommendations, err = strconv.ParseBool(v[FlagRecommendations]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagRecommendations), v[FlagRecommendations]))
+	}
+	if cfg.ReconcileWorkers, err = strconv.Atoi(v[FlagReconcileWorkers]); err != nil || cfg.ReconcileWorkers < 1 {
+		errs = append(errs, fmt.Errorf("%s must be a whole number of at least 1, got %q", setting(FlagReconcileWorkers), v[FlagReconcileWorkers]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

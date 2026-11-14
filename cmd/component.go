@@ -87,6 +87,11 @@ func newComponentCmd() *cobra.Command {
 				})},
 	}
 	for _, v := range verbs {
+		usage, takesID, idRequired := cli.IDVerb(v.use)
+		if takesID {
+			// The component acted on is --id; a positional ID still works (hidden).
+			v.use, v.args = usage, cobra.MaximumNArgs(1)
+		}
 		cmd := &cobra.Command{Use: v.use, Short: v.short, Args: v.args,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				cfg, err := config.LoadClient(changedFlags(cmd.Flags()), os.LookupEnv)
@@ -95,15 +100,24 @@ func newComponentCmd() *cobra.Command {
 				}
 				opts := o
 				opts.Progress, opts.RequestTimeout, opts.Terminal = cmd.ErrOrStderr(), cfg.RequestTimeout, onTerminal()
-				if len(args) > 0 {
-					if v.name {
-						opts.Component = args[0]
-					} else {
-						opts.ID = args[0]
+				switch {
+				case v.name && len(args) > 0:
+					opts.Component = args[0]
+				case takesID:
+					if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
+						return err
+					}
+					if idRequired {
+						if err := cli.RequireID(opts.ID, "component"); err != nil {
+							return err
+						}
 					}
 				}
 				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken)), opts, cmd.OutOrStdout(), output)
 			},
+		}
+		if takesID {
+			cmd.Flags().StringVar(&o.ID, "id", "", "the component's ID, as component enable and component list print it")
 		}
 		if v.flags != nil {
 			v.flags(cmd, &o)

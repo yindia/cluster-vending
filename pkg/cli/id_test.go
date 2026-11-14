@@ -25,3 +25,36 @@ func TestResolveID(t *testing.T) {
 		})
 	}
 }
+
+// A verb written with an <id> (or optional [id]) argument takes --id
+// instead: its usage drops the argument, a positional one is still taken.
+func TestIDVerb(t *testing.T) {
+	tests := []struct {
+		use, wantUse    string
+		takes, required bool
+	}{
+		{"get <id>", "get", true, true},
+		{"update [id]", "update", true, false},
+		{"watch <id>", "watch", true, true},
+		{"list", "list", false, false},
+		{"enable <name>", "enable <name>", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.use, func(t *testing.T) {
+			use, takes, required := IDVerb(tt.use)
+
+			if use != tt.wantUse || takes != tt.takes || required != tt.required {
+				t.Errorf("IDVerb(%q) = %q, %v, %v", tt.use, use, takes, required)
+			}
+		})
+	}
+}
+
+func TestRequireID(t *testing.T) {
+	if err := RequireID("", "cluster"); err == nil || err.Error() != "--id is required: the cluster's ID" {
+		t.Errorf("RequireID = %v", err)
+	}
+	if err := RequireID("01a1", "cluster"); err != nil {
+		t.Errorf("RequireID = %v", err)
+	}
+}

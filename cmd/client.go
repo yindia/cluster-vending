@@ -39,7 +39,7 @@ func crud(noun, kind string, create, get, list, update, del cli.Command) []verb 
 			run: create, args: cobra.NoArgs, input: true, wait: true},
 		{use: "get <id>", short: "Show a " + noun, run: get, args: cobra.ExactArgs(1)},
 		{use: "list", short: "List " + noun + "s", run: list, args: cobra.NoArgs, page: true},
-		{use: "update [id]", short: fmt.Sprintf("Update the --update-mask fields of a %s from a %s manifest (-f); the id is the argument or metadata.id", noun, kind),
+		{use: "update [id]", short: fmt.Sprintf("Update the --update-mask fields of a %s from a %s manifest (-f); the id is --id or metadata.id", noun, kind),
 			run: update, args: cobra.MaximumNArgs(1), input: true, etag: true, mask: true, wait: true},
 		{use: "delete <id>", short: fmt.Sprintf("Delete a %s; its resources are deleted in order", noun), run: del,
 			args: cobra.ExactArgs(1), etag: true, wait: true},
@@ -60,6 +60,11 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	}
 
 	for _, v := range verbs {
+		usage, takesID, idRequired := cli.IDVerb(v.use)
+		if takesID {
+			// The object acted on is --id; a positional ID still works (hidden).
+			v.use, v.args, v.id = usage, cobra.MaximumNArgs(1), true
+		}
 		cmd := &cobra.Command{
 			Use:   v.use,
 			Short: v.short,
@@ -75,12 +80,17 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
 					return err
 				}
+				if idRequired {
+					if err := cli.RequireID(opts.ID, use); err != nil {
+						return err
+					}
+				}
 				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken)), opts, cmd.OutOrStdout(), output)
 			},
 		}
 		f := cmd.Flags()
 		if v.id {
-			f.StringVar(&o.ID, "id", "", "the account's ID: the id account create and account list print")
+			f.StringVar(&o.ID, "id", "", fmt.Sprintf("the %s's ID, as %s create and %s list print it", use, use, use))
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")

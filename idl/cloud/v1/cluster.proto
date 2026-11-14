@@ -15,6 +15,7 @@ import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
 import "cloud/v1/node_pool.proto";
 import "cloud/v1/pause.proto";
+import "cloud/v1/recommendation.proto";
 import "google/protobuf/timestamp.proto";
 
 // Cluster is a managed Kubernetes cluster owned by exactly one tenant.
@@ -401,6 +402,11 @@ message ClusterStatus {
   // who, since when and why. The platform then only observes the cluster;
   // the condition Paused is True and message says so. Unset: not paused.
   Pause pause = 45;
+
+  // recommendations is the summary of the usage the controller records to
+  // recommend resource requests (the recommendations themselves:
+  // ListClusterRecommendations). Unset until the cluster was sampled.
+  ClusterRecommendations recommendations = 42;
 }
 
 // PlatformComponent is one component the platform installed with a

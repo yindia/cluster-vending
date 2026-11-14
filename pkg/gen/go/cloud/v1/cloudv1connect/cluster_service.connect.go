@@ -44,6 +44,9 @@ const (
 	// ClusterServiceListClusterEventsProcedure is the procedure name of the ClusterService's
 	// ListClusterEvents RPC.
 	ClusterServiceListClusterEventsProcedure = "/cloud.v1.ClusterService/ListClusterEvents"
+	// ClusterServiceListClusterRecommendationsProcedure is the procedure name of the ClusterService's
+	// ListClusterRecommendations RPC.
+	ClusterServiceListClusterRecommendationsProcedure = "/cloud.v1.ClusterService/ListClusterRecommendations"
 	// ClusterServiceListClustersProcedure is the procedure name of the ClusterService's ListClusters
 	// RPC.
 	ClusterServiceListClustersProcedure = "/cloud.v1.ClusterService/ListClusters"
@@ -109,6 +112,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListClusterEvents"),
 			Procedure:        ClusterServiceListClusterEventsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	clusterServiceListClusterRecommendationsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListClusterRecommendations"),
+			Procedure:        ClusterServiceListClusterRecommendationsProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -201,6 +212,13 @@ type ClusterServiceClient interface {
 	// which Kubernetes keeps for about an hour. status.recent_events (in
 	// GetCluster) keeps the last ten for good.
 	ListClusterEvents(context.Context, *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error)
+	// Lists what the platform recommends the containers of a cluster's
+	// workloads ask for: per container its current requests and limits, the
+	// usage recorded over the last week, the recommended requests and
+	// limits and the difference. Computed from what the controller recorded
+	// (it samples the cluster every five minutes, read-only), read from the
+	// platform's store. Empty for a cluster that was not sampled yet.
+	ListClusterRecommendations(context.Context, *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -314,6 +332,13 @@ type ClusterServiceHandler interface {
 	// which Kubernetes keeps for about an hour. status.recent_events (in
 	// GetCluster) keeps the last ten for good.
 	ListClusterEvents(context.Context, *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error)
+	// Lists what the platform recommends the containers of a cluster's
+	// workloads ask for: per container its current requests and limits, the
+	// usage recorded over the last week, the recommended requests and
+	// limits and the difference. Computed from what the controller recorded
+	// (it samples the cluster every five minutes, read-only), read from the
+	// platform's store. Empty for a cluster that was not sampled yet.
+	ListClusterRecommendations(context.Context, *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -356,6 +381,7 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceGetClusterStatusSpec(), Handler: adapter.getClusterStatus},
 		connect.Method{Spec: clusterServiceListClusterDeprecationsSpec(), Handler: adapter.listClusterDeprecations},
 		connect.Method{Spec: clusterServiceListClusterEventsSpec(), Handler: adapter.listClusterEvents},
+		connect.Method{Spec: clusterServiceListClusterRecommendationsSpec(), Handler: adapter.listClusterRecommendations},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
 		connect.Method{Spec: clusterServiceWatchClusterSpec(), Handler: adapter.watchCluster},
@@ -408,6 +434,10 @@ func (UnimplementedClusterServiceHandler) ListClusterDeprecations(context.Contex
 
 func (UnimplementedClusterServiceHandler) ListClusterEvents(context.Context, *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListClusterEvents is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) ListClusterRecommendations(context.Context, *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListClusterRecommendations is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
@@ -481,6 +511,14 @@ func (c *clusterServiceClient) ListClusterDeprecations(ctx context.Context, req 
 func (c *clusterServiceClient) ListClusterEvents(ctx context.Context, req *v1.ListClusterEventsRequest) (*v1.ListClusterEventsResponse, error) {
 	var res v1.ListClusterEventsResponse
 	if err := c.client.CallUnary(ctx, clusterServiceListClusterEventsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) ListClusterRecommendations(ctx context.Context, req *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error) {
+	var res v1.ListClusterRecommendationsResponse
+	if err := c.client.CallUnary(ctx, clusterServiceListClusterRecommendationsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -598,6 +636,18 @@ func (h clusterServiceHandler) listClusterEvents(ctx context.Context, _ connect.
 		return err
 	}
 	res, err := h.svc.ListClusterEvents(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) listClusterRecommendations(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListClusterRecommendationsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListClusterRecommendations(ctx, &req)
 	if err != nil {
 		return err
 	}

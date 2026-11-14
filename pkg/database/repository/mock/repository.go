@@ -1267,6 +1267,44 @@ func (c *MockClustersSetDeprecationsCall) DoAndReturn(f func(context.Context, st
 	return c
 }
 
+// SetRecommendations mocks base method.
+func (m *MockClusters) SetRecommendations(ctx context.Context, tenantID, id string, recommendations model.JSON) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetRecommendations", ctx, tenantID, id, recommendations)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetRecommendations indicates an expected call of SetRecommendations.
+func (mr *MockClustersMockRecorder) SetRecommendations(ctx, tenantID, id, recommendations any) *MockClustersSetRecommendationsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRecommendations", reflect.TypeOf((*MockClusters)(nil).SetRecommendations), ctx, tenantID, id, recommendations)
+	return &MockClustersSetRecommendationsCall{Call: call}
+}
+
+// MockClustersSetRecommendationsCall wrap *gomock.Call
+type MockClustersSetRecommendationsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersSetRecommendationsCall) Return(arg0 error) *MockClustersSetRecommendationsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersSetRecommendationsCall) Do(f func(context.Context, string, string, model.JSON) error) *MockClustersSetRecommendationsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersSetRecommendationsCall) DoAndReturn(f func(context.Context, string, string, model.JSON) error) *MockClustersSetRecommendationsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetStatus mocks base method.
 func (m *MockClusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()
@@ -1301,6 +1339,44 @@ func (c *MockClustersSetStatusCall) Do(f func(context.Context, string, string, s
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockClustersSetStatusCall) DoAndReturn(f func(context.Context, string, string, string, model.JSON) error) *MockClustersSetStatusCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetUsageHistory mocks base method.
+func (m *MockClusters) SetUsageHistory(ctx context.Context, tenantID, id string, history []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetUsageHistory", ctx, tenantID, id, history)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetUsageHistory indicates an expected call of SetUsageHistory.
+func (mr *MockClustersMockRecorder) SetUsageHistory(ctx, tenantID, id, history any) *MockClustersSetUsageHistoryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetUsageHistory", reflect.TypeOf((*MockClusters)(nil).SetUsageHistory), ctx, tenantID, id, history)
+	return &MockClustersSetUsageHistoryCall{Call: call}
+}
+
+// MockClustersSetUsageHistoryCall wrap *gomock.Call
+type MockClustersSetUsageHistoryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersSetUsageHistoryCall) Return(arg0 error) *MockClustersSetUsageHistoryCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersSetUsageHistoryCall) Do(f func(context.Context, string, string, []byte) error) *MockClustersSetUsageHistoryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersSetUsageHistoryCall) DoAndReturn(f func(context.Context, string, string, []byte) error) *MockClustersSetUsageHistoryCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -1341,6 +1417,45 @@ func (c_2 *MockClustersUpdateCall) Do(f func(context.Context, *model.Cluster) er
 func (c_2 *MockClustersUpdateCall) DoAndReturn(f func(context.Context, *model.Cluster) error) *MockClustersUpdateCall {
 	c_2.Call = c_2.Call.DoAndReturn(f)
 	return c_2
+}
+
+// UsageHistory mocks base method.
+func (m *MockClusters) UsageHistory(ctx context.Context, tenantID, id string) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UsageHistory", ctx, tenantID, id)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UsageHistory indicates an expected call of UsageHistory.
+func (mr *MockClustersMockRecorder) UsageHistory(ctx, tenantID, id any) *MockClustersUsageHistoryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UsageHistory", reflect.TypeOf((*MockClusters)(nil).UsageHistory), ctx, tenantID, id)
+	return &MockClustersUsageHistoryCall{Call: call}
+}
+
+// MockClustersUsageHistoryCall wrap *gomock.Call
+type MockClustersUsageHistoryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersUsageHistoryCall) Return(arg0 []byte, arg1 error) *MockClustersUsageHistoryCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersUsageHistoryCall) Do(f func(context.Context, string, string) ([]byte, error)) *MockClustersUsageHistoryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersUsageHistoryCall) DoAndReturn(f func(context.Context, string, string) ([]byte, error)) *MockClustersUsageHistoryCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // MockComponents is a mock of Components interface.

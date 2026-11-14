@@ -219,6 +219,11 @@ type Cluster struct {
 	// included). Not part of Status: the scan writes it on its own, with
 	// Clusters.SetDeprecations. Empty: never scanned.
 	Deprecations JSON
+	// Recommendations is the summary of the usage the controller records
+	// to recommend resource requests (protojson cloud.v1
+	// ClusterRecommendations), set with Clusters.SetRecommendations.
+	// Empty: never sampled.
+	Recommendations JSON
 }
 
 // Event is one Kubernetes event about an object of a tenant, as the

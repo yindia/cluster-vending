@@ -1214,7 +1214,7 @@ var File_cloud_v1_cluster_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecloud/v1/cluster_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x13cloud/v1/plan.proto\x1a google/protobuf/field_mask.proto\"\xeb\x02\n" +
+	"\x1ecloud/v1/cluster_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x13cloud/v1/plan.proto\x1a\x1dcloud/v1/recommendation.proto\x1a google/protobuf/field_mask.proto\"\xeb\x02\n" +
 	"\x14ImportClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12@\n" +
 	"\x04name\x18\x02 \x01(\tB,\xbaH)r'\x10\x01\x18(2!^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$R\x04name\x12+\n" +
@@ -1292,7 +1292,7 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\x12\x14\n" +
 	"\x05force\x18\x04 \x01(\bR\x05force\"D\n" +
 	"\x15DeleteClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster2\xe5\a\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster2\xe3\b\n" +
 	"\x0eClusterService\x12P\n" +
 	"\rCreateCluster\x12\x1e.cloud.v1.CreateClusterRequest\x1a\x1f.cloud.v1.CreateClusterResponse\x12P\n" +
 	"\rImportCluster\x12\x1e.cloud.v1.ImportClusterRequest\x1a\x1f.cloud.v1.ImportClusterResponse\x12V\n" +
@@ -1301,7 +1301,8 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"GetCluster\x12\x1b.cloud.v1.GetClusterRequest\x1a\x1c.cloud.v1.GetClusterResponse\"\x03\x90\x02\x01\x12^\n" +
 	"\x10GetClusterStatus\x12!.cloud.v1.GetClusterStatusRequest\x1a\".cloud.v1.GetClusterStatusResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x17ListClusterDeprecations\x12(.cloud.v1.ListClusterDeprecationsRequest\x1a).cloud.v1.ListClusterDeprecationsResponse\"\x03\x90\x02\x01\x12a\n" +
-	"\x11ListClusterEvents\x12\".cloud.v1.ListClusterEventsRequest\x1a#.cloud.v1.ListClusterEventsResponse\"\x03\x90\x02\x01\x12R\n" +
+	"\x11ListClusterEvents\x12\".cloud.v1.ListClusterEventsRequest\x1a#.cloud.v1.ListClusterEventsResponse\"\x03\x90\x02\x01\x12|\n" +
+	"\x1aListClusterRecommendations\x12+.cloud.v1.ListClusterRecommendationsRequest\x1a,.cloud.v1.ListClusterRecommendationsResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\fListClusters\x12\x1d.cloud.v1.ListClustersRequest\x1a\x1e.cloud.v1.ListClustersResponse\"\x03\x90\x02\x01\x12P\n" +
 	"\rUpdateCluster\x12\x1e.cloud.v1.UpdateClusterRequest\x1a\x1f.cloud.v1.UpdateClusterResponse\x12T\n" +
 	"\fWatchCluster\x12\x1d.cloud.v1.WatchClusterRequest\x1a\x1e.cloud.v1.WatchClusterResponse\"\x03\x90\x02\x010\x01\x12U\n" +
@@ -1322,33 +1323,35 @@ func file_cloud_v1_cluster_service_proto_rawDescGZIP() []byte {
 
 var file_cloud_v1_cluster_service_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_cloud_v1_cluster_service_proto_goTypes = []any{
-	(*ImportClusterRequest)(nil),            // 0: cloud.v1.ImportClusterRequest
-	(*AwsImportCluster)(nil),                // 1: cloud.v1.AwsImportCluster
-	(*ImportClusterResponse)(nil),           // 2: cloud.v1.ImportClusterResponse
-	(*TakeOverClusterRequest)(nil),          // 3: cloud.v1.TakeOverClusterRequest
-	(*TakeOverClusterResponse)(nil),         // 4: cloud.v1.TakeOverClusterResponse
-	(*CreateClusterRequest)(nil),            // 5: cloud.v1.CreateClusterRequest
-	(*CreateClusterResponse)(nil),           // 6: cloud.v1.CreateClusterResponse
-	(*GetClusterRequest)(nil),               // 7: cloud.v1.GetClusterRequest
-	(*GetClusterStatusRequest)(nil),         // 8: cloud.v1.GetClusterStatusRequest
-	(*GetClusterStatusResponse)(nil),        // 9: cloud.v1.GetClusterStatusResponse
-	(*WatchClusterRequest)(nil),             // 10: cloud.v1.WatchClusterRequest
-	(*WatchClusterResponse)(nil),            // 11: cloud.v1.WatchClusterResponse
-	(*GetClusterResponse)(nil),              // 12: cloud.v1.GetClusterResponse
-	(*ListClustersRequest)(nil),             // 13: cloud.v1.ListClustersRequest
-	(*ListClustersResponse)(nil),            // 14: cloud.v1.ListClustersResponse
-	(*UpdateClusterRequest)(nil),            // 15: cloud.v1.UpdateClusterRequest
-	(*UpdateClusterResponse)(nil),           // 16: cloud.v1.UpdateClusterResponse
-	(*DeleteClusterRequest)(nil),            // 17: cloud.v1.DeleteClusterRequest
-	(*DeleteClusterResponse)(nil),           // 18: cloud.v1.DeleteClusterResponse
-	(*Cluster)(nil),                         // 19: cloud.v1.Cluster
-	(*ManagedResourceEvent)(nil),            // 20: cloud.v1.ManagedResourceEvent
-	(*fieldmaskpb.FieldMask)(nil),           // 21: google.protobuf.FieldMask
-	(*Plan)(nil),                            // 22: cloud.v1.Plan
-	(*ListClusterDeprecationsRequest)(nil),  // 23: cloud.v1.ListClusterDeprecationsRequest
-	(*ListClusterEventsRequest)(nil),        // 24: cloud.v1.ListClusterEventsRequest
-	(*ListClusterDeprecationsResponse)(nil), // 25: cloud.v1.ListClusterDeprecationsResponse
-	(*ListClusterEventsResponse)(nil),       // 26: cloud.v1.ListClusterEventsResponse
+	(*ImportClusterRequest)(nil),               // 0: cloud.v1.ImportClusterRequest
+	(*AwsImportCluster)(nil),                   // 1: cloud.v1.AwsImportCluster
+	(*ImportClusterResponse)(nil),              // 2: cloud.v1.ImportClusterResponse
+	(*TakeOverClusterRequest)(nil),             // 3: cloud.v1.TakeOverClusterRequest
+	(*TakeOverClusterResponse)(nil),            // 4: cloud.v1.TakeOverClusterResponse
+	(*CreateClusterRequest)(nil),               // 5: cloud.v1.CreateClusterRequest
+	(*CreateClusterResponse)(nil),              // 6: cloud.v1.CreateClusterResponse
+	(*GetClusterRequest)(nil),                  // 7: cloud.v1.GetClusterRequest
+	(*GetClusterStatusRequest)(nil),            // 8: cloud.v1.GetClusterStatusRequest
+	(*GetClusterStatusResponse)(nil),           // 9: cloud.v1.GetClusterStatusResponse
+	(*WatchClusterRequest)(nil),                // 10: cloud.v1.WatchClusterRequest
+	(*WatchClusterResponse)(nil),               // 11: cloud.v1.WatchClusterResponse
+	(*GetClusterResponse)(nil),                 // 12: cloud.v1.GetClusterResponse
+	(*ListClustersRequest)(nil),                // 13: cloud.v1.ListClustersRequest
+	(*ListClustersResponse)(nil),               // 14: cloud.v1.ListClustersResponse
+	(*UpdateClusterRequest)(nil),               // 15: cloud.v1.UpdateClusterRequest
+	(*UpdateClusterResponse)(nil),              // 16: cloud.v1.UpdateClusterResponse
+	(*DeleteClusterRequest)(nil),               // 17: cloud.v1.DeleteClusterRequest
+	(*DeleteClusterResponse)(nil),              // 18: cloud.v1.DeleteClusterResponse
+	(*Cluster)(nil),                            // 19: cloud.v1.Cluster
+	(*ManagedResourceEvent)(nil),               // 20: cloud.v1.ManagedResourceEvent
+	(*fieldmaskpb.FieldMask)(nil),              // 21: google.protobuf.FieldMask
+	(*Plan)(nil),                               // 22: cloud.v1.Plan
+	(*ListClusterDeprecationsRequest)(nil),     // 23: cloud.v1.ListClusterDeprecationsRequest
+	(*ListClusterEventsRequest)(nil),           // 24: cloud.v1.ListClusterEventsRequest
+	(*ListClusterRecommendationsRequest)(nil),  // 25: cloud.v1.ListClusterRecommendationsRequest
+	(*ListClusterDeprecationsResponse)(nil),    // 26: cloud.v1.ListClusterDeprecationsResponse
+	(*ListClusterEventsResponse)(nil),          // 27: cloud.v1.ListClusterEventsResponse
+	(*ListClusterRecommendationsResponse)(nil), // 28: cloud.v1.ListClusterRecommendationsResponse
 }
 var file_cloud_v1_cluster_service_proto_depIdxs = []int32{
 	1,  // 0: cloud.v1.ImportClusterRequest.aws:type_name -> cloud.v1.AwsImportCluster
@@ -1373,23 +1376,25 @@ var file_cloud_v1_cluster_service_proto_depIdxs = []int32{
 	8,  // 19: cloud.v1.ClusterService.GetClusterStatus:input_type -> cloud.v1.GetClusterStatusRequest
 	23, // 20: cloud.v1.ClusterService.ListClusterDeprecations:input_type -> cloud.v1.ListClusterDeprecationsRequest
 	24, // 21: cloud.v1.ClusterService.ListClusterEvents:input_type -> cloud.v1.ListClusterEventsRequest
-	13, // 22: cloud.v1.ClusterService.ListClusters:input_type -> cloud.v1.ListClustersRequest
-	15, // 23: cloud.v1.ClusterService.UpdateCluster:input_type -> cloud.v1.UpdateClusterRequest
-	10, // 24: cloud.v1.ClusterService.WatchCluster:input_type -> cloud.v1.WatchClusterRequest
-	17, // 25: cloud.v1.ClusterService.DeleteCluster:input_type -> cloud.v1.DeleteClusterRequest
-	6,  // 26: cloud.v1.ClusterService.CreateCluster:output_type -> cloud.v1.CreateClusterResponse
-	2,  // 27: cloud.v1.ClusterService.ImportCluster:output_type -> cloud.v1.ImportClusterResponse
-	4,  // 28: cloud.v1.ClusterService.TakeOverCluster:output_type -> cloud.v1.TakeOverClusterResponse
-	12, // 29: cloud.v1.ClusterService.GetCluster:output_type -> cloud.v1.GetClusterResponse
-	9,  // 30: cloud.v1.ClusterService.GetClusterStatus:output_type -> cloud.v1.GetClusterStatusResponse
-	25, // 31: cloud.v1.ClusterService.ListClusterDeprecations:output_type -> cloud.v1.ListClusterDeprecationsResponse
-	26, // 32: cloud.v1.ClusterService.ListClusterEvents:output_type -> cloud.v1.ListClusterEventsResponse
-	14, // 33: cloud.v1.ClusterService.ListClusters:output_type -> cloud.v1.ListClustersResponse
-	16, // 34: cloud.v1.ClusterService.UpdateCluster:output_type -> cloud.v1.UpdateClusterResponse
-	11, // 35: cloud.v1.ClusterService.WatchCluster:output_type -> cloud.v1.WatchClusterResponse
-	18, // 36: cloud.v1.ClusterService.DeleteCluster:output_type -> cloud.v1.DeleteClusterResponse
-	26, // [26:37] is the sub-list for method output_type
-	15, // [15:26] is the sub-list for method input_type
+	25, // 22: cloud.v1.ClusterService.ListClusterRecommendations:input_type -> cloud.v1.ListClusterRecommendationsRequest
+	13, // 23: cloud.v1.ClusterService.ListClusters:input_type -> cloud.v1.ListClustersRequest
+	15, // 24: cloud.v1.ClusterService.UpdateCluster:input_type -> cloud.v1.UpdateClusterRequest
+	10, // 25: cloud.v1.ClusterService.WatchCluster:input_type -> cloud.v1.WatchClusterRequest
+	17, // 26: cloud.v1.ClusterService.DeleteCluster:input_type -> cloud.v1.DeleteClusterRequest
+	6,  // 27: cloud.v1.ClusterService.CreateCluster:output_type -> cloud.v1.CreateClusterResponse
+	2,  // 28: cloud.v1.ClusterService.ImportCluster:output_type -> cloud.v1.ImportClusterResponse
+	4,  // 29: cloud.v1.ClusterService.TakeOverCluster:output_type -> cloud.v1.TakeOverClusterResponse
+	12, // 30: cloud.v1.ClusterService.GetCluster:output_type -> cloud.v1.GetClusterResponse
+	9,  // 31: cloud.v1.ClusterService.GetClusterStatus:output_type -> cloud.v1.GetClusterStatusResponse
+	26, // 32: cloud.v1.ClusterService.ListClusterDeprecations:output_type -> cloud.v1.ListClusterDeprecationsResponse
+	27, // 33: cloud.v1.ClusterService.ListClusterEvents:output_type -> cloud.v1.ListClusterEventsResponse
+	28, // 34: cloud.v1.ClusterService.ListClusterRecommendations:output_type -> cloud.v1.ListClusterRecommendationsResponse
+	14, // 35: cloud.v1.ClusterService.ListClusters:output_type -> cloud.v1.ListClustersResponse
+	16, // 36: cloud.v1.ClusterService.UpdateCluster:output_type -> cloud.v1.UpdateClusterResponse
+	11, // 37: cloud.v1.ClusterService.WatchCluster:output_type -> cloud.v1.WatchClusterResponse
+	18, // 38: cloud.v1.ClusterService.DeleteCluster:output_type -> cloud.v1.DeleteClusterResponse
+	27, // [27:39] is the sub-list for method output_type
+	15, // [15:27] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
 	15, // [15:15] is the sub-list for extension extendee
 	0,  // [0:15] is the sub-list for field type_name
@@ -1405,6 +1410,7 @@ func file_cloud_v1_cluster_service_proto_init() {
 	file_cloud_v1_events_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_plan_proto_init()
+	file_cloud_v1_recommendation_proto_init()
 	file_cloud_v1_cluster_service_proto_msgTypes[0].OneofWrappers = []any{
 		(*ImportClusterRequest_Aws)(nil),
 	}

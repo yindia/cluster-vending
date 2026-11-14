@@ -1505,6 +1505,54 @@ spec:
                 maxItems: 10
                 type: array
                 x-kubernetes-list-type: atomic
+              recommendations:
+                description: |-
+                  recommendations summarises the usage recorded to recommend resource
+                  requests (ListClusterRecommendations).
+                properties:
+                  attemptedAt:
+                    description: attemptedAt is when the cluster was last sampled,
+                      or tried to.
+                    format: date-time
+                    type: string
+                  containers:
+                    format: int32
+                    type: integer
+                  error:
+                    description: error is why the last sample failed; empty when it
+                      worked.
+                    maxLength: 1024
+                    type: string
+                  message:
+                    description: message is what stands in the way of recommendations,
+                      if anything.
+                    maxLength: 1024
+                    type: string
+                  metricsAvailable:
+                    description: 'metricsAvailable: the cluster serves the metrics
+                      API.'
+                    type: boolean
+                  sampledAt:
+                    description: sampledAt is when the cluster was last sampled.
+                    format: date-time
+                    type: string
+                  truncated:
+                    description: 'truncated: the cluster has more containers than
+                      are recorded.'
+                    type: boolean
+                  vpaAvailable:
+                    description: 'vpaAvailable: the cluster has the VerticalPodAutoscaler
+                      kind.'
+                    type: boolean
+                  windowDays:
+                    description: windowDays is how many days of usage are kept.
+                    format: int32
+                    type: integer
+                  workloads:
+                    description: workloads and containers are how many are recorded.
+                    format: int32
+                    type: integer
+                type: object
               upgrade:
                 description: |-
                   upgrade is the Kubernetes upgrade in progress: set from the moment

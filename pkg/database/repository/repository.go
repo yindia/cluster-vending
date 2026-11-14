@@ -125,6 +125,16 @@ type Clusters interface {
 	// (protojson cloud.v1 ClusterDeprecations) and nothing else: the etag,
 	// the generation and the status stay.
 	SetDeprecations(ctx context.Context, tenantID, id string, deprecations model.JSON) error
+	// SetRecommendations records the summary of the usage recorded for
+	// resource recommendations (protojson cloud.v1 ClusterRecommendations)
+	// and nothing else, like SetDeprecations.
+	SetRecommendations(ctx context.Context, tenantID, id string, recommendations model.JSON) error
+	// UsageHistory is the cluster's recorded usage (pkg/recommend, as
+	// History.Encode wrote it); empty when none is recorded yet.
+	UsageHistory(ctx context.Context, tenantID, id string) ([]byte, error)
+	// SetUsageHistory stores the cluster's recorded usage. It is deleted
+	// with the cluster.
+	SetUsageHistory(ctx context.Context, tenantID, id string, history []byte) error
 	// Delete fails with ErrInUse while the cluster has components.
 	Delete(ctx context.Context, tenantID, id string) error
 }

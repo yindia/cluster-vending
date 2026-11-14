@@ -894,6 +894,10 @@ type ClusterStatus struct {
 	// deprecations is what the last scan for deprecated API versions found.
 	// +optional
 	Deprecations *ClusterDeprecations `json:"deprecations,omitempty"`
+	// recommendations summarises the usage recorded to recommend resource
+	// requests (ListClusterRecommendations).
+	// +optional
+	Recommendations *ClusterRecommendations `json:"recommendations,omitempty"`
 	// recentEvents are the last things the controller reported about the
 	// cluster, oldest first: the states it reached, steps that finished,
 	// failures. They are also Kubernetes events of this object, which are

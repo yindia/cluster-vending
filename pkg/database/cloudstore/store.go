@@ -99,6 +99,9 @@ const (
 	LabelClusterID = group + "cluster-id"
 	// LabelClaim marks the ConfigMaps that are claims.
 	LabelClaim = group + "claim"
+	// LabelUsageHistory marks the ConfigMaps of a cluster's recorded usage
+	// (resource recommendations).
+	LabelUsageHistory = group + "usage-history"
 )
 
 // Annotations of row objects.

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"sort"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"google.golang.org/protobuf/encoding/protojson"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -108,6 +111,11 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 			return nil, err
 		}
 	}
+	if rec := convert.RecommendationsFromAPI(obj.Status.Recommendations); rec != nil {
+		if c.Recommendations, err = protojson.Marshal(rec); err != nil {
+			return nil, err
+		}
+	}
 	m.into(&c.Resource)
 	c.Paused = pauseOf(obj)
 	return c, nil
@@ -149,6 +157,72 @@ func (r clusters) SetDeprecations(ctx context.Context, tenantID, id string, depr
 		}
 		return r.c.Status().Update(ctx, obj)
 	}))
+}
+
+// SetRecommendations writes the summary of the recorded usage; no change
+// when it says what is stored.
+func (r clusters) SetRecommendations(ctx context.Context, tenantID, id string, recommendations model.JSON) error {
+	p := &cloudv1.ClusterRecommendations{}
+	if err := decode(recommendations, p); err != nil {
+		return fmt.Errorf("%w: cluster recommendations: %w", repository.ErrInvalid, err)
+	}
+	return translate(retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		next := convert.RecommendationsToAPI(p)
+		if equality.Semantic.DeepEqual(obj.Status.Recommendations, next) {
+			return nil
+		}
+		obj.Status.Recommendations = next
+		return r.c.Status().Update(ctx, obj)
+	}))
+}
+
+// usageHistoryKey is the key of the recorded usage in its ConfigMap.
+const usageHistoryKey = "history.json.gz"
+
+// usageHistoryName is the ConfigMap of a cluster's recorded usage, next
+// to the Cluster object in the tenant namespace.
+func usageHistoryName(cluster string) string { return cluster + "-usage-history" }
+
+// UsageHistory reads the cluster's recorded usage; nil when there is none.
+func (r clusters) UsageHistory(ctx context.Context, tenantID, id string) ([]byte, error) {
+	obj, err := r.find(ctx, tenantID, id)
+	if err != nil {
+		return nil, translate(err)
+	}
+	cm := &corev1.ConfigMap{}
+	err = r.c.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: usageHistoryName(obj.Name)}, cm)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, translate(err)
+	}
+	if cm.Labels[LabelID] != id {
+		return nil, nil // another cluster's of the same name, left behind
+	}
+	return cm.BinaryData[usageHistoryKey], nil
+}
+
+// SetUsageHistory writes the cluster's recorded usage into its ConfigMap,
+// owned by the Cluster object so that it goes with it.
+func (r clusters) SetUsageHistory(ctx context.Context, tenantID, id string, history []byte) error {
+	obj, err := r.find(ctx, tenantID, id)
+	if err != nil {
+		return translate(err)
+	}
+	cm := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: obj.Namespace, Name: usageHistoryName(obj.Name),
+			Labels: map[string]string{LabelTenant: tenantID, LabelID: id, LabelUsageHistory: "true"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "Cluster",
+				Name: obj.Name, UID: obj.UID}}},
+		BinaryData: map[string][]byte{usageHistoryKey: history},
+	}
+	return translate(kube.Apply(ctx, r.c, cm))
 }
 
 // find is the cluster of the tenant with the row ID.

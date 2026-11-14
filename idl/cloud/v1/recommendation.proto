@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// RecommendationSource is where a recommendation comes from.
+enum RecommendationSource {
+  RECOMMENDATION_SOURCE_UNSPECIFIED = 0;
+  // The cluster's own Vertical Pod Autoscaler recommends it.
+  RECOMMENDATION_SOURCE_VPA = 1;
+  // Estimated from the usage the platform recorded (metrics-server).
+  RECOMMENDATION_SOURCE_USAGE_ESTIMATE = 2;
+  // Usage is recorded, but for less than a day: no recommendation yet.
+  RECOMMENDATION_SOURCE_INSUFFICIENT_DATA = 3;
+  // No usage was recorded and no Vertical Pod Autoscaler recommends: the
+  // cluster has no metrics-server, or the workload has no running pod.
+  RECOMMENDATION_SOURCE_NO_DATA = 4;
+}
+
+// ResourceAmounts are CPU in millicores and memory in bytes. Zero is
+// "not set" for what a workload asks for, and "none" for a recommendation.
+message ResourceAmounts {
+  int64 cpu_millis = 1;
+  int64 memory_bytes = 2;
+}
+
+// ResourceRecommendation is one container of one workload: what it asks
+// for now, what it used, and what the platform recommends it ask for.
+message ResourceRecommendation {
+  string namespace = 1;
+  // Deployment, StatefulSet or DaemonSet.
+  string workload_kind = 2;
+  string workload_name = 3;
+  string container = 4;
+  // Replicas of the workload (a DaemonSet: the nodes it runs on).
+  int32 replicas = 5;
+  // The namespace is one of the platform's components'.
+  bool platform = 6;
+
+  // What the workload's pod template sets now.
+  ResourceAmounts current_requests = 7;
+  ResourceAmounts current_limits = 8;
+
+  // The recommended requests; unset without a recommendation.
+  ResourceAmounts recommended_requests = 9;
+  // The recommended limits: memory only. No CPU limit is ever
+  // recommended (CPU over a limit only throttles).
+  ResourceAmounts recommended_limits = 10;
+
+  // recommended_requests minus current_requests.
+  ResourceAmounts difference = 11;
+  // The difference as a percentage of the current request; 0 where the
+  // workload sets none.
+  int32 cpu_percent = 12;
+  int32 memory_percent = 13;
+
+  // The most and the average the container used over the window (the
+  // most any pod of the workload used). Unset without recorded usage.
+  ResourceAmounts usage_peak = 14;
+  ResourceAmounts usage_average = 15;
+
+  RecommendationSource source = 16;
+  // How long usage has been recorded for the container, in hours, and in
+  // how many samples.
+  int32 data_hours = 17;
+  int32 samples = 18;
+}
+
+// ClusterRecommendations is the summary of what the platform records to
+// recommend resource requests for a cluster's workloads. Every five
+// minutes the controller reads the cluster's workloads, the usage its
+// metrics-server reports and its Vertical Pod Autoscalers' recommendations
+// (read-only: nothing is installed in the cluster), and keeps a rolling
+// week of usage per container in the management cluster. The
+// recommendations themselves are ListClusterRecommendations'.
+message ClusterRecommendations {
+  // When the cluster was last sampled. Unset: never.
+  google.protobuf.Timestamp sampled_at = 1;
+  // When the cluster was last sampled, or tried to.
+  google.protobuf.Timestamp attempted_at = 2;
+  // How many workloads and containers are recorded.
+  int32 workloads = 3;
+  int32 containers = 4;
+  // How many days of usage are kept.
+  int32 window_days = 5;
+  // The cluster serves the metrics API (metrics-server): usage is
+  // recorded and estimates are made.
+  bool metrics_available = 6;
+  // The cluster has the Vertical Pod Autoscaler kind: its
+  // recommendations are used.
+  bool vpa_available = 7;
+  // The cluster has more containers than are recorded: the largest
+  // consumers are kept.
+  bool truncated = 8;
+  // Why the last sample failed; empty when it worked.
+  string error = 9;
+  // What stands in the way of recommendations, when something does: for
+  // example that the cluster has neither metrics-server nor a Vertical
+  // Pod Autoscaler.
+  string message = 10;
+}
+
+message ListClusterRecommendationsRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+
+  // Only the workloads of this namespace of the cluster. Empty: all.
+  string namespace = 3 [(buf.validate.field).string = {
+    max_len: 63
+    pattern: "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)?$"
+  }];
+
+  // Maximum results per page. Defaults to 50; values above 200 are coerced
+  // to 200.
+  int32 page_size = 4 [(buf.validate.field).int32.gte = 0];
+
+  // next_page_token from a previous call. All other fields must match the
+  // call that produced it.
+  string page_token = 5 [(buf.validate.field).string = {
+    max_len: 8
+    pattern: "^[0-9]*$"
+  }];
+
+  // Only the containers whose recommended requests differ from what they
+  // set by a tenth or more.
+  bool only_changes = 6;
+}
+
+message ListClusterRecommendationsResponse {
+  // Ordered by namespace, workload kind, workload name and container.
+  repeated ResourceRecommendation recommendations = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+  // What the recommendations are made from: see ClusterRecommendations.
+  ClusterRecommendations summary = 3;
+  // How many recommendations match the request in all.
+  int32 total = 4;
+}

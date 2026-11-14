@@ -8,6 +8,7 @@ import "cloud/v1/deprecation.proto";
 import "cloud/v1/events.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/plan.proto";
+import "cloud/v1/recommendation.proto";
 import "google/protobuf/field_mask.proto";
 
 // ClusterService manages the lifecycle of tenant clusters.
@@ -91,6 +92,16 @@ service ClusterService {
   // which Kubernetes keeps for about an hour. status.recent_events (in
   // GetCluster) keeps the last ten for good.
   rpc ListClusterEvents(ListClusterEventsRequest) returns (ListClusterEventsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists what the platform recommends the containers of a cluster's
+  // workloads ask for: per container its current requests and limits, the
+  // usage recorded over the last week, the recommended requests and
+  // limits and the difference. Computed from what the controller recorded
+  // (it samples the cluster every five minutes, read-only), read from the
+  // platform's store. Empty for a cluster that was not sampled yet.
+  rpc ListClusterRecommendations(ListClusterRecommendationsRequest) returns (ListClusterRecommendationsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

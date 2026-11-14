@@ -134,13 +134,14 @@ A cluster cannot be deleted while it has components.
 
 | RPC | What it does |
 |---|---|
-| `PauseReconcile` | Sets `crossplane.io/paused` on a tenant's managed resources, or on one cluster's. |
-| `ResumeReconcile` | Removes it. |
+| `PauseReconcile` | Pauses a tenant, one of its networks or clusters, or a release channel's clusters (`channel`, with `tier` for one tier): everything (the rows get the pause, their managed resources `crossplane.io/paused`), or with `only_upgrades` their automatic upgrades only. `until` ends it by itself. |
+| `ResumeReconcile` | Ends the pause of the same target and kind; other pauses of a cluster stay. |
+| `ListPauses` | Every pause in effect: target, everything or upgrades only, who, since, until, why, how many clusters. |
 | `ListReleases`, `GetRelease` | The releases, newest first; one release per Kubernetes minor: channel, default, upgrade target, end of support, ending, components with versions and locked values. Read-only. |
 | `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy and stage; one channel adds the releases it offered and its conditions. |
 | `ListRollouts` | Each channel's rollout as the controller last reported it: target minor, stage, counts per tier, why it waits. |
 | `GetRollout` | One channel's rollout planned now with the controller's rules (`pkg/rollout`), cluster by cluster (filter by tier, paged). |
-| `ListReleaseHolds` | The holds keeping clusters out of rollouts, and until when. |
+| `ListReleaseHolds` | The release objects behind the pauses of upgrades (`ListPauses` lists them as pauses), and until when. |
 
 ### Stored status and live status
 

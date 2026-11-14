@@ -253,7 +253,8 @@ func (s *Service) resumeUpgrades(ctx context.Context, t pauseTarget) (*cloudv1.R
 		if !sameTarget(holds.Items[i].Spec, want) {
 			continue
 		}
-		if err := s.deps.Kube.Delete(ctx, &holds.Items[i]); client.IgnoreNotFound(err) != nil {
+		err := client.IgnoreNotFound(s.deps.Kube.Delete(ctx, &holds.Items[i]))
+		if err != nil {
 			s.logger().ErrorContext(ctx, "delete the pause of upgrades", "name", holds.Items[i].Name, "error", err)
 			return nil, connect.NewError(connect.CodeUnavailable, "cannot remove the pause of upgrades; try again")
 		}

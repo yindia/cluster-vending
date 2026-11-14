@@ -17,7 +17,9 @@ The whole procedure has not been run against a real management cluster yet.
 ## What a pause is
 
 `AdminService.PauseReconcile` (CLI: `cluster-vending admin pause --tenant <t>
-[--network <id> | --cluster <id>] [--reason "..."]`) does two things **[code]**:
+[--network <id> | --cluster <id>] [--reason "..."] [--until <time>]`, or
+`--channel <c> [--tier <n>]` for a channel's clusters; docs/controller.md,
+"Admin: pause and resume") does two things **[code]**:
 
 1. **It records the pause on the platform's own objects**: the tenant's
    `CloudAccount`s, `Network`s and `Cluster`s (only the `Cluster` with

@@ -354,7 +354,7 @@ The plan (`pkg/upgrade`):
   upgrade ended. More than `spec.policy.maxFailed` failures in a tier halt the
   channel (`rollout.halted`, a `RolloutHalted` event).
 - Before a cluster starts, its own gates are checked: Manual mode, paused,
-  held by a ReleaseHold, not Ready, platform components not Ready, no
+  its upgrades paused (`admin pause --only upgrades`), not Ready, platform components not Ready, no
   deprecation scan for the target minor or removed APIs in use, outside its
   maintenance window. A cluster blocked by its gates is listed in
   `rollout.blocked` with the first reason and does not hold the rollout back.
@@ -414,7 +414,7 @@ The same views through the API (AdminService, platform admin role only),
 without access to the management cluster:
 
 ```sh
-cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS HOLDS AGE
+cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS PINNED AGE (PINNED: pauses of upgrades that keep a cluster on it)
 cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
 cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES STAGE PAUSED AGE (wide: policy, why it waits)
 cluster-vending admin channel get --id stable         # policy, rollout, the releases it offered, conditions
@@ -429,6 +429,41 @@ tier, tenant, the version it runs, the minor it moves to next, its state
 (Pending, InProgress, Succeeded, Failed, Blocked), since when, and why it is
 blocked (`-o wide`: the cluster ID and the gate code). All of them are
 read-only and support `-o yaml|json`.
+
+### Admin: pause and resume
+
+One command pauses, one resumes. The target is a tenant (`--tenant`), one of
+its networks or clusters (`--tenant` with `--network` or `--cluster`), or the
+clusters of a release channel, of every tenant (`--channel`, with `--tier`
+for one tier). What stops is everything, or with `--only upgrades` the
+automatic upgrades only:
+
+| | `admin pause …` | `admin pause … --only upgrades` |
+|---|---|---|
+| Stops | everything: the platform and the Crossplane providers do not act on it | only automatic upgrades: the rollouts skip the clusters |
+| The clusters | keep running in AWS; nothing is created, changed, repaired or deleted; what is asked for meanwhile is done after the resume | are reconciled, repaired and updated as usual |
+| Use it for | a provider upgrade, an incident, a fix by hand | a freeze ("not this quarter"), a team testing on the version it runs |
+| Networks | `--network` or `--tenant` | not for a network: it has no upgrades |
+| By channel or tier | pauses the clusters on it now; one that joins later is not paused | covers the clusters that join later too |
+
+```sh
+cluster-vending admin pause --tenant acme --reason "provider-aws upgrade"
+cluster-vending admin pause --channel beta --tier 0 --only upgrades --reason "quarter-end freeze" --until 2026-12-31
+cluster-vending admin pause --tenant acme --cluster <id> --only upgrades --reason "app team testing 1.36"
+cluster-vending admin pause list        # TARGET WHAT BY SINCE UNTIL CLUSTERS REASON
+cluster-vending admin resume --channel beta --tier 0 --only upgrades
+```
+
+- `--until` (RFC 3339, or a date: its start in UTC) ends a pause by itself:
+  the controller lifts it then and the providers act again. Without it a
+  pause lasts until `admin resume`.
+- Pauses add up: a resume removes the pause it names (same target, same
+  `--only`) and nothing else. A cluster paused on its own stays paused when
+  its channel's tier or its tenant is resumed; a tenant's resume leaves a
+  network or cluster paused on its own.
+- `cluster get` shows each pause on its `Paused:` line: `everything: …` or
+  `upgrades only: …`, with why, the scope it was asked at, who, since and
+  until when.
 
 ## What a controller does
 

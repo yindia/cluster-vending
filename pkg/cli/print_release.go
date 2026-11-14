@@ -64,7 +64,7 @@ func date(t *timestamppb.Timestamp) string {
 	return t.AsTime().UTC().Format("2006-01-02")
 }
 
-var releaseHeader = []string{"NAME", "SHIPPED", "VALID", "CHANNELS", "HOLDS", "AGE"}
+var releaseHeader = []string{"NAME", "SHIPPED", "VALID", "CHANNELS", "PINNED", "AGE"}
 
 func printReleases(w io.Writer, releases []*cloudv1.Release, wide bool) error {
 	if len(releases) == 0 {
@@ -111,7 +111,7 @@ func channelList(chs []cloudv1.ReleaseChannel) string {
 func describeRelease(w io.Writer, r *cloudv1.Release, wide bool) error {
 	kv := [][2]string{{"Name", r.GetName()}, {"Shipped", yesNo(r.GetShipped())}, {"Valid", validWord(r)},
 		{"Reason", r.GetInvalidReason()}, {"Channels", channelList(r.GetChannels())},
-		{"Holds", strings.Join(r.GetHolds(), ", ")}, {"Age", age(r.GetCreateTime())}, {"Notes", oneLine(r.GetNotes())}}
+		{"Pinned", strings.Join(r.GetHolds(), ", ")}, {"Age", age(r.GetCreateTime())}, {"Notes", oneLine(r.GetNotes())}}
 	if err := fields(w, kv); err != nil {
 		return err
 	}

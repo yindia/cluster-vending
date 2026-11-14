@@ -144,6 +144,9 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	if p := st.GetPause(); p != nil {
 		kv = append(kv, [2]string{"Paused", pauseLine(p)})
 	}
+	if p := st.GetUpgradePause(); p != nil {
+		kv = append(kv, [2]string{"Paused", upgradePauseLine(p)})
+	}
 	kv = append(kv, [2]string{"Message", oneLine(st.GetMessage())}, [2]string{"Age", age(c.GetCreateTime())})
 	if err := fields(w, kv); err != nil {
 		return err

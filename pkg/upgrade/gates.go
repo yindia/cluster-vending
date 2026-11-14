@@ -25,7 +25,7 @@ const (
 	GateHalted       GateCode = "HALTED"
 	GateUpgrading    GateCode = "UPGRADING"
 	GatePaused       GateCode = "PAUSED"
-	GateHeld         GateCode = "HELD"
+	GateHeld         GateCode = "UPGRADES_PAUSED"
 	GateNotReady     GateCode = "NOT_READY"
 	GatePlatform     GateCode = "PLATFORM_NOT_READY"
 	GateDeprecations GateCode = "DEPRECATIONS"

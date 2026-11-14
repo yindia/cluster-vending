@@ -31,6 +31,12 @@ type verb struct {
 	recommend bool
 	// rollout adds --channel and --tier (admin rollout get).
 	rollout bool
+	// pauseTargets adds --channel, --tier and --only (admin pause and
+	// resume), until --until (admin pause).
+	pauseTargets, until bool
+	// parent makes the verb a subcommand of the group's verb of that name
+	// (admin pause list).
+	parent string
 	// idHelp replaces the help of --id.
 	idHelp string
 }
@@ -63,6 +69,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
 	}
 
+	byName := map[string]*cobra.Command{}
 	for _, v := range verbs {
 		usage, takesID, idRequired := cli.IDVerb(v.use)
 		if takesID {
@@ -103,6 +110,14 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.rollout {
 			f.StringVar(&o.Channel, "channel", "", "the channel: alpha, beta or stable (required)")
 			f.StringVar(&o.Tier, "tier", "", "only this tier's clusters: 0, 1 or 2; default: all")
+		}
+		if v.pauseTargets {
+			f.StringVar(&o.Channel, "channel", "", "every cluster on this release channel, of every tenant: alpha, beta or stable; not with --tenant")
+			f.StringVar(&o.Tier, "tier", "", "only the channel's clusters of this tier: 0, 1 or 2 (a cluster with no tier is 0)")
+			f.StringVar(&o.Only, "only", "", "upgrades: pause only the automatic upgrades; the clusters are reconciled as usual")
+		}
+		if v.until {
+			f.StringVar(&o.Until, "until", "", "end the pause by itself at this time: RFC 3339 (2026-12-31T18:00:00Z) or a date (2026-12-31, its start in UTC)")
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
@@ -165,6 +180,11 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit")
 			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
 		}
+		byName[cmd.Name()] = cmd
+		if parent := byName[v.parent]; parent != nil {
+			parent.AddCommand(cmd)
+			continue
+		}
 		group.AddCommand(cmd)
 	}
 	return group
@@ -211,10 +231,12 @@ func newNetworkCmd() *cobra.Command {
 
 func newAdminCmd() *cobra.Command {
 	admin := newResourceCmd("admin", "Operator actions (AdminService)", []verb{
-		{use: "pause", short: "Pause a tenant (or one network or cluster): the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume",
-			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true, pauseNetwork: true},
-		{use: "resume", short: "Resume what pause paused: a tenant (a network or cluster also paused on its own stays paused), or one network or cluster",
-			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true},
+		{use: "pause", short: "Pause a tenant, one network or cluster, or a channel's clusters (--channel, --tier): everything (the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume), or with --only upgrades its automatic upgrades only",
+			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true, pauseNetwork: true, pauseTargets: true, until: true},
+		{use: "list", short: "List every pause in effect: what it covers, whether everything or only upgrades, who, since and until when, why, how many clusters",
+			run: cli.AdminPauseList, args: cobra.NoArgs, parent: "pause"},
+		{use: "resume", short: "Resume what pause paused, with the same target and --only: a tenant (a network or cluster also paused on its own stays paused), one network or cluster, or a channel's clusters",
+			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true, pauseTargets: true},
 	})
 	admin.AddCommand(newAdminReleaseCmds()...)
 	return admin

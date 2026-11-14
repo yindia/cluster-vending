@@ -132,17 +132,24 @@ func TestPrintClusterDescribe(t *testing.T) {
 	}
 }
 
-// A paused cluster says who paused it, since when and why; an empty
-// section is <none>, as kubectl describe prints it.
+// A paused cluster says what is paused (everything, or its upgrades
+// only), why, at what scope, who paused it, since and until when; an
+// empty section is <none>, as kubectl describe prints it.
 func TestPrintClusterDescribePausedAndEmpty(t *testing.T) {
 	withClock(t)
 	cl := testCluster()
-	cl.Status.Pause = &cloudv1.Pause{By: "alice", Since: ago(time.Hour), Reason: "provider upgrade"}
+	cl.Status.Pause = &cloudv1.Pause{By: "alice", Since: ago(time.Hour), Reason: "provider upgrade", Scope: "tenant"}
+	cl.Status.UpgradePause = &cloudv1.Pause{By: "bob", Since: ago(2 * time.Hour), Reason: "quarter-end freeze",
+		Scope: "channel beta tier 0", Until: timestamppb.New(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))}
 	cl.Status.ManagedResources, cl.Status.RecentEvents = nil, nil
 
 	got := printed(t, &cloudv1.GetClusterStatusResponse{Cluster: cl}, OutputTable)
 
-	for _, want := range []string{"Paused:        by alice since 2026-11-14T11:00:00Z (provider upgrade)\n", "\nResources:\n  <none>\n", "\nEvents:\n  <none>\n"} {
+	for _, want := range []string{
+		"Paused:        everything: provider upgrade (tenant, by alice since 2026-11-14T11:00:00Z)\n",
+		"Paused:        upgrades only: quarter-end freeze (channel beta tier 0, by bob since 2026-11-14T10:00:00Z, until 2026-12-31T00:00:00Z)\n",
+		"\nResources:\n  <none>\n", "\nEvents:\n  <none>\n",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q:\n%s", want, got)
 		}

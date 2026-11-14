@@ -267,10 +267,10 @@ func TestListPauses(t *testing.T) {
 		reason   string
 		clusters int32
 	}{
-		"tenant acme":                {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "provider upgrade", 2},
-		"cluster " + globexQA:        {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "by hand", 1},
-		"channel beta tier 0":        {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "tier freeze", 2},
-		"channel beta (upgrades)":    {cloudv1.PauseKind_PAUSE_KIND_UPGRADES, "quarter end", 3},
+		"tenant acme":             {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "provider upgrade", 2},
+		"cluster " + globexQA:     {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "by hand", 1},
+		"channel beta tier 0":     {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "tier freeze", 2},
+		"channel beta (upgrades)": {cloudv1.PauseKind_PAUSE_KIND_UPGRADES, "quarter end", 3},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("pauses %v", res.GetPauses())

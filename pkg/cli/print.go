@@ -298,18 +298,36 @@ func eventRows(events []*cloudv1.Event) [][]string {
 var eventHeader = []string{"LAST SEEN", "TYPE", "REASON", "MESSAGE"}
 
 // pauseLine says who paused something, since when and why.
-func pauseLine(p *cloudv1.Pause) string {
+func pauseLine(p *cloudv1.Pause) string { return pauseWith(p, "everything") }
+
+// upgradePauseLine is a pause of the automatic upgrades only.
+func upgradePauseLine(p *cloudv1.Pause) string { return pauseWith(p, "upgrades only") }
+
+// pauseWith is a pause as describe prints it: what it stops, why, then
+// what it was asked for at (when wider than the object), who, since and
+// until when: "everything: provider upgrade (tenant, by alice since
+// 2026-11-14T11:00:00Z)".
+func pauseWith(p *cloudv1.Pause, what string) string {
 	if p == nil {
 		return ""
 	}
-	line := "by " + orNone(p.GetBy())
-	if p.GetSince() != nil {
-		line += " since " + p.GetSince().AsTime().UTC().Format(time.RFC3339)
-	}
+	line := what
 	if p.GetReason() != "" {
-		line += " (" + p.GetReason() + ")"
+		line += ": " + p.GetReason()
 	}
-	return line
+	var detail []string
+	if s := p.GetScope(); s != "" && s != "cluster" && s != "network" {
+		detail = append(detail, s)
+	}
+	by := "by " + orNone(p.GetBy())
+	if p.GetSince() != nil {
+		by += " since " + p.GetSince().AsTime().UTC().Format(time.RFC3339)
+	}
+	detail = append(detail, by)
+	if p.GetUntil() != nil {
+		detail = append(detail, "until "+p.GetUntil().AsTime().UTC().Format(time.RFC3339))
+	}
+	return line + " (" + strings.Join(detail, ", ") + ")"
 }
 
 // mutated writes kubectl's "kind/name (id) verb" line.

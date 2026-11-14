@@ -85,6 +85,27 @@ type ComponentStatus struct {
 	// message explains the phase when it is not Ready.
 	// +optional
 	Message string `json:"message,omitempty"`
+	// since is when the component entered its phase.
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
+	// chart is the Helm release the phase is about, while the component
+	// is not Ready.
+	// +optional
+	Chart string `json:"chart,omitempty"`
+	// helmState is Helm's state of that release: deployed, failed,
+	// uninstalling, pending-install, ...
+	// +optional
+	HelmState string `json:"helmState,omitempty"`
+	// lastError is the install mechanism's last error for that release.
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+	// failures are its failed attempts in a row.
+	// +optional
+	Failures int32 `json:"failures,omitempty"`
+	// recoveries is how many times a stuck Helm release of the component
+	// was recovered at this version.
+	// +optional
+	Recoveries int32 `json:"recoveries,omitempty"`
 }
 
 // Component is one catalog component enabled on one cluster of a tenant.

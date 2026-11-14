@@ -29,6 +29,13 @@ func ComponentStatusInto(p *cloudv1.ComponentStatus, state string, at metav1.Tim
 	into.TargetVersion = p.GetTargetVersion()
 	into.Release = p.GetRelease()
 	into.EffectiveValues = StructToRaw(p.GetEffectiveValues())
+	into.Since = nil
+	if t := p.GetSince(); t != nil {
+		at := metav1.NewTime(t.AsTime())
+		into.Since = &at
+	}
+	into.Chart, into.HelmState, into.LastError = p.GetChart(), p.GetHelmState(), p.GetLastError()
+	into.Failures, into.Recoveries = p.GetFailures(), p.GetRecoveries()
 }
 
 // ComponentStatusFromAPI is the contract status the kind's status says:
@@ -38,6 +45,10 @@ func ComponentStatusFromAPI(st *cloudv1alpha1.ComponentStatus) *cloudv1.Componen
 		Phase:   cloudv1.ComponentPhase(uncamel(cloudv1.ComponentPhase(0).Descriptor(), prefixComponentPhase, st.Phase)),
 		Message: st.Message, ObservedGeneration: st.ObservedGeneration, ClusterName: st.Cluster,
 		InstalledVersion: st.InstalledVersion, TargetVersion: st.TargetVersion, Release: st.Release,
+		Chart: st.Chart, HelmState: st.HelmState, LastError: st.LastError, Failures: st.Failures, Recoveries: st.Recoveries,
+	}
+	if st.Since != nil {
+		out.Since = timestamppb.New(st.Since.Time)
 	}
 	for _, c := range st.Conditions {
 		out.Conditions = append(out.Conditions, &cloudv1.Condition{Type: c.Type, Status: conditionStatusFromAPI(c.Status),

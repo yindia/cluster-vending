@@ -99,6 +99,11 @@ spec:
           status:
             description: ComponentStatus is written by the controller only.
             properties:
+              chart:
+                description: |-
+                  chart is the Helm release the phase is about, while the component
+                  is not Ready.
+                type: string
               cluster:
                 description: |-
                   cluster is the cluster's name, resolved from spec.clusterID, for
@@ -173,6 +178,15 @@ spec:
                   platform-computed keys included and no secrets.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              failures:
+                description: failures are its failed attempts in a row.
+                format: int32
+                type: integer
+              helmState:
+                description: |-
+                  helmState is Helm's state of that release: deployed, failed,
+                  uninstalling, pending-install, ...
+                type: string
               installedVersion:
                 description: installedVersion is what runs.
                 type: string
@@ -232,6 +246,10 @@ spec:
                   type: object
                 type: array
                 x-kubernetes-list-type: atomic
+              lastError:
+                description: lastError is the install mechanism's last error for that
+                  release.
+                type: string
               message:
                 description: message explains the phase when it is not Ready.
                 type: string
@@ -251,8 +269,18 @@ spec:
                 - Failed
                 - Deleting
                 type: string
+              recoveries:
+                description: |-
+                  recoveries is how many times a stuck Helm release of the component
+                  was recovered at this version.
+                format: int32
+                type: integer
               release:
                 description: release the version came from (empty for a pinned version).
+                type: string
+              since:
+                description: since is when the component entered its phase.
+                format: date-time
                 type: string
               targetVersion:
                 description: targetVersion is what it is moving to.

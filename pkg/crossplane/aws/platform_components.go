@@ -106,6 +106,12 @@ type PlatformPlan struct {
 	// Empty: not waited for.
 	NodeGroupName string
 	Components    []PlatformComponentPlan
+	// External are components a component of the plan requires that are
+	// installed by another plan of the same cluster (a tenant component
+	// that requires a platform component): by name, the last Release
+	// object of each. A component of this plan waits for it, and a Usage
+	// keeps it until this plan's component is gone.
+	External map[string]string
 }
 
 // HelmReleaseObjectName is the name of the Release object of a Helm
@@ -202,7 +208,8 @@ func (p PlatformPlan) installed(name string) []sequence.Condition {
 //   - its chart of CustomResourceDefinitions, then its chart (once the
 //     role's policies are attached and the CRD chart is deployed), then
 //     its companions, each once the one before is deployed;
-//   - a component after the last chart of every component it requires;
+//   - a component after the last chart of every component it requires,
+//     one of another plan included (External);
 //   - a component whose values wait (WaitsFor) keeps its charts back and
 //     says what for; a component after it waits with it.
 //
@@ -227,7 +234,11 @@ func PlatformSet(p PlatformPlan) sequence.Set {
 		after := slices.Clone(reachable)
 		var users []string // Release objects installed before this component's first
 		for _, req := range c.Requires {
-			if name, ok := last[req]; ok {
+			name, ok := last[req]
+			if !ok {
+				name, ok = p.External[req]
+			}
+			if ok {
 				after = append(after, p.installed(name)...)
 				users = append(users, name)
 			}

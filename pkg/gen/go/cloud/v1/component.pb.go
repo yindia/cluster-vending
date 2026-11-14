@@ -314,7 +314,18 @@ type ComponentStatus struct {
 	EffectiveValues *structpb.Struct `protobuf:"bytes,9,opt,name=effective_values,json=effectiveValues,proto3" json:"effective_values,omitempty"`
 	// Since when the component is in its phase; for one the platform
 	// installs, as the cluster reports it. Unset when it is not enabled.
-	Since         *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=since,proto3" json:"since,omitempty"`
+	Since *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=since,proto3" json:"since,omitempty"`
+	// While the component is not READY: the Helm release (chart) its phase
+	// is about, Helm's state of it (deployed, failed, uninstalling,
+	// pending-install, ...), the install mechanism's last error and its
+	// failed attempts in a row.
+	Chart     string `protobuf:"bytes,11,opt,name=chart,proto3" json:"chart,omitempty"`
+	HelmState string `protobuf:"bytes,12,opt,name=helm_state,json=helmState,proto3" json:"helm_state,omitempty"`
+	LastError string `protobuf:"bytes,13,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	Failures  int32  `protobuf:"varint,14,opt,name=failures,proto3" json:"failures,omitempty"`
+	// How many times the platform recovered a stuck Helm release of the
+	// component at this version (at most three).
+	Recoveries    int32 `protobuf:"varint,15,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -417,6 +428,41 @@ func (x *ComponentStatus) GetSince() *timestamppb.Timestamp {
 		return x.Since
 	}
 	return nil
+}
+
+func (x *ComponentStatus) GetChart() string {
+	if x != nil {
+		return x.Chart
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetHelmState() string {
+	if x != nil {
+		return x.HelmState
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetFailures() int32 {
+	if x != nil {
+		return x.Failures
+	}
+	return 0
+}
+
+func (x *ComponentStatus) GetRecoveries() int32 {
+	if x != nil {
+		return x.Recoveries
+	}
+	return 0
 }
 
 // ComponentDefinition is what tenants see of a catalog entry. How the
@@ -608,7 +654,7 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\n" +
 	"management\x18\n" +
 	" \x01(\x0e2\x1d.cloud.v1.ComponentManagementR\n" +
-	"management\"\xc8\x03\n" +
+	"management\"\xd8\x04\n" +
 	"\x0fComponentStatus\x12.\n" +
 	"\x05phase\x18\x01 \x01(\x0e2\x18.cloud.v1.ComponentPhaseR\x05phase\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -622,7 +668,16 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\arelease\x18\b \x01(\tR\arelease\x12B\n" +
 	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\x120\n" +
 	"\x05since\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\xcc\x05\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x14\n" +
+	"\x05chart\x18\v \x01(\tR\x05chart\x12\x1d\n" +
+	"\n" +
+	"helm_state\x18\f \x01(\tR\thelmState\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\r \x01(\tR\tlastError\x12\x1a\n" +
+	"\bfailures\x18\x0e \x01(\x05R\bfailures\x12\x1e\n" +
+	"\n" +
+	"recoveries\x18\x0f \x01(\x05R\n" +
+	"recoveries\"\xcc\x05\n" +
 	"\x13ComponentDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +

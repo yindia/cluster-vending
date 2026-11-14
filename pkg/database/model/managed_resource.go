@@ -15,6 +15,10 @@ const (
 	// cluster's. Kept apart from the cluster's own objects: the cluster's
 	// state is read from those only.
 	OwnerClusterComponents OwnerKind = "cluster_components"
+	// OwnerComponent owns the objects of one tenant component (its IAM
+	// role and Helm releases); OwnerID is the component's. Each component
+	// has its own inventory, so disabling one removes only its objects.
+	OwnerComponent OwnerKind = "component"
 )
 
 // ManagedResource is one Kubernetes object the platform created in the

@@ -50,6 +50,8 @@ func ownedAs(obj client.Object, kind model.OwnerKind) *owned {
 		return &owned{obj: o, kind: model.OwnerNetwork, inventory: &o.Status.Inventory}
 	case *cloudv1alpha1.Cluster:
 		return &owned{obj: o, kind: model.OwnerCluster, inventory: &o.Status.Inventory}
+	case *cloudv1alpha1.Component:
+		return &owned{obj: o, kind: model.OwnerComponent, inventory: &o.Status.Inventory}
 	}
 	return nil
 }
@@ -64,6 +66,8 @@ func ownerList(kind model.OwnerKind) (client.ObjectList, error) {
 		return &cloudv1alpha1.NetworkList{}, nil
 	case model.OwnerCluster, model.OwnerClusterComponents:
 		return &cloudv1alpha1.ClusterList{}, nil
+	case model.OwnerComponent:
+		return &cloudv1alpha1.ComponentList{}, nil
 	}
 	return nil, fmt.Errorf("%w: owner kind %q", repository.ErrInvalid, kind)
 }
@@ -280,6 +284,8 @@ func (r managedResources) byRecord(ctx context.Context, id string) (*owned, stri
 		obj = &cloudv1alpha1.Network{}
 	case model.OwnerCluster, model.OwnerClusterComponents:
 		obj = &cloudv1alpha1.Cluster{}
+	case model.OwnerComponent:
+		obj = &cloudv1alpha1.Component{}
 	default:
 		return nil, "", nil
 	}

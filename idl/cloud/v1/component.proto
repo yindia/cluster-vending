@@ -128,6 +128,19 @@ message ComponentStatus {
   // Since when the component is in its phase; for one the platform
   // installs, as the cluster reports it. Unset when it is not enabled.
   google.protobuf.Timestamp since = 10;
+
+  // While the component is not READY: the Helm release (chart) its phase
+  // is about, Helm's state of it (deployed, failed, uninstalling,
+  // pending-install, ...), the install mechanism's last error and its
+  // failed attempts in a row.
+  string chart = 11;
+  string helm_state = 12;
+  string last_error = 13;
+  int32 failures = 14;
+
+  // How many times the platform recovered a stuck Helm release of the
+  // component at this version (at most three).
+  int32 recoveries = 15;
 }
 
 // ComponentDefinition is what tenants see of a catalog entry. How the

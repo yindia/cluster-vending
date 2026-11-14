@@ -148,17 +148,27 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 	if !a.Direct && !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
 		return nil, fmt.Errorf("%w: %q is not a role of account %s", ErrInvalid, a.RoleARN, a.AccountID)
 	}
+	cfg, err := c.regionConfig(a, region)
+	if err != nil {
+		return nil, err
+	}
+	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
+	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
+		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
+}
+
+// regionConfig is the SDK configuration of a in region: the client's own
+// credentials, through the tenant role unless the access is direct.
+func (c *Client) regionConfig(a Access, region string) (awssdk.Config, error) {
 	if !awscatalog.IsRegion(region) {
-		return nil, fmt.Errorf("%w: unknown region %q", ErrInvalid, region)
+		return awssdk.Config{}, fmt.Errorf("%w: unknown region %q", ErrInvalid, region)
 	}
 	cfg := c.base.Copy()
 	cfg.Region = region
 	if !a.Direct {
 		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
 	}
-	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
-	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
-		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
+	return cfg, nil
 }
 
 // tenantCredentials are the credentials of a tenant role, cached per role

@@ -21,8 +21,9 @@ type verb struct {
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
-	// reason adds --reason (admin pause).
-	reason bool
+	// reason adds --reason (admin pause), pauseNetwork --network (admin
+	// pause and resume).
+	reason, pauseNetwork bool
 	// table: the verb prints a table unless --output says otherwise;
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
@@ -137,6 +138,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.reason {
 			f.StringVar(&o.Reason, "reason", "", "why, shown with the pause in the status of what is paused")
 		}
+		if v.pauseNetwork {
+			f.StringVar(&o.PauseNetwork, "network", "", "only this network (network ID): the network itself, not its clusters; not with --cluster")
+		}
 		if v.wait {
 			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit")
 			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
@@ -172,9 +176,10 @@ func newNetworkCmd() *cobra.Command {
 
 func newAdminCmd() *cobra.Command {
 	return newResourceCmd("admin", "Operator actions (AdminService)", []verb{
-		{use: "pause", short: "Pause a tenant (or one cluster): the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume",
-			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true},
-		{use: "resume", short: "Resume what pause paused: a tenant and everything it has, or one cluster", run: cli.AdminResume, args: cobra.NoArgs, cluster: true},
+		{use: "pause", short: "Pause a tenant (or one network or cluster): the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume",
+			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true, pauseNetwork: true},
+		{use: "resume", short: "Resume what pause paused: a tenant (a network or cluster also paused on its own stays paused), or one network or cluster",
+			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true},
 	})
 }
 

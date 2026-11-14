@@ -17,7 +17,7 @@ The whole procedure has not been run against a real management cluster yet.
 ## What a pause is
 
 `AdminService.PauseReconcile` (CLI: `cluster-vending admin pause --tenant <t>
-[--cluster <id>] [--reason "..."]`) does two things **[code]**:
+[--network <id> | --cluster <id>] [--reason "..."]`) does two things **[code]**:
 
 1. **It records the pause on the platform's own objects**: the tenant's
    `CloudAccount`s, `Network`s and `Cluster`s (only the `Cluster` with
@@ -39,7 +39,9 @@ The whole procedure has not been run against a real management cluster yet.
 
 | | |
 |---|---|
-| Unit | One tenant (its accounts, networks and clusters), or one cluster (`--cluster <id>`). Resuming one cluster of a paused tenant leaves the rest paused. There is no single call for every tenant, and none for one network. **[code]** |
+| Unit | One tenant (its accounts, networks and clusters), one network (`--network <id>`: the network and its own managed resources, not its clusters), or one cluster (`--cluster <id>`). Resuming one network or cluster of a paused tenant leaves the rest paused. There is no single call for every tenant. **[code]** |
+| Network scope | A network's pause is the network's alone: its clusters keep running. What of a cluster needs the network to change (new subnet tags, say) waits until the network is resumed; deleting one of its clusters is not held. **[code]** |
+| Scopes | A row records each scope it was paused at. A tenant's resume removes the tenant's scope only: a network or cluster also paused on its own stays paused, with the providers' pause still on its managed resources. Its own resume ends it, whatever else holds it. A pause written by an older build records no scope, and any resume ends it. **[code]** |
 | Covers | Our objects as above; every managed resource kind the platform renders for the AWS providers, and provider-helm's `Release`. **[code]** |
 | Does not cover | `ProviderConfig`s and `Usage`s: they are not managed resources. Crossplane v2.4.3's Usage controller has no pause handling, and a Usage does nothing to the cloud: it only blocks deletes. **[code]**, **[upstream]** source read |
 | Stored as | The two annotations. Who, when and why are in `status.pause` of a paused network or cluster, in its `Paused` condition and in its message. **[code]** |

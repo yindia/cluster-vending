@@ -205,8 +205,13 @@ func TestPauseCoversHelmReleases(t *testing.T) {
 	if err != nil || res.GetResources() != 1 || !paused("a-kyverno") || paused("b-kyverno") {
 		t.Fatalf("pause: %v, %d resources; a %v b %v", err, res.GetResources(), paused("a-kyverno"), paused("b-kyverno"))
 	}
+	// The tenant's resume leaves a cluster paused on its own as it is.
 	resumed, err := s.ResumeReconcile(ctx, &cloudv1.ResumeReconcileRequest{TenantId: "acme"})
-	if err != nil || resumed.GetResources() != 2 || paused("a-kyverno") {
-		t.Fatalf("resume: %v, %d resources; a %v", err, resumed.GetResources(), paused("a-kyverno"))
+	if err != nil || resumed.GetResources() != 1 || !paused("a-kyverno") {
+		t.Fatalf("resume the tenant: %v, %d resources; a %v", err, resumed.GetResources(), paused("a-kyverno"))
+	}
+	resumed, err = s.ResumeReconcile(ctx, &cloudv1.ResumeReconcileRequest{TenantId: "acme", ClusterId: clusterA})
+	if err != nil || resumed.GetResources() != 1 || paused("a-kyverno") {
+		t.Fatalf("resume the cluster: %v, %d resources; a %v", err, resumed.GetResources(), paused("a-kyverno"))
 	}
 }

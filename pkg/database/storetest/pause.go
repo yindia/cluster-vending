@@ -68,17 +68,17 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 	pause := &model.Pause{By: "alice", Since: since, Reason: "provider upgrade"}
 
 	// One cluster.
-	if err := s.Tenants().SetPause(ctx, "acme", prod.ID, pause); err != nil {
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{ClusterID: prod.ID}, pause); err != nil {
 		t.Fatal(err)
 	}
 	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod}),
 		map[string]string{"account": "", "net": "", "prod": "alice"})
-	if err := s.Tenants().SetPause(ctx, "acme", prod.ID, nil); err != nil {
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{ClusterID: prod.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// The tenant: everything it has, and nothing of another tenant.
-	if err := s.Tenants().SetPause(ctx, "acme", "", pause); err != nil {
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, pause); err != nil {
 		t.Fatal(err)
 	}
 	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod}),
@@ -92,7 +92,7 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 	}
 
 	// Pausing again keeps who paused first and when.
-	if err := s.Tenants().SetPause(ctx, "acme", "", &model.Pause{By: "bob", Since: since.Add(time.Hour)}); err != nil {
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, &model.Pause{By: "bob", Since: since.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod}),
@@ -110,20 +110,73 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 		map[string]string{"prod": "alice", "late": "alice", "late-net": "alice"})
 
 	// Resuming one cluster leaves the rest of the tenant paused.
-	if err := s.Tenants().SetPause(ctx, "acme", prod.ID, nil); err != nil {
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{ClusterID: prod.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod, late}),
 		map[string]string{"account": "alice", "net": "alice", "prod": "", "late": "alice"})
 
 	// Resuming the tenant resumes everything, and new rows are not paused.
-	if err := s.Tenants().SetPause(ctx, "acme", "", nil); err != nil {
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	after := MustCluster(t, s, "acme", "after", network)
 	requirePaused(t, pausedRows(t, s, []*model.Network{network, lateNet}, []*model.Cluster{prod, late, after}),
 		map[string]string{"account": "", "net": "", "late-net": "", "prod": "", "late": "", "after": ""})
 
-	RequireErr(t, s.Tenants().SetPause(ctx, "nobody", "", pause), repository.ErrNotFound)
-	RequireErr(t, s.Tenants().SetPause(ctx, "acme", "01a1d0a6-0000-7000-8000-000000000000", pause), repository.ErrNotFound)
+	RequireErr(t, s.Tenants().SetPause(ctx, "nobody", model.PauseTarget{}, pause), repository.ErrNotFound)
+	RequireErr(t, s.Tenants().SetPause(ctx, "acme", model.PauseTarget{ClusterID: "01a1d0a6-0000-7000-8000-000000000000"}, pause), repository.ErrNotFound)
+}
+
+// One network is paused on its own: the tenant's other network and the
+// clusters stay unpaused. Paused also with the tenant, the tenant's resume
+// leaves it paused; its own resume ends it. A cluster paused on its own
+// stays paused through a pause and resume of its tenant.
+func testPauseOfOneNetwork(t *testing.T, b Backend) {
+	ctx := t.Context()
+	s := b.New(t)
+	MustTenant(t, s, "acme")
+	net := MustNetwork(t, s, "acme", "net")
+	other := MustNetwork(t, s, "acme", "other")
+	prod := MustCluster(t, s, "acme", "prod", net)
+	alice := &model.Pause{By: "alice", Since: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)}
+	bob := &model.Pause{By: "bob", Since: alice.Since.Add(time.Hour)}
+	rows := func() map[string]string {
+		return pausedRows(t, s, []*model.Network{net, other}, []*model.Cluster{prod})
+	}
+
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{NetworkID: net.ID}, alice); err != nil {
+		t.Fatal(err)
+	}
+	requirePaused(t, rows(), map[string]string{"account": "", "net": "alice", "other": "", "prod": ""})
+
+	// The tenant too, then its resume: the network's own pause stays.
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, bob); err != nil {
+		t.Fatal(err)
+	}
+	requirePaused(t, rows(), map[string]string{"account": "bob", "net": "alice", "other": "bob", "prod": "bob"})
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	requirePaused(t, rows(), map[string]string{"account": "", "net": "alice", "other": "", "prod": ""})
+
+	// Its own resume ends it.
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{NetworkID: net.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	requirePaused(t, rows(), map[string]string{"net": ""})
+
+	// A cluster paused on its own outlasts a pause and resume of its tenant.
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{ClusterID: prod.ID}, alice); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, bob); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tenants().SetPause(ctx, "acme", model.PauseTarget{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	requirePaused(t, rows(), map[string]string{"prod": "alice", "net": ""})
+
+	RequireErr(t, s.Tenants().SetPause(ctx, "acme", model.PauseTarget{NetworkID: "01a1d0a6-0000-7000-8000-000000000000"}, alice), repository.ErrNotFound)
 }

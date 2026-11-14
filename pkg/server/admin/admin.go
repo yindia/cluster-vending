@@ -53,11 +53,12 @@ func (s *Service) PauseReconcile(ctx context.Context, req *cloudv1.PauseReconcil
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
+	target := model.PauseTarget{NetworkID: req.GetNetworkId(), ClusterID: req.GetClusterId()}
 	pause := &model.Pause{By: caller(ctx), Since: s.now().UTC(), Reason: req.GetReason()}
-	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), req.GetClusterId(), pause); err != nil {
-		return nil, s.storeError(ctx, "pause", req.GetTenantId(), req.GetClusterId(), err)
+	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), target, pause); err != nil {
+		return nil, s.storeError(ctx, "pause", req.GetTenantId(), target, err)
 	}
-	n, err := s.setPaused(ctx, req.GetTenantId(), req.GetClusterId(), true)
+	n, err := s.setPaused(ctx, req.GetTenantId(), target, true)
 	return &cloudv1.PauseReconcileResponse{Resources: n}, err
 }
 
@@ -69,10 +70,11 @@ func (s *Service) ResumeReconcile(ctx context.Context, req *cloudv1.ResumeReconc
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
-	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), req.GetClusterId(), nil); err != nil {
-		return nil, s.storeError(ctx, "resume", req.GetTenantId(), req.GetClusterId(), err)
+	target := model.PauseTarget{NetworkID: req.GetNetworkId(), ClusterID: req.GetClusterId()}
+	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), target, nil); err != nil {
+		return nil, s.storeError(ctx, "resume", req.GetTenantId(), target, err)
 	}
-	n, err := s.setPaused(ctx, req.GetTenantId(), req.GetClusterId(), false)
+	n, err := s.setPaused(ctx, req.GetTenantId(), target, false)
 	return &cloudv1.ResumeReconcileResponse{Resources: n}, err
 }
 
@@ -97,27 +99,40 @@ func caller(ctx context.Context) string {
 
 // storeError answers a failed record of a pause: NOT_FOUND for a tenant or
 // a cluster that does not exist, else what the store's failures map to.
-func (s *Service) storeError(ctx context.Context, verb, tenantID, clusterID string, err error) error {
+func (s *Service) storeError(ctx context.Context, verb, tenantID string, target model.PauseTarget, err error) error {
 	if errors.Is(err, repository.ErrNotFound) {
-		if clusterID != "" {
-			return connect.NewError(connect.CodeNotFound, fmt.Sprintf("cluster %s of tenant %s not found", clusterID, tenantID))
+		switch {
+		case target.ClusterID != "":
+			return connect.NewError(connect.CodeNotFound, fmt.Sprintf("cluster %s of tenant %s not found", target.ClusterID, tenantID))
+		case target.NetworkID != "":
+			return connect.NewError(connect.CodeNotFound, fmt.Sprintf("network %s of tenant %s not found", target.NetworkID, tenantID))
 		}
 		return connect.NewError(connect.CodeNotFound, fmt.Sprintf("tenant %s not found", tenantID))
 	}
-	s.logger().ErrorContext(ctx, "record the "+verb, "tenant_id", tenantID, "cluster_id", clusterID, "error", err)
+	s.logger().ErrorContext(ctx, "record the "+verb, "tenant_id", tenantID, "cluster_id", target.ClusterID,
+		"network_id", target.NetworkID, "error", err)
 	return service.ToConnect(err)
 }
 
 // setPaused sets or removes the paused annotation on every managed
-// resource of the tenant (of the cluster, when given) and returns how
-// many are in that state now. Objects are read from the API server and
-// patched one by one (pausedKinds).
+// resource of the target (the tenant's, or one network's or cluster's)
+// and returns how many are in that state now. Objects are read from the
+// API server and patched one by one (pausedKinds). A tenant's resume
+// leaves the annotation on the resources of a network or cluster that is
+// still paused on its own (stillPaused).
 // The annotation is the admin's: the platform's applies do not own it,
 // so they neither set nor remove it.
-func (s *Service) setPaused(ctx context.Context, tenantID, clusterID string, paused bool) (int32, error) {
+func (s *Service) setPaused(ctx context.Context, tenantID string, target model.PauseTarget, paused bool) (int32, error) {
 	selector := client.MatchingLabels{crossplane.LabelTenantID: tenantID}
-	if clusterID != "" {
-		selector[crossplane.LabelCluster] = clusterID
+	switch {
+	case target.ClusterID != "":
+		selector[crossplane.LabelCluster] = target.ClusterID
+	case target.NetworkID != "":
+		selector[crossplane.LabelNetwork] = target.NetworkID
+	}
+	keep := stillPaused{s: s, tenantID: tenantID, rows: map[string]bool{}}
+	if paused || target.Scope() != model.PauseTenant {
+		keep.s = nil // pausing, or resuming one network or cluster: every resource of it
 	}
 	kinds, err := s.pausedKinds()
 	if err != nil {
@@ -135,6 +150,13 @@ func (s *Service) setPaused(ctx context.Context, tenantID, clusterID string, pau
 			return count, connect.NewError(connect.CodeUnavailable, fmt.Sprintf("cannot list %s: %v", gvk.Kind, err))
 		}
 		for i := range list.Items {
+			stays, err := keep.holds(ctx, &list.Items[i])
+			if err != nil {
+				return count, connect.NewError(connect.CodeUnavailable, err.Error())
+			}
+			if stays {
+				continue
+			}
 			if err := s.patch(ctx, &list.Items[i], paused); err != nil {
 				return count, connect.NewError(connect.CodeInternal,
 					fmt.Sprintf("%s %s: %v (%d resources done; the call can be repeated)", gvk.Kind, list.Items[i].GetName(), err, count))
@@ -142,8 +164,8 @@ func (s *Service) setPaused(ctx context.Context, tenantID, clusterID string, pau
 			count++
 		}
 	}
-	s.logger().InfoContext(ctx, "reconciliation paused state set", "tenant_id", tenantID, "cluster_id", clusterID,
-		"paused", paused, "resources", count)
+	s.logger().InfoContext(ctx, "reconciliation paused state set", "tenant_id", tenantID, "cluster_id", target.ClusterID,
+		"network_id", target.NetworkID, "paused", paused, "resources", count)
 	return count, nil
 }
 
@@ -190,4 +212,55 @@ func (s *Service) logger() *slog.Logger {
 		return slog.New(slog.DiscardHandler)
 	}
 	return s.deps.Logger
+}
+
+// stillPaused tells a tenant's resume which managed resources keep the
+// providers' pause: those of a network or cluster that is still paused on
+// its own (its row's pause, read once per row). A nil s keeps none.
+type stillPaused struct {
+	s        *Service
+	tenantID string
+	rows     map[string]bool
+}
+
+// holds reports whether u belongs to a network or cluster still paused.
+func (k stillPaused) holds(ctx context.Context, u *unstructured.Unstructured) (bool, error) {
+	if k.s == nil {
+		return false, nil
+	}
+	labels := u.GetLabels()
+	if id := labels[crossplane.LabelCluster]; id != "" {
+		return k.row(ctx, "cluster/"+id, func() (*model.Pause, error) {
+			c, err := k.s.deps.Store.Clusters().Get(ctx, k.tenantID, id)
+			if err != nil {
+				return nil, err
+			}
+			return c.Paused, nil
+		})
+	}
+	if id := labels[crossplane.LabelNetwork]; id != "" {
+		return k.row(ctx, "network/"+id, func() (*model.Pause, error) {
+			n, err := k.s.deps.Store.Networks().Get(ctx, k.tenantID, id)
+			if err != nil {
+				return nil, err
+			}
+			return n.Paused, nil
+		})
+	}
+	return false, nil
+}
+
+func (k stillPaused) row(_ context.Context, key string, read func() (*model.Pause, error)) (bool, error) {
+	if paused, ok := k.rows[key]; ok {
+		return paused, nil
+	}
+	pause, err := read()
+	if errors.Is(err, repository.ErrNotFound) {
+		pause, err = nil, nil // gone: nothing holds its resources
+	}
+	if err != nil {
+		return false, fmt.Errorf("cannot read %s: %w", key, err)
+	}
+	k.rows[key] = pause != nil
+	return pause != nil, nil
 }

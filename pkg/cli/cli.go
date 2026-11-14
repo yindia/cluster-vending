@@ -109,6 +109,9 @@ type Options struct {
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
 	// cluster's OIDC identity provider.
 	OIDC bool
+	// PauseNetwork is --network of admin pause and resume: only this
+	// network (network ID). Not with Cluster.
+	PauseNetwork string
 	// Details is --details of component list: why each component is not
 	// ready (chart, Helm state, last error, failures, recoveries).
 	Details bool

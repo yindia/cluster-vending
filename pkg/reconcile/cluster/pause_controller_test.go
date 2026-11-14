@@ -55,7 +55,7 @@ func countingWorld(t *testing.T) (world, *atomic.Int64) {
 
 func (w world) pause(t *testing.T, p *model.Pause) {
 	t.Helper()
-	if err := w.store.Tenants().SetPause(t.Context(), worldTenant, w.row.ID, p); err != nil {
+	if err := w.store.Tenants().SetPause(t.Context(), worldTenant, model.PauseTarget{ClusterID: w.row.ID}, p); err != nil {
 		t.Fatal(err)
 	}
 }

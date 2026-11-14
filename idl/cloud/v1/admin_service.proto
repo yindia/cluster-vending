@@ -9,11 +9,13 @@ import "buf/validate/validate.proto";
 // admin role, whatever tenant the request names; with auth.mode none,
 // expose it to administrators only.
 service AdminService {
-  // Pauses a tenant, or one of its clusters, e.g. to upgrade the Crossplane
-  // providers (docs/runbooks/provider-upgrade.md). Two things happen:
+  // Pauses a tenant, one of its networks or one of its clusters, e.g. to
+  // upgrade the Crossplane providers (docs/runbooks/provider-upgrade.md).
+  // Two things happen:
   //
   //   - the pause is recorded on the tenant's cloud accounts, networks and
-  //     clusters (on the one cluster), with who paused, when and why. The
+  //     clusters (on the one network or cluster), with who paused, when
+  //     and why. The
   //     platform's controller does not act on a paused resource: it
   //     creates, changes and deletes nothing of it in the cloud or in its
   //     workload cluster, and only observes it. An update or a delete
@@ -23,18 +25,33 @@ service AdminService {
   //     platform components, get the crossplane.io/paused annotation, so
   //     the providers neither change nor delete their cloud resources.
   //
-  // A paused network or cluster has the condition Paused and status.pause.
-  // Idempotent: a resource that is paused already keeps who paused it.
+  // A network's pause is the network's alone: its clusters are not paused
+  // and keep running. What of a cluster needs the network to change (new
+  // subnet tags, say) waits until the network is resumed; deleting one of
+  // its clusters is not held.
+  //
+  // A paused account, network or cluster has the condition Paused and
+  // status.pause. Idempotent: a resource paused already keeps who paused
+  // it, and records each scope it was paused at.
   rpc PauseReconcile(PauseReconcileRequest) returns (PauseReconcileResponse);
 
-  // Removes the pause (PauseReconcile): from the tenant and everything it
-  // has, or from one cluster (the rest of a paused tenant stays paused).
-  // The controller then observes each resource and applies what changed
-  // meanwhile, once. Idempotent.
+  // Removes the pause (PauseReconcile). A tenant's resume removes the
+  // tenant's pause from everything it has, except a network or cluster
+  // also paused on its own, which stays paused with the providers' pause
+  // on its managed resources. A resume of one network or cluster ends its
+  // pause whatever else holds it, so it runs again in a paused tenant
+  // (the rest of the tenant stays paused). The controller then observes
+  // each resource and applies what changed meanwhile, once. Idempotent.
   rpc ResumeReconcile(ResumeReconcileRequest) returns (ResumeReconcileResponse);
 }
 
 message PauseReconcileRequest {
+  option (buf.validate.message).cel = {
+    id: "scope.one"
+    message: "set at most one of cluster_id and network_id"
+    expression: "size(this.cluster_id) == 0 || size(this.network_id) == 0"
+  };
+
   // The tenant whose managed resources are paused.
   string tenant_id = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -51,6 +68,13 @@ message PauseReconcileRequest {
 
   // Why, shown with the pause (status.pause.reason). Optional.
   string reason = 3 [(buf.validate.field).string.max_len = 256];
+
+  // Only this network (Network.id): the network row and its own managed
+  // resources, not its clusters. Not with cluster_id.
+  string network_id = 4 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
 }
 
 message PauseReconcileResponse {
@@ -59,6 +83,12 @@ message PauseReconcileResponse {
 }
 
 message ResumeReconcileRequest {
+  option (buf.validate.message).cel = {
+    id: "scope.one"
+    message: "set at most one of cluster_id and network_id"
+    expression: "size(this.cluster_id) == 0 || size(this.network_id) == 0"
+  };
+
   // The tenant whose managed resources are resumed.
   string tenant_id = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -69,6 +99,13 @@ message ResumeReconcileRequest {
   // Only this cluster's managed resources (Cluster.id); empty: all the
   // tenant's.
   string cluster_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  // Only this network (Network.id): the network row and its own managed
+  // resources, not its clusters. Not with cluster_id.
+  string network_id = 3 [
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string.uuid = true
   ];

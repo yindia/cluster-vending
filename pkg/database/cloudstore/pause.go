@@ -41,20 +41,28 @@ func (s store) inheritPause(ctx context.Context, obj client.Object) error {
 }
 
 // SetPause implements repository.Tenants.
-func (r tenants) SetPause(ctx context.Context, tenantID, clusterID string, pause *model.Pause) error {
+func (r tenants) SetPause(ctx context.Context, tenantID string, target model.PauseTarget, pause *model.Pause) error {
 	ns, err := r.tenantNamespace(ctx, tenantID)
 	if err != nil {
 		return err
 	}
-	if clusterID != "" {
-		obj, err := clusters(r).find(ctx, tenantID, clusterID)
+	scope := target.Scope()
+	switch {
+	case target.ClusterID != "":
+		obj, err := clusters(r).find(ctx, tenantID, target.ClusterID)
 		if err != nil {
 			return err
 		}
-		return r.markPaused(ctx, obj, pause)
+		return r.markPaused(ctx, obj, scope, pause, true)
+	case target.NetworkID != "":
+		obj, err := networks(r).find(ctx, tenantID, target.NetworkID)
+		if err != nil {
+			return err
+		}
+		return r.markPaused(ctx, obj, scope, pause, true)
 	}
 	// The namespace first: what is created from here on is paused.
-	if err := r.markPaused(ctx, ns, pause); err != nil {
+	if err := r.markPaused(ctx, ns, scope, pause, true); err != nil {
 		return err
 	}
 	labels := map[string]string{LabelTenant: tenantID}
@@ -62,7 +70,7 @@ func (r tenants) SetPause(ctx context.Context, tenantID, clusterID string, pause
 	if err != nil {
 		return err
 	}
-	networks, err := items[*cloudv1alpha1.Network](ctx, r.store, &cloudv1alpha1.NetworkList{}, ns.Name, labels)
+	nets, err := items[*cloudv1alpha1.Network](ctx, r.store, &cloudv1alpha1.NetworkList{}, ns.Name, labels)
 	if err != nil {
 		return err
 	}
@@ -70,38 +78,45 @@ func (r tenants) SetPause(ctx context.Context, tenantID, clusterID string, pause
 	if err != nil {
 		return err
 	}
-	objects := make([]client.Object, 0, len(accounts)+len(networks)+len(all))
+	objects := make([]client.Object, 0, len(accounts)+len(nets)+len(all))
 	for _, o := range accounts {
 		objects = append(objects, o)
 	}
-	for _, o := range networks {
+	for _, o := range nets {
 		objects = append(objects, o)
 	}
 	for _, o := range all {
 		objects = append(objects, o)
 	}
 	for _, obj := range objects {
-		if err := r.markPaused(ctx, obj, pause); err != nil {
+		// A tenant's resume removes its own scope only: a network or
+		// cluster paused on its own stays paused.
+		if err := r.markPaused(ctx, obj, scope, pause, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// markPaused sets the pause on obj, or with nil removes it. An object
-// that is paused already keeps its pause: who paused first, and when. It
-// is a patch of the one annotation: the row (its etag, its spec) is not
-// written, and no update of the row is lost to it.
-func (s store) markPaused(ctx context.Context, obj client.Object, pause *model.Pause) error {
-	_, has := obj.GetAnnotations()[AnnotationPaused]
-	if has == (pause != nil) {
+// markPaused records a pause of obj at scope, or with nil a resume at
+// scope (model.Pause.With, Without: own is a resume of obj's own scope,
+// which ends its pause). An object paused already keeps who paused it
+// first, and when. It is a patch of the one annotation: the row (its etag,
+// its spec) is not written, and no update of the row is lost to it.
+func (s store) markPaused(ctx context.Context, obj client.Object, scope model.PauseScope, pause *model.Pause, own bool) error {
+	current := pauseOf(obj)
+	next := current.Without(scope, own)
+	if pause != nil {
+		next = current.With(scope, pause)
+	}
+	value := ""
+	if next != nil {
+		value = next.Annotation()
+	}
+	if value == obj.GetAnnotations()[AnnotationPaused] {
 		return nil
 	}
 	before := client.MergeFrom(obj.DeepCopyObject().(client.Object))
-	value := ""
-	if pause != nil {
-		value = pause.Annotation()
-	}
 	annotate(obj, map[string]string{AnnotationPaused: value})
 	err := s.c.Patch(ctx, obj, before)
 	if apierrors.IsNotFound(err) {

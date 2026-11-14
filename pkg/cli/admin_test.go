@@ -30,14 +30,17 @@ func (p *pauseRecorder) ResumeReconcile(_ context.Context, req *cloudv1.ResumeRe
 // the tenant and the cluster.
 func TestAdminPauseAndResume(t *testing.T) {
 	const cluster = "0190a000-0000-7000-8000-00000000000a"
+	const network = "0190a000-0000-7000-8000-00000000000b"
 	tests := []struct {
 		name        string
 		opts        Options
 		wantCluster string
+		wantNetwork string
 		wantReason  string
 	}{
-		{"a tenant, with the reason", Options{Tenant: "acme", Reason: "provider upgrade"}, "", "provider upgrade"},
-		{"one cluster", Options{Tenant: "acme", Cluster: cluster}, cluster, ""},
+		{"a tenant, with the reason", Options{Tenant: "acme", Reason: "provider upgrade"}, "", "", "provider upgrade"},
+		{"one cluster", Options{Tenant: "acme", Cluster: cluster}, cluster, "", ""},
+		{"one network", Options{Tenant: "acme", PauseNetwork: network}, "", network, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,10 +57,11 @@ func TestAdminPauseAndResume(t *testing.T) {
 				t.Fatalf("%v; %d pauses, %d resumes", err, len(svc.paused), len(svc.resumed))
 			}
 			p, r := svc.paused[0], svc.resumed[0]
-			if p.GetTenantId() != "acme" || p.GetClusterId() != tt.wantCluster || p.GetReason() != tt.wantReason {
+			if p.GetTenantId() != "acme" || p.GetClusterId() != tt.wantCluster || p.GetNetworkId() != tt.wantNetwork ||
+				p.GetReason() != tt.wantReason {
 				t.Errorf("pause request %v", p)
 			}
-			if r.GetTenantId() != "acme" || r.GetClusterId() != tt.wantCluster {
+			if r.GetTenantId() != "acme" || r.GetClusterId() != tt.wantCluster || r.GetNetworkId() != tt.wantNetwork {
 				t.Errorf("resume request %v", r)
 			}
 		})

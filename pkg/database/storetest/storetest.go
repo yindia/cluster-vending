@@ -63,6 +63,7 @@ func Run(t *testing.T, b Backend) {
 		{"ManagedResourceRecords", testManagedResourceRecords},
 		{"ClusterLookups", testClusterLookups},
 		{"PauseIsRecordedInheritedAndRemoved", testPauseIsRecordedInheritedAndRemoved},
+		{"PauseOfOneNetwork", testPauseOfOneNetwork},
 	} {
 		t.Run(tc.name, func(t *testing.T) { tc.test(t, b) })
 	}

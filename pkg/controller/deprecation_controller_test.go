@@ -135,7 +135,7 @@ func TestClusterThatCannotBeScanned(t *testing.T) {
 		{"paused by an operator", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {
 			// The scan reads the workload cluster: a paused cluster's is
 			// left alone.
-			w.must(t, w.store.Tenants().SetPause(t.Context(), tenant, obj.Labels[cloudstore.LabelID],
+			w.must(t, w.store.Tenants().SetPause(t.Context(), tenant, model.PauseTarget{ClusterID: obj.Labels[cloudstore.LabelID]},
 				&model.Pause{By: "alice", Since: time.Now()}))
 		}, true, ""},
 		{"no kubeconfig Secret named", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {

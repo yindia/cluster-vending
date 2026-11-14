@@ -30,7 +30,10 @@ type PauseReconcileRequest struct {
 	// tenant's, networks included.
 	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	// Why, shown with the pause (status.pause.reason). Optional.
-	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	// Only this network (Network.id): the network row and its own managed
+	// resources, not its clusters. Not with cluster_id.
+	NetworkId     string `protobuf:"bytes,4,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,6 +89,13 @@ func (x *PauseReconcileRequest) GetReason() string {
 	return ""
 }
 
+func (x *PauseReconcileRequest) GetNetworkId() string {
+	if x != nil {
+		return x.NetworkId
+	}
+	return ""
+}
+
 type PauseReconcileResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Managed resources that are paused now (already paused ones included).
@@ -137,7 +147,10 @@ type ResumeReconcileRequest struct {
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// Only this cluster's managed resources (Cluster.id); empty: all the
 	// tenant's.
-	ClusterId     string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	// Only this network (Network.id): the network row and its own managed
+	// resources, not its clusters. Not with cluster_id.
+	NetworkId     string `protobuf:"bytes,3,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +195,13 @@ func (x *ResumeReconcileRequest) GetTenantId() string {
 func (x *ResumeReconcileRequest) GetClusterId() string {
 	if x != nil {
 		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *ResumeReconcileRequest) GetNetworkId() string {
+	if x != nil {
+		return x.NetworkId
 	}
 	return ""
 }
@@ -235,18 +255,24 @@ var File_cloud_v1_admin_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\"\xb3\x01\n" +
+	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\"\xd9\x02\n" +
 	"\x15PauseReconcileRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12 \n" +
-	"\x06reason\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x06reason\"6\n" +
+	"\x06reason\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x06reason\x12*\n" +
+	"\n" +
+	"network_id\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:x\xbaHu\x1as\n" +
+	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\"6\n" +
 	"\x16PauseReconcileResponse\x12\x1c\n" +
-	"\tresources\x18\x01 \x01(\x05R\tresources\"\x92\x01\n" +
+	"\tresources\x18\x01 \x01(\x05R\tresources\"\xb8\x02\n" +
 	"\x16ResumeReconcileRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
 	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\"7\n" +
+	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12*\n" +
+	"\n" +
+	"network_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:x\xbaHu\x1as\n" +
+	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\"7\n" +
 	"\x17ResumeReconcileResponse\x12\x1c\n" +
 	"\tresources\x18\x01 \x01(\x05R\tresources2\xbb\x01\n" +
 	"\fAdminService\x12S\n" +

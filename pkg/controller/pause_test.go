@@ -22,7 +22,7 @@ var operatorPause = &model.Pause{By: "alice", Since: time.Date(2026, 11, 14, 9, 
 
 func (w world) pauseTenant(t *testing.T, p *model.Pause) {
 	t.Helper()
-	w.must(t, w.store.Tenants().SetPause(t.Context(), tenant, "", p))
+	w.must(t, w.store.Tenants().SetPause(t.Context(), tenant, model.PauseTarget{}, p))
 }
 
 // A network created while its tenant is paused is stored and not acted

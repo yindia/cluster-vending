@@ -36,7 +36,7 @@ func TestRecentEventsOfTheKinds(t *testing.T) {
 		{name: "an unspecified type is normal", in: []*cloudv1.Event{event("Running", cloudv1.EventType_EVENT_TYPE_UNSPECIFIED)},
 			want: []string{"Normal Running"}},
 		{name: "no time, no reason: left out",
-			in: []*cloudv1.Event{{Reason: "NoTime"}, {Time: timestamppb.New(at)}, event("Running", cloudv1.EventType_EVENT_TYPE_NORMAL)},
+			in:   []*cloudv1.Event{{Reason: "NoTime"}, {Time: timestamppb.New(at)}, event("Running", cloudv1.EventType_EVENT_TYPE_NORMAL)},
 			want: []string{"Normal Running"}},
 		{name: "only the last ten", in: many, want: []string{"Normal Reason2", "Normal Reason3", "Normal Reason4", "Normal Reason5",
 			"Normal Reason6", "Normal Reason7", "Normal Reason8", "Normal Reason9", "Normal Reason10", "Normal Reason11"}},

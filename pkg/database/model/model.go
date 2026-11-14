@@ -73,6 +73,10 @@ type Resource struct {
 	// their provider oneof (aws / gcp / azure).
 	Spec   JSON
 	Status JSON
+	// Paused is the operator's pause of the resource; nil for none. Read
+	// only: it is set and removed by Tenants.SetPause, and a new resource
+	// of a paused tenant is created with the tenant's.
+	Paused *Pause
 }
 
 // Meta returns the shared resource columns, for code that handles every
@@ -123,6 +127,8 @@ type CloudAccount struct {
 	// AccountName is the human-readable name (AWS account name, GCP project
 	// name, Azure subscription name). Informational only.
 	AccountName string
+	// Paused is the operator's pause of the account (Resource.Paused).
+	Paused *Pause
 }
 
 // AssignNew gives a new account its ID and, when the caller set none, its

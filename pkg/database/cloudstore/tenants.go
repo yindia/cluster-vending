@@ -182,6 +182,7 @@ func accountRow(obj *cloudv1alpha1.CloudAccount) *model.CloudAccount {
 	if obj.Spec.AWS != nil {
 		a.AccountID = obj.Spec.AWS.AccountID
 	}
+	a.Paused = pauseOf(obj)
 	return a
 }
 
@@ -238,6 +239,9 @@ func (r tenants) createAccount(ctx context.Context, key client.ObjectKey, a *mod
 	obj := &cloudv1alpha1.CloudAccount{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name,
 		Labels: map[string]string{LabelID: row.ID, LabelTenant: row.TenantID}}}
 	if err := fillAccount(&row, obj); err != nil {
+		return nil, err
+	}
+	if err := r.inheritPause(ctx, obj); err != nil {
 		return nil, err
 	}
 	if err := r.c.Create(ctx, obj); err != nil {

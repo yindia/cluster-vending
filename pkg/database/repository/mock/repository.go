@@ -603,6 +603,44 @@ func (c *MockTenantsPutCloudAccountCall) DoAndReturn(f func(context.Context, *mo
 	return c
 }
 
+// SetPause mocks base method.
+func (m *MockTenants) SetPause(ctx context.Context, tenantID, clusterID string, pause *model.Pause) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetPause", ctx, tenantID, clusterID, pause)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetPause indicates an expected call of SetPause.
+func (mr *MockTenantsMockRecorder) SetPause(ctx, tenantID, clusterID, pause any) *MockTenantsSetPauseCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPause", reflect.TypeOf((*MockTenants)(nil).SetPause), ctx, tenantID, clusterID, pause)
+	return &MockTenantsSetPauseCall{Call: call}
+}
+
+// MockTenantsSetPauseCall wrap *gomock.Call
+type MockTenantsSetPauseCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockTenantsSetPauseCall) Return(arg0 error) *MockTenantsSetPauseCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockTenantsSetPauseCall) Do(f func(context.Context, string, string, *model.Pause) error) *MockTenantsSetPauseCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockTenantsSetPauseCall) DoAndReturn(f func(context.Context, string, string, *model.Pause) error) *MockTenantsSetPauseCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // MockNetworks is a mock of Networks interface.
 type MockNetworks struct {
 	ctrl     *gomock.Controller

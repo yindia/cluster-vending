@@ -47,6 +47,9 @@ func AdoptNetwork(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Ne
 	if err := owner.Set(account, obj, r.c.Scheme()); err != nil {
 		return invalid(err)
 	}
+	if err := r.inheritPause(ctx, obj); err != nil {
+		return err
+	}
 	if err := r.c.Update(ctx, obj); err != nil {
 		return translate(err)
 	}
@@ -85,6 +88,9 @@ func AdoptCluster(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Cl
 	}
 	if err := owner.Set(network, obj, r.c.Scheme()); err != nil {
 		return invalid(err)
+	}
+	if err := r.inheritPause(ctx, obj); err != nil {
+		return err
 	}
 	if err := r.c.Update(ctx, obj); err != nil {
 		return translate(err)

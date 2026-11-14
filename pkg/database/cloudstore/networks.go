@@ -135,6 +135,7 @@ func (r networks) row(obj *cloudv1alpha1.Network) (*model.Network, error) {
 		ExternalID: m.ExternalID, CreateRequestID: m.CreateRequestID,
 	}
 	m.into(&n.Resource)
+	n.Paused = pauseOf(obj)
 	return n, nil
 }
 
@@ -255,6 +256,9 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 	}
 	if err := owner.Set(account, obj, r.c.Scheme()); err != nil {
 		return invalid(err)
+	}
+	if err := r.inheritPause(ctx, obj); err != nil {
+		return err
 	}
 	keys := networkKeys(n)
 	if err := r.claimAll(ctx, obj.Namespace, kindNetwork, n.ID, keys); err != nil {

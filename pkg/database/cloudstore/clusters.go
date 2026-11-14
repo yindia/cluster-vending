@@ -109,6 +109,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 		}
 	}
 	m.into(&c.Resource)
+	c.Paused = pauseOf(obj)
 	return c, nil
 }
 
@@ -205,6 +206,9 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	}
 	if err := owner.Set(network, obj, r.c.Scheme()); err != nil {
 		return invalid(err)
+	}
+	if err := r.inheritPause(ctx, obj); err != nil {
+		return err
 	}
 	keys := clusterKeys(c)
 	if err := r.claimAll(ctx, obj.Namespace, kindCluster, c.ID, keys); err != nil {

@@ -57,6 +57,8 @@ const (
 
 	FlagRecoverStuckReleases = "recover-stuck-releases"
 	EnvRecoverStuckReleases  = "CV_RECOVER_STUCK_RELEASES"
+	FlagRecommendations      = "recommendations"
+	EnvRecommendations       = "CV_RECOMMENDATIONS"
 
 	FlagLeaderElect    = "leader-elect"
 	EnvLeaderElect     = "CV_LEADER_ELECT"

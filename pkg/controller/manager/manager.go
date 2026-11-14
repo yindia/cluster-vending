@@ -70,6 +70,9 @@ type Options struct {
 	// record of a platform component's stuck revision in the workload
 	// cluster (docs/catalog.md).
 	RecoverStuckReleases bool
+	// Recommendations samples running clusters for resource
+	// recommendations.
+	Recommendations bool
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -178,6 +181,7 @@ func Run(ctx context.Context, o Options) error {
 		// Helm release of a platform component.
 		Workloads:            management.Workloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
+		NoRecommendations:    !o.Recommendations,
 		Logger:               logger,
 	})
 	if err != nil {

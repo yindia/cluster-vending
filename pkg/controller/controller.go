@@ -137,6 +137,11 @@ func SetupAll(mgr ctrl.Manager, d Deps) error {
 	if err := scans.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("set up the deprecation scans: %w", err)
 	}
+	if !d.NoRecommendations {
+		if err := NewRecommendationReconciler(d).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("set up the recommendations: %w", err)
+		}
+	}
 	return nil
 }
 

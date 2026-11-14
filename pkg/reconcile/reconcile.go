@@ -76,6 +76,9 @@ type Deps struct {
 	// record of a stuck revision in a workload cluster, so provider-helm
 	// can install again.
 	RecoverStuckReleases bool
+	// NoRecommendations turns the sampling for resource recommendations
+	// off (--recommendations=false).
+	NoRecommendations bool
 	// Events is where what happens to accounts, networks and clusters is
 	// reported as Kubernetes events (events.go). Only what reconciles has
 	// it; nil emits nothing.

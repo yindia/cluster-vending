@@ -49,6 +49,8 @@ var controllerSettings = []Setting{
 		Usage: "on startup, create the component catalog this build ships (pkg/catalog/definitions) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
 	{Flag: FlagRecoverStuckReleases, Env: EnvRecoverStuckReleases, Default: "true",
 		Usage: "recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes): remove the Helm record of the stuck revision in the workload cluster so the chart is installed again, at most 3 times per component version; false leaves such a component failed for a person to look at"},
+	{Flag: FlagRecommendations, Env: EnvRecommendations, Default: "true",
+		Usage: "every five minutes, read each running cluster's workloads, the usage its metrics-server reports and its own Vertical Pod Autoscalers (read-only, nothing is installed there) and record a week of usage, for resource recommendations (ListClusterRecommendations); false records nothing"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -74,6 +76,9 @@ type Controller struct {
 	// RecoverStuckReleases: remove the Helm record of a platform
 	// component's stuck revision in the workload cluster.
 	RecoverStuckReleases bool
+	// Recommendations: sample running clusters for resource
+	// recommendations.
+	Recommendations bool
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -118,6 +123,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.RecoverStuckReleases, err = strconv.ParseBool(v[FlagRecoverStuckReleases]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagRecoverStuckReleases), v[FlagRecoverStuckReleases]))
+	}
+	if cfg.Recommendations, err = strconv.ParseBool(v[FlagRecommendations]); err != nil {
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagRecommendations), v[FlagRecommendations]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

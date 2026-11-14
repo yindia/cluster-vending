@@ -13,7 +13,7 @@ cluster-vending cluster recommendations <cluster-id> --tenant acme [--namespace 
 Sampled 2026-11-14T08:00:00Z: 41 containers of 30 workloads, 7 days kept; metrics-server: yes; VPA: no
 NAMESPACE  WORKLOAD             CONTAINER  CPU REQ                MEM REQ              MEM LIMIT       SOURCE          DATA
 shop       deployment/web       app        1000m -> 120m (-88%)  1Gi -> 230Mi (-77%)  2Gi -> 276Mi    usage-estimate  6d
-shop       statefulset/db       pg         -> 240m                -> 345Mi             - -> 414Mi      usage-estimate  6d
+shop       statefulset/db       pg         - -> 240m              - -> 345Mi           - -> 414Mi      usage-estimate  6d
 ops        daemonset/agent      agent      -                      -                    -               no-data         -
 ```
 

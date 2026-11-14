@@ -194,8 +194,6 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterRecommendations, args: cobra.ExactArgs(1), page: true, table: true, recommend: true},
 		verb{use: "events <id>", short: "List what the controller reported about the cluster, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
 			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, table: true, warnings: true},
-		verb{use: "components <id>", short: "List the components the platform installed with the cluster, and why one is not ready (chart, Helm state, last error); -o table, yaml or json",
-			run: cli.ClusterComponents, args: cobra.ExactArgs(1), table: true},
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		watchVerb("cluster", cli.ClusterWatch))

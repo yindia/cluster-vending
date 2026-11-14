@@ -83,6 +83,7 @@ func newComponentCmd() *cobra.Command {
 			run: cli.ComponentList, args: cobra.NoArgs, table: true,
 			flags: all(cluster("everything on this cluster (cluster ID); default: the tenant's components on all clusters"),
 				func(cmd *cobra.Command, o *cli.Options) {
+					cmd.Flags().BoolVar(&o.Details, "details", false, "also show why each component is not ready: chart, Helm state, last error, failures")
 					cmd.Flags().Int32Var(&o.PageSize, "page-size", 0, "maximum results per page; 0 uses the server default")
 					cmd.Flags().StringVar(&o.PageToken, "page-token", "", "next_page_token of the previous page")
 				})},

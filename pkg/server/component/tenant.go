@@ -492,7 +492,8 @@ func (s *Service) onCluster(ctx context.Context, tenantID, clusterID string) ([]
 		out = append(out, &cloudv1.Component{TenantId: tenantID, ClusterId: clusterID, Component: p.GetName(),
 			Version: p.GetVersion(), Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM,
 			Status: &cloudv1.ComponentStatus{Phase: p.GetPhase(), Message: p.GetMessage(), ClusterName: row.Name,
-				InstalledVersion: p.GetVersion(), Since: p.GetSince()}})
+				InstalledVersion: p.GetVersion(), Since: p.GetSince(), Chart: p.GetChart(), HelmState: p.GetHelmState(),
+				LastError: p.GetLastError(), Failures: p.GetFailures(), Recoveries: p.GetRecoveries()}})
 	}
 	for i := range rows {
 		if seen[rows[i].Component] {

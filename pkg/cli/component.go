@@ -315,6 +315,11 @@ func ComponentList(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err := tw.Flush(); err != nil {
 		return nil, err
 	}
+	if o.Details {
+		if err := printDetails(o.Out, list.GetComponents()); err != nil {
+			return nil, err
+		}
+	}
 	if token := list.GetNextPageToken(); token != "" {
 		_, err = fmt.Fprintf(o.Out, "\nMore: --page-token %s\n", token)
 	}
@@ -458,4 +463,26 @@ func runEditor(ctx context.Context, path string) error {
 	cmd := exec.CommandContext(ctx, words[0], append(words[1:], path)...) //nolint:gosec // the caller's own $VISUAL/$EDITOR, no shell
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// printDetails writes, under the table, what it has no room for: for each
+// component with something to explain, its chart, Helm state, failures and
+// recoveries, and the provider's last error.
+func printDetails(w io.Writer, components []*cloudv1.Component) error {
+	for _, comp := range components {
+		st := comp.GetStatus()
+		if st.GetChart() == "" && st.GetLastError() == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "\n%s: chart %s, Helm state %s, %d failed attempts, recovered %d times\n", comp.GetComponent(),
+			dash(st.GetChart()), dash(st.GetHelmState()), st.GetFailures(), st.GetRecoveries()); err != nil {
+			return err
+		}
+		if st.GetLastError() != "" {
+			if _, err := fmt.Fprintf(w, "  last error: %s\n", st.GetLastError()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

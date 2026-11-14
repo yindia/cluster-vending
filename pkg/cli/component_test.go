@@ -39,6 +39,8 @@ type componentAPI struct {
 	updates          []*cloudv1.UpdateComponentRequest
 	disabled         []string
 	listed           []*cloudv1.ListComponentsRequest
+	// details is listed after the other components when set.
+	details *cloudv1.Component
 }
 
 func (a *componentAPI) ListComponentDefinitions(_ context.Context, req *cloudv1.ListComponentDefinitionsRequest) (*cloudv1.ListComponentDefinitionsResponse, error) {
@@ -100,14 +102,18 @@ func (a *componentAPI) GetComponent(_ context.Context, req *cloudv1.GetComponent
 
 func (a *componentAPI) ListComponents(_ context.Context, req *cloudv1.ListComponentsRequest) (*cloudv1.ListComponentsResponse, error) {
 	a.listed = append(a.listed, req)
-	return &cloudv1.ListComponentsResponse{NextPageToken: "next", Components: []*cloudv1.Component{
+	components := []*cloudv1.Component{
 		{Component: "karpenter", Version: "1.15.1", Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM,
 			Status: &cloudv1.ComponentStatus{Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY, Since: timestamppb.New(componentSince)}},
 		{Id: componentID, Component: "policies", Version: "3.10.0", Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT,
 			Status: &cloudv1.ComponentStatus{Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, Message: "stored;\nnot installed yet"}},
 		{Component: "gpu-operator", Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT,
 			Status: &cloudv1.ComponentStatus{Message: "not enabled"}},
-	}}, nil
+	}
+	if a.details != nil {
+		components = append(components, a.details)
+	}
+	return &cloudv1.ListComponentsResponse{NextPageToken: "next", Components: components}, nil
 }
 
 func stored(t *testing.T, values map[string]any) *cloudv1.Component {
@@ -337,6 +343,25 @@ func TestComponentListTable(t *testing.T) {
 	}
 	if api.listed[0].GetClusterId() != componentCluster {
 		t.Errorf("request = %v", api.listed[0])
+	}
+}
+
+// --details adds, under the table, why each component is not ready.
+func TestComponentListDetails(t *testing.T) {
+	api := &componentAPI{}
+	api.details = &cloudv1.Component{Component: "kyverno", Version: "3.10.0", Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM,
+		Status: &cloudv1.ComponentStatus{Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "chart kyverno failed",
+			Chart: "kyverno", HelmState: "uninstalling", LastError: "has no deployed releases", Failures: 3, Recoveries: 1}}
+	var out bytes.Buffer
+
+	err := Run(t.Context(), ComponentList, Clients{Component: api}, Options{Tenant: "acme", Cluster: componentCluster, Details: true}, &out, OutputTable)
+
+	want := "\nkyverno: chart kyverno, Helm state uninstalling, 3 failed attempts, recovered 1 times\n  last error: has no deployed releases\n"
+	if err != nil || !strings.Contains(out.String(), want) {
+		t.Fatalf("got %v\n%s\nwant it to contain\n%s", err, out.String(), want)
+	}
+	if strings.Contains(out.String(), "karpenter: chart") {
+		t.Errorf("a component with nothing to explain has details:\n%s", out.String())
 	}
 }
 

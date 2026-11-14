@@ -109,6 +109,9 @@ type Options struct {
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
 	// cluster's OIDC identity provider.
 	OIDC bool
+	// Details is --details of component list: why each component is not
+	// ready (chart, Helm state, last error, failures, recoveries).
+	Details bool
 	// Print is --print of cluster kubeconfig: print the kubeconfig instead
 	// of installing it with the AWS CLI.
 	Print bool

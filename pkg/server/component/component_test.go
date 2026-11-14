@@ -554,6 +554,34 @@ func TestListOnACluster(t *testing.T) {
 	requireCode(t, err, connect.CodeNotFound)
 }
 
+// A listed platform component carries why it is not ready: the chart,
+// Helm's state, the last error and how often it failed or was recovered.
+func TestListOnAClusterCarriesPlatformDetails(t *testing.T) {
+	w := newWorld(t)
+	status := &cloudv1.ClusterStatus{PlatformComponents: []*cloudv1.PlatformComponent{
+		{Name: "mesh-base", Version: "1.2.3", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "chart mesh-base: boom",
+			Chart: "base", HelmState: "pending-install", LastError: "create failed: boom", Failures: 4, Recoveries: 1},
+	}}
+	encoded, err := reconcilecluster.Encode(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.Clusters().SetStatus(t.Context(), tenant, w.cluster.ID, w.cluster.ETag, encoded); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := w.svc.ListComponents(t.Context(), &cloudv1.ListComponentsRequest{TenantId: tenant, ClusterId: w.cluster.ID})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := res.GetComponents()[0].GetStatus()
+	if st.GetChart() != "base" || st.GetHelmState() != "pending-install" || st.GetLastError() != "create failed: boom" ||
+		st.GetFailures() != 4 || st.GetRecoveries() != 1 {
+		t.Fatalf("status = %v", st)
+	}
+}
+
 // Without a cluster the list is the tenant's components, a page at a time.
 func TestListOfATenantIsPaged(t *testing.T) {
 	w := newWorld(t)

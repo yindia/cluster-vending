@@ -80,7 +80,7 @@ its kind; the message has the details.
 | Release | `ReleaseInvalid` | Warning | a release fails a check; the message says which |
 | ReleaseChannel | `ChannelOffers` | Normal | a channel offers another release than before |
 | ReleaseChannel | `ChannelCannotMove` | Warning | a channel cannot offer the release it should; the message says why |
-| ReleaseChannel | `RolloutStage` | Normal | the rollout of the channel's Kubernetes minor moved to another tier |
+| ReleaseChannel | `RolloutTier` | Normal | the rollout of the channel's Kubernetes minor moved to another tier |
 | ReleaseChannel | `RolloutHalted` | Warning | more upgrades failed in a tier than `spec.policy.maxFailed` allows; nothing more starts |
 | Cluster, ReleaseChannel | `AutomaticUpgradeStarted` | Normal | the rollout set the cluster's next Kubernetes minor, e.g. "automatic upgrade 1.36 → 1.37 (channel alpha, tier 2)" (`--automatic-upgrades`) |
 | Cluster | `AutomaticUpgradeSucceeded` | Normal | an automatic upgrade finished: the cluster runs the new minor (`status.rollout`) |

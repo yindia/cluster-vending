@@ -75,8 +75,8 @@ message ReleaseChannelInfo {
   // Paused: no cluster starts.
   bool paused = 6;
   RolloutPolicy policy = 7;
-  // The tier the rollout is at.
-  ClusterTier stage = 8;
+  // The tier the rollout is at: 2, then 1, then 0.
+  ClusterTier rollout_tier = 8;
   RolloutSummary rollout = 9;
   // The releases it offered, newest first. GetReleaseChannel only.
   repeated ChannelHistoryEntry history = 10;
@@ -171,7 +171,8 @@ message Rollout {
   ReleaseChannel channel = 1;
   // The release the channel offers.
   string release = 2;
-  ClusterTier stage = 3;
+  // The tier the rollout is at: 2, then 1, then 0.
+  ClusterTier rollout_tier = 3;
   RolloutPolicy policy = 4;
   bool paused = 5;
   RolloutSummary summary = 6;

@@ -68,7 +68,7 @@ func (r Row) Key() string { return r.Namespace + "/" + r.Name }
 
 // Result is a plan: the status fields of the channel and the rows.
 type Result struct {
-	Stage   cloudv1alpha1.ClusterTier
+	Tier    cloudv1alpha1.ClusterTier
 	Tiers   []cloudv1alpha1.TierStatus
 	Rollout *cloudv1alpha1.ChannelRollout
 	// Problem is why the rollout cannot be planned (the policy cannot be
@@ -169,7 +169,7 @@ func (p *Result) fill(d upgrade.Decision, members []upgrade.Member, blocked []cl
 		p.Rollout.Done = true
 		return
 	}
-	p.Stage = ClusterTier(d.Stage)
+	p.Tier = ClusterTier(d.Tier)
 	p.Rollout.Waiting, p.Rollout.Halted, p.Rollout.Done = d.Waiting, d.Halted, d.Done
 	p.Rollout.WouldStart = capped(d.Start)
 	p.Start, p.waiting = d.Start, d.Waiting

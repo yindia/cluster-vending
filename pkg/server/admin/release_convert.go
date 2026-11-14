@@ -149,7 +149,7 @@ func RolloutSummaryFromAPI(r *cloudv1alpha1.ChannelRollout) *cloudv1.RolloutSumm
 func ChannelFromAPI(ch *cloudv1alpha1.ReleaseChannel, detail bool) *cloudv1.ReleaseChannelInfo {
 	out := &cloudv1.ReleaseChannelInfo{Channel: ChannelFromName(ch.Name), Promotion: string(ch.Spec.Promotion),
 		PinnedRelease: ch.Spec.Release, Release: ch.Status.Release, KubernetesMinor: ch.Status.KubernetesMinor,
-		Paused: ch.Spec.Paused, Policy: RolloutPolicyFromAPI(ch.Spec.Policy), Stage: TierFromAPI(ch.Status.Stage),
+		Paused: ch.Spec.Paused, Policy: RolloutPolicyFromAPI(ch.Spec.Policy), RolloutTier: TierFromAPI(ch.Status.RolloutTier),
 		Rollout: RolloutSummaryFromAPI(ch.Status.Rollout), Conditions: ConditionsFromAPI(ch.Status.Conditions),
 		CreateTime: timeOf(&ch.CreationTimestamp)}
 	if detail {
@@ -164,7 +164,7 @@ func ChannelFromAPI(ch *cloudv1alpha1.ReleaseChannel, detail bool) *cloudv1.Rele
 // RolloutFromAPI is a channel's rollout as the stored status reports it
 // (ListRollouts): no members.
 func RolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel) *cloudv1.Rollout {
-	return &cloudv1.Rollout{Channel: ChannelFromName(ch.Name), Release: ch.Status.Release, Stage: TierFromAPI(ch.Status.Stage),
+	return &cloudv1.Rollout{Channel: ChannelFromName(ch.Name), Release: ch.Status.Release, RolloutTier: TierFromAPI(ch.Status.RolloutTier),
 		Policy: RolloutPolicyFromAPI(ch.Spec.Policy), Paused: ch.Spec.Paused, Summary: RolloutSummaryFromAPI(ch.Status.Rollout)}
 }
 
@@ -173,7 +173,7 @@ func RolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel) *cloudv1.Rollout {
 // at a time (RolloutMemberFromRow).
 func PlannedRolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel, res rollout.Result) *cloudv1.Rollout {
 	out := RolloutFromAPI(ch)
-	out.Stage, out.Summary = TierFromAPI(res.Stage), RolloutSummaryFromAPI(res.Rollout)
+	out.RolloutTier, out.Summary = TierFromAPI(res.Tier), RolloutSummaryFromAPI(res.Rollout)
 	return out
 }
 

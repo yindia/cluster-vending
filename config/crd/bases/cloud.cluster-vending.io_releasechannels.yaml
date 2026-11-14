@@ -32,8 +32,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Offering")].status
       name: Offering
       type: string
-    - jsonPath: .status.stage
-      name: Stage
+    - jsonPath: .status.rolloutTier
+      name: Rolling Tier
       type: string
     - jsonPath: .status.rollout.waiting
       name: Waiting
@@ -321,9 +321,9 @@ spec:
                     maxItems: 20
                     type: array
                 type: object
-              stage:
+              rolloutTier:
                 description: |-
-                  Stage is the tier the Kubernetes rollout is at (or waits for):
+                  RolloutTier is the tier the Kubernetes rollout is at (or waits for):
                   Tier2 first, then Tier1, then Tier0.
                 enum:
                 - Tier0

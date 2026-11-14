@@ -97,8 +97,8 @@ func TestRolloutStartsWithTier2(t *testing.T) {
 	}
 	c := rolloutWorld(t, defaultPolicy, objects...)
 	s, res, events := planRollout(t, c, rolloutNow)
-	if s.Stage != cloudv1alpha1.ClusterTier2 || s.Rollout == nil || s.Rollout.TargetMinor != "1.36" || !s.Rollout.ReportOnly {
-		t.Fatalf("status = %+v / %+v, want stage Tier2, target 1.36, report only", s, s.Rollout)
+	if s.RolloutTier != cloudv1alpha1.ClusterTier2 || s.Rollout == nil || s.Rollout.TargetMinor != "1.36" || !s.Rollout.ReportOnly {
+		t.Fatalf("status = %+v / %+v, want tier Tier2, target 1.36, report only", s, s.Rollout)
 	}
 	if want := []string{"tenant-acme/a2", "tenant-acme/b2"}; !reflect.DeepEqual(s.Rollout.WouldStart, want) {
 		t.Errorf("wouldStart = %v, want %v", s.Rollout.WouldStart, want)
@@ -112,8 +112,8 @@ func TestRolloutStartsWithTier2(t *testing.T) {
 	if res.RequeueAfter <= 0 || res.RequeueAfter > rolloutRecheck {
 		t.Errorf("requeue after %v, want at most %v", res.RequeueAfter, rolloutRecheck)
 	}
-	if !reflect.DeepEqual(events.reasons, []string{platform.ReasonRolloutStage}) {
-		t.Errorf("events = %v, want one RolloutStage", events.reasons)
+	if !reflect.DeepEqual(events.reasons, []string{platform.ReasonRolloutTier}) {
+		t.Errorf("events = %v, want one RolloutTier", events.reasons)
 	}
 	for _, name := range []string{"a2", "b0"} {
 		got := &cloudv1alpha1.Cluster{}
@@ -145,8 +145,8 @@ func TestRolloutPassesOverBlockedClusters(t *testing.T) {
 	c := rolloutWorld(t, defaultPolicy, closed, done, manual, unscanned, ahead, next)
 	s, res, _ := planRollout(t, c, rolloutNow)
 
-	if want := []string{"tenant-acme/next"}; !reflect.DeepEqual(s.Rollout.WouldStart, want) || s.Stage != cloudv1alpha1.ClusterTier1 {
-		t.Errorf("stage %s, wouldStart = %v, want Tier1 and %v", s.Stage, s.Rollout.WouldStart, want)
+	if want := []string{"tenant-acme/next"}; !reflect.DeepEqual(s.Rollout.WouldStart, want) || s.RolloutTier != cloudv1alpha1.ClusterTier1 {
+		t.Errorf("tier %s, wouldStart = %v, want Tier1 and %v", s.RolloutTier, s.Rollout.WouldStart, want)
 	}
 	for cluster, gate := range map[string]string{"tenant-acme/window": "MAINTENANCE_WINDOW", "tenant-acme/manual": "MANUAL",
 		"tenant-acme/unscanned": "DEPRECATIONS"} {

@@ -361,7 +361,7 @@ The plan (`pkg/upgrade`):
 - `spec.paused` on the channel: the plan is reported, nothing starts.
 
 ```sh
-kubectl get releasechannels          # STAGE and WAITING columns
+kubectl get releasechannels          # ROLLING TIER and WAITING columns
 kubectl get releasechannel stable -o jsonpath='{.status.rollout}'
 ```
 
@@ -416,9 +416,9 @@ without access to the management cluster:
 ```sh
 cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS PINNED AGE (PINNED: pauses of upgrades that keep a cluster on it)
 cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
-cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES STAGE PAUSED AGE (wide: policy, why it waits)
+cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES ROLLING TIER PAUSED AGE (wide: policy, why it waits)
 cluster-vending admin channel get --id stable         # policy, rollout, the releases it offered, conditions
-cluster-vending admin rollout list                    # CHANNEL KUBERNETES STAGE TIER2 TIER1 TIER0 STATE WAITING
+cluster-vending admin rollout list                    # CHANNEL KUBERNETES ROLLING TIER TIER2 TIER1 TIER0 STATE WAITING
 cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
 ```
 

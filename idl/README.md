@@ -138,8 +138,8 @@ A cluster cannot be deleted while it has components.
 | `ResumeReconcile` | Ends the pause of the same target and kind; other pauses of a cluster stay. |
 | `ListPauses` | Every pause in effect: target, everything or upgrades only, who, since, until, why, how many clusters. |
 | `ListReleases`, `GetRelease` | The releases, newest first; one release per Kubernetes minor: channel, default, upgrade target, end of support, ending, components with versions and locked values. Read-only. |
-| `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy and stage; one channel adds the releases it offered and its conditions. |
-| `ListRollouts` | Each channel's rollout as the controller last reported it: target minor, stage, counts per tier, why it waits. |
+| `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy and the tier its rollout is at; one channel adds the releases it offered and its conditions. |
+| `ListRollouts` | Each channel's rollout as the controller last reported it: target minor, the tier it is at, counts per tier, why it waits. |
 | `GetRollout` | One channel's rollout planned now with the controller's rules (`pkg/rollout`), cluster by cluster (filter by tier, paged). |
 | `ListReleaseHolds` | The release objects behind the pauses of upgrades (`ListPauses` lists them as pauses), and until when. |
 

@@ -184,7 +184,7 @@ type AdminServiceClient interface {
 	ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
 	// Returns one channel, with the releases it offered and its conditions.
 	GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
-	// Lists each channel's rollout of its Kubernetes minor: the stage, the
+	// Lists each channel's rollout of its Kubernetes minor: the tier it is at, the
 	// counts per tier, which clusters start (or would) and why none does.
 	ListRollouts(context.Context, *v1.ListRolloutsRequest) (*v1.ListRolloutsResponse, error)
 	// Returns one channel's rollout cluster by cluster, tier 2 first: what
@@ -255,7 +255,7 @@ type AdminServiceHandler interface {
 	ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
 	// Returns one channel, with the releases it offered and its conditions.
 	GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
-	// Lists each channel's rollout of its Kubernetes minor: the stage, the
+	// Lists each channel's rollout of its Kubernetes minor: the tier it is at, the
 	// counts per tier, which clusters start (or would) and why none does.
 	ListRollouts(context.Context, *v1.ListRolloutsRequest) (*v1.ListRolloutsResponse, error)
 	// Returns one channel's rollout cluster by cluster, tier 2 first: what

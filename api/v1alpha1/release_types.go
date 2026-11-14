@@ -356,10 +356,10 @@ type ReleaseChannelStatus struct {
 	// minor its automatic clusters run. Empty when it puts none.
 	// +optional
 	KubernetesMinor string `json:"kubernetesMinor,omitempty"`
-	// Stage is the tier the Kubernetes rollout is at (or waits for):
+	// RolloutTier is the tier the Kubernetes rollout is at (or waits for):
 	// Tier2 first, then Tier1, then Tier0.
 	// +optional
-	Stage ClusterTier `json:"stage,omitempty"`
+	RolloutTier ClusterTier `json:"rolloutTier,omitempty"`
 	// Tiers is the rollout's progress per tier: Done clusters run the
 	// channel's minor, Held ones are kept back by a ReleaseHold.
 	// +optional
@@ -391,7 +391,7 @@ type ReleaseChannelStatus struct {
 // +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion`
 // +kubebuilder:printcolumn:name="Paused",type=boolean,JSONPath=`.spec.paused`
 // +kubebuilder:printcolumn:name="Offering",type=string,JSONPath=`.status.conditions[?(@.type=="Offering")].status`
-// +kubebuilder:printcolumn:name="Stage",type=string,JSONPath=`.status.stage`
+// +kubebuilder:printcolumn:name="Rolling Tier",type=string,JSONPath=`.status.rolloutTier`
 // +kubebuilder:printcolumn:name="Waiting",type=string,JSONPath=`.status.rollout.waiting`
 type ReleaseChannel struct {
 	metav1.TypeMeta   `json:",inline"`

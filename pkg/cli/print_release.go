@@ -162,7 +162,7 @@ func valuesLine(c *cloudv1.ReleaseComponent) string {
 	return string(js)
 }
 
-var channelHeader = []string{"NAME", "PROMOTION", "RELEASE", "KUBERNETES", "STAGE", "PAUSED", "AGE"}
+var channelHeader = []string{"NAME", "PROMOTION", "RELEASE", "KUBERNETES", "ROLLING TIER", "PAUSED", "AGE"}
 
 func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide bool) error {
 	if len(channels) == 0 {
@@ -176,7 +176,7 @@ func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide boo
 	rows := make([][]string, 0, len(channels))
 	for _, c := range channels {
 		rw := []string{channelWord(c.GetChannel()), orNone(c.GetPromotion()), orNone(c.GetRelease()), orNone(c.GetKubernetesMinor()),
-			tierWord(c.GetStage()), yesNo(c.GetPaused()), age(c.GetCreateTime())}
+			tierWord(c.GetRolloutTier()), yesNo(c.GetPaused()), age(c.GetCreateTime())}
 		if wide {
 			rw = append(rw, policyLine(c.GetPolicy()), orNone(oneLine(c.GetRollout().GetWaiting())))
 		}
@@ -191,7 +191,7 @@ func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
 	pinned := c.GetPinnedRelease()
 	kv := [][2]string{{"Name", channelWord(c.GetChannel())}, {"Promotion", c.GetPromotion()}, {"Pinned Release", pinned},
 		{"Release", c.GetRelease()}, {"Kubernetes", c.GetKubernetesMinor()}, {"Paused", yesNo(c.GetPaused())},
-		{"Policy", policyLine(c.GetPolicy())}, {"Stage", tierWord(c.GetStage())},
+		{"Policy", policyLine(c.GetPolicy())}, {"Rolling Tier", tierWord(c.GetRolloutTier())},
 		{"Rollout", rolloutState(c.GetRollout(), c.GetPaused())}, {"Waiting", oneLine(c.GetRollout().GetWaiting())},
 		{"Would Start", strings.Join(c.GetRollout().GetWouldStart(), ", ")}, {"Age", age(c.GetCreateTime())}}
 	if err := fields(w, kv); err != nil {
@@ -248,7 +248,7 @@ func tierCell(r *cloudv1.RolloutSummary, tier cloudv1.ClusterTier) string {
 	return "-"
 }
 
-var rolloutHeader = []string{"CHANNEL", "KUBERNETES", "STAGE", "TIER2", "TIER1", "TIER0", "STATE", "WAITING"}
+var rolloutHeader = []string{"CHANNEL", "KUBERNETES", "ROLLING TIER", "TIER2", "TIER1", "TIER0", "STATE", "WAITING"}
 
 func printRollouts(w io.Writer, rollouts []*cloudv1.Rollout) error {
 	if len(rollouts) == 0 {
@@ -258,7 +258,7 @@ func printRollouts(w io.Writer, rollouts []*cloudv1.Rollout) error {
 	rows := make([][]string, 0, len(rollouts))
 	for _, r := range rollouts {
 		s := r.GetSummary()
-		rows = append(rows, []string{channelWord(r.GetChannel()), orNone(s.GetTargetMinor()), tierWord(r.GetStage()),
+		rows = append(rows, []string{channelWord(r.GetChannel()), orNone(s.GetTargetMinor()), tierWord(r.GetRolloutTier()),
 			tierCell(s, cloudv1.ClusterTier_CLUSTER_TIER_2), tierCell(s, cloudv1.ClusterTier_CLUSTER_TIER_1),
 			tierCell(s, cloudv1.ClusterTier_CLUSTER_TIER_0), rolloutState(s, r.GetPaused()), orNone(oneLine(s.GetWaiting()))})
 	}
@@ -272,7 +272,7 @@ var memberHeader = []string{"TIER", "TENANT", "CLUSTER", "RUNS", "TARGET", "STAT
 func describeRollout(w io.Writer, r *cloudv1.Rollout, next string, wide bool) error {
 	s := r.GetSummary()
 	kv := [][2]string{{"Channel", channelWord(r.GetChannel())}, {"Kubernetes", s.GetTargetMinor()}, {"Release", r.GetRelease()},
-		{"Policy", policyLine(r.GetPolicy())}, {"Stage", tierWord(r.GetStage())}, {"State", rolloutState(s, r.GetPaused())},
+		{"Policy", policyLine(r.GetPolicy())}, {"Rolling Tier", tierWord(r.GetRolloutTier())}, {"State", rolloutState(s, r.GetPaused())},
 		{"Waiting", oneLine(s.GetWaiting())}, {"Would Start", strings.Join(s.GetWouldStart(), ", ")}}
 	if err := fields(w, kv); err != nil {
 		return err

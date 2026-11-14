@@ -60,7 +60,7 @@ const (
 //	Release       ReleaseInvalid              Warning  a release fails a check; the message says which
 //	Channel       ChannelOffers               Normal   a channel offers another release than before
 //	Channel       ChannelCannotMove           Warning  a channel cannot offer the release it should
-//	Channel       RolloutStage                Normal   the rollout of the channel's minor moved to another tier
+//	Channel       RolloutTier                 Normal   the rollout of the channel's minor moved to another tier
 //	Channel       RolloutHalted               Warning  too many upgrades failed in a tier; nothing more starts
 //	both          AutomaticUpgradeStarted     Normal   the rollout set the cluster's next minor (cluster and channel)
 //	Cluster       AutomaticUpgradeSucceeded   Normal   an automatic upgrade finished: the cluster runs the new minor
@@ -103,7 +103,7 @@ const (
 	ReasonReleaseInvalid              = "ReleaseInvalid"
 	ReasonChannelOffers               = "ChannelOffers"
 	ReasonChannelCannotMove           = "ChannelCannotMove"
-	ReasonRolloutStage                = "RolloutStage"
+	ReasonRolloutTier                 = "RolloutTier"
 	ReasonRolloutHalted               = "RolloutHalted"
 	ReasonAutomaticUpgradeStarted     = "AutomaticUpgradeStarted"
 	ReasonAutomaticUpgradeSucceeded   = "AutomaticUpgradeSucceeded"

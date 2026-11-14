@@ -260,7 +260,7 @@ func newAdminReleaseCmds() []*cobra.Command {
 				run: cli.AdminChannelGet, args: cobra.ExactArgs(1), idHelp: "the channel: alpha, beta or stable"},
 		}),
 		newResourceCmd("rollout", "The rollout of each channel's Kubernetes minor to its automatic clusters, tier 2 first (read-only)", []verb{
-			{use: "list", short: "List each channel's rollout: its Kubernetes minor, stage, progress per tier and why it waits",
+			{use: "list", short: "List each channel's rollout: its Kubernetes minor, the tier it is at, progress per tier and why it waits",
 				run: cli.AdminRolloutList, args: cobra.NoArgs},
 			{use: "get", short: "Show one channel's rollout cluster by cluster: what each runs, the minor it moves to, its state and why it is blocked; -o wide adds cluster IDs and gate codes",
 				run: cli.AdminRolloutGet, args: cobra.NoArgs, rollout: true, page: true},

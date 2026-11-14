@@ -389,9 +389,9 @@ type ReleaseChannelInfo struct {
 	// Paused: no cluster starts.
 	Paused bool           `protobuf:"varint,6,opt,name=paused,proto3" json:"paused,omitempty"`
 	Policy *RolloutPolicy `protobuf:"bytes,7,opt,name=policy,proto3" json:"policy,omitempty"`
-	// The tier the rollout is at.
-	Stage   ClusterTier     `protobuf:"varint,8,opt,name=stage,proto3,enum=cloud.v1.ClusterTier" json:"stage,omitempty"`
-	Rollout *RolloutSummary `protobuf:"bytes,9,opt,name=rollout,proto3" json:"rollout,omitempty"`
+	// The tier the rollout is at: 2, then 1, then 0.
+	RolloutTier ClusterTier     `protobuf:"varint,8,opt,name=rollout_tier,json=rolloutTier,proto3,enum=cloud.v1.ClusterTier" json:"rollout_tier,omitempty"`
+	Rollout     *RolloutSummary `protobuf:"bytes,9,opt,name=rollout,proto3" json:"rollout,omitempty"`
 	// The releases it offered, newest first. GetReleaseChannel only.
 	History       []*ChannelHistoryEntry `protobuf:"bytes,10,rep,name=history,proto3" json:"history,omitempty"`
 	Conditions    []*Condition           `protobuf:"bytes,11,rep,name=conditions,proto3" json:"conditions,omitempty"`
@@ -479,9 +479,9 @@ func (x *ReleaseChannelInfo) GetPolicy() *RolloutPolicy {
 	return nil
 }
 
-func (x *ReleaseChannelInfo) GetStage() ClusterTier {
+func (x *ReleaseChannelInfo) GetRolloutTier() ClusterTier {
 	if x != nil {
-		return x.Stage
+		return x.RolloutTier
 	}
 	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
 }
@@ -968,11 +968,12 @@ type Rollout struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Channel ReleaseChannel         `protobuf:"varint,1,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
 	// The release the channel offers.
-	Release string          `protobuf:"bytes,2,opt,name=release,proto3" json:"release,omitempty"`
-	Stage   ClusterTier     `protobuf:"varint,3,opt,name=stage,proto3,enum=cloud.v1.ClusterTier" json:"stage,omitempty"`
-	Policy  *RolloutPolicy  `protobuf:"bytes,4,opt,name=policy,proto3" json:"policy,omitempty"`
-	Paused  bool            `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`
-	Summary *RolloutSummary `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
+	Release string `protobuf:"bytes,2,opt,name=release,proto3" json:"release,omitempty"`
+	// The tier the rollout is at: 2, then 1, then 0.
+	RolloutTier ClusterTier     `protobuf:"varint,3,opt,name=rollout_tier,json=rolloutTier,proto3,enum=cloud.v1.ClusterTier" json:"rollout_tier,omitempty"`
+	Policy      *RolloutPolicy  `protobuf:"bytes,4,opt,name=policy,proto3" json:"policy,omitempty"`
+	Paused      bool            `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`
+	Summary     *RolloutSummary `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
 	// The channel's clusters in the rollout, tier 2 first. GetRollout only.
 	Members       []*RolloutMember `protobuf:"bytes,7,rep,name=members,proto3" json:"members,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1023,9 +1024,9 @@ func (x *Rollout) GetRelease() string {
 	return ""
 }
 
-func (x *Rollout) GetStage() ClusterTier {
+func (x *Rollout) GetRolloutTier() ClusterTier {
 	if x != nil {
-		return x.Stage
+		return x.RolloutTier
 	}
 	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
 }
@@ -1889,7 +1890,7 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\x10ReleaseComponent\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12/\n" +
-	"\x06values\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06values\"\xa7\x04\n" +
+	"\x06values\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06values\"\xb4\x04\n" +
 	"\x12ReleaseChannelInfo\x122\n" +
 	"\achannel\x18\x01 \x01(\x0e2\x18.cloud.v1.ReleaseChannelR\achannel\x12\x1c\n" +
 	"\tpromotion\x18\x02 \x01(\tR\tpromotion\x12%\n" +
@@ -1897,8 +1898,8 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\arelease\x18\x04 \x01(\tR\arelease\x12)\n" +
 	"\x10kubernetes_minor\x18\x05 \x01(\tR\x0fkubernetesMinor\x12\x16\n" +
 	"\x06paused\x18\x06 \x01(\bR\x06paused\x12/\n" +
-	"\x06policy\x18\a \x01(\v2\x17.cloud.v1.RolloutPolicyR\x06policy\x12+\n" +
-	"\x05stage\x18\b \x01(\x0e2\x15.cloud.v1.ClusterTierR\x05stage\x122\n" +
+	"\x06policy\x18\a \x01(\v2\x17.cloud.v1.RolloutPolicyR\x06policy\x128\n" +
+	"\frollout_tier\x18\b \x01(\x0e2\x15.cloud.v1.ClusterTierR\vrolloutTier\x122\n" +
 	"\arollout\x18\t \x01(\v2\x18.cloud.v1.RolloutSummaryR\arollout\x127\n" +
 	"\ahistory\x18\n" +
 	" \x03(\v2\x1d.cloud.v1.ChannelHistoryEntryR\ahistory\x123\n" +
@@ -1951,11 +1952,11 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\x05since\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x12\n" +
 	"\x04gate\x18\t \x01(\tR\x04gate\x12\x16\n" +
 	"\x06reason\x18\n" +
-	" \x01(\tR\x06reason\"\xb4\x02\n" +
+	" \x01(\tR\x06reason\"\xc1\x02\n" +
 	"\aRollout\x122\n" +
 	"\achannel\x18\x01 \x01(\x0e2\x18.cloud.v1.ReleaseChannelR\achannel\x12\x18\n" +
-	"\arelease\x18\x02 \x01(\tR\arelease\x12+\n" +
-	"\x05stage\x18\x03 \x01(\x0e2\x15.cloud.v1.ClusterTierR\x05stage\x12/\n" +
+	"\arelease\x18\x02 \x01(\tR\arelease\x128\n" +
+	"\frollout_tier\x18\x03 \x01(\x0e2\x15.cloud.v1.ClusterTierR\vrolloutTier\x12/\n" +
 	"\x06policy\x18\x04 \x01(\v2\x17.cloud.v1.RolloutPolicyR\x06policy\x12\x16\n" +
 	"\x06paused\x18\x05 \x01(\bR\x06paused\x122\n" +
 	"\asummary\x18\x06 \x01(\v2\x18.cloud.v1.RolloutSummaryR\asummary\x121\n" +
@@ -2078,7 +2079,7 @@ var file_cloud_v1_admin_release_proto_depIdxs = []int32{
 	29, // 6: cloud.v1.ReleaseComponent.values:type_name -> google.protobuf.Struct
 	27, // 7: cloud.v1.ReleaseChannelInfo.channel:type_name -> cloud.v1.ReleaseChannel
 	5,  // 8: cloud.v1.ReleaseChannelInfo.policy:type_name -> cloud.v1.RolloutPolicy
-	30, // 9: cloud.v1.ReleaseChannelInfo.stage:type_name -> cloud.v1.ClusterTier
+	30, // 9: cloud.v1.ReleaseChannelInfo.rollout_tier:type_name -> cloud.v1.ClusterTier
 	8,  // 10: cloud.v1.ReleaseChannelInfo.rollout:type_name -> cloud.v1.RolloutSummary
 	6,  // 11: cloud.v1.ReleaseChannelInfo.history:type_name -> cloud.v1.ChannelHistoryEntry
 	31, // 12: cloud.v1.ReleaseChannelInfo.conditions:type_name -> cloud.v1.Condition
@@ -2092,7 +2093,7 @@ var file_cloud_v1_admin_release_proto_depIdxs = []int32{
 	0,  // 20: cloud.v1.RolloutMember.state:type_name -> cloud.v1.RolloutState
 	28, // 21: cloud.v1.RolloutMember.since:type_name -> google.protobuf.Timestamp
 	27, // 22: cloud.v1.Rollout.channel:type_name -> cloud.v1.ReleaseChannel
-	30, // 23: cloud.v1.Rollout.stage:type_name -> cloud.v1.ClusterTier
+	30, // 23: cloud.v1.Rollout.rollout_tier:type_name -> cloud.v1.ClusterTier
 	5,  // 24: cloud.v1.Rollout.policy:type_name -> cloud.v1.RolloutPolicy
 	8,  // 25: cloud.v1.Rollout.summary:type_name -> cloud.v1.RolloutSummary
 	9,  // 26: cloud.v1.Rollout.members:type_name -> cloud.v1.RolloutMember

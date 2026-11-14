@@ -37,7 +37,7 @@ const ConditionRolloutPlanned = "RolloutPlanned"
 
 // RolloutReconciler plans the rollout of each channel's Kubernetes minor
 // to its automatic clusters (pkg/upgrade) and reports it on the
-// ReleaseChannel (the stage, the per-tier progress, the clusters that
+// ReleaseChannel (the tier it is at, the per-tier progress, the clusters that
 // start now and those kept back with why) and on each member cluster
 // (status.rollout). With automatic upgrades on it also starts the plan's
 // hops (rollout_apply.go); off, it never changes a cluster's version.
@@ -139,7 +139,7 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	status := *ch.Status.DeepCopy()
-	status.Stage, status.Tiers, status.Rollout = plan.Stage, plan.Tiers, plan.Rollout
+	status.RolloutTier, status.Tiers, status.Rollout = plan.Tier, plan.Tiers, plan.Rollout
 	meta.SetStatusCondition(&status.Conditions, plan.condition(ch.Generation))
 	if !equality.Semantic.DeepEqual(status, ch.Status) {
 		was := ch.Status
@@ -196,9 +196,9 @@ func (r *RolloutReconciler) report(ctx context.Context, channel string, was, is 
 	switch {
 	case is.Rollout.Halted && !halted:
 		r.events.Event(ctx, obj, "Warning", platform.ReasonRolloutHalted, is.Rollout.Waiting)
-	case is.Stage != "" && is.Stage != was.Stage:
-		r.events.Event(ctx, obj, "Normal", platform.ReasonRolloutStage,
-			fmt.Sprintf("the rollout of Kubernetes %s is at %s", is.Rollout.TargetMinor, is.Stage))
+	case is.RolloutTier != "" && is.RolloutTier != was.RolloutTier:
+		r.events.Event(ctx, obj, "Normal", platform.ReasonRolloutTier,
+			fmt.Sprintf("rolling out Kubernetes %s to tier %s", is.Rollout.TargetMinor, strings.TrimPrefix(string(is.RolloutTier), "Tier")))
 	}
 }
 

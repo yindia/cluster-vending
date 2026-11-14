@@ -73,15 +73,15 @@ func TestPrintChannels(t *testing.T) {
 	channels := []*cloudv1.ReleaseChannelInfo{
 		{Channel: alpha, Promotion: "Pinned", PinnedRelease: "shipped-1aed928c", Release: "shipped-1aed928c", KubernetesMinor: "1.37",
 			Policy: policy(), CreateTime: ago(72 * time.Hour), Rollout: &cloudv1.RolloutSummary{TargetMinor: "1.37", Done: true}},
-		{Channel: stable, Promotion: "Automatic", Release: "shipped-1aed928c", KubernetesMinor: "1.35", Stage: tier2,
+		{Channel: stable, Promotion: "Automatic", Release: "shipped-1aed928c", KubernetesMinor: "1.35", RolloutTier: tier2,
 			Policy: policy(), CreateTime: ago(72 * time.Hour), Rollout: summary,
 			History: []*cloudv1.ChannelHistoryEntry{{Release: "shipped-1aed928c", From: timestamppb.New(printNow.Add(-time.Hour)), Reason: "promoted"}}},
 	}
 
 	if got, want := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputTable),
-		"NAME     PROMOTION   RELEASE            KUBERNETES   STAGE    PAUSED   AGE\n"+
-			"alpha    Pinned      shipped-1aed928c   1.37         <none>   no       3d\n"+
-			"stable   Automatic   shipped-1aed928c   1.35         2        no       3d\n"; got != want {
+		"NAME     PROMOTION   RELEASE            KUBERNETES   ROLLING TIER   PAUSED   AGE\n"+
+			"alpha    Pinned      shipped-1aed928c   1.37         <none>         no       3d\n"+
+			"stable   Automatic   shipped-1aed928c   1.35         2              no       3d\n"; got != want {
 		t.Errorf("channels: got\n%s\nwant\n%s", got, want)
 	}
 	if got := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputWide); !strings.Contains(got,
@@ -100,7 +100,7 @@ func TestPrintChannels(t *testing.T) {
 
 func TestPrintRollouts(t *testing.T) {
 	withClock(t)
-	stableRollout := &cloudv1.Rollout{Channel: stable, Release: "shipped-1aed928c", Stage: tier1, Policy: policy(),
+	stableRollout := &cloudv1.Rollout{Channel: stable, Release: "shipped-1aed928c", RolloutTier: tier1, Policy: policy(),
 		Summary: &cloudv1.RolloutSummary{TargetMinor: "1.36", ReportOnly: true, Waiting: "soak ends in 6h (Tier2)",
 			Tiers: []*cloudv1.RolloutTier{{Tier: tier2, Succeeded: 4}, {Tier: tier1, InProgress: 1, Pending: 2}, {Tier: tier0, Pending: 2}}}}
 	rollouts := []*cloudv1.Rollout{
@@ -110,10 +110,10 @@ func TestPrintRollouts(t *testing.T) {
 	}
 
 	if got, want := printed(t, &cloudv1.ListRolloutsResponse{Rollouts: rollouts}, OutputTable),
-		"CHANNEL   KUBERNETES   STAGE    TIER2      TIER1                 TIER0      STATE     WAITING\n"+
-			"alpha     1.37         <none>   1/1 done   -                     -          Done      <none>\n"+
-			"beta      1.36         <none>   -          -                     -          Paused    <none>\n"+
-			"stable    1.36         1        4/4 done   0/3 done, 1 running   0/2 done   Rolling   soak ends in 6h (Tier2)\n"; got != want {
+		"CHANNEL   KUBERNETES   ROLLING TIER   TIER2      TIER1                 TIER0      STATE     WAITING\n"+
+			"alpha     1.37         <none>         1/1 done   -                     -          Done      <none>\n"+
+			"beta      1.36         <none>         -          -                     -          Paused    <none>\n"+
+			"stable    1.36         1              4/4 done   0/3 done, 1 running   0/2 done   Rolling   soak ends in 6h (Tier2)\n"; got != want {
 		t.Errorf("rollouts: got\n%s\nwant\n%s", got, want)
 	}
 
@@ -127,8 +127,8 @@ func TestPrintRollouts(t *testing.T) {
 	}
 	got := printed(t, &cloudv1.GetRolloutResponse{Rollout: stableRollout, NextPageToken: "3"}, OutputTable)
 	for _, want := range []string{
-		"Channel:       stable\n", "Kubernetes:    1.36\n", "Policy:        maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n",
-		"State:         Rolling\n",
+		"Channel:        stable\n", "Kubernetes:     1.36\n", "Policy:         maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n",
+		"Rolling Tier:   1\n", "State:          Rolling\n",
 		"  TIER   TENANT   CLUSTER        RUNS   TARGET   STATE        SINCE    REASON\n",
 		"  2      acme     dev-eks        1.36   1.36     Succeeded    2d       <none>\n",
 		"  1      acme     payments-eks   1.35   1.36     InProgress   12m      <none>\n",

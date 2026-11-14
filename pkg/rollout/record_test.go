@@ -173,8 +173,8 @@ func TestComputeIsNotDoneWhileAClusterIsBlocked(t *testing.T) {
 
 	res := Compute(input(blocked, cluster("done", cloudv1alpha1.ClusterTier1, "1.36")))
 
-	if res.Rollout.Done || res.Stage != cloudv1alpha1.ClusterTier2 {
-		t.Errorf("done = %v, stage = %s; want not done, at Tier2", res.Rollout.Done, res.Stage)
+	if res.Rollout.Done || res.Tier != cloudv1alpha1.ClusterTier2 {
+		t.Errorf("done = %v, tier = %s; want not done, at Tier2", res.Rollout.Done, res.Tier)
 	}
 	if !strings.Contains(res.Rollout.Waiting, "1 cluster blocked: manual upgrades") {
 		t.Errorf("waiting = %q", res.Rollout.Waiting)

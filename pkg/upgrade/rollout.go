@@ -70,8 +70,8 @@ type TierCount struct {
 type Decision struct {
 	// Start are the clusters to start upgrading now, in order.
 	Start []string
-	// Stage is the tier being rolled out (or waited for).
-	Stage Tier
+	// Tier is the tier being rolled out (or waited for).
+	Tier Tier
 	// Waiting says why nothing (more) starts; empty when Start is not.
 	Waiting string
 	// SoakUntil is when the soak the rollout waits for ends; zero when it
@@ -98,7 +98,7 @@ func Plan(p Policy, now time.Time, members []Member) Decision {
 	maxFailed := max(p.MaxFailed, 0)
 	for _, tier := range rolloutOrder {
 		if failed := d.Tiers[tier].Failed; failed > maxFailed {
-			d.Stage, d.Halted = tier, true
+			d.Tier, d.Halted = tier, true
 			d.Waiting = fmt.Sprintf("halted: %s failed in tier %d, at most %d allowed", clusters(failed), tier, maxFailed)
 			return d
 		}
@@ -112,7 +112,7 @@ func Plan(p Policy, now time.Time, members []Member) Decision {
 			}
 			continue
 		}
-		d.Stage = tier
+		d.Tier = tier
 		if finished != nil {
 			if opens := finished.at.Add(p.soak(finished.tier)); now.Before(opens) {
 				d.SoakUntil = opens
@@ -124,7 +124,7 @@ func Plan(p Policy, now time.Time, members []Member) Decision {
 		d.Start, d.Waiting = start(byTier[tier], tier, c, p.MaxInProgress)
 		return d
 	}
-	d.Stage, d.Done = Tier0, true
+	d.Tier, d.Done = Tier0, true
 	return d
 }
 

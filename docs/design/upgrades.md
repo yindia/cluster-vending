@@ -9,7 +9,7 @@ Status: plan only; nothing was changed. Read at `fd1e668` on main. Paths are rel
 | A cluster keeps the release its components were installed from; it leaves only when the release is gone or `Valid=False`. Mode, tier and holds are not read. | `pkg/reconcile/cluster/platform.go` `platformInput` |
 | `release.Resolve` and `release.CheckVersion` have no caller. Create/update do not check the Kubernetes version against the offered release. | `pkg/release/release.go`; `pkg/server/cluster/mutate.go` only calls `CheckVersionStep` |
 | `upgrade_mode` exists on the contract (field 13) and the kind, defaults to manual, and is updatable with channel and tier. | `idl/cloud/v1/cluster.proto`, `api/v1alpha1/cluster_types.go`, `pkg/cluster/plan.go`, `pkg/server/cluster/mutate.go` `releasePaths` |
-| Beta and stable offer whatever upstream offers, at once. `CheckStep` is applied per channel, not per cluster. `status.stage` and `status.tiers` are never written. | `pkg/controller/release_controller.go` `target`, `release_catalog.go` `stepProblem` |
+| Beta and stable offer whatever upstream offers, at once. `CheckStep` is applied per channel, not per cluster. `status.stage` (now `status.rolloutTier`) and `status.tiers` are never written. | `pkg/controller/release_controller.go` `target`, `release_catalog.go` `stepProblem` |
 | The whole platform set is applied every pass. A dependent waits only for its requirement to be Ready and `deployed`, which stays true at the old version, so a release change would upgrade every chart at once. | `pkg/crossplane/aws/platform_components.go` `PlatformSet`, `installed` |
 | "Ready" means Helm applied the chart, not that its workloads run. | `docs/catalog.md`, `component-usage.md` §7.2 item 6 |
 | A component the release does not pin is reported `FAILED: not in release X` and left out of the set. | `pkg/component/platform.go` `planComponent`; `platform.go` `platformStatus` |
@@ -129,7 +129,7 @@ func Rollout(policy Policy, release string, members []Member, prev State, now ti
 - **Pause:** `spec.paused` stops admissions; `Resolve` already keeps clusters where they are.
 - **Holds:** read by cluster ID (`cloudstore.LabelID`), counted per tier, and passed to `Resolve` by the cluster reconciler.
 - **Promotion:** add `status.completed{release, at}`, set when Tier0 has completed and soaked and the channel is not halted. An Automatic channel's `target()` reads its upstream's `status.completed.release` instead of `status.release`. A channel takes a new release only when its current rollout completed, unless the operator changes `spec.release` (supersede).
-- **Reporting:** `status.stage`, `status.tiers[]` (add `pending`, `skipped`, `soakUntil`), conditions `Progressing`, `Soaking`, `Halted`, `Complete`, failed cluster IDs (at most 20), and events on the channel and the cluster.
+- **Reporting:** `status.rolloutTier` (was `status.stage`), `status.tiers[]` (add `pending`, `skipped`, `soakUntil`), conditions `Progressing`, `Soaking`, `Halted`, `Complete`, failed cluster IDs (at most 20), and events on the channel and the cluster.
 
 **The `0s` soak.** `Soak` is a `metav1.Duration` struct, so `omitempty` never omits it: the Go client sends `"0s"` and the CRD default of 24h never applies (`asShipped` in `release_defaults.go` already works around it). `MaxFailed` has the mirror problem: an explicit 0 is dropped and becomes 1.
 

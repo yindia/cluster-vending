@@ -80,7 +80,7 @@ service AdminService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Lists each channel's rollout of its Kubernetes minor: the stage, the
+  // Lists each channel's rollout of its Kubernetes minor: the tier it is at, the
   // counts per tier, which clusters start (or would) and why none does.
   rpc ListRollouts(ListRolloutsRequest) returns (ListRolloutsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;

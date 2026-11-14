@@ -59,7 +59,7 @@ func releaseWorld(t *testing.T, objects ...client.Object) *Service {
 			Spec: cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.PromotionAutomatic,
 				Policy: cloudv1alpha1.RolloutPolicy{MaxInProgress: 2, MaxFailed: 1, Soak: metav1.Duration{Duration: 24 * time.Hour},
 					SoakPerTier: map[cloudv1alpha1.ClusterTier]metav1.Duration{cloudv1alpha1.ClusterTier1: {Duration: 48 * time.Hour}}}},
-			Status: cloudv1alpha1.ReleaseChannelStatus{Release: shipped, KubernetesMinor: minor, Stage: cloudv1alpha1.ClusterTier2,
+			Status: cloudv1alpha1.ReleaseChannelStatus{Release: shipped, KubernetesMinor: minor, RolloutTier: cloudv1alpha1.ClusterTier2,
 				Rollout: &cloudv1alpha1.ChannelRollout{TargetMinor: minor, ReportOnly: true, Waiting: "would start 1 cluster (automatic upgrades are off)",
 					WouldStart: []string{"tenant-acme/next"},
 					Members:    []cloudv1alpha1.RolloutTierCount{{Tier: cloudv1alpha1.ClusterTier2, Pending: 1, Succeeded: 1}}},
@@ -192,7 +192,7 @@ func TestListRolloutsIsWhatTheControllerReported(t *testing.T) {
 		t.Fatalf("rollouts = %v", res.GetRollouts())
 	}
 	r := res.GetRollouts()[2]
-	if r.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE || r.GetStage() != cloudv1.ClusterTier_CLUSTER_TIER_2 ||
+	if r.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE || r.GetRolloutTier() != cloudv1.ClusterTier_CLUSTER_TIER_2 ||
 		r.GetSummary().GetTargetMinor() != "1.35" || !r.GetSummary().GetReportOnly() || len(r.GetMembers()) != 0 ||
 		r.GetSummary().GetTiers()[0].GetPending() != 1 {
 		t.Errorf("stable = %v", r)

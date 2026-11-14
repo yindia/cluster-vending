@@ -132,7 +132,7 @@ func Planned(r Row, c *cloudv1alpha1.Cluster, res Result, now time.Time) *cloudv
 
 // pendingMessage is what a pending cluster waits for.
 func pendingMessage(r Row, res Result) string {
-	stage := Tier(res.Stage)
+	rolling := Tier(res.Tier)
 	switch {
 	case slices.Contains(res.Start, r.Key()) && res.Rollout.ReportOnly:
 		return "automatic upgrades are off (would start)"
@@ -140,8 +140,8 @@ func pendingMessage(r Row, res Result) string {
 		return "next to start"
 	case res.Rollout.Halted:
 		return "waiting: " + res.waiting
-	case r.Tier < stage:
-		return fmt.Sprintf("waiting: tier %d first", stage)
+	case r.Tier < rolling:
+		return fmt.Sprintf("waiting: tier %d first", rolling)
 	case res.waiting != "" && len(res.Start) == 0:
 		return "waiting: " + res.waiting
 	default:
@@ -151,7 +151,7 @@ func pendingMessage(r Row, res Result) string {
 
 // notDoneWhileBelow keeps the rollout from being done while a member is
 // still below the target: one kept back by its own check, or one that
-// failed. The stage is the first tier (2, 1, 0) that has one, and the
+// failed. The tier rolled out is the first tier (2, 1, 0) that has one, and the
 // rollout says why it is not done.
 func notDoneWhileBelow(d upgrade.Decision, members []upgrade.Member, blocked []cloudv1alpha1.BlockedCluster) upgrade.Decision {
 	if !d.Done {
@@ -162,14 +162,14 @@ func notDoneWhileBelow(d upgrade.Decision, members []upgrade.Member, blocked []c
 		reasons[b.Cluster] = b.Message
 	}
 	var nBlocked, nFailed int
-	first, stage, found := "", upgrade.Tier0, false
+	first, rolling, found := "", upgrade.Tier0, false
 	for _, tier := range []upgrade.Tier{upgrade.Tier2, upgrade.Tier1, upgrade.Tier0} {
 		for _, m := range members {
 			if m.Tier != tier || (m.State != upgrade.Blocked && m.State != upgrade.Failed) {
 				continue
 			}
 			if !found {
-				stage, found = tier, true
+				rolling, found = tier, true
 			}
 			if m.State == upgrade.Failed {
 				nFailed++
@@ -184,7 +184,7 @@ func notDoneWhileBelow(d upgrade.Decision, members []upgrade.Member, blocked []c
 	if !found {
 		return d
 	}
-	d.Done, d.Stage = false, stage
+	d.Done, d.Tier = false, rolling
 	if nBlocked > 0 {
 		d.Waiting = fmt.Sprintf("%s blocked: %s", clusterCount(nBlocked), first)
 	} else {

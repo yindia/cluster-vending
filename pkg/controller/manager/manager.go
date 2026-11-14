@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -79,6 +80,9 @@ type Options struct {
 	// AutomaticUpgrades: upgrade automatic clusters to their channel's
 	// Kubernetes minor; off, the rollout is planned and reported only.
 	AutomaticUpgrades bool
+	// UpgradeTimeout is how long an automatic upgrade may take before the
+	// rollout counts it as failed (0: config.DefaultUpgradeTimeout).
+	UpgradeTimeout time.Duration
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -197,7 +201,8 @@ func Run(ctx context.Context, o Options) error {
 	// What happens to accounts, networks, clusters and releases is also a
 	// Kubernetes event of the object (docs/events.md).
 	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
-	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades}
+	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades,
+		UpgradeTimeout: o.UpgradeTimeout}
 	if err := Setup(mgr, deps); err != nil {
 		return err
 	}

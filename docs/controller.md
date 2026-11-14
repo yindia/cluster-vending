@@ -116,7 +116,8 @@ and `--log-level`, and only these:
 | `--recover-stuck-releases` | default `true`: recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes) by removing the Helm record of the stuck revision in the workload cluster, at most 3 times per component version ([catalog.md](catalog.md), "When a component fails"); `false` leaves it failed for a person |
 | `--recommendations` | default `true`: every five minutes, sample each running cluster for resource recommendations (read-only: workloads, metrics-server usage, the cluster's own Vertical Pod Autoscalers) and record a week of usage in the tenant namespace ([recommendations.md](recommendations.md)); `false` records nothing |
 | `--reconcile-workers` | default `8`: how many cloud accounts, networks and clusters of each kind are reconciled at once; one object is never reconciled twice at the same time. The release, catalog, deprecation and recommendation controllers keep one worker |
-| `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel only; no cluster is upgraded (see "Rollout of a channel's Kubernetes minor"). The upgrade step is not built yet |
+| `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel and each cluster (`status.rollout`) only; no cluster is upgraded. `true` upgrades clusters with `upgradeMode: Automatic`, tier by tier; **irreversible** (EKS cannot downgrade). See "Rollout of a channel's Kubernetes minor" |
+| `--upgrade-timeout` | default `90m`: how long an automatic upgrade may take before it counts as failed (`TimedOut`, against the tier's `maxFailed`) |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 
@@ -337,10 +338,10 @@ stores the desired state; it has no background loop.
 Each ReleaseChannel's release puts one Kubernetes minor on it
 (`pkg/catalog/release.yaml`, `channel:` on the minor; `status.kubernetesMinor`).
 The rollout controller plans how the channel's clusters with `upgradeMode:
-Automatic` move to that minor and writes the plan to the channel's status.
-**It does not upgrade any cluster yet**: with `--automatic-upgrades` off (the
-default, and for now the only behaviour) `status.rollout.reportOnly` is true
-and `wouldStart` lists the clusters an upgrade would start on.
+Automatic` move to that minor, writes the plan to the channel's status and
+each member's place in it to the cluster's `status.rollout`. With
+`--automatic-upgrades` off (the default) that is all: `status.rollout.reportOnly`
+is true and `wouldStart` lists the clusters an upgrade would start on.
 
 The plan (`pkg/upgrade`):
 
@@ -367,6 +368,45 @@ kubectl get releasechannel stable -o jsonpath='{.status.rollout}'
 A pass runs when the channel, its release, a ReleaseHold or what the rollout
 reads of a cluster changes, when a soak ends or a blocking window opens, and
 every 10 minutes.
+
+### Automatic upgrades (`--automatic-upgrades=true`)
+
+**Irreversible**: EKS cannot downgrade a cluster. Turn it on only when the
+channels' minors and the clusters' tiers, modes and windows are what you
+want.
+
+For each cluster the plan starts, the controller reads it again and starts
+the hop only if it is still Automatic, on the channel, asks for the minor the
+plan saw, and is not paused or being deleted. It then sets
+`spec.controlPlane.kubernetesVersion` to the next minor through the store
+(the etag-guarded update an API call would make; a write that loses to
+another change is skipped and planned again next pass), records the upgrade
+and emits `AutomaticUpgradeStarted` on the cluster and the channel. The
+cluster's own reconcile runs the upgrade as for any version change: control
+plane first, then the node group and the add-ons.
+
+The record (`status.rollout` on the Cluster, `rollout` in `GetCluster`):
+
+| `result` | Meaning |
+|---|---|
+| `Pending` | not started: it waits its turn, its tier, a soak, or automatic upgrades are off (`message` says which) |
+| `Blocked` | kept back by its own check: manual mode, a maintenance window, the deprecation scan, health, a pause |
+| `InProgress` | the rollout set the new version; counts against `maxInProgress` before the cluster reports the upgrade |
+| `Succeeded` | the cluster runs the new minor and reports no upgrade; `finishTime` starts the tier's soak |
+| `Failed` | the cluster failed while upgrading (`message`); counts against `maxFailed` until the cluster runs the minor |
+| `TimedOut` | not finished within `--upgrade-timeout`; counted as failed |
+
+`Pending` and `Blocked` are written only when they change, and never over an
+upgrade in progress or one that failed. A version a person changes
+(`cluster update`) writes no record and is not counted as the rollout's.
+
+To follow it:
+
+```sh
+cluster-vending cluster get --id <cluster>          # Rollout: 1.36 → 1.37 via channel alpha (tier 2): in progress since 12m
+cluster-vending cluster watch --id <cluster>        # every change as it happens
+cluster-vending admin rollout get --channel alpha   # every cluster of the channel, tier by tier
+```
 
 ### Admin: releases, channels and rollouts
 

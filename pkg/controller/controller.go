@@ -105,6 +105,9 @@ type Deps struct {
 	// AutomaticUpgrades: the rollout controller upgrades automatic
 	// clusters; off, it plans and reports the rollout only.
 	AutomaticUpgrades bool
+	// UpgradeTimeout is how long an automatic upgrade may take before the
+	// rollout counts it as failed; 0 is config.DefaultUpgradeTimeout.
+	UpgradeTimeout time.Duration
 }
 
 func (d Deps) logger() *slog.Logger {

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yindia/cluster-vending/pkg/config"
 )
@@ -31,8 +32,8 @@ func TestLoadController(t *testing.T) {
 	// The management account is the role's.
 	want := config.Controller{MetricsAddr: "0", ProbeAddr: ":8081", LeaderElect: true, LeaseNamespace: config.DefaultLeaseNamespace,
 		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true, Recommendations: true,
-		ReconcileWorkers: config.DefaultReconcileWorkers,
-		AWS:              config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
+		ReconcileWorkers: config.DefaultReconcileWorkers, UpgradeTimeout: config.DefaultUpgradeTimeout,
+		AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("defaults = %+v, want %+v", cfg, want)
 	}
@@ -63,6 +64,8 @@ func TestLoadController(t *testing.T) {
 		"workers zero":    {config.FlagReconcileWorkers: "0"},
 		"workers word":    {config.FlagReconcileWorkers: "many"},
 		"upgrades":        {config.FlagAutomaticUpgrades: "soon"},
+		"timeout word":    {config.FlagUpgradeTimeout: "long"},
+		"timeout zero":    {config.FlagUpgradeTimeout: "0s"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
 			t.Errorf("%s: %v, want an error naming the flag", name, err)
@@ -95,6 +98,18 @@ func TestAutomaticUpgrades(t *testing.T) {
 	}
 }
 
+// --upgrade-timeout is how long an automatic upgrade may take before the
+// rollout counts it as failed.
+func TestUpgradeTimeout(t *testing.T) {
+	cfg, err := config.LoadController(nil, lookupIn(management(map[string]string{config.EnvUpgradeTimeout: "2h"})), nil)
+	if err != nil || cfg.UpgradeTimeout != 2*time.Hour {
+		t.Errorf("CV_UPGRADE_TIMEOUT=2h: %s (%v), want 2h", cfg.UpgradeTimeout, err)
+	}
+	if config.DefaultUpgradeTimeout != 90*time.Minute {
+		t.Errorf("default = %s, want 90m", config.DefaultUpgradeTimeout)
+	}
+}
+
 // The controller takes exactly these settings; everything else about how
 // the providers run is the platform's (or managed outside it).
 func TestControllerSettingsAreFew(t *testing.T) {
@@ -105,7 +120,8 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagRecommendations,
-		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagProviderCredentialsSecret, config.FlagSkipTenantRole}
+		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagProviderCredentialsSecret,
+		config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)
 	}

@@ -107,7 +107,7 @@ func orDefault(s, def string) string {
 // it entered that state).
 func Planned(r Row, c *cloudv1alpha1.Cluster, res Result, now time.Time) *cloudv1alpha1.ClusterRolloutRecord {
 	next := &cloudv1alpha1.ClusterRolloutRecord{Channel: res.Channel, FromVersion: r.Current, ToVersion: r.Target,
-		StartTime: metav1.NewTime(now), Tier: int32(r.Tier)}
+		StartTime: metav1.NewTime(now), Tier: Count32(int(r.Tier))}
 	switch r.State {
 	case upgrade.Pending:
 		next.Result, next.Message = cloudv1alpha1.ClusterRolloutPending, pendingMessage(r, res)

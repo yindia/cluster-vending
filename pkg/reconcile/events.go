@@ -60,6 +60,11 @@ const (
 //	Release       ReleaseInvalid              Warning  a release fails a check; the message says which
 //	Channel       ChannelOffers               Normal   a channel offers another release than before
 //	Channel       ChannelCannotMove           Warning  a channel cannot offer the release it should
+//	Channel       RolloutStage                Normal   the rollout of the channel's minor moved to another tier
+//	Channel       RolloutHalted               Warning  too many upgrades failed in a tier; nothing more starts
+//	both          AutomaticUpgradeStarted     Normal   the rollout set the cluster's next minor (cluster and channel)
+//	Cluster       AutomaticUpgradeSucceeded   Normal   an automatic upgrade finished: the cluster runs the new minor
+//	Cluster       AutomaticUpgradeFailed      Warning  an automatic upgrade failed or did not finish in time
 const (
 	ReasonProvisioning                = "Provisioning"
 	ReasonControlPlaneActive          = "ControlPlaneActive"
@@ -100,6 +105,9 @@ const (
 	ReasonChannelCannotMove           = "ChannelCannotMove"
 	ReasonRolloutStage                = "RolloutStage"
 	ReasonRolloutHalted               = "RolloutHalted"
+	ReasonAutomaticUpgradeStarted     = "AutomaticUpgradeStarted"
+	ReasonAutomaticUpgradeSucceeded   = "AutomaticUpgradeSucceeded"
+	ReasonAutomaticUpgradeFailed      = "AutomaticUpgradeFailed"
 )
 
 // Kinds of the objects events are about.

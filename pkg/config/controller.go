@@ -5,6 +5,7 @@ import (
 	"net"
 	"slices"
 	"strconv"
+	"time"
 )
 
 // Flags and environment variables of the controller command.
@@ -22,6 +23,10 @@ const (
 	// reported on each ReleaseChannel only.
 	FlagAutomaticUpgrades = "automatic-upgrades"
 	EnvAutomaticUpgrades  = "CV_AUTOMATIC_UPGRADES"
+	// FlagUpgradeTimeout is how long an automatic upgrade may take before
+	// the rollout counts it as failed (TimedOut).
+	FlagUpgradeTimeout = "upgrade-timeout"
+	EnvUpgradeTimeout  = "CV_UPGRADE_TIMEOUT"
 )
 
 // Defaults of the controller command.
@@ -33,6 +38,9 @@ const (
 	// network, a Helm install) no longer holds up every other object of
 	// its kind. An object is never reconciled by two workers at once.
 	DefaultReconcileWorkers = 8
+	// DefaultUpgradeTimeout covers an EKS control plane upgrade (about 10
+	// minutes), a node group's rolling replacement and the add-ons.
+	DefaultUpgradeTimeout = 90 * time.Minute
 )
 
 // controllerSettings are all the controller takes. How the providers run
@@ -67,7 +75,9 @@ var controllerSettings = []Setting{
 	{Flag: FlagReconcileWorkers, Env: EnvReconcileWorkers, Default: strconv.Itoa(DefaultReconcileWorkers),
 		Usage: "how many cloud accounts, networks and clusters of each kind are reconciled at once (at least 1); one object is never reconciled twice at the same time"},
 	{Flag: FlagAutomaticUpgrades, Env: EnvAutomaticUpgrades, Default: "false",
-		Usage: "upgrade clusters with upgradeMode Automatic to their release channel's Kubernetes minor, one minor at a time, tier by tier; false (for now always: the upgrade step is not built) plans and reports the rollout on each ReleaseChannel (status.rollout) and upgrades nothing"},
+		Usage: "upgrade clusters with upgradeMode Automatic to their release channel's Kubernetes minor, one minor at a time, tier by tier (irreversible: EKS cannot downgrade); false plans and reports the rollout on each ReleaseChannel and cluster (status.rollout) and upgrades nothing"},
+	{Flag: FlagUpgradeTimeout, Env: EnvUpgradeTimeout, Default: DefaultUpgradeTimeout.String(),
+		Usage: "how long an automatic upgrade may take before the rollout counts it as failed (TimedOut, against the tier's maxFailed), e.g. 2h"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -102,6 +112,8 @@ type Controller struct {
 	// AutomaticUpgrades: upgrade automatic clusters to their channel's
 	// minor; off, the rollout is reported only.
 	AutomaticUpgrades bool
+	// UpgradeTimeout is how long an automatic upgrade may take.
+	UpgradeTimeout time.Duration
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -155,6 +167,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.AutomaticUpgrades, err = strconv.ParseBool(v[FlagAutomaticUpgrades]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagAutomaticUpgrades), v[FlagAutomaticUpgrades]))
+	}
+	if cfg.UpgradeTimeout, err = time.ParseDuration(v[FlagUpgradeTimeout]); err != nil || cfg.UpgradeTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive duration like 90m or 2h, got %q", setting(FlagUpgradeTimeout), v[FlagUpgradeTimeout]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/rollout"
 )
@@ -35,20 +37,36 @@ const ConditionRolloutPlanned = "RolloutPlanned"
 
 // RolloutReconciler plans the rollout of each channel's Kubernetes minor
 // to its automatic clusters (pkg/upgrade) and reports it on the
-// ReleaseChannel: the stage, the per-tier progress, the clusters that
-// start now and those kept back with why. It never changes a cluster.
+// ReleaseChannel (the stage, the per-tier progress, the clusters that
+// start now and those kept back with why) and on each member cluster
+// (status.rollout). With automatic upgrades on it also starts the plan's
+// hops (rollout_apply.go); off, it never changes a cluster's version.
 type RolloutReconciler struct {
 	c   client.Client
 	now func() time.Time
-	// automatic is the controller's automatic-upgrades setting.
+	// automatic is the controller's automatic-upgrades setting; timeout
+	// its upgrade-timeout (0: the default).
 	automatic bool
+	timeout   time.Duration
 	events    platform.Events
+	// store writes clusters: their version (etag-guarded) and their
+	// rollout record. Nil: nothing is written to clusters.
+	store repository.Store
+	log   *slog.Logger
 }
 
 // NewRolloutReconciler returns the rollout controller on d's manager
 // client (SetupWithManager sets it).
 func NewRolloutReconciler(d Deps) *RolloutReconciler {
-	return &RolloutReconciler{automatic: d.AutomaticUpgrades, events: d.Events}
+	return &RolloutReconciler{automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, events: d.Events,
+		store: d.Store, log: d.Logger}
+}
+
+func (r *RolloutReconciler) logger() *slog.Logger {
+	if r.log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return r.log
 }
 
 // SetupWithManager registers the controller: one worker, since a pass
@@ -116,7 +134,7 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	now := r.clock()
-	plan, err := r.plan(ctx, ch, now)
+	plan, in, err := r.plan(ctx, ch, now)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -131,12 +149,8 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		r.report(ctx, ch.Name, was, status)
 	}
-	// increment 6: for each cluster in plan.rollout.WouldStart, when
-	// r.automatic, set spec.controlPlane.kubernetesVersion to its hop
-	// through the store (an event on the cluster saying "automatic
-	// upgrade <from> to <to>, channel <name>"). Irreversible: it stays
-	// behind the automatic-upgrades setting and is not built until it was
-	// run on a real EKS cluster. Nothing here writes a cluster.
+	started := r.startHops(ctx, plan.Result, now)
+	r.recordPlans(ctx, plan.Result, in, started, now)
 	return ctrl.Result{RequeueAfter: plan.requeue(now)}, nil
 }
 
@@ -159,15 +173,17 @@ func (p rolloutPlan) requeue(now time.Time) time.Duration {
 	return min(p.Wake.Sub(now)+time.Second, rolloutRecheck)
 }
 
-// plan reads the channel's release, clusters and holds and plans the
-// rollout at now (rollout.Compute).
-func (r *RolloutReconciler) plan(ctx context.Context, ch *cloudv1alpha1.ReleaseChannel, now time.Time) (rolloutPlan, error) {
+// plan reads the channel's release, clusters and holds, ends the
+// upgrades it started that finished, and plans the rollout at now
+// (rollout.Compute).
+func (r *RolloutReconciler) plan(ctx context.Context, ch *cloudv1alpha1.ReleaseChannel, now time.Time) (rolloutPlan, rollout.Input, error) {
 	in, err := rollout.Read(ctx, r.c, ch)
 	if err != nil {
-		return rolloutPlan{}, err
+		return rolloutPlan{}, in, err
 	}
 	in.Now, in.Automatic = now, r.automatic
-	return rolloutPlan{rollout.Compute(in)}, nil
+	r.finishUpgrades(ctx, ch.Name, &in, now)
+	return rolloutPlan{rollout.Compute(in)}, in, nil
 }
 
 // report records the rollout's transitions as events of the channel.

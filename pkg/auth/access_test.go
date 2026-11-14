@@ -37,6 +37,13 @@ func TestEveryRPCIsClassified(t *testing.T) {
 	want := map[protoreflect.FullName]auth.Access{
 		"cloud.v1.AdminService.PauseReconcile":         {Scope: auth.ScopePlatform, Write: true},
 		"cloud.v1.AdminService.ResumeReconcile":        {Scope: auth.ScopePlatform, Write: true},
+		"cloud.v1.AdminService.ListReleases":           {Scope: auth.ScopePlatform},
+		"cloud.v1.AdminService.GetRelease":             {Scope: auth.ScopePlatform},
+		"cloud.v1.AdminService.ListReleaseChannels":    {Scope: auth.ScopePlatform},
+		"cloud.v1.AdminService.GetReleaseChannel":      {Scope: auth.ScopePlatform},
+		"cloud.v1.AdminService.ListRollouts":           {Scope: auth.ScopePlatform},
+		"cloud.v1.AdminService.GetRollout":             {Scope: auth.ScopePlatform},
+		"cloud.v1.AdminService.ListReleaseHolds":       {Scope: auth.ScopePlatform},
 		"cloud.v1.ComponentService.GetComponentValues": {Scope: auth.ScopeAuthenticated},
 		"cloud.v1.TenantService.WhoAmI":                {Scope: auth.ScopeAuthenticated},
 		"cloud.v1.TenantService.BootstrapTenant":       {Scope: auth.ScopeTenant, Write: true},

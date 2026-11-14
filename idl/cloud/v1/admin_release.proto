@@ -1,0 +1,286 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/cluster.proto";
+import "cloud/v1/conditions.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// The platform's release configuration as the operators read it
+// (AdminService): the releases, the channels that offer them, the
+// rollout of each channel's Kubernetes minor and the holds that keep
+// clusters out of it. Read-only: the objects are written with kubectl or
+// from Git (docs/design/release-admin.md).
+
+// Release is a published release: what clusters run, per Kubernetes minor.
+message Release {
+  // The Release object's name, e.g. shipped-1aed928c.
+  string name = 1;
+  // Shipped: the controller created it from its build.
+  bool shipped = 2;
+  // Valid: the release's checks passed; invalid_reason says why not.
+  bool valid = 3;
+  string invalid_reason = 4;
+  // Withdrawn: no channel may offer it any more.
+  bool withdrawn = 5;
+  // The channels offering it now.
+  repeated ReleaseChannel channels = 6;
+  // The holds naming it.
+  repeated string holds = 7;
+  google.protobuf.Timestamp create_time = 8;
+  // The supported Kubernetes minors, newest first. GetRelease only.
+  repeated ReleaseMinor kubernetes = 9;
+  // Notes for operators and tenants. GetRelease only.
+  string notes = 10;
+}
+
+// ReleaseMinor is what clusters on one Kubernetes minor run.
+message ReleaseMinor {
+  // e.g. "1.37".
+  string minor = 1;
+  // The channel whose clusters run it; UNSPECIFIED: none.
+  ReleaseChannel channel = 2;
+  // The minor a new cluster on no channel gets.
+  bool default = 3;
+  // The minor its automatic clusters move to next, if any.
+  string upgrade_to = 4;
+  google.protobuf.Timestamp end_of_support = 5;
+  // Ending: offered but on no channel; its users are warned to move off.
+  bool ending = 6;
+  // The components the platform installs on it.
+  repeated ReleaseComponent components = 7;
+}
+
+// ReleaseComponent is a component the platform installs, at its version.
+message ReleaseComponent {
+  string name = 1;
+  string version = 2;
+  // The Helm values the release locks for it on this minor; unset: none.
+  google.protobuf.Struct values = 3;
+}
+
+// ReleaseChannelInfo is a channel's settings and what it offers.
+message ReleaseChannelInfo {
+  ReleaseChannel channel = 1;
+  // AUTOMATIC, MANUAL or PINNED, as the object spells it.
+  string promotion = 2;
+  // The release a Manual or Pinned channel names (spec.release).
+  string pinned_release = 3;
+  // The release it offers now (status.release).
+  string release = 4;
+  // The Kubernetes minor that release puts on the channel.
+  string kubernetes_minor = 5;
+  // Paused: no cluster starts.
+  bool paused = 6;
+  RolloutPolicy policy = 7;
+  // The tier the rollout is at.
+  ClusterTier stage = 8;
+  RolloutSummary rollout = 9;
+  // The releases it offered, newest first. GetReleaseChannel only.
+  repeated ChannelHistoryEntry history = 10;
+  repeated Condition conditions = 11;
+  google.protobuf.Timestamp create_time = 12;
+}
+
+// RolloutPolicy is how a channel's rollout moves through the tiers.
+message RolloutPolicy {
+  // Clusters upgrading at once per tier (tier 0: always 1).
+  int32 max_in_progress = 1;
+  // Failures in a tier before the channel halts.
+  int32 max_failed = 2;
+  // Healthy time after a tier before the next one starts, e.g. "24h0m0s".
+  string soak = 3;
+  // soak per tier, by tier: "Tier0", "Tier1", "Tier2".
+  map<string, string> soak_per_tier = 4;
+}
+
+// ChannelHistoryEntry is one release a channel offered.
+message ChannelHistoryEntry {
+  string release = 1;
+  google.protobuf.Timestamp from = 2;
+  // Unset for the release offered now.
+  google.protobuf.Timestamp to = 3;
+  string reason = 4;
+}
+
+// RolloutState is a cluster's place in a rollout.
+enum RolloutState {
+  ROLLOUT_STATE_UNSPECIFIED = 0;
+  // Waiting for its turn.
+  ROLLOUT_STATE_PENDING = 1;
+  // Upgrading now.
+  ROLLOUT_STATE_IN_PROGRESS = 2;
+  // Runs the channel's minor.
+  ROLLOUT_STATE_SUCCEEDED = 3;
+  // Its upgrade failed.
+  ROLLOUT_STATE_FAILED = 4;
+  // Kept back by its own gates (reason); it does not hold the rollout.
+  ROLLOUT_STATE_BLOCKED = 5;
+}
+
+// RolloutTier counts one tier's clusters by state.
+message RolloutTier {
+  ClusterTier tier = 1;
+  int32 pending = 2;
+  int32 in_progress = 3;
+  int32 succeeded = 4;
+  int32 failed = 5;
+  int32 blocked = 6;
+}
+
+// RolloutSummary is what a channel's rollout does now.
+message RolloutSummary {
+  // The minor the channel's clusters move to.
+  string target_minor = 1;
+  // Automatic upgrades are off: the rollout is planned and reported only.
+  bool report_only = 2;
+  // Why no (more) cluster starts; when halted, why it halted.
+  string waiting = 3;
+  bool halted = 4;
+  // Every cluster runs the minor, or is kept back by its own gates.
+  bool done = 5;
+  // The clusters (namespace/name) that start now, or would.
+  repeated string would_start = 6;
+  // Tier 2 first.
+  repeated RolloutTier tiers = 7;
+}
+
+// RolloutMember is one cluster of a channel's rollout.
+message RolloutMember {
+  ClusterTier tier = 1;
+  string tenant_id = 2;
+  string cluster_id = 3;
+  string cluster_name = 4;
+  // The version it runs.
+  string current_version = 5;
+  // The minor it moves to next (one minor at a time), or runs once there.
+  string target_version = 6;
+  RolloutState state = 7;
+  // When it entered its state; unset when unknown.
+  google.protobuf.Timestamp since = 8;
+  // Why it is blocked: the gate's code (MANUAL, MAINTENANCE_WINDOW, ...)
+  // and its message for people.
+  string gate = 9;
+  string reason = 10;
+}
+
+// Rollout is a channel's rollout of its Kubernetes minor.
+message Rollout {
+  ReleaseChannel channel = 1;
+  // The release the channel offers.
+  string release = 2;
+  ClusterTier stage = 3;
+  RolloutPolicy policy = 4;
+  bool paused = 5;
+  RolloutSummary summary = 6;
+  // The channel's clusters in the rollout, tier 2 first. GetRollout only.
+  repeated RolloutMember members = 7;
+}
+
+// ReleaseHold keeps one cluster out of rollouts.
+message ReleaseHold {
+  string name = 1;
+  // The held cluster's ID, and the object it resolved to.
+  string cluster_id = 2;
+  string tenant_namespace = 3;
+  string cluster_name = 4;
+  // Set: the cluster stays on exactly this release (a lock); unset, where
+  // it is (a freeze).
+  string release = 5;
+  string reason = 6;
+  // When it ends by itself; unset: never.
+  google.protobuf.Timestamp until = 7;
+  // Active: it holds its cluster now (not past until).
+  bool active = 8;
+  google.protobuf.Timestamp create_time = 9;
+}
+
+message ListReleasesRequest {
+  // Maximum results per page. Defaults to 50; values above 200 are coerced
+  // to 200.
+  int32 page_size = 1 [(buf.validate.field).int32.gte = 0];
+  // next_page_token from a previous call.
+  string page_token = 2;
+}
+
+message ListReleasesResponse {
+  // Newest first.
+  repeated Release releases = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+}
+
+message GetReleaseRequest {
+  // The Release object's name.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 63
+  }];
+}
+
+message GetReleaseResponse {
+  Release release = 1;
+}
+
+// The three channels: no pagination.
+message ListReleaseChannelsRequest {}
+
+message ListReleaseChannelsResponse {
+  // alpha, beta, stable.
+  repeated ReleaseChannelInfo channels = 1;
+}
+
+message GetReleaseChannelRequest {
+  ReleaseChannel channel = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message GetReleaseChannelResponse {
+  ReleaseChannelInfo channel = 1;
+}
+
+// One rollout per channel: no pagination.
+message ListRolloutsRequest {}
+
+message ListRolloutsResponse {
+  // alpha, beta, stable; without members.
+  repeated Rollout rollouts = 1;
+}
+
+message GetRolloutRequest {
+  ReleaseChannel channel = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Only this tier's members; UNSPECIFIED: all.
+  ClusterTier tier = 2 [(buf.validate.field).enum.defined_only = true];
+  // Maximum members per page. Defaults to 50; values above 200 are
+  // coerced to 200.
+  int32 page_size = 3 [(buf.validate.field).int32.gte = 0];
+  // next_page_token from a previous call.
+  string page_token = 4;
+}
+
+message GetRolloutResponse {
+  Rollout rollout = 1;
+  // Empty when there are no more members.
+  string next_page_token = 2;
+}
+
+message ListReleaseHoldsRequest {
+  // Maximum results per page. Defaults to 50; values above 200 are coerced
+  // to 200.
+  int32 page_size = 1 [(buf.validate.field).int32.gte = 0];
+  // next_page_token from a previous call.
+  string page_token = 2;
+}
+
+message ListReleaseHoldsResponse {
+  repeated ReleaseHold holds = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+}

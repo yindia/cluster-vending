@@ -62,6 +62,19 @@ func TestHandlerAuthenticatesTheServices(t *testing.T) {
 	if got := post("cloud.v1.TenantService/WhoAmI", admin); got != http.StatusOK {
 		t.Errorf("WhoAmI as platform admin: status %d, want 200", got)
 	}
+	// The release configuration is the operators' to read: a caller
+	// without the platform admin role is refused; an admin reaches the
+	// handler (which cannot read a management cluster here).
+	someone := idp.Sign(t, idp.Claims("api", "v", map[string]any{"groups": []string{"devs"}}))
+	for _, rpc := range []string{"cloud.v1.AdminService/ListReleases", "cloud.v1.AdminService/ListReleaseChannels",
+		"cloud.v1.AdminService/ListRollouts", "cloud.v1.AdminService/ListReleaseHolds"} {
+		if got := post(rpc, someone); got != http.StatusForbidden {
+			t.Errorf("%s without the admin role: status %d, want 403", rpc, got)
+		}
+		if got := post(rpc, admin); got != http.StatusServiceUnavailable {
+			t.Errorf("%s as platform admin without a management cluster: status %d, want the handler's 503", rpc, got)
+		}
+	}
 	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
 		res, err := srv.Client().Get(srv.URL + path)
 		if err != nil {

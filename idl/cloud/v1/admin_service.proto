@@ -3,6 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/admin_release.proto";
 
 // AdminService holds operations of the platform's operators, not of
 // tenants. Where the server authenticates, its RPCs need the platform
@@ -43,6 +44,51 @@ service AdminService {
   // (the rest of the tenant stays paused). The controller then observes
   // each resource and applies what changed meanwhile, once. Idempotent.
   rpc ResumeReconcile(ResumeReconcileRequest) returns (ResumeReconcileResponse);
+
+  // Lists the releases, newest first: valid or not, shipped or published,
+  // and the channels and holds naming them. Read-only.
+  rpc ListReleases(ListReleasesRequest) returns (ListReleasesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Returns one release with what it offers per Kubernetes minor: the
+  // channel, default, upgrade target, end of support, whether it is
+  // ending (on no channel), and the components with their versions and
+  // locked values. NOT_FOUND when there is no such release.
+  rpc GetRelease(GetReleaseRequest) returns (GetReleaseResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the three channels: what each offers, its Kubernetes minor, its
+  // rollout policy and where its rollout is.
+  rpc ListReleaseChannels(ListReleaseChannelsRequest) returns (ListReleaseChannelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Returns one channel, with the releases it offered and its conditions.
+  rpc GetReleaseChannel(GetReleaseChannelRequest) returns (GetReleaseChannelResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists each channel's rollout of its Kubernetes minor: the stage, the
+  // counts per tier, which clusters start (or would) and why none does.
+  rpc ListRollouts(ListRolloutsRequest) returns (ListRolloutsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Returns one channel's rollout cluster by cluster, tier 2 first: what
+  // each runs, the minor it moves to, its state and why it is blocked.
+  // Planned the way the controller plans it (pkg/rollout), from what the
+  // management cluster holds now.
+  rpc GetRollout(GetRolloutRequest) returns (GetRolloutResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the release holds: the clusters kept out of rollouts, and until
+  // when.
+  rpc ListReleaseHolds(ListReleaseHoldsRequest) returns (ListReleaseHoldsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 message PauseReconcileRequest {

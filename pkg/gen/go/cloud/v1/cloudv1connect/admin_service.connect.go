@@ -30,6 +30,23 @@ const (
 	// AdminServiceResumeReconcileProcedure is the procedure name of the AdminService's ResumeReconcile
 	// RPC.
 	AdminServiceResumeReconcileProcedure = "/cloud.v1.AdminService/ResumeReconcile"
+	// AdminServiceListReleasesProcedure is the procedure name of the AdminService's ListReleases RPC.
+	AdminServiceListReleasesProcedure = "/cloud.v1.AdminService/ListReleases"
+	// AdminServiceGetReleaseProcedure is the procedure name of the AdminService's GetRelease RPC.
+	AdminServiceGetReleaseProcedure = "/cloud.v1.AdminService/GetRelease"
+	// AdminServiceListReleaseChannelsProcedure is the procedure name of the AdminService's
+	// ListReleaseChannels RPC.
+	AdminServiceListReleaseChannelsProcedure = "/cloud.v1.AdminService/ListReleaseChannels"
+	// AdminServiceGetReleaseChannelProcedure is the procedure name of the AdminService's
+	// GetReleaseChannel RPC.
+	AdminServiceGetReleaseChannelProcedure = "/cloud.v1.AdminService/GetReleaseChannel"
+	// AdminServiceListRolloutsProcedure is the procedure name of the AdminService's ListRollouts RPC.
+	AdminServiceListRolloutsProcedure = "/cloud.v1.AdminService/ListRollouts"
+	// AdminServiceGetRolloutProcedure is the procedure name of the AdminService's GetRollout RPC.
+	AdminServiceGetRolloutProcedure = "/cloud.v1.AdminService/GetRollout"
+	// AdminServiceListReleaseHoldsProcedure is the procedure name of the AdminService's
+	// ListReleaseHolds RPC.
+	AdminServiceListReleaseHoldsProcedure = "/cloud.v1.AdminService/ListReleaseHolds"
 )
 
 var (
@@ -45,6 +62,62 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ResumeReconcile"),
 			Procedure:  AdminServiceResumeReconcileProcedure,
+		}
+	})
+	adminServiceListReleasesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListReleases"),
+			Procedure:        AdminServiceListReleasesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceGetReleaseSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("GetRelease"),
+			Procedure:        AdminServiceGetReleaseProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceListReleaseChannelsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListReleaseChannels"),
+			Procedure:        AdminServiceListReleaseChannelsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceGetReleaseChannelSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("GetReleaseChannel"),
+			Procedure:        AdminServiceGetReleaseChannelProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceListRolloutsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListRollouts"),
+			Procedure:        AdminServiceListRolloutsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceGetRolloutSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("GetRollout"),
+			Procedure:        AdminServiceGetRolloutProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceListReleaseHoldsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListReleaseHolds"),
+			Procedure:        AdminServiceListReleaseHoldsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
 )
@@ -84,6 +157,30 @@ type AdminServiceClient interface {
 	// (the rest of the tenant stays paused). The controller then observes
 	// each resource and applies what changed meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
+	// Lists the releases, newest first: valid or not, shipped or published,
+	// and the channels and holds naming them. Read-only.
+	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
+	// Returns one release with what it offers per Kubernetes minor: the
+	// channel, default, upgrade target, end of support, whether it is
+	// ending (on no channel), and the components with their versions and
+	// locked values. NOT_FOUND when there is no such release.
+	GetRelease(context.Context, *v1.GetReleaseRequest) (*v1.GetReleaseResponse, error)
+	// Lists the three channels: what each offers, its Kubernetes minor, its
+	// rollout policy and where its rollout is.
+	ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
+	// Returns one channel, with the releases it offered and its conditions.
+	GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
+	// Lists each channel's rollout of its Kubernetes minor: the stage, the
+	// counts per tier, which clusters start (or would) and why none does.
+	ListRollouts(context.Context, *v1.ListRolloutsRequest) (*v1.ListRolloutsResponse, error)
+	// Returns one channel's rollout cluster by cluster, tier 2 first: what
+	// each runs, the minor it moves to, its state and why it is blocked.
+	// Planned the way the controller plans it (pkg/rollout), from what the
+	// management cluster holds now.
+	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
+	// Lists the release holds: the clusters kept out of rollouts, and until
+	// when.
+	ListReleaseHolds(context.Context, *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error)
 }
 
 // NewAdminServiceClient constructs a client for the cloud.v1.AdminService service. Multiple service
@@ -127,6 +224,30 @@ type AdminServiceHandler interface {
 	// (the rest of the tenant stays paused). The controller then observes
 	// each resource and applies what changed meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
+	// Lists the releases, newest first: valid or not, shipped or published,
+	// and the channels and holds naming them. Read-only.
+	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
+	// Returns one release with what it offers per Kubernetes minor: the
+	// channel, default, upgrade target, end of support, whether it is
+	// ending (on no channel), and the components with their versions and
+	// locked values. NOT_FOUND when there is no such release.
+	GetRelease(context.Context, *v1.GetReleaseRequest) (*v1.GetReleaseResponse, error)
+	// Lists the three channels: what each offers, its Kubernetes minor, its
+	// rollout policy and where its rollout is.
+	ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
+	// Returns one channel, with the releases it offered and its conditions.
+	GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
+	// Lists each channel's rollout of its Kubernetes minor: the stage, the
+	// counts per tier, which clusters start (or would) and why none does.
+	ListRollouts(context.Context, *v1.ListRolloutsRequest) (*v1.ListRolloutsResponse, error)
+	// Returns one channel's rollout cluster by cluster, tier 2 first: what
+	// each runs, the minor it moves to, its state and why it is blocked.
+	// Planned the way the controller plans it (pkg/rollout), from what the
+	// management cluster holds now.
+	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
+	// Lists the release holds: the clusters kept out of rollouts, and until
+	// when.
+	ListReleaseHolds(context.Context, *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error)
 }
 
 // RegisterAdminServiceHandler registers svc as the cloud.v1.AdminService implementation on server.
@@ -135,6 +256,13 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 	server.Register(
 		connect.Method{Spec: adminServicePauseReconcileSpec(), Handler: adapter.pauseReconcile},
 		connect.Method{Spec: adminServiceResumeReconcileSpec(), Handler: adapter.resumeReconcile},
+		connect.Method{Spec: adminServiceListReleasesSpec(), Handler: adapter.listReleases},
+		connect.Method{Spec: adminServiceGetReleaseSpec(), Handler: adapter.getRelease},
+		connect.Method{Spec: adminServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
+		connect.Method{Spec: adminServiceGetReleaseChannelSpec(), Handler: adapter.getReleaseChannel},
+		connect.Method{Spec: adminServiceListRolloutsSpec(), Handler: adapter.listRollouts},
+		connect.Method{Spec: adminServiceGetRolloutSpec(), Handler: adapter.getRollout},
+		connect.Method{Spec: adminServiceListReleaseHoldsSpec(), Handler: adapter.listReleaseHolds},
 	)
 }
 
@@ -147,6 +275,34 @@ func (UnimplementedAdminServiceHandler) PauseReconcile(context.Context, *v1.Paus
 
 func (UnimplementedAdminServiceHandler) ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ResumeReconcile is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListReleases is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) GetRelease(context.Context, *v1.GetReleaseRequest) (*v1.GetReleaseResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetRelease is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListReleaseChannels is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetReleaseChannel is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) ListRollouts(context.Context, *v1.ListRolloutsRequest) (*v1.ListRolloutsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListRollouts is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetRollout is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) ListReleaseHolds(context.Context, *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListReleaseHolds is not implemented")
 }
 
 type adminServiceClient struct {
@@ -164,6 +320,62 @@ func (c *adminServiceClient) PauseReconcile(ctx context.Context, req *v1.PauseRe
 func (c *adminServiceClient) ResumeReconcile(ctx context.Context, req *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error) {
 	var res v1.ResumeReconcileResponse
 	if err := c.client.CallUnary(ctx, adminServiceResumeReconcileSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) ListReleases(ctx context.Context, req *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error) {
+	var res v1.ListReleasesResponse
+	if err := c.client.CallUnary(ctx, adminServiceListReleasesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) GetRelease(ctx context.Context, req *v1.GetReleaseRequest) (*v1.GetReleaseResponse, error) {
+	var res v1.GetReleaseResponse
+	if err := c.client.CallUnary(ctx, adminServiceGetReleaseSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) ListReleaseChannels(ctx context.Context, req *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error) {
+	var res v1.ListReleaseChannelsResponse
+	if err := c.client.CallUnary(ctx, adminServiceListReleaseChannelsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) GetReleaseChannel(ctx context.Context, req *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
+	var res v1.GetReleaseChannelResponse
+	if err := c.client.CallUnary(ctx, adminServiceGetReleaseChannelSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) ListRollouts(ctx context.Context, req *v1.ListRolloutsRequest) (*v1.ListRolloutsResponse, error) {
+	var res v1.ListRolloutsResponse
+	if err := c.client.CallUnary(ctx, adminServiceListRolloutsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) GetRollout(ctx context.Context, req *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
+	var res v1.GetRolloutResponse
+	if err := c.client.CallUnary(ctx, adminServiceGetRolloutSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) ListReleaseHolds(ctx context.Context, req *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error) {
+	var res v1.ListReleaseHoldsResponse
+	if err := c.client.CallUnary(ctx, adminServiceListReleaseHoldsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -189,6 +401,90 @@ func (h adminServiceHandler) resumeReconcile(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.ResumeReconcile(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) listReleases(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListReleasesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListReleases(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) getRelease(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetReleaseRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetRelease(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) listReleaseChannels(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListReleaseChannelsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListReleaseChannels(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) getReleaseChannel(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetReleaseChannelRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetReleaseChannel(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) listRollouts(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListRolloutsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListRollouts(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) getRollout(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetRolloutRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetRollout(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) listReleaseHolds(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListReleaseHoldsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListReleaseHolds(ctx, &req)
 	if err != nil {
 		return err
 	}

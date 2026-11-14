@@ -96,23 +96,29 @@ later manifest needs is a placeholder in it, named in the file's header:
 bin/cluster-vending account create -f examples/cloudaccount.yaml
 bin/cluster-vending account list --tenant acme
 
-# 2. Create a network in it (set spec.bootstrapId to BOOTSTRAP_ID first).
+# 2. Wait until the controller has checked the account's access: ACCESS
+#    in account list is Verified. Networks and clusters are refused until
+#    then. To check now, or a region no network uses yet:
+bin/cluster-vending account verify --id BOOTSTRAP_ID --tenant acme --region us-east-1
+bin/cluster-vending account get --id BOOTSTRAP_ID --tenant acme   # its Checks
+
+# 3. Create a network in it (set spec.bootstrapId to BOOTSTRAP_ID first).
 #    The answer has its id: NETWORK_ID.
 bin/cluster-vending network create -f examples/network.yaml --wait
 bin/cluster-vending network get NETWORK_ID --tenant acme      # status last recorded
 bin/cluster-vending network status NETWORK_ID --tenant acme   # status read live
 
-# 3. Create a cluster in the network (set spec.network.networkId to
+# 4. Create a cluster in the network (set spec.network.networkId to
 #    NETWORK_ID first). The answer has its id: CLUSTER_ID.
 bin/cluster-vending cluster create -f examples/cluster.yaml --wait
 
-# 4. Or import an existing VPC read-only (set spec.bootstrapId and the VPC
+# 5. Or import an existing VPC read-only (set spec.bootstrapId and the VPC
 #    and subnet IDs first), review the plan in status.import, then take
 #    it over. The answer has its id: IMPORTED_NETWORK_ID.
 bin/cluster-vending network import -f examples/network-import.yaml
 bin/cluster-vending network takeover IMPORTED_NETWORK_ID --tenant acme --wait
 
-# 5. Delete, in order: clusters before their network.
+# 6. Delete, in order: clusters before their network.
 bin/cluster-vending cluster delete CLUSTER_ID --tenant acme --wait
 bin/cluster-vending network delete NETWORK_ID --tenant acme --wait
 ```

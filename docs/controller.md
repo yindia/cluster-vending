@@ -282,8 +282,31 @@ When: on create and on every change of the account, when its networks use a
 region not checked yet, every 6 hours, and on request
 (`cluster-vending account verify --id <id> --tenant <t>`, the
 `VerifyCloudAccount` RPC, which only records the request; `account get`
-shows the result once the controller has run it). A paused account is not
+shows the result once the controller has run it). `--region` (repeatable;
+`VerifyCloudAccountRequest.regions`) adds regions no network uses yet: they
+are kept on the account (the annotation
+`cloud.cluster-vending.io/access-regions`) and checked with the others from then
+on; a later verify without `--region` keeps them. A paused account is not
 checked.
+
+The API server acts on the result. `CreateNetwork`, `ImportNetwork`,
+`TakeOverNetwork`, `CreateCluster`, `ImportCluster` and `TakeOverCluster`
+(a cluster: the account of its network) refuse an account the last check
+did not verify, with `FAILED_PRECONDITION`, and store nothing:
+
+| The account | The refusal |
+|-------------|-------------|
+| never checked (or no verdict yet) | `account <name> (<account id>) has not been verified yet; the controller checks it shortly after it is added, or run: cluster-vending account verify --id <id>` |
+| denied | `account <name> (<account id>) cannot be used: <reason>: <message>; fix the account and run: cluster-vending account verify --id <id>` |
+| the region failed | `region <region> of account <name> (<account id>) cannot be used: <reason>: <message>; fix the account and run: cluster-vending account verify --id <id>` |
+| the region not checked | `region <region> of account <name> (<account id>) has not been verified yet; run: cluster-vending account verify --id <id> --region <region>` |
+
+A verdict that is stale (later checks could not finish) but verified is
+used, and the server logs a warning. Reads, updates, deletes, pause and
+resume do not check: what exists can always be looked at, changed and
+removed. There is no switch to skip it; a local run with
+`skip-tenant-role` is checked with its keys like any other. A cluster is
+also created only once its network is Ready (or being updated).
 
 The result is the account's `status.access` (when, as whom, each region
 and call with its reason) and the condition `AccessVerified`: `True`,

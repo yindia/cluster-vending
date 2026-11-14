@@ -73,9 +73,17 @@ type KubernetesRelease struct {
 	// +required
 	// +kubebuilder:validation:Pattern=`^1\.[0-9]{2}$`
 	Minor string `json:"minor"`
-	// Default marks the minor a new cluster gets when it names none.
+	// Default marks the minor a new cluster on no channel gets when it
+	// names none. A cluster on a channel gets the channel's minor.
 	// +optional
 	Default bool `json:"default,omitempty"`
+	// Channel is the channel whose clusters run this minor. A release puts
+	// either no minor on a channel, or exactly one on each of alpha, beta
+	// and stable, alpha's the newest. A minor on no channel is still
+	// supported; its users are warned to move off it. Unset: none.
+	// +optional
+	// +kubebuilder:validation:Enum=alpha;beta;stable
+	Channel string `json:"channel,omitempty"`
 	// UpgradeTo moves automatic clusters on this minor to the next one
 	// (one minor at a time). Unset: they stay.
 	// +optional
@@ -100,12 +108,13 @@ type ReleaseContent struct {
 	// +required
 	// +kubebuilder:validation:Minimum=1
 	RenderVersion int64 `json:"renderVersion"`
-	// Kubernetes: the three supported minors, consecutive.
+	// Kubernetes: the supported minors, consecutive: one per channel, and
+	// those still supported on no channel.
 	// +required
 	// +listType=map
 	// +listMapKey=minor
 	// +kubebuilder:validation:MinItems=3
-	// +kubebuilder:validation:MaxItems=3
+	// +kubebuilder:validation:MaxItems=6
 	Kubernetes []KubernetesRelease `json:"kubernetes"`
 }
 
@@ -273,6 +282,10 @@ type ReleaseChannelStatus struct {
 	// it).
 	// +optional
 	Release string `json:"release,omitempty"`
+	// KubernetesMinor is the minor that release puts on this channel: the
+	// minor its automatic clusters run. Empty when it puts none.
+	// +optional
+	KubernetesMinor string `json:"kubernetesMinor,omitempty"`
 	// Stage is the tier being rolled out (rollouts: later).
 	// +optional
 	Stage ClusterTier `json:"stage,omitempty"`
@@ -298,6 +311,7 @@ type ReleaseChannelStatus struct {
 // +kubebuilder:validation:XValidation:rule="self.metadata.name in ['alpha', 'beta', 'stable']",message="channels are alpha, beta and stable"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name != 'alpha' || self.spec.promotion != 'Automatic'",message="alpha has no upstream channel: it is Pinned or Manual to a release"
 // +kubebuilder:printcolumn:name="Release",type=string,JSONPath=`.status.release`
+// +kubebuilder:printcolumn:name="Kubernetes",type=string,JSONPath=`.status.kubernetesMinor`
 // +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion`
 // +kubebuilder:printcolumn:name="Paused",type=boolean,JSONPath=`.spec.paused`
 // +kubebuilder:printcolumn:name="Offering",type=string,JSONPath=`.status.conditions[?(@.type=="Offering")].status`

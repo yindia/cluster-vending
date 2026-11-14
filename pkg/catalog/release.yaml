@@ -5,22 +5,33 @@
 #
 # Each component's chart, values and IAM are in definitions/<name>.yaml.
 
-# Kubernetes minors on offer, newest first. Exactly one is the default (what
-# a cluster gets when it names no version); upgradeTo is the minor an
-# automatic cluster moves to next.
+# Kubernetes minors on offer, newest first.
+#
+# channel: the channel whose clusters run this minor. Each of alpha, beta
+# and stable is on exactly one minor, alpha's the newest and stable's the
+# oldest. To move a channel, edit its line here: adding a minor moves only
+# the channel you put on it. A minor on no channel stays supported, and
+# its users are warned to move off it.
+#
+# default: what a cluster on no channel gets when it names no version
+# (exactly one minor). upgradeTo: the minor after this one (deprecation
+# scans check against it).
 kubernetes:
 - minor: "1.37"
+  channel: alpha
   default: true
   endOfSupport: "2028-01-31"      # placeholder: set your own
   # Locked Helm values of a component on this minor only.
   values:
     cluster-autoscaler: {image: {tag: v1.37.0}}   # its image must be of the cluster's minor
 - minor: "1.36"
+  channel: beta
   upgradeTo: "1.37"
   endOfSupport: "2027-09-30"
   values:
     cluster-autoscaler: {image: {tag: v1.36.2}}
 - minor: "1.35"
+  channel: stable
   upgradeTo: "1.36"
   endOfSupport: "2027-05-31"
   values:

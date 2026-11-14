@@ -17,6 +17,7 @@ spec:
     renderVersion: 4
     kubernetes:
       - minor: "1.37"
+        channel: alpha
         default: true
         endOfSupport: "2028-01-31T00:00:00Z"
         components:
@@ -33,6 +34,7 @@ spec:
           - {name: kyverno-policies, version: "3.10.0"}
           - {name: ztunnel, version: "1.32.0"}
       - minor: "1.36"
+        channel: beta
         upgradeTo: "1.37"
         endOfSupport: "2027-09-30T00:00:00Z"
         components:
@@ -49,6 +51,7 @@ spec:
           - {name: kyverno-policies, version: "3.10.0"}
           - {name: ztunnel, version: "1.32.0"}
       - minor: "1.35"
+        channel: stable
         upgradeTo: "1.36"
         endOfSupport: "2027-05-31T00:00:00Z"
         components:

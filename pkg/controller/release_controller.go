@@ -221,10 +221,11 @@ func (r *ReleaseReconciler) namedBy(ctx context.Context, release string) (namedR
 }
 
 // ValidateRelease makes the checks of a release's content the API
-// server's CEL rules cannot: the three minors are consecutive, an
-// upgradeTo is the next minor and one of the three, and the renderer
-// version is not newer than this build's (render). It returns the problems
-// found; none means valid.
+// server's CEL rules cannot: the minors are consecutive, an upgradeTo is
+// the next minor and one of them, the channels are each on one minor
+// from the newest (alpha) to the oldest (stable) or none is
+// (release.ChannelProblems), and the renderer version is not newer than
+// this build's (render). It returns the problems found; none means valid.
 func ValidateRelease(content cloudv1alpha1.ReleaseContent, render int64) []string {
 	var problems []string
 	if content.RenderVersion > render {
@@ -260,6 +261,7 @@ func ValidateRelease(content cloudv1alpha1.ReleaseContent, render int64) []strin
 			problems = append(problems, fmt.Sprintf("%s upgrades to %s, which the release does not have", k.Minor, k.UpgradeTo))
 		}
 	}
+	problems = append(problems, release.ChannelProblems(releasePins("", content))...)
 	return append(problems, pinValueProblems(content)...)
 }
 
@@ -366,6 +368,9 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if status.Release != "" && offering.Status == metav1.ConditionFalse {
 		offering.Message += "; still offers " + status.Release
 	}
+	if status.KubernetesMinor, err = r.channelMinor(ctx, status.Release, ch.Name); err != nil {
+		return ctrl.Result{}, err
+	}
 	meta.SetStatusCondition(&status.Conditions, offering)
 	if equality.Semantic.DeepEqual(status, ch.Status) {
 		return ctrl.Result{}, nil
@@ -429,6 +434,21 @@ func (r *ReleaseChannelReconciler) unusable(ctx context.Context, release, why st
 		return fmt.Sprintf("release %s is not valid (yet): %s", release, conditionMessage(rel.Status.Conditions, cloudv1alpha1.ReleaseConditionValid))
 	}
 	return ""
+}
+
+// channelMinor is the Kubernetes minor the release a channel offers puts
+// on that channel; "" when it offers none, the release is gone, or it puts
+// no minor on the channel.
+func (r *ReleaseChannelReconciler) channelMinor(ctx context.Context, name, channel string) (string, error) {
+	if name == "" {
+		return "", nil
+	}
+	rel := &cloudv1alpha1.Release{}
+	if err := r.c.Get(ctx, client.ObjectKey{Name: name}, rel); err != nil {
+		return "", client.IgnoreNotFound(err)
+	}
+	minor, _ := release.ChannelMinor(releasePins(rel.Name, rel.Spec.Content), channel)
+	return minor, nil
 }
 
 func (r *ReleaseChannelReconciler) clock() metav1.Time {

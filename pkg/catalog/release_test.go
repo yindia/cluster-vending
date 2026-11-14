@@ -1,6 +1,7 @@
 package catalog_test
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -37,10 +38,22 @@ func TestShippedReleaseCoversTheCatalog(t *testing.T) {
 func TestParseReleaseReportsEveryProblem(t *testing.T) {
 	const valid = `
 kubernetes:
-- {minor: "1.37", default: true, endOfSupport: "2028-01-31"}
+- {minor: "1.37", default: true, endOfSupport: "2028-01-31", channel: alpha}
 components: {karpenter: "1.15.1"}
 channels:
 - {name: alpha, promotion: Pinned}
+`
+	const three = `
+kubernetes:
+- {minor: "1.37", default: true, endOfSupport: "2028-01-31", channel: %s}
+- {minor: "1.36", endOfSupport: "2027-09-30", channel: %s}
+- {minor: "1.35", endOfSupport: "2027-05-31", channel: %s}
+- {minor: "1.34", endOfSupport: "2027-01-31"}
+components: {karpenter: "1.15.1"}
+channels:
+- {name: alpha, promotion: Pinned}
+- {name: beta, promotion: Automatic}
+- {name: stable, promotion: Automatic}
 `
 	tests := []struct {
 		name string
@@ -62,6 +75,15 @@ kubernetes:
 components: {karpenter: "1.15.1"}
 `, []string{"values for nope"}},
 		{"a bad channel", valid + "- {name: gamma, promotion: Sometimes}\n", []string{`"gamma"`, `"Sometimes"`}},
+		{"a channel per minor, and a minor on none", fmt.Sprintf(three, "alpha", "beta", "stable"), nil},
+		{"a channel on no minor", fmt.Sprintf(three, "alpha", "beta", `""`),
+			[]string{"channel stable is on no minor"}},
+		{"a channel on two minors", fmt.Sprintf(three, "alpha", "beta", "beta"),
+			[]string{"channel beta is on 1.36 and 1.35"}},
+		{"stable newer than beta", fmt.Sprintf(three, "alpha", "stable", "beta"),
+			[]string{"stable (1.36) is newer than beta (1.35)"}},
+		{"a channel the file does not have", strings.Replace(valid, "channel: alpha", "channel: beta", 1),
+			[]string{"kubernetes 1.37: channel beta is not under channels", "channel alpha is on no minor"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

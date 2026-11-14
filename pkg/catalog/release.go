@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/yaml"
@@ -30,8 +32,15 @@ type Release struct {
 type KubernetesVersion struct {
 	// Minor, e.g. "1.37".
 	Minor string `json:"minor"`
-	// Default marks the minor a cluster gets when it names none.
+	// Default marks the minor a cluster on no channel gets when it names
+	// none. A cluster on a channel gets the channel's minor (Channel).
 	Default bool `json:"default,omitempty"`
+	// Channel is the channel (alpha, beta or stable, one of Channels)
+	// whose clusters run this minor: each channel is on exactly one minor,
+	// alpha's the newest and stable's the oldest. A minor on no channel is
+	// still supported; its users are warned to move. Moving a channel is
+	// editing this line.
+	Channel string `json:"channel,omitempty"`
 	// UpgradeTo is the minor an automatic cluster moves to next.
 	UpgradeTo string `json:"upgradeTo,omitempty"`
 	// EndOfSupport is the day (YYYY-MM-DD, UTC) support for the minor ends.
@@ -127,6 +136,7 @@ func (r Release) check() error {
 			errs = append(errs, fmt.Errorf("kubernetes %s: upgradeTo %s is not on offer", k.Minor, k.UpgradeTo))
 		}
 	}
+	errs = append(errs, r.channelProblems()...)
 	for name, version := range r.Components {
 		if version == "" {
 			errs = append(errs, fmt.Errorf("components: %s has no version", name))
@@ -146,4 +156,55 @@ func (r Release) check() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// channelProblems: each channel under channels is on exactly one minor, a
+// minor is on a channel the file has, and the channels go from the newest
+// minor (alpha) to the oldest (stable).
+func (r Release) channelProblems() []error {
+	var errs []error
+	listed := map[string]bool{}
+	for _, ch := range r.Channels {
+		listed[ch.Name] = true
+	}
+	on := map[string]string{}
+	for _, k := range r.Kubernetes {
+		switch {
+		case k.Channel == "":
+		case !listed[k.Channel]:
+			errs = append(errs, fmt.Errorf("kubernetes %s: channel %s is not under channels", k.Minor, k.Channel))
+		case on[k.Channel] != "":
+			errs = append(errs, fmt.Errorf("kubernetes: channel %s is on %s and %s: one minor per channel", k.Channel, on[k.Channel], k.Minor))
+		default:
+			on[k.Channel] = k.Minor
+		}
+	}
+	var present []string
+	for _, name := range []string{"alpha", "beta", "stable"} {
+		switch {
+		case !listed[name]:
+		case on[name] == "":
+			errs = append(errs, fmt.Errorf("kubernetes: channel %s is on no minor: put channel: %s on one", name, name))
+		default:
+			present = append(present, name)
+		}
+	}
+	for i := 1; i < len(present); i++ {
+		newer, older := present[i-1], present[i]
+		if minorValue(on[older]) > minorValue(on[newer]) {
+			errs = append(errs, fmt.Errorf("kubernetes: channel %s (%s) is newer than %s (%s): alpha, beta and stable go from the newest minor to the oldest",
+				older, on[older], newer, on[newer]))
+		}
+	}
+	return errs
+}
+
+// minorValue is 37 for "1.37"; -1 for anything else.
+func minorValue(minor string) int {
+	rest, ok := strings.CutPrefix(minor, "1.")
+	n, err := strconv.Atoi(rest)
+	if !ok || err != nil {
+		return -1
+	}
+	return n
 }

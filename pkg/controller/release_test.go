@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,8 +40,8 @@ func releaseRules(r *cloudv1alpha1.Release) []string {
 		out = append(out, "name "+r.Name)
 	}
 	k := r.Spec.Content.Kubernetes
-	if len(k) != 3 {
-		out = append(out, "not three minors")
+	if len(k) < 3 || len(k) > 6 {
+		out = append(out, "not three to six minors")
 	}
 	defaults := 0
 	for _, m := range k {
@@ -49,6 +50,9 @@ func releaseRules(r *cloudv1alpha1.Release) []string {
 		}
 		if !minorRE.MatchString(m.Minor) || (m.UpgradeTo != "" && !minorRE.MatchString(m.UpgradeTo)) {
 			out = append(out, "minor "+m.Minor)
+		}
+		if m.Channel != "" && !slices.Contains([]string{"alpha", "beta", "stable"}, m.Channel) {
+			out = append(out, "channel "+m.Channel)
 		}
 		for _, c := range m.Components {
 			if c.Version == "" {
@@ -167,15 +171,22 @@ func TestValidateRelease(t *testing.T) {
 	k := func(minor, upgradeTo string) cloudv1alpha1.KubernetesRelease {
 		return cloudv1alpha1.KubernetesRelease{Minor: minor, UpgradeTo: upgradeTo}
 	}
+	on := func(minor, channel string) cloudv1alpha1.KubernetesRelease {
+		return cloudv1alpha1.KubernetesRelease{Minor: minor, Channel: channel}
+	}
 	for name, tt := range map[string]struct {
 		content cloudv1alpha1.ReleaseContent
 		want    string // a fragment of the problems; "" for none
 	}{
-		"shipped":             {DefaultRelease().Spec.Content, ""},
-		"consecutive":         {minors(k("1.35", "1.36"), k("1.36", ""), k("1.37", "")), ""},
-		"gap":                 {minors(k("1.33", ""), k("1.36", ""), k("1.37", "")), "not consecutive"},
-		"skips a minor":       {minors(k("1.35", "1.37"), k("1.36", ""), k("1.37", "")), "next minor"},
-		"upgrade out of list": {minors(k("1.35", ""), k("1.36", ""), k("1.37", "1.38")), "does not have"},
+		"shipped":                          {DefaultRelease().Spec.Content, ""},
+		"consecutive":                      {minors(k("1.35", "1.36"), k("1.36", ""), k("1.37", "")), ""},
+		"gap":                              {minors(k("1.33", ""), k("1.36", ""), k("1.37", "")), "not consecutive"},
+		"skips a minor":                    {minors(k("1.35", "1.37"), k("1.36", ""), k("1.37", "")), "next minor"},
+		"upgrade out of list":              {minors(k("1.35", ""), k("1.36", ""), k("1.37", "1.38")), "does not have"},
+		"a channel per minor, one on none": {minors(on("1.38", "alpha"), on("1.37", "beta"), on("1.36", "stable"), on("1.35", "")), ""},
+		"stable newer than beta": {minors(on("1.37", "alpha"), on("1.36", "stable"), on("1.35", "beta")),
+			"stable (1.36) is newer than beta (1.35)"},
+		"a channel on no minor": {minors(on("1.37", "alpha"), on("1.36", "beta"), on("1.35", "")), "no minor is on channel stable"},
 		"newer renderer": {cloudv1alpha1.ReleaseContent{RenderVersion: crossplaneaws.RenderVersion + 1,
 			Kubernetes: []cloudv1alpha1.KubernetesRelease{k("1.35", ""), k("1.36", ""), k("1.37", "")}}, "newer than this controller"},
 	} {
@@ -304,6 +315,7 @@ func TestChannelOffers(t *testing.T) {
 	c := releaseClient(t, valid, withdrawn, channels[0], channels[1], channels[2])
 	at := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
 	r := &ReleaseChannelReconciler{c: c, now: func() time.Time { return at }}
+	minor := map[string]string{}
 	offers := func(name string) (string, *metav1.Condition, []cloudv1alpha1.ChannelHistoryEntry) {
 		t.Helper()
 		reconcileOnce(t, r, name)
@@ -311,8 +323,15 @@ func TestChannelOffers(t *testing.T) {
 		if err := c.Get(ctx, client.ObjectKey{Name: name}, ch); err != nil {
 			t.Fatal(err)
 		}
+		minor[name] = ch.Status.KubernetesMinor
 		return ch.Status.Release, meta.FindStatusCondition(ch.Status.Conditions, cloudv1alpha1.ChannelConditionOffering), ch.Status.History
 	}
+	defer func() {
+		// Each channel reports the minor the shipped release puts on it.
+		if want := map[string]string{"alpha": "1.37", "beta": "1.36", "stable": "1.35"}; !maps.Equal(minor, want) {
+			t.Errorf("channels' Kubernetes minors %v, want %v", minor, want)
+		}
+	}()
 	if got, cond, history := offers("alpha"); got != DefaultReleaseName || cond.Status != metav1.ConditionTrue || len(history) != 1 {
 		t.Errorf("alpha offers %q (%+v, history %d)", got, cond, len(history))
 	}

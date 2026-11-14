@@ -65,11 +65,24 @@ spec:
                   to change a version.
                 properties:
                   kubernetes:
-                    description: 'Kubernetes: the three supported minors, consecutive.'
+                    description: |-
+                      Kubernetes: the supported minors, consecutive: one per channel, and
+                      those still supported on no channel.
                     items:
                       description: KubernetesRelease is what clusters on one supported
                         Kubernetes minor run.
                       properties:
+                        channel:
+                          description: |-
+                            Channel is the channel whose clusters run this minor. A release puts
+                            either no minor on a channel, or exactly one on each of alpha, beta
+                            and stable, alpha's the newest. A minor on no channel is still
+                            supported; its users are warned to move off it. Unset: none.
+                          enum:
+                          - alpha
+                          - beta
+                          - stable
+                          type: string
                         components:
                           description: Components the platform installs on this minor,
                             at these versions.
@@ -109,8 +122,9 @@ spec:
                           - name
                           x-kubernetes-list-type: map
                         default:
-                          description: Default marks the minor a new cluster gets
-                            when it names none.
+                          description: |-
+                            Default marks the minor a new cluster on no channel gets when it
+                            names none. A cluster on a channel gets the channel's minor.
                           type: boolean
                         endOfSupport:
                           description: EndOfSupport is when this minor stops being
@@ -131,7 +145,7 @@ spec:
                       - endOfSupport
                       - minor
                       type: object
-                    maxItems: 3
+                    maxItems: 6
                     minItems: 3
                     type: array
                     x-kubernetes-list-map-keys:

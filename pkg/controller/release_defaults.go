@@ -88,7 +88,7 @@ func ContentOf(rel catalog.Release) cloudv1alpha1.ReleaseContent {
 		Kubernetes: make([]cloudv1alpha1.KubernetesRelease, 0, len(rel.Kubernetes))}
 	for _, k := range rel.Kubernetes {
 		end, _ := k.EndOfSupportTime() // checked by catalog.ParseRelease
-		minor := cloudv1alpha1.KubernetesRelease{Minor: k.Minor, Default: k.Default, UpgradeTo: k.UpgradeTo,
+		minor := cloudv1alpha1.KubernetesRelease{Minor: k.Minor, Default: k.Default, Channel: k.Channel, UpgradeTo: k.UpgradeTo,
 			EndOfSupport: metav1.NewTime(end)}
 		for _, name := range rel.ComponentNames() {
 			pin := cloudv1alpha1.ComponentPin{Name: name, Version: rel.Components[name]}

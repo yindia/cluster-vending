@@ -331,6 +331,35 @@ Chart versions are not in the definitions. A `Release` pins them per
 Kubernetes minor; the versions below are what each definition was checked
 against.
 
+### Kubernetes minors and channels
+
+Each minor in `release.yaml` names the channel whose clusters run it:
+
+| Minor | Channel | Default (cluster on no channel) | Upgrade to |
+|---|---|---|---|
+| 1.37 | `alpha` | yes | |
+| 1.36 | `beta` | | 1.37 |
+| 1.35 | `stable` | | 1.36 |
+
+- Each of `alpha`, `beta` and `stable` is on exactly one minor, `alpha`'s
+  the newest and `stable`'s the oldest. The file and every published
+  `Release` are checked for this (a `Release` may also put no minor on any
+  channel, as releases published before channels did). Each
+  `ReleaseChannel` shows its minor in `status.kubernetesMinor`
+  (`kubectl get releasechannels`, column `KUBERNETES`).
+- **Moving a channel is editing one line.** Adding 1.38 as `alpha` moves
+  only alpha: put `channel: alpha` on 1.38, `beta` on 1.37, `stable` on
+  1.36 when you want those channels to move too. Nothing moves a channel
+  except that edit.
+- A minor on no channel (say 1.35, once `stable` is on 1.36) stays
+  supported: clusters keep running it. Its users are warned to move off it
+  (`release.Ending`); it is not removed and no cluster is upgraded because
+  of it.
+- A cluster on a channel gets its channel's minor; `default: true` is only
+  for a cluster on no channel. (Automatic upgrades to the channel's minor
+  come in later increments; see `docs/design/upgrades.md`.)
+- A `Release` offers three to six minors, consecutive.
+
 ## The components
 
 | Component | Chart (version checked) | Namespace | Tenant values | CRD chart |

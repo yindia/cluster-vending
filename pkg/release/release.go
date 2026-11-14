@@ -59,6 +59,10 @@ type Minor struct {
 	// UpgradeTo moves clusters on this minor to the next one; empty: they
 	// stay. Only a move of exactly one minor is followed.
 	UpgradeTo string
+	// Channel is the channel (alpha, beta or stable) whose clusters this
+	// minor is for; empty: none (still supported, its users are warned:
+	// Ending).
+	Channel string
 	// EndOfSupport is when this minor stops being supported; zero: not set.
 	EndOfSupport time.Time
 	Components   []Component

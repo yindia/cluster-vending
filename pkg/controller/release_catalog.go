@@ -32,7 +32,7 @@ func pinValueProblems(content cloudv1alpha1.ReleaseContent) []string {
 func releasePins(name string, content cloudv1alpha1.ReleaseContent) release.Release {
 	out := release.Release{Name: name, RenderVersion: content.RenderVersion}
 	for _, k := range content.Kubernetes {
-		m := release.Minor{Minor: k.Minor, Default: k.Default, UpgradeTo: k.UpgradeTo}
+		m := release.Minor{Minor: k.Minor, Default: k.Default, UpgradeTo: k.UpgradeTo, Channel: k.Channel}
 		for _, c := range k.Components {
 			m.Components = append(m.Components, release.Component{Name: c.Name, Version: c.Version})
 		}

@@ -20,6 +20,9 @@ spec:
     - jsonPath: .status.release
       name: Release
       type: string
+    - jsonPath: .status.kubernetesMinor
+      name: Kubernetes
+      type: string
     - jsonPath: .spec.promotion
       name: Promotion
       type: string
@@ -199,6 +202,11 @@ spec:
                   type: object
                 maxItems: 20
                 type: array
+              kubernetesMinor:
+                description: |-
+                  KubernetesMinor is the minor that release puts on this channel: the
+                  minor its automatic clusters run. Empty when it puts none.
+                type: string
               release:
                 description: |-
                   Release the channel offers now: spec.release, or for an Automatic

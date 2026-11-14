@@ -152,7 +152,9 @@ The controller is the only command that looks at AWS: it discovers the VPC
 or EKS cluster of an import, checks a new cluster's name against EKS,
 resolves the Kubernetes and add-on versions EKS offers, and checks that it
 can reach and act in each account (the access check, below). The API server makes
-no AWS call and has no AWS setting or credentials.
+no AWS call and has no AWS credentials; its one AWS setting,
+`aws-management-role-arn`, is only printed for tenants creating the role
+(`account template`, [onboarding.md](onboarding.md)).
 
 There is one rule, for the controller's lookups and for the Crossplane
 providers alike:
@@ -184,7 +186,8 @@ anywhere and `--provider-credentials-secret` is not set. What must be true:
   the cluster's OIDC provider (the usual IRSA trust policy).
 - They may call `sts:AssumeRole` on the tenant roles.
 - Each tenant role's trust policy allows them (`sts:AssumeRole`, principal:
-  the role's ARN).
+  the role's ARN). The role's CloudFormation template does this
+  (`cluster-vending account template`, [onboarding.md](onboarding.md)).
 
 The simplest arrangement is to run the controller as the management role
 itself: the tenant roles then trust one role.

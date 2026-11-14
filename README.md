@@ -91,6 +91,12 @@ later manifest needs is a placeholder in it, named in the file's header:
 `111122223333`, the role and the VPC and subnet IDs with your own.
 
 ```sh
+# 0. Create the platform's IAM role in acme's AWS account: a CloudFormation
+#    stack (docs/onboarding.md). It writes the template and prints the
+#    aws cloudformation create-stack command (and a console link when the
+#    server has cloudformation-template-url).
+bin/cluster-vending account template --tenant acme --account-id 111122223333
+
 # 1. Onboard acme's AWS account. The answer has the account's id
 #    (BOOTSTRAP_ID, the bootstrap id that networks refer to).
 bin/cluster-vending account create -f examples/cloudaccount.yaml
@@ -150,6 +156,9 @@ bin/cluster-vending cluster get CLUSTER_ID --tenant acme -o yaml
   direction the project is moving in.
 - [idl/README.md](idl/README.md): the `cloud.v1` contract and how its fields
   map to AWS.
+- [docs/onboarding.md](docs/onboarding.md): onboarding an AWS account: the
+  CloudFormation templates of the platform's role (reader, updater,
+  provisioner), `account template`, and the `make cf-*` targets.
 - [docs/components.md](docs/components.md): the `component` command: the
   catalog, enabling a component on a cluster, its values, and what is not
   installed yet.

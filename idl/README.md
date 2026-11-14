@@ -68,6 +68,7 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `BootstrapTenant` | Registers one cloud account of the tenant (creating the tenant if needed), stores it, and creates the tenant namespace and the account's `ProviderConfig` in the management cluster. Idempotent per account. |
 | `GetCloudAccount` | Returns one account by its bootstrap ID (`CloudAccount.id`). |
 | `ListCloudAccounts` | Lists the tenant's accounts, ordered by provider then account ID. Not paginated. |
+| `GetAccountOnboarding` | Returns the CloudFormation template of the platform's role in an AWS account (`reader`, `updater` or `provisioner`, default `provisioner`), the stack's name and its `ManagementRoleArn` parameter, and a console quick-create link when the server has `cloudformation-template-url`. No AWS call; `FAILED_PRECONDITION` without `aws-management-role-arn`. See [docs/onboarding.md](../docs/onboarding.md). |
 | `WhoAmI` | Returns the caller as the server sees it: subject, username, issuer, the token's roles and the grants the server's rules give. Open to every accepted caller; anonymous where the server does not authenticate. |
 
 ### NetworkService
@@ -192,7 +193,7 @@ a network is created or imported in it.
 | `id` | Output only: the bootstrap ID. `NetworkSpec.bootstrap_id` and `ImportNetworkRequest.bootstrap_id` refer to it. |
 | `account_name` | Informational, at most 128 characters. Bootstrapping the same account again updates it. |
 | `aws.account_id` | Required: the 12-digit account ID. Unique within the tenant; it identifies the account on a repeated bootstrap. |
-| `aws.role` | Required: the name of the IAM role the platform assumes in the account. The tenant creates it, outside this API. |
+| `aws.role` | Required: the name of the IAM role the platform assumes in the account. The tenant creates it, outside this API: `cluster-vending account template` (`GetAccountOnboarding`) gives the CloudFormation stack of `cluster-vending-provisioner`. |
 | `status.state` | Always `READY` once bootstrap returned. |
 | `status.namespace` | `tenant-<tenant_id>`. |
 | `status.provider_config_name` | Generated on the first bootstrap, then fixed (for example `aws-0a1b2c3d`). |

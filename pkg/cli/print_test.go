@@ -274,3 +274,37 @@ func TestResourceRowsShowDeleted(t *testing.T) {
 		t.Fatalf("states = %q, %q", rows[0][3], rows[1][3])
 	}
 }
+
+// cluster get says what the cluster's channel offers: the channel's minor
+// next to the version, an upgrade available, and, prominently, a minor
+// that is ending.
+func TestPrintClusterKubernetes(t *testing.T) {
+	withClock(t)
+	for _, tc := range []struct {
+		name  string
+		k     *cloudv1.ClusterKubernetes
+		lines []string
+	}{
+		{"on its channel's minor", &cloudv1.ClusterKubernetes{Channel: "alpha", ChannelMinor: "1.37"},
+			[]string{"Version:       1.37 (channel alpha offers 1.37)\n"}},
+		{"behind", &cloudv1.ClusterKubernetes{Channel: "alpha", ChannelMinor: "1.38", Available: "1.38",
+			Message: "upgrade available: 1.38, the minor channel alpha offers"},
+			[]string{"Version:       1.37 (channel alpha offers 1.38)\n", "Available:     1.38\n"}},
+		{"ahead", &cloudv1.ClusterKubernetes{Channel: "stable", ChannelMinor: "1.35",
+			Message: "runs 1.37, ahead of channel stable's 1.35: it is never downgraded and waits for the channel"},
+			[]string{"Note:          runs 1.37, ahead of channel stable's 1.35: it is never downgraded and waits for the channel\n"}},
+		{"ending", &cloudv1.ClusterKubernetes{Ending: true, Message: "Kubernetes 1.37 is on no release channel: it is ending; move to 1.38"},
+			[]string{"Version:       1.37\n", "WARNING:       Kubernetes 1.37 is on no release channel: it is ending; move to 1.38\n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testCluster()
+			c.Status.Kubernetes = tc.k
+			got := printed(t, &cloudv1.GetClusterResponse{Cluster: c}, OutputTable)
+			for _, line := range tc.lines {
+				if !strings.Contains(got, line) {
+					t.Errorf("missing %q in\n%s", line, got)
+				}
+			}
+		})
+	}
+}

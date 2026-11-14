@@ -29,7 +29,7 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `network_service.proto` | `NetworkService` and its request and response messages |
 | `network.proto` | `Network`, `NetworkSpec`, `NetworkLayout`, `Subnet`, `NetworkFlowLogs`, `NetworkStatus`, `NetworkResources`; `ClusterNetwork` (a cluster's reference to a network) |
 | `cluster_service.proto` | `ClusterService` and its request and response messages; `AwsImportCluster` |
-| `cluster.proto` | `Cluster`, `ClusterSpec` with its CEL rules, `ReleaseChannel`, `ClusterTier`, `ClusterState`, `ClusterStatus`, `ClusterEndpoint`, `ClusterUpgrade`, `ClusterUpgradePhase` |
+| `cluster.proto` | `Cluster`, `ClusterSpec` with its CEL rules, `ReleaseChannel`, `ClusterTier`, `ClusterState`, `ClusterStatus`, `ClusterEndpoint`, `ClusterUpgrade`, `ClusterUpgradePhase`, `ClusterKubernetes` |
 | `control_plane.proto` | `ControlPlaneSpec`, `SecretsEncryption`, `EndpointAccess` |
 | `node_pool.proto` | `NodePoolSpec`, `ScalingConfig`, `Taint`, `CapacityType`, `TaintEffect` |
 | `access.proto` | `AccessSpec`, `AccessEntry`, `AccessPolicy` and their enums |
@@ -352,6 +352,26 @@ cluster's state as it is. An unset tier is stored as `CLUSTER_TIER_0` and an
 unset mode as `UPGRADE_MODE_MANUAL`, on create and on update; an unset
 channel stays unset. An imported cluster has all three unset until it is
 taken over.
+
+Kubernetes version on a channel: each channel offers one Kubernetes minor
+(the release it offers puts one minor on each of alpha, beta and stable;
+`pkg/catalog/release.yaml`). A cluster created on a channel without
+`spec.control_plane.kubernetes_version` runs the channel's minor. Asking for
+a newer minor than the channel's is `INVALID_ARGUMENT`, on create and on
+update, and says what to choose instead (an older minor, or the channel that
+offers it); an older minor the release offers is allowed, one it does not
+offer is refused. Moving a cluster to a channel whose minor is older than the
+one it runs is allowed: it is never downgraded, it waits for the channel. A
+cluster on no channel is not checked: its version is the client's, or EKS's
+default. When the release channels cannot be read, the create or update is
+`UNAVAILABLE`, never accepted unchecked.
+
+`status.kubernetes` says what the cluster's channel offers: `channel_minor`,
+`available` (the next minor, one at a time, while the cluster is behind),
+and `ending`: the cluster's minor is still supported but on no channel any
+more, so the cluster should move to a newer one (event `KubernetesEnding`).
+`message` says it in a sentence; `cluster get` prints it, the ending warning
+as `WARNING:`.
 
 Maintenance window: `spec.maintenance_window` is when an automatic upgrade
 of the cluster may start, every week in UTC: on each of `days` (every day
@@ -728,7 +748,7 @@ region and zone catalog next to `pkg/constant/aws`.
 | `NAT_GATEWAY_MODE_REGIONAL` | `UNIMPLEMENTED` for AWS. |
 | Providers other than AWS (`gcp`, `azure`) | No message exists; only `aws` can be set. Accounts, networks and clusters of another provider are refused. |
 | `ClusterNetwork.pod_cidr` | Must be empty on AWS (CEL rule `aws.no_pod_cidr`). |
-| `spec.release_channel`, `spec.tier`, `spec.upgrade_mode` | Stored, returned and updatable; releases do not act on them yet. |
+| `spec.release_channel`, `spec.tier`, `spec.upgrade_mode` | Stored, returned and updatable. The channel sets and limits the Kubernetes version (above); automatic upgrades do not act on them yet. |
 | `CLOUD_ACCOUNT_STATE_BOOTSTRAPPING`, `CLOUD_ACCOUNT_STATE_FAILED` | Never set, as their comments say: an account's state is `READY` once bootstrap returned. The tenant role is not assumed at bootstrap; a role that cannot be assumed shows on the managed resources of networks and clusters. |
 | `ComponentService` | Served: a tenant's component is checked and stored, and stays `PENDING`. Nothing installs it yet; only the components the platform manages are installed, with their cluster. `Component.version` and the `version` mask path are refused: a tenant does not choose a version. `DisableComponent.force` has nothing to do. |
 | Caller authorization of `tenant_id` | Not implemented, as the service comments say: the server trusts the `tenant_id` of the request. |

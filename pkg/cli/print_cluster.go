@@ -78,6 +78,33 @@ func mutatedCluster(w io.Writer, c *cloudv1.Cluster, verb string) error {
 	return table(w, clusterHeader, [][]string{clusterRow(c, false)})
 }
 
+// versionLine is the cluster's version, with the minor its release
+// channel offers when it is on one.
+func versionLine(c *cloudv1.Cluster) string {
+	v := clusterVersion(c)
+	if k := c.GetStatus().GetKubernetes(); k.GetChannelMinor() != "" {
+		v += fmt.Sprintf(" (channel %s offers %s)", k.GetChannel(), k.GetChannelMinor())
+	}
+	return v
+}
+
+// kubernetesLines are what the cluster's channel says of its version: the
+// next minor it can move to, a minor that is ending (a warning), or that
+// it is ahead of its channel.
+func kubernetesLines(k *cloudv1.ClusterKubernetes) [][2]string {
+	var out [][2]string
+	if k.GetAvailable() != "" {
+		out = append(out, [2]string{"Available", k.GetAvailable()})
+	}
+	switch {
+	case k.GetEnding():
+		out = append(out, [2]string{"WARNING", k.GetMessage()})
+	case k.GetAvailable() == "" && k.GetMessage() != "":
+		out = append(out, [2]string{"Note", k.GetMessage()})
+	}
+	return out
+}
+
 // describeCluster is one cluster: its fields, then every resource with
 // its state and external name, its conditions, platform components and
 // recent events.
@@ -86,9 +113,11 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	kv := [][2]string{
 		{"Name", c.GetName()}, {"ID", c.GetId()}, {"Tenant", c.GetTenantId()}, {"Phase", clusterPhase(st)},
 		{"Region", c.GetSpec().GetRegion()}, {"Network", c.GetSpec().GetNetwork().GetNetworkId()},
-		{"Version", clusterVersion(c)}, {"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", st.GetPlatformRelease()},
-		{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())},
+		{"Version", versionLine(c)},
 	}
+	kv = append(kv, kubernetesLines(st.GetKubernetes())...)
+	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", st.GetPlatformRelease()},
+		{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())}}...)
 	if u := st.GetUpgrade(); u != nil {
 		kv = append(kv, [2]string{"Upgrade", fmt.Sprintf("%s to %s (%s)", orNone(u.GetFromVersion()), orNone(u.GetToVersion()),
 			word(u.GetPhase().String(), "CLUSTER_UPGRADE_PHASE_"))})

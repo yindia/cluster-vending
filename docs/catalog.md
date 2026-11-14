@@ -353,11 +353,15 @@ Each minor in `release.yaml` names the channel whose clusters run it:
   except that edit.
 - A minor on no channel (say 1.35, once `stable` is on 1.36) stays
   supported: clusters keep running it. Its users are warned to move off it
-  (`release.Ending`); it is not removed and no cluster is upgraded because
-  of it.
-- A cluster on a channel gets its channel's minor; `default: true` is only
-  for a cluster on no channel. (Automatic upgrades to the channel's minor
-  come in later increments; see `docs/design/upgrades.md`.)
+  (`status.kubernetes.ending`, the `KubernetesEnding` event, and a
+  `WARNING:` line in `cluster get`); it is not removed and no cluster is
+  upgraded because of it.
+- A cluster created on a channel without a version gets its channel's
+  minor, and the API refuses a newer one than the channel's
+  (`idl/README.md`). A cluster on no channel keeps the version it asks for,
+  or EKS's default: `default: true` is not applied to it yet. (Automatic
+  upgrades to the channel's minor come in later increments; see
+  `docs/design/upgrades.md`.)
 - A `Release` offers three to six minors, consecutive.
 
 ## The components

@@ -147,6 +147,21 @@ message VerifyCloudAccountRequest {
   }];
   // The bootstrap ID, CloudAccount.id.
   string id = 2 [(buf.validate.field).string.uuid = true];
+  // Regions to check besides the ones the account's networks use, e.g.
+  // the region of a network not created yet: a network or cluster is
+  // created only in a region the last check passed. Kept until a later
+  // verify names others; empty keeps the ones asked for before.
+  repeated string regions = 3 [(buf.validate.field).repeated = {
+    max_items: 10
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 32
+        pattern: "^[a-z]{2}(-[a-z]+)+-[0-9]+$"
+      }
+    }
+  }];
 }
 
 message VerifyCloudAccountResponse {

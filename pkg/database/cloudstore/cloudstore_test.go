@@ -2,6 +2,7 @@ package cloudstore_test
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -337,10 +338,10 @@ func TestAccountAccess(t *testing.T) {
 	ctx := t.Context()
 	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 
-	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", w.account, at); err != nil {
+	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", w.account, at, []string{"eu-west-1", "ap-south-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", "00000000-0000-0000-0000-000000000000", at); !errors.Is(err, repository.ErrNotFound) {
+	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", "00000000-0000-0000-0000-000000000000", at, nil); !errors.Is(err, repository.ErrNotFound) {
 		t.Errorf("request for an unknown account: %v, want not found", err)
 	}
 	list := &cloudv1alpha1.CloudAccountList{}
@@ -368,6 +369,20 @@ func TestAccountAccess(t *testing.T) {
 	if a == nil || a.Verified || !a.CheckedAt.Equal(checked.Time) || a.Reason != "DeniedBySCP" || a.PrincipalARN == "" ||
 		len(a.Regions) != 1 || a.Regions[0].Region != "us-west-1" || len(a.Checks) != 1 || !a.Checks[0].OK {
 		t.Errorf("access = %+v", a)
+	}
+	if want := []string{"eu-west-1", "ap-south-1"}; !slices.Equal(row.AccessRequestedRegions, want) {
+		t.Errorf("requested regions %v, want %v", row.AccessRequestedRegions, want)
+	}
+
+	// A request without regions keeps the ones asked for before.
+	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", w.account, at.Add(time.Hour), nil); err != nil {
+		t.Fatal(err)
+	}
+	if row, err = w.s.Tenants().GetCloudAccountByID(ctx, "acme", w.account); err != nil {
+		t.Fatal(err)
+	}
+	if len(row.AccessRequestedRegions) != 2 || !row.AccessRequestedAt.Equal(at.Add(time.Hour)) {
+		t.Errorf("after a request without regions: regions %v, at %v", row.AccessRequestedRegions, row.AccessRequestedAt)
 	}
 }
 

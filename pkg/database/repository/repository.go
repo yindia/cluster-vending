@@ -80,10 +80,11 @@ type Tenants interface {
 	// ErrNotFound: no such tenant, network or cluster.
 	SetPause(ctx context.Context, tenantID string, target model.PauseTarget, pause *model.Pause) error
 	// RequestAccessCheck records that an access check of the account (by
-	// row ID) was asked for at at (CloudAccount.AccessRequestedAt); the
-	// controller runs it. The row itself is not written. ErrNotFound: no
-	// such account.
-	RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time) error
+	// row ID) was asked for at at (CloudAccount.AccessRequestedAt), of
+	// regions too when any are given (AccessRequestedRegions; none keeps
+	// the ones recorded before); the controller runs it. The row itself is
+	// not written. ErrNotFound: no such account.
+	RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time, regions []string) error
 }
 
 // Networks stores networks of a tenant.

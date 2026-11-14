@@ -2,6 +2,7 @@ package cloudstore
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,15 +20,23 @@ import (
 // controller runs a check when it is later than the last one tried.
 const AnnotationAccessRequested = group + "access-requested"
 
+// AnnotationAccessRegions are the regions VerifyCloudAccount asked to be
+// checked besides the ones of the account's networks, comma-separated.
+const AnnotationAccessRegions = group + "access-regions"
+
 // RequestAccessCheck implements repository.Tenants: a patch of the one
 // annotation, so the row (its etag, its spec) is not written.
-func (r tenants) RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time) error {
+func (r tenants) RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time, regions []string) error {
 	obj, err := byID[*cloudv1alpha1.CloudAccount](ctx, r.store, &cloudv1alpha1.CloudAccountList{}, kube.TenantNamespace(tenantID), id)
 	if err != nil {
 		return err
 	}
 	before := client.MergeFrom(obj.DeepCopyObject().(client.Object))
-	annotate(obj, map[string]string{AnnotationAccessRequested: at.UTC().Format(time.RFC3339Nano)})
+	values := map[string]string{AnnotationAccessRequested: at.UTC().Format(time.RFC3339Nano)}
+	if len(regions) > 0 {
+		values[AnnotationAccessRegions] = strings.Join(regions, ",")
+	}
+	annotate(obj, values)
 	err = r.c.Patch(ctx, obj, before)
 	if apierrors.IsNotFound(err) {
 		return repository.ErrNotFound
@@ -43,6 +52,17 @@ func accessRequestedOf(obj *cloudv1alpha1.CloudAccount) time.Time {
 		return time.Time{}
 	}
 	return at
+}
+
+// accessRegionsOf are the regions asked to be checked an account carries.
+func accessRegionsOf(obj *cloudv1alpha1.CloudAccount) []string {
+	var out []string
+	for _, r := range strings.Split(obj.Annotations[AnnotationAccessRegions], ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // AccessModel is the stored form of an account's typed status.access.

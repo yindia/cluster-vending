@@ -49,7 +49,7 @@ func BootstrapVerify(ctx context.Context, c Clients, o Options) (proto.Message, 
 	if o.ID == "" {
 		return nil, errors.New("--id is required")
 	}
-	return call(ctx, &cloudv1.VerifyCloudAccountRequest{TenantId: o.Tenant, Id: o.ID}, c.Tenant.VerifyCloudAccount)
+	return call(ctx, &cloudv1.VerifyCloudAccountRequest{TenantId: o.Tenant, Id: o.ID, Regions: o.Regions}, c.Tenant.VerifyCloudAccount)
 }
 
 // BootstrapList calls TenantService.ListCloudAccounts.

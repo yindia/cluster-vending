@@ -129,10 +129,16 @@ func (r *Reconciler) VerifyAccess(ctx context.Context, a *model.CloudAccount, no
 	return next, AccessInterval, nil
 }
 
-// accountRegions are the regions of the account's networks, sorted, each
+// accountRegions are the regions of the account's networks and the ones
+// VerifyCloudAccount asked for (AccessRequestedRegions), sorted, each
 // once. A cluster is in its network's region.
 func (r *Reconciler) accountRegions(ctx context.Context, a *model.CloudAccount) ([]string, error) {
 	var regions []string
+	for _, region := range a.AccessRequestedRegions {
+		if region != "" && !slices.Contains(regions, region) {
+			regions = append(regions, region)
+		}
+	}
 	page := repository.Page{Limit: networkPage}
 	for {
 		networks, err := r.deps.Store.Networks().List(ctx, a.TenantID, page)

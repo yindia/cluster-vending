@@ -185,6 +185,7 @@ func accountRow(obj *cloudv1alpha1.CloudAccount) *model.CloudAccount {
 	a.Paused = pauseOf(obj)
 	a.Access = AccessModel(obj.Status.Access)
 	a.AccessRequestedAt = accessRequestedOf(obj)
+	a.AccessRequestedRegions = accessRegionsOf(obj)
 	return a
 }
 

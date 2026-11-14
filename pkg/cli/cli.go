@@ -81,6 +81,9 @@ type Options struct {
 	Cluster string
 	// Reason is --reason of admin pause: why, shown with the pause.
 	Reason string
+	// Regions is --region of account verify: regions to check besides
+	// those of the account's networks.
+	Regions []string
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.
 	AcknowledgeNotImported bool

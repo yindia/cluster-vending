@@ -62,7 +62,7 @@ func TestAccountAccessStatusAndEvents(t *testing.T) {
 		t.Helper()
 		obj := run(0)
 		w.must(t, w.deps.Store.Tenants().RequestAccessCheck(ctx, obj.Labels[cloudstore.LabelTenant],
-			obj.Labels[cloudstore.LabelID], time.Now().Add(time.Second)))
+			obj.Labels[cloudstore.LabelID], time.Now().Add(time.Second), nil))
 	}
 
 	obj := run(3)

@@ -522,7 +522,12 @@ type VerifyCloudAccountRequest struct {
 	// Same rules as BootstrapTenantRequest.tenant_id.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// The bootstrap ID, CloudAccount.id.
-	Id            string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Id string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	// Regions to check besides the ones the account's networks use, e.g.
+	// the region of a network not created yet: a network or cluster is
+	// created only in a region the last check passed. Kept until a later
+	// verify names others; empty keeps the ones asked for before.
+	Regions       []string `protobuf:"bytes,3,rep,name=regions,proto3" json:"regions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -569,6 +574,13 @@ func (x *VerifyCloudAccountRequest) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *VerifyCloudAccountRequest) GetRegions() []string {
+	if x != nil {
+		return x.Regions
+	}
+	return nil
 }
 
 type VerifyCloudAccountResponse struct {
@@ -1235,10 +1247,12 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12\x18\n" +
 	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\"K\n" +
 	"\x17GetCloudAccountResponse\x120\n" +
-	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\x83\x01\n" +
+	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\xce\x01\n" +
 	"\x19VerifyCloudAccountRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12\x18\n" +
-	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\"N\n" +
+	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\x12I\n" +
+	"\aregions\x18\x03 \x03(\tB/\xbaH,\x92\x01)\x10\n" +
+	"\x18\x01\"#r!\x10\x01\x18 2\x1b^[a-z]{2}(-[a-z]+)+-[0-9]+$R\aregions\"N\n" +
 	"\x1aVerifyCloudAccountResponse\x120\n" +
 	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"h\n" +
 	"\x18ListCloudAccountsRequest\x12L\n" +

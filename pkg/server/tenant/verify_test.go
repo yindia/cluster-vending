@@ -2,6 +2,7 @@ package tenant
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -20,6 +21,12 @@ func TestVerifyCloudAccount(t *testing.T) {
 		code connect.Code // 0: ok
 	}{
 		{name: "records the request", req: &cloudv1.VerifyCloudAccountRequest{TenantId: "acme", Id: id}},
+		{name: "records the regions asked for", req: &cloudv1.VerifyCloudAccountRequest{TenantId: "acme", Id: id,
+			Regions: []string{"eu-west-1", "ap-south-1"}}},
+		{name: "not a region", req: &cloudv1.VerifyCloudAccountRequest{TenantId: "acme", Id: id,
+			Regions: []string{"Europe"}}, code: connect.CodeInvalidArgument},
+		{name: "not an AWS region", req: &cloudv1.VerifyCloudAccountRequest{TenantId: "acme", Id: id,
+			Regions: []string{"eu-nowhere-9"}}, code: connect.CodeInvalidArgument},
 		{name: "unknown account", req: &cloudv1.VerifyCloudAccountRequest{TenantId: "acme", Id: unknown}, code: connect.CodeNotFound},
 		{name: "not a bootstrap ID", req: &cloudv1.VerifyCloudAccountRequest{TenantId: "acme", Id: account}, code: connect.CodeInvalidArgument},
 		{name: "no tenant", req: &cloudv1.VerifyCloudAccountRequest{Id: id}, code: connect.CodeInvalidArgument},
@@ -30,16 +37,20 @@ func TestVerifyCloudAccount(t *testing.T) {
 			row := stored(account)
 			row.ID = id
 			var asked time.Time
-			f.tenants.EXPECT().RequestAccessCheck(gomock.Any(), "acme", id, gomock.Any()).DoAndReturn(
-				func(_ context.Context, _, _ string, at time.Time) error { asked = at; return nil }).MaxTimes(1)
-			f.tenants.EXPECT().RequestAccessCheck(gomock.Any(), "acme", unknown, gomock.Any()).Return(repository.ErrNotFound).MaxTimes(1)
+			var regions []string
+			f.tenants.EXPECT().RequestAccessCheck(gomock.Any(), "acme", id, gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, _, _ string, at time.Time, r []string) error {
+					asked, regions = at, r
+					return nil
+				}).MaxTimes(1)
+			f.tenants.EXPECT().RequestAccessCheck(gomock.Any(), "acme", unknown, gomock.Any(), gomock.Any()).Return(repository.ErrNotFound).MaxTimes(1)
 			f.tenants.EXPECT().GetCloudAccountByID(gomock.Any(), "acme", id).Return(row, nil).MaxTimes(1)
 
 			got, err := f.svc.VerifyCloudAccount(t.Context(), tt.req)
 
 			if tt.code == 0 {
-				if err != nil || asked.IsZero() || got.GetAccount().GetId() != id {
-					t.Errorf("err %v, asked at %v, account %v", err, asked, got.GetAccount())
+				if err != nil || asked.IsZero() || got.GetAccount().GetId() != id || !slices.Equal(regions, tt.req.GetRegions()) {
+					t.Errorf("err %v, asked at %v for %v, account %v", err, asked, regions, got.GetAccount())
 				}
 				return
 			}

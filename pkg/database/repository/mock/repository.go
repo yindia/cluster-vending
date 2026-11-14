@@ -604,17 +604,17 @@ func (c *MockTenantsPutCloudAccountCall) DoAndReturn(f func(context.Context, *mo
 }
 
 // RequestAccessCheck mocks base method.
-func (m *MockTenants) RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time) error {
+func (m *MockTenants) RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time, regions []string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RequestAccessCheck", ctx, tenantID, id, at)
+	ret := m.ctrl.Call(m, "RequestAccessCheck", ctx, tenantID, id, at, regions)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RequestAccessCheck indicates an expected call of RequestAccessCheck.
-func (mr *MockTenantsMockRecorder) RequestAccessCheck(ctx, tenantID, id, at any) *MockTenantsRequestAccessCheckCall {
+func (mr *MockTenantsMockRecorder) RequestAccessCheck(ctx, tenantID, id, at, regions any) *MockTenantsRequestAccessCheckCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestAccessCheck", reflect.TypeOf((*MockTenants)(nil).RequestAccessCheck), ctx, tenantID, id, at)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestAccessCheck", reflect.TypeOf((*MockTenants)(nil).RequestAccessCheck), ctx, tenantID, id, at, regions)
 	return &MockTenantsRequestAccessCheckCall{Call: call}
 }
 
@@ -630,13 +630,13 @@ func (c *MockTenantsRequestAccessCheckCall) Return(arg0 error) *MockTenantsReque
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockTenantsRequestAccessCheckCall) Do(f func(context.Context, string, string, time.Time) error) *MockTenantsRequestAccessCheckCall {
+func (c *MockTenantsRequestAccessCheckCall) Do(f func(context.Context, string, string, time.Time, []string) error) *MockTenantsRequestAccessCheckCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockTenantsRequestAccessCheckCall) DoAndReturn(f func(context.Context, string, string, time.Time) error) *MockTenantsRequestAccessCheckCall {
+func (c *MockTenantsRequestAccessCheckCall) DoAndReturn(f func(context.Context, string, string, time.Time, []string) error) *MockTenantsRequestAccessCheckCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

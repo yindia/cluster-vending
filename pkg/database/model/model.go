@@ -135,6 +135,9 @@ type CloudAccount struct {
 	// AccessRequestedAt is when VerifyCloudAccount last asked for a check;
 	// zero when never.
 	AccessRequestedAt time.Time
+	// AccessRequestedRegions are regions VerifyCloudAccount asked to be
+	// checked besides the ones the account's networks use.
+	AccessRequestedRegions []string
 }
 
 // AccountAccess is what the controller found when it checked that it can

@@ -216,6 +216,16 @@ func TestVerifyAccess(t *testing.T) {
 	if again, _, err := rec.VerifyAccess(ctx, w.account, at.Add(time.Minute)); err != nil || again != nil || c.calls != 1 {
 		t.Errorf("checked again before due: %+v, %d calls (%v)", again, c.calls, err)
 	}
+
+	// A region asked for (VerifyCloudAccount.regions) that no network uses
+	// yet is checked too, at once: it was not checked before.
+	w.account.AccessRequestedRegions = []string{"ap-south-1", "eu-west-1"}
+	if _, _, err := rec.VerifyAccess(ctx, w.account, at.Add(2*time.Minute)); err != nil || c.calls != 2 {
+		t.Fatalf("a requested region: %d calls (%v), want a second check", c.calls, err)
+	}
+	if !slices.Equal(c.regions, []string{"ap-south-1", "eu-west-1", "us-west-2"}) {
+		t.Errorf("regions %v, want the requested ones and the networks', once each", c.regions)
+	}
 }
 
 func TestVerifyAccessSkips(t *testing.T) {

@@ -22,8 +22,8 @@ type verb struct {
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
 	// reason adds --reason (admin pause), pauseNetwork --network (admin
-	// pause and resume).
-	reason, pauseNetwork bool
+	// pause and resume), regions --region (account verify).
+	reason, pauseNetwork, regions bool
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
 	removed, oidc, warnings, noPlatform bool
@@ -143,6 +143,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.reason {
 			f.StringVar(&o.Reason, "reason", "", "why, shown with the pause in the status of what is paused")
 		}
+		if v.regions {
+			f.StringSliceVar(&o.Regions, "region", nil, "also check these regions (repeat or comma-separate), e.g. the region of a network not created yet; kept for later checks")
+		}
 		if v.pauseNetwork {
 			f.StringVar(&o.PauseNetwork, "network", "", "only this network (network ID): the network itself, not its clusters; not with --cluster")
 		}
@@ -164,7 +167,7 @@ func newAccountCmd() *cobra.Command {
 		{use: "get", short: "Show the account --id, with its access check", run: cli.BootstrapGet, args: cobra.MaximumNArgs(1), id: true},
 		{use: "list", short: "List the tenant's accounts", run: cli.BootstrapList, args: cobra.NoArgs},
 		{use: "verify", short: "Ask the controller to check the account --id's access now (the tenant role in each region, and the calls the platform needs); get shows the result",
-			run: cli.BootstrapVerify, args: cobra.MaximumNArgs(1), id: true},
+			run: cli.BootstrapVerify, args: cobra.MaximumNArgs(1), id: true, regions: true},
 	})
 }
 

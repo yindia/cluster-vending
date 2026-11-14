@@ -13,6 +13,7 @@ import (
 	"connectrpc.com/connect/v2"
 
 	"github.com/yindia/cluster-vending/pkg/config"
+	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -118,7 +119,12 @@ func (s *TenantService) VerifyCloudAccount(ctx context.Context, req *cloudv1.Ver
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
-	err := s.deps.Store.Tenants().RequestAccessCheck(ctx, req.GetTenantId(), req.GetId(), time.Now())
+	for _, region := range req.GetRegions() {
+		if !awscatalog.IsRegion(region) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf("region %q is not a known AWS region", region))
+		}
+	}
+	err := s.deps.Store.Tenants().RequestAccessCheck(ctx, req.GetTenantId(), req.GetId(), time.Now(), req.GetRegions())
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, connect.NewError(connect.CodeNotFound,
 			fmt.Sprintf("tenant %s has no bootstrapped account %s", req.GetTenantId(), req.GetId()))

@@ -124,6 +124,19 @@ and resource events, and `list` lists. Each command has `--help`. The
 controller's samples (`config/samples`) are the same account, network and
 cluster as objects of its kinds.
 
+### Output
+
+Commands print tables in the style of kubectl. A list prints one row per
+object; `-o wide` adds columns, such as a network's VPC, CIDR, zones and NAT,
+or a cluster's network, node pool and release. `get` prints the object, then
+its managed resources (external name, state, synced, ready), its conditions
+and its recent events. `-o yaml` and `-o json` print the full API object.
+
+```sh
+bin/cluster-vending cluster list --tenant acme -o wide
+bin/cluster-vending cluster get CLUSTER_ID --tenant acme -o yaml
+```
+
 ## Where to read more
 
 - [docs/architecture.md](docs/architecture.md): the packages and their

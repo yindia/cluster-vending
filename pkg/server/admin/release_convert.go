@@ -160,8 +160,8 @@ func ChannelFromAPI(ch *cloudv1alpha1.ReleaseChannel, detail bool) *cloudv1.Rele
 	return out
 }
 
-// RolloutFromAPI is a channel's rollout as the stored status reports it
-// (ListRollouts): no members.
+// RolloutFromAPI is a channel's rollout as its stored status reports it:
+// no members.
 func RolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel) *cloudv1.Rollout {
 	return &cloudv1.Rollout{Channel: ChannelFromName(ch.Name), Release: ch.Status.Release, RolloutTier: TierFromAPI(ch.Status.RolloutTier),
 		Policy: RolloutPolicyFromAPI(ch.Spec.Policy), Paused: ch.Spec.Paused, Summary: RolloutSummaryFromAPI(ch.Status.Rollout)}

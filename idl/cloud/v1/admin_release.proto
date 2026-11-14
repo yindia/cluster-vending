@@ -227,13 +227,6 @@ message GetReleaseChannelResponse {
 }
 
 // One rollout per channel: no pagination.
-message ListRolloutsRequest {}
-
-message ListRolloutsResponse {
-  // alpha, beta, stable; without members.
-  repeated Rollout rollouts = 1;
-}
-
 message GetRolloutRequest {
   ReleaseChannel channel = 1 [(buf.validate.field).enum = {
     defined_only: true

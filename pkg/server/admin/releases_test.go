@@ -180,22 +180,24 @@ func TestChannelsAlphaFirst(t *testing.T) {
 	}
 }
 
-func TestListRolloutsIsWhatTheControllerReported(t *testing.T) {
+// ListReleaseChannels carries each channel's rollout as the controller
+// reported it: the tier it is at, its target and its counts per tier.
+func TestListReleaseChannelsCarriesTheRollout(t *testing.T) {
 	s := releaseWorld(t)
 
-	res, err := s.ListRollouts(t.Context(), &cloudv1.ListRolloutsRequest{})
+	res, err := s.ListReleaseChannels(t.Context(), &cloudv1.ListReleaseChannelsRequest{})
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.GetRollouts()) != 3 {
-		t.Fatalf("rollouts = %v", res.GetRollouts())
+	if len(res.GetChannels()) != 3 {
+		t.Fatalf("channels = %v", res.GetChannels())
 	}
-	r := res.GetRollouts()[2]
-	if r.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE || r.GetRolloutTier() != cloudv1.ClusterTier_CLUSTER_TIER_2 ||
-		r.GetSummary().GetTargetMinor() != "1.35" || !r.GetSummary().GetReportOnly() || len(r.GetMembers()) != 0 ||
-		r.GetSummary().GetTiers()[0].GetPending() != 1 {
-		t.Errorf("stable = %v", r)
+	c := res.GetChannels()[2]
+	if c.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE || c.GetRolloutTier() != cloudv1.ClusterTier_CLUSTER_TIER_2 ||
+		c.GetRollout().GetTargetMinor() != "1.35" || !c.GetRollout().GetReportOnly() ||
+		len(c.GetRollout().GetTiers()) == 0 || c.GetRollout().GetTiers()[0].GetPending() != 1 {
+		t.Errorf("stable = %v", c)
 	}
 }
 

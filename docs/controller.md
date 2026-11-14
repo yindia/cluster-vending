@@ -419,14 +419,13 @@ without access to the management cluster:
 ```sh
 cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS PINNED AGE (PINNED: pauses of upgrades that keep a cluster on it)
 cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
-cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES ROLLING TIER PAUSED AGE (wide: policy, why it waits)
+cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES ROLLING TIER STATE WAITING PAUSED AGE (wide: TIER2 TIER1 TIER0 progress, policy)
 cluster-vending admin channel get --id stable         # policy, rollout, the releases it offered, conditions
-cluster-vending admin rollout list                    # CHANNEL KUBERNETES ROLLING TIER TIER2 TIER1 TIER0 STATE WAITING
 cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
 ```
 
-`rollout list` shows what the controller last wrote to each channel's
-status. `rollout get` plans the channel's rollout again at the time of the
+`channel list` shows each channel's rollout as the controller last wrote
+it to the channel's status. `rollout get` plans the channel's rollout again at the time of the
 call with the controller's rules (`pkg/rollout`), and lists every cluster:
 tier, tenant, the version it runs, the minor it moves to next, its state
 (Pending, InProgress, Succeeded, Failed, Blocked), since when, and why it is

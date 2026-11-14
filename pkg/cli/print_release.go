@@ -162,7 +162,7 @@ func valuesLine(c *cloudv1.ReleaseComponent) string {
 	return string(js)
 }
 
-var channelHeader = []string{"NAME", "PROMOTION", "RELEASE", "KUBERNETES", "ROLLING TIER", "PAUSED", "AGE"}
+var channelHeader = []string{"NAME", "PROMOTION", "RELEASE", "KUBERNETES", "ROLLING TIER", "STATE", "WAITING", "PAUSED", "AGE"}
 
 func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide bool) error {
 	if len(channels) == 0 {
@@ -171,14 +171,17 @@ func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide boo
 	}
 	header := channelHeader
 	if wide {
-		header = append(slices.Clone(header), "POLICY", "WAITING")
+		header = append(slices.Clone(header), "TIER2", "TIER1", "TIER0", "POLICY")
 	}
 	rows := make([][]string, 0, len(channels))
 	for _, c := range channels {
+		r := c.GetRollout()
 		rw := []string{channelWord(c.GetChannel()), orNone(c.GetPromotion()), orNone(c.GetRelease()), orNone(c.GetKubernetesMinor()),
-			tierWord(c.GetRolloutTier()), yesNo(c.GetPaused()), age(c.GetCreateTime())}
+			tierWord(c.GetRolloutTier()), rolloutState(r, c.GetPaused()), orNone(oneLine(r.GetWaiting())), yesNo(c.GetPaused()),
+			age(c.GetCreateTime())}
 		if wide {
-			rw = append(rw, policyLine(c.GetPolicy()), orNone(oneLine(c.GetRollout().GetWaiting())))
+			rw = append(rw, tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_2), tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_1),
+				tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_0), policyLine(c.GetPolicy()))
 		}
 		rows = append(rows, rw)
 	}
@@ -228,7 +231,7 @@ func rolloutState(r *cloudv1.RolloutSummary, paused bool) string {
 	return "Rolling"
 }
 
-// tierCell is one tier's progress in a rollout list: done/total, with
+// tierCell is one tier's progress in a channel list: done/total, with
 // the clusters upgrading now; "-" for a tier without clusters.
 func tierCell(r *cloudv1.RolloutSummary, tier cloudv1.ClusterTier) string {
 	for _, t := range r.GetTiers() {
@@ -246,23 +249,6 @@ func tierCell(r *cloudv1.RolloutSummary, tier cloudv1.ClusterTier) string {
 		return cell
 	}
 	return "-"
-}
-
-var rolloutHeader = []string{"CHANNEL", "KUBERNETES", "ROLLING TIER", "TIER2", "TIER1", "TIER0", "STATE", "WAITING"}
-
-func printRollouts(w io.Writer, rollouts []*cloudv1.Rollout) error {
-	if len(rollouts) == 0 {
-		_, err := fmt.Fprintln(w, "No release channels found.")
-		return err
-	}
-	rows := make([][]string, 0, len(rollouts))
-	for _, r := range rollouts {
-		s := r.GetSummary()
-		rows = append(rows, []string{channelWord(r.GetChannel()), orNone(s.GetTargetMinor()), tierWord(r.GetRolloutTier()),
-			tierCell(s, cloudv1.ClusterTier_CLUSTER_TIER_2), tierCell(s, cloudv1.ClusterTier_CLUSTER_TIER_1),
-			tierCell(s, cloudv1.ClusterTier_CLUSTER_TIER_0), rolloutState(s, r.GetPaused()), orNone(oneLine(s.GetWaiting()))})
-	}
-	return table(w, rolloutHeader, rows)
 }
 
 var memberHeader = []string{"TIER", "TENANT", "CLUSTER", "RUNS", "TARGET", "STATE", "SINCE", "REASON"}

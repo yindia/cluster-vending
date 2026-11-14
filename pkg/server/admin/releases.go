@@ -176,23 +176,6 @@ func (s *Service) GetReleaseChannel(ctx context.Context, req *cloudv1.GetRelease
 	return &cloudv1.GetReleaseChannelResponse{Channel: ChannelFromAPI(ch, true)}, nil
 }
 
-// ListRollouts lists each channel's rollout as the controller last
-// reported it.
-func (s *Service) ListRollouts(ctx context.Context, req *cloudv1.ListRolloutsRequest) (*cloudv1.ListRolloutsResponse, error) {
-	if err := service.Validate(req); err != nil {
-		return nil, err
-	}
-	chs, err := s.channels(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := &cloudv1.ListRolloutsResponse{}
-	for i := range chs {
-		out.Rollouts = append(out.Rollouts, RolloutFromAPI(&chs[i]))
-	}
-	return out, nil
-}
-
 // GetRollout plans one channel's rollout now, the way the controller
 // does (rollout.Compute), and returns it cluster by cluster. Whether
 // automatic upgrades are on is the controller's setting: it is taken from

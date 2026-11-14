@@ -36,11 +36,6 @@ func AdminChannelGet(ctx context.Context, c Clients, o Options) (proto.Message, 
 	return call(ctx, &cloudv1.GetReleaseChannelRequest{Channel: ch}, c.Admin.GetReleaseChannel)
 }
 
-// AdminRolloutList calls AdminService.ListRollouts: each channel's rollout.
-func AdminRolloutList(ctx context.Context, c Clients, _ Options) (proto.Message, error) {
-	return call(ctx, &cloudv1.ListRolloutsRequest{}, c.Admin.ListRollouts)
-}
-
 // AdminRolloutGet calls AdminService.GetRollout for --channel, only --tier
 // when set: the rollout cluster by cluster.
 func AdminRolloutGet(ctx context.Context, c Clients, o Options) (proto.Message, error) {

@@ -79,14 +79,16 @@ func TestPrintChannels(t *testing.T) {
 	}
 
 	if got, want := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputTable),
-		"NAME     PROMOTION   RELEASE            KUBERNETES   ROLLING TIER   PAUSED   AGE\n"+
-			"alpha    Pinned      shipped-1aed928c   1.37         <none>         no       3d\n"+
-			"stable   Automatic   shipped-1aed928c   1.35         2              no       3d\n"; got != want {
+		"NAME     PROMOTION   RELEASE            KUBERNETES   ROLLING TIER   STATE     WAITING                                              PAUSED   AGE\n"+
+			"alpha    Pinned      shipped-1aed928c   1.37         <none>         Done      <none>                                               no       3d\n"+
+			"stable   Automatic   shipped-1aed928c   1.35         2              Rolling   would start 1 cluster (automatic upgrades are off)   no       3d\n"; got != want {
 		t.Errorf("channels: got\n%s\nwant\n%s", got, want)
 	}
-	if got := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputWide); !strings.Contains(got,
-		"maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)") {
-		t.Errorf("wide channels lack the policy:\n%s", got)
+	wide := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputWide)
+	for _, want := range []string{"TIER2      TIER1   TIER0   POLICY", "1/2 done   -       -       maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("wide channels lack %q:\n%s", want, wide)
+		}
 	}
 	got := printed(t, &cloudv1.GetReleaseChannelResponse{Channel: channels[1]}, OutputTable)
 	for _, want := range []string{"Policy:           maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n",
@@ -103,20 +105,6 @@ func TestPrintRollouts(t *testing.T) {
 	stableRollout := &cloudv1.Rollout{Channel: stable, Release: "shipped-1aed928c", RolloutTier: tier1, Policy: policy(),
 		Summary: &cloudv1.RolloutSummary{TargetMinor: "1.36", ReportOnly: true, Waiting: "soak ends in 6h (Tier2)",
 			Tiers: []*cloudv1.RolloutTier{{Tier: tier2, Succeeded: 4}, {Tier: tier1, InProgress: 1, Pending: 2}, {Tier: tier0, Pending: 2}}}}
-	rollouts := []*cloudv1.Rollout{
-		{Channel: alpha, Summary: &cloudv1.RolloutSummary{TargetMinor: "1.37", Done: true, Tiers: []*cloudv1.RolloutTier{{Tier: tier2, Succeeded: 1}}}},
-		{Channel: beta, Paused: true, Summary: &cloudv1.RolloutSummary{TargetMinor: "1.36"}},
-		stableRollout,
-	}
-
-	if got, want := printed(t, &cloudv1.ListRolloutsResponse{Rollouts: rollouts}, OutputTable),
-		"CHANNEL   KUBERNETES   ROLLING TIER   TIER2      TIER1                 TIER0      STATE     WAITING\n"+
-			"alpha     1.37         <none>         1/1 done   -                     -          Done      <none>\n"+
-			"beta      1.36         <none>         -          -                     -          Paused    <none>\n"+
-			"stable    1.36         1              4/4 done   0/3 done, 1 running   0/2 done   Rolling   soak ends in 6h (Tier2)\n"; got != want {
-		t.Errorf("rollouts: got\n%s\nwant\n%s", got, want)
-	}
-
 	stableRollout.Members = []*cloudv1.RolloutMember{
 		{Tier: tier2, TenantId: "acme", ClusterId: "id-dev", ClusterName: "dev-eks", CurrentVersion: "1.36", TargetVersion: "1.36",
 			State: cloudv1.RolloutState_ROLLOUT_STATE_SUCCEEDED, Since: ago(48 * time.Hour)},

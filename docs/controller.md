@@ -146,8 +146,9 @@ objects take their place (docs/design/rollouts.md).
 ## AWS access
 
 The controller is the only command that looks at AWS: it discovers the VPC
-or EKS cluster of an import, checks a new cluster's name against EKS, and
-resolves the Kubernetes and add-on versions EKS offers. The API server makes
+or EKS cluster of an import, checks a new cluster's name against EKS,
+resolves the Kubernetes and add-on versions EKS offers, and checks that it
+can reach and act in each account (the access check, below). The API server makes
 no AWS call and has no AWS setting or credentials.
 
 There is one rule, for the controller's lookups and for the Crossplane
@@ -250,6 +251,58 @@ In a cluster without IRSA that runs the controller as a Deployment, enable
 `config/local-credentials` (read on that one Secret, and write on Secrets in
 the tenant namespaces for the copies) and create the Secret in the
 controller's namespace.
+
+### The access check
+
+A bootstrapped account is not proof that the platform can work in it: an
+AWS Organizations SCP can deny `sts:AssumeRole` in every region but one, a
+trust policy can name the wrong principal, a region can be disabled. So the
+CloudAccount controller checks each account, after its ProviderConfig is
+applied, as the providers will reach it: the tenant role assumed from the
+controller's own credentials (with `skip-tenant-role`, the keys as they
+are), in every region of the account's networks (a cluster is in its
+network's region) and in `us-east-1`. Nothing is created or changed:
+
+| Call | How | Needed for |
+|------|-----|------------|
+| `sts:GetCallerIdentity` | after assuming the tenant role, in the region's STS endpoint (no permission needed); the account and the role of the answer must be the account's | every call: the providers assume the same role in the same regions |
+| `ec2:DescribeAvailabilityZones` | read | network layouts and their zones |
+| `ec2:DescribeVpcs` | read (one page) | network import and the providers' observation |
+| `ec2:CreateVpc` | `DryRun=true`: AWS answers `DryRunOperation` when allowed, `UnauthorizedOperation` when not | creating networks |
+| `eks:ListClusters` | read (one page) | EKS name checks, import and the providers' clusters |
+| `iam:GetRole` | of the tenant role itself, once (IAM is global) | the IAM roles the platform creates and reads |
+
+`iam:SimulatePrincipalPolicy` is not used: it does not see SCPs, which are
+the usual cause. A region whose identity call fails runs none of its other
+calls. Throttling and network errors are retried twice with backoff; a
+check that still cannot finish is no verdict: the last one stays, marked
+stale, and it is tried again in 15 minutes.
+
+When: on create and on every change of the account, when its networks use a
+region not checked yet, every 6 hours, and on request
+(`cluster-vending account verify --id <id> --tenant <t>`, the
+`VerifyCloudAccount` RPC, which only records the request; `account get`
+shows the result once the controller has run it). A paused account is not
+checked.
+
+The result is the account's `status.access` (when, as whom, each region
+and call with its reason) and the condition `AccessVerified`: `True`,
+`False` with the first failure's reason, or `Unknown` before the first
+verdict. Reasons: `AssumeRoleDenied` (the trust policy, or no permission to
+assume), `DeniedBySCP` (an explicit deny in a service control policy),
+`NotAllowed` (the role's policies), `WrongAccount` (the role answered as
+another account or role), `RegionNotEnabled`, `Unavailable` (transient),
+`NoTenantRole` (none stored). An account whose access is denied is
+`Failed`, and the change is one event, `AccessVerified` or `AccessDenied`
+(docs/events.md). `account list` shows it in the ACCESS column, `account
+get` in its Checks section.
+
+IAM the check needs: the controller's own role may `sts:AssumeRole` on the
+tenant role (as for its other lookups), and the tenant role allows
+`ec2:DescribeAvailabilityZones`, `ec2:DescribeVpcs`, `ec2:CreateVpc`,
+`eks:ListClusters` and `iam:GetRole` on itself, in every region it is used
+in. Each is a permission the providers need anyway; an SCP must allow them
+in those regions too.
 
 Who reconciles: this controller, and nothing else. The API server only
 stores the desired state; it has no background loop.

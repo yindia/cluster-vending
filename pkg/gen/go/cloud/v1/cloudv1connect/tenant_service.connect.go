@@ -103,10 +103,11 @@ type TenantServiceClient interface {
 	//
 	// Idempotent: calling it again for the same account updates its name and
 	// converges the resources again. Another account ID adds an account. The
-	// account is READY once the namespace and ProviderConfig are applied;
-	// whether the tenant role can be assumed is not verified here (condition
-	// AccessVerified is UNKNOWN): a role that cannot be assumed shows up as
-	// errors on the managed resources of the account's networks.
+	// account is READY once the namespace and ProviderConfig are applied.
+	// Whether the tenant role can be used is not checked by the call: the
+	// controller checks it afterwards (status.access, condition
+	// AccessVerified; VerifyCloudAccount asks for a check now), and an
+	// account whose access is denied is FAILED.
 	BootstrapTenant(context.Context, *v1.BootstrapTenantRequest) (*v1.BootstrapTenantResponse, error)
 	// Returns one bootstrapped account of the tenant by its bootstrap ID
 	// (CloudAccount.id), or NOT_FOUND.
@@ -154,10 +155,11 @@ type TenantServiceHandler interface {
 	//
 	// Idempotent: calling it again for the same account updates its name and
 	// converges the resources again. Another account ID adds an account. The
-	// account is READY once the namespace and ProviderConfig are applied;
-	// whether the tenant role can be assumed is not verified here (condition
-	// AccessVerified is UNKNOWN): a role that cannot be assumed shows up as
-	// errors on the managed resources of the account's networks.
+	// account is READY once the namespace and ProviderConfig are applied.
+	// Whether the tenant role can be used is not checked by the call: the
+	// controller checks it afterwards (status.access, condition
+	// AccessVerified; VerifyCloudAccount asks for a check now), and an
+	// account whose access is denied is FAILED.
 	BootstrapTenant(context.Context, *v1.BootstrapTenantRequest) (*v1.BootstrapTenantResponse, error)
 	// Returns one bootstrapped account of the tenant by its bootstrap ID
 	// (CloudAccount.id), or NOT_FOUND.

@@ -86,10 +86,13 @@ const (
 	CloudAccountState_CLOUD_ACCOUNT_STATE_UNSPECIFIED CloudAccountState = 0
 	// Not reported yet: bootstrap is applied by the call itself.
 	CloudAccountState_CLOUD_ACCOUNT_STATE_BOOTSTRAPPING CloudAccountState = 1
-	// The namespace and the credential (AWS: ProviderConfig) are applied.
-	// The credential itself is not verified (condition AccessVerified).
+	// The namespace and the credential (AWS: ProviderConfig) are applied,
+	// and the last access check did not deny anything (condition
+	// AccessVerified: True, or Unknown before the first verdict).
 	CloudAccountState_CLOUD_ACCOUNT_STATE_READY CloudAccountState = 2
-	// Not reported yet: a failed bootstrap is the call's error.
+	// The controller's access check was denied: the tenant role cannot be
+	// used in a region, or does not allow a call the platform needs
+	// (status.access says which). A failed bootstrap is the call's error.
 	CloudAccountState_CLOUD_ACCOUNT_STATE_FAILED CloudAccountState = 3
 )
 

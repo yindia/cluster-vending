@@ -31,10 +31,11 @@ service TenantService {
   //
   // Idempotent: calling it again for the same account updates its name and
   // converges the resources again. Another account ID adds an account. The
-  // account is READY once the namespace and ProviderConfig are applied;
-  // whether the tenant role can be assumed is not verified here (condition
-  // AccessVerified is UNKNOWN): a role that cannot be assumed shows up as
-  // errors on the managed resources of the account's networks.
+  // account is READY once the namespace and ProviderConfig are applied.
+  // Whether the tenant role can be used is not checked by the call: the
+  // controller checks it afterwards (status.access, condition
+  // AccessVerified; VerifyCloudAccount asks for a check now), and an
+  // account whose access is denied is FAILED.
   rpc BootstrapTenant(BootstrapTenantRequest) returns (BootstrapTenantResponse) {
     option idempotency_level = IDEMPOTENT;
   }
@@ -220,10 +221,13 @@ enum CloudAccountState {
   CLOUD_ACCOUNT_STATE_UNSPECIFIED = 0;
   // Not reported yet: bootstrap is applied by the call itself.
   CLOUD_ACCOUNT_STATE_BOOTSTRAPPING = 1;
-  // The namespace and the credential (AWS: ProviderConfig) are applied.
-  // The credential itself is not verified (condition AccessVerified).
+  // The namespace and the credential (AWS: ProviderConfig) are applied,
+  // and the last access check did not deny anything (condition
+  // AccessVerified: True, or Unknown before the first verdict).
   CLOUD_ACCOUNT_STATE_READY = 2;
-  // Not reported yet: a failed bootstrap is the call's error.
+  // The controller's access check was denied: the tenant role cannot be
+  // used in a region, or does not allow a call the platform needs
+  // (status.access says which). A failed bootstrap is the call's error.
   CLOUD_ACCOUNT_STATE_FAILED = 3;
 }
 

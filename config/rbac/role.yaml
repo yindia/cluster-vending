@@ -17,6 +17,7 @@ rules:
   resources:
   - cloudaccounts
   - clusters
+  - componentdefinitions
   - components
   - networks
   verbs:
@@ -52,15 +53,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - cloud.cluster-vending.io
-  resources:
-  - componentdefinitions
-  verbs:
-  - create
-  - get
-  - list
-  - watch
 - apiGroups:
   - cloud.cluster-vending.io
   resources:

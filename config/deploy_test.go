@@ -316,17 +316,18 @@ func TestComponentRoles(t *testing.T) {
 	}
 	for _, verb := range writes {
 		for name, role := range map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "controller": controller, "server": server} {
-			// The controller creates the shipped definitions that are
-			// missing (--install-catalog), and never changes one.
-			if name == "controller" && verb == "create" {
+			// The controller syncs the definitions it shipped
+			// (--install-catalog): creates the missing ones, updates the
+			// ones nobody edited, deletes the ones a build dropped.
+			if name == "controller" {
+				if !allows(role, group, "componentdefinitions", verb) {
+					t.Errorf("controller: cannot %s componentdefinitions, so it cannot sync the shipped catalog", verb)
+				}
 				continue
 			}
 			if allows(role, group, "componentdefinitions", verb) {
 				t.Errorf("%s: may %s componentdefinitions; only the operator writes the catalog", name, verb)
 			}
-		}
-		if verb == "create" && !allows(controller, group, "componentdefinitions", "create") {
-			t.Error("controller: cannot create componentdefinitions, so it cannot install the shipped catalog")
 		}
 		for name, role := range map[string]*rbacv1.ClusterRole{"release-admin": admin, "release-viewer": viewer} {
 			if allows(role, group, "components", verb) {

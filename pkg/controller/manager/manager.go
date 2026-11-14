@@ -141,12 +141,21 @@ func Run(ctx context.Context, o Options) error {
 	}
 	if o.InstallCatalog {
 		// The platform's kinds are served (ConnectStore waited for them).
-		// Every replica may try: creating only what is missing is safe twice.
+		// Every replica may try: each write is conditional on what was read.
 		res, err := catalog.Install(ctx, direct)
 		if err != nil {
 			return fmt.Errorf("%w (--install-catalog=false skips installing the component catalog)", err)
 		}
-		logger.Info("component catalog", "created", res.Created, "existing", res.Existing)
+		logger.Info("component catalog", "created", res.Created, "updated", res.Updated, "existing", res.Existing,
+			"adopted", res.Adopted, "deleted", res.Deleted)
+		if len(res.Edited) > 0 {
+			logger.Info("component definitions edited by the platform team are kept as they are; delete one and restart to take this build's",
+				"definitions", res.Edited)
+		}
+		if len(res.Foreign) > 0 {
+			logger.Warn("component definitions differ from this build's and were not shipped by it: kept; kubectl replace -f pkg/catalog/definitions/<name>.yaml, or delete and restart, to take this build's",
+				"definitions", res.Foreign)
+		}
 	}
 	if o.AWS.StaticKeys != nil {
 		logger.Warn("AWS keys found in the environment: they are the controller's own credentials (local testing); every lookup still assumes the tenant role of the account it reads")

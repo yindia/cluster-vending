@@ -135,13 +135,29 @@ add a node for it.
 ## How the catalog reaches the management cluster
 
 - **By the controller (default).** On startup, after it installs the CRDs,
-  the controller creates every shipped definition that does not exist
-  (`--install-catalog`, default `true`; `pkg/catalog`). It never changes an
-  existing definition, so the platform team's edits survive an upgrade of the
-  controller. To take a newer shipped version of a definition, delete it and
-  restart the controller, or replace it with the file
+  the controller syncs the shipped definitions (`--install-catalog`, default
+  `true`; `pkg/catalog` `Sync`). It labels what it ships
+  `cloud.cluster-vending.io/shipped: "true"` and records the hash of the
+  spec it shipped in `cloud.cluster-vending.io/shipped-hash`, so it can tell
+  an untouched definition from one the platform team edited:
+
+  | On the management cluster | What a new build does |
+  |---|---|
+  | missing | creates it, labelled, with the hash |
+  | shipped, spec still has the recorded hash, build's spec differs | replaces the spec with the build's (whole: fields the new file dropped go), keeps `disabled`, records the new hash |
+  | shipped, unedited, same as the build | nothing |
+  | shipped, spec changed since (hash differs) | nothing: the platform team's; logged |
+  | not labelled, equal to the build's spec | adopts it: adds the label and hash |
+  | not labelled, different | nothing: logged with how to take the build's |
+  | shipped, unedited, no longer in the build | deletes it (the in-use guard holds it while clusters use it) |
+  | shipped, edited, no longer in the build | nothing |
+  | the platform team's own (not labelled, not in the build) | nothing |
+
+  `disabled` is not part of the hash: switching a shipped definition off
+  does not stop later builds from updating the rest of it. To take a newer
+  shipped version of an edited definition, replace it with the file
   (`kubectl replace -f pkg/catalog/definitions/<name>.yaml`; `apply` keeps
-  fields the new file dropped).
+  fields the new file dropped) or delete it and restart the controller.
 - **By hand.** `--install-catalog=false`, then
   `kubectl create -f pkg/catalog/definitions/` once the CRDs are installed.
   The catalog is not part of any kustomization.

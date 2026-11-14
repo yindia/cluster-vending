@@ -76,7 +76,7 @@ func TestInstallKeepsAnEditedDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(res.Existing, "karpenter") || slices.Contains(res.Created, "karpenter") {
+	if !slices.Contains(res.Foreign, "karpenter") || slices.Contains(res.Created, "karpenter") {
 		t.Errorf("result = %+v, want karpenter left as it was", res)
 	}
 	got := &cloudv1alpha1.ComponentDefinition{}
@@ -107,10 +107,10 @@ func TestInstallReportsAFailedCreate(t *testing.T) {
 	}
 }
 
-// Create does not change the definitions it is given.
+// Sync does not change the definitions it is given.
 func TestCreateLeavesItsInputAlone(t *testing.T) {
 	def := &cloudv1alpha1.ComponentDefinition{ObjectMeta: metav1.ObjectMeta{Name: "x"}}
-	if _, err := catalog.Create(t.Context(), newClient(t), []*cloudv1alpha1.ComponentDefinition{def}); err != nil {
+	if _, err := catalog.Sync(t.Context(), newClient(t), []*cloudv1alpha1.ComponentDefinition{def}); err != nil {
 		t.Fatal(err)
 	}
 	if def.ResourceVersion != "" {

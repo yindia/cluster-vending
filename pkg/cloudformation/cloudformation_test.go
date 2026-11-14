@@ -37,8 +37,10 @@ func TestTemplatesAreEmbedded(t *testing.T) {
 			if got := r.Properties["RoleName"]; got != RoleName(role) {
 				t.Errorf("RoleName = %v, want %s", got, RoleName(role))
 			}
-			if strings.Contains(strings.ToLower(string(body)), "cops") {
-				t.Error("the template still names Cops")
+			for _, line := range strings.Split(string(body), "\n") {
+				if name, ok := strings.CutPrefix(strings.TrimSpace(line), "ManagedPolicyName: "); ok && !strings.HasPrefix(name, "cluster-vending-") {
+					t.Errorf("policy %s is not named cluster-vending-<role>-<part>", name)
+				}
 			}
 		})
 	}

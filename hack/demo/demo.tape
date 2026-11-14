@@ -57,12 +57,12 @@ Type `sed -e "s/__TENANT__/$T/" -e "s/__BOOTSTRAP_ID__/$ACCOUNT/" -e "s/__REGION
 Show
 Type "# 2. A network: VPC, two zones, public and private subnets, one NAT gateway" Enter
 Sleep 1s
-Type `cluster-vending network create -f $D/network.yaml --wait` Enter
-Sleep 8s
+Type `cluster-vending network create -f $D/network.yaml` Enter
+Sleep 6s
 Hide
-Type "step 2" Enter
+Type `until [ -n "${NETWORK:=$(json network list | jq -r '.networks[] | select(.name=="demo-net") | .id')}" ] && json network get --id "$NETWORK" --live | jq -e '.network.status.state=="NETWORK_STATE_READY"' >/dev/null; do sleep 15; done; step 2` Enter
 Wait+Screen@40m /__step_2_done__/
-Type `export NETWORK="$(json network list | jq -r '.networks[] | select(.name=="demo-net") | .id')"; clear` Enter
+Type `export NETWORK; clear` Enter
 Show
 Type `cluster-vending network list --tenant $T` Enter
 Sleep 4s
@@ -75,12 +75,12 @@ Type "# 3. An EKS cluster on Kubernetes 1.36, on the alpha channel (1.37), upgra
 Sleep 1s
 Type `grep -E 'kubernetesVersion|releaseChannel|upgradeMode|tier' $D/cluster.yaml` Enter
 Sleep 3s
-Type `cluster-vending cluster create -f $D/cluster.yaml --wait` Enter
-Sleep 8s
+Type `cluster-vending cluster create -f $D/cluster.yaml` Enter
+Sleep 6s
 Hide
-Type "step 3" Enter
+Type `until [ -n "${CLUSTER:=$(json cluster list | jq -r '.clusters[] | select(.name=="demo-eks") | .id')}" ] && json cluster get --id "$CLUSTER" --live | jq -e '.cluster.status.state=="CLUSTER_STATE_RUNNING"' >/dev/null; do sleep 30; done; step 3` Enter
 Wait+Screen@75m /__step_3_done__/
-Type `export CLUSTER="$(json cluster list | jq -r '.clusters[] | select(.name=="demo-eks") | .id')"; clear` Enter
+Type `export CLUSTER; clear` Enter
 Show
 Type `cluster-vending cluster get --id $CLUSTER --tenant $T | head -22` Enter
 Sleep 7s
@@ -113,17 +113,17 @@ Sleep 6s
 Type "clear" Enter
 Type "# 5. Delete everything the demo created: the cluster, then the network" Enter
 Sleep 1s
-Type `cluster-vending cluster delete --id $CLUSTER --tenant $T --wait` Enter
+Type `cluster-vending cluster delete --id $CLUSTER --tenant $T` Enter
 Sleep 6s
 Hide
-Type "step 6" Enter
+Type `while json cluster get --id "$CLUSTER" >/dev/null 2>&1; do sleep 30; done; step 6` Enter
 Wait+Screen@60m /__step_6_done__/
 Type "clear" Enter
 Show
-Type `cluster-vending network delete --id $NETWORK --tenant $T --wait` Enter
+Type `cluster-vending network delete --id $NETWORK --tenant $T` Enter
 Sleep 6s
 Hide
-Type "step 7" Enter
+Type `while json network get --id "$NETWORK" >/dev/null 2>&1; do sleep 15; done; step 7` Enter
 Wait+Screen@40m /__step_7_done__/
 Type "clear" Enter
 Show

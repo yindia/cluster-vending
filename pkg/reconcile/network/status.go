@@ -191,6 +191,7 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 			st.Message = strings.TrimPrefix(st.Message+note, "; ")
 		}
 	}
+	withEditIgnored(st, row)
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)
 	return st
 }

@@ -273,6 +273,7 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 			st.Message = strings.TrimPrefix(st.Message+note, "; ")
 		}
 	}
+	withEditIgnored(st, row)
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)
 	return st
 }

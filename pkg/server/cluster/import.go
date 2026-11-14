@@ -85,6 +85,12 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, err
 	}
+	// The plan that was reviewed is the one applied: a spec changed on the
+	// object behind the API's back, which no pass has put back yet, is
+	// dropped here.
+	if _, err := reconcilecluster.RestoreDiscovered(row); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
+	}
 	spec, err := reconcilecluster.SpecOf(row)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())

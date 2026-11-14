@@ -152,6 +152,16 @@ stored as `BLOCKED` with that reason as its one plan line, and the cloud is
 not asked again. Delete it and import again. A lookup that did not answer,
 or credentials that cannot read the resource, are retried: neither is final.
 
+An imported network or cluster is read-only until its takeover. The API
+refuses to change it, and a change made on its object behind the API
+(`kubectl edit`) is not kept: the reconciler remembers the spec, display name
+and labels as the import left them (with the row), puts them back on the next
+pass, and reports it (`SpecEditIgnored` condition, the status message, one
+line in the controller's log). A takeover does the same before it stores
+anything, so what is applied is the plan that was reviewed. A resource
+imported before this was remembered is remembered on its next pass, as it is
+then.
+
 A **carried-over** object is one that came with the import and that no spec
 field describes (for example a VPC's existing flow log). It is marked, never
 removed when the owner is rendered again, and deleted with its owner.

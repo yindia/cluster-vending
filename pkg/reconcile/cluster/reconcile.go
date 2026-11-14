@@ -120,6 +120,11 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 		}
 	}
 	if row.State == StateImported || row.State == StateBlocked {
+		// Read-only until its takeover: what the import discovered is
+		// remembered, and a spec edited on the object is put back.
+		if err := s.keepDiscovered(ctx, row); err != nil {
+			return fmt.Errorf("keep the discovered spec: %w", err)
+		}
 		if row.State == StateImported && row.AppliedGeneration < row.Generation {
 			// The import was stored; its Observe-only objects are created here.
 			if err := s.applyStoredImport(ctx, row); err != nil {

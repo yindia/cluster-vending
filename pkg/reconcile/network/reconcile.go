@@ -103,6 +103,11 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 // never created again blindly. An imported network, also after its
 // takeover, is not repaired: its objects are the discovered ones.
 func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
+	// Imported and not taken over: read-only. What the import left is
+	// remembered, and what was edited on the object is put back.
+	if err := s.keepDiscovered(ctx, row); err != nil {
+		return fmt.Errorf("keep what the import left: %w", err)
+	}
 	var repair []model.ManagedResource
 	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
 		if row.State == StateImported || row.State == StateBlocked || Discovering(row) || StoredImport(row) != nil {
@@ -136,6 +141,11 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		}
 	}
 	if row.State == StateImported || row.State == StateBlocked {
+		// Right after the discovery: what it left is remembered before
+		// anything else can change it.
+		if err := s.keepDiscovered(ctx, row); err != nil {
+			return fmt.Errorf("keep what the import left: %w", err)
+		}
 		if row.State == StateImported && row.AppliedGeneration < row.Generation {
 			// The import was stored; its Observe-only objects are created here.
 			if err := s.applyImported(ctx, row); err != nil {

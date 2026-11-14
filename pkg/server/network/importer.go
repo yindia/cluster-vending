@@ -108,6 +108,12 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
+	// The plan that was reviewed is the one applied: what was changed on
+	// the object behind the API's back, and no pass has put back yet, is
+	// dropped here.
+	if _, err := netreconcile.RestoreDiscovered(row); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err.Error())
+	}
 	// The row only: a network whose objects are owned (deleting them
 	// deletes the cloud resources) must never be stored as read-only, so
 	// the reconciler owns them once the row says so (moveOn).

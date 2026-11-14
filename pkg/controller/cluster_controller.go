@@ -115,6 +115,12 @@ func (r *ClusterReconciler) bump(ctx context.Context, tenant, id string) error {
 	if row.State == reconcilecluster.StateDeleting {
 		return nil
 	}
+	if row.Imported && (row.State == reconcilecluster.StateImported || row.State == reconcilecluster.StateBlocked) {
+		// Imported and not taken over: read-only. The edit is not a new
+		// generation; the reconciler puts the discovered spec back and
+		// reports it (keepDiscovered).
+		return nil
+	}
 	row.Generation++
 	if row.State == reconcilecluster.StateRunning {
 		row.State = reconcilecluster.StateUpdating

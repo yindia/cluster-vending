@@ -85,6 +85,12 @@ func (r *NetworkReconciler) bump(ctx context.Context, tenant, id string) error {
 	if row.State == netreconcile.StateDeleting {
 		return nil
 	}
+	if row.State == netreconcile.StateImported || row.State == netreconcile.StateBlocked {
+		// Imported and not taken over: read-only. The edit is not a new
+		// generation; the reconciler puts what the import left back and
+		// reports it (keepDiscovered).
+		return nil
+	}
 	row.Generation++
 	if row.State == netreconcile.StateReady {
 		row.State = netreconcile.StateUpdating

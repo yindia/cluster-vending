@@ -99,6 +99,11 @@ type Options struct {
 	PageToken string
 	// OnlyRemoved is --only-removed of cluster deprecations.
 	OnlyRemoved bool
+	// Namespace is --namespace of cluster recommendations: one namespace of
+	// the workload cluster.
+	Namespace string
+	// OnlyChanges is --only-changes of cluster recommendations.
+	OnlyChanges bool
 	// OnlyWarnings is --only-warnings of cluster events and network events.
 	OnlyWarnings bool
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the

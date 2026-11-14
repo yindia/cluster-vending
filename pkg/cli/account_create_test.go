@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -37,13 +38,31 @@ type accountAPI struct {
 	// verdict is the access check's result once verify was asked; nil:
 	// the controller never checks.
 	verdict *cloudv1.AccountAccess
+	// deleted: DeleteCloudAccount was called; gets is how many reads the
+	// account survives after it (0: gone at once); deleteErr fails it.
+	deleted   bool
+	gets      int
+	deleteErr error
+	// role is the onboarded account's role (account delete reads it).
+	role string
+}
+
+func (f *accountAPI) DeleteCloudAccount(_ context.Context, _ *cloudv1.DeleteCloudAccountRequest) (*cloudv1.DeleteCloudAccountResponse, error) {
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
+	f.deleted = true
+	return &cloudv1.DeleteCloudAccountResponse{Account: f.account()}, nil
 }
 
 func (f *accountAPI) GetAccountOnboarding(_ context.Context, req *cloudv1.GetAccountOnboardingRequest) (*cloudv1.GetAccountOnboardingResponse, error) {
 	f.onboarded = req
-	role := req.GetRole()
+	role, name := req.GetRole(), req.GetRoleName()
+	if name == "" {
+		name = "cluster-vending-" + role
+	}
 	return &cloudv1.GetAccountOnboardingResponse{Onboarding: &cloudv1.AccountOnboarding{Role: role,
-		RoleName: "cluster-vending-" + role, StackName: "cluster-vending-" + role, Region: "us-east-1",
+		RoleName: name, StackName: name, Region: "us-east-1",
 		AccountId: req.GetAccountId(), ManagementRoleArn: managementRole, TemplateBody: roleTemplate,
 		TemplateFile: "cluster-vending-" + role + "-role.template.yaml", ConsoleUrl: f.console}}, nil
 }
@@ -59,12 +78,22 @@ func (f *accountAPI) VerifyCloudAccount(_ context.Context, _ *cloudv1.VerifyClou
 }
 
 func (f *accountAPI) GetCloudAccount(_ context.Context, _ *cloudv1.GetCloudAccountRequest) (*cloudv1.GetCloudAccountResponse, error) {
+	if f.deleted {
+		if f.gets <= 0 {
+			return nil, connect.NewError(connect.CodeNotFound, "tenant acme has no bootstrapped account")
+		}
+		f.gets--
+	}
 	return &cloudv1.GetCloudAccountResponse{Account: f.account()}, nil
 }
 
 func (f *accountAPI) account() *cloudv1.CloudAccount {
+	aws := f.bootstrapped.GetAccount().GetAws()
+	if f.role != "" {
+		aws = &cloudv1.AwsAccount{AccountId: tenantAccount, Role: f.role}
+	}
 	a := &cloudv1.CloudAccount{Id: accountID, TenantId: "acme", AccountName: "acme-prod",
-		Provider: &cloudv1.CloudAccount_Aws{Aws: f.bootstrapped.GetAccount().GetAws()},
+		Provider: &cloudv1.CloudAccount_Aws{Aws: aws},
 		Status:   &cloudv1.CloudAccountStatus{State: cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_READY}}
 	if f.verified && f.verdict != nil {
 		a.Status.Access = f.verdict
@@ -84,6 +113,7 @@ type fakeStacks struct {
 	events  []StackEvent
 	created []StackInput
 	updated []StackInput
+	deleted []string
 	// unchanged: UpdateStack finds nothing to update.
 	unchanged bool
 }
@@ -103,6 +133,11 @@ func (f *fakeStacks) TemplateBody(context.Context, string) (string, error) { ret
 
 func (f *fakeStacks) CreateStack(_ context.Context, in StackInput) error {
 	f.created = append(f.created, in)
+	return nil
+}
+
+func (f *fakeStacks) DeleteStack(_ context.Context, name string) error {
+	f.deleted = append(f.deleted, name)
 	return nil
 }
 

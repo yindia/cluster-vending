@@ -220,7 +220,10 @@ func (s *TenantService) DeleteCloudAccount(ctx context.Context, req *cloudv1.Del
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
-	err := s.deps.Store.Tenants().DeleteCloudAccount(ctx, req.GetTenantId(), req.GetId())
+	a, err := s.deps.Store.Tenants().GetCloudAccountByID(ctx, req.GetTenantId(), req.GetId())
+	if err == nil {
+		err = s.deps.Store.Tenants().DeleteCloudAccount(ctx, req.GetTenantId(), req.GetId())
+	}
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, connect.NewError(connect.CodeNotFound,
 			fmt.Sprintf("tenant %s has no bootstrapped account %s", req.GetTenantId(), req.GetId()))
@@ -231,5 +234,5 @@ func (s *TenantService) DeleteCloudAccount(ctx context.Context, req *cloudv1.Del
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	return &cloudv1.DeleteCloudAccountResponse{}, nil
+	return &cloudv1.DeleteCloudAccountResponse{Account: accountreconcile.Proto(a)}, nil
 }

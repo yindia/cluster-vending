@@ -26,15 +26,23 @@ func TestDeleteCloudAccount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t)
+			row := stored(account)
+			row.ID = id
+			f.tenants.EXPECT().GetCloudAccountByID(gomock.Any(), "acme", id).Return(row, nil).MaxTimes(1)
+			f.tenants.EXPECT().GetCloudAccountByID(gomock.Any(), "acme", used).Return(row, nil).MaxTimes(1)
+			f.tenants.EXPECT().GetCloudAccountByID(gomock.Any(), "acme", unknown).Return(nil, repository.ErrNotFound).MaxTimes(1)
 			f.tenants.EXPECT().DeleteCloudAccount(gomock.Any(), "acme", id).Return(nil).MaxTimes(1)
 			f.tenants.EXPECT().DeleteCloudAccount(gomock.Any(), "acme", used).
 				Return(fmt.Errorf("%w: networks prod belong to the account; delete them first", repository.ErrInUse)).MaxTimes(1)
 			f.tenants.EXPECT().DeleteCloudAccount(gomock.Any(), "acme", unknown).Return(repository.ErrNotFound).MaxTimes(1)
 
-			_, err := f.svc.DeleteCloudAccount(t.Context(), &cloudv1.DeleteCloudAccountRequest{TenantId: "acme", Id: tt.id})
+			res, err := f.svc.DeleteCloudAccount(t.Context(), &cloudv1.DeleteCloudAccountRequest{TenantId: "acme", Id: tt.id})
 
-			if connect.CodeOf(err) != tt.code && !(tt.code == 0 && err == nil) {
+			if ok := tt.code == 0 && err == nil; !ok && connect.CodeOf(err) != tt.code {
 				t.Fatalf("err = %v, want %v", err, tt.code)
+			}
+			if tt.code == 0 && res.GetAccount().GetId() != id {
+				t.Errorf("account = %v, want the one deleted", res.GetAccount())
 			}
 			if tt.wantText != "" && !strings.Contains(err.Error(), tt.wantText) {
 				t.Errorf("err = %v, want it to name %q", err, tt.wantText)

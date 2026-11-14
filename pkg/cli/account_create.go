@@ -94,7 +94,7 @@ func createRole(ctx context.Context, c Clients, o Options, tenant string, aws *c
 		return nil
 	}
 	res, err := call(ctx, &cloudv1.GetAccountOnboardingRequest{TenantId: tenant, Role: role, Region: o.StackRegion,
-		AccountId: aws.GetAccountId()}, c.Tenant.GetAccountOnboarding)
+		AccountId: aws.GetAccountId(), RoleName: aws.GetRole()}, c.Tenant.GetAccountOnboarding)
 	if err != nil {
 		return err
 	}

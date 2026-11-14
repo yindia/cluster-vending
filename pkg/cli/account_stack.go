@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
@@ -26,19 +27,28 @@ type RoleStacks interface {
 	UpdateStack(ctx context.Context, in StackInput) (bool, error)
 	// StackEvents are the stack's latest events, newest first.
 	StackEvents(ctx context.Context, name string) ([]StackEvent, error)
+	DeleteStack(ctx context.Context, name string) error
 }
 
 // StackInfo is a stack as DescribeStacks reports it.
 type StackInfo struct {
 	Status, Reason string
-	// ManagementRoleARN is the stack's ManagementRoleArn parameter.
-	ManagementRoleARN string
+	// ManagementRoleARN and RoleName are the stack's parameters.
+	ManagementRoleARN, RoleName string
+	Tags                        map[string]string
 }
 
-// StackInput is the stack of one role: its name, template and the
-// management role the role trusts.
+// createdByCLI reports whether account create made the stack: it carries
+// cloudformation.ManagedByTag (or the managed-by tag of earlier builds).
+func (s *StackInfo) createdByCLI() bool {
+	return s.Tags[cloudformation.ManagedByTag] == cloudformation.Platform || s.Tags["managed-by"] == cloudformation.Platform
+}
+
+// StackInput is the stack of one role: its name, template, the management
+// role the role trusts, the role's name, and the stack's tags.
 type StackInput struct {
-	Name, Body, ManagementRoleARN string
+	Name, Body, ManagementRoleARN, RoleName string
+	Tags                                    map[string]string
 }
 
 // StackEvent is one event of a stack.
@@ -72,7 +82,8 @@ func stackFailed(status string) bool {
 // management role differ, or leaves it as it is; then follows it to the
 // end, printing its events.
 func ensureStack(ctx context.Context, o Options, s RoleStacks, ob *cloudv1.AccountOnboarding, account string) error {
-	in := StackInput{Name: ob.GetStackName(), Body: ob.GetTemplateBody(), ManagementRoleARN: ob.GetManagementRoleArn()}
+	in := StackInput{Name: ob.GetStackName(), Body: ob.GetTemplateBody(), ManagementRoleARN: ob.GetManagementRoleArn(),
+		RoleName: ob.GetRoleName(), Tags: map[string]string{cloudformation.ManagedByTag: cloudformation.Platform}}
 	info, err := s.Stack(ctx, in.Name)
 	if err != nil {
 		return fmt.Errorf("read the stack %s in account %s: %w", in.Name, account, err)
@@ -118,7 +129,9 @@ func ensureStack(ctx context.Context, o Options, s RoleStacks, ob *cloudv1.Accou
 // sameStack reports whether the stack has the role's template and
 // management role.
 func sameStack(ctx context.Context, s RoleStacks, in StackInput, info *StackInfo) (bool, error) {
-	if info.ManagementRoleARN != in.ManagementRoleARN {
+	// A stack of a template before RoleName has no such parameter: its
+	// template differs, which the comparison below finds.
+	if info.ManagementRoleARN != in.ManagementRoleARN || (info.RoleName != "" && info.RoleName != in.RoleName) {
 		return false, nil
 	}
 	body, err := s.TemplateBody(ctx, in.Name)

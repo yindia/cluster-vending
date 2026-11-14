@@ -27,6 +27,9 @@ type verb struct {
 	// createRole adds --create-role, --profile and --region (account
 	// create), and makes --wait default to true.
 	createRole bool
+	// deleteRole adds --delete-role, --profile and --region (account
+	// delete).
+	deleteRole bool
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
 	removed, oidc, warnings, noPlatform bool
@@ -195,6 +198,13 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.Profile, "profile", "", "the AWS profile with credentials of the account (default: AWS_PROFILE and the SDK's default chain)")
 			f.StringVar(&o.StackRegion, "region", "", "the AWS region of the role's stack (IAM is global); default us-east-1")
 		}
+		if v.deleteRole {
+			f.BoolVar(&o.DeleteRole, "delete-role", false, "also delete the CloudFormation stack of the account's role (spec.aws.role), "+
+				"with your AWS credentials of the account, once the account is gone: only a stack account create made (its "+
+				"cluster-vending.io/managed-by tag); any other is refused before anything is deleted")
+			f.StringVar(&o.Profile, "profile", "", "the AWS profile with credentials of the account (default: AWS_PROFILE and the SDK's default chain)")
+			f.StringVar(&o.StackRegion, "region", "", "the AWS region of the role's stack; default us-east-1")
+		}
 		if v.wait {
 			help := "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit"
 			if v.createRole {
@@ -224,6 +234,9 @@ func newAccountCmd() *cobra.Command {
 		{use: "list", short: "List the tenant's accounts", run: cli.BootstrapList, args: cobra.NoArgs},
 		{use: "verify", short: "Ask the controller to check the account --id's access now (the tenant role in each region, and the calls the platform needs); get shows the result",
 			run: cli.BootstrapVerify, args: cobra.MaximumNArgs(1), id: true, regions: true},
+		{use: "delete", short: "Delete the account --id (refused while networks belong to it): the controller removes its ProviderConfig; " +
+			"--delete-role also deletes its role's CloudFormation stack, when account create made it",
+			run: cli.AccountDelete, args: cobra.MaximumNArgs(1), id: true, wait: true, deleteRole: true},
 	})
 }
 

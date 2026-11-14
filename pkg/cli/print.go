@@ -118,6 +118,8 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 		return true, accountNext(w, m.GetAccount())
 	case *cloudv1.VerifyCloudAccountResponse:
 		return true, mutatedAccount(w, m.GetAccount(), "access check requested")
+	case *cloudv1.DeleteCloudAccountResponse:
+		return true, mutatedAccount(w, m.GetAccount(), "deleted")
 	case *cloudv1.GetComponentResponse:
 		return true, describeComponent(w, m.GetComponent())
 	case *cloudv1.EnableComponentResponse:

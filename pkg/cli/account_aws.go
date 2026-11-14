@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"errors"
+	"maps"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -57,11 +59,17 @@ func (s sdkStacks) Stack(ctx context.Context, name string) (*StackInfo, error) {
 		return nil, nil
 	}
 	st := out.Stacks[0]
-	info := &StackInfo{Status: string(st.StackStatus), Reason: aws.ToString(st.StackStatusReason)}
+	info := &StackInfo{Status: string(st.StackStatus), Reason: aws.ToString(st.StackStatusReason), Tags: map[string]string{}}
 	for _, p := range st.Parameters {
-		if aws.ToString(p.ParameterKey) == cloudformation.ParameterManagementRoleARN {
+		switch aws.ToString(p.ParameterKey) {
+		case cloudformation.ParameterManagementRoleARN:
 			info.ManagementRoleARN = aws.ToString(p.ParameterValue)
+		case cloudformation.ParameterRoleName:
+			info.RoleName = aws.ToString(p.ParameterValue)
 		}
+	}
+	for _, t := range st.Tags {
+		info.Tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
 	}
 	return info, nil
 }
@@ -77,8 +85,23 @@ func (s sdkStacks) TemplateBody(ctx context.Context, name string) (string, error
 func (s sdkStacks) CreateStack(ctx context.Context, in StackInput) error {
 	_, err := s.cf.CreateStack(ctx, &cfn.CreateStackInput{StackName: aws.String(in.Name), TemplateBody: aws.String(in.Body),
 		Capabilities: []cfntypes.Capability{cfntypes.CapabilityCapabilityNamedIam}, Parameters: stackParameters(in),
-		Tags: []cfntypes.Tag{{Key: aws.String("managed-by"), Value: aws.String(cloudformation.Platform)}}})
+		Tags: stackTags(in)})
 	return err
+}
+
+func (s sdkStacks) DeleteStack(ctx context.Context, name string) error {
+	_, err := s.cf.DeleteStack(ctx, &cfn.DeleteStackInput{StackName: aws.String(name)})
+	return err
+}
+
+// stackTags are in's tags, in name order (a stable request).
+func stackTags(in StackInput) []cfntypes.Tag {
+	keys := slices.Sorted(maps.Keys(in.Tags))
+	out := make([]cfntypes.Tag, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, cfntypes.Tag{Key: aws.String(k), Value: aws.String(in.Tags[k])})
+	}
+	return out
 }
 
 func (s sdkStacks) UpdateStack(ctx context.Context, in StackInput) (bool, error) {
@@ -104,8 +127,13 @@ func (s sdkStacks) StackEvents(ctx context.Context, name string) ([]StackEvent, 
 }
 
 func stackParameters(in StackInput) []cfntypes.Parameter {
-	return []cfntypes.Parameter{{ParameterKey: aws.String(cloudformation.ParameterManagementRoleARN),
+	params := []cfntypes.Parameter{{ParameterKey: aws.String(cloudformation.ParameterManagementRoleARN),
 		ParameterValue: aws.String(in.ManagementRoleARN)}}
+	if in.RoleName != "" {
+		params = append(params, cfntypes.Parameter{ParameterKey: aws.String(cloudformation.ParameterRoleName),
+			ParameterValue: aws.String(in.RoleName)})
+	}
+	return params
 }
 
 // isAPIError reports whether err is the AWS API error code whose message

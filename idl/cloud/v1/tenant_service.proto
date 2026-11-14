@@ -173,7 +173,10 @@ message DeleteCloudAccountRequest {
   string id = 2 [(buf.validate.field).string.uuid = true];
 }
 
-message DeleteCloudAccountResponse {}
+message DeleteCloudAccountResponse {
+  // The account as it was when its deletion was asked for.
+  CloudAccount account = 1;
+}
 
 message VerifyCloudAccountRequest {
   // Same rules as BootstrapTenantRequest.tenant_id.

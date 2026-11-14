@@ -572,7 +572,9 @@ func (x *DeleteCloudAccountRequest) GetId() string {
 }
 
 type DeleteCloudAccountResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The account as it was when its deletion was asked for.
+	Account       *CloudAccount `protobuf:"bytes,1,opt,name=account,proto3" json:"account,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -605,6 +607,13 @@ func (x *DeleteCloudAccountResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeleteCloudAccountResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCloudAccountResponse) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DeleteCloudAccountResponse) GetAccount() *CloudAccount {
+	if x != nil {
+		return x.Account
+	}
+	return nil
 }
 
 type VerifyCloudAccountRequest struct {
@@ -1601,8 +1610,9 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\x83\x01\n" +
 	"\x19DeleteCloudAccountRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12\x18\n" +
-	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\"\x1c\n" +
-	"\x1aDeleteCloudAccountResponse\"\xce\x01\n" +
+	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\"N\n" +
+	"\x1aDeleteCloudAccountResponse\x120\n" +
+	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\xce\x01\n" +
 	"\x19VerifyCloudAccountRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12\x18\n" +
 	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\x12I\n" +
@@ -1754,41 +1764,42 @@ var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
 	18, // 2: cloud.v1.BootstrapTenantRequest.account:type_name -> cloud.v1.CloudAccount
 	18, // 3: cloud.v1.BootstrapTenantResponse.account:type_name -> cloud.v1.CloudAccount
 	18, // 4: cloud.v1.GetCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
-	18, // 5: cloud.v1.VerifyCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
-	15, // 6: cloud.v1.GetAccountOnboardingResponse.onboarding:type_name -> cloud.v1.AccountOnboarding
-	18, // 7: cloud.v1.ListCloudAccountsResponse.accounts:type_name -> cloud.v1.CloudAccount
-	20, // 8: cloud.v1.CloudAccount.status:type_name -> cloud.v1.CloudAccountStatus
-	23, // 9: cloud.v1.CloudAccount.create_time:type_name -> google.protobuf.Timestamp
-	23, // 10: cloud.v1.CloudAccount.update_time:type_name -> google.protobuf.Timestamp
-	19, // 11: cloud.v1.CloudAccount.aws:type_name -> cloud.v1.AwsAccount
-	1,  // 12: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
-	24, // 13: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
-	25, // 14: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	26, // 15: cloud.v1.CloudAccountStatus.pause:type_name -> cloud.v1.Pause
-	21, // 16: cloud.v1.CloudAccountStatus.access:type_name -> cloud.v1.AccountAccess
-	23, // 17: cloud.v1.AccountAccess.checked_time:type_name -> google.protobuf.Timestamp
-	23, // 18: cloud.v1.AccountAccess.attempted_time:type_name -> google.protobuf.Timestamp
-	22, // 19: cloud.v1.AccountAccess.regions:type_name -> cloud.v1.AccessResult
-	22, // 20: cloud.v1.AccountAccess.checks:type_name -> cloud.v1.AccessResult
-	5,  // 21: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
-	7,  // 22: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
-	16, // 23: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
-	11, // 24: cloud.v1.TenantService.VerifyCloudAccount:input_type -> cloud.v1.VerifyCloudAccountRequest
-	9,  // 25: cloud.v1.TenantService.DeleteCloudAccount:input_type -> cloud.v1.DeleteCloudAccountRequest
-	13, // 26: cloud.v1.TenantService.GetAccountOnboarding:input_type -> cloud.v1.GetAccountOnboardingRequest
-	2,  // 27: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
-	6,  // 28: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
-	8,  // 29: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
-	17, // 30: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
-	12, // 31: cloud.v1.TenantService.VerifyCloudAccount:output_type -> cloud.v1.VerifyCloudAccountResponse
-	10, // 32: cloud.v1.TenantService.DeleteCloudAccount:output_type -> cloud.v1.DeleteCloudAccountResponse
-	14, // 33: cloud.v1.TenantService.GetAccountOnboarding:output_type -> cloud.v1.GetAccountOnboardingResponse
-	3,  // 34: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
-	28, // [28:35] is the sub-list for method output_type
-	21, // [21:28] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	18, // 5: cloud.v1.DeleteCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
+	18, // 6: cloud.v1.VerifyCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
+	15, // 7: cloud.v1.GetAccountOnboardingResponse.onboarding:type_name -> cloud.v1.AccountOnboarding
+	18, // 8: cloud.v1.ListCloudAccountsResponse.accounts:type_name -> cloud.v1.CloudAccount
+	20, // 9: cloud.v1.CloudAccount.status:type_name -> cloud.v1.CloudAccountStatus
+	23, // 10: cloud.v1.CloudAccount.create_time:type_name -> google.protobuf.Timestamp
+	23, // 11: cloud.v1.CloudAccount.update_time:type_name -> google.protobuf.Timestamp
+	19, // 12: cloud.v1.CloudAccount.aws:type_name -> cloud.v1.AwsAccount
+	1,  // 13: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
+	24, // 14: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
+	25, // 15: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	26, // 16: cloud.v1.CloudAccountStatus.pause:type_name -> cloud.v1.Pause
+	21, // 17: cloud.v1.CloudAccountStatus.access:type_name -> cloud.v1.AccountAccess
+	23, // 18: cloud.v1.AccountAccess.checked_time:type_name -> google.protobuf.Timestamp
+	23, // 19: cloud.v1.AccountAccess.attempted_time:type_name -> google.protobuf.Timestamp
+	22, // 20: cloud.v1.AccountAccess.regions:type_name -> cloud.v1.AccessResult
+	22, // 21: cloud.v1.AccountAccess.checks:type_name -> cloud.v1.AccessResult
+	5,  // 22: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
+	7,  // 23: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
+	16, // 24: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
+	11, // 25: cloud.v1.TenantService.VerifyCloudAccount:input_type -> cloud.v1.VerifyCloudAccountRequest
+	9,  // 26: cloud.v1.TenantService.DeleteCloudAccount:input_type -> cloud.v1.DeleteCloudAccountRequest
+	13, // 27: cloud.v1.TenantService.GetAccountOnboarding:input_type -> cloud.v1.GetAccountOnboardingRequest
+	2,  // 28: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
+	6,  // 29: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
+	8,  // 30: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
+	17, // 31: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
+	12, // 32: cloud.v1.TenantService.VerifyCloudAccount:output_type -> cloud.v1.VerifyCloudAccountResponse
+	10, // 33: cloud.v1.TenantService.DeleteCloudAccount:output_type -> cloud.v1.DeleteCloudAccountResponse
+	14, // 34: cloud.v1.TenantService.GetAccountOnboarding:output_type -> cloud.v1.GetAccountOnboardingResponse
+	3,  // 35: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
+	29, // [29:36] is the sub-list for method output_type
+	22, // [22:29] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_tenant_service_proto_init() }

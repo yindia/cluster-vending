@@ -103,6 +103,9 @@ type Options struct {
 	// StackRegion --region, the region of the role's stack (empty: the
 	// server's default).
 	CreateRole, Profile, StackRegion string
+	// DeleteRole is account delete's --delete-role: delete the stack of
+	// the account's role too, when account create made it.
+	DeleteRole bool
 	// RoleStacks opens the account's CloudFormation with the caller's AWS
 	// credentials; nil: the AWS SDK. OpenURL opens a link in a browser;
 	// nil: the system's opener. PollInterval is how often account create

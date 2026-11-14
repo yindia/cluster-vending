@@ -29,7 +29,6 @@ import (
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -244,16 +243,6 @@ func ownerRequests(o *owners, c client.Reader, label string, list func() client.
 		}
 		return []reconcile.Request{{NamespacedName: key}}
 	}
-}
-
-// tenantOf is the tenant whose namespace obj is in; "" when the namespace
-// is no tenant's.
-func tenantOf(ctx context.Context, c client.Reader, obj client.Object) (string, error) {
-	ns := &corev1.Namespace{}
-	if err := c.Get(ctx, client.ObjectKey{Name: obj.GetNamespace()}, ns); err != nil {
-		return "", client.IgnoreNotFound(err)
-	}
-	return ns.Labels[cloudstore.LabelTenant], nil
 }
 
 // setCondition writes one condition of obj's status (conds: its

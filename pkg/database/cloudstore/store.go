@@ -65,14 +65,18 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -148,10 +152,13 @@ var now = time.Now
 // Cluster and Component objects in the tenants' namespaces. c must read from the API
 // server (not from a cache) and know the kinds
 // (cloudv1alpha1.AddToScheme).
-func New(c client.Client) repository.Store { return store{c: c} }
+func New(c client.Client) repository.Store { return store{c: c, keys: &keys{}} }
 
 type store struct {
 	c client.Client
+	// keys remembers where the object of a row ID is, so the next lookup
+	// of that ID is a get instead of a list (byID).
+	keys *keys
 	// undo, inside WithinTransaction, collects how to take back what was
 	// created.
 	undo *[]func(context.Context) error
@@ -354,8 +361,17 @@ func items[T client.Object](ctx context.Context, s store, list client.ObjectList
 
 // byID is the object with the row ID in namespace ("" for all
 // namespaces); ErrNotFound when there is none.
+//
+// The first lookup of an ID lists the objects with its label; later ones
+// get the object where it was found, still at the API server (as fresh
+// as the list), and list again when it is no longer there or no longer
+// has the ID. A row's object never moves: its name and namespace are
+// fixed when it is created.
 func byID[T client.Object](ctx context.Context, s store, list client.ObjectList, namespace, id string) (T, error) {
 	var none T
+	if obj, ok, err := knownByID[T](ctx, s, list, namespace, id); err != nil || ok {
+		return obj, err
+	}
 	found, err := items[T](ctx, s, list, namespace, map[string]string{LabelID: id})
 	if err != nil {
 		return none, err
@@ -363,7 +379,81 @@ func byID[T client.Object](ctx context.Context, s store, list client.ObjectList,
 	if len(found) == 0 {
 		return none, repository.ErrNotFound
 	}
+	s.keys.remember(list, id, client.ObjectKeyFromObject(found[0]))
 	return found[0], nil
+}
+
+// knownByID gets the object of id where it was last found; ok is false
+// when its place is not known, or the object there is gone or another
+// row's.
+func knownByID[T client.Object](ctx context.Context, s store, list client.ObjectList, namespace, id string) (T, bool, error) {
+	var none T
+	key, known := s.keys.find(list, id)
+	if !known || (namespace != "" && key.Namespace != namespace) || !labelValue(id) {
+		return none, false, nil
+	}
+	obj, err := itemOf(s.c.Scheme(), list)
+	if err != nil {
+		return none, false, nil //nolint:nilerr // a kind the scheme cannot make is listed instead
+	}
+	err = s.c.Get(ctx, key, obj)
+	gone := apierrors.IsNotFound(err)
+	if err != nil && !gone {
+		return none, false, translate(err)
+	}
+	typed, isT := obj.(T)
+	if gone || !isT || obj.GetLabels()[LabelID] != id {
+		s.keys.forget(list, id)
+		return none, false, nil
+	}
+	return typed, true, nil
+}
+
+// itemOf is a new, empty object of list's item kind.
+func itemOf(scheme *runtime.Scheme, list client.ObjectList) (client.Object, error) {
+	gvk, err := apiutil.GVKForObject(list, scheme)
+	if err != nil {
+		return nil, err
+	}
+	gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
+	made, err := scheme.New(gvk)
+	if err != nil {
+		return nil, err
+	}
+	obj, ok := made.(client.Object)
+	if !ok {
+		return nil, fmt.Errorf("%s is not an object", gvk.Kind)
+	}
+	return obj, nil
+}
+
+// keys are the places of the row IDs looked up so far, by list kind.
+type keys struct{ m sync.Map }
+
+func idKey(list client.ObjectList, id string) string { return fmt.Sprintf("%T/%s", list, id) }
+
+func (k *keys) find(list client.ObjectList, id string) (client.ObjectKey, bool) {
+	if k == nil {
+		return client.ObjectKey{}, false
+	}
+	v, ok := k.m.Load(idKey(list, id))
+	if !ok {
+		return client.ObjectKey{}, false
+	}
+	key, ok := v.(client.ObjectKey)
+	return key, ok
+}
+
+func (k *keys) remember(list client.ObjectList, id string, key client.ObjectKey) {
+	if k != nil {
+		k.m.Store(idKey(list, id), key)
+	}
+}
+
+func (k *keys) forget(list client.ObjectList, id string) {
+	if k != nil {
+		k.m.Delete(idKey(list, id))
+	}
 }
 
 // remove deletes obj as it was read, without its dependents (they are

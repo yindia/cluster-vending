@@ -168,7 +168,7 @@ func (r *ClusterReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Cluste
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonNotThroughAPI,
 			"this cluster was created without the API and imports an existing EKS cluster: imports are made through the API (cluster import), which looks the cluster up first")
 	}
-	tenant, err := tenantOf(ctx, r.deps.Direct, obj)
+	tenant, err := tenantOf(ctx, r.deps, obj)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -176,7 +176,7 @@ func (r *ClusterReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Cluste
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonInvalid, fmt.Sprintf("namespace %s is not a tenant's: bootstrap the tenant first", obj.Namespace))
 	}
 	network := &cloudv1alpha1.Network{}
-	err = r.deps.Direct.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: obj.Spec.Network.NetworkRef.Name}, network)
+	err = r.deps.getAdopted(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: obj.Spec.Network.NetworkRef.Name}, network)
 	if err != nil || network.Labels[cloudstore.LabelID] == "" {
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonWaiting, fmt.Sprintf("network %s does not exist in this namespace (yet)", obj.Spec.Network.NetworkRef.Name))
 	}

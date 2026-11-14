@@ -200,6 +200,8 @@ func accountEvent(was *metav1.Condition, is metav1.Condition) *platform.Note {
 // the tenant namespace stays) and, once that is gone, the finalizer.
 func (r *CloudAccountReconciler) deleting(ctx context.Context, obj *cloudv1alpha1.CloudAccount, tenant, id string) (ctrl.Result, error) {
 	networks := &cloudv1alpha1.NetworkList{}
+	// At the API server, not the cache: a network created a moment ago
+	// must keep its account.
 	if err := r.deps.Direct.List(ctx, networks, client.InNamespace(obj.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}

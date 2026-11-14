@@ -129,11 +129,11 @@ func (r *DeprecationReconciler) upgradeTo(ctx context.Context, obj *cloudv1alpha
 		channel = defaultChannel
 	}
 	ch := &cloudv1alpha1.ReleaseChannel{}
-	if err := r.deps.Direct.Get(ctx, client.ObjectKey{Name: channel}, ch); err != nil || ch.Status.Release == "" {
+	if err := r.deps.getCached(ctx, client.ObjectKey{Name: channel}, ch); err != nil || ch.Status.Release == "" {
 		return ""
 	}
 	release := &cloudv1alpha1.Release{}
-	if err := r.deps.Direct.Get(ctx, client.ObjectKey{Name: ch.Status.Release}, release); err != nil {
+	if err := r.deps.getCached(ctx, client.ObjectKey{Name: ch.Status.Release}, release); err != nil {
 		return ""
 	}
 	// Two versions are of one minor when the same minor follows them.

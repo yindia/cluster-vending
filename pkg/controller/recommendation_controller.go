@@ -88,7 +88,7 @@ func (r *RecommendationReconciler) platformNamespaces(ctx context.Context) func(
 		set[ns] = true
 	}
 	defs := &cloudv1alpha1.ComponentDefinitionList{}
-	if err := r.deps.Direct.List(ctx, defs); err == nil {
+	if err := r.deps.listCached(ctx, defs); err == nil {
 		for _, d := range defs.Items {
 			if d.Spec.Namespace != "" {
 				set[d.Spec.Namespace] = true

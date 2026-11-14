@@ -108,6 +108,8 @@ func (r *NetworkReconciler) bump(ctx context.Context, tenant, id string) error {
 // with it the object's finalizer.
 func (r *NetworkReconciler) deleting(ctx context.Context, obj *cloudv1alpha1.Network, tenant, id string) (ctrl.Result, bool, error) {
 	clusters := &cloudv1alpha1.ClusterList{}
+	// At the API server, not the cache: a cluster created a moment ago
+	// must keep its network.
 	if err := r.deps.Direct.List(ctx, clusters, client.InNamespace(obj.Namespace)); err != nil {
 		return ctrl.Result{}, true, err
 	}
@@ -152,7 +154,7 @@ func (r *NetworkReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Networ
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonNotThroughAPI,
 			"this network was created without the API and imports an existing VPC: imports are made through the API (network import), which looks the VPC up first")
 	}
-	tenant, err := tenantOf(ctx, r.deps.Direct, obj)
+	tenant, err := tenantOf(ctx, r.deps, obj)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -160,7 +162,7 @@ func (r *NetworkReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Networ
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonInvalid, fmt.Sprintf("namespace %s is not a tenant's: bootstrap the tenant first", obj.Namespace))
 	}
 	account := &cloudv1alpha1.CloudAccount{}
-	err = r.deps.Direct.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: obj.Spec.AccountRef.Name}, account)
+	err = r.deps.getAdopted(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: obj.Spec.AccountRef.Name}, account)
 	if err != nil || account.Labels[cloudstore.LabelID] == "" {
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonWaiting, fmt.Sprintf("account %s is not a bootstrapped account of this tenant", obj.Spec.AccountRef.Name))
 	}

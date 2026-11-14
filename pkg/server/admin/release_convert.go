@@ -12,6 +12,7 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/release"
 	"github.com/yindia/cluster-vending/pkg/rollout"
 	"github.com/yindia/cluster-vending/pkg/upgrade"
@@ -100,7 +101,7 @@ func ReleaseFromAPI(r *cloudv1alpha1.Release, detail bool) *cloudv1.Release {
 		return out
 	}
 	out.Notes = r.Spec.Notes
-	pins := rollout.ReleaseOf(r.Name, r.Spec.Content)
+	pins := reconcile.ReleaseOf(r.Name, r.Spec.Content)
 	for _, k := range r.Spec.Content.Kubernetes {
 		m := &cloudv1.ReleaseMinor{Minor: k.Minor, Channel: ChannelFromName(k.Channel), Default: k.Default,
 			UpgradeTo: k.UpgradeTo, EndOfSupport: timeOf(&k.EndOfSupport), Ending: release.Ending(pins, k.Minor)}

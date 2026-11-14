@@ -16,6 +16,17 @@ spec:
       repository: https://kyverno.github.io/kyverno/
       chart: kyverno
   platformValues:
+    # Kyverno's legacy policy kinds (ClusterPolicy, Policy, ClusterCleanupPolicy,
+    # CleanupPolicy) are not installed: Kyverno 1.20 no longer enforces them,
+    # kyverno-policies uses the policies.kyverno.io kinds, and their CRDs bring
+    # the Helm release record from 93% to about 57% of the 1 MiB Secret limit.
+    crds:
+      groups:
+        kyverno:
+          cleanuppolicies: false
+          clustercleanuppolicies: false
+          clusterpolicies: false
+          policies: false
     upgrade:
       legacyPolicyCheck:
         # No pre-install/pre-upgrade hook Job for the legacy-policy check. The

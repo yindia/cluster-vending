@@ -449,6 +449,14 @@ holds that a pin's image minor is the minor it is pinned under.
   CRDs are not kept on uninstall.
 - Kyverno 1.20 no longer serves the old policy kinds (ClusterPolicy and the
   like) and refuses to install or upgrade while any exist.
+- The four legacy policy CRDs are not installed (`crds.groups.kyverno`
+  `clusterpolicies`, `policies`, `clustercleanuppolicies`,
+  `cleanuppolicies` off): tenants cannot create `ClusterPolicy`, `Policy`,
+  `ClusterCleanupPolicy` or `CleanupPolicy` objects; `kyverno-policies` uses
+  the `policies.kyverno.io` kinds. With them, Kyverno's Helm release record
+  is 93% of the 1 MiB a Secret may hold; without, about 57% (measured on chart
+  3.10.0). On a cluster that already has them, the next apply removes those
+  four CRDs and with them every object of those kinds.
 - Kyverno skips `kube-system`, `kube-public`, `kube-node-lease`, `kyverno`
   and every namespace a catalog component installs into (`gateway-system`,
   `gpu-operator`, `istio-ingress`, `istio-system`). A test fails when a

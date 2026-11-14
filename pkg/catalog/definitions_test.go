@@ -473,3 +473,18 @@ func TestDefinitionsShipWithoutStatus(t *testing.T) {
 		}
 	}
 }
+
+// Kyverno ships without its four legacy policy CRDs: they keep its Helm
+// release record well under the 1 MiB a Secret may hold (about 57% with
+// them off, 93% with them on, measured on chart 3.10.0).
+func TestKyvernoLeavesOutTheLegacyPolicyCRDs(t *testing.T) {
+	d, err := component.DefinitionOf(byName(t)["kyverno"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range []string{"cleanuppolicies", "clustercleanuppolicies", "clusterpolicies", "policies"} {
+		if got := lookup(d.PlatformValues, "crds", "groups", "kyverno", group); got != false {
+			t.Errorf("crds.groups.kyverno.%s = %v, want false", group, got)
+		}
+	}
+}

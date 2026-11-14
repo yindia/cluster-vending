@@ -167,10 +167,13 @@ func TestComponentCatalogTable(t *testing.T) {
 	}
 }
 
-func TestComponentValuesPrintsTheFileAsWritten(t *testing.T) {
+// catalog <name> prints that component's values template as the platform
+// wrote it (comments kept), to edit and send with enable -f.
+func TestComponentCatalogNamePrintsTheValuesTemplate(t *testing.T) {
+	api := &componentAPI{}
 	var out bytes.Buffer
 
-	err := Run(t.Context(), ComponentValues, Clients{Component: &componentAPI{}}, Options{Component: "policies"}, &out, OutputYAML)
+	err := Run(t.Context(), ComponentCatalog, Clients{Component: api}, Options{Tenant: "acme", Component: "policies"}, &out, OutputTable)
 
 	if err != nil || out.String() != policiesFile {
 		t.Fatalf("got %q, %v", out.String(), err)

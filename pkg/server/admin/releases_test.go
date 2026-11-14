@@ -248,26 +248,3 @@ func TestGetRolloutPlansClusterByCluster(t *testing.T) {
 		t.Errorf("page = %v, %v", paged, err)
 	}
 }
-
-func TestListReleaseHolds(t *testing.T) {
-	past := metav1.NewTime(releaseNow.Add(-time.Hour))
-	s := releaseWorld(t,
-		&cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: "freeze-prod"},
-			Spec:   cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-prod", Reason: "quarter end"},
-			Status: cloudv1alpha1.ReleaseHoldStatus{Namespace: "tenant-acme", Name: "prod-eks"}},
-		&cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: "a-lock"},
-			Spec: cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-old", Release: shipped, Reason: "audit", Until: &past}})
-
-	res, err := s.ListReleaseHolds(t.Context(), &cloudv1.ListReleaseHoldsRequest{})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	holds := res.GetHolds()
-	if len(holds) != 2 || holds[0].GetName() != "a-lock" || holds[0].GetActive() || holds[0].GetRelease() != shipped {
-		t.Fatalf("holds = %v", holds)
-	}
-	if h := holds[1]; !h.GetActive() || h.GetClusterName() != "prod-eks" || h.GetTenantNamespace() != "tenant-acme" || h.GetUntil() != nil {
-		t.Errorf("freeze = %v", h)
-	}
-}

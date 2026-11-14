@@ -3,7 +3,6 @@ package admin
 import (
 	"maps"
 	"slices"
-	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -188,14 +187,6 @@ func RolloutMemberFromRow(r rollout.Row) *cloudv1.RolloutMember {
 		out.Gate, out.Reason = string(r.Gate.Code), r.Gate.Message
 	}
 	return out
-}
-
-// HoldFromAPI is a ReleaseHold as the contract returns it, active or not
-// at now.
-func HoldFromAPI(h *cloudv1alpha1.ReleaseHold, now time.Time) *cloudv1.ReleaseHold {
-	return &cloudv1.ReleaseHold{Name: h.Name, ClusterId: h.Spec.ClusterID, TenantNamespace: h.Status.Namespace,
-		ClusterName: h.Status.Name, Release: h.Spec.Release, Reason: h.Spec.Reason, Until: timeOf(h.Spec.Until),
-		Active: rollout.Active(*h, now), CreateTime: timeOf(&h.CreationTimestamp)}
 }
 
 func conditionStatus(s metav1.ConditionStatus) cloudv1.ConditionStatus {

@@ -180,24 +180,6 @@ message Rollout {
   repeated RolloutMember members = 7;
 }
 
-// ReleaseHold keeps one cluster out of rollouts.
-message ReleaseHold {
-  string name = 1;
-  // The held cluster's ID, and the object it resolved to.
-  string cluster_id = 2;
-  string tenant_namespace = 3;
-  string cluster_name = 4;
-  // Set: the cluster stays on exactly this release (a lock); unset, where
-  // it is (a freeze).
-  string release = 5;
-  string reason = 6;
-  // When it ends by itself; unset: never.
-  google.protobuf.Timestamp until = 7;
-  // Active: it holds its cluster now (not past until).
-  bool active = 8;
-  google.protobuf.Timestamp create_time = 9;
-}
-
 message ListReleasesRequest {
   // Maximum results per page. Defaults to 50; values above 200 are coerced
   // to 200.
@@ -269,19 +251,5 @@ message GetRolloutRequest {
 message GetRolloutResponse {
   Rollout rollout = 1;
   // Empty when there are no more members.
-  string next_page_token = 2;
-}
-
-message ListReleaseHoldsRequest {
-  // Maximum results per page. Defaults to 50; values above 200 are coerced
-  // to 200.
-  int32 page_size = 1 [(buf.validate.field).int32.gte = 0];
-  // next_page_token from a previous call.
-  string page_token = 2;
-}
-
-message ListReleaseHoldsResponse {
-  repeated ReleaseHold holds = 1;
-  // Empty when there are no more results.
   string next_page_token = 2;
 }

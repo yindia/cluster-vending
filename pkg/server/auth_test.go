@@ -67,7 +67,7 @@ func TestHandlerAuthenticatesTheServices(t *testing.T) {
 	// handler (which cannot read a management cluster here).
 	someone := idp.Sign(t, idp.Claims("api", "v", map[string]any{"groups": []string{"devs"}}))
 	for _, rpc := range []string{"cloud.v1.AdminService/ListReleases", "cloud.v1.AdminService/ListReleaseChannels",
-		"cloud.v1.AdminService/ListRollouts", "cloud.v1.AdminService/ListReleaseHolds"} {
+		"cloud.v1.AdminService/ListRollouts"} {
 		if got := post(rpc, someone); got != http.StatusForbidden {
 			t.Errorf("%s without the admin role: status %d, want 403", rpc, got)
 		}

@@ -46,9 +46,6 @@ const (
 	AdminServiceListRolloutsProcedure = "/cloud.v1.AdminService/ListRollouts"
 	// AdminServiceGetRolloutProcedure is the procedure name of the AdminService's GetRollout RPC.
 	AdminServiceGetRolloutProcedure = "/cloud.v1.AdminService/GetRollout"
-	// AdminServiceListReleaseHoldsProcedure is the procedure name of the AdminService's
-	// ListReleaseHolds RPC.
-	AdminServiceListReleaseHoldsProcedure = "/cloud.v1.AdminService/ListReleaseHolds"
 )
 
 var (
@@ -122,14 +119,6 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
-	adminServiceListReleaseHoldsSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType:       connect.StreamTypeUnary,
-			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListReleaseHolds"),
-			Procedure:        AdminServiceListReleaseHoldsProcedure,
-			IdempotencyLevel: connect.IdempotencyNoSideEffects,
-		}
-	})
 )
 
 // AdminServiceClient is a client for the cloud.v1.AdminService service.
@@ -192,9 +181,6 @@ type AdminServiceClient interface {
 	// Planned the way the controller plans it (pkg/rollout), from what the
 	// management cluster holds now.
 	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
-	// Lists the release holds: the clusters kept out of rollouts, and until
-	// when.
-	ListReleaseHolds(context.Context, *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error)
 }
 
 // NewAdminServiceClient constructs a client for the cloud.v1.AdminService service. Multiple service
@@ -263,9 +249,6 @@ type AdminServiceHandler interface {
 	// Planned the way the controller plans it (pkg/rollout), from what the
 	// management cluster holds now.
 	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
-	// Lists the release holds: the clusters kept out of rollouts, and until
-	// when.
-	ListReleaseHolds(context.Context, *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error)
 }
 
 // RegisterAdminServiceHandler registers svc as the cloud.v1.AdminService implementation on server.
@@ -281,7 +264,6 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 		connect.Method{Spec: adminServiceGetReleaseChannelSpec(), Handler: adapter.getReleaseChannel},
 		connect.Method{Spec: adminServiceListRolloutsSpec(), Handler: adapter.listRollouts},
 		connect.Method{Spec: adminServiceGetRolloutSpec(), Handler: adapter.getRollout},
-		connect.Method{Spec: adminServiceListReleaseHoldsSpec(), Handler: adapter.listReleaseHolds},
 	)
 }
 
@@ -322,10 +304,6 @@ func (UnimplementedAdminServiceHandler) ListRollouts(context.Context, *v1.ListRo
 
 func (UnimplementedAdminServiceHandler) GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetRollout is not implemented")
-}
-
-func (UnimplementedAdminServiceHandler) ListReleaseHolds(context.Context, *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListReleaseHolds is not implemented")
 }
 
 type adminServiceClient struct {
@@ -399,14 +377,6 @@ func (c *adminServiceClient) ListRollouts(ctx context.Context, req *v1.ListRollo
 func (c *adminServiceClient) GetRollout(ctx context.Context, req *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
 	var res v1.GetRolloutResponse
 	if err := c.client.CallUnary(ctx, adminServiceGetRolloutSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *adminServiceClient) ListReleaseHolds(ctx context.Context, req *v1.ListReleaseHoldsRequest) (*v1.ListReleaseHoldsResponse, error) {
-	var res v1.ListReleaseHoldsResponse
-	if err := c.client.CallUnary(ctx, adminServiceListReleaseHoldsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -516,18 +486,6 @@ func (h adminServiceHandler) getRollout(ctx context.Context, _ connect.Spec, str
 		return err
 	}
 	res, err := h.svc.GetRollout(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h adminServiceHandler) listReleaseHolds(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.ListReleaseHoldsRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.ListReleaseHolds(ctx, &req)
 	if err != nil {
 		return err
 	}

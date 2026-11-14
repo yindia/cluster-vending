@@ -225,25 +225,3 @@ func (s *Service) GetRollout(ctx context.Context, req *cloudv1.GetRolloutRequest
 	}
 	return &cloudv1.GetRolloutResponse{Rollout: out, NextPageToken: next}, nil
 }
-
-// ListReleaseHolds lists the release holds, by name.
-func (s *Service) ListReleaseHolds(ctx context.Context, req *cloudv1.ListReleaseHoldsRequest) (*cloudv1.ListReleaseHoldsResponse, error) {
-	if err := service.Validate(req); err != nil {
-		return nil, err
-	}
-	list := &cloudv1alpha1.ReleaseHoldList{}
-	if err := s.reader().List(ctx, list); err != nil {
-		return nil, s.readError(ctx, "release holds", err)
-	}
-	slices.SortFunc(list.Items, func(a, b cloudv1alpha1.ReleaseHold) int { return cmp.Compare(a.Name, b.Name) })
-	start, end, next, err := page(len(list.Items), req.GetPageSize(), req.GetPageToken())
-	if err != nil {
-		return nil, err
-	}
-	now := s.now()
-	out := &cloudv1.ListReleaseHoldsResponse{NextPageToken: next}
-	for i := start; i < end; i++ {
-		out.Holds = append(out.Holds, HoldFromAPI(&list.Items[i], now))
-	}
-	return out, nil
-}

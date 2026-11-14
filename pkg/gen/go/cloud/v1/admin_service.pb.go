@@ -395,7 +395,7 @@ const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\x10upgrades.network\x12Ba network has no upgrades: resume it whole (without only_upgrades)\x1a1!this.only_upgrades || size(this.network_id) == 0\"S\n" +
 	"\x17ResumeReconcileResponse\x12\x1c\n" +
 	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
-	"\bclusters\x18\x02 \x01(\x05R\bclusters2\xf9\x06\n" +
+	"\bclusters\x18\x02 \x01(\x05R\bclusters2\x99\x06\n" +
 	"\fAdminService\x12S\n" +
 	"\x0ePauseReconcile\x12\x1f.cloud.v1.PauseReconcileRequest\x1a .cloud.v1.PauseReconcileResponse\x12V\n" +
 	"\x0fResumeReconcile\x12 .cloud.v1.ResumeReconcileRequest\x1a!.cloud.v1.ResumeReconcileResponse\x12L\n" +
@@ -408,8 +408,7 @@ const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\x11GetReleaseChannel\x12\".cloud.v1.GetReleaseChannelRequest\x1a#.cloud.v1.GetReleaseChannelResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\fListRollouts\x12\x1d.cloud.v1.ListRolloutsRequest\x1a\x1e.cloud.v1.ListRolloutsResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\n" +
-	"GetRollout\x12\x1b.cloud.v1.GetRolloutRequest\x1a\x1c.cloud.v1.GetRolloutResponse\"\x03\x90\x02\x01\x12^\n" +
-	"\x10ListReleaseHolds\x12!.cloud.v1.ListReleaseHoldsRequest\x1a\".cloud.v1.ListReleaseHoldsResponse\"\x03\x90\x02\x01B\xa1\x01\n" +
+	"GetRollout\x12\x1b.cloud.v1.GetRolloutRequest\x1a\x1c.cloud.v1.GetRolloutResponse\"\x03\x90\x02\x01B\xa1\x01\n" +
 	"\fcom.cloud.v1B\x11AdminServiceProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -440,15 +439,13 @@ var file_cloud_v1_admin_service_proto_goTypes = []any{
 	(*GetReleaseChannelRequest)(nil),    // 11: cloud.v1.GetReleaseChannelRequest
 	(*ListRolloutsRequest)(nil),         // 12: cloud.v1.ListRolloutsRequest
 	(*GetRolloutRequest)(nil),           // 13: cloud.v1.GetRolloutRequest
-	(*ListReleaseHoldsRequest)(nil),     // 14: cloud.v1.ListReleaseHoldsRequest
-	(*ListPausesResponse)(nil),          // 15: cloud.v1.ListPausesResponse
-	(*ListReleasesResponse)(nil),        // 16: cloud.v1.ListReleasesResponse
-	(*GetReleaseResponse)(nil),          // 17: cloud.v1.GetReleaseResponse
-	(*ListReleaseChannelsResponse)(nil), // 18: cloud.v1.ListReleaseChannelsResponse
-	(*GetReleaseChannelResponse)(nil),   // 19: cloud.v1.GetReleaseChannelResponse
-	(*ListRolloutsResponse)(nil),        // 20: cloud.v1.ListRolloutsResponse
-	(*GetRolloutResponse)(nil),          // 21: cloud.v1.GetRolloutResponse
-	(*ListReleaseHoldsResponse)(nil),    // 22: cloud.v1.ListReleaseHoldsResponse
+	(*ListPausesResponse)(nil),          // 14: cloud.v1.ListPausesResponse
+	(*ListReleasesResponse)(nil),        // 15: cloud.v1.ListReleasesResponse
+	(*GetReleaseResponse)(nil),          // 16: cloud.v1.GetReleaseResponse
+	(*ListReleaseChannelsResponse)(nil), // 17: cloud.v1.ListReleaseChannelsResponse
+	(*GetReleaseChannelResponse)(nil),   // 18: cloud.v1.GetReleaseChannelResponse
+	(*ListRolloutsResponse)(nil),        // 19: cloud.v1.ListRolloutsResponse
+	(*GetRolloutResponse)(nil),          // 20: cloud.v1.GetRolloutResponse
 }
 var file_cloud_v1_admin_service_proto_depIdxs = []int32{
 	4,  // 0: cloud.v1.PauseReconcileRequest.channel:type_name -> cloud.v1.ReleaseChannel
@@ -465,19 +462,17 @@ var file_cloud_v1_admin_service_proto_depIdxs = []int32{
 	11, // 11: cloud.v1.AdminService.GetReleaseChannel:input_type -> cloud.v1.GetReleaseChannelRequest
 	12, // 12: cloud.v1.AdminService.ListRollouts:input_type -> cloud.v1.ListRolloutsRequest
 	13, // 13: cloud.v1.AdminService.GetRollout:input_type -> cloud.v1.GetRolloutRequest
-	14, // 14: cloud.v1.AdminService.ListReleaseHolds:input_type -> cloud.v1.ListReleaseHoldsRequest
-	1,  // 15: cloud.v1.AdminService.PauseReconcile:output_type -> cloud.v1.PauseReconcileResponse
-	3,  // 16: cloud.v1.AdminService.ResumeReconcile:output_type -> cloud.v1.ResumeReconcileResponse
-	15, // 17: cloud.v1.AdminService.ListPauses:output_type -> cloud.v1.ListPausesResponse
-	16, // 18: cloud.v1.AdminService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
-	17, // 19: cloud.v1.AdminService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
-	18, // 20: cloud.v1.AdminService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
-	19, // 21: cloud.v1.AdminService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
-	20, // 22: cloud.v1.AdminService.ListRollouts:output_type -> cloud.v1.ListRolloutsResponse
-	21, // 23: cloud.v1.AdminService.GetRollout:output_type -> cloud.v1.GetRolloutResponse
-	22, // 24: cloud.v1.AdminService.ListReleaseHolds:output_type -> cloud.v1.ListReleaseHoldsResponse
-	15, // [15:25] is the sub-list for method output_type
-	5,  // [5:15] is the sub-list for method input_type
+	1,  // 14: cloud.v1.AdminService.PauseReconcile:output_type -> cloud.v1.PauseReconcileResponse
+	3,  // 15: cloud.v1.AdminService.ResumeReconcile:output_type -> cloud.v1.ResumeReconcileResponse
+	14, // 16: cloud.v1.AdminService.ListPauses:output_type -> cloud.v1.ListPausesResponse
+	15, // 17: cloud.v1.AdminService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
+	16, // 18: cloud.v1.AdminService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
+	17, // 19: cloud.v1.AdminService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
+	18, // 20: cloud.v1.AdminService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
+	19, // 21: cloud.v1.AdminService.ListRollouts:output_type -> cloud.v1.ListRolloutsResponse
+	20, // 22: cloud.v1.AdminService.GetRollout:output_type -> cloud.v1.GetRolloutResponse
+	14, // [14:23] is the sub-list for method output_type
+	5,  // [5:14] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name

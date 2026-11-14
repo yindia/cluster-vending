@@ -93,12 +93,6 @@ service AdminService {
   rpc GetRollout(GetRolloutRequest) returns (GetRolloutResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-
-  // Lists the release holds: the clusters kept out of rollouts, and until
-  // when.
-  rpc ListReleaseHolds(ListReleaseHoldsRequest) returns (ListReleaseHoldsResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
 }
 
 message PauseReconcileRequest {

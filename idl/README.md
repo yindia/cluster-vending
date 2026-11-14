@@ -141,7 +141,6 @@ A cluster cannot be deleted while it has components.
 | `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy and the tier its rollout is at; one channel adds the releases it offered and its conditions. |
 | `ListRollouts` | Each channel's rollout as the controller last reported it: target minor, the tier it is at, counts per tier, why it waits. |
 | `GetRollout` | One channel's rollout planned now with the controller's rules (`pkg/rollout`), cluster by cluster (filter by tier, paged). |
-| `ListReleaseHolds` | The release objects behind the pauses of upgrades (`ListPauses` lists them as pauses), and until when. |
 
 ### Stored status and live status
 

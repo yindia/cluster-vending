@@ -16,54 +16,76 @@ The whole procedure has not been run against a real management cluster yet.
 
 ## What a pause is
 
-`AdminService.PauseReconcile` (CLI: `cluster-vending admin pause`) puts the
-annotation `crossplane.io/paused: "true"` on managed resources; the provider
-of a paused resource stops reconciling it until the annotation is removed
-**[upstream]**: "Manually applying the `crossplane.io/paused` annotation
-causes the Provider to stop reconciling the managed resource", and
-"Kubernetes and Crossplane can't delete resources with a `paused`
-annotation" (docs.crossplane.io, Managed Resources, "Paused").
+`AdminService.PauseReconcile` (CLI: `cluster-vending admin pause --tenant <t>
+[--cluster <id>] [--reason "..."]`) does two things **[code]**:
+
+1. **It records the pause on the platform's own objects**: the tenant's
+   `CloudAccount`s, `Network`s and `Cluster`s (only the `Cluster` with
+   `--cluster`) and the tenant's namespace get the annotation
+   `cloud.cluster-vending.io/paused`, a JSON value with who paused (the
+   caller's name, `anonymous` without authentication), since when, and the
+   reason. The platform's controller does not act on what carries it, and
+   what is created in a paused tenant carries it from the start.
+2. **It pauses the providers**: every managed resource of the scope, and
+   provider-helm's `Release`s of its platform components, get
+   `crossplane.io/paused: "true"`; the provider of a paused resource stops
+   reconciling it until the annotation is removed **[upstream]**:
+   "Manually applying the `crossplane.io/paused` annotation causes the
+   Provider to stop reconciling the managed resource", and "Kubernetes and
+   Crossplane can't delete resources with a `paused` annotation"
+   (docs.crossplane.io, Managed Resources, "Paused").
+
+`ResumeReconcile` removes both, in the same order.
 
 | | |
 |---|---|
-| Unit | One tenant (all its networks and clusters), or one cluster (`--cluster <id>`). There is no single call for every tenant, and none for one network. **[code]** |
-| Covers | Every managed resource kind the platform renders for the AWS providers, and provider-helm's `Release` (a platform component's chart). **[code]** |
-| Does not cover | `ProviderConfig`s and `Usage`s (not managed resources), and objects created after the pause (see "The controller during a pause"). **[code]** |
-| Stored as | Only the annotation on each object. Who paused and when is in the API server's log line `reconciliation paused state set`, nowhere else. **[code]** |
+| Unit | One tenant (its accounts, networks and clusters), or one cluster (`--cluster <id>`). Resuming one cluster of a paused tenant leaves the rest paused. There is no single call for every tenant, and none for one network. **[code]** |
+| Covers | Our objects as above; every managed resource kind the platform renders for the AWS providers, and provider-helm's `Release`. **[code]** |
+| Does not cover | `ProviderConfig`s and `Usage`s: they are not managed resources. Crossplane v2.4.3's Usage controller has no pause handling, and a Usage does nothing to the cloud: it only blocks deletes. **[code]**, **[upstream]** source read |
+| Stored as | The two annotations. Who, when and why are in `status.pause` of a paused network or cluster, in its `Paused` condition and in its message. **[code]** |
 | Needs | The `PlatformAdmin` role where the API authenticates. **[code]** |
-| Repeatable | Yes: pausing or resuming twice changes nothing and returns the same count. **[code]** |
+| Repeatable | Yes: a paused object keeps who paused it first, and pausing or resuming twice returns the same count. **[code]** |
 
-While resources are paused **[code]**:
+What the platform's controller does with a paused object **[code]**:
 
-- the network or cluster carries the condition `Paused=True`
-  (`N of M resources are paused`), and each paused resource has
-  `paused: true` in `status.managedResources`;
+| Loop | While paused |
+|---|---|
+| Cloud account | Its `ProviderConfig`, credentials copy and kubeconfig-reader binding are not applied; a delete is held. |
+| Network | Nothing applied, repaired or deleted; import discovery (an AWS lookup) does not run. Status recorded. |
+| Cluster | Nothing applied, repaired or deleted; no subnet tagging, no import discovery, no EKS name or version lookup, no node group retirement. Status recorded. |
+| Platform components | Not applied; no stuck-release recovery (nothing is removed in the workload cluster). |
+| Deprecation scan | Does not run: it reads the workload cluster. |
+| Spec update, delete | Accepted by the API and stored; done by the first pass after the resume, once. |
+| New cluster or network in a paused tenant | Stored, paused from the start; `PROVISIONING` with "paused by …" until the resume. |
+
+The status of a paused network or cluster **[code]**:
+
+- `status.pause` says who, since when and why, and the condition `Paused=True`
+  says it too; the message ends with `paused by <who> since <time> (<reason>)`;
 - a paused resource is never a failure: one that was ready stays `READY`,
   one that was not is `WAITING` with the reason `ReconcilePaused`, however
   long the pause lasts. A running cluster stays `RUNNING`;
-- a deleted object of the cluster is not created again (the repair is off
-  while anything of the owner is paused);
-- a stuck Helm release is not recovered: nothing is removed in the workload
-  cluster for a paused `Release`;
-- a delete requested during the pause is held, not lost: the objects get
-  their deletion timestamp, the providers do not act **[upstream]**, and the
-  delete continues after the resume;
-- a spec update is accepted and stored. Its objects are applied to the
-  management cluster, and the providers act on them after the resume.
+- the events `Paused` and `Resumed` are emitted when it starts and ends
+  (`cluster events <id>`).
 
-## The controller during a pause
+## What a tenant pause does not stop
 
-The pause stops the **providers**. The platform's own controller does not
-know about it **[code]**: it keeps applying objects to the management cluster.
-For objects that already exist and are paused that changes nothing in the
-cloud. But an object the controller creates during the pause is not paused:
-a cluster created now, a platform component's chart installed now, a tenant's
-`ProviderConfig`. So for a provider upgrade, **stop the controller** for the
-duration (step 2). The API server can stay up: it only stores what is asked.
+The controller's own startup work is not a tenant's: on start it creates the
+providers, runtime configs and CRDs that are missing, adds kinds to the
+activation policy, creates the shipped release and catalog definitions that
+are missing, and may move the `alpha` channel to a new shipped release
+**[code]**. It never changes an existing provider's package or runtime
+config, so it does not undo a provider upgrade. Two cases still want care:
 
-Stopping the controller also holds what else it does by itself: applying
-clusters again after a renderer change, tagging subnets, discovering
-imports, the deprecation scan, moving `alpha` to a new shipped release.
+- **Starting the controller while the new providers' kinds are not served
+  yet**: it waits up to five minutes for every kind it uses, then exits
+  **[code]**. Start it after step 6.
+- **A controller build that is behind the providers** may not know a kind
+  the new provider version renamed. Deploy the build made for the new
+  version (step 5).
+
+So the controller can stay up during the upgrade **[untested]**. Stopping it
+(the older procedure) is still a valid, more conservative choice.
 
 ## Steps
 
@@ -82,13 +104,14 @@ Note the provider packages in use, for the rollback:
 kubectl get providers.pkg.crossplane.io -o custom-columns=NAME:.metadata.name,PACKAGE:.spec.package
 ```
 
-### 2. Stop the controller **[untested]**
+### 2. The controller
+
+It can stay up: paused tenants are only observed **[code]**. To be
+conservative, stop it instead and start it again in step 7:
 
 ```sh
 kubectl -n cluster-vending-system scale deployment cluster-vending-controller-manager --replicas=0
 ```
-
-(A controller run from a terminal: stop it.)
 
 ### 3. Pause every tenant **[code]**
 
@@ -96,11 +119,12 @@ A tenant's namespace is `tenant-<tenant id>`.
 
 ```sh
 for t in $(kubectl get namespaces -o name | sed -n 's|^namespace/tenant-||p'); do
-  cluster-vending admin pause --tenant "$t"
+  cluster-vending admin pause --tenant "$t" --reason "provider upgrade to $V"
 done
 ```
 
-Each call prints how many resources are paused now.
+Each call prints how many resources are paused now. A tenant created after
+this loop is not paused: run the loop again just before step 5.
 
 ### 4. Check that nothing reconciles
 
@@ -176,10 +200,11 @@ kubectl api-resources --api-group=eks.aws.m.upbound.io >/dev/null && echo "kinds
 Repeat step 4's first command: still nothing unpaused. The new provider
 pods must not have acted on anything.
 
-### 7. Start the controller, resume one cluster first
+### 7. Resume one cluster first
 
-Deploy the build made for the new provider version (or scale the old one
-back up when only `provider-helm` changed):
+Deploy the build made for the new provider version (or keep the old one when
+only `provider-helm` changed). If you stopped the controller in step 2,
+start it:
 
 ```sh
 kubectl -n cluster-vending-system scale deployment cluster-vending-controller-manager --replicas=1
@@ -194,7 +219,8 @@ cluster-vending admin resume --tenant <tenant> --cluster <cluster id>
 cluster-vending cluster get <cluster id> --tenant <tenant>
 ```
 
-It is fine when: the `Paused` condition is gone, the cluster is `RUNNING`,
+It is fine when: the `Paused` condition and `status.pause` are gone, the
+cluster is `RUNNING`,
 and none of its resources reports an error:
 
 ```sh
@@ -228,10 +254,6 @@ rollback is another upgrade: pause again first.
 
 ## What is missing
 
-- **The controller does not honour a pause.** A pause should be recorded on
-  the tenant (and on the cluster for `--cluster`), and the controller should
-  then stamp the annotation on every object it creates for that scope, skip
-  what it does in the cloud and in workload clusters by itself, and say who
-  paused and since when. Until then: stop the controller (step 2).
-- **No "pause everything" call**, and no pause of one network.
+- **No "pause everything" call**, and no pause of one network: the loop in
+  step 3 pauses tenant by tenant.
 - **Not run end to end** against real providers.

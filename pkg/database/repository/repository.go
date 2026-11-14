@@ -90,6 +90,11 @@ type Tenants interface {
 	// the ones recorded before); the controller runs it. The row itself is
 	// not written. ErrNotFound: no such account.
 	RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time, regions []string) error
+	// DeleteCloudAccount asks for the account's deletion (by row ID): the
+	// controller removes its ProviderConfig, then the account. ErrInUse,
+	// naming them, while networks belong to it; ErrNotFound: no such
+	// account.
+	DeleteCloudAccount(ctx context.Context, tenantID, id string) error
 }
 
 // Networks stores networks of a tenant.

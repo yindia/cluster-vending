@@ -213,3 +213,23 @@ func (s *TenantService) logger() *slog.Logger {
 	}
 	return s.deps.Logger
 }
+
+// DeleteCloudAccount asks for the account's deletion; the controller
+// removes its ProviderConfig, then the account.
+func (s *TenantService) DeleteCloudAccount(ctx context.Context, req *cloudv1.DeleteCloudAccountRequest) (*cloudv1.DeleteCloudAccountResponse, error) {
+	if err := service.Validate(req); err != nil {
+		return nil, err
+	}
+	err := s.deps.Store.Tenants().DeleteCloudAccount(ctx, req.GetTenantId(), req.GetId())
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, connect.NewError(connect.CodeNotFound,
+			fmt.Sprintf("tenant %s has no bootstrapped account %s", req.GetTenantId(), req.GetId()))
+	}
+	if errors.Is(err, repository.ErrInUse) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
+	}
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	return &cloudv1.DeleteCloudAccountResponse{}, nil
+}

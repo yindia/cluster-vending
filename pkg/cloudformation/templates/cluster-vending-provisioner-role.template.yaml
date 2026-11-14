@@ -15,11 +15,17 @@ Parameters:
     Description: ARN of the cluster-vending management role (the identity the controller and the Crossplane providers run as); the role trusts only it. cluster-vending account create fills it in from the
       API server.
     Type: String
+  RoleName:
+    AllowedPattern: ^cluster-vending-([A-Za-z0-9+=,.@_-]+-)?provisioner$
+    Default: cluster-vending-provisioner
+    Description: 'Name of the IAM role, and prefix of its policies: cluster-vending-provisioner, or cluster-vending-<anything>-provisioner for a stack of its own.'
+    MaxLength: 64
+    Type: String
 Resources:
   ProvisionClustersPolicy:
     Properties:
       Description: 'cluster-vending provisioner role: provision clusters'
-      ManagedPolicyName: cluster-vending-provisioner-provision-clusters
+      ManagedPolicyName: !Sub '${RoleName}-provision-clusters'
       PolicyDocument:
         Statement:
           - Action:
@@ -121,7 +127,7 @@ Resources:
   ProvisionNetworkPolicy:
     Properties:
       Description: 'cluster-vending provisioner role: provision network'
-      ManagedPolicyName: cluster-vending-provisioner-provision-network
+      ManagedPolicyName: !Sub '${RoleName}-provision-network'
       PolicyDocument:
         Statement:
           - Action:
@@ -171,7 +177,7 @@ Resources:
   ReadClustersPolicy:
     Properties:
       Description: 'cluster-vending provisioner role: read clusters'
-      ManagedPolicyName: cluster-vending-provisioner-read-clusters
+      ManagedPolicyName: !Sub '${RoleName}-read-clusters'
       PolicyDocument:
         Statement:
           - Action:
@@ -235,7 +241,7 @@ Resources:
   ReadNetworkPolicy:
     Properties:
       Description: 'cluster-vending provisioner role: read network'
-      ManagedPolicyName: cluster-vending-provisioner-read-network
+      ManagedPolicyName: !Sub '${RoleName}-read-network'
       PolicyDocument:
         Statement:
           - Action:
@@ -264,7 +270,7 @@ Resources:
         - !Ref 'UpdatePolicy'
         - !Ref 'ProvisionNetworkPolicy'
         - !Ref 'ProvisionClustersPolicy'
-      RoleName: cluster-vending-provisioner
+      RoleName: !Ref 'RoleName'
       Tags:
         - Key: cluster-vending.io/role
           Value: provisioner
@@ -274,7 +280,7 @@ Resources:
   UpdatePolicy:
     Properties:
       Description: 'cluster-vending provisioner role: update'
-      ManagedPolicyName: cluster-vending-provisioner-update
+      ManagedPolicyName: !Sub '${RoleName}-update'
       PolicyDocument:
         Statement:
           - Action:

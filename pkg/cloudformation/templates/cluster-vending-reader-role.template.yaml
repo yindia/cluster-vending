@@ -15,11 +15,17 @@ Parameters:
     Description: ARN of the cluster-vending management role (the identity the controller and the Crossplane providers run as); the role trusts only it. cluster-vending account create fills it in from the
       API server.
     Type: String
+  RoleName:
+    AllowedPattern: ^cluster-vending-([A-Za-z0-9+=,.@_-]+-)?reader$
+    Default: cluster-vending-reader
+    Description: 'Name of the IAM role, and prefix of its policies: cluster-vending-reader, or cluster-vending-<anything>-reader for a stack of its own.'
+    MaxLength: 64
+    Type: String
 Resources:
   ReadClustersPolicy:
     Properties:
       Description: 'cluster-vending reader role: read clusters'
-      ManagedPolicyName: cluster-vending-reader-read-clusters
+      ManagedPolicyName: !Sub '${RoleName}-read-clusters'
       PolicyDocument:
         Statement:
           - Action:
@@ -83,7 +89,7 @@ Resources:
   ReadNetworkPolicy:
     Properties:
       Description: 'cluster-vending reader role: read network'
-      ManagedPolicyName: cluster-vending-reader-read-network
+      ManagedPolicyName: !Sub '${RoleName}-read-network'
       PolicyDocument:
         Statement:
           - Action:
@@ -109,7 +115,7 @@ Resources:
       ManagedPolicyArns:
         - !Ref 'ReadNetworkPolicy'
         - !Ref 'ReadClustersPolicy'
-      RoleName: cluster-vending-reader
+      RoleName: !Ref 'RoleName'
       Tags:
         - Key: cluster-vending.io/role
           Value: reader

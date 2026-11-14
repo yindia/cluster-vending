@@ -42,9 +42,19 @@ func (s *TenantService) GetAccountOnboarding(_ context.Context, req *cloudv1.Get
 			"the API server has no management role configured ("+config.FlagAWSManagementRoleARN+
 				"): the platform team sets it to the role the controller runs as")
 	}
-	role := req.GetRole()
-	if role == "" {
+	role, name := req.GetRole(), req.GetRoleName()
+	switch {
+	case role == "" && name != "":
+		role = cloudformation.RoleOf(name)
+	case role == "":
 		role = cloudformation.DefaultRole
+	}
+	if name == "" {
+		name = cloudformation.RoleName(role)
+	}
+	if cloudformation.RoleOf(name) != role {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			"role_name "+name+" is not a name of the "+role+" template: cluster-vending-"+role+" or cluster-vending-<anything>-"+role)
 	}
 	region := req.GetRegion()
 	if region == "" {
@@ -54,11 +64,11 @@ func (s *TenantService) GetAccountOnboarding(_ context.Context, req *cloudv1.Get
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
 	}
-	out := &cloudv1.AccountOnboarding{Role: role, RoleName: cloudformation.RoleName(role), StackName: cloudformation.RoleName(role),
+	out := &cloudv1.AccountOnboarding{Role: role, RoleName: name, StackName: name,
 		Region: region, AccountId: req.GetAccountId(), ManagementRoleArn: s.onboarding.ManagementRoleARN,
 		TemplateBody: string(body), TemplateFile: cloudformation.FileName(role)}
 	if s.onboarding.TemplateURL != "" {
-		stack := cloudformation.Stack{Role: role, Region: region, ManagementRoleARN: s.onboarding.ManagementRoleARN}
+		stack := cloudformation.Stack{Role: role, RoleName: name, Region: region, ManagementRoleARN: s.onboarding.ManagementRoleARN}
 		console, err := cloudformation.QuickCreateURL(s.onboarding.TemplateURL, stack)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err.Error())

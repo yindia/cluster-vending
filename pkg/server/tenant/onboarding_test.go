@@ -40,6 +40,17 @@ func TestAccountOnboarding(t *testing.T) {
 				TemplateUrl:  "https://bucket.s3.amazonaws.com/cv/cluster-vending-reader-role.template.yaml"},
 			console: true,
 		},
+		{
+			name:   "a role name of its own: its own stack, so stacks of one role do not collide",
+			config: tenant.Onboarding{ManagementRoleARN: platformRole, TemplateURL: "https://bucket.s3.amazonaws.com/cv"},
+			req: &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "provisioner",
+				RoleName: "cluster-vending-demo-0115-provisioner"},
+			want: &cloudv1.AccountOnboarding{Role: "provisioner", RoleName: "cluster-vending-demo-0115-provisioner",
+				StackName: "cluster-vending-demo-0115-provisioner", Region: "us-east-1", ManagementRoleArn: platformRole,
+				TemplateFile: "cluster-vending-provisioner-role.template.yaml",
+				TemplateUrl:  "https://bucket.s3.amazonaws.com/cv/cluster-vending-provisioner-role.template.yaml"},
+			console: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

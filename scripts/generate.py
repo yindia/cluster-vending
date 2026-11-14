@@ -3,8 +3,10 @@ assumes in a tenant AWS account.
 
 Run with `make cf-generate`. The templates are written to
 pkg/cloudformation/templates/ and embedded in the cluster-vending binary,
-which prints them for a tenant to create (`cluster-vending account
-template`).
+which creates their stack in a tenant account (`cluster-vending account
+create`). The role's name is a parameter (RoleName, default
+cluster-vending-<role>), and its policies are named after it, so several
+stacks of one role fit in one account.
 
 Three roles, each a superset of the one before:
 
@@ -44,7 +46,7 @@ from awacs.aws import (
     StringEquals,
 )
 from awacs.sts import AssumeRole
-from troposphere import GetAtt, Output, Parameter, Ref, Tags, Template
+from troposphere import GetAtt, Output, Parameter, Ref, Sub, Tags, Template
 from troposphere.iam import ManagedPolicy, Role
 
 # The platform's name, on every role, policy and stack.
@@ -408,7 +410,7 @@ def managed_policy(role, suffix, statements):
         )
     return ManagedPolicy(
         logical_id(suffix),
-        ManagedPolicyName=f"{PLATFORM}-{role}-{suffix}",
+        ManagedPolicyName=Sub("${RoleName}-" + suffix),
         Description=f"{PLATFORM} {role} role: {suffix.replace('-', ' ')}",
         PolicyDocument=document,
     )
@@ -432,6 +434,19 @@ def template_of(role):
             AllowedPattern=r"^arn:aws[a-z-]*:iam::\d{12}:role/.+$",
         )
     )
+    role_name = template.add_parameter(
+        Parameter(
+            "RoleName",
+            Type="String",
+            Default=f"{PLATFORM}-{role}",
+            Description=(
+                f"Name of the IAM role, and prefix of its policies: {PLATFORM}-{role}, "
+                f"or {PLATFORM}-<anything>-{role} for a stack of its own."
+            ),
+            MaxLength=64,
+            AllowedPattern=rf"^{PLATFORM}-([A-Za-z0-9+=,.@_-]+-)?{role}$",
+        )
+    )
     refs = [
         Ref(template.add_resource(managed_policy(role, suffix, statements)))
         for suffix, statements in policies_of(role)
@@ -439,7 +454,7 @@ def template_of(role):
     iam_role = template.add_resource(
         Role(
             "Role",
-            RoleName=f"{PLATFORM}-{role}",
+            RoleName=Ref(role_name),
             Description=f"Assumed by the {PLATFORM} platform ({role})",
             AssumeRolePolicyDocument=PolicyDocument(
                 Version="2012-10-17",

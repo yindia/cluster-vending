@@ -409,6 +409,44 @@ func (c *MockTenantsDeleteCall) DoAndReturn(f func(context.Context, string) erro
 	return c
 }
 
+// DeleteCloudAccount mocks base method.
+func (m *MockTenants) DeleteCloudAccount(ctx context.Context, tenantID, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteCloudAccount", ctx, tenantID, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteCloudAccount indicates an expected call of DeleteCloudAccount.
+func (mr *MockTenantsMockRecorder) DeleteCloudAccount(ctx, tenantID, id any) *MockTenantsDeleteCloudAccountCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteCloudAccount", reflect.TypeOf((*MockTenants)(nil).DeleteCloudAccount), ctx, tenantID, id)
+	return &MockTenantsDeleteCloudAccountCall{Call: call}
+}
+
+// MockTenantsDeleteCloudAccountCall wrap *gomock.Call
+type MockTenantsDeleteCloudAccountCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockTenantsDeleteCloudAccountCall) Return(arg0 error) *MockTenantsDeleteCloudAccountCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockTenantsDeleteCloudAccountCall) Do(f func(context.Context, string, string) error) *MockTenantsDeleteCloudAccountCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockTenantsDeleteCloudAccountCall) DoAndReturn(f func(context.Context, string, string) error) *MockTenantsDeleteCloudAccountCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // DropLapsedPause mocks base method.
 func (m *MockTenants) DropLapsedPause(ctx context.Context, tenantID string, target model.PauseTarget) error {
 	m.ctrl.T.Helper()

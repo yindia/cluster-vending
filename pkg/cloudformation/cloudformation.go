@@ -20,9 +20,21 @@ var templates embed.FS
 // Platform is the prefix of every role, policy and stack name.
 const Platform = "cluster-vending"
 
-// ParameterManagementRoleARN is the templates' one parameter: the role the
+// ParameterManagementRoleARN is the templates' parameter of the role the
 // tenant role trusts (the platform's management role).
 const ParameterManagementRoleARN = "ManagementRoleArn"
+
+// ParameterRoleName is the templates' parameter of the role's name (and
+// its policies' prefix): RoleName(role) by default, or
+// cluster-vending-<anything>-<role> for a stack of its own.
+const ParameterRoleName = "RoleName"
+
+// ManagedByTag is the tag of every stack the CLI creates: account delete
+// --delete-role deletes only a stack that carries it.
+const ManagedByTag = Platform + ".io/managed-by"
+
+// maxRoleName is IAM's limit on a role's name.
+const maxRoleName = 64
 
 // DefaultRole is the role the controller needs today: it creates and
 // deletes networks and clusters.
@@ -37,14 +49,19 @@ func Roles() []string { return slices.Clone(roles) }
 // RoleName is the IAM role (and stack) name of a role.
 func RoleName(role string) string { return Platform + "-" + role }
 
-// RoleOf is the role an IAM role name is the template of; "" for a name
-// none of the templates creates.
+// RoleOf is the role whose template creates an IAM role of this name:
+// cluster-vending-<role> or cluster-vending-<anything>-<role>; "" for a
+// name none of the templates creates (or longer than IAM allows).
 func RoleOf(name string) string {
-	role, ok := strings.CutPrefix(name, Platform+"-")
-	if !ok || !slices.Contains(roles, role) {
+	rest, ok := strings.CutPrefix(name, Platform+"-")
+	if !ok || len(name) > maxRoleName {
 		return ""
 	}
-	return role
+	parts := strings.Split(rest, "-")
+	if role := parts[len(parts)-1]; slices.Contains(roles, role) && !slices.Contains(parts[:len(parts)-1], "") {
+		return role
+	}
+	return ""
 }
 
 // FileName is the template's file name, also its name under a base URL.
@@ -61,6 +78,8 @@ func Template(role string) ([]byte, error) {
 // Stack is one role's stack in a tenant account.
 type Stack struct {
 	Role string
+	// RoleName is the role's name, also the stack's; empty: RoleName(Role).
+	RoleName string
 	// Region is where the stack is created (IAM is global; the stack is
 	// regional).
 	Region string
@@ -89,7 +108,12 @@ func QuickCreateURL(baseURL string, s Stack) (string, error) {
 	}
 	query := url.Values{}
 	query.Set("templateURL", template)
-	query.Set("stackName", RoleName(s.Role))
+	name := s.RoleName
+	if name == "" {
+		name = RoleName(s.Role)
+	}
+	query.Set("stackName", name)
+	query.Set("param_"+ParameterRoleName, name)
 	query.Set("param_"+ParameterManagementRoleARN, s.ManagementRoleARN)
 	console := url.URL{Scheme: "https", Host: "console.aws.amazon.com", Path: "/cloudformation/home",
 		RawQuery: url.Values{"region": {s.Region}}.Encode(), Fragment: "/stacks/quickcreate?" + query.Encode()}

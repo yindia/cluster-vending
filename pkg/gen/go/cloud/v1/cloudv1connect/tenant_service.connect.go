@@ -36,6 +36,9 @@ const (
 	// TenantServiceVerifyCloudAccountProcedure is the procedure name of the TenantService's
 	// VerifyCloudAccount RPC.
 	TenantServiceVerifyCloudAccountProcedure = "/cloud.v1.TenantService/VerifyCloudAccount"
+	// TenantServiceDeleteCloudAccountProcedure is the procedure name of the TenantService's
+	// DeleteCloudAccount RPC.
+	TenantServiceDeleteCloudAccountProcedure = "/cloud.v1.TenantService/DeleteCloudAccount"
 	// TenantServiceGetAccountOnboardingProcedure is the procedure name of the TenantService's
 	// GetAccountOnboarding RPC.
 	TenantServiceGetAccountOnboardingProcedure = "/cloud.v1.TenantService/GetAccountOnboarding"
@@ -73,6 +76,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("VerifyCloudAccount"),
 			Procedure:        TenantServiceVerifyCloudAccountProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+	tenantServiceDeleteCloudAccountSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("DeleteCloudAccount"),
+			Procedure:        TenantServiceDeleteCloudAccountProcedure,
 			IdempotencyLevel: connect.IdempotencyIdempotent,
 		}
 	})
@@ -133,6 +144,13 @@ type TenantServiceClient interface {
 	// the request. The controller also checks when the account changes and
 	// every 6 hours.
 	VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error)
+	// Deletes one of the tenant's accounts: the controller removes its
+	// ProviderConfig in the management cluster, then the account. Nothing
+	// in the cloud account is touched (the tenant role stays; the CLI's
+	// account delete --delete-role deletes the role's stack with the
+	// caller's credentials). FAILED_PRECONDITION, naming them, while
+	// networks belong to the account; NOT_FOUND for an unknown account.
+	DeleteCloudAccount(context.Context, *v1.DeleteCloudAccountRequest) (*v1.DeleteCloudAccountResponse, error)
 	// Returns how the tenant creates, in one of its AWS accounts, the IAM
 	//   role the platform assumes there: the CloudFormation template of the
 	//   role (reader, updater or provisioner; the controller needs
@@ -196,6 +214,13 @@ type TenantServiceHandler interface {
 	// the request. The controller also checks when the account changes and
 	// every 6 hours.
 	VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error)
+	// Deletes one of the tenant's accounts: the controller removes its
+	// ProviderConfig in the management cluster, then the account. Nothing
+	// in the cloud account is touched (the tenant role stays; the CLI's
+	// account delete --delete-role deletes the role's stack with the
+	// caller's credentials). FAILED_PRECONDITION, naming them, while
+	// networks belong to the account; NOT_FOUND for an unknown account.
+	DeleteCloudAccount(context.Context, *v1.DeleteCloudAccountRequest) (*v1.DeleteCloudAccountResponse, error)
 	// Returns how the tenant creates, in one of its AWS accounts, the IAM
 	//   role the platform assumes there: the CloudFormation template of the
 	//   role (reader, updater or provisioner; the controller needs
@@ -223,6 +248,7 @@ func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandl
 		connect.Method{Spec: tenantServiceGetCloudAccountSpec(), Handler: adapter.getCloudAccount},
 		connect.Method{Spec: tenantServiceListCloudAccountsSpec(), Handler: adapter.listCloudAccounts},
 		connect.Method{Spec: tenantServiceVerifyCloudAccountSpec(), Handler: adapter.verifyCloudAccount},
+		connect.Method{Spec: tenantServiceDeleteCloudAccountSpec(), Handler: adapter.deleteCloudAccount},
 		connect.Method{Spec: tenantServiceGetAccountOnboardingSpec(), Handler: adapter.getAccountOnboarding},
 		connect.Method{Spec: tenantServiceWhoAmISpec(), Handler: adapter.whoAmI},
 	)
@@ -245,6 +271,10 @@ func (UnimplementedTenantServiceHandler) ListCloudAccounts(context.Context, *v1.
 
 func (UnimplementedTenantServiceHandler) VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.VerifyCloudAccount is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) DeleteCloudAccount(context.Context, *v1.DeleteCloudAccountRequest) (*v1.DeleteCloudAccountResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.DeleteCloudAccount is not implemented")
 }
 
 func (UnimplementedTenantServiceHandler) GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error) {
@@ -286,6 +316,14 @@ func (c *tenantServiceClient) ListCloudAccounts(ctx context.Context, req *v1.Lis
 func (c *tenantServiceClient) VerifyCloudAccount(ctx context.Context, req *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error) {
 	var res v1.VerifyCloudAccountResponse
 	if err := c.client.CallUnary(ctx, tenantServiceVerifyCloudAccountSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) DeleteCloudAccount(ctx context.Context, req *v1.DeleteCloudAccountRequest) (*v1.DeleteCloudAccountResponse, error) {
+	var res v1.DeleteCloudAccountResponse
+	if err := c.client.CallUnary(ctx, tenantServiceDeleteCloudAccountSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -351,6 +389,18 @@ func (h tenantServiceHandler) verifyCloudAccount(ctx context.Context, _ connect.
 		return err
 	}
 	res, err := h.svc.VerifyCloudAccount(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) deleteCloudAccount(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.DeleteCloudAccountRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.DeleteCloudAccount(ctx, &req)
 	if err != nil {
 		return err
 	}

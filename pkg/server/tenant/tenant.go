@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"connectrpc.com/connect/v2"
 
@@ -107,6 +108,29 @@ func (s *TenantService) GetCloudAccount(ctx context.Context, req *cloudv1.GetClo
 	}
 	out, err := s.rec().View(ctx, a)
 	return &cloudv1.GetCloudAccountResponse{Account: out}, service.ToConnect(err)
+}
+
+// VerifyCloudAccount records a request for an access check of the
+// tenant's account; the controller runs it (account.Reconciler.
+// VerifyAccess) and writes the result to the account's status. It returns
+// the account as it is now.
+func (s *TenantService) VerifyCloudAccount(ctx context.Context, req *cloudv1.VerifyCloudAccountRequest) (*cloudv1.VerifyCloudAccountResponse, error) {
+	if err := service.Validate(req); err != nil {
+		return nil, err
+	}
+	err := s.deps.Store.Tenants().RequestAccessCheck(ctx, req.GetTenantId(), req.GetId(), time.Now())
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, connect.NewError(connect.CodeNotFound,
+			fmt.Sprintf("tenant %s has no bootstrapped account %s", req.GetTenantId(), req.GetId()))
+	}
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	a, err := s.deps.Store.Tenants().GetCloudAccountByID(ctx, req.GetTenantId(), req.GetId())
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	return &cloudv1.VerifyCloudAccountResponse{Account: accountreconcile.Proto(a)}, nil
 }
 
 // ListCloudAccounts returns the tenant's accounts, ordered by provider. An

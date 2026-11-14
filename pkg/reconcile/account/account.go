@@ -32,7 +32,9 @@ const (
 	// ConditionBootstrapped: the namespace and the account's ProviderConfig
 	// are applied.
 	ConditionBootstrapped = "Bootstrapped"
-	// ConditionAccessVerified: the tenant role was assumed successfully.
+	// ConditionAccessVerified: the controller's access check passed: the
+	// tenant role works in every region the account uses and allows the
+	// platform's calls (VerifyAccess).
 	ConditionAccessVerified = "AccessVerified"
 )
 
@@ -250,10 +252,17 @@ func (r *Reconciler) View(ctx context.Context, a *model.CloudAccount) (*cloudv1.
 }
 
 // Proto is the API view of a stored account, without its objects. Only
-// AWS can be bootstrapped so far; the status is what bootstrap applies (it
-// is not stored).
+// AWS can be bootstrapped so far; the status is what bootstrap applies and
+// the controller's last access check. An account whose access was denied
+// is FAILED.
 func Proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 	out := proto(a)
+	out.Status.Access = accessProto(a.Access)
+	out.Status.Conditions = append(out.Status.Conditions, AccessCondition(a.Access))
+	if AccessDenied(a.Access) {
+		// Bootstrapped, but the platform cannot act in it.
+		out.Status.State = cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_FAILED
+	}
 	if a.Paused != nil {
 		out.Status.Pause = reconcile.PauseProto(a.Paused)
 		out.Status.Conditions = append(out.Status.Conditions, PausedCondition(a.Paused))
@@ -286,8 +295,6 @@ func proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 			Identity:           a.Identity,
 			Conditions: []*cloudv1.Condition{
 				{Type: ConditionBootstrapped, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, Reason: "Applied"},
-				{Type: ConditionAccessVerified, Status: cloudv1.ConditionStatus_CONDITION_STATUS_UNKNOWN, Reason: "VerificationDisabled",
-					Message: "the tenant role is not assumed at bootstrap yet; errors show up on the managed resources"},
 			},
 		},
 	}

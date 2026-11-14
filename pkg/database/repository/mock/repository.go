@@ -603,6 +603,44 @@ func (c *MockTenantsPutCloudAccountCall) DoAndReturn(f func(context.Context, *mo
 	return c
 }
 
+// RequestAccessCheck mocks base method.
+func (m *MockTenants) RequestAccessCheck(ctx context.Context, tenantID, id string, at time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestAccessCheck", ctx, tenantID, id, at)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RequestAccessCheck indicates an expected call of RequestAccessCheck.
+func (mr *MockTenantsMockRecorder) RequestAccessCheck(ctx, tenantID, id, at any) *MockTenantsRequestAccessCheckCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestAccessCheck", reflect.TypeOf((*MockTenants)(nil).RequestAccessCheck), ctx, tenantID, id, at)
+	return &MockTenantsRequestAccessCheckCall{Call: call}
+}
+
+// MockTenantsRequestAccessCheckCall wrap *gomock.Call
+type MockTenantsRequestAccessCheckCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockTenantsRequestAccessCheckCall) Return(arg0 error) *MockTenantsRequestAccessCheckCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockTenantsRequestAccessCheckCall) Do(f func(context.Context, string, string, time.Time) error) *MockTenantsRequestAccessCheckCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockTenantsRequestAccessCheckCall) DoAndReturn(f func(context.Context, string, string, time.Time) error) *MockTenantsRequestAccessCheckCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetPause mocks base method.
 func (m *MockTenants) SetPause(ctx context.Context, tenantID string, target model.PauseTarget, pause *model.Pause) error {
 	m.ctrl.T.Helper()

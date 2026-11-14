@@ -514,6 +514,106 @@ func (x *GetCloudAccountResponse) GetAccount() *CloudAccount {
 	return nil
 }
 
+type VerifyCloudAccountRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Same rules as BootstrapTenantRequest.tenant_id.
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// The bootstrap ID, CloudAccount.id.
+	Id            string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyCloudAccountRequest) Reset() {
+	*x = VerifyCloudAccountRequest{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyCloudAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyCloudAccountRequest) ProtoMessage() {}
+
+func (x *VerifyCloudAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyCloudAccountRequest.ProtoReflect.Descriptor instead.
+func (*VerifyCloudAccountRequest) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *VerifyCloudAccountRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *VerifyCloudAccountRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type VerifyCloudAccountResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The account as it is now: its access is the last check's until the
+	// controller has run the one asked for.
+	Account       *CloudAccount `protobuf:"bytes,1,opt,name=account,proto3" json:"account,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyCloudAccountResponse) Reset() {
+	*x = VerifyCloudAccountResponse{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyCloudAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyCloudAccountResponse) ProtoMessage() {}
+
+func (x *VerifyCloudAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyCloudAccountResponse.ProtoReflect.Descriptor instead.
+func (*VerifyCloudAccountResponse) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *VerifyCloudAccountResponse) GetAccount() *CloudAccount {
+	if x != nil {
+		return x.Account
+	}
+	return nil
+}
+
 type ListCloudAccountsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Same rules as BootstrapTenantRequest.tenant_id.
@@ -524,7 +624,7 @@ type ListCloudAccountsRequest struct {
 
 func (x *ListCloudAccountsRequest) Reset() {
 	*x = ListCloudAccountsRequest{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -536,7 +636,7 @@ func (x *ListCloudAccountsRequest) String() string {
 func (*ListCloudAccountsRequest) ProtoMessage() {}
 
 func (x *ListCloudAccountsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[7]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -549,7 +649,7 @@ func (x *ListCloudAccountsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCloudAccountsRequest.ProtoReflect.Descriptor instead.
 func (*ListCloudAccountsRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{7}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListCloudAccountsRequest) GetTenantId() string {
@@ -569,7 +669,7 @@ type ListCloudAccountsResponse struct {
 
 func (x *ListCloudAccountsResponse) Reset() {
 	*x = ListCloudAccountsResponse{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +681,7 @@ func (x *ListCloudAccountsResponse) String() string {
 func (*ListCloudAccountsResponse) ProtoMessage() {}
 
 func (x *ListCloudAccountsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[8]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +694,7 @@ func (x *ListCloudAccountsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCloudAccountsResponse.ProtoReflect.Descriptor instead.
 func (*ListCloudAccountsResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{8}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListCloudAccountsResponse) GetAccounts() []*CloudAccount {
@@ -638,7 +738,7 @@ type CloudAccount struct {
 
 func (x *CloudAccount) Reset() {
 	*x = CloudAccount{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[9]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +750,7 @@ func (x *CloudAccount) String() string {
 func (*CloudAccount) ProtoMessage() {}
 
 func (x *CloudAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[9]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +763,7 @@ func (x *CloudAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudAccount.ProtoReflect.Descriptor instead.
 func (*CloudAccount) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{9}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CloudAccount) GetId() string {
@@ -750,7 +850,7 @@ type AwsAccount struct {
 
 func (x *AwsAccount) Reset() {
 	*x = AwsAccount{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +862,7 @@ func (x *AwsAccount) String() string {
 func (*AwsAccount) ProtoMessage() {}
 
 func (x *AwsAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +875,7 @@ func (x *AwsAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AwsAccount.ProtoReflect.Descriptor instead.
 func (*AwsAccount) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{10}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AwsAccount) GetAccountId() string {
@@ -814,14 +914,19 @@ type CloudAccountStatus struct {
 	// not change the account's ProviderConfig, its credentials copy or its
 	// bindings until it is resumed. The condition Paused is True and says
 	// who, since when and why. Unset: not paused.
-	Pause         *Pause `protobuf:"bytes,7,opt,name=pause,proto3" json:"pause,omitempty"`
+	Pause *Pause `protobuf:"bytes,7,opt,name=pause,proto3" json:"pause,omitempty"`
+	// The controller's last check that it can reach and act in the account
+	// (the tenant role in every region the account's networks use, and the
+	// calls the platform needs). The condition AccessVerified says the same.
+	// Unset: not checked yet.
+	Access        *AccountAccess `protobuf:"bytes,8,opt,name=access,proto3" json:"access,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CloudAccountStatus) Reset() {
 	*x = CloudAccountStatus{}
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -833,7 +938,7 @@ func (x *CloudAccountStatus) String() string {
 func (*CloudAccountStatus) ProtoMessage() {}
 
 func (x *CloudAccountStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_tenant_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -846,7 +951,7 @@ func (x *CloudAccountStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudAccountStatus.ProtoReflect.Descriptor instead.
 func (*CloudAccountStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{11}
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CloudAccountStatus) GetState() CloudAccountState {
@@ -898,6 +1003,210 @@ func (x *CloudAccountStatus) GetPause() *Pause {
 	return nil
 }
 
+func (x *CloudAccountStatus) GetAccess() *AccountAccess {
+	if x != nil {
+		return x.Access
+	}
+	return nil
+}
+
+// AccountAccess is what an access check of an account found.
+type AccountAccess struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every region and check passed when last checked.
+	Verified bool `protobuf:"varint,1,opt,name=verified,proto3" json:"verified,omitempty"`
+	// The last check that gave a verdict.
+	CheckedTime *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=checked_time,json=checkedTime,proto3" json:"checked_time,omitempty"`
+	// The last check tried; later than checked_time when it failed for a
+	// transient reason.
+	AttemptedTime *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=attempted_time,json=attemptedTime,proto3" json:"attempted_time,omitempty"`
+	// The last attempt failed transiently (throttling, the network);
+	// verified and the results are from checked_time.
+	Stale bool `protobuf:"varint,4,opt,name=stale,proto3" json:"stale,omitempty"`
+	// Who the calls were made as: the assumed tenant role.
+	PrincipalArn string `protobuf:"bytes,5,opt,name=principal_arn,json=principalArn,proto3" json:"principal_arn,omitempty"`
+	// What failed first; empty when verified.
+	Reason  string `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
+	Message string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	// Whether the tenant role could be used in each region.
+	Regions []*AccessResult `protobuf:"bytes,8,rep,name=regions,proto3" json:"regions,omitempty"`
+	// Each call of the check, per region.
+	Checks        []*AccessResult `protobuf:"bytes,9,rep,name=checks,proto3" json:"checks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountAccess) Reset() {
+	*x = AccountAccess{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountAccess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountAccess) ProtoMessage() {}
+
+func (x *AccountAccess) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountAccess.ProtoReflect.Descriptor instead.
+func (*AccountAccess) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AccountAccess) GetVerified() bool {
+	if x != nil {
+		return x.Verified
+	}
+	return false
+}
+
+func (x *AccountAccess) GetCheckedTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CheckedTime
+	}
+	return nil
+}
+
+func (x *AccountAccess) GetAttemptedTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.AttemptedTime
+	}
+	return nil
+}
+
+func (x *AccountAccess) GetStale() bool {
+	if x != nil {
+		return x.Stale
+	}
+	return false
+}
+
+func (x *AccountAccess) GetPrincipalArn() string {
+	if x != nil {
+		return x.PrincipalArn
+	}
+	return ""
+}
+
+func (x *AccountAccess) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *AccountAccess) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *AccountAccess) GetRegions() []*AccessResult {
+	if x != nil {
+		return x.Regions
+	}
+	return nil
+}
+
+func (x *AccountAccess) GetChecks() []*AccessResult {
+	if x != nil {
+		return x.Checks
+	}
+	return nil
+}
+
+// AccessResult is one region's or call's outcome; action is empty for a
+// region.
+type AccessResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	Region        string                 `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessResult) Reset() {
+	*x = AccessResult{}
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessResult) ProtoMessage() {}
+
+func (x *AccessResult) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_service_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessResult.ProtoReflect.Descriptor instead.
+func (*AccessResult) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_service_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *AccessResult) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AccessResult) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *AccessResult) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *AccessResult) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *AccessResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_cloud_v1_tenant_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_tenant_service_proto_rawDesc = "" +
@@ -923,6 +1232,11 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12\x18\n" +
 	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\"K\n" +
 	"\x17GetCloudAccountResponse\x120\n" +
+	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\x83\x01\n" +
+	"\x19VerifyCloudAccountRequest\x12L\n" +
+	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12\x18\n" +
+	"\x02id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\x02id\"N\n" +
+	"\x1aVerifyCloudAccountResponse\x120\n" +
 	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"h\n" +
 	"\x18ListCloudAccountsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"O\n" +
@@ -944,7 +1258,7 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"AwsAccount\x121\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^[0-9]{12}$R\taccountId\x12-\n" +
-	"\x04role\x18\x02 \x01(\tB\x19\xbaH\x16r\x142\x12^[\\w+=,.@-]{1,64}$R\x04role\"\xd7\x02\n" +
+	"\x04role\x18\x02 \x01(\tB\x19\xbaH\x16r\x142\x12^[\\w+=,.@-]{1,64}$R\x04role\"\x88\x03\n" +
 	"\x12CloudAccountStatus\x121\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x1b.cloud.v1.CloudAccountStateR\x05state\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x120\n" +
@@ -954,7 +1268,24 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"conditions\x12\x1a\n" +
 	"\bidentity\x18\x05 \x01(\tR\bidentity\x12F\n" +
 	"\x11managed_resources\x18\x06 \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources\x12%\n" +
-	"\x05pause\x18\a \x01(\v2\x0f.cloud.v1.PauseR\x05pause*\x86\x01\n" +
+	"\x05pause\x18\a \x01(\v2\x0f.cloud.v1.PauseR\x05pause\x12/\n" +
+	"\x06access\x18\b \x01(\v2\x17.cloud.v1.AccountAccessR\x06access\"\xfc\x02\n" +
+	"\rAccountAccess\x12\x1a\n" +
+	"\bverified\x18\x01 \x01(\bR\bverified\x12=\n" +
+	"\fchecked_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vcheckedTime\x12A\n" +
+	"\x0eattempted_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rattemptedTime\x12\x14\n" +
+	"\x05stale\x18\x04 \x01(\bR\x05stale\x12#\n" +
+	"\rprincipal_arn\x18\x05 \x01(\tR\fprincipalArn\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x120\n" +
+	"\aregions\x18\b \x03(\v2\x16.cloud.v1.AccessResultR\aregions\x12.\n" +
+	"\x06checks\x18\t \x03(\v2\x16.cloud.v1.AccessResultR\x06checks\"\x80\x01\n" +
+	"\fAccessResult\x12\x16\n" +
+	"\x06action\x18\x01 \x01(\tR\x06action\x12\x16\n" +
+	"\x06region\x18\x02 \x01(\tR\x06region\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x18\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage*\x86\x01\n" +
 	"\n" +
 	"AccessRole\x12\x1b\n" +
 	"\x17ACCESS_ROLE_UNSPECIFIED\x10\x00\x12\x1e\n" +
@@ -965,11 +1296,12 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\x1fCLOUD_ACCOUNT_STATE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!CLOUD_ACCOUNT_STATE_BOOTSTRAPPING\x10\x01\x12\x1d\n" +
 	"\x19CLOUD_ACCOUNT_STATE_READY\x10\x02\x12\x1e\n" +
-	"\x1aCLOUD_ACCOUNT_STATE_FAILED\x10\x032\xee\x02\n" +
+	"\x1aCLOUD_ACCOUNT_STATE_FAILED\x10\x032\xd4\x03\n" +
 	"\rTenantService\x12[\n" +
 	"\x0fBootstrapTenant\x12 .cloud.v1.BootstrapTenantRequest\x1a!.cloud.v1.BootstrapTenantResponse\"\x03\x90\x02\x02\x12[\n" +
 	"\x0fGetCloudAccount\x12 .cloud.v1.GetCloudAccountRequest\x1a!.cloud.v1.GetCloudAccountResponse\"\x03\x90\x02\x01\x12a\n" +
-	"\x11ListCloudAccounts\x12\".cloud.v1.ListCloudAccountsRequest\x1a#.cloud.v1.ListCloudAccountsResponse\"\x03\x90\x02\x01\x12@\n" +
+	"\x11ListCloudAccounts\x12\".cloud.v1.ListCloudAccountsRequest\x1a#.cloud.v1.ListCloudAccountsResponse\"\x03\x90\x02\x01\x12d\n" +
+	"\x12VerifyCloudAccount\x12#.cloud.v1.VerifyCloudAccountRequest\x1a$.cloud.v1.VerifyCloudAccountResponse\"\x03\x90\x02\x02\x12@\n" +
 	"\x06WhoAmI\x12\x17.cloud.v1.WhoAmIRequest\x1a\x18.cloud.v1.WhoAmIResponse\"\x03\x90\x02\x01B\xa2\x01\n" +
 	"\fcom.cloud.v1B\x12TenantServiceProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
@@ -986,55 +1318,67 @@ func file_cloud_v1_tenant_service_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_tenant_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_cloud_v1_tenant_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_cloud_v1_tenant_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_cloud_v1_tenant_service_proto_goTypes = []any{
-	(AccessRole)(0),                   // 0: cloud.v1.AccessRole
-	(CloudAccountState)(0),            // 1: cloud.v1.CloudAccountState
-	(*WhoAmIRequest)(nil),             // 2: cloud.v1.WhoAmIRequest
-	(*WhoAmIResponse)(nil),            // 3: cloud.v1.WhoAmIResponse
-	(*AccessGrant)(nil),               // 4: cloud.v1.AccessGrant
-	(*BootstrapTenantRequest)(nil),    // 5: cloud.v1.BootstrapTenantRequest
-	(*BootstrapTenantResponse)(nil),   // 6: cloud.v1.BootstrapTenantResponse
-	(*GetCloudAccountRequest)(nil),    // 7: cloud.v1.GetCloudAccountRequest
-	(*GetCloudAccountResponse)(nil),   // 8: cloud.v1.GetCloudAccountResponse
-	(*ListCloudAccountsRequest)(nil),  // 9: cloud.v1.ListCloudAccountsRequest
-	(*ListCloudAccountsResponse)(nil), // 10: cloud.v1.ListCloudAccountsResponse
-	(*CloudAccount)(nil),              // 11: cloud.v1.CloudAccount
-	(*AwsAccount)(nil),                // 12: cloud.v1.AwsAccount
-	(*CloudAccountStatus)(nil),        // 13: cloud.v1.CloudAccountStatus
-	(*timestamppb.Timestamp)(nil),     // 14: google.protobuf.Timestamp
-	(*Condition)(nil),                 // 15: cloud.v1.Condition
-	(*ManagedResource)(nil),           // 16: cloud.v1.ManagedResource
-	(*Pause)(nil),                     // 17: cloud.v1.Pause
+	(AccessRole)(0),                    // 0: cloud.v1.AccessRole
+	(CloudAccountState)(0),             // 1: cloud.v1.CloudAccountState
+	(*WhoAmIRequest)(nil),              // 2: cloud.v1.WhoAmIRequest
+	(*WhoAmIResponse)(nil),             // 3: cloud.v1.WhoAmIResponse
+	(*AccessGrant)(nil),                // 4: cloud.v1.AccessGrant
+	(*BootstrapTenantRequest)(nil),     // 5: cloud.v1.BootstrapTenantRequest
+	(*BootstrapTenantResponse)(nil),    // 6: cloud.v1.BootstrapTenantResponse
+	(*GetCloudAccountRequest)(nil),     // 7: cloud.v1.GetCloudAccountRequest
+	(*GetCloudAccountResponse)(nil),    // 8: cloud.v1.GetCloudAccountResponse
+	(*VerifyCloudAccountRequest)(nil),  // 9: cloud.v1.VerifyCloudAccountRequest
+	(*VerifyCloudAccountResponse)(nil), // 10: cloud.v1.VerifyCloudAccountResponse
+	(*ListCloudAccountsRequest)(nil),   // 11: cloud.v1.ListCloudAccountsRequest
+	(*ListCloudAccountsResponse)(nil),  // 12: cloud.v1.ListCloudAccountsResponse
+	(*CloudAccount)(nil),               // 13: cloud.v1.CloudAccount
+	(*AwsAccount)(nil),                 // 14: cloud.v1.AwsAccount
+	(*CloudAccountStatus)(nil),         // 15: cloud.v1.CloudAccountStatus
+	(*AccountAccess)(nil),              // 16: cloud.v1.AccountAccess
+	(*AccessResult)(nil),               // 17: cloud.v1.AccessResult
+	(*timestamppb.Timestamp)(nil),      // 18: google.protobuf.Timestamp
+	(*Condition)(nil),                  // 19: cloud.v1.Condition
+	(*ManagedResource)(nil),            // 20: cloud.v1.ManagedResource
+	(*Pause)(nil),                      // 21: cloud.v1.Pause
 }
 var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
 	4,  // 0: cloud.v1.WhoAmIResponse.grants:type_name -> cloud.v1.AccessGrant
 	0,  // 1: cloud.v1.AccessGrant.role:type_name -> cloud.v1.AccessRole
-	11, // 2: cloud.v1.BootstrapTenantRequest.account:type_name -> cloud.v1.CloudAccount
-	11, // 3: cloud.v1.BootstrapTenantResponse.account:type_name -> cloud.v1.CloudAccount
-	11, // 4: cloud.v1.GetCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
-	11, // 5: cloud.v1.ListCloudAccountsResponse.accounts:type_name -> cloud.v1.CloudAccount
-	13, // 6: cloud.v1.CloudAccount.status:type_name -> cloud.v1.CloudAccountStatus
-	14, // 7: cloud.v1.CloudAccount.create_time:type_name -> google.protobuf.Timestamp
-	14, // 8: cloud.v1.CloudAccount.update_time:type_name -> google.protobuf.Timestamp
-	12, // 9: cloud.v1.CloudAccount.aws:type_name -> cloud.v1.AwsAccount
-	1,  // 10: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
-	15, // 11: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
-	16, // 12: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	17, // 13: cloud.v1.CloudAccountStatus.pause:type_name -> cloud.v1.Pause
-	5,  // 14: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
-	7,  // 15: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
-	9,  // 16: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
-	2,  // 17: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
-	6,  // 18: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
-	8,  // 19: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
-	10, // 20: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
-	3,  // 21: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
-	18, // [18:22] is the sub-list for method output_type
-	14, // [14:18] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	13, // 2: cloud.v1.BootstrapTenantRequest.account:type_name -> cloud.v1.CloudAccount
+	13, // 3: cloud.v1.BootstrapTenantResponse.account:type_name -> cloud.v1.CloudAccount
+	13, // 4: cloud.v1.GetCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
+	13, // 5: cloud.v1.VerifyCloudAccountResponse.account:type_name -> cloud.v1.CloudAccount
+	13, // 6: cloud.v1.ListCloudAccountsResponse.accounts:type_name -> cloud.v1.CloudAccount
+	15, // 7: cloud.v1.CloudAccount.status:type_name -> cloud.v1.CloudAccountStatus
+	18, // 8: cloud.v1.CloudAccount.create_time:type_name -> google.protobuf.Timestamp
+	18, // 9: cloud.v1.CloudAccount.update_time:type_name -> google.protobuf.Timestamp
+	14, // 10: cloud.v1.CloudAccount.aws:type_name -> cloud.v1.AwsAccount
+	1,  // 11: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
+	19, // 12: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
+	20, // 13: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	21, // 14: cloud.v1.CloudAccountStatus.pause:type_name -> cloud.v1.Pause
+	16, // 15: cloud.v1.CloudAccountStatus.access:type_name -> cloud.v1.AccountAccess
+	18, // 16: cloud.v1.AccountAccess.checked_time:type_name -> google.protobuf.Timestamp
+	18, // 17: cloud.v1.AccountAccess.attempted_time:type_name -> google.protobuf.Timestamp
+	17, // 18: cloud.v1.AccountAccess.regions:type_name -> cloud.v1.AccessResult
+	17, // 19: cloud.v1.AccountAccess.checks:type_name -> cloud.v1.AccessResult
+	5,  // 20: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
+	7,  // 21: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
+	11, // 22: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
+	9,  // 23: cloud.v1.TenantService.VerifyCloudAccount:input_type -> cloud.v1.VerifyCloudAccountRequest
+	2,  // 24: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
+	6,  // 25: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
+	8,  // 26: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
+	12, // 27: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
+	10, // 28: cloud.v1.TenantService.VerifyCloudAccount:output_type -> cloud.v1.VerifyCloudAccountResponse
+	3,  // 29: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
+	25, // [25:30] is the sub-list for method output_type
+	20, // [20:25] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_tenant_service_proto_init() }
@@ -1045,7 +1389,7 @@ func file_cloud_v1_tenant_service_proto_init() {
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_pause_proto_init()
-	file_cloud_v1_tenant_service_proto_msgTypes[9].OneofWrappers = []any{
+	file_cloud_v1_tenant_service_proto_msgTypes[11].OneofWrappers = []any{
 		(*CloudAccount_Aws)(nil),
 	}
 	type x struct{}
@@ -1054,7 +1398,7 @@ func file_cloud_v1_tenant_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_tenant_service_proto_rawDesc), len(file_cloud_v1_tenant_service_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

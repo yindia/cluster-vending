@@ -38,7 +38,7 @@ type Deps struct {
 	// that to these tenant, network or cluster IDs; empty means all.
 	RenderTarget  int64
 	RenderRollout []string
-	// The three AWS lookups are what the reconcilers look the cloud up
+	// The AWS lookups are what the reconcilers look the cloud up
 	// with (management.WithAWS). Only what reconciles has them: the API
 	// handlers are built without, and make no AWS call.
 	//
@@ -51,6 +51,10 @@ type Deps struct {
 	// AWSClusters checks a new cluster's name against EKS and resolves the
 	// versions EKS offers; nil skips both (tests): EKS chooses at create.
 	AWSClusters awscloud.ClusterLookup
+	// AWSAccessCheck checks that the tenant role can be used and does what
+	// the platform needs in an account (account.Reconciler.VerifyAccess);
+	// nil: accounts are not checked (tests, the API handlers).
+	AWSAccessCheck awscloud.AccessChecker
 	// ProviderCredentials, when set, is the Secret every account's
 	// ProviderConfig authenticates the Crossplane AWS providers with,
 	// instead of IRSA (a management cluster without IRSA, such as a local

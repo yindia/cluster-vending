@@ -33,6 +33,9 @@ const (
 	// TenantServiceListCloudAccountsProcedure is the procedure name of the TenantService's
 	// ListCloudAccounts RPC.
 	TenantServiceListCloudAccountsProcedure = "/cloud.v1.TenantService/ListCloudAccounts"
+	// TenantServiceVerifyCloudAccountProcedure is the procedure name of the TenantService's
+	// VerifyCloudAccount RPC.
+	TenantServiceVerifyCloudAccountProcedure = "/cloud.v1.TenantService/VerifyCloudAccount"
 	// TenantServiceWhoAmIProcedure is the procedure name of the TenantService's WhoAmI RPC.
 	TenantServiceWhoAmIProcedure = "/cloud.v1.TenantService/WhoAmI"
 )
@@ -60,6 +63,14 @@ var (
 			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("ListCloudAccounts"),
 			Procedure:        TenantServiceListCloudAccountsProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceVerifyCloudAccountSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("VerifyCloudAccount"),
+			Procedure:        TenantServiceVerifyCloudAccountProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
 		}
 	})
 	tenantServiceWhoAmISpec = sync.OnceValue(func() connect.Spec {
@@ -103,6 +114,13 @@ type TenantServiceClient interface {
 	// Lists the tenant's bootstrapped accounts, ordered by provider then
 	// account ID.
 	ListCloudAccounts(context.Context, *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error)
+	// Asks the controller to check the account's access now (the tenant
+	// role in every region its networks use, and the calls the platform
+	// needs); the result is in the account's status (access, condition
+	// AccessVerified) once the controller has run it. The call only records
+	// the request. The controller also checks when the account changes and
+	// every 6 hours.
+	VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error)
 	// Returns the caller as the server sees it: who its token stands for and
 	// what the server's rules let it do. Any accepted caller may ask. Where
 	// the server does not authenticate (auth.mode none, or optional and no
@@ -147,6 +165,13 @@ type TenantServiceHandler interface {
 	// Lists the tenant's bootstrapped accounts, ordered by provider then
 	// account ID.
 	ListCloudAccounts(context.Context, *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error)
+	// Asks the controller to check the account's access now (the tenant
+	// role in every region its networks use, and the calls the platform
+	// needs); the result is in the account's status (access, condition
+	// AccessVerified) once the controller has run it. The call only records
+	// the request. The controller also checks when the account changes and
+	// every 6 hours.
+	VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error)
 	// Returns the caller as the server sees it: who its token stands for and
 	// what the server's rules let it do. Any accepted caller may ask. Where
 	// the server does not authenticate (auth.mode none, or optional and no
@@ -162,6 +187,7 @@ func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandl
 		connect.Method{Spec: tenantServiceBootstrapTenantSpec(), Handler: adapter.bootstrapTenant},
 		connect.Method{Spec: tenantServiceGetCloudAccountSpec(), Handler: adapter.getCloudAccount},
 		connect.Method{Spec: tenantServiceListCloudAccountsSpec(), Handler: adapter.listCloudAccounts},
+		connect.Method{Spec: tenantServiceVerifyCloudAccountSpec(), Handler: adapter.verifyCloudAccount},
 		connect.Method{Spec: tenantServiceWhoAmISpec(), Handler: adapter.whoAmI},
 	)
 }
@@ -179,6 +205,10 @@ func (UnimplementedTenantServiceHandler) GetCloudAccount(context.Context, *v1.Ge
 
 func (UnimplementedTenantServiceHandler) ListCloudAccounts(context.Context, *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.ListCloudAccounts is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.VerifyCloudAccount is not implemented")
 }
 
 func (UnimplementedTenantServiceHandler) WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error) {
@@ -208,6 +238,14 @@ func (c *tenantServiceClient) GetCloudAccount(ctx context.Context, req *v1.GetCl
 func (c *tenantServiceClient) ListCloudAccounts(ctx context.Context, req *v1.ListCloudAccountsRequest) (*v1.ListCloudAccountsResponse, error) {
 	var res v1.ListCloudAccountsResponse
 	if err := c.client.CallUnary(ctx, tenantServiceListCloudAccountsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) VerifyCloudAccount(ctx context.Context, req *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error) {
+	var res v1.VerifyCloudAccountResponse
+	if err := c.client.CallUnary(ctx, tenantServiceVerifyCloudAccountSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -253,6 +291,18 @@ func (h tenantServiceHandler) listCloudAccounts(ctx context.Context, _ connect.S
 		return err
 	}
 	res, err := h.svc.ListCloudAccounts(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) verifyCloudAccount(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.VerifyCloudAccountRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.VerifyCloudAccount(ctx, &req)
 	if err != nil {
 		return err
 	}

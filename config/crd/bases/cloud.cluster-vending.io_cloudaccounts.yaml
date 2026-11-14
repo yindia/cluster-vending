@@ -98,6 +98,89 @@ spec:
           status:
             description: status defines the observed state of CloudAccount
             properties:
+              access:
+                description: |-
+                  access is the controller's last check that it can reach and act in
+                  the account: the tenant role in every region the account's networks
+                  use, and the calls the platform needs (docs/controller.md).
+                properties:
+                  attemptedAt:
+                    description: |-
+                      attemptedAt is the last check tried; later than checkedAt when it
+                      failed for a transient reason.
+                    format: date-time
+                    type: string
+                  checkedAt:
+                    description: checkedAt is the last check that gave a verdict.
+                    format: date-time
+                    type: string
+                  checks:
+                    description: 'checks: each call of the check, per region.'
+                    items:
+                      description: |-
+                        AccessResult is one region's or call's outcome; action is empty for a
+                        region.
+                      properties:
+                        action:
+                          type: string
+                        message:
+                          type: string
+                        ok:
+                          type: boolean
+                        reason:
+                          type: string
+                        region:
+                          type: string
+                      required:
+                      - ok
+                      - region
+                      type: object
+                    maxItems: 200
+                    type: array
+                  message:
+                    type: string
+                  principalARN:
+                    description: principalARN is who the calls were made as.
+                    type: string
+                  reason:
+                    description: reason and message say what failed first.
+                    type: string
+                  regions:
+                    description: 'regions: whether the tenant role could be used in
+                      each region.'
+                    items:
+                      description: |-
+                        AccessResult is one region's or call's outcome; action is empty for a
+                        region.
+                      properties:
+                        action:
+                          type: string
+                        message:
+                          type: string
+                        ok:
+                          type: boolean
+                        reason:
+                          type: string
+                        region:
+                          type: string
+                      required:
+                      - ok
+                      - region
+                      type: object
+                    maxItems: 40
+                    type: array
+                  stale:
+                    description: |-
+                      stale: the last attempt failed transiently (throttling, the
+                      network); verified and the results are from checkedAt.
+                    type: boolean
+                  verified:
+                    description: 'verified: every region and check passed when last
+                      checked.'
+                    type: boolean
+                required:
+                - verified
+                type: object
               conditions:
                 description: 'conditions: Ready and Synced.'
                 items:

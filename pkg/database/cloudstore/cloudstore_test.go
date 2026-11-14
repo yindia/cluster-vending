@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -326,6 +327,47 @@ func TestStatusAndInventoryShareTheStatus(t *testing.T) {
 	}
 	if err := w.k.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "shared"}, obj); err != nil || obj.ResourceVersion != before {
 		t.Errorf("an unchanged status was written again (%v)", err)
+	}
+}
+
+// A request for an access check is an annotation of the account; the
+// controller's last check is read from the account's status.
+func TestAccountAccess(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+
+	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", w.account, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.s.Tenants().RequestAccessCheck(ctx, "acme", "00000000-0000-0000-0000-000000000000", at); !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("request for an unknown account: %v, want not found", err)
+	}
+	list := &cloudv1alpha1.CloudAccountList{}
+	if err := w.k.List(ctx, list, client.InNamespace(namespace)); err != nil || len(list.Items) != 1 {
+		t.Fatalf("%d accounts (%v)", len(list.Items), err)
+	}
+	obj := &list.Items[0]
+	checked := metav1.NewTime(at.Add(time.Minute))
+	obj.Status.Access = &cloudv1alpha1.AccountAccess{Verified: false, CheckedAt: &checked, AttemptedAt: &checked,
+		PrincipalARN: "arn:aws:sts::444455556666:assumed-role/r/s", Reason: "DeniedBySCP", Message: "us-west-1: denied",
+		Regions: []cloudv1alpha1.AccessResult{{Region: "us-west-1", Reason: "DeniedBySCP", Message: "denied"}},
+		Checks:  []cloudv1alpha1.AccessResult{{Action: "ec2:DescribeVpcs", Region: "us-east-1", OK: true}}}
+	if err := w.k.Status().Update(ctx, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	row, err := w.s.Tenants().GetCloudAccountByID(ctx, "acme", w.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !row.AccessRequestedAt.Equal(at) {
+		t.Errorf("requested at %v, want %v", row.AccessRequestedAt, at)
+	}
+	a := row.Access
+	if a == nil || a.Verified || !a.CheckedAt.Equal(checked.Time) || a.Reason != "DeniedBySCP" || a.PrincipalARN == "" ||
+		len(a.Regions) != 1 || a.Regions[0].Region != "us-west-1" || len(a.Checks) != 1 || !a.Checks[0].OK {
+		t.Errorf("access = %+v", a)
 	}
 }
 

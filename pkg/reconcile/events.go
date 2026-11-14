@@ -52,6 +52,8 @@ const (
 //	Cluster       DeprecationScanClean        Normal   a scan that had findings, or failed, found nothing removed now
 //	CloudAccount  Bootstrapped                Normal   the tenant namespace and the account's ProviderConfig exist
 //	CloudAccount  ProviderConfigFailed        Warning  the account's ProviderConfig or credentials copy could not be applied
+//	CloudAccount  AccessVerified              Normal   the tenant role works in every region the account uses
+//	CloudAccount  AccessDenied                Warning  a region or call of the access check was denied; the message says which
 //	CloudAccount  Deleted                     Normal   the account's objects are gone
 //	Release       ReleaseValid                Normal   a release passed its checks and can be offered
 //	Release       ReleaseInvalid              Warning  a release fails a check; the message says which
@@ -88,6 +90,8 @@ const (
 	ReasonDeprecationScanClean        = "DeprecationScanClean"
 	ReasonBootstrapped                = "Bootstrapped"
 	ReasonProviderConfigFailed        = "ProviderConfigFailed"
+	ReasonAccessVerified              = "AccessVerified"
+	ReasonAccessDenied                = "AccessDenied"
 	ReasonReleaseValid                = "ReleaseValid"
 	ReasonReleaseInvalid              = "ReleaseInvalid"
 	ReasonChannelOffers               = "ChannelOffers"

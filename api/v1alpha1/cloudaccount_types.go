@@ -85,6 +85,57 @@ type CloudAccountStatus struct {
 	// +listType=atomic
 	// +optional
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
+	// access is the controller's last check that it can reach and act in
+	// the account: the tenant role in every region the account's networks
+	// use, and the calls the platform needs (docs/controller.md).
+	// +optional
+	Access *AccountAccess `json:"access,omitempty"`
+}
+
+// AccountAccess is what an access check of the account found.
+type AccountAccess struct {
+	// verified: every region and check passed when last checked.
+	Verified bool `json:"verified"`
+	// checkedAt is the last check that gave a verdict.
+	// +optional
+	CheckedAt *metav1.Time `json:"checkedAt,omitempty"`
+	// attemptedAt is the last check tried; later than checkedAt when it
+	// failed for a transient reason.
+	// +optional
+	AttemptedAt *metav1.Time `json:"attemptedAt,omitempty"`
+	// stale: the last attempt failed transiently (throttling, the
+	// network); verified and the results are from checkedAt.
+	// +optional
+	Stale bool `json:"stale,omitempty"`
+	// principalARN is who the calls were made as.
+	// +optional
+	PrincipalARN string `json:"principalARN,omitempty"`
+	// reason and message say what failed first.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+	// regions: whether the tenant role could be used in each region.
+	// +optional
+	// +kubebuilder:validation:MaxItems=40
+	Regions []AccessResult `json:"regions,omitempty"`
+	// checks: each call of the check, per region.
+	// +optional
+	// +kubebuilder:validation:MaxItems=200
+	Checks []AccessResult `json:"checks,omitempty"`
+}
+
+// AccessResult is one region's or call's outcome; action is empty for a
+// region.
+type AccessResult struct {
+	// +optional
+	Action string `json:"action,omitempty"`
+	Region string `json:"region"`
+	OK     bool   `json:"ok"`
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // +kubebuilder:object:root=true

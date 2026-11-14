@@ -72,6 +72,8 @@ its kind; the message has the details.
 | Cluster | `DeprecationScanClean` | Normal | a scan that had findings, or had failed, finds nothing removed now |
 | CloudAccount | `Bootstrapped` | Normal | the tenant namespace and the account's ProviderConfig exist |
 | CloudAccount | `ProviderConfigFailed` | Warning | the account's ProviderConfig or credentials copy could not be applied |
+| CloudAccount | `AccessVerified` | Normal | the tenant role works in every region the account uses (the access check, docs/controller.md) |
+| CloudAccount | `AccessDenied` | Warning | a region or call of the access check was denied; the message says which and why |
 | CloudAccount | `Deleted` | Normal | the account's ProviderConfig is gone and the account is removed |
 | Release | `ReleaseValid` | Normal | a release passed its checks and can be offered |
 | Release | `ReleaseInvalid` | Warning | a release fails a check; the message says which |

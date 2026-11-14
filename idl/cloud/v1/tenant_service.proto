@@ -51,6 +51,16 @@ service TenantService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // Asks the controller to check the account's access now (the tenant
+  // role in every region its networks use, and the calls the platform
+  // needs); the result is in the account's status (access, condition
+  // AccessVerified) once the controller has run it. The call only records
+  // the request. The controller also checks when the account changes and
+  // every 6 hours.
+  rpc VerifyCloudAccount(VerifyCloudAccountRequest) returns (VerifyCloudAccountResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
   // Returns the caller as the server sees it: who its token stands for and
   // what the server's rules let it do. Any accepted caller may ask. Where
   // the server does not authenticate (auth.mode none, or optional and no
@@ -124,6 +134,23 @@ message GetCloudAccountRequest {
 }
 
 message GetCloudAccountResponse {
+  CloudAccount account = 1;
+}
+
+message VerifyCloudAccountRequest {
+  // Same rules as BootstrapTenantRequest.tenant_id.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // The bootstrap ID, CloudAccount.id.
+  string id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message VerifyCloudAccountResponse {
+  // The account as it is now: its access is the last check's until the
+  // controller has run the one asked for.
   CloudAccount account = 1;
 }
 
@@ -222,4 +249,42 @@ message CloudAccountStatus {
   // bindings until it is resumed. The condition Paused is True and says
   // who, since when and why. Unset: not paused.
   Pause pause = 7;
+  // The controller's last check that it can reach and act in the account
+  // (the tenant role in every region the account's networks use, and the
+  // calls the platform needs). The condition AccessVerified says the same.
+  // Unset: not checked yet.
+  AccountAccess access = 8;
+}
+
+// AccountAccess is what an access check of an account found.
+message AccountAccess {
+  // Every region and check passed when last checked.
+  bool verified = 1;
+  // The last check that gave a verdict.
+  google.protobuf.Timestamp checked_time = 2;
+  // The last check tried; later than checked_time when it failed for a
+  // transient reason.
+  google.protobuf.Timestamp attempted_time = 3;
+  // The last attempt failed transiently (throttling, the network);
+  // verified and the results are from checked_time.
+  bool stale = 4;
+  // Who the calls were made as: the assumed tenant role.
+  string principal_arn = 5;
+  // What failed first; empty when verified.
+  string reason = 6;
+  string message = 7;
+  // Whether the tenant role could be used in each region.
+  repeated AccessResult regions = 8;
+  // Each call of the check, per region.
+  repeated AccessResult checks = 9;
+}
+
+// AccessResult is one region's or call's outcome; action is empty for a
+// region.
+message AccessResult {
+  string action = 1;
+  string region = 2;
+  bool ok = 3;
+  string reason = 4;
+  string message = 5;
 }

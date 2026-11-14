@@ -129,6 +129,39 @@ type CloudAccount struct {
 	AccountName string
 	// Paused is the operator's pause of the account (Resource.Paused).
 	Paused *Pause
+	// Access is the controller's last access check of the account (its
+	// status); nil before the first.
+	Access *AccountAccess
+	// AccessRequestedAt is when VerifyCloudAccount last asked for a check;
+	// zero when never.
+	AccessRequestedAt time.Time
+}
+
+// AccountAccess is what the controller found when it checked that it can
+// reach and act in an account (pkg/cloud/aws CheckAccess).
+type AccountAccess struct {
+	// Verified: every region and check passed when last checked.
+	Verified bool
+	// CheckedAt is the last check that gave a verdict; AttemptedAt the
+	// last one tried (later than CheckedAt when it failed transiently).
+	CheckedAt, AttemptedAt time.Time
+	// Stale: the last attempt failed for a transient reason (throttling,
+	// the network); Verified and the results are from CheckedAt.
+	Stale bool
+	// PrincipalARN is who the calls were made as.
+	PrincipalARN string
+	// Reason and Message say what failed first; empty when verified.
+	Reason, Message string
+	Regions         []AccessResult
+	Checks          []AccessResult
+}
+
+// AccessResult is one region's or call's outcome. Action is empty for a
+// region.
+type AccessResult struct {
+	Action, Region  string
+	OK              bool
+	Reason, Message string
 }
 
 // AssignNew gives a new account its ID and, when the caller set none, its

@@ -19,6 +19,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -252,6 +253,25 @@ func (r *Reconciler) View(ctx context.Context, a *model.CloudAccount) (*cloudv1.
 // AWS can be bootstrapped so far; the status is what bootstrap applies (it
 // is not stored).
 func Proto(a *model.CloudAccount) *cloudv1.CloudAccount {
+	out := proto(a)
+	if a.Paused != nil {
+		out.Status.Pause = reconcile.PauseProto(a.Paused)
+		out.Status.Conditions = append(out.Status.Conditions, PausedCondition(a.Paused))
+	}
+	return out
+}
+
+// PausedNote is what a paused account's status says after who paused it.
+const PausedNote = "nothing is created, changed or deleted until it is resumed (admin resume)"
+
+// PausedCondition is the Paused condition of a paused account: who
+// paused it, since when, why, and what that means.
+func PausedCondition(p *model.Pause) *cloudv1.Condition {
+	return &cloudv1.Condition{Type: reconcile.ConditionPaused, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE,
+		Reason: managed.ReasonPaused, Message: reconcile.PausedBy(p) + ": " + PausedNote}
+}
+
+func proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 	return &cloudv1.CloudAccount{
 		Id:          a.ID,
 		TenantId:    a.TenantID,

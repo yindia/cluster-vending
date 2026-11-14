@@ -44,7 +44,7 @@ The whole procedure has not been run against a real management cluster yet.
 | Scopes | A row records each scope it was paused at. A tenant's resume removes the tenant's scope only: a network or cluster also paused on its own stays paused, with the providers' pause still on its managed resources. Its own resume ends it, whatever else holds it. A pause written by an older build records no scope, and any resume ends it. **[code]** |
 | Covers | Our objects as above; every managed resource kind the platform renders for the AWS providers, and provider-helm's `Release`. **[code]** |
 | Does not cover | `ProviderConfig`s and `Usage`s: they are not managed resources. Crossplane v2.4.3's Usage controller has no pause handling, and a Usage does nothing to the cloud: it only blocks deletes. **[code]**, **[upstream]** source read |
-| Stored as | The two annotations. Who, when and why are in `status.pause` of a paused network or cluster, in its `Paused` condition and in its message. **[code]** |
+| Stored as | The two annotations. Who, when and why are in `status.pause` of a paused account, network or cluster and in its `Paused` condition, and in the message of a network or cluster. A paused account's own `CloudAccount` object has the `Paused` condition too. **[code]** |
 | Needs | The `PlatformAdmin` role where the API authenticates. **[code]** |
 | Repeatable | Yes: a paused object keeps who paused it first, and pausing or resuming twice returns the same count. **[code]** |
 

@@ -810,8 +810,13 @@ type CloudAccountStatus struct {
 	// the bootstrap's own objects (namespace, ProviderConfig) and those of
 	// its networks, clusters and node pools.
 	ManagedResources []*ManagedResource `protobuf:"bytes,6,rep,name=managed_resources,json=managedResources,proto3" json:"managed_resources,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// An operator's pause (AdminService.PauseReconcile): the platform does
+	// not change the account's ProviderConfig, its credentials copy or its
+	// bindings until it is resumed. The condition Paused is True and says
+	// who, since when and why. Unset: not paused.
+	Pause         *Pause `protobuf:"bytes,7,opt,name=pause,proto3" json:"pause,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CloudAccountStatus) Reset() {
@@ -886,11 +891,18 @@ func (x *CloudAccountStatus) GetManagedResources() []*ManagedResource {
 	return nil
 }
 
+func (x *CloudAccountStatus) GetPause() *Pause {
+	if x != nil {
+		return x.Pause
+	}
+	return nil
+}
+
 var File_cloud_v1_tenant_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1dcloud/v1/tenant_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x0f\n" +
+	"\x1dcloud/v1/tenant_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x14cloud/v1/pause.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x0f\n" +
 	"\rWhoAmIRequest\"\xc1\x01\n" +
 	"\x0eWhoAmIResponse\x12\x1c\n" +
 	"\tanonymous\x18\x01 \x01(\bR\tanonymous\x12\x18\n" +
@@ -932,7 +944,7 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"AwsAccount\x121\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^[0-9]{12}$R\taccountId\x12-\n" +
-	"\x04role\x18\x02 \x01(\tB\x19\xbaH\x16r\x142\x12^[\\w+=,.@-]{1,64}$R\x04role\"\xb0\x02\n" +
+	"\x04role\x18\x02 \x01(\tB\x19\xbaH\x16r\x142\x12^[\\w+=,.@-]{1,64}$R\x04role\"\xd7\x02\n" +
 	"\x12CloudAccountStatus\x121\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x1b.cloud.v1.CloudAccountStateR\x05state\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x120\n" +
@@ -941,7 +953,8 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"conditions\x18\x04 \x03(\v2\x13.cloud.v1.ConditionR\n" +
 	"conditions\x12\x1a\n" +
 	"\bidentity\x18\x05 \x01(\tR\bidentity\x12F\n" +
-	"\x11managed_resources\x18\x06 \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources*\x86\x01\n" +
+	"\x11managed_resources\x18\x06 \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources\x12%\n" +
+	"\x05pause\x18\a \x01(\v2\x0f.cloud.v1.PauseR\x05pause*\x86\x01\n" +
 	"\n" +
 	"AccessRole\x12\x1b\n" +
 	"\x17ACCESS_ROLE_UNSPECIFIED\x10\x00\x12\x1e\n" +
@@ -992,6 +1005,7 @@ var file_cloud_v1_tenant_service_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil),     // 14: google.protobuf.Timestamp
 	(*Condition)(nil),                 // 15: cloud.v1.Condition
 	(*ManagedResource)(nil),           // 16: cloud.v1.ManagedResource
+	(*Pause)(nil),                     // 17: cloud.v1.Pause
 }
 var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
 	4,  // 0: cloud.v1.WhoAmIResponse.grants:type_name -> cloud.v1.AccessGrant
@@ -1007,19 +1021,20 @@ var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
 	1,  // 10: cloud.v1.CloudAccountStatus.state:type_name -> cloud.v1.CloudAccountState
 	15, // 11: cloud.v1.CloudAccountStatus.conditions:type_name -> cloud.v1.Condition
 	16, // 12: cloud.v1.CloudAccountStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	5,  // 13: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
-	7,  // 14: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
-	9,  // 15: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
-	2,  // 16: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
-	6,  // 17: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
-	8,  // 18: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
-	10, // 19: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
-	3,  // 20: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
-	17, // [17:21] is the sub-list for method output_type
-	13, // [13:17] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	17, // 13: cloud.v1.CloudAccountStatus.pause:type_name -> cloud.v1.Pause
+	5,  // 14: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
+	7,  // 15: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
+	9,  // 16: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
+	2,  // 17: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
+	6,  // 18: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
+	8,  // 19: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
+	10, // 20: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
+	3,  // 21: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
+	18, // [18:22] is the sub-list for method output_type
+	14, // [14:18] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_tenant_service_proto_init() }
@@ -1029,6 +1044,7 @@ func file_cloud_v1_tenant_service_proto_init() {
 	}
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
+	file_cloud_v1_pause_proto_init()
 	file_cloud_v1_tenant_service_proto_msgTypes[9].OneofWrappers = []any{
 		(*CloudAccount_Aws)(nil),
 	}

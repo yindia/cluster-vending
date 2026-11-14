@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/managed_resource.proto";
+import "cloud/v1/pause.proto";
 import "google/protobuf/timestamp.proto";
 
 // TenantService onboards tenants' cloud accounts. A tenant can have any
@@ -216,4 +217,9 @@ message CloudAccountStatus {
   // the bootstrap's own objects (namespace, ProviderConfig) and those of
   // its networks, clusters and node pools.
   repeated ManagedResource managed_resources = 6;
+  // An operator's pause (AdminService.PauseReconcile): the platform does
+  // not change the account's ProviderConfig, its credentials copy or its
+  // bindings until it is resumed. The condition Paused is True and says
+  // who, since when and why. Unset: not paused.
+  Pause pause = 7;
 }

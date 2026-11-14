@@ -14,6 +14,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/reconcile/account"
@@ -95,6 +96,14 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 	}
 	meta.SetStatusCondition(&obj.Status.Conditions, cond)
 	meta.RemoveStatusCondition(&obj.Status.Conditions, ConditionAdopted)
+	pause := model.ParsePause(obj.Annotations[cloudstore.AnnotationPaused])
+	if pause != nil {
+		paused := account.PausedCondition(pause)
+		meta.SetStatusCondition(&obj.Status.Conditions, metav1.Condition{Type: paused.GetType(), Status: metav1.ConditionTrue,
+			Reason: paused.GetReason(), Message: paused.GetMessage(), ObservedGeneration: obj.Generation})
+	} else {
+		meta.RemoveStatusCondition(&obj.Status.Conditions, platform.ConditionPaused)
+	}
 	if equality.Semantic.DeepEqual(before, &obj.Status) {
 		return nil
 	}
@@ -106,7 +115,25 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 	if n := accountEvent(meta.FindStatusCondition(before.Conditions, ConditionReady), cond); n != nil {
 		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
 	}
+	if n := accountPauseEvent(meta.FindStatusCondition(before.Conditions, platform.ConditionPaused), pause); n != nil {
+		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
+	}
 	return nil
+}
+
+// accountPauseEvent says what a change of the account's pause means: the
+// pause began (Paused) or ended (Resumed). Nil when nothing changed.
+func accountPauseEvent(was *metav1.Condition, pause *model.Pause) *platform.Note {
+	switch {
+	case pause != nil && was == nil:
+		n := platform.Normal(platform.ReasonPaused, account.PausedCondition(pause).GetMessage())
+		return &n
+	case pause == nil && was != nil:
+		n := platform.Normal(platform.ReasonResumed, "the pause ended: the platform and the providers act on it again")
+		return &n
+	default:
+		return nil
+	}
 }
 
 // accountObject is the object events of a CloudAccount are about.

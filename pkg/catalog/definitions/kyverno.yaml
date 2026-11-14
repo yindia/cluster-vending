@@ -11,6 +11,12 @@ spec:
   description: Kyverno policy engine (admission, background, cleanup and reports controllers) installed highly available and fail closed, with system and platform namespaces excluded from its webhooks.
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
+  # Shipped off, and kyverno-policies (which requires it) with it. Turn it
+  # on with: kubectl patch componentdefinitions.cloud.cluster-vending.io
+  # kyverno --type merge -p '{"spec":{"disabled":false}}'
+  # Its CRDs are large; a management cluster outside AWS (kind) can fail to
+  # send them to an EKS cluster ("connection reset by peer").
+  disabled: true
   namespace: kyverno
   # kyverno and kyverno-policies are released together.
   versionGroup: kyverno

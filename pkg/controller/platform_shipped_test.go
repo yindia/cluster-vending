@@ -45,7 +45,7 @@ func TestShippedPlatformComponentsPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "istio-base", "istio-cni",
-		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "ztunnel"}
+		"istio-ingress-gateway", "istiod", "karpenter", "ztunnel"} // kyverno ships disabled
 	for _, k := range DefaultRelease().Spec.Content.Kubernetes {
 		t.Run(k.Minor, func(t *testing.T) {
 			pins := map[string]component.Pin{}

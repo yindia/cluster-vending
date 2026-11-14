@@ -8,7 +8,7 @@ The components this build ships, as `ComponentDefinition` files in
 
 | `management` | Components | How they reach a cluster |
 |---|---|---|
-| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `external-secrets`, `karpenter`, `kyverno`, `istio` (a bundle of five charts) | Installed with every cluster, as part of creating it, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
+| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `external-secrets`, `karpenter`, `istio` (a bundle of five charts); `kyverno` ships disabled (turn it on with `spec.disabled: false`; `kyverno-policies` is off until then) | Installed with every cluster, as part of creating it, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
 | `Tenant` (default) | `gpu-operator`, `kyverno-policies` | A tenant enables and disables them on a cluster (a `Component`), and may set the values the schema allows. |
 
 **Platform components are part of the cluster.** Once a cluster is

@@ -149,7 +149,7 @@ func TestWhoControlsWhat(t *testing.T) {
 	}
 	got := definitionNames(platform)
 	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
-		"istio-cni", "istio-ingress-gateway", "karpenter", "kyverno", "ztunnel"}
+		"istio-cni", "istio-ingress-gateway", "karpenter", "ztunnel"} // kyverno ships disabled
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
 	}
@@ -159,6 +159,24 @@ func TestWhoControlsWhat(t *testing.T) {
 		if tenant != (err == nil) {
 			t.Errorf("%s: tenant access = %v", d.Name, err)
 		}
+	}
+}
+
+// Kyverno ships switched off (the platform team turns it on with
+// spec.disabled: false), and kyverno-policies, which requires it, is off
+// with it.
+func TestKyvernoShipsDisabled(t *testing.T) {
+	defs := catalogDefinitions(t)
+
+	off := component.Off(defs)
+
+	for _, d := range defs {
+		if d.Name == "kyverno" && !d.Disabled {
+			t.Error("kyverno is not shipped disabled")
+		}
+	}
+	if off["kyverno-policies"] == "" {
+		t.Errorf("kyverno-policies is not off with kyverno: %v", off)
 	}
 }
 

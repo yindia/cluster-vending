@@ -3,6 +3,7 @@ package component
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -585,4 +586,50 @@ func TestReleasePinValuesAreLocked(t *testing.T) {
 		Component: &cloudv1.Component{ClusterId: w.cluster.ID, Component: "policies", Values: values(t, map[string]any{"action": "Enforce"})}})
 
 	requireCode(t, err, connect.CodeInvalidArgument, "only the platform sets action")
+}
+
+// A definition the platform switched off is listed as disabled, with what
+// is off because of it; it cannot be enabled, and a cluster's list says so.
+func TestDisabledDefinitions(t *testing.T) {
+	w := newWorld(t)
+	for i := range w.catalog.defs {
+		if w.catalog.defs[i].Name == "scanner" {
+			w.catalog.defs[i].Spec.Disabled = true
+		}
+	}
+
+	res, err := w.svc.ListComponentDefinitions(t.Context(), &cloudv1.ListComponentDefinitionsRequest{TenantId: tenant})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, d := range res.GetDefinitions() {
+		if d.GetDisabled() != (d.GetDisabledReason() != "") {
+			t.Errorf("%s: disabled %v with reason %q", d.GetName(), d.GetDisabled(), d.GetDisabledReason())
+		}
+		got[d.GetName()] = d.GetDisabledReason()
+	}
+	want := map[string]string{"karpenter": "", "mesh": "", "scanner": "disabled", "policies": "it requires scanner, which is off"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("catalog = %v, want %v", got, want)
+	}
+
+	for _, name := range []string{"scanner", "policies"} {
+		_, err := w.svc.EnableComponent(t.Context(), &cloudv1.EnableComponentRequest{TenantId: tenant,
+			Component: &cloudv1.Component{ClusterId: w.cluster.ID, Component: name}})
+		requireCode(t, err, connect.CodeFailedPrecondition, name)
+	}
+
+	list, err := w.svc.ListComponents(t.Context(), &cloudv1.ListComponentsRequest{TenantId: tenant, ClusterId: w.cluster.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := map[string]string{}
+	for _, c := range list.GetComponents() {
+		messages[c.GetComponent()] = c.GetStatus().GetMessage()
+	}
+	if messages["scanner"] != "disabled by the platform" || messages["policies"] != "off: it requires scanner, which is off" {
+		t.Errorf("list messages = %v", messages)
+	}
 }

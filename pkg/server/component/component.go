@@ -43,6 +43,9 @@ const (
 	pendingMessage = "stored; not installed yet: this build installs platform components only"
 	// notEnabled is the message of a catalog component a cluster does not have.
 	notEnabled = "not enabled"
+	// disabledMessage is the message of a catalog component the platform
+	// switched off.
+	disabledMessage = "disabled by the platform"
 )
 
 // Service implements cloudv1connect.ComponentServiceHandler on the store
@@ -347,6 +350,7 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 		}
 	}
 	res := &cloudv1.ListComponentDefinitionsResponse{}
+	off := core.Off(definitions(entries))
 	for _, e := range entries {
 		if !e.Valid || e.Internal {
 			continue
@@ -359,6 +363,8 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 		if err != nil {
 			return nil, err
 		}
+		def.DisabledReason = off[e.Name]
+		def.Disabled = def.DisabledReason != ""
 		res.Definitions = append(res.Definitions, def)
 	}
 	return res, nil

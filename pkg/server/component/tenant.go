@@ -486,13 +486,21 @@ func (s *Service) onCluster(ctx context.Context, tenantID, clusterID string) ([]
 		}
 		out = append(out, c)
 	}
+	off := core.Off(definitions(entries))
 	for _, d := range core.TenantCatalog(definitions(entries)) {
 		if seen[d.Name] || !d.Valid {
 			continue
 		}
+		message := notEnabled
+		switch why := off[d.Name]; {
+		case d.Disabled:
+			message = disabledMessage
+		case why != "":
+			message = "off: " + why
+		}
 		out = append(out, &cloudv1.Component{TenantId: tenantID, ClusterId: clusterID, Component: d.Name,
 			Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT,
-			Status:     &cloudv1.ComponentStatus{Message: notEnabled, ClusterName: row.Name}})
+			Status:     &cloudv1.ComponentStatus{Message: message, ClusterName: row.Name}})
 	}
 	slices.SortStableFunc(out, func(a, b *cloudv1.Component) int { return strings.Compare(a.GetComponent(), b.GetComponent()) })
 	return out, nil

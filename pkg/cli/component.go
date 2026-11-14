@@ -25,6 +25,16 @@ import (
 // The component commands (ComponentService). A component is enabled by its
 // catalog name on a cluster, and addressed by its ID from then on.
 
+// catalogDescription is a definition's description on one line, with why
+// it is off in front when the platform switched it off.
+func catalogDescription(d *cloudv1.ComponentDefinition) string {
+	description := oneLine(d.GetDescription())
+	if !d.GetDisabled() {
+		return description
+	}
+	return strings.TrimSpace("[off: " + d.GetDisabledReason() + "] " + description)
+}
+
 // ComponentCatalog lists the catalog: every component, with who manages
 // it. With --cluster, the version that cluster's release gives each.
 func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message, error) {
@@ -53,7 +63,7 @@ func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message,
 			}
 			cols = append(cols, version)
 		}
-		cols = append(cols, dash(strings.Join(d.GetRequires(), ", ")), dash(oneLine(d.GetDescription())))
+		cols = append(cols, dash(strings.Join(d.GetRequires(), ", ")), dash(catalogDescription(d)))
 		if _, err := fmt.Fprintln(tw, strings.Join(cols, "\t")); err != nil {
 			return nil, err
 		}

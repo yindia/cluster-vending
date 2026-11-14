@@ -201,18 +201,63 @@ func BundleOrder(d Definition, defs []Definition) ([]string, error) {
 	return order, nil
 }
 
+// Off are the definitions that are not in use, by name, each with why:
+// "disabled" for one the platform team switched off (Disabled), and for
+// what cannot work without one that is off, a member of an off bundle and
+// whatever requires something that is off. A definition that is on is not
+// in the map. The catalog is not changed.
+func Off(defs []Definition) map[string]string {
+	off := map[string]string{}
+	ordered := slices.Clone(defs)
+	slices.SortFunc(ordered, func(a, b Definition) int { return strings.Compare(a.Name, b.Name) })
+	for _, d := range ordered {
+		if d.Disabled {
+			off[d.Name] = "disabled"
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, d := range ordered {
+			if _, done := off[d.Name]; done {
+				continue
+			}
+			if why := offBecause(d, ordered, off); why != "" {
+				off[d.Name], changed = why, true
+			}
+		}
+	}
+	return off
+}
+
+// offBecause is why d is off given what is off already; "" when it is on.
+func offBecause(d Definition, defs []Definition, off map[string]string) string {
+	for _, b := range defs {
+		if _, bundleOff := off[b.Name]; bundleOff && slices.Contains(b.Includes, d.Name) {
+			return fmt.Sprintf("its bundle %s is off", b.Name)
+		}
+	}
+	for _, r := range sortedCopy(d.Requires) {
+		if _, requiredOff := off[r]; requiredOff {
+			return fmt.Sprintf("it requires %s, which is off", r)
+		}
+	}
+	return ""
+}
+
 // PlatformComponents are the definitions the platform installs with every
 // cluster, in install order: the Platform definitions that have a chart of
 // their own, bundles expanded to their members (a bundle itself installs
 // nothing), each after what it requires, then by name. The cluster's
-// reconcile renders them after the cluster can be reached. An error when
-// the Platform definitions are inconsistent (CheckCatalog).
+// reconcile renders them after the cluster can be reached. What is off
+// (Off) is left out: a cluster that has it installed removes it. An error
+// when the Platform definitions are inconsistent (CheckCatalog).
 func PlatformComponents(defs []Definition) ([]Definition, error) {
 	byName := make(map[string]Definition, len(defs))
+	off := Off(defs)
 	var entries []release.Definition
 	for _, d := range defs {
 		byName[d.Name] = d
-		if !d.IsPlatform() || d.IsBundle() {
+		if _, isOff := off[d.Name]; isOff || !d.IsPlatform() || d.IsBundle() {
 			continue
 		}
 		entries = append(entries, release.Definition{Name: d.Name, Requires: d.Requires})
@@ -235,8 +280,8 @@ func PlatformComponents(defs []Definition) ([]Definition, error) {
 	return out, nil
 }
 
-// TenantCatalog are the definitions tenants see and may enable: Tenant,
-// not internal, by name.
+// TenantCatalog are the definitions tenants see: Tenant, not internal, by
+// name. A disabled one is listed too (Disabled): it cannot be enabled.
 func TenantCatalog(defs []Definition) []Definition {
 	var out []Definition
 	for _, d := range defs {

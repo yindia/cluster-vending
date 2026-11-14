@@ -178,6 +178,14 @@ message ComponentDefinition {
   // file and a values_schema.
   bool configurable = 11;
 
+  // The platform switched the component off, or it needs one that is: it
+  // cannot be enabled, and a PLATFORM one is not installed.
+  bool disabled = 12;
+
+  // Why it is off, e.g. "disabled" or "it requires kyverno, which is off".
+  // Empty when disabled is false.
+  string disabled_reason = 13;
+
   // What the platform creates in the tenant's account for the component
   // (an IAM role), shown so tenants know what the component may do there.
   ComponentCloudResources cloud_resources = 16;

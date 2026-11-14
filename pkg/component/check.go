@@ -137,6 +137,13 @@ func checkTargets(r Request) *Problem {
 		// Platform components come with the cluster, and a bundle's
 		// members with the bundle: not a tenant's to enable or change.
 		return &Problem{Check: 1, Kind: fault.PermissionDenied, Message: CheckTenantAccess(*r.Definition, r.Catalog).Error()}
+	case r.Definition.Disabled:
+		return &Problem{Check: 1, Kind: fault.FailedPrecondition,
+			Message: fmt.Sprintf("component %s is disabled by the platform", r.Component)}
+	case Off(r.Catalog)[r.Component] != "":
+		// Not disabled itself: it needs something the platform switched off.
+		return &Problem{Check: 1, Kind: fault.FailedPrecondition,
+			Message: fmt.Sprintf("component %s is off: %s", r.Component, Off(r.Catalog)[r.Component])}
 	case r.Cluster == nil:
 		return &Problem{Check: 2, Kind: fault.NotFound, Message: "the tenant has no such cluster"}
 	case !r.Update && slices.Contains(r.Enabled, r.Component):

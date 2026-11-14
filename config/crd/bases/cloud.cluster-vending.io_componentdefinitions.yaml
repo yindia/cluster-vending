@@ -23,6 +23,9 @@ spec:
     - jsonPath: .spec.cloudResources.iamRole.access
       name: IAM
       type: string
+    - jsonPath: .spec.disabled
+      name: Disabled
+      type: boolean
     - jsonPath: .status.conditions[?(@.type=="Valid")].status
       name: Valid
       type: string
@@ -161,6 +164,14 @@ spec:
                 maxLength: 1024
                 minLength: 1
                 type: string
+              disabled:
+                description: |-
+                  disabled switches the component off without deleting its definition:
+                  a Platform component is not installed (clusters that have it remove
+                  it), and a Tenant one cannot be enabled. What requires it, and the
+                  members of a disabled bundle, are off with it. The platform team's
+                  to set: a new build keeps it when it updates a shipped definition.
+                type: boolean
               includes:
                 description: |-
                   includes makes the definition a bundle: one component made of

@@ -270,6 +270,13 @@ type ComponentDefinitionSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Description string `json:"description"`
+	// disabled switches the component off without deleting its definition:
+	// a Platform component is not installed (clusters that have it remove
+	// it), and a Tenant one cannot be enabled. What requires it, and the
+	// members of a disabled bundle, are off with it. The platform team's
+	// to set: a new build keeps it when it updates a shipped definition.
+	// +optional
+	Disabled bool `json:"disabled,omitempty"`
 	// management says who controls the component. Platform: installed
 	// with every cluster by the cluster's own reconcile, once the cluster
 	// can be reached, with fixed values; no Component object exists for
@@ -391,6 +398,7 @@ type ComponentDefinitionStatus struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)",message="a component cannot require itself"
 // +kubebuilder:printcolumn:name="Requires",type=string,JSONPath=`.spec.requires`
 // +kubebuilder:printcolumn:name="IAM",type=string,JSONPath=`.spec.cloudResources.iamRole.access`
+// +kubebuilder:printcolumn:name="Disabled",type=boolean,JSONPath=`.spec.disabled`
 // +kubebuilder:printcolumn:name="Valid",type=string,JSONPath=`.status.conditions[?(@.type=="Valid")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type ComponentDefinition struct {

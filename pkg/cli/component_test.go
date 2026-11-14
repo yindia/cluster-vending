@@ -451,3 +451,25 @@ func TestComponentEditOfAComponentWithoutValues(t *testing.T) {
 		t.Fatalf("Run = %v, the editor opened %d times", err, len(*opened))
 	}
 }
+
+// A component that is off says so, and why, in front of its description.
+func TestCatalogDescriptionOfADisabledComponent(t *testing.T) {
+	tests := []struct {
+		name string
+		def  *cloudv1.ComponentDefinition
+		want string
+	}{
+		{"on", &cloudv1.ComponentDefinition{Description: "Node autoscaling."}, "Node autoscaling."},
+		{"disabled", &cloudv1.ComponentDefinition{Description: "Node autoscaling.", Disabled: true, DisabledReason: "disabled"},
+			"[off: disabled] Node autoscaling."},
+		{"off with what it needs", &cloudv1.ComponentDefinition{Disabled: true, DisabledReason: "it requires kyverno, which is off"},
+			"[off: it requires kyverno, which is off]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := catalogDescription(tt.def); got != tt.want {
+				t.Errorf("catalogDescription = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

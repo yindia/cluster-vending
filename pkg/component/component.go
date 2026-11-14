@@ -45,6 +45,9 @@ type Definition struct {
 	// Valid is the definition's Valid condition: an invalid entry counts as
 	// not in the catalog.
 	Valid bool
+	// Disabled: the platform team switched the definition off
+	// (spec.disabled). It is not installed and cannot be enabled (Off).
+	Disabled bool
 	// Management says who controls the component; empty is Tenant.
 	Management Management
 	// Internal: only installed as a member of a bundle.

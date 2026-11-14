@@ -453,6 +453,12 @@ type ComponentDefinition struct {
 	// A tenant may set values for it: it is TENANT, and has a user_values
 	// file and a values_schema.
 	Configurable bool `protobuf:"varint,11,opt,name=configurable,proto3" json:"configurable,omitempty"`
+	// The platform switched the component off, or it needs one that is: it
+	// cannot be enabled, and a PLATFORM one is not installed.
+	Disabled bool `protobuf:"varint,12,opt,name=disabled,proto3" json:"disabled,omitempty"`
+	// Why it is off, e.g. "disabled" or "it requires kyverno, which is off".
+	// Empty when disabled is false.
+	DisabledReason string `protobuf:"bytes,13,opt,name=disabled_reason,json=disabledReason,proto3" json:"disabled_reason,omitempty"`
 	// What the platform creates in the tenant's account for the component
 	// (an IAM role), shown so tenants know what the component may do there.
 	CloudResources *ComponentCloudResources `protobuf:"bytes,16,opt,name=cloud_resources,json=cloudResources,proto3" json:"cloud_resources,omitempty"`
@@ -560,6 +566,20 @@ func (x *ComponentDefinition) GetConfigurable() bool {
 	return false
 }
 
+func (x *ComponentDefinition) GetDisabled() bool {
+	if x != nil {
+		return x.Disabled
+	}
+	return false
+}
+
+func (x *ComponentDefinition) GetDisabledReason() string {
+	if x != nil {
+		return x.DisabledReason
+	}
+	return ""
+}
+
 func (x *ComponentDefinition) GetCloudResources() *ComponentCloudResources {
 	if x != nil {
 		return x.CloudResources
@@ -602,7 +622,7 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\arelease\x18\b \x01(\tR\arelease\x12B\n" +
 	"\x10effective_values\x18\t \x01(\v2\x17.google.protobuf.StructR\x0feffectiveValues\x120\n" +
 	"\x05since\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\x87\x05\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\xcc\x05\n" +
 	"\x13ComponentDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +
@@ -617,7 +637,9 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"management\x18\n" +
 	" \x01(\x0e2\x1d.cloud.v1.ComponentManagementR\n" +
 	"management\x12\"\n" +
-	"\fconfigurable\x18\v \x01(\bR\fconfigurable\x12J\n" +
+	"\fconfigurable\x18\v \x01(\bR\fconfigurable\x12\x1a\n" +
+	"\bdisabled\x18\f \x01(\bR\bdisabled\x12'\n" +
+	"\x0fdisabled_reason\x18\r \x01(\tR\x0edisabledReason\x12J\n" +
 	"\x0fcloud_resources\x18\x10 \x01(\v2!.cloud.v1.ComponentCloudResourcesR\x0ecloudResources\x1a;\n" +
 	"\rVersionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

@@ -30,6 +30,7 @@ func DefinitionOf(def *cloudv1alpha1.ComponentDefinition) (Definition, error) {
 	return Definition{
 		Name:                def.Name,
 		Valid:               meta.IsStatusConditionTrue(def.Status.Conditions, ConditionValid),
+		Disabled:            def.Spec.Disabled,
 		Management:          Management(def.Spec.Management),
 		Internal:            def.Spec.Internal,
 		Includes:            slices.Clone(def.Spec.Includes),

@@ -74,6 +74,9 @@ type Decision struct {
 	Stage Tier
 	// Waiting says why nothing (more) starts; empty when Start is not.
 	Waiting string
+	// SoakUntil is when the soak the rollout waits for ends; zero when it
+	// waits for none.
+	SoakUntil time.Time
 	// Halted: too many clusters failed; nothing starts.
 	Halted bool
 	// Done: no cluster is waiting or upgrading.
@@ -112,6 +115,7 @@ func Plan(p Policy, now time.Time, members []Member) Decision {
 		d.Stage = tier
 		if finished != nil {
 			if opens := finished.at.Add(p.soak(finished.tier)); now.Before(opens) {
+				d.SoakUntil = opens
 				d.Waiting = fmt.Sprintf("tier %d finished; tier %d starts after the soak, at %s",
 					finished.tier, tier, opens.UTC().Format("2006-01-02 15:04")+" UTC")
 				return d

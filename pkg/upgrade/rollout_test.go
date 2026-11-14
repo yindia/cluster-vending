@@ -36,7 +36,7 @@ func TestPlan(t *testing.T) {
 		{name: "tier 2 done: tier 1 waits for the soak",
 			policy:  policy,
 			members: []Member{done("a", Tier2, 2*time.Hour), done("b", Tier2, time.Hour), m("t1", Tier1, Pending)},
-			want: Decision{Stage: Tier1,
+			want: Decision{Stage: Tier1, SoakUntil: time.Date(2026, 11, 16, 11, 0, 0, 0, time.UTC),
 				Waiting: "tier 2 finished; tier 1 starts after the soak, at 2026-11-16 11:00 UTC"}},
 		{name: "soak passed: tier 1 starts",
 			policy:  policy,

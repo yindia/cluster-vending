@@ -103,6 +103,11 @@ func scannable(obj *cloudv1alpha1.Cluster) bool {
 	if !obj.DeletionTimestamp.IsZero() {
 		return false
 	}
+	if obj.Annotations[cloudstore.AnnotationPaused] != "" {
+		// Paused by an operator: the scan reads the workload cluster, and
+		// a paused cluster's is left alone until the resume.
+		return false
+	}
 	if obj.Status.Phase == cloudv1alpha1.ClusterPhaseImported {
 		return obj.Status.KubeconfigSecret != ""
 	}

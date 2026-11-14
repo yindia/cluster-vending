@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Pause is an operator's pause of a cloud account, network or cluster
+// (AdminService.PauseReconcile). While it is set the platform does not act
+// on the resource: nothing of it is created, changed or deleted in the
+// cloud or in its workload cluster, and what was asked for meanwhile (an
+// update, a delete) is stored and done once it is resumed. The resource is
+// still observed and its status kept current.
+message Pause {
+  // Who paused: the caller's name; "anonymous" when the API runs without
+  // authentication.
+  string by = 1;
+
+  // Since when.
+  google.protobuf.Timestamp since = 2;
+
+  // Why, as the caller said. Optional.
+  string reason = 3;
+}

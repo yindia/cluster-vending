@@ -57,6 +57,17 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	// What changed in a pass is reported as events of the network's
 	// object (events.go), once: when its status is recorded.
 	ctx = reconcile.WithNotes(ctx)
+	// A paused network (AdminService.PauseReconcile) is only observed:
+	// nothing of it is applied, repaired or deleted, and what was asked
+	// for meanwhile (a new generation, a delete) stays stored until the
+	// resume. Its status is still recorded, and says who paused it.
+	if row.Paused != nil {
+		n, err := s.view(ctx, row, nil)
+		if err != nil {
+			return fmt.Errorf("observe: %w", err)
+		}
+		return s.remember(ctx, row, n.GetStatus())
+	}
 	if row.State == StateDeleting {
 		failed := s.Finalize(ctx, row)
 		// What GetNetwork returns while it goes: how far the deletion is.

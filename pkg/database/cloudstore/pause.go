@@ -47,7 +47,7 @@ func (r tenants) SetPause(ctx context.Context, tenantID, clusterID string, pause
 		return err
 	}
 	if clusterID != "" {
-		obj, err := clusters{r.store}.find(ctx, tenantID, clusterID)
+		obj, err := clusters(r).find(ctx, tenantID, clusterID)
 		if err != nil {
 			return err
 		}

@@ -856,7 +856,11 @@ type NetworkStatus struct {
 	// network (at most 10, oldest first). Kubernetes keeps an object's
 	// events for about an hour; these stay with the network.
 	// ListNetworkEvents returns the events themselves while they exist.
-	RecentEvents  []*Event `protobuf:"bytes,10,rep,name=recent_events,json=recentEvents,proto3" json:"recent_events,omitempty"`
+	RecentEvents []*Event `protobuf:"bytes,10,rep,name=recent_events,json=recentEvents,proto3" json:"recent_events,omitempty"`
+	// pause is set while an operator paused the network (its tenant): who,
+	// since when and why. The platform then only observes the network; the
+	// condition Paused is True and message says so. Unset: not paused.
+	Pause         *Pause `protobuf:"bytes,45,opt,name=pause,proto3" json:"pause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -961,6 +965,13 @@ func (x *NetworkStatus) GetRecentEvents() []*Event {
 	return nil
 }
 
+func (x *NetworkStatus) GetPause() *Pause {
+	if x != nil {
+		return x.Pause
+	}
+	return nil
+}
+
 // NetworkResources lists the cloud resources of a network, all owned by the
 // platform. Also reported per cluster in ClusterStatus.network.
 type NetworkResources struct {
@@ -1050,7 +1061,7 @@ var File_cloud_v1_network_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_network_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/network.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
+	"\x16cloud/v1/network.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\x1a\x14cloud/v1/pause.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aNetwork\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
@@ -1105,7 +1116,7 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04role\x12'\n" +
 	"\n" +
 	"cidr_block\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xf0\x01\x01R\tcidrBlock\x121\n" +
-	"\azone_id\x18\x03 \x01(\tB\x18\xbaH\x15\xd8\x01\x01r\x10\x18@2\f^[a-z0-9-]+$R\x06zoneId\"\x85\x04\n" +
+	"\azone_id\x18\x03 \x01(\tB\x18\xbaH\x15\xd8\x01\x01r\x10\x18@2\f^[a-z0-9-]+$R\x06zoneId\"\xac\x04\n" +
 	"\rNetworkStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.NetworkStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1120,7 +1131,8 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"\fcarried_over\x18\b \x03(\v2\x1a.cloud.v1.ImportedResourceR\vcarriedOver\x12F\n" +
 	"\x11managed_resources\x18\t \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources\x124\n" +
 	"\rrecent_events\x18\n" +
-	" \x03(\v2\x0f.cloud.v1.EventR\frecentEvents\"\xdd\x01\n" +
+	" \x03(\v2\x0f.cloud.v1.EventR\frecentEvents\x12%\n" +
+	"\x05pause\x18- \x01(\v2\x0f.cloud.v1.PauseR\x05pause\"\xdd\x01\n" +
 	"\x10NetworkResources\x12(\n" +
 	"\x10cloud_network_id\x18\x01 \x01(\tR\x0ecloudNetworkId\x12*\n" +
 	"\x11public_subnet_ids\x18\x02 \x03(\tR\x0fpublicSubnetIds\x12,\n" +
@@ -1194,6 +1206,7 @@ var file_cloud_v1_network_proto_goTypes = []any{
 	(*ImportedResource)(nil),      // 16: cloud.v1.ImportedResource
 	(*ManagedResource)(nil),       // 17: cloud.v1.ManagedResource
 	(*Event)(nil),                 // 18: cloud.v1.Event
+	(*Pause)(nil),                 // 19: cloud.v1.Pause
 }
 var file_cloud_v1_network_proto_depIdxs = []int32{
 	12, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
@@ -1214,11 +1227,12 @@ var file_cloud_v1_network_proto_depIdxs = []int32{
 	16, // 15: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
 	17, // 16: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
 	18, // 17: cloud.v1.NetworkStatus.recent_events:type_name -> cloud.v1.Event
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	19, // 18: cloud.v1.NetworkStatus.pause:type_name -> cloud.v1.Pause
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_proto_init() }
@@ -1231,6 +1245,7 @@ func file_cloud_v1_network_proto_init() {
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_options_proto_init()
+	file_cloud_v1_pause_proto_init()
 	file_cloud_v1_network_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -263,11 +263,14 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	default:
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING, progress
 	}
-	if paused := reconcile.PausedCondition(views); paused != nil {
-		// A pause is the operator's: reported, never a failure.
+	if paused, note := reconcile.RowPause(row.Paused, views); paused != nil {
+		// A pause is the operator's: reported, never a failure. A paused
+		// cluster says who paused it whatever its state; paused resources
+		// of a cluster that is not are only worth a note while it moves.
 		st.Conditions = append(st.Conditions, paused)
-		if st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_RUNNING {
-			st.Message += reconcile.PausedNote(views)
+		st.Pause = reconcile.PauseProto(row.Paused)
+		if row.Paused != nil || st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_RUNNING {
+			st.Message = strings.TrimPrefix(st.Message+note, "; ")
 		}
 	}
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)

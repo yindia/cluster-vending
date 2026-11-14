@@ -55,6 +55,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, tenantID, cloudAccountID str
 	if err != nil {
 		return err
 	}
+	if a.Paused != nil {
+		// Paused by an operator (AdminService.PauseReconcile): its
+		// ProviderConfig, credentials copy and bindings are left as they
+		// are until the resume.
+		return nil
+	}
 	return r.Apply(ctx, a)
 }
 
@@ -193,6 +199,9 @@ func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
 // FailedPrecondition fault): their managed resources reach the cloud
 // through the ProviderConfig. It is safe to repeat.
 func (r *Reconciler) Delete(ctx context.Context, a *model.CloudAccount) (bool, error) {
+	if a.Paused != nil {
+		return false, nil // held until the resume
+	}
 	records, err := r.deps.Store.ManagedResources().ListByAccount(ctx, a.TenantID, a.ID)
 	if err != nil {
 		return false, err

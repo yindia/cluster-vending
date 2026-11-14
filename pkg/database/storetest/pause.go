@@ -8,9 +8,10 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 )
 
-// pausedRows reads who paused each row of the tenant: "" for a row that
+// pausedRows reads who paused each row of tenant acme: "" for a row that
 // is not paused.
-func pausedRows(t *testing.T, s repository.Store, tenant string, networks []*model.Network, clusters []*model.Cluster) map[string]string {
+func pausedRows(t *testing.T, s repository.Store, networks []*model.Network, clusters []*model.Cluster) map[string]string {
+	const tenant = "acme"
 	t.Helper()
 	by := func(p *model.Pause) string {
 		if p == nil {
@@ -70,7 +71,7 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 	if err := s.Tenants().SetPause(ctx, "acme", prod.ID, pause); err != nil {
 		t.Fatal(err)
 	}
-	requirePaused(t, pausedRows(t, s, "acme", []*model.Network{network}, []*model.Cluster{prod}),
+	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod}),
 		map[string]string{"account": "", "net": "", "prod": "alice"})
 	if err := s.Tenants().SetPause(ctx, "acme", prod.ID, nil); err != nil {
 		t.Fatal(err)
@@ -80,7 +81,7 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 	if err := s.Tenants().SetPause(ctx, "acme", "", pause); err != nil {
 		t.Fatal(err)
 	}
-	requirePaused(t, pausedRows(t, s, "acme", []*model.Network{network}, []*model.Cluster{prod}),
+	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod}),
 		map[string]string{"account": "alice", "net": "alice", "prod": "alice"})
 	if row, err := s.Clusters().Get(ctx, "globex", other.ID); err != nil || row.Paused != nil {
 		t.Fatalf("another tenant's cluster: paused %+v, %v", row.Paused, err)
@@ -94,7 +95,7 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 	if err := s.Tenants().SetPause(ctx, "acme", "", &model.Pause{By: "bob", Since: since.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	requirePaused(t, pausedRows(t, s, "acme", []*model.Network{network}, []*model.Cluster{prod}),
+	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod}),
 		map[string]string{"account": "alice", "net": "alice", "prod": "alice"})
 
 	// An update of the row keeps the pause.
@@ -105,14 +106,14 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 	// A row created while the tenant is paused is paused.
 	late := MustCluster(t, s, "acme", "late", network)
 	lateNet := MustNetwork(t, s, "acme", "late-net")
-	requirePaused(t, pausedRows(t, s, "acme", []*model.Network{network, lateNet}, []*model.Cluster{prod, late}),
+	requirePaused(t, pausedRows(t, s, []*model.Network{network, lateNet}, []*model.Cluster{prod, late}),
 		map[string]string{"prod": "alice", "late": "alice", "late-net": "alice"})
 
 	// Resuming one cluster leaves the rest of the tenant paused.
 	if err := s.Tenants().SetPause(ctx, "acme", prod.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	requirePaused(t, pausedRows(t, s, "acme", []*model.Network{network}, []*model.Cluster{prod, late}),
+	requirePaused(t, pausedRows(t, s, []*model.Network{network}, []*model.Cluster{prod, late}),
 		map[string]string{"account": "alice", "net": "alice", "prod": "", "late": "alice"})
 
 	// Resuming the tenant resumes everything, and new rows are not paused.
@@ -120,7 +121,7 @@ func testPauseIsRecordedInheritedAndRemoved(t *testing.T, b Backend) {
 		t.Fatal(err)
 	}
 	after := MustCluster(t, s, "acme", "after", network)
-	requirePaused(t, pausedRows(t, s, "acme", []*model.Network{network, lateNet}, []*model.Cluster{prod, late, after}),
+	requirePaused(t, pausedRows(t, s, []*model.Network{network, lateNet}, []*model.Cluster{prod, late, after}),
 		map[string]string{"account": "", "net": "", "late-net": "", "prod": "", "late": "", "after": ""})
 
 	RequireErr(t, s.Tenants().SetPause(ctx, "nobody", "", pause), repository.ErrNotFound)

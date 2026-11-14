@@ -14,6 +14,7 @@ import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
 import "cloud/v1/node_pool.proto";
+import "cloud/v1/pause.proto";
 import "google/protobuf/timestamp.proto";
 
 // Cluster is a managed Kubernetes cluster owned by exactly one tenant.
@@ -395,6 +396,11 @@ message ClusterStatus {
   // hour; these stay with the cluster. ListClusterEvents returns the
   // events themselves while they exist.
   repeated Event recent_events = 41;
+
+  // pause is set while an operator paused the cluster (or its tenant):
+  // who, since when and why. The platform then only observes the cluster;
+  // the condition Paused is True and message says so. Unset: not paused.
+  Pause pause = 45;
 }
 
 // PlatformComponent is one component the platform installed with a

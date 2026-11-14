@@ -51,19 +51,27 @@ var (
 
 // AdminServiceClient is a client for the cloud.v1.AdminService service.
 type AdminServiceClient interface {
-	// Pauses Crossplane's reconciliation of a tenant's managed resources, or
-	// of one cluster's: every one of them gets the crossplane.io/paused
-	// annotation, so the providers neither change nor delete its cloud
-	// resource until resumed. The Helm Releases of a cluster's platform
-	// components are paused with it. Used to upgrade providers one tenant or
-	// cluster at a time: pause everything else, upgrade, check, resume step
-	// by step (docs/runbooks/provider-upgrade.md). Idempotent.
+	// Pauses a tenant, or one of its clusters, e.g. to upgrade the Crossplane
+	// providers (docs/runbooks/provider-upgrade.md). Two things happen:
 	//
-	// It pauses the providers, not the platform's controller: objects the
-	// controller creates afterwards are not paused. While resources are
-	// paused their network or cluster has the condition Paused.
+	//   - the pause is recorded on the tenant's cloud accounts, networks and
+	//     clusters (on the one cluster), with who paused, when and why. The
+	//     platform's controller does not act on a paused resource: it
+	//     creates, changes and deletes nothing of it in the cloud or in its
+	//     workload cluster, and only observes it. An update or a delete
+	//     asked for meanwhile is stored and done after the resume. What is
+	//     created in a paused tenant is paused from the start.
+	//   - every managed resource of the scope, and the Helm releases of its
+	//     platform components, get the crossplane.io/paused annotation, so
+	//     the providers neither change nor delete their cloud resources.
+	//
+	// A paused network or cluster has the condition Paused and status.pause.
+	// Idempotent: a resource that is paused already keeps who paused it.
 	PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error)
-	// Removes the pause (PauseReconcile). Idempotent.
+	// Removes the pause (PauseReconcile): from the tenant and everything it
+	// has, or from one cluster (the rest of a paused tenant stays paused).
+	// The controller then observes each resource and applies what changed
+	// meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
 }
 
@@ -75,19 +83,27 @@ func NewAdminServiceClient(client *connect.Client) AdminServiceClient {
 
 // AdminServiceHandler is an implementation of the cloud.v1.AdminService service.
 type AdminServiceHandler interface {
-	// Pauses Crossplane's reconciliation of a tenant's managed resources, or
-	// of one cluster's: every one of them gets the crossplane.io/paused
-	// annotation, so the providers neither change nor delete its cloud
-	// resource until resumed. The Helm Releases of a cluster's platform
-	// components are paused with it. Used to upgrade providers one tenant or
-	// cluster at a time: pause everything else, upgrade, check, resume step
-	// by step (docs/runbooks/provider-upgrade.md). Idempotent.
+	// Pauses a tenant, or one of its clusters, e.g. to upgrade the Crossplane
+	// providers (docs/runbooks/provider-upgrade.md). Two things happen:
 	//
-	// It pauses the providers, not the platform's controller: objects the
-	// controller creates afterwards are not paused. While resources are
-	// paused their network or cluster has the condition Paused.
+	//   - the pause is recorded on the tenant's cloud accounts, networks and
+	//     clusters (on the one cluster), with who paused, when and why. The
+	//     platform's controller does not act on a paused resource: it
+	//     creates, changes and deletes nothing of it in the cloud or in its
+	//     workload cluster, and only observes it. An update or a delete
+	//     asked for meanwhile is stored and done after the resume. What is
+	//     created in a paused tenant is paused from the start.
+	//   - every managed resource of the scope, and the Helm releases of its
+	//     platform components, get the crossplane.io/paused annotation, so
+	//     the providers neither change nor delete their cloud resources.
+	//
+	// A paused network or cluster has the condition Paused and status.pause.
+	// Idempotent: a resource that is paused already keeps who paused it.
 	PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error)
-	// Removes the pause (PauseReconcile). Idempotent.
+	// Removes the pause (PauseReconcile): from the tenant and everything it
+	// has, or from one cluster (the rest of a paused tenant stays paused).
+	// The controller then observes each resource and applies what changed
+	// meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
 }
 

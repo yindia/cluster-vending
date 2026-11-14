@@ -9,20 +9,28 @@ import "buf/validate/validate.proto";
 // admin role, whatever tenant the request names; with auth.mode none,
 // expose it to administrators only.
 service AdminService {
-  // Pauses Crossplane's reconciliation of a tenant's managed resources, or
-  // of one cluster's: every one of them gets the crossplane.io/paused
-  // annotation, so the providers neither change nor delete its cloud
-  // resource until resumed. The Helm Releases of a cluster's platform
-  // components are paused with it. Used to upgrade providers one tenant or
-  // cluster at a time: pause everything else, upgrade, check, resume step
-  // by step (docs/runbooks/provider-upgrade.md). Idempotent.
+  // Pauses a tenant, or one of its clusters, e.g. to upgrade the Crossplane
+  // providers (docs/runbooks/provider-upgrade.md). Two things happen:
   //
-  // It pauses the providers, not the platform's controller: objects the
-  // controller creates afterwards are not paused. While resources are
-  // paused their network or cluster has the condition Paused.
+  //   - the pause is recorded on the tenant's cloud accounts, networks and
+  //     clusters (on the one cluster), with who paused, when and why. The
+  //     platform's controller does not act on a paused resource: it
+  //     creates, changes and deletes nothing of it in the cloud or in its
+  //     workload cluster, and only observes it. An update or a delete
+  //     asked for meanwhile is stored and done after the resume. What is
+  //     created in a paused tenant is paused from the start.
+  //   - every managed resource of the scope, and the Helm releases of its
+  //     platform components, get the crossplane.io/paused annotation, so
+  //     the providers neither change nor delete their cloud resources.
+  //
+  // A paused network or cluster has the condition Paused and status.pause.
+  // Idempotent: a resource that is paused already keeps who paused it.
   rpc PauseReconcile(PauseReconcileRequest) returns (PauseReconcileResponse);
 
-  // Removes the pause (PauseReconcile). Idempotent.
+  // Removes the pause (PauseReconcile): from the tenant and everything it
+  // has, or from one cluster (the rest of a paused tenant stays paused).
+  // The controller then observes each resource and applies what changed
+  // meanwhile, once. Idempotent.
   rpc ResumeReconcile(ResumeReconcileRequest) returns (ResumeReconcileResponse);
 }
 
@@ -40,6 +48,9 @@ message PauseReconcileRequest {
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string.uuid = true
   ];
+
+  // Why, shown with the pause (status.pause.reason). Optional.
+  string reason = 3 [(buf.validate.field).string.max_len = 256];
 }
 
 message PauseReconcileResponse {

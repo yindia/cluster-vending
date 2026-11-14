@@ -45,6 +45,14 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 		return err
 	}
 	ctx = reconcile.WithNotes(ctx)
+	// A paused cluster (AdminService.PauseReconcile) is only observed:
+	// nothing of it is applied, repaired or deleted, AWS and its workload
+	// cluster are not touched, and what was asked for meanwhile (a new
+	// generation, a delete) stays stored until the resume. Its status is
+	// still recorded below, and says who paused it.
+	if row.Paused != nil {
+		return s.observePaused(ctx, row)
+	}
 	// What went wrong is the cluster's status (below) and the error of the
 	// pass: the loop logs it and comes back.
 	failed := s.moveOn(ctx, row)
@@ -76,6 +84,17 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 		return errors.Join(failed, perr, fmt.Errorf("observe: %w", err))
 	}
 	return errors.Join(failed, perr, s.remember(ctx, current, c.GetStatus()))
+}
+
+// observePaused records a paused cluster's status: what its resources
+// say now, the platform components as they were last recorded, and the
+// failure recorded before the pause.
+func (s *Reconciler) observePaused(ctx context.Context, row *model.Cluster) error {
+	c, err := s.viewWith(ctx, row, storedFailure(row), nil)
+	if err != nil {
+		return fmt.Errorf("observe: %w", err)
+	}
+	return s.remember(ctx, row, c.GetStatus())
 }
 
 // moveOn is Reconcile without recording the status.

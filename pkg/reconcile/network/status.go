@@ -182,11 +182,13 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 		st.State = cloudv1.NetworkState_NETWORK_STATE_PROVISIONING
 		st.Message = progress
 	}
-	if paused := reconcile.PausedCondition(views); paused != nil {
-		// A pause is the operator's: reported, never a failure.
+	if paused, note := reconcile.RowPause(row.Paused, views); paused != nil {
+		// A pause is the operator's: reported, never a failure. A paused
+		// network says who paused it whatever its state.
 		st.Conditions = append(st.Conditions, paused)
-		if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_READY {
-			st.Message += reconcile.PausedNote(views)
+		st.Pause = reconcile.PauseProto(row.Paused)
+		if row.Paused != nil || st.GetState() != cloudv1.NetworkState_NETWORK_STATE_READY {
+			st.Message = strings.TrimPrefix(st.Message+note, "; ")
 		}
 	}
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)

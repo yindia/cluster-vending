@@ -53,7 +53,7 @@ Sleep 1s
 Type `cluster-vending account create -f $D/cloudaccount.yaml --create-role $DEMO_CREATE_ROLE --region $DEMO_REGION` Enter
 Sleep 6s
 Hide
-Type `export ACCOUNT="$(json account list | jq -r '.accounts[] | select(.name=="demo") | .id')"; until json account get --id "$ACCOUNT" | jq -e '.account.status.access.verified' >/dev/null; do sleep 10; done; step 1` Enter
+Type `export ACCOUNT="$(json account list | jq -r '.accounts[] | select(.accountName=="demo") | .id')"; until json account get --id "$ACCOUNT" | jq -e '.account.status.access.verified' >/dev/null; do sleep 10; done; step 1` Enter
 Wait+Screen@20m /__step_1_done__/
 Type "clear" Enter
 Show

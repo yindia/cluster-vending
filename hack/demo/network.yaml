@@ -1,0 +1,20 @@
+# The demo's network (hack/demo/demo.tape): one NAT gateway, two zones.
+# __BOOTSTRAP_ID__ is the id `account create` returns.
+apiVersion: cluster-vending.io/v1
+kind: Network
+metadata:
+  name: demo-net
+  tenant: demo
+  displayName: Demo network
+  labels: {env: demo}
+spec:
+  region: __REGION__
+  bootstrapId: __BOOTSTRAP_ID__
+  layout:
+    cidrBlock: 10.30.0.0/16
+    natGatewayMode: NAT_GATEWAY_MODE_SINGLE
+    subnets:
+      - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.30.0.0/24,  zoneId: __ZONE_A__}
+      - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.30.1.0/24,  zoneId: __ZONE_B__}
+      - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.30.16.0/20, zoneId: __ZONE_A__}
+      - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.30.32.0/20, zoneId: __ZONE_B__}

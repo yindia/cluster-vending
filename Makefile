@@ -212,3 +212,15 @@ deploy-manifests: ## Render the controller's and the server's manifests into bin
 	  $(KUSTOMIZE) $$dir | sed 's|ghcr.io/yindia/cluster-vending:latest|$(IMAGE):$(TAG)|' > $$out; \
 	  echo "$$dir -> $$out"; \
 	done
+
+##@ Demo
+
+.PHONY: demo demo-validate
+demo-validate: ## Parse hack/demo/demo.tape (vhs); nothing runs
+	vhs validate hack/demo/demo.tape
+
+demo: build demo-validate ## Record the end-to-end demo into bin/demo.gif and bin/demo.mp4 (REAL AWS: account, network, EKS create, upgrade, delete; ~90 min); needs DEMO_ACCOUNT_ID and AWS credentials
+	@test -n "$${DEMO_ACCOUNT_ID:-}" || { echo "export DEMO_ACCOUNT_ID=<12-digit account> first" >&2; exit 1; }
+	@{ test -n "$${AWS_ACCESS_KEY_ID:-}" || test -n "$${AWS_PROFILE:-}"; } || { echo "export AWS credentials (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE) first" >&2; exit 1; }
+	@aws sts get-caller-identity --query Account --output text | grep -qx "$${DEMO_ACCOUNT_ID}" || { echo "the AWS credentials are not of account $${DEMO_ACCOUNT_ID}" >&2; exit 1; }
+	PATH="$(CURDIR)/$(BIN_DIR):$$PATH" vhs hack/demo/demo.tape

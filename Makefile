@@ -11,6 +11,14 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS  := -s -w -X $(MODULE)/pkg/version.Version=$(VERSION) -X $(MODULE)/pkg/version.Commit=$(COMMIT)
 
+# go.mod asks for a newer Go than some installs ship (conda-forge's, in a
+# pixi shell, is older and sets GOTOOLCHAIN=local). With local, go refuses
+# instead of fetching the toolchain go.mod names; let it fetch it. Any other
+# setting (auto, go1.x.y, path) is kept.
+ifeq ($(GOTOOLCHAIN),local)
+export GOTOOLCHAIN := auto
+endif
+
 GOLANGCI_LINT_VERSION ?= v2.15.0
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo $(BIN_DIR)/golangci-lint)
 

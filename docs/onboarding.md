@@ -8,8 +8,12 @@ the role's name.
 
 ## The roles
 
-Three templates, each a superset of the one before. Role names are
-`cluster-vending-<role>`; each policy is `cluster-vending-<role>-<part>`.
+Three templates, each a superset of the one before. The role's name is the
+template's `RoleName` parameter: `cluster-vending-<role>` by default, or
+`cluster-vending-<anything>-<role>` (at most 64 characters) for a stack of
+its own, so several roles of one template fit in one account (a demo run,
+a second tenant). Each policy is `<RoleName>-<part>`, and the stack is
+named after the role.
 
 | Role | What it may do | Use |
 |---|---|---|
@@ -50,19 +54,21 @@ metadata: {name: acme-prod, tenant: acme}
 spec:
   aws:
     accountId: "444455556666"
-    role: cluster-vending-provisioner   # reader, updater or provisioner
+    role: cluster-vending-provisioner   # cluster-vending-[<anything>-]<reader|updater|provisioner>
 ```
 
 ```sh
 cluster-vending account create -f cloudaccount.yaml [--create-role terminal|browser|skip] [--profile <aws profile>] [--region us-east-1]
 ```
 
-1. **The role's stack.** When `spec.aws.role` is one of the platform's
-   (`cluster-vending-reader`, `-updater`, `-provisioner`), the CLI gets its
-   template and the management role from the API server
-   (`GetAccountOnboarding`) and creates the stack `cluster-vending-<role>`
-   in the account. How is `--create-role`; at a terminal without it, that
-   is the one question asked:
+1. **The role's stack.** When `spec.aws.role` is a name the templates make
+   (`cluster-vending-[<anything>-]<reader|updater|provisioner>`: its last
+   word is the template), the CLI gets that template and the management
+   role from the API server (`GetAccountOnboarding`) and creates a stack
+   named after the role, with `RoleName` set to it and the tag
+   `cluster-vending.io/managed-by: cluster-vending`. How is
+   `--create-role`; at a terminal without it, that is the one question
+   asked:
    - `terminal`: here, with your AWS credentials of the account (the AWS
      SDK's default chain: environment, `~/.aws` profiles, SSO; `--profile`
      picks one). The credentials must be of the manifest's account, or
@@ -96,6 +102,25 @@ cluster-vending account get --id <account id> --tenant acme   # ACCESS: Verified
 ```
 
 Networks and clusters are refused until the access is verified.
+
+## Deleting the account
+
+```sh
+cluster-vending account delete --id <account id> --tenant acme [--wait] [--delete-role [--profile <aws profile>] [--region us-east-1]]
+```
+
+- **Refused while networks belong to the account** (`FAILED_PRECONDITION`,
+  naming them): delete its clusters and networks first.
+- **The account goes through the controller:** it removes the account's
+  ProviderConfig in the management cluster, then the account.
+  `--wait` waits until it is gone.
+- **The role stays** unless `--delete-role`: then, with your AWS
+  credentials of the account (they must be of that account), the CLI
+  deletes the role's stack once the account is gone, printing its events.
+  It deletes only a stack `account create` made: one named after the role
+  with the `cluster-vending.io/managed-by` tag. Any other (a role created by
+  hand, a stack without the tag, no stack in `--region`) is refused before
+  anything is deleted, account included.
 
 The API server also serves the templates for download, without a token (a
 template holds no secret):

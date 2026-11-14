@@ -1,0 +1,15 @@
+# The demo's account (hack/demo/demo.tape). The tape fills the
+# placeholders: __RUN__ (DEMO_RUN, each run's own names), __TENANT__ and
+# __ACCOUNT_ID__ (DEMO_ACCOUNT_ID). The role is the run's own, created by
+# account create's CloudFormation stack and deleted by account delete
+# --delete-role: an existing cluster-vending-provisioner role is never
+# touched.
+apiVersion: cluster-vending.io/v1
+kind: CloudAccount
+metadata:
+  name: demo-__RUN__
+  tenant: __TENANT__
+spec:
+  aws:
+    accountId: "__ACCOUNT_ID__"
+    role: cluster-vending-demo-__RUN__-provisioner

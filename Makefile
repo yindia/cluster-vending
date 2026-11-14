@@ -219,5 +219,8 @@ deploy-manifests: ## Render the controller's and the server's manifests into bin
 demo-validate: ## Parse hack/demo/demo.tape (vhs); nothing runs
 	vhs validate hack/demo/demo.tape
 
-demo: build demo-validate ## Record the end-to-end demo into bin/demo.gif and bin/demo.mp4 (REAL AWS: network, EKS create, automatic upgrade, delete; ~90 min) in DEMO_TENANT (default acme), which needs a verified account
-	PATH="$(CURDIR)/$(BIN_DIR):$$PATH" vhs hack/demo/demo.tape
+demo: build demo-validate ## Record the end-to-end demo into bin/demo.gif and bin/demo.mp4 (REAL AWS, ~90 min: account and its role, network, EKS create, automatic upgrade, delete everything); needs DEMO_ACCOUNT_ID and AWS credentials of that account; DEMO_RUN names the run (default: the time)
+	@test -n "$${DEMO_ACCOUNT_ID:-}" || { echo "export DEMO_ACCOUNT_ID=<12-digit account> first" >&2; exit 1; }
+	@aws sts get-caller-identity --query Account --output text | grep -qx "$${DEMO_ACCOUNT_ID}" || { echo "the AWS credentials are not of account $${DEMO_ACCOUNT_ID} (export them, or AWS_PROFILE)" >&2; exit 1; }
+	@rm -f $(BIN_DIR)/demo-failed.txt
+	@PATH="$(CURDIR)/$(BIN_DIR):$$PATH" vhs hack/demo/demo.tape || { cat $(BIN_DIR)/demo-failed.txt 2>/dev/null; echo "the recording stopped; clean up its run: hack/demo/README.md" >&2; exit 1; }

@@ -289,15 +289,27 @@ stores the desired state; it has no background loop.
   groups, add-ons, access entries, the OIDC identity provider
   configuration), where the provider takes a survivor over or AWS refuses
   the duplicate. Deleting such an object deletes its cloud resource first,
-  so a node group created again is a new node group. Kinds whose ID AWS
-  assigns are not created again blindly, because a new object would be a
-  second resource next to whatever survived: the encryption key, VPCs,
-  subnets, gateways, addresses, route tables, network ACLs, flow logs,
-  security groups and rules, launch templates, pod identity associations,
-  the IAM OIDC provider; nor is the EKS cluster. While one of those is
-  missing nothing is repaired and the owner reports it, as before. Not
-  repaired either: imported networks and clusters, anything being deleted,
-  and a node group being retired.
+  so a node group created again is a new node group.
+
+  Every other kind (the encryption key, VPCs, subnets, gateways, addresses,
+  route tables, network ACLs, flow logs, security groups and rules, launch
+  templates, pod identity associations, the IAM OIDC provider) has an ID
+  AWS assigns, so a new object would be a second resource. Such an object
+  is created again only with its **recorded cloud identity**: the external
+  name the platform stored when it last saw the object
+  (`ManagedResource.ExternalName`). It is created with that name in its
+  first write (`sequence.Item.ExternalName`), before anything else is
+  applied to it, so its provider takes the existing resource over. One
+  whose identity was never recorded (deleted before its provider created
+  the resource) is not created again, and while it is missing nothing is
+  repaired and the owner reports it. The EKS cluster is never created again.
+
+  Imported networks and clusters are repaired too: the object comes back
+  from what the import discovered, with its cloud identity and the same
+  read-only `Observe` policies. Taken-over ones are repaired from the set
+  their import discovered, like any other. Not repaired: blocked imports,
+  anything being deleted, a node group being retired, and an owner with a
+  paused object.
 - **Deletion.** With dependents (a network of an account, a cluster of a
   network) nothing is deleted and the condition `DeletionBlocked=True` names
   them. Without, the row is marked DELETING and the reconciler deletes the

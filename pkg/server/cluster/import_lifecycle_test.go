@@ -181,9 +181,10 @@ func TestTakeoverCreatesNoSecondCloudResource(t *testing.T) {
 }
 
 // After a takeover a deleted object is created again with the cloud
-// identity it adopted, so its provider finds the resource that is there;
-// while an object whose identity only the cloud knows is missing, nothing
-// is created again.
+// identity it adopted, so its provider finds the resource that is there.
+// That also holds for an object whose ID only the cloud knows (the key):
+// its identity is recorded, so it is created again with it, not as a
+// second key.
 func TestRepairAfterATakeoverKeepsTheAdoptedIdentity(t *testing.T) {
 	w := importWorld(t, terraformCluster())
 	ctx := t.Context()
@@ -212,15 +213,16 @@ func TestRepairAfterATakeoverKeepsTheAdoptedIdentity(t *testing.T) {
 		t.Errorf("recreated with external name %q, want the adopted default-ng: a second node group would be made", got)
 	}
 
-	// The key's ID is AWS's: never created again, and then nothing is.
+	// The key's ID is AWS's: it is created again with the recorded one.
 	keys := objectsOfKind(objectsOf(t, w, c.GetId()), "Key")
 	if len(keys) != 1 {
 		t.Fatalf("%d keys, want the carried-over one", len(keys))
 	}
-	if err := w.kube.Delete(ctx, keys[0]); err != nil {
-		t.Fatal(err)
+	keyID := keys[0].GetAnnotations()[crossplaneaws.ExternalNameAnnotation]
+	if keyID == "" {
+		t.Fatal("the carried-over key has no external name")
 	}
-	if err := w.kube.Delete(ctx, again); err != nil {
+	if err := w.kube.Delete(ctx, keys[0]); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -228,8 +230,48 @@ func TestRepairAfterATakeoverKeepsTheAdoptedIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	after := objectsOf(t, w, c.GetId())
-	if after["Key/"+keys[0].GetName()] != nil || after["NodeGroup/"+group.GetName()] != nil {
-		t.Error("objects were created again although the key, whose ID is AWS's, is missing")
+	key := objectsOf(t, w, c.GetId())["Key/"+keys[0].GetName()]
+	if key == nil {
+		t.Fatal("the deleted key was not created again")
+	}
+	if got := key.GetAnnotations()[crossplaneaws.ExternalNameAnnotation]; got != keyID {
+		t.Errorf("key recreated with external name %q, want %q: a second key would be made", got, keyID)
+	}
+}
+
+// An imported cluster that was not taken over gets a deleted object back,
+// observing the same resource: with its cloud identity and only Observe
+// policies, exactly as the import made it.
+func TestRepairOfAnImportedClusterObservesTheSameResource(t *testing.T) {
+	w := importWorld(t, terraformCluster())
+	ctx := t.Context()
+	c := importTF(t, w)
+	reconcile(t, w, c.GetId())
+	before := objectsOf(t, w, c.GetId())
+	keys := objectsOfKind(before, "Key")
+	if len(keys) != 1 {
+		t.Fatalf("%d keys, want the imported one", len(keys))
+	}
+	was := keys[0]
+	if err := w.kube.Delete(ctx, was); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		reconcile(t, w, c.GetId())
+	}
+
+	now := objectsOf(t, w, c.GetId())["Key/"+was.GetName()]
+	if now == nil {
+		t.Fatal("the deleted object of the imported cluster was not created again")
+	}
+	if a, b := was.GetAnnotations()[crossplaneaws.ExternalNameAnnotation], now.GetAnnotations()[crossplaneaws.ExternalNameAnnotation]; a == "" || a != b {
+		t.Errorf("external name %q became %q", a, b)
+	}
+	if got := policies(now); !slices.Equal(got, policies(was)) || slices.ContainsFunc(got, func(p string) bool { return p != "Observe" && p != "LateInitialize" }) {
+		t.Errorf("recreated with managementPolicies %v, want the import's %v (read-only)", got, policies(was))
+	}
+	if st := storedCluster(t, w, c.GetId()).GetStatus(); st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_IMPORTED {
+		t.Errorf("state = %s, want IMPORTED still", st.GetState())
 	}
 }

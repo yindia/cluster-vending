@@ -135,6 +135,9 @@ func (s *Reconciler) Apply(ctx context.Context, row *model.Cluster, a *model.Clo
 	if err != nil {
 		return err
 	}
+	if set, err = reconcile.WithRecordedNames(ctx, set, s.deps.Kube.Scheme()); err != nil {
+		return fault.New(fault.Internal, err.Error())
+	}
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
 	res, err := s.deps.Sequence().Apply(ctx, set, sequence.Keeping(s.deps.Inventory(owner), keep))
 	if err != nil {

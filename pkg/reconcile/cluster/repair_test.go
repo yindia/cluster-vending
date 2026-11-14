@@ -161,7 +161,8 @@ func TestMissingObject(t *testing.T) {
 		{name: "an object is missing", state: StateRunning, status: status(ready, missing), want: true},
 		{name: "missing while updating", state: StateUpdating, status: status(missing), want: true},
 		{name: "missing while it is deleted", state: StateDeleting, status: status(missing)},
-		{name: "an imported cluster", state: StateImported, status: status(missing)},
+		{name: "an imported cluster", state: StateImported, status: status(missing), want: true},
+		{name: "a blocked import", state: StateBlocked, status: status(missing)},
 		{name: "no status yet", state: StateProvisioning},
 		{name: "a status this build cannot read", state: StateRunning, status: []byte("{")},
 	}

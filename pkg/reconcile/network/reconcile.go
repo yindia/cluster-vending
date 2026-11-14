@@ -95,13 +95,14 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 // moveOn applies a network again while its generation or renderer version
 // is behind.
 //
-// A network rendered from its spec whose generation is applied is applied
-// once more when recorded objects were deleted from the management
-// cluster and may be created again (Deps.Repairable): the repair. Of a
-// network that is mostly the flow logs' role, policy and log group: its
-// VPC, subnets, gateways and route tables have IDs AWS assigns, and are
-// never created again blindly. An imported network, also after its
-// takeover, is not repaired: its objects are the discovered ones.
+// A network whose generation is applied is applied once more when
+// recorded objects were deleted from the management cluster and may be
+// created again (Deps.Repairable): the repair. Objects whose ID AWS
+// assigns (the VPC, subnets, gateways, route tables) are created again
+// only with their recorded cloud identity, so they take the existing
+// resource over; one never recorded is not. An imported network is
+// repaired too, Observe-only like its other objects, and so is a
+// taken-over one, from the set its import discovered.
 func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 	// Imported and not taken over: read-only. What the import left is
 	// remembered, and what was edited on the object is put back.
@@ -110,7 +111,7 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 	}
 	var repair []model.ManagedResource
 	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
-		if row.State == StateImported || row.State == StateBlocked || Discovering(row) || StoredImport(row) != nil {
+		if row.State == StateBlocked || Discovering(row) {
 			return nil
 		}
 		records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
@@ -146,11 +147,14 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		if err := s.keepDiscovered(ctx, row); err != nil {
 			return fmt.Errorf("keep what the import left: %w", err)
 		}
-		if row.State == StateImported && row.AppliedGeneration < row.Generation {
-			// The import was stored; its Observe-only objects are created here.
-			if err := s.applyImported(ctx, row); err != nil {
+		if row.State == StateImported && (row.AppliedGeneration < row.Generation || len(repair) > 0) {
+			// The import was stored; its Observe-only objects are created
+			// here, and created again (with their recorded identity) when
+			// one was deleted.
+			if err := s.applyImported(reconcile.Repairing(ctx, repair), row); err != nil {
 				return fmt.Errorf("apply: %w", err)
 			}
+			s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerNetwork, ID: row.ID}, repair)
 		}
 		return s.MarkApplied(ctx, row)
 	}
@@ -158,16 +162,17 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		// Taken over: the set its import discovered, applied as owned, with
 		// the network's labels as tags (also the rest of a takeover or an
 		// update that stopped half-way).
-		if err := s.applyOwned(ctx, row); err != nil {
+		if err := s.applyOwned(reconcile.Repairing(ctx, repair), row); err != nil {
 			return fmt.Errorf("apply: %w", err)
 		}
+		s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerNetwork, ID: row.ID}, repair)
 		return s.MarkApplied(ctx, row)
 	}
 	spec, err := SpecOf(row)
 	if err != nil {
 		return err
 	}
-	if err := s.Reapply(ctx, row, spec); err != nil {
+	if err := s.Reapply(reconcile.Repairing(ctx, repair), row, spec); err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}
 	if len(repair) > 0 {

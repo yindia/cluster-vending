@@ -130,6 +130,8 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 			if err := s.applyStoredImport(ctx, row); err != nil {
 				return fmt.Errorf("apply: %w", err)
 			}
+		} else if err := s.repairImported(ctx, row); err != nil {
+			return fmt.Errorf("repair: %w", err)
 		}
 		// Observed only, until TakeOverCluster. Counted as applied with this
 		// renderer, or a renderer change would list it as pending forever.

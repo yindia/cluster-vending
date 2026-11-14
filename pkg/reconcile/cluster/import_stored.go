@@ -12,6 +12,7 @@ import (
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // Keys of the stored adoption (a JSON object) under which an imported
@@ -133,4 +134,30 @@ func (s *Reconciler) applyStoredImport(ctx context.Context, row *model.Cluster) 
 		return storeError(err)
 	}
 	return s.applyImport(ctx, row, account, objects, identities)
+}
+
+// repairImported creates again, Observe-only like the others, the objects
+// of an imported cluster that were deleted from the management cluster:
+// every one carries the cloud identity it was imported with
+// (reconcile.Repairable), so the new object observes the same resource.
+// Its import's stored objects are applied once more, the missing ones with
+// their recorded identity (reconcile.Repairing). Nothing while the cluster
+// is paused, blocked or has nothing missing.
+func (s *Reconciler) repairImported(ctx context.Context, row *model.Cluster) error {
+	if row.State != StateImported || row.AppliedGeneration < row.Generation {
+		return nil
+	}
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
+	if err != nil {
+		return storeError(err)
+	}
+	repair, err := s.deps.Repairable(ctx, records)
+	if err != nil || len(repair) == 0 {
+		return err
+	}
+	if err := s.applyStoredImport(reconcile.Repairing(ctx, repair), row); err != nil {
+		return err
+	}
+	s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerCluster, ID: row.ID}, repair)
+	return nil
 }

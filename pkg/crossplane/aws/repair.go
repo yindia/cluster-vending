@@ -60,3 +60,23 @@ func Recreatable(apiVersion, kind string) bool {
 	}
 	return recreatable[schema.GroupKind{Group: gv.Group, Kind: kind}]
 }
+
+// notByName are the kinds that are never created again even with their
+// recorded cloud identity: the EKS cluster, since nothing of a cluster is
+// applied while its EKS cluster is not ACTIVE, so its object would not
+// come back in a repair and the cluster would wait for it for ever.
+var notByName = map[schema.GroupKind]bool{
+	awseks.CRDGroupVersion.WithKind("Cluster").GroupKind(): true,
+}
+
+// RecreatableByName reports whether an object of this API version and kind
+// may be created again with its recorded cloud identity (its
+// external name), which makes it take the existing resource over: every
+// kind but notByName.
+func RecreatableByName(apiVersion, kind string) bool {
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return false
+	}
+	return !notByName[schema.GroupKind{Group: gv.Group, Kind: kind}]
+}

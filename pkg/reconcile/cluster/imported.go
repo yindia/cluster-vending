@@ -48,7 +48,11 @@ func importSet(objects []client.Object) sequence.Set {
 // is not part of any later render.
 func (s *Reconciler) applyImport(ctx context.Context, row *model.Cluster, a *model.CloudAccount, objects []client.Object, identities map[string]string) error {
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCluster, ID: row.ID}
-	if _, err := s.deps.Sequence().Apply(ctx, importSet(objects), s.deps.Inventory(owner)); err != nil {
+	set, err := reconcile.WithRecordedNames(ctx, importSet(objects), s.deps.Kube.Scheme())
+	if err != nil {
+		return fault.New(fault.Internal, err.Error())
+	}
+	if _, err := s.deps.Sequence().Apply(ctx, set, s.deps.Inventory(owner)); err != nil {
 		s.logger().ErrorContext(ctx, "apply imported resources", "cluster_id", row.ID, "error", err)
 		return applyError(err)
 	}

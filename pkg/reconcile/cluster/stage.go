@@ -86,11 +86,11 @@ func (s *Reconciler) resumeCreate(ctx context.Context, row *model.Cluster, recor
 
 // MissingObject reports whether the row's recorded status names an object
 // that is gone from the management cluster, on a cluster the platform
-// applies (not imported, not being deleted). Such a cluster is looked at
+// applies or observes (not blocked, not being deleted). Such a cluster is looked at
 // again soon: the pass that finds the object missing may be the one that
 // creates it again (advance), or the object may come back.
 func MissingObject(row *model.Cluster) bool {
-	if row.State == StateDeleting || row.State == StateImported || row.State == StateBlocked {
+	if row.State == StateDeleting || row.State == StateBlocked {
 		return false
 	}
 	for _, v := range storedStatus(row).GetManagedResources() {
@@ -159,7 +159,7 @@ func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
 	if err := s.TagSubnets(ctx, row, t); err != nil {
 		return err
 	}
-	if err := s.Apply(ctx, row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
+	if err := s.Apply(reconcile.Repairing(ctx, repair), row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
 		return err
 	}
 	if len(repair) > 0 {

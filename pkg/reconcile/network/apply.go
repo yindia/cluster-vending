@@ -44,6 +44,10 @@ func (s *Reconciler) ApplySet(ctx context.Context, row *model.Network, a *model.
 		return sequence.Result{}, fault.New(fault.FailedPrecondition,
 			fmt.Sprintf("account %s is not fully bootstrapped; run BootstrapTenant again", a.ID))
 	}
+	set, err := reconcile.WithRecordedNames(ctx, set, s.deps.Kube.Scheme())
+	if err != nil {
+		return sequence.Result{}, fault.New(fault.Internal, err.Error())
+	}
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: a.ID, Kind: model.OwnerNetwork, ID: row.ID}
 	res, err := s.deps.Sequence().Apply(ctx, set, s.deps.Inventory(owner))
 	switch {

@@ -72,6 +72,16 @@ type Item struct {
 	// kube.ApplyObject makes it) before it is sent: for fields the
 	// provider's Go type always serializes and that must not be applied.
 	Adjust func(body *unstructured.Unstructured)
+	// ExternalName, when set, is the cloud resource the object stands for
+	// (its crossplane.io/external-name) as it was last known: for an
+	// object that was deleted from the management cluster and is created
+	// again. An object that does not exist is then created with this
+	// name in one write, before it is applied, so its provider never sees
+	// it without and takes the existing resource over instead of creating
+	// a second one. It is not part of the apply: an object that exists
+	// keeps the name it has, and one that brings its own name
+	// (Object's annotation) is applied as it is.
+	ExternalName string
 }
 
 // Set is the objects an owner should have, in the order they are applied.
@@ -318,15 +328,49 @@ func (e Engine) build(ctx context.Context, item *Item, ref managed.Ref, seen Obs
 // applyItem server-side applies one item, through its Adjust when it has
 // one.
 func (e Engine) applyItem(ctx context.Context, item Item) error {
-	if item.Adjust == nil {
+	if item.Adjust == nil && item.ExternalName == "" {
 		return kube.Apply(ctx, e.Objects.Kube, item.Object)
 	}
 	body, err := kube.ApplyObject(item.Object, e.scheme())
 	if err != nil {
 		return err
 	}
-	item.Adjust(body)
+	if item.Adjust != nil {
+		item.Adjust(body)
+	}
+	if err := e.createNamed(ctx, body, item.ExternalName); err != nil {
+		return err
+	}
 	return kube.Apply(ctx, e.Objects.Kube, body)
+}
+
+// adoptOwner is the field manager of an object created again with its
+// recorded external name (createNamed). Not the manager of the applies
+// (kube.FieldOwner): an apply that does not set the name then leaves it
+// alone, where it would remove a field of its own.
+const adoptOwner = kube.FieldOwner + "-adopt"
+
+// createNamed creates the object of body with externalName as its
+// external name, when the name is known, the body brings none and the
+// object does not exist. The create is the object's first write and
+// carries the name. An object that exists is left as it is (the create
+// answers AlreadyExists): its name is its provider's.
+func (e Engine) createNamed(ctx context.Context, body *unstructured.Unstructured, externalName string) error {
+	if externalName == "" || body.GetAnnotations()[managed.ExternalNameAnnotation] != "" {
+		return nil
+	}
+	named := body.DeepCopy()
+	annotations := named.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[managed.ExternalNameAnnotation] = externalName
+	named.SetAnnotations(annotations)
+	err := e.Objects.Kube.Create(ctx, named, client.FieldOwner(adoptOwner))
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create %s %s with its external name: %w", body.GetKind(), client.ObjectKeyFromObject(body), err)
+	}
+	return nil
 }
 
 // checks evaluates the conditions of one Apply; each is read once,

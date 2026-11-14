@@ -36,6 +36,9 @@ const (
 	// TenantServiceVerifyCloudAccountProcedure is the procedure name of the TenantService's
 	// VerifyCloudAccount RPC.
 	TenantServiceVerifyCloudAccountProcedure = "/cloud.v1.TenantService/VerifyCloudAccount"
+	// TenantServiceGetAccountOnboardingProcedure is the procedure name of the TenantService's
+	// GetAccountOnboarding RPC.
+	TenantServiceGetAccountOnboardingProcedure = "/cloud.v1.TenantService/GetAccountOnboarding"
 	// TenantServiceWhoAmIProcedure is the procedure name of the TenantService's WhoAmI RPC.
 	TenantServiceWhoAmIProcedure = "/cloud.v1.TenantService/WhoAmI"
 )
@@ -71,6 +74,14 @@ var (
 			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("VerifyCloudAccount"),
 			Procedure:        TenantServiceVerifyCloudAccountProcedure,
 			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+	tenantServiceGetAccountOnboardingSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("GetAccountOnboarding"),
+			Procedure:        TenantServiceGetAccountOnboardingProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
 	tenantServiceWhoAmISpec = sync.OnceValue(func() connect.Spec {
@@ -122,6 +133,17 @@ type TenantServiceClient interface {
 	// the request. The controller also checks when the account changes and
 	// every 6 hours.
 	VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error)
+	// Returns how the tenant creates, in one of its AWS accounts, the IAM
+	//   role the platform assumes there: the CloudFormation template of the
+	//   role (reader, updater or provisioner; the controller needs
+	//   provisioner), the stack's name and parameters (the platform's
+	//   management role, which the role trusts), and a console quick-create
+	//   link when the server knows where the templates are hosted. The server
+	//   makes no AWS call: the tenant creates the stack with its own
+	//   credentials, then bootstraps the account with the role's name and
+	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
+	//   no management role configured (aws-management-role-arn).
+	GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error)
 	// Returns the caller as the server sees it: who its token stands for and
 	// what the server's rules let it do. Any accepted caller may ask. Where
 	// the server does not authenticate (auth.mode none, or optional and no
@@ -174,6 +196,17 @@ type TenantServiceHandler interface {
 	// the request. The controller also checks when the account changes and
 	// every 6 hours.
 	VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error)
+	// Returns how the tenant creates, in one of its AWS accounts, the IAM
+	//   role the platform assumes there: the CloudFormation template of the
+	//   role (reader, updater or provisioner; the controller needs
+	//   provisioner), the stack's name and parameters (the platform's
+	//   management role, which the role trusts), and a console quick-create
+	//   link when the server knows where the templates are hosted. The server
+	//   makes no AWS call: the tenant creates the stack with its own
+	//   credentials, then bootstraps the account with the role's name and
+	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
+	//   no management role configured (aws-management-role-arn).
+	GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error)
 	// Returns the caller as the server sees it: who its token stands for and
 	// what the server's rules let it do. Any accepted caller may ask. Where
 	// the server does not authenticate (auth.mode none, or optional and no
@@ -190,6 +223,7 @@ func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandl
 		connect.Method{Spec: tenantServiceGetCloudAccountSpec(), Handler: adapter.getCloudAccount},
 		connect.Method{Spec: tenantServiceListCloudAccountsSpec(), Handler: adapter.listCloudAccounts},
 		connect.Method{Spec: tenantServiceVerifyCloudAccountSpec(), Handler: adapter.verifyCloudAccount},
+		connect.Method{Spec: tenantServiceGetAccountOnboardingSpec(), Handler: adapter.getAccountOnboarding},
 		connect.Method{Spec: tenantServiceWhoAmISpec(), Handler: adapter.whoAmI},
 	)
 }
@@ -211,6 +245,10 @@ func (UnimplementedTenantServiceHandler) ListCloudAccounts(context.Context, *v1.
 
 func (UnimplementedTenantServiceHandler) VerifyCloudAccount(context.Context, *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.VerifyCloudAccount is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.GetAccountOnboarding is not implemented")
 }
 
 func (UnimplementedTenantServiceHandler) WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error) {
@@ -248,6 +286,14 @@ func (c *tenantServiceClient) ListCloudAccounts(ctx context.Context, req *v1.Lis
 func (c *tenantServiceClient) VerifyCloudAccount(ctx context.Context, req *v1.VerifyCloudAccountRequest) (*v1.VerifyCloudAccountResponse, error) {
 	var res v1.VerifyCloudAccountResponse
 	if err := c.client.CallUnary(ctx, tenantServiceVerifyCloudAccountSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) GetAccountOnboarding(ctx context.Context, req *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error) {
+	var res v1.GetAccountOnboardingResponse
+	if err := c.client.CallUnary(ctx, tenantServiceGetAccountOnboardingSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -305,6 +351,18 @@ func (h tenantServiceHandler) verifyCloudAccount(ctx context.Context, _ connect.
 		return err
 	}
 	res, err := h.svc.VerifyCloudAccount(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) getAccountOnboarding(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetAccountOnboardingRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetAccountOnboarding(ctx, &req)
 	if err != nil {
 		return err
 	}

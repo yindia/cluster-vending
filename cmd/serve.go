@@ -16,6 +16,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/management"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server"
+	"github.com/yindia/cluster-vending/pkg/server/tenant"
 )
 
 func newServeCmd(g *globals) *cobra.Command {
@@ -101,7 +102,10 @@ func newServeCmd(g *globals) *cobra.Command {
 			}()
 			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
 			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
-				server.WithCatalog(catalog))
+				server.WithCatalog(catalog),
+				// What account onboarding prints; the server makes no AWS call.
+				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN,
+					TemplateURL: cfg.CloudFormationTemplateURL}))
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}

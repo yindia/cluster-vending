@@ -81,18 +81,27 @@ func CreateStackCommand(s Stack, path string) string {
 	}, " ")
 }
 
+// TemplateURL is where a role's template is under baseURL (the templates
+// uploaded there by file name); "" for a base that is not an https URL.
+func TemplateURL(baseURL, role string) string {
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Scheme != "https" || base.Host == "" {
+		return ""
+	}
+	return base.JoinPath(FileName(role)).String()
+}
+
 // QuickCreateURL is the CloudFormation console link that creates the
 // stack in the account the browser is signed in to, with the template
 // hosted under baseURL (an HTTPS location the console can read, such as
 // an S3 bucket the templates were uploaded to).
 func QuickCreateURL(baseURL string, s Stack) (string, error) {
-	base, err := url.Parse(baseURL)
-	if err != nil || base.Scheme != "https" || base.Host == "" {
+	template := TemplateURL(baseURL, s.Role)
+	if template == "" {
 		return "", fmt.Errorf("the templates' base URL must be an https URL, got %q", baseURL)
 	}
-	template := base.JoinPath(FileName(s.Role))
 	query := url.Values{}
-	query.Set("templateURL", template.String())
+	query.Set("templateURL", template)
 	query.Set("stackName", RoleName(s.Role))
 	query.Set("param_"+ParameterManagementRoleARN, s.ManagementRoleARN)
 	console := url.URL{Scheme: "https", Host: "console.aws.amazon.com", Path: "/cloudformation/home",

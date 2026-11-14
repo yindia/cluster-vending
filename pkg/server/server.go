@@ -16,6 +16,7 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/yindia/cluster-vending/pkg/auth"
+	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/admin"
@@ -37,8 +38,16 @@ const readHeaderTimeout = 10 * time.Second
 type Option func(*options)
 
 type options struct {
-	auth    authn.Options
-	catalog reconcile.PlatformSource
+	auth       authn.Options
+	catalog    reconcile.PlatformSource
+	onboarding tenant.Onboarding
+}
+
+// WithOnboarding gives TenantService.GetAccountOnboarding the platform's
+// management role and where the account role templates are hosted.
+// Without it GetAccountOnboarding answers FAILED_PRECONDITION.
+func WithOnboarding(o tenant.Onboarding) Option {
+	return func(opts *options) { opts.onboarding = o }
 }
 
 // WithCatalog gives the component service where it reads the component
@@ -75,13 +84,15 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 	server := connect.NewServer(service.Faults, authn.Interceptor(o.auth))
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
-	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d))
+	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d, tenant.WithOnboarding(o.onboarding)))
 	cloudv1connect.RegisterAdminServiceHandler(server, admin.NewService(d))
 	cloudv1connect.RegisterComponentServiceHandler(server, component.NewService(d, o.catalog))
 
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
 	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
+	// The account role templates, for tenants to create their stack.
+	cloudformation.Mount(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if ready != nil && !ready() {

@@ -90,6 +90,13 @@ type Options struct {
 	// Regions is --region of account verify: regions to check besides
 	// those of the account's networks.
 	Regions []string
+	// Role, AccountID, StackRegion and TemplateOut are account template's
+	// --role, --account-id, --region and --out (where the template is
+	// written; empty: a new file in the temporary directory).
+	Role, AccountID, StackRegion, TemplateOut string
+	// Server is the API's base URL (--server): where the account role
+	// templates are served too.
+	Server string
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.
 	AcknowledgeNotImported bool

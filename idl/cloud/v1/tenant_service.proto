@@ -62,6 +62,20 @@ service TenantService {
     option idempotency_level = IDEMPOTENT;
   }
 
+  // Returns how the tenant creates, in one of its AWS accounts, the IAM
+  //   role the platform assumes there: the CloudFormation template of the
+  //   role (reader, updater or provisioner; the controller needs
+  //   provisioner), the stack's name and parameters (the platform's
+  //   management role, which the role trusts), and a console quick-create
+  //   link when the server knows where the templates are hosted. The server
+  //   makes no AWS call: the tenant creates the stack with its own
+  //   credentials, then bootstraps the account with the role's name and
+  //   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
+  //   no management role configured (aws-management-role-arn).
+  rpc GetAccountOnboarding(GetAccountOnboardingRequest) returns (GetAccountOnboardingResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // Returns the caller as the server sees it: who its token stands for and
   // what the server's rules let it do. Any accepted caller may ask. Where
   // the server does not authenticate (auth.mode none, or optional and no
@@ -168,6 +182,66 @@ message VerifyCloudAccountResponse {
   // The account as it is now: its access is the last check's until the
   // controller has run the one asked for.
   CloudAccount account = 1;
+}
+
+message GetAccountOnboardingRequest {
+  // Same rules as BootstrapTenantRequest.tenant_id.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // The role: reader, updater or provisioner. Empty: provisioner, the one
+  // the controller needs to create and delete networks and clusters.
+  string role = 2 [(buf.validate.field).string = {
+    in: [
+      "",
+      "reader",
+      "updater",
+      "provisioner"
+    ]
+  }];
+  // The AWS region to create the stack in (IAM is global; a stack is
+  // regional). Empty: us-east-1.
+  string region = 3 [(buf.validate.field).string = {
+    max_len: 32
+    pattern: "^([a-z]{2}(-[a-z]+)+-[0-9]+)?$"
+  }];
+  // The tenant account the stack is for (12 digits), shown in the
+  // instructions; optional.
+  string account_id = 4 [(buf.validate.field).string.pattern = "^([0-9]{12})?$"];
+}
+
+message GetAccountOnboardingResponse {
+  AccountOnboarding onboarding = 1;
+}
+
+// AccountOnboarding is how a tenant creates the platform's role in one of
+// its AWS accounts with CloudFormation.
+message AccountOnboarding {
+  // reader, updater or provisioner.
+  string role = 1;
+  // The IAM role the stack creates (cluster-vending-<role>): the
+  // CloudAccount's aws.role.
+  string role_name = 2;
+  // The stack's name (the role's name).
+  string stack_name = 3;
+  // The stack's region.
+  string region = 4;
+  // The account the stack is for, as asked; empty when not given.
+  string account_id = 5;
+  // The template's ManagementRoleArn parameter: the platform's management
+  // role, the only principal the role trusts.
+  string management_role_arn = 6;
+  // The CloudFormation template (YAML).
+  string template_body = 7;
+  // The template's file name; also its name under the hosted location.
+  string template_file = 8;
+  // The template's HTTPS URL and the console's quick-create link, when the
+  // server knows where the templates are hosted
+  // (cloudformation-template-url); empty otherwise.
+  string template_url = 9;
+  string console_url = 10;
 }
 
 message ListCloudAccountsRequest {

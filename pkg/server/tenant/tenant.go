@@ -31,12 +31,22 @@ const (
 )
 
 // TenantService implements cloud.v1.TenantService.
-type TenantService struct{ deps reconcile.Deps }
+type TenantService struct {
+	deps reconcile.Deps
+	// onboarding is what GetAccountOnboarding answers with.
+	onboarding Onboarding
+}
 
 var _ cloudv1connect.TenantServiceHandler = (*TenantService)(nil)
 
 // NewTenantService returns the TenantService.
-func NewTenantService(d reconcile.Deps) *TenantService { return &TenantService{deps: d} }
+func NewTenantService(d reconcile.Deps, opts ...Option) *TenantService {
+	s := &TenantService{deps: d}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
 
 // rec is the account Reconciler on the service's dependencies: what
 // applies and reads the account's objects in the management cluster.

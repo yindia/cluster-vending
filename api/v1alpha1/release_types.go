@@ -261,6 +261,76 @@ type TierStatus struct {
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
+// MaxRolloutClusters is how many clusters ChannelRollout lists in
+// wouldStart and in blocked.
+const MaxRolloutClusters = 20
+
+// ChannelRollout is the rollout of a channel's Kubernetes minor to its
+// automatic clusters, one minor at a time.
+type ChannelRollout struct {
+	// TargetMinor is the minor the channel's clusters move to: the one
+	// its release puts on the channel.
+	// +optional
+	TargetMinor string `json:"targetMinor,omitempty"`
+	// ReportOnly: automatic upgrades are off (the controller's
+	// automatic-upgrades setting); the rollout is planned and reported,
+	// no cluster is upgraded.
+	// +optional
+	ReportOnly bool `json:"reportOnly,omitempty"`
+	// Waiting says why no (more) cluster starts now; when Halted, why the
+	// rollout halted.
+	// +optional
+	Waiting string `json:"waiting,omitempty"`
+	// Halted: more clusters of a tier failed than spec.policy.maxFailed
+	// allows; no cluster starts until they are fixed.
+	// +optional
+	Halted bool `json:"halted,omitempty"`
+	// Done: every cluster of the channel runs its minor, or is kept back
+	// by its own gates (blocked).
+	// +optional
+	Done bool `json:"done,omitempty"`
+	// WouldStart are the clusters (namespace/name) whose upgrade starts
+	// now; with ReportOnly, those it would start. At most 20.
+	// +optional
+	// +kubebuilder:validation:MaxItems=20
+	WouldStart []string `json:"wouldStart,omitempty"`
+	// Members counts the channel's clusters per tier and state.
+	// +optional
+	Members []RolloutTierCount `json:"members,omitempty"`
+	// Blocked are clusters kept back by their own gates, with the first
+	// reason; they do not hold the rollout back. At most 20.
+	// +optional
+	// +kubebuilder:validation:MaxItems=20
+	Blocked []BlockedCluster `json:"blocked,omitempty"`
+}
+
+// RolloutTierCount counts one tier's clusters by rollout state.
+type RolloutTierCount struct {
+	Tier ClusterTier `json:"tier"`
+	// +optional
+	Pending int32 `json:"pending,omitempty"`
+	// +optional
+	InProgress int32 `json:"inProgress,omitempty"`
+	// +optional
+	Succeeded int32 `json:"succeeded,omitempty"`
+	// +optional
+	Failed int32 `json:"failed,omitempty"`
+	// +optional
+	Blocked int32 `json:"blocked,omitempty"`
+}
+
+// BlockedCluster is a cluster the rollout passes over, and why.
+type BlockedCluster struct {
+	// Cluster is namespace/name.
+	Cluster string `json:"cluster"`
+	// Gate is the code of the first reason (MANUAL, MAINTENANCE_WINDOW,
+	// DEPRECATIONS, ...).
+	Gate string `json:"gate"`
+	// Message is that reason, for the cluster's users.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // ChannelHistoryEntry is one release a channel offered.
 type ChannelHistoryEntry struct {
 	Release string `json:"release"`
@@ -286,12 +356,18 @@ type ReleaseChannelStatus struct {
 	// minor its automatic clusters run. Empty when it puts none.
 	// +optional
 	KubernetesMinor string `json:"kubernetesMinor,omitempty"`
-	// Stage is the tier being rolled out (rollouts: later).
+	// Stage is the tier the Kubernetes rollout is at (or waits for):
+	// Tier2 first, then Tier1, then Tier0.
 	// +optional
 	Stage ClusterTier `json:"stage,omitempty"`
-	// Tiers is the progress per tier (rollouts: later).
+	// Tiers is the rollout's progress per tier: Done clusters run the
+	// channel's minor, Held ones are kept back by a ReleaseHold.
 	// +optional
 	Tiers []TierStatus `json:"tiers,omitempty"`
+	// Rollout is what the rollout of the channel's Kubernetes minor does
+	// now: which clusters start, or why none does.
+	// +optional
+	Rollout *ChannelRollout `json:"rollout,omitempty"`
 	// History: the releases the channel offered, newest first, at most 20.
 	// +optional
 	// +kubebuilder:validation:MaxItems=20
@@ -315,6 +391,8 @@ type ReleaseChannelStatus struct {
 // +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion`
 // +kubebuilder:printcolumn:name="Paused",type=boolean,JSONPath=`.spec.paused`
 // +kubebuilder:printcolumn:name="Offering",type=string,JSONPath=`.status.conditions[?(@.type=="Offering")].status`
+// +kubebuilder:printcolumn:name="Stage",type=string,JSONPath=`.status.stage`
+// +kubebuilder:printcolumn:name="Waiting",type=string,JSONPath=`.status.rollout.waiting`
 type ReleaseChannel struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

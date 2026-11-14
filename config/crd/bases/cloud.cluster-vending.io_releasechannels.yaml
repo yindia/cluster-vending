@@ -32,6 +32,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Offering")].status
       name: Offering
       type: string
+    - jsonPath: .status.stage
+      name: Stage
+      type: string
+    - jsonPath: .status.rollout.waiting
+      name: Waiting
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -214,15 +220,120 @@ spec:
                   release counts as completed upstream as soon as the upstream offers
                   it).
                 type: string
+              rollout:
+                description: |-
+                  Rollout is what the rollout of the channel's Kubernetes minor does
+                  now: which clusters start, or why none does.
+                properties:
+                  blocked:
+                    description: |-
+                      Blocked are clusters kept back by their own gates, with the first
+                      reason; they do not hold the rollout back. At most 20.
+                    items:
+                      description: BlockedCluster is a cluster the rollout passes
+                        over, and why.
+                      properties:
+                        cluster:
+                          description: Cluster is namespace/name.
+                          type: string
+                        gate:
+                          description: |-
+                            Gate is the code of the first reason (MANUAL, MAINTENANCE_WINDOW,
+                            DEPRECATIONS, ...).
+                          type: string
+                        message:
+                          description: Message is that reason, for the cluster's users.
+                          type: string
+                      required:
+                      - cluster
+                      - gate
+                      type: object
+                    maxItems: 20
+                    type: array
+                  done:
+                    description: |-
+                      Done: every cluster of the channel runs its minor, or is kept back
+                      by its own gates (blocked).
+                    type: boolean
+                  halted:
+                    description: |-
+                      Halted: more clusters of a tier failed than spec.policy.maxFailed
+                      allows; no cluster starts until they are fixed.
+                    type: boolean
+                  members:
+                    description: Members counts the channel's clusters per tier and
+                      state.
+                    items:
+                      description: RolloutTierCount counts one tier's clusters by
+                        rollout state.
+                      properties:
+                        blocked:
+                          format: int32
+                          type: integer
+                        failed:
+                          format: int32
+                          type: integer
+                        inProgress:
+                          format: int32
+                          type: integer
+                        pending:
+                          format: int32
+                          type: integer
+                        succeeded:
+                          format: int32
+                          type: integer
+                        tier:
+                          description: |-
+                            ClusterTier is how sensitive a cluster is. Within a release channel a
+                            release reaches Tier2 clusters first, then Tier1, then Tier0. Stored
+                            only for now: nothing acts on it yet.
+                          enum:
+                          - Tier0
+                          - Tier1
+                          - Tier2
+                          type: string
+                      required:
+                      - tier
+                      type: object
+                    type: array
+                  reportOnly:
+                    description: |-
+                      ReportOnly: automatic upgrades are off (the controller's
+                      automatic-upgrades setting); the rollout is planned and reported,
+                      no cluster is upgraded.
+                    type: boolean
+                  targetMinor:
+                    description: |-
+                      TargetMinor is the minor the channel's clusters move to: the one
+                      its release puts on the channel.
+                    type: string
+                  waiting:
+                    description: |-
+                      Waiting says why no (more) cluster starts now; when Halted, why the
+                      rollout halted.
+                    type: string
+                  wouldStart:
+                    description: |-
+                      WouldStart are the clusters (namespace/name) whose upgrade starts
+                      now; with ReportOnly, those it would start. At most 20.
+                    items:
+                      type: string
+                    maxItems: 20
+                    type: array
+                type: object
               stage:
-                description: 'Stage is the tier being rolled out (rollouts: later).'
+                description: |-
+                  Stage is the tier the Kubernetes rollout is at (or waits for):
+                  Tier2 first, then Tier1, then Tier0.
                 enum:
                 - Tier0
                 - Tier1
                 - Tier2
                 type: string
               tiers:
-                description: 'Tiers is the progress per tier (rollouts: later).'
+                description: |-
+                  Tiers is the rollout's progress per tier: Done clusters run the
+                  channel's minor, Held ones are kept back by a ReleaseHold.
                 items:
                   description: TierStatus is the progress of the offered release in
                     one tier.

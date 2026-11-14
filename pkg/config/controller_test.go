@@ -62,6 +62,7 @@ func TestLoadController(t *testing.T) {
 		"credentials":     {config.FlagProviderCredentialsSecret: "aws-local"},
 		"workers zero":    {config.FlagReconcileWorkers: "0"},
 		"workers word":    {config.FlagReconcileWorkers: "many"},
+		"upgrades":        {config.FlagAutomaticUpgrades: "soon"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
 			t.Errorf("%s: %v, want an error naming the flag", name, err)
@@ -81,6 +82,19 @@ func TestReconcileWorkers(t *testing.T) {
 	}
 }
 
+// --automatic-upgrades is off unless turned on: the rollout of a
+// channel's Kubernetes minor is then planned and reported only.
+func TestAutomaticUpgrades(t *testing.T) {
+	cfg, err := config.LoadController(nil, lookupIn(management(nil)), nil)
+	if err != nil || cfg.AutomaticUpgrades {
+		t.Errorf("default: %v (%v), want off", cfg.AutomaticUpgrades, err)
+	}
+	cfg, err = config.LoadController(nil, lookupIn(management(map[string]string{config.EnvAutomaticUpgrades: "true"})), nil)
+	if err != nil || !cfg.AutomaticUpgrades {
+		t.Errorf("CV_AUTOMATIC_UPGRADES=true: %v (%v), want on", cfg.AutomaticUpgrades, err)
+	}
+}
+
 // The controller takes exactly these settings; everything else about how
 // the providers run is the platform's (or managed outside it).
 func TestControllerSettingsAreFew(t *testing.T) {
@@ -91,7 +105,7 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagRecommendations,
-		config.FlagReconcileWorkers, config.FlagProviderCredentialsSecret, config.FlagSkipTenantRole}
+		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagProviderCredentialsSecret, config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)
 	}

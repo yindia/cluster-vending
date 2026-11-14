@@ -102,6 +102,9 @@ type Deps struct {
 	// Workers is how many accounts, networks and clusters of each kind are
 	// reconciled at once (objectOptions); 0 is one.
 	Workers int
+	// AutomaticUpgrades: the rollout controller upgrades automatic
+	// clusters; off, it plans and reports the rollout only.
+	AutomaticUpgrades bool
 }
 
 func (d Deps) logger() *slog.Logger {
@@ -129,6 +132,9 @@ func SetupAll(mgr ctrl.Manager, d Deps) error {
 	}
 	if err := setupReleases(mgr, d); err != nil {
 		return fmt.Errorf("set up the release controllers: %w", err)
+	}
+	if err := NewRolloutReconciler(d).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("set up the rollout controller: %w", err)
 	}
 	if err := setupComponentDefinitions(mgr); err != nil {
 		return fmt.Errorf("set up the component definition controller: %w", err)

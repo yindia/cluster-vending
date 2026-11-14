@@ -96,6 +96,8 @@ const (
 	ReasonReleaseInvalid              = "ReleaseInvalid"
 	ReasonChannelOffers               = "ChannelOffers"
 	ReasonChannelCannotMove           = "ChannelCannotMove"
+	ReasonRolloutStage                = "RolloutStage"
+	ReasonRolloutHalted               = "RolloutHalted"
 )
 
 // Kinds of the objects events are about.

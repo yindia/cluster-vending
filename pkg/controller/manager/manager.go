@@ -76,6 +76,9 @@ type Options struct {
 	// ReconcileWorkers is how many accounts, networks and clusters of each
 	// kind are reconciled at once (0: one).
 	ReconcileWorkers int
+	// AutomaticUpgrades: upgrade automatic clusters to their channel's
+	// Kubernetes minor; off, the rollout is planned and reported only.
+	AutomaticUpgrades bool
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -194,7 +197,7 @@ func Run(ctx context.Context, o Options) error {
 	// What happens to accounts, networks, clusters and releases is also a
 	// Kubernetes event of the object (docs/events.md).
 	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
-	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers}
+	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades}
 	if err := Setup(mgr, deps); err != nil {
 		return err
 	}

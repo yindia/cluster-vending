@@ -116,6 +116,7 @@ and `--log-level`, and only these:
 | `--recover-stuck-releases` | default `true`: recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes) by removing the Helm record of the stuck revision in the workload cluster, at most 3 times per component version ([catalog.md](catalog.md), "When a component fails"); `false` leaves it failed for a person |
 | `--recommendations` | default `true`: every five minutes, sample each running cluster for resource recommendations (read-only: workloads, metrics-server usage, the cluster's own Vertical Pod Autoscalers) and record a week of usage in the tenant namespace ([recommendations.md](recommendations.md)); `false` records nothing |
 | `--reconcile-workers` | default `8`: how many cloud accounts, networks and clusters of each kind are reconciled at once; one object is never reconciled twice at the same time. The release, catalog, deprecation and recommendation controllers keep one worker |
+| `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel only; no cluster is upgraded (see "Rollout of a channel's Kubernetes minor"). The upgrade step is not built yet |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 
@@ -330,6 +331,42 @@ in those regions too.
 
 Who reconciles: this controller, and nothing else. The API server only
 stores the desired state; it has no background loop.
+
+## Rollout of a channel's Kubernetes minor
+
+Each ReleaseChannel's release puts one Kubernetes minor on it
+(`pkg/catalog/release.yaml`, `channel:` on the minor; `status.kubernetesMinor`).
+The rollout controller plans how the channel's clusters with `upgradeMode:
+Automatic` move to that minor and writes the plan to the channel's status.
+**It does not upgrade any cluster yet**: with `--automatic-upgrades` off (the
+default, and for now the only behaviour) `status.rollout.reportOnly` is true
+and `wouldStart` lists the clusters an upgrade would start on.
+
+The plan (`pkg/upgrade`):
+
+- A cluster moves one minor at a time toward its channel's minor and is
+  never moved down; a cluster ahead of its channel is not part of the rollout.
+- Tier2 clusters go first, then Tier1, then Tier0 (an unset tier is Tier0).
+  Within a tier at most `spec.policy.maxInProgress` upgrade at once (Tier0:
+  one); the next tier starts once the tier before is done and
+  `spec.policy.soak` (or `soakPerTier[<tier>]`) has passed since its last
+  upgrade ended. More than `spec.policy.maxFailed` failures in a tier halt the
+  channel (`rollout.halted`, a `RolloutHalted` event).
+- Before a cluster starts, its own gates are checked: Manual mode, paused,
+  held by a ReleaseHold, not Ready, platform components not Ready, no
+  deprecation scan for the target minor or removed APIs in use, outside its
+  maintenance window. A cluster blocked by its gates is listed in
+  `rollout.blocked` with the first reason and does not hold the rollout back.
+- `spec.paused` on the channel: the plan is reported, nothing starts.
+
+```sh
+kubectl get releasechannels          # STAGE and WAITING columns
+kubectl get releasechannel stable -o jsonpath='{.status.rollout}'
+```
+
+A pass runs when the channel, its release, a ReleaseHold or what the rollout
+reads of a cluster changes, when a soak ends or a blocking window opens, and
+every 10 minutes.
 
 ## What a controller does
 

@@ -221,17 +221,6 @@ func newAccountCmd() *cobra.Command {
 	})
 }
 
-// newBootstrapCmd is the old name of account: hidden, and each of its
-// commands says on stderr that it is deprecated.
-func newBootstrapCmd() *cobra.Command {
-	c := newAccountCmd()
-	c.Use, c.Hidden = "bootstrap", true
-	for _, sub := range c.Commands() {
-		sub.Deprecated = "use \"account " + sub.Name() + "\""
-	}
-	return c
-}
-
 func newNetworkCmd() *cobra.Command {
 	verbs := crud("network", cli.KindNetwork, cli.NetworkCreate, cli.NetworkGet, cli.NetworkList, cli.NetworkUpdate, cli.NetworkDelete)
 	verbs = append(verbs,

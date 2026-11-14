@@ -79,7 +79,6 @@ func NewRootCmd() *cobra.Command {
 		newServeCmd(g),
 		newControllerCmd(g),
 		newAccountCmd(),
-		newBootstrapCmd(),
 		newNetworkCmd(),
 		newClusterCmd(),
 		newComponentCmd(),

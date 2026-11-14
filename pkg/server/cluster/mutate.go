@@ -38,10 +38,13 @@ const (
 	pathUpgradeMode    = "spec.upgrade_mode"
 	pathReleaseChannel = "spec.release_channel"
 	pathTier           = "spec.tier"
+	// When an automatic upgrade may start: read by the rollout, never
+	// rendered.
+	pathMaintenanceWindow = "spec.maintenance_window"
 )
 
 // releasePaths are the paths of releaseOnly updates.
-var releasePaths = []string{pathUpgradeMode, pathReleaseChannel, pathTier}
+var releasePaths = []string{pathUpgradeMode, pathReleaseChannel, pathTier, pathMaintenanceWindow}
 
 // releaseOnly reports whether every path of an update is one of
 // releasePaths: the update changes no cloud resource.
@@ -61,6 +64,9 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
 	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
 	pathTier:           func(dst, src *cloudv1.ClusterSpec) { dst.Tier = src.GetTier() },
+	pathMaintenanceWindow: func(dst, src *cloudv1.ClusterSpec) {
+		dst.MaintenanceWindow = src.GetMaintenanceWindow()
+	},
 	pathKubernetesVersion: func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.KubernetesVersion = src.GetControlPlane().GetKubernetesVersion()
 	},

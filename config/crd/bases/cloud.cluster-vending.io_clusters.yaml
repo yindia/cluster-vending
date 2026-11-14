@@ -757,6 +757,42 @@ spec:
                 - message: a takeover cannot be undone
                   rule: '!has(oldSelf.takeOver) || !oldSelf.takeOver || (has(self.takeOver)
                     && self.takeOver)'
+              maintenanceWindow:
+                description: |-
+                  maintenanceWindow is when the platform may start an automatic upgrade
+                  of the cluster. Unset: at any time. Only an upgrade's start must fall
+                  inside it; a started upgrade runs to its end. Mutable.
+                properties:
+                  days:
+                    description: 'days the window opens on. Empty: every day.'
+                    items:
+                      description: Weekday is a day of the week.
+                      enum:
+                      - Monday
+                      - Tuesday
+                      - Wednesday
+                      - Thursday
+                      - Friday
+                      - Saturday
+                      - Sunday
+                      type: string
+                    maxItems: 7
+                    type: array
+                    x-kubernetes-list-type: set
+                  duration:
+                    description: |-
+                      duration is how long the window stays open, 1h to 24h: "4h", "90m",
+                      "1h30m".
+                    pattern: ^([0-9]+h)?([0-9]+m)?$
+                    type: string
+                  start:
+                    description: start is when the window opens, "HH:MM" in UTC.
+                    pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+                    type: string
+                required:
+                - duration
+                - start
+                type: object
               network:
                 description: |-
                   network is where the cluster runs: its Network (which owns the

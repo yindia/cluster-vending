@@ -277,6 +277,7 @@ Common spec:
 | `spec.release_channel` | no | stays unset | yes; changes no cloud resource |
 | `spec.tier` | no | `CLUSTER_TIER_0` | yes; changes no cloud resource |
 | `spec.upgrade_mode` | no | `UPGRADE_MODE_MANUAL` | yes; changes no cloud resource |
+| `spec.maintenance_window` | no; with it, `start` (`HH:MM`, UTC) and `duration` (`1h` to `24h`, like `4h`, `90m`, `1h30m`); `days` (`WEEKDAY_MONDAY` to `WEEKDAY_SUNDAY`, each once) is optional | none: an upgrade may start at any time | yes; changes no cloud resource |
 
 AWS block (`spec.aws`, required, may be empty: `aws: {}`):
 
@@ -327,6 +328,7 @@ spec.aws.default_node_pool.ami_type
 spec.upgrade_mode
 spec.release_channel
 spec.tier
+spec.maintenance_window
 ```
 
 `pkg/server/cluster/mutate.go` (`specPaths`) is the source of this list. Any
@@ -350,6 +352,25 @@ cluster's state as it is. An unset tier is stored as `CLUSTER_TIER_0` and an
 unset mode as `UPGRADE_MODE_MANUAL`, on create and on update; an unset
 channel stays unset. An imported cluster has all three unset until it is
 taken over.
+
+Maintenance window: `spec.maintenance_window` is when an automatic upgrade
+of the cluster may start, every week in UTC: on each of `days` (every day
+when empty), from `start` for `duration`. A window may run past midnight:
+`days: [WEEKDAY_SATURDAY]`, `start: "23:00"`, `duration: "4h"` is open from
+Saturday 23:00 to Sunday 03:00. Only an upgrade's start must fall inside the
+window; an upgrade that started runs to its end, since stopping EKS halfway
+is worse than finishing late. An update with the path and no window removes
+it. Like the release fields, it renders nothing and nothing acts on it yet.
+
+```yaml
+spec:
+  maintenanceWindow:
+    days: [WEEKDAY_SATURDAY, WEEKDAY_SUNDAY]
+    start: "02:00"
+    duration: 4h
+```
+
+On the `Cluster` kind the days are spelled `Monday` to `Sunday`.
 
 Status (`ClusterStatus`): `state`, `message`, `observed_generation`,
 `conditions` (`Ready`, and `Synced` when a resource failed), `endpoint`

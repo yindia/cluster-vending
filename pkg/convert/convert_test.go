@@ -157,6 +157,7 @@ func TestUnsetStaysUnset(t *testing.T) {
 func TestEnumSpellings(t *testing.T) {
 	spec, _ := convert.ClusterSpecToAPI(&cloudv1.ClusterSpec{
 		ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_0,
+		MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY}},
 		DefaultNodePool: &cloudv1.NodePoolSpec{CapacityType: cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND,
 			Taints: []*cloudv1.Taint{{Key: "k", Effect: cloudv1.TaintEffect_TAINT_EFFECT_PREFER_NO_SCHEDULE}}},
 		Access: &cloudv1.AccessSpec{AccessEntries: []*cloudv1.AccessEntry{{Type: cloudv1.AccessEntryType_ACCESS_ENTRY_TYPE_EC2_LINUX,
@@ -172,6 +173,7 @@ func TestEnumSpellings(t *testing.T) {
 	for got, want := range map[string]string{
 		string(spec.ReleaseChannel):                                          "Beta",
 		string(spec.Tier):                                                    "Tier0",
+		string(spec.MaintenanceWindow.Days[0]):                               "Saturday",
 		string(spec.DefaultNodePool.CapacityType):                            "OnDemand",
 		string(spec.DefaultNodePool.Taints[0].Effect):                        "PreferNoSchedule",
 		string(spec.Access.AccessEntries[0].Type):                            "EC2_LINUX",

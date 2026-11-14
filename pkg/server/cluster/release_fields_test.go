@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
+	"google.golang.org/protobuf/proto"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
-// The upgrade mode, the release channel and the tier are updatable. An
+// The upgrade mode, the release channel, the tier and the maintenance
+// window are updatable. An
 // update of only these stores them and changes no cloud resource: the
 // generation counts as applied at once, the cluster's state stays, and a
 // reconcile renders exactly the objects it had.
@@ -21,8 +23,9 @@ func TestReleaseFieldsAreUpdatableWithoutTouchingTheCloud(t *testing.T) {
 	objects := objectsOf(t, w, w.row.ID)
 
 	spec := &cloudv1.ClusterSpec{UpgradeMode: cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
-		ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_2}
-	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, pathUpgradeMode, pathReleaseChannel, pathTier)); err != nil {
+		ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_2,
+		MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY}, Start: "02:00", Duration: "4h"}}
+	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, pathUpgradeMode, pathReleaseChannel, pathTier, pathMaintenanceWindow)); err != nil {
 		t.Fatalf("UpdateCluster: %v", err)
 	}
 	after := w.cluster(t)
@@ -35,8 +38,9 @@ func TestReleaseFieldsAreUpdatableWithoutTouchingTheCloud(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stored.GetUpgradeMode() != spec.GetUpgradeMode() || stored.GetReleaseChannel() != spec.GetReleaseChannel() ||
-		stored.GetTier() != spec.GetTier() {
-		t.Errorf("stored mode %s, channel %s, tier %s", stored.GetUpgradeMode(), stored.GetReleaseChannel(), stored.GetTier())
+		stored.GetTier() != spec.GetTier() || !proto.Equal(stored.GetMaintenanceWindow(), spec.GetMaintenanceWindow()) {
+		t.Errorf("stored mode %s, channel %s, tier %s, window %v", stored.GetUpgradeMode(), stored.GetReleaseChannel(),
+			stored.GetTier(), stored.GetMaintenanceWindow())
 	}
 
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
@@ -74,6 +78,22 @@ func TestReleaseFieldDefaultsOnUpdate(t *testing.T) {
 		stored.GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED {
 		t.Errorf("unset values stored as mode %s, tier %s, channel %s; want MANUAL, TIER_0, unset",
 			stored.GetUpgradeMode(), stored.GetTier(), stored.GetReleaseChannel())
+	}
+
+	// A window is removed by updating its path with none.
+	window := &cloudv1.ClusterSpec{MaintenanceWindow: &cloudv1.MaintenanceWindow{Start: "02:00", Duration: "4h"}}
+	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, window, pathMaintenanceWindow)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, &cloudv1.ClusterSpec{}, pathMaintenanceWindow)); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := reconcilecluster.SpecOf(w.cluster(t)); err != nil || stored.GetMaintenanceWindow() != nil {
+		t.Errorf("window after removing it: %v (%v), want none", stored.GetMaintenanceWindow(), err)
+	}
+	short := &cloudv1.ClusterSpec{MaintenanceWindow: &cloudv1.MaintenanceWindow{Start: "02:00", Duration: "10m"}}
+	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, short, pathMaintenanceWindow)); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("10m window: %v, want INVALID_ARGUMENT", err)
 	}
 
 	bad := &cloudv1.ClusterSpec{UpgradeMode: cloudv1.UpgradeMode(99)}

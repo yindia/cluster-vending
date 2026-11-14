@@ -146,7 +146,71 @@ func (ClusterTier) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{1}
 }
 
-// UpgradeMode is whether platform releases move a cluster.
+// Weekday is a day of the week.
+type Weekday int32
+
+const (
+	Weekday_WEEKDAY_UNSPECIFIED Weekday = 0
+	Weekday_WEEKDAY_MONDAY      Weekday = 1
+	Weekday_WEEKDAY_TUESDAY     Weekday = 2
+	Weekday_WEEKDAY_WEDNESDAY   Weekday = 3
+	Weekday_WEEKDAY_THURSDAY    Weekday = 4
+	Weekday_WEEKDAY_FRIDAY      Weekday = 5
+	Weekday_WEEKDAY_SATURDAY    Weekday = 6
+	Weekday_WEEKDAY_SUNDAY      Weekday = 7
+)
+
+// Enum value maps for Weekday.
+var (
+	Weekday_name = map[int32]string{
+		0: "WEEKDAY_UNSPECIFIED",
+		1: "WEEKDAY_MONDAY",
+		2: "WEEKDAY_TUESDAY",
+		3: "WEEKDAY_WEDNESDAY",
+		4: "WEEKDAY_THURSDAY",
+		5: "WEEKDAY_FRIDAY",
+		6: "WEEKDAY_SATURDAY",
+		7: "WEEKDAY_SUNDAY",
+	}
+	Weekday_value = map[string]int32{
+		"WEEKDAY_UNSPECIFIED": 0,
+		"WEEKDAY_MONDAY":      1,
+		"WEEKDAY_TUESDAY":     2,
+		"WEEKDAY_WEDNESDAY":   3,
+		"WEEKDAY_THURSDAY":    4,
+		"WEEKDAY_FRIDAY":      5,
+		"WEEKDAY_SATURDAY":    6,
+		"WEEKDAY_SUNDAY":      7,
+	}
+)
+
+func (x Weekday) Enum() *Weekday {
+	p := new(Weekday)
+	*p = x
+	return p
+}
+
+func (x Weekday) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Weekday) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_cluster_proto_enumTypes[2].Descriptor()
+}
+
+func (Weekday) Type() protoreflect.EnumType {
+	return &file_cloud_v1_cluster_proto_enumTypes[2]
+}
+
+func (x Weekday) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Weekday.Descriptor instead.
+func (Weekday) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{2}
+}
+
 type UpgradeMode int32
 
 const (
@@ -188,11 +252,11 @@ func (x UpgradeMode) String() string {
 }
 
 func (UpgradeMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_cluster_proto_enumTypes[2].Descriptor()
+	return file_cloud_v1_cluster_proto_enumTypes[3].Descriptor()
 }
 
 func (UpgradeMode) Type() protoreflect.EnumType {
-	return &file_cloud_v1_cluster_proto_enumTypes[2]
+	return &file_cloud_v1_cluster_proto_enumTypes[3]
 }
 
 func (x UpgradeMode) Number() protoreflect.EnumNumber {
@@ -201,7 +265,7 @@ func (x UpgradeMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UpgradeMode.Descriptor instead.
 func (UpgradeMode) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{3}
 }
 
 // ClusterState is the coarse lifecycle state of a cluster.
@@ -257,11 +321,11 @@ func (x ClusterState) String() string {
 }
 
 func (ClusterState) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_cluster_proto_enumTypes[3].Descriptor()
+	return file_cloud_v1_cluster_proto_enumTypes[4].Descriptor()
 }
 
 func (ClusterState) Type() protoreflect.EnumType {
-	return &file_cloud_v1_cluster_proto_enumTypes[3]
+	return &file_cloud_v1_cluster_proto_enumTypes[4]
 }
 
 func (x ClusterState) Number() protoreflect.EnumNumber {
@@ -270,7 +334,7 @@ func (x ClusterState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClusterState.Descriptor instead.
 func (ClusterState) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{4}
 }
 
 // ClusterUpgradePhase is the step of a Kubernetes upgrade.
@@ -316,11 +380,11 @@ func (x ClusterUpgradePhase) String() string {
 }
 
 func (ClusterUpgradePhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_cluster_proto_enumTypes[4].Descriptor()
+	return file_cloud_v1_cluster_proto_enumTypes[5].Descriptor()
 }
 
 func (ClusterUpgradePhase) Type() protoreflect.EnumType {
-	return &file_cloud_v1_cluster_proto_enumTypes[4]
+	return &file_cloud_v1_cluster_proto_enumTypes[5]
 }
 
 func (x ClusterUpgradePhase) Number() protoreflect.EnumNumber {
@@ -329,7 +393,7 @@ func (x ClusterUpgradePhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClusterUpgradePhase.Descriptor instead.
 func (ClusterUpgradePhase) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{5}
 }
 
 // Cluster is a managed Kubernetes cluster owned by exactly one tenant.
@@ -525,6 +589,11 @@ type ClusterSpec struct {
 	// stored as UPGRADE_MODE_MANUAL. Mutable, like release_channel and tier.
 	// Stored and returned; releases do not act on it yet.
 	UpgradeMode UpgradeMode `protobuf:"varint,13,opt,name=upgrade_mode,json=upgradeMode,proto3,enum=cloud.v1.UpgradeMode" json:"upgrade_mode,omitempty"`
+	// When the platform may start an automatic upgrade of the cluster.
+	// Unset: at any time. Only the start of an upgrade must fall inside the
+	// window; an upgrade that started runs to its end. Mutable, like
+	// upgrade_mode; changing it changes no cloud resource.
+	MaintenanceWindow *MaintenanceWindow `protobuf:"bytes,14,opt,name=maintenance_window,json=maintenanceWindow,proto3" json:"maintenance_window,omitempty"`
 	// The cloud the cluster runs on. Exactly one must be set, even if empty
 	// (e.g. `aws: {}`).
 	//
@@ -622,6 +691,13 @@ func (x *ClusterSpec) GetUpgradeMode() UpgradeMode {
 	return UpgradeMode_UPGRADE_MODE_UNSPECIFIED
 }
 
+func (x *ClusterSpec) GetMaintenanceWindow() *MaintenanceWindow {
+	if x != nil {
+		return x.MaintenanceWindow
+	}
+	return nil
+}
+
 func (x *ClusterSpec) GetProvider() isClusterSpec_Provider {
 	if x != nil {
 		return x.Provider
@@ -647,6 +723,73 @@ type ClusterSpec_Aws struct {
 }
 
 func (*ClusterSpec_Aws) isClusterSpec_Provider() {}
+
+// UpgradeMode is whether platform releases move a cluster.
+// MaintenanceWindow is a weekly time when an upgrade of the cluster may
+// start, in UTC: every day in days, from start for duration. A window may
+// run past midnight: Saturday 23:00 for 4h is open until Sunday 03:00.
+type MaintenanceWindow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The days the window opens on. Empty: every day.
+	Days []Weekday `protobuf:"varint,1,rep,packed,name=days,proto3,enum=cloud.v1.Weekday" json:"days,omitempty"`
+	// When the window opens, "HH:MM" in UTC, e.g. "02:00".
+	Start string `protobuf:"bytes,2,opt,name=start,proto3" json:"start,omitempty"`
+	// How long the window stays open, from 1h to 24h: "4h", "90m", "1h30m".
+	Duration      string `protobuf:"bytes,3,opt,name=duration,proto3" json:"duration,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MaintenanceWindow) Reset() {
+	*x = MaintenanceWindow{}
+	mi := &file_cloud_v1_cluster_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MaintenanceWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MaintenanceWindow) ProtoMessage() {}
+
+func (x *MaintenanceWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_cluster_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MaintenanceWindow.ProtoReflect.Descriptor instead.
+func (*MaintenanceWindow) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *MaintenanceWindow) GetDays() []Weekday {
+	if x != nil {
+		return x.Days
+	}
+	return nil
+}
+
+func (x *MaintenanceWindow) GetStart() string {
+	if x != nil {
+		return x.Start
+	}
+	return ""
+}
+
+func (x *MaintenanceWindow) GetDuration() string {
+	if x != nil {
+		return x.Duration
+	}
+	return ""
+}
 
 // ClusterStatus is the observed state, aggregated from the Crossplane
 // managed resources' status.
@@ -748,7 +891,7 @@ type ClusterStatus struct {
 
 func (x *ClusterStatus) Reset() {
 	*x = ClusterStatus{}
-	mi := &file_cloud_v1_cluster_proto_msgTypes[2]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -760,7 +903,7 @@ func (x *ClusterStatus) String() string {
 func (*ClusterStatus) ProtoMessage() {}
 
 func (x *ClusterStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_proto_msgTypes[2]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -773,7 +916,7 @@ func (x *ClusterStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterStatus.ProtoReflect.Descriptor instead.
 func (*ClusterStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ClusterStatus) GetState() ClusterState {
@@ -981,7 +1124,7 @@ type PlatformComponent struct {
 
 func (x *PlatformComponent) Reset() {
 	*x = PlatformComponent{}
-	mi := &file_cloud_v1_cluster_proto_msgTypes[3]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -993,7 +1136,7 @@ func (x *PlatformComponent) String() string {
 func (*PlatformComponent) ProtoMessage() {}
 
 func (x *PlatformComponent) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_proto_msgTypes[3]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1006,7 +1149,7 @@ func (x *PlatformComponent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlatformComponent.ProtoReflect.Descriptor instead.
 func (*PlatformComponent) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PlatformComponent) GetName() string {
@@ -1103,7 +1246,7 @@ type ClusterUpgrade struct {
 
 func (x *ClusterUpgrade) Reset() {
 	*x = ClusterUpgrade{}
-	mi := &file_cloud_v1_cluster_proto_msgTypes[4]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1115,7 +1258,7 @@ func (x *ClusterUpgrade) String() string {
 func (*ClusterUpgrade) ProtoMessage() {}
 
 func (x *ClusterUpgrade) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_proto_msgTypes[4]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1128,7 +1271,7 @@ func (x *ClusterUpgrade) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterUpgrade.ProtoReflect.Descriptor instead.
 func (*ClusterUpgrade) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ClusterUpgrade) GetFromVersion() string {
@@ -1179,7 +1322,7 @@ type ClusterEndpoint struct {
 
 func (x *ClusterEndpoint) Reset() {
 	*x = ClusterEndpoint{}
-	mi := &file_cloud_v1_cluster_proto_msgTypes[5]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1191,7 +1334,7 @@ func (x *ClusterEndpoint) String() string {
 func (*ClusterEndpoint) ProtoMessage() {}
 
 func (x *ClusterEndpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_proto_msgTypes[5]
+	mi := &file_cloud_v1_cluster_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1204,7 +1347,7 @@ func (x *ClusterEndpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterEndpoint.ProtoReflect.Descriptor instead.
 func (*ClusterEndpoint) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{5}
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ClusterEndpoint) GetUrl() string {
@@ -1245,7 +1388,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe3\x18\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaf\x19\n" +
 	"\vClusterSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x12:\n" +
 	"\anetwork\x18\x02 \x01(\v2\x18.cloud.v1.ClusterNetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12?\n" +
@@ -1254,7 +1397,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x06access\x18\x06 \x01(\v2\x14.cloud.v1.AccessSpecR\x06access\x12K\n" +
 	"\x0frelease_channel\x18\b \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x0ereleaseChannel\x123\n" +
 	"\x04tier\x18\t \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12B\n" +
-	"\fupgrade_mode\x18\r \x01(\x0e2\x15.cloud.v1.UpgradeModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vupgradeMode\x12,\n" +
+	"\fupgrade_mode\x18\r \x01(\x0e2\x15.cloud.v1.UpgradeModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vupgradeMode\x12J\n" +
+	"\x12maintenance_window\x18\x0e \x01(\v2\x1b.cloud.v1.MaintenanceWindowR\x11maintenanceWindow\x12,\n" +
 	"\x03aws\x18\n" +
 	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\x80\x14\xbaH\xfc\x13\x1a\x8f\x01\n" +
 	"\n" +
@@ -1270,7 +1414,12 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1aT\n" +
 	"\roidc_aws_only\x12\x1aonly AWS takes access.oidc\x1a'has(this.aws) || !has(this.access.oidc)\x1a\x87\x01\n" +
 	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aAhas(this.aws) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
-	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xc9\b\n" +
+	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xb4\x03\n" +
+	"\x11MaintenanceWindow\x12:\n" +
+	"\x04days\x18\x01 \x03(\x0e2\x11.cloud.v1.WeekdayB\x13\xbaH\x10\x92\x01\r\x10\a\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x04days\x12<\n" +
+	"\x05start\x18\x02 \x01(\tB&\xbaH#r!2\x1f^([01][0-9]|2[0-3]):[0-5][0-9]$R\x05start\x12\x1a\n" +
+	"\bduration\x18\x03 \x01(\tR\bduration:\x88\x02\xbaH\x84\x02\x1a\x81\x02\n" +
+	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xc9\b\n" +
 	"\rClusterStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1333,7 +1482,16 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x18CLUSTER_TIER_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eCLUSTER_TIER_0\x10\x01\x12\x12\n" +
 	"\x0eCLUSTER_TIER_1\x10\x02\x12\x12\n" +
-	"\x0eCLUSTER_TIER_2\x10\x03*`\n" +
+	"\x0eCLUSTER_TIER_2\x10\x03*\xb6\x01\n" +
+	"\aWeekday\x12\x17\n" +
+	"\x13WEEKDAY_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eWEEKDAY_MONDAY\x10\x01\x12\x13\n" +
+	"\x0fWEEKDAY_TUESDAY\x10\x02\x12\x15\n" +
+	"\x11WEEKDAY_WEDNESDAY\x10\x03\x12\x14\n" +
+	"\x10WEEKDAY_THURSDAY\x10\x04\x12\x12\n" +
+	"\x0eWEEKDAY_FRIDAY\x10\x05\x12\x14\n" +
+	"\x10WEEKDAY_SATURDAY\x10\x06\x12\x12\n" +
+	"\x0eWEEKDAY_SUNDAY\x10\a*`\n" +
 	"\vUpgradeMode\x12\x1c\n" +
 	"\x18UPGRADE_MODE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13UPGRADE_MODE_MANUAL\x10\x01\x12\x1a\n" +
@@ -1364,76 +1522,80 @@ func file_cloud_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_cluster_proto_rawDescData
 }
 
-var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_cloud_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_cloud_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_cloud_v1_cluster_proto_goTypes = []any{
 	(ReleaseChannel)(0),            // 0: cloud.v1.ReleaseChannel
 	(ClusterTier)(0),               // 1: cloud.v1.ClusterTier
-	(UpgradeMode)(0),               // 2: cloud.v1.UpgradeMode
-	(ClusterState)(0),              // 3: cloud.v1.ClusterState
-	(ClusterUpgradePhase)(0),       // 4: cloud.v1.ClusterUpgradePhase
-	(*Cluster)(nil),                // 5: cloud.v1.Cluster
-	(*ClusterSpec)(nil),            // 6: cloud.v1.ClusterSpec
-	(*ClusterStatus)(nil),          // 7: cloud.v1.ClusterStatus
-	(*PlatformComponent)(nil),      // 8: cloud.v1.PlatformComponent
-	(*ClusterUpgrade)(nil),         // 9: cloud.v1.ClusterUpgrade
-	(*ClusterEndpoint)(nil),        // 10: cloud.v1.ClusterEndpoint
-	nil,                            // 11: cloud.v1.Cluster.LabelsEntry
-	(*timestamppb.Timestamp)(nil),  // 12: google.protobuf.Timestamp
-	(*ClusterNetwork)(nil),         // 13: cloud.v1.ClusterNetwork
-	(*ControlPlaneSpec)(nil),       // 14: cloud.v1.ControlPlaneSpec
-	(*NodePoolSpec)(nil),           // 15: cloud.v1.NodePoolSpec
-	(*AccessSpec)(nil),             // 16: cloud.v1.AccessSpec
-	(*AwsClusterSpec)(nil),         // 17: cloud.v1.AwsClusterSpec
-	(*Condition)(nil),              // 18: cloud.v1.Condition
-	(*NetworkResources)(nil),       // 19: cloud.v1.NetworkResources
-	(*AwsClusterStatus)(nil),       // 20: cloud.v1.AwsClusterStatus
-	(*ImportStatus)(nil),           // 21: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),       // 22: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),        // 23: cloud.v1.ManagedResource
-	(*ClusterDeprecations)(nil),    // 24: cloud.v1.ClusterDeprecations
-	(*Event)(nil),                  // 25: cloud.v1.Event
-	(*Pause)(nil),                  // 26: cloud.v1.Pause
-	(*ClusterRecommendations)(nil), // 27: cloud.v1.ClusterRecommendations
-	(ComponentPhase)(0),            // 28: cloud.v1.ComponentPhase
+	(Weekday)(0),                   // 2: cloud.v1.Weekday
+	(UpgradeMode)(0),               // 3: cloud.v1.UpgradeMode
+	(ClusterState)(0),              // 4: cloud.v1.ClusterState
+	(ClusterUpgradePhase)(0),       // 5: cloud.v1.ClusterUpgradePhase
+	(*Cluster)(nil),                // 6: cloud.v1.Cluster
+	(*ClusterSpec)(nil),            // 7: cloud.v1.ClusterSpec
+	(*MaintenanceWindow)(nil),      // 8: cloud.v1.MaintenanceWindow
+	(*ClusterStatus)(nil),          // 9: cloud.v1.ClusterStatus
+	(*PlatformComponent)(nil),      // 10: cloud.v1.PlatformComponent
+	(*ClusterUpgrade)(nil),         // 11: cloud.v1.ClusterUpgrade
+	(*ClusterEndpoint)(nil),        // 12: cloud.v1.ClusterEndpoint
+	nil,                            // 13: cloud.v1.Cluster.LabelsEntry
+	(*timestamppb.Timestamp)(nil),  // 14: google.protobuf.Timestamp
+	(*ClusterNetwork)(nil),         // 15: cloud.v1.ClusterNetwork
+	(*ControlPlaneSpec)(nil),       // 16: cloud.v1.ControlPlaneSpec
+	(*NodePoolSpec)(nil),           // 17: cloud.v1.NodePoolSpec
+	(*AccessSpec)(nil),             // 18: cloud.v1.AccessSpec
+	(*AwsClusterSpec)(nil),         // 19: cloud.v1.AwsClusterSpec
+	(*Condition)(nil),              // 20: cloud.v1.Condition
+	(*NetworkResources)(nil),       // 21: cloud.v1.NetworkResources
+	(*AwsClusterStatus)(nil),       // 22: cloud.v1.AwsClusterStatus
+	(*ImportStatus)(nil),           // 23: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),       // 24: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),        // 25: cloud.v1.ManagedResource
+	(*ClusterDeprecations)(nil),    // 26: cloud.v1.ClusterDeprecations
+	(*Event)(nil),                  // 27: cloud.v1.Event
+	(*Pause)(nil),                  // 28: cloud.v1.Pause
+	(*ClusterRecommendations)(nil), // 29: cloud.v1.ClusterRecommendations
+	(ComponentPhase)(0),            // 30: cloud.v1.ComponentPhase
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
-	11, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
-	6,  // 1: cloud.v1.Cluster.spec:type_name -> cloud.v1.ClusterSpec
-	7,  // 2: cloud.v1.Cluster.status:type_name -> cloud.v1.ClusterStatus
-	12, // 3: cloud.v1.Cluster.create_time:type_name -> google.protobuf.Timestamp
-	12, // 4: cloud.v1.Cluster.update_time:type_name -> google.protobuf.Timestamp
-	13, // 5: cloud.v1.ClusterSpec.network:type_name -> cloud.v1.ClusterNetwork
-	14, // 6: cloud.v1.ClusterSpec.control_plane:type_name -> cloud.v1.ControlPlaneSpec
-	15, // 7: cloud.v1.ClusterSpec.default_node_pool:type_name -> cloud.v1.NodePoolSpec
-	16, // 8: cloud.v1.ClusterSpec.access:type_name -> cloud.v1.AccessSpec
+	13, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
+	7,  // 1: cloud.v1.Cluster.spec:type_name -> cloud.v1.ClusterSpec
+	9,  // 2: cloud.v1.Cluster.status:type_name -> cloud.v1.ClusterStatus
+	14, // 3: cloud.v1.Cluster.create_time:type_name -> google.protobuf.Timestamp
+	14, // 4: cloud.v1.Cluster.update_time:type_name -> google.protobuf.Timestamp
+	15, // 5: cloud.v1.ClusterSpec.network:type_name -> cloud.v1.ClusterNetwork
+	16, // 6: cloud.v1.ClusterSpec.control_plane:type_name -> cloud.v1.ControlPlaneSpec
+	17, // 7: cloud.v1.ClusterSpec.default_node_pool:type_name -> cloud.v1.NodePoolSpec
+	18, // 8: cloud.v1.ClusterSpec.access:type_name -> cloud.v1.AccessSpec
 	0,  // 9: cloud.v1.ClusterSpec.release_channel:type_name -> cloud.v1.ReleaseChannel
 	1,  // 10: cloud.v1.ClusterSpec.tier:type_name -> cloud.v1.ClusterTier
-	2,  // 11: cloud.v1.ClusterSpec.upgrade_mode:type_name -> cloud.v1.UpgradeMode
-	17, // 12: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
-	3,  // 13: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
-	18, // 14: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
-	10, // 15: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
-	19, // 16: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
-	20, // 17: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
-	21, // 18: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
-	22, // 19: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	23, // 20: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	9,  // 21: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
-	8,  // 22: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
-	24, // 23: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
-	25, // 24: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
-	26, // 25: cloud.v1.ClusterStatus.pause:type_name -> cloud.v1.Pause
-	27, // 26: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
-	28, // 27: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	12, // 28: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
-	4,  // 29: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	12, // 30: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	3,  // 11: cloud.v1.ClusterSpec.upgrade_mode:type_name -> cloud.v1.UpgradeMode
+	8,  // 12: cloud.v1.ClusterSpec.maintenance_window:type_name -> cloud.v1.MaintenanceWindow
+	19, // 13: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
+	2,  // 14: cloud.v1.MaintenanceWindow.days:type_name -> cloud.v1.Weekday
+	4,  // 15: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
+	20, // 16: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
+	12, // 17: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
+	21, // 18: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
+	22, // 19: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
+	23, // 20: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
+	24, // 21: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	25, // 22: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	11, // 23: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
+	10, // 24: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
+	26, // 25: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
+	27, // 26: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
+	28, // 27: cloud.v1.ClusterStatus.pause:type_name -> cloud.v1.Pause
+	29, // 28: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
+	30, // 29: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
+	14, // 30: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	5,  // 31: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	14, // 32: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -1457,7 +1619,7 @@ func file_cloud_v1_cluster_proto_init() {
 	file_cloud_v1_cluster_proto_msgTypes[1].OneofWrappers = []any{
 		(*ClusterSpec_Aws)(nil),
 	}
-	file_cloud_v1_cluster_proto_msgTypes[2].OneofWrappers = []any{
+	file_cloud_v1_cluster_proto_msgTypes[3].OneofWrappers = []any{
 		(*ClusterStatus_Aws)(nil),
 	}
 	type x struct{}
@@ -1465,8 +1627,8 @@ func file_cloud_v1_cluster_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_cluster_proto_rawDesc), len(file_cloud_v1_cluster_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   7,
+			NumEnums:      6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

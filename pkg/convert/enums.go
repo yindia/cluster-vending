@@ -112,6 +112,7 @@ const (
 	prefixReleaseChannel = "RELEASE_CHANNEL_"
 	prefixTier           = "CLUSTER_" // CLUSTER_TIER_0 -> "Tier0"
 	prefixUpgradeMode    = "UPGRADE_MODE_"
+	prefixWeekday        = "WEEKDAY_"
 	prefixNetworkState   = "NETWORK_STATE_"
 	prefixClusterState   = "CLUSTER_STATE_"
 	prefixImportPhase    = "IMPORT_PHASE_"

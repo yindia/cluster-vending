@@ -52,6 +52,28 @@ const (
 	UpgradeModeAutomatic UpgradeMode = "Automatic"
 )
 
+// Weekday is a day of the week.
+// +kubebuilder:validation:Enum=Monday;Tuesday;Wednesday;Thursday;Friday;Saturday;Sunday
+type Weekday string
+
+// MaintenanceWindow is a weekly time, in UTC, when an upgrade of the
+// cluster may start: every day in days, from start for duration. It may
+// run past midnight (Saturday 23:00 for 4h is open until Sunday 03:00).
+type MaintenanceWindow struct {
+	// days the window opens on. Empty: every day.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=7
+	Days []Weekday `json:"days,omitempty"`
+	// start is when the window opens, "HH:MM" in UTC.
+	// +kubebuilder:validation:Pattern=`^([01][0-9]|2[0-3]):[0-5][0-9]$`
+	Start string `json:"start"`
+	// duration is how long the window stays open, 1h to 24h: "4h", "90m",
+	// "1h30m".
+	// +kubebuilder:validation:Pattern=`^([0-9]+h)?([0-9]+m)?$`
+	Duration string `json:"duration"`
+}
+
 // ClusterNetwork is where a cluster runs: its Network and the cluster's
 // own address ranges. Immutable as a whole.
 type ClusterNetwork struct {
@@ -655,6 +677,11 @@ type ClusterSpec struct {
 	// +optional
 	// +kubebuilder:default=Manual
 	UpgradeMode UpgradeMode `json:"upgradeMode,omitempty"`
+	// maintenanceWindow is when the platform may start an automatic upgrade
+	// of the cluster. Unset: at any time. Only an upgrade's start must fall
+	// inside it; a started upgrade runs to its end. Mutable.
+	// +optional
+	MaintenanceWindow *MaintenanceWindow `json:"maintenanceWindow,omitempty"`
 	// aws selects AWS (EKS) and carries its settings.
 	// +optional
 	AWS *AWSClusterSpec `json:"aws,omitempty"`

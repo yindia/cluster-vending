@@ -219,6 +219,12 @@ message ClusterSpec {
   // Stored and returned; releases do not act on it yet.
   UpgradeMode upgrade_mode = 13 [(buf.validate.field).enum.defined_only = true];
 
+  // When the platform may start an automatic upgrade of the cluster.
+  // Unset: at any time. Only the start of an upgrade must fall inside the
+  // window; an upgrade that started runs to its end. Mutable, like
+  // upgrade_mode; changing it changes no cloud resource.
+  MaintenanceWindow maintenance_window = 14;
+
   // The cloud the cluster runs on. Exactly one must be set, even if empty
   // (e.g. `aws: {}`).
   oneof provider {
@@ -266,6 +272,47 @@ enum ClusterTier {
 }
 
 // UpgradeMode is whether platform releases move a cluster.
+// MaintenanceWindow is a weekly time when an upgrade of the cluster may
+// start, in UTC: every day in days, from start for duration. A window may
+// run past midnight: Saturday 23:00 for 4h is open until Sunday 03:00.
+message MaintenanceWindow {
+  option (buf.validate.message).cel = {
+    id: "maintenance_window.duration"
+    message: "duration must be from 1h to 24h, written like 4h, 90m or 1h30m"
+    expression: "this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')"
+  };
+
+  // The days the window opens on. Empty: every day.
+  repeated Weekday days = 1 [(buf.validate.field).repeated = {
+    unique: true
+    max_items: 7
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+
+  // When the window opens, "HH:MM" in UTC, e.g. "02:00".
+  string start = 2 [(buf.validate.field).string.pattern = "^([01][0-9]|2[0-3]):[0-5][0-9]$"];
+
+  // How long the window stays open, from 1h to 24h: "4h", "90m", "1h30m".
+  string duration = 3;
+}
+
+// Weekday is a day of the week.
+enum Weekday {
+  WEEKDAY_UNSPECIFIED = 0;
+  WEEKDAY_MONDAY = 1;
+  WEEKDAY_TUESDAY = 2;
+  WEEKDAY_WEDNESDAY = 3;
+  WEEKDAY_THURSDAY = 4;
+  WEEKDAY_FRIDAY = 5;
+  WEEKDAY_SATURDAY = 6;
+  WEEKDAY_SUNDAY = 7;
+}
+
 enum UpgradeMode {
   // Not chosen: stored as UPGRADE_MODE_MANUAL.
   UPGRADE_MODE_UNSPECIFIED = 0;

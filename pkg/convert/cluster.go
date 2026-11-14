@@ -27,15 +27,38 @@ func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1
 			NetworkRef: cloudv1alpha1.LocalReference{Name: networkName},
 			ZoneIDs:    slices.Clone(n.GetZoneIds()), PodCIDR: n.GetPodCidr(), ServiceCIDR: n.GetServiceCidr(),
 		},
-		ControlPlane:    controlPlaneToAPI(p.GetControlPlane()),
-		DefaultNodePool: nodePoolToAPI(p.GetDefaultNodePool()),
-		Access:          accessToAPI(p.GetAccess()),
-		ReleaseChannel:  cloudv1alpha1.ReleaseChannelName(camel(p.GetReleaseChannel(), prefixReleaseChannel)),
-		Tier:            cloudv1alpha1.ClusterTier(camel(p.GetTier(), prefixTier)),
-		UpgradeMode:     cloudv1alpha1.UpgradeMode(camel(p.GetUpgradeMode(), prefixUpgradeMode)),
-		AWS:             awsToAPI(p.GetAws()),
+		ControlPlane:      controlPlaneToAPI(p.GetControlPlane()),
+		DefaultNodePool:   nodePoolToAPI(p.GetDefaultNodePool()),
+		Access:            accessToAPI(p.GetAccess()),
+		ReleaseChannel:    cloudv1alpha1.ReleaseChannelName(camel(p.GetReleaseChannel(), prefixReleaseChannel)),
+		Tier:              cloudv1alpha1.ClusterTier(camel(p.GetTier(), prefixTier)),
+		UpgradeMode:       cloudv1alpha1.UpgradeMode(camel(p.GetUpgradeMode(), prefixUpgradeMode)),
+		MaintenanceWindow: windowToAPI(p.GetMaintenanceWindow()),
+		AWS:               awsToAPI(p.GetAws()),
 	}
 	return spec, nil
+}
+
+func windowToAPI(w *cloudv1.MaintenanceWindow) *cloudv1alpha1.MaintenanceWindow {
+	if w == nil {
+		return nil
+	}
+	out := &cloudv1alpha1.MaintenanceWindow{Start: w.GetStart(), Duration: w.GetDuration()}
+	for _, d := range w.GetDays() {
+		out.Days = append(out.Days, cloudv1alpha1.Weekday(camel(d, prefixWeekday)))
+	}
+	return out
+}
+
+func windowFromAPI(w *cloudv1alpha1.MaintenanceWindow) *cloudv1.MaintenanceWindow {
+	if w == nil {
+		return nil
+	}
+	out := &cloudv1.MaintenanceWindow{Start: w.Start, Duration: w.Duration}
+	for _, d := range w.Days {
+		out.Days = append(out.Days, cloudv1.Weekday(uncamel(cloudv1.Weekday(0).Descriptor(), prefixWeekday, string(d))))
+	}
+	return out
 }
 
 // ClusterSpecFromAPI is the contract spec of a kind's spec. networkID is
@@ -57,6 +80,7 @@ func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, _ *cloudv
 		Tier: cloudv1.ClusterTier(uncamel(cloudv1.ClusterTier(0).Descriptor(), prefixTier, string(s.Tier))),
 		UpgradeMode: cloudv1.UpgradeMode(uncamel(
 			cloudv1.UpgradeMode(0).Descriptor(), prefixUpgradeMode, string(s.UpgradeMode))),
+		MaintenanceWindow: windowFromAPI(s.MaintenanceWindow),
 	}
 	if s.AWS != nil {
 		p.Provider = &cloudv1.ClusterSpec_Aws{Aws: awsFromAPI(s.AWS)}

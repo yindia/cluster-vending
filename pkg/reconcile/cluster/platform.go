@@ -250,6 +250,10 @@ func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan,
 	return out, objects
 }
 
+// removingMessage is a platform component whose chart is being
+// uninstalled: its definition was disabled, or it left the release.
+const removingMessage = "being removed from the cluster"
+
 // componentPhase reads a component's phase from its Release objects
 // (names, in install order). object is the Release the phase is about: the
 // one that failed or is being installed; "" when all are deployed or none
@@ -264,6 +268,8 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 		switch {
 		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED:
 			return cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, fmt.Sprintf("chart %s: %s", v.GetExternalName(), v.GetMessage()), name
+		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING:
+			return cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING, removingMessage, name
 		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
 			ready++
 		case len(waiting[name]) > 0:

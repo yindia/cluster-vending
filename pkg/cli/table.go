@@ -31,6 +31,8 @@ func componentPhaseWord(p cloudv1.ComponentPhase) string {
 		return "Ready"
 	case cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED:
 		return "Failed"
+	case cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING:
+		return "Deleting"
 	default:
 		return "Unknown"
 	}

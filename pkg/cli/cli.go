@@ -1,4 +1,4 @@
-// Package cli is the API client behind the bootstrap, network and cluster
+// Package cli is the API client behind the account, network and cluster
 // commands: it builds requests from flags and Kubernetes-style manifests
 // (manifest.go), calls
 // the cloud.v1 API, and prints the response. cmd only wires cobra flags to
@@ -48,7 +48,8 @@ type Options struct {
 	// Tenant is --tenant, required by every command.
 	Tenant string
 	// ID is the resource ID: the argument of network and cluster
-	// commands, --id of bootstrap get (the bootstrap ID, CloudAccount.id).
+	// commands, --id of account get and verify (CloudAccount.id; the
+	// argument is accepted too, ResolveID).
 	ID string
 	// Input is -f: the manifest of a create, update or import (Manifest).
 	Input string

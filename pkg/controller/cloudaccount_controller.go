@@ -59,7 +59,7 @@ func (r *CloudAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonNotThroughAPI,
-			"this account was created without the API: accounts are bootstrapped through it (bootstrap create), which stores the account's role and ProviderConfig")
+			"this account was created without the API: accounts are bootstrapped through it (account create), which stores the account's role and ProviderConfig")
 	}
 	if !obj.DeletionTimestamp.IsZero() {
 		return r.deleting(ctx, obj, tenant, id)

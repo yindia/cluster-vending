@@ -72,15 +72,15 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				opts := o
 				opts.Progress = cmd.ErrOrStderr()
 				opts.RequestTimeout = cfg.RequestTimeout
-				if len(args) > 0 {
-					opts.ID = args[0]
+				if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
+					return err
 				}
 				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken)), opts, cmd.OutOrStdout(), output)
 			},
 		}
 		f := cmd.Flags()
 		if v.id {
-			f.StringVar(&o.ID, "id", "", "bootstrap ID: the id returned by bootstrap create / list")
+			f.StringVar(&o.ID, "id", "", "the account's ID: the id account create and account list print")
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
@@ -145,15 +145,28 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	return group
 }
 
-func newBootstrapCmd() *cobra.Command {
-	return newResourceCmd("bootstrap", "Onboard a tenant's cloud account (TenantService)", []verb{
-		{use: "create", short: "Bootstrap the account in a CloudAccount manifest (-f)",
+// newAccountCmd is the cloud accounts of a tenant. get and verify take
+// --id; the ID as the argument works too (not shown in the help).
+func newAccountCmd() *cobra.Command {
+	return newResourceCmd("account", "Onboard and check a tenant's cloud accounts (TenantService)", []verb{
+		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): its namespace and ProviderConfig",
 			run: cli.BootstrapCreate, args: cobra.NoArgs, input: true},
-		{use: "get", short: "Show the bootstrapped account --id", run: cli.BootstrapGet, args: cobra.NoArgs, id: true},
-		{use: "list", short: "List the tenant's bootstrapped accounts", run: cli.BootstrapList, args: cobra.NoArgs},
-		{use: "verify", short: "Ask the controller to check the account's access --id now (the tenant role in each region, and the calls the platform needs); get shows the result",
-			run: cli.BootstrapVerify, args: cobra.NoArgs, id: true},
+		{use: "get", short: "Show the account --id, with its access check", run: cli.BootstrapGet, args: cobra.MaximumNArgs(1), id: true},
+		{use: "list", short: "List the tenant's accounts", run: cli.BootstrapList, args: cobra.NoArgs},
+		{use: "verify", short: "Ask the controller to check the account --id's access now (the tenant role in each region, and the calls the platform needs); get shows the result",
+			run: cli.BootstrapVerify, args: cobra.MaximumNArgs(1), id: true},
 	})
+}
+
+// newBootstrapCmd is the old name of account: hidden, and each of its
+// commands says on stderr that it is deprecated.
+func newBootstrapCmd() *cobra.Command {
+	c := newAccountCmd()
+	c.Use, c.Hidden = "bootstrap", true
+	for _, sub := range c.Commands() {
+		sub.Deprecated = "use \"account " + sub.Name() + "\""
+	}
+	return c
 }
 
 func newNetworkCmd() *cobra.Command {

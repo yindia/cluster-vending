@@ -7,7 +7,7 @@ network or EKS cluster that something else built, read-only at first, and
 then take it over.
 
 The repository holds one binary with three roles: an API server (`serve`), a
-CLI that calls it (`bootstrap`, `network`, `cluster`, `admin`, and `login`,
+CLI that calls it (`account`, `network`, `cluster`, `admin`, and `login`,
 `logout`, `whoami` where the server authenticates), and a controller manager
 (`controller`) that reconciles the same resources when they are kept as
 custom resources.
@@ -93,8 +93,8 @@ later manifest needs is a placeholder in it, named in the file's header:
 ```sh
 # 1. Onboard acme's AWS account. The answer has the account's id
 #    (BOOTSTRAP_ID, the bootstrap id that networks refer to).
-bin/cluster-vending bootstrap create -f examples/cloudaccount.yaml
-bin/cluster-vending bootstrap list --tenant acme
+bin/cluster-vending account create -f examples/cloudaccount.yaml
+bin/cluster-vending account list --tenant acme
 
 # 2. Create a network in it (set spec.bootstrapId to BOOTSTRAP_ID first).
 #    The answer has its id: NETWORK_ID.

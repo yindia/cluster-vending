@@ -219,7 +219,16 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		u.SetGroupVersionKind(gvk)
 		b = b.Watches(u, handler.EnqueueRequestsFromMapFunc(owner))
 	}
+	// A tenant's Component (enabled, changed, disabled) wakes the cluster
+	// it is on: the cluster reconcile installs and removes it.
+	b = b.Watches(&cloudv1alpha1.Component{}, handler.EnqueueRequestsFromMapFunc(componentCluster(r.owners, r.deps.Direct)))
 	return b.Complete(r)
+}
+
+// componentCluster maps a Component to the request of the cluster it is
+// on (its cluster-ID label).
+func componentCluster(o *owners, c client.Reader) handler.MapFunc {
+	return ownerRequests(o, c, cloudstore.LabelClusterID, func() client.ObjectList { return &cloudv1alpha1.ClusterList{} })
 }
 
 // clusterHelmKinds are the provider-helm kinds a cluster has objects of,

@@ -194,9 +194,45 @@ kubectl get componentdefinitions.cloud.cluster-vending.io external-dns \
 | What holds the delete | What to do |
 |---|---|
 | a tenant's Component of it | the tenant disables it; until then it stays |
-| a cluster that has it installed | nothing: a definition being deleted is off, so clusters remove it, and the delete finishes on its own |
+| a cluster with objects of it still in the management cluster (its Helm Releases or IAM Role) | nothing: a definition being deleted is off, so the cluster uninstalls it; the objects go when the uninstall is done, and the delete finishes on its own |
+| the same, on a paused cluster | resume the cluster; the condition says who paused it and since when |
 | its bundle | delete or disable the bundle first |
 | a definition that requires it | delete or change that one first |
+
+What a cluster holds is read from the component's objects themselves, not
+from the cluster's status, so a cluster that stops reporting does not hold
+a delete for ever. Clusters that can never release do not hold: one that is
+being deleted (it removes its components with it), and one that no longer
+exists.
+
+The removal procedure for a Platform component:
+
+1. **Disable** it (`"disabled": true`) and wait: every cluster uninstalls
+   it on its next pass.
+2. **Delete** the definition. The delete finishes once no cluster has its
+   objects any more.
+3. **Last resort**, when a cluster cannot uninstall (its workload cluster
+   is gone, its Helm releases are stuck): annotate the definition with
+   exactly `cloud.cluster-vending.io/force-delete: "true"`. The finalizer
+   goes, after a warning event and a log line that name every holder it
+   ignored.
+
+   ```sh
+   kubectl annotate componentdefinitions.cloud.cluster-vending.io external-dns cloud.cluster-vending.io/force-delete=true
+   ```
+
+   What it installed stays on those clusters, orphaned. To clean up, delete
+   the objects labelled with the component in the tenant's namespace on the
+   management cluster (their providers then uninstall the charts and delete
+   the role, if they still can):
+
+   ```sh
+   kubectl delete releases.helm.m.crossplane.io,roles.iam.aws.m.upbound.io \
+     -n tenant-acme -l cluster-vending.io/component=external-dns
+   ```
+
+   Any other value of the annotation is ignored, and the `InUse` condition
+   says so.
 
 So for a Platform component, deleting is how it is removed from every
 cluster: the delete waits until no cluster has it. To stop it everywhere

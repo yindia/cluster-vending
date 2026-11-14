@@ -743,6 +743,10 @@ func TestDeleteNetworkWaitsForDeletingClusters(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("DeleteNetwork: %v, want FAILED_PRECONDITION", err)
 	}
+	// The hint names a command that exists and waits for that cluster.
+	if msg := err.Error(); !strings.Contains(msg, "cluster delete --id "+c.ID+" --wait") || strings.Contains(msg, "get --wait") {
+		t.Errorf("message = %q, want the cluster delete --id %s --wait hint", msg, c.ID)
+	}
 	if _, err := f.store.Clusters().Get(ctx, tenant, c.ID); err != nil {
 		t.Errorf("the deleting cluster's row: %v, want it kept", err)
 	}

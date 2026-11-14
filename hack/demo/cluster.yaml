@@ -27,5 +27,6 @@ spec:
   access:
     adminPrincipals: []
   aws:                                   # the cloud (required): AWS settings of the EKS cluster
+    irsa: true                           # the IAM OIDC provider: the platform components' IAM roles need it (default for a new cluster)
     upgradePolicy:
       supportType: AWS_SUPPORT_TYPE_STANDARD

@@ -292,7 +292,7 @@ AWS block (`spec.aws`, required, may be empty: `aws: {}`):
 | `addons` | `vpc-cni`, `coredns`, `kube-proxy`, `eks-pod-identity-agent`, `aws-ebs-csi-driver`; an empty `version` is the one EKS recommends for the Kubernetes version | mutable (the whole list) |
 | `control_plane_log_group.enabled` | off: EKS creates the group itself when logging is on | mutable |
 | `control_plane_log_group.retention_days` | 90 | mutable |
-| `irsa` | off | mutable: turning it off deletes the IAM OIDC provider |
+| `irsa` | on for a new cluster (the platform components' IAM roles use it; `false` is refused while they do); an import keeps its own | mutable: turning it off deletes the IAM OIDC provider |
 | `additional_security_group_ids` | none | immutable |
 | `default_node_pool.ami_type` | `AL2023_X86_64_STANDARD`; `CUSTOM` with `launch_template.image_id` | mutable: replaces the node group |
 | `default_node_pool.launch_template` | none | mutable: setting, removing or switching it replaces the node group; a new version of the same template rolls out in place |

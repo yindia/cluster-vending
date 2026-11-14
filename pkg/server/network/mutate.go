@@ -211,10 +211,11 @@ func (s *NetworkService) refuseInUse(ctx context.Context, row *model.Network) er
 	if err != nil {
 		return service.ToConnect(err)
 	}
-	var using, deleting []string
+	var using, deleting, waits []string
 	for _, c := range clusters {
 		if c.State == clusterStateDeleting {
 			deleting = append(deleting, fmt.Sprintf("%s (%s)", c.Name, c.ID))
+			waits = append(waits, "cluster delete --id "+c.ID+" --wait")
 		} else {
 			using = append(using, fmt.Sprintf("%s (%s)", c.Name, c.ID))
 		}
@@ -225,8 +226,8 @@ func (s *NetworkService) refuseInUse(ctx context.Context, row *model.Network) er
 			fmt.Sprintf("network %s is used by clusters %s; delete them first", row.ID, strings.Join(using, ", ")))
 	case len(deleting) > 0:
 		return connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("network %s is used by clusters still being deleted: %s; retry once they are gone (cluster get --wait)",
-				row.ID, strings.Join(deleting, ", ")))
+			fmt.Sprintf("network %s is used by clusters still being deleted: %s; wait until they are gone (%s), then delete the network again",
+				row.ID, strings.Join(deleting, ", "), strings.Join(waits, "; ")))
 	}
 	return nil
 }

@@ -100,6 +100,9 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err := s.withChannelVersion(ctx, requested); err != nil {
 		return nil, err
 	}
+	if err := s.withIRSA(ctx, requested); err != nil {
+		return nil, err
+	}
 	spec, err := corecluster.ResolveSpec(requested, t.Zones)
 	if err != nil {
 		return nil, fault.New(fault.Invalid, err.Error())

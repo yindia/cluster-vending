@@ -122,7 +122,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 		}
 	}
 	m.into(&c.Resource)
-	c.Paused = pauseOf(obj)
+	c.Paused, c.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	return c, nil
 }
 

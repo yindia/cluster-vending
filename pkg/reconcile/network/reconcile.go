@@ -57,6 +57,13 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	// What changed in a pass is reported as events of the network's
 	// object (events.go), once: when its status is recorded.
 	ctx = reconcile.WithNotes(ctx)
+	// A pause asked with an until ends by itself (cluster reconcile).
+	if row.PauseLapsed {
+		target := model.PauseTarget{NetworkID: row.ID}
+		if err := reconcile.LiftLapsedPause(ctx, s.deps, tenantID, target, row.Paused != nil); err != nil {
+			return err
+		}
+	}
 	// A paused network (AdminService.PauseReconcile) is only observed:
 	// nothing of it is applied, repaired or deleted, and what was asked
 	// for meanwhile (a new generation, a delete) stays stored until the

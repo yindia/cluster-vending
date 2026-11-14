@@ -79,6 +79,11 @@ type Tenants interface {
 	// whatever else holds it, so it can run again in a paused tenant.
 	// ErrNotFound: no such tenant, network or cluster.
 	SetPause(ctx context.Context, tenantID string, target model.PauseTarget, pause *model.Pause) error
+	// DropLapsedPause writes the pause of target (one cluster, one
+	// network, or the tenant's namespace) again without the scopes whose
+	// until has passed, and without the annotation when none is left.
+	// ErrNotFound: no such tenant, network or cluster.
+	DropLapsedPause(ctx context.Context, tenantID string, target model.PauseTarget) error
 	// RequestAccessCheck records that an access check of the account (by
 	// row ID) was asked for at at (CloudAccount.AccessRequestedAt), of
 	// regions too when any are given (AccessRequestedRegions; none keeps

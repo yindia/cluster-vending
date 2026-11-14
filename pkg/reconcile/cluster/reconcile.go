@@ -45,6 +45,14 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 		return err
 	}
 	ctx = reconcile.WithNotes(ctx)
+	// A pause asked with an until ends by itself: its scope is dropped,
+	// and when none is left the providers act on the resources again.
+	if row.PauseLapsed {
+		target := model.PauseTarget{ClusterID: row.ID}
+		if err := reconcile.LiftLapsedPause(ctx, s.deps, tenantID, target, row.Paused != nil); err != nil {
+			return err
+		}
+	}
 	// A paused cluster (AdminService.PauseReconcile) is only observed:
 	// nothing of it is applied, repaired or deleted, AWS and its workload
 	// cluster are not touched, and what was asked for meanwhile (a new

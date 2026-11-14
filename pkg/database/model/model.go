@@ -75,8 +75,13 @@ type Resource struct {
 	Status JSON
 	// Paused is the operator's pause of the resource; nil for none. Read
 	// only: it is set and removed by Tenants.SetPause, and a new resource
-	// of a paused tenant is created with the tenant's.
+	// of a paused tenant is created with the tenant's. A scope whose until
+	// has passed is not part of it.
 	Paused *Pause
+	// PauseLapsed: the stored pause has a scope whose until has passed;
+	// Tenants.DropLapsedPause writes it again without (the reconcile
+	// does, and resumes the providers when nothing is left).
+	PauseLapsed bool
 }
 
 // Meta returns the shared resource columns, for code that handles every
@@ -129,6 +134,8 @@ type CloudAccount struct {
 	AccountName string
 	// Paused is the operator's pause of the account (Resource.Paused).
 	Paused *Pause
+	// PauseLapsed is Resource.PauseLapsed of the account.
+	PauseLapsed bool
 	// Access is the controller's last access check of the account (its
 	// status); nil before the first.
 	Access *AccountAccess

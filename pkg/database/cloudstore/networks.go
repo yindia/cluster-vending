@@ -135,7 +135,7 @@ func (r networks) row(obj *cloudv1alpha1.Network) (*model.Network, error) {
 		ExternalID: m.ExternalID, CreateRequestID: m.CreateRequestID,
 	}
 	m.into(&n.Resource)
-	n.Paused = pauseOf(obj)
+	n.Paused, n.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	return n, nil
 }
 

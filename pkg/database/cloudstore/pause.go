@@ -18,9 +18,38 @@ import (
 // a row update never touches it.
 const AnnotationPaused = group + "paused"
 
-// pauseOf is the pause an object carries; nil for none.
+// pauseOf is the pause an object carries now; nil for none. A scope whose
+// until has passed is not part of it (model.Pause.Active).
 func pauseOf(obj client.Object) *model.Pause {
+	return storedPause(obj).Active(now())
+}
+
+// storedPause is the pause as the annotation records it, lapsed scopes
+// included.
+func storedPause(obj client.Object) *model.Pause {
 	return model.ParsePause(obj.GetAnnotations()[AnnotationPaused])
+}
+
+// pauseLapsed reports whether the object's stored pause has a scope whose
+// until has passed (model.Pause.Lapsed).
+func pauseLapsed(obj client.Object) bool { return storedPause(obj).Lapsed(now()) }
+
+// DropLapsedPause implements repository.Tenants.
+func (r tenants) DropLapsedPause(ctx context.Context, tenantID string, target model.PauseTarget) error {
+	var obj client.Object
+	var err error
+	switch {
+	case target.ClusterID != "":
+		obj, err = clusters(r).find(ctx, tenantID, target.ClusterID)
+	case target.NetworkID != "":
+		obj, err = networks(r).find(ctx, tenantID, target.NetworkID)
+	default:
+		obj, err = r.tenantNamespace(ctx, tenantID)
+	}
+	if err != nil {
+		return err
+	}
+	return r.writePause(ctx, obj, pauseOf(obj))
 }
 
 // inheritPause gives a new object of a paused tenant the tenant's pause:
@@ -53,7 +82,9 @@ func (r tenants) SetPause(ctx context.Context, tenantID string, target model.Pau
 		if err != nil {
 			return err
 		}
-		return r.markPaused(ctx, obj, scope, pause, true)
+		// Paused at a channel's scope, the cluster's resume of that scope
+		// removes that scope only: its own pause, or another, stays.
+		return r.markPaused(ctx, obj, scope, pause, target.Selector == "")
 	case target.NetworkID != "":
 		obj, err := networks(r).find(ctx, tenantID, target.NetworkID)
 		if err != nil {
@@ -104,11 +135,17 @@ func (r tenants) SetPause(ctx context.Context, tenantID string, target model.Pau
 // first, and when. It is a patch of the one annotation: the row (its etag,
 // its spec) is not written, and no update of the row is lost to it.
 func (s store) markPaused(ctx context.Context, obj client.Object, scope model.PauseScope, pause *model.Pause, own bool) error {
-	current := pauseOf(obj)
+	current := pauseOf(obj) // what has lapsed goes with this write
 	next := current.Without(scope, own)
 	if pause != nil {
 		next = current.With(scope, pause)
 	}
+	return s.writePause(ctx, obj, next)
+}
+
+// writePause sets obj's pause annotation to next (nil: removes it), with
+// a patch of the one annotation; nothing when it says that already.
+func (s store) writePause(ctx context.Context, obj client.Object, next *model.Pause) error {
 	value := ""
 	if next != nil {
 		value = next.Annotation()

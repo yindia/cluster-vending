@@ -182,7 +182,7 @@ func accountRow(obj *cloudv1alpha1.CloudAccount) *model.CloudAccount {
 	if obj.Spec.AWS != nil {
 		a.AccountID = obj.Spec.AWS.AccountID
 	}
-	a.Paused = pauseOf(obj)
+	a.Paused, a.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	a.Access = AccessModel(obj.Status.Access)
 	a.AccessRequestedAt = accessRequestedOf(obj)
 	a.AccessRequestedRegions = accessRegionsOf(obj)

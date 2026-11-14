@@ -328,6 +328,28 @@ func edited(generation, observed int64) bool { return observed != 0 && generatio
 // next decides when a row is looked at again, from what the pass did and
 // the row as it is now (nil: gone).
 func next(r *model.Resource, pending []string, imported string, err error) ctrl.Result {
+	res := nextOf(r, pending, imported, err)
+	if r == nil {
+		return res
+	}
+	return untilPauseEnds(r.Paused, res, time.Now())
+}
+
+// untilPauseEnds looks at a paused row again when a part of its pause
+// ends by itself (its until), if that is sooner than res.
+func untilPauseEnds(p *model.Pause, res ctrl.Result, now time.Time) ctrl.Result {
+	end, ok := p.NextEnd()
+	if !ok {
+		return res
+	}
+	wait := max(end.Sub(now), time.Second)
+	if res.RequeueAfter == 0 || wait < res.RequeueAfter {
+		res.RequeueAfter = wait
+	}
+	return res
+}
+
+func nextOf(r *model.Resource, pending []string, imported string, err error) ctrl.Result {
 	switch {
 	case err != nil:
 		return ctrl.Result{RequeueAfter: failedDelay}

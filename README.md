@@ -91,20 +91,17 @@ later manifest needs is a placeholder in it, named in the file's header:
 `111122223333`, the role and the VPC and subnet IDs with your own.
 
 ```sh
-# 0. Create the platform's IAM role in acme's AWS account: a CloudFormation
-#    stack (docs/onboarding.md). It writes the template and prints the
-#    aws cloudformation create-stack command (and a console link when the
-#    server has cloudformation-template-url).
-bin/cluster-vending account template --tenant acme --account-id 111122223333
-
-# 1. Onboard acme's AWS account. The answer has the account's id
-#    (BOOTSTRAP_ID, the bootstrap id that networks refer to).
-bin/cluster-vending account create -f examples/cloudaccount.yaml
+# 1. Onboard acme's AWS account (docs/onboarding.md). It creates the
+#    platform's IAM role in the account with CloudFormation (terminal: your
+#    AWS credentials of the account; browser: the console), onboards the
+#    account and waits for the controller's access check. The answer has
+#    the account's id (BOOTSTRAP_ID, the bootstrap id that networks refer to).
+bin/cluster-vending account create -f examples/cloudaccount.yaml --create-role terminal
 bin/cluster-vending account list --tenant acme
 
-# 2. Wait until the controller has checked the account's access: ACCESS
-#    in account list is Verified. Networks and clusters are refused until
-#    then. To check now, or a region no network uses yet:
+# 2. Networks and clusters are refused until ACCESS in account list is
+#    Verified (account create waited for it). To check again, or a region
+#    no network uses yet:
 bin/cluster-vending account verify --id BOOTSTRAP_ID --tenant acme --region us-east-1
 bin/cluster-vending account get --id BOOTSTRAP_ID --tenant acme   # its Checks
 
@@ -158,7 +155,7 @@ bin/cluster-vending cluster get CLUSTER_ID --tenant acme -o yaml
   map to AWS.
 - [docs/onboarding.md](docs/onboarding.md): onboarding an AWS account: the
   CloudFormation templates of the platform's role (reader, updater,
-  provisioner), `account template`, and the `make cf-*` targets.
+  provisioner), how `account create` creates its stack, and the `make cf-*` targets.
 - [docs/components.md](docs/components.md): the `component` command: the
   catalog, enabling a component on a cluster, its values, and what is not
   installed yet.

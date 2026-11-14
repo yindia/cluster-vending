@@ -190,7 +190,7 @@ a network is created or imported in it.
 | `id` | Output only: the bootstrap ID. `NetworkSpec.bootstrap_id` and `ImportNetworkRequest.bootstrap_id` refer to it. |
 | `account_name` | Informational, at most 128 characters. Bootstrapping the same account again updates it. |
 | `aws.account_id` | Required: the 12-digit account ID. Unique within the tenant; it identifies the account on a repeated bootstrap. |
-| `aws.role` | Required: the name of the IAM role the platform assumes in the account. The tenant creates it, outside this API: `cluster-vending account template` (`GetAccountOnboarding`) gives the CloudFormation stack of `cluster-vending-provisioner`. |
+| `aws.role` | Required: the name of the IAM role the platform assumes in the account. The tenant creates it, outside this API: `cluster-vending account create` creates the CloudFormation stack of `cluster-vending-<role>` from `GetAccountOnboarding` before onboarding the account. |
 | `status.state` | Always `READY` once bootstrap returned. |
 | `status.namespace` | `tenant-<tenant_id>`. |
 | `status.provider_config_name` | Generated on the first bootstrap, then fixed (for example `aws-0a1b2c3d`). |

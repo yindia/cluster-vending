@@ -37,46 +37,75 @@ Each role trusts exactly one principal: the template's `ManagementRoleArn`
 parameter. There is no external ID yet: the platform assumes the role
 without `sts:ExternalId`, and a template requiring one would lock it out.
 
-## Creating the role
+## Onboarding the account
 
-```sh
-# The template of the role (default provisioner), and how to create it:
-cluster-vending account template --tenant acme --account-id 444455556666 [--role provisioner] [--region us-east-1] [--out role.yaml]
+One command creates the role and onboards the account. The manifest has
+everything it needs: the account and the role.
+
+```yaml
+# cloudaccount.yaml
+apiVersion: cluster-vending.io/v1
+kind: CloudAccount
+metadata: {name: acme-prod, tenant: acme}
+spec:
+  aws:
+    accountId: "444455556666"
+    role: cluster-vending-provisioner   # reader, updater or provisioner
 ```
 
-It writes the template to `--out` (or a new file in the temporary
-directory) and prints:
+```sh
+cluster-vending account create -f cloudaccount.yaml [--create-role terminal|browser|skip] [--profile <aws profile>] [--region us-east-1]
+```
 
-- the AWS CLI command, to run with credentials of the tenant account:
-  ```sh
-  aws cloudformation create-stack --stack-name cluster-vending-provisioner \
-    --template-body file://role.yaml --capabilities CAPABILITY_NAMED_IAM \
-    --parameters ParameterKey=ManagementRoleArn,ParameterValue=<management role> --region us-east-1
-  ```
-- where the API server serves the template:
-  `<server>/cloudformation/cluster-vending-provisioner-role.template.yaml`
-  (no token needed: a template holds no secret);
-- a CloudFormation console quick-create link, when the server has
-  `cloudformation-template-url` (below);
-- what to run next: `account create` with `spec.aws.role:
-  cluster-vending-provisioner`, then `account verify`.
+1. **The role's stack.** When `spec.aws.role` is one of the platform's
+   (`cluster-vending-reader`, `-updater`, `-provisioner`), the CLI gets its
+   template and the management role from the API server
+   (`GetAccountOnboarding`) and creates the stack `cluster-vending-<role>`
+   in the account. How is `--create-role`; at a terminal without it, that
+   is the one question asked:
+   - `terminal`: here, with your AWS credentials of the account (the AWS
+     SDK's default chain: environment, `~/.aws` profiles, SSO; `--profile`
+     picks one). The credentials must be of the manifest's account, or
+     nothing is created. A stack that already has the role's template and
+     management role is left alone; one with an older template is updated.
+     Each stack event is printed as it happens.
+   - `browser`: opens the CloudFormation console's quick-create link (and
+     prints it, for a session without a browser). Sign in to the account,
+     acknowledge that the stack creates IAM resources and choose **Create
+     stack**. With credentials of the account here, the CLI follows the
+     stack until it is created; without, it goes on and the access check
+     tells whether the role works. The link needs the templates on S3
+     (`cloudformation-template-url`, below); without it the CLI creates the
+     stack from the terminal instead.
+   - `skip`: the role exists already.
 
-`account create` prints the same next steps, and `account template --id
-<account id>` uses an onboarded account's role and AWS account.
-
-Then:
+   A stack that fails stops the command, with the reasons of the events
+   that failed: the account is not onboarded. Not at a terminal (CI),
+   `--create-role` is required. A role that is not one of the platform's is
+   yours to create, trusting the management role; no stack is created.
+2. **The account** is onboarded: its namespace and ProviderConfig
+   (`BootstrapTenant`).
+3. **The access check.** With `--wait` (the default) the CLI asks the
+   controller to check the account (`VerifyCloudAccount`) and waits for its
+   verdict: `Access: verified`, or the check that failed and a non-zero
+   exit. `--wait=false` returns once the account is onboarded; then:
 
 ```sh
-cluster-vending account create -f cloudaccount.yaml          # spec.aws: {accountId: ..., role: cluster-vending-provisioner}
 cluster-vending account verify --id <account id> --tenant acme
 cluster-vending account get --id <account id> --tenant acme   # ACCESS: Verified
 ```
+
+Networks and clusters are refused until the access is verified.
+
+The API server also serves the templates for download, without a token (a
+template holds no secret):
+`<server>/cloudformation/cluster-vending-provisioner-role.template.yaml`.
 
 ## Server settings
 
 | Setting | |
 |---|---|
-| `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account template` fails with `FAILED_PRECONDITION`, saying so. The server makes no AWS call with it. |
+| `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account create` cannot create a stack: `GetAccountOnboarding` fails with `FAILED_PRECONDITION`, saying so. The server makes no AWS call with it. |
 | `cloudformation-template-url` | Optional: an `https` location the templates are uploaded to, by file name. CloudFormation reads a template URL only from S3, so for the console link upload `pkg/cloudformation/templates/` to a bucket the tenant accounts can read and set this to it (for example `https://<bucket>.s3.amazonaws.com/cluster-vending`). The server's own `/cloudformation/` URL is for downloading: the console cannot use it. |
 
 ## Changing the templates

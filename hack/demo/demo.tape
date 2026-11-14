@@ -50,7 +50,7 @@ Show
 # ---------------------------------------------------------- 1. account
 Type "# 1. Onboard the AWS account: the CLI creates the platform's role with CloudFormation, then checks access" Enter
 Sleep 1s
-Type `cluster-vending account create -f $D/cloudaccount.yaml --create-role $DEMO_CREATE_ROLE` Enter
+Type `cluster-vending account create -f $D/cloudaccount.yaml --create-role $DEMO_CREATE_ROLE --region $DEMO_REGION` Enter
 Sleep 6s
 Hide
 Type `export ACCOUNT="$(json account list | jq -r '.accounts[] | select(.name=="demo") | .id')"; until json account get --id "$ACCOUNT" | jq -e '.account.status.access.verified' >/dev/null; do sleep 10; done; step 1` Enter

@@ -269,6 +269,18 @@ type ComponentInstall struct {
 	Helm *HelmInstall `json:"helm,omitempty"`
 }
 
+// CloudProvider is a cloud a component can be installed on: aws, gcp or
+// azure, the names of the cluster's provider.
+// +kubebuilder:validation:Enum=aws;gcp;azure
+type CloudProvider string
+
+// Cloud providers.
+const (
+	CloudProviderAWS   CloudProvider = "aws"
+	CloudProviderGCP   CloudProvider = "gcp"
+	CloudProviderAzure CloudProvider = "azure"
+)
+
 // ComponentManagement says who controls a component.
 // +kubebuilder:validation:Enum=Platform;Tenant
 type ComponentManagement string
@@ -306,6 +318,14 @@ type ComponentDefinitionSpec struct {
 	// +optional
 	// +kubebuilder:default=Tenant
 	Management ComponentManagement `json:"management,omitempty"`
+	// provider is the cloud the component is installed on: a cluster of
+	// another provider never gets it, and a tenant cannot enable it there.
+	// Every definition is for one cloud; the same component for another
+	// cloud is another definition, named <name>-<provider> (kyverno-gcp).
+	// Immutable.
+	// +required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="provider is immutable; a definition for another cloud is another definition"
+	Provider CloudProvider `json:"provider"`
 	// internal marks a definition that is only installed as a member of a
 	// bundle (includes): tenants cannot enable it by itself, and the
 	// catalog they see does not list it.

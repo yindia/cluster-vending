@@ -8,6 +8,9 @@ kind: ComponentDefinition
 metadata:
   name: cluster-autoscaler
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Kubernetes Cluster Autoscaler, which resizes the cluster's managed node groups between their minimum and maximum size.
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform

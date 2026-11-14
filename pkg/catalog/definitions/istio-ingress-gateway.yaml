@@ -3,6 +3,9 @@ kind: ComponentDefinition
 metadata:
   name: istio-ingress-gateway
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Cluster ingress, Istio's gateway (an Envoy Deployment) behind an internal AWS Network Load Balancer.
   # A member of the istio bundle (istio.yaml): installed with it, by the
   # platform, with every cluster.

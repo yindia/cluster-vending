@@ -138,7 +138,7 @@ func TestLastRelease(t *testing.T) {
 func catalogForTenant() []cloudv1alpha1.ComponentDefinition {
 	def := func(name string, management cloudv1alpha1.ComponentManagement, internal bool) cloudv1alpha1.ComponentDefinition {
 		return cloudv1alpha1.ComponentDefinition{ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec: cloudv1alpha1.ComponentDefinitionSpec{Namespace: "ns", Management: management, Internal: internal,
+			Spec: cloudv1alpha1.ComponentDefinitionSpec{Namespace: "ns", Management: management, Internal: internal, Provider: cloudv1alpha1.CloudProviderAWS,
 				Install: &cloudv1alpha1.ComponentInstall{Helm: &cloudv1alpha1.HelmInstall{
 					HelmChartSource: cloudv1alpha1.HelmChartSource{Repository: "https://charts.example.com", Chart: name}}}}}
 	}

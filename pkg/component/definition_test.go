@@ -82,7 +82,9 @@ func TestCheckDefinition(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			problems := component.CheckDefinition(tt.d)
+			d := tt.d
+			d.Provider = "aws" // TestCheckDefinitionNeedsAProvider covers it
+			problems := component.CheckDefinition(d)
 			if len(tt.wantIn) == 0 && len(problems) > 0 {
 				t.Fatalf("problems %v, want none", problems)
 			}

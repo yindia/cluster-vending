@@ -488,3 +488,13 @@ func TestKyvernoLeavesOutTheLegacyPolicyCRDs(t *testing.T) {
 		}
 	}
 }
+
+// Every shipped definition is for AWS: a definition is for one cloud, and
+// a variant for another cloud is its own definition, <name>-<provider>.
+func TestShippedDefinitionsAreForAWS(t *testing.T) {
+	for _, d := range definitions(t) {
+		if d.Spec.Provider != cloudv1alpha1.CloudProviderAWS {
+			t.Errorf("%s is for %q, want aws", d.Name, d.Spec.Provider)
+		}
+	}
+}

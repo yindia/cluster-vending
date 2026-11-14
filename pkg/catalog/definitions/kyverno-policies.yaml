@@ -3,6 +3,9 @@ kind: ComponentDefinition
 metadata:
   name: kyverno-policies
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Kubernetes Pod Security Standards (baseline or restricted) as Kyverno ValidatingPolicies, with system and platform namespaces excluded.
   namespace: kyverno
   requires: [kyverno]

@@ -3,6 +3,9 @@ kind: ComponentDefinition
 metadata:
   name: gpu-operator
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: NVIDIA GPU Operator, which runs the device plugin, GPU Feature Discovery, DCGM exporter, MIG manager and Node Feature Discovery on GPU nodes that use the EKS-optimized AL2023 NVIDIA AMI (the AMI already provides the driver and container toolkit).
   namespace: gpu-operator
   install:

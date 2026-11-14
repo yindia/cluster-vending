@@ -462,6 +462,22 @@ spec:
                   cluster by the controller.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              provider:
+                description: |-
+                  provider is the cloud the component is installed on: a cluster of
+                  another provider never gets it, and a tenant cannot enable it there.
+                  Every definition is for one cloud; the same component for another
+                  cloud is another definition, named <name>-<provider> (kyverno-gcp).
+                  Immutable.
+                enum:
+                - aws
+                - gcp
+                - azure
+                type: string
+                x-kubernetes-validations:
+                - message: provider is immutable; a definition for another cloud is
+                    another definition
+                  rule: self == oldSelf
               requires:
                 description: requires lists other components that must be Ready first.
                 items:
@@ -507,6 +523,7 @@ spec:
                 type: string
             required:
             - description
+            - provider
             type: object
             x-kubernetes-validations:
             - message: exactly one of install and includes is set

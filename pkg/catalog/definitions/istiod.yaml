@@ -3,6 +3,9 @@ kind: ComponentDefinition
 metadata:
   name: istiod
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Istio control plane (istiod) with the ambient profile; deploys waypoints and Gateway API gateways once the Gateway API CRDs are installed.
   # A member of the istio bundle (istio.yaml): installed with it, by the
   # platform, with every cluster.

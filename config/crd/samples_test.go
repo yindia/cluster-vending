@@ -94,6 +94,7 @@ kind: ComponentDefinition
 metadata:
   name: %s
 spec:
+  provider: aws
   description: d
   namespace: tools
   install:
@@ -132,7 +133,7 @@ spec:
 // Tenant; a CRD chart is a chart source.
 func TestComponentDefinitionShapeRules(t *testing.T) {
 	v := newValidator(t, "ComponentDefinition")
-	const head = "apiVersion: cloud.cluster-vending.io/v1alpha1\nkind: ComponentDefinition\nmetadata:\n  name: x\nspec:\n  description: d\n"
+	const head = "apiVersion: cloud.cluster-vending.io/v1alpha1\nkind: ComponentDefinition\nmetadata:\n  name: x\nspec:\n  provider: aws\n  description: d\n"
 	const install = "  install:\n    helm: {repository: 'https://charts.example.com', chart: tools}\n"
 	for name, tt := range map[string]struct {
 		spec    string
@@ -215,7 +216,7 @@ func catalogEntry(t *testing.T, def *cloudv1alpha1.ComponentDefinition) componen
 		}
 		return v
 	}
-	return component.Definition{Name: def.Name, Valid: true, Requires: def.Spec.Requires,
+	return component.Definition{Name: def.Name, Valid: true, Requires: def.Spec.Requires, Provider: string(def.Spec.Provider),
 		ConflictsWithAddons: def.Spec.ConflictsWithAddons, PlatformValues: object(def.Spec.PlatformValues),
 		UserValues: def.Spec.UserValues, ValuesSchema: object(def.Spec.ValuesSchema)}
 }

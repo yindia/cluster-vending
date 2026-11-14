@@ -5,6 +5,9 @@ kind: ComponentDefinition
 metadata:
   name: kyverno
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Kyverno policy engine (admission, background, cleanup and reports controllers) installed highly available and fail closed, with system and platform namespaces excluded from its webhooks.
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform

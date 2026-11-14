@@ -76,6 +76,14 @@ enum ComponentManagement {
   COMPONENT_MANAGEMENT_PLATFORM = 2;
 }
 
+// CloudProvider is a cloud a component can be installed on.
+enum CloudProvider {
+  CLOUD_PROVIDER_UNSPECIFIED = 0;
+  CLOUD_PROVIDER_AWS = 1;
+  CLOUD_PROVIDER_GCP = 2;
+  CLOUD_PROVIDER_AZURE = 3;
+}
+
 // ComponentPhase summarises a component's state.
 enum ComponentPhase {
   COMPONENT_PHASE_UNSPECIFIED = 0;
@@ -198,6 +206,11 @@ message ComponentDefinition {
   // Why it is off, e.g. "disabled" or "it requires kyverno, which is off".
   // Empty when disabled is false.
   string disabled_reason = 13;
+
+  // The cloud the component is installed on; a cluster of another
+  // provider never gets it. The same component for another cloud is
+  // another definition (<name>-<provider>).
+  CloudProvider provider = 14;
 
   // What the platform creates in the tenant's account for the component
   // (an IAM role), shown so tenants know what the component may do there.

@@ -18,6 +18,7 @@ kind: ComponentDefinition
 metadata:
   name: tools
 spec:
+  provider: aws
   description: d
   namespace: tools
   install:

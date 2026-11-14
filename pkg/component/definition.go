@@ -57,6 +57,7 @@ func CheckDefinition(d Definition) []string {
 	if err := Validate(d.PlatformValues); err != nil {
 		out = append(out, "platformValues: "+err.Error())
 	}
+	out = append(out, providerProblems(d)...)
 	if err := ValidateCloudResources(d.CloudResources); err != nil {
 		out = append(out, err.Error())
 	}

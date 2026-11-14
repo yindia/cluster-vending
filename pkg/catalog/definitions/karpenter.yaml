@@ -3,6 +3,9 @@ kind: ComponentDefinition
 metadata:
   name: karpenter
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Karpenter node autoscaler. It launches EC2 nodes for the NodePools and EC2NodeClasses created on the cluster; none is shipped (docs/catalog.md).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform

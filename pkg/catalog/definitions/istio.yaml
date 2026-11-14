@@ -11,6 +11,9 @@ kind: ComponentDefinition
 metadata:
   name: istio
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Istio service mesh in ambient mode, with an internal ingress gateway. Namespaces join the mesh with the label istio.io/dataplane-mode=ambient.
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform

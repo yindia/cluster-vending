@@ -62,6 +62,13 @@ type Definition struct {
 	HasInstall bool
 	// Requires are components that must be enabled first.
 	Requires []string
+	// Provider is the cloud the component is installed on (aws, gcp,
+	// azure); Covers.
+	Provider string
+	// Chart is "<repository> <chart>" of its main chart, and Namespace
+	// where it is installed: two definitions for overlapping clouds must
+	// not install the same chart into the same namespace.
+	Chart, Namespace string
 	// ConflictsWithAddons are EKS add-on names the cluster must not have
 	// while this component is enabled.
 	ConflictsWithAddons []string

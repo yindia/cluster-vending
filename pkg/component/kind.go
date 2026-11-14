@@ -37,6 +37,9 @@ func DefinitionOf(def *cloudv1alpha1.ComponentDefinition) (Definition, error) {
 		Includes:            slices.Clone(def.Spec.Includes),
 		HasInstall:          def.Spec.Install != nil,
 		Requires:            slices.Clone(def.Spec.Requires),
+		Provider:            string(def.Spec.Provider),
+		Chart:               chartOf(def),
+		Namespace:           def.Spec.Namespace,
 		ConflictsWithAddons: slices.Clone(def.Spec.ConflictsWithAddons),
 		PlatformValues:      platform,
 		UserValues:          def.Spec.UserValues,
@@ -88,4 +91,13 @@ func PinValues(raw *runtime.RawExtension) (Values, error) {
 		return nil, err
 	}
 	return v, nil
+}
+
+// chartOf is "<repository> <chart>" of the definition's main chart; empty
+// without one.
+func chartOf(def *cloudv1alpha1.ComponentDefinition) string {
+	if def.Spec.Install == nil || def.Spec.Install.Helm == nil {
+		return ""
+	}
+	return def.Spec.Install.Helm.Repository + " " + def.Spec.Install.Helm.Chart
 }

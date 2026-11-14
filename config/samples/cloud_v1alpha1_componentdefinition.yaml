@@ -11,6 +11,7 @@ kind: ComponentDefinition
 metadata:
   name: kyverno
 spec:
+  provider: aws
   description: Policy engine. Validates, mutates and generates Kubernetes resources.
   namespace: kyverno
   install:
@@ -41,6 +42,7 @@ kind: ComponentDefinition
 metadata:
   name: kyverno-policies
 spec:
+  provider: aws
   description: The Kubernetes Pod Security Standards as Kyverno policies.
   namespace: kyverno
   requires:
@@ -68,6 +70,7 @@ kind: ComponentDefinition
 metadata:
   name: karpenter
 spec:
+  provider: aws
   description: Node autoscaling. Launches EC2 instances for pending pods.
   namespace: kube-system
   # An IRSA role (the default access): the cluster needs spec.aws.irsa. The
@@ -163,6 +166,7 @@ kind: ComponentDefinition
 metadata:
   name: internal-dashboards
 spec:
+  provider: aws
   description: The platform team's Grafana dashboards and alerts for workload clusters.
   namespace: monitoring
   install:
@@ -183,6 +187,7 @@ kind: ComponentDefinition
 metadata:
   name: aws-load-balancer-controller
 spec:
+  provider: aws
   description: Provisions AWS load balancers for Services and Ingresses.
   namespace: kube-system
   install:

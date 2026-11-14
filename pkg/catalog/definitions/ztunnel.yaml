@@ -3,6 +3,9 @@ kind: ComponentDefinition
 metadata:
   name: ztunnel
 spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
   description: Istio ztunnel node proxy (DaemonSet); gives ambient workloads mTLS and L4 policy without sidecars.
   # A member of the istio bundle (istio.yaml): installed with it, by the
   # platform, with every cluster.

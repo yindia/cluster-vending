@@ -65,7 +65,10 @@ func CheckTenantAccess(d Definition, catalog []Definition) error {
 //   - an internal definition is a member of exactly one bundle, with that
 //     bundle's management, and requires nothing a Tenant controls unless
 //     it is a fellow member;
-//   - requirements exist and have no cycle.
+//   - requirements exist and have no cycle;
+//   - providers agree within a bundle, a requirement covers the clouds of
+//     what requires it, and no two definitions install one chart into one
+//     namespace on the same cloud (checkProviders).
 func CheckCatalog(defs []Definition) []string {
 	byName := make(map[string]Definition, len(defs))
 	for _, d := range defs {
@@ -82,6 +85,7 @@ func CheckCatalog(defs []Definition) []string {
 		out = append(out, checkPlatform(d, byName)...)
 		out = append(out, checkBundle(d, byName)...)
 		out = append(out, checkInternal(d, byName, bundleOf[d.Name])...)
+		out = append(out, checkProviders(d, byName, defs)...)
 	}
 	if _, err := release.UpgradeOrder(orderEntries(defs)); err != nil {
 		out = append(out, err.Error())

@@ -130,7 +130,9 @@ func TestCheckDefinitionManagementAndBundles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := strings.Join(CheckDefinition(tt.d), "; ")
+			d := tt.d
+			d.Provider = "aws" // TestCheckDefinitionNeedsAProvider covers it
+			got := strings.Join(CheckDefinition(d), "; ")
 			if (tt.want == "") != (got == "") || !strings.Contains(got, tt.want) {
 				t.Errorf("problems = %q, want %q", got, tt.want)
 			}

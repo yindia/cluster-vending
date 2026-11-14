@@ -48,7 +48,10 @@ func AccessDue(a *model.CloudAccount, regions []string, now time.Time) (bool, ti
 	if last == nil {
 		return true, 0
 	}
-	if a.AccessRequestedAt.After(last.AttemptedAt) || a.UpdatedAt.After(last.AttemptedAt) {
+	// The status keeps seconds (metav1.Time): a request or a change in the
+	// second of the last attempt is taken as seen by it.
+	attempted := last.AttemptedAt.Truncate(time.Second)
+	if a.AccessRequestedAt.Truncate(time.Second).After(attempted) || a.UpdatedAt.Truncate(time.Second).After(attempted) {
 		return true, 0
 	}
 	for _, region := range regions {

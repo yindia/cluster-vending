@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -13,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -41,8 +43,9 @@ func NewCloudAccountReconciler(d Deps) *CloudAccountReconciler {
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=cloudaccounts/finalizers,verbs=update
 
 // Reconcile keeps the account's namespace and ProviderConfig in the
-// management cluster (account.Reconciler.Apply) and reports it in the
-// status. An account is bootstrapped through the API, which decides its
+// management cluster (account.Reconciler.Apply), checks, when due, that the
+// tenant role works and allows the platform's calls
+// (account.Reconciler.VerifyAccess), and reports both in the status. An account is bootstrapped through the API, which decides its
 // ProviderConfig name and its role: one created without it is marked, not
 // adopted.
 func (r *CloudAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -68,20 +71,41 @@ func (r *CloudAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if errors.Is(err, repository.ErrNotFound) {
 		return ctrl.Result{}, nil
 	}
-	if serr := r.report(ctx, req, err); serr != nil {
+	var access *model.AccountAccess
+	var wait time.Duration
+	if err == nil {
+		access, wait, err = r.verify(ctx, tenant, id)
+	}
+	if serr := r.report(ctx, req, err, access); serr != nil {
 		return ctrl.Result{}, serr
 	}
 	if err != nil {
 		r.deps.logger().ErrorContext(ctx, "reconcile account", "namespace", obj.Namespace, "name", obj.Name, "error", err)
 		return ctrl.Result{RequeueAfter: failedDelay}, nil
 	}
+	if wait > 0 && wait < resyncDelay {
+		return ctrl.Result{RequeueAfter: wait}, nil
+	}
 	return ctrl.Result{RequeueAfter: resyncDelay}, nil
 }
 
-// report writes the phase and the Ready condition of the account from
-// how the pass went, when they changed. The object is read again: the
-// reconciler recorded its objects in the status meanwhile.
-func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, passErr error) error {
+// verify runs the account's access check when it is due
+// (account.Reconciler.VerifyAccess): the access after it, nil when none
+// ran, and how long until the next is due.
+func (r *CloudAccountReconciler) verify(ctx context.Context, tenant, id string) (*model.AccountAccess, time.Duration, error) {
+	row, err := r.deps.Store.Tenants().GetCloudAccountByID(ctx, tenant, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	return r.rec.VerifyAccess(ctx, row, time.Now())
+}
+
+// report writes the phase, the Ready condition and, with a check that ran,
+// the access of the account from how the pass went, when they changed.
+// An account whose access was denied is Failed: the platform cannot act
+// in it. The object is read again: the reconciler recorded its objects in
+// the status meanwhile.
+func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, passErr error, access *model.AccountAccess) error {
 	obj := &cloudv1alpha1.CloudAccount{}
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
 		return client.IgnoreNotFound(err)
@@ -96,6 +120,16 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 	}
 	meta.SetStatusCondition(&obj.Status.Conditions, cond)
 	meta.RemoveStatusCondition(&obj.Status.Conditions, ConditionAdopted)
+	if access != nil {
+		obj.Status.Access = cloudstore.AccessStatus(access)
+	}
+	current := cloudstore.AccessModel(obj.Status.Access)
+	if r.deps.AWSAccessCheck != nil || current != nil {
+		meta.SetStatusCondition(&obj.Status.Conditions, convert.Condition(account.AccessCondition(current), obj.Generation))
+	}
+	if account.AccessDenied(current) {
+		obj.Status.Phase = cloudv1alpha1.CloudAccountPhaseFailed
+	}
 	pause := model.ParsePause(obj.Annotations[cloudstore.AnnotationPaused])
 	if pause != nil {
 		paused := account.PausedCondition(pause)
@@ -116,6 +150,9 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
 	}
 	if n := accountPauseEvent(meta.FindStatusCondition(before.Conditions, platform.ConditionPaused), pause); n != nil {
+		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
+	}
+	if n := account.AccessNote(cloudstore.AccessModel(before.Access), current); n != nil {
 		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
 	}
 	return nil

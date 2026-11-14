@@ -142,6 +142,13 @@ func conditions(in []*cloudv1.Condition, existing []metav1.Condition, at metav1.
 	return out
 }
 
+// Condition is the kind's form of one contract condition, observed at
+// generation.
+func Condition(c *cloudv1.Condition, generation int64) metav1.Condition {
+	return metav1.Condition{Type: c.GetType(), Status: conditionStatus(c.GetStatus()), Reason: c.GetReason(),
+		Message: c.GetMessage(), ObservedGeneration: generation}
+}
+
 func conditionStatus(s cloudv1.ConditionStatus) metav1.ConditionStatus {
 	switch s {
 	case cloudv1.ConditionStatus_CONDITION_STATUS_TRUE:

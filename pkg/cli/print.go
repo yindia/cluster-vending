@@ -246,6 +246,9 @@ func resourceRows(resources []*cloudv1.ManagedResource) [][]string {
 	rows := make([][]string, 0, len(resources))
 	for _, r := range resources {
 		state := word(r.GetState().String(), "MANAGED_RESOURCE_STATE_")
+		if r.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING && r.GetMessage() == "deleted" {
+			state = "Deleted"
+		}
 		if r.GetPaused() {
 			state += " (paused)"
 		}

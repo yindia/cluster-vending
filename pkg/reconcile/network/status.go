@@ -126,8 +126,9 @@ func deref(s *string) string {
 //	READY         every resource READY
 //	PROVISIONING  otherwise (CREATING / WAITING resources)
 func status(row *model.Network, views []*cloudv1.ManagedResource, resources *cloudv1.NetworkResources, clusterIDs []string) *cloudv1.NetworkStatus {
-	st := &cloudv1.NetworkStatus{Resources: resources, ClusterIds: clusterIDs, ManagedResources: views,
-		Import: StoredImport(row)}
+	st := &cloudv1.NetworkStatus{Resources: resources, ClusterIds: clusterIDs,
+		ManagedResources: reconcile.ExplainMissing(views, row.State == StateDeleting),
+		Import:           StoredImport(row)}
 	ready, waiting := 0, 0
 	var failed *cloudv1.ManagedResource
 	for _, v := range views {

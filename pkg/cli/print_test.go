@@ -259,3 +259,15 @@ func TestPrintFormats(t *testing.T) {
 		t.Errorf("xml: %v", err)
 	}
 }
+
+// While its owner is deleted, a recorded object that is gone reads Deleted.
+func TestResourceRowsShowDeleted(t *testing.T) {
+	rows := resourceRows([]*cloudv1.ManagedResource{
+		{Kind: "Subnet", Name: "s", ExternalName: "subnet-1", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING, Message: "deleted"},
+		{Kind: "Subnet", Name: "t", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING, Message: "deleted outside the platform"},
+	})
+
+	if rows[0][3] != "Deleted" || rows[1][3] != "Missing" {
+		t.Fatalf("states = %q, %q", rows[0][3], rows[1][3])
+	}
+}

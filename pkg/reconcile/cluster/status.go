@@ -200,7 +200,8 @@ func deref(p *string) string {
 // the cluster cannot be RUNNING.
 func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bool) *cloudv1.ClusterStatus {
 	converged := convergedOn(row, views)
-	st := &cloudv1.ClusterStatus{ManagedResources: views, ObservedGeneration: row.ObservedGeneration}
+	st := &cloudv1.ClusterStatus{ManagedResources: reconcile.ExplainMissing(views, row.State == StateDeleting),
+		ObservedGeneration: row.ObservedGeneration}
 	if converged {
 		st.ObservedGeneration = row.Generation
 	}

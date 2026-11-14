@@ -78,7 +78,11 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err := reconcile.CheckAWSLabels(in.GetLabels()); err != nil {
 		return nil, err
 	}
-	t, err := s.Target(ctx, req.GetTenantId(), in.GetSpec())
+	n, err := s.newClusterNetwork(ctx, req.GetTenantId(), in.GetSpec())
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.targetIn(ctx, req.GetTenantId(), n, in.GetSpec())
 	if err != nil {
 		return nil, err
 	}

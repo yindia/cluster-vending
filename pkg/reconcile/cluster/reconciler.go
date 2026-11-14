@@ -55,22 +55,54 @@ type Target struct {
 
 // Target loads the cluster's network and account and picks its subnets.
 func (s *Reconciler) Target(ctx context.Context, tenantID string, spec *cloudv1.ClusterSpec) (Target, error) {
+	n, err := s.network(ctx, tenantID, spec)
+	if err != nil {
+		return Target{}, err
+	}
+	return s.targetIn(ctx, tenantID, n, spec)
+}
+
+// network loads the cluster's network and refuses one no cluster can be
+// in: missing (NotFound), not the platform's (FailedPrecondition), or of
+// another provider or region (Invalid).
+func (s *Reconciler) network(ctx context.Context, tenantID string, spec *cloudv1.ClusterSpec) (*model.Network, error) {
 	n, err := s.deps.Store.Networks().Get(ctx, tenantID, spec.GetNetwork().GetNetworkId())
 	if errors.Is(err, repository.ErrNotFound) {
-		return Target{}, fault.New(fault.FailedPrecondition,
+		return nil, fault.New(fault.NotFound,
 			fmt.Sprintf("tenant %s has no network %s", tenantID, spec.GetNetwork().GetNetworkId()))
 	}
 	if err != nil {
-		return Target{}, storeError(err)
+		return nil, storeError(err)
 	}
 	switch {
 	case n.State == "NETWORK_STATE_DELETING", n.State == "NETWORK_STATE_IMPORTED", n.State == "NETWORK_STATE_FAILED":
-		return Target{}, fault.New(fault.FailedPrecondition,
+		return nil, fault.New(fault.FailedPrecondition,
 			fmt.Sprintf("network %s is %s; clusters need a network the platform owns", n.ID, n.State))
 	case n.Provider != model.ProviderAWS || n.Region != spec.GetRegion():
-		return Target{}, fault.New(fault.Invalid,
+		return nil, fault.New(fault.Invalid,
 			fmt.Sprintf("network %s is %s/%s; the cluster is aws/%s", n.ID, n.Provider, n.Region, spec.GetRegion()))
 	}
+	return n, nil
+}
+
+// newClusterNetwork is network for a cluster being created: the network
+// must also be Ready or being updated. One still being created has no
+// subnets to choose yet. Only a create asks: a network taken over goes
+// back to PROVISIONING while its clusters keep running in it.
+func (s *Reconciler) newClusterNetwork(ctx context.Context, tenantID string, spec *cloudv1.ClusterSpec) (*model.Network, error) {
+	n, err := s.network(ctx, tenantID, spec)
+	if err != nil {
+		return nil, err
+	}
+	if n.State != "NETWORK_STATE_READY" && n.State != "NETWORK_STATE_UPDATING" {
+		return nil, fault.New(fault.FailedPrecondition,
+			fmt.Sprintf("network %s is still being created; a cluster can be created once it is Ready", n.ID))
+	}
+	return n, nil
+}
+
+// targetIn is Target in network n, already loaded and checked.
+func (s *Reconciler) targetIn(ctx context.Context, tenantID string, n *model.Network, spec *cloudv1.ClusterSpec) (Target, error) {
 	account, err := s.deps.Store.Tenants().GetCloudAccountByID(ctx, tenantID, n.CloudAccountID)
 	if err != nil {
 		return Target{}, storeError(err)

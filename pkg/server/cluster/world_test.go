@@ -65,7 +65,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	// The controller verified the account's access in the network's region.
 	storetest.SetAccess(t, storeKube, worldTenant, account.ID, storetest.Verified("us-east-1"))
 	network := &model.Network{TenantID: worldTenant, Name: "net", CloudAccountID: account.ID, Provider: model.ProviderAWS,
-		Region: "us-east-1", Resource: model.Resource{State: "NETWORK_STATE_PROVISIONING", Spec: model.JSON(`{}`)}}
+		Region: "us-east-1", Resource: model.Resource{State: "NETWORK_STATE_READY", Spec: model.JSON(`{}`)}}
 	must(store.Networks().Create(ctx, network))
 
 	scheme, err := kube.Scheme()

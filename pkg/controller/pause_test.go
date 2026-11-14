@@ -15,7 +15,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/server/network"
 )
 
 var operatorPause = &model.Pause{By: "alice", Since: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), Reason: "provider upgrade"}
@@ -32,7 +31,7 @@ func TestNetworkOfAPausedTenantWaitsForTheResume(t *testing.T) {
 	w := newWorld(t)
 	ctx := t.Context()
 	w.pauseTenant(t, operatorPause)
-	api := network.NewNetworkService(w.deps.Deps)
+	api := w.networkAPI(t)
 	created, err := api.CreateNetwork(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
 		Name: "prod", Spec: &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: w.account.ID, Layout: &cloudv1.NetworkLayout{}}}})
 	w.must(t, err)
@@ -74,7 +73,7 @@ func TestNetworkOfAPausedTenantWaitsForTheResume(t *testing.T) {
 func TestNetworkDeleteWhilePausedIsHeld(t *testing.T) {
 	w := newWorld(t)
 	ctx := t.Context()
-	api := network.NewNetworkService(w.deps.Deps)
+	api := w.networkAPI(t)
 	created, err := api.CreateNetwork(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
 		Name: "prod", Spec: &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: w.account.ID, Layout: &cloudv1.NetworkLayout{}}}})
 	w.must(t, err)

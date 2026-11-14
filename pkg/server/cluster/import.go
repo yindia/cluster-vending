@@ -42,8 +42,11 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 			return nil, service.ToConnect(err)
 		}
 	}
-	network, _, err := s.ImportNetwork(ctx, req.GetTenantId(), req.GetNetworkId())
+	network, account, err := s.ImportNetwork(ctx, req.GetTenantId(), req.GetNetworkId())
 	if err != nil {
+		return nil, err
+	}
+	if err := s.usable(ctx, account, network.Region); err != nil {
 		return nil, err
 	}
 	if err := s.NameTaken(ctx, req.GetTenantId(), req.GetName()); err != nil {
@@ -96,7 +99,11 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
 	// Refuses a network that is still imported read-only.
-	if _, err := s.Target(ctx, row.TenantID, spec); err != nil {
+	target, err := s.Target(ctx, row.TenantID, spec)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.usable(ctx, target.Account, target.Network.Region); err != nil {
 		return nil, err
 	}
 	// The row only: once anything is owned the cluster is no longer an

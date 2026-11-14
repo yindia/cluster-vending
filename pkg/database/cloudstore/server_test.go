@@ -24,6 +24,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -56,6 +57,7 @@ func TestNetworkServiceRunsOnTheKinds(t *testing.T) {
 	if err := store.Tenants().PutCloudAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
+	storetest.SetAccess(t, k, tenant, account.ID, storetest.Verified("us-east-1"))
 	svc := network.NewNetworkService(reconcile.Deps{Store: store, Kube: k})
 
 	created, err := svc.CreateNetwork(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
@@ -183,6 +185,7 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 	account := &model.CloudAccount{TenantID: tenant, Provider: model.ProviderAWS, AccountID: "444455556666",
 		ProviderConfigName: "aws-0a1b2c3d", Namespace: namespace}
 	must(store.Tenants().PutCloudAccount(ctx, account))
+	storetest.SetAccess(t, k, tenant, account.ID, storetest.Verified("us-east-1"))
 	net := &model.Network{TenantID: tenant, Name: "net", CloudAccountID: account.ID, Provider: model.ProviderAWS, Region: "us-east-1",
 		Resource: model.Resource{State: "NETWORK_STATE_READY"}}
 	net.Spec = document(t, networkSpec(net))

@@ -81,6 +81,9 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	if err != nil {
 		return nil, err
 	}
+	if err := s.usableNetwork(ctx, row.TenantID, row.NetworkID); err != nil {
+		return nil, err
+	}
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
 		return nil, createError(err, row)
 	}

@@ -26,6 +26,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
@@ -112,6 +113,14 @@ func newWorld(t *testing.T) world {
 
 func request(name string) ctrl.Request {
 	return ctrl.Request{NamespacedName: client.ObjectKey{Namespace: namespace, Name: name}}
+}
+
+// networkAPI is the NetworkService on the world's store, its account's
+// access verified in us-east-1 as the API requires.
+func (w world) networkAPI(t *testing.T) *network.NetworkService {
+	t.Helper()
+	storetest.SetAccess(t, w.k, tenant, w.account.ID, storetest.Verified("us-east-1"))
+	return network.NewNetworkService(w.deps.Deps)
 }
 
 func (w world) must(t *testing.T, err error) {
@@ -494,7 +503,7 @@ func TestCloudAccount(t *testing.T) {
 func TestNetworkWrittenByTheAPIIsReconciled(t *testing.T) {
 	w := newWorld(t)
 	ctx := t.Context()
-	api := network.NewNetworkService(w.deps.Deps)
+	api := w.networkAPI(t)
 	created, err := api.CreateNetwork(ctx, &cloudv1.CreateNetworkRequest{TenantId: tenant, Network: &cloudv1.Network{
 		Name: "prod", Spec: &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: w.account.ID, Layout: &cloudv1.NetworkLayout{}}}})
 	w.must(t, err)

@@ -55,6 +55,9 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	if err := bootstrapped(account); err != nil {
 		return nil, err
 	}
+	if err := s.usable(ctx, account, req.GetRegion()); err != nil {
+		return nil, err
+	}
 	if err := s.refuseOwnedVPC(ctx, account, req.GetAws().GetVpcId()); err != nil {
 		return nil, service.ToConnect(err)
 	}
@@ -107,6 +110,9 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 	imp, err := takeOverAllowed(row, req)
 	if err != nil {
 		return nil, service.ToConnect(err)
+	}
+	if err := s.usableByID(ctx, row.TenantID, row.CloudAccountID, row.Region); err != nil {
+		return nil, err
 	}
 	// The plan that was reviewed is the one applied: what was changed on
 	// the object behind the API's back, and no pass has put back yet, is

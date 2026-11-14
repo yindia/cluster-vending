@@ -19,6 +19,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -78,6 +79,9 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
+	if err := s.usableByID(ctx, row.TenantID, row.CloudAccountID, row.Region); err != nil {
+		return nil, err
+	}
 	if err := s.deps.Store.Networks().Create(ctx, row); err != nil {
 		if errors.Is(err, repository.ErrAlreadyExists) {
 			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(
@@ -96,6 +100,29 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 // (netreconcile.Bootstrapped), as FAILED_PRECONDITION.
 func bootstrapped(a *model.CloudAccount) error {
 	return service.ToConnect(netreconcile.Bootstrapped(a))
+}
+
+// usable refuses an account whose access the controller has not verified
+// in region (accountreconcile.Usable), as FAILED_PRECONDITION. A verdict
+// that is stale is logged and allowed.
+func (s *NetworkService) usable(ctx context.Context, a *model.CloudAccount, region string) error {
+	warning, err := accountreconcile.Usable(a, region)
+	if err != nil {
+		return service.ToConnect(err)
+	}
+	if warning != "" {
+		s.logger().WarnContext(ctx, warning, "tenant_id", a.TenantID, "bootstrap_id", a.ID, "region", region)
+	}
+	return nil
+}
+
+// usableByID is usable for the account of a network row.
+func (s *NetworkService) usableByID(ctx context.Context, tenantID, accountID, region string) error {
+	a, err := s.rec().Account(ctx, tenantID, accountID)
+	if err != nil {
+		return service.ToConnect(err)
+	}
+	return s.usable(ctx, a, region)
 }
 
 // GetNetwork returns one network from the database: its spec and the

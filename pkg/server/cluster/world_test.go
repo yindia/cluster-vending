@@ -21,6 +21,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/storetest"
@@ -36,6 +37,10 @@ type world struct {
 	store repository.Store
 	kube  client.Client
 	row   *model.Cluster
+	// storeKube is the API server the store keeps its rows in; accountID
+	// the bootstrap ID of the account of the cluster's network.
+	storeKube client.Client
+	accountID string
 }
 
 const worldTenant, worldNS = "acme", "tenant-acme"
@@ -43,7 +48,8 @@ const worldTenant, worldNS = "acme", "tenant-acme"
 func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts ...func(*recon.Deps)) world {
 	t.Helper()
 	ctx := t.Context()
-	store := storetest.NewStore(t)
+	storeKube := storetest.NewClient(t)
+	store := cloudstore.New(storeKube)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -56,6 +62,8 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	must(store.Tenants().PutCloudAccount(ctx, account))
 	account, err := store.Tenants().GetCloudAccount(ctx, worldTenant, model.ProviderAWS, "444455556666")
 	must(err)
+	// The controller verified the account's access in the network's region.
+	storetest.SetAccess(t, storeKube, worldTenant, account.ID, storetest.Verified("us-east-1"))
 	network := &model.Network{TenantID: worldTenant, Name: "net", CloudAccountID: account.ID, Provider: model.ProviderAWS,
 		Region: "us-east-1", Resource: model.Resource{State: "NETWORK_STATE_PROVISIONING", Spec: model.JSON(`{}`)}}
 	must(store.Networks().Create(ctx, network))
@@ -110,7 +118,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	for _, opt := range opts {
 		opt(&deps)
 	}
-	return world{svc: NewClusterService(deps), store: store, kube: k, row: row}
+	return world{svc: NewClusterService(deps), store: store, kube: k, row: row, storeKube: storeKube, accountID: account.ID}
 }
 
 func (w world) cluster(t *testing.T) *model.Cluster {

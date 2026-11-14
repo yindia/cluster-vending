@@ -25,6 +25,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/repository/mock"
@@ -46,14 +47,26 @@ type fixture struct {
 	svc       *NetworkService
 	kube      client.Client
 	store     repository.Store
-	accountID string // bootstrap ID of the tenant's AWS account
+	storeKube client.Client // the API server the store keeps its rows in
+	accountID string        // bootstrap ID of the tenant's AWS account
 }
 
 // newFixture is a NetworkService on a store (storetest.NewStore) with a
-// bootstrapped AWS account, and a fake Kubernetes client.
+// bootstrapped AWS account whose access was verified in us-east-1, and a
+// fake Kubernetes client.
 func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 	t.Helper()
-	store := storetest.NewStore(t)
+	f := newUnverifiedFixture(t, funcs...)
+	storetest.SetAccess(t, f.storeKube, tenant, f.accountID, storetest.Verified("us-east-1"))
+	return f
+}
+
+// newUnverifiedFixture is newFixture before the controller checked the
+// account's access.
+func newUnverifiedFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
+	t.Helper()
+	storeKube := storetest.NewClient(t)
+	store := cloudstore.New(storeKube)
 	ctx := t.Context()
 	if err := store.Tenants().Create(ctx, &model.Tenant{ID: tenant}); err != nil {
 		t.Fatal(err)
@@ -69,7 +82,8 @@ func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 		t.Fatal(err)
 	}
 	k := fakeKube(t, funcs...)
-	return fixture{svc: NewNetworkService(reconcile.Deps{Store: store, Kube: k}), kube: k, store: store, accountID: stored.ID}
+	return fixture{svc: NewNetworkService(reconcile.Deps{Store: store, Kube: k}), kube: k, store: store, storeKube: storeKube,
+		accountID: stored.ID}
 }
 
 func fakeKube(t *testing.T, funcs ...interceptor.Funcs) client.Client {

@@ -12,6 +12,7 @@ import (
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -47,6 +48,7 @@ func TestImportIsStoredThenDiscoveredOnTheKinds(t *testing.T) {
 	if err := store.Tenants().PutCloudAccount(ctx, account); err != nil {
 		t.Fatal(err)
 	}
+	storetest.SetAccess(t, k, tenant, account.ID, storetest.Verified("us-east-1"))
 	const vpc = "vpc-0123456789abcdef0"
 	request := &cloudv1.ImportNetworkRequest{TenantId: tenant, Name: "legacy", Region: "us-east-1", BootstrapId: account.ID,
 		Provider: &cloudv1.ImportNetworkRequest_Aws{Aws: &cloudv1.AwsImportNetwork{VpcId: vpc, SubnetIds: []string{"subnet-0123456789abcdef0"}}}}

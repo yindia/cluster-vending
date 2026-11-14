@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/maintenance"
 )
 
 var clusterHeader = []string{"NAME", "ID", "PHASE", "VERSION", "REGION", "AGE"}
@@ -86,6 +87,7 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 		{"Name", c.GetName()}, {"ID", c.GetId()}, {"Tenant", c.GetTenantId()}, {"Phase", clusterPhase(st)},
 		{"Region", c.GetSpec().GetRegion()}, {"Network", c.GetSpec().GetNetwork().GetNetworkId()},
 		{"Version", clusterVersion(c)}, {"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", st.GetPlatformRelease()},
+		{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())},
 	}
 	if u := st.GetUpgrade(); u != nil {
 		kv = append(kv, [2]string{"Upgrade", fmt.Sprintf("%s to %s (%s)", orNone(u.GetFromVersion()), orNone(u.GetToVersion()),

@@ -40,7 +40,9 @@ func testCluster() *cloudv1.Cluster {
 		Spec: &cloudv1.ClusterSpec{Region: "us-west-1",
 			Network:         &cloudv1.ClusterNetwork{NetworkId: "01a1d0a1-3333-7766-a4ff-84f3f49a774f"},
 			ControlPlane:    &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.37"},
-			DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"t3.large"}, ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}}},
+			DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"t3.large"}, ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
+			MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY, cloudv1.Weekday_WEEKDAY_SUNDAY},
+				Start: "02:00", Duration: "4h"}},
 		Status: &cloudv1.ClusterStatus{
 			State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING, CurrentKubernetesVersion: "1.37",
 			Endpoint:        &cloudv1.ClusterEndpoint{Url: "https://ABC.sk1.us-west-1.eks.amazonaws.com"},
@@ -91,17 +93,18 @@ func TestPrintClusterDescribe(t *testing.T) {
 
 	got := printed(t, &cloudv1.GetClusterResponse{Cluster: testCluster()}, OutputTable)
 
-	want := "Name:       prod-eks\n" +
-		"ID:         01a1d2f6-12a9-7505-b7b2-8b8acfcab306\n" +
-		"Tenant:     acme\n" +
-		"Phase:      Running\n" +
-		"Region:     us-west-1\n" +
-		"Network:    01a1d0a1-3333-7766-a4ff-84f3f49a774f\n" +
-		"Version:    1.37\n" +
-		"Endpoint:   https://ABC.sk1.us-west-1.eks.amazonaws.com\n" +
-		"Release:    shipped-f874cd2c\n" +
-		"Message:    <none>\n" +
-		"Age:        2d2h\n" +
+	want := "Name:          prod-eks\n" +
+		"ID:            01a1d2f6-12a9-7505-b7b2-8b8acfcab306\n" +
+		"Tenant:        acme\n" +
+		"Phase:         Running\n" +
+		"Region:        us-west-1\n" +
+		"Network:       01a1d0a1-3333-7766-a4ff-84f3f49a774f\n" +
+		"Version:       1.37\n" +
+		"Endpoint:      https://ABC.sk1.us-west-1.eks.amazonaws.com\n" +
+		"Release:       shipped-f874cd2c\n" +
+		"Maintenance:   Sat,Sun 02:00 UTC for 4h\n" +
+		"Message:       <none>\n" +
+		"Age:           2d2h\n" +
 		"\nResources:\n" +
 		"  KIND        NAME                        EXTERNAL-NAME   STATE      SYNCED   READY   MESSAGE\n" +
 		"  Cluster     prod-eks-f772324f           prod-eks        Ready      True     True    <none>\n" +
@@ -134,7 +137,7 @@ func TestPrintClusterDescribePausedAndEmpty(t *testing.T) {
 
 	got := printed(t, &cloudv1.GetClusterStatusResponse{Cluster: cl}, OutputTable)
 
-	for _, want := range []string{"Paused:     by alice since 2026-11-14T11:00:00Z (provider upgrade)\n", "\nResources:\n  <none>\n", "\nEvents:\n  <none>\n"} {
+	for _, want := range []string{"Paused:        by alice since 2026-11-14T11:00:00Z (provider upgrade)\n", "\nResources:\n  <none>\n", "\nEvents:\n  <none>\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q:\n%s", want, got)
 		}

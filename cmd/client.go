@@ -151,6 +151,8 @@ func newBootstrapCmd() *cobra.Command {
 			run: cli.BootstrapCreate, args: cobra.NoArgs, input: true},
 		{use: "get", short: "Show the bootstrapped account --id", run: cli.BootstrapGet, args: cobra.NoArgs, id: true},
 		{use: "list", short: "List the tenant's bootstrapped accounts", run: cli.BootstrapList, args: cobra.NoArgs},
+		{use: "verify", short: "Ask the controller to check the account's access --id now (the tenant role in each region, and the calls the platform needs); get shows the result",
+			run: cli.BootstrapVerify, args: cobra.NoArgs, id: true},
 	})
 }
 

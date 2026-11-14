@@ -226,8 +226,8 @@ func TestPrintAccountsAndWhoAmI(t *testing.T) {
 		Status: &cloudv1.CloudAccountStatus{State: cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_READY, Namespace: "tenant-acme"}}
 
 	if got, want := printed(t, &cloudv1.ListCloudAccountsResponse{Accounts: []*cloudv1.CloudAccount{account}}, OutputTable),
-		"NAME               ID                                     ACCOUNT        STATE   AGE\n"+
-			"aws-111122223333   01a1d0a0-4a34-735f-be7d-19d1662f1138   111122223333   Ready   24h\n"; got != want {
+		"NAME               ID                                     ACCOUNT        STATE   ACCESS      AGE\n"+
+			"aws-111122223333   01a1d0a0-4a34-735f-be7d-19d1662f1138   111122223333   Ready   Unchecked   24h\n"; got != want {
 		t.Errorf("accounts: got\n%s\nwant\n%s", got, want)
 	}
 	if got := printed(t, &cloudv1.BootstrapTenantResponse{Account: account}, OutputTable); !strings.HasPrefix(got,

@@ -21,7 +21,7 @@ func NetworkCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if m.Metadata.ID != "" {
 		return nil, fmt.Errorf("metadata.id %q: a network's id is assigned by the server", m.Metadata.ID)
 	}
-	tenant, err := m.tenant(o.Tenant)
+	tenant, err := m.tenantFor(o)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	tenant, err := m.tenant(o.Tenant)
+	tenant, err := m.tenantFor(o)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func NetworkImport(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	tenant, err := m.tenant(o.Tenant)
+	tenant, err := m.tenantFor(o)
 	if err != nil {
 		return nil, err
 	}

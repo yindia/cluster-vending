@@ -47,6 +47,12 @@ func newHTTPClient() *http.Client { return &http.Client{} }
 type Options struct {
 	// Tenant is --tenant, required by every command.
 	Tenant string
+	// DefaultTenant is CV_TENANT: the tenant when --tenant is not given
+	// and no manifest names one (withDefaultTenant).
+	DefaultTenant string
+	// tenantDefaulted: Tenant is DefaultTenant, which a manifest's
+	// metadata.tenant overrides.
+	tenantDefaulted bool
 	// ID is the resource ID: the argument of network and cluster
 	// commands, --id of account get and verify (CloudAccount.id; the
 	// argument is accepted too, ResolveID).
@@ -165,7 +171,7 @@ type Options struct {
 
 func (o Options) requireTenant() error {
 	if o.Tenant == "" {
-		return errors.New("--tenant is required")
+		return errors.New("--tenant is required (or set " + EnvTenant + ")")
 	}
 	return nil
 }
@@ -214,6 +220,7 @@ type Command func(ctx context.Context, c Clients, o Options) (proto.Message, err
 // by o.Timeout.
 func Run(ctx context.Context, cmd Command, c Clients, o Options, w io.Writer, format string) error {
 	o.Out, o.Output = w, format
+	o = o.withDefaultTenant()
 	if o.RequestTimeout > 0 {
 		ctx = context.WithValue(ctx, requestTimeoutKey{}, o.RequestTimeout)
 	}

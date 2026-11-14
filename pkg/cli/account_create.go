@@ -40,7 +40,7 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	tenant, err := m.tenant(o.Tenant)
+	tenant, err := m.tenantFor(o)
 	if err != nil {
 		return nil, err
 	}

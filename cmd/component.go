@@ -30,7 +30,7 @@ func newComponentCmd() *cobra.Command {
 	group := &cobra.Command{Use: "component", Args: cobra.NoArgs,
 		Short: "The component catalog, and the components enabled on a cluster (ComponentService)"}
 	pf := group.PersistentFlags()
-	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (required, except by values)")
+	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (default $"+cli.EnvTenant+"; required, except by template)")
 	pf.StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
 	for _, s := range config.ClientSettings() {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
@@ -100,6 +100,7 @@ func newComponentCmd() *cobra.Command {
 				}
 				opts := o
 				opts.Progress, opts.RequestTimeout, opts.Terminal = cmd.ErrOrStderr(), cfg.RequestTimeout, onTerminal()
+				opts.DefaultTenant = os.Getenv(cli.EnvTenant)
 				switch {
 				case v.name && len(args) > 0:
 					opts.Component = args[0]

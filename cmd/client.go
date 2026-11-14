@@ -68,7 +68,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	var output string
 	group := &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs}
 	pf := group.PersistentFlags()
-	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (required unless the manifest sets metadata.tenant)")
+	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (default $"+cli.EnvTenant+"; a manifest's metadata.tenant wins over $"+cli.EnvTenant+")")
 	pf.StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
 	for _, s := range config.ClientSettings() {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
@@ -95,6 +95,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				opts.RequestTimeout = cfg.RequestTimeout
 				opts.Server = cfg.Server
 				opts.Terminal = onTerminal()
+				if use != "admin" { // admin's --tenant is a pause target: never defaulted
+					opts.DefaultTenant = os.Getenv(cli.EnvTenant)
+				}
 				if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
 					return err
 				}

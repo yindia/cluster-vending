@@ -3,7 +3,6 @@ package network
 import (
 	"context"
 	"errors"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -13,9 +12,6 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
-
-// now is the clock; tests replace it.
-var now = time.Now
 
 // ConditionSpecEditIgnored: see reconcile.ConditionSpecEditIgnored.
 const ConditionSpecEditIgnored = reconcile.ConditionSpecEditIgnored

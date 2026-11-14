@@ -83,7 +83,8 @@ cluster-vending account get --id <account id> --tenant acme   # ACCESS: Verified
 
 `scripts/generate.py` (troposphere and awacs) generates them into
 `pkg/cloudformation/templates/`, which the binary embeds; do not edit the
-YAML by hand. With Python 3.11 and a virtualenv:
+YAML by hand. With Python 3.14 (pinned with pip-compile on 3.14; in the
+workspace's pixi environment run `pixi shell` first) or a virtualenv:
 
 ```sh
 make cf-requirements   # pip install -r requirements.txt (pinned; requirements.in lists the direct ones)

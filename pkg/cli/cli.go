@@ -81,6 +81,9 @@ type Options struct {
 	Cluster string
 	// Reason is --reason of admin pause: why, shown with the pause.
 	Reason string
+	// Channel is --channel of admin rollout get (alpha, beta, stable);
+	// Tier its --tier (0, 1, 2; empty: all).
+	Channel, Tier string
 	// Regions is --region of account verify: regions to check besides
 	// those of the account's networks.
 	Regions []string

@@ -136,6 +136,11 @@ A cluster cannot be deleted while it has components.
 |---|---|
 | `PauseReconcile` | Sets `crossplane.io/paused` on a tenant's managed resources, or on one cluster's. |
 | `ResumeReconcile` | Removes it. |
+| `ListReleases`, `GetRelease` | The releases, newest first; one release per Kubernetes minor: channel, default, upgrade target, end of support, ending, components with versions and locked values. Read-only. |
+| `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy and stage; one channel adds the releases it offered and its conditions. |
+| `ListRollouts` | Each channel's rollout as the controller last reported it: target minor, stage, counts per tier, why it waits. |
+| `GetRollout` | One channel's rollout planned now with the controller's rules (`pkg/rollout`), cluster by cluster (filter by tier, paged). |
+| `ListReleaseHolds` | The holds keeping clusters out of rollouts, and until when. |
 
 ### Stored status and live status
 

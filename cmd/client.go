@@ -29,6 +29,10 @@ type verb struct {
 	removed, oidc, warnings, noPlatform bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
+	// rollout adds --channel and --tier (admin rollout get).
+	rollout bool
+	// idHelp replaces the help of --id.
+	idHelp string
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -90,7 +94,15 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		f := cmd.Flags()
 		if v.id {
-			f.StringVar(&o.ID, "id", "", fmt.Sprintf("the %s's ID, as %s create and %s list print it", use, use, use))
+			help := v.idHelp
+			if help == "" {
+				help = fmt.Sprintf("the %s's ID, as %s create and %s list print it", use, use, use)
+			}
+			f.StringVar(&o.ID, "id", "", help)
+		}
+		if v.rollout {
+			f.StringVar(&o.Channel, "channel", "", "the channel: alpha, beta or stable (required)")
+			f.StringVar(&o.Tier, "tier", "", "only this tier's clusters: 0, 1 or 2; default: all")
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
@@ -198,12 +210,40 @@ func newNetworkCmd() *cobra.Command {
 }
 
 func newAdminCmd() *cobra.Command {
-	return newResourceCmd("admin", "Operator actions (AdminService)", []verb{
+	admin := newResourceCmd("admin", "Operator actions (AdminService)", []verb{
 		{use: "pause", short: "Pause a tenant (or one network or cluster): the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume",
 			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true, pauseNetwork: true},
 		{use: "resume", short: "Resume what pause paused: a tenant (a network or cluster also paused on its own stays paused), or one network or cluster",
 			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true},
 	})
+	admin.AddCommand(newAdminReleaseCmds()...)
+	return admin
+}
+
+// newAdminReleaseCmds are the read-only views of the platform's release
+// configuration: releases, channels and the rollout of each channel's
+// Kubernetes minor (AdminService).
+func newAdminReleaseCmds() []*cobra.Command {
+	return []*cobra.Command{
+		newResourceCmd("release", "The platform's releases: what clusters run per Kubernetes minor (read-only)", []verb{
+			{use: "list", short: "List the releases, newest first: shipped or published, valid, the channels offering them; -o wide adds why one is not valid",
+				run: cli.AdminReleaseList, args: cobra.NoArgs, page: true},
+			{use: "get <id>", short: "Show a release: each Kubernetes minor with its channel, upgrade target, end of support and whether it is ending, and the components on it; -o wide adds their locked values",
+				run: cli.AdminReleaseGet, args: cobra.ExactArgs(1), idHelp: "the release's name, as release list prints it (e.g. shipped-1aed928c)"},
+		}),
+		newResourceCmd("channel", "The release channels alpha, beta and stable: what each offers and its rollout policy (read-only)", []verb{
+			{use: "list", short: "List the channels: promotion, the release and Kubernetes minor each offers, where its rollout is; -o wide adds the policy and why it waits",
+				run: cli.AdminChannelList, args: cobra.NoArgs},
+			{use: "get <id>", short: "Show a channel: its release, Kubernetes minor, rollout policy and progress, the releases it offered, its conditions",
+				run: cli.AdminChannelGet, args: cobra.ExactArgs(1), idHelp: "the channel: alpha, beta or stable"},
+		}),
+		newResourceCmd("rollout", "The rollout of each channel's Kubernetes minor to its automatic clusters, tier 2 first (read-only)", []verb{
+			{use: "list", short: "List each channel's rollout: its Kubernetes minor, stage, progress per tier and why it waits",
+				run: cli.AdminRolloutList, args: cobra.NoArgs},
+			{use: "get", short: "Show one channel's rollout cluster by cluster: what each runs, the minor it moves to, its state and why it is blocked; -o wide adds cluster IDs and gate codes",
+				run: cli.AdminRolloutGet, args: cobra.NoArgs, rollout: true, page: true},
+		}),
+	}
 }
 
 func newClusterCmd() *cobra.Command {

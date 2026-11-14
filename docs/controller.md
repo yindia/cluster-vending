@@ -368,6 +368,28 @@ A pass runs when the channel, its release, a ReleaseHold or what the rollout
 reads of a cluster changes, when a soak ends or a blocking window opens, and
 every 10 minutes.
 
+### Admin: releases, channels and rollouts
+
+The same views through the API (AdminService, platform admin role only),
+without access to the management cluster:
+
+```sh
+cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS HOLDS AGE
+cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
+cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES STAGE PAUSED AGE (wide: policy, why it waits)
+cluster-vending admin channel get --id stable         # policy, rollout, the releases it offered, conditions
+cluster-vending admin rollout list                    # CHANNEL KUBERNETES STAGE TIER2 TIER1 TIER0 STATE WAITING
+cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
+```
+
+`rollout list` shows what the controller last wrote to each channel's
+status. `rollout get` plans the channel's rollout again at the time of the
+call with the controller's rules (`pkg/rollout`), and lists every cluster:
+tier, tenant, the version it runs, the minor it moves to next, its state
+(Pending, InProgress, Succeeded, Failed, Blocked), since when, and why it is
+blocked (`-o wide`: the cluster ID and the gate code). All of them are
+read-only and support `-o yaml|json`.
+
 ## What a controller does
 
 - **Event to reconciler.** The object's labels (`cloud.cluster-vending.io/tenant`,

@@ -129,6 +129,18 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 		return true, mutatedComponent(w, m.GetComponent(), "disable requested")
 	case *cloudv1.WhoAmIResponse:
 		return true, printWhoAmI(w, m)
+	case *cloudv1.ListReleasesResponse:
+		return true, printReleases(w, m.GetReleases(), wide)
+	case *cloudv1.GetReleaseResponse:
+		return true, describeRelease(w, m.GetRelease(), wide)
+	case *cloudv1.ListReleaseChannelsResponse:
+		return true, printChannels(w, m.GetChannels(), wide)
+	case *cloudv1.GetReleaseChannelResponse:
+		return true, describeChannel(w, m.GetChannel())
+	case *cloudv1.ListRolloutsResponse:
+		return true, printRollouts(w, m.GetRollouts())
+	case *cloudv1.GetRolloutResponse:
+		return true, describeRollout(w, m.GetRollout(), m.GetNextPageToken(), wide)
 	}
 	return false, nil
 }

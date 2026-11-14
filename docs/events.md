@@ -59,7 +59,8 @@ its kind; the message has the details.
 | Network, Cluster | `ImportBlocked` | Warning | the import found something it cannot take over |
 | Network, Cluster | `TakenOver` | Normal | the platform owns the imported resources now |
 | Cluster | `UpgradeStarted` | Normal | a Kubernetes upgrade began (the control plane first) |
-| Cluster | `UpgradeFinished` | Normal | the node group and the add-ons followed the control plane |
+| Cluster | `UpgradeNodes` | Normal | the control plane runs the new version; the node groups, then the add-ons, follow |
+| Cluster | `UpgradeFinished` | Normal | control plane, node groups and add-ons run the new version |
 | Cluster | `PlatformComponentInstalling` | Normal | a platform component's charts are being installed |
 | Cluster | `PlatformComponentReady` | Normal | a platform component is installed |
 | Cluster | `PlatformComponentFailed` | Warning | a platform component failed: its chart, Helm's state, the failures and the provider's last error |

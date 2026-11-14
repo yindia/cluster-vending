@@ -1683,6 +1683,12 @@ spec:
                   plane runs until the node group and the add-ons have followed. Unset
                   when no upgrade is in progress.
                 properties:
+                  addonsBehind:
+                    description: addonsBehind are the add-ons not on their new version
+                      yet.
+                    items:
+                      type: string
+                    type: array
                   fromVersion:
                     description: fromVersion is the version the upgrade started from.
                     type: string
@@ -1691,6 +1697,34 @@ spec:
                       message is what the step waits for or, when the cloud refuses or
                       fails the step, the provider's error for the resource concerned.
                     type: string
+                  nodeGroups:
+                    description: |-
+                      nodeGroups are the node groups following the control plane: the
+                      version each runs as the provider last saw it, and how it stands.
+                    items:
+                      description: |-
+                        ClusterUpgradeNodeGroup is one node group following a Kubernetes
+                        upgrade.
+                      properties:
+                        fromVersion:
+                          description: fromVersion is the version it runs, as the
+                            provider last saw it.
+                          type: string
+                        name:
+                          description: name is the EKS node group's name.
+                          type: string
+                        state:
+                          description: |-
+                            state is Updating while it moves, Ready once it runs toVersion,
+                            Failed when the cloud fails it.
+                          type: string
+                        toVersion:
+                          description: toVersion is the version it moves to.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                   phase:
                     description: phase is the step the upgrade is at.
                     enum:

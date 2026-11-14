@@ -862,6 +862,30 @@ type ClusterUpgrade struct {
 	// fails the step, the provider's error for the resource concerned.
 	// +optional
 	Message string `json:"message,omitempty"`
+	// nodeGroups are the node groups following the control plane: the
+	// version each runs as the provider last saw it, and how it stands.
+	// +optional
+	NodeGroups []ClusterUpgradeNodeGroup `json:"nodeGroups,omitempty"`
+	// addonsBehind are the add-ons not on their new version yet.
+	// +optional
+	AddonsBehind []string `json:"addonsBehind,omitempty"`
+}
+
+// ClusterUpgradeNodeGroup is one node group following a Kubernetes
+// upgrade.
+type ClusterUpgradeNodeGroup struct {
+	// name is the EKS node group's name.
+	Name string `json:"name"`
+	// fromVersion is the version it runs, as the provider last saw it.
+	// +optional
+	FromVersion string `json:"fromVersion,omitempty"`
+	// toVersion is the version it moves to.
+	// +optional
+	ToVersion string `json:"toVersion,omitempty"`
+	// state is Updating while it moves, Ready once it runs toVersion,
+	// Failed when the cloud fails it.
+	// +optional
+	State string `json:"state,omitempty"`
 }
 
 // ConditionPlatformComponentsReady is a Cluster's condition that every

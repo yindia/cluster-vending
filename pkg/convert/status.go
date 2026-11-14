@@ -100,7 +100,11 @@ func upgrade(p *cloudv1.ClusterUpgrade) *cloudv1alpha1.ClusterUpgrade {
 		return nil
 	}
 	out := &cloudv1alpha1.ClusterUpgrade{FromVersion: p.GetFromVersion(), ToVersion: p.GetToVersion(),
-		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage()}
+		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage(), AddonsBehind: p.GetAddonsBehind()}
+	for _, g := range p.GetNodeGroups() {
+		out.NodeGroups = append(out.NodeGroups, cloudv1alpha1.ClusterUpgradeNodeGroup{Name: g.GetName(),
+			FromVersion: g.GetFromVersion(), ToVersion: g.GetToVersion(), State: camel(g.GetState(), "MANAGED_RESOURCE_STATE_")})
+	}
 	if p.GetStartTime() != nil {
 		out.StartTime = &metav1.Time{Time: p.GetStartTime().AsTime()}
 	}

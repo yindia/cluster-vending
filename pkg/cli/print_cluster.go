@@ -138,8 +138,7 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	}
 	kv = append(kv, [2]string{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())})
 	if u := st.GetUpgrade(); u != nil {
-		kv = append(kv, [2]string{"Upgrade", fmt.Sprintf("%s to %s (%s)", orNone(u.GetFromVersion()), orNone(u.GetToVersion()),
-			word(u.GetPhase().String(), "CLUSTER_UPGRADE_PHASE_"))})
+		kv = append(kv, [2]string{"Upgrade", upgradeLine(u)})
 	}
 	if p := st.GetPause(); p != nil {
 		kv = append(kv, [2]string{"Paused", pauseLine(p)})

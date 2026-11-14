@@ -23,8 +23,10 @@ type upgrade struct {
 	// target is spec.control_plane.kubernetes_version; controlPlane what
 	// the EKS cluster reports (status.atProvider.version).
 	target, controlPlane string
-	// nodes are the versions the node groups report.
-	nodes []string
+	// nodes are the versions the node groups report; nodeGroups the same
+	// by the node group's managed resource name.
+	nodes      []string
+	nodeGroups map[string]string
 	// addons are the versions the Addon objects ask for now, by add-on.
 	addons map[string]string
 }
@@ -95,7 +97,7 @@ func (s *Reconciler) GateUpgrade(ctx context.Context, row *model.Cluster, plan *
 // groups report, and the versions the Addon objects ask for
 // (spec.forProvider).
 func (s *Reconciler) observeUpgrade(ctx context.Context, records []model.ManagedResource, target string) (upgrade, error) {
-	u := upgrade{target: target, addons: map[string]string{}}
+	u := upgrade{target: target, addons: map[string]string{}, nodeGroups: map[string]string{}}
 	for _, r := range records {
 		if r.Kind != "Cluster" && r.Kind != "Addon" && r.Kind != KindNodeGroup {
 			continue
@@ -113,6 +115,7 @@ func (s *Reconciler) observeUpgrade(ctx context.Context, records []model.Managed
 		case KindNodeGroup:
 			if v, _, _ := unstructured.NestedString(obj.Object, "status", "atProvider", "version"); v != "" {
 				u.nodes = append(u.nodes, v)
+				u.nodeGroups[r.Name] = v
 			}
 		default:
 			name, _, _ := unstructured.NestedString(obj.Object, "spec", "forProvider", "addonName")
@@ -155,7 +158,8 @@ func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, st
 		if same && stored.GetFromVersion() != "" {
 			out.FromVersion = stored.GetFromVersion()
 		}
-		out.Message = fmt.Sprintf("the control plane runs %s; upgrading the node group and the add-ons", u.target)
+		out.NodeGroups, out.AddonsBehind = u.following(views)
+		out.Message = fmt.Sprintf("the control plane runs %s; %s", u.target, followingMessage(out))
 		if failure := failureOf(views, func(kind string) bool { return followers[kind] }); failure != "" {
 			out.Message = failure
 		}
@@ -163,6 +167,86 @@ func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, st
 		return nil
 	}
 	return out
+}
+
+// following is how the node groups and add-ons follow the control plane:
+// each node group with the version the provider last saw it run and its
+// state, and the add-ons not settled on their version yet (by add-on
+// name, from "<cluster>:<add-on>").
+func (u upgrade) following(views []*cloudv1.ManagedResource) ([]*cloudv1.ClusterUpgradeNodeGroup, []string) {
+	var groups []*cloudv1.ClusterUpgradeNodeGroup
+	var addons []string
+	for _, v := range views {
+		if v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING {
+			continue
+		}
+		switch v.GetKind() {
+		case KindNodeGroup:
+			name := v.GetExternalName()
+			if name == "" {
+				name = v.GetName()
+			}
+			groups = append(groups, &cloudv1.ClusterUpgradeNodeGroup{Name: name, FromVersion: u.nodeGroups[v.GetName()],
+				ToVersion: u.target, State: v.GetState()})
+		case "Addon":
+			if v.GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || reconcile.Behind(v) {
+				name := v.GetExternalName()
+				if _, after, found := strings.Cut(name, ":"); found {
+					name = after
+				}
+				addons = append(addons, orName(name, v.GetName()))
+			}
+		}
+	}
+	return groups, addons
+}
+
+func orName(name, fallback string) string {
+	if name == "" {
+		return fallback
+	}
+	return name
+}
+
+// followingMessage says how the node groups and add-ons stand, e.g.
+// "node group prod-default 1.36 → 1.37 (updating); add-ons updating:
+// coredns".
+func followingMessage(u *cloudv1.ClusterUpgrade) string {
+	var parts []string
+	for _, g := range u.GetNodeGroups() {
+		state := strings.ToLower(strings.TrimPrefix(g.GetState().String(), "MANAGED_RESOURCE_STATE_"))
+		if g.GetFromVersion() == "" || g.GetFromVersion() == g.GetToVersion() {
+			parts = append(parts, fmt.Sprintf("node group %s on %s (%s)", g.GetName(), g.GetToVersion(), state))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("node group %s %s → %s (%s)", g.GetName(), g.GetFromVersion(), g.GetToVersion(), state))
+	}
+	if behind := u.GetAddonsBehind(); len(behind) > 0 {
+		parts = append(parts, "add-ons updating: "+strings.Join(behind, ", "))
+	} else {
+		parts = append(parts, "add-ons current")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// upgrading makes the status of a cluster with an upgrade in progress say
+// so: UPDATING, not RUNNING, and a Ready condition that is False with what
+// the upgrade waits for, not "N of N resources ready". The provider sees
+// the cloud at its poll interval, so a node group shows as updating until
+// its next look.
+func upgrading(st *cloudv1.ClusterStatus) {
+	u := st.GetUpgrade()
+	if u == nil || st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_DELETING ||
+		st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_FAILED {
+		return
+	}
+	message := fmt.Sprintf("upgrading %s to %s: %s", u.GetFromVersion(), u.GetToVersion(), u.GetMessage())
+	st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_UPDATING, message
+	for _, c := range st.GetConditions() {
+		if c.GetType() == conditionReady {
+			c.Status, c.Reason, c.Message = cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, "Upgrading", message
+		}
+	}
 }
 
 // followersSettled reports whether the node groups and add-ons are done

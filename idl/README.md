@@ -417,6 +417,10 @@ otherwise. `state` stays `UPDATING` meanwhile.
 | `phase` | `CLUSTER_UPGRADE_PHASE_CONTROL_PLANE`: the control plane still reports `from_version`; the EKS cluster is applied at `to_version`, the node group at `from_version` and the add-ons at the versions they run. `CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS`: the control plane runs `to_version`; the node group and the add-ons are applied at it and are rolling out. |
 | `start_time` | When the upgrade was first seen in progress. |
 | `message` | What the step waits for; when the cloud refuses or fails the step, the provider's error for the resource concerned. The upgrade is retried, not given up. |
+| `node_groups` | In `NODES_AND_ADDONS`: each node group with the version it runs (as the provider last saw it), the version it moves to, and its state (`UPDATING`, `READY`, `FAILED`). |
+| `addons_behind` | The add-ons not on their new version yet; empty once all are. |
+
+The upgrade is done only when the control plane and every node group *report* `to_version` and the add-ons are settled, not when their Ready conditions are True: a resource the cloud is moving to a new version is `MANAGED_RESOURCE_STATE_UPDATING` ("updating: 1.36 → 1.37") in `managed_resources` while Ready stays True. That covers the EKS cluster (`version`, or EKS status `UPDATING`), each node group, each add-on (`addon_version`), and a platform component's Helm release while Helm applies a new chart version or values. The provider looks at AWS at its poll interval (10 minutes by default), so a resource shows as updating until its next look; the controller does not force an earlier one.
 
 A cluster is imported with `ImportClusterRequest`: `name` (the EKS cluster
 name), `network_id` (a network of the tenant, imported or owned, that holds
@@ -457,6 +461,7 @@ that becomes `spec.default_node_pool`).
 | `FAILED` | The provider cannot reconcile it; `reason` and `message` say why. |
 | `DELETING` | Deletion requested. |
 | `MISSING` | Recorded, but not in the management cluster. |
+| `UPDATING` | Exists and works, and the cloud moves it to the version its spec asks for (a Kubernetes upgrade of the EKS cluster, a node group or an add-on, or Helm applying a new chart version or values); `message` says from what to what. |
 
 A `ManagedResource` also carries the Crossplane `Ready` and `Synced`
 conditions, the cloud ID (`external_name`), `generation` and

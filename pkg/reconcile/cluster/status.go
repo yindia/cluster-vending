@@ -114,6 +114,7 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
 	st.Upgrade = u.status(row, views, storedUpgrade(row))
+	upgrading(st)
 	return ClusterProto(row, spec, st), nil
 }
 

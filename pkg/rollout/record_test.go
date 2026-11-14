@@ -65,6 +65,11 @@ func TestFinish(t *testing.T) {
 			c.Status.CurrentKubernetesVersion = "1.36"
 			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "NodesAndAddons", ToVersion: "1.36"}
 		}, ""},
+		{"control plane on the target, a node group the provider still sees behind", func(c *cloudv1alpha1.Cluster) {
+			c.Status.CurrentKubernetesVersion = "1.36"
+			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "NodesAndAddons", ToVersion: "1.36",
+				NodeGroups: []cloudv1alpha1.ClusterUpgradeNodeGroup{{Name: "default", FromVersion: "1.35", ToVersion: "1.36", State: "Updating"}}}
+		}, ""},
 		{"failed", func(c *cloudv1alpha1.Cluster) {
 			c.Status.Phase, c.Status.Message = cloudv1alpha1.ClusterPhaseFailed, "UpdateClusterVersion: InvalidRequest"
 			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "ControlPlane", ToVersion: "1.36"}

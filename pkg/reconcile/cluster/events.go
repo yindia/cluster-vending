@@ -148,16 +148,29 @@ func count(st *cloudv1.ClusterStatus, kind string) int {
 	return n
 }
 
-// upgradeEvents are a Kubernetes upgrade starting and finishing.
+// upgradeEvents are a Kubernetes upgrade starting, reaching its node
+// groups, and finishing.
 func upgradeEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	was, is := before.GetUpgrade(), after.GetUpgrade()
 	switch {
 	case was == nil && is != nil:
 		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeStarted,
 			fmt.Sprintf("upgrading Kubernetes from %s to %s: the control plane first", is.GetFromVersion(), is.GetToVersion()))}
+	case was.GetPhase() == cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE &&
+		is.GetPhase() == cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS:
+		names := make([]string, 0, len(is.GetNodeGroups()))
+		for _, g := range is.GetNodeGroups() {
+			names = append(names, g.GetName())
+		}
+		what := "the node groups"
+		if len(names) > 0 {
+			what = "node group " + strings.Join(names, ", ")
+		}
+		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeNodes,
+			fmt.Sprintf("the control plane runs %s; upgrading %s to %s, then the add-ons", is.GetToVersion(), what, is.GetToVersion()))}
 	case was != nil && is == nil && after.GetState() != cloudv1.ClusterState_CLUSTER_STATE_DELETING:
 		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeFinished,
-			fmt.Sprintf("Kubernetes %s: the node group and the add-ons followed the control plane", was.GetToVersion()))}
+			fmt.Sprintf("Kubernetes %s: control plane, node groups and add-ons upgraded", was.GetToVersion()))}
 	default:
 		return nil
 	}

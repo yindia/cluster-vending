@@ -626,6 +626,31 @@ message ClusterUpgrade {
   // the provider's error for the resource concerned (the upgrade is
   // retried, it is not given up).
   string message = 5;
+
+  // The node groups in the NODES_AND_ADDONS step: the version each runs
+  // (as the provider last saw it) and how it stands.
+  repeated ClusterUpgradeNodeGroup node_groups = 6;
+
+  // The add-ons not on their new version yet, by add-on name (e.g.
+  // "coredns"); empty once every add-on runs its version.
+  repeated string addons_behind = 7;
+}
+
+// ClusterUpgradeNodeGroup is one node group following a Kubernetes
+// upgrade.
+message ClusterUpgradeNodeGroup {
+  // The EKS node group's name.
+  string name = 1;
+
+  // The version it runs, as the provider last saw it.
+  string from_version = 2;
+
+  // The version it moves to (the upgrade's to_version).
+  string to_version = 3;
+
+  // UPDATING while it moves, READY once it runs to_version, FAILED when
+  // the cloud fails it.
+  ManagedResourceState state = 4;
 }
 
 // ClusterUpgradePhase is the step of a Kubernetes upgrade.

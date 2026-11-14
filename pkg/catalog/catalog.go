@@ -41,8 +41,8 @@ type Result struct {
 	Foreign []string
 	// Deleted: shipped, not edited, and no longer in the build.
 	Deleted []string
-	// Kept: no longer in the build and not edited, but in use; deleted
-	// once nothing uses it (the definition's in-use guard holds it).
+	// Kept: being deleted already (its in-use guard holds it while
+	// something uses it); left alone.
 	Kept []string
 }
 
@@ -130,6 +130,11 @@ func syncOne(ctx context.Context, c client.Client, def *cloudv1alpha1.ComponentD
 	}
 	if err != nil {
 		return fmt.Errorf("read component definition %s: %w", def.Name, err)
+	}
+	if !current.DeletionTimestamp.IsZero() {
+		// Its delete was asked for: not recreated or changed meanwhile.
+		out.Kept = append(out.Kept, def.Name)
+		return nil
 	}
 	want := SpecHash(def.Spec)
 	switch {

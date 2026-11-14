@@ -127,6 +127,9 @@ func SetupAll(mgr ctrl.Manager, d Deps) error {
 	if err := setupReleases(mgr, d); err != nil {
 		return fmt.Errorf("set up the release controllers: %w", err)
 	}
+	if err := setupComponentDefinitions(mgr); err != nil {
+		return fmt.Errorf("set up the component definition controller: %w", err)
+	}
 	scans, err := NewDeprecationReconciler(d)
 	if err != nil {
 		return fmt.Errorf("set up the deprecation scans: %w", err)

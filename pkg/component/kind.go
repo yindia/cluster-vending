@@ -31,6 +31,7 @@ func DefinitionOf(def *cloudv1alpha1.ComponentDefinition) (Definition, error) {
 		Name:                def.Name,
 		Valid:               meta.IsStatusConditionTrue(def.Status.Conditions, ConditionValid),
 		Disabled:            def.Spec.Disabled,
+		Deleting:            !def.DeletionTimestamp.IsZero(),
 		Management:          Management(def.Spec.Management),
 		Internal:            def.Spec.Internal,
 		Includes:            slices.Clone(def.Spec.Includes),

@@ -48,6 +48,9 @@ type Definition struct {
 	// Disabled: the platform team switched the definition off
 	// (spec.disabled). It is not installed and cannot be enabled (Off).
 	Disabled bool
+	// Deleting: the definition is being deleted. It is off like a disabled
+	// one, so clusters remove it and its delete can finish (HeldBy).
+	Deleting bool
 	// Management says who controls the component; empty is Tenant.
 	Management Management
 	// Internal: only installed as a member of a bundle.

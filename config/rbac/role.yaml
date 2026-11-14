@@ -33,6 +33,7 @@ rules:
   resources:
   - cloudaccounts/finalizers
   - clusters/finalizers
+  - componentdefinitions/finalizers
   - components/finalizers
   - networks/finalizers
   - releases/finalizers

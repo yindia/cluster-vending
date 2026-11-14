@@ -202,7 +202,8 @@ func BundleOrder(d Definition, defs []Definition) ([]string, error) {
 }
 
 // Off are the definitions that are not in use, by name, each with why:
-// "disabled" for one the platform team switched off (Disabled), and for
+// "disabled" for one the platform team switched off (Disabled), "being
+// deleted" for one whose delete was asked for (Deleting), and for
 // what cannot work without one that is off, a member of an off bundle and
 // whatever requires something that is off. A definition that is on is not
 // in the map. The catalog is not changed.
@@ -211,7 +212,10 @@ func Off(defs []Definition) map[string]string {
 	ordered := slices.Clone(defs)
 	slices.SortFunc(ordered, func(a, b Definition) int { return strings.Compare(a.Name, b.Name) })
 	for _, d := range ordered {
-		if d.Disabled {
+		switch {
+		case d.Deleting:
+			off[d.Name] = "being deleted"
+		case d.Disabled:
 			off[d.Name] = "disabled"
 		}
 	}

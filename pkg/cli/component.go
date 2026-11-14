@@ -321,23 +321,13 @@ func ComponentList(ctx context.Context, c Clients, o Options) (proto.Message, er
 	return nil, err
 }
 
-// notInstalledYet marks the status of a component nothing will install:
-// this build installs the platform's components only (the server's
-// message says so).
-const notInstalledYet = "not installed yet"
-
-// waitComponent is --wait for a component: until it is ready, or gone for
-// a disable. A component nothing installs is not waited for: the wait
-// says so and ends, since it would only time out.
+// waitComponent is --wait for a component: until the cluster reconcile
+// reports it READY (or FAILED, an error), or gone for a disable.
 func waitComponent(ctx context.Context, c Clients, o Options, component *cloudv1.Component, gone bool) error {
 	if !o.Wait {
 		return nil
 	}
 	what := "component " + component.GetComponent()
-	if !gone && strings.Contains(component.GetStatus().GetMessage(), notInstalledYet) {
-		o.progress("%s: stored, and nothing to wait for: this build does not install tenant components yet, so it stays Pending", what)
-		return nil
-	}
 	return waitUntil(ctx, o, what, gone, func(ctx context.Context) (observation, error) {
 		res, err := call(ctx, &cloudv1.GetComponentRequest{TenantId: o.Tenant, ComponentId: component.GetId()}, c.Component.GetComponent)
 		if err != nil {

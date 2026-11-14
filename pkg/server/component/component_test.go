@@ -281,7 +281,7 @@ func TestEnableStoresOnlyTheEdits(t *testing.T) {
 	}
 	st := c.GetStatus()
 	effective := st.GetEffectiveValues().AsMap()
-	if st.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING || !strings.Contains(st.GetMessage(), "not installed yet") ||
+	if st.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING || st.GetMessage() != pendingMessage ||
 		st.GetRelease() != "2026-11-a" || st.GetTargetVersion() != "1.2.3" || st.GetClusterName() != "prod" ||
 		effective["level"] != "baseline" || effective["action"] != "Enforce" || effective["failurePolicy"] != "Fail" {
 		t.Errorf("status = %v", st)
@@ -494,13 +494,19 @@ func TestDisable(t *testing.T) {
 	if err != nil || gone.GetStatus().GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING {
 		t.Fatalf("disable = %v, %v", gone, err)
 	}
-	_, err = w.svc.GetComponent(t.Context(), &cloudv1.GetComponentRequest{TenantId: tenant, ComponentId: policies.GetId()})
-	requireCode(t, err, connect.CodeNotFound)
-	// With policies gone the scanner can go, and be enabled again.
+	// It stays, DELETING, until the cluster reconcile has removed it.
+	got, err := w.svc.GetComponent(t.Context(), &cloudv1.GetComponentRequest{TenantId: tenant, ComponentId: policies.GetId()})
+	if err != nil || got.GetComponent().GetStatus().GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING {
+		t.Fatalf("after disable: %v, %v", got, err)
+	}
+	// Disabling it again answers the same; changing it is refused.
+	if again, err := disable(policies.GetId(), ""); err != nil || again.GetStatus().GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING {
+		t.Fatalf("disable again = %v, %v", again, err)
+	}
+	// With policies being removed, the scanner it required can go.
 	if _, err := disable(scanner.GetId(), ""); err != nil {
 		t.Fatal(err)
 	}
-	w.enable(t, "scanner", nil)
 }
 
 // With a cluster the list is everything on it: what the platform

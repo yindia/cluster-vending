@@ -76,6 +76,11 @@ func (s *Service) check(ctx context.Context, tenantID, clusterID, name string, v
 			return nil, service.ToConnect(err)
 		}
 		for _, c := range rows {
+			// One being removed does not count for what requires it; the
+			// component itself still exists until it is gone.
+			if c.State == phaseDeleting && c.Component != name {
+				continue
+			}
 			req.Enabled = append(req.Enabled, c.Component)
 		}
 		if out.entry != nil {
@@ -169,6 +174,10 @@ func view(row *model.Component) (*cloudv1.Component, error) {
 	}
 	if out.Status.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_UNSPECIFIED {
 		out.Status.Phase = cloudv1.ComponentPhase(cloudv1.ComponentPhase_value[row.State])
+	}
+	if row.State == phaseDeleting && out.Status.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING {
+		// Disabled: being removed, whatever the last pass reported.
+		out.Status.Phase, out.Status.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING, "being removed from the cluster"
 	}
 	out.Version = out.Status.GetTargetVersion()
 	if v := out.Status.GetInstalledVersion(); v != "" {
@@ -351,11 +360,10 @@ func sameJSON(a, b model.JSON) bool {
 }
 
 // DisableComponent removes the component from its cluster, unless another
-// enabled component requires it. Nothing is installed for a tenant
-// component yet, so there is nothing to uninstall: the component is
-// removed from the store at once and returned as DELETING. (Once tenant
-// components are installed, this call must only mark it DELETING and
-// leave the removal to what uninstalls it.)
+// enabled component requires it. The call only marks it DELETING: the
+// cluster reconcile uninstalls its charts, then its role, then removes the
+// Component. Disabling a component already being removed returns it as
+// it is.
 func (s *Service) DisableComponent(ctx context.Context, req *cloudv1.DisableComponentRequest) (_ *cloudv1.DisableComponentResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -368,6 +376,10 @@ func (s *Service) DisableComponent(ctx context.Context, req *cloudv1.DisableComp
 	if err := stale(row, req.GetEtag()); err != nil {
 		return nil, err
 	}
+	if row.State == phaseDeleting {
+		c, err := view(row)
+		return &cloudv1.DisableComponentResponse{Component: c}, err
+	}
 	entries, err := s.entries(ctx)
 	if err != nil {
 		return nil, err
@@ -378,6 +390,9 @@ func (s *Service) DisableComponent(ctx context.Context, req *cloudv1.DisableComp
 	}
 	var enabled []core.Definition
 	for _, c := range rows {
+		if c.State == phaseDeleting {
+			continue // being removed already: it requires nothing any more
+		}
 		if e := find(entries, c.Component); e != nil {
 			enabled = append(enabled, e.Definition)
 		}
@@ -385,14 +400,18 @@ func (s *Service) DisableComponent(ctx context.Context, req *cloudv1.DisableComp
 	if err := core.CheckDisable(row.Component, enabled); err != nil {
 		return nil, err
 	}
-	if err := s.deps.Store.Components().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
+	row.State = phaseDeleting
+	if err := s.deps.Store.Components().Update(ctx, row); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return nil, fault.Newf(fault.Aborted, "component %s changed since it was read: read it again", row.ID)
+		}
 		return nil, service.ToConnect(err)
 	}
-	s.logger().InfoContext(ctx, "component removed", "tenant_id", row.TenantID, "component_id", row.ID,
+	s.logger().InfoContext(ctx, "component disabled", "tenant_id", row.TenantID, "component_id", row.ID,
 		"component", row.Component, "cluster_id", row.ClusterID)
 	c, err := view(row)
 	if c != nil {
-		c.Status.Phase, c.Status.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING, "removed"
+		c.Status.Phase, c.Status.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING, "being removed from the cluster"
 	}
 	return &cloudv1.DisableComponentResponse{Component: c}, err
 }

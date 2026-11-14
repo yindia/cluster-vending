@@ -241,16 +241,30 @@ func TestComponentEnable(t *testing.T) {
 	}
 }
 
-// Nothing installs a tenant's component yet: --wait says so and ends, it
-// does not sit until its timeout.
-func TestComponentEnableWaitDoesNotHang(t *testing.T) {
-	var out, progress bytes.Buffer
-	opts := Options{Tenant: "acme", Cluster: componentCluster, Component: "policies", Wait: true, Progress: &progress}
+// --wait follows the component until the cluster reconcile reports it
+// READY, and fails when it reports FAILED.
+func TestComponentEnableWaits(t *testing.T) {
+	tests := []struct {
+		name    string
+		phase   cloudv1.ComponentPhase
+		wantErr string
+	}{
+		{"ready", cloudv1.ComponentPhase_COMPONENT_PHASE_READY, ""},
+		{"failed", cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, "is Failed: chart policies: boom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &componentAPI{component: &cloudv1.Component{Id: componentID, Component: "policies",
+				Status: &cloudv1.ComponentStatus{Phase: tt.phase, Message: "chart policies: boom"}}}
+			var out, progress bytes.Buffer
+			opts := Options{Tenant: "acme", Cluster: componentCluster, Component: "policies", Wait: true, Progress: &progress}
 
-	err := Run(t.Context(), ComponentEnable, Clients{Component: &componentAPI{}}, opts, &out, OutputYAML)
+			err := Run(t.Context(), ComponentEnable, Clients{Component: api}, opts, &out, OutputYAML)
 
-	if err != nil || !strings.Contains(progress.String(), "does not install tenant components yet") {
-		t.Fatalf("Run = %v, progress %q", err, progress.String())
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("Run = %v, want %q; progress %q", err, tt.wantErr, progress.String())
+			}
+		})
 	}
 }
 

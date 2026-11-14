@@ -2,9 +2,9 @@
 // tenant reads, and the components a tenant enables on its clusters.
 //
 // The handlers validate and store; they install nothing. A Platform
-// component is installed with its cluster by the cluster reconcile. A
-// tenant's Component is stored PENDING: the controller that installs
-// tenant components does not exist yet (docs/design/component-usage.md).
+// component is installed with its cluster by the cluster reconcile, and
+// so is a tenant's Component, after the platform's: it is stored PENDING,
+// and the reconcile writes its phase (docs/design/component-usage.md).
 package component
 
 import (
@@ -38,9 +38,9 @@ const (
 	phasePending  = "COMPONENT_PHASE_PENDING"
 	phaseDeleting = "COMPONENT_PHASE_DELETING"
 
-	// pendingMessage is the status of a stored component: honest about
-	// what does not happen yet.
-	pendingMessage = "stored; not installed yet: this build installs platform components only"
+	// pendingMessage is the status of a stored component until the
+	// cluster reconcile looks at it.
+	pendingMessage = "accepted; the platform installs it with the cluster's next pass"
 	// notEnabled is the message of a catalog component a cluster does not have.
 	notEnabled = "not enabled"
 	// disabledMessage is the message of a catalog component the platform

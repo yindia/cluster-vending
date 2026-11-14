@@ -385,21 +385,27 @@ stores nothing. The user guide is [components.md](../components.md).
 
 **What the built API and CLI do, and where they differ from this design:**
 
-- **The handlers store; nothing installs a tenant's component.**
+- **The handlers store; the cluster reconcile installs.**
   `pkg/server/component` runs the checks of section 4.4 (prune, check,
-  merge) and stores the `Component`, `PENDING`, with what it would run in
-  its status. No controller reconciles a `Component`, so no Helm release
-  is created for it. `--wait` says so and ends; `DisableComponent` removes
-  the stored component at once, as there is nothing to uninstall.
-  **The smallest next step:** the cluster reconcile already installs the
-  Platform definitions through `component.PlanPlatform` and
-  `crossplaneaws.PlatformSet` (IAM role, chart, companions, in `requires`
-  order, into the cluster's own component inventory). Feeding it the
-  cluster's enabled `Component`s as well (their definition as an entry,
-  their stored values as the tenant layer of `component.Merge`, their
-  status written back with `Components.SetStatus`) installs tenant
-  components with no second installer. `DisableComponent` must then only
-  mark the component `DELETING` and leave its removal to that pass.
+  merge) and stores the `Component`, `PENDING`. The cluster reconcile
+  (`pkg/reconcile/cluster/tenant_components.go`) then installs it on every
+  pass after the Platform components, with the same installer:
+  `component.PlanTenant` plans it as `PlanPlatform` plans a Platform
+  component (pin version and values, placeholders filled in the
+  platform's values only) and merges the userValues file, then the
+  tenant's stored values, under the platform's; `crossplaneaws.PlatformSet`
+  applies it, waiting for what it requires, the platform's included
+  (`PlatformPlan.External`: a Usage keeps the required platform chart
+  until the tenant's is gone). Each component's objects are recorded on
+  the `Component` itself (`model.OwnerComponent`), and its status (phase,
+  version, release, chart, Helm state, last error, failures, recoveries,
+  since) is written with `Components.SetStatus`. `DisableComponent` marks
+  it `DELETING`; the reconcile uninstalls its charts, then its role, then
+  removes the `Component`. A cluster delete removes its tenant components
+  before the Platform ones (`deleteTenant`), so `Clusters.Delete` never
+  meets one. Nothing is installed on an imported cluster that was not
+  taken over, one taken over with `skip_platform_components`, a paused
+  one, or one that is not running.
 - **Catalog.** `ListComponentDefinitions` returns every component, the
   Platform ones included, with `management` and `configurable`; a bundle is
   one entry and its members are hidden (decided after this section was

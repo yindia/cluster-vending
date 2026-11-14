@@ -5,11 +5,13 @@ the AWS Load Balancer Controller, Karpenter, Kyverno, the GPU operator. The
 platform team keeps the list (the catalog, [catalog.md](catalog.md)); this
 page is how a tenant reads it and turns components on.
 
-> **Not installed yet.** A tenant's component is checked and stored, and
-> then stays `Pending`: this build installs the platform's own components
-> only (with the cluster). Nothing installs a component a tenant enables,
-> so nothing runs on the cluster for it. `--wait` says so instead of
-> waiting. See [the gap](#what-does-not-work-yet).
+> **How it gets installed.** `enable` checks and stores the component,
+> `Pending`. The cluster's next pass installs it, after the platform's own
+> components: it waits for what it requires (`kyverno-policies` for the
+> platform's `kyverno`), then its chart is installed at the version of
+> the cluster's release, with your values under the platform's. Its
+> status says `Installing`, then `Ready` or `Failed` with why. See
+> [how it works](#how-a-component-is-installed).
 
 ## Who manages a component
 
@@ -86,7 +88,7 @@ the tenant enabled, and what the tenant could enable (`not enabled`).
 ID                                    NAME              MANAGED BY  VERSION  PHASE    SINCE                 MESSAGE
 -                                     karpenter         platform    1.15.1   Ready    2026-11-13T04:00:00Z  -
 -                                     kyverno           platform    3.10.0   Ready    2026-11-13T04:02:10Z  -
-01a1d0a7-0000-7000-8000-000000000001  kyverno-policies  tenant      3.10.0   Pending  2026-11-13T05:10:00Z  stored; not installed yet: ...
+01a1d0a7-0000-7000-8000-000000000001  kyverno-policies  tenant      3.10.0   Pending  2026-11-13T05:10:00Z  accepted; the platform installs it with the cluster's next pass
 -                                     gpu-operator      tenant      -        -        -                     not enabled
 ```
 
@@ -143,17 +145,26 @@ without a shell (`code --wait` works).
 | `invalid_argument: version cannot be set` | The version comes from the cluster's release. |
 | `aborted: component ... changed since it was read` | The `--etag` you gave is not the current one. |
 
-## What does not work yet
+## How a component is installed
 
-- **Tenant components are not installed.** `enable` stores the component
-  with what it would run (`status.targetVersion`, `status.release`,
-  `status.effectiveValues`) and it stays `Pending`. The cluster reconcile
-  installs platform components; nothing does the same for a `Component`.
-- **`--wait`** on `enable` and `update` therefore ends at once, saying so.
-- **`disable`** removes the stored component at once: there is nothing to
-  uninstall.
+| Step | What happens |
+|---|---|
+| `enable` | Checked and stored `Pending`. On the cluster's next pass it is planned like a platform component: the release's version and locked values, your values under the platform's. It waits for what it requires, then its IAM role (if any) and its chart are applied: `Installing`, then `Ready` once Helm reports the chart deployed. |
+| `update` | New values make a new generation; the next pass upgrades the chart, and `status.observedGeneration` follows. The same values again change nothing. |
+| `disable` | Marked `Deleting`. The next passes uninstall its chart, then remove its role, then the component. A component another enabled one requires cannot be disabled. |
+| cluster delete | Every tenant component is removed first, then the platform's, then the cluster. |
+
+- **`--wait`** follows the component until it is `Ready` (or `Failed`,
+  an error), or gone after a `disable`.
+- **Nothing is installed** while the cluster is imported and not taken
+  over, taken over with the platform components kept off, paused, or not
+  running yet: the component stays `Pending` and says why.
+- **A stuck Helm release** is recovered as a platform component's is
+  (at most three times per version; `status.recoveries`).
+- **Ready means Helm finished**, as for platform components: that the
+  workloads run is not checked.
 - **Placeholders** in `status.effectiveValues` (`${cluster.name}`) are
-  shown as written: they are filled in when a component is installed.
+  shown as written; they are filled in in what is installed.
 
 The design, the checks and the API are in
 [design/component-usage.md](design/component-usage.md).

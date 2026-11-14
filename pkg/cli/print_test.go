@@ -42,7 +42,9 @@ func testCluster() *cloudv1.Cluster {
 			ControlPlane:    &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.37"},
 			DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"t3.large"}, ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
 			MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY, cloudv1.Weekday_WEEKDAY_SUNDAY},
-				Start: "02:00", Duration: "4h"}},
+				Start: "02:00", Duration: "4h"},
+			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_ALPHA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_2,
+			UpgradeMode: cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC},
 		Status: &cloudv1.ClusterStatus{
 			State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING, CurrentKubernetesVersion: "1.37",
 			Endpoint:        &cloudv1.ClusterEndpoint{Url: "https://ABC.sk1.us-west-1.eks.amazonaws.com"},
@@ -102,6 +104,9 @@ func TestPrintClusterDescribe(t *testing.T) {
 		"Version:       1.37\n" +
 		"Endpoint:      https://ABC.sk1.us-west-1.eks.amazonaws.com\n" +
 		"Release:       shipped-f874cd2c\n" +
+		"Channel:       Alpha\n" +
+		"Tier:          2\n" +
+		"Upgrades:      Automatic (follow the channel's minor)\n" +
 		"Maintenance:   Sat,Sun 02:00 UTC for 4h\n" +
 		"Message:       <none>\n" +
 		"Age:           2d2h\n" +

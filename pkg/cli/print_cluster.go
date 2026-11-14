@@ -105,6 +105,21 @@ func kubernetesLines(k *cloudv1.ClusterKubernetes) [][2]string {
 	return out
 }
 
+// releaseLines are how the cluster takes new versions: its release
+// channel, its rollout tier and its upgrade mode (unset is stored as
+// Manual: it never upgrades by itself).
+func releaseLines(s *cloudv1.ClusterSpec) [][2]string {
+	mode := "Manual (upgrades only when you change the version)"
+	if s.GetUpgradeMode() == cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC {
+		mode = "Automatic (follow the channel's minor)"
+	}
+	return [][2]string{
+		{"Channel", word(s.GetReleaseChannel().String(), "RELEASE_CHANNEL_")},
+		{"Tier", word(s.GetTier().String(), "CLUSTER_TIER_")},
+		{"Upgrades", mode},
+	}
+}
+
 // describeCluster is one cluster: its fields, then every resource with
 // its state and external name, its conditions, platform components and
 // recent events.
@@ -116,8 +131,9 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 		{"Version", versionLine(c)},
 	}
 	kv = append(kv, kubernetesLines(st.GetKubernetes())...)
-	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", st.GetPlatformRelease()},
-		{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())}}...)
+	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", st.GetPlatformRelease()}}...)
+	kv = append(kv, releaseLines(c.GetSpec())...)
+	kv = append(kv, [2]string{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())})
 	if u := st.GetUpgrade(); u != nil {
 		kv = append(kv, [2]string{"Upgrade", fmt.Sprintf("%s to %s (%s)", orNone(u.GetFromVersion()), orNone(u.GetToVersion()),
 			word(u.GetPhase().String(), "CLUSTER_UPGRADE_PHASE_"))})

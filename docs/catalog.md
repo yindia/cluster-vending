@@ -162,6 +162,77 @@ add a node for it.
   `kubectl create -f pkg/catalog/definitions/` once the CRDs are installed.
   The catalog is not part of any kustomization.
 
+## Disabling and removing a component
+
+**Disable** a component without deleting its definition:
+
+```sh
+kubectl patch componentdefinitions.cloud.cluster-vending.io istio --type merge -p '{"spec":{"disabled":true}}'
+```
+
+- **Platform component:** no longer installed; every cluster that has it
+  removes it on its next pass.
+- **Tenant component:** cannot be enabled any more. Components already
+  enabled stay until the tenant disables them.
+- **What depends on it** is off with it: the members of a disabled bundle,
+  and every definition that requires it. The catalog shows each as off,
+  with why.
+- **Kept across builds:** a new build that updates the shipped definition
+  keeps `disabled` as the platform team set it.
+- Turn it back on with `"disabled": false`.
+
+**Remove** a definition. Each one carries the
+`cloud.cluster-vending.io/definition-in-use` finalizer, and its `InUse`
+condition says what holds it:
+
+```sh
+kubectl delete componentdefinitions.cloud.cluster-vending.io external-dns
+kubectl get componentdefinitions.cloud.cluster-vending.io external-dns \
+  -o jsonpath='{.status.conditions[?(@.type=="InUse")].message}'
+```
+
+| What holds the delete | What to do |
+|---|---|
+| a tenant's Component of it | the tenant disables it; until then it stays |
+| a cluster that has it installed | nothing: a definition being deleted is off, so clusters remove it, and the delete finishes on its own |
+| its bundle | delete or disable the bundle first |
+| a definition that requires it | delete or change that one first |
+
+So for a Platform component, deleting is how it is removed from every
+cluster: the delete waits until no cluster has it. To stop it everywhere
+without deleting the definition, disable it instead.
+
+A shipped definition that is deleted comes back when the controller
+restarts (it is in the build); disable it to keep it off.
+
+## Changing the catalog without a build
+
+The controller reads the catalog live, so the platform team can change it
+with `kubectl` alone:
+
+- **Add a component:** apply a `ComponentDefinition` (chart, namespace,
+  `management`, values, and an IAM role if it needs one), then publish a
+  `Release` that pins its version and point `alpha` at it
+  ([release-admin](design/release-admin.md)). New clusters install it; a
+  cluster already on an older release reports it "not in release" until it
+  moves.
+- **Disable one:** `spec.disabled: true` (above).
+- **Remove one:** delete its definition (above).
+- **Take a newer shipped version of a definition you edited:**
+  `kubectl replace -f pkg/catalog/definitions/<name>.yaml`, or delete it and
+  restart the controller.
+
+What still needs code:
+
+- **AWS resources other than an IAM role.** A component that needs a queue,
+  a bucket or a DNS zone cannot describe it in a definition.
+- **New placeholders.** `${cluster.name}`, `${iam.roleArn}` and the others
+  are a fixed list in `pkg/component/placeholders.go`.
+- **Kyverno's excluded namespaces.** A component added at runtime installs
+  into a namespace Kyverno does not skip; add it to the `kyverno` and
+  `kyverno-policies` definitions by hand (for shipped components a test
+  checks this).
+
 ## Changing a version
 
 Versions are data, in one file: `pkg/catalog/release.yaml`. It lists the

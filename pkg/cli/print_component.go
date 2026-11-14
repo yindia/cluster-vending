@@ -6,12 +6,21 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-var componentHeader = []string{"ID", "NAME", "MANAGED BY", "VERSION", "PHASE", "AGE", "MESSAGE"}
+var componentHeader = []string{"NAME", "ID", "MANAGED BY", "VERSION", "PHASE", "AGE", "MESSAGE"}
+
+// noID is the ID column of a component that has none: a platform
+// component (part of the cluster, not an object of its own) or one the
+// tenant has not enabled. Not <none>: nothing is missing.
+const noID = "-"
 
 // componentRow is a component's row of component list.
 func componentRow(c *cloudv1.Component) []string {
 	st := c.GetStatus()
-	return []string{orNone(c.GetId()), c.GetComponent(), managedBy(c.GetManagement()), orNone(c.GetVersion()),
+	id := c.GetId()
+	if id == "" {
+		id = noID
+	}
+	return []string{c.GetComponent(), id, managedBy(c.GetManagement()), orNone(c.GetVersion()),
 		word(st.GetPhase().String(), "COMPONENT_PHASE_"), age(st.GetSince()), orNone(oneLine(st.GetMessage()))}
 }
 

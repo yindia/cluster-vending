@@ -337,10 +337,10 @@ func TestComponentListTable(t *testing.T) {
 
 	err := Run(t.Context(), ComponentList, Clients{Component: api}, Options{Tenant: "acme", Cluster: componentCluster}, &out, OutputTable)
 
-	want := "ID                                     NAME           MANAGED BY   VERSION   PHASE     AGE      MESSAGE\n" +
-		"<none>                                 karpenter      platform     1.15.1    Ready     32h      <none>\n" +
-		componentID + "   policies       tenant       3.10.0    Pending   <none>   stored; not installed yet\n" +
-		"<none>                                 gpu-operator   tenant       <none>    <none>    <none>   not enabled\n" +
+	want := "NAME           ID                                     MANAGED BY   VERSION   PHASE     AGE      MESSAGE\n" +
+		"karpenter      -                                      platform     1.15.1    Ready     32h      <none>\n" +
+		"policies       " + componentID + "   tenant       3.10.0    Pending   <none>   stored; not installed yet\n" +
+		"gpu-operator   -                                      tenant       <none>    <none>    <none>   not enabled\n" +
 		"\nMore: --page-token next\n"
 	if err != nil || out.String() != want {
 		t.Fatalf("got %v\n%s\nwant\n%s", err, out.String(), want)

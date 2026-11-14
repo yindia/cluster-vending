@@ -163,6 +163,8 @@ type condition struct {
 //	DELETING  deletion requested
 //	READY     Ready=True; or, for objects that are not managed resources
 //	          (namespaces, ProviderConfigs: no spec.forProvider), existing
+//	UPDATING  Ready=True, and the cloud moves an EKS cluster, node group
+//	          or add-on to the version its spec asks for (updating)
 //	WAITING   Synced=False because a referenced resource is not ready yet;
 //	          or paused (PausedAnnotation) and not ready: an operator's
 //	          choice, never a failure, however long it lasts
@@ -192,6 +194,9 @@ func View(r Ref, u *unstructured.Unstructured) *cloudv1.ManagedResource {
 		}
 	case ready.status == "True" || (!isManaged(u) && !hasReady && !hasSynced):
 		v.State = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY
+		if message, moving := updating(u); moving {
+			v.State, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_UPDATING, message
+		}
 	case v.Paused:
 		v.State, v.Reason, v.Message = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING, ReasonPaused, pausedMessage
 	case synced.status == "False" && strings.Contains(synced.message, waitingOnReference):

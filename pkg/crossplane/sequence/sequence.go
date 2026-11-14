@@ -449,7 +449,10 @@ func (e Engine) met(ctx context.Context, cond Condition, ref managed.Ref) (bool,
 		if err != nil {
 			return false, err
 		}
-		return views[0].GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY, nil
+		// UPDATING is ready too: the object works, only its version moves.
+		state := views[0].GetState()
+		return state == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
+			state == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_UPDATING, nil
 	}
 	u, err := e.Objects.Read(ctx, ref)
 	if err != nil || u == nil {

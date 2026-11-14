@@ -42,6 +42,11 @@ const (
 	// Recorded but not found in the management cluster (deleted outside the
 	// platform).
 	ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING ManagedResourceState = 6
+	// Exists and works, and the cloud is moving it to the version its spec
+	// asks for (a Kubernetes upgrade of an EKS cluster, node group or
+	// add-on): the provider reports another version, or EKS reports
+	// UPDATING; see message.
+	ManagedResourceState_MANAGED_RESOURCE_STATE_UPDATING ManagedResourceState = 7
 )
 
 // Enum value maps for ManagedResourceState.
@@ -54,6 +59,7 @@ var (
 		4: "MANAGED_RESOURCE_STATE_FAILED",
 		5: "MANAGED_RESOURCE_STATE_DELETING",
 		6: "MANAGED_RESOURCE_STATE_MISSING",
+		7: "MANAGED_RESOURCE_STATE_UPDATING",
 	}
 	ManagedResourceState_value = map[string]int32{
 		"MANAGED_RESOURCE_STATE_UNSPECIFIED": 0,
@@ -63,6 +69,7 @@ var (
 		"MANAGED_RESOURCE_STATE_FAILED":      4,
 		"MANAGED_RESOURCE_STATE_DELETING":    5,
 		"MANAGED_RESOURCE_STATE_MISSING":     6,
+		"MANAGED_RESOURCE_STATE_UPDATING":    7,
 	}
 )
 
@@ -409,7 +416,7 @@ const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\n" +
 	"TYPE_ADDED\x10\x01\x12\x11\n" +
 	"\rTYPE_MODIFIED\x10\x02\x12\x10\n" +
-	"\fTYPE_DELETED\x10\x03*\x95\x02\n" +
+	"\fTYPE_DELETED\x10\x03*\xba\x02\n" +
 	"\x14ManagedResourceState\x12&\n" +
 	"\"MANAGED_RESOURCE_STATE_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fMANAGED_RESOURCE_STATE_CREATING\x10\x01\x12\"\n" +
@@ -417,7 +424,8 @@ const file_cloud_v1_managed_resource_proto_rawDesc = "" +
 	"\x1cMANAGED_RESOURCE_STATE_READY\x10\x03\x12!\n" +
 	"\x1dMANAGED_RESOURCE_STATE_FAILED\x10\x04\x12#\n" +
 	"\x1fMANAGED_RESOURCE_STATE_DELETING\x10\x05\x12\"\n" +
-	"\x1eMANAGED_RESOURCE_STATE_MISSING\x10\x06B\xa4\x01\n" +
+	"\x1eMANAGED_RESOURCE_STATE_MISSING\x10\x06\x12#\n" +
+	"\x1fMANAGED_RESOURCE_STATE_UPDATING\x10\aB\xa4\x01\n" +
 	"\fcom.cloud.v1B\x14ManagedResourceProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (

@@ -23,6 +23,11 @@ enum ManagedResourceState {
   // Recorded but not found in the management cluster (deleted outside the
   // platform).
   MANAGED_RESOURCE_STATE_MISSING = 6;
+  // Exists and works, and the cloud is moving it to the version its spec
+  // asks for (a Kubernetes upgrade of an EKS cluster, node group or
+  // add-on): the provider reports another version, or EKS reports
+  // UPDATING; see message.
+  MANAGED_RESOURCE_STATE_UPDATING = 7;
 }
 
 // ManagedResource is one Kubernetes object the platform created in the

@@ -80,12 +80,19 @@ type Result struct {
 	// Rows are the channel's clusters in the rollout, tier 2 first, then
 	// by namespace/name.
 	Rows []Row
+	// Channel is the channel's name; Start the namespace/name of every
+	// cluster to start now (WouldStart, uncapped).
+	Channel string
+	Start   []string
+	// waiting is why the plan starts nothing (more), before a report-only
+	// plan's wording replaced it.
+	waiting string
 }
 
 // Compute plans the channel's rollout at in.Now.
 func Compute(in Input) Result {
 	ch := in.Channel
-	out := Result{Rollout: &cloudv1alpha1.ChannelRollout{ReportOnly: !in.Automatic}}
+	out := Result{Rollout: &cloudv1alpha1.ChannelRollout{ReportOnly: !in.Automatic}, Channel: ch.Name}
 	switch {
 	case ch.Status.Release == "":
 		out.Rollout.Waiting = "the channel offers no release yet"
@@ -127,6 +134,7 @@ func Compute(in Input) Result {
 	if ch.Spec.Paused && !d.Halted && len(d.Start) > 0 {
 		d.Start, d.Waiting = nil, "the channel is paused (spec.paused): no cluster starts"
 	}
+	d = notDoneWhileBelow(d, members, blocked)
 	out.fill(d, members, blocked)
 	return out
 }
@@ -164,6 +172,7 @@ func (p *Result) fill(d upgrade.Decision, members []upgrade.Member, blocked []cl
 	p.Stage = ClusterTier(d.Stage)
 	p.Rollout.Waiting, p.Rollout.Halted, p.Rollout.Done = d.Waiting, d.Halted, d.Done
 	p.Rollout.WouldStart = capped(d.Start)
+	p.Start, p.waiting = d.Start, d.Waiting
 	if len(d.Start) > 0 && p.Rollout.ReportOnly {
 		p.Rollout.Waiting = fmt.Sprintf("would start %s (automatic upgrades are off)", clusterCount(len(d.Start)))
 	}
@@ -221,7 +230,10 @@ func (in memberInputs) row(c *cloudv1alpha1.Cluster) (r Row, wake time.Time, ok 
 	}
 	r = Row{ID: c.Labels[cloudstore.LabelID], Tenant: tenantOf(c), Namespace: c.Namespace, Name: c.Name,
 		Tier: Tier(c.Spec.Tier), Current: current, Target: in.target}
-	upgrading := c.Status.Upgrade != nil && c.Status.Upgrade.Phase != ""
+	if recorded, ok := fromRecord(c, in.channel, r, cmp); ok {
+		return recorded, wake, true
+	}
+	upgrading := upgrading(c)
 	switch {
 	case cmp == 0 && !upgrading:
 		r.State, r.Since = upgrade.Succeeded, FinishedAt(c)
@@ -302,16 +314,21 @@ func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Fa
 	return f
 }
 
-// platformReady: the PlatformComponentsReady condition is True, or,
-// without it, every platform component is Ready.
+// platformReady: every platform component the cluster lists is Ready or
+// being removed (Deleting: its definition was switched off, which must
+// not hold an upgrade back); without a list, the PlatformComponentsReady
+// condition is True (or missing).
 func platformReady(c *cloudv1alpha1.Cluster) bool {
+	if len(c.Status.PlatformComponents) > 0 {
+		for _, pc := range c.Status.PlatformComponents {
+			if pc.Phase != "Ready" && pc.Phase != "Deleting" {
+				return false
+			}
+		}
+		return true
+	}
 	if cond := meta.FindStatusCondition(c.Status.Conditions, cloudv1alpha1.ConditionPlatformComponentsReady); cond != nil {
 		return cond.Status == metav1.ConditionTrue
-	}
-	for _, pc := range c.Status.PlatformComponents {
-		if pc.Phase != "Ready" {
-			return false
-		}
 	}
 	return true
 }

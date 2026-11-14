@@ -102,3 +102,31 @@ func TestTakeoverAppliesTheReviewedPlanNotAnEdit(t *testing.T) {
 		t.Errorf("taken over with display name %q, want %q", res.GetCluster().GetDisplayName(), discovered.GetDisplayName())
 	}
 }
+
+// A takeover may keep the platform components off the cluster: it is
+// stored with the cluster, and the reconciler then installs none.
+func TestTakeoverCanKeepThePlatformComponentsOff(t *testing.T) {
+	for name, skip := range map[string]bool{"kept off": true, "as any cluster": false} {
+		t.Run(name, func(t *testing.T) {
+			w := importWorld(t, terraformCluster())
+			c := importTF(t, w)
+
+			if _, err := w.svc.TakeOverCluster(t.Context(), &cloudv1.TakeOverClusterRequest{TenantId: worldTenant, ClusterId: c.GetId(),
+				AcknowledgeNotImported: true, SkipPlatformComponents: skip}); err != nil {
+				t.Fatalf("TakeOverCluster: %v", err)
+			}
+
+			row, err := w.store.Clusters().Get(t.Context(), worldTenant, c.GetId())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := reconcilecluster.PlatformKeptOff(row); got != skip {
+				t.Errorf("platform components kept off = %v, want %v", got, skip)
+			}
+			// What the import kept with the cluster is still there.
+			if a := reconcilecluster.Adoption(row); a.NodeRoleName == "" && a.ClusterRoleName == "" && len(a.ExternalNames) == 0 {
+				t.Errorf("the cluster's adoption was lost: %s", row.Adoption)
+			}
+		})
+	}
+}

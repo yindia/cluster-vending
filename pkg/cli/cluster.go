@@ -172,6 +172,7 @@ func ClusterTakeOver(ctx context.Context, c Clients, o Options) (proto.Message, 
 	}
 	res, err := call(ctx, &cloudv1.TakeOverClusterRequest{
 		TenantId: o.Tenant, ClusterId: o.ID, Etag: o.ETag, AcknowledgeNotImported: o.AcknowledgeNotImported,
+		SkipPlatformComponents: o.SkipPlatformComponents,
 	}, c.Cluster.TakeOverCluster)
 	if err != nil || !o.Wait {
 		return res, err

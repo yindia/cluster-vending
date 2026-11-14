@@ -947,7 +947,9 @@ recorded apart from the cluster's (`status.componentInventory`, owner
    its kubeconfig exists. Every chart also waits for the `<prefix>-helm`
    ProviderConfig and the node group by itself (`crossplaneaws.PlatformSet`).
    Once started, installing goes on through updates of the cluster. Nothing
-   is installed on an imported cluster, also after its takeover (later).
+   is installed on an imported cluster before its takeover; a taken-over one
+   gets them like any cluster, unless its takeover kept them off
+   (`skip_platform_components`). See catalog.md, "Taken-over clusters".
 2. **Which release.** The release the cluster's channel offers when its
    components are first installed (`spec.releaseChannel`, `stable` when
    unset), recorded as `status.platformRelease` and kept from then on, for

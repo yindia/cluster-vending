@@ -215,12 +215,18 @@ func (s *Service) targetOf(ctx context.Context, row *model.Cluster) (target, err
 	if version == "" {
 		version = st.GetCurrentKubernetesVersion()
 	}
+	// Also the IAM OIDC provider a taken-over cluster was imported with,
+	// which its spec does not say.
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
+	if err != nil {
+		return target{}, service.ToConnect(err)
+	}
 	t := target{cluster: core.Cluster{
 		Name: row.Name, State: strings.TrimPrefix(row.State, "CLUSTER_STATE_"),
 		Running:         row.State == reconcilecluster.StateRunning,
 		Deleting:        row.State == reconcilecluster.StateDeleting,
 		Imported:        row.State == reconcilecluster.StateImported,
-		KubernetesMinor: minorOf(version), IRSA: spec.GetAws().GetIrsa(),
+		KubernetesMinor: minorOf(version), IRSA: reconcilecluster.HasIRSA(spec, records),
 	}}
 	for _, a := range spec.GetAws().GetAddons() {
 		t.cluster.Addons = append(t.cluster.Addons, a.GetName())

@@ -24,8 +24,9 @@ type verb struct {
 	// reason adds --reason (admin pause).
 	reason bool
 	// table: the verb prints a table unless --output says otherwise;
-	// removed adds --only-removed, oidc --oidc, warnings --only-warnings.
-	table, removed, oidc, warnings bool
+	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
+	// noPlatform --skip-platform-components.
+	table, removed, oidc, warnings, noPlatform bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -97,6 +98,10 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.ack {
 			f.BoolVar(&o.AcknowledgeNotImported, "acknowledge-not-imported", false,
 				"take over even though some resources were not imported (see status.import)")
+		}
+		if v.noPlatform {
+			f.BoolVar(&o.SkipPlatformComponents, "skip-platform-components", false,
+				"keep the platform components off the cluster (it already runs its own); decided at the takeover")
 		}
 		if v.page {
 			f.Int32Var(&o.PageSize, "page-size", 0, "maximum results per page; 0 uses the server default")
@@ -174,7 +179,7 @@ func newClusterCmd() *cobra.Command {
 		verb{use: "import", short: "Import an existing EKS cluster read-only from a ClusterImport manifest (-f)",
 			run: cli.ClusterImport, args: cobra.NoArgs, input: true, wait: true},
 		verb{use: "takeover <id>", short: "Take over an imported cluster: the platform becomes its owner",
-			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
+			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true, noPlatform: true},
 		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",

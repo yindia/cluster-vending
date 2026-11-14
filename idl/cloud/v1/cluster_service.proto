@@ -205,6 +205,14 @@ message TakeOverClusterRequest {
   // Confirms that every NOT_IMPORTED resource has another owner (or was
   // deleted) and the previous tool no longer manages anything here.
   bool acknowledge_not_imported = 4;
+
+  // Keeps the platform components (load balancer controller, autoscalers,
+  // policy engine, mesh, ...) off this cluster. Unset: once the cluster is
+  // taken over and running it gets them like any cluster. For a cluster
+  // that already runs its own: the platform never deletes or adopts those,
+  // and its own install of the same component would fail next to them.
+  // It is decided at the takeover and stays.
+  bool skip_platform_components = 5;
 }
 
 message TakeOverClusterResponse {

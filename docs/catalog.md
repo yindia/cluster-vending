@@ -20,8 +20,29 @@ channel offered at that moment (`status.platformRelease`). Their state is
 on the Cluster: `status.platformComponents` (name, version, phase, message)
 and the condition `PlatformComponentsReady`; it does not hold back the
 cluster's own Ready. They are removed, in reverse, before the cluster is
-deleted. Nothing is installed on imported clusters. The details are in
+deleted. Nothing is installed on an imported cluster before its takeover. The details are in
 [design/component-usage.md](design/component-usage.md), section 7.2.
+
+**Taken-over clusters.** An imported cluster is only observed, so it gets
+no platform components. Once it is taken over and RUNNING it gets them like
+any cluster.
+
+- *It may already run some of them itself* (its own load balancer
+  controller, Karpenter, mesh, ...). The platform never deletes or adopts
+  what a cluster came with. Its own install of the same component then
+  fails next to the existing one (a Helm release or objects of that name
+  exist): the component is `Failed` with the provider's error, followed by
+  a note that the cluster was taken over. Uninstall the cluster's own and
+  the platform's is installed on the next try.
+- *To keep the platform components off such a cluster*, take it over with
+  `skip_platform_components` (`cluster takeover <id> --skip-platform-components`).
+  It is decided at the takeover and stays; there is no switch afterwards
+  yet.
+- *IRSA.* A taken-over cluster keeps the IAM OIDC provider it was imported
+  with, as a carried-over object, while `spec.aws.irsa` stays off (it cannot
+  be turned on over that provider). It counts as having IRSA: components
+  with an IAM role trust that provider. A cluster with no provider at all
+  reports "IRSA is off" for them, as any cluster does.
 
 See what a cluster has, through the API or on the management cluster:
 

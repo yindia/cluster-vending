@@ -107,6 +107,12 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if row.Status, err = reconcilecluster.Encode(&cloudv1.ClusterStatus{Import: imp}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
+	if req.GetSkipPlatformComponents() {
+		// The cluster runs its own: the platform's are never installed.
+		if row.Adoption, err = reconcilecluster.WithoutPlatformComponents(row.Adoption); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err.Error())
+		}
+	}
 	row.State = reconcilecluster.StateUpdating
 	row.Generation++
 	// The versions are the ones the cluster runs: nothing to look up.

@@ -175,6 +175,10 @@ in its stored input, a cluster's planned objects in its stored adoption).
 The row leaves the imported state first, so a takeover that stops half-way
 is finished by the controller.
 
+A taken-over cluster then gets the platform components like any cluster,
+unless the takeover asked to keep them off (`skip_platform_components`); see
+[catalog.md](catalog.md), "Taken-over clusters".
+
 - **Network**: `crossplaneaws.OwnedNetworkResources` renders every imported
   object with full management, or without the right to delete for a log
   group or role that other VPCs also use. Subnets get the load balancer

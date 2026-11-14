@@ -243,6 +243,13 @@ type TakeOverClusterRequest struct {
 	// Confirms that every NOT_IMPORTED resource has another owner (or was
 	// deleted) and the previous tool no longer manages anything here.
 	AcknowledgeNotImported bool `protobuf:"varint,4,opt,name=acknowledge_not_imported,json=acknowledgeNotImported,proto3" json:"acknowledge_not_imported,omitempty"`
+	// Keeps the platform components (load balancer controller, autoscalers,
+	// policy engine, mesh, ...) off this cluster. Unset: once the cluster is
+	// taken over and running it gets them like any cluster. For a cluster
+	// that already runs its own: the platform never deletes or adopts those,
+	// and its own install of the same component would fail next to them.
+	// It is decided at the takeover and stays.
+	SkipPlatformComponents bool `protobuf:"varint,5,opt,name=skip_platform_components,json=skipPlatformComponents,proto3" json:"skip_platform_components,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -301,6 +308,13 @@ func (x *TakeOverClusterRequest) GetEtag() string {
 func (x *TakeOverClusterRequest) GetAcknowledgeNotImported() bool {
 	if x != nil {
 		return x.AcknowledgeNotImported
+	}
+	return false
+}
+
+func (x *TakeOverClusterRequest) GetSkipPlatformComponents() bool {
+	if x != nil {
+		return x.SkipPlatformComponents
 	}
 	return false
 }
@@ -1215,13 +1229,14 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\x10AwsImportCluster\x12]\n" +
 	"\x17default_node_group_name\x18\x01 \x01(\tB&\xbaH#r!\x10\x01\x18?2\x1b^[0-9A-Za-z][A-Za-z0-9_-]*$R\x14defaultNodeGroupName\"D\n" +
 	"\x15ImportClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\xdd\x01\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\x97\x02\n" +
 	"\x16TakeOverClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12\x12\n" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\x128\n" +
-	"\x18acknowledge_not_imported\x18\x04 \x01(\bR\x16acknowledgeNotImported\"F\n" +
+	"\x18acknowledge_not_imported\x18\x04 \x01(\bR\x16acknowledgeNotImported\x128\n" +
+	"\x18skip_platform_components\x18\x05 \x01(\bR\x16skipPlatformComponents\"F\n" +
 	"\x17TakeOverClusterResponse\x12+\n" +
 	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\xc5\x01\n" +
 	"\x14CreateClusterRequest\x12L\n" +

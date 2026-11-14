@@ -119,15 +119,19 @@ func withPlatform(st *cloudv1.ClusterStatus, p *platform) {
 // the cluster's state never waits for them.
 //
 // Nothing is installed before the cluster is RUNNING (its node group is
-// ready and its kubeconfig exists), on an imported cluster, or while the
-// cluster is being deleted. Once started it goes on through updates. nil
+// ready and its kubeconfig exists), on an imported cluster that was not
+// taken over (noPlatform; a taken-over one gets them like any cluster,
+// unless its takeover kept them off), or while the cluster is being
+// deleted. Once started it goes on through updates. nil
 // when this pass has nothing new to say: the recorded status stays.
 func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*platform, error) {
 	if s.deps.Platform == nil || row.State == StateDeleting {
 		return nil, nil
 	}
-	if row.Imported {
-		return &platform{}, nil // nothing is installed on an imported cluster
+	if noPlatform(row) {
+		// Imported and only observed, or taken over with the platform
+		// components kept off: nothing is installed.
+		return &platform{}, nil
 	}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerClusterComponents, row.ID)
 	if err != nil {
@@ -163,6 +167,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	components, objects := platformStatus(in, plan, skipped, res, views)
 	p := &platform{release: release, components: components}
 	s.describe(ctx, row, in.Plan.Namespace, p, objects)
+	explainTakenOver(row, p.components)
 	return p, nil
 }
 
@@ -296,8 +301,11 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 		TenantID: row.TenantID, ClusterID: row.ID, ClusterName: row.Name, ClusterPrefix: clusterPlan.Prefix,
 		Region: spec.GetRegion(), Tags: row.Labels}
 	in.Cluster = component.Cluster{Name: row.Name, State: row.State, Running: row.State == StateRunning,
-		KubernetesMinor: kubernetesMinor(spec.GetControlPlane().GetKubernetesVersion()), IRSA: spec.GetAws().GetIrsa()}
-	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM)
+		KubernetesMinor: kubernetesMinor(spec.GetControlPlane().GetKubernetesVersion()),
+		// The provider spec.aws.irsa renders, or the one a taken-over
+		// cluster was imported with.
+		IRSA: HasIRSA(spec, records)}
+	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM, in.Cluster.IRSA)
 
 	// The recorded release is kept once something is installed from it.
 	// Until then the cluster follows its channel: a release that pinned no
@@ -387,9 +395,17 @@ func kubernetesMinor(version string) string {
 // own role and policy as the management cluster has them now. What does
 // not exist yet is left empty: the component then waits.
 func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, t Target,
-	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan) func(string) component.Vars {
+	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan, irsa bool) func(string) component.Vars {
 	recorded := storedStatus(row)
 	kindSpec, _ := convert.ClusterSpecToAPI(spec, "")
+	if irsa {
+		// Also for the provider a taken-over cluster was imported with,
+		// which its spec does not say (hasOIDCProvider).
+		if kindSpec.AWS == nil {
+			kindSpec.AWS = &cloudv1alpha1.AWSClusterSpec{}
+		}
+		kindSpec.AWS.IRSA = ptr.To(true)
+	}
 	cluster := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: row.Name}, Spec: kindSpec}
 	cluster.Status.OIDCIssuerURL = recorded.GetOidcIssuerUrl()
 	if e := recorded.GetEndpoint(); e.GetUrl() != "" {

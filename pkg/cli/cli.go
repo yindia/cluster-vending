@@ -91,6 +91,9 @@ type Options struct {
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.
 	AcknowledgeNotImported bool
+	// SkipPlatformComponents is --skip-platform-components of cluster
+	// takeover: the platform components are kept off the cluster.
+	SkipPlatformComponents bool
 	// PageSize and PageToken page list results.
 	PageSize  int32
 	PageToken string

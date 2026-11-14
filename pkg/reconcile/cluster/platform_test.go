@@ -212,7 +212,9 @@ func TestPlatformComponentsAreNotInstalled(t *testing.T) {
 		msg  string
 	}{
 		{name: "before the cluster is running", edit: func(r *model.Cluster, _ *fakePlatform) { r.State = StateUpdating }},
-		{name: "on an imported cluster", edit: func(r *model.Cluster, _ *fakePlatform) { r.Imported = true }, want: "-"},
+		{name: "on an imported cluster that was not taken over", edit: func(r *model.Cluster, _ *fakePlatform) {
+			r.Imported, r.State = true, StateImported
+		}, want: "-"},
 		{name: "while it is deleted", edit: func(r *model.Cluster, _ *fakePlatform) { r.State = StateDeleting }},
 		{name: "the channel offers nothing", edit: func(_ *model.Cluster, f *fakePlatform) { f.offered = "" },
 			want: "base=FAILED,mesh=FAILED", msg: "release channel stable offers no release yet"},

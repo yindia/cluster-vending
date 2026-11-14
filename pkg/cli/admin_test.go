@@ -70,3 +70,32 @@ func TestAdminPauseAndResume(t *testing.T) {
 		t.Error("a pause without --tenant was sent")
 	}
 }
+
+// As a table, pause and resume say the scope they were asked at.
+func TestAdminPauseTable(t *testing.T) {
+	const cluster = "0190a000-0000-7000-8000-00000000000a"
+	tests := []struct {
+		name string
+		cmd  Command
+		opts Options
+		want string
+	}{
+		{"a tenant paused", AdminPause, Options{Tenant: "acme"},
+			"TENANT   SCOPE    TARGET   OBJECTS PAUSED\n" +
+				"acme     tenant   acme     3\n"},
+		{"a cluster resumed", AdminResume, Options{Tenant: "acme", Cluster: cluster},
+			"TENANT   SCOPE     TARGET                                 OBJECTS RESUMED\n" +
+				"acme     cluster   " + cluster + "   3\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+
+			err := Run(t.Context(), tt.cmd, Clients{Admin: &pauseRecorder{}}, tt.opts, &out, OutputTable)
+
+			if err != nil || out.String() != tt.want {
+				t.Fatalf("got %v\n%s\nwant\n%s", err, out.String(), tt.want)
+			}
+		})
+	}
+}

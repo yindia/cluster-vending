@@ -383,8 +383,45 @@ func TestHoldResolvesTheClusterID(t *testing.T) {
 		if cond == nil || cond.Reason != want {
 			t.Errorf("%s: condition %+v, want %s", name, cond, want)
 		}
-		if name == "ok" && (got.Status.Namespace != "tenant-acme" || got.Status.Name != "prod-eks" || res.RequeueAfter != time.Hour) {
-			t.Errorf("ok: resolved to %s/%s, requeue %s", got.Status.Namespace, got.Status.Name, res.RequeueAfter)
+		if name == "ok" && (got.Status.Namespace != "tenant-acme" || got.Status.Name != "prod-eks" || res.RequeueAfter != time.Hour ||
+			got.Status.Clusters != 1) {
+			t.Errorf("ok: resolved to %s/%s (%d clusters), requeue %s", got.Status.Namespace, got.Status.Name, got.Status.Clusters, res.RequeueAfter)
+		}
+	}
+}
+
+// A hold of a tenant or a channel covers every cluster that matches, those
+// added later too: it is resolved with how many match now, none included,
+// and names no one cluster.
+func TestHoldOfATenantOrChannelCountsItsClusters(t *testing.T) {
+	ctx := t.Context()
+	cluster := func(name, tenant string, channel cloudv1alpha1.ReleaseChannelName, tier cloudv1alpha1.ClusterTier) *cloudv1alpha1.Cluster {
+		return &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-" + tenant, Name: name,
+			Labels: map[string]string{cloudstore.LabelID: "id-" + name, cloudstore.LabelTenant: tenant}},
+			Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: channel, Tier: tier}}
+	}
+	hold := func(name string, spec cloudv1alpha1.ReleaseHoldSpec) *cloudv1alpha1.ReleaseHold {
+		spec.Reason = "freeze"
+		return &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
+	}
+	c := releaseClient(t,
+		cluster("a", "acme", cloudv1alpha1.ReleaseChannelBeta, cloudv1alpha1.ClusterTier0),
+		cluster("b", "acme", cloudv1alpha1.ReleaseChannelBeta, cloudv1alpha1.ClusterTier2),
+		cluster("c", "globex", cloudv1alpha1.ReleaseChannelStable, ""),
+		hold("tenant", cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme"}),
+		hold("beta", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta"}),
+		hold("beta-tier0", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta", Tier: cloudv1alpha1.ClusterTier0}),
+		hold("alpha", cloudv1alpha1.ReleaseHoldSpec{Channel: "alpha"}))
+	r := &ReleaseHoldReconciler{c: c, now: time.Now}
+	for name, want := range map[string]int32{"tenant": 2, "beta": 2, "beta-tier0": 1, "alpha": 0} {
+		reconcileOnce(t, r, name)
+		got := &cloudv1alpha1.ReleaseHold{}
+		if err := c.Get(ctx, client.ObjectKey{Name: name}, got); err != nil {
+			t.Fatal(err)
+		}
+		cond := meta.FindStatusCondition(got.Status.Conditions, cloudv1alpha1.HoldConditionResolved)
+		if got.Status.Clusters != want || got.Status.Name != "" || cond == nil || cond.Status != metav1.ConditionTrue {
+			t.Errorf("%s: %d clusters (want %d), name %q, condition %+v", name, got.Status.Clusters, want, got.Status.Name, cond)
 		}
 	}
 }

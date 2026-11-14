@@ -411,13 +411,33 @@ type ReleaseChannelList struct {
 	Items           []ReleaseChannel `json:"items"`
 }
 
-// ReleaseHoldSpec keeps one cluster out of rollouts.
+// ReleaseHoldSpec keeps clusters out of rollouts (AdminService.PauseReconcile
+// with only_upgrades): one cluster, a tenant's clusters, or a release
+// channel's (every tier, or one). Exactly one of clusterID, tenantID and
+// channel is set; tier only with channel.
+// +kubebuilder:validation:XValidation:rule="[has(self.clusterID), has(self.tenantID), has(self.channel)].filter(x, x).size() == 1",message="set exactly one of clusterID, tenantID and channel"
+// +kubebuilder:validation:XValidation:rule="!has(self.tier) || has(self.channel)",message="tier needs channel"
 type ReleaseHoldSpec struct {
 	// ClusterID is the held cluster's ID (the API's Cluster.id).
-	// +required
+	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterID is immutable; create another hold"
-	ClusterID string `json:"clusterID"`
+	ClusterID string `json:"clusterID,omitempty"`
+	// TenantID holds every cluster of the tenant, those created later too.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantID is immutable; create another hold"
+	TenantID string `json:"tenantID,omitempty"`
+	// Channel holds every cluster on the release channel (alpha, beta,
+	// stable), those that join it later too; with Tier, only that tier's.
+	// +optional
+	// +kubebuilder:validation:Enum=alpha;beta;stable
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="channel is immutable; create another hold"
+	Channel string `json:"channel,omitempty"`
+	// Tier narrows Channel to one tier.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tier is immutable; create another hold"
+	Tier ClusterTier `json:"tier,omitempty"`
 	// Release, when set, keeps the cluster on exactly this release (a
 	// lock); unset, the cluster stays on what it has now (a freeze).
 	// +optional
@@ -431,16 +451,24 @@ type ReleaseHoldSpec struct {
 	// Until, when set, ends the hold by itself.
 	// +optional
 	Until *metav1.Time `json:"until,omitempty"`
+	// By is who asked for it (AdminService.PauseReconcile sets it).
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	By string `json:"by,omitempty"`
 }
 
 // ReleaseHoldStatus is written by the controller.
 type ReleaseHoldStatus struct {
 	// Namespace and Name of the Cluster object the ID resolved to (for
-	// people; the hold follows the ID).
+	// people; the hold follows the ID). Empty for a hold of a tenant or a
+	// channel.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 	// +optional
 	Name string `json:"name,omitempty"`
+	// Clusters is how many clusters the hold matches now.
+	// +optional
+	Clusters int32 `json:"clusters,omitempty"`
 	// Conditions: Resolved.
 	// +optional
 	// +listType=map
@@ -448,12 +476,18 @@ type ReleaseHoldStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// ReleaseHold keeps one cluster out of rollouts: on a named release (a
-// lock) or where it is (a freeze). Only the operator holds a cluster.
+// ReleaseHold keeps clusters out of rollouts: one cluster on a named
+// release (a lock) or where it is (a freeze), or a tenant's or a channel's
+// clusters where they are. Only the operator holds a cluster; users see it
+// as a pause of upgrades (admin pause --only upgrades).
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=cvhold
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Cluster-ID",type=string,JSONPath=`.spec.clusterID`
+// +kubebuilder:printcolumn:name="Tenant",type=string,JSONPath=`.spec.tenantID`
+// +kubebuilder:printcolumn:name="Channel",type=string,JSONPath=`.spec.channel`
+// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
+// +kubebuilder:printcolumn:name="Clusters",type=integer,JSONPath=`.status.clusters`
 // +kubebuilder:printcolumn:name="Cluster",type=string,JSONPath=`.status.name`
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace`
 // +kubebuilder:printcolumn:name="Release",type=string,JSONPath=`.spec.release`

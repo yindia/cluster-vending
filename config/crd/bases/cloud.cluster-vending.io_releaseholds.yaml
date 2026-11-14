@@ -20,6 +20,18 @@ spec:
     - jsonPath: .spec.clusterID
       name: Cluster-ID
       type: string
+    - jsonPath: .spec.tenantID
+      name: Tenant
+      type: string
+    - jsonPath: .spec.channel
+      name: Channel
+      type: string
+    - jsonPath: .spec.tier
+      name: Tier
+      type: string
+    - jsonPath: .status.clusters
+      name: Clusters
+      type: integer
     - jsonPath: .status.name
       name: Cluster
       type: string
@@ -39,8 +51,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          ReleaseHold keeps one cluster out of rollouts: on a named release (a
-          lock) or where it is (a freeze). Only the operator holds a cluster.
+          ReleaseHold keeps clusters out of rollouts: one cluster on a named
+          release (a lock) or where it is (a freeze), or a tenant's or a channel's
+          clusters where they are. Only the operator holds a cluster; users see it
+          as a pause of upgrades (admin pause --only upgrades).
         properties:
           apiVersion:
             description: |-
@@ -60,8 +74,29 @@ spec:
           metadata:
             type: object
           spec:
-            description: ReleaseHoldSpec keeps one cluster out of rollouts.
+            description: |-
+              ReleaseHoldSpec keeps clusters out of rollouts (AdminService.PauseReconcile
+              with only_upgrades): one cluster, a tenant's clusters, or a release
+              channel's (every tier, or one). Exactly one of clusterID, tenantID and
+              channel is set; tier only with channel.
             properties:
+              by:
+                description: By is who asked for it (AdminService.PauseReconcile sets
+                  it).
+                maxLength: 256
+                type: string
+              channel:
+                description: |-
+                  Channel holds every cluster on the release channel (alpha, beta,
+                  stable), those that join it later too; with Tier, only that tier's.
+                enum:
+                - alpha
+                - beta
+                - stable
+                type: string
+                x-kubernetes-validations:
+                - message: channel is immutable; create another hold
+                  rule: self == oldSelf
               clusterID:
                 description: ClusterID is the held cluster's ID (the API's Cluster.id).
                 pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
@@ -80,17 +115,44 @@ spec:
                   lock); unset, the cluster stays on what it has now (a freeze).
                 pattern: ^([0-9]{4}-[0-9]{2}-[a-z]|shipped-[0-9a-f]{8})$
                 type: string
+              tenantID:
+                description: TenantID holds every cluster of the tenant, those created
+                  later too.
+                pattern: ^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: tenantID is immutable; create another hold
+                  rule: self == oldSelf
+              tier:
+                description: Tier narrows Channel to one tier.
+                enum:
+                - Tier0
+                - Tier1
+                - Tier2
+                type: string
+                x-kubernetes-validations:
+                - message: tier is immutable; create another hold
+                  rule: self == oldSelf
               until:
                 description: Until, when set, ends the hold by itself.
                 format: date-time
                 type: string
             required:
-            - clusterID
             - reason
             type: object
+            x-kubernetes-validations:
+            - message: set exactly one of clusterID, tenantID and channel
+              rule: '[has(self.clusterID), has(self.tenantID), has(self.channel)].filter(x,
+                x).size() == 1'
+            - message: tier needs channel
+              rule: '!has(self.tier) || has(self.channel)'
           status:
             description: ReleaseHoldStatus is written by the controller.
             properties:
+              clusters:
+                description: Clusters is how many clusters the hold matches now.
+                format: int32
+                type: integer
               conditions:
                 description: 'Conditions: Resolved.'
                 items:
@@ -156,7 +218,8 @@ spec:
               namespace:
                 description: |-
                   Namespace and Name of the Cluster object the ID resolved to (for
-                  people; the hold follows the ID).
+                  people; the hold follows the ID). Empty for a hold of a tenant or a
+                  channel.
                 type: string
             type: object
         required:

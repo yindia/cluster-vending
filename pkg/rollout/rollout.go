@@ -113,7 +113,7 @@ func Compute(in Input) Result {
 		out.Problem, out.Rollout.Waiting = problem, problem
 		return out
 	}
-	m := memberInputs{channel: ch.Name, target: target, offered: OfferedMinors(content), held: Held(in.Holds, in.Now), now: in.Now}
+	m := memberInputs{channel: ch.Name, target: target, offered: OfferedMinors(content), holds: in.Holds, now: in.Now}
 	var members []upgrade.Member
 	var blocked []cloudv1alpha1.BlockedCluster
 	for i := range in.Clusters {
@@ -207,9 +207,9 @@ func (p *Result) fill(d upgrade.Decision, members []upgrade.Member, blocked []cl
 type memberInputs struct {
 	channel, target string
 	offered         []string
-	// held are the IDs of the clusters a ReleaseHold holds now.
-	held map[string]bool
-	now  time.Time
+	// holds are the release holds: the pauses of upgrades (HoldOf).
+	holds []cloudv1alpha1.ReleaseHold
+	now   time.Time
 }
 
 // row is the cluster's place in the channel's rollout: false when it is
@@ -305,7 +305,9 @@ func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Fa
 		Ready:         meta.IsStatusConditionTrue(c.Status.Conditions, "Ready") || c.Status.Phase == cloudv1alpha1.ClusterPhaseRunning,
 		PlatformReady: platformReady(c),
 		Paused:        model.ParsePause(c.Annotations[cloudstore.AnnotationPaused]) != nil,
-		Held:          in.held[c.Labels[cloudstore.LabelID]],
+	}
+	if h := HoldOf(in.holds, c, in.now); h != nil {
+		f.Held, f.HeldMessage = true, HoldMessage(h)
 	}
 	if dep := c.Status.Deprecations; dep != nil {
 		f.DeprecationsScanned = dep.ScannedAt != nil
@@ -344,15 +346,61 @@ func FinishedAt(c *cloudv1alpha1.Cluster) time.Time {
 	return c.CreationTimestamp.Time
 }
 
-// Held are the IDs of the clusters an unexpired ReleaseHold holds at now.
-func Held(holds []cloudv1alpha1.ReleaseHold, now time.Time) map[string]bool {
-	out := map[string]bool{}
-	for _, h := range holds {
-		if Active(h, now) {
-			out[h.Spec.ClusterID] = true
+// HoldOf is the first unexpired hold that matches c at now (Matches): its
+// upgrades are paused. Nil when none does.
+func HoldOf(holds []cloudv1alpha1.ReleaseHold, c *cloudv1alpha1.Cluster, now time.Time) *cloudv1alpha1.ReleaseHold {
+	for i := range holds {
+		if Active(holds[i], now) && Matches(holds[i].Spec, c) {
+			return &holds[i]
 		}
 	}
-	return out
+	return nil
+}
+
+// Matches reports whether a hold's target covers c: c is the cluster it
+// names, or of the tenant it names, or on the channel it names (and of its
+// tier, when it names one; a cluster with no tier is tier 0).
+func Matches(h cloudv1alpha1.ReleaseHoldSpec, c *cloudv1alpha1.Cluster) bool {
+	switch {
+	case h.ClusterID != "":
+		return c.Labels[cloudstore.LabelID] == h.ClusterID
+	case h.TenantID != "":
+		return tenantOf(c) == h.TenantID
+	case h.Channel != "":
+		if !strings.EqualFold(string(c.Spec.ReleaseChannel), h.Channel) {
+			return false
+		}
+		return h.Tier == "" || Tier(c.Spec.Tier) == Tier(h.Tier)
+	}
+	return false
+}
+
+// HoldTarget names what a hold covers, for people: "cluster <id>",
+// "tenant acme", "channel beta", "channel beta tier 0".
+func HoldTarget(h cloudv1alpha1.ReleaseHoldSpec) string {
+	switch {
+	case h.ClusterID != "":
+		return "cluster " + h.ClusterID
+	case h.TenantID != "":
+		return "tenant " + h.TenantID
+	case h.Tier != "":
+		return fmt.Sprintf("channel %s tier %d", h.Channel, Tier(h.Tier))
+	}
+	return "channel " + h.Channel
+}
+
+// HoldMessage is what a cluster whose upgrades a hold pauses says: "upgrades
+// paused: quarter-end freeze (channel beta tier 0, until 2026-12-31)".
+func HoldMessage(h *cloudv1alpha1.ReleaseHold) string {
+	out := "upgrades paused"
+	if h.Spec.Reason != "" {
+		out += ": " + h.Spec.Reason
+	}
+	detail := HoldTarget(h.Spec)
+	if h.Spec.Until != nil {
+		detail += ", until " + h.Spec.Until.UTC().Format(time.RFC3339)
+	}
+	return out + " (" + detail + ")"
 }
 
 // Active reports whether the hold holds its cluster at now.

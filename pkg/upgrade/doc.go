@@ -15,7 +15,7 @@
 //   - Check: whether this cluster may start that move now. Every reason it
 //     may not is a blocking Gate with a message for the cluster's users:
 //     manual upgrades, a failed earlier upgrade, an upgrade already
-//     running, paused, on hold, not Ready, a platform component not Ready,
+//     running, paused, upgrades paused, not Ready, a platform component not Ready,
 //     no deprecation scan for the target minor or removed APIs still in
 //     use, outside the maintenance window. Notifying users before an
 //     upgrade is not a gate yet: there is no notification system.

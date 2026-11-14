@@ -49,9 +49,10 @@ type Facts struct {
 	// Ready: the cluster is Ready; PlatformReady: every platform
 	// component is Ready.
 	Ready, PlatformReady bool
-	// Paused: the cluster's resources are paused; Held: a ReleaseHold
-	// holds it.
+	// Paused: the cluster's resources are paused; Held: its upgrades are
+	// paused (a ReleaseHold), HeldMessage says why and until when.
 	Paused, Held bool
+	HeldMessage  string
 	// DeprecationsScanned: a deprecation scan finished; DeprecationsTarget
 	// is the minor it checked against; RemovedInUse counts the objects it
 	// found on APIs the target removes.
@@ -87,7 +88,11 @@ func Check(f Facts) []Gate {
 		block(GatePaused, "the cluster is paused")
 	}
 	if f.Held {
-		block(GateHeld, "upgrades are on hold")
+		message := f.HeldMessage
+		if message == "" {
+			message = "upgrades paused"
+		}
+		block(GateHeld, message)
 	}
 	if !f.Ready {
 		block(GateNotReady, "the cluster is not Ready")

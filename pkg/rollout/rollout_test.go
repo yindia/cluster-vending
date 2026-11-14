@@ -142,17 +142,49 @@ func TestComputeWithoutAReleaseSaysWhy(t *testing.T) {
 	}
 }
 
-func TestActiveHolds(t *testing.T) {
+// A hold matches the cluster it names, or every cluster of its tenant, or
+// of its channel (of one tier, with a tier), while its until has not
+// passed. A matched cluster is blocked with the hold's reason, in words
+// that say upgrades are paused.
+func TestHoldsMatchClusters(t *testing.T) {
 	past, future := metav1.NewTime(now.Add(-time.Minute)), metav1.NewTime(now.Add(time.Hour))
-	holds := []cloudv1alpha1.ReleaseHold{
-		{Spec: cloudv1alpha1.ReleaseHoldSpec{ClusterID: "forever"}},
-		{Spec: cloudv1alpha1.ReleaseHoldSpec{ClusterID: "later", Until: &future}},
-		{Spec: cloudv1alpha1.ReleaseHoldSpec{ClusterID: "over", Until: &past}},
+	c := cluster("prod", cloudv1alpha1.ClusterTier0, "1.35")
+	tests := []struct {
+		name string
+		spec cloudv1alpha1.ReleaseHoldSpec
+		want bool
+	}{
+		{"its ID", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-prod"}, true},
+		{"another ID", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-dev"}, false},
+		{"its ID, until later", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-prod", Until: &future}, true},
+		{"its ID, until passed", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-prod", Until: &past}, false},
+		{"its tenant", cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme"}, true},
+		{"another tenant", cloudv1alpha1.ReleaseHoldSpec{TenantID: "globex"}, false},
+		{"its channel", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable"}, true},
+		{"its channel and tier", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Tier: cloudv1alpha1.ClusterTier0}, true},
+		{"its channel, another tier", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Tier: cloudv1alpha1.ClusterTier2}, false},
+		{"another channel", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta"}, false},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hold := tt.spec
+			hold.Reason = "quarter-end freeze"
+			in := input(c)
+			in.Holds = []cloudv1alpha1.ReleaseHold{{Spec: hold}}
 
-	held := Held(holds, now)
+			got := HoldOf(in.Holds, &c, now) != nil
+			row := rowOf(t, Compute(in), "prod")
 
-	if !held["forever"] || !held["later"] || held["over"] {
-		t.Errorf("held = %v", held)
+			if got != tt.want {
+				t.Fatalf("HoldOf = %v, want %v", got, tt.want)
+			}
+			held := row.Gate != nil && row.Gate.Code == upgrade.GateHeld
+			if held != tt.want {
+				t.Fatalf("row %+v: held %v, want %v", row, held, tt.want)
+			}
+			if held && (!strings.Contains(row.Gate.Message, "upgrades paused: quarter-end freeze") || strings.Contains(row.Gate.Message, "hold")) {
+				t.Errorf("message %q", row.Gate.Message)
+			}
+		})
 	}
 }

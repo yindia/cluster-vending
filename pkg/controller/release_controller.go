@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/release"
+	"github.com/yindia/cluster-vending/pkg/rollout"
 )
 
 // The release controllers keep the status of the operator's release
@@ -503,22 +505,33 @@ func (r *ReleaseHoldReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	clusters := &cloudv1alpha1.ClusterList{}
-	if err := r.c.List(ctx, clusters, client.MatchingLabels{cloudstore.LabelID: hold.Spec.ClusterID}); err != nil {
+	var opts []client.ListOption
+	if hold.Spec.ClusterID != "" {
+		opts = append(opts, client.MatchingLabels{cloudstore.LabelID: hold.Spec.ClusterID})
+	}
+	if err := r.c.List(ctx, clusters, opts...); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list clusters: %w", err)
 	}
+	matched := slices.DeleteFunc(clusters.Items, func(c cloudv1alpha1.Cluster) bool { return !rollout.Matches(hold.Spec, &c) })
 	status := *hold.Status.DeepCopy()
-	status.Namespace, status.Name = "", ""
+	status.Namespace, status.Name, status.Clusters = "", "", int32(min(len(matched), math.MaxInt32))
 	resolved := metav1.Condition{Type: cloudv1alpha1.HoldConditionResolved, Status: metav1.ConditionTrue,
 		Reason: "Resolved", ObservedGeneration: hold.Generation}
 	var requeue time.Duration
 	switch {
-	case len(clusters.Items) == 0:
+	case hold.Spec.ClusterID != "" && len(matched) == 0:
 		resolved.Status, resolved.Reason = metav1.ConditionFalse, "ClusterNotFound"
 		resolved.Message = fmt.Sprintf("no cluster has ID %s", hold.Spec.ClusterID)
 	default:
-		cl := clusters.Items[0]
-		status.Namespace, status.Name = cl.Namespace, cl.Name
-		resolved.Message = fmt.Sprintf("holds cluster %s/%s", cl.Namespace, cl.Name)
+		if hold.Spec.ClusterID != "" {
+			cl := matched[0]
+			status.Namespace, status.Name = cl.Namespace, cl.Name
+			resolved.Message = fmt.Sprintf("holds cluster %s/%s", cl.Namespace, cl.Name)
+		} else {
+			// A tenant's or a channel's: the clusters that match now; one
+			// added later is covered too.
+			resolved.Message = fmt.Sprintf("pauses the upgrades of %d clusters (%s)", len(matched), rollout.HoldTarget(hold.Spec))
+		}
 		if problem := r.releaseProblem(ctx, hold.Spec.Release); problem != "" {
 			resolved.Status, resolved.Reason, resolved.Message = metav1.ConditionFalse, "ReleaseNotUsable", problem
 		} else if until := hold.Spec.Until; until != nil {

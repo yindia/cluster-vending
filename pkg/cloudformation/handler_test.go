@@ -43,14 +43,3 @@ func TestHandlerServesTheTemplates(t *testing.T) {
 		})
 	}
 }
-
-func TestDownloadURL(t *testing.T) {
-	got := DownloadURL("https://api.example.com/", "reader")
-
-	if got != "https://api.example.com/cloudformation/cluster-vending-reader-role.template.yaml" {
-		t.Fatalf("got %q", got)
-	}
-	if DownloadURL("not a url\x7f", "reader") != "" {
-		t.Error("a bad server URL gave a URL")
-	}
-}

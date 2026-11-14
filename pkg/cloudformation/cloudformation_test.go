@@ -69,19 +69,6 @@ func TestRoleOfName(t *testing.T) {
 	}
 }
 
-func TestCreateStackCommand(t *testing.T) {
-	got := CreateStackCommand(Stack{Role: "provisioner", Region: "us-west-1",
-		ManagementRoleARN: "arn:aws:iam::111122223333:role/platform"}, "/tmp/role.yaml")
-
-	want := "aws cloudformation create-stack --stack-name cluster-vending-provisioner" +
-		" --template-body file:///tmp/role.yaml --capabilities CAPABILITY_NAMED_IAM" +
-		" --parameters ParameterKey=ManagementRoleArn,ParameterValue=arn:aws:iam::111122223333:role/platform" +
-		" --region us-west-1"
-	if got != want {
-		t.Fatalf("got\n%s\nwant\n%s", got, want)
-	}
-}
-
 // The console's quick-create link needs the template at an HTTPS URL.
 func TestQuickCreateURL(t *testing.T) {
 	stack := Stack{Role: "reader", Region: "eu-west-1", ManagementRoleARN: "arn:aws:iam::111122223333:role/platform"}

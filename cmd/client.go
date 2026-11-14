@@ -24,9 +24,9 @@ type verb struct {
 	// reason adds --reason (admin pause), pauseNetwork --network (admin
 	// pause and resume), regions --region (account verify).
 	reason, pauseNetwork, regions bool
-	// onboard adds --role, --account-id, --region and --out (account
-	// template).
-	onboard bool
+	// createRole adds --create-role, --profile and --region (account
+	// create), and makes --wait default to true.
+	createRole bool
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
 	removed, oidc, warnings, noPlatform bool
@@ -94,6 +94,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				opts.Progress = cmd.ErrOrStderr()
 				opts.RequestTimeout = cfg.RequestTimeout
 				opts.Server = cfg.Server
+				opts.Terminal = onTerminal()
 				if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
 					return err
 				}
@@ -185,14 +186,18 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.pauseNetwork {
 			f.StringVar(&o.PauseNetwork, "network", "", "only this network (network ID): the network itself, not its clusters; not with --cluster")
 		}
-		if v.onboard {
-			f.StringVar(&o.Role, "role", "", "the role: reader, updater or provisioner (default provisioner, what the controller needs; with --id the account's role)")
-			f.StringVar(&o.AccountID, "account-id", "", "the 12-digit AWS account the stack is for, shown in the instructions (with --id: the account's)")
-			f.StringVar(&o.StackRegion, "region", "", "the AWS region to create the stack in (IAM is global); default us-east-1")
-			f.StringVar(&o.TemplateOut, "out", "", "write the template to this file; default: a new file in the temporary directory")
+		if v.createRole {
+			f.StringVar(&o.CreateRole, "create-role", "", "how to create the platform's role (spec.aws.role) in the AWS account with CloudFormation: "+
+				"terminal (here, with your AWS credentials of the account), browser (the CloudFormation console) or skip (it exists); asked when at a terminal")
+			f.StringVar(&o.Profile, "profile", "", "the AWS profile with credentials of the account (default: AWS_PROFILE and the SDK's default chain)")
+			f.StringVar(&o.StackRegion, "region", "", "the AWS region of the role's stack (IAM is global); default us-east-1")
 		}
 		if v.wait {
-			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit")
+			help := "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit"
+			if v.createRole {
+				help = "wait for the controller's access check of the account, printing progress to stderr; a denied check exits non-zero; --wait=false returns once the account is onboarded (a stack the CLI creates is followed to its end either way)"
+			}
+			f.BoolVar(&o.Wait, "wait", v.createRole, help)
 			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
 		}
 		byName[cmd.Name()] = cmd
@@ -209,15 +214,13 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 // --id; the ID as the argument works too (not shown in the help).
 func newAccountCmd() *cobra.Command {
 	return newResourceCmd("account", "Onboard and check a tenant's cloud accounts (TenantService)", []verb{
-		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): its namespace and ProviderConfig",
-			run: cli.BootstrapCreate, args: cobra.NoArgs, input: true},
+		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): create the platform's IAM role in it with CloudFormation " +
+			"(--create-role terminal or browser), then its namespace and ProviderConfig, and wait for its access check",
+			run: cli.AccountCreate, args: cobra.NoArgs, input: true, wait: true, createRole: true},
 		{use: "get", short: "Show the account --id, with its access check", run: cli.BootstrapGet, args: cobra.MaximumNArgs(1), id: true},
 		{use: "list", short: "List the tenant's accounts", run: cli.BootstrapList, args: cobra.NoArgs},
 		{use: "verify", short: "Ask the controller to check the account --id's access now (the tenant role in each region, and the calls the platform needs); get shows the result",
 			run: cli.BootstrapVerify, args: cobra.MaximumNArgs(1), id: true, regions: true},
-		{use: "template", short: "Write the CloudFormation template of the platform's IAM role in an AWS account (--role, default provisioner) and print how to create its stack: the AWS CLI command, or the console link",
-			run: cli.AccountTemplate, args: cobra.MaximumNArgs(1), id: true, onboard: true,
-			idHelp: "an onboarded account's ID: its role and AWS account are used (optional)"},
 	})
 }
 

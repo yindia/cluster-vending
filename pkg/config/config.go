@@ -131,9 +131,9 @@ var serveSettings = []Setting{
 	{Flag: FlagShutdownTimeout, Env: EnvShutdownTimeout, Default: DefaultShutdownTimeout.String(),
 		Usage: "how long in-flight requests get to finish on shutdown"},
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
-		Usage: "the platform's management role (the controller's aws-management-role-arn): the principal the account role templates trust, which account template prints for tenants; the server makes no AWS call with it. Empty: account template fails, saying to set it"},
+		Usage: "the platform's management role (the controller's aws-management-role-arn): the principal the account role templates trust, which account create puts in the role's stack; the server makes no AWS call with it. Empty: account create cannot create a stack, saying to set it"},
 	{Flag: FlagCloudFormationTemplateURL, Env: EnvCloudFormationTemplateURL,
-		Usage: "https URL the account role templates are uploaded to (pkg/cloudformation/templates, by file name; for example an S3 bucket): account template then also prints a CloudFormation console quick-create link. Empty: only the AWS CLI command"},
+		Usage: "https URL the account role templates are uploaded to (pkg/cloudformation/templates, by file name; for example an S3 bucket): account create --create-role browser then opens the CloudFormation console's quick-create link. Empty: the stack is created from the terminal only"},
 }
 
 // GlobalSettings returns the settings every command accepts.

@@ -68,19 +68,6 @@ type Stack struct {
 	ManagementRoleARN string
 }
 
-// CreateStackCommand is the AWS CLI command that creates the stack from
-// the template written at path. It must run with credentials of the
-// tenant account.
-func CreateStackCommand(s Stack, path string) string {
-	return strings.Join([]string{
-		"aws cloudformation create-stack --stack-name", RoleName(s.Role),
-		"--template-body", "file://" + path,
-		"--capabilities CAPABILITY_NAMED_IAM",
-		"--parameters", "ParameterKey=" + ParameterManagementRoleARN + ",ParameterValue=" + s.ManagementRoleARN,
-		"--region", s.Region,
-	}, " ")
-}
-
 // TemplateURL is where a role's template is under baseURL (the templates
 // uploaded there by file name); "" for a base that is not an https URL.
 func TemplateURL(baseURL, role string) string {

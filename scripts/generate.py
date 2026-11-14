@@ -426,8 +426,8 @@ def template_of(role):
             Description=(
                 "ARN of the cluster-vending management role (the identity the "
                 "controller and the Crossplane providers run as); the role trusts "
-                "only it. The platform team gives it: cluster-vending account "
-                "template prints it."
+                "only it. cluster-vending account create fills it in from the "
+                "API server."
             ),
             AllowedPattern=r"^arn:aws[a-z-]*:iam::\d{12}:role/.+$",
         )

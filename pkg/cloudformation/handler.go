@@ -3,7 +3,6 @@ package cloudformation
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 )
@@ -48,14 +47,4 @@ func listTemplates(w http.ResponseWriter, _ *http.Request) {
 		names = append(names, FileName(role))
 	}
 	_, _ = fmt.Fprintln(w, strings.Join(names, "\n"))
-}
-
-// DownloadURL is where the API server at serverURL serves a role's
-// template; "" for a server URL that does not parse.
-func DownloadURL(serverURL, role string) string {
-	u, err := url.Parse(serverURL)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return u.JoinPath(Path, FileName(role)).String()
 }

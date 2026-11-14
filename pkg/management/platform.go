@@ -37,6 +37,15 @@ func (p platformSource) Offered(ctx context.Context, channel string) (string, er
 	return ch.Status.Release, nil
 }
 
+// Holds are the release holds: the pauses of upgrades.
+func (p platformSource) Holds(ctx context.Context) ([]cloudv1alpha1.ReleaseHold, error) {
+	list := &cloudv1alpha1.ReleaseHoldList{}
+	if err := p.c.List(ctx, list); err != nil {
+		return nil, fmt.Errorf("list release holds: %w", err)
+	}
+	return list.Items, nil
+}
+
 func (p platformSource) Release(ctx context.Context, name string) (*cloudv1alpha1.Release, error) {
 	rel := &cloudv1alpha1.Release{}
 	if err := p.c.Get(ctx, client.ObjectKey{Name: name}, rel); err != nil {

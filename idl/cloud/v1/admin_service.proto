@@ -3,7 +3,10 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/admin_pause.proto";
 import "cloud/v1/admin_release.proto";
+import "cloud/v1/cluster.proto";
+import "google/protobuf/timestamp.proto";
 
 // AdminService holds operations of the platform's operators, not of
 // tenants. Where the server authenticates, its RPCs need the platform
@@ -44,6 +47,13 @@ service AdminService {
   // (the rest of the tenant stays paused). The controller then observes
   // each resource and applies what changed meanwhile, once. Idempotent.
   rpc ResumeReconcile(ResumeReconcileRequest) returns (ResumeReconcileResponse);
+
+  // Lists every pause in effect: full pauses (of a tenant, a network, a
+  // cluster, or of a channel's clusters) and pauses of upgrades only, with
+  // who asked, when, why, until when and how many clusters each covers.
+  rpc ListPauses(ListPausesRequest) returns (ListPausesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // Lists the releases, newest first: valid or not, shipped or published,
   // and the channels and holds naming them. Read-only.
@@ -97,13 +107,35 @@ message PauseReconcileRequest {
     message: "set at most one of cluster_id and network_id"
     expression: "size(this.cluster_id) == 0 || size(this.network_id) == 0"
   };
+  option (buf.validate.message).cel = {
+    id: "target.one"
+    message: "set tenant_id (with cluster_id or network_id for one of its), or channel; not both"
+    expression: "(size(this.tenant_id) > 0) != (this.channel != 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "channel.alone"
+    message: "a channel's pause takes no cluster_id or network_id"
+    expression: "this.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "tier.channel"
+    message: "tier needs channel"
+    expression: "this.tier == 0 || this.channel != 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "upgrades.network"
+    message: "a network has no upgrades: pause it whole (without only_upgrades)"
+    expression: "!this.only_upgrades || size(this.network_id) == 0"
+  };
 
-  // The tenant whose managed resources are paused.
-  string tenant_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 56
-    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
-  }];
+  // The tenant whose managed resources are paused. Not with channel.
+  string tenant_id = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 56
+      pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+    }
+  ];
 
   // Only this cluster's managed resources (Cluster.id); empty: all the
   // tenant's, networks included.
@@ -121,11 +153,34 @@ message PauseReconcileRequest {
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string.uuid = true
   ];
+
+  // Every cluster on this release channel, of every tenant: with
+  // only_upgrades, those that join it later too; without, the clusters on
+  // it now, each paused as by cluster_id (a cluster that joins later is
+  // not). Not with tenant_id.
+  ReleaseChannel channel = 5 [(buf.validate.field).enum.defined_only = true];
+
+  // Only the channel's clusters of this tier (a cluster with no tier is
+  // tier 0). Only with channel.
+  ClusterTier tier = 6 [(buf.validate.field).enum.defined_only = true];
+
+  // Pause automatic upgrades only: the rollouts skip the clusters; they are
+  // reconciled, repaired and updated as usual. Not for a network.
+  bool only_upgrades = 7;
+
+  // When the pause ends by itself; unset: at a resume only. In the future.
+  google.protobuf.Timestamp until = 8;
 }
 
 message PauseReconcileResponse {
-  // Managed resources that are paused now (already paused ones included).
+  // Managed resources that are paused now (already paused ones included);
+  // 0 for a pause of upgrades only.
   int32 resources = 1;
+  // Clusters the pause covers now.
+  int32 clusters = 2;
+  // What else to know, e.g. that clusters joining a channel later are not
+  // paused by a full pause of it.
+  string note = 3;
 }
 
 message ResumeReconcileRequest {
@@ -134,13 +189,35 @@ message ResumeReconcileRequest {
     message: "set at most one of cluster_id and network_id"
     expression: "size(this.cluster_id) == 0 || size(this.network_id) == 0"
   };
+  option (buf.validate.message).cel = {
+    id: "target.one"
+    message: "set tenant_id (with cluster_id or network_id for one of its), or channel; not both"
+    expression: "(size(this.tenant_id) > 0) != (this.channel != 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "channel.alone"
+    message: "a channel's resume takes no cluster_id or network_id"
+    expression: "this.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "tier.channel"
+    message: "tier needs channel"
+    expression: "this.tier == 0 || this.channel != 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "upgrades.network"
+    message: "a network has no upgrades: resume it whole (without only_upgrades)"
+    expression: "!this.only_upgrades || size(this.network_id) == 0"
+  };
 
-  // The tenant whose managed resources are resumed.
-  string tenant_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 56
-    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
-  }];
+  // The tenant whose managed resources are resumed. Not with channel.
+  string tenant_id = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string = {
+      max_len: 56
+      pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+    }
+  ];
 
   // Only this cluster's managed resources (Cluster.id); empty: all the
   // tenant's.
@@ -155,9 +232,23 @@ message ResumeReconcileRequest {
     (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
     (buf.validate.field).string.uuid = true
   ];
+
+  // The pause of this channel's clusters (PauseReconcileRequest.channel):
+  // only what was paused at that channel (and tier) is resumed; a cluster
+  // also paused on its own, or by another pause, stays paused.
+  ReleaseChannel channel = 4 [(buf.validate.field).enum.defined_only = true];
+
+  // The tier the channel's pause was asked for (none: the whole channel's).
+  ClusterTier tier = 5 [(buf.validate.field).enum.defined_only = true];
+
+  // Resume a pause of upgrades only, of exactly this target.
+  bool only_upgrades = 6;
 }
 
 message ResumeReconcileResponse {
-  // Managed resources that are reconciled again now.
+  // Managed resources that are reconciled again now; 0 for upgrades only.
   int32 resources = 1;
+  // Clusters resumed (of a channel's pause), or whose upgrades start
+  // again.
+  int32 clusters = 2;
 }

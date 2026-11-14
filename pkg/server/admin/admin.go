@@ -36,38 +36,74 @@ var _ cloudv1connect.AdminServiceHandler = (*Service)(nil)
 // NewService returns the AdminService.
 func NewService(d reconcile.Deps) *Service { return &Service{deps: d, now: time.Now} }
 
-// PauseReconcile pauses the tenant, or one of its clusters. The pause is
-// recorded on the rows first (the tenant's accounts, networks and
-// clusters, or the one cluster: Tenants.SetPause), with who asked, when
-// and why, so the controller stops acting on them; then every managed
-// resource of the scope gets the providers' pause.
+// PauseReconcile pauses a tenant, one of its networks or clusters, or a
+// release channel's clusters (one tier, or all): everything (the rows and
+// their managed resources: pauseRows), or with only_upgrades their
+// automatic upgrades (a release hold: pauseUpgrades).
 func (s *Service) PauseReconcile(ctx context.Context, req *cloudv1.PauseReconcileRequest) (*cloudv1.PauseReconcileResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
-	target := model.PauseTarget{NetworkID: req.GetNetworkId(), ClusterID: req.GetClusterId()}
 	pause := &model.Pause{By: caller(ctx), Since: s.now().UTC(), Reason: req.GetReason()}
-	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), target, pause); err != nil {
-		return nil, s.storeError(ctx, "pause", req.GetTenantId(), target, err)
+	if u := req.GetUntil(); u != nil {
+		until := u.AsTime().UTC()
+		if !until.After(s.now()) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "until "+until.Format(time.RFC3339)+" has passed")
+		}
+		pause.Until = &until
 	}
-	n, err := s.setPaused(ctx, req.GetTenantId(), target, true)
-	return &cloudv1.PauseReconcileResponse{Resources: n}, err
+	t := pauseTargetOf(req.GetTenantId(), req.GetClusterId(), req.GetNetworkId(), req.GetChannel(), req.GetTier())
+	switch {
+	case req.GetOnlyUpgrades():
+		return s.pauseUpgrades(ctx, t, pause)
+	case t.channel != "":
+		return s.pauseChannel(ctx, t, pause)
+	}
+	return s.pauseRows(ctx, t, pause)
 }
 
-// ResumeReconcile resumes the tenant, or one of its clusters: the pause
-// recorded on the rows is removed, then the providers' pause on the
-// managed resources. The controller's next pass observes each resource
-// and applies what was asked for meanwhile.
+// ResumeReconcile ends what PauseReconcile of the same target asked for:
+// a full pause (resumeRows, resumeChannel) or, with only_upgrades, the
+// pause of upgrades of exactly that target.
 func (s *Service) ResumeReconcile(ctx context.Context, req *cloudv1.ResumeReconcileRequest) (*cloudv1.ResumeReconcileResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
-	target := model.PauseTarget{NetworkID: req.GetNetworkId(), ClusterID: req.GetClusterId()}
-	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), target, nil); err != nil {
-		return nil, s.storeError(ctx, "resume", req.GetTenantId(), target, err)
+	t := pauseTargetOf(req.GetTenantId(), req.GetClusterId(), req.GetNetworkId(), req.GetChannel(), req.GetTier())
+	switch {
+	case req.GetOnlyUpgrades():
+		return s.resumeUpgrades(ctx, t)
+	case t.channel != "":
+		return s.resumeChannel(ctx, t)
 	}
-	n, err := s.setPaused(ctx, req.GetTenantId(), target, false)
-	return &cloudv1.ResumeReconcileResponse{Resources: n}, err
+	return s.resumeRows(ctx, t)
+}
+
+// pauseRows pauses the tenant, or one of its networks or clusters. The
+// pause is recorded on the rows first (the tenant's accounts, networks
+// and clusters, or the one: Tenants.SetPause), with who asked, when, why
+// and until when, so the controller stops acting on them; then every
+// managed resource of the scope gets the providers' pause.
+func (s *Service) pauseRows(ctx context.Context, t pauseTarget, pause *model.Pause) (*cloudv1.PauseReconcileResponse, error) {
+	target := t.rows()
+	if err := s.deps.Store.Tenants().SetPause(ctx, t.tenant, target, pause); err != nil {
+		return nil, s.storeError(ctx, "pause", t.tenant, target, err)
+	}
+	n, err := s.setPaused(ctx, t.tenant, target, true)
+	return &cloudv1.PauseReconcileResponse{Resources: n, Clusters: s.clustersOf(ctx, t)}, err
+}
+
+// resumeRows resumes the tenant, or one of its networks or clusters: the
+// pause recorded on the rows is removed, then the providers' pause on the
+// managed resources. The controller's next pass observes each resource
+// and applies what was asked for meanwhile.
+func (s *Service) resumeRows(ctx context.Context, t pauseTarget) (*cloudv1.ResumeReconcileResponse, error) {
+	target := t.rows()
+	if err := s.deps.Store.Tenants().SetPause(ctx, t.tenant, target, nil); err != nil {
+		return nil, s.storeError(ctx, "resume", t.tenant, target, err)
+	}
+	n, err := s.setPaused(ctx, t.tenant, target, false)
+	return &cloudv1.ResumeReconcileResponse{Resources: n, Clusters: s.clustersOf(ctx, t)}, err
 }
 
 // anonymousCaller is who paused when the API runs without authentication.

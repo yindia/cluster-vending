@@ -60,6 +60,12 @@ func PauseProto(p *model.Pause) *cloudv1.Pause {
 	if !p.Since.IsZero() {
 		out.Since = timestamppb.New(p.Since)
 	}
+	if p.Until != nil {
+		out.Until = timestamppb.New(*p.Until)
+	}
+	if len(p.Scopes) > 0 {
+		out.Scope = p.Scopes[0].Text()
+	}
 	return out
 }
 
@@ -76,6 +82,9 @@ func PausedBy(p *model.Pause) string {
 	}
 	if p.Reason != "" {
 		out += " (" + p.Reason + ")"
+	}
+	if p.Until != nil {
+		out += " until " + p.Until.UTC().Format(time.RFC3339)
 	}
 	return out
 }

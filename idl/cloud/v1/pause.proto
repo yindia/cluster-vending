@@ -20,4 +20,12 @@ message Pause {
 
   // Why, as the caller said. Optional.
   string reason = 3;
+
+  // When it ends by itself; unset: at a resume only.
+  google.protobuf.Timestamp until = 4;
+
+  // What it was asked for at, for people: "tenant acme", "channel beta
+  // tier 0", "cluster" (the resource itself); empty for a pause of an
+  // older build.
+  string scope = 5;
 }

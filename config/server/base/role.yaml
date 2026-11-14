@@ -48,6 +48,16 @@ rules:
   - get
   - list
   - watch
+# A pause of upgrades (AdminService.PauseReconcile with only_upgrades) is a
+# release hold: the server writes it for the platform admin.
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releaseholds
+  verbs:
+  - create
+  - update
+  - delete
 # What the controller reported about a network or a cluster: the
 # Kubernetes events in the tenants' namespaces, read for
 # ListNetworkEvents and ListClusterEvents (pkg/database/cloudstore

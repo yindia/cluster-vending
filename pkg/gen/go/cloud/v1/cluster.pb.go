@@ -966,7 +966,12 @@ type ClusterStatus struct {
 	// channel's rollout started (the controller's automatic-upgrades
 	// setting) and how it ended. Unset until the rollout upgraded the
 	// cluster; a version a person changed writes none.
-	Rollout       *ClusterRollout `protobuf:"bytes,47,opt,name=rollout,proto3" json:"rollout,omitempty"`
+	Rollout *ClusterRollout `protobuf:"bytes,47,opt,name=rollout,proto3" json:"rollout,omitempty"`
+	// upgrade_pause is set while an operator paused the cluster's automatic
+	// upgrades (AdminService.PauseReconcile with only_upgrades: of this
+	// cluster, its tenant or its channel): who, why, until when, and its
+	// scope. The cluster is reconciled as usual; rollouts skip it.
+	UpgradePause  *Pause `protobuf:"bytes,48,opt,name=upgrade_pause,json=upgradePause,proto3" json:"upgrade_pause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1160,6 +1165,13 @@ func (x *ClusterStatus) GetKubernetes() *ClusterKubernetes {
 func (x *ClusterStatus) GetRollout() *ClusterRollout {
 	if x != nil {
 		return x.Rollout
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetUpgradePause() *Pause {
+	if x != nil {
+		return x.UpgradePause
 	}
 	return nil
 }
@@ -1721,7 +1733,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x04days\x18\x01 \x03(\x0e2\x11.cloud.v1.WeekdayB\x13\xbaH\x10\x92\x01\r\x10\a\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x04days\x12<\n" +
 	"\x05start\x18\x02 \x01(\tB&\xbaH#r!2\x1f^([01][0-9]|2[0-3]):[0-5][0-9]$R\x05start\x12\x1a\n" +
 	"\bduration\x18\x03 \x01(\tR\bduration:\x88\x02\xbaH\x84\x02\x1a\x81\x02\n" +
-	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xba\t\n" +
+	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xf0\t\n" +
 	"\rClusterStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1749,7 +1761,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"kubernetes\x18. \x01(\v2\x1b.cloud.v1.ClusterKubernetesR\n" +
 	"kubernetes\x122\n" +
-	"\arollout\x18/ \x01(\v2\x18.cloud.v1.ClusterRolloutR\arolloutB\n" +
+	"\arollout\x18/ \x01(\v2\x18.cloud.v1.ClusterRolloutR\arollout\x124\n" +
+	"\rupgrade_pause\x180 \x01(\v2\x0f.cloud.v1.PauseR\fupgradePauseB\n" +
 	"\n" +
 	"\bprovider\"\xca\x02\n" +
 	"\x0eClusterRollout\x12\x18\n" +
@@ -1924,18 +1937,19 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	32, // 28: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
 	12, // 29: cloud.v1.ClusterStatus.kubernetes:type_name -> cloud.v1.ClusterKubernetes
 	11, // 30: cloud.v1.ClusterStatus.rollout:type_name -> cloud.v1.ClusterRollout
-	17, // 31: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
-	17, // 32: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
-	5,  // 33: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
-	33, // 34: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	17, // 35: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
-	6,  // 36: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	17, // 37: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	38, // [38:38] is the sub-list for method output_type
-	38, // [38:38] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	31, // 31: cloud.v1.ClusterStatus.upgrade_pause:type_name -> cloud.v1.Pause
+	17, // 32: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
+	17, // 33: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
+	5,  // 34: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
+	33, // 35: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
+	17, // 36: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	6,  // 37: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	17, // 38: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	39, // [39:39] is the sub-list for method output_type
+	39, // [39:39] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }

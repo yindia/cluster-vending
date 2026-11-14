@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -24,7 +25,7 @@ const (
 
 type PauseReconcileRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tenant whose managed resources are paused.
+	// The tenant whose managed resources are paused. Not with channel.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// Only this cluster's managed resources (Cluster.id); empty: all the
 	// tenant's, networks included.
@@ -33,7 +34,20 @@ type PauseReconcileRequest struct {
 	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	// Only this network (Network.id): the network row and its own managed
 	// resources, not its clusters. Not with cluster_id.
-	NetworkId     string `protobuf:"bytes,4,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	NetworkId string `protobuf:"bytes,4,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	// Every cluster on this release channel, of every tenant: with
+	// only_upgrades, those that join it later too; without, the clusters on
+	// it now, each paused as by cluster_id (a cluster that joins later is
+	// not). Not with tenant_id.
+	Channel ReleaseChannel `protobuf:"varint,5,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
+	// Only the channel's clusters of this tier (a cluster with no tier is
+	// tier 0). Only with channel.
+	Tier ClusterTier `protobuf:"varint,6,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
+	// Pause automatic upgrades only: the rollouts skip the clusters; they are
+	// reconciled, repaired and updated as usual. Not for a network.
+	OnlyUpgrades bool `protobuf:"varint,7,opt,name=only_upgrades,json=onlyUpgrades,proto3" json:"only_upgrades,omitempty"`
+	// When the pause ends by itself; unset: at a resume only. In the future.
+	Until         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=until,proto3" json:"until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -96,10 +110,44 @@ func (x *PauseReconcileRequest) GetNetworkId() string {
 	return ""
 }
 
+func (x *PauseReconcileRequest) GetChannel() ReleaseChannel {
+	if x != nil {
+		return x.Channel
+	}
+	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
+}
+
+func (x *PauseReconcileRequest) GetTier() ClusterTier {
+	if x != nil {
+		return x.Tier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
+}
+
+func (x *PauseReconcileRequest) GetOnlyUpgrades() bool {
+	if x != nil {
+		return x.OnlyUpgrades
+	}
+	return false
+}
+
+func (x *PauseReconcileRequest) GetUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Until
+	}
+	return nil
+}
+
 type PauseReconcileResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Managed resources that are paused now (already paused ones included).
-	Resources     int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
+	// Managed resources that are paused now (already paused ones included);
+	// 0 for a pause of upgrades only.
+	Resources int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
+	// Clusters the pause covers now.
+	Clusters int32 `protobuf:"varint,2,opt,name=clusters,proto3" json:"clusters,omitempty"`
+	// What else to know, e.g. that clusters joining a channel later are not
+	// paused by a full pause of it.
+	Note          string `protobuf:"bytes,3,opt,name=note,proto3" json:"note,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -141,16 +189,38 @@ func (x *PauseReconcileResponse) GetResources() int32 {
 	return 0
 }
 
+func (x *PauseReconcileResponse) GetClusters() int32 {
+	if x != nil {
+		return x.Clusters
+	}
+	return 0
+}
+
+func (x *PauseReconcileResponse) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
 type ResumeReconcileRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tenant whose managed resources are resumed.
+	// The tenant whose managed resources are resumed. Not with channel.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// Only this cluster's managed resources (Cluster.id); empty: all the
 	// tenant's.
 	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	// Only this network (Network.id): the network row and its own managed
 	// resources, not its clusters. Not with cluster_id.
-	NetworkId     string `protobuf:"bytes,3,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	NetworkId string `protobuf:"bytes,3,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	// The pause of this channel's clusters (PauseReconcileRequest.channel):
+	// only what was paused at that channel (and tier) is resumed; a cluster
+	// also paused on its own, or by another pause, stays paused.
+	Channel ReleaseChannel `protobuf:"varint,4,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
+	// The tier the channel's pause was asked for (none: the whole channel's).
+	Tier ClusterTier `protobuf:"varint,5,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
+	// Resume a pause of upgrades only, of exactly this target.
+	OnlyUpgrades  bool `protobuf:"varint,6,opt,name=only_upgrades,json=onlyUpgrades,proto3" json:"only_upgrades,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -206,10 +276,34 @@ func (x *ResumeReconcileRequest) GetNetworkId() string {
 	return ""
 }
 
+func (x *ResumeReconcileRequest) GetChannel() ReleaseChannel {
+	if x != nil {
+		return x.Channel
+	}
+	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
+}
+
+func (x *ResumeReconcileRequest) GetTier() ClusterTier {
+	if x != nil {
+		return x.Tier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
+}
+
+func (x *ResumeReconcileRequest) GetOnlyUpgrades() bool {
+	if x != nil {
+		return x.OnlyUpgrades
+	}
+	return false
+}
+
 type ResumeReconcileResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Managed resources that are reconciled again now.
-	Resources     int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
+	// Managed resources that are reconciled again now; 0 for upgrades only.
+	Resources int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
+	// Clusters resumed (of a channel's pause), or whose upgrades start
+	// again.
+	Clusters      int32 `protobuf:"varint,2,opt,name=clusters,proto3" json:"clusters,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -251,33 +345,62 @@ func (x *ResumeReconcileResponse) GetResources() int32 {
 	return 0
 }
 
+func (x *ResumeReconcileResponse) GetClusters() int32 {
+	if x != nil {
+		return x.Clusters
+	}
+	return 0
+}
+
 var File_cloud_v1_admin_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ccloud/v1/admin_release.proto\"\xd9\x02\n" +
-	"\x15PauseReconcileRequest\x12L\n" +
-	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
+	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1acloud/v1/admin_pause.proto\x1a\x1ccloud/v1/admin_release.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa8\b\n" +
+	"\x15PauseReconcileRequest\x12M\n" +
+	"\ttenant_id\x18\x01 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12 \n" +
 	"\x06reason\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x06reason\x12*\n" +
 	"\n" +
-	"network_id\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:x\xbaHu\x1as\n" +
-	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\"6\n" +
+	"network_id\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId\x12<\n" +
+	"\achannel\x18\x05 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
+	"\x04tier\x18\x06 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12#\n" +
+	"\ronly_upgrades\x18\a \x01(\bR\fonlyUpgrades\x120\n" +
+	"\x05until\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05until:\xfb\x04\xbaH\xf7\x04\x1as\n" +
+	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\x1a\x93\x01\n" +
+	"\n" +
+	"target.one\x12Rset tenant_id (with cluster_id or network_id for one of its), or channel; not both\x1a1(size(this.tenant_id) > 0) != (this.channel != 0)\x1a\x95\x01\n" +
+	"\rchannel.alone\x123a channel's pause takes no cluster_id or network_id\x1aOthis.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)\x1aG\n" +
+	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0\x1a\x88\x01\n" +
+	"\x10upgrades.network\x12Aa network has no upgrades: pause it whole (without only_upgrades)\x1a1!this.only_upgrades || size(this.network_id) == 0\"f\n" +
 	"\x16PauseReconcileResponse\x12\x1c\n" +
-	"\tresources\x18\x01 \x01(\x05R\tresources\"\xb8\x02\n" +
-	"\x16ResumeReconcileRequest\x12L\n" +
-	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
+	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
+	"\bclusters\x18\x02 \x01(\x05R\bclusters\x12\x12\n" +
+	"\x04note\x18\x03 \x01(\tR\x04note\"\xd7\a\n" +
+	"\x16ResumeReconcileRequest\x12M\n" +
+	"\ttenant_id\x18\x01 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12*\n" +
 	"\n" +
-	"network_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:x\xbaHu\x1as\n" +
-	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\"7\n" +
+	"network_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId\x12<\n" +
+	"\achannel\x18\x04 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
+	"\x04tier\x18\x05 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12#\n" +
+	"\ronly_upgrades\x18\x06 \x01(\bR\fonlyUpgrades:\xfd\x04\xbaH\xf9\x04\x1as\n" +
+	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\x1a\x93\x01\n" +
+	"\n" +
+	"target.one\x12Rset tenant_id (with cluster_id or network_id for one of its), or channel; not both\x1a1(size(this.tenant_id) > 0) != (this.channel != 0)\x1a\x96\x01\n" +
+	"\rchannel.alone\x124a channel's resume takes no cluster_id or network_id\x1aOthis.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)\x1aG\n" +
+	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0\x1a\x89\x01\n" +
+	"\x10upgrades.network\x12Ba network has no upgrades: resume it whole (without only_upgrades)\x1a1!this.only_upgrades || size(this.network_id) == 0\"S\n" +
 	"\x17ResumeReconcileResponse\x12\x1c\n" +
-	"\tresources\x18\x01 \x01(\x05R\tresources2\xab\x06\n" +
+	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
+	"\bclusters\x18\x02 \x01(\x05R\bclusters2\xf9\x06\n" +
 	"\fAdminService\x12S\n" +
 	"\x0ePauseReconcile\x12\x1f.cloud.v1.PauseReconcileRequest\x1a .cloud.v1.PauseReconcileResponse\x12V\n" +
-	"\x0fResumeReconcile\x12 .cloud.v1.ResumeReconcileRequest\x1a!.cloud.v1.ResumeReconcileResponse\x12R\n" +
+	"\x0fResumeReconcile\x12 .cloud.v1.ResumeReconcileRequest\x1a!.cloud.v1.ResumeReconcileResponse\x12L\n" +
+	"\n" +
+	"ListPauses\x12\x1b.cloud.v1.ListPausesRequest\x1a\x1c.cloud.v1.ListPausesResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\fListReleases\x12\x1d.cloud.v1.ListReleasesRequest\x1a\x1e.cloud.v1.ListReleasesResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\n" +
 	"GetRelease\x12\x1b.cloud.v1.GetReleaseRequest\x1a\x1c.cloud.v1.GetReleaseResponse\"\x03\x90\x02\x01\x12g\n" +
@@ -307,45 +430,57 @@ var file_cloud_v1_admin_service_proto_goTypes = []any{
 	(*PauseReconcileResponse)(nil),      // 1: cloud.v1.PauseReconcileResponse
 	(*ResumeReconcileRequest)(nil),      // 2: cloud.v1.ResumeReconcileRequest
 	(*ResumeReconcileResponse)(nil),     // 3: cloud.v1.ResumeReconcileResponse
-	(*ListReleasesRequest)(nil),         // 4: cloud.v1.ListReleasesRequest
-	(*GetReleaseRequest)(nil),           // 5: cloud.v1.GetReleaseRequest
-	(*ListReleaseChannelsRequest)(nil),  // 6: cloud.v1.ListReleaseChannelsRequest
-	(*GetReleaseChannelRequest)(nil),    // 7: cloud.v1.GetReleaseChannelRequest
-	(*ListRolloutsRequest)(nil),         // 8: cloud.v1.ListRolloutsRequest
-	(*GetRolloutRequest)(nil),           // 9: cloud.v1.GetRolloutRequest
-	(*ListReleaseHoldsRequest)(nil),     // 10: cloud.v1.ListReleaseHoldsRequest
-	(*ListReleasesResponse)(nil),        // 11: cloud.v1.ListReleasesResponse
-	(*GetReleaseResponse)(nil),          // 12: cloud.v1.GetReleaseResponse
-	(*ListReleaseChannelsResponse)(nil), // 13: cloud.v1.ListReleaseChannelsResponse
-	(*GetReleaseChannelResponse)(nil),   // 14: cloud.v1.GetReleaseChannelResponse
-	(*ListRolloutsResponse)(nil),        // 15: cloud.v1.ListRolloutsResponse
-	(*GetRolloutResponse)(nil),          // 16: cloud.v1.GetRolloutResponse
-	(*ListReleaseHoldsResponse)(nil),    // 17: cloud.v1.ListReleaseHoldsResponse
+	(ReleaseChannel)(0),                 // 4: cloud.v1.ReleaseChannel
+	(ClusterTier)(0),                    // 5: cloud.v1.ClusterTier
+	(*timestamppb.Timestamp)(nil),       // 6: google.protobuf.Timestamp
+	(*ListPausesRequest)(nil),           // 7: cloud.v1.ListPausesRequest
+	(*ListReleasesRequest)(nil),         // 8: cloud.v1.ListReleasesRequest
+	(*GetReleaseRequest)(nil),           // 9: cloud.v1.GetReleaseRequest
+	(*ListReleaseChannelsRequest)(nil),  // 10: cloud.v1.ListReleaseChannelsRequest
+	(*GetReleaseChannelRequest)(nil),    // 11: cloud.v1.GetReleaseChannelRequest
+	(*ListRolloutsRequest)(nil),         // 12: cloud.v1.ListRolloutsRequest
+	(*GetRolloutRequest)(nil),           // 13: cloud.v1.GetRolloutRequest
+	(*ListReleaseHoldsRequest)(nil),     // 14: cloud.v1.ListReleaseHoldsRequest
+	(*ListPausesResponse)(nil),          // 15: cloud.v1.ListPausesResponse
+	(*ListReleasesResponse)(nil),        // 16: cloud.v1.ListReleasesResponse
+	(*GetReleaseResponse)(nil),          // 17: cloud.v1.GetReleaseResponse
+	(*ListReleaseChannelsResponse)(nil), // 18: cloud.v1.ListReleaseChannelsResponse
+	(*GetReleaseChannelResponse)(nil),   // 19: cloud.v1.GetReleaseChannelResponse
+	(*ListRolloutsResponse)(nil),        // 20: cloud.v1.ListRolloutsResponse
+	(*GetRolloutResponse)(nil),          // 21: cloud.v1.GetRolloutResponse
+	(*ListReleaseHoldsResponse)(nil),    // 22: cloud.v1.ListReleaseHoldsResponse
 }
 var file_cloud_v1_admin_service_proto_depIdxs = []int32{
-	0,  // 0: cloud.v1.AdminService.PauseReconcile:input_type -> cloud.v1.PauseReconcileRequest
-	2,  // 1: cloud.v1.AdminService.ResumeReconcile:input_type -> cloud.v1.ResumeReconcileRequest
-	4,  // 2: cloud.v1.AdminService.ListReleases:input_type -> cloud.v1.ListReleasesRequest
-	5,  // 3: cloud.v1.AdminService.GetRelease:input_type -> cloud.v1.GetReleaseRequest
-	6,  // 4: cloud.v1.AdminService.ListReleaseChannels:input_type -> cloud.v1.ListReleaseChannelsRequest
-	7,  // 5: cloud.v1.AdminService.GetReleaseChannel:input_type -> cloud.v1.GetReleaseChannelRequest
-	8,  // 6: cloud.v1.AdminService.ListRollouts:input_type -> cloud.v1.ListRolloutsRequest
-	9,  // 7: cloud.v1.AdminService.GetRollout:input_type -> cloud.v1.GetRolloutRequest
-	10, // 8: cloud.v1.AdminService.ListReleaseHolds:input_type -> cloud.v1.ListReleaseHoldsRequest
-	1,  // 9: cloud.v1.AdminService.PauseReconcile:output_type -> cloud.v1.PauseReconcileResponse
-	3,  // 10: cloud.v1.AdminService.ResumeReconcile:output_type -> cloud.v1.ResumeReconcileResponse
-	11, // 11: cloud.v1.AdminService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
-	12, // 12: cloud.v1.AdminService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
-	13, // 13: cloud.v1.AdminService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
-	14, // 14: cloud.v1.AdminService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
-	15, // 15: cloud.v1.AdminService.ListRollouts:output_type -> cloud.v1.ListRolloutsResponse
-	16, // 16: cloud.v1.AdminService.GetRollout:output_type -> cloud.v1.GetRolloutResponse
-	17, // 17: cloud.v1.AdminService.ListReleaseHolds:output_type -> cloud.v1.ListReleaseHoldsResponse
-	9,  // [9:18] is the sub-list for method output_type
-	0,  // [0:9] is the sub-list for method input_type
-	0,  // [0:0] is the sub-list for extension type_name
-	0,  // [0:0] is the sub-list for extension extendee
-	0,  // [0:0] is the sub-list for field type_name
+	4,  // 0: cloud.v1.PauseReconcileRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	5,  // 1: cloud.v1.PauseReconcileRequest.tier:type_name -> cloud.v1.ClusterTier
+	6,  // 2: cloud.v1.PauseReconcileRequest.until:type_name -> google.protobuf.Timestamp
+	4,  // 3: cloud.v1.ResumeReconcileRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	5,  // 4: cloud.v1.ResumeReconcileRequest.tier:type_name -> cloud.v1.ClusterTier
+	0,  // 5: cloud.v1.AdminService.PauseReconcile:input_type -> cloud.v1.PauseReconcileRequest
+	2,  // 6: cloud.v1.AdminService.ResumeReconcile:input_type -> cloud.v1.ResumeReconcileRequest
+	7,  // 7: cloud.v1.AdminService.ListPauses:input_type -> cloud.v1.ListPausesRequest
+	8,  // 8: cloud.v1.AdminService.ListReleases:input_type -> cloud.v1.ListReleasesRequest
+	9,  // 9: cloud.v1.AdminService.GetRelease:input_type -> cloud.v1.GetReleaseRequest
+	10, // 10: cloud.v1.AdminService.ListReleaseChannels:input_type -> cloud.v1.ListReleaseChannelsRequest
+	11, // 11: cloud.v1.AdminService.GetReleaseChannel:input_type -> cloud.v1.GetReleaseChannelRequest
+	12, // 12: cloud.v1.AdminService.ListRollouts:input_type -> cloud.v1.ListRolloutsRequest
+	13, // 13: cloud.v1.AdminService.GetRollout:input_type -> cloud.v1.GetRolloutRequest
+	14, // 14: cloud.v1.AdminService.ListReleaseHolds:input_type -> cloud.v1.ListReleaseHoldsRequest
+	1,  // 15: cloud.v1.AdminService.PauseReconcile:output_type -> cloud.v1.PauseReconcileResponse
+	3,  // 16: cloud.v1.AdminService.ResumeReconcile:output_type -> cloud.v1.ResumeReconcileResponse
+	15, // 17: cloud.v1.AdminService.ListPauses:output_type -> cloud.v1.ListPausesResponse
+	16, // 18: cloud.v1.AdminService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
+	17, // 19: cloud.v1.AdminService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
+	18, // 20: cloud.v1.AdminService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
+	19, // 21: cloud.v1.AdminService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
+	20, // 22: cloud.v1.AdminService.ListRollouts:output_type -> cloud.v1.ListRolloutsResponse
+	21, // 23: cloud.v1.AdminService.GetRollout:output_type -> cloud.v1.GetRolloutResponse
+	22, // 24: cloud.v1.AdminService.ListReleaseHolds:output_type -> cloud.v1.ListReleaseHoldsResponse
+	15, // [15:25] is the sub-list for method output_type
+	5,  // [5:15] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_service_proto_init() }
@@ -353,7 +488,9 @@ func file_cloud_v1_admin_service_proto_init() {
 	if File_cloud_v1_admin_service_proto != nil {
 		return
 	}
+	file_cloud_v1_admin_pause_proto_init()
 	file_cloud_v1_admin_release_proto_init()
+	file_cloud_v1_cluster_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

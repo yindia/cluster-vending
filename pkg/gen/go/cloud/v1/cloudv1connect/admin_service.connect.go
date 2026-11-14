@@ -30,6 +30,8 @@ const (
 	// AdminServiceResumeReconcileProcedure is the procedure name of the AdminService's ResumeReconcile
 	// RPC.
 	AdminServiceResumeReconcileProcedure = "/cloud.v1.AdminService/ResumeReconcile"
+	// AdminServiceListPausesProcedure is the procedure name of the AdminService's ListPauses RPC.
+	AdminServiceListPausesProcedure = "/cloud.v1.AdminService/ListPauses"
 	// AdminServiceListReleasesProcedure is the procedure name of the AdminService's ListReleases RPC.
 	AdminServiceListReleasesProcedure = "/cloud.v1.AdminService/ListReleases"
 	// AdminServiceGetReleaseProcedure is the procedure name of the AdminService's GetRelease RPC.
@@ -62,6 +64,14 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ResumeReconcile"),
 			Procedure:  AdminServiceResumeReconcileProcedure,
+		}
+	})
+	adminServiceListPausesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListPauses"),
+			Procedure:        AdminServiceListPausesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
 	adminServiceListReleasesSpec = sync.OnceValue(func() connect.Spec {
@@ -157,6 +167,10 @@ type AdminServiceClient interface {
 	// (the rest of the tenant stays paused). The controller then observes
 	// each resource and applies what changed meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
+	// Lists every pause in effect: full pauses (of a tenant, a network, a
+	// cluster, or of a channel's clusters) and pauses of upgrades only, with
+	// who asked, when, why, until when and how many clusters each covers.
+	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
 	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
@@ -224,6 +238,10 @@ type AdminServiceHandler interface {
 	// (the rest of the tenant stays paused). The controller then observes
 	// each resource and applies what changed meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
+	// Lists every pause in effect: full pauses (of a tenant, a network, a
+	// cluster, or of a channel's clusters) and pauses of upgrades only, with
+	// who asked, when, why, until when and how many clusters each covers.
+	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
 	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
@@ -256,6 +274,7 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 	server.Register(
 		connect.Method{Spec: adminServicePauseReconcileSpec(), Handler: adapter.pauseReconcile},
 		connect.Method{Spec: adminServiceResumeReconcileSpec(), Handler: adapter.resumeReconcile},
+		connect.Method{Spec: adminServiceListPausesSpec(), Handler: adapter.listPauses},
 		connect.Method{Spec: adminServiceListReleasesSpec(), Handler: adapter.listReleases},
 		connect.Method{Spec: adminServiceGetReleaseSpec(), Handler: adapter.getRelease},
 		connect.Method{Spec: adminServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
@@ -275,6 +294,10 @@ func (UnimplementedAdminServiceHandler) PauseReconcile(context.Context, *v1.Paus
 
 func (UnimplementedAdminServiceHandler) ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ResumeReconcile is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListPauses is not implemented")
 }
 
 func (UnimplementedAdminServiceHandler) ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error) {
@@ -320,6 +343,14 @@ func (c *adminServiceClient) PauseReconcile(ctx context.Context, req *v1.PauseRe
 func (c *adminServiceClient) ResumeReconcile(ctx context.Context, req *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error) {
 	var res v1.ResumeReconcileResponse
 	if err := c.client.CallUnary(ctx, adminServiceResumeReconcileSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) ListPauses(ctx context.Context, req *v1.ListPausesRequest) (*v1.ListPausesResponse, error) {
+	var res v1.ListPausesResponse
+	if err := c.client.CallUnary(ctx, adminServiceListPausesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -401,6 +432,18 @@ func (h adminServiceHandler) resumeReconcile(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.ResumeReconcile(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) listPauses(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListPausesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListPauses(ctx, &req)
 	if err != nil {
 		return err
 	}

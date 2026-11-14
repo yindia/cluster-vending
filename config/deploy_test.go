@@ -265,7 +265,16 @@ func TestReleaseObjectRoles(t *testing.T) {
 			}
 		}
 		for _, verb := range []string{"create", "update", "patch", "delete"} {
-			for name, role := range map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "server": server} {
+			roles := map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "server": server}
+			if kind == "releaseholds" {
+				// A pause of upgrades (admin pause --only upgrades) is a
+				// release hold the API server writes for the admin.
+				if verb != "patch" && !allows(server, group, kind, verb) {
+					t.Errorf("server: no %s on %s; admin pause --only upgrades writes them", verb, kind)
+				}
+				delete(roles, "server")
+			}
+			for name, role := range roles {
 				if allows(role, group, kind, verb) {
 					t.Errorf("%s: may %s %s; only the operator writes release objects", name, verb, kind)
 				}

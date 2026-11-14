@@ -466,6 +466,12 @@ message ClusterStatus {
   // setting) and how it ended. Unset until the rollout upgraded the
   // cluster; a version a person changed writes none.
   ClusterRollout rollout = 47;
+
+  // upgrade_pause is set while an operator paused the cluster's automatic
+  // upgrades (AdminService.PauseReconcile with only_upgrades: of this
+  // cluster, its tenant or its channel): who, why, until when, and its
+  // scope. The cluster is reconciled as usual; rollouts skip it.
+  Pause upgrade_pause = 48;
 }
 
 // ClusterRollout is one automatic upgrade of a cluster, as the rollout

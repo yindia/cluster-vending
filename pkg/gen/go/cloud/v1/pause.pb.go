@@ -36,7 +36,13 @@ type Pause struct {
 	// Since when.
 	Since *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=since,proto3" json:"since,omitempty"`
 	// Why, as the caller said. Optional.
-	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	// When it ends by itself; unset: at a resume only.
+	Until *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=until,proto3" json:"until,omitempty"`
+	// What it was asked for at, for people: "tenant acme", "channel beta
+	// tier 0", "cluster" (the resource itself); empty for a pause of an
+	// older build.
+	Scope         string `protobuf:"bytes,5,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -92,15 +98,31 @@ func (x *Pause) GetReason() string {
 	return ""
 }
 
+func (x *Pause) GetUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Until
+	}
+	return nil
+}
+
+func (x *Pause) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
 var File_cloud_v1_pause_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_pause_proto_rawDesc = "" +
 	"\n" +
-	"\x14cloud/v1/pause.proto\x12\bcloud.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"a\n" +
+	"\x14cloud/v1/pause.proto\x12\bcloud.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa9\x01\n" +
 	"\x05Pause\x12\x0e\n" +
 	"\x02by\x18\x01 \x01(\tR\x02by\x120\n" +
 	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reasonB\x9a\x01\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\x120\n" +
+	"\x05until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x05until\x12\x14\n" +
+	"\x05scope\x18\x05 \x01(\tR\x05scopeB\x9a\x01\n" +
 	"\fcom.cloud.v1B\n" +
 	"PauseProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
@@ -123,11 +145,12 @@ var file_cloud_v1_pause_proto_goTypes = []any{
 }
 var file_cloud_v1_pause_proto_depIdxs = []int32{
 	1, // 0: cloud.v1.Pause.since:type_name -> google.protobuf.Timestamp
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	1, // 1: cloud.v1.Pause.until:type_name -> google.protobuf.Timestamp
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_pause_proto_init() }

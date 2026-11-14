@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "cloud/v1/cluster.proto";
+import "google/protobuf/timestamp.proto";
+
+// PauseKind is what a pause stops.
+enum PauseKind {
+  PAUSE_KIND_UNSPECIFIED = 0;
+  // Everything: the platform and the Crossplane providers do not act on
+  // what is paused (AdminService.PauseReconcile without only_upgrades).
+  PAUSE_KIND_EVERYTHING = 1;
+  // Automatic upgrades only: the rollouts skip the clusters; they are
+  // reconciled, repaired and updated as usual.
+  PAUSE_KIND_UPGRADES = 2;
+}
+
+// PauseRecord is one pause as an operator asked for it: what it covers,
+// what it stops, who asked, when, why and until when.
+message PauseRecord {
+  // What it covers, for people: "tenant acme", "network <id>", "cluster
+  // <id>", "channel beta", "channel beta tier 0".
+  string target = 1;
+  // The target's fields: a tenant (with a network or cluster ID for one of
+  // them), or a channel with an optional tier.
+  string tenant_id = 2;
+  string network_id = 3;
+  string cluster_id = 4;
+  ReleaseChannel channel = 5;
+  ClusterTier tier = 6;
+  PauseKind kind = 7;
+  string by = 8;
+  google.protobuf.Timestamp since = 9;
+  // When it ends by itself; unset: at a resume only.
+  google.protobuf.Timestamp until = 10;
+  string reason = 11;
+  // How many clusters it covers now: a pause of a channel's (or a
+  // tenant's) upgrades covers the clusters that join it later too; a full
+  // pause by channel covers the clusters that matched when it was asked.
+  int32 clusters = 12;
+}
+
+message ListPausesRequest {}
+
+message ListPausesResponse {
+  // Every pause in effect, full ones first, each by target.
+  repeated PauseRecord pauses = 1;
+}

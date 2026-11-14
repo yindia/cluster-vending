@@ -242,6 +242,19 @@ func (s PauseScope) Channel() (channel, tier string, ok bool) {
 	return channel, tier, true
 }
 
+// Text is the scope for people: "tenant", "network", "cluster", "channel
+// beta", "channel beta tier 0".
+func (s PauseScope) Text() string {
+	channel, tier, ok := s.Channel()
+	switch {
+	case !ok:
+		return string(s)
+	case tier != "":
+		return "channel " + channel + " tier " + tier
+	}
+	return "channel " + channel
+}
+
 // PauseTarget is what a pause is set on: one cluster (ClusterID), one
 // network (NetworkID), or with neither the whole tenant. At most one is
 // set. Selector, with ClusterID, records the pause of that cluster at a

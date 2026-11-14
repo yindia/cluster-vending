@@ -56,6 +56,7 @@ var scopeOverrides = map[protoreflect.FullName]Scope{
 	// Operator actions on a tenant's resources.
 	"cloud.v1.AdminService.PauseReconcile":  ScopePlatform,
 	"cloud.v1.AdminService.ResumeReconcile": ScopePlatform,
+	"cloud.v1.AdminService.ListPauses":      ScopePlatform,
 	// The platform's release configuration and its rollouts.
 	"cloud.v1.AdminService.ListReleases":        ScopePlatform,
 	"cloud.v1.AdminService.GetRelease":          ScopePlatform,

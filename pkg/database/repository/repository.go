@@ -138,6 +138,10 @@ type Clusters interface {
 	// resource recommendations (protojson cloud.v1 ClusterRecommendations)
 	// and nothing else, like SetDeprecations.
 	SetRecommendations(ctx context.Context, tenantID, id string, recommendations model.JSON) error
+	// SetRollout records the cluster's place in its release channel's
+	// rollout and its last automatic upgrade (protojson cloud.v1
+	// ClusterRollout) and nothing else, like SetDeprecations.
+	SetRollout(ctx context.Context, tenantID, id string, rollout model.JSON) error
 	// UsageHistory is the cluster's recorded usage (pkg/recommend, as
 	// History.Encode wrote it); empty when none is recorded yet.
 	UsageHistory(ctx context.Context, tenantID, id string) ([]byte, error)

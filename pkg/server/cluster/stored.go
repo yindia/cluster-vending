@@ -33,6 +33,7 @@ func stored(row *model.Cluster) (*cloudv1.Cluster, error) {
 	}
 	st.Deprecations = deprecationSummary(row)
 	st.Recommendations = recommendationSummary(row)
+	st.Rollout = rolloutOf(row)
 	return reconcilecluster.ClusterProto(row, spec, st), nil
 }
 

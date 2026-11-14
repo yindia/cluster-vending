@@ -777,6 +777,48 @@ const (
 	ClusterUpgradeNodesAndAddons ClusterUpgradePhase = "NodesAndAddons"
 )
 
+// ClusterRolloutResult is how an automatic upgrade stands.
+// +kubebuilder:validation:Enum=InProgress;Succeeded;Failed;TimedOut;Pending;Blocked
+type ClusterRolloutResult string
+
+// The results of an automatic upgrade.
+const (
+	ClusterRolloutInProgress ClusterRolloutResult = "InProgress"
+	ClusterRolloutSucceeded  ClusterRolloutResult = "Succeeded"
+	ClusterRolloutFailed     ClusterRolloutResult = "Failed"
+	ClusterRolloutTimedOut   ClusterRolloutResult = "TimedOut"
+	// ClusterRolloutPending: not started yet; it waits its turn, or
+	// automatic upgrades are off.
+	ClusterRolloutPending ClusterRolloutResult = "Pending"
+	// ClusterRolloutBlocked: kept back by one of its own checks.
+	ClusterRolloutBlocked ClusterRolloutResult = "Blocked"
+)
+
+// ClusterRolloutRecord is one automatic upgrade of a cluster.
+type ClusterRolloutRecord struct {
+	// channel is the release channel whose rollout started it.
+	Channel string `json:"channel"`
+	// fromVersion is the Kubernetes minor the cluster ran before.
+	FromVersion string `json:"fromVersion"`
+	// toVersion is the Kubernetes minor it is upgraded to.
+	ToVersion string `json:"toVersion"`
+	// startTime is when the rollout set the new version (for Pending and
+	// Blocked: when the cluster entered that state).
+	StartTime metav1.Time `json:"startTime"`
+	// finishTime is when the upgrade ended; unset while it is in progress.
+	// +optional
+	FinishTime *metav1.Time `json:"finishTime,omitempty"`
+	// result is how it stands.
+	Result ClusterRolloutResult `json:"result"`
+	// message is what it waits for, what keeps it back, or why it failed
+	// or timed out.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// tier is the cluster's rollout tier (2 first, then 1, then 0).
+	// +optional
+	Tier int32 `json:"tier,omitempty"`
+}
+
 // ClusterKubernetesStatus is the cluster's Kubernetes version as the
 // release its channel offers sees it.
 type ClusterKubernetesStatus struct {
@@ -950,6 +992,11 @@ type ClusterStatus struct {
 	// deprecations is what the last scan for deprecated API versions found.
 	// +optional
 	Deprecations *ClusterDeprecations `json:"deprecations,omitempty"`
+	// rollout is the cluster's last automatic upgrade, as its release
+	// channel's rollout started and followed it. Written by the controller
+	// only; a version a person changed writes none.
+	// +optional
+	Rollout *ClusterRolloutRecord `json:"rollout,omitempty"`
 	// recommendations summarises the usage recorded to recommend resource
 	// requests (ListClusterRecommendations).
 	// +optional

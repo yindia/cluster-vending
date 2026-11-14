@@ -1620,6 +1620,62 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              rollout:
+                description: |-
+                  rollout is the cluster's last automatic upgrade, as its release
+                  channel's rollout started and followed it. Written by the controller
+                  only; a version a person changed writes none.
+                properties:
+                  channel:
+                    description: channel is the release channel whose rollout started
+                      it.
+                    type: string
+                  finishTime:
+                    description: finishTime is when the upgrade ended; unset while
+                      it is in progress.
+                    format: date-time
+                    type: string
+                  fromVersion:
+                    description: fromVersion is the Kubernetes minor the cluster ran
+                      before.
+                    type: string
+                  message:
+                    description: |-
+                      message is what it waits for, what keeps it back, or why it failed
+                      or timed out.
+                    type: string
+                  result:
+                    description: result is how it stands.
+                    enum:
+                    - InProgress
+                    - Succeeded
+                    - Failed
+                    - TimedOut
+                    - Pending
+                    - Blocked
+                    type: string
+                  startTime:
+                    description: |-
+                      startTime is when the rollout set the new version (for Pending and
+                      Blocked: when the cluster entered that state).
+                    format: date-time
+                    type: string
+                  tier:
+                    description: tier is the cluster's rollout tier (2 first, then
+                      1, then 0).
+                    format: int32
+                    type: integer
+                  toVersion:
+                    description: toVersion is the Kubernetes minor it is upgraded
+                      to.
+                    type: string
+                required:
+                - channel
+                - fromVersion
+                - result
+                - startTime
+                - toVersion
+                type: object
               upgrade:
                 description: |-
                   upgrade is the Kubernetes upgrade in progress: set from the moment

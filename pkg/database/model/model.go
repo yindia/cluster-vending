@@ -260,6 +260,10 @@ type Cluster struct {
 	// ClusterRecommendations), set with Clusters.SetRecommendations.
 	// Empty: never sampled.
 	Recommendations JSON
+	// Rollout is the cluster's place in its release channel's rollout and
+	// its last automatic upgrade (protojson cloud.v1 ClusterRollout), set
+	// by the controller with Clusters.SetRollout. Empty: none yet.
+	Rollout JSON
 }
 
 // Event is one Kubernetes event about an object of a tenant, as the

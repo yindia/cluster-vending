@@ -111,6 +111,11 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 			return nil, err
 		}
 	}
+	if ro := convert.RolloutFromAPI(obj.Status.Rollout); ro != nil {
+		if c.Rollout, err = protojson.Marshal(ro); err != nil {
+			return nil, err
+		}
+	}
 	if rec := convert.RecommendationsFromAPI(obj.Status.Recommendations); rec != nil {
 		if c.Recommendations, err = protojson.Marshal(rec); err != nil {
 			return nil, err
@@ -155,6 +160,27 @@ func (r clusters) SetDeprecations(ctx context.Context, tenantID, id string, depr
 		if equality.Semantic.DeepEqual(before, &obj.Status) {
 			return nil
 		}
+		return r.c.Status().Update(ctx, obj)
+	}))
+}
+
+// SetRollout writes the cluster's rollout record; no change writes
+// nothing. The etag, the generation and the rest of the status stay.
+func (r clusters) SetRollout(ctx context.Context, tenantID, id string, rollout model.JSON) error {
+	p := &cloudv1.ClusterRollout{}
+	if err := decode(rollout, p); err != nil {
+		return fmt.Errorf("%w: cluster rollout: %w", repository.ErrInvalid, err)
+	}
+	return translate(retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		next := convert.RolloutToAPI(p)
+		if equality.Semantic.DeepEqual(obj.Status.Rollout, next) {
+			return nil
+		}
+		obj.Status.Rollout = next
 		return r.c.Status().Update(ctx, obj)
 	}))
 }

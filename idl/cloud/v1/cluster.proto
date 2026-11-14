@@ -460,6 +460,63 @@ message ClusterStatus {
   // next minor it can move to, and whether its minor is ending. Unset
   // until the controller read the cluster's release.
   ClusterKubernetes kubernetes = 46;
+
+  // rollout is the cluster's last automatic upgrade: the hop its release
+  // channel's rollout started (the controller's automatic-upgrades
+  // setting) and how it ended. Unset until the rollout upgraded the
+  // cluster; a version a person changed writes none.
+  ClusterRollout rollout = 47;
+}
+
+// ClusterRollout is one automatic upgrade of a cluster, as the rollout
+// of its release channel started and followed it.
+message ClusterRollout {
+  // The release channel whose rollout started it (alpha, beta, stable).
+  string channel = 1;
+
+  // The Kubernetes minor the cluster ran before, e.g. "1.36".
+  string from_version = 2;
+
+  // The Kubernetes minor it is upgraded to, e.g. "1.37".
+  string to_version = 3;
+
+  // When the rollout set the new version.
+  google.protobuf.Timestamp start_time = 4;
+
+  // When the upgrade ended (succeeded, failed or timed out); unset while
+  // it is in progress.
+  google.protobuf.Timestamp finish_time = 5;
+
+  // How it stands.
+  ClusterRolloutResult result = 6;
+
+  // What it waits for (PENDING), what keeps it back (BLOCKED), or why it
+  // failed or timed out; empty otherwise.
+  string message = 7;
+
+  // The cluster's rollout tier: 2 is upgraded first, then 1, then 0.
+  int32 tier = 8;
+}
+
+// ClusterRolloutResult is how an automatic upgrade stands.
+enum ClusterRolloutResult {
+  CLUSTER_ROLLOUT_RESULT_UNSPECIFIED = 0;
+  // The new version is set; the control plane, then the nodes and add-ons
+  // are being upgraded.
+  CLUSTER_ROLLOUT_RESULT_IN_PROGRESS = 1;
+  // The cluster runs the new minor and the upgrade is done.
+  CLUSTER_ROLLOUT_RESULT_SUCCEEDED = 2;
+  // The upgrade failed; the rollout counts it against the tier's maxFailed.
+  CLUSTER_ROLLOUT_RESULT_FAILED = 3;
+  // The upgrade did not finish within the controller's upgrade-timeout;
+  // counted as failed.
+  CLUSTER_ROLLOUT_RESULT_TIMED_OUT = 4;
+  // Not started yet: it waits its turn (its tier, a soak, a free slot), or
+  // automatic upgrades are off; message says which.
+  CLUSTER_ROLLOUT_RESULT_PENDING = 5;
+  // Kept back by one of its own checks (manual upgrades, a maintenance
+  // window, the deprecation scan, health, a pause); message says which.
+  CLUSTER_ROLLOUT_RESULT_BLOCKED = 6;
 }
 
 // ClusterKubernetes is the cluster's Kubernetes version as the release

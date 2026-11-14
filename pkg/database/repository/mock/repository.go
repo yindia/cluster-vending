@@ -1343,6 +1343,44 @@ func (c *MockClustersSetRecommendationsCall) DoAndReturn(f func(context.Context,
 	return c
 }
 
+// SetRollout mocks base method.
+func (m *MockClusters) SetRollout(ctx context.Context, tenantID, id string, rollout model.JSON) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetRollout", ctx, tenantID, id, rollout)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetRollout indicates an expected call of SetRollout.
+func (mr *MockClustersMockRecorder) SetRollout(ctx, tenantID, id, rollout any) *MockClustersSetRolloutCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRollout", reflect.TypeOf((*MockClusters)(nil).SetRollout), ctx, tenantID, id, rollout)
+	return &MockClustersSetRolloutCall{Call: call}
+}
+
+// MockClustersSetRolloutCall wrap *gomock.Call
+type MockClustersSetRolloutCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersSetRolloutCall) Return(arg0 error) *MockClustersSetRolloutCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersSetRolloutCall) Do(f func(context.Context, string, string, model.JSON) error) *MockClustersSetRolloutCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersSetRolloutCall) DoAndReturn(f func(context.Context, string, string, model.JSON) error) *MockClustersSetRolloutCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetStatus mocks base method.
 func (m *MockClusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()

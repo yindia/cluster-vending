@@ -150,7 +150,7 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 	if row.AppliedGeneration < row.Generation {
 		// Its Observe-only objects are not there yet: there is nothing to own.
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("network %s is still being imported; retry once its resources are observed (network status)", row.ID))
+			fmt.Sprintf("network %s is still being imported; retry once its resources are observed (network get --live)", row.ID))
 	}
 	imp := netreconcile.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {

@@ -126,8 +126,8 @@ func (s *NetworkService) usableByID(ctx context.Context, tenantID, accountID, re
 }
 
 // GetNetwork returns one network from the database: its spec and the
-// status last recorded for it (stored). It does not read the management
-// cluster; GetNetworkStatus does.
+// status last recorded for it (stored); with live, the status read now
+// from the management cluster. Like every read it changes nothing.
 func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetworkRequest) (*cloudv1.GetNetworkResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, service.ToConnect(err)
@@ -135,6 +135,10 @@ func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetwork
 	row, err := s.get(ctx, req.GetTenantId(), req.GetNetworkId())
 	if err != nil {
 		return nil, service.ToConnect(err)
+	}
+	if req.GetLive() {
+		n, err := s.rec().View(ctx, row)
+		return &cloudv1.GetNetworkResponse{Network: n}, service.ToConnect(err)
 	}
 	n, err := s.stored(ctx, row)
 	return &cloudv1.GetNetworkResponse{Network: n}, service.ToConnect(err)

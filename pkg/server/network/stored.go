@@ -57,17 +57,3 @@ func storedState(rowState string, recorded cloudv1.NetworkState) cloudv1.Network
 		return recorded
 	}
 }
-
-// GetNetworkStatus returns one network with its status read live from the
-// management cluster. Like every read it changes nothing.
-func (s *NetworkService) GetNetworkStatus(ctx context.Context, req *cloudv1.GetNetworkStatusRequest) (*cloudv1.GetNetworkStatusResponse, error) {
-	if err := service.Validate(req); err != nil {
-		return nil, service.ToConnect(err)
-	}
-	row, err := s.get(ctx, req.GetTenantId(), req.GetNetworkId())
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	n, err := s.rec().View(ctx, row)
-	return &cloudv1.GetNetworkStatusResponse{Network: n}, service.ToConnect(err)
-}

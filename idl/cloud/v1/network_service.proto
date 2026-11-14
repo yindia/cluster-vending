@@ -45,15 +45,8 @@ service NetworkService {
 
   // Returns one network, or NOT_FOUND, from the platform's store: its spec
   // and the status the controller last recorded for it. It does not read
-  // the provider objects. GetNetworkStatus reads the live status.
+  // the provider objects, unless live is set.
   rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
-
-  // Returns one network with its live status, read now from its managed
-  // resources in the management cluster. UNAVAILABLE when the management
-  // cluster cannot be read.
-  rpc GetNetworkStatus(GetNetworkStatusRequest) returns (GetNetworkStatusResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -197,25 +190,13 @@ message GetNetworkRequest {
   }];
   // Network.id.
   string network_id = 2 [(buf.validate.field).string.uuid = true];
+  // Read the status now from the network's managed resources in the
+  // management cluster instead of the status last recorded. UNAVAILABLE
+  // when the management cluster cannot be read.
+  bool live = 3;
 }
 
 message GetNetworkResponse {
-  Network network = 1;
-}
-
-message GetNetworkStatusRequest {
-  string tenant_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 56
-    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
-  }];
-
-  // Network.id.
-  string network_id = 2 [(buf.validate.field).string.uuid = true];
-}
-
-message GetNetworkStatusResponse {
-  // The network as GetNetwork returns it, with status read live.
   Network network = 1;
 }
 

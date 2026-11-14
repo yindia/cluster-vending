@@ -111,8 +111,8 @@ func createError(err error, row *model.Cluster) error {
 }
 
 // GetCluster returns one cluster from the database: its spec and the
-// status last recorded for it (stored). It does not read the management
-// cluster; GetClusterStatus does.
+// status last recorded for it (stored); with live, the status read now
+// from the management cluster. Like every read it changes nothing.
 func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetClusterRequest) (_ *cloudv1.GetClusterResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -122,7 +122,11 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
-	c, err := stored(row)
+	read := stored
+	if req.GetLive() {
+		read = func(row *model.Cluster) (*cloudv1.Cluster, error) { return s.View(ctx, row) }
+	}
+	c, err := read(row)
 	if err != nil {
 		return nil, err
 	}

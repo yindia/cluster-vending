@@ -35,9 +35,6 @@ const (
 	ClusterServiceTakeOverClusterProcedure = "/cloud.v1.ClusterService/TakeOverCluster"
 	// ClusterServiceGetClusterProcedure is the procedure name of the ClusterService's GetCluster RPC.
 	ClusterServiceGetClusterProcedure = "/cloud.v1.ClusterService/GetCluster"
-	// ClusterServiceGetClusterStatusProcedure is the procedure name of the ClusterService's
-	// GetClusterStatus RPC.
-	ClusterServiceGetClusterStatusProcedure = "/cloud.v1.ClusterService/GetClusterStatus"
 	// ClusterServiceListClusterDeprecationsProcedure is the procedure name of the ClusterService's
 	// ListClusterDeprecations RPC.
 	ClusterServiceListClusterDeprecationsProcedure = "/cloud.v1.ClusterService/ListClusterDeprecations"
@@ -88,14 +85,6 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetCluster"),
 			Procedure:        ClusterServiceGetClusterProcedure,
-			IdempotencyLevel: connect.IdempotencyNoSideEffects,
-		}
-	})
-	clusterServiceGetClusterStatusSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType:       connect.StreamTypeUnary,
-			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetClusterStatus"),
-			Procedure:        ClusterServiceGetClusterStatusProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -194,13 +183,8 @@ type ClusterServiceClient interface {
 	// and the status the controller last recorded for it (it records one on
 	// every reconcile while the cluster is being created, changed or deleted;
 	// afterwards it is the status the cluster converged on). It does not read
-	// the provider objects. GetClusterStatus reads the live status.
+	// the provider objects, unless live is set.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
-	// Returns one cluster with its live status, read now from its managed
-	// resources in the management cluster (their conditions, the EKS
-	// endpoint, versions, ...). UNAVAILABLE when the management cluster
-	// cannot be read.
-	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
 	// Lists the objects of a cluster that were written with an API version
 	// that is deprecated or removed at the Kubernetes version the cluster
 	// moves to next, removed first: what the controller's last scan found
@@ -314,13 +298,8 @@ type ClusterServiceHandler interface {
 	// and the status the controller last recorded for it (it records one on
 	// every reconcile while the cluster is being created, changed or deleted;
 	// afterwards it is the status the cluster converged on). It does not read
-	// the provider objects. GetClusterStatus reads the live status.
+	// the provider objects, unless live is set.
 	GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error)
-	// Returns one cluster with its live status, read now from its managed
-	// resources in the management cluster (their conditions, the EKS
-	// endpoint, versions, ...). UNAVAILABLE when the management cluster
-	// cannot be read.
-	GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error)
 	// Lists the objects of a cluster that were written with an API version
 	// that is deprecated or removed at the Kubernetes version the cluster
 	// moves to next, removed first: what the controller's last scan found
@@ -378,7 +357,6 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceImportClusterSpec(), Handler: adapter.importCluster},
 		connect.Method{Spec: clusterServiceTakeOverClusterSpec(), Handler: adapter.takeOverCluster},
 		connect.Method{Spec: clusterServiceGetClusterSpec(), Handler: adapter.getCluster},
-		connect.Method{Spec: clusterServiceGetClusterStatusSpec(), Handler: adapter.getClusterStatus},
 		connect.Method{Spec: clusterServiceListClusterDeprecationsSpec(), Handler: adapter.listClusterDeprecations},
 		connect.Method{Spec: clusterServiceListClusterEventsSpec(), Handler: adapter.listClusterEvents},
 		connect.Method{Spec: clusterServiceListClusterRecommendationsSpec(), Handler: adapter.listClusterRecommendations},
@@ -422,10 +400,6 @@ func (UnimplementedClusterServiceHandler) TakeOverCluster(context.Context, *v1.T
 
 func (UnimplementedClusterServiceHandler) GetCluster(context.Context, *v1.GetClusterRequest) (*v1.GetClusterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetCluster is not implemented")
-}
-
-func (UnimplementedClusterServiceHandler) GetClusterStatus(context.Context, *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetClusterStatus is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusterDeprecations(context.Context, *v1.ListClusterDeprecationsRequest) (*v1.ListClusterDeprecationsResponse, error) {
@@ -487,14 +461,6 @@ func (c *clusterServiceClient) TakeOverCluster(ctx context.Context, req *v1.Take
 func (c *clusterServiceClient) GetCluster(ctx context.Context, req *v1.GetClusterRequest) (*v1.GetClusterResponse, error) {
 	var res v1.GetClusterResponse
 	if err := c.client.CallUnary(ctx, clusterServiceGetClusterSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *clusterServiceClient) GetClusterStatus(ctx context.Context, req *v1.GetClusterStatusRequest) (*v1.GetClusterStatusResponse, error) {
-	var res v1.GetClusterStatusResponse
-	if err := c.client.CallUnary(ctx, clusterServiceGetClusterStatusSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -600,18 +566,6 @@ func (h clusterServiceHandler) getCluster(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	res, err := h.svc.GetCluster(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h clusterServiceHandler) getClusterStatus(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.GetClusterStatusRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.GetClusterStatus(ctx, &req)
 	if err != nil {
 		return err
 	}

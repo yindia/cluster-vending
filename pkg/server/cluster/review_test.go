@@ -94,7 +94,7 @@ func TestTakeOverFailingHalfWayIsFinishedByTheLoop(t *testing.T) {
 		t.Fatalf("state %s, applied %d of %d (%v): a cluster with objects already owned must not read as imported, read-only",
 			row.State, row.AppliedGeneration, row.Generation, err)
 	}
-	st, err := w.svc.GetClusterStatus(ctx, &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: c.GetId()})
+	st, err := w.svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: worldTenant, ClusterId: c.GetId(), Live: true})
 	if err != nil || st.GetCluster().GetStatus().GetMessage() != "retrying: could not create the cluster's resources" {
 		t.Errorf("status after the failed pass = %q (%v), want the failure being retried", st.GetCluster().GetStatus().GetMessage(), err)
 	}

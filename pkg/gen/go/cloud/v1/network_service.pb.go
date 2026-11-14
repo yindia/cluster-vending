@@ -420,7 +420,11 @@ type GetNetworkRequest struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// Network.id.
-	NetworkId     string `protobuf:"bytes,2,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	NetworkId string `protobuf:"bytes,2,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	// Read the status now from the network's managed resources in the
+	// management cluster instead of the status last recorded. UNAVAILABLE
+	// when the management cluster cannot be read.
+	Live          bool `protobuf:"varint,3,opt,name=live,proto3" json:"live,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -469,6 +473,13 @@ func (x *GetNetworkRequest) GetNetworkId() string {
 	return ""
 }
 
+func (x *GetNetworkRequest) GetLive() bool {
+	if x != nil {
+		return x.Live
+	}
+	return false
+}
+
 type GetNetworkResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Network       *Network               `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
@@ -513,104 +524,6 @@ func (x *GetNetworkResponse) GetNetwork() *Network {
 	return nil
 }
 
-type GetNetworkStatusRequest struct {
-	state    protoimpl.MessageState `protogen:"open.v1"`
-	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// Network.id.
-	NetworkId     string `protobuf:"bytes,2,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetNetworkStatusRequest) Reset() {
-	*x = GetNetworkStatusRequest{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetNetworkStatusRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetNetworkStatusRequest) ProtoMessage() {}
-
-func (x *GetNetworkStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetNetworkStatusRequest.ProtoReflect.Descriptor instead.
-func (*GetNetworkStatusRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *GetNetworkStatusRequest) GetTenantId() string {
-	if x != nil {
-		return x.TenantId
-	}
-	return ""
-}
-
-func (x *GetNetworkStatusRequest) GetNetworkId() string {
-	if x != nil {
-		return x.NetworkId
-	}
-	return ""
-}
-
-type GetNetworkStatusResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The network as GetNetwork returns it, with status read live.
-	Network       *Network `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetNetworkStatusResponse) Reset() {
-	*x = GetNetworkStatusResponse{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetNetworkStatusResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetNetworkStatusResponse) ProtoMessage() {}
-
-func (x *GetNetworkStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetNetworkStatusResponse.ProtoReflect.Descriptor instead.
-func (*GetNetworkStatusResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *GetNetworkStatusResponse) GetNetwork() *Network {
-	if x != nil {
-		return x.Network
-	}
-	return nil
-}
-
 type WatchNetworkRequest struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
@@ -622,7 +535,7 @@ type WatchNetworkRequest struct {
 
 func (x *WatchNetworkRequest) Reset() {
 	*x = WatchNetworkRequest{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -634,7 +547,7 @@ func (x *WatchNetworkRequest) String() string {
 func (*WatchNetworkRequest) ProtoMessage() {}
 
 func (x *WatchNetworkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +560,7 @@ func (x *WatchNetworkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchNetworkRequest.ProtoReflect.Descriptor instead.
 func (*WatchNetworkRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{10}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WatchNetworkRequest) GetTenantId() string {
@@ -679,7 +592,7 @@ type WatchNetworkResponse struct {
 
 func (x *WatchNetworkResponse) Reset() {
 	*x = WatchNetworkResponse{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -691,7 +604,7 @@ func (x *WatchNetworkResponse) String() string {
 func (*WatchNetworkResponse) ProtoMessage() {}
 
 func (x *WatchNetworkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -704,7 +617,7 @@ func (x *WatchNetworkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchNetworkResponse.ProtoReflect.Descriptor instead.
 func (*WatchNetworkResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{11}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WatchNetworkResponse) GetNetwork() *Network {
@@ -740,7 +653,7 @@ type ListNetworksRequest struct {
 
 func (x *ListNetworksRequest) Reset() {
 	*x = ListNetworksRequest{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[12]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -752,7 +665,7 @@ func (x *ListNetworksRequest) String() string {
 func (*ListNetworksRequest) ProtoMessage() {}
 
 func (x *ListNetworksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[12]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -765,7 +678,7 @@ func (x *ListNetworksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNetworksRequest.ProtoReflect.Descriptor instead.
 func (*ListNetworksRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{12}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListNetworksRequest) GetTenantId() string {
@@ -799,7 +712,7 @@ type ListNetworksResponse struct {
 
 func (x *ListNetworksResponse) Reset() {
 	*x = ListNetworksResponse{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[13]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -811,7 +724,7 @@ func (x *ListNetworksResponse) String() string {
 func (*ListNetworksResponse) ProtoMessage() {}
 
 func (x *ListNetworksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[13]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -824,7 +737,7 @@ func (x *ListNetworksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNetworksResponse.ProtoReflect.Descriptor instead.
 func (*ListNetworksResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{13}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListNetworksResponse) GetNetworks() []*Network {
@@ -863,7 +776,7 @@ type UpdateNetworkRequest struct {
 
 func (x *UpdateNetworkRequest) Reset() {
 	*x = UpdateNetworkRequest{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[14]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +788,7 @@ func (x *UpdateNetworkRequest) String() string {
 func (*UpdateNetworkRequest) ProtoMessage() {}
 
 func (x *UpdateNetworkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[14]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +801,7 @@ func (x *UpdateNetworkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateNetworkRequest.ProtoReflect.Descriptor instead.
 func (*UpdateNetworkRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{14}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UpdateNetworkRequest) GetTenantId() string {
@@ -921,7 +834,7 @@ type UpdateNetworkResponse struct {
 
 func (x *UpdateNetworkResponse) Reset() {
 	*x = UpdateNetworkResponse{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[15]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -933,7 +846,7 @@ func (x *UpdateNetworkResponse) String() string {
 func (*UpdateNetworkResponse) ProtoMessage() {}
 
 func (x *UpdateNetworkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[15]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -946,7 +859,7 @@ func (x *UpdateNetworkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateNetworkResponse.ProtoReflect.Descriptor instead.
 func (*UpdateNetworkResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{15}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateNetworkResponse) GetNetwork() *Network {
@@ -969,7 +882,7 @@ type DeleteNetworkRequest struct {
 
 func (x *DeleteNetworkRequest) Reset() {
 	*x = DeleteNetworkRequest{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[16]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +894,7 @@ func (x *DeleteNetworkRequest) String() string {
 func (*DeleteNetworkRequest) ProtoMessage() {}
 
 func (x *DeleteNetworkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[16]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +907,7 @@ func (x *DeleteNetworkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteNetworkRequest.ProtoReflect.Descriptor instead.
 func (*DeleteNetworkRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{16}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteNetworkRequest) GetTenantId() string {
@@ -1028,7 +941,7 @@ type DeleteNetworkResponse struct {
 
 func (x *DeleteNetworkResponse) Reset() {
 	*x = DeleteNetworkResponse{}
-	mi := &file_cloud_v1_network_service_proto_msgTypes[17]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1040,7 +953,7 @@ func (x *DeleteNetworkResponse) String() string {
 func (*DeleteNetworkResponse) ProtoMessage() {}
 
 func (x *DeleteNetworkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_network_service_proto_msgTypes[17]
+	mi := &file_cloud_v1_network_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1053,7 +966,7 @@ func (x *DeleteNetworkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteNetworkResponse.ProtoReflect.Descriptor instead.
 func (*DeleteNetworkResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{17}
+	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeleteNetworkResponse) GetNetwork() *Network {
@@ -1096,18 +1009,13 @@ const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\x128\n" +
 	"\x18acknowledge_not_imported\x18\x04 \x01(\bR\x16acknowledgeNotImported\"F\n" +
 	"\x17TakeOverNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\x8a\x01\n" +
+	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\x9e\x01\n" +
 	"\x11GetNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
-	"network_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\"A\n" +
+	"network_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\x12\x12\n" +
+	"\x04live\x18\x03 \x01(\bR\x04live\"A\n" +
 	"\x12GetNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\x90\x01\n" +
-	"\x17GetNetworkStatusRequest\x12L\n" +
-	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
-	"\n" +
-	"network_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\"G\n" +
-	"\x18GetNetworkStatusResponse\x12+\n" +
 	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\x8c\x01\n" +
 	"\x13WatchNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
@@ -1139,14 +1047,13 @@ const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"network_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\x12\x12\n" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\"D\n" +
 	"\x15DeleteNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork2\xf0\x06\n" +
+	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork2\x90\x06\n" +
 	"\x0eNetworkService\x12P\n" +
 	"\rCreateNetwork\x12\x1e.cloud.v1.CreateNetworkRequest\x1a\x1f.cloud.v1.CreateNetworkResponse\x12P\n" +
 	"\rImportNetwork\x12\x1e.cloud.v1.ImportNetworkRequest\x1a\x1f.cloud.v1.ImportNetworkResponse\x12V\n" +
 	"\x0fTakeOverNetwork\x12 .cloud.v1.TakeOverNetworkRequest\x1a!.cloud.v1.TakeOverNetworkResponse\x12L\n" +
 	"\n" +
-	"GetNetwork\x12\x1b.cloud.v1.GetNetworkRequest\x1a\x1c.cloud.v1.GetNetworkResponse\"\x03\x90\x02\x01\x12^\n" +
-	"\x10GetNetworkStatus\x12!.cloud.v1.GetNetworkStatusRequest\x1a\".cloud.v1.GetNetworkStatusResponse\"\x03\x90\x02\x01\x12T\n" +
+	"GetNetwork\x12\x1b.cloud.v1.GetNetworkRequest\x1a\x1c.cloud.v1.GetNetworkResponse\"\x03\x90\x02\x01\x12T\n" +
 	"\fWatchNetwork\x12\x1d.cloud.v1.WatchNetworkRequest\x1a\x1e.cloud.v1.WatchNetworkResponse\"\x03\x90\x02\x010\x01\x12a\n" +
 	"\x11ListNetworkEvents\x12\".cloud.v1.ListNetworkEventsRequest\x1a#.cloud.v1.ListNetworkEventsResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\fListNetworks\x12\x1d.cloud.v1.ListNetworksRequest\x1a\x1e.cloud.v1.ListNetworksResponse\"\x03\x90\x02\x01\x12P\n" +
@@ -1166,7 +1073,7 @@ func file_cloud_v1_network_service_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_network_service_proto_rawDescData
 }
 
-var file_cloud_v1_network_service_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_cloud_v1_network_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_cloud_v1_network_service_proto_goTypes = []any{
 	(*CreateNetworkRequest)(nil),      // 0: cloud.v1.CreateNetworkRequest
 	(*CreateNetworkResponse)(nil),     // 1: cloud.v1.CreateNetworkResponse
@@ -1176,63 +1083,58 @@ var file_cloud_v1_network_service_proto_goTypes = []any{
 	(*TakeOverNetworkResponse)(nil),   // 5: cloud.v1.TakeOverNetworkResponse
 	(*GetNetworkRequest)(nil),         // 6: cloud.v1.GetNetworkRequest
 	(*GetNetworkResponse)(nil),        // 7: cloud.v1.GetNetworkResponse
-	(*GetNetworkStatusRequest)(nil),   // 8: cloud.v1.GetNetworkStatusRequest
-	(*GetNetworkStatusResponse)(nil),  // 9: cloud.v1.GetNetworkStatusResponse
-	(*WatchNetworkRequest)(nil),       // 10: cloud.v1.WatchNetworkRequest
-	(*WatchNetworkResponse)(nil),      // 11: cloud.v1.WatchNetworkResponse
-	(*ListNetworksRequest)(nil),       // 12: cloud.v1.ListNetworksRequest
-	(*ListNetworksResponse)(nil),      // 13: cloud.v1.ListNetworksResponse
-	(*UpdateNetworkRequest)(nil),      // 14: cloud.v1.UpdateNetworkRequest
-	(*UpdateNetworkResponse)(nil),     // 15: cloud.v1.UpdateNetworkResponse
-	(*DeleteNetworkRequest)(nil),      // 16: cloud.v1.DeleteNetworkRequest
-	(*DeleteNetworkResponse)(nil),     // 17: cloud.v1.DeleteNetworkResponse
-	(*Network)(nil),                   // 18: cloud.v1.Network
-	(*AwsImportNetwork)(nil),          // 19: cloud.v1.AwsImportNetwork
-	(*ManagedResourceEvent)(nil),      // 20: cloud.v1.ManagedResourceEvent
-	(*fieldmaskpb.FieldMask)(nil),     // 21: google.protobuf.FieldMask
-	(*ListNetworkEventsRequest)(nil),  // 22: cloud.v1.ListNetworkEventsRequest
-	(*ListNetworkEventsResponse)(nil), // 23: cloud.v1.ListNetworkEventsResponse
+	(*WatchNetworkRequest)(nil),       // 8: cloud.v1.WatchNetworkRequest
+	(*WatchNetworkResponse)(nil),      // 9: cloud.v1.WatchNetworkResponse
+	(*ListNetworksRequest)(nil),       // 10: cloud.v1.ListNetworksRequest
+	(*ListNetworksResponse)(nil),      // 11: cloud.v1.ListNetworksResponse
+	(*UpdateNetworkRequest)(nil),      // 12: cloud.v1.UpdateNetworkRequest
+	(*UpdateNetworkResponse)(nil),     // 13: cloud.v1.UpdateNetworkResponse
+	(*DeleteNetworkRequest)(nil),      // 14: cloud.v1.DeleteNetworkRequest
+	(*DeleteNetworkResponse)(nil),     // 15: cloud.v1.DeleteNetworkResponse
+	(*Network)(nil),                   // 16: cloud.v1.Network
+	(*AwsImportNetwork)(nil),          // 17: cloud.v1.AwsImportNetwork
+	(*ManagedResourceEvent)(nil),      // 18: cloud.v1.ManagedResourceEvent
+	(*fieldmaskpb.FieldMask)(nil),     // 19: google.protobuf.FieldMask
+	(*ListNetworkEventsRequest)(nil),  // 20: cloud.v1.ListNetworkEventsRequest
+	(*ListNetworkEventsResponse)(nil), // 21: cloud.v1.ListNetworkEventsResponse
 }
 var file_cloud_v1_network_service_proto_depIdxs = []int32{
-	18, // 0: cloud.v1.CreateNetworkRequest.network:type_name -> cloud.v1.Network
-	18, // 1: cloud.v1.CreateNetworkResponse.network:type_name -> cloud.v1.Network
-	19, // 2: cloud.v1.ImportNetworkRequest.aws:type_name -> cloud.v1.AwsImportNetwork
-	18, // 3: cloud.v1.ImportNetworkResponse.network:type_name -> cloud.v1.Network
-	18, // 4: cloud.v1.TakeOverNetworkResponse.network:type_name -> cloud.v1.Network
-	18, // 5: cloud.v1.GetNetworkResponse.network:type_name -> cloud.v1.Network
-	18, // 6: cloud.v1.GetNetworkStatusResponse.network:type_name -> cloud.v1.Network
-	18, // 7: cloud.v1.WatchNetworkResponse.network:type_name -> cloud.v1.Network
-	20, // 8: cloud.v1.WatchNetworkResponse.events:type_name -> cloud.v1.ManagedResourceEvent
-	18, // 9: cloud.v1.ListNetworksResponse.networks:type_name -> cloud.v1.Network
-	18, // 10: cloud.v1.UpdateNetworkRequest.network:type_name -> cloud.v1.Network
-	21, // 11: cloud.v1.UpdateNetworkRequest.update_mask:type_name -> google.protobuf.FieldMask
-	18, // 12: cloud.v1.UpdateNetworkResponse.network:type_name -> cloud.v1.Network
-	18, // 13: cloud.v1.DeleteNetworkResponse.network:type_name -> cloud.v1.Network
-	0,  // 14: cloud.v1.NetworkService.CreateNetwork:input_type -> cloud.v1.CreateNetworkRequest
-	2,  // 15: cloud.v1.NetworkService.ImportNetwork:input_type -> cloud.v1.ImportNetworkRequest
-	4,  // 16: cloud.v1.NetworkService.TakeOverNetwork:input_type -> cloud.v1.TakeOverNetworkRequest
-	6,  // 17: cloud.v1.NetworkService.GetNetwork:input_type -> cloud.v1.GetNetworkRequest
-	8,  // 18: cloud.v1.NetworkService.GetNetworkStatus:input_type -> cloud.v1.GetNetworkStatusRequest
-	10, // 19: cloud.v1.NetworkService.WatchNetwork:input_type -> cloud.v1.WatchNetworkRequest
-	22, // 20: cloud.v1.NetworkService.ListNetworkEvents:input_type -> cloud.v1.ListNetworkEventsRequest
-	12, // 21: cloud.v1.NetworkService.ListNetworks:input_type -> cloud.v1.ListNetworksRequest
-	14, // 22: cloud.v1.NetworkService.UpdateNetwork:input_type -> cloud.v1.UpdateNetworkRequest
-	16, // 23: cloud.v1.NetworkService.DeleteNetwork:input_type -> cloud.v1.DeleteNetworkRequest
-	1,  // 24: cloud.v1.NetworkService.CreateNetwork:output_type -> cloud.v1.CreateNetworkResponse
-	3,  // 25: cloud.v1.NetworkService.ImportNetwork:output_type -> cloud.v1.ImportNetworkResponse
-	5,  // 26: cloud.v1.NetworkService.TakeOverNetwork:output_type -> cloud.v1.TakeOverNetworkResponse
-	7,  // 27: cloud.v1.NetworkService.GetNetwork:output_type -> cloud.v1.GetNetworkResponse
-	9,  // 28: cloud.v1.NetworkService.GetNetworkStatus:output_type -> cloud.v1.GetNetworkStatusResponse
-	11, // 29: cloud.v1.NetworkService.WatchNetwork:output_type -> cloud.v1.WatchNetworkResponse
-	23, // 30: cloud.v1.NetworkService.ListNetworkEvents:output_type -> cloud.v1.ListNetworkEventsResponse
-	13, // 31: cloud.v1.NetworkService.ListNetworks:output_type -> cloud.v1.ListNetworksResponse
-	15, // 32: cloud.v1.NetworkService.UpdateNetwork:output_type -> cloud.v1.UpdateNetworkResponse
-	17, // 33: cloud.v1.NetworkService.DeleteNetwork:output_type -> cloud.v1.DeleteNetworkResponse
-	24, // [24:34] is the sub-list for method output_type
-	14, // [14:24] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	16, // 0: cloud.v1.CreateNetworkRequest.network:type_name -> cloud.v1.Network
+	16, // 1: cloud.v1.CreateNetworkResponse.network:type_name -> cloud.v1.Network
+	17, // 2: cloud.v1.ImportNetworkRequest.aws:type_name -> cloud.v1.AwsImportNetwork
+	16, // 3: cloud.v1.ImportNetworkResponse.network:type_name -> cloud.v1.Network
+	16, // 4: cloud.v1.TakeOverNetworkResponse.network:type_name -> cloud.v1.Network
+	16, // 5: cloud.v1.GetNetworkResponse.network:type_name -> cloud.v1.Network
+	16, // 6: cloud.v1.WatchNetworkResponse.network:type_name -> cloud.v1.Network
+	18, // 7: cloud.v1.WatchNetworkResponse.events:type_name -> cloud.v1.ManagedResourceEvent
+	16, // 8: cloud.v1.ListNetworksResponse.networks:type_name -> cloud.v1.Network
+	16, // 9: cloud.v1.UpdateNetworkRequest.network:type_name -> cloud.v1.Network
+	19, // 10: cloud.v1.UpdateNetworkRequest.update_mask:type_name -> google.protobuf.FieldMask
+	16, // 11: cloud.v1.UpdateNetworkResponse.network:type_name -> cloud.v1.Network
+	16, // 12: cloud.v1.DeleteNetworkResponse.network:type_name -> cloud.v1.Network
+	0,  // 13: cloud.v1.NetworkService.CreateNetwork:input_type -> cloud.v1.CreateNetworkRequest
+	2,  // 14: cloud.v1.NetworkService.ImportNetwork:input_type -> cloud.v1.ImportNetworkRequest
+	4,  // 15: cloud.v1.NetworkService.TakeOverNetwork:input_type -> cloud.v1.TakeOverNetworkRequest
+	6,  // 16: cloud.v1.NetworkService.GetNetwork:input_type -> cloud.v1.GetNetworkRequest
+	8,  // 17: cloud.v1.NetworkService.WatchNetwork:input_type -> cloud.v1.WatchNetworkRequest
+	20, // 18: cloud.v1.NetworkService.ListNetworkEvents:input_type -> cloud.v1.ListNetworkEventsRequest
+	10, // 19: cloud.v1.NetworkService.ListNetworks:input_type -> cloud.v1.ListNetworksRequest
+	12, // 20: cloud.v1.NetworkService.UpdateNetwork:input_type -> cloud.v1.UpdateNetworkRequest
+	14, // 21: cloud.v1.NetworkService.DeleteNetwork:input_type -> cloud.v1.DeleteNetworkRequest
+	1,  // 22: cloud.v1.NetworkService.CreateNetwork:output_type -> cloud.v1.CreateNetworkResponse
+	3,  // 23: cloud.v1.NetworkService.ImportNetwork:output_type -> cloud.v1.ImportNetworkResponse
+	5,  // 24: cloud.v1.NetworkService.TakeOverNetwork:output_type -> cloud.v1.TakeOverNetworkResponse
+	7,  // 25: cloud.v1.NetworkService.GetNetwork:output_type -> cloud.v1.GetNetworkResponse
+	9,  // 26: cloud.v1.NetworkService.WatchNetwork:output_type -> cloud.v1.WatchNetworkResponse
+	21, // 27: cloud.v1.NetworkService.ListNetworkEvents:output_type -> cloud.v1.ListNetworkEventsResponse
+	11, // 28: cloud.v1.NetworkService.ListNetworks:output_type -> cloud.v1.ListNetworksResponse
+	13, // 29: cloud.v1.NetworkService.UpdateNetwork:output_type -> cloud.v1.UpdateNetworkResponse
+	15, // 30: cloud.v1.NetworkService.DeleteNetwork:output_type -> cloud.v1.DeleteNetworkResponse
+	22, // [22:31] is the sub-list for method output_type
+	13, // [13:22] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_service_proto_init() }
@@ -1253,7 +1155,7 @@ func file_cloud_v1_network_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_network_service_proto_rawDesc), len(file_cloud_v1_network_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

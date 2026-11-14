@@ -1,14 +1,11 @@
 package cluster
 
 import (
-	"context"
-
 	"connectrpc.com/connect/v2"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
-	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 // stored is the API view of a cluster from the database alone: its spec
@@ -53,22 +50,4 @@ func storedState(rowState string, recorded cloudv1.ClusterState) cloudv1.Cluster
 	default:
 		return recorded
 	}
-}
-
-// GetClusterStatus returns one cluster with its status read live from the
-// management cluster. Like every read it changes nothing.
-func (s *ClusterService) GetClusterStatus(ctx context.Context, req *cloudv1.GetClusterStatusRequest) (_ *cloudv1.GetClusterStatusResponse, err error) {
-	defer func() { err = rpcError(err) }()
-	if err := service.Validate(req); err != nil {
-		return nil, err
-	}
-	row, err := s.get(ctx, req.GetTenantId(), req.GetClusterId())
-	if err != nil {
-		return nil, err
-	}
-	c, err := s.View(ctx, row)
-	if err != nil {
-		return nil, err
-	}
-	return &cloudv1.GetClusterStatusResponse{Cluster: c}, nil
 }

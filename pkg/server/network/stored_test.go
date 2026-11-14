@@ -56,7 +56,7 @@ func (f fixture) allReady(t *testing.T, id string) {
 }
 
 // GetNetwork and ListNetworks answer from the database: the spec and the
-// status the loop last recorded. Only GetNetworkStatus reads the
+// status the loop last recorded. Only GetNetwork with live reads the
 // management cluster.
 func TestGetNetworkReadsOnlyTheDatabase(t *testing.T) {
 	var reads atomic.Int64
@@ -98,9 +98,9 @@ func TestGetNetworkReadsOnlyTheDatabase(t *testing.T) {
 	if st := get().GetStatus(); st.GetState() != cloudv1.NetworkState_NETWORK_STATE_PROVISIONING {
 		t.Errorf("before the loop's pass GetNetwork says %s", st.GetState())
 	}
-	live, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
+	live, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: true})
 	if err != nil || live.GetNetwork().GetStatus().GetState() != cloudv1.NetworkState_NETWORK_STATE_READY || reads.Load() == 0 {
-		t.Errorf("GetNetworkStatus = %s (%v) with %d reads, want READY read live", live.GetNetwork().GetStatus().GetState(), err, reads.Load())
+		t.Errorf("GetNetwork live = %s (%v) with %d reads, want READY read live", live.GetNetwork().GetStatus().GetState(), err, reads.Load())
 	}
 	etag := row().ETag
 	if err := f.svc.Reconcile(ctx, tenant, n.GetId()); err != nil {

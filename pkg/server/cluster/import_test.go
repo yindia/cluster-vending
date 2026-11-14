@@ -129,12 +129,12 @@ func reconcile(t *testing.T, w world, id string) {
 	}
 }
 
-// live is the cluster as GetClusterStatus returns it: read live.
+// live is the cluster as GetCluster with live returns it: read live.
 func live(t *testing.T, w world, id string) *cloudv1.Cluster {
 	t.Helper()
-	res, err := w.svc.GetClusterStatus(t.Context(), &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: id})
+	res, err := w.svc.GetCluster(t.Context(), &cloudv1.GetClusterRequest{TenantId: worldTenant, ClusterId: id, Live: true})
 	if err != nil {
-		t.Fatalf("GetClusterStatus: %v", err)
+		t.Fatalf("GetCluster live: %v", err)
 	}
 	return res.GetCluster()
 }
@@ -492,7 +492,7 @@ func TestTakeOverCluster(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := w.svc.GetClusterStatus(ctx, &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: c.GetId()})
+	got, err := w.svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: worldTenant, ClusterId: c.GetId(), Live: true})
 	if err != nil {
 		t.Fatal(err)
 	}

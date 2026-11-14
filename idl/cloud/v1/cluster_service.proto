@@ -65,16 +65,8 @@ service ClusterService {
   // and the status the controller last recorded for it (it records one on
   // every reconcile while the cluster is being created, changed or deleted;
   // afterwards it is the status the cluster converged on). It does not read
-  // the provider objects. GetClusterStatus reads the live status.
+  // the provider objects, unless live is set.
   rpc GetCluster(GetClusterRequest) returns (GetClusterResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
-
-  // Returns one cluster with its live status, read now from its managed
-  // resources in the management cluster (their conditions, the EKS
-  // endpoint, versions, ...). UNAVAILABLE when the management cluster
-  // cannot be read.
-  rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -265,22 +257,11 @@ message GetClusterRequest {
   }];
   // Cluster.id.
   string cluster_id = 2 [(buf.validate.field).string.uuid = true];
-}
-
-message GetClusterStatusRequest {
-  string tenant_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 56
-    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
-  }];
-
-  // Cluster.id.
-  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
-}
-
-message GetClusterStatusResponse {
-  // The cluster as GetCluster returns it, with status read live.
-  Cluster cluster = 1;
+  // Read the status now from the cluster's managed resources in the
+  // management cluster (their conditions, the EKS endpoint, versions, ...)
+  // instead of the status last recorded. UNAVAILABLE when the management
+  // cluster cannot be read.
+  bool live = 3;
 }
 
 message WatchClusterRequest {

@@ -112,7 +112,7 @@ bin/cluster-vending account get --id BOOTSTRAP_ID --tenant acme   # its Checks
 #    The answer has its id: NETWORK_ID.
 bin/cluster-vending network create -f examples/network.yaml --wait
 bin/cluster-vending network get NETWORK_ID --tenant acme      # status last recorded
-bin/cluster-vending network status NETWORK_ID --tenant acme   # status read live
+bin/cluster-vending network get NETWORK_ID --tenant acme --live   # status read live
 
 # 4. Create a cluster in the network (set spec.network.networkId to
 #    NETWORK_ID first). The answer has its id: CLUSTER_ID.

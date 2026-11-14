@@ -14,7 +14,7 @@ import (
 )
 
 // GetCluster and ListClusters answer from the database: the spec and the
-// status the loop last recorded. Only GetClusterStatus reads the
+// status the loop last recorded. Only GetCluster with live reads the
 // management cluster.
 func TestGetClusterReadsOnlyTheDatabase(t *testing.T) {
 	var reads atomic.Int64
@@ -59,9 +59,9 @@ func TestGetClusterReadsOnlyTheDatabase(t *testing.T) {
 	if st := recorded.GetStatus(); len(st.GetManagedResources()) < 20 || st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_UNSPECIFIED {
 		t.Errorf("after the pass: %s, %d resources recorded", st.GetState(), len(st.GetManagedResources()))
 	}
-	live, err := w.svc.GetClusterStatus(ctx, &cloudv1.GetClusterStatusRequest{TenantId: worldTenant, ClusterId: w.row.ID})
+	live, err := w.svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: worldTenant, ClusterId: w.row.ID, Live: true})
 	if err != nil || reads.Load() == 0 || len(live.GetCluster().GetStatus().GetManagedResources()) != len(recorded.GetStatus().GetManagedResources()) {
-		t.Errorf("GetClusterStatus: %v, %d reads, %d resources", err, reads.Load(), len(live.GetCluster().GetStatus().GetManagedResources()))
+		t.Errorf("GetCluster live: %v, %d reads, %d resources", err, reads.Load(), len(live.GetCluster().GetStatus().GetManagedResources()))
 	}
 	// Another pass with nothing new records nothing: the etag stays.
 	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {

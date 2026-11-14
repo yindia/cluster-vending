@@ -80,8 +80,6 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 		return true, printClusters(w, m.GetClusters(), wide)
 	case *cloudv1.GetClusterResponse:
 		return true, describeCluster(w, m.GetCluster())
-	case *cloudv1.GetClusterStatusResponse:
-		return true, describeCluster(w, m.GetCluster())
 	case *cloudv1.CreateClusterResponse:
 		return true, mutatedCluster(w, m.GetCluster(), "created")
 	case *cloudv1.UpdateClusterResponse:
@@ -98,8 +96,6 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 	case *cloudv1.ListNetworksResponse:
 		return true, printNetworks(w, m.GetNetworks(), wide)
 	case *cloudv1.GetNetworkResponse:
-		return true, describeNetwork(w, m.GetNetwork())
-	case *cloudv1.GetNetworkStatusResponse:
 		return true, describeNetwork(w, m.GetNetwork())
 	case *cloudv1.CreateNetworkResponse:
 		return true, mutatedNetwork(w, m.GetNetwork(), "created")

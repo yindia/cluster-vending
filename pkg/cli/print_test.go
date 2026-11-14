@@ -143,7 +143,7 @@ func TestPrintClusterDescribePausedAndEmpty(t *testing.T) {
 		Scope: "channel beta tier 0", Until: timestamppb.New(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))}
 	cl.Status.ManagedResources, cl.Status.RecentEvents = nil, nil
 
-	got := printed(t, &cloudv1.GetClusterStatusResponse{Cluster: cl}, OutputTable)
+	got := printed(t, &cloudv1.GetClusterResponse{Cluster: cl}, OutputTable)
 
 	for _, want := range []string{
 		"Paused:        everything: provider upgrade (tenant, by alice since 2026-11-14T11:00:00Z)\n",

@@ -106,6 +106,8 @@ type Options struct {
 	// PageSize and PageToken page list results.
 	PageSize  int32
 	PageToken string
+	// Live is --live of get: the status read now, not the recorded one.
+	Live bool
 	// OnlyRemoved is --only-removed of cluster deprecations.
 	OnlyRemoved bool
 	// Namespace is --namespace of cluster recommendations: one namespace of

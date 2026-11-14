@@ -45,7 +45,7 @@ func NetworkGet(ctx context.Context, c Clients, o Options) (proto.Message, error
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
-	return call(ctx, &cloudv1.GetNetworkRequest{TenantId: o.Tenant, NetworkId: o.ID}, c.Network.GetNetwork)
+	return call(ctx, &cloudv1.GetNetworkRequest{TenantId: o.Tenant, NetworkId: o.ID, Live: o.Live}, c.Network.GetNetwork)
 }
 
 // NetworkList calls NetworkService.ListNetworks.
@@ -135,12 +135,12 @@ func NetworkImport(ctx context.Context, c Clients, o Options) (proto.Message, er
 	id := res.(*cloudv1.ImportNetworkResponse).GetNetwork().GetId()
 	var last proto.Message
 	err = waitUntil(ctx, o, "network "+id, false, func(ctx context.Context) (observation, error) {
-		res, err := call(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id}, c.Network.GetNetworkStatus)
+		res, err := call(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id, Live: true}, c.Network.GetNetwork)
 		if err != nil {
 			return observation{}, err
 		}
 		last = res
-		st := res.(*cloudv1.GetNetworkStatusResponse).GetNetwork().GetStatus()
+		st := res.(*cloudv1.GetNetworkResponse).GetNetwork().GetStatus()
 		return importObservation(st.GetState().String(), st.GetMessage(), st.GetImport(), len(st.GetManagedResources()),
 			st.GetState() == cloudv1.NetworkState_NETWORK_STATE_FAILED), nil
 	})
@@ -162,15 +162,6 @@ func NetworkTakeOver(ctx context.Context, c Clients, o Options) (proto.Message, 
 	return waitNetwork(ctx, c, o, o.Tenant, o.ID, false)
 }
 
-// NetworkStatus calls NetworkService.GetNetworkStatus: the network with
-// its status read live from the management cluster.
-func NetworkStatus(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
-		return nil, err
-	}
-	return call(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: o.Tenant, NetworkId: o.ID}, c.Network.GetNetworkStatus)
-}
-
 // waitNetwork waits until the network is READY, or IMPORTED with its
 // resources observed (gone: deleted), and returns its last read. A call
 // only stores what was asked for; what goes wrong applying it is the
@@ -179,12 +170,12 @@ func waitNetwork(ctx context.Context, c Clients, o Options, tenant, id string, g
 	var last proto.Message
 	err := waitUntil(ctx, o, "network "+id, gone, func(ctx context.Context) (observation, error) {
 		// The live status: Get returns what the server last recorded.
-		res, err := call(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id}, c.Network.GetNetworkStatus)
+		res, err := call(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id, Live: true}, c.Network.GetNetwork)
 		if err != nil {
 			return observation{}, err
 		}
 		last = res
-		st := res.(*cloudv1.GetNetworkStatusResponse).GetNetwork().GetStatus()
+		st := res.(*cloudv1.GetNetworkResponse).GetNetwork().GetStatus()
 		state := st.GetState()
 		return observation{
 			state: state.String(), message: st.GetMessage(),

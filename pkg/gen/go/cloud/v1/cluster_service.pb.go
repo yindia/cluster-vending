@@ -479,7 +479,12 @@ type GetClusterRequest struct {
 	// "tenant-<id>" fits the 63-char Kubernetes limit.
 	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// Cluster.id.
-	ClusterId     string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	// Read the status now from the cluster's managed resources in the
+	// management cluster (their conditions, the EKS endpoint, versions, ...)
+	// instead of the status last recorded. UNAVAILABLE when the management
+	// cluster cannot be read.
+	Live          bool `protobuf:"varint,3,opt,name=live,proto3" json:"live,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -528,102 +533,11 @@ func (x *GetClusterRequest) GetClusterId() string {
 	return ""
 }
 
-type GetClusterStatusRequest struct {
-	state    protoimpl.MessageState `protogen:"open.v1"`
-	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// Cluster.id.
-	ClusterId     string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetClusterStatusRequest) Reset() {
-	*x = GetClusterStatusRequest{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetClusterStatusRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetClusterStatusRequest) ProtoMessage() {}
-
-func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[8]
+func (x *GetClusterRequest) GetLive() bool {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
+		return x.Live
 	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetClusterStatusRequest.ProtoReflect.Descriptor instead.
-func (*GetClusterStatusRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *GetClusterStatusRequest) GetTenantId() string {
-	if x != nil {
-		return x.TenantId
-	}
-	return ""
-}
-
-func (x *GetClusterStatusRequest) GetClusterId() string {
-	if x != nil {
-		return x.ClusterId
-	}
-	return ""
-}
-
-type GetClusterStatusResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The cluster as GetCluster returns it, with status read live.
-	Cluster       *Cluster `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetClusterStatusResponse) Reset() {
-	*x = GetClusterStatusResponse{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetClusterStatusResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetClusterStatusResponse) ProtoMessage() {}
-
-func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetClusterStatusResponse.ProtoReflect.Descriptor instead.
-func (*GetClusterStatusResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *GetClusterStatusResponse) GetCluster() *Cluster {
-	if x != nil {
-		return x.Cluster
-	}
-	return nil
+	return false
 }
 
 type WatchClusterRequest struct {
@@ -637,7 +551,7 @@ type WatchClusterRequest struct {
 
 func (x *WatchClusterRequest) Reset() {
 	*x = WatchClusterRequest{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -649,7 +563,7 @@ func (x *WatchClusterRequest) String() string {
 func (*WatchClusterRequest) ProtoMessage() {}
 
 func (x *WatchClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[10]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -662,7 +576,7 @@ func (x *WatchClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchClusterRequest.ProtoReflect.Descriptor instead.
 func (*WatchClusterRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{10}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WatchClusterRequest) GetTenantId() string {
@@ -694,7 +608,7 @@ type WatchClusterResponse struct {
 
 func (x *WatchClusterResponse) Reset() {
 	*x = WatchClusterResponse{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -706,7 +620,7 @@ func (x *WatchClusterResponse) String() string {
 func (*WatchClusterResponse) ProtoMessage() {}
 
 func (x *WatchClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[11]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -719,7 +633,7 @@ func (x *WatchClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchClusterResponse.ProtoReflect.Descriptor instead.
 func (*WatchClusterResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{11}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WatchClusterResponse) GetCluster() *Cluster {
@@ -752,7 +666,7 @@ type GetClusterResponse struct {
 
 func (x *GetClusterResponse) Reset() {
 	*x = GetClusterResponse{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[12]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -764,7 +678,7 @@ func (x *GetClusterResponse) String() string {
 func (*GetClusterResponse) ProtoMessage() {}
 
 func (x *GetClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[12]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -777,7 +691,7 @@ func (x *GetClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{12}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetClusterResponse) GetCluster() *Cluster {
@@ -804,7 +718,7 @@ type ListClustersRequest struct {
 
 func (x *ListClustersRequest) Reset() {
 	*x = ListClustersRequest{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[13]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -816,7 +730,7 @@ func (x *ListClustersRequest) String() string {
 func (*ListClustersRequest) ProtoMessage() {}
 
 func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[13]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +743,7 @@ func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClustersRequest.ProtoReflect.Descriptor instead.
 func (*ListClustersRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{13}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListClustersRequest) GetTenantId() string {
@@ -864,7 +778,7 @@ type ListClustersResponse struct {
 
 func (x *ListClustersResponse) Reset() {
 	*x = ListClustersResponse{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[14]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -876,7 +790,7 @@ func (x *ListClustersResponse) String() string {
 func (*ListClustersResponse) ProtoMessage() {}
 
 func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[14]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -889,7 +803,7 @@ func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClustersResponse.ProtoReflect.Descriptor instead.
 func (*ListClustersResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{14}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListClustersResponse) GetClusters() []*Cluster {
@@ -970,7 +884,7 @@ type UpdateClusterRequest struct {
 
 func (x *UpdateClusterRequest) Reset() {
 	*x = UpdateClusterRequest{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[15]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -982,7 +896,7 @@ func (x *UpdateClusterRequest) String() string {
 func (*UpdateClusterRequest) ProtoMessage() {}
 
 func (x *UpdateClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[15]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -995,7 +909,7 @@ func (x *UpdateClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateClusterRequest.ProtoReflect.Descriptor instead.
 func (*UpdateClusterRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{15}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateClusterRequest) GetTenantId() string {
@@ -1045,7 +959,7 @@ type UpdateClusterResponse struct {
 
 func (x *UpdateClusterResponse) Reset() {
 	*x = UpdateClusterResponse{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[16]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1057,7 +971,7 @@ func (x *UpdateClusterResponse) String() string {
 func (*UpdateClusterResponse) ProtoMessage() {}
 
 func (x *UpdateClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[16]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1070,7 +984,7 @@ func (x *UpdateClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateClusterResponse.ProtoReflect.Descriptor instead.
 func (*UpdateClusterResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{16}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *UpdateClusterResponse) GetCluster() *Cluster {
@@ -1109,7 +1023,7 @@ type DeleteClusterRequest struct {
 
 func (x *DeleteClusterRequest) Reset() {
 	*x = DeleteClusterRequest{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[17]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1121,7 +1035,7 @@ func (x *DeleteClusterRequest) String() string {
 func (*DeleteClusterRequest) ProtoMessage() {}
 
 func (x *DeleteClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[17]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1134,7 +1048,7 @@ func (x *DeleteClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteClusterRequest.ProtoReflect.Descriptor instead.
 func (*DeleteClusterRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{17}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeleteClusterRequest) GetTenantId() string {
@@ -1175,7 +1089,7 @@ type DeleteClusterResponse struct {
 
 func (x *DeleteClusterResponse) Reset() {
 	*x = DeleteClusterResponse{}
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[18]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1187,7 +1101,7 @@ func (x *DeleteClusterResponse) String() string {
 func (*DeleteClusterResponse) ProtoMessage() {}
 
 func (x *DeleteClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_cluster_service_proto_msgTypes[18]
+	mi := &file_cloud_v1_cluster_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1200,7 +1114,7 @@ func (x *DeleteClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteClusterResponse.ProtoReflect.Descriptor instead.
 func (*DeleteClusterResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{18}
+	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DeleteClusterResponse) GetCluster() *Cluster {
@@ -1245,17 +1159,12 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\trequestId\"D\n" +
 	"\x15CreateClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\x8a\x01\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\x9e\x01\n" +
 	"\x11GetClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\"\x90\x01\n" +
-	"\x17GetClusterStatusRequest\x12L\n" +
-	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
-	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\"G\n" +
-	"\x18GetClusterStatusResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\x8c\x01\n" +
+	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12\x12\n" +
+	"\x04live\x18\x03 \x01(\bR\x04live\"\x8c\x01\n" +
 	"\x13WatchClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -1292,14 +1201,13 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\x12\x14\n" +
 	"\x05force\x18\x04 \x01(\bR\x05force\"D\n" +
 	"\x15DeleteClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster2\xe3\b\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster2\x83\b\n" +
 	"\x0eClusterService\x12P\n" +
 	"\rCreateCluster\x12\x1e.cloud.v1.CreateClusterRequest\x1a\x1f.cloud.v1.CreateClusterResponse\x12P\n" +
 	"\rImportCluster\x12\x1e.cloud.v1.ImportClusterRequest\x1a\x1f.cloud.v1.ImportClusterResponse\x12V\n" +
 	"\x0fTakeOverCluster\x12 .cloud.v1.TakeOverClusterRequest\x1a!.cloud.v1.TakeOverClusterResponse\x12L\n" +
 	"\n" +
-	"GetCluster\x12\x1b.cloud.v1.GetClusterRequest\x1a\x1c.cloud.v1.GetClusterResponse\"\x03\x90\x02\x01\x12^\n" +
-	"\x10GetClusterStatus\x12!.cloud.v1.GetClusterStatusRequest\x1a\".cloud.v1.GetClusterStatusResponse\"\x03\x90\x02\x01\x12s\n" +
+	"GetCluster\x12\x1b.cloud.v1.GetClusterRequest\x1a\x1c.cloud.v1.GetClusterResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x17ListClusterDeprecations\x12(.cloud.v1.ListClusterDeprecationsRequest\x1a).cloud.v1.ListClusterDeprecationsResponse\"\x03\x90\x02\x01\x12a\n" +
 	"\x11ListClusterEvents\x12\".cloud.v1.ListClusterEventsRequest\x1a#.cloud.v1.ListClusterEventsResponse\"\x03\x90\x02\x01\x12|\n" +
 	"\x1aListClusterRecommendations\x12+.cloud.v1.ListClusterRecommendationsRequest\x1a,.cloud.v1.ListClusterRecommendationsResponse\"\x03\x90\x02\x01\x12R\n" +
@@ -1321,7 +1229,7 @@ func file_cloud_v1_cluster_service_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_cluster_service_proto_rawDescData
 }
 
-var file_cloud_v1_cluster_service_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_cloud_v1_cluster_service_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_cloud_v1_cluster_service_proto_goTypes = []any{
 	(*ImportClusterRequest)(nil),               // 0: cloud.v1.ImportClusterRequest
 	(*AwsImportCluster)(nil),                   // 1: cloud.v1.AwsImportCluster
@@ -1331,73 +1239,68 @@ var file_cloud_v1_cluster_service_proto_goTypes = []any{
 	(*CreateClusterRequest)(nil),               // 5: cloud.v1.CreateClusterRequest
 	(*CreateClusterResponse)(nil),              // 6: cloud.v1.CreateClusterResponse
 	(*GetClusterRequest)(nil),                  // 7: cloud.v1.GetClusterRequest
-	(*GetClusterStatusRequest)(nil),            // 8: cloud.v1.GetClusterStatusRequest
-	(*GetClusterStatusResponse)(nil),           // 9: cloud.v1.GetClusterStatusResponse
-	(*WatchClusterRequest)(nil),                // 10: cloud.v1.WatchClusterRequest
-	(*WatchClusterResponse)(nil),               // 11: cloud.v1.WatchClusterResponse
-	(*GetClusterResponse)(nil),                 // 12: cloud.v1.GetClusterResponse
-	(*ListClustersRequest)(nil),                // 13: cloud.v1.ListClustersRequest
-	(*ListClustersResponse)(nil),               // 14: cloud.v1.ListClustersResponse
-	(*UpdateClusterRequest)(nil),               // 15: cloud.v1.UpdateClusterRequest
-	(*UpdateClusterResponse)(nil),              // 16: cloud.v1.UpdateClusterResponse
-	(*DeleteClusterRequest)(nil),               // 17: cloud.v1.DeleteClusterRequest
-	(*DeleteClusterResponse)(nil),              // 18: cloud.v1.DeleteClusterResponse
-	(*Cluster)(nil),                            // 19: cloud.v1.Cluster
-	(*ManagedResourceEvent)(nil),               // 20: cloud.v1.ManagedResourceEvent
-	(*fieldmaskpb.FieldMask)(nil),              // 21: google.protobuf.FieldMask
-	(*Plan)(nil),                               // 22: cloud.v1.Plan
-	(*ListClusterDeprecationsRequest)(nil),     // 23: cloud.v1.ListClusterDeprecationsRequest
-	(*ListClusterEventsRequest)(nil),           // 24: cloud.v1.ListClusterEventsRequest
-	(*ListClusterRecommendationsRequest)(nil),  // 25: cloud.v1.ListClusterRecommendationsRequest
-	(*ListClusterDeprecationsResponse)(nil),    // 26: cloud.v1.ListClusterDeprecationsResponse
-	(*ListClusterEventsResponse)(nil),          // 27: cloud.v1.ListClusterEventsResponse
-	(*ListClusterRecommendationsResponse)(nil), // 28: cloud.v1.ListClusterRecommendationsResponse
+	(*WatchClusterRequest)(nil),                // 8: cloud.v1.WatchClusterRequest
+	(*WatchClusterResponse)(nil),               // 9: cloud.v1.WatchClusterResponse
+	(*GetClusterResponse)(nil),                 // 10: cloud.v1.GetClusterResponse
+	(*ListClustersRequest)(nil),                // 11: cloud.v1.ListClustersRequest
+	(*ListClustersResponse)(nil),               // 12: cloud.v1.ListClustersResponse
+	(*UpdateClusterRequest)(nil),               // 13: cloud.v1.UpdateClusterRequest
+	(*UpdateClusterResponse)(nil),              // 14: cloud.v1.UpdateClusterResponse
+	(*DeleteClusterRequest)(nil),               // 15: cloud.v1.DeleteClusterRequest
+	(*DeleteClusterResponse)(nil),              // 16: cloud.v1.DeleteClusterResponse
+	(*Cluster)(nil),                            // 17: cloud.v1.Cluster
+	(*ManagedResourceEvent)(nil),               // 18: cloud.v1.ManagedResourceEvent
+	(*fieldmaskpb.FieldMask)(nil),              // 19: google.protobuf.FieldMask
+	(*Plan)(nil),                               // 20: cloud.v1.Plan
+	(*ListClusterDeprecationsRequest)(nil),     // 21: cloud.v1.ListClusterDeprecationsRequest
+	(*ListClusterEventsRequest)(nil),           // 22: cloud.v1.ListClusterEventsRequest
+	(*ListClusterRecommendationsRequest)(nil),  // 23: cloud.v1.ListClusterRecommendationsRequest
+	(*ListClusterDeprecationsResponse)(nil),    // 24: cloud.v1.ListClusterDeprecationsResponse
+	(*ListClusterEventsResponse)(nil),          // 25: cloud.v1.ListClusterEventsResponse
+	(*ListClusterRecommendationsResponse)(nil), // 26: cloud.v1.ListClusterRecommendationsResponse
 }
 var file_cloud_v1_cluster_service_proto_depIdxs = []int32{
 	1,  // 0: cloud.v1.ImportClusterRequest.aws:type_name -> cloud.v1.AwsImportCluster
-	19, // 1: cloud.v1.ImportClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	19, // 2: cloud.v1.TakeOverClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	19, // 3: cloud.v1.CreateClusterRequest.cluster:type_name -> cloud.v1.Cluster
-	19, // 4: cloud.v1.CreateClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	19, // 5: cloud.v1.GetClusterStatusResponse.cluster:type_name -> cloud.v1.Cluster
-	19, // 6: cloud.v1.WatchClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	20, // 7: cloud.v1.WatchClusterResponse.events:type_name -> cloud.v1.ManagedResourceEvent
-	19, // 8: cloud.v1.GetClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	19, // 9: cloud.v1.ListClustersResponse.clusters:type_name -> cloud.v1.Cluster
-	19, // 10: cloud.v1.UpdateClusterRequest.cluster:type_name -> cloud.v1.Cluster
-	21, // 11: cloud.v1.UpdateClusterRequest.update_mask:type_name -> google.protobuf.FieldMask
-	19, // 12: cloud.v1.UpdateClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	22, // 13: cloud.v1.UpdateClusterResponse.plan:type_name -> cloud.v1.Plan
-	19, // 14: cloud.v1.DeleteClusterResponse.cluster:type_name -> cloud.v1.Cluster
-	5,  // 15: cloud.v1.ClusterService.CreateCluster:input_type -> cloud.v1.CreateClusterRequest
-	0,  // 16: cloud.v1.ClusterService.ImportCluster:input_type -> cloud.v1.ImportClusterRequest
-	3,  // 17: cloud.v1.ClusterService.TakeOverCluster:input_type -> cloud.v1.TakeOverClusterRequest
-	7,  // 18: cloud.v1.ClusterService.GetCluster:input_type -> cloud.v1.GetClusterRequest
-	8,  // 19: cloud.v1.ClusterService.GetClusterStatus:input_type -> cloud.v1.GetClusterStatusRequest
-	23, // 20: cloud.v1.ClusterService.ListClusterDeprecations:input_type -> cloud.v1.ListClusterDeprecationsRequest
-	24, // 21: cloud.v1.ClusterService.ListClusterEvents:input_type -> cloud.v1.ListClusterEventsRequest
-	25, // 22: cloud.v1.ClusterService.ListClusterRecommendations:input_type -> cloud.v1.ListClusterRecommendationsRequest
-	13, // 23: cloud.v1.ClusterService.ListClusters:input_type -> cloud.v1.ListClustersRequest
-	15, // 24: cloud.v1.ClusterService.UpdateCluster:input_type -> cloud.v1.UpdateClusterRequest
-	10, // 25: cloud.v1.ClusterService.WatchCluster:input_type -> cloud.v1.WatchClusterRequest
-	17, // 26: cloud.v1.ClusterService.DeleteCluster:input_type -> cloud.v1.DeleteClusterRequest
-	6,  // 27: cloud.v1.ClusterService.CreateCluster:output_type -> cloud.v1.CreateClusterResponse
-	2,  // 28: cloud.v1.ClusterService.ImportCluster:output_type -> cloud.v1.ImportClusterResponse
-	4,  // 29: cloud.v1.ClusterService.TakeOverCluster:output_type -> cloud.v1.TakeOverClusterResponse
-	12, // 30: cloud.v1.ClusterService.GetCluster:output_type -> cloud.v1.GetClusterResponse
-	9,  // 31: cloud.v1.ClusterService.GetClusterStatus:output_type -> cloud.v1.GetClusterStatusResponse
-	26, // 32: cloud.v1.ClusterService.ListClusterDeprecations:output_type -> cloud.v1.ListClusterDeprecationsResponse
-	27, // 33: cloud.v1.ClusterService.ListClusterEvents:output_type -> cloud.v1.ListClusterEventsResponse
-	28, // 34: cloud.v1.ClusterService.ListClusterRecommendations:output_type -> cloud.v1.ListClusterRecommendationsResponse
-	14, // 35: cloud.v1.ClusterService.ListClusters:output_type -> cloud.v1.ListClustersResponse
-	16, // 36: cloud.v1.ClusterService.UpdateCluster:output_type -> cloud.v1.UpdateClusterResponse
-	11, // 37: cloud.v1.ClusterService.WatchCluster:output_type -> cloud.v1.WatchClusterResponse
-	18, // 38: cloud.v1.ClusterService.DeleteCluster:output_type -> cloud.v1.DeleteClusterResponse
-	27, // [27:39] is the sub-list for method output_type
-	15, // [15:27] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	17, // 1: cloud.v1.ImportClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	17, // 2: cloud.v1.TakeOverClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	17, // 3: cloud.v1.CreateClusterRequest.cluster:type_name -> cloud.v1.Cluster
+	17, // 4: cloud.v1.CreateClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	17, // 5: cloud.v1.WatchClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	18, // 6: cloud.v1.WatchClusterResponse.events:type_name -> cloud.v1.ManagedResourceEvent
+	17, // 7: cloud.v1.GetClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	17, // 8: cloud.v1.ListClustersResponse.clusters:type_name -> cloud.v1.Cluster
+	17, // 9: cloud.v1.UpdateClusterRequest.cluster:type_name -> cloud.v1.Cluster
+	19, // 10: cloud.v1.UpdateClusterRequest.update_mask:type_name -> google.protobuf.FieldMask
+	17, // 11: cloud.v1.UpdateClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	20, // 12: cloud.v1.UpdateClusterResponse.plan:type_name -> cloud.v1.Plan
+	17, // 13: cloud.v1.DeleteClusterResponse.cluster:type_name -> cloud.v1.Cluster
+	5,  // 14: cloud.v1.ClusterService.CreateCluster:input_type -> cloud.v1.CreateClusterRequest
+	0,  // 15: cloud.v1.ClusterService.ImportCluster:input_type -> cloud.v1.ImportClusterRequest
+	3,  // 16: cloud.v1.ClusterService.TakeOverCluster:input_type -> cloud.v1.TakeOverClusterRequest
+	7,  // 17: cloud.v1.ClusterService.GetCluster:input_type -> cloud.v1.GetClusterRequest
+	21, // 18: cloud.v1.ClusterService.ListClusterDeprecations:input_type -> cloud.v1.ListClusterDeprecationsRequest
+	22, // 19: cloud.v1.ClusterService.ListClusterEvents:input_type -> cloud.v1.ListClusterEventsRequest
+	23, // 20: cloud.v1.ClusterService.ListClusterRecommendations:input_type -> cloud.v1.ListClusterRecommendationsRequest
+	11, // 21: cloud.v1.ClusterService.ListClusters:input_type -> cloud.v1.ListClustersRequest
+	13, // 22: cloud.v1.ClusterService.UpdateCluster:input_type -> cloud.v1.UpdateClusterRequest
+	8,  // 23: cloud.v1.ClusterService.WatchCluster:input_type -> cloud.v1.WatchClusterRequest
+	15, // 24: cloud.v1.ClusterService.DeleteCluster:input_type -> cloud.v1.DeleteClusterRequest
+	6,  // 25: cloud.v1.ClusterService.CreateCluster:output_type -> cloud.v1.CreateClusterResponse
+	2,  // 26: cloud.v1.ClusterService.ImportCluster:output_type -> cloud.v1.ImportClusterResponse
+	4,  // 27: cloud.v1.ClusterService.TakeOverCluster:output_type -> cloud.v1.TakeOverClusterResponse
+	10, // 28: cloud.v1.ClusterService.GetCluster:output_type -> cloud.v1.GetClusterResponse
+	24, // 29: cloud.v1.ClusterService.ListClusterDeprecations:output_type -> cloud.v1.ListClusterDeprecationsResponse
+	25, // 30: cloud.v1.ClusterService.ListClusterEvents:output_type -> cloud.v1.ListClusterEventsResponse
+	26, // 31: cloud.v1.ClusterService.ListClusterRecommendations:output_type -> cloud.v1.ListClusterRecommendationsResponse
+	12, // 32: cloud.v1.ClusterService.ListClusters:output_type -> cloud.v1.ListClustersResponse
+	14, // 33: cloud.v1.ClusterService.UpdateCluster:output_type -> cloud.v1.UpdateClusterResponse
+	9,  // 34: cloud.v1.ClusterService.WatchCluster:output_type -> cloud.v1.WatchClusterResponse
+	16, // 35: cloud.v1.ClusterService.DeleteCluster:output_type -> cloud.v1.DeleteClusterResponse
+	25, // [25:36] is the sub-list for method output_type
+	14, // [14:25] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_service_proto_init() }
@@ -1420,7 +1323,7 @@ func file_cloud_v1_cluster_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_cluster_service_proto_rawDesc), len(file_cloud_v1_cluster_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

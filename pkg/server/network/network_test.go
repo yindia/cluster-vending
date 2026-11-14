@@ -155,12 +155,12 @@ func (f fixture) get(t *testing.T, id string) *cloudv1.Network {
 	return res.GetNetwork()
 }
 
-// status is the network as GetNetworkStatus returns it: read live.
+// status is the network as GetNetwork with live returns it: read live.
 func (f fixture) status(t *testing.T, id string) *cloudv1.Network {
 	t.Helper()
-	res, err := f.svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id})
+	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id, Live: true})
 	if err != nil {
-		t.Fatalf("GetNetworkStatus: %v", err)
+		t.Fatalf("GetNetwork live: %v", err)
 	}
 	return res.GetNetwork()
 }
@@ -188,7 +188,7 @@ func (f fixture) attachGateway(t *testing.T, id string) *cloudv1.Network {
 	if err := f.svc.Reconcile(ctx, tenant, id); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	res, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: id})
+	res, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: id, Live: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestGetNetworkReportsResources(t *testing.T) {
 	n := f.create(t, "prod", nil)
 	f.markReady(t, "")
 
-	res, err := f.svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
+	res, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +616,7 @@ func TestDeleteNetwork(t *testing.T) {
 	// Reads change nothing: the loop's Reconcile moves the deletion on,
 	// tier by tier; dependencies outlive their dependents.
 	for i := 0; ; i++ {
-		_, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
+		_, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: true})
 		if connect.CodeOf(err) == connect.CodeNotFound {
 			break
 		}
@@ -625,7 +625,7 @@ func TestDeleteNetwork(t *testing.T) {
 		}
 		before := count(&awsec2.RouteTableList{}) + count(&awsec2.NATGatewayList{}) + count(&awsec2.EIPList{}) +
 			count(&awsec2.SubnetList{}) + count(&awsec2.VPCList{})
-		if _, err := f.svc.GetNetworkStatus(ctx, &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()}); err != nil {
+		if _, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: true}); err != nil {
 			t.Fatal(err)
 		}
 		if after := count(&awsec2.RouteTableList{}) + count(&awsec2.NATGatewayList{}) + count(&awsec2.EIPList{}) +
@@ -663,7 +663,7 @@ func TestDeleteNetworkInUse(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
 	}
-	got, err := f.svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: n.GetId()})
+	got, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: true})
 	if err != nil || got.GetNetwork().GetStatus().GetClusterIds()[0] != "eks" {
 		t.Errorf("cluster_ids = %v, %v", got.GetNetwork().GetStatus().GetClusterIds(), err)
 	}
@@ -693,7 +693,7 @@ func TestDatabaseErrorsAreInternal(t *testing.T) {
 	networks.EXPECT().Get(gomock.Any(), tenant, unknownID).Return(nil, errors.New("connection refused"))
 	svc := NewNetworkService(reconcile.Deps{Store: store, Kube: fakeKube(t)})
 
-	_, err := svc.GetNetworkStatus(t.Context(), &cloudv1.GetNetworkStatusRequest{TenantId: tenant, NetworkId: unknownID})
+	_, err := svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: unknownID, Live: true})
 	if connect.CodeOf(err) != connect.CodeInternal {
 		t.Fatalf("err = %v, want INTERNAL", err)
 	}

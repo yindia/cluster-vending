@@ -30,6 +30,8 @@ type verb struct {
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
 	removed, oidc, warnings, noPlatform bool
+	// live adds --live: read the status now instead of the recorded one.
+	live bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
 	// rollout adds --channel and --tier (admin rollout get).
@@ -50,7 +52,7 @@ func crud(noun, kind string, create, get, list, update, del cli.Command) []verb 
 	return []verb{
 		{use: "create", short: fmt.Sprintf("Create a %s from a %s manifest (-f); prints its server-assigned id", noun, kind),
 			run: create, args: cobra.NoArgs, input: true, wait: true},
-		{use: "get <id>", short: "Show a " + noun, run: get, args: cobra.ExactArgs(1)},
+		{use: "get <id>", short: "Show a " + noun + "; --live reads its status now instead of the one last recorded", run: get, args: cobra.ExactArgs(1), live: true},
 		{use: "list", short: "List " + noun + "s", run: list, args: cobra.NoArgs, page: true},
 		{use: "update [id]", short: fmt.Sprintf("Update the --update-mask fields of a %s from a %s manifest (-f); the id is --id or metadata.id", noun, kind),
 			run: update, args: cobra.MaximumNArgs(1), input: true, etag: true, mask: true, wait: true},
@@ -157,6 +159,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.Namespace, "namespace", "", "only the workloads of this namespace of the cluster")
 			f.BoolVar(&o.OnlyChanges, "only-changes", false, "only the containers whose recommended requests differ from theirs by a tenth or more")
 		}
+		if v.live {
+			f.BoolVar(&o.Live, "live", false, "read the status now from the management cluster instead of the one the controller last recorded")
+		}
 		if v.removed {
 			f.BoolVar(&o.OnlyRemoved, "only-removed", false, "only the objects whose API version is removed at the target version")
 		}
@@ -234,8 +239,6 @@ func newNetworkCmd() *cobra.Command {
 			run: cli.NetworkImport, args: cobra.NoArgs, input: true, wait: true},
 		verb{use: "takeover <id>", short: "Take over an imported network: the platform becomes its owner",
 			run: cli.NetworkTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
-		verb{use: "status <id>", short: "Show a network with its live status (get shows the status last recorded)",
-			run: cli.NetworkStatus, args: cobra.ExactArgs(1)},
 		verb{use: "events <id>", short: "List what the controller reported about the network, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
 			run: cli.NetworkEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
 		watchVerb("network", cli.NetworkWatch))
@@ -289,8 +292,6 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterImport, args: cobra.NoArgs, input: true, wait: true},
 		verb{use: "takeover <id>", short: "Take over an imported cluster: the platform becomes its owner",
 			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true, noPlatform: true},
-		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",
-			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
 			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, removed: true},
 		verb{use: "recommendations <id>", short: "Recommend the requests and limits of the cluster's containers from a week of recorded usage (read-only: nothing is installed); -o table, yaml or json",

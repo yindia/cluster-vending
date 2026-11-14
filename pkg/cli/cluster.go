@@ -46,16 +46,7 @@ func ClusterGet(ctx context.Context, c Clients, o Options) (proto.Message, error
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
-	return call(ctx, &cloudv1.GetClusterRequest{TenantId: o.Tenant, ClusterId: o.ID}, c.Cluster.GetCluster)
-}
-
-// ClusterStatus calls ClusterService.GetClusterStatus: the cluster with
-// its status read live from the management cluster.
-func ClusterStatus(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
-		return nil, err
-	}
-	return call(ctx, &cloudv1.GetClusterStatusRequest{TenantId: o.Tenant, ClusterId: o.ID}, c.Cluster.GetClusterStatus)
+	return call(ctx, &cloudv1.GetClusterRequest{TenantId: o.Tenant, ClusterId: o.ID, Live: o.Live}, c.Cluster.GetCluster)
 }
 
 // ClusterList calls ClusterService.ListClusters.
@@ -152,12 +143,12 @@ func ClusterImport(ctx context.Context, c Clients, o Options) (proto.Message, er
 	id := res.(*cloudv1.ImportClusterResponse).GetCluster().GetId()
 	var last proto.Message
 	err = waitUntil(ctx, o, "cluster "+id, false, func(ctx context.Context) (observation, error) {
-		res, err := call(ctx, &cloudv1.GetClusterStatusRequest{TenantId: tenant, ClusterId: id}, c.Cluster.GetClusterStatus)
+		res, err := call(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: id, Live: true}, c.Cluster.GetCluster)
 		if err != nil {
 			return observation{}, err
 		}
 		last = res
-		st := res.(*cloudv1.GetClusterStatusResponse).GetCluster().GetStatus()
+		st := res.(*cloudv1.GetClusterResponse).GetCluster().GetStatus()
 		return importObservation(st.GetState().String(), st.GetMessage(), st.GetImport(), len(st.GetManagedResources()),
 			st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_FAILED), nil
 	})
@@ -187,13 +178,13 @@ func ClusterTakeOver(ctx context.Context, c Clients, o Options) (proto.Message, 
 func waitCluster(ctx context.Context, c Clients, o Options, tenant, id string, gone bool) (proto.Message, error) {
 	var last proto.Message
 	err := waitUntil(ctx, o, "cluster "+id, gone, func(ctx context.Context) (observation, error) {
-		// The live status: Get returns what the server last recorded.
-		res, err := call(ctx, &cloudv1.GetClusterStatusRequest{TenantId: tenant, ClusterId: id}, c.Cluster.GetClusterStatus)
+		// The live status: without live, Get returns what was last recorded.
+		res, err := call(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: id, Live: true}, c.Cluster.GetCluster)
 		if err != nil {
 			return observation{}, err
 		}
 		last = res
-		st := res.(*cloudv1.GetClusterStatusResponse).GetCluster().GetStatus()
+		st := res.(*cloudv1.GetClusterResponse).GetCluster().GetStatus()
 		state := st.GetState()
 		return observation{
 			state: state.String(), message: st.GetMessage(),

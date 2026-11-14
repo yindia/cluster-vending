@@ -145,7 +145,7 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 	if row.AppliedGeneration < row.Generation {
 		// Its Observe-only objects are not there yet: there is nothing to own.
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Sprintf("cluster %s is still being imported; retry once its resources are observed (cluster status)", row.ID))
+			fmt.Sprintf("cluster %s is still being imported; retry once its resources are observed (cluster get --live)", row.ID))
 	}
 	imp := reconcilecluster.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {

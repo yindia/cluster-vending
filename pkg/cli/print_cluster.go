@@ -104,6 +104,14 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	if err := section(w, "Conditions", conditionHeader, conditionRows(st.GetConditions())); err != nil {
 		return err
 	}
+	addons := make([][]string, 0, len(st.GetAws().GetAddons()))
+	for _, a := range st.GetAws().GetAddons() {
+		addons = append(addons, []string{a.GetName(), orNone(a.GetVersion()), word(a.GetState().String(), "MANAGED_RESOURCE_STATE_"),
+			orNone(oneLine(a.GetMessage()))})
+	}
+	if err := section(w, "Add-ons", []string{"NAME", "VERSION", "STATE", "MESSAGE"}, addons); err != nil {
+		return err
+	}
 	components := make([][]string, 0, len(st.GetPlatformComponents()))
 	for _, p := range st.GetPlatformComponents() {
 		components = append(components, []string{p.GetName(), orNone(p.GetVersion()), word(p.GetPhase().String(), "COMPONENT_PHASE_"),

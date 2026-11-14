@@ -52,6 +52,10 @@ func testCluster() *cloudv1.Cluster {
 					Synced: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, Ready: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Message: "creating\nnode group"},
 			},
 			Conditions: []*cloudv1.Condition{{Type: "Ready", Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, Reason: "AllResourcesReady"}},
+			Provider: &cloudv1.ClusterStatus_Aws{Aws: &cloudv1.AwsClusterStatus{Addons: []*cloudv1.AwsAddonStatus{
+				{Name: "coredns", Version: "v1.14.7-eksbuild.35", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY},
+				{Name: "aws-ebs-csi-driver", Version: "v1.68.0-eksbuild.1", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED,
+					Message: "ConfigurationConflict"}}}},
 			PlatformComponents: []*cloudv1.PlatformComponent{
 				{Name: "karpenter", Version: "1.15.1", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY, Since: ago(2 * time.Hour)}},
 			RecentEvents: []*cloudv1.Event{{Time: ago(5 * time.Minute), Type: cloudv1.EventType_EVENT_TYPE_NORMAL, Reason: "Running",
@@ -105,6 +109,10 @@ func TestPrintClusterDescribe(t *testing.T) {
 		"\nConditions:\n" +
 		"  TYPE    STATUS   REASON              MESSAGE\n" +
 		"  Ready   True     AllResourcesReady   <none>\n" +
+		"\nAdd-ons:\n" +
+		"  NAME                 VERSION               STATE    MESSAGE\n" +
+		"  coredns              v1.14.7-eksbuild.35   Ready    <none>\n" +
+		"  aws-ebs-csi-driver   v1.68.0-eksbuild.1    Failed   ConfigurationConflict\n" +
 		"\nPlatform Components:\n" +
 		"  NAME        VERSION   PHASE   AGE    MESSAGE\n" +
 		"  karpenter   1.15.1    Ready   120m   <none>\n" +

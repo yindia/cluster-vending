@@ -41,8 +41,12 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 			return false, err
 		}
 	}
-	// The platform's components first: their charts are uninstalled while
-	// the cluster and its nodes are still there.
+	// The tenant's components first, then the platform's: their charts are
+	// uninstalled while the cluster and its nodes are still there, and a
+	// tenant component may require a platform one.
+	if gone, err := s.deleteTenant(ctx, row); err != nil || !gone {
+		return false, err
+	}
 	if gone, err := s.deletePlatform(ctx, row, records); err != nil || !gone {
 		return false, err
 	}

@@ -79,6 +79,11 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	// What changed about them is logged here, once: the status alone would
 	// leave a failed component out of the controller's log.
 	s.logPlatform(ctx, current, storedPlatform(current), installed)
+	// The components the tenant enabled, after the platform's (they may
+	// require one of them); each writes its own status.
+	if terr := s.installTenant(ctx, current, installed); terr != nil {
+		perr = errors.Join(perr, fmt.Errorf("tenant components: %w", terr))
+	}
 	c, err := s.viewWith(ctx, current, FailureCondition(failed), installed)
 	if err != nil {
 		return errors.Join(failed, perr, fmt.Errorf("observe: %w", err))

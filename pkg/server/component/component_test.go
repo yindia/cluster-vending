@@ -71,6 +71,9 @@ func catalog() []cloudv1alpha1.ComponentDefinition {
 		if spec.Namespace == "" && len(spec.Includes) == 0 {
 			spec.Namespace = name
 		}
+		if spec.Provider == "" {
+			spec.Provider = cloudv1alpha1.CloudProviderAWS
+		}
 		spec.Description = "The " + name + " component."
 		return cloudv1alpha1.ComponentDefinition{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
 	}

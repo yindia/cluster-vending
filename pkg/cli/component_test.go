@@ -45,9 +45,9 @@ type componentAPI struct {
 
 func (a *componentAPI) ListComponentDefinitions(_ context.Context, req *cloudv1.ListComponentDefinitionsRequest) (*cloudv1.ListComponentDefinitionsResponse, error) {
 	policies := &cloudv1.ComponentDefinition{Name: "policies", Description: "Pod security\npolicies.", Requires: []string{"kyverno"},
-		Configurable: true, Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT}
+		Configurable: true, Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT, Provider: cloudv1.CloudProvider_CLOUD_PROVIDER_AWS}
 	karpenter := &cloudv1.ComponentDefinition{Name: "karpenter", Description: "Node autoscaling.",
-		Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM}
+		Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM, Provider: cloudv1.CloudProvider_CLOUD_PROVIDER_AWS}
 	if req.GetClusterId() != "" {
 		policies.Versions, karpenter.Versions = map[string]string{"1.37": "3.10.0"}, map[string]string{"1.37": "1.15.1"}
 	}
@@ -146,13 +146,13 @@ func TestComponentCatalogTable(t *testing.T) {
 		want string
 	}{
 		{"the catalog", Options{Tenant: "acme"},
-			"NAME        MANAGED BY   CONFIGURABLE   REQUIRES   DESCRIPTION\n" +
-				"karpenter   platform     no             <none>     Node autoscaling.\n" +
-				"policies    tenant       yes            kyverno    Pod security policies.\n"},
+			"NAME        PROVIDER   MANAGED BY   CONFIGURABLE   REQUIRES   DESCRIPTION\n" +
+				"karpenter   aws        platform     no             <none>     Node autoscaling.\n" +
+				"policies    aws        tenant       yes            kyverno    Pod security policies.\n"},
 		{"with a cluster's versions", Options{Tenant: "acme", Cluster: componentCluster},
-			"NAME        MANAGED BY   CONFIGURABLE   VERSION   REQUIRES   DESCRIPTION\n" +
-				"karpenter   platform     no             1.15.1    <none>     Node autoscaling.\n" +
-				"policies    tenant       yes            3.10.0    kyverno    Pod security policies.\n"},
+			"NAME        PROVIDER   MANAGED BY   CONFIGURABLE   VERSION   REQUIRES   DESCRIPTION\n" +
+				"karpenter   aws        platform     no             1.15.1    <none>     Node autoscaling.\n" +
+				"policies    aws        tenant       yes            3.10.0    kyverno    Pod security policies.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

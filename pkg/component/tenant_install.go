@@ -58,6 +58,9 @@ func LastRelease(e PlatformEntry, pins map[string]Pin) string {
 func PlanTenant(in PlatformInput, e PlatformEntry, tenant Values, ready map[string]string) (plan crossplaneaws.PlatformPlan, reason string) {
 	plan = in.Plan
 	plan.Components, plan.External = nil, map[string]string{}
+	if !e.Covers(in.Cluster.Provider) {
+		return plan, NotOnProvider(e.Definition, in.Cluster.Provider)
+	}
 	for _, r := range e.Requires {
 		object, ok := ready[r]
 		if !ok {

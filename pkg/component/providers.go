@@ -15,6 +15,11 @@ func (d Definition) Covers(provider string) bool {
 	return provider != "" && d.Provider == provider
 }
 
+// NotOnProvider says d is not installed on clusters of provider.
+func NotOnProvider(d Definition, provider string) string {
+	return fmt.Sprintf("not available on %s clusters: %s is for %s", provider, d.Name, d.Provider)
+}
+
 // providerProblems are what is wrong with d's provider.
 func providerProblems(d Definition) []string {
 	switch {

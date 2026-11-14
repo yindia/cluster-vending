@@ -322,8 +322,11 @@ type ComponentDefinitionSpec struct {
 	// another provider never gets it, and a tenant cannot enable it there.
 	// Every definition is for one cloud; the same component for another
 	// cloud is another definition, named <name>-<provider> (kyverno-gcp).
-	// Immutable.
+	// Immutable. Defaults to aws, the cloud every definition was for
+	// before this field: one stored without it reads as aws, so it stays
+	// valid and nothing is uninstalled.
 	// +required
+	// +kubebuilder:default=aws
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="provider is immutable; a definition for another cloud is another definition"
 	Provider CloudProvider `json:"provider"`
 	// internal marks a definition that is only installed as a member of a

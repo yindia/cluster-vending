@@ -83,6 +83,10 @@ func (s *Service) check(ctx context.Context, tenantID, clusterID, name string, v
 			}
 			req.Enabled = append(req.Enabled, c.Component)
 		}
+		if out.entry != nil && !out.entry.Covers(t.cluster.Provider) {
+			return nil, fault.Newf(fault.FailedPrecondition, "component %s is for %s and cluster %s runs on %s",
+				name, out.entry.Provider, row.Name, t.cluster.Provider)
+		}
 		if out.entry != nil {
 			// The release's values for the component are the platform's too:
 			// locked, and last in the merge.
@@ -508,8 +512,8 @@ func (s *Service) onCluster(ctx context.Context, tenantID, clusterID string) ([]
 	}
 	off := core.Off(definitions(entries))
 	for _, d := range core.TenantCatalog(definitions(entries)) {
-		if seen[d.Name] || !d.Valid {
-			continue
+		if seen[d.Name] || !d.Valid || !d.Covers(string(row.Provider)) {
+			continue // what the cluster has, or cannot have
 		}
 		message := notEnabled
 		switch why := off[d.Name]; {

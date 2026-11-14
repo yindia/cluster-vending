@@ -21,6 +21,8 @@ const (
 type Cluster struct {
 	// Name, for messages.
 	Name string
+	// Provider is the cloud the cluster runs on: aws, gcp or azure.
+	Provider string
 	// State is the cluster's stored state, for messages (e.g. PROVISIONING).
 	State string
 	// Running: the cluster is RUNNING.

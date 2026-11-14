@@ -463,12 +463,15 @@ spec:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
               provider:
+                default: aws
                 description: |-
                   provider is the cloud the component is installed on: a cluster of
                   another provider never gets it, and a tenant cannot enable it there.
                   Every definition is for one cloud; the same component for another
                   cloud is another definition, named <name>-<provider> (kyverno-gcp).
-                  Immutable.
+                  Immutable. Defaults to aws, the cloud every definition was for
+                  before this field: one stored without it reads as aws, so it stays
+                  valid and nothing is uninstalled.
                 enum:
                 - aws
                 - gcp

@@ -34,7 +34,8 @@ func catalogDescription(d *cloudv1.ComponentDefinition) string {
 }
 
 // ComponentCatalog lists the catalog: every component, with who manages
-// it. With --cluster, the version that cluster's release gives each.
+// it and the cloud it is for. With --cluster, only the components for
+// that cluster's cloud, with the version its release gives each.
 func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
@@ -44,13 +45,13 @@ func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message,
 	if err != nil || !isTable(o.Output) {
 		return res, err
 	}
-	header := []string{"NAME", "MANAGED BY", "CONFIGURABLE", "REQUIRES", "DESCRIPTION"}
+	header := []string{"NAME", "PROVIDER", "MANAGED BY", "CONFIGURABLE", "REQUIRES", "DESCRIPTION"}
 	if o.Cluster != "" {
-		header = []string{"NAME", "MANAGED BY", "CONFIGURABLE", "VERSION", "REQUIRES", "DESCRIPTION"}
+		header = []string{"NAME", "PROVIDER", "MANAGED BY", "CONFIGURABLE", "VERSION", "REQUIRES", "DESCRIPTION"}
 	}
 	var rows [][]string
 	for _, d := range res.(*cloudv1.ListComponentDefinitionsResponse).GetDefinitions() {
-		cols := []string{d.GetName(), managedBy(d.GetManagement()), yesNo(d.GetConfigurable())}
+		cols := []string{d.GetName(), cloudOf(d.GetProvider()), managedBy(d.GetManagement()), yesNo(d.GetConfigurable())}
 		if o.Cluster != "" {
 			version := none
 			for _, v := range d.GetVersions() {
@@ -61,6 +62,15 @@ func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message,
 		rows = append(rows, append(cols, orNone(strings.Join(d.GetRequires(), ", ")), orNone(catalogDescription(d))))
 	}
 	return nil, table(o.Out, header, rows)
+}
+
+// cloudOf is a definition's cloud as the catalog prints it: aws, gcp or
+// azure.
+func cloudOf(p cloudv1.CloudProvider) string {
+	if p == cloudv1.CloudProvider_CLOUD_PROVIDER_UNSPECIFIED {
+		return none
+	}
+	return strings.ToLower(strings.TrimPrefix(p.String(), "CLOUD_PROVIDER_"))
 }
 
 func managedBy(m cloudv1.ComponentManagement) string {

@@ -225,7 +225,7 @@ func (s *Service) targetOf(ctx context.Context, row *model.Cluster) (target, err
 		return target{}, service.ToConnect(err)
 	}
 	t := target{cluster: core.Cluster{
-		Name: row.Name, State: strings.TrimPrefix(row.State, "CLUSTER_STATE_"),
+		Name: row.Name, Provider: string(row.Provider), State: strings.TrimPrefix(row.State, "CLUSTER_STATE_"),
 		Running:         row.State == reconcilecluster.StateRunning,
 		Deleting:        row.State == reconcilecluster.StateDeleting,
 		Imported:        row.State == reconcilecluster.StateImported,
@@ -292,7 +292,7 @@ func definitionMessage(e entry, versions map[string]string) (*cloudv1.ComponentD
 	out := &cloudv1.ComponentDefinition{
 		Name: e.Name, Description: e.object.Spec.Description, Requires: slices.Clone(e.Requires),
 		ConflictsWithAddons: slices.Clone(e.ConflictsWithAddons), Management: management(e.Definition),
-		Configurable: configurable(e.Definition), Versions: versions,
+		Configurable: configurable(e.Definition), Versions: versions, Provider: providerOf(e.Provider),
 	}
 	if e.IsPlatform() {
 		return out, nil // fixed: its values are not a tenant's concern
@@ -308,6 +308,19 @@ func definitionMessage(e entry, versions map[string]string) (*cloudv1.ComponentD
 	return out, nil
 }
 
+// providerOf is a definition's cloud in the contract.
+func providerOf(p string) cloudv1.CloudProvider {
+	switch p {
+	case "aws":
+		return cloudv1.CloudProvider_CLOUD_PROVIDER_AWS
+	case "gcp":
+		return cloudv1.CloudProvider_CLOUD_PROVIDER_GCP
+	case "azure":
+		return cloudv1.CloudProvider_CLOUD_PROVIDER_AZURE
+	}
+	return cloudv1.CloudProvider_CLOUD_PROVIDER_UNSPECIFIED
+}
+
 // structOf is values as a Struct; nil for none.
 func structOf(v core.Values) (*structpb.Struct, error) {
 	if len(v) == 0 {
@@ -321,7 +334,8 @@ func structOf(v core.Values) (*structpb.Struct, error) {
 }
 
 // ListComponentDefinitions lists the catalog: every valid definition that
-// is not a bundle's member, the Platform ones included.
+// is not a bundle's member, the Platform ones included. With a cluster,
+// only the definitions for the cluster's cloud.
 func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.ListComponentDefinitionsRequest) (_ *cloudv1.ListComponentDefinitionsResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -332,7 +346,7 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 		return nil, err
 	}
 	var offered map[string]string
-	minor := ""
+	minor, provider := "", ""
 	if id := req.GetClusterId(); id != "" {
 		row, err := s.cluster(ctx, req.GetTenantId(), id)
 		if err != nil {
@@ -341,6 +355,7 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 		if row == nil {
 			return nil, noCluster(req.GetTenantId(), id)
 		}
+		provider = string(row.Provider)
 		t, err := s.targetOf(ctx, row)
 		if err != nil {
 			return nil, err
@@ -352,7 +367,7 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 	res := &cloudv1.ListComponentDefinitionsResponse{}
 	off := core.Off(definitions(entries))
 	for _, e := range entries {
-		if !e.Valid || e.Internal {
+		if !e.Valid || e.Internal || provider != "" && !e.Covers(provider) {
 			continue
 		}
 		var versions map[string]string

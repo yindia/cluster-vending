@@ -54,6 +54,23 @@ func storedStatus(row *model.Cluster) *cloudv1.ClusterStatus {
 	return st
 }
 
+// startedPlatform are the platform components the row's recorded status
+// says something was installed for (by name): any phase but PENDING, and
+// FAILED only once a chart was started.
+func startedPlatform(row *model.Cluster) map[string]bool {
+	out := map[string]bool{}
+	for _, c := range storedStatus(row).GetPlatformComponents() {
+		switch c.GetPhase() {
+		case cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, cloudv1.ComponentPhase_COMPONENT_PHASE_UNSPECIFIED:
+		case cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED:
+			out[c.GetName()] = c.GetChart() != ""
+		default:
+			out[c.GetName()] = true
+		}
+	}
+	return out
+}
+
 // storedPlatform is what the row's recorded status says about the
 // platform components: what a read returns, and what a pass that could
 // not look reports again.
@@ -287,6 +304,15 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 	if err != nil {
 		return in, "", "", fault.New(fault.FailedPrecondition, "the component catalog is inconsistent: "+err.Error())
 	}
+	// A cluster gets the definitions for its cloud. One installed already
+	// whose definition is now for another cloud is kept: a catalog change
+	// never uninstalls.
+	var elsewhere []string
+	in.Entries, elsewhere = component.ForProvider(in.Entries, string(row.Provider), startedPlatform(row))
+	if len(elsewhere) > 0 {
+		s.logger().WarnContext(ctx, "platform components kept although their definitions are for another cloud",
+			"cluster_id", row.ID, "provider", row.Provider, "components", elsewhere)
+	}
 	clusterPlan := s.RenderPlan(spec, row, t)
 	in.Plan = crossplaneaws.PlatformPlan{Namespace: clusterPlan.Namespace, TenantID: row.TenantID, ClusterID: row.ID,
 		ClusterPrefix: clusterPlan.Prefix}
@@ -300,7 +326,7 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 	in.IAM = crossplaneaws.ComponentIAMPlan{Namespace: clusterPlan.Namespace, ProviderConfigName: clusterPlan.ProviderConfigName,
 		TenantID: row.TenantID, ClusterID: row.ID, ClusterName: row.Name, ClusterPrefix: clusterPlan.Prefix,
 		Region: spec.GetRegion(), Tags: row.Labels}
-	in.Cluster = component.Cluster{Name: row.Name, State: row.State, Running: row.State == StateRunning,
+	in.Cluster = component.Cluster{Name: row.Name, State: row.State, Running: row.State == StateRunning, Provider: string(row.Provider),
 		KubernetesMinor: kubernetesMinor(spec.GetControlPlane().GetKubernetesVersion()),
 		// The provider spec.aws.irsa renders, or the one a taken-over
 		// cluster was imported with.

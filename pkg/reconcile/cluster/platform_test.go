@@ -47,7 +47,7 @@ func (f *fakePlatform) Release(_ context.Context, name string) (*cloudv1alpha1.R
 func platformDef(name string, requires ...string) cloudv1alpha1.ComponentDefinition {
 	return cloudv1alpha1.ComponentDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: cloudv1alpha1.ComponentDefinitionSpec{Description: name, Management: cloudv1alpha1.ComponentManagementPlatform,
+		Spec: cloudv1alpha1.ComponentDefinitionSpec{Description: name, Management: cloudv1alpha1.ComponentManagementPlatform, Provider: cloudv1alpha1.CloudProviderAWS,
 			Namespace: name + "-system", Requires: requires,
 			Install: &cloudv1alpha1.ComponentInstall{Helm: &cloudv1alpha1.HelmInstall{
 				HelmChartSource: cloudv1alpha1.HelmChartSource{Repository: "https://charts.example.com", Chart: name}}}},

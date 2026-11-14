@@ -16,7 +16,7 @@ import (
 // platform value with a placeholder, requiring the platform's engine.
 func policies() component.PlatformEntry {
 	return component.PlatformEntry{
-		Definition: component.Definition{Name: "policies", Valid: true, Management: component.Tenant, Requires: []string{"engine"},
+		Definition: component.Definition{Name: "policies", Valid: true, Management: component.Tenant, Requires: []string{"engine"}, Provider: "aws",
 			UserValues:     "mode: Audit\nlevel: baseline\n",
 			PlatformValues: component.Values{"cluster": "${cluster.name}", "level": "locked"},
 		},
@@ -27,7 +27,7 @@ func policies() component.PlatformEntry {
 func tenantInput(pins map[string]component.Pin) component.PlatformInput {
 	return component.PlatformInput{
 		Release: "r1", Pins: pins,
-		Cluster: component.Cluster{Name: "prod", Running: true, KubernetesMinor: "1.37"},
+		Cluster: component.Cluster{Name: "prod", Provider: "aws", Running: true, KubernetesMinor: "1.37"},
 		Vars: func(string) component.Vars {
 			return component.Vars{"cluster.name": "prod"}
 		},
@@ -42,6 +42,7 @@ func TestPlanTenant(t *testing.T) {
 		pins       map[string]component.Pin
 		tenant     component.Values
 		ready      map[string]string // required components installed elsewhere, with their last Release object
+		provider   string            // the cluster's, when not aws
 		wantReason string
 		wantValues component.Values
 	}{
@@ -59,6 +60,9 @@ func TestPlanTenant(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			in := tenantInput(tt.pins)
+			if tt.provider != "" {
+				in.Cluster.Provider = tt.provider
+			}
 
 			plan, reason := component.PlanTenant(in, policies(), tt.tenant, tt.ready)
 

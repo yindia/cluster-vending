@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -333,7 +334,8 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 		TenantID: row.TenantID, ClusterID: row.ID, ClusterName: row.Name, ClusterPrefix: clusterPlan.Prefix,
 		Region: spec.GetRegion(), Tags: row.Labels}
 	in.Cluster = component.Cluster{Name: row.Name, State: row.State, Running: row.State == StateRunning, Provider: string(row.Provider),
-		KubernetesMinor: kubernetesMinor(spec.GetControlPlane().GetKubernetesVersion()),
+		KubernetesMinor: componentsMinor(spec.GetControlPlane().GetKubernetesVersion(),
+			storedStatus(row).GetCurrentKubernetesVersion()),
 		// The provider spec.aws.irsa renders, or the one a taken-over
 		// cluster was imported with.
 		IRSA: HasIRSA(spec, records)}
@@ -409,6 +411,34 @@ func channelOf(spec *cloudv1.ClusterSpec) string {
 	default:
 		return cloudv1alpha1.ChannelStable
 	}
+}
+
+// componentsMinor is the Kubernetes minor the platform components are
+// planned for: the one the control plane runs (as EKS last reported it)
+// while it is behind the spec's, so an upgrade changes no component
+// (cluster-autoscaler's image is per minor) before the control plane is
+// on the new minor; the spec's otherwise (a new cluster, or one that
+// reports nothing readable).
+func componentsMinor(specVersion, running string) string {
+	want, have := kubernetesMinor(specVersion), kubernetesMinor(running)
+	wantMajor, wantMinor, okWant := minorParts(want)
+	haveMajor, haveMinor, okHave := minorParts(have)
+	if okWant && okHave && (haveMajor < wantMajor || haveMajor == wantMajor && haveMinor < wantMinor) {
+		return have
+	}
+	return want
+}
+
+// minorParts are the numbers of a "1.37" minor; ok is false for anything
+// else.
+func minorParts(minor string) (major, number int, ok bool) {
+	parts := strings.Split(minor, ".")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	major, errMajor := strconv.Atoi(parts[0])
+	number, errMinor := strconv.Atoi(parts[1])
+	return major, number, errMajor == nil && errMinor == nil
 }
 
 // kubernetesMinor is the Kubernetes minor of a version: "1.37" of "1.37" and of

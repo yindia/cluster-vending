@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"text/tabwriter"
-	"time"
 
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
@@ -43,32 +41,26 @@ func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message,
 	}
 	res, err := call(ctx, &cloudv1.ListComponentDefinitionsRequest{TenantId: o.Tenant, ClusterId: o.Cluster},
 		c.Component.ListComponentDefinitions)
-	if err != nil || o.Output != OutputTable {
+	if err != nil || !isTable(o.Output) {
 		return res, err
 	}
-	tw := tabwriter.NewWriter(o.Out, 0, 4, 2, ' ', 0)
-	header := "NAME\tMANAGED BY\tCONFIGURABLE\tREQUIRES\tDESCRIPTION"
+	header := []string{"NAME", "MANAGED BY", "CONFIGURABLE", "REQUIRES", "DESCRIPTION"}
 	if o.Cluster != "" {
-		header = "NAME\tMANAGED BY\tCONFIGURABLE\tVERSION\tREQUIRES\tDESCRIPTION"
+		header = []string{"NAME", "MANAGED BY", "CONFIGURABLE", "VERSION", "REQUIRES", "DESCRIPTION"}
 	}
-	if _, err := fmt.Fprintln(tw, header); err != nil {
-		return nil, err
-	}
+	var rows [][]string
 	for _, d := range res.(*cloudv1.ListComponentDefinitionsResponse).GetDefinitions() {
 		cols := []string{d.GetName(), managedBy(d.GetManagement()), yesNo(d.GetConfigurable())}
 		if o.Cluster != "" {
-			version := "-"
+			version := none
 			for _, v := range d.GetVersions() {
 				version = v
 			}
 			cols = append(cols, version)
 		}
-		cols = append(cols, dash(strings.Join(d.GetRequires(), ", ")), dash(catalogDescription(d)))
-		if _, err := fmt.Fprintln(tw, strings.Join(cols, "\t")); err != nil {
-			return nil, err
-		}
+		rows = append(rows, append(cols, orNone(strings.Join(d.GetRequires(), ", ")), orNone(catalogDescription(d))))
 	}
-	return nil, tw.Flush()
+	return nil, table(o.Out, header, rows)
 }
 
 func managedBy(m cloudv1.ComponentManagement) string {
@@ -291,29 +283,15 @@ func ComponentList(ctx context.Context, c Clients, o Options) (proto.Message, er
 	}
 	res, err := call(ctx, &cloudv1.ListComponentsRequest{TenantId: o.Tenant, ClusterId: o.Cluster,
 		PageSize: o.PageSize, PageToken: o.PageToken}, c.Component.ListComponents)
-	if err != nil || o.Output != OutputTable {
+	if err != nil || !isTable(o.Output) {
 		return res, err
 	}
 	list := res.(*cloudv1.ListComponentsResponse)
-	tw := tabwriter.NewWriter(o.Out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "ID\tNAME\tMANAGED BY\tVERSION\tPHASE\tSINCE\tMESSAGE"); err != nil {
-		return nil, err
-	}
+	rows := make([][]string, 0, len(list.GetComponents()))
 	for _, comp := range list.GetComponents() {
-		st := comp.GetStatus()
-		since, phase := "-", "-"
-		if st.GetSince() != nil {
-			since = st.GetSince().AsTime().UTC().Format(time.RFC3339)
-		}
-		if st.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_UNSPECIFIED {
-			phase = componentPhaseWord(st.GetPhase())
-		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", dash(comp.GetId()), comp.GetComponent(),
-			managedBy(comp.GetManagement()), dash(comp.GetVersion()), phase, since, dash(oneLine(st.GetMessage()))); err != nil {
-			return nil, err
-		}
+		rows = append(rows, componentRow(comp))
 	}
-	if err := tw.Flush(); err != nil {
+	if err := table(o.Out, componentHeader, rows); err != nil {
 		return nil, err
 	}
 	if o.Details {
@@ -476,7 +454,7 @@ func printDetails(w io.Writer, components []*cloudv1.Component) error {
 			continue
 		}
 		if _, err := fmt.Fprintf(w, "\n%s: chart %s, Helm state %s, %d failed attempts, recovered %d times\n", comp.GetComponent(),
-			dash(st.GetChart()), dash(st.GetHelmState()), st.GetFailures(), st.GetRecoveries()); err != nil {
+			orNone(st.GetChart()), orNone(st.GetHelmState()), st.GetFailures(), st.GetRecoveries()); err != nil {
 			return err
 		}
 		if st.GetLastError() != "" {

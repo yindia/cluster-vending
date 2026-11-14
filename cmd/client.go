@@ -24,10 +24,9 @@ type verb struct {
 	// reason adds --reason (admin pause), pauseNetwork --network (admin
 	// pause and resume).
 	reason, pauseNetwork bool
-	// table: the verb prints a table unless --output says otherwise;
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
-	table, removed, oidc, warnings, noPlatform bool
+	removed, oidc, warnings, noPlatform bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
 }
@@ -55,7 +54,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	group := &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs}
 	pf := group.PersistentFlags()
 	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (required unless the manifest sets metadata.tenant)")
-	pf.StringVarP(&output, "output", "o", cli.OutputYAML, "output format: yaml or json")
+	pf.StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
 	for _, s := range config.ClientSettings() {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
 	}
@@ -75,10 +74,6 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				opts.RequestTimeout = cfg.RequestTimeout
 				if len(args) > 0 {
 					opts.ID = args[0]
-				}
-				output := output
-				if v.table && !cmd.Flags().Changed("output") {
-					output = cli.OutputTable
 				}
 				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken)), opts, cmd.OutOrStdout(), output)
 			},
@@ -169,7 +164,7 @@ func newNetworkCmd() *cobra.Command {
 		verb{use: "status <id>", short: "Show a network with its live status (get shows the status last recorded)",
 			run: cli.NetworkStatus, args: cobra.ExactArgs(1)},
 		verb{use: "events <id>", short: "List what the controller reported about the network, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
-			run: cli.NetworkEvents, args: cobra.ExactArgs(1), page: true, table: true, warnings: true},
+			run: cli.NetworkEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
 		watchVerb("network", cli.NetworkWatch))
 	return newResourceCmd("network", "Manage networks (NetworkService)", verbs)
 }
@@ -194,11 +189,11 @@ func newClusterCmd() *cobra.Command {
 		verb{use: "status <id>", short: "Show a cluster with its live status (get shows the status last recorded)",
 			run: cli.ClusterStatus, args: cobra.ExactArgs(1)},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
-			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, table: true, removed: true},
+			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, removed: true},
 		verb{use: "recommendations <id>", short: "Recommend the requests and limits of the cluster's containers from a week of recorded usage (read-only: nothing is installed); -o table, yaml or json",
-			run: cli.ClusterRecommendations, args: cobra.ExactArgs(1), page: true, table: true, recommend: true},
+			run: cli.ClusterRecommendations, args: cobra.ExactArgs(1), page: true, recommend: true},
 		verb{use: "events <id>", short: "List what the controller reported about the cluster, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
-			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, table: true, warnings: true},
+			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		watchVerb("cluster", cli.ClusterWatch))

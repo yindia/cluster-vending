@@ -116,7 +116,7 @@ func newWhoamiCmd() *cobra.Command {
 			return cli.Run(cmd.Context(), cli.WhoAmI, clients, cli.Options{RequestTimeout: cfg.RequestTimeout}, cmd.OutOrStdout(), output)
 		},
 	}
-	cmd.Flags().StringVarP(&output, "output", "o", cli.OutputYAML, "output format: yaml or json")
+	cmd.Flags().StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
 	for _, s := range config.ClientSettings() {
 		cmd.Flags().String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
 	}

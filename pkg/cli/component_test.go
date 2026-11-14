@@ -146,13 +146,13 @@ func TestComponentCatalogTable(t *testing.T) {
 		want string
 	}{
 		{"the catalog", Options{Tenant: "acme"},
-			"NAME       MANAGED BY  CONFIGURABLE  REQUIRES  DESCRIPTION\n" +
-				"karpenter  platform    no            -         Node autoscaling.\n" +
-				"policies   tenant      yes           kyverno   Pod security policies.\n"},
+			"NAME        MANAGED BY   CONFIGURABLE   REQUIRES   DESCRIPTION\n" +
+				"karpenter   platform     no             <none>     Node autoscaling.\n" +
+				"policies    tenant       yes            kyverno    Pod security policies.\n"},
 		{"with a cluster's versions", Options{Tenant: "acme", Cluster: componentCluster},
-			"NAME       MANAGED BY  CONFIGURABLE  VERSION  REQUIRES  DESCRIPTION\n" +
-				"karpenter  platform    no            1.15.1   -         Node autoscaling.\n" +
-				"policies   tenant      yes           3.10.0   kyverno   Pod security policies.\n"},
+			"NAME        MANAGED BY   CONFIGURABLE   VERSION   REQUIRES   DESCRIPTION\n" +
+				"karpenter   platform     no             1.15.1    <none>     Node autoscaling.\n" +
+				"policies    tenant       yes            3.10.0    kyverno    Pod security policies.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -331,15 +331,16 @@ func TestComponentGet(t *testing.T) {
 }
 
 func TestComponentListTable(t *testing.T) {
+	withClock(t)
 	api := &componentAPI{}
 	var out bytes.Buffer
 
 	err := Run(t.Context(), ComponentList, Clients{Component: api}, Options{Tenant: "acme", Cluster: componentCluster}, &out, OutputTable)
 
-	want := "ID                                    NAME          MANAGED BY  VERSION  PHASE    SINCE                 MESSAGE\n" +
-		"-                                     karpenter     platform    1.15.1   Ready    2026-11-13T04:00:00Z  -\n" +
-		componentID + "  policies      tenant      3.10.0   Pending  -                     stored; not installed yet\n" +
-		"-                                     gpu-operator  tenant      -        -        -                     not enabled\n" +
+	want := "ID                                     NAME           MANAGED BY   VERSION   PHASE     AGE      MESSAGE\n" +
+		"<none>                                 karpenter      platform     1.15.1    Ready     32h      <none>\n" +
+		componentID + "   policies       tenant       3.10.0    Pending   <none>   stored; not installed yet\n" +
+		"<none>                                 gpu-operator   tenant       <none>    <none>    <none>   not enabled\n" +
 		"\nMore: --page-token next\n"
 	if err != nil || out.String() != want {
 		t.Fatalf("got %v\n%s\nwant\n%s", err, out.String(), want)

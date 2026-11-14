@@ -17,8 +17,6 @@ type componentVerb struct {
 	args       cobra.PositionalArgs
 	// name: the argument is a catalog name, not a component ID.
 	name bool
-	// table: a table unless --output says otherwise.
-	table bool
 	// flags adds the verb's own flags.
 	flags func(*cobra.Command, *cli.Options)
 }
@@ -33,7 +31,7 @@ func newComponentCmd() *cobra.Command {
 		Short: "The component catalog, and the components enabled on a cluster (ComponentService)"}
 	pf := group.PersistentFlags()
 	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (required, except by values)")
-	pf.StringVarP(&output, "output", "o", cli.OutputYAML, "output format: yaml or json (catalog and list: table by default)")
+	pf.StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
 	for _, s := range config.ClientSettings() {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
 	}
@@ -62,7 +60,7 @@ func newComponentCmd() *cobra.Command {
 
 	verbs := []componentVerb{
 		{use: "catalog", short: "List every component that can be installed: who manages it (the platform's cannot be enabled or disabled), whether it takes values, what it requires",
-			run: cli.ComponentCatalog, args: cobra.NoArgs, table: true,
+			run: cli.ComponentCatalog, args: cobra.NoArgs,
 			flags: cluster("also show the version this cluster's release gives each component (cluster ID)")},
 		{use: "template <name>", short: "Print a component's values template (YAML, with the platform's comments) to edit and send with enable -f",
 			run: cli.ComponentTemplate, args: cobra.ExactArgs(1), name: true},
@@ -80,7 +78,7 @@ func newComponentCmd() *cobra.Command {
 				cmd.Flags().BoolVar(&o.Values, "values", false, "print only the stored values, as YAML to edit and send back with update -f")
 			}},
 		{use: "list", short: "List what is on --cluster: the platform's components, the tenant's, and the ones it could enable; without --cluster the tenant's components",
-			run: cli.ComponentList, args: cobra.NoArgs, table: true,
+			run: cli.ComponentList, args: cobra.NoArgs,
 			flags: all(cluster("everything on this cluster (cluster ID); default: the tenant's components on all clusters"),
 				func(cmd *cobra.Command, o *cli.Options) {
 					cmd.Flags().BoolVar(&o.Details, "details", false, "also show why each component is not ready: chart, Helm state, last error, failures")
@@ -103,10 +101,6 @@ func newComponentCmd() *cobra.Command {
 					} else {
 						opts.ID = args[0]
 					}
-				}
-				output := output
-				if v.table && !cmd.Flags().Changed("output") {
-					output = cli.OutputTable
 				}
 				return cli.Run(cmd.Context(), v.run, cli.NewClients(cfg.Server, nil, cli.WithToken(apiToken)), opts, cmd.OutOrStdout(), output)
 			},

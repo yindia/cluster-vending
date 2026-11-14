@@ -17,9 +17,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/google/uuid"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"sigs.k8s.io/yaml"
 
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 )
@@ -43,12 +41,6 @@ func requestTimeoutOf(ctx context.Context) time.Duration {
 // would also cut a watch (a response read for as long as it is watched)
 // off; each call is bounded by its context instead (call).
 func newHTTPClient() *http.Client { return &http.Client{} }
-
-// Output formats.
-const (
-	OutputYAML = "yaml"
-	OutputJSON = "json"
-)
 
 // Options are the inputs of every command. Commands use the fields they
 // need and ignore the others.
@@ -228,26 +220,4 @@ func requestID(tenant string, req proto.Message) (string, error) {
 		return "", err
 	}
 	return uuid.NewSHA1(requestNamespace, append([]byte(tenant+"\x00"), raw...)).String(), nil
-}
-
-// Print writes msg as YAML or JSON.
-func Print(w io.Writer, msg proto.Message, format string) error {
-	js, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	switch format {
-	case OutputJSON:
-		_, err = fmt.Fprintln(w, string(js))
-		return err
-	case OutputYAML, "":
-		y, err := yaml.JSONToYAML(js)
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(y)
-		return err
-	default:
-		return fmt.Errorf("--output must be %s or %s, got %q", OutputYAML, OutputJSON, format)
-	}
 }

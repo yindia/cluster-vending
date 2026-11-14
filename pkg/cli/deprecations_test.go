@@ -74,10 +74,10 @@ func TestClusterDeprecationsTable(t *testing.T) {
 	}
 	want := []string{
 		"Kubernetes 1.37, scanned 2026-11-13T04:00:00Z: 3 found, 1 removed (the first 200 are kept)",
-		"NAMESPACE  KIND                   NAME     API VERSION             STATE       REMOVED IN  REPLACEMENT           SOURCE",
-		"web        Ingress                site     extensions/v1beta1      removed     v1.22.0     networking.k8s.io/v1  manifest",
-		"-          VolumeAttributesClass  fast     storage.k8s.io/v1beta1  deprecated  -           -                     helm storage/classes",
-		"jobs       CronJob                nightly  batch/v1beta1           deprecated  -           -                     manifest",
+		"NAMESPACE   KIND                    NAME      API VERSION              STATE        REMOVED IN   REPLACEMENT            SOURCE",
+		"web         Ingress                 site      extensions/v1beta1       removed      v1.22.0      networking.k8s.io/v1   manifest",
+		"<none>      VolumeAttributesClass   fast      storage.k8s.io/v1beta1   deprecated   <none>       <none>                 helm storage/classes",
+		"jobs        CronJob                 nightly   batch/v1beta1            deprecated   <none>       <none>                 manifest",
 		"",
 	}
 	if got := out.String(); got != strings.Join(want, "\n") {

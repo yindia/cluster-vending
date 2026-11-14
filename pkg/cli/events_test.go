@@ -82,6 +82,7 @@ func (s *networkEvents) ListNetworkEvents(_ context.Context, req *cloudv1.ListNe
 }
 
 func TestClusterEventsTable(t *testing.T) {
+	withClock(t)
 	tests := []struct {
 		name         string
 		events       []*cloudv1.Event
@@ -91,15 +92,15 @@ func TestClusterEventsTable(t *testing.T) {
 	}{
 		{name: "every page, newest first", events: someEvents(), opts: Options{Tenant: "acme", ID: eventsObject}, wantRequests: 2,
 			want: []string{
-				"TIME                  COUNT  TYPE     REASON              MESSAGE",
-				"2026-11-13T10:02:00Z  3      Warning  Failed              NodeGroup ng: quota exceeded",
-				"2026-11-13T10:01:00Z  1      Normal   ControlPlaneActive  the EKS cluster is ACTIVE",
-				"2026-11-13T10:00:00Z  1      Normal   Provisioning        creating the cluster's resources",
+				"LAST SEEN   COUNT   TYPE      REASON               MESSAGE",
+				"25h         3       Warning   Failed               NodeGroup ng: quota exceeded",
+				"25h         1       Normal    ControlPlaneActive   the EKS cluster is ACTIVE",
+				"26h         1       Normal    Provisioning         creating the cluster's resources",
 			}},
 		{name: "only the warnings", events: someEvents(), opts: Options{Tenant: "acme", ID: eventsObject, OnlyWarnings: true}, wantRequests: 1,
 			want: []string{
-				"TIME                  COUNT  TYPE     REASON  MESSAGE",
-				"2026-11-13T10:02:00Z  3      Warning  Failed  NodeGroup ng: quota exceeded",
+				"LAST SEEN   COUNT   TYPE      REASON   MESSAGE",
+				"25h         3       Warning   Failed   NodeGroup ng: quota exceeded",
 			}},
 		{name: "no events", opts: Options{Tenant: "acme", ID: eventsObject}, wantRequests: 1,
 			want: []string{"No events: Kubernetes keeps them for about an hour. The cluster's status.recentEvents keeps the last ten (get)."}},

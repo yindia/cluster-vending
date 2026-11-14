@@ -4,16 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"text/tabwriter"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
-
-// OutputTable is --output table: the default of cluster deprecations.
-const OutputTable = "table"
 
 // maxDeprecationPages bounds how many pages one command reads.
 const maxDeprecationPages = 20
@@ -43,7 +39,7 @@ func ClusterDeprecations(ctx context.Context, c Clients, o Options) (proto.Messa
 			break
 		}
 	}
-	if o.Output != OutputTable {
+	if !isTable(o.Output) {
 		return all, nil
 	}
 	return nil, printDeprecations(o.Out, all)
@@ -72,10 +68,7 @@ func printDeprecations(w io.Writer, res *cloudv1.ListClusterDeprecationsResponse
 	if len(res.GetFindings()) == 0 {
 		return nil
 	}
-	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "NAMESPACE\tKIND\tNAME\tAPI VERSION\tSTATE\tREMOVED IN\tREPLACEMENT\tSOURCE"); err != nil {
-		return err
-	}
+	rows := make([][]string, 0, len(res.GetFindings()))
 	for _, f := range res.GetFindings() {
 		state := "deprecated"
 		if f.GetRemoved() {
@@ -85,17 +78,8 @@ func printDeprecations(w io.Writer, res *cloudv1.ListClusterDeprecationsResponse
 		if f.GetSource() == cloudv1.DeprecationSource_DEPRECATION_SOURCE_HELM_RELEASE {
 			source = "helm " + f.GetHelmRelease()
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", dash(f.GetNamespace()), f.GetKind(), f.GetName(),
-			f.GetApiVersion(), state, dash(f.GetRemovedIn()), dash(f.GetReplacementApi()), source); err != nil {
-			return err
-		}
+		rows = append(rows, []string{orNone(f.GetNamespace()), f.GetKind(), f.GetName(), f.GetApiVersion(), state,
+			orNone(f.GetRemovedIn()), orNone(f.GetReplacementApi()), source})
 	}
-	return tw.Flush()
-}
-
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
+	return table(w, []string{"NAMESPACE", "KIND", "NAME", "API VERSION", "STATE", "REMOVED IN", "REPLACEMENT", "SOURCE"}, rows)
 }

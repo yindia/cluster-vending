@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
-	"text/tabwriter"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -42,7 +41,7 @@ func ClusterEvents(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	if o.Output != OutputTable {
+	if !isTable(o.Output) {
 		return &cloudv1.ListClusterEventsResponse{Events: events, NextPageToken: next}, nil
 	}
 	return nil, printEvents(o.Out, events, "cluster")
@@ -65,7 +64,7 @@ func NetworkEvents(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	if o.Output != OutputTable {
+	if !isTable(o.Output) {
 		return &cloudv1.ListNetworkEventsResponse{Events: events, NextPageToken: next}, nil
 	}
 	return nil, printEvents(o.Out, events, "network")
@@ -95,23 +94,14 @@ func printEvents(w io.Writer, events []*cloudv1.Event, noun string) error {
 		_, err := fmt.Fprintf(w, "No events: Kubernetes keeps them for about an hour. The %s's status.recentEvents keeps the last ten (get).\n", noun)
 		return err
 	}
-	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "TIME\tCOUNT\tTYPE\tREASON\tMESSAGE"); err != nil {
-		return err
-	}
+	rows := make([][]string, 0, len(events))
 	for _, e := range events {
 		kind := "Normal"
 		if e.GetType() == cloudv1.EventType_EVENT_TYPE_WARNING {
 			kind = "Warning"
 		}
-		when := "-"
-		if e.GetTime() != nil {
-			when = e.GetTime().AsTime().UTC().Format(time.RFC3339)
-		}
 		message := strings.Join(strings.Fields(e.GetMessage()), " ") // one line
-		if _, err := fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", when, max(e.GetCount(), 1), kind, e.GetReason(), message); err != nil {
-			return err
-		}
+		rows = append(rows, []string{age(e.GetTime()), strconv.Itoa(int(max(e.GetCount(), 1))), kind, orNone(e.GetReason()), orNone(message)})
 	}
-	return tw.Flush()
+	return table(w, []string{"LAST SEEN", "COUNT", "TYPE", "REASON", "MESSAGE"}, rows)
 }

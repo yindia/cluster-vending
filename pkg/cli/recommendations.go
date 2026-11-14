@@ -6,7 +6,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -43,7 +42,7 @@ func ClusterRecommendations(ctx context.Context, c Clients, o Options) (proto.Me
 			break
 		}
 	}
-	if o.Output != OutputTable {
+	if !isTable(o.Output) {
 		return all, nil
 	}
 	return nil, printRecommendations(o.Out, all)
@@ -73,7 +72,7 @@ func printRecommendations(w io.Writer, res *cloudv1.ListClusterRecommendationsRe
 			}
 		}
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	if _, err := fmt.Fprintln(tw, "NAMESPACE\tWORKLOAD\tCONTAINER\tCPU REQ\tMEM REQ\tMEM LIMIT\tSOURCE\tDATA"); err != nil {
 		return err
 	}

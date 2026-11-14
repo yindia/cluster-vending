@@ -72,12 +72,16 @@ All take `--tenant` (except `values`), `--server` and `-o yaml|json`;
 ### `catalog`
 
 ```
-NAME                          MANAGED BY  CONFIGURABLE  REQUIRES  DESCRIPTION
-aws-load-balancer-controller  platform    no            -         Provisions ALBs and NLBs.
-gpu-operator                  tenant      yes           -         NVIDIA GPU operator.
-kyverno                       platform    no            -         Policy engine.
-kyverno-policies              tenant      yes           kyverno   Pod Security Standards as Kyverno policies.
+NAME                          PROVIDER  MANAGED BY  CONFIGURABLE  REQUIRES  DESCRIPTION
+aws-load-balancer-controller  aws       platform    no            -         Provisions ALBs and NLBs.
+gpu-operator                  aws       tenant      yes           -         NVIDIA GPU operator.
+kyverno                       aws       platform    no            -         Policy engine.
+kyverno-policies              aws       tenant      yes           kyverno   Pod Security Standards as Kyverno policies.
 ```
+
+`PROVIDER` is the cloud the definition is for. With `--cluster`, only the
+definitions for that cluster's cloud are listed (see
+[catalog.md](catalog.md#one-definition-per-cloud)).
 
 ### `list --cluster`
 

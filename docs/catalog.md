@@ -132,6 +132,52 @@ labels on its nodes. **This split relies on the default node pool being
 tainted**: without a taint, a pending tenant pod fits both, and both may
 add a node for it.
 
+## One definition per cloud
+
+Every definition is for exactly one cloud: `spec.provider` is `aws`, `gcp`
+or `azure` (the cluster's provider). It is immutable, and defaults to
+`aws`, the cloud every definition was for before the field existed. Every
+definition this build ships is `provider: aws`, the cloud-neutral ones
+(`kyverno`, `kyverno-policies`) too: their values and names are written
+for EKS, and a component for another cloud is always its own definition.
+**No GCP or Azure definition is shipped.**
+
+A variant for another cloud is a separate definition named
+`<name>-<provider>`: `kyverno-gcp`, `gpu-operator-gcp`, `istio-gcp`. A
+bundle's variant has its own members, named after it
+(`istio-gcp-base` for `istio-base`). The AWS definitions keep their
+names: renaming one would make clusters uninstall it.
+
+What the provider decides:
+
+| Where | What happens |
+|---|---|
+| platform installer | a cluster gets the Platform definitions for its cloud. One installed already whose definition is now for another cloud is kept and logged, never uninstalled. |
+| tenant installer | a tenant component for another cloud is not installed; its status is `FAILED` with `not available on <provider> clusters: <name> is for <p>` |
+| `EnableComponent` | refused (`FAILED_PRECONDITION`) for a definition of another cloud, naming both |
+| `component catalog` | a `PROVIDER` column; with `--cluster`, only that cluster's cloud |
+| `component list --cluster` | a tenant component for another cloud is not listed as `not enabled` |
+
+The catalog check (`CheckCatalog`) refuses, and marks not Valid:
+
+- a bundle whose member is for another cloud than the bundle;
+- a definition that requires one for another cloud;
+- two definitions for the same cloud that install the same chart into the
+  same namespace: a cluster would get both.
+
+### Adding a GCP variant
+
+1. Copy the AWS definition to `<name>-gcp.yaml`, set `metadata.name:
+   <name>-gcp` and `spec.provider: gcp`.
+2. Replace what is AWS-specific: IAM roles (`cloudResources.iamRole`), AWS
+   placeholders in `platformValues` (`${account.id}`, the IRSA role ARN),
+   `conflictsWithAddons` naming EKS add-ons.
+3. Point `requires` at the GCP definitions (`kyverno-policies-gcp` requires
+   `kyverno-gcp`); a bundle's `includes` at its `-gcp` members.
+4. Pin `<name>-gcp` in the releases that offer it: a release pins by
+   definition name.
+5. Apply it (`kubectl create -f`) or ship it in `pkg/catalog/definitions/`.
+
 ## How the catalog reaches the management cluster
 
 - **By the controller (default).** On startup, after it installs the CRDs,

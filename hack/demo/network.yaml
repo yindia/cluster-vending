@@ -4,7 +4,7 @@ apiVersion: cluster-vending.io/v1
 kind: Network
 metadata:
   name: demo-net
-  tenant: demo
+  tenant: __TENANT__
   displayName: Demo network
   labels: {env: demo}
 spec:

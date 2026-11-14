@@ -6,7 +6,7 @@ apiVersion: cluster-vending.io/v1
 kind: Cluster
 metadata:
   name: demo-eks
-  tenant: demo
+  tenant: __TENANT__
   displayName: Demo EKS
   labels: {env: demo}
 spec:

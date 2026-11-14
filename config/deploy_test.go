@@ -485,7 +485,9 @@ func TestConfigMapsAreWrittenOnlyThroughTheTenantBinding(t *testing.T) {
 		}
 	}
 	writer := clusterRole(t, "rbac/usage_history_writer_role.yaml")
-	want := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "create", "update", "patch"}}}
+	// get/create/update/patch: the usage history; delete: the store releases
+	// a deleted row's claims (cv-claim-* ConfigMaps) in the same namespace.
+	want := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "create", "update", "patch", "delete"}}}
 	if !reflect.DeepEqual(writer.Rules, want) {
 		t.Errorf("usage-history-writer rules = %+v, want %+v", writer.Rules, want)
 	}
@@ -493,10 +495,15 @@ func TestConfigMapsAreWrittenOnlyThroughTheTenantBinding(t *testing.T) {
 		t.Errorf("usage-history-writer is deployed as %s, the code binds %s", got, reconcile.UsageHistoryWriterRole)
 	}
 	server := clusterRole(t, filepath.Join(serverBase, "role.yaml"))
-	if !allows(server, "", "configmaps", "get") {
-		t.Error("server role: cannot get ConfigMaps (the recorded usage the recommendations are computed from)")
+	// get: the recorded usage; create and delete: the store's claims
+	// (request IDs, VPC and cluster names), which a create takes and an
+	// abandoned one gives up. Never update or patch.
+	for _, verb := range []string{"get", "create", "delete"} {
+		if !allows(server, "", "configmaps", verb) {
+			t.Errorf("server role: cannot %s ConfigMaps", verb)
+		}
 	}
-	for _, verb := range []string{"update", "patch", "delete"} {
+	for _, verb := range []string{"update", "patch"} {
 		if allows(server, "", "configmaps", verb) {
 			t.Errorf("server role: may %s ConfigMaps", verb)
 		}

@@ -112,6 +112,26 @@ tidy: ## Run go mod tidy
 $(BIN_DIR)/golangci-lint:
 	GOBIN=$(abspath $(BIN_DIR)) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
+##@ CloudFormation (the IAM roles of a tenant account; Python, requirements.txt)
+
+PYTHON ?= python3
+
+.PHONY: cf-requirements
+cf-requirements: ## Install the Python tools of the cf-* targets (requirements.txt; a virtualenv is advised)
+	$(PYTHON) -m pip install -r requirements.txt
+
+.PHONY: cf-generate
+cf-generate: ## Generate the account role templates into pkg/cloudformation/templates (scripts/generate.py)
+	$(PYTHON) scripts/generate.py
+
+.PHONY: cf-lint
+cf-lint: cf-requirements ## Lint the account role templates with cfn-lint
+	cfn-lint pkg/cloudformation/templates/*.yaml
+
+.PHONY: cf-format-check
+cf-format-check: cf-requirements ## Check scripts/generate.py is black-formatted
+	black --check scripts/generate.py
+
 ##@ Test
 
 .PHONY: test

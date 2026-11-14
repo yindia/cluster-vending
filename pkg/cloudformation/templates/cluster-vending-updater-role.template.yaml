@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'cluster-vending updater role: the reader role, and changes to existing networks and EKS clusters (tags, attributes, versions). It cannot create or delete resources.'
+Outputs:
+  RoleArn:
+    Description: The role's ARN
+    Value: !GetAtt 'Role.Arn'
+  RoleName:
+    Description: 'The role''s name: spec.aws.role of the CloudAccount'
+    Value: !Ref 'Role'
+Parameters:
+  ManagementRoleArn:
+    AllowedPattern: ^arn:aws[a-z-]*:iam::\d{12}:role/.+$
+    Description: >-
+      ARN of the cluster-vending management role (the identity the controller and the Crossplane providers run as); the role trusts only it. The platform team gives it: cluster-vending account template
+      prints it.
+    Type: String
+Resources:
+  ReadClustersPolicy:
+    Properties:
+      Description: 'cluster-vending updater role: read clusters'
+      ManagedPolicyName: cluster-vending-updater-read-clusters
+      PolicyDocument:
+        Statement:
+          - Action:
+              - eks:Describe*
+              - eks:List*
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadEKS
+          - Action:
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:GetOpenIDConnectProvider
+              - iam:ListRoles
+              - iam:ListPolicies
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:ListRoleTags
+              - iam:ListPolicyTags
+              - iam:ListPolicyVersions
+              - iam:ListInstanceProfilesForRole
+              - iam:ListOpenIDConnectProviders
+              - iam:ListOpenIDConnectProviderTags
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadIAM
+          - Action:
+              - kms:DescribeKey
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListAliases
+              - kms:ListResourceTags
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadKMS
+          - Action:
+              - logs:DescribeLogGroups
+              - logs:ListTagsForResource
+              - logs:ListTagsLogGroup
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadLogs
+          - Action:
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sqs:ListQueueTags
+              - events:DescribeRule
+              - events:ListTargetsByRule
+              - events:ListTagsForResource
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadKarpenterEvents
+        Version: '2012-10-17'
+    Type: AWS::IAM::ManagedPolicy
+  ReadNetworkPolicy:
+    Properties:
+      Description: 'cluster-vending updater role: read network'
+      ManagedPolicyName: cluster-vending-updater-read-network
+      PolicyDocument:
+        Statement:
+          - Action:
+              - ec2:Describe*
+              - ec2:GetEbsEncryptionByDefault
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadEC2
+        Version: '2012-10-17'
+    Type: AWS::IAM::ManagedPolicy
+  Role:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              AWS: !Ref 'ManagementRoleArn'
+        Version: '2012-10-17'
+      Description: Assumed by the cluster-vending platform (updater)
+      ManagedPolicyArns:
+        - !Ref 'ReadNetworkPolicy'
+        - !Ref 'ReadClustersPolicy'
+        - !Ref 'UpdatePolicy'
+      RoleName: cluster-vending-updater
+      Tags:
+        - Key: cluster-vending.io/role
+          Value: updater
+        - Key: managed-by
+          Value: cluster-vending
+    Type: AWS::IAM::Role
+  UpdatePolicy:
+    Properties:
+      Description: 'cluster-vending updater role: update'
+      ManagedPolicyName: cluster-vending-updater-update
+      PolicyDocument:
+        Statement:
+          - Action:
+              - ec2:CreateTags
+              - ec2:DeleteTags
+              - ec2:ModifyVpcAttribute
+              - ec2:ModifySubnetAttribute
+              - ec2:ModifySecurityGroupRules
+              - ec2:UpdateSecurityGroupRuleDescriptionsEgress
+              - ec2:UpdateSecurityGroupRuleDescriptionsIngress
+              - ec2:ReplaceRoute
+              - ec2:ReplaceNetworkAclEntry
+              - ec2:ModifyLaunchTemplate
+              - ec2:CreateLaunchTemplateVersion
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: UpdateNetwork
+          - Action:
+              - eks:UpdateClusterConfig
+              - eks:UpdateClusterVersion
+              - eks:UpdateNodegroupConfig
+              - eks:UpdateNodegroupVersion
+              - eks:UpdateAddon
+              - eks:UpdateAccessEntry
+              - eks:UpdatePodIdentityAssociation
+              - eks:TagResource
+              - eks:UntagResource
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: UpdateEKS
+          - Action:
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:TagPolicy
+              - iam:UntagPolicy
+              - iam:TagOpenIDConnectProvider
+              - iam:UntagOpenIDConnectProvider
+              - iam:UpdateRole
+              - iam:UpdateAssumeRolePolicy
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicyVersion
+              - iam:UpdateOpenIDConnectProviderThumbprint
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: UpdateIAM
+          - Action:
+              - kms:EnableKeyRotation
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - logs:PutRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+              - logs:TagLogGroup
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: UpdateKMSAndLogs
+          - Action:
+              - sqs:SetQueueAttributes
+              - sqs:TagQueue
+              - sqs:UntagQueue
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:TagResource
+              - events:UntagResource
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: UpdateKarpenterEvents
+        Version: '2012-10-17'
+    Type: AWS::IAM::ManagedPolicy

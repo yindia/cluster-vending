@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -215,9 +214,7 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	for _, gvk := range clusterHelmKinds() {
-		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(gvk)
-		b = b.Watches(u, handler.EnqueueRequestsFromMapFunc(owner))
+		b = watchOwned(b, gvk, owner)
 	}
 	// A tenant's Component (enabled, changed, disabled) wakes the cluster
 	// it is on: the cluster reconcile installs and removes it.

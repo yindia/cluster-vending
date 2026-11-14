@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -204,18 +205,26 @@ func (o *owners) find(ctx context.Context, c client.Reader, list client.ObjectLi
 // providerWatches makes b also watch every kind the platform renders
 // (crossplaneaws.ManagedObjects, as the manager's cache holds them:
 // unstructured) and wake the object that owner maps a changed provider
-// object to.
+// object to (watchOwned).
 func providerWatches(b *builder.Builder, mgr ctrl.Manager, owner handler.MapFunc) (*builder.Builder, error) {
 	for _, obj := range crossplaneaws.ManagedObjects() {
 		gvk, err := apiutil.GVKForObject(obj, mgr.GetScheme())
 		if err != nil {
 			return nil, err
 		}
-		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(gvk)
-		b = b.Watches(u, handler.EnqueueRequestsFromMapFunc(owner))
+		b = watchOwned(b, gvk, owner)
 	}
 	return b, nil
+}
+
+// watchOwned makes b watch the objects of gvk (unstructured) that an owner
+// recorded: a change its pass can see (providerObjectChanged) wakes the
+// owner after batchWindow, with the other changes of its objects in that
+// window (batchedOwner).
+func watchOwned(b *builder.Builder, gvk schema.GroupVersionKind, owner handler.MapFunc) *builder.Builder {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(gvk)
+	return b.Watches(u, batchedOwner(owner, batchWindow), builder.WithPredicates(providerObjectChanged()))
 }
 
 // ownerRequests is the MapFunc of providerWatches: the request for the

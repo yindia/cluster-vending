@@ -1,9 +1,15 @@
 package controller
 
 import (
+	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +35,36 @@ func definitionClient(t *testing.T, objects ...client.Object) client.Client {
 	}
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).
 		WithStatusSubresource(&cloudv1alpha1.ComponentDefinition{}).Build()
+}
+
+// unstructuredOnly is c as the manager's cache answers: managed resources
+// (Crossplane kinds) are cached as unstructured objects only, so a typed
+// list of one fails the way the real cache does.
+func unstructuredOnly(c client.Client) client.Client {
+	return interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*unstructured.UnstructuredList); !ok && strings.Contains(reflect.TypeOf(list).Elem().PkgPath(), "provider-aws") {
+				return fmt.Errorf("%T is not cached", list)
+			}
+			return cl.List(ctx, list, opts...)
+		},
+	})
+}
+
+// The recorded objects are read the way the cache holds them: a cluster's
+// Roles hold the definition, and reading them does not fail.
+func TestComponentDefinitionReadsRolesAsTheCacheHoldsThem(t *testing.T) {
+	lb := catalogEntry("lb", cloudv1alpha1.ComponentDefinitionSpec{Management: cloudv1alpha1.ComponentManagementPlatform})
+	role := &awsiam.Role{ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-acme", Name: "prod-lb-role",
+		Labels: map[string]string{crossplane.LabelComponent: "lb", crossplane.LabelCluster: holderClusterID}}}
+	c := unstructuredOnly(definitionClient(t, lb, holderCluster(nil), role))
+	r := &ComponentDefinitionReconciler{c: c}
+
+	got := deleteAndReconcile(t, c, r, "lb")
+
+	if got == nil {
+		t.Fatal("the cluster's role does not hold the definition")
+	}
 }
 
 func catalogEntry(name string, spec cloudv1alpha1.ComponentDefinitionSpec) *cloudv1alpha1.ComponentDefinition {

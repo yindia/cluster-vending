@@ -163,7 +163,10 @@ func (r *ComponentDefinitionReconciler) componentObjects(ctx context.Context, in
 	if err := r.c.List(ctx, releases, selector); err != nil && !meta.IsNoMatchError(err) {
 		return nil, err
 	}
-	roles := &awsiam.RoleList{}
+	// The manager's cache holds managed resources as unstructured objects
+	// only (kube.NewManagerWith): a typed list of them is refused.
+	roles := &unstructured.UnstructuredList{}
+	roles.SetGroupVersionKind(awsiam.CRDGroupVersion.WithKind(awsiam.Role_Kind + "List"))
 	if err := r.c.List(ctx, roles, selector); err != nil && !meta.IsNoMatchError(err) {
 		return nil, err
 	}

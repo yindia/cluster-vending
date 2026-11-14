@@ -86,6 +86,8 @@ type Options struct {
 	Force bool
 	// Cluster is --cluster of admin pause / resume: one cluster only.
 	Cluster string
+	// Reason is --reason of admin pause: why, shown with the pause.
+	Reason string
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.
 	AcknowledgeNotImported bool

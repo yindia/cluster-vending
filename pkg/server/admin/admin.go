@@ -4,8 +4,10 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -14,9 +16,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -28,30 +33,79 @@ import (
 const PausedAnnotation = managed.PausedAnnotation
 
 // Service implements cloud.v1.AdminService.
-type Service struct{ deps reconcile.Deps }
+type Service struct {
+	deps reconcile.Deps
+	// now is the clock; tests replace it.
+	now func() time.Time
+}
 
 var _ cloudv1connect.AdminServiceHandler = (*Service)(nil)
 
 // NewService returns the AdminService.
-func NewService(d reconcile.Deps) *Service { return &Service{deps: d} }
+func NewService(d reconcile.Deps) *Service { return &Service{deps: d, now: time.Now} }
 
-// PauseReconcile pauses the tenant's (or one cluster's) managed resources.
+// PauseReconcile pauses the tenant, or one of its clusters. The pause is
+// recorded on the rows first (the tenant's accounts, networks and
+// clusters, or the one cluster: Tenants.SetPause), with who asked, when
+// and why, so the controller stops acting on them; then every managed
+// resource of the scope gets the providers' pause.
 func (s *Service) PauseReconcile(ctx context.Context, req *cloudv1.PauseReconcileRequest) (*cloudv1.PauseReconcileResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
+	}
+	pause := &model.Pause{By: caller(ctx), Since: s.now().UTC(), Reason: req.GetReason()}
+	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), req.GetClusterId(), pause); err != nil {
+		return nil, s.storeError(ctx, "pause", req.GetTenantId(), req.GetClusterId(), err)
 	}
 	n, err := s.setPaused(ctx, req.GetTenantId(), req.GetClusterId(), true)
 	return &cloudv1.PauseReconcileResponse{Resources: n}, err
 }
 
-// ResumeReconcile resumes the tenant's (or one cluster's) managed
-// resources.
+// ResumeReconcile resumes the tenant, or one of its clusters: the pause
+// recorded on the rows is removed, then the providers' pause on the
+// managed resources. The controller's next pass observes each resource
+// and applies what was asked for meanwhile.
 func (s *Service) ResumeReconcile(ctx context.Context, req *cloudv1.ResumeReconcileRequest) (*cloudv1.ResumeReconcileResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
+	if err := s.deps.Store.Tenants().SetPause(ctx, req.GetTenantId(), req.GetClusterId(), nil); err != nil {
+		return nil, s.storeError(ctx, "resume", req.GetTenantId(), req.GetClusterId(), err)
+	}
 	n, err := s.setPaused(ctx, req.GetTenantId(), req.GetClusterId(), false)
 	return &cloudv1.ResumeReconcileResponse{Resources: n}, err
+}
+
+// anonymousCaller is who paused when the API runs without authentication.
+const anonymousCaller = "anonymous"
+
+// caller names who makes the request, for the pause's record: the
+// caller's username, else its subject; "anonymous" without a token.
+func caller(ctx context.Context) string {
+	id := auth.FromContext(ctx)
+	switch {
+	case id == nil || id.Anonymous:
+		return anonymousCaller
+	case id.Username != "":
+		return id.Username
+	case id.Subject != "":
+		return id.Subject
+	default:
+		return anonymousCaller
+	}
+}
+
+// storeError answers a failed record of a pause: NOT_FOUND for a tenant or
+// a cluster that does not exist, else what the store's failures map to.
+func (s *Service) storeError(ctx context.Context, verb, tenantID, clusterID string, err error) error {
+	if errors.Is(err, repository.ErrNotFound) {
+		if clusterID != "" {
+			return connect.NewError(connect.CodeNotFound, fmt.Sprintf("cluster %s of tenant %s not found", clusterID, tenantID))
+		}
+		return connect.NewError(connect.CodeNotFound, fmt.Sprintf("tenant %s not found", tenantID))
+	}
+	s.logger().ErrorContext(ctx, "record the "+verb, "tenant_id", tenantID, "cluster_id", clusterID, "error", err)
+	return service.ToConnect(err)
 }
 
 // setPaused sets or removes the paused annotation on every managed

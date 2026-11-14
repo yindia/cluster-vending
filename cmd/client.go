@@ -21,6 +21,8 @@ type verb struct {
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
+	// reason adds --reason (admin pause).
+	reason bool
 	// table: the verb prints a table unless --output says otherwise;
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings.
 	table, removed, oidc, warnings bool
@@ -119,7 +121,10 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.KubeconfigFile, "kubeconfig-file", "", "the kubeconfig the AWS CLI writes to (default: its own, ~/.kube/config)")
 		}
 		if v.cluster {
-			f.StringVar(&o.Cluster, "cluster", "", "only this cluster's resources (cluster ID); default: all the tenant's")
+			f.StringVar(&o.Cluster, "cluster", "", "only this cluster (cluster ID); default: the tenant and everything it has")
+		}
+		if v.reason {
+			f.StringVar(&o.Reason, "reason", "", "why, shown with the pause in the status of what is paused")
 		}
 		if v.wait {
 			f.BoolVar(&o.Wait, "wait", false, "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit")
@@ -156,9 +161,9 @@ func newNetworkCmd() *cobra.Command {
 
 func newAdminCmd() *cobra.Command {
 	return newResourceCmd("admin", "Operator actions (AdminService)", []verb{
-		{use: "pause", short: "Pause Crossplane's reconciliation of a tenant's (or one cluster's) resources, e.g. during a provider upgrade",
-			run: cli.AdminPause, args: cobra.NoArgs, cluster: true},
-		{use: "resume", short: "Resume the reconciliation paused with pause", run: cli.AdminResume, args: cobra.NoArgs, cluster: true},
+		{use: "pause", short: "Pause a tenant (or one cluster): the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume",
+			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true},
+		{use: "resume", short: "Resume what pause paused: a tenant and everything it has, or one cluster", run: cli.AdminResume, args: cobra.NoArgs, cluster: true},
 	})
 }
 

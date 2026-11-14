@@ -143,6 +143,9 @@ cluster as objects of its kinds.
 - [docs/runbooks/provider-upgrade.md](docs/runbooks/provider-upgrade.md):
   upgrading the Crossplane providers under a running platform: pause,
   upgrade, check, resume.
+- [docs/recommendations.md](docs/recommendations.md): CPU and memory
+  requests recommended from a week of recorded usage, without installing
+  anything in the workload cluster.
 - [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
   API versions in workload clusters are found and shown.
 - [docs/events.md](docs/events.md): the events the controller emits about

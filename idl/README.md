@@ -95,6 +95,7 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `GetClusterStatus` | Returns the cluster with its status read now from the management cluster. |
 | `ListClusterEvents` | Returns what the controller reported about the cluster, newest first: the Kubernetes events of its object, kept for about an hour; `only_warnings` for the failures. `status.recent_events` of `GetCluster` keeps the last ten. |
 | `ListClusterDeprecations` | Returns the objects of the cluster written with API versions that are deprecated or removed at the Kubernetes version it moves to next: what the controller's last scan found, read from the store. `GetCluster` carries only the counts (`status.deprecations`). |
+| `ListClusterRecommendations` | Returns the CPU and memory requests (and memory limits) the platform recommends for the cluster's containers, computed from the usage the controller recorded over a week (it samples every five minutes, read-only), with the current values and the difference. `GetCluster` carries only the summary (`status.recommendations`). |
 | `WatchCluster` | Streams the cluster and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |
 | `DeleteCluster` | Marks the cluster `DELETING` and deletes its resources. `force` also releases Helm releases without uninstalling them. |

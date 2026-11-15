@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+
+message RetryClusterRequest {
+  // Tenant scope (GetClusterRequest.tenant_id).
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // The components to try again, by name. Empty, and upgrade false:
+  // everything that failed.
+  repeated string components = 3 [(buf.validate.field).repeated = {
+    max_items: 50
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 63
+      }
+    }
+  }];
+  // Also try a failed automatic upgrade again.
+  bool upgrade = 4;
+}
+
+message RetryClusterResponse {
+  // What happens to each item asked for (or to each failed one).
+  repeated RetryItem items = 1;
+}
+
+// RetryItem is what a RetryCluster does to one component or the upgrade.
+message RetryItem {
+  // The component's name; "upgrade" for the automatic upgrade.
+  string name = 1;
+  RetryItemKind kind = 2;
+  RetryAction action = 3;
+  // What will happen, or what to change first.
+  string message = 4;
+}
+
+enum RetryItemKind {
+  RETRY_ITEM_KIND_UNSPECIFIED = 0;
+  // Installed by the platform with every cluster.
+  RETRY_ITEM_KIND_PLATFORM_COMPONENT = 1;
+  // Enabled by the tenant (ComponentService).
+  RETRY_ITEM_KIND_TENANT_COMPONENT = 2;
+  // The automatic upgrade its release channel's rollout started.
+  RETRY_ITEM_KIND_UPGRADE = 3;
+}
+
+enum RetryAction {
+  RETRY_ACTION_UNSPECIFIED = 0;
+  // The controller tries it again on its next pass.
+  RETRY_ACTION_RETRY = 1;
+  // It failed because of something to change first (message says what);
+  // it installs by itself once that is done.
+  RETRY_ACTION_FIX = 2;
+  // It has not failed: nothing to retry.
+  RETRY_ACTION_NOTHING = 3;
+}

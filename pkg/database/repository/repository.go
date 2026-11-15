@@ -159,6 +159,12 @@ type Clusters interface {
 	// rollout and its last automatic upgrade (protojson cloud.v1
 	// ClusterRollout) and nothing else, like SetDeprecations.
 	SetRollout(ctx context.Context, tenantID, id string, rollout model.JSON) error
+	// RequestRetry records a request to recover what failed on the
+	// cluster, added to one not yet acted on; the etag stays.
+	RequestRetry(ctx context.Context, tenantID, id string, retry model.Retry) error
+	// ClearRetry removes the request made at at, once acted on; a newer
+	// one stays.
+	ClearRetry(ctx context.Context, tenantID, id string, at time.Time) error
 	// UsageHistory is the cluster's recorded usage (pkg/recommend, as
 	// History.Encode wrote it); empty when none is recorded yet.
 	UsageHistory(ctx context.Context, tenantID, id string) ([]byte, error)

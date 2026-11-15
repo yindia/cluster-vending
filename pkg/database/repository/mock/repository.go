@@ -1110,6 +1110,44 @@ func (m *MockClusters) EXPECT() *MockClustersMockRecorder {
 	return m.recorder
 }
 
+// ClearRetry mocks base method.
+func (m *MockClusters) ClearRetry(ctx context.Context, tenantID, id string, at time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClearRetry", ctx, tenantID, id, at)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ClearRetry indicates an expected call of ClearRetry.
+func (mr *MockClustersMockRecorder) ClearRetry(ctx, tenantID, id, at any) *MockClustersClearRetryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearRetry", reflect.TypeOf((*MockClusters)(nil).ClearRetry), ctx, tenantID, id, at)
+	return &MockClustersClearRetryCall{Call: call}
+}
+
+// MockClustersClearRetryCall wrap *gomock.Call
+type MockClustersClearRetryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersClearRetryCall) Return(arg0 error) *MockClustersClearRetryCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersClearRetryCall) Do(f func(context.Context, string, string, time.Time) error) *MockClustersClearRetryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersClearRetryCall) DoAndReturn(f func(context.Context, string, string, time.Time) error) *MockClustersClearRetryCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Create mocks base method.
 func (m *MockClusters) Create(ctx context.Context, c *model.Cluster) error {
 	m.ctrl.T.Helper()
@@ -1417,6 +1455,44 @@ func (c_2 *MockClustersRecordCall) Do(f func(context.Context, *model.Cluster) er
 func (c_2 *MockClustersRecordCall) DoAndReturn(f func(context.Context, *model.Cluster) error) *MockClustersRecordCall {
 	c_2.Call = c_2.Call.DoAndReturn(f)
 	return c_2
+}
+
+// RequestRetry mocks base method.
+func (m *MockClusters) RequestRetry(ctx context.Context, tenantID, id string, retry model.Retry) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestRetry", ctx, tenantID, id, retry)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RequestRetry indicates an expected call of RequestRetry.
+func (mr *MockClustersMockRecorder) RequestRetry(ctx, tenantID, id, retry any) *MockClustersRequestRetryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestRetry", reflect.TypeOf((*MockClusters)(nil).RequestRetry), ctx, tenantID, id, retry)
+	return &MockClustersRequestRetryCall{Call: call}
+}
+
+// MockClustersRequestRetryCall wrap *gomock.Call
+type MockClustersRequestRetryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersRequestRetryCall) Return(arg0 error) *MockClustersRequestRetryCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersRequestRetryCall) Do(f func(context.Context, string, string, model.Retry) error) *MockClustersRequestRetryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersRequestRetryCall) DoAndReturn(f func(context.Context, string, string, model.Retry) error) *MockClustersRequestRetryCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // SetDeprecations mocks base method.

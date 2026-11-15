@@ -56,6 +56,9 @@ const (
 	// ClusterServiceDeleteClusterProcedure is the procedure name of the ClusterService's DeleteCluster
 	// RPC.
 	ClusterServiceDeleteClusterProcedure = "/cloud.v1.ClusterService/DeleteCluster"
+	// ClusterServiceRetryClusterProcedure is the procedure name of the ClusterService's RetryCluster
+	// RPC.
+	ClusterServiceRetryClusterProcedure = "/cloud.v1.ClusterService/RetryCluster"
 )
 
 var (
@@ -140,6 +143,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("DeleteCluster"),
 			Procedure:        ClusterServiceDeleteClusterProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+	clusterServiceRetryClusterSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("RetryCluster"),
+			Procedure:        ClusterServiceRetryClusterProcedure,
 			IdempotencyLevel: connect.IdempotencyIdempotent,
 		}
 	})
@@ -231,6 +242,14 @@ type ClusterServiceClient interface {
 	// taken-over cluster is deleted like a created one, except for resources
 	// the import marked as shared (retained), which stay.
 	DeleteCluster(context.Context, *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error)
+	// Tries again what failed on a cluster: its failed platform and tenant
+	// components, and its failed or timed-out automatic upgrade; or only the
+	// components named, and the upgrade with upgrade: true. The controller
+	// acts on it on its next pass. The response says per item what happens:
+	// RETRY, FIX (a component that failed because of something to change
+	// first, e.g. spec.aws.irsa off: retrying would fail again) or NOTHING
+	// (it has not failed).
+	RetryCluster(context.Context, *v1.RetryClusterRequest) (*v1.RetryClusterResponse, error)
 }
 
 // NewClusterServiceClient constructs a client for the cloud.v1.ClusterService service. Multiple
@@ -346,6 +365,14 @@ type ClusterServiceHandler interface {
 	// taken-over cluster is deleted like a created one, except for resources
 	// the import marked as shared (retained), which stay.
 	DeleteCluster(context.Context, *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error)
+	// Tries again what failed on a cluster: its failed platform and tenant
+	// components, and its failed or timed-out automatic upgrade; or only the
+	// components named, and the upgrade with upgrade: true. The controller
+	// acts on it on its next pass. The response says per item what happens:
+	// RETRY, FIX (a component that failed because of something to change
+	// first, e.g. spec.aws.irsa off: retrying would fail again) or NOTHING
+	// (it has not failed).
+	RetryCluster(context.Context, *v1.RetryClusterRequest) (*v1.RetryClusterResponse, error)
 }
 
 // RegisterClusterServiceHandler registers svc as the cloud.v1.ClusterService implementation on
@@ -364,6 +391,7 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
 		connect.Method{Spec: clusterServiceWatchClusterSpec(), Handler: adapter.watchCluster},
 		connect.Method{Spec: clusterServiceDeleteClusterSpec(), Handler: adapter.deleteCluster},
+		connect.Method{Spec: clusterServiceRetryClusterSpec(), Handler: adapter.retryCluster},
 	)
 }
 
@@ -428,6 +456,10 @@ func (UnimplementedClusterServiceHandler) WatchCluster(context.Context, *v1.Watc
 
 func (UnimplementedClusterServiceHandler) DeleteCluster(context.Context, *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.DeleteCluster is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) RetryCluster(context.Context, *v1.RetryClusterRequest) (*v1.RetryClusterResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.RetryCluster is not implemented")
 }
 
 type clusterServiceClient struct {
@@ -517,6 +549,14 @@ func (c *clusterServiceClient) WatchCluster(ctx context.Context, req *v1.WatchCl
 func (c *clusterServiceClient) DeleteCluster(ctx context.Context, req *v1.DeleteClusterRequest) (*v1.DeleteClusterResponse, error) {
 	var res v1.DeleteClusterResponse
 	if err := c.client.CallUnary(ctx, clusterServiceDeleteClusterSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) RetryCluster(ctx context.Context, req *v1.RetryClusterRequest) (*v1.RetryClusterResponse, error) {
+	var res v1.RetryClusterResponse
+	if err := c.client.CallUnary(ctx, clusterServiceRetryClusterSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -646,6 +686,18 @@ func (h clusterServiceHandler) deleteCluster(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.DeleteCluster(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) retryCluster(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.RetryClusterRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RetryCluster(ctx, &req)
 	if err != nil {
 		return err
 	}

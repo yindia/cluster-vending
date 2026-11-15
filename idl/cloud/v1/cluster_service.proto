@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
+import "cloud/v1/cluster_retry.proto";
 import "cloud/v1/deprecation.proto";
 import "cloud/v1/events.proto";
 import "cloud/v1/managed_resource.proto";
@@ -132,6 +133,17 @@ service ClusterService {
   // taken-over cluster is deleted like a created one, except for resources
   // the import marked as shared (retained), which stay.
   rpc DeleteCluster(DeleteClusterRequest) returns (DeleteClusterResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  // Tries again what failed on a cluster: its failed platform and tenant
+  // components, and its failed or timed-out automatic upgrade; or only the
+  // components named, and the upgrade with upgrade: true. The controller
+  // acts on it on its next pass. The response says per item what happens:
+  // RETRY, FIX (a component that failed because of something to change
+  // first, e.g. spec.aws.irsa off: retrying would fail again) or NOTHING
+  // (it has not failed).
+  rpc RetryCluster(RetryClusterRequest) returns (RetryClusterResponse) {
     option idempotency_level = IDEMPOTENT;
   }
 }

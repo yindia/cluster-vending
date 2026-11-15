@@ -124,6 +124,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 	m.into(&c.Resource)
 	c.Seen = seen(obj)
 	c.Paused, c.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
+	c.Retry = retryOf(obj)
 	return c, nil
 }
 

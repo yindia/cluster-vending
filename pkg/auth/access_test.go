@@ -52,6 +52,7 @@ func TestEveryRPCIsClassified(t *testing.T) {
 		"cloud.v1.TenantService.GetAccountOnboarding":  {Scope: auth.ScopeTenant},
 		"cloud.v1.ClusterService.CreateCluster":        {Scope: auth.ScopeTenant, Write: true},
 		"cloud.v1.ClusterService.DeleteCluster":        {Scope: auth.ScopeTenant, Write: true},
+		"cloud.v1.ClusterService.RetryCluster":         {Scope: auth.ScopeTenant, Write: true},
 		"cloud.v1.ClusterService.GetCluster":           {Scope: auth.ScopeTenant},
 		"cloud.v1.ClusterService.WatchCluster":         {Scope: auth.ScopeTenant},
 		"cloud.v1.NetworkService.UpdateNetwork":        {Scope: auth.ScopeTenant, Write: true},

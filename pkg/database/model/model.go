@@ -287,6 +287,10 @@ type Cluster struct {
 	// its last automatic upgrade (protojson cloud.v1 ClusterRollout), set
 	// by the controller with Clusters.SetRollout. Empty: none yet.
 	Rollout JSON
+	// Retry is a pending request to recover what failed on the cluster
+	// (Clusters.RequestRetry); nil for none. Read only: the controller
+	// acts on it and removes it with Clusters.ClearRetry.
+	Retry *Retry
 }
 
 // Event is one Kubernetes event about an object of a tenant, as the

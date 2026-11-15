@@ -16,7 +16,6 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/yindia/cluster-vending/pkg/auth"
-	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/admin"
@@ -91,8 +90,6 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
 	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
-	// The account role templates, for tenants to create their stack.
-	cloudformation.Mount(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if ready != nil && !ready() {

@@ -149,10 +149,6 @@ cluster-vending account delete --id <account id> --tenant acme [--wait] [--delet
   hand, a stack without the tag, no stack in `--region`) is refused before
   anything is deleted, account included.
 
-The API server also serves the templates for download, without a token (a
-template holds no secret):
-`<server>/cloudformation/cluster-vending-provisioner-role.template.yaml`.
-
 ## Server settings
 
 | Setting | |

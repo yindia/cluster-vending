@@ -449,6 +449,12 @@ the one that applied it (the cache may still hold the old state):
 
 `status.upgrade.phase` is the step (`ControlPlane`, `NodeGroups`, `Addons`,
 `PlatformComponents`, `TenantComponents`); `phaseStartTime` when it started.
+`cluster get` shows every step in order:
+
+```
+Upgrade:       1.36 → 1.37: control plane ✓, node groups ✓, add-ons (coredns, vpc-cni) …, platform components, tenant components
+```
+
 When the last step settles the upgrade is cleared at once (`UpgradeFinished`),
 the rollout record turns `Succeeded`, and an upgrading cluster is looked at
 every 30 seconds, so the rollout plans the next hop right away

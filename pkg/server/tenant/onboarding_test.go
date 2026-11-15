@@ -22,20 +22,18 @@ func TestAccountOnboarding(t *testing.T) {
 		want   *cloudv1.AccountOnboarding
 	}{
 		{
-			name:   "the default role and region",
+			name:   "the default role",
 			config: tenant.Onboarding{ManagementRoleARN: platformRole},
 			req:    &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", AccountId: "444455556666"},
 			want: &cloudv1.AccountOnboarding{Role: "provisioner", RoleName: "cluster-vending-provisioner",
-				StackName: "cluster-vending-provisioner", Region: "us-east-1", AccountId: "444455556666",
-				ManagementRoleArn: platformRole, TemplateFile: "cluster-vending-provisioner-role.template.yaml"},
+				AccountId: "444455556666", ManagementRoleArn: platformRole, TemplatePath: "/cloudformation/provisioner.yaml"},
 		},
 		{
-			name:   "another role and region",
+			name:   "another role",
 			config: tenant.Onboarding{ManagementRoleARN: platformRole},
-			req:    &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "reader", Region: "eu-west-1"},
+			req:    &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "reader"},
 			want: &cloudv1.AccountOnboarding{Role: "reader", RoleName: "cluster-vending-reader",
-				StackName: "cluster-vending-reader", Region: "eu-west-1", ManagementRoleArn: platformRole,
-				TemplateFile: "cluster-vending-reader-role.template.yaml"},
+				ManagementRoleArn: platformRole, TemplatePath: "/cloudformation/reader.yaml"},
 		},
 		{
 			name:   "a role name of its own: its own stack, so stacks of one role do not collide",
@@ -43,8 +41,7 @@ func TestAccountOnboarding(t *testing.T) {
 			req: &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "provisioner",
 				RoleName: "cluster-vending-demo-0115-provisioner"},
 			want: &cloudv1.AccountOnboarding{Role: "provisioner", RoleName: "cluster-vending-demo-0115-provisioner",
-				StackName: "cluster-vending-demo-0115-provisioner", Region: "us-east-1", ManagementRoleArn: platformRole,
-				TemplateFile: "cluster-vending-provisioner-role.template.yaml"},
+				ManagementRoleArn: platformRole, TemplatePath: "/cloudformation/provisioner.yaml"},
 		},
 	}
 	for _, tt := range tests {
@@ -56,12 +53,7 @@ func TestAccountOnboarding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := res.GetOnboarding()
-			if !strings.Contains(got.GetTemplateBody(), "AWS::IAM::Role") {
-				t.Errorf("template body = %.80q", got.GetTemplateBody())
-			}
-			got.TemplateBody = ""
-			if got.String() != tt.want.String() {
+			if got := res.GetOnboarding(); got.String() != tt.want.String() {
 				t.Errorf("got  %v\nwant %v", got, tt.want)
 			}
 		})

@@ -43,7 +43,7 @@ Type "check" Enter
 Wait+Screen@10s /__continue__/
 Type "clear" Enter
 Show
-Type `cluster-vending account delete --id $ACCOUNT --tenant $T --delete-role --region $DEMO_REGION --wait` Enter
+Type `cluster-vending account delete --id $ACCOUNT --tenant $T --wait && aws cloudformation delete-stack --stack-name $ROLE --region $DEMO_REGION` Enter
 Sleep 8s
 Hide
 Wait@10m /^❯\s*$/

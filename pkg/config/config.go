@@ -125,7 +125,7 @@ var serveSettings = []Setting{
 	{Flag: FlagShutdownTimeout, Env: EnvShutdownTimeout, Default: DefaultShutdownTimeout.String(),
 		Usage: "how long in-flight requests get to finish on shutdown"},
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
-		Usage: "the platform's management role (the controller's aws-management-role-arn): the principal the account role templates trust, which account create puts in the role's stack; the server makes no AWS call with it. Empty: account create cannot create a stack, saying to set it"},
+		Usage: "the platform's management role (the controller's aws-management-role-arn): the principal the account role templates trust, which account create prints as the role stack's parameter; the server makes no AWS call with it. Empty: account create says to set it and creates nothing"},
 }
 
 // GlobalSettings returns the settings every command accepts.

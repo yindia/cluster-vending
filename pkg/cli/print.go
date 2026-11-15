@@ -114,10 +114,7 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 	case *cloudv1.GetCloudAccountResponse:
 		return true, describeAccount(w, m.GetAccount())
 	case *cloudv1.BootstrapTenantResponse:
-		if err := mutatedAccount(w, m.GetAccount(), "bootstrapped"); err != nil {
-			return true, err
-		}
-		return true, accountNext(w, m.GetAccount())
+		return true, mutatedAccount(w, m.GetAccount(), "bootstrapped")
 	case *cloudv1.VerifyCloudAccountResponse:
 		return true, mutatedAccount(w, m.GetAccount(), "access check requested")
 	case *cloudv1.DeleteCloudAccountResponse:

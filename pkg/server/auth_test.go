@@ -74,7 +74,9 @@ func TestHandlerAuthenticatesTheServices(t *testing.T) {
 			t.Errorf("%s as platform admin without a management cluster: status %d, want the handler's 503", rpc, got)
 		}
 	}
-	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
+	// The account role templates hold no secret: a tenant fetches them to
+	// create the role's stack.
+	for _, path := range []string{"/healthz", "/readyz", "/metrics", "/cloudformation/", "/cloudformation/provisioner.yaml"} {
 		res, err := srv.Client().Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)

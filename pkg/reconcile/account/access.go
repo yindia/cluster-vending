@@ -245,7 +245,7 @@ func timestamp(t time.Time) *timestamppb.Timestamp {
 // NoExternalIDWarning is added to a verified account's AccessVerified
 // message when the account has no external ID (onboarded before them): it
 // works, but its role trusts the management role without one.
-const NoExternalIDWarning = "warning: no external ID: run account create again, so the role's stack requires one"
+const NoExternalIDWarning = "warning: no external ID: run account create again and update the role's stack with the external ID it prints"
 
 // withExternalIDWarning is c with NoExternalIDWarning when a is verified
 // and has no external ID; the condition stays True.

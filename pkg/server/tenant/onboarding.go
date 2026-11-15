@@ -14,7 +14,6 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	"github.com/yindia/cluster-vending/pkg/config"
-	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -35,8 +34,9 @@ func WithOnboarding(o Onboarding) Option {
 	return func(s *TenantService) { s.onboarding = o }
 }
 
-// GetAccountOnboarding answers with the CloudFormation template of the
-// role and how to create its stack. It reads nothing and calls no AWS.
+// GetAccountOnboarding answers with where the role's CloudFormation
+// template is served and the template's parameters (the account's
+// external ID for an account named by id). It calls no AWS.
 func (s *TenantService) GetAccountOnboarding(ctx context.Context, req *cloudv1.GetAccountOnboardingRequest) (*cloudv1.GetAccountOnboardingResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -76,17 +76,8 @@ func (s *TenantService) GetAccountOnboarding(ctx context.Context, req *cloudv1.G
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			"role_name "+name+" is not a name of the "+role+" template: cluster-vending-"+role+" or cluster-vending-<anything>-"+role)
 	}
-	region := req.GetRegion()
-	if region == "" {
-		region = string(awscatalog.USEast1)
-	}
-	body, err := cloudformation.Template(role)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
-	}
-	out := &cloudv1.AccountOnboarding{Role: role, RoleName: name, StackName: name,
-		Region: region, AccountId: req.GetAccountId(), ManagementRoleArn: s.onboarding.ManagementRoleARN,
-		TemplateBody: string(body), TemplateFile: cloudformation.FileName(role)}
+	out := &cloudv1.AccountOnboarding{Role: role, RoleName: name, AccountId: req.GetAccountId(),
+		ManagementRoleArn: s.onboarding.ManagementRoleARN, TemplatePath: cloudformation.TemplatePath(role)}
 	if account != nil {
 		out.AccountId, out.ExternalId = account.AccountID, account.ExternalID
 	}

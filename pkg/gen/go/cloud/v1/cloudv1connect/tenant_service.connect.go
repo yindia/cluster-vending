@@ -152,12 +152,12 @@ type TenantServiceClient interface {
 	// networks belong to the account; NOT_FOUND for an unknown account.
 	DeleteCloudAccount(context.Context, *v1.DeleteCloudAccountRequest) (*v1.DeleteCloudAccountResponse, error)
 	// Returns how the tenant creates, in one of its AWS accounts, the IAM
-	//   role the platform assumes there: the CloudFormation template of the
-	//   role (reader, updater or provisioner; the controller needs
-	//   provisioner), the stack's name and parameters (the platform's
-	//   management role, which the role trusts). The server
-	//   makes no AWS call: the tenant creates the stack with its own
-	//   credentials, then bootstraps the account with the role's name and
+	//   role the platform assumes there: where the API server serves the
+	//   role's CloudFormation template (reader, updater or provisioner; the
+	//   controller needs provisioner) and the template's parameters (the
+	//   platform's management role, which the role trusts, and, for an
+	//   account named by id, its external ID). The server makes no AWS
+	//   call: the tenant creates the stack with its own credentials, then
 	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
 	//   no management role configured (aws-management-role-arn).
 	GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error)
@@ -221,12 +221,12 @@ type TenantServiceHandler interface {
 	// networks belong to the account; NOT_FOUND for an unknown account.
 	DeleteCloudAccount(context.Context, *v1.DeleteCloudAccountRequest) (*v1.DeleteCloudAccountResponse, error)
 	// Returns how the tenant creates, in one of its AWS accounts, the IAM
-	//   role the platform assumes there: the CloudFormation template of the
-	//   role (reader, updater or provisioner; the controller needs
-	//   provisioner), the stack's name and parameters (the platform's
-	//   management role, which the role trusts). The server
-	//   makes no AWS call: the tenant creates the stack with its own
-	//   credentials, then bootstraps the account with the role's name and
+	//   role the platform assumes there: where the API server serves the
+	//   role's CloudFormation template (reader, updater or provisioner; the
+	//   controller needs provisioner) and the template's parameters (the
+	//   platform's management role, which the role trusts, and, for an
+	//   account named by id, its external ID). The server makes no AWS
+	//   call: the tenant creates the stack with its own credentials, then
 	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
 	//   no management role configured (aws-management-role-arn).
 	GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error)

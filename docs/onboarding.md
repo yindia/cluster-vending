@@ -2,9 +2,10 @@
 
 The platform works in a tenant's AWS account through one IAM role there,
 assumed from its management role (the identity the controller and the
-Crossplane providers run as). The tenant creates that role with a
-CloudFormation stack the platform provides, then onboards the account with
-the role's name.
+Crossplane providers run as). The tenant onboards the account with the
+role's name, then creates that role with a CloudFormation stack of the
+template the API server serves, with the parameters `account create`
+prints. The platform never creates or deletes the stack itself.
 
 ## The roles
 
@@ -51,23 +52,22 @@ platform act in it (the "confused deputy").
   ProviderConfig (`assumeRoleChain[].externalID`) and the controller's own
   calls (the access check, imports).
 - **Given only to the account's tenant**, in `GetAccountOnboarding` of that
-  account (`id`), which `account create` passes to the stack. `account get`
-  says only whether there is one (`External ID: set`).
+  account (`id`), which `account create` prints as the stack's
+  `ExternalId` parameter. `account get` says only whether there is one
+  (`External ID: set`).
 - **Accounts onboarded before external IDs** have none: they keep working
   without one, and their access check says `warning: no external ID: run
-  account create again, so the role's stack requires one`. Running `account
-  create` again gives the account one and updates its stack. The platform
+  account create again and update the role's stack with the external ID it
+  prints`. Running `account
+  create` again gives the account one and prints it; update the stack with
+  it (`aws cloudformation update-stack`, the same parameters). The platform
   passes an external ID as soon as the account has one; a role whose trust
   does not require one yet accepts it, so nothing breaks in between.
-- **The parameter is NoEcho:** CloudFormation shows it masked. The stack
-  carries the tag `cluster-vending.io/external-id-sha256` (a short
-  fingerprint, not the ID), so `account create` sees whether the stack has
-  the account's external ID and updates it when not.
+- **The parameter is NoEcho:** CloudFormation shows it masked.
 
 ## Onboarding the account
 
-One command creates the role and onboards the account. The manifest has
-everything it needs: the account and the role.
+The manifest names the account and the role:
 
 ```yaml
 # cloudaccount.yaml
@@ -81,51 +81,74 @@ spec:
 ```
 
 ```sh
-cluster-vending account create -f cloudaccount.yaml [--create-role terminal|skip] [--profile <aws profile>] [--region us-east-1]
+cluster-vending account create -f cloudaccount.yaml
 ```
 
-1. **How the role is created.** When `spec.aws.role` is a name the
-   templates make (`cluster-vending-[<anything>-]<reader|updater|provisioner>`:
-   its last word is the template), the CLI creates a stack named after the
-   role, with `RoleName` set to it and the tag
-   `cluster-vending.io/managed-by: cluster-vending`. How is
-   `--create-role`; at a terminal without it, that is the one question
-   asked:
-   - `terminal`: here, with your AWS credentials of the account (the AWS
-     SDK's default chain: environment, `~/.aws` profiles, SSO; `--profile`
-     picks one). The credentials must be of the manifest's account, or
-     nothing is created. A stack that already has the role's template and
-     management role is left alone; one with an older template is updated.
-     Each stack event is printed as it happens.
-   - `skip`: the role exists already.
-
-   Not at a terminal (CI), `--create-role` is required. A role that is not
-   one of the platform's is yours to create, trusting the management role
-   (and requiring the account's external ID, which `GetAccountOnboarding`
-   with the account's `id` gives); no stack is created.
+1. **What the server can say is checked first** (`GetAccountOnboarding`):
+   no management role configured, or a role name that is not of its
+   template, stops the command with nothing created.
 2. **The account** is onboarded: its namespace and ProviderConfig, and its
    external ID (`BootstrapTenant`).
-3. **The role's stack**, from the account's onboarding (`GetAccountOnboarding`
-   with its `id`): the template, the management role and the account's
-   external ID. A stack that fails stops the command, with the reasons of
-   the events that failed; the account stays onboarded, and the error says
-   how to retry (`account create` again) or remove it (`account delete`).
-4. **The access check.** With `--wait` (the default) the CLI asks the
-   controller to check the account (`VerifyCloudAccount`) and waits for its
-   verdict: `Access: verified`, or the check that failed and a non-zero
-   exit. `--wait=false` returns once the account is onboarded; then:
+3. **The steps to create the role** are printed, from the account's
+   onboarding (`GetAccountOnboarding` with its `id`): the template's URL on
+   the API server, its parameters (`RoleName`, `ManagementRoleArn`, the
+   account's `ExternalId`) and the command that creates the stack, to run
+   with your AWS credentials of the account:
+
+```
+Create the IAM role cluster-vending-provisioner in account 444455556666 with CloudFormation, with your AWS credentials of that account:
+
+  Template:           http://127.0.0.1:8080/cloudformation/provisioner.yaml
+  RoleName:           cluster-vending-provisioner
+  ManagementRoleArn:  arn:aws:iam::111122223333:role/platform
+  ExternalId:         <the account's external ID>
+
+  curl -fsSL http://127.0.0.1:8080/cloudformation/provisioner.yaml -o cluster-vending-provisioner.yaml && \
+  aws cloudformation create-stack --stack-name cluster-vending-provisioner \
+    --template-body file://cluster-vending-provisioner.yaml --capabilities CAPABILITY_NAMED_IAM \
+    --parameters ParameterKey=ManagementRoleArn,ParameterValue=arn:aws:iam::111122223333:role/platform \
+      ParameterKey=ExternalId,ParameterValue=<the account's external ID> \
+      ParameterKey=RoleName,ParameterValue=cluster-vending-provisioner \
+    --region us-east-1
+
+  (any region works: IAM is global, the stack is regional)
+
+When the stack is CREATE_COMPLETE: cluster-vending account verify --id <account id> --tenant acme --wait
+```
+
+   With `-o json` or `-o yaml`, stdout is the account alone and the steps
+   go to stderr. A role that is not one of the templates' names is yours
+   to create: the command prints what it must trust (the management role,
+   requiring the external ID) instead of a stack.
+4. **The access check.** Once the stack is `CREATE_COMPLETE`, `account
+   verify --wait` asks the controller to check the account
+   (`VerifyCloudAccount`) and waits for its verdict: `Access: verified`, or
+   the check that failed and a non-zero exit. `--region` adds regions to
+   the check (one where a network is to be created). Without `--wait` it
+   only asks; `account get` shows the result:
 
 ```sh
-cluster-vending account verify --id <account id> --tenant acme
 cluster-vending account get --id <account id> --tenant acme   # ACCESS: Verified
 ```
 
 Networks and clusters are refused until the access is verified.
 
+## The templates on the API server
+
+The API server serves the three templates, read-only and without
+authentication: they hold no secret (the management role and the external
+ID are parameters, and the external ID comes only from
+`GetAccountOnboarding` of the tenant's own account).
+
+| Path | |
+|---|---|
+| `GET /cloudformation/` | the three paths, one per line |
+| `GET /cloudformation/<reader\|updater\|provisioner>.yaml` | the role's template (`application/yaml`) |
+
 ## Deleting the account
 
 ```sh
-cluster-vending account delete --id <account id> --tenant acme [--wait] [--delete-role [--profile <aws profile>] [--region us-east-1]]
+cluster-vending account delete --id <account id> --tenant acme [--wait]
 ```
 
 - **Refused while networks belong to the account** (`FAILED_PRECONDITION`,
@@ -133,19 +156,15 @@ cluster-vending account delete --id <account id> --tenant acme [--wait] [--delet
 - **The account goes through the controller:** it removes the account's
   ProviderConfig in the management cluster, then the account.
   `--wait` waits until it is gone.
-- **The role stays** unless `--delete-role`: then, with your AWS
-  credentials of the account (they must be of that account), the CLI
-  deletes the role's stack once the account is gone, printing its events.
-  It deletes only a stack `account create` made: one named after the role
-  with the `cluster-vending.io/managed-by` tag. Any other (a role created by
-  hand, a stack without the tag, no stack in `--region`) is refused before
-  anything is deleted, account included.
+- **The role stays:** it is yours to delete, with your AWS credentials of
+  the account: `aws cloudformation delete-stack --stack-name <role name>
+  --region <the stack's region>`.
 
 ## Server settings
 
 | Setting | |
 |---|---|
-| `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account create` cannot create a stack: `GetAccountOnboarding` fails with `FAILED_PRECONDITION`, saying so. The server makes no AWS call with it. |
+| `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account create` cannot say what the role trusts: `GetAccountOnboarding` fails with `FAILED_PRECONDITION`, saying so, and nothing is created. The server makes no AWS call with it. |
 
 ## Changing the templates
 

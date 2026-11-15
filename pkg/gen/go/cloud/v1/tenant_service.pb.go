@@ -735,9 +735,6 @@ type GetAccountOnboardingRequest struct {
 	// The role: reader, updater or provisioner. Empty: provisioner, the one
 	// the controller needs to create and delete networks and clusters.
 	Role string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
-	// The AWS region to create the stack in (IAM is global; a stack is
-	// regional). Empty: us-east-1.
-	Region string `protobuf:"bytes,3,opt,name=region,proto3" json:"region,omitempty"`
 	// The tenant account the stack is for (12 digits), shown in the
 	// instructions; optional.
 	AccountId string `protobuf:"bytes,4,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
@@ -793,13 +790,6 @@ func (x *GetAccountOnboardingRequest) GetTenantId() string {
 func (x *GetAccountOnboardingRequest) GetRole() string {
 	if x != nil {
 		return x.Role
-	}
-	return ""
-}
-
-func (x *GetAccountOnboardingRequest) GetRegion() string {
-	if x != nil {
-		return x.Region
 	}
 	return ""
 }
@@ -869,33 +859,29 @@ func (x *GetAccountOnboardingResponse) GetOnboarding() *AccountOnboarding {
 	return nil
 }
 
-// AccountOnboarding is how a tenant creates the platform's role in one of
-// its AWS accounts with CloudFormation.
+// AccountOnboarding is what a tenant needs to create the platform's role
+// in one of its AWS accounts with CloudFormation: the template (served by
+// the API server at template_path) and its parameters.
 type AccountOnboarding struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// reader, updater or provisioner.
 	Role string `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
-	// The IAM role the stack creates (cluster-vending-<role>): the
-	// CloudAccount's aws.role.
+	// The IAM role the stack creates (the template's RoleName parameter),
+	// also the stack's name: the CloudAccount's aws.role.
 	RoleName string `protobuf:"bytes,2,opt,name=role_name,json=roleName,proto3" json:"role_name,omitempty"`
-	// The stack's name (the role's name).
-	StackName string `protobuf:"bytes,3,opt,name=stack_name,json=stackName,proto3" json:"stack_name,omitempty"`
-	// The stack's region.
-	Region string `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
-	// The account the stack is for, as asked; empty when not given.
+	// The account the role is for, as asked; empty when not given.
 	AccountId string `protobuf:"bytes,5,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// The template's ManagementRoleArn parameter: the platform's management
 	// role, the only principal the role trusts.
 	ManagementRoleArn string `protobuf:"bytes,6,opt,name=management_role_arn,json=managementRoleArn,proto3" json:"management_role_arn,omitempty"`
-	// The CloudFormation template (YAML).
-	TemplateBody string `protobuf:"bytes,7,opt,name=template_body,json=templateBody,proto3" json:"template_body,omitempty"`
-	// The template's file name; also its name under the hosted location.
-	TemplateFile string `protobuf:"bytes,8,opt,name=template_file,json=templateFile,proto3" json:"template_file,omitempty"`
 	// The template's ExternalId parameter: the account's external ID, which
 	// the management role passes when it assumes the role (sts:ExternalId).
 	// Set when the request named an account (id) that has one; give it to
 	// nobody else. Empty: the role is created without one.
-	ExternalId    string `protobuf:"bytes,11,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	ExternalId string `protobuf:"bytes,11,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	// Where the API server serves the role's template, relative to its base
+	// URL (/cloudformation/<role>.yaml), without authentication.
+	TemplatePath  string `protobuf:"bytes,12,opt,name=template_path,json=templatePath,proto3" json:"template_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -944,20 +930,6 @@ func (x *AccountOnboarding) GetRoleName() string {
 	return ""
 }
 
-func (x *AccountOnboarding) GetStackName() string {
-	if x != nil {
-		return x.StackName
-	}
-	return ""
-}
-
-func (x *AccountOnboarding) GetRegion() string {
-	if x != nil {
-		return x.Region
-	}
-	return ""
-}
-
 func (x *AccountOnboarding) GetAccountId() string {
 	if x != nil {
 		return x.AccountId
@@ -972,23 +944,16 @@ func (x *AccountOnboarding) GetManagementRoleArn() string {
 	return ""
 }
 
-func (x *AccountOnboarding) GetTemplateBody() string {
-	if x != nil {
-		return x.TemplateBody
-	}
-	return ""
-}
-
-func (x *AccountOnboarding) GetTemplateFile() string {
-	if x != nil {
-		return x.TemplateFile
-	}
-	return ""
-}
-
 func (x *AccountOnboarding) GetExternalId() string {
 	if x != nil {
 		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *AccountOnboarding) GetTemplatePath() string {
+	if x != nil {
+		return x.TemplatePath
 	}
 	return ""
 }
@@ -1636,34 +1601,30 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\aregions\x18\x03 \x03(\tB/\xbaH,\x92\x01)\x10\n" +
 	"\x18\x01\"#r!\x10\x01\x18 2\x1b^[a-z]{2}(-[a-z]+)+-[0-9]+$R\aregions\"N\n" +
 	"\x1aVerifyCloudAccountResponse\x120\n" +
-	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\xaa\x03\n" +
+	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\xf7\x02\n" +
 	"\x1bGetAccountOnboardingRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x129\n" +
-	"\x04role\x18\x02 \x01(\tB%\xbaH\"r R\x00R\x06readerR\aupdaterR\vprovisionerR\x04role\x12?\n" +
-	"\x06region\x18\x03 \x01(\tB'\xbaH$r\"\x18 2\x1e^([a-z]{2}(-[a-z]+)+-[0-9]+)?$R\x06region\x124\n" +
+	"\x04role\x18\x02 \x01(\tB%\xbaH\"r R\x00R\x06readerR\aupdaterR\vprovisionerR\x04role\x124\n" +
 	"\n" +
 	"account_id\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^([0-9]{12})?$R\taccountId\x12n\n" +
 	"\trole_name\x18\x05 \x01(\tBQ\xbaHNrL\x18@2H^(cluster-vending-([A-Za-z0-9+=,.@_-]+-)?(reader|updater|provisioner))?$R\broleName\x12\x1b\n" +
-	"\x02id\x18\x06 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\x02id\"[\n" +
+	"\x02id\x18\x06 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\x02idJ\x04\b\x03\x10\x04R\x06region\"[\n" +
 	"\x1cGetAccountOnboardingResponse\x12;\n" +
 	"\n" +
 	"onboarding\x18\x01 \x01(\v2\x1b.cloud.v1.AccountOnboardingR\n" +
-	"onboarding\"\xdc\x02\n" +
+	"onboarding\"\xca\x02\n" +
 	"\x11AccountOnboarding\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1b\n" +
 	"\trole_name\x18\x02 \x01(\tR\broleName\x12\x1d\n" +
 	"\n" +
-	"stack_name\x18\x03 \x01(\tR\tstackName\x12\x16\n" +
-	"\x06region\x18\x04 \x01(\tR\x06region\x12\x1d\n" +
-	"\n" +
 	"account_id\x18\x05 \x01(\tR\taccountId\x12.\n" +
-	"\x13management_role_arn\x18\x06 \x01(\tR\x11managementRoleArn\x12#\n" +
-	"\rtemplate_body\x18\a \x01(\tR\ftemplateBody\x12#\n" +
-	"\rtemplate_file\x18\b \x01(\tR\ftemplateFile\x12\x1f\n" +
+	"\x13management_role_arn\x18\x06 \x01(\tR\x11managementRoleArn\x12\x1f\n" +
 	"\vexternal_id\x18\v \x01(\tR\n" +
-	"externalIdJ\x04\b\t\x10\n" +
+	"externalId\x12#\n" +
+	"\rtemplate_path\x18\f \x01(\tR\ftemplatePathJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
 	"J\x04\b\n" +
-	"\x10\vR\ftemplate_urlR\vconsole_url\"h\n" +
+	"\x10\vR\n" +
+	"stack_nameR\x06regionR\rtemplate_bodyR\rtemplate_fileR\ftemplate_urlR\vconsole_url\"h\n" +
 	"\x18ListCloudAccountsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"O\n" +
 	"\x19ListCloudAccountsResponse\x122\n" +

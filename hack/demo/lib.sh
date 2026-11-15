@@ -134,11 +134,12 @@ found_account() {
 	[ -n "$id" ] && state_set ACCOUNT "$id"
 }
 
-# wait_account n status: account create (status: its exit code) onboarded
-# demo-<run> and its access is verified. A create that failed is fine when
-# the account exists: an earlier attempt of the phase made it.
-# role_stack_ready: the role's CloudFormation stack (account create made
-# it) is complete; prints its status otherwise.
+# wait_account n status: account verify --wait (status: its exit code)
+# found demo-<run> verified. A failure is fine when the account, its stack
+# and its access are there anyway: an earlier attempt of the phase made
+# them.
+# role_stack_ready: the role's CloudFormation stack (the command account
+# create printed made it) is complete; prints its status otherwise.
 role_stack_ready() {
 	local st
 	st="$(aws cloudformation describe-stacks --stack-name "cluster-vending-demo-$RUN-provisioner" \
@@ -154,10 +155,10 @@ role_stack_ready() {
 }
 
 wait_account() {
-	# A failed create is fine only on a re-run: the account and its role's
-	# stack exist from an earlier attempt.
+	# A failure is fine only on a re-run: the account and its role's stack
+	# exist from an earlier attempt.
 	if [ "$2" -ne 0 ] && ! { found_account && role_stack_ready >/dev/null; }; then
-		fail "$1" "account create exited $2 (its output is above)"
+		fail "$1" "account create, the stack or account verify failed (exit $2; the output is above)"
 		return
 	fi
 	until_ "$1" 60 "the account demo-$RUN does not exist" found_account || return
@@ -285,8 +286,9 @@ stack_gone() {
 	! aws cloudformation describe-stacks --stack-name "$ROLE" --region "$DEMO_REGION" >/dev/null 2>&1
 }
 
-# wait_account_gone n status: account delete --delete-role removed the
-# account and its role's stack (or they are gone already).
+# wait_account_gone n status: account delete and aws cloudformation
+# delete-stack removed the account and its role's stack (or they are gone
+# already).
 wait_account_gone() {
 	if gone account "${ACCOUNT:-}" && stack_gone; then
 		done_ "$1"

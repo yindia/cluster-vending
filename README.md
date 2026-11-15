@@ -91,18 +91,19 @@ later manifest needs is a placeholder in it, named in the file's header:
 `111122223333`, the role and the VPC and subnet IDs with your own.
 
 ```sh
-# 1. Onboard acme's AWS account (docs/onboarding.md). It creates the
-#    platform's IAM role in the account with CloudFormation (with your AWS
-#    credentials of the account), onboards the
-#    account and waits for the controller's access check. The answer has
-#    the account's id (BOOTSTRAP_ID, the bootstrap id that networks refer to).
-bin/cluster-vending account create -f examples/cloudaccount.yaml --create-role terminal
+# 1. Onboard acme's AWS account (docs/onboarding.md). It onboards the
+#    account and prints how to create the platform's IAM role there: the
+#    template this server serves (/cloudformation/provisioner.yaml), its
+#    parameters and the aws cloudformation create-stack command to run with
+#    your AWS credentials of the account. The answer has the account's id
+#    (BOOTSTRAP_ID, the bootstrap id that networks refer to).
+bin/cluster-vending account create -f examples/cloudaccount.yaml
 bin/cluster-vending account list --tenant acme
 
-# 2. Networks and clusters are refused until ACCESS in account list is
-#    Verified (account create waited for it). To check again, or a region
-#    no network uses yet:
-bin/cluster-vending account verify --id BOOTSTRAP_ID --tenant acme --region us-east-1
+# 2. Once the stack is CREATE_COMPLETE, have the controller check the
+#    account's access (--region adds a region no network uses yet).
+#    Networks and clusters are refused until ACCESS is Verified.
+bin/cluster-vending account verify --id BOOTSTRAP_ID --tenant acme --region us-east-1 --wait
 bin/cluster-vending account get --id BOOTSTRAP_ID --tenant acme   # its Checks
 
 # 3. Create a network in it (set spec.bootstrapId to BOOTSTRAP_ID first).
@@ -158,7 +159,8 @@ bin/cluster-vending cluster get CLUSTER_ID --tenant acme -o yaml
   map to AWS.
 - [docs/onboarding.md](docs/onboarding.md): onboarding an AWS account: the
   CloudFormation templates of the platform's role (reader, updater,
-  provisioner), how `account create` creates its stack, and the `make cf-*` targets.
+  provisioner), which the API server serves at `/cloudformation/`, the steps
+  `account create` prints to create the stack, and the `make cf-*` targets.
 - [docs/components.md](docs/components.md): the `component` command: the
   catalog, enabling a component on a cluster, its values, and what is not
   installed yet.

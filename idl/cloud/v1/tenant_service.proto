@@ -73,12 +73,12 @@ service TenantService {
   }
 
   // Returns how the tenant creates, in one of its AWS accounts, the IAM
-  //   role the platform assumes there: the CloudFormation template of the
-  //   role (reader, updater or provisioner; the controller needs
-  //   provisioner), the stack's name and parameters (the platform's
-  //   management role, which the role trusts). The server
-  //   makes no AWS call: the tenant creates the stack with its own
-  //   credentials, then bootstraps the account with the role's name and
+  //   role the platform assumes there: where the API server serves the
+  //   role's CloudFormation template (reader, updater or provisioner; the
+  //   controller needs provisioner) and the template's parameters (the
+  //   platform's management role, which the role trusts, and, for an
+  //   account named by id, its external ID). The server makes no AWS
+  //   call: the tenant creates the stack with its own credentials, then
   //   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
   //   no management role configured (aws-management-role-arn).
   rpc GetAccountOnboarding(GetAccountOnboardingRequest) returns (GetAccountOnboardingResponse) {
@@ -226,12 +226,9 @@ message GetAccountOnboardingRequest {
       "provisioner"
     ]
   }];
-  // The AWS region to create the stack in (IAM is global; a stack is
-  // regional). Empty: us-east-1.
-  string region = 3 [(buf.validate.field).string = {
-    max_len: 32
-    pattern: "^([a-z]{2}(-[a-z]+)+-[0-9]+)?$"
-  }];
+  // 3 was the stack's region: the CLI no longer creates the stack.
+  reserved 3;
+  reserved "region";
   // The tenant account the stack is for (12 digits), shown in the
   // instructions; optional.
   string account_id = 4 [(buf.validate.field).string.pattern = "^([0-9]{12})?$"];
@@ -255,27 +252,24 @@ message GetAccountOnboardingResponse {
   AccountOnboarding onboarding = 1;
 }
 
-// AccountOnboarding is how a tenant creates the platform's role in one of
-// its AWS accounts with CloudFormation.
+// AccountOnboarding is what a tenant needs to create the platform's role
+// in one of its AWS accounts with CloudFormation: the template (served by
+// the API server at template_path) and its parameters.
 message AccountOnboarding {
   // reader, updater or provisioner.
   string role = 1;
-  // The IAM role the stack creates (cluster-vending-<role>): the
-  // CloudAccount's aws.role.
+  // The IAM role the stack creates (the template's RoleName parameter),
+  // also the stack's name: the CloudAccount's aws.role.
   string role_name = 2;
-  // The stack's name (the role's name).
-  string stack_name = 3;
-  // The stack's region.
-  string region = 4;
-  // The account the stack is for, as asked; empty when not given.
+  // 3, 4, 7 and 8 were the stack's name and region, the template's body
+  // and its file name: the CLI no longer creates the stack.
+  reserved 3, 4, 7, 8;
+  reserved "stack_name", "region", "template_body", "template_file";
+  // The account the role is for, as asked; empty when not given.
   string account_id = 5;
   // The template's ManagementRoleArn parameter: the platform's management
   // role, the only principal the role trusts.
   string management_role_arn = 6;
-  // The CloudFormation template (YAML).
-  string template_body = 7;
-  // The template's file name; also its name under the hosted location.
-  string template_file = 8;
   // 9 and 10 were the hosted template's URL and the console's quick-create
   // link (account create in the browser), removed.
   reserved 9, 10;
@@ -285,6 +279,9 @@ message AccountOnboarding {
   // Set when the request named an account (id) that has one; give it to
   // nobody else. Empty: the role is created without one.
   string external_id = 11;
+  // Where the API server serves the role's template, relative to its base
+  // URL (/cloudformation/<role>.yaml), without authentication.
+  string template_path = 12;
 }
 
 message ListCloudAccountsRequest {

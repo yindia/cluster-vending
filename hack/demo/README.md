@@ -6,11 +6,11 @@ phase that fails is run again on its own, not the whole demo:
 
 | Phase | Tape | `make` | Shows |
 |---|---|---|---|
-| 1 | `01-account.tape` | `demo-account` | `account create`: the CLI creates the platform's role (`cluster-vending-demo-<run>-provisioner`) with CloudFormation, onboards the account; the controller verifies its access |
+| 1 | `01-account.tape` | `demo-account` | `account create` onboards the account and prints how to create the platform's role (`cluster-vending-demo-<run>-provisioner`); the tape runs that `aws cloudformation create-stack`, then `account verify --wait` |
 | 2 | `02-network.tape` | `demo-network` | `network create`: a VPC, two zones, one NAT gateway |
 | 3 | `03-cluster.tape` | `demo-cluster` | `cluster create`: EKS on 1.36, alpha channel (1.37), upgrades automatic, tier 2 |
 | 4 | `04-upgrade.tape` | `demo-upgrade` | the alpha rollout upgrades it to 1.37 by itself: `admin rollout get`, `cluster get`, `cluster events` |
-| 5 | `05-cleanup.tape` | `demo-cleanup` | `cluster delete`, `network delete`, `account delete --delete-role` |
+| 5 | `05-cleanup.tape` | `demo-cleanup` | `cluster delete`, `network delete`, `account delete`, `aws cloudformation delete-stack` |
 
 `make demo` runs them in order and stops at the first that fails. It is real:
 it creates and deletes AWS resources (an IAM role, EKS, a NAT gateway) and
@@ -87,13 +87,12 @@ ID() { cluster-vending "$1" list --tenant "$T" -o json | jq -r ".$2[]? | select(
 
 cluster-vending cluster delete --tenant $T --id "$(ID cluster clusters name demo-$RUN-eks)" --wait
 cluster-vending network delete --tenant $T --id "$(ID network networks name demo-$RUN-net)" --wait
-cluster-vending account delete --tenant $T --id "$(ID account accounts accountName demo-$RUN)" \
-  --delete-role --region us-west-1 --wait
+cluster-vending account delete --tenant $T --id "$(ID account accounts accountName demo-$RUN)" --wait
+aws cloudformation delete-stack --stack-name cluster-vending-demo-$RUN-provisioner --region us-west-1
 ```
 
-`account delete --delete-role` deletes the role's stack only when `account
-create` made it (its `cluster-vending.io/managed-by` tag), and refuses any
-other before deleting anything.
+`account delete` deletes the account only: the role's stack is yours, so
+the run deletes it with the AWS CLI.
 
 ## Tests
 

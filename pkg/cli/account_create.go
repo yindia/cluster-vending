@@ -1,12 +1,9 @@
 package cli
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -15,28 +12,23 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// The ways account create creates the platform's role in the AWS account
-// (--create-role).
-const (
-	CreateRoleTerminal = "terminal"
-	CreateRoleSkip     = "skip"
-)
+// stackRegion is the region account create's printed command creates the
+// stack in: any works, IAM is global.
+const stackRegion = "us-east-1"
 
 // AccountCreate onboards the account of a CloudAccount manifest (-f):
 //
-//  1. When its role is one of the platform's (cluster-vending-reader,
-//     -updater, -provisioner), it settles how the role's CloudFormation
-//     stack is created: from the terminal with the caller's AWS
-//     credentials (checked to be of the account, before anything is
-//     made), or not at all (skip: the role exists); --create-role says
-//     which, or the one question asked at a terminal.
+//  1. GetAccountOnboarding, before anything is made: what the server
+//     refuses (no management role configured, a role name that does not
+//     match its template) stops it with nothing created.
 //  2. TenantService.BootstrapTenant: the account, with its external ID.
-//  3. The role's stack, from GetAccountOnboarding of that account: its
-//     trust requires the account's external ID.
-//  4. With --wait: the access check (VerifyCloudAccount), until the
-//     controller gives its verdict.
+//  3. GetAccountOnboarding of that account, and the steps the tenant
+//     follows to create the platform's role in AWS (the template the API
+//     server serves, its parameters, the create-stack command), then
+//     account verify. It makes no AWS call itself.
 //
-// A stack that fails stops it, saying how to retry or remove the account.
+// In table output the steps follow the account on stdout; with -o json or
+// yaml stdout is the account alone and the steps go to stderr.
 func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	m, err := LoadManifest(o.Input, KindCloudAccount)
 	if err != nil {
@@ -50,16 +42,9 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	var plan *rolePlan
-	if aws := account.GetAws(); aws != nil {
-		if plan, err = planRole(ctx, o, aws); err != nil {
-			return nil, err
-		}
-	}
-	if plan != nil {
-		// The server must be able to onboard the role (its management role
-		// is configured, the role name is valid) before the account is.
-		if err := plan.preflight(ctx, c, o, tenant); err != nil {
+	aws := account.GetAws()
+	if aws != nil {
+		if _, err := onboarding(ctx, c, tenant, "", aws); err != nil {
 			return nil, fmt.Errorf("%w\nNothing was created", err)
 		}
 	}
@@ -68,209 +53,78 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		return nil, err
 	}
 	created := res.(*cloudv1.BootstrapTenantResponse)
-	if plan != nil {
-		if err := plan.create(ctx, c, o, created.GetAccount()); err != nil {
-			a := created.GetAccount()
-			return nil, fmt.Errorf("%w\nThe account %s is onboarded, its role is not: fix the stack and run account create again, "+
-				"or remove the account: cluster-vending account delete --id %s --tenant %s", err, a.GetId(), a.GetId(), a.GetTenantId())
-		}
-	}
-	if !o.Wait || created.GetAccount().GetAws() == nil {
+	if aws == nil {
 		return created, nil
 	}
-	checked, err := checkAccess(ctx, c, o, created.GetAccount())
+	a := created.GetAccount()
+	ob, err := onboarding(ctx, c, a.GetTenantId(), a.GetId(), aws)
+	if err != nil {
+		return nil, fmt.Errorf("%w\nThe account %s is onboarded: run account create again for the steps to create its role", err, a.GetId())
+	}
+	steps := roleSteps(o.Server, a, ob)
+	if o.Output != OutputTable && o.Output != OutputWide {
+		o.progressf("%s", steps)
+		return created, nil
+	}
+	if err := Print(o.Out, created, o.Output); err != nil {
+		return nil, err
+	}
+	_, err = io.WriteString(o.Out, steps)
+	return nil, err
+}
+
+// onboarding is GetAccountOnboarding of the account's role: of the
+// account id once it is onboarded (with its external ID), else only what
+// the server can say. A role none of the templates creates asks for the
+// default role's, without its name: only the trust is used.
+func onboarding(ctx context.Context, c Clients, tenant, id string, aws *cloudv1.AwsAccount) (*cloudv1.AccountOnboarding, error) {
+	req := &cloudv1.GetAccountOnboardingRequest{TenantId: tenant, Id: id, AccountId: aws.GetAccountId(),
+		Role: cloudformation.RoleOf(aws.GetRole()), RoleName: aws.GetRole()}
+	if req.Role == "" {
+		req.Role, req.RoleName = cloudformation.DefaultRole, ""
+	}
+	res, err := call(ctx, req, c.Tenant.GetAccountOnboarding)
 	if err != nil {
 		return nil, err
 	}
-	out := &cloudv1.BootstrapTenantResponse{Account: checked}
-	if access := checked.GetStatus().GetAccess(); access != nil && !access.GetVerified() {
-		if err := Print(o.Out, out, o.Output); err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("the access check failed: %s: %s; fix the role in account %s, then run: cluster-vending account verify --id %s --tenant %s",
-			access.GetReason(), access.GetMessage(), checked.GetAws().GetAccountId(), checked.GetId(), checked.GetTenantId())
-	}
-	return out, nil
+	return res.(*cloudv1.GetAccountOnboardingResponse).GetOnboarding(), nil
 }
 
-// rolePlan is how account create makes the account's role: settled
-// before the account is onboarded (planRole), done after (create), when
-// the account has its external ID.
-type rolePlan struct {
-	mode, role string
-	aws        *cloudv1.AwsAccount
-	// stacks: the account's stacks through the caller's credentials
-	// (terminal), checked to be of the account.
-	stacks RoleStacks
-}
-
-// planRole settles how the account's role is created, the way
-// --create-role (or the question) says; nil: no stack (a role of the
-// tenant's own, or skip).
-func planRole(ctx context.Context, o Options, aws *cloudv1.AwsAccount) (*rolePlan, error) {
-	role := cloudformation.RoleOf(aws.GetRole())
-	if role == "" {
-		o.progressf("%s is not a role the platform's templates create: it is yours to create in account %s, trusting the platform's management role. Not creating a stack.\n",
-			aws.GetRole(), aws.GetAccountId())
-		return nil, nil
-	}
-	mode, err := chooseCreateRole(o, aws)
-	if err != nil {
-		return nil, err
-	}
-	if mode == CreateRoleSkip {
-		o.progressf("Not creating the role %s: it is expected to exist in account %s already\n", aws.GetRole(), aws.GetAccountId())
-		return nil, nil
-	}
-	plan := &rolePlan{mode: mode, role: role, aws: aws}
-	if mode == CreateRoleTerminal {
-		if plan.stacks, err = accountStacks(ctx, o, stackRegion(o), aws.GetAccountId()); err != nil {
-			return nil, err
-		}
-	}
-	return plan, nil
-}
-
-// preflight asks the server for the role's onboarding before the account
-// exists: what it refuses (no management role configured, a role name
-// that does not match its template) stops account create with nothing
-// made. The external ID comes later, with the account (create).
-func (p *rolePlan) preflight(ctx context.Context, c Clients, o Options, tenant string) error {
-	_, err := call(ctx, &cloudv1.GetAccountOnboardingRequest{TenantId: tenant, Role: p.role,
-		Region: o.StackRegion, AccountId: p.aws.GetAccountId(), RoleName: p.aws.GetRole()}, c.Tenant.GetAccountOnboarding)
-	return err
-}
-
-// create makes the role's stack for the onboarded account: its template
-// and parameters, the account's external ID among them, from
-// GetAccountOnboarding.
-func (p *rolePlan) create(ctx context.Context, c Clients, o Options, account *cloudv1.CloudAccount) error {
-	res, err := call(ctx, &cloudv1.GetAccountOnboardingRequest{TenantId: account.GetTenantId(), Id: account.GetId(), Role: p.role,
-		Region: o.StackRegion, AccountId: p.aws.GetAccountId(), RoleName: p.aws.GetRole()}, c.Tenant.GetAccountOnboarding)
-	if err != nil {
-		return err
-	}
-	ob := res.(*cloudv1.GetAccountOnboardingResponse).GetOnboarding()
-	return ensureStack(ctx, o, p.stacks, ob, p.aws.GetAccountId())
-}
-
-// stackRegion is the region of the role's stack: --region, else the API
-// server's default (GetAccountOnboarding), us-east-1.
-func stackRegion(o Options) string {
-	if o.StackRegion != "" {
-		return o.StackRegion
-	}
-	return "us-east-1"
-}
-
-// chooseCreateRole is --create-role, or the answer to the one question
-// account create asks at a terminal.
-func chooseCreateRole(o Options, aws *cloudv1.AwsAccount) (string, error) {
-	switch o.CreateRole {
-	case CreateRoleTerminal, CreateRoleSkip:
-		return o.CreateRole, nil
-	case "":
-	default:
-		return "", fmt.Errorf("--create-role %q: want terminal or skip", o.CreateRole)
-	}
-	if !o.Terminal {
-		return "", fmt.Errorf("how to create the role %s in account %s: pass --create-role terminal (your AWS credentials) or skip (it exists)",
-			aws.GetRole(), aws.GetAccountId())
-	}
-	o.progressf("Create the IAM role %s in account %s with CloudFormation:\n"+
-		"  1) terminal: here, with your AWS credentials of the account\n"+
-		"  2) skip: the role exists already\n"+
-		"Choose [1]: ", aws.GetRole(), aws.GetAccountId())
-	in := o.In
-	if in == nil {
-		in = os.Stdin
-	}
-	answer, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", fmt.Errorf("read the answer: %w", err)
-	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "", "1", CreateRoleTerminal:
-		return CreateRoleTerminal, nil
-	case "2", CreateRoleSkip:
-		return CreateRoleSkip, nil
-	default:
-		return "", fmt.Errorf("%q: answer 1 or 2", strings.TrimSpace(answer))
-	}
-}
-
-// accountStacks are the account's stacks through the caller's AWS
-// credentials (--profile, else the default chain), checked to be of the
-// account.
-func accountStacks(ctx context.Context, o Options, region, account string) (RoleStacks, error) {
-	open := o.RoleStacks
-	if open == nil {
-		open = awsRoleStacks
-	}
-	s, err := open(ctx, o.Profile, region)
-	if err != nil {
-		return nil, fmt.Errorf("no AWS credentials for account %s: %w (set AWS_PROFILE or pass --profile)", account, err)
-	}
-	caller, err := s.CallerAccount(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("no AWS credentials for account %s: %w (set AWS_PROFILE or pass --profile)", account, err)
-	}
-	if caller != account {
-		return nil, fmt.Errorf("your AWS credentials are of account %s, the manifest's account is %s: pass --profile with credentials of %s",
-			caller, account, account)
-	}
-	return s, nil
-}
-
-// checkAccess asks the controller to check the account's access and
-// waits for its verdict: a check later than the one the account has now.
-func checkAccess(ctx context.Context, c Clients, o Options, a *cloudv1.CloudAccount) (*cloudv1.CloudAccount, error) {
-	before := a.GetStatus().GetAccess().GetCheckedTime().AsTime()
-	// --region is where the account is used: the check covers it, so a
-	// network there is not refused as not verified yet.
-	var regions []string
-	if o.StackRegion != "" {
-		regions = []string{o.StackRegion}
-	}
-	if _, err := call(ctx, &cloudv1.VerifyCloudAccountRequest{TenantId: a.GetTenantId(), Id: a.GetId(), Regions: regions}, c.Tenant.VerifyCloudAccount); err != nil {
-		return nil, err
-	}
-	o.progressf("Checking the account's access: the controller assumes %s in account %s\n",
-		a.GetAws().GetRole(), a.GetAws().GetAccountId())
-	latest := a
-	err := poll(ctx, o, "the access check", func() (bool, error) {
-		res, err := call(ctx, &cloudv1.GetCloudAccountRequest{TenantId: a.GetTenantId(), Id: a.GetId()}, c.Tenant.GetCloudAccount)
-		if err != nil {
-			return false, err
-		}
-		latest = res.(*cloudv1.GetCloudAccountResponse).GetAccount()
-		access := latest.GetStatus().GetAccess()
-		return access != nil && access.GetCheckedTime().AsTime().After(before), nil
-	})
-	if err != nil {
-		o.progressf("%v: account get --id %s shows the check when it is done\n", err, a.GetId())
-		return latest, nil
-	}
-	if access := latest.GetStatus().GetAccess(); access.GetVerified() {
-		o.progressf("Access: verified, as %s\n", access.GetPrincipalArn())
-	}
-	return latest, nil
-}
-
-// accountNext is what account create prints after the account: what to
-// create next once its access is verified, else how to have it checked.
-func accountNext(w io.Writer, a *cloudv1.CloudAccount) error {
-	if a.GetAws() == nil {
-		return nil
-	}
+// roleSteps is how the tenant creates the account's role and has its
+// access checked: the stack of the template the API server (server)
+// serves, or, for a role none of the templates creates, what it must
+// trust.
+func roleSteps(server string, a *cloudv1.CloudAccount, ob *cloudv1.AccountOnboarding) string {
+	aws := a.GetAws()
+	url := strings.TrimSuffix(server, "/") + ob.GetTemplatePath()
 	ref := fmt.Sprintf("--id %s --tenant %s", a.GetId(), a.GetTenantId())
 	var b strings.Builder
-	if a.GetStatus().GetAccess().GetVerified() {
-		fmt.Fprintf(&b, "\nNext: cluster-vending network create -f <Network manifest with spec.bootstrapId: %s> --tenant %s\n",
-			a.GetId(), a.GetTenantId())
+	if cloudformation.RoleOf(aws.GetRole()) == "" {
+		fmt.Fprintf(&b, "\nCreate the role %s in account %s yourself, trusting %s", aws.GetRole(), aws.GetAccountId(), ob.GetManagementRoleArn())
+		if ob.GetExternalId() != "" {
+			fmt.Fprintf(&b, " with external ID %s (sts:ExternalId)", ob.GetExternalId())
+		}
+		fmt.Fprintf(&b, ", with the permissions of %s.\n\nWhen the role is there:", url)
 	} else {
-		fmt.Fprintf(&b, "\nThen: cluster-vending account verify %s   (networks and clusters need its access verified)\n", ref)
+		file := cloudformation.RoleName(ob.GetRole()) + ".yaml"
+		fmt.Fprintf(&b, "\nCreate the IAM role %s in account %s with CloudFormation, with your AWS credentials of that account:\n\n",
+			ob.GetRoleName(), aws.GetAccountId())
+		fmt.Fprintf(&b, "  Template:           %s\n  RoleName:           %s\n  ManagementRoleArn:  %s\n", url, ob.GetRoleName(), ob.GetManagementRoleArn())
+		params := fmt.Sprintf("ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterManagementRoleARN, ob.GetManagementRoleArn())
+		if ob.GetExternalId() != "" {
+			fmt.Fprintf(&b, "  ExternalId:         %s\n", ob.GetExternalId())
+			params += fmt.Sprintf(" \\\n      ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterExternalID, ob.GetExternalId())
+		}
+		params += fmt.Sprintf(" \\\n      ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterRoleName, ob.GetRoleName())
+		fmt.Fprintf(&b, "\n  curl -fsSL %s -o %s && \\\n", url, file)
+		fmt.Fprintf(&b, "  aws cloudformation create-stack --stack-name %s \\\n", ob.GetRoleName())
+		fmt.Fprintf(&b, "    --template-body file://%s --capabilities CAPABILITY_NAMED_IAM \\\n", file)
+		fmt.Fprintf(&b, "    --parameters %s \\\n", params)
+		fmt.Fprintf(&b, "    --region %s\n\n  (any region works: IAM is global, the stack is regional)\n\n", stackRegion)
+		b.WriteString("When the stack is CREATE_COMPLETE:")
 	}
-	_, err := io.WriteString(w, b.String())
-	return err
+	fmt.Fprintf(&b, " cluster-vending account verify %s --wait\n", ref)
+	fmt.Fprintf(&b, "Then: cluster-vending network create -f <Network manifest with spec.bootstrapId: %s> --tenant %s\n",
+		a.GetId(), a.GetTenantId())
+	return b.String()
 }

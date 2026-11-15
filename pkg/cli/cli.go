@@ -94,23 +94,10 @@ type Options struct {
 	// Regions is --region of account verify: regions to check besides
 	// those of the account's networks.
 	Regions []string
-	// CreateRole is account create's --create-role: how the platform's
-	// role is created in the AWS account (CreateRoleTerminal or
-	// CreateRoleSkip; empty: asked at a terminal).
-	// Profile is --profile, the AWS profile of the account's credentials;
-	// StackRegion --region, the region of the role's stack (empty: the
-	// server's default).
-	CreateRole, Profile, StackRegion string
-	// DeleteRole is account delete's --delete-role: delete the stack of
-	// the account's role too, when account create made it.
-	DeleteRole bool
-	// RoleStacks opens the account's CloudFormation with the caller's AWS
-	// credentials; nil: the AWS SDK. PollInterval is how often account
-	// create looks at the stack and the access check; zero: 5s.
-	RoleStacks   func(ctx context.Context, profile, region string) (RoleStacks, error)
+	// PollInterval is how often a --wait looks again; zero: 5s.
 	PollInterval time.Duration
 	// Server is the API's base URL (--server): where the account role
-	// templates are served too.
+	// templates are served too (account create prints their URL).
 	Server string
 	// AcknowledgeNotImported is --acknowledge-not-imported of network
 	// takeover.

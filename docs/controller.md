@@ -154,8 +154,8 @@ or EKS cluster of an import, checks a new cluster's name against EKS,
 resolves the Kubernetes and add-on versions EKS offers, and checks that it
 can reach and act in each account (the access check, below). The API server makes
 no AWS call and has no AWS credentials; its one AWS setting,
-`aws-management-role-arn`, is only handed to the CLI creating the role
-(`account create`, [onboarding.md](onboarding.md)).
+`aws-management-role-arn`, is only handed to the tenant creating the role
+(`account create` prints it, [onboarding.md](onboarding.md)).
 
 There is one rule, for the controller's lookups and for the Crossplane
 providers alike:

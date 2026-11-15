@@ -24,28 +24,6 @@ const (
 	nodesAndAddons = cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS
 )
 
-func TestUpgradePhase(t *testing.T) {
-	for _, tt := range []struct {
-		name      string
-		u         upgrade
-		following bool
-		want      cloudv1.ClusterUpgradePhase
-	}{
-		{"no version in the spec", upgrade{controlPlane: "1.34"}, false, noUpgrade},
-		{"no EKS cluster yet", upgrade{target: "1.35"}, false, noUpgrade},
-		{"nothing to do", upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35"}}, false, noUpgrade},
-		{"the control plane is behind", upgrade{target: "1.35", controlPlane: "1.34", nodes: []string{"1.34"}}, false, controlPlane},
-		{"the control plane is behind, also when following", upgrade{target: "1.35", controlPlane: "1.34"}, true, controlPlane},
-		{"a node group is behind", upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35", "1.34"}}, false, nodesAndAddons},
-		{"nodes report the target, add-ons still roll out", upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35"}}, true, nodesAndAddons},
-		{"node groups that report nothing yet", upgrade{target: "1.35", controlPlane: "1.35"}, false, noUpgrade},
-	} {
-		if got := tt.u.phase(tt.following); got != tt.want {
-			t.Errorf("%s: %s, want %s", tt.name, got, tt.want)
-		}
-	}
-}
-
 // view is a managed resource's view for the upgrade status.
 func upgradeView(kind, name string, state cloudv1.ManagedResourceState, synced cloudv1.ConditionStatus, message string) *cloudv1.ManagedResource {
 	return &cloudv1.ManagedResource{Kind: kind, Name: name, State: state, Synced: synced, Message: message,
@@ -73,7 +51,12 @@ func TestUpgradeStatus(t *testing.T) {
 		upgradeView("Cluster", "prod", ready, yes, ""), upgradeView(KindNodeGroup, "prod-default", working, yes, ""),
 		upgradeView("Addon", "prod-addon-coredns", ready, yes, ""),
 	}
-	before := &cloudv1.ClusterUpgrade{FromVersion: "1.34", ToVersion: "1.35", Phase: controlPlane, StartTime: started}
+	at := func(step cloudv1.ClusterUpgradePhase, applied bool) *cloudv1.ClusterUpgrade {
+		return &cloudv1.ClusterUpgrade{FromVersion: "1.34", ToVersion: "1.35", Phase: step, StartTime: started, Applied: applied}
+	}
+	onTarget := upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35"},
+		nodeGroups: map[string]string{"prod-default": "1.35"}, nodeSpecs: map[string]string{"prod-default": "1.35"}}
+	allReady := componentsState{platformReady: true, tenantReady: true}
 
 	for _, tt := range []struct {
 		name    string
@@ -81,46 +64,55 @@ func TestUpgradeStatus(t *testing.T) {
 		row     *model.Cluster
 		views   []*cloudv1.ManagedResource
 		stored  *cloudv1.ClusterUpgrade
+		comps   componentsState
 		phase   cloudv1.ClusterUpgradePhase
 		from    string
 		start   *timestamppb.Timestamp
 		message string
 	}{
-		{name: "no upgrade", u: upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35"}},
-			row: row(StateRunning, 3), views: settled, phase: noUpgrade},
+		{name: "no upgrade", u: onTarget, row: row(StateRunning, 3), views: settled, comps: allReady, phase: noUpgrade},
 		{name: "control plane upgrading, first seen", u: upgrade{target: "1.35", controlPlane: "1.34", nodes: []string{"1.34"}},
 			row: row(StateUpdating, 2), views: settled, phase: controlPlane, from: "1.34", start: timestamppb.New(asked),
 			message: "upgrading the control plane from 1.34 to 1.35"},
 		{name: "control plane upgrading, seen before", u: upgrade{target: "1.35", controlPlane: "1.34", nodes: []string{"1.34"}},
-			row: row(StateUpdating, 2), views: settled, stored: before, phase: controlPlane, from: "1.34", start: started,
+			row: row(StateUpdating, 2), views: settled, stored: at(controlPlane, true), phase: controlPlane, from: "1.34", start: started,
 			message: "upgrading the control plane from 1.34 to 1.35"},
 		{name: "control plane upgrade refused by the cloud", u: upgrade{target: "1.35", controlPlane: "1.34"},
-			row: row(StateUpdating, 2), stored: before, phase: controlPlane, from: "1.34", start: started,
+			row: row(StateUpdating, 2), stored: at(controlPlane, true), phase: controlPlane, from: "1.34", start: started,
 			views:   []*cloudv1.ManagedResource{upgradeView("Cluster", "prod", ready, no, "InvalidParameterException: unsupported version")},
 			message: "Cluster prod: InvalidParameterException: unsupported version"},
 		{name: "a stored upgrade to another version does not carry over", u: upgrade{target: "1.36", controlPlane: "1.35"},
-			row: row(StateUpdating, 2), views: settled, stored: before, phase: controlPlane, from: "1.35",
+			row: row(StateUpdating, 2), views: settled, stored: at(controlPlane, true), phase: controlPlane, from: "1.35",
 			start: timestamppb.New(asked), message: "from 1.35 to 1.36"},
-		{name: "nodes behind the control plane", u: upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.34"}},
-			row: row(StateUpdating, 3), views: rolling, stored: before, phase: nodesAndAddons, from: "1.34", start: started,
-			message: "the control plane runs 1.35"},
-		{name: "nodes report the target, the generation is not applied in full yet",
-			u:   upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35"}},
-			row: row(StateUpdating, 2), views: settled, stored: before, phase: nodesAndAddons, from: "1.34", start: started,
-			message: "the control plane runs 1.35"},
-		{name: "node group fails to follow", u: upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.34"}},
-			row: row(StateUpdating, 3), stored: before, phase: nodesAndAddons, from: "1.34", start: started,
+		{name: "the control plane is done: the node groups' turn",
+			u:   upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.34"}, nodeGroups: map[string]string{"prod-default": "1.34"}},
+			row: row(StateUpdating, 2), views: rolling, stored: at(controlPlane, true), phase: stepNodes, from: "1.34", start: started,
+			message: "the control plane runs 1.35; node group prod-default 1.34 → 1.35"},
+		{name: "a node group fails to follow", u: upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.34"}},
+			row: row(StateUpdating, 2), stored: at(stepNodes, true), phase: stepNodes, from: "1.34", start: started,
 			views: []*cloudv1.ManagedResource{upgradeView("Cluster", "prod", ready, yes, ""),
 				upgradeView(KindNodeGroup, "prod-default", failed, no, "PodEvictionFailure: reached max retries")},
 			message: "NodeGroup prod-default: PodEvictionFailure: reached max retries"},
-		{name: "done: everything settled at the target", u: upgrade{target: "1.35", controlPlane: "1.35", nodes: []string{"1.35"}},
-			row: row(StateUpdating, 3), views: settled, stored: before, phase: noUpgrade},
+		{name: "node groups settled: the add-ons' turn", u: onTarget, row: row(StateUpdating, 2), views: settled,
+			stored: at(stepNodes, true), phase: stepAddons, from: "1.34", start: started, message: "the node groups run 1.35"},
+		{name: "add-ons still held (generation not applied)", u: onTarget, row: row(StateUpdating, 2), views: settled,
+			stored: at(stepAddons, true), phase: stepAddons, from: "1.34", start: started},
+		{name: "add-ons settled: the platform components' turn", u: onTarget, row: row(StateUpdating, 3), views: settled,
+			stored: at(stepAddons, true), comps: allReady, phase: stepPlatform, from: "1.34", start: started,
+			message: "the platform components move to 1.35"},
+		{name: "a platform component still moving", u: onTarget, row: row(StateRunning, 3), views: settled,
+			stored: at(stepPlatform, true), comps: componentsState{tenantReady: true, platformBehind: []string{"cluster-autoscaler"}},
+			phase: stepPlatform, from: "1.34", start: started, message: "platform components moving to 1.35: cluster-autoscaler"},
+		{name: "platform settled: the tenant components' turn", u: onTarget, row: row(StateRunning, 3), views: settled,
+			stored: at(stepPlatform, true), comps: allReady, phase: stepTenant, from: "1.34", start: started},
+		{name: "done: every step settled", u: onTarget, row: row(StateRunning, 3), views: settled,
+			stored: at(stepTenant, true), comps: allReady, phase: noUpgrade},
 		{name: "a deleting cluster has no upgrade", u: upgrade{target: "1.35", controlPlane: "1.34"},
 			row: row(StateDeleting, 2), views: settled, phase: noUpgrade},
 		{name: "an imported cluster has no upgrade", u: upgrade{target: "1.35", controlPlane: "1.34"},
 			row: row(StateImported, 2), views: settled, phase: noUpgrade},
 	} {
-		got := tt.u.status(tt.row, tt.views, tt.stored)
+		got := tt.u.status(tt.row, tt.views, tt.stored, tt.comps)
 		if tt.phase == noUpgrade {
 			if got != nil {
 				t.Errorf("%s: %v, want no upgrade", tt.name, got)
@@ -134,9 +126,10 @@ func TestUpgradeStatus(t *testing.T) {
 	}
 }
 
-// The gate and the status read the same observation: while the status
-// says CONTROL_PLANE the plan is held, and not otherwise.
-func TestGateFollowsTheUpgradePhase(t *testing.T) {
+// The gate holds what a later step applies: the node groups while the
+// control plane is behind, the add-ons until the upgrade reaches their
+// step.
+func TestGateFollowsTheUpgradeStep(t *testing.T) {
 	eks := func(version string) *awseks.Cluster {
 		c := &awseks.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: ngNamespace, Name: "prod"}}
 		c.Spec.ForProvider.Region = ptr.To("us-east-1")
@@ -152,29 +145,37 @@ func TestGateFollowsTheUpgradePhase(t *testing.T) {
 		{Kind: "Cluster", APIVersion: "eks.aws.m.upbound.io/v1beta1", Namespace: ngNamespace, Name: "prod"},
 		ngRecord("1", "prod-default"),
 	}
-	row := &model.Cluster{Resource: model.Resource{Base: model.Base{ID: "c-1"}, State: StateUpdating, Generation: 2, AppliedGeneration: 1}}
+	row := func(step cloudv1.ClusterUpgradePhase) *model.Cluster {
+		r := &model.Cluster{Resource: model.Resource{Base: model.Base{ID: "c-1"}, State: StateUpdating, Generation: 2, AppliedGeneration: 1}}
+		if step != noUpgrade {
+			raw, err := Encode(&cloudv1.ClusterStatus{Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.34", ToVersion: "1.35", Phase: step}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Status = raw
+		}
+		return r
+	}
 	for _, tt := range []struct {
 		name          string
 		plane, groups string
-		phase         cloudv1.ClusterUpgradePhase
+		step          cloudv1.ClusterUpgradePhase
 		gated         bool
+		nodesAt       string
 	}{
-		{"control plane behind", "1.34", "1.34", controlPlane, true},
-		{"nodes behind", "1.35", "1.34", nodesAndAddons, false},
-		{"all at the target", "1.35", "1.35", noUpgrade, false},
+		{"control plane behind", "1.34", "1.34", controlPlane, true, "1.34"},
+		{"node groups' turn: add-ons held", "1.35", "1.34", stepNodes, true, ""},
+		{"nodes behind, nothing recorded: add-ons held", "1.35", "1.34", noUpgrade, true, ""},
+		{"add-ons' turn: nothing held", "1.35", "1.35", stepAddons, false, ""},
+		{"platform components' turn: nothing held", "1.35", "1.35", stepPlatform, false, ""},
+		{"all at the target, nothing recorded", "1.35", "1.35", noUpgrade, false, ""},
 	} {
 		s, _, _ := ngService(t, records, eks(tt.plane), nodes(tt.groups))
-		u, err := s.observeUpgrade(t.Context(), records, "1.35")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := u.status(row, nil, nil).GetPhase(); got != tt.phase {
-			t.Errorf("%s: status phase %s, want %s", tt.name, got, tt.phase)
-		}
 		plan := crossplaneaws.ClusterPlan{KubernetesVersion: "1.35"}
-		gated, err := s.GateUpgrade(t.Context(), row, &plan)
-		if err != nil || gated != tt.gated || (gated && plan.NodeKubernetesVersion != tt.plane) {
-			t.Errorf("%s: gated %t (%v), nodes rendered at %q; want gated %t", tt.name, gated, err, plan.NodeKubernetesVersion, tt.gated)
+		gated, err := s.GateUpgrade(t.Context(), row(tt.step), &plan)
+		if err != nil || gated != tt.gated || plan.NodeKubernetesVersion != tt.nodesAt {
+			t.Errorf("%s: gated %t (%v), nodes rendered at %q; want gated %t, nodes at %q", tt.name, gated, err,
+				plan.NodeKubernetesVersion, tt.gated, tt.nodesAt)
 		}
 	}
 }
@@ -241,7 +242,7 @@ func TestReconcileRecordsTheUpgrade(t *testing.T) {
 		ptr.Deref(ng.Spec.ForProvider.Version, "") != "1.35" {
 		t.Errorf("node group version once the control plane runs the target = %q (%v), want 1.35", ptr.Deref(ng.Spec.ForProvider.Version, ""), err)
 	}
-	if u := recorded(); u != nil && (u.GetPhase() != nodesAndAddons || u.GetFromVersion() != "1.34" || !u.GetStartTime().AsTime().Equal(started)) {
-		t.Errorf("upgrade recorded once the control plane runs the target = %v, want none or NODES_AND_ADDONS from 1.34 since %s", u, started)
+	if u := recorded(); u.GetPhase() != stepNodes || u.GetFromVersion() != "1.34" || !u.GetStartTime().AsTime().Equal(started) {
+		t.Errorf("upgrade recorded once the control plane runs the target = %v, want NODE_GROUPS from 1.34 since %s", u, started)
 	}
 }

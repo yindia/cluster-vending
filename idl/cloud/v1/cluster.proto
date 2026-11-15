@@ -619,9 +619,10 @@ message PlatformComponent {
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in
-// two steps, in this order, because EKS refuses node groups and add-ons
-// ahead of the control plane: the control plane first, then the node
-// group and the add-ons.
+// the order a cluster is created, one step at a time, each starting once
+// the one before is settled as AWS and Helm report it: the control plane,
+// the node groups, the EKS add-ons, the platform components, the tenant
+// components.
 message ClusterUpgrade {
   // The version the upgrade started from: what the control plane ran.
   string from_version = 1;
@@ -647,6 +648,18 @@ message ClusterUpgrade {
   // The add-ons not on their new version yet, by add-on name (e.g.
   // "coredns"); empty once every add-on runs its version.
   repeated string addons_behind = 7;
+
+  // The step's changes were applied in an earlier pass: what the step
+  // waits for is then read as settled or not (a pass that applies a
+  // change may still read the old state).
+  bool applied = 8;
+
+  // When the upgrade entered its current step.
+  google.protobuf.Timestamp phase_start_time = 9;
+
+  // The components (platform or tenant, by the step) not settled on their
+  // new version yet.
+  repeated string components_behind = 10;
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes
@@ -677,11 +690,24 @@ enum ClusterUpgradePhase {
   // applied meanwhile.
   CLUSTER_UPGRADE_PHASE_CONTROL_PLANE = 1;
 
-  // The control plane runs to_version. The node group and the add-ons are
-  // applied at to_version (the add-ons at the versions resolved for it)
-  // and are rolling out: the node group replaces its nodes, the add-ons
-  // restart.
+  // Not reported any more (an upgrade now has a step for the node groups
+  // and one for the add-ons); kept for statuses recorded before.
   CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS = 2;
+
+  // The control plane runs to_version; the node groups are applied at it
+  // and replace their nodes. The add-ons stay at the versions they run.
+  CLUSTER_UPGRADE_PHASE_NODE_GROUPS = 3;
+
+  // The node groups run to_version; the add-ons are applied at the
+  // versions EKS recommends for it (or the ones the client pinned).
+  CLUSTER_UPGRADE_PHASE_ADDONS = 4;
+
+  // The add-ons are settled; the platform components move to to_version's
+  // values (e.g. cluster-autoscaler's image).
+  CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS = 5;
+
+  // The platform components are settled; the tenant's components move.
+  CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS = 6;
 }
 
 // ClusterEndpoint is how clients reach the Kubernetes API server.

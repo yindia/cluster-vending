@@ -420,11 +420,20 @@ const (
 	// ahead of the control plane. Other changes of the same update are
 	// applied meanwhile.
 	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE ClusterUpgradePhase = 1
-	// The control plane runs to_version. The node group and the add-ons are
-	// applied at to_version (the add-ons at the versions resolved for it)
-	// and are rolling out: the node group replaces its nodes, the add-ons
-	// restart.
+	// Not reported any more (an upgrade now has a step for the node groups
+	// and one for the add-ons); kept for statuses recorded before.
 	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS ClusterUpgradePhase = 2
+	// The control plane runs to_version; the node groups are applied at it
+	// and replace their nodes. The add-ons stay at the versions they run.
+	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODE_GROUPS ClusterUpgradePhase = 3
+	// The node groups run to_version; the add-ons are applied at the
+	// versions EKS recommends for it (or the ones the client pinned).
+	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_ADDONS ClusterUpgradePhase = 4
+	// The add-ons are settled; the platform components move to to_version's
+	// values (e.g. cluster-autoscaler's image).
+	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS ClusterUpgradePhase = 5
+	// The platform components are settled; the tenant's components move.
+	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS ClusterUpgradePhase = 6
 )
 
 // Enum value maps for ClusterUpgradePhase.
@@ -433,11 +442,19 @@ var (
 		0: "CLUSTER_UPGRADE_PHASE_UNSPECIFIED",
 		1: "CLUSTER_UPGRADE_PHASE_CONTROL_PLANE",
 		2: "CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS",
+		3: "CLUSTER_UPGRADE_PHASE_NODE_GROUPS",
+		4: "CLUSTER_UPGRADE_PHASE_ADDONS",
+		5: "CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS",
+		6: "CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS",
 	}
 	ClusterUpgradePhase_value = map[string]int32{
-		"CLUSTER_UPGRADE_PHASE_UNSPECIFIED":      0,
-		"CLUSTER_UPGRADE_PHASE_CONTROL_PLANE":    1,
-		"CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS": 2,
+		"CLUSTER_UPGRADE_PHASE_UNSPECIFIED":         0,
+		"CLUSTER_UPGRADE_PHASE_CONTROL_PLANE":       1,
+		"CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS":    2,
+		"CLUSTER_UPGRADE_PHASE_NODE_GROUPS":         3,
+		"CLUSTER_UPGRADE_PHASE_ADDONS":              4,
+		"CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS": 5,
+		"CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS":   6,
 	}
 )
 
@@ -1682,9 +1699,10 @@ func (x *PlatformComponent) GetRecoveries() int32 {
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in
-// two steps, in this order, because EKS refuses node groups and add-ons
-// ahead of the control plane: the control plane first, then the node
-// group and the add-ons.
+// the order a cluster is created, one step at a time, each starting once
+// the one before is settled as AWS and Helm report it: the control plane,
+// the node groups, the EKS add-ons, the platform components, the tenant
+// components.
 type ClusterUpgrade struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The version the upgrade started from: what the control plane ran.
@@ -1704,9 +1722,18 @@ type ClusterUpgrade struct {
 	NodeGroups []*ClusterUpgradeNodeGroup `protobuf:"bytes,6,rep,name=node_groups,json=nodeGroups,proto3" json:"node_groups,omitempty"`
 	// The add-ons not on their new version yet, by add-on name (e.g.
 	// "coredns"); empty once every add-on runs its version.
-	AddonsBehind  []string `protobuf:"bytes,7,rep,name=addons_behind,json=addonsBehind,proto3" json:"addons_behind,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AddonsBehind []string `protobuf:"bytes,7,rep,name=addons_behind,json=addonsBehind,proto3" json:"addons_behind,omitempty"`
+	// The step's changes were applied in an earlier pass: what the step
+	// waits for is then read as settled or not (a pass that applies a
+	// change may still read the old state).
+	Applied bool `protobuf:"varint,8,opt,name=applied,proto3" json:"applied,omitempty"`
+	// When the upgrade entered its current step.
+	PhaseStartTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=phase_start_time,json=phaseStartTime,proto3" json:"phase_start_time,omitempty"`
+	// The components (platform or tenant, by the step) not settled on their
+	// new version yet.
+	ComponentsBehind []string `protobuf:"bytes,10,rep,name=components_behind,json=componentsBehind,proto3" json:"components_behind,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ClusterUpgrade) Reset() {
@@ -1784,6 +1811,27 @@ func (x *ClusterUpgrade) GetNodeGroups() []*ClusterUpgradeNodeGroup {
 func (x *ClusterUpgrade) GetAddonsBehind() []string {
 	if x != nil {
 		return x.AddonsBehind
+	}
+	return nil
+}
+
+func (x *ClusterUpgrade) GetApplied() bool {
+	if x != nil {
+		return x.Applied
+	}
+	return false
+}
+
+func (x *ClusterUpgrade) GetPhaseStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PhaseStartTime
+	}
+	return nil
+}
+
+func (x *ClusterUpgrade) GetComponentsBehind() []string {
+	if x != nil {
+		return x.ComponentsBehind
 	}
 	return nil
 }
@@ -2253,7 +2301,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"recoveries\x18\n" +
 	" \x01(\x05R\n" +
-	"recoveries\"\xc5\x02\n" +
+	"recoveries\"\xd2\x03\n" +
 	"\x0eClusterUpgrade\x12!\n" +
 	"\ffrom_version\x18\x01 \x01(\tR\vfromVersion\x12\x1d\n" +
 	"\n" +
@@ -2264,7 +2312,11 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\amessage\x18\x05 \x01(\tR\amessage\x12B\n" +
 	"\vnode_groups\x18\x06 \x03(\v2!.cloud.v1.ClusterUpgradeNodeGroupR\n" +
 	"nodeGroups\x12#\n" +
-	"\raddons_behind\x18\a \x03(\tR\faddonsBehind\"\xa5\x01\n" +
+	"\raddons_behind\x18\a \x03(\tR\faddonsBehind\x12\x18\n" +
+	"\aapplied\x18\b \x01(\bR\aapplied\x12D\n" +
+	"\x10phase_start_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0ephaseStartTime\x12+\n" +
+	"\x11components_behind\x18\n" +
+	" \x03(\tR\x10componentsBehind\"\xa5\x01\n" +
 	"\x17ClusterUpgradeNodeGroup\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\ffrom_version\x18\x02 \x01(\tR\vfromVersion\x12\x1d\n" +
@@ -2333,11 +2385,15 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x1dCLUSTER_ROLLOUT_RESULT_FAILED\x10\x03\x12$\n" +
 	" CLUSTER_ROLLOUT_RESULT_TIMED_OUT\x10\x04\x12\"\n" +
 	"\x1eCLUSTER_ROLLOUT_RESULT_PENDING\x10\x05\x12\"\n" +
-	"\x1eCLUSTER_ROLLOUT_RESULT_BLOCKED\x10\x06*\x91\x01\n" +
+	"\x1eCLUSTER_ROLLOUT_RESULT_BLOCKED\x10\x06*\xb6\x02\n" +
 	"\x13ClusterUpgradePhase\x12%\n" +
 	"!CLUSTER_UPGRADE_PHASE_UNSPECIFIED\x10\x00\x12'\n" +
 	"#CLUSTER_UPGRADE_PHASE_CONTROL_PLANE\x10\x01\x12*\n" +
-	"&CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS\x10\x02*\xb2\x01\n" +
+	"&CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS\x10\x02\x12%\n" +
+	"!CLUSTER_UPGRADE_PHASE_NODE_GROUPS\x10\x03\x12 \n" +
+	"\x1cCLUSTER_UPGRADE_PHASE_ADDONS\x10\x04\x12-\n" +
+	")CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS\x10\x05\x12+\n" +
+	"'CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS\x10\x06*\xb2\x01\n" +
 	"\x15ClusterTeardownResult\x12'\n" +
 	"#CLUSTER_TEARDOWN_RESULT_UNSPECIFIED\x10\x00\x12$\n" +
 	" CLUSTER_TEARDOWN_RESULT_FINISHED\x10\x01\x12%\n" +
@@ -2450,18 +2506,19 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	6,  // 39: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
 	22, // 40: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
 	17, // 41: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
-	39, // 42: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
-	22, // 43: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
-	22, // 44: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
-	7,  // 45: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
-	8,  // 46: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
-	22, // 47: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
-	22, // 48: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
-	49, // [49:49] is the sub-list for method output_type
-	49, // [49:49] is the sub-list for method input_type
-	49, // [49:49] is the sub-list for extension type_name
-	49, // [49:49] is the sub-list for extension extendee
-	0,  // [0:49] is the sub-list for field type_name
+	22, // 42: cloud.v1.ClusterUpgrade.phase_start_time:type_name -> google.protobuf.Timestamp
+	39, // 43: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
+	22, // 44: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
+	22, // 45: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
+	7,  // 46: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
+	8,  // 47: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
+	22, // 48: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
+	22, // 49: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
+	50, // [50:50] is the sub-list for method output_type
+	50, // [50:50] is the sub-list for method input_type
+	50, // [50:50] is the sub-list for extension type_name
+	50, // [50:50] is the sub-list for extension extendee
+	0,  // [0:50] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }

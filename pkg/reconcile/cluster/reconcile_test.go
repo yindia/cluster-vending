@@ -232,7 +232,7 @@ func TestFreshlyRecordedObjectsAreNotFailed(t *testing.T) {
 	ctx := t.Context()
 	records := []model.ManagedResource{{Base: model.Base{CreatedAt: time.Now()}, APIVersion: "iam.aws.m.upbound.io/v1beta1",
 		Kind: "Role", Namespace: worldNS, Name: "not-there-yet"}}
-	c, err := w.svc.viewOf(ctx, w.cluster(t), records)
+	c, err := w.svc.viewOf(ctx, w.cluster(t), records, componentsState{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestFreshlyRecordedObjectsAreNotFailed(t *testing.T) {
 		t.Errorf("state %s, resource %s; want not FAILED and CREATING", st.GetState(), st.GetManagedResources()[0].GetState())
 	}
 	records[0].CreatedAt = time.Now().Add(-10 * time.Minute)
-	c, err = w.svc.viewOf(ctx, w.cluster(t), records)
+	c, err = w.svc.viewOf(ctx, w.cluster(t), records, componentsState{})
 	if err != nil || c.GetStatus().GetState() != cloudv1.ClusterState_CLUSTER_STATE_FAILED {
 		t.Errorf("an object missing for 10 minutes: state %s (%v), want FAILED", c.GetStatus().GetState(), err)
 	}

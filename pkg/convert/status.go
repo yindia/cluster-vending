@@ -90,8 +90,12 @@ func platformComponents(in []*cloudv1.PlatformComponent) []cloudv1alpha1.Platfor
 
 // upgradePhases are the kind's spellings of the contract's upgrade phases.
 var upgradePhases = map[cloudv1.ClusterUpgradePhase]cloudv1alpha1.ClusterUpgradePhase{
-	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE:    cloudv1alpha1.ClusterUpgradeControlPlane,
-	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS: cloudv1alpha1.ClusterUpgradeNodesAndAddons,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE:       cloudv1alpha1.ClusterUpgradeControlPlane,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS:    cloudv1alpha1.ClusterUpgradeNodesAndAddons,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODE_GROUPS:         cloudv1alpha1.ClusterUpgradeNodeGroups,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_ADDONS:              cloudv1alpha1.ClusterUpgradeAddons,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS: cloudv1alpha1.ClusterUpgradePlatformComponents,
+	cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS:   cloudv1alpha1.ClusterUpgradeTenantComponents,
 }
 
 // upgrade is the kind's view of a Kubernetes upgrade in progress; nil
@@ -101,7 +105,8 @@ func upgrade(p *cloudv1.ClusterUpgrade) *cloudv1alpha1.ClusterUpgrade {
 		return nil
 	}
 	out := &cloudv1alpha1.ClusterUpgrade{FromVersion: p.GetFromVersion(), ToVersion: p.GetToVersion(),
-		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage(), AddonsBehind: p.GetAddonsBehind()}
+		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage(), AddonsBehind: p.GetAddonsBehind(),
+		PhaseStartTime: timeOf(p.GetPhaseStartTime()), ComponentsBehind: p.GetComponentsBehind()}
 	for _, g := range p.GetNodeGroups() {
 		out.NodeGroups = append(out.NodeGroups, cloudv1alpha1.ClusterUpgradeNodeGroup{Name: g.GetName(),
 			FromVersion: g.GetFromVersion(), ToVersion: g.GetToVersion(), State: camel(g.GetState(), "MANAGED_RESOURCE_STATE_")})

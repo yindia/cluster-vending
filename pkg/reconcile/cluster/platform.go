@@ -161,7 +161,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if row.State != StateRunning && len(records) == 0 {
 		return nil, nil
 	}
-	in, release, problem, err := s.platformInput(ctx, row, len(records) > 0)
+	in, release, problem, err := s.platformInput(ctx, row, len(records) > 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 // platformInput gathers what the cluster's platform components are planned
 // from. problem, when set, says why none can be installed now (the
 // release cannot be used); the entries are still returned, to report.
-func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, installed bool) (in component.PlatformInput, release, problem string, err error) {
+func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, installed, tenant bool) (in component.PlatformInput, release, problem string, err error) {
 	spec, err := SpecOf(row)
 	if err != nil {
 		return in, "", "", err
@@ -351,8 +351,7 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 		TenantID: row.TenantID, ClusterID: row.ID, ClusterName: row.Name, ClusterPrefix: clusterPlan.Prefix,
 		Region: spec.GetRegion(), Tags: row.Labels}
 	in.Cluster = component.Cluster{Name: row.Name, State: row.State, Running: row.State == StateRunning, Provider: string(row.Provider),
-		KubernetesMinor: componentsMinor(spec.GetControlPlane().GetKubernetesVersion(),
-			storedStatus(row).GetCurrentKubernetesVersion()),
+		KubernetesMinor: componentsMinor(spec.GetControlPlane().GetKubernetesVersion(), storedStatus(row), tenant),
 		// The provider spec.aws.irsa renders, or the one a taken-over
 		// cluster was imported with.
 		IRSA: HasIRSA(spec, records)}
@@ -430,20 +429,40 @@ func channelOf(spec *cloudv1.ClusterSpec) string {
 	}
 }
 
-// componentsMinor is the Kubernetes minor the platform components are
-// planned for: the one the control plane runs (as EKS last reported it)
-// while it is behind the spec's, so an upgrade changes no component
-// (cluster-autoscaler's image is per minor) before the control plane is
-// on the new minor; the spec's otherwise (a new cluster, or one that
-// reports nothing readable).
-func componentsMinor(specVersion, running string) string {
-	want, have := kubernetesMinor(specVersion), kubernetesMinor(running)
-	wantMajor, wantMinor, okWant := minorParts(want)
-	haveMajor, haveMinor, okHave := minorParts(have)
-	if okWant && okHave && (haveMajor < wantMajor || haveMajor == wantMajor && haveMinor < wantMinor) {
-		return have
+// componentsMinor is the Kubernetes minor the components are planned for
+// (their pins and values, e.g. cluster-autoscaler's image): during an
+// upgrade the minor they run (the upgrade's from_version) until the
+// upgrade reaches their step (the platform components', for tenant false;
+// the tenant components', for tenant true), the spec's then and when no
+// upgrade is recorded. A spec ahead of the version last recorded for the
+// cluster with no upgrade recorded yet (it was just asked for) keeps that
+// version's minor.
+func componentsMinor(specVersion string, stored *cloudv1.ClusterStatus, tenant bool) string {
+	want := kubernetesMinor(specVersion)
+	u := stored.GetUpgrade()
+	if u == nil || !sameMinor(u.GetToVersion(), specVersion) {
+		running := kubernetesMinor(stored.GetCurrentKubernetesVersion())
+		if behind(running, want) {
+			return running
+		}
+		return want
+	}
+	step := stepPlatformComps
+	if tenant {
+		step = stepTenantComps
+	}
+	if from := kubernetesMinor(u.GetFromVersion()); !reached(stepOf(u), step) && behind(from, want) {
+		return from
 	}
 	return want
+}
+
+// behind reports whether minor have is older than minor want; false when
+// either does not read as a minor.
+func behind(have, want string) bool {
+	haveMajor, haveMinor, okHave := minorParts(have)
+	wantMajor, wantMinor, okWant := minorParts(want)
+	return okWant && okHave && (haveMajor < wantMajor || haveMajor == wantMajor && haveMinor < wantMinor)
 }
 
 // minorParts are the numbers of a "1.37" minor; ok is false for anything

@@ -157,8 +157,14 @@ func upgradeEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	case was == nil && is != nil:
 		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeStarted,
 			fmt.Sprintf("upgrading Kubernetes from %s to %s: the control plane first", is.GetFromVersion(), is.GetToVersion()))}
-	case was.GetPhase() == cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE &&
-		is.GetPhase() == cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_NODES_AND_ADDONS:
+	case was != nil && is == nil && after.GetState() != cloudv1.ClusterState_CLUSTER_STATE_DELETING:
+		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeFinished,
+			fmt.Sprintf("Kubernetes %s: control plane, node groups, add-ons and components upgraded", was.GetToVersion()))}
+	case was == nil || stepOf(was) == stepOf(is):
+		return nil
+	}
+	switch stepOf(is) {
+	case stepNodeGroups:
 		names := make([]string, 0, len(is.GetNodeGroups()))
 		for _, g := range is.GetNodeGroups() {
 			names = append(names, g.GetName())
@@ -169,9 +175,15 @@ func upgradeEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 		}
 		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeNodes,
 			fmt.Sprintf("the control plane runs %s; upgrading %s to %s, then the add-ons", is.GetToVersion(), what, is.GetToVersion()))}
-	case was != nil && is == nil && after.GetState() != cloudv1.ClusterState_CLUSTER_STATE_DELETING:
-		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeFinished,
-			fmt.Sprintf("Kubernetes %s: control plane, node groups and add-ons upgraded", was.GetToVersion()))}
+	case stepAddonsPhase:
+		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeStep,
+			fmt.Sprintf("the node groups run %s; upgrading the add-ons, then the platform components", is.GetToVersion()))}
+	case stepPlatformComps:
+		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeStep,
+			fmt.Sprintf("the add-ons are upgraded; moving the platform components to %s, then the tenant components", is.GetToVersion()))}
+	case stepTenantComps:
+		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeStep,
+			"the platform components are upgraded; moving the tenant components")}
 	default:
 		return nil
 	}

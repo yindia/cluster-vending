@@ -761,9 +761,10 @@ type AWSClusterStatus struct {
 }
 
 // ClusterUpgradePhase is the step of a Kubernetes upgrade. An upgrade runs
-// in two steps, in this order, because EKS refuses node groups and add-ons
-// ahead of the control plane.
-// +kubebuilder:validation:Enum=ControlPlane;NodesAndAddons
+// in the order a cluster is created, each step once the one before is
+// settled: ControlPlane, NodeGroups, Addons, PlatformComponents,
+// TenantComponents.
+// +kubebuilder:validation:Enum=ControlPlane;NodesAndAddons;NodeGroups;Addons;PlatformComponents;TenantComponents
 type ClusterUpgradePhase string
 
 const (
@@ -775,6 +776,17 @@ const (
 	// version; the node group and the add-ons are applied at it and are
 	// rolling out.
 	ClusterUpgradeNodesAndAddons ClusterUpgradePhase = "NodesAndAddons"
+	// ClusterUpgradeNodeGroups: the control plane runs the target; the node
+	// groups move to it. The add-ons stay where they are.
+	ClusterUpgradeNodeGroups ClusterUpgradePhase = "NodeGroups"
+	// ClusterUpgradeAddons: the node groups run the target; the add-ons
+	// move to the versions EKS recommends for it.
+	ClusterUpgradeAddons ClusterUpgradePhase = "Addons"
+	// ClusterUpgradePlatformComponents: the platform components move to the
+	// target minor's values.
+	ClusterUpgradePlatformComponents ClusterUpgradePhase = "PlatformComponents"
+	// ClusterUpgradeTenantComponents: the tenant's components move.
+	ClusterUpgradeTenantComponents ClusterUpgradePhase = "TenantComponents"
 )
 
 // ClusterRolloutResult is how an automatic upgrade stands.
@@ -869,6 +881,12 @@ type ClusterUpgrade struct {
 	// addonsBehind are the add-ons not on their new version yet.
 	// +optional
 	AddonsBehind []string `json:"addonsBehind,omitempty"`
+	// phaseStartTime is when the upgrade entered its current step.
+	// +optional
+	PhaseStartTime *metav1.Time `json:"phaseStartTime,omitempty"`
+	// componentsBehind are the components (of the step) not settled yet.
+	// +optional
+	ComponentsBehind []string `json:"componentsBehind,omitempty"`
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes

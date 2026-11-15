@@ -20,8 +20,9 @@ func named(v *cloudv1.ManagedResource, external string) *cloudv1.ManagedResource
 	return v
 }
 
-// In NODES_AND_ADDONS the upgrade names each node group with the version
-// the provider last saw and how it stands, and the add-ons still moving.
+// In NODE_GROUPS the upgrade names each node group with the version the
+// provider last saw and how it stands; in ADDONS, the add-ons still
+// moving.
 func TestUpgradeStatusNamesTheNodeGroups(t *testing.T) {
 	yes := cloudv1.ConditionStatus_CONDITION_STATUS_TRUE
 	row := &model.Cluster{Resource: model.Resource{Base: model.Base{ID: "c-1", UpdatedAt: time.Now()},
@@ -34,40 +35,49 @@ func TestUpgradeStatusNamesTheNodeGroups(t *testing.T) {
 		named(upgradeView("Addon", "prod-addon-vpc-cni", readyState, yes, ""), "prod-eks:vpc-cni"),
 	}
 
-	got := u.status(row, views, nil)
+	got := u.status(row, views, nil, componentsState{})
 
-	if got.GetPhase() != nodesAndAddons {
-		t.Fatalf("phase = %s, want NODES_AND_ADDONS", got.GetPhase())
+	if got.GetPhase() != stepNodes {
+		t.Fatalf("phase = %s, want NODE_GROUPS", got.GetPhase())
 	}
 	groups := got.GetNodeGroups()
 	if len(groups) != 1 || groups[0].GetName() != "prod-eks-default" || groups[0].GetFromVersion() != "1.36" ||
 		groups[0].GetToVersion() != "1.37" || groups[0].GetState() != updatingState {
 		t.Errorf("node groups = %v", groups)
 	}
-	if behind := got.GetAddonsBehind(); len(behind) != 1 || behind[0] != "coredns" {
-		t.Errorf("add-ons behind = %v, want [coredns]", behind)
+	if want := "node group prod-eks-default 1.36 → 1.37 (updating)"; !strings.Contains(got.GetMessage(), want) {
+		t.Errorf("message = %q, want it to say %q", got.GetMessage(), want)
 	}
-	if want := "node group prod-eks-default 1.36 → 1.37 (updating); add-ons updating: coredns"; !strings.Contains(got.GetMessage(), want) {
+
+	settledNodes := upgrade{target: "1.37", controlPlane: "1.37", nodes: []string{"1.37"},
+		nodeGroups: map[string]string{"prod-default": "1.37"}, nodeSpecs: map[string]string{"prod-default": "1.37"}}
+	views[1] = named(upgradeView(KindNodeGroup, "prod-default", readyState, yes, ""), "prod-eks-default")
+	got = settledNodes.status(row, views, &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: stepAddons, Applied: true},
+		componentsState{})
+	if behind := got.GetAddonsBehind(); got.GetPhase() != stepAddons || len(behind) != 1 || behind[0] != "coredns" {
+		t.Errorf("phase %s, add-ons behind = %v, want ADDONS with [coredns]", got.GetPhase(), behind)
+	}
+	if want := "add-ons updating: coredns"; !strings.Contains(got.GetMessage(), want) {
 		t.Errorf("message = %q, want it to say %q", got.GetMessage(), want)
 	}
 }
 
-// A node group the provider still sees at the old version keeps the
-// upgrade in NODES_AND_ADDONS even though its Ready condition is True:
-// done is the version it reports, not Ready.
+// A node group the provider still sees updating keeps the upgrade in
+// NODE_GROUPS even though it reports the version: done is the version it
+// reports and READY.
 func TestALaggingNodeGroupKeepsTheUpgradeOpen(t *testing.T) {
 	yes := cloudv1.ConditionStatus_CONDITION_STATUS_TRUE
 	row := &model.Cluster{Resource: model.Resource{Base: model.Base{ID: "c-1", UpdatedAt: time.Now()},
 		State: StateUpdating, Generation: 4, AppliedGeneration: 4}}
-	stored := &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: nodesAndAddons}
+	stored := &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: nodesAndAddons, Applied: true}
 	u := upgrade{target: "1.37", controlPlane: "1.37", nodes: []string{"1.37"}, nodeGroups: map[string]string{"prod-default": "1.37"}}
 	views := []*cloudv1.ManagedResource{
 		upgradeView("Cluster", "prod", readyState, yes, ""),
 		upgradeView(KindNodeGroup, "prod-default", updatingState, yes, "updating"),
 	}
 
-	if got := u.status(row, views, stored); got.GetPhase() != nodesAndAddons {
-		t.Errorf("phase = %s, want NODES_AND_ADDONS while the node group updates", got.GetPhase())
+	if got := u.status(row, views, stored, componentsState{}); got.GetPhase() != stepNodes {
+		t.Errorf("phase = %s, want NODE_GROUPS while the node group updates", got.GetPhase())
 	}
 }
 
@@ -77,7 +87,7 @@ func TestAnUpgradingClusterIsNotRunning(t *testing.T) {
 	st := &cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING,
 		Conditions: []*cloudv1.Condition{{Type: conditionReady, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE,
 			Reason: "AllResourcesReady", Message: "51 of 51 resources ready"}},
-		Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: nodesAndAddons,
+		Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: stepNodes,
 			Message: "the control plane runs 1.37; node group prod-eks-default 1.36 → 1.37 (updating)"}}
 
 	upgrading(st)
@@ -94,9 +104,12 @@ func TestAnUpgradingClusterIsNotRunning(t *testing.T) {
 // once.
 func TestUpgradeEventsPerStep(t *testing.T) {
 	cp := &cloudv1.ClusterStatus{Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: controlPlane}}
-	nodes := &cloudv1.ClusterStatus{Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: nodesAndAddons,
+	nodes := &cloudv1.ClusterStatus{Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: stepNodes,
 		NodeGroups: []*cloudv1.ClusterUpgradeNodeGroup{{Name: "prod-eks-default", FromVersion: "1.36", ToVersion: "1.37"}}}}
 	done := &cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING}
+	step := func(p cloudv1.ClusterUpgradePhase) *cloudv1.ClusterStatus {
+		return &cloudv1.ClusterStatus{Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.36", ToVersion: "1.37", Phase: p}}
+	}
 
 	for _, tt := range []struct {
 		name          string
@@ -107,7 +120,10 @@ func TestUpgradeEventsPerStep(t *testing.T) {
 		{"started", done, cp, reconcile.ReasonUpgradeStarted, "upgrading Kubernetes from 1.36 to 1.37"},
 		{"the node groups' turn", cp, nodes, reconcile.ReasonUpgradeNodes, "upgrading node group prod-eks-default to 1.37"},
 		{"still on the node groups", nodes, nodes, "", ""},
-		{"finished", nodes, done, reconcile.ReasonUpgradeFinished, "Kubernetes 1.37: control plane, node groups and add-ons upgraded"},
+		{"the add-ons' turn", nodes, step(stepAddons), reconcile.ReasonUpgradeStep, "upgrading the add-ons, then the platform components"},
+		{"the platform components' turn", step(stepAddons), step(stepPlatform), reconcile.ReasonUpgradeStep, "moving the platform components to 1.37"},
+		{"the tenant components' turn", step(stepPlatform), step(stepTenant), reconcile.ReasonUpgradeStep, "moving the tenant components"},
+		{"finished", step(stepTenant), done, reconcile.ReasonUpgradeFinished, "Kubernetes 1.37: control plane, node groups, add-ons and components upgraded"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := upgradeEvents(tt.before, tt.after)

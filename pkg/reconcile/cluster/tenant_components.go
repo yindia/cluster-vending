@@ -71,7 +71,7 @@ func (s *Reconciler) installTenant(ctx context.Context, row *model.Cluster, p *p
 		}
 		return errors.Join(errs...)
 	}
-	in, release, problem, err := s.platformInput(ctx, row, storedStatus(row).GetPlatformRelease() != "")
+	in, release, problem, err := s.platformInput(ctx, row, storedStatus(row).GetPlatformRelease() != "", true)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}

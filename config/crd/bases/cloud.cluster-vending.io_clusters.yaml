@@ -1724,6 +1724,12 @@ spec:
                     items:
                       type: string
                     type: array
+                  componentsBehind:
+                    description: componentsBehind are the components (of the step)
+                      not settled yet.
+                    items:
+                      type: string
+                    type: array
                   fromVersion:
                     description: fromVersion is the version the upgrade started from.
                     type: string
@@ -1765,6 +1771,15 @@ spec:
                     enum:
                     - ControlPlane
                     - NodesAndAddons
+                    - NodeGroups
+                    - Addons
+                    - PlatformComponents
+                    - TenantComponents
+                    type: string
+                  phaseStartTime:
+                    description: phaseStartTime is when the upgrade entered its current
+                      step.
+                    format: date-time
                     type: string
                   startTime:
                     description: startTime is when the upgrade was first seen in progress.

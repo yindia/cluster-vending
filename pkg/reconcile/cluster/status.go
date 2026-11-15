@@ -73,14 +73,14 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 	if err != nil {
 		return nil, storeError(err)
 	}
-	c, err := s.viewOf(ctx, row, records)
+	if installed == nil {
+		installed = storedPlatform(row)
+	}
+	c, err := s.viewOf(ctx, row, records, s.componentsOf(ctx, row, installed))
 	if err != nil {
 		return nil, err
 	}
 	withFailure(c.GetStatus(), failure)
-	if installed == nil {
-		installed = storedPlatform(row)
-	}
 	withPlatform(c.GetStatus(), installed)
 	s.withKubernetes(ctx, row.ID, c.GetSpec(), c.GetStatus(), storedStatus(row))
 	s.withUpgradePause(ctx, row, c.GetSpec(), c.GetStatus())
@@ -92,7 +92,7 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 }
 
 // viewOf is view with the cluster's records at hand. It only reads.
-func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []model.ManagedResource) (*cloudv1.Cluster, error) {
+func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []model.ManagedResource, comps componentsState) (*cloudv1.Cluster, error) {
 	spec, err := SpecOf(row)
 	if err != nil {
 		return nil, fault.New(fault.Internal, err.Error())
@@ -114,7 +114,7 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		s.logger().ErrorContext(ctx, "observe upgrade", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
-	st.Upgrade = u.status(row, views, storedUpgrade(row))
+	st.Upgrade = u.status(row, views, storedUpgrade(row), comps)
 	upgrading(st)
 	return ClusterProto(row, spec, st), nil
 }

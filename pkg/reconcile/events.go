@@ -89,6 +89,7 @@ const (
 	ReasonTakenOver                   = "TakenOver"
 	ReasonUpgradeStarted              = "UpgradeStarted"
 	ReasonUpgradeNodes                = "UpgradeNodes"
+	ReasonUpgradeStep                 = "UpgradeStep"
 	ReasonUpgradeFinished             = "UpgradeFinished"
 	ReasonPlatformComponentInstalling = "PlatformComponentInstalling"
 	ReasonPlatformComponentReady      = "PlatformComponentReady"

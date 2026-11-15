@@ -15,6 +15,7 @@ import (
 	corenetwork "github.com/yindia/cluster-vending/pkg/network"
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/updatemask"
 )
 
 // Update mask paths UpdateNetwork accepts. The layout, region and account
@@ -25,8 +26,9 @@ const (
 	pathFlowLogs    = "spec.flow_logs"
 )
 
-// updatable are the update mask paths, for error messages.
-var updatable = strings.Join([]string{pathDisplayName, pathLabels, pathFlowLogs}, ", ")
+// updatable are the update mask paths (updatemask.Network, which the CLI
+// infers masks from), for error messages.
+var updatable = strings.Join(updatemask.Network, ", ")
 
 // changes is what an update changed that needs the resources touched.
 type changes struct{ labels, flowLogs bool }

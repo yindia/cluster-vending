@@ -17,6 +17,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/updatemask"
 )
 
 // Update mask paths with no cloud effect.
@@ -338,15 +339,9 @@ func checkMutable(row *model.Cluster, etag string) error {
 	return nil
 }
 
-func updatablePaths() string {
-	paths := make([]string, 0, 2+len(specPaths))
-	paths = append(paths, pathDisplayName, pathLabels)
-	for p := range specPaths {
-		paths = append(paths, p)
-	}
-	slices.Sort(paths)
-	return strings.Join(paths, ", ")
-}
+// updatablePaths are the paths UpdateCluster accepts (updatemask.Cluster,
+// which the CLI infers masks from; a test keeps it equal to specPaths).
+func updatablePaths() string { return strings.Join(updatemask.Cluster, ", ") }
 
 // applyMask copies the masked fields of in onto row and spec and checks
 // the result against the contract. It reports whether the cluster must be

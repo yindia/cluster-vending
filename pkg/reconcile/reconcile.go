@@ -11,6 +11,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -86,6 +87,12 @@ type Deps struct {
 	// record of a stuck revision in a workload cluster, so provider-helm
 	// can install again.
 	RecoverStuckReleases bool
+	// Teardowns reaches workload clusters to delete, first in a cluster's
+	// deletion, what their controllers made in the cloud (load
+	// balancers, Karpenter's nodes). Nil: no teardown.
+	Teardowns Teardowns
+	// TeardownTimeout bounds that teardown; 0 is DefaultTeardownTimeout.
+	TeardownTimeout time.Duration
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool

@@ -83,6 +83,9 @@ type Options struct {
 	// UpgradeTimeout is how long an automatic upgrade may take before the
 	// rollout counts it as failed (0: config.DefaultUpgradeTimeout).
 	UpgradeTimeout time.Duration
+	// TeardownTimeout bounds a cluster deletion's teardown (0:
+	// reconcile.DefaultTeardownTimeout).
+	TeardownTimeout time.Duration
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -191,8 +194,12 @@ func Run(ctx context.Context, o Options) error {
 		// Helm release of a platform component.
 		Workloads:            management.Workloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
-		NoRecommendations:    !o.Recommendations,
-		Logger:               logger,
+		// The same, first in a cluster's deletion: its load balancers and
+		// Karpenter's nodes, while their controllers still run.
+		Teardowns:         management.Teardowns(direct),
+		TeardownTimeout:   o.TeardownTimeout,
+		NoRecommendations: !o.Recommendations,
+		Logger:            logger,
 	})
 	if err != nil {
 		return err

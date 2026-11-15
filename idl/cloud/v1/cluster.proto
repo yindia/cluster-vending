@@ -472,6 +472,14 @@ message ClusterStatus {
   // cluster, its tenant or its channel): who, why, until when, and its
   // scope. The cluster is reconciled as usual; rollouts skip it.
   Pause upgrade_pause = 48;
+
+  // teardown is the first step of the cluster's deletion: what its
+  // controllers made in the cloud (load balancers of Services and
+  // Ingresses, Karpenter's nodes and node classes) is deleted in the
+  // workload cluster while those controllers still run, before the
+  // platform components are uninstalled. Unset until the cluster is
+  // deleted.
+  ClusterTeardown teardown = 49;
 }
 
 // ClusterRollout is one automatic upgrade of a cluster, as the rollout
@@ -677,4 +685,37 @@ message ClusterEndpoint {
   string url = 1;
   // PEM-encoded cluster CA certificate.
   bytes certificate_authority_data = 2;
+}
+
+// ClusterTeardown is the teardown step of a cluster's deletion.
+message ClusterTeardown {
+  // When it started; kept across passes (the timeout counts from it).
+  google.protobuf.Timestamp start_time = 1;
+
+  // When it ended; unset while it runs.
+  google.protobuf.Timestamp finish_time = 2;
+
+  // How it ended; UNSPECIFIED while it runs.
+  ClusterTeardownResult result = 3;
+
+  // What it waits for while it runs, or what was left (timed out) or why
+  // it was skipped.
+  string message = 4;
+
+  // The objects it waits for (running) or left (timed out), e.g.
+  // "Service istio-system/istio-ingressgateway".
+  repeated string waiting = 5;
+}
+
+// ClusterTeardownResult is how a teardown ended.
+enum ClusterTeardownResult {
+  CLUSTER_TEARDOWN_RESULT_UNSPECIFIED = 0;
+  // Every such object is gone.
+  CLUSTER_TEARDOWN_RESULT_FINISHED = 1;
+  // The controller's teardown-timeout passed with objects left: the
+  // deletion goes on; their cloud resources may be left behind.
+  CLUSTER_TEARDOWN_RESULT_TIMED_OUT = 2;
+  // Not run: the deletion is forced, or the cluster's API cannot be
+  // reached; their cloud resources may be left behind.
+  CLUSTER_TEARDOWN_RESULT_SKIPPED = 3;
 }

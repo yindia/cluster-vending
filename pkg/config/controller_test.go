@@ -33,7 +33,8 @@ func TestLoadController(t *testing.T) {
 	want := config.Controller{MetricsAddr: "0", ProbeAddr: ":8081", LeaderElect: true, LeaseNamespace: config.DefaultLeaseNamespace,
 		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true, Recommendations: true,
 		ReconcileWorkers: config.DefaultReconcileWorkers, UpgradeTimeout: config.DefaultUpgradeTimeout,
-		AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
+		TeardownTimeout: config.DefaultTeardownTimeout,
+		AWS:             config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("defaults = %+v, want %+v", cfg, want)
 	}
@@ -66,6 +67,8 @@ func TestLoadController(t *testing.T) {
 		"upgrades":        {config.FlagAutomaticUpgrades: "soon"},
 		"timeout word":    {config.FlagUpgradeTimeout: "long"},
 		"timeout zero":    {config.FlagUpgradeTimeout: "0s"},
+		"teardown word":   {config.FlagTeardownTimeout: "soon"},
+		"teardown zero":   {config.FlagTeardownTimeout: "0s"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
 			t.Errorf("%s: %v, want an error naming the flag", name, err)
@@ -110,6 +113,18 @@ func TestUpgradeTimeout(t *testing.T) {
 	}
 }
 
+// --teardown-timeout bounds the first step of a cluster deletion: deleting
+// what its controllers made in the cloud.
+func TestTeardownTimeout(t *testing.T) {
+	cfg, err := config.LoadController(nil, lookupIn(management(map[string]string{config.EnvTeardownTimeout: "30m"})), nil)
+	if err != nil || cfg.TeardownTimeout != 30*time.Minute {
+		t.Errorf("CV_TEARDOWN_TIMEOUT=30m: %s (%v), want 30m", cfg.TeardownTimeout, err)
+	}
+	if config.DefaultTeardownTimeout != 15*time.Minute {
+		t.Errorf("default = %s, want 15m", config.DefaultTeardownTimeout)
+	}
+}
+
 // The controller takes exactly these settings; everything else about how
 // the providers run is the platform's (or managed outside it).
 func TestControllerSettingsAreFew(t *testing.T) {
@@ -120,7 +135,8 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagRecommendations,
-		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagProviderCredentialsSecret,
+		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
+		config.FlagProviderCredentialsSecret,
 		config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)

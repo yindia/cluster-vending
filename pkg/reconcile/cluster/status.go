@@ -84,6 +84,7 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 	withPlatform(c.GetStatus(), installed)
 	s.withKubernetes(ctx, row.ID, c.GetSpec(), c.GetStatus(), storedStatus(row))
 	s.withUpgradePause(ctx, row, c.GetSpec(), c.GetStatus())
+	withTeardownStatus(ctx, c.GetStatus(), storedStatus(row))
 	// What the controller reported last stays with the status: a read
 	// returns it, and a pass adds to it (remember).
 	c.GetStatus().RecentEvents = storedStatus(row).GetRecentEvents()

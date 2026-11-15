@@ -44,7 +44,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	ctx = reconcile.WithNotes(ctx)
+	ctx = withTeardownHolder(reconcile.WithNotes(ctx))
 	// A pause asked with an until ends by itself: its scope is dropped,
 	// and when none is left the providers act on the resources again.
 	if row.PauseLapsed {

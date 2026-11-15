@@ -36,6 +36,12 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	if err != nil {
 		return false, fmt.Errorf("list cluster resources: %w", err)
 	}
+	// First, while the controllers that made them still run: the load
+	// balancers and Karpenter's nodes the workload cluster has in the
+	// cloud, which nothing else would delete.
+	if done, err := s.teardown(ctx, row, records); err != nil || !done {
+		return false, err
+	}
 	if row.DeleteForce {
 		if err := s.forceRelease(ctx, row); err != nil {
 			return false, err

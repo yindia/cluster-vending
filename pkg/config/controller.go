@@ -27,6 +27,10 @@ const (
 	// the rollout counts it as failed (TimedOut).
 	FlagUpgradeTimeout = "upgrade-timeout"
 	EnvUpgradeTimeout  = "CV_UPGRADE_TIMEOUT"
+	// FlagTeardownTimeout bounds the first step of a cluster's deletion:
+	// deleting the load balancers and Karpenter nodes its controllers made.
+	FlagTeardownTimeout = "teardown-timeout"
+	EnvTeardownTimeout  = "CV_TEARDOWN_TIMEOUT"
 )
 
 // Defaults of the controller command.
@@ -41,6 +45,9 @@ const (
 	// DefaultUpgradeTimeout covers an EKS control plane upgrade (about 10
 	// minutes), a node group's rolling replacement and the add-ons.
 	DefaultUpgradeTimeout = 90 * time.Minute
+	// DefaultTeardownTimeout: deleting a load balancer takes a minute or
+	// two, draining and terminating Karpenter's nodes a few minutes more.
+	DefaultTeardownTimeout = 15 * time.Minute
 )
 
 // controllerSettings are all the controller takes. How the providers run
@@ -78,6 +85,8 @@ var controllerSettings = []Setting{
 		Usage: "upgrade clusters with upgradeMode Automatic to their release channel's Kubernetes minor, one minor at a time, tier by tier (irreversible: EKS cannot downgrade); false plans and reports the rollout on each ReleaseChannel and cluster (status.rollout) and upgrades nothing"},
 	{Flag: FlagUpgradeTimeout, Env: EnvUpgradeTimeout, Default: DefaultUpgradeTimeout.String(),
 		Usage: "how long an automatic upgrade may take before the rollout counts it as failed (TimedOut, against the tier's maxFailed), e.g. 2h"},
+	{Flag: FlagTeardownTimeout, Env: EnvTeardownTimeout, Default: DefaultTeardownTimeout.String(),
+		Usage: "how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted, before it goes on (what is left is reported), e.g. 30m"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -114,6 +123,8 @@ type Controller struct {
 	AutomaticUpgrades bool
 	// UpgradeTimeout is how long an automatic upgrade may take.
 	UpgradeTimeout time.Duration
+	// TeardownTimeout bounds a cluster deletion's teardown.
+	TeardownTimeout time.Duration
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -170,6 +181,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.UpgradeTimeout, err = time.ParseDuration(v[FlagUpgradeTimeout]); err != nil || cfg.UpgradeTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("%s must be a positive duration like 90m or 2h, got %q", setting(FlagUpgradeTimeout), v[FlagUpgradeTimeout]))
+	}
+	if cfg.TeardownTimeout, err = time.ParseDuration(v[FlagTeardownTimeout]); err != nil || cfg.TeardownTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive duration like 15m, got %q", setting(FlagTeardownTimeout), v[FlagTeardownTimeout]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

@@ -88,6 +88,70 @@ func (RolloutState) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{0}
 }
 
+// RolloutTierState is where a tier is in the rollout.
+type RolloutTierState int32
+
+const (
+	RolloutTierState_ROLLOUT_TIER_STATE_UNSPECIFIED RolloutTierState = 0
+	// None of its clusters waits or upgrades.
+	RolloutTierState_ROLLOUT_TIER_STATE_DONE RolloutTierState = 1
+	// Its clusters are upgraded, a batch at a time.
+	RolloutTierState_ROLLOUT_TIER_STATE_ROLLING RolloutTierState = 2
+	// It is next, and waits for the tier before it to soak.
+	RolloutTierState_ROLLOUT_TIER_STATE_SOAKING RolloutTierState = 3
+	// A tier before it is not done (or the rollout halted).
+	RolloutTierState_ROLLOUT_TIER_STATE_NOT_STARTED RolloutTierState = 4
+	// More of its clusters failed than max_failed: the channel halted.
+	RolloutTierState_ROLLOUT_TIER_STATE_HALTED RolloutTierState = 5
+)
+
+// Enum value maps for RolloutTierState.
+var (
+	RolloutTierState_name = map[int32]string{
+		0: "ROLLOUT_TIER_STATE_UNSPECIFIED",
+		1: "ROLLOUT_TIER_STATE_DONE",
+		2: "ROLLOUT_TIER_STATE_ROLLING",
+		3: "ROLLOUT_TIER_STATE_SOAKING",
+		4: "ROLLOUT_TIER_STATE_NOT_STARTED",
+		5: "ROLLOUT_TIER_STATE_HALTED",
+	}
+	RolloutTierState_value = map[string]int32{
+		"ROLLOUT_TIER_STATE_UNSPECIFIED": 0,
+		"ROLLOUT_TIER_STATE_DONE":        1,
+		"ROLLOUT_TIER_STATE_ROLLING":     2,
+		"ROLLOUT_TIER_STATE_SOAKING":     3,
+		"ROLLOUT_TIER_STATE_NOT_STARTED": 4,
+		"ROLLOUT_TIER_STATE_HALTED":      5,
+	}
+)
+
+func (x RolloutTierState) Enum() *RolloutTierState {
+	p := new(RolloutTierState)
+	*p = x
+	return p
+}
+
+func (x RolloutTierState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RolloutTierState) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_admin_release_proto_enumTypes[1].Descriptor()
+}
+
+func (RolloutTierState) Type() protoreflect.EnumType {
+	return &file_cloud_v1_admin_release_proto_enumTypes[1]
+}
+
+func (x RolloutTierState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RolloutTierState.Descriptor instead.
+func (RolloutTierState) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{1}
+}
+
 // Release is a published release: what clusters run, per Kubernetes minor.
 type Release struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1166,7 +1230,10 @@ type Rollout struct {
 	Paused      bool            `protobuf:"varint,5,opt,name=paused,proto3" json:"paused,omitempty"`
 	Summary     *RolloutSummary `protobuf:"bytes,6,opt,name=summary,proto3" json:"summary,omitempty"`
 	// The channel's clusters in the rollout, tier 2 first. GetRollout only.
-	Members       []*RolloutMember `protobuf:"bytes,7,rep,name=members,proto3" json:"members,omitempty"`
+	Members []*RolloutMember `protobuf:"bytes,7,rep,name=members,proto3" json:"members,omitempty"`
+	// How the rollout proceeds from now, per tier and batch, as the
+	// controller plans it. GetRollout only; not paged.
+	Plan          *RolloutPlan `protobuf:"bytes,8,opt,name=plan,proto3" json:"plan,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1250,6 +1317,410 @@ func (x *Rollout) GetMembers() []*RolloutMember {
 	return nil
 }
 
+func (x *Rollout) GetPlan() *RolloutPlan {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
+// RolloutPlan is a channel's rollout laid out per tier and batch: the
+// tiers in rollout order (2, 1, 0), each tier's clusters in batches of at
+// most max_in_progress (tier 0: one), finished ones by when they ended,
+// then the batch upgrading or next and the queued ones by name.
+type RolloutPlan struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A tier is rolling (or soaking toward): rolling_tier, at batch of
+	// batches (1-based).
+	Rolling       bool               `protobuf:"varint,1,opt,name=rolling,proto3" json:"rolling,omitempty"`
+	RollingTier   ClusterTier        `protobuf:"varint,2,opt,name=rolling_tier,json=rollingTier,proto3,enum=cloud.v1.ClusterTier" json:"rolling_tier,omitempty"`
+	Batch         int32              `protobuf:"varint,3,opt,name=batch,proto3" json:"batch,omitempty"`
+	Batches       int32              `protobuf:"varint,4,opt,name=batches,proto3" json:"batches,omitempty"`
+	Done          bool               `protobuf:"varint,5,opt,name=done,proto3" json:"done,omitempty"`
+	Halted        bool               `protobuf:"varint,6,opt,name=halted,proto3" json:"halted,omitempty"`
+	Tiers         []*RolloutTierPlan `protobuf:"bytes,7,rep,name=tiers,proto3" json:"tiers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RolloutPlan) Reset() {
+	*x = RolloutPlan{}
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RolloutPlan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RolloutPlan) ProtoMessage() {}
+
+func (x *RolloutPlan) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RolloutPlan.ProtoReflect.Descriptor instead.
+func (*RolloutPlan) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *RolloutPlan) GetRolling() bool {
+	if x != nil {
+		return x.Rolling
+	}
+	return false
+}
+
+func (x *RolloutPlan) GetRollingTier() ClusterTier {
+	if x != nil {
+		return x.RollingTier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
+}
+
+func (x *RolloutPlan) GetBatch() int32 {
+	if x != nil {
+		return x.Batch
+	}
+	return 0
+}
+
+func (x *RolloutPlan) GetBatches() int32 {
+	if x != nil {
+		return x.Batches
+	}
+	return 0
+}
+
+func (x *RolloutPlan) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+func (x *RolloutPlan) GetHalted() bool {
+	if x != nil {
+		return x.Halted
+	}
+	return false
+}
+
+func (x *RolloutPlan) GetTiers() []*RolloutTierPlan {
+	if x != nil {
+		return x.Tiers
+	}
+	return nil
+}
+
+// RolloutTierPlan is one tier of a rollout plan.
+type RolloutTierPlan struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Tier       ClusterTier            `protobuf:"varint,1,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
+	State      RolloutTierState       `protobuf:"varint,2,opt,name=state,proto3,enum=cloud.v1.RolloutTierState" json:"state,omitempty"`
+	Total      int32                  `protobuf:"varint,3,opt,name=total,proto3" json:"total,omitempty"`
+	Done       int32                  `protobuf:"varint,4,opt,name=done,proto3" json:"done,omitempty"`
+	InProgress int32                  `protobuf:"varint,5,opt,name=in_progress,json=inProgress,proto3" json:"in_progress,omitempty"`
+	Failed     int32                  `protobuf:"varint,6,opt,name=failed,proto3" json:"failed,omitempty"`
+	Blocked    int32                  `protobuf:"varint,7,opt,name=blocked,proto3" json:"blocked,omitempty"`
+	// Failures it may have before the channel halts.
+	MaxFailed int32 `protobuf:"varint,8,opt,name=max_failed,json=maxFailed,proto3" json:"max_failed,omitempty"`
+	// Clusters upgraded at once.
+	BatchSize int32 `protobuf:"varint,9,opt,name=batch_size,json=batchSize,proto3" json:"batch_size,omitempty"`
+	// When its last upgrade ended, and when the next tier may start
+	// (that plus its soak); unset while none ended.
+	FinishedTime *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=finished_time,json=finishedTime,proto3" json:"finished_time,omitempty"`
+	SoakUntil    *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=soak_until,json=soakUntil,proto3" json:"soak_until,omitempty"`
+	Batches      []*RolloutBatch        `protobuf:"bytes,12,rep,name=batches,proto3" json:"batches,omitempty"`
+	// Index in batches of the batch upgrading or next; -1 when all are
+	// finished.
+	Current int32 `protobuf:"varint,13,opt,name=current,proto3" json:"current,omitempty"`
+	// Clusters blocked by their own gate: in no batch; one joins the batch
+	// being filled when its gate clears.
+	Waits         []*RolloutPlanCluster `protobuf:"bytes,14,rep,name=waits,proto3" json:"waits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RolloutTierPlan) Reset() {
+	*x = RolloutTierPlan{}
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RolloutTierPlan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RolloutTierPlan) ProtoMessage() {}
+
+func (x *RolloutTierPlan) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RolloutTierPlan.ProtoReflect.Descriptor instead.
+func (*RolloutTierPlan) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RolloutTierPlan) GetTier() ClusterTier {
+	if x != nil {
+		return x.Tier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
+}
+
+func (x *RolloutTierPlan) GetState() RolloutTierState {
+	if x != nil {
+		return x.State
+	}
+	return RolloutTierState_ROLLOUT_TIER_STATE_UNSPECIFIED
+}
+
+func (x *RolloutTierPlan) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetDone() int32 {
+	if x != nil {
+		return x.Done
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetInProgress() int32 {
+	if x != nil {
+		return x.InProgress
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetFailed() int32 {
+	if x != nil {
+		return x.Failed
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetBlocked() int32 {
+	if x != nil {
+		return x.Blocked
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetMaxFailed() int32 {
+	if x != nil {
+		return x.MaxFailed
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetBatchSize() int32 {
+	if x != nil {
+		return x.BatchSize
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetFinishedTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishedTime
+	}
+	return nil
+}
+
+func (x *RolloutTierPlan) GetSoakUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SoakUntil
+	}
+	return nil
+}
+
+func (x *RolloutTierPlan) GetBatches() []*RolloutBatch {
+	if x != nil {
+		return x.Batches
+	}
+	return nil
+}
+
+func (x *RolloutTierPlan) GetCurrent() int32 {
+	if x != nil {
+		return x.Current
+	}
+	return 0
+}
+
+func (x *RolloutTierPlan) GetWaits() []*RolloutPlanCluster {
+	if x != nil {
+		return x.Waits
+	}
+	return nil
+}
+
+// RolloutBatch is clusters upgraded together.
+type RolloutBatch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Clusters      []*RolloutPlanCluster  `protobuf:"bytes,1,rep,name=clusters,proto3" json:"clusters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RolloutBatch) Reset() {
+	*x = RolloutBatch{}
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RolloutBatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RolloutBatch) ProtoMessage() {}
+
+func (x *RolloutBatch) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RolloutBatch.ProtoReflect.Descriptor instead.
+func (*RolloutBatch) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RolloutBatch) GetClusters() []*RolloutPlanCluster {
+	if x != nil {
+		return x.Clusters
+	}
+	return nil
+}
+
+// RolloutPlanCluster is a cluster in a rollout plan.
+type RolloutPlanCluster struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	TenantId    string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	ClusterName string                 `protobuf:"bytes,2,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
+	ClusterId   string                 `protobuf:"bytes,3,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	State       RolloutState           `protobuf:"varint,4,opt,name=state,proto3,enum=cloud.v1.RolloutState" json:"state,omitempty"`
+	// The step its upgrade is at (ControlPlane, NodesAndAddons, ...) while
+	// in progress.
+	Phase string `protobuf:"bytes,5,opt,name=phase,proto3" json:"phase,omitempty"`
+	// When it entered its state; unset when unknown.
+	Since *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=since,proto3" json:"since,omitempty"`
+	// Why it waits (blocked) or failed.
+	Reason        string `protobuf:"bytes,7,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RolloutPlanCluster) Reset() {
+	*x = RolloutPlanCluster{}
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RolloutPlanCluster) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RolloutPlanCluster) ProtoMessage() {}
+
+func (x *RolloutPlanCluster) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RolloutPlanCluster.ProtoReflect.Descriptor instead.
+func (*RolloutPlanCluster) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RolloutPlanCluster) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *RolloutPlanCluster) GetClusterName() string {
+	if x != nil {
+		return x.ClusterName
+	}
+	return ""
+}
+
+func (x *RolloutPlanCluster) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *RolloutPlanCluster) GetState() RolloutState {
+	if x != nil {
+		return x.State
+	}
+	return RolloutState_ROLLOUT_STATE_UNSPECIFIED
+}
+
+func (x *RolloutPlanCluster) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *RolloutPlanCluster) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
+func (x *RolloutPlanCluster) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type ListReleasesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Maximum results per page. Defaults to 50; values above 200 are coerced
@@ -1263,7 +1734,7 @@ type ListReleasesRequest struct {
 
 func (x *ListReleasesRequest) Reset() {
 	*x = ListReleasesRequest{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[13]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1275,7 +1746,7 @@ func (x *ListReleasesRequest) String() string {
 func (*ListReleasesRequest) ProtoMessage() {}
 
 func (x *ListReleasesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[13]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1288,7 +1759,7 @@ func (x *ListReleasesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReleasesRequest.ProtoReflect.Descriptor instead.
 func (*ListReleasesRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{13}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListReleasesRequest) GetPageSize() int32 {
@@ -1317,7 +1788,7 @@ type ListReleasesResponse struct {
 
 func (x *ListReleasesResponse) Reset() {
 	*x = ListReleasesResponse{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[14]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1329,7 +1800,7 @@ func (x *ListReleasesResponse) String() string {
 func (*ListReleasesResponse) ProtoMessage() {}
 
 func (x *ListReleasesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[14]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1342,7 +1813,7 @@ func (x *ListReleasesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReleasesResponse.ProtoReflect.Descriptor instead.
 func (*ListReleasesResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{14}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListReleasesResponse) GetReleases() []*Release {
@@ -1369,7 +1840,7 @@ type GetReleaseRequest struct {
 
 func (x *GetReleaseRequest) Reset() {
 	*x = GetReleaseRequest{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[15]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1852,7 @@ func (x *GetReleaseRequest) String() string {
 func (*GetReleaseRequest) ProtoMessage() {}
 
 func (x *GetReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[15]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1865,7 @@ func (x *GetReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReleaseRequest.ProtoReflect.Descriptor instead.
 func (*GetReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{15}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetReleaseRequest) GetName() string {
@@ -1413,7 +1884,7 @@ type GetReleaseResponse struct {
 
 func (x *GetReleaseResponse) Reset() {
 	*x = GetReleaseResponse{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[16]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1425,7 +1896,7 @@ func (x *GetReleaseResponse) String() string {
 func (*GetReleaseResponse) ProtoMessage() {}
 
 func (x *GetReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[16]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1438,7 +1909,7 @@ func (x *GetReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReleaseResponse.ProtoReflect.Descriptor instead.
 func (*GetReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{16}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetReleaseResponse) GetRelease() *Release {
@@ -1457,7 +1928,7 @@ type ListReleaseChannelsRequest struct {
 
 func (x *ListReleaseChannelsRequest) Reset() {
 	*x = ListReleaseChannelsRequest{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[17]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1469,7 +1940,7 @@ func (x *ListReleaseChannelsRequest) String() string {
 func (*ListReleaseChannelsRequest) ProtoMessage() {}
 
 func (x *ListReleaseChannelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[17]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1482,7 +1953,7 @@ func (x *ListReleaseChannelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReleaseChannelsRequest.ProtoReflect.Descriptor instead.
 func (*ListReleaseChannelsRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{17}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{21}
 }
 
 type ListReleaseChannelsResponse struct {
@@ -1495,7 +1966,7 @@ type ListReleaseChannelsResponse struct {
 
 func (x *ListReleaseChannelsResponse) Reset() {
 	*x = ListReleaseChannelsResponse{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[18]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1507,7 +1978,7 @@ func (x *ListReleaseChannelsResponse) String() string {
 func (*ListReleaseChannelsResponse) ProtoMessage() {}
 
 func (x *ListReleaseChannelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[18]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1520,7 +1991,7 @@ func (x *ListReleaseChannelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReleaseChannelsResponse.ProtoReflect.Descriptor instead.
 func (*ListReleaseChannelsResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{18}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListReleaseChannelsResponse) GetChannels() []*ReleaseChannelInfo {
@@ -1539,7 +2010,7 @@ type GetReleaseChannelRequest struct {
 
 func (x *GetReleaseChannelRequest) Reset() {
 	*x = GetReleaseChannelRequest{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[19]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1551,7 +2022,7 @@ func (x *GetReleaseChannelRequest) String() string {
 func (*GetReleaseChannelRequest) ProtoMessage() {}
 
 func (x *GetReleaseChannelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[19]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1564,7 +2035,7 @@ func (x *GetReleaseChannelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReleaseChannelRequest.ProtoReflect.Descriptor instead.
 func (*GetReleaseChannelRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{19}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetReleaseChannelRequest) GetChannel() ReleaseChannel {
@@ -1583,7 +2054,7 @@ type GetReleaseChannelResponse struct {
 
 func (x *GetReleaseChannelResponse) Reset() {
 	*x = GetReleaseChannelResponse{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[20]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1595,7 +2066,7 @@ func (x *GetReleaseChannelResponse) String() string {
 func (*GetReleaseChannelResponse) ProtoMessage() {}
 
 func (x *GetReleaseChannelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[20]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1608,7 +2079,7 @@ func (x *GetReleaseChannelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReleaseChannelResponse.ProtoReflect.Descriptor instead.
 func (*GetReleaseChannelResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{20}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetReleaseChannelResponse) GetChannel() *ReleaseChannelInfo {
@@ -1635,7 +2106,7 @@ type GetRolloutRequest struct {
 
 func (x *GetRolloutRequest) Reset() {
 	*x = GetRolloutRequest{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[21]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1647,7 +2118,7 @@ func (x *GetRolloutRequest) String() string {
 func (*GetRolloutRequest) ProtoMessage() {}
 
 func (x *GetRolloutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[21]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1660,7 +2131,7 @@ func (x *GetRolloutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRolloutRequest.ProtoReflect.Descriptor instead.
 func (*GetRolloutRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{21}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetRolloutRequest) GetChannel() ReleaseChannel {
@@ -1702,7 +2173,7 @@ type GetRolloutResponse struct {
 
 func (x *GetRolloutResponse) Reset() {
 	*x = GetRolloutResponse{}
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[22]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1714,7 +2185,7 @@ func (x *GetRolloutResponse) String() string {
 func (*GetRolloutResponse) ProtoMessage() {}
 
 func (x *GetRolloutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_release_proto_msgTypes[22]
+	mi := &file_cloud_v1_admin_release_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1727,7 +2198,7 @@ func (x *GetRolloutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRolloutResponse.ProtoReflect.Descriptor instead.
 func (*GetRolloutResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{22}
+	return file_cloud_v1_admin_release_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetRolloutResponse) GetRollout() *Rollout {
@@ -1852,7 +2323,7 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\x05since\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x12\n" +
 	"\x04gate\x18\t \x01(\tR\x04gate\x12\x16\n" +
 	"\x06reason\x18\n" +
-	" \x01(\tR\x06reason\"\xc1\x02\n" +
+	" \x01(\tR\x06reason\"\xec\x02\n" +
 	"\aRollout\x122\n" +
 	"\achannel\x18\x01 \x01(\x0e2\x18.cloud.v1.ReleaseChannelR\achannel\x12\x18\n" +
 	"\arelease\x18\x02 \x01(\tR\arelease\x128\n" +
@@ -1860,7 +2331,47 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\x06policy\x18\x04 \x01(\v2\x17.cloud.v1.RolloutPolicyR\x06policy\x12\x16\n" +
 	"\x06paused\x18\x05 \x01(\bR\x06paused\x122\n" +
 	"\asummary\x18\x06 \x01(\v2\x18.cloud.v1.RolloutSummaryR\asummary\x121\n" +
-	"\amembers\x18\a \x03(\v2\x17.cloud.v1.RolloutMemberR\amembers\"Z\n" +
+	"\amembers\x18\a \x03(\v2\x17.cloud.v1.RolloutMemberR\amembers\x12)\n" +
+	"\x04plan\x18\b \x01(\v2\x15.cloud.v1.RolloutPlanR\x04plan\"\xee\x01\n" +
+	"\vRolloutPlan\x12\x18\n" +
+	"\arolling\x18\x01 \x01(\bR\arolling\x128\n" +
+	"\frolling_tier\x18\x02 \x01(\x0e2\x15.cloud.v1.ClusterTierR\vrollingTier\x12\x14\n" +
+	"\x05batch\x18\x03 \x01(\x05R\x05batch\x12\x18\n" +
+	"\abatches\x18\x04 \x01(\x05R\abatches\x12\x12\n" +
+	"\x04done\x18\x05 \x01(\bR\x04done\x12\x16\n" +
+	"\x06halted\x18\x06 \x01(\bR\x06halted\x12/\n" +
+	"\x05tiers\x18\a \x03(\v2\x19.cloud.v1.RolloutTierPlanR\x05tiers\"\xa5\x04\n" +
+	"\x0fRolloutTierPlan\x12)\n" +
+	"\x04tier\x18\x01 \x01(\x0e2\x15.cloud.v1.ClusterTierR\x04tier\x120\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x1a.cloud.v1.RolloutTierStateR\x05state\x12\x14\n" +
+	"\x05total\x18\x03 \x01(\x05R\x05total\x12\x12\n" +
+	"\x04done\x18\x04 \x01(\x05R\x04done\x12\x1f\n" +
+	"\vin_progress\x18\x05 \x01(\x05R\n" +
+	"inProgress\x12\x16\n" +
+	"\x06failed\x18\x06 \x01(\x05R\x06failed\x12\x18\n" +
+	"\ablocked\x18\a \x01(\x05R\ablocked\x12\x1d\n" +
+	"\n" +
+	"max_failed\x18\b \x01(\x05R\tmaxFailed\x12\x1d\n" +
+	"\n" +
+	"batch_size\x18\t \x01(\x05R\tbatchSize\x12?\n" +
+	"\rfinished_time\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\ffinishedTime\x129\n" +
+	"\n" +
+	"soak_until\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tsoakUntil\x120\n" +
+	"\abatches\x18\f \x03(\v2\x16.cloud.v1.RolloutBatchR\abatches\x12\x18\n" +
+	"\acurrent\x18\r \x01(\x05R\acurrent\x122\n" +
+	"\x05waits\x18\x0e \x03(\v2\x1c.cloud.v1.RolloutPlanClusterR\x05waits\"H\n" +
+	"\fRolloutBatch\x128\n" +
+	"\bclusters\x18\x01 \x03(\v2\x1c.cloud.v1.RolloutPlanClusterR\bclusters\"\x81\x02\n" +
+	"\x12RolloutPlanCluster\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12!\n" +
+	"\fcluster_name\x18\x02 \x01(\tR\vclusterName\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x03 \x01(\tR\tclusterId\x12,\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x16.cloud.v1.RolloutStateR\x05state\x12\x14\n" +
+	"\x05phase\x18\x05 \x01(\tR\x05phase\x120\n" +
+	"\x05since\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x16\n" +
+	"\x06reason\x18\a \x01(\tR\x06reason\"Z\n" +
 	"\x13ListReleasesRequest\x12$\n" +
 	"\tpage_size\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x12\x1d\n" +
 	"\n" +
@@ -1896,7 +2407,14 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\x19ROLLOUT_STATE_IN_PROGRESS\x10\x02\x12\x1b\n" +
 	"\x17ROLLOUT_STATE_SUCCEEDED\x10\x03\x12\x18\n" +
 	"\x14ROLLOUT_STATE_FAILED\x10\x04\x12\x19\n" +
-	"\x15ROLLOUT_STATE_BLOCKED\x10\x05B\xa1\x01\n" +
+	"\x15ROLLOUT_STATE_BLOCKED\x10\x05*\xd6\x01\n" +
+	"\x10RolloutTierState\x12\"\n" +
+	"\x1eROLLOUT_TIER_STATE_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17ROLLOUT_TIER_STATE_DONE\x10\x01\x12\x1e\n" +
+	"\x1aROLLOUT_TIER_STATE_ROLLING\x10\x02\x12\x1e\n" +
+	"\x1aROLLOUT_TIER_STATE_SOAKING\x10\x03\x12\"\n" +
+	"\x1eROLLOUT_TIER_STATE_NOT_STARTED\x10\x04\x12\x1d\n" +
+	"\x19ROLLOUT_TIER_STATE_HALTED\x10\x05B\xa1\x01\n" +
 	"\fcom.cloud.v1B\x11AdminReleaseProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -1911,86 +2429,103 @@ func file_cloud_v1_admin_release_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_admin_release_proto_rawDescData
 }
 
-var file_cloud_v1_admin_release_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_cloud_v1_admin_release_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_cloud_v1_admin_release_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_cloud_v1_admin_release_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_cloud_v1_admin_release_proto_goTypes = []any{
 	(RolloutState)(0),                     // 0: cloud.v1.RolloutState
-	(*Release)(nil),                       // 1: cloud.v1.Release
-	(*ReleaseMinor)(nil),                  // 2: cloud.v1.ReleaseMinor
-	(*ReleaseComponent)(nil),              // 3: cloud.v1.ReleaseComponent
-	(*ReleaseChannelInfo)(nil),            // 4: cloud.v1.ReleaseChannelInfo
-	(*PendingRelease)(nil),                // 5: cloud.v1.PendingRelease
-	(*PromoteReleaseChannelRequest)(nil),  // 6: cloud.v1.PromoteReleaseChannelRequest
-	(*PromoteReleaseChannelResponse)(nil), // 7: cloud.v1.PromoteReleaseChannelResponse
-	(*RolloutPolicy)(nil),                 // 8: cloud.v1.RolloutPolicy
-	(*ChannelHistoryEntry)(nil),           // 9: cloud.v1.ChannelHistoryEntry
-	(*RolloutTier)(nil),                   // 10: cloud.v1.RolloutTier
-	(*RolloutSummary)(nil),                // 11: cloud.v1.RolloutSummary
-	(*RolloutMember)(nil),                 // 12: cloud.v1.RolloutMember
-	(*Rollout)(nil),                       // 13: cloud.v1.Rollout
-	(*ListReleasesRequest)(nil),           // 14: cloud.v1.ListReleasesRequest
-	(*ListReleasesResponse)(nil),          // 15: cloud.v1.ListReleasesResponse
-	(*GetReleaseRequest)(nil),             // 16: cloud.v1.GetReleaseRequest
-	(*GetReleaseResponse)(nil),            // 17: cloud.v1.GetReleaseResponse
-	(*ListReleaseChannelsRequest)(nil),    // 18: cloud.v1.ListReleaseChannelsRequest
-	(*ListReleaseChannelsResponse)(nil),   // 19: cloud.v1.ListReleaseChannelsResponse
-	(*GetReleaseChannelRequest)(nil),      // 20: cloud.v1.GetReleaseChannelRequest
-	(*GetReleaseChannelResponse)(nil),     // 21: cloud.v1.GetReleaseChannelResponse
-	(*GetRolloutRequest)(nil),             // 22: cloud.v1.GetRolloutRequest
-	(*GetRolloutResponse)(nil),            // 23: cloud.v1.GetRolloutResponse
-	nil,                                   // 24: cloud.v1.RolloutPolicy.SoakPerTierEntry
-	(ReleaseChannel)(0),                   // 25: cloud.v1.ReleaseChannel
-	(*timestamppb.Timestamp)(nil),         // 26: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),               // 27: google.protobuf.Struct
-	(ClusterTier)(0),                      // 28: cloud.v1.ClusterTier
-	(*Condition)(nil),                     // 29: cloud.v1.Condition
+	(RolloutTierState)(0),                 // 1: cloud.v1.RolloutTierState
+	(*Release)(nil),                       // 2: cloud.v1.Release
+	(*ReleaseMinor)(nil),                  // 3: cloud.v1.ReleaseMinor
+	(*ReleaseComponent)(nil),              // 4: cloud.v1.ReleaseComponent
+	(*ReleaseChannelInfo)(nil),            // 5: cloud.v1.ReleaseChannelInfo
+	(*PendingRelease)(nil),                // 6: cloud.v1.PendingRelease
+	(*PromoteReleaseChannelRequest)(nil),  // 7: cloud.v1.PromoteReleaseChannelRequest
+	(*PromoteReleaseChannelResponse)(nil), // 8: cloud.v1.PromoteReleaseChannelResponse
+	(*RolloutPolicy)(nil),                 // 9: cloud.v1.RolloutPolicy
+	(*ChannelHistoryEntry)(nil),           // 10: cloud.v1.ChannelHistoryEntry
+	(*RolloutTier)(nil),                   // 11: cloud.v1.RolloutTier
+	(*RolloutSummary)(nil),                // 12: cloud.v1.RolloutSummary
+	(*RolloutMember)(nil),                 // 13: cloud.v1.RolloutMember
+	(*Rollout)(nil),                       // 14: cloud.v1.Rollout
+	(*RolloutPlan)(nil),                   // 15: cloud.v1.RolloutPlan
+	(*RolloutTierPlan)(nil),               // 16: cloud.v1.RolloutTierPlan
+	(*RolloutBatch)(nil),                  // 17: cloud.v1.RolloutBatch
+	(*RolloutPlanCluster)(nil),            // 18: cloud.v1.RolloutPlanCluster
+	(*ListReleasesRequest)(nil),           // 19: cloud.v1.ListReleasesRequest
+	(*ListReleasesResponse)(nil),          // 20: cloud.v1.ListReleasesResponse
+	(*GetReleaseRequest)(nil),             // 21: cloud.v1.GetReleaseRequest
+	(*GetReleaseResponse)(nil),            // 22: cloud.v1.GetReleaseResponse
+	(*ListReleaseChannelsRequest)(nil),    // 23: cloud.v1.ListReleaseChannelsRequest
+	(*ListReleaseChannelsResponse)(nil),   // 24: cloud.v1.ListReleaseChannelsResponse
+	(*GetReleaseChannelRequest)(nil),      // 25: cloud.v1.GetReleaseChannelRequest
+	(*GetReleaseChannelResponse)(nil),     // 26: cloud.v1.GetReleaseChannelResponse
+	(*GetRolloutRequest)(nil),             // 27: cloud.v1.GetRolloutRequest
+	(*GetRolloutResponse)(nil),            // 28: cloud.v1.GetRolloutResponse
+	nil,                                   // 29: cloud.v1.RolloutPolicy.SoakPerTierEntry
+	(ReleaseChannel)(0),                   // 30: cloud.v1.ReleaseChannel
+	(*timestamppb.Timestamp)(nil),         // 31: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),               // 32: google.protobuf.Struct
+	(ClusterTier)(0),                      // 33: cloud.v1.ClusterTier
+	(*Condition)(nil),                     // 34: cloud.v1.Condition
 }
 var file_cloud_v1_admin_release_proto_depIdxs = []int32{
-	25, // 0: cloud.v1.Release.channels:type_name -> cloud.v1.ReleaseChannel
-	26, // 1: cloud.v1.Release.create_time:type_name -> google.protobuf.Timestamp
-	2,  // 2: cloud.v1.Release.kubernetes:type_name -> cloud.v1.ReleaseMinor
-	25, // 3: cloud.v1.ReleaseMinor.channel:type_name -> cloud.v1.ReleaseChannel
-	26, // 4: cloud.v1.ReleaseMinor.end_of_support:type_name -> google.protobuf.Timestamp
-	3,  // 5: cloud.v1.ReleaseMinor.components:type_name -> cloud.v1.ReleaseComponent
-	27, // 6: cloud.v1.ReleaseComponent.values:type_name -> google.protobuf.Struct
-	25, // 7: cloud.v1.ReleaseChannelInfo.channel:type_name -> cloud.v1.ReleaseChannel
-	8,  // 8: cloud.v1.ReleaseChannelInfo.policy:type_name -> cloud.v1.RolloutPolicy
-	28, // 9: cloud.v1.ReleaseChannelInfo.rollout_tier:type_name -> cloud.v1.ClusterTier
-	11, // 10: cloud.v1.ReleaseChannelInfo.rollout:type_name -> cloud.v1.RolloutSummary
-	9,  // 11: cloud.v1.ReleaseChannelInfo.history:type_name -> cloud.v1.ChannelHistoryEntry
-	29, // 12: cloud.v1.ReleaseChannelInfo.conditions:type_name -> cloud.v1.Condition
-	26, // 13: cloud.v1.ReleaseChannelInfo.create_time:type_name -> google.protobuf.Timestamp
-	5,  // 14: cloud.v1.ReleaseChannelInfo.pending:type_name -> cloud.v1.PendingRelease
-	26, // 15: cloud.v1.PendingRelease.since:type_name -> google.protobuf.Timestamp
-	26, // 16: cloud.v1.PendingRelease.until:type_name -> google.protobuf.Timestamp
-	25, // 17: cloud.v1.PromoteReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
-	4,  // 18: cloud.v1.PromoteReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
-	24, // 19: cloud.v1.RolloutPolicy.soak_per_tier:type_name -> cloud.v1.RolloutPolicy.SoakPerTierEntry
-	26, // 20: cloud.v1.ChannelHistoryEntry.from:type_name -> google.protobuf.Timestamp
-	26, // 21: cloud.v1.ChannelHistoryEntry.to:type_name -> google.protobuf.Timestamp
-	28, // 22: cloud.v1.RolloutTier.tier:type_name -> cloud.v1.ClusterTier
-	10, // 23: cloud.v1.RolloutSummary.tiers:type_name -> cloud.v1.RolloutTier
-	28, // 24: cloud.v1.RolloutMember.tier:type_name -> cloud.v1.ClusterTier
+	30, // 0: cloud.v1.Release.channels:type_name -> cloud.v1.ReleaseChannel
+	31, // 1: cloud.v1.Release.create_time:type_name -> google.protobuf.Timestamp
+	3,  // 2: cloud.v1.Release.kubernetes:type_name -> cloud.v1.ReleaseMinor
+	30, // 3: cloud.v1.ReleaseMinor.channel:type_name -> cloud.v1.ReleaseChannel
+	31, // 4: cloud.v1.ReleaseMinor.end_of_support:type_name -> google.protobuf.Timestamp
+	4,  // 5: cloud.v1.ReleaseMinor.components:type_name -> cloud.v1.ReleaseComponent
+	32, // 6: cloud.v1.ReleaseComponent.values:type_name -> google.protobuf.Struct
+	30, // 7: cloud.v1.ReleaseChannelInfo.channel:type_name -> cloud.v1.ReleaseChannel
+	9,  // 8: cloud.v1.ReleaseChannelInfo.policy:type_name -> cloud.v1.RolloutPolicy
+	33, // 9: cloud.v1.ReleaseChannelInfo.rollout_tier:type_name -> cloud.v1.ClusterTier
+	12, // 10: cloud.v1.ReleaseChannelInfo.rollout:type_name -> cloud.v1.RolloutSummary
+	10, // 11: cloud.v1.ReleaseChannelInfo.history:type_name -> cloud.v1.ChannelHistoryEntry
+	34, // 12: cloud.v1.ReleaseChannelInfo.conditions:type_name -> cloud.v1.Condition
+	31, // 13: cloud.v1.ReleaseChannelInfo.create_time:type_name -> google.protobuf.Timestamp
+	6,  // 14: cloud.v1.ReleaseChannelInfo.pending:type_name -> cloud.v1.PendingRelease
+	31, // 15: cloud.v1.PendingRelease.since:type_name -> google.protobuf.Timestamp
+	31, // 16: cloud.v1.PendingRelease.until:type_name -> google.protobuf.Timestamp
+	30, // 17: cloud.v1.PromoteReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	5,  // 18: cloud.v1.PromoteReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
+	29, // 19: cloud.v1.RolloutPolicy.soak_per_tier:type_name -> cloud.v1.RolloutPolicy.SoakPerTierEntry
+	31, // 20: cloud.v1.ChannelHistoryEntry.from:type_name -> google.protobuf.Timestamp
+	31, // 21: cloud.v1.ChannelHistoryEntry.to:type_name -> google.protobuf.Timestamp
+	33, // 22: cloud.v1.RolloutTier.tier:type_name -> cloud.v1.ClusterTier
+	11, // 23: cloud.v1.RolloutSummary.tiers:type_name -> cloud.v1.RolloutTier
+	33, // 24: cloud.v1.RolloutMember.tier:type_name -> cloud.v1.ClusterTier
 	0,  // 25: cloud.v1.RolloutMember.state:type_name -> cloud.v1.RolloutState
-	26, // 26: cloud.v1.RolloutMember.since:type_name -> google.protobuf.Timestamp
-	25, // 27: cloud.v1.Rollout.channel:type_name -> cloud.v1.ReleaseChannel
-	28, // 28: cloud.v1.Rollout.rollout_tier:type_name -> cloud.v1.ClusterTier
-	8,  // 29: cloud.v1.Rollout.policy:type_name -> cloud.v1.RolloutPolicy
-	11, // 30: cloud.v1.Rollout.summary:type_name -> cloud.v1.RolloutSummary
-	12, // 31: cloud.v1.Rollout.members:type_name -> cloud.v1.RolloutMember
-	1,  // 32: cloud.v1.ListReleasesResponse.releases:type_name -> cloud.v1.Release
-	1,  // 33: cloud.v1.GetReleaseResponse.release:type_name -> cloud.v1.Release
-	4,  // 34: cloud.v1.ListReleaseChannelsResponse.channels:type_name -> cloud.v1.ReleaseChannelInfo
-	25, // 35: cloud.v1.GetReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
-	4,  // 36: cloud.v1.GetReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
-	25, // 37: cloud.v1.GetRolloutRequest.channel:type_name -> cloud.v1.ReleaseChannel
-	28, // 38: cloud.v1.GetRolloutRequest.tier:type_name -> cloud.v1.ClusterTier
-	13, // 39: cloud.v1.GetRolloutResponse.rollout:type_name -> cloud.v1.Rollout
-	40, // [40:40] is the sub-list for method output_type
-	40, // [40:40] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	31, // 26: cloud.v1.RolloutMember.since:type_name -> google.protobuf.Timestamp
+	30, // 27: cloud.v1.Rollout.channel:type_name -> cloud.v1.ReleaseChannel
+	33, // 28: cloud.v1.Rollout.rollout_tier:type_name -> cloud.v1.ClusterTier
+	9,  // 29: cloud.v1.Rollout.policy:type_name -> cloud.v1.RolloutPolicy
+	12, // 30: cloud.v1.Rollout.summary:type_name -> cloud.v1.RolloutSummary
+	13, // 31: cloud.v1.Rollout.members:type_name -> cloud.v1.RolloutMember
+	15, // 32: cloud.v1.Rollout.plan:type_name -> cloud.v1.RolloutPlan
+	33, // 33: cloud.v1.RolloutPlan.rolling_tier:type_name -> cloud.v1.ClusterTier
+	16, // 34: cloud.v1.RolloutPlan.tiers:type_name -> cloud.v1.RolloutTierPlan
+	33, // 35: cloud.v1.RolloutTierPlan.tier:type_name -> cloud.v1.ClusterTier
+	1,  // 36: cloud.v1.RolloutTierPlan.state:type_name -> cloud.v1.RolloutTierState
+	31, // 37: cloud.v1.RolloutTierPlan.finished_time:type_name -> google.protobuf.Timestamp
+	31, // 38: cloud.v1.RolloutTierPlan.soak_until:type_name -> google.protobuf.Timestamp
+	17, // 39: cloud.v1.RolloutTierPlan.batches:type_name -> cloud.v1.RolloutBatch
+	18, // 40: cloud.v1.RolloutTierPlan.waits:type_name -> cloud.v1.RolloutPlanCluster
+	18, // 41: cloud.v1.RolloutBatch.clusters:type_name -> cloud.v1.RolloutPlanCluster
+	0,  // 42: cloud.v1.RolloutPlanCluster.state:type_name -> cloud.v1.RolloutState
+	31, // 43: cloud.v1.RolloutPlanCluster.since:type_name -> google.protobuf.Timestamp
+	2,  // 44: cloud.v1.ListReleasesResponse.releases:type_name -> cloud.v1.Release
+	2,  // 45: cloud.v1.GetReleaseResponse.release:type_name -> cloud.v1.Release
+	5,  // 46: cloud.v1.ListReleaseChannelsResponse.channels:type_name -> cloud.v1.ReleaseChannelInfo
+	30, // 47: cloud.v1.GetReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	5,  // 48: cloud.v1.GetReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
+	30, // 49: cloud.v1.GetRolloutRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	33, // 50: cloud.v1.GetRolloutRequest.tier:type_name -> cloud.v1.ClusterTier
+	14, // 51: cloud.v1.GetRolloutResponse.rollout:type_name -> cloud.v1.Rollout
+	52, // [52:52] is the sub-list for method output_type
+	52, // [52:52] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_release_proto_init() }
@@ -2005,8 +2540,8 @@ func file_cloud_v1_admin_release_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_admin_release_proto_rawDesc), len(file_cloud_v1_admin_release_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   24,
+			NumEnums:      2,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

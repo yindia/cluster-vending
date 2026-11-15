@@ -179,6 +179,7 @@ func RolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel) *cloudv1.Rollout {
 func PlannedRolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel, res rollout.Result) *cloudv1.Rollout {
 	out := RolloutFromAPI(ch)
 	out.RolloutTier, out.Summary = TierFromAPI(res.Tier), RolloutSummaryFromAPI(res.Rollout)
+	out.Plan = RolloutPlanFromResult(res)
 	return out
 }
 

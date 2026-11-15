@@ -213,6 +213,86 @@ message Rollout {
   RolloutSummary summary = 6;
   // The channel's clusters in the rollout, tier 2 first. GetRollout only.
   repeated RolloutMember members = 7;
+  // How the rollout proceeds from now, per tier and batch, as the
+  // controller plans it. GetRollout only; not paged.
+  RolloutPlan plan = 8;
+}
+
+// RolloutPlan is a channel's rollout laid out per tier and batch: the
+// tiers in rollout order (2, 1, 0), each tier's clusters in batches of at
+// most max_in_progress (tier 0: one), finished ones by when they ended,
+// then the batch upgrading or next and the queued ones by name.
+message RolloutPlan {
+  // A tier is rolling (or soaking toward): rolling_tier, at batch of
+  // batches (1-based).
+  bool rolling = 1;
+  ClusterTier rolling_tier = 2;
+  int32 batch = 3;
+  int32 batches = 4;
+  bool done = 5;
+  bool halted = 6;
+  repeated RolloutTierPlan tiers = 7;
+}
+
+// RolloutTierState is where a tier is in the rollout.
+enum RolloutTierState {
+  ROLLOUT_TIER_STATE_UNSPECIFIED = 0;
+  // None of its clusters waits or upgrades.
+  ROLLOUT_TIER_STATE_DONE = 1;
+  // Its clusters are upgraded, a batch at a time.
+  ROLLOUT_TIER_STATE_ROLLING = 2;
+  // It is next, and waits for the tier before it to soak.
+  ROLLOUT_TIER_STATE_SOAKING = 3;
+  // A tier before it is not done (or the rollout halted).
+  ROLLOUT_TIER_STATE_NOT_STARTED = 4;
+  // More of its clusters failed than max_failed: the channel halted.
+  ROLLOUT_TIER_STATE_HALTED = 5;
+}
+
+// RolloutTierPlan is one tier of a rollout plan.
+message RolloutTierPlan {
+  ClusterTier tier = 1;
+  RolloutTierState state = 2;
+  int32 total = 3;
+  int32 done = 4;
+  int32 in_progress = 5;
+  int32 failed = 6;
+  int32 blocked = 7;
+  // Failures it may have before the channel halts.
+  int32 max_failed = 8;
+  // Clusters upgraded at once.
+  int32 batch_size = 9;
+  // When its last upgrade ended, and when the next tier may start
+  // (that plus its soak); unset while none ended.
+  google.protobuf.Timestamp finished_time = 10;
+  google.protobuf.Timestamp soak_until = 11;
+  repeated RolloutBatch batches = 12;
+  // Index in batches of the batch upgrading or next; -1 when all are
+  // finished.
+  int32 current = 13;
+  // Clusters blocked by their own gate: in no batch; one joins the batch
+  // being filled when its gate clears.
+  repeated RolloutPlanCluster waits = 14;
+}
+
+// RolloutBatch is clusters upgraded together.
+message RolloutBatch {
+  repeated RolloutPlanCluster clusters = 1;
+}
+
+// RolloutPlanCluster is a cluster in a rollout plan.
+message RolloutPlanCluster {
+  string tenant_id = 1;
+  string cluster_name = 2;
+  string cluster_id = 3;
+  RolloutState state = 4;
+  // The step its upgrade is at (ControlPlane, NodesAndAddons, ...) while
+  // in progress.
+  string phase = 5;
+  // When it entered its state; unset when unknown.
+  google.protobuf.Timestamp since = 6;
+  // Why it waits (blocked) or failed.
+  string reason = 7;
 }
 
 message ListReleasesRequest {

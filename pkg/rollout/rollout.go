@@ -61,6 +61,9 @@ type Row struct {
 	Since time.Time
 	// Gate is why it is blocked; nil when it is not.
 	Gate *upgrade.Gate
+	// Phase is the step its Kubernetes upgrade is at (status.upgrade);
+	// empty when none runs.
+	Phase string
 }
 
 // Key is the row's namespace/name, as the channel's status names clusters.
@@ -236,6 +239,9 @@ func (in memberInputs) row(c *cloudv1alpha1.Cluster) (r Row, wake time.Time, ok 
 	}
 	r = Row{ID: c.Labels[cloudstore.LabelID], Tenant: tenantOf(c), Namespace: c.Namespace, Name: c.Name,
 		Tier: Tier(c.Spec.Tier), Current: current, Target: in.target}
+	if u := c.Status.Upgrade; u != nil {
+		r.Phase = string(u.Phase)
+	}
 	if recorded, ok := fromRecord(c, in.channel, r, cmp); ok {
 		return recorded, wake, true
 	}

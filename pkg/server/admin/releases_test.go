@@ -250,3 +250,33 @@ func TestGetRolloutPlansClusterByCluster(t *testing.T) {
 		t.Errorf("page = %v, %v", paged, err)
 	}
 }
+
+// GetRollout carries the plan per tier and batch, whole on every page.
+func TestGetRolloutCarriesThePlan(t *testing.T) {
+	manual := stableCluster("manual", cloudv1alpha1.ClusterTier0, "1.34")
+	manual.Spec.UpgradeMode = cloudv1alpha1.UpgradeModeManual
+	s := releaseWorld(t, stableCluster("done", cloudv1alpha1.ClusterTier2, "1.35"),
+		stableCluster("next", cloudv1alpha1.ClusterTier2, "1.34"), stableCluster("later", cloudv1alpha1.ClusterTier1, "1.34"), manual)
+	stable := cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE
+
+	res, err := s.GetRollout(t.Context(), &cloudv1.GetRolloutRequest{Channel: stable, PageSize: 1})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := res.GetRollout().GetPlan()
+	if !plan.GetRolling() || plan.GetRollingTier() != cloudv1.ClusterTier_CLUSTER_TIER_2 || len(plan.GetTiers()) != 3 {
+		t.Fatalf("plan = %v", plan)
+	}
+	t2 := plan.GetTiers()[0]
+	current := t2.GetBatches()[t2.GetCurrent()].GetClusters()
+	if t2.GetState() != cloudv1.RolloutTierState_ROLLOUT_TIER_STATE_ROLLING || len(current) != 1 ||
+		current[0].GetClusterName() != "next" || current[0].GetTenantId() != "acme" || current[0].GetClusterId() != "id-next" {
+		t.Errorf("tier 2 = %v", t2)
+	}
+	t0 := plan.GetTiers()[2]
+	if t0.GetState() != cloudv1.RolloutTierState_ROLLOUT_TIER_STATE_NOT_STARTED || len(t0.GetWaits()) != 1 ||
+		t0.GetWaits()[0].GetClusterName() != "manual" || t0.GetWaits()[0].GetReason() == "" {
+		t.Errorf("tier 0 = %v", t0)
+	}
+}

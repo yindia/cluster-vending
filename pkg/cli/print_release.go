@@ -177,7 +177,7 @@ func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide boo
 	for _, c := range channels {
 		r := c.GetRollout()
 		rw := []string{channelWord(c.GetChannel()), orNone(c.GetPromotion()), orNone(c.GetRelease()), orNone(c.GetKubernetesMinor()),
-			tierWord(c.GetRolloutTier()), rolloutState(r, c.GetPaused()), orNone(oneLine(r.GetWaiting())), yesNo(c.GetPaused()),
+			tierWord(c.GetRolloutTier()), rolloutState(r, c.GetPaused()), orNone(channelWaiting(c)), yesNo(c.GetPaused()),
 			age(c.GetCreateTime())}
 		if wide {
 			rw = append(rw, tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_2), tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_1),
@@ -197,6 +197,17 @@ func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
 		{"Policy", policyLine(c.GetPolicy())}, {"Rolling Tier", tierWord(c.GetRolloutTier())},
 		{"Rollout", rolloutState(c.GetRollout(), c.GetPaused())}, {"Waiting", oneLine(c.GetRollout().GetWaiting())},
 		{"Would Start", strings.Join(c.GetRollout().GetWouldStart(), ", ")}, {"Age", age(c.GetCreateTime())}}
+	if c.GetPromotion() == "Automatic" {
+		soak := c.GetPolicy().GetReleaseSoak()
+		if soak == "" {
+			soak = "default (beta 7d, stable 14d)"
+		}
+		kv = append(kv, [2]string{"Release Soak", soak})
+	}
+	if p := c.GetPending(); p != nil {
+		kv = append(kv, [2]string{"Next Release", fmt.Sprintf("%s %s (%s); admin channel promote --id %s takes it now",
+			p.GetRelease(), untilText(p.GetUntil()), date(p.GetUntil()), channelWord(c.GetChannel()))})
+	}
 	if err := fields(w, kv); err != nil {
 		return err
 	}
@@ -212,6 +223,15 @@ func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
 		return err
 	}
 	return section(w, "Conditions", conditionHeader, conditionRows(c.GetConditions()))
+}
+
+// channelWaiting is why a channel waits: the release it takes once its
+// release soak ends, else what its rollout waits for.
+func channelWaiting(c *cloudv1.ReleaseChannelInfo) string {
+	if p := c.GetPending(); p != nil {
+		return fmt.Sprintf("takes %s %s", p.GetRelease(), untilText(p.GetUntil()))
+	}
+	return oneLine(c.GetRollout().GetWaiting())
 }
 
 // rolloutState is a rollout in one word.

@@ -91,6 +91,9 @@ type Options struct {
 	// Only is --only of admin pause and resume ("upgrades": automatic
 	// upgrades only); Until --until of admin pause.
 	Only, Until string
+	// PromoteRelease is --release of admin channel promote: the release the
+	// channel takes now; empty: its upstream's.
+	PromoteRelease string
 	// Regions is --region of account verify: regions to check besides
 	// those of the account's networks.
 	Regions []string

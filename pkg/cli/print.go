@@ -140,6 +140,9 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 		return true, printChannels(w, m.GetChannels(), wide)
 	case *cloudv1.GetReleaseChannelResponse:
 		return true, describeChannel(w, m.GetChannel())
+	case *cloudv1.PromoteReleaseChannelResponse:
+		_, err := fmt.Fprintln(w, m.GetNote())
+		return true, err
 	case *cloudv1.GetRolloutResponse:
 		return true, describeRollout(w, m.GetRollout(), m.GetNextPageToken(), wide)
 	}

@@ -100,6 +100,29 @@ func TestPrintChannels(t *testing.T) {
 	}
 }
 
+// A channel waiting out its release soak says what it takes next, when,
+// and how to take it now.
+func TestPrintChannelWaitingForARelease(t *testing.T) {
+	withClock(t)
+	beta := &cloudv1.ReleaseChannelInfo{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Promotion: "Automatic",
+		Release: "shipped-1aed928c", KubernetesMinor: "1.36", Policy: &cloudv1.RolloutPolicy{Soak: "24h0m0s", ReleaseSoak: "168h0m0s"},
+		CreateTime: ago(72 * time.Hour), Rollout: &cloudv1.RolloutSummary{TargetMinor: "1.36", Done: true},
+		Pending: &cloudv1.PendingRelease{Release: "2026-11-a", Since: timestamppb.New(printNow.Add(-24 * time.Hour)),
+			Until: timestamppb.New(printNow.Add(6 * 24 * time.Hour))}}
+
+	list := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: []*cloudv1.ReleaseChannelInfo{beta}}, OutputTable)
+	get := printed(t, &cloudv1.GetReleaseChannelResponse{Channel: beta}, OutputTable)
+
+	if !strings.Contains(list, "takes 2026-11-a in 6d") {
+		t.Errorf("channel list lacks the pending release:\n%s", list)
+	}
+	for _, want := range []string{"Release Soak:", "168h", "Next Release:", "2026-11-a in 6d", "admin channel promote --id beta"} {
+		if !strings.Contains(get, want) {
+			t.Errorf("channel get lacks %q:\n%s", want, get)
+		}
+	}
+}
+
 func TestPrintRollouts(t *testing.T) {
 	withClock(t)
 	stableRollout := &cloudv1.Rollout{Channel: stable, Release: "shipped-1aed928c", RolloutTier: tier1, Policy: policy(),

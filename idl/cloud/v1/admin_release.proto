@@ -82,6 +82,37 @@ message ReleaseChannelInfo {
   repeated ChannelHistoryEntry history = 10;
   repeated Condition conditions = 11;
   google.protobuf.Timestamp create_time = 12;
+  // The release an Automatic channel takes once its release soak ends;
+  // unset when it waits for none.
+  PendingRelease pending = 13;
+}
+
+// PendingRelease is the release an Automatic channel waits to take.
+message PendingRelease {
+  string release = 1;
+  // When the upstream channel started offering it.
+  google.protobuf.Timestamp since = 2;
+  // When the release soak ends and the channel takes it.
+  google.protobuf.Timestamp until = 3;
+}
+
+message PromoteReleaseChannelRequest {
+  // beta or stable: alpha takes its release from the build (Pinned).
+  ReleaseChannel channel = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [
+      0,
+      1
+    ]
+  }];
+  // The release to offer now; empty: the upstream channel's.
+  string release = 2 [(buf.validate.field).string.max_len = 63];
+}
+
+message PromoteReleaseChannelResponse {
+  ReleaseChannelInfo channel = 1;
+  // What happens next, e.g. "beta takes 2026-11-a on the controller's next pass".
+  string note = 2;
 }
 
 // RolloutPolicy is how a channel's rollout moves through the tiers.
@@ -94,6 +125,10 @@ message RolloutPolicy {
   string soak = 3;
   // soak per tier, by tier: "Tier0", "Tier1", "Tier2".
   map<string, string> soak_per_tier = 4;
+  // How long the upstream channel must have offered a release before an
+  // Automatic channel takes it, e.g. "168h0m0s"; empty: the default
+  // (beta 7 days, stable 14).
+  string release_soak = 5;
 }
 
 // ChannelHistoryEntry is one release a channel offered.

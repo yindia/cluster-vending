@@ -337,6 +337,33 @@ in those regions too.
 Who reconciles: this controller, and nothing else. The API server only
 stores the desired state; it has no background loop.
 
+## Releases through the channels: the release soak
+
+alpha is Pinned: it offers the release this build ships (or `spec.release`).
+beta and stable are Automatic: beta takes alpha's release, stable beta's,
+but only once the channel before has offered it for the channel's
+**release soak** (`spec.policy.releaseSoak`; shipped: beta 168h, stable
+336h; unset on a channel made before: the same 7 and 14 days). Until then
+the channel keeps its release, `status.pending` names the one it takes and
+when, its Offering condition says so, and a `PromotionWaiting` event is
+emitted once. A channel that offers nothing yet (a new management cluster)
+takes its upstream's release at once.
+
+An admin takes it sooner:
+
+```sh
+cluster-vending admin channel promote --id beta [--release 2026-11-a]   # the upstream's release, or one named
+```
+
+The release must exist, be valid and not withdrawn. The request is an
+annotation on the channel (`cloud.cluster-vending.io/promote`, with who
+asked); the controller offers the release on its next pass, records "promoted
+by <who>" in the channel's history and removes the annotation. A soak of
+`0s` makes a channel follow at once, as before.
+
+A release a channel offers is what new clusters on it install; clusters
+that have one keep it (their move to a new release is its own step).
+
 ## Rollout of a channel's Kubernetes minor
 
 Each ReleaseChannel's release puts one Kubernetes minor on it
@@ -421,7 +448,8 @@ without access to the management cluster:
 cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS PINNED AGE (PINNED: pauses of upgrades that keep a cluster on it)
 cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
 cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES ROLLING TIER STATE WAITING PAUSED AGE (wide: TIER2 TIER1 TIER0 progress, policy)
-cluster-vending admin channel get --id stable         # policy, rollout, the releases it offered, conditions
+cluster-vending admin channel get --id stable         # policy, release soak, next release, rollout, the releases it offered, conditions
+cluster-vending admin channel promote --id beta [--release <name>]   # take the upstream's (or a named) release now, before the soak ends
 cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
 ```
 

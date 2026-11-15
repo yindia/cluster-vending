@@ -120,6 +120,9 @@ func ReleaseFromAPI(r *cloudv1alpha1.Release, detail bool) *cloudv1.Release {
 // returns it.
 func RolloutPolicyFromAPI(p cloudv1alpha1.RolloutPolicy) *cloudv1.RolloutPolicy {
 	out := &cloudv1.RolloutPolicy{MaxInProgress: p.MaxInProgress, MaxFailed: p.MaxFailed, Soak: p.Soak.Duration.String()}
+	if p.ReleaseSoak != nil {
+		out.ReleaseSoak = p.ReleaseSoak.Duration.String()
+	}
 	if len(p.SoakPerTier) > 0 {
 		out.SoakPerTier = map[string]string{}
 		for _, tier := range slices.Sorted(maps.Keys(p.SoakPerTier)) {
@@ -151,6 +154,9 @@ func ChannelFromAPI(ch *cloudv1alpha1.ReleaseChannel, detail bool) *cloudv1.Rele
 		Paused: ch.Spec.Paused, Policy: RolloutPolicyFromAPI(ch.Spec.Policy), RolloutTier: TierFromAPI(ch.Status.RolloutTier),
 		Rollout: RolloutSummaryFromAPI(ch.Status.Rollout), Conditions: ConditionsFromAPI(ch.Status.Conditions),
 		CreateTime: timeOf(&ch.CreationTimestamp)}
+	if p := ch.Status.Pending; p != nil {
+		out.Pending = &cloudv1.PendingRelease{Release: p.Release, Since: timeOf(&p.Since), Until: timeOf(&p.Until)}
+	}
 	if detail {
 		for _, h := range ch.Status.History {
 			out.History = append(out.History, &cloudv1.ChannelHistoryEntry{Release: h.Release, From: timeOf(&h.From),

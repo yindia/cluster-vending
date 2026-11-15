@@ -36,6 +36,16 @@ func AdminChannelGet(ctx context.Context, c Clients, o Options) (proto.Message, 
 	return call(ctx, &cloudv1.GetReleaseChannelRequest{Channel: ch}, c.Admin.GetReleaseChannel)
 }
 
+// AdminChannelPromote calls AdminService.PromoteReleaseChannel: the
+// channel --id (beta or stable) takes --release, or its upstream's, now.
+func AdminChannelPromote(ctx context.Context, c Clients, o Options) (proto.Message, error) {
+	ch, err := parseChannel("--id", o.ID)
+	if err != nil {
+		return nil, err
+	}
+	return call(ctx, &cloudv1.PromoteReleaseChannelRequest{Channel: ch, Release: o.PromoteRelease}, c.Admin.PromoteReleaseChannel)
+}
+
 // AdminRolloutGet calls AdminService.GetRollout for --channel, only --tier
 // when set: the rollout cluster by cluster.
 func AdminRolloutGet(ctx context.Context, c Clients, o Options) (proto.Message, error) {

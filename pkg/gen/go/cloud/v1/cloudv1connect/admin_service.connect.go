@@ -44,6 +44,9 @@ const (
 	AdminServiceGetReleaseChannelProcedure = "/cloud.v1.AdminService/GetReleaseChannel"
 	// AdminServiceGetRolloutProcedure is the procedure name of the AdminService's GetRollout RPC.
 	AdminServiceGetRolloutProcedure = "/cloud.v1.AdminService/GetRollout"
+	// AdminServicePromoteReleaseChannelProcedure is the procedure name of the AdminService's
+	// PromoteReleaseChannel RPC.
+	AdminServicePromoteReleaseChannelProcedure = "/cloud.v1.AdminService/PromoteReleaseChannel"
 )
 
 var (
@@ -109,6 +112,13 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	adminServicePromoteReleaseChannelSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("PromoteReleaseChannel"),
+			Procedure:  AdminServicePromoteReleaseChannelProcedure,
+		}
+	})
 )
 
 // AdminServiceClient is a client for the cloud.v1.AdminService service.
@@ -168,6 +178,12 @@ type AdminServiceClient interface {
 	// Planned the way the controller plans it (pkg/rollout), from what the
 	// management cluster holds now.
 	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
+	// Makes an Automatic channel (beta, stable) take a release now, before
+	// its release soak ends: the upstream channel's, or another valid
+	// release. Recorded with who asked; the controller takes it on its next
+	// pass. FAILED_PRECONDITION for a release that is missing, not valid or
+	// withdrawn, and for a channel that is not Automatic.
+	PromoteReleaseChannel(context.Context, *v1.PromoteReleaseChannelRequest) (*v1.PromoteReleaseChannelResponse, error)
 }
 
 // NewAdminServiceClient constructs a client for the cloud.v1.AdminService service. Multiple service
@@ -233,6 +249,12 @@ type AdminServiceHandler interface {
 	// Planned the way the controller plans it (pkg/rollout), from what the
 	// management cluster holds now.
 	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
+	// Makes an Automatic channel (beta, stable) take a release now, before
+	// its release soak ends: the upstream channel's, or another valid
+	// release. Recorded with who asked; the controller takes it on its next
+	// pass. FAILED_PRECONDITION for a release that is missing, not valid or
+	// withdrawn, and for a channel that is not Automatic.
+	PromoteReleaseChannel(context.Context, *v1.PromoteReleaseChannelRequest) (*v1.PromoteReleaseChannelResponse, error)
 }
 
 // RegisterAdminServiceHandler registers svc as the cloud.v1.AdminService implementation on server.
@@ -247,6 +269,7 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 		connect.Method{Spec: adminServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
 		connect.Method{Spec: adminServiceGetReleaseChannelSpec(), Handler: adapter.getReleaseChannel},
 		connect.Method{Spec: adminServiceGetRolloutSpec(), Handler: adapter.getRollout},
+		connect.Method{Spec: adminServicePromoteReleaseChannelSpec(), Handler: adapter.promoteReleaseChannel},
 	)
 }
 
@@ -283,6 +306,10 @@ func (UnimplementedAdminServiceHandler) GetReleaseChannel(context.Context, *v1.G
 
 func (UnimplementedAdminServiceHandler) GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetRollout is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) PromoteReleaseChannel(context.Context, *v1.PromoteReleaseChannelRequest) (*v1.PromoteReleaseChannelResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.PromoteReleaseChannel is not implemented")
 }
 
 type adminServiceClient struct {
@@ -348,6 +375,14 @@ func (c *adminServiceClient) GetReleaseChannel(ctx context.Context, req *v1.GetR
 func (c *adminServiceClient) GetRollout(ctx context.Context, req *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
 	var res v1.GetRolloutResponse
 	if err := c.client.CallUnary(ctx, adminServiceGetRolloutSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) PromoteReleaseChannel(ctx context.Context, req *v1.PromoteReleaseChannelRequest) (*v1.PromoteReleaseChannelResponse, error) {
+	var res v1.PromoteReleaseChannelResponse
+	if err := c.client.CallUnary(ctx, adminServicePromoteReleaseChannelSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -445,6 +480,18 @@ func (h adminServiceHandler) getRollout(ctx context.Context, _ connect.Spec, str
 		return err
 	}
 	res, err := h.svc.GetRollout(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) promoteReleaseChannel(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.PromoteReleaseChannelRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.PromoteReleaseChannel(ctx, &req)
 	if err != nil {
 		return err
 	}

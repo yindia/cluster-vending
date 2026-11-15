@@ -87,6 +87,13 @@ service AdminService {
   rpc GetRollout(GetRolloutRequest) returns (GetRolloutResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // Makes an Automatic channel (beta, stable) take a release now, before
+  // its release soak ends: the upstream channel's, or another valid
+  // release. Recorded with who asked; the controller takes it on its next
+  // pass. FAILED_PRECONDITION for a release that is missing, not valid or
+  // withdrawn, and for a channel that is not Automatic.
+  rpc PromoteReleaseChannel(PromoteReleaseChannelRequest) returns (PromoteReleaseChannelResponse);
 }
 
 message PauseReconcileRequest {

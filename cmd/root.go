@@ -74,7 +74,9 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 	root.SetVersionTemplate("{{.Name}} {{.Version}}\n")
-	addFlags(root.PersistentFlags(), config.GlobalSettings())
+	// The management cluster and logging settings are serve's and the
+	// controller's (addFlags there): the API client commands reach only the
+	// API server.
 	root.AddCommand(
 		newServeCmd(g),
 		newControllerCmd(g),

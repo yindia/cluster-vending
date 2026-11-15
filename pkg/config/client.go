@@ -28,7 +28,7 @@ var clientSettings = []Setting{
 	{Flag: FlagServer, Env: EnvServer, Default: DefaultServer,
 		Usage: "base URL of the cluster-vending API, http(s)://host:port"},
 	{Flag: FlagRequestTimeout, Env: EnvRequestTimeout, Default: DefaultRequestTimeout.String(),
-		Usage: "how long one API call may take, e.g. 2m (watch and --wait are not bounded by it)"},
+		Usage: "how long one API call may take, e.g. 2m (--wait is not bounded by it)"},
 }
 
 // ClientSettings returns the settings of the commands that call the API.

@@ -108,6 +108,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}
+	addFlags(cmd.Flags(), config.GlobalSettings())
 	addFlags(cmd.Flags(), config.ServeSettings())
 	return cmd
 }

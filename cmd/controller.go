@@ -51,6 +51,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 			})
 		},
 	}
+	addFlags(cmd.Flags(), config.GlobalSettings())
 	addFlags(cmd.Flags(), config.ControllerSettings())
 	return cmd
 }

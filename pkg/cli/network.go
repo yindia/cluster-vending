@@ -93,9 +93,6 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		return nil, err
 	}
 	n.Etag = current.GetEtag()
-	if o.ETag != "" {
-		n.Etag = o.ETag
-	}
 	return call(ctx, &cloudv1.UpdateNetworkRequest{
 		TenantId: tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask},
 	}, c.Network.UpdateNetwork)

@@ -98,12 +98,9 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		return nil, err
 	}
 	cl.Etag = current.GetEtag()
-	if o.ETag != "" {
-		cl.Etag = o.ETag
-	}
 	res, err := call(ctx, &cloudv1.UpdateClusterRequest{
 		TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask},
-		ValidateOnly: o.Plan, PlanId: o.PlanID,
+		ValidateOnly: o.Plan,
 	}, c.Cluster.UpdateCluster)
 	if err != nil || !o.Wait || o.Plan {
 		return res, err

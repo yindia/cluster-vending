@@ -60,7 +60,7 @@ func crud(noun, kind string, create, get, list, update, del cli.Command) []verb 
 		{use: "get <id>", short: "Show a " + noun + "; --live reads its status now instead of the one last recorded", run: get, args: cobra.ExactArgs(1), live: true},
 		{use: "list", short: "List " + noun + "s", run: list, args: cobra.NoArgs, page: true},
 		{use: "update [id]", short: fmt.Sprintf("Update a %s from a %s manifest (-f): what the manifest changes is shown, then applied; the id is --id or metadata.id", noun, kind),
-			run: update, args: cobra.MaximumNArgs(1), input: true, etag: true, wait: true},
+			run: update, args: cobra.MaximumNArgs(1), input: true, wait: true},
 		{use: "delete <id>", short: fmt.Sprintf("Delete a %s; its resources are deleted in order", noun), run: del,
 			args: cobra.ExactArgs(1), etag: true, wait: true},
 	}
@@ -154,7 +154,6 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.plan {
 			f.BoolVar(&o.Plan, "plan", false, "only show what the update would do (a plan: creates, in-place and disruptive changes, deletes); nothing changes")
-			f.StringVar(&o.PlanID, "plan-id", "", "apply only if this plan (planId of --plan) still holds")
 		}
 		if v.force {
 			f.BoolVar(&o.Force, "force", false, "tear the cluster down even if its API is unreachable: Helm releases are released without uninstalling")

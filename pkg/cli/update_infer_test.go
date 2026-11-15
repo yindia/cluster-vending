@@ -100,7 +100,8 @@ func TestClusterUpdateInfersTheMask(t *testing.T) {
 			progress: []string{"nothing to change"}},
 		{name: "the region cannot change", noUpdate: true, wantErr: "spec.region cannot be changed",
 			manifest: clusterHead + "spec: {region: us-east-1}\n"},
-		{name: "--etag wins over the one read", wantMask: []string{"spec.tier"}, wantETag: "mine",
+		// update has no --etag: it always sends the etag of the object it read.
+		{name: "the etag read is sent", wantMask: []string{"spec.tier"}, wantETag: "etag-1",
 			opts:     Options{ETag: "mine"},
 			manifest: clusterHead + "spec: {region: us-west-1, tier: CLUSTER_TIER_1}\n"},
 	}

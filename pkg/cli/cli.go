@@ -72,13 +72,12 @@ type Options struct {
 	// for itself (events, tables) prints.
 	Out    io.Writer
 	Output string
-	// ETag is --etag, for optimistic concurrency on update and delete.
+	// ETag is --etag, for optimistic concurrency on delete (update sends
+	// the etag of the object it read).
 	ETag string
-	// Plan is --plan of cluster update: only show what the update would do
-	// (validate_only); PlanID is --plan-id: apply only if that plan still
-	// holds.
-	Plan   bool
-	PlanID string
+	// Plan is --plan of update: only show what the update would do
+	// (validate_only).
+	Plan bool
 	// Force is --force of cluster delete: tear down even if the cluster's
 	// API is unreachable.
 	Force bool

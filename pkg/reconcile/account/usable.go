@@ -37,8 +37,9 @@ func Usable(a *model.CloudAccount, region string) (warning string, err error) {
 			name, last.Reason, last.Message, verify)
 	}
 	if region != "" && i < 0 {
-		return "", fault.Newf(fault.FailedPrecondition, "region %s of account %s has not been verified yet; run: %s --region %s",
-			region, name, verify, region)
+		// The caller starts that check (RegionToCheck): say so.
+		return "", fault.Newf(fault.FailedPrecondition, "region %s of account %s has not been checked yet; its check has started: "+
+			"try again in a minute (cluster-vending account get --id %s shows it)", region, name, a.ID)
 	}
 	if last.Stale {
 		warning = fmt.Sprintf("account %s was last verified at %s; the checks since failed for a transient reason (throttling, the network)",
@@ -54,4 +55,24 @@ func accountLabel(a *model.CloudAccount) string {
 		return a.AccountID
 	}
 	return fmt.Sprintf("%s (%s)", a.AccountName, a.AccountID)
+}
+
+// RegionToCheck is what to ask the controller to check when Usable refuses
+// a verified account only because region was never among the regions
+// checked: the regions checked so far and region (a check covers the
+// regions it is asked for). ok is false for any other refusal.
+func RegionToCheck(a *model.CloudAccount, region string) (regions []string, ok bool) {
+	last := a.Access
+	if region == "" || last == nil || last.CheckedAt.IsZero() || !last.Verified {
+		return nil, false
+	}
+	for _, r := range last.Regions {
+		if r.Region == region {
+			return nil, false
+		}
+		regions = append(regions, r.Region)
+	}
+	regions = append(regions, region)
+	slices.Sort(regions)
+	return regions, true
 }

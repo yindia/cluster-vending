@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/kube"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -32,7 +37,7 @@ func TestNetworkNeedsVerifiedAccount(t *testing.T) {
 		{name: "denied", access: denied, want: "account 444455556666 cannot be used: DeniedBySCP: ec2:CreateVpc: denied; " +
 			"fix the account and run: cluster-vending account verify --id "},
 		{name: "region never checked", access: storetest.Verified("eu-west-1"),
-			want: "region us-east-1 of account 444455556666 has not been verified yet; run: cluster-vending account verify --id "},
+			want: "region us-east-1 of account 444455556666 has not been checked yet; its check has started: try again in a minute (cluster-vending account get --id "},
 		{name: "stale but verified", access: stale},
 		{name: "verified", access: storetest.Verified("us-east-1")},
 	}
@@ -80,6 +85,12 @@ func TestNetworkNeedsVerifiedAccount(t *testing.T) {
 				if got := ce.Message(); !strings.Contains(got, s.want+f.accountID) {
 					t.Errorf("message %q, want it to say %q and name the account %s", got, s.want, f.accountID)
 				}
+				if s.name == "region never checked" {
+					// The refusal started the region's check, keeping the regions checked before.
+					if got := accessRegions(t, f); got != "eu-west-1,us-east-1" {
+						t.Errorf("access-regions = %q, want eu-west-1,us-east-1", got)
+					}
+				}
 				if c.name != "takeover" {
 					rows, err := f.store.Networks().List(t.Context(), tenant, repository.Page{Limit: 10})
 					if err != nil || len(rows) != 0 {
@@ -89,4 +100,14 @@ func TestNetworkNeedsVerifiedAccount(t *testing.T) {
 			})
 		}
 	}
+}
+
+// accessRegions are the regions the account's check was asked to cover.
+func accessRegions(t *testing.T, f fixture) string {
+	t.Helper()
+	list := &cloudv1alpha1.CloudAccountList{}
+	if err := f.storeKube.List(t.Context(), list, client.InNamespace(kube.TenantNamespace(tenant))); err != nil || len(list.Items) == 0 {
+		t.Fatalf("accounts: %v (%d)", err, len(list.Items))
+	}
+	return list.Items[0].Annotations[cloudstore.AnnotationAccessRegions]
 }

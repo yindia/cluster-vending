@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"connectrpc.com/connect/v2"
 
@@ -108,6 +109,7 @@ func bootstrapped(a *model.CloudAccount) error {
 func (s *NetworkService) usable(ctx context.Context, a *model.CloudAccount, region string) error {
 	warning, err := accountreconcile.Usable(a, region)
 	if err != nil {
+		s.startRegionCheck(ctx, a, region)
 		return service.ToConnect(err)
 	}
 	if warning != "" {
@@ -187,4 +189,17 @@ func (s *NetworkService) get(ctx context.Context, tenantID, networkID string) (*
 
 func notFound(tenantID, networkID string) error {
 	return connect.NewError(connect.CodeNotFound, fmt.Sprintf("tenant %s has no network %s", tenantID, networkID))
+}
+
+// startRegionCheck asks the controller to check region of a verified
+// account that was never checked there, so the refusal fixes itself
+// (accountreconcile.RegionToCheck); a failure to ask is only logged.
+func (s *NetworkService) startRegionCheck(ctx context.Context, a *model.CloudAccount, region string) {
+	regions, ok := accountreconcile.RegionToCheck(a, region)
+	if !ok {
+		return
+	}
+	if err := s.deps.Store.Tenants().RequestAccessCheck(ctx, a.TenantID, a.ID, time.Now(), regions); err != nil {
+		s.logger().WarnContext(ctx, "start the check of a region", "tenant_id", a.TenantID, "bootstrap_id", a.ID, "region", region, "error", err)
+	}
 }

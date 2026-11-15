@@ -85,8 +85,8 @@ func TestUsable(t *testing.T) {
 		},
 		{
 			name: "the region was never checked", account: account(verified), region: "ap-south-1",
-			wantErr: "region ap-south-1 of account prod (123456789012) has not been verified yet; " +
-				"run: cluster-vending account verify --id 0190a1b2-0000-7000-8000-000000000001 --region ap-south-1",
+			wantErr: "region ap-south-1 of account prod (123456789012) has not been checked yet; its check has started: " +
+				"try again in a minute (cluster-vending account get --id 0190a1b2-0000-7000-8000-000000000001 shows it)",
 		},
 		{
 			name: "stale, the last verdict verified",

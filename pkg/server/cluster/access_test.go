@@ -34,7 +34,7 @@ func TestClusterNeedsVerifiedAccount(t *testing.T) {
 		{name: "region failed", access: regionFailed, want: "region us-east-1 of account 444455556666 cannot be used: NotAllowed: us-east-1: denied; " +
 			"fix the account and run: cluster-vending account verify --id "},
 		{name: "region never checked", access: storetest.Verified("eu-west-1"),
-			want: "region us-east-1 of account 444455556666 has not been verified yet; run: cluster-vending account verify --id "},
+			want: "region us-east-1 of account 444455556666 has not been checked yet; its check has started: try again in a minute (cluster-vending account get --id "},
 		{name: "stale but verified", access: stale},
 		{name: "verified", access: storetest.Verified("us-east-1")},
 	}

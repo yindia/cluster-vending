@@ -136,8 +136,6 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
-			f.StringVar(&o.Input, "config", "", "the manifest (use -f)")
-			_ = f.MarkDeprecated("config", "use -f/--file")
 		}
 		if v.etag {
 			f.StringVar(&o.ETag, "etag", "", "fail unless the resource still has this etag")

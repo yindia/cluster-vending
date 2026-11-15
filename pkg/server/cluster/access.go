@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"time"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
@@ -15,6 +16,13 @@ import (
 func (s *ClusterService) usable(ctx context.Context, a *model.CloudAccount, region string) error {
 	warning, err := accountreconcile.Usable(a, region)
 	if err != nil {
+		if regions, ok := accountreconcile.RegionToCheck(a, region); ok {
+			// The refusal starts the region's check, so it fixes itself.
+			if rerr := s.deps.Store.Tenants().RequestAccessCheck(ctx, a.TenantID, a.ID, time.Now(), regions); rerr != nil {
+				s.logger().WarnContext(ctx, "start the check of a region", "tenant_id", a.TenantID, "bootstrap_id", a.ID,
+					"region", region, "error", rerr)
+			}
+		}
 		return err
 	}
 	if warning != "" {

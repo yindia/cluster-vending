@@ -249,8 +249,7 @@ func newNetworkCmd() *cobra.Command {
 		verb{use: "takeover <id>", short: "Take over an imported network: the platform becomes its owner",
 			run: cli.NetworkTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true},
 		verb{use: "events <id>", short: "List what the controller reported about the network, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
-			run: cli.NetworkEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
-		watchVerb("network", cli.NetworkWatch))
+			run: cli.NetworkEvents, args: cobra.ExactArgs(1), page: true, warnings: true})
 	return newResourceCmd("network", "Manage networks (NetworkService)", verbs)
 }
 
@@ -308,14 +307,6 @@ func newClusterCmd() *cobra.Command {
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		verb{use: "retry <id>", short: "Try again what failed on the cluster: its failed platform and tenant components and a failed automatic upgrade (or only --component, --upgrade); says per item what happens, or what to fix first",
-			run: cli.ClusterRetry, args: cobra.ExactArgs(1), retry: true},
-		watchVerb("cluster", cli.ClusterWatch))
+			run: cli.ClusterRetry, args: cobra.ExactArgs(1), retry: true})
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
-}
-
-// watchVerb streams a resource's state and its managed resources' events.
-func watchVerb(noun string, run cli.Command) verb {
-	return verb{use: "watch <id>",
-		short: fmt.Sprintf("Stream a %s's state and its resources' events (+ added, ~ changed, - deleted) until it is deleted; -o json for JSON lines", noun),
-		run:   run, args: cobra.ExactArgs(1)}
 }

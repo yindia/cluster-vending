@@ -23,7 +23,7 @@ import (
 )
 
 // DefaultRequestTimeout bounds one API call unless Options.RequestTimeout
-// says otherwise. A watch and --wait are not bounded by it.
+// says otherwise. --wait as a whole is not bounded by it.
 const DefaultRequestTimeout = 2 * time.Minute
 
 // requestTimeoutKey carries Options.RequestTimeout to call.
@@ -37,9 +37,9 @@ func requestTimeoutOf(ctx context.Context) time.Duration {
 	return DefaultRequestTimeout
 }
 
-// newHTTPClient is the client of the API. It has no total timeout: that
-// would also cut a watch (a response read for as long as it is watched)
-// off; each call is bounded by its context instead (call).
+// newHTTPClient is the client of the API. It has no total timeout: each
+// call is bounded by its context instead (call), so --request-timeout
+// decides.
 func newHTTPClient() *http.Client { return &http.Client{} }
 
 // Options are the inputs of every command. Commands use the fields they
@@ -68,7 +68,8 @@ type Options struct {
 	RequestTimeout time.Duration
 	// Progress receives --wait's state changes (stderr).
 	Progress io.Writer
-	// Out and Output are where and how (--output) watch prints its stream.
+	// Out and Output are where and how (--output) a command that prints
+	// for itself (events, tables) prints.
 	Out    io.Writer
 	Output string
 	// ETag is --etag, for optimistic concurrency on update and delete.
@@ -224,7 +225,7 @@ func Run(ctx context.Context, cmd Command, c Clients, o Options, w io.Writer, fo
 		ctx = context.WithValue(ctx, requestTimeoutKey{}, o.RequestTimeout)
 	}
 	res, err := cmd(ctx, c, o)
-	if err != nil || res == nil { // watch prints as it goes
+	if err != nil || res == nil { // the command printed for itself
 		return err
 	}
 	return Print(w, res, format)

@@ -482,7 +482,7 @@ To follow it:
 
 ```sh
 cluster-vending cluster get --id <cluster>          # Rollout: 1.36 → 1.37 via channel alpha (tier 2): in progress since 12m
-cluster-vending cluster watch --id <cluster>        # every change as it happens
+cluster-vending cluster events --id <cluster>       # what happened, newest first
 cluster-vending admin rollout get --channel alpha   # every cluster of the channel, tier by tier
 ```
 

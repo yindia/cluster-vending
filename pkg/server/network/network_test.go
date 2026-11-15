@@ -3,13 +3,10 @@ package network
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connecthttp"
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	"github.com/google/uuid"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
@@ -32,7 +29,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
@@ -801,50 +797,5 @@ func TestUpdateNetworkNeedsAMask(t *testing.T) {
 		Network: &cloudv1.Network{Id: n.GetId()}, UpdateMask: mask()})
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("empty update_mask: %v, want INVALID_ARGUMENT", err)
-	}
-}
-
-// WatchNetwork over a real Connect stream: the first message carries the
-// network and one ADDED event per managed resource.
-func TestWatchNetworkFirstMessage(t *testing.T) {
-	f := newFixture(t)
-	n := f.create(t, "prod", nil)
-	server := connect.NewServer()
-	cloudv1connect.RegisterNetworkServiceHandler(server, f.svc)
-	mux := http.NewServeMux()
-	connecthttp.Mount(mux, server)
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	client := cloudv1connect.NewNetworkServiceClient(connect.NewClient(connecthttp.NewTransport(srv.Client(), srv.URL)))
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	stream, err := client.WatchNetwork(ctx, &cloudv1.WatchNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = stream.Close() }()
-	first, err := stream.Receive()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := len(n.GetStatus().GetManagedResources())
-	if first.GetNetwork().GetId() != n.GetId() || len(first.GetEvents()) != want || want == 0 {
-		t.Fatalf("first message: network %q, %d events; want %s and %d", first.GetNetwork().GetId(), len(first.GetEvents()), n.GetId(), want)
-	}
-	for _, e := range first.GetEvents() {
-		if e.GetType() != cloudv1.ManagedResourceEvent_TYPE_ADDED {
-			t.Errorf("%s %s: %s, want ADDED", e.GetResource().GetKind(), e.GetResource().GetName(), e.GetType())
-		}
-	}
-
-	// An unknown network fails the stream with NOT_FOUND.
-	bad, err := client.WatchNetwork(ctx, &cloudv1.WatchNetworkRequest{TenantId: tenant, NetworkId: "0190a000-0000-7000-8000-00000000dead"})
-	if err == nil {
-		_, err = bad.Receive()
-		_ = bad.Close()
-	}
-	if connect.CodeOf(err) != connect.CodeNotFound {
-		t.Errorf("unknown network: %v, want NOT_FOUND", err)
 	}
 }

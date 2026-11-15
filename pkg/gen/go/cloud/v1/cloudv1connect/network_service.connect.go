@@ -35,9 +35,6 @@ const (
 	NetworkServiceTakeOverNetworkProcedure = "/cloud.v1.NetworkService/TakeOverNetwork"
 	// NetworkServiceGetNetworkProcedure is the procedure name of the NetworkService's GetNetwork RPC.
 	NetworkServiceGetNetworkProcedure = "/cloud.v1.NetworkService/GetNetwork"
-	// NetworkServiceWatchNetworkProcedure is the procedure name of the NetworkService's WatchNetwork
-	// RPC.
-	NetworkServiceWatchNetworkProcedure = "/cloud.v1.NetworkService/WatchNetwork"
 	// NetworkServiceListNetworkEventsProcedure is the procedure name of the NetworkService's
 	// ListNetworkEvents RPC.
 	NetworkServiceListNetworkEventsProcedure = "/cloud.v1.NetworkService/ListNetworkEvents"
@@ -79,14 +76,6 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_network_service_proto.Services().ByName("NetworkService").Methods().ByName("GetNetwork"),
 			Procedure:        NetworkServiceGetNetworkProcedure,
-			IdempotencyLevel: connect.IdempotencyNoSideEffects,
-		}
-	})
-	networkServiceWatchNetworkSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType:       connect.StreamTypeServer,
-			Schema:           v1.File_cloud_v1_network_service_proto.Services().ByName("NetworkService").Methods().ByName("WatchNetwork"),
-			Procedure:        NetworkServiceWatchNetworkProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -151,14 +140,6 @@ type NetworkServiceClient interface {
 	// and the status the controller last recorded for it. It does not read
 	// the provider objects, unless live is set.
 	GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error)
-	// Streams one network's state: a first message with the network and an
-	// ADDED event per managed resource, then a message whenever something
-	// changes (the network's state or message, or a resource's), until the
-	// network is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the network does not exist. It reads the stored network (what
-	// GetNetwork returns) every five seconds and changes nothing; the
-	// controller moves the network on, also a deletion.
-	WatchNetwork(context.Context, *v1.WatchNetworkRequest) (NetworkServiceWatchNetworkClientStream, error)
 	// Lists what the controller reported about a network, newest first: the
 	// Kubernetes events of the network's object in the management cluster,
 	// which Kubernetes keeps for about an hour. status.recent_events (in
@@ -179,27 +160,6 @@ type NetworkServiceClient interface {
 // service clients may share a single connect.Client.
 func NewNetworkServiceClient(client *connect.Client) NetworkServiceClient {
 	return &networkServiceClient{client: client}
-}
-
-// NetworkServiceWatchNetworkClientStream is the client stream for the NetworkService's WatchNetwork
-// RPC.
-type NetworkServiceWatchNetworkClientStream struct {
-	stream connect.ClientStream
-}
-
-// Receive returns the next response message from the server.
-func (s NetworkServiceWatchNetworkClientStream) Receive() (*v1.WatchNetworkResponse, error) {
-	var res v1.WatchNetworkResponse
-	if err := s.stream.Receive(&res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-// Close releases the stream's resources. It is idempotent and is typically deferred to clean up a
-// stream abandoned before io.EOF.
-func (s NetworkServiceWatchNetworkClientStream) Close() error {
-	return s.stream.Close()
 }
 
 // NetworkServiceHandler is an implementation of the cloud.v1.NetworkService service.
@@ -230,14 +190,6 @@ type NetworkServiceHandler interface {
 	// and the status the controller last recorded for it. It does not read
 	// the provider objects, unless live is set.
 	GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error)
-	// Streams one network's state: a first message with the network and an
-	// ADDED event per managed resource, then a message whenever something
-	// changes (the network's state or message, or a resource's), until the
-	// network is deleted (deleted: true) or the client cancels. NOT_FOUND
-	// when the network does not exist. It reads the stored network (what
-	// GetNetwork returns) every five seconds and changes nothing; the
-	// controller moves the network on, also a deletion.
-	WatchNetwork(context.Context, *v1.WatchNetworkRequest, NetworkServiceWatchNetworkServerStream) error
 	// Lists what the controller reported about a network, newest first: the
 	// Kubernetes events of the network's object in the management cluster,
 	// which Kubernetes keeps for about an hour. status.recent_events (in
@@ -263,28 +215,11 @@ func RegisterNetworkServiceHandler(server *connect.Server, svc NetworkServiceHan
 		connect.Method{Spec: networkServiceImportNetworkSpec(), Handler: adapter.importNetwork},
 		connect.Method{Spec: networkServiceTakeOverNetworkSpec(), Handler: adapter.takeOverNetwork},
 		connect.Method{Spec: networkServiceGetNetworkSpec(), Handler: adapter.getNetwork},
-		connect.Method{Spec: networkServiceWatchNetworkSpec(), Handler: adapter.watchNetwork},
 		connect.Method{Spec: networkServiceListNetworkEventsSpec(), Handler: adapter.listNetworkEvents},
 		connect.Method{Spec: networkServiceListNetworksSpec(), Handler: adapter.listNetworks},
 		connect.Method{Spec: networkServiceUpdateNetworkSpec(), Handler: adapter.updateNetwork},
 		connect.Method{Spec: networkServiceDeleteNetworkSpec(), Handler: adapter.deleteNetwork},
 	)
-}
-
-// NetworkServiceWatchNetworkServerStream is the server stream for the NetworkService's WatchNetwork
-// RPC.
-type NetworkServiceWatchNetworkServerStream struct {
-	stream connect.ServerStream
-}
-
-// SendHeaders flushes the response headers without a message. The first Send does this implicitly.
-func (s NetworkServiceWatchNetworkServerStream) SendHeaders() error {
-	return s.stream.SendHeaders()
-}
-
-// Send sends a response message to the client.
-func (s NetworkServiceWatchNetworkServerStream) Send(res *v1.WatchNetworkResponse) error {
-	return s.stream.Send(res)
 }
 
 // UnimplementedNetworkServiceHandler returns CodeUnimplemented from all methods.
@@ -304,10 +239,6 @@ func (UnimplementedNetworkServiceHandler) TakeOverNetwork(context.Context, *v1.T
 
 func (UnimplementedNetworkServiceHandler) GetNetwork(context.Context, *v1.GetNetworkRequest) (*v1.GetNetworkResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.NetworkService.GetNetwork is not implemented")
-}
-
-func (UnimplementedNetworkServiceHandler) WatchNetwork(context.Context, *v1.WatchNetworkRequest, NetworkServiceWatchNetworkServerStream) error {
-	return connect.NewError(connect.CodeUnimplemented, "cloud.v1.NetworkService.WatchNetwork is not implemented")
 }
 
 func (UnimplementedNetworkServiceHandler) ListNetworkEvents(context.Context, *v1.ListNetworkEventsRequest) (*v1.ListNetworkEventsResponse, error) {
@@ -360,14 +291,6 @@ func (c *networkServiceClient) GetNetwork(ctx context.Context, req *v1.GetNetwor
 		return nil, err
 	}
 	return &res, nil
-}
-
-func (c *networkServiceClient) WatchNetwork(ctx context.Context, req *v1.WatchNetworkRequest) (NetworkServiceWatchNetworkClientStream, error) {
-	stream, err := c.client.CallServerStream(ctx, networkServiceWatchNetworkSpec(), req)
-	if err != nil {
-		return NetworkServiceWatchNetworkClientStream{}, err
-	}
-	return NetworkServiceWatchNetworkClientStream{stream: stream}, nil
 }
 
 func (c *networkServiceClient) ListNetworkEvents(ctx context.Context, req *v1.ListNetworkEventsRequest) (*v1.ListNetworkEventsResponse, error) {
@@ -450,14 +373,6 @@ func (h networkServiceHandler) getNetwork(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	return stream.Send(res)
-}
-
-func (h networkServiceHandler) watchNetwork(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.WatchNetworkRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	return h.svc.WatchNetwork(ctx, &req, NetworkServiceWatchNetworkServerStream{stream: stream})
 }
 
 func (h networkServiceHandler) listNetworkEvents(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {

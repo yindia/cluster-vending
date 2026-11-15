@@ -105,7 +105,7 @@ themselves would let them pick their tenant.
 |---|---|
 | `PlatformAdmin` | Everything, for every tenant, including `AdminService`. |
 | `TenantAdmin` | Every tenant RPC of its tenants. |
-| `TenantViewer` | The tenant RPCs marked `NO_SIDE_EFFECTS` (get, list, watch, status) of its tenants. |
+| `TenantViewer` | The tenant RPCs marked `NO_SIDE_EFFECTS` (get, list, status) of its tenants. |
 
 The server classifies each RPC from the contract, not from a hand-kept
 list: read or write is the method's `idempotency_level` option, and an RPC

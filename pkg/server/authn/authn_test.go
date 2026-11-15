@@ -3,7 +3,6 @@ package authn_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -50,11 +49,6 @@ func (h *handlers) GetCluster(ctx context.Context, _ *cloudv1.GetClusterRequest)
 func (h *handlers) DeleteCluster(ctx context.Context, _ *cloudv1.DeleteClusterRequest) (*cloudv1.DeleteClusterResponse, error) {
 	h.seen(ctx)
 	return &cloudv1.DeleteClusterResponse{}, nil
-}
-
-func (h *handlers) WatchCluster(ctx context.Context, _ *cloudv1.WatchClusterRequest, _ cloudv1connect.ClusterServiceWatchClusterServerStream) error {
-	h.seen(ctx)
-	return nil
 }
 
 func (h *handlers) PauseReconcile(ctx context.Context, _ *cloudv1.PauseReconcileRequest) (*cloudv1.PauseReconcileResponse, error) {
@@ -283,36 +277,6 @@ func TestUnauthenticatedAnswer(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "cluster-vending login") {
 		t.Errorf("body %s does not say how to log in", body)
-	}
-}
-
-// A server-streaming RPC is guarded like a unary one.
-func TestStreamingIsGuarded(t *testing.T) {
-	a := newAPI(t, auth.ModeRequired)
-	watch := func(roles []string, tenant string) error {
-		stream, err := a.clients.cluster.WatchCluster(with(t, bearer(a.token(t, roles...))), &cloudv1.WatchClusterRequest{TenantId: tenant})
-		if err != nil {
-			return err
-		}
-		defer func() { _ = stream.Close() }()
-		for {
-			if _, err := stream.Receive(); errors.Is(err, io.EOF) {
-				return nil
-			} else if err != nil {
-				return err
-			}
-		}
-	}
-
-	allowed := watch([]string{"acme.viewer"}, "acme")
-	refused := watch([]string{"acme.viewer"}, "globex")
-
-	if allowed != nil {
-		t.Errorf("a viewer watching its tenant: %v", allowed)
-	}
-	if connect.CodeOf(refused) != connect.CodePermissionDenied || a.handlers.reached.Load() != 1 {
-		t.Errorf("another tenant's watch = %v (handler ran %d times), want PERMISSION_DENIED before the handler",
-			refused, a.handlers.reached.Load())
 	}
 }
 

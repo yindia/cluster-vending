@@ -47,8 +47,8 @@ func TestRequestTimeoutDefault(t *testing.T) {
 	}
 }
 
-// A total client timeout would cut a watch off: only the per-call context
-// bounds a call.
+// Only the per-call context bounds a call (--request-timeout), not a total
+// client timeout.
 func TestHTTPClientHasNoTotalTimeout(t *testing.T) {
 	if c := newHTTPClient(); c.Timeout != 0 {
 		t.Fatalf("http client timeout = %s, want none", c.Timeout)

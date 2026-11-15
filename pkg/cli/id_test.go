@@ -35,7 +35,6 @@ func TestIDVerb(t *testing.T) {
 	}{
 		{"get <id>", "get", true, true},
 		{"update [id]", "update", true, false},
-		{"watch <id>", "watch", true, true},
 		{"list", "list", false, false},
 		{"enable <name>", "enable <name>", false, false},
 	}

@@ -36,7 +36,7 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `aws.proto` | The AWS provider block: `AwsClusterSpec`, add-ons, control plane log group, launch template, AMI types, `AwsClusterStatus`; `AwsImportNetwork` |
 | `import.proto` | Import plans: `ImportStatus`, `ImportedResource`, `ImportPhase`, `Disposition` |
 | `plan.proto` | Update plans: `Plan`, `PlannedChange`, `PlannedAction` |
-| `managed_resource.proto` | `ManagedResource`, `ManagedResourceState`, `ManagedResourceEvent` |
+| `managed_resource.proto` | `ManagedResource`, `ManagedResourceState` |
 | `conditions.proto` | `Condition`, `ConditionStatus` |
 | `options.proto` | The `(cloud.v1.crossplane)` enum value option |
 | `admin_service.proto` | `AdminService` (operators only) |
@@ -80,7 +80,6 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `TakeOverNetwork` | Makes the platform the owner of an `IMPORTED` network. |
 | `GetNetwork`, `ListNetworks` | Return the stored network: its spec and the status last recorded. They do not read the management cluster; `GetNetwork` with `live` reads its status now from it. |
 | `ListNetworkEvents` | Returns what the controller reported about the network, newest first: the Kubernetes events of its object, kept for about an hour ([docs/events.md](../docs/events.md)). `status.recent_events` of `GetNetwork` keeps the last ten. |
-| `WatchNetwork` | Streams the network and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateNetwork` | Changes the fields named in `update_mask`. |
 | `DeleteNetwork` | Marks the network `DELETING` and deletes its resources in order; refused while clusters use it. |
 
@@ -95,7 +94,6 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `ListClusterEvents` | Returns what the controller reported about the cluster, newest first: the Kubernetes events of its object, kept for about an hour; `only_warnings` for the failures. `status.recent_events` of `GetCluster` keeps the last ten. |
 | `ListClusterDeprecations` | Returns the objects of the cluster written with API versions that are deprecated or removed at the Kubernetes version it moves to next: what the controller's last scan found, read from the store. `GetCluster` carries only the counts (`status.deprecations`). |
 | `ListClusterRecommendations` | Returns the CPU and memory requests (and memory limits) the platform recommends for the cluster's containers, computed from the usage the controller recorded over a week (it samples every five minutes, read-only), with the current values and the difference. `GetCluster` carries only the summary (`status.recommendations`). |
-| `WatchCluster` | Streams the cluster and the changes of its managed resources until it is deleted or the client cancels. |
 | `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |
 | `DeleteCluster` | Marks the cluster `DELETING` and deletes its resources. `force` also releases Helm releases without uninstalling them. |
 
@@ -144,13 +142,12 @@ A cluster cannot be deleted while it has components.
 
 | Call | Source | Status returned |
 |---|---|---|
-| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters`, `WatchNetwork`, `WatchCluster` | the platform's store | the status last recorded: by the controller on every reconcile while the resource is being created, changed or deleted, or is imported. A converged resource keeps the status it converged on. |
+| `GetNetwork`, `ListNetworks`, `GetCluster`, `ListClusters` | the platform's store | the status last recorded: by the controller on every reconcile while the resource is being created, changed or deleted, or is imported. A converged resource keeps the status it converged on. |
 | `GetNetwork`, `GetCluster` with `live` | the management cluster, now | live: the conditions of every managed resource, cloud IDs, the EKS endpoint and versions |
 
 A stored change shows in `Get*` at once (`DELETING`, `UPDATING`). What the
 cloud did since the last pass of the loop shows in the status calls first.
-The watch RPCs read the stored resource every five seconds and send what
-changed. The CLI's `--wait` polls the status call.
+The CLI's `--wait` polls the status call.
 
 Mutations are asynchronous: a call returns once the desired state is
 stored. The API server checks a request against the contract, the store and

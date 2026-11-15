@@ -292,6 +292,17 @@ func annotate(obj client.Object, values map[string]string) {
 	obj.SetAnnotations(annotations)
 }
 
+// seen is a row's Seen: its row annotation as stored now. Status writes
+// leave it; every Update and Record changes it.
+func seen(obj client.Object) string { return obj.GetAnnotations()[AnnotationRow] }
+
+// changedSince reports whether obj was written (Update or Record) after
+// the read that saw seenAs; a row without one (not read from the store)
+// is not checked.
+func changedSince(obj client.Object, seenAs string) bool {
+	return seenAs != "" && seen(obj) != seenAs
+}
+
 // setMeta writes the row annotation of obj.
 func setMeta(obj client.Object, m rowMeta) error {
 	raw, err := json.Marshal(m)

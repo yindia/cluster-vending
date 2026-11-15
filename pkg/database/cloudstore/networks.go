@@ -135,6 +135,7 @@ func (r networks) row(obj *cloudv1alpha1.Network) (*model.Network, error) {
 		ExternalID: m.ExternalID, CreateRequestID: m.CreateRequestID,
 	}
 	m.into(&n.Resource)
+	n.Seen = seen(obj)
 	n.Paused, n.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	return n, nil
 }
@@ -351,6 +352,18 @@ func (r networks) List(ctx context.Context, tenantID string, p repository.Page) 
 // when it changed; see the package comment for what a failure between the
 // two leaves.
 func (r networks) Update(ctx context.Context, n *model.Network) error {
+	return r.write(ctx, n, true)
+}
+
+// Record writes what the controller found out (Repository docs): Update
+// without a new etag.
+func (r networks) Record(ctx context.Context, n *model.Network) error {
+	return r.write(ctx, n, false)
+}
+
+// write stores the row if the stored etag is n's and the row did not
+// change since n was read (n.Seen); with newETag it gives n a new etag.
+func (r networks) write(ctx context.Context, n *model.Network, rotate bool) error {
 	old, updated := n.ETag, n.UpdatedAt
 	var obj *cloudv1alpha1.Network
 	err := retry(func() error {
@@ -359,10 +372,13 @@ func (r networks) Update(ctx context.Context, n *model.Network) error {
 			return err
 		}
 		m := metaOf(obj)
-		if m.ETag != old {
+		if m.ETag != old || changedSince(obj, n.Seen) {
 			return repository.ErrConflict
 		}
-		n.ETag, n.UpdatedAt, n.CreatedAt = newETag(), now(), m.CreatedAt
+		n.CreatedAt = m.CreatedAt
+		if rotate {
+			n.ETag, n.UpdatedAt = newETag(), now()
+		}
 		if err := r.fill(n, obj.Spec.AccountRef.Name, obj); err != nil {
 			return err
 		}
@@ -372,6 +388,7 @@ func (r networks) Update(ctx context.Context, n *model.Network) error {
 		n.ETag, n.UpdatedAt = old, updated
 		return translate(err)
 	}
+	n.Seen = seen(obj)
 	return r.writeStatus(ctx, n.TenantID, n.ID, n.ETag, n.Status, obj)
 }
 

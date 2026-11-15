@@ -67,8 +67,17 @@ type Resource struct {
 	// target, the controller applies it again, so renderer changes
 	// roll out resource by resource.
 	RenderVersion int64
-	// ETag changes on every write; updates must present the current one.
+	// ETag is the user's version of the resource: it changes when what was
+	// asked for changes (an Update: spec, labels, display name, a new
+	// generation, a delete), not when the controller records its progress
+	// (Record: state, observed, applied and resolved generations). An API
+	// update presents the etag it got and is refused once it changed.
 	ETag string
+	// Seen is the store's record of the row as it was read (opaque; empty
+	// for a row not read from the store). Update and Record refuse to write
+	// a row that changed since (ErrConflict), so neither kind of write is
+	// lost under the other.
+	Seen string
 	// Spec and Status are the protojson cloud.v1 *Spec / *Status, including
 	// their provider oneof (aws / gcp / azure).
 	Spec   JSON

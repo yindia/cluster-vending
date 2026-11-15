@@ -111,6 +111,11 @@ type Networks interface {
 	// Update writes every column of n if the stored etag equals n.ETag, and
 	// assigns a new ETag.
 	Update(ctx context.Context, n *model.Network) error
+	// Record writes what the controller found out about the network (its
+	// state, observed, applied and resolved generations, its status) like
+	// Update, but keeps the etag: the user's etag only changes with what the
+	// user asked for. ErrConflict when the row changed since it was read.
+	Record(ctx context.Context, n *model.Network) error
 	// SetStatus stores the status last recorded for the row (what Get and
 	// List return) and nothing else: the etag and update time do not
 	// change, so recording a status never invalidates a client's etag. It
@@ -138,6 +143,8 @@ type Clusters interface {
 	// ListByName returns the tenant's clusters with this name, oldest first.
 	ListByName(ctx context.Context, tenantID, name string) ([]model.Cluster, error)
 	Update(ctx context.Context, c *model.Cluster) error
+	// Record is Networks.Record for clusters.
+	Record(ctx context.Context, c *model.Cluster) error
 	// SetStatus is Networks.SetStatus for clusters.
 	SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error
 	// SetDeprecations records the last scan for deprecated API versions

@@ -972,6 +972,44 @@ func (c *MockNetworksListCall) DoAndReturn(f func(context.Context, string, repos
 	return c
 }
 
+// Record mocks base method.
+func (m *MockNetworks) Record(ctx context.Context, n *model.Network) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Record", ctx, n)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Record indicates an expected call of Record.
+func (mr *MockNetworksMockRecorder) Record(ctx, n any) *MockNetworksRecordCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Record", reflect.TypeOf((*MockNetworks)(nil).Record), ctx, n)
+	return &MockNetworksRecordCall{Call: call}
+}
+
+// MockNetworksRecordCall wrap *gomock.Call
+type MockNetworksRecordCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockNetworksRecordCall) Return(arg0 error) *MockNetworksRecordCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockNetworksRecordCall) Do(f func(context.Context, *model.Network) error) *MockNetworksRecordCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockNetworksRecordCall) DoAndReturn(f func(context.Context, *model.Network) error) *MockNetworksRecordCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetStatus mocks base method.
 func (m *MockNetworks) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	m.ctrl.T.Helper()
@@ -1341,6 +1379,44 @@ func (c *MockClustersListByNetworkCall) Do(f func(context.Context, string) ([]mo
 func (c *MockClustersListByNetworkCall) DoAndReturn(f func(context.Context, string) ([]model.Cluster, error)) *MockClustersListByNetworkCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
+}
+
+// Record mocks base method.
+func (m *MockClusters) Record(ctx context.Context, c *model.Cluster) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Record", ctx, c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Record indicates an expected call of Record.
+func (mr *MockClustersMockRecorder) Record(ctx, c any) *MockClustersRecordCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Record", reflect.TypeOf((*MockClusters)(nil).Record), ctx, c)
+	return &MockClustersRecordCall{Call: call}
+}
+
+// MockClustersRecordCall wrap *gomock.Call
+type MockClustersRecordCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c_2 *MockClustersRecordCall) Return(arg0 error) *MockClustersRecordCall {
+	c_2.Call = c_2.Call.Return(arg0)
+	return c_2
+}
+
+// Do rewrite *gomock.Call.Do
+func (c_2 *MockClustersRecordCall) Do(f func(context.Context, *model.Cluster) error) *MockClustersRecordCall {
+	c_2.Call = c_2.Call.Do(f)
+	return c_2
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c_2 *MockClustersRecordCall) DoAndReturn(f func(context.Context, *model.Cluster) error) *MockClustersRecordCall {
+	c_2.Call = c_2.Call.DoAndReturn(f)
+	return c_2
 }
 
 // SetDeprecations mocks base method.

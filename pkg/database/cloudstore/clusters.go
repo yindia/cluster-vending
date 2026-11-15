@@ -122,6 +122,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 		}
 	}
 	m.into(&c.Resource)
+	c.Seen = seen(obj)
 	c.Paused, c.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	return c, nil
 }
@@ -434,6 +435,18 @@ func (r clusters) ListByName(ctx context.Context, tenantID, name string) ([]mode
 // Update writes the row if the stored etag is c's, and gives c a new one
 // (networks.Update).
 func (r clusters) Update(ctx context.Context, c *model.Cluster) error {
+	return r.write(ctx, c, true)
+}
+
+// Record writes what the controller found out (Repository docs): Update
+// without a new etag.
+func (r clusters) Record(ctx context.Context, c *model.Cluster) error {
+	return r.write(ctx, c, false)
+}
+
+// write stores the row if the stored etag is c's and the row did not
+// change since c was read (c.Seen); with newETag it gives c a new etag.
+func (r clusters) write(ctx context.Context, c *model.Cluster, rotate bool) error {
 	old, updated := c.ETag, c.UpdatedAt
 	var obj *cloudv1alpha1.Cluster
 	err := retry(func() error {
@@ -442,10 +455,13 @@ func (r clusters) Update(ctx context.Context, c *model.Cluster) error {
 			return err
 		}
 		m := metaOf(obj)
-		if m.ETag != old {
+		if m.ETag != old || changedSince(obj, c.Seen) {
 			return repository.ErrConflict
 		}
-		c.ETag, c.UpdatedAt, c.CreatedAt = newETag(), now(), m.CreatedAt
+		c.CreatedAt = m.CreatedAt
+		if rotate {
+			c.ETag, c.UpdatedAt = newETag(), now()
+		}
 		if err := r.fill(c, obj.Spec.Network.NetworkRef.Name, obj); err != nil {
 			return err
 		}
@@ -455,6 +471,7 @@ func (r clusters) Update(ctx context.Context, c *model.Cluster) error {
 		c.ETag, c.UpdatedAt = old, updated
 		return translate(err)
 	}
+	c.Seen = seen(obj)
 	return r.writeStatus(ctx, c.TenantID, c.ID, c.ETag, c.Status, obj)
 }
 

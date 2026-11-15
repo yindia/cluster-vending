@@ -208,7 +208,7 @@ ztunnel and istio-cni: the planner's "one at a time, wait for the rollout" plus 
 | RPC | CLI |
 |---|---|
 | `ListReleases`, `GetRelease` | `admin release list|get` |
-| `ListReleaseChannels`, `GetReleaseChannel` | `admin channel list|get`, `admin rollout status [--channel c]` |
+| `ListReleaseChannels`, `GetReleaseChannel` | `admin channel list|get` (get carries the rollout plan) |
 | `PauseChannel`, `ResumeChannel` (also acknowledges a halt) | `admin channel pause|resume` |
 | `SetChannelRelease` | `admin channel set <c> --release r --promotion p` |
 | `HoldCluster`, `UnholdCluster`, `ListHolds` | `admin hold create|delete|list` |

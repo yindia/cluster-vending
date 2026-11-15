@@ -137,10 +137,15 @@ func RolloutSummaryFromAPI(r *cloudv1alpha1.ChannelRollout) *cloudv1.RolloutSumm
 	if r == nil {
 		return nil
 	}
-	out := &cloudv1.RolloutSummary{TargetMinor: r.TargetMinor, ReportOnly: r.ReportOnly, Waiting: r.Waiting,
-		Halted: r.Halted, Done: r.Done, WouldStart: slices.Clone(r.WouldStart)}
-	for _, t := range r.Members {
-		out.Tiers = append(out.Tiers, &cloudv1.RolloutTier{Tier: TierFromAPI(t.Tier), Pending: t.Pending,
+	return &cloudv1.RolloutSummary{TargetMinor: r.TargetMinor, ReportOnly: r.ReportOnly, Waiting: r.Waiting,
+		Halted: r.Halted, Done: r.Done, WouldStart: slices.Clone(r.WouldStart), Tiers: rolloutTiersFromAPI(r.Members)}
+}
+
+// rolloutTiersFromAPI are a rollout's counts per tier.
+func rolloutTiersFromAPI(members []cloudv1alpha1.RolloutTierCount) []*cloudv1.RolloutTier {
+	out := make([]*cloudv1.RolloutTier, 0, len(members))
+	for _, t := range members {
+		out = append(out, &cloudv1.RolloutTier{Tier: TierFromAPI(t.Tier), Pending: t.Pending,
 			InProgress: t.InProgress, Succeeded: t.Succeeded, Failed: t.Failed, Blocked: t.Blocked})
 	}
 	return out
@@ -157,11 +162,26 @@ func ChannelFromAPI(ch *cloudv1alpha1.ReleaseChannel, detail bool) *cloudv1.Rele
 	if p := ch.Status.Pending; p != nil {
 		out.Pending = &cloudv1.PendingRelease{Release: p.Release, Since: timeOf(&p.Since), Until: timeOf(&p.Until)}
 	}
+	out.ReleaseMoves = ChangeRolloutFromAPI(ch.Status.ReleaseMoves)
 	if detail {
 		for _, h := range ch.Status.History {
 			out.History = append(out.History, &cloudv1.ChannelHistoryEntry{Release: h.Release, From: timeOf(&h.From),
 				To: timeOf(h.To), Reason: h.Reason})
 		}
+	}
+	return out
+}
+
+// ChangeRolloutFromAPI is a channel's rollout of its release moves as its
+// status reports it; nil when none is planned.
+func ChangeRolloutFromAPI(m *cloudv1alpha1.ChannelReleaseMoves) *cloudv1.ChangeRollout {
+	if m == nil {
+		return nil
+	}
+	out := &cloudv1.ChangeRollout{Target: m.Release, Admitted: slices.Clone(m.Admitted), Waiting: m.Waiting, Halted: m.Halted,
+		Done: m.Done, Tiers: rolloutTiersFromAPI(m.Members)}
+	for _, b := range m.Blocked {
+		out.Blocked = append(out.Blocked, &cloudv1.BlockedMember{Cluster: b.Cluster, Gate: b.Gate, Reason: b.Message})
 	}
 	return out
 }
@@ -173,7 +193,7 @@ func RolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel) *cloudv1.Rollout {
 		Policy: RolloutPolicyFromAPI(ch.Spec.Policy), Paused: ch.Spec.Paused, Summary: RolloutSummaryFromAPI(ch.Status.Rollout)}
 }
 
-// PlannedRolloutFromAPI is a channel's rollout as planned now (GetRollout):
+// PlannedRolloutFromAPI is a channel's rollout as planned now (GetReleaseChannel):
 // the summary and rows of res; members are added by the caller, a page
 // at a time (RolloutMemberFromRow).
 func PlannedRolloutFromAPI(ch *cloudv1alpha1.ReleaseChannel, res rollout.Result) *cloudv1.Rollout {

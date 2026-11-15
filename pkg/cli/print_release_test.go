@@ -136,22 +136,28 @@ func TestPrintRollouts(t *testing.T) {
 		{Tier: tier1, TenantId: "acme", ClusterId: "id-search", ClusterName: "search-eks", CurrentVersion: "1.35", TargetVersion: "1.36",
 			State: cloudv1.RolloutState_ROLLOUT_STATE_BLOCKED, Gate: "MAINTENANCE_WINDOW", Reason: "the maintenance window opens Sat 02:00 UTC"},
 	}
-	got := printed(t, &cloudv1.GetRolloutResponse{Rollout: stableRollout, NextPageToken: "3"}, OutputTable)
+	info := &cloudv1.ReleaseChannelInfo{Channel: stable, Release: "shipped-1aed928c", KubernetesMinor: "1.36", Policy: policy(),
+		ReleaseMoves: &cloudv1.ChangeRollout{Target: "2026-11-a", Waiting: "tier 1 soaks",
+			Tiers:   []*cloudv1.RolloutTier{{Tier: tier2, Succeeded: 3}, {Tier: tier1, Pending: 4}},
+			Blocked: []*cloudv1.BlockedMember{{Cluster: "tenant-acme/prod", Gate: "FROZEN", Reason: "the platform is frozen: deploy"}}}}
+	got := printed(t, &cloudv1.GetReleaseChannelResponse{Channel: info, Rollout: stableRollout}, OutputTable)
 	for _, want := range []string{
-		"Channel:        stable\n", "Kubernetes:     1.36\n", "Policy:         maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n",
-		"Rolling Tier:   1\n", "State:          Rolling\n",
+		"Name:             stable\n", "Kubernetes:       1.36\n", "Policy:           maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n",
+		"Rolling Tier:     1\n", "Rollout:          Rolling\n",
+		"Release Moves:    2026-11-a: Rolling, 3/7 done; waiting: tier 1 soaks; 1 kept back\n",
 		"  TIER   TENANT   CLUSTER        RUNS   TARGET   STATE        SINCE    REASON\n",
 		"  2      acme     dev-eks        1.36   1.36     Succeeded    2d       <none>\n",
 		"  1      acme     payments-eks   1.35   1.36     InProgress   12m      <none>\n",
 		"  1      acme     search-eks     1.35   1.36     Blocked      <none>   the maintenance window opens Sat 02:00 UTC\n",
-		"More clusters: --page-token 3\n",
+		"Release Moves Kept Back:\n", "  tenant-acme/prod   FROZEN   the platform is frozen: deploy\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("rollout get lacks %q:\n%s", want, got)
+			t.Errorf("channel get lacks %q:\n%s", want, got)
 		}
 	}
-	if wide := printed(t, &cloudv1.GetRolloutResponse{Rollout: stableRollout}, OutputWide); !strings.Contains(wide, "id-search    MAINTENANCE_WINDOW") {
-		t.Errorf("wide rollout lacks the ID and gate:\n%s", wide)
+	wide := printed(t, &cloudv1.GetReleaseChannelResponse{Channel: info, Rollout: stableRollout}, OutputWide)
+	if !strings.Contains(wide, "id-search    MAINTENANCE_WINDOW") {
+		t.Errorf("wide channel get lacks the ID and gate:\n%s", wide)
 	}
 }
 

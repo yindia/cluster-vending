@@ -85,7 +85,7 @@ type Options struct {
 	Cluster string
 	// Reason is --reason of admin pause: why, shown with the pause.
 	Reason string
-	// Channel is --channel of admin rollout get, pause and resume (alpha,
+	// Channel is --channel of admin pause, resume, freeze and unfreeze (alpha,
 	// beta, stable); Tier its --tier (0, 1, 2; empty: all).
 	Channel, Tier string
 	// Until is --until of admin pause and freeze.

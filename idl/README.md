@@ -137,8 +137,7 @@ A cluster cannot be deleted while it has components.
 | `Freeze` | Freezes the platform, or a tenant's or a channel's (`tier`) clusters: no automatic change starts (Kubernetes upgrades, release moves, add-on upgrades, code changes); users' own changes still apply. `until` ends it by itself. |
 | `Unfreeze` | Lifts the freeze of a target, or with `cluster_id` / `network_id` lets one through while it stays. |
 | `ListReleases`, `GetRelease` | The releases, newest first; one release per Kubernetes minor: channel, default, upgrade target, end of support, ending, components with versions and locked values. Read-only. |
-| `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy (with `release_soak`) and the tier its rollout is at, and `pending`: the release an Automatic channel takes once its release soak ends; one channel adds the releases it offered and its conditions. |
-| `GetRollout` | One channel's rollout planned now with the controller's rules (`pkg/rollout`), cluster by cluster (filter by tier, paged). |
+| `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy (with `release_soak`) and the tier its rollout is at, and `pending`: the release an Automatic channel takes once its release soak ends; one channel adds the releases it offered, its conditions, its `release_moves`, and its rollout planned now with the controller's rules (`pkg/rollout`): per tier and batch, with every cluster. |
 
 ### Stored status and live status
 

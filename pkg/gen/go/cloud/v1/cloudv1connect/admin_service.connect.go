@@ -46,8 +46,6 @@ const (
 	// AdminServiceGetReleaseChannelProcedure is the procedure name of the AdminService's
 	// GetReleaseChannel RPC.
 	AdminServiceGetReleaseChannelProcedure = "/cloud.v1.AdminService/GetReleaseChannel"
-	// AdminServiceGetRolloutProcedure is the procedure name of the AdminService's GetRollout RPC.
-	AdminServiceGetRolloutProcedure = "/cloud.v1.AdminService/GetRollout"
 )
 
 var (
@@ -119,14 +117,6 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
-	adminServiceGetRolloutSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType:       connect.StreamTypeUnary,
-			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("GetRollout"),
-			Procedure:        AdminServiceGetRolloutProcedure,
-			IdempotencyLevel: connect.IdempotencyNoSideEffects,
-		}
-	})
 )
 
 // AdminServiceClient is a client for the cloud.v1.AdminService service.
@@ -193,13 +183,11 @@ type AdminServiceClient interface {
 	// Lists the three channels: what each offers, its Kubernetes minor, its
 	// rollout policy and where its rollout is.
 	ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
-	// Returns one channel, with the releases it offered and its conditions.
+	// Returns one channel, with the releases it offered, its conditions,
+	// its release moves, and its Kubernetes rollout planned now: tier by
+	// tier and batch by batch, each cluster with what it runs, the minor it
+	// moves to, its state and why it is blocked.
 	GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
-	// Returns one channel's rollout cluster by cluster, tier 2 first: what
-	// each runs, the minor it moves to, its state and why it is blocked.
-	// Planned the way the controller plans it (pkg/rollout), from what the
-	// management cluster holds now.
-	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
 }
 
 // NewAdminServiceClient constructs a client for the cloud.v1.AdminService service. Multiple service
@@ -272,13 +260,11 @@ type AdminServiceHandler interface {
 	// Lists the three channels: what each offers, its Kubernetes minor, its
 	// rollout policy and where its rollout is.
 	ListReleaseChannels(context.Context, *v1.ListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
-	// Returns one channel, with the releases it offered and its conditions.
+	// Returns one channel, with the releases it offered, its conditions,
+	// its release moves, and its Kubernetes rollout planned now: tier by
+	// tier and batch by batch, each cluster with what it runs, the minor it
+	// moves to, its state and why it is blocked.
 	GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
-	// Returns one channel's rollout cluster by cluster, tier 2 first: what
-	// each runs, the minor it moves to, its state and why it is blocked.
-	// Planned the way the controller plans it (pkg/rollout), from what the
-	// management cluster holds now.
-	GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error)
 }
 
 // RegisterAdminServiceHandler registers svc as the cloud.v1.AdminService implementation on server.
@@ -294,7 +280,6 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 		connect.Method{Spec: adminServiceGetReleaseSpec(), Handler: adapter.getRelease},
 		connect.Method{Spec: adminServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
 		connect.Method{Spec: adminServiceGetReleaseChannelSpec(), Handler: adapter.getReleaseChannel},
-		connect.Method{Spec: adminServiceGetRolloutSpec(), Handler: adapter.getRollout},
 	)
 }
 
@@ -335,10 +320,6 @@ func (UnimplementedAdminServiceHandler) ListReleaseChannels(context.Context, *v1
 
 func (UnimplementedAdminServiceHandler) GetReleaseChannel(context.Context, *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetReleaseChannel is not implemented")
-}
-
-func (UnimplementedAdminServiceHandler) GetRollout(context.Context, *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetRollout is not implemented")
 }
 
 type adminServiceClient struct {
@@ -412,14 +393,6 @@ func (c *adminServiceClient) ListReleaseChannels(ctx context.Context, req *v1.Li
 func (c *adminServiceClient) GetReleaseChannel(ctx context.Context, req *v1.GetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
 	var res v1.GetReleaseChannelResponse
 	if err := c.client.CallUnary(ctx, adminServiceGetReleaseChannelSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *adminServiceClient) GetRollout(ctx context.Context, req *v1.GetRolloutRequest) (*v1.GetRolloutResponse, error) {
-	var res v1.GetRolloutResponse
-	if err := c.client.CallUnary(ctx, adminServiceGetRolloutSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -529,18 +502,6 @@ func (h adminServiceHandler) getReleaseChannel(ctx context.Context, _ connect.Sp
 		return err
 	}
 	res, err := h.svc.GetReleaseChannel(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h adminServiceHandler) getRollout(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.GetRolloutRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.GetRollout(ctx, &req)
 	if err != nil {
 		return err
 	}

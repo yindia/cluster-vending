@@ -136,9 +136,7 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 	case *cloudv1.ListReleaseChannelsResponse:
 		return true, printChannels(w, m.GetChannels(), wide)
 	case *cloudv1.GetReleaseChannelResponse:
-		return true, describeChannel(w, m.GetChannel())
-	case *cloudv1.GetRolloutResponse:
-		return true, describeRollout(w, m.GetRollout(), m.GetNextPageToken(), wide)
+		return true, describeChannel(w, m, wide)
 	}
 	return false, nil
 }

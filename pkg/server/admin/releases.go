@@ -164,23 +164,12 @@ func (s *Service) ListReleaseChannels(ctx context.Context, req *cloudv1.ListRele
 	return out, nil
 }
 
-// GetReleaseChannel returns one channel with its history.
+// GetReleaseChannel returns one channel with its history and release
+// moves, and its rollout planned now, the way the controller does
+// (rollout.Compute), cluster by cluster. Whether automatic upgrades are
+// on is the controller's setting: it is taken from what the controller
+// last reported.
 func (s *Service) GetReleaseChannel(ctx context.Context, req *cloudv1.GetReleaseChannelRequest) (*cloudv1.GetReleaseChannelResponse, error) {
-	if err := service.Validate(req); err != nil {
-		return nil, err
-	}
-	ch, err := s.channel(ctx, req.GetChannel())
-	if err != nil {
-		return nil, err
-	}
-	return &cloudv1.GetReleaseChannelResponse{Channel: ChannelFromAPI(ch, true)}, nil
-}
-
-// GetRollout plans one channel's rollout now, the way the controller
-// does (rollout.Compute), and returns it cluster by cluster. Whether
-// automatic upgrades are on is the controller's setting: it is taken from
-// what the controller last reported.
-func (s *Service) GetRollout(ctx context.Context, req *cloudv1.GetRolloutRequest) (*cloudv1.GetRolloutResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -194,17 +183,9 @@ func (s *Service) GetRollout(ctx context.Context, req *cloudv1.GetRolloutRequest
 	}
 	in.Now, in.Automatic = s.now(), ch.Status.Rollout != nil && !ch.Status.Rollout.ReportOnly
 	res := rollout.Compute(in)
-	rows := res.Rows
-	if t := req.GetTier(); t != cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
-		rows = slices.DeleteFunc(slices.Clone(rows), func(r rollout.Row) bool { return RolloutTierFromAPI(r.Tier) != t })
+	planned := PlannedRolloutFromAPI(ch, res)
+	for _, r := range res.Rows {
+		planned.Members = append(planned.Members, RolloutMemberFromRow(r))
 	}
-	start, end, next, err := page(len(rows), req.GetPageSize(), req.GetPageToken())
-	if err != nil {
-		return nil, err
-	}
-	out := PlannedRolloutFromAPI(ch, res)
-	for _, r := range rows[start:end] {
-		out.Members = append(out.Members, RolloutMemberFromRow(r))
-	}
-	return &cloudv1.GetRolloutResponse{Rollout: out, NextPageToken: next}, nil
+	return &cloudv1.GetReleaseChannelResponse{Channel: ChannelFromAPI(ch, true), Rollout: planned}, nil
 }

@@ -33,8 +33,6 @@ type verb struct {
 	retry bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
-	// rollout adds --channel and --tier (admin rollout get).
-	rollout bool
 	// pauseTargets adds --channel and --tier (admin pause, resume, freeze
 	// and unfreeze), until --until (admin pause and freeze), letThrough
 	// --cluster and --network of admin unfreeze.
@@ -116,10 +114,6 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				help = fmt.Sprintf("the %s's ID, as %s create and %s list print it", use, use, use)
 			}
 			f.StringVar(&o.ID, "id", "", help)
-		}
-		if v.rollout {
-			f.StringVar(&o.Channel, "channel", "", "the channel: alpha, beta or stable (required)")
-			f.StringVar(&o.Tier, "tier", "", "only this tier's clusters: 0, 1 or 2; default: all")
 		}
 		if v.pauseTargets {
 			f.StringVar(&o.Channel, "channel", "", "every cluster on this release channel, of every tenant: alpha, beta or stable; not with --tenant")
@@ -255,8 +249,8 @@ func newAdminCmd() *cobra.Command {
 }
 
 // newAdminReleaseCmds are the read-only views of the platform's release
-// configuration: releases, channels and the rollout of each channel's
-// Kubernetes minor (AdminService).
+// configuration: releases, and channels with their rollouts
+// (AdminService).
 func newAdminReleaseCmds() []*cobra.Command {
 	return []*cobra.Command{
 		newResourceCmd("release", "The platform's releases: what clusters run per Kubernetes minor (read-only)", []verb{
@@ -268,12 +262,8 @@ func newAdminReleaseCmds() []*cobra.Command {
 		newResourceCmd("channel", "The release channels alpha, beta and stable: what each offers, its rollout policy and release soak (read-only)", []verb{
 			{use: "list", short: "List the channels: promotion, the release and Kubernetes minor each offers, the tier its rollout is at, its state and why it waits; -o wide adds the progress per tier and the policy",
 				run: cli.AdminChannelList, args: cobra.NoArgs},
-			{use: "get <id>", short: "Show a channel: its release, Kubernetes minor, rollout policy and progress, the releases it offered, its conditions",
+			{use: "get <id>", short: "Show a channel: its release, Kubernetes minor, release soak, rollout policy and its rollout planned now (tiers, batches, who waits and why: Kubernetes upgrades and release moves), the releases it offered, its conditions; -o wide adds every cluster with its ID and gate",
 				run: cli.AdminChannelGet, args: cobra.ExactArgs(1), idHelp: "the channel: alpha, beta or stable"},
-		}),
-		newResourceCmd("rollout", "The rollout of each channel's Kubernetes minor to its automatic clusters, tier 2 first (read-only)", []verb{
-			{use: "get", short: "Show one channel's rollout cluster by cluster: what each runs, the minor it moves to, its state and why it is blocked; -o wide adds cluster IDs and gate codes",
-				run: cli.AdminRolloutGet, args: cobra.NoArgs, rollout: true, page: true},
 		}),
 	}
 }

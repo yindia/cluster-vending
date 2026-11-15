@@ -44,7 +44,6 @@ func TestEveryRPCIsClassified(t *testing.T) {
 		"cloud.v1.AdminService.GetRelease":             {Scope: auth.ScopePlatform},
 		"cloud.v1.AdminService.ListReleaseChannels":    {Scope: auth.ScopePlatform},
 		"cloud.v1.AdminService.GetReleaseChannel":      {Scope: auth.ScopePlatform},
-		"cloud.v1.AdminService.GetRollout":             {Scope: auth.ScopePlatform},
 		"cloud.v1.ComponentService.GetComponentValues": {Scope: auth.ScopeAuthenticated},
 		"cloud.v1.TenantService.WhoAmI":                {Scope: auth.ScopeAuthenticated},
 		"cloud.v1.TenantService.BootstrapTenant":       {Scope: auth.ScopeTenant, Write: true},

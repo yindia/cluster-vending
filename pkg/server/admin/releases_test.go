@@ -201,7 +201,9 @@ func TestListReleaseChannelsCarriesTheRollout(t *testing.T) {
 	}
 }
 
-func TestGetRolloutPlansClusterByCluster(t *testing.T) {
+// GetReleaseChannel plans the channel's rollout cluster by cluster, tier
+// 2 first, its clusters only.
+func TestGetReleaseChannelPlansClusterByCluster(t *testing.T) {
 	manual := stableCluster("manual", cloudv1alpha1.ClusterTier0, "1.34")
 	manual.Spec.UpgradeMode = cloudv1alpha1.UpgradeModeManual
 	beta := stableCluster("beta-one", cloudv1alpha1.ClusterTier2, "1.34")
@@ -211,10 +213,13 @@ func TestGetRolloutPlansClusterByCluster(t *testing.T) {
 		manual, beta)
 	stable := cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE
 
-	res, err := s.GetRollout(t.Context(), &cloudv1.GetRolloutRequest{Channel: stable})
+	res, err := s.GetReleaseChannel(t.Context(), &cloudv1.GetReleaseChannelRequest{Channel: stable})
 
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.GetChannel().GetChannel() != stable {
+		t.Errorf("channel = %v", res.GetChannel())
 	}
 	members := res.GetRollout().GetMembers()
 	names := []string{}
@@ -240,26 +245,17 @@ func TestGetRolloutPlansClusterByCluster(t *testing.T) {
 	if len(sum.GetWouldStart()) != 1 || sum.GetWouldStart()[0] != "tenant-acme/next" || !sum.GetReportOnly() {
 		t.Errorf("summary = %v", sum)
 	}
-
-	tier1, err := s.GetRollout(t.Context(), &cloudv1.GetRolloutRequest{Channel: stable, Tier: cloudv1.ClusterTier_CLUSTER_TIER_1})
-	if err != nil || len(tier1.GetRollout().GetMembers()) != 1 || tier1.GetRollout().GetMembers()[0].GetClusterName() != "later" {
-		t.Errorf("tier 1 = %v, %v", tier1, err)
-	}
-	paged, err := s.GetRollout(t.Context(), &cloudv1.GetRolloutRequest{Channel: stable, PageSize: 3})
-	if err != nil || len(paged.GetRollout().GetMembers()) != 3 || paged.GetNextPageToken() != "3" {
-		t.Errorf("page = %v, %v", paged, err)
-	}
 }
 
-// GetRollout carries the plan per tier and batch, whole on every page.
-func TestGetRolloutCarriesThePlan(t *testing.T) {
+// GetReleaseChannel carries the rollout plan per tier and batch.
+func TestGetReleaseChannelCarriesThePlan(t *testing.T) {
 	manual := stableCluster("manual", cloudv1alpha1.ClusterTier0, "1.34")
 	manual.Spec.UpgradeMode = cloudv1alpha1.UpgradeModeManual
 	s := releaseWorld(t, stableCluster("done", cloudv1alpha1.ClusterTier2, "1.35"),
 		stableCluster("next", cloudv1alpha1.ClusterTier2, "1.34"), stableCluster("later", cloudv1alpha1.ClusterTier1, "1.34"), manual)
 	stable := cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE
 
-	res, err := s.GetRollout(t.Context(), &cloudv1.GetRolloutRequest{Channel: stable, PageSize: 1})
+	res, err := s.GetReleaseChannel(t.Context(), &cloudv1.GetReleaseChannelRequest{Channel: stable})
 
 	if err != nil {
 		t.Fatal(err)

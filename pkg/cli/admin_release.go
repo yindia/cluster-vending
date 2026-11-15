@@ -27,28 +27,13 @@ func AdminChannelList(ctx context.Context, c Clients, _ Options) (proto.Message,
 }
 
 // AdminChannelGet calls AdminService.GetReleaseChannel for the channel
-// --id (alpha, beta or stable).
+// --id (alpha, beta or stable): the channel and its rollout planned now.
 func AdminChannelGet(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	ch, err := parseChannel("--id", o.ID)
 	if err != nil {
 		return nil, err
 	}
 	return call(ctx, &cloudv1.GetReleaseChannelRequest{Channel: ch}, c.Admin.GetReleaseChannel)
-}
-
-// AdminRolloutGet calls AdminService.GetRollout for --channel, only --tier
-// when set: the rollout cluster by cluster.
-func AdminRolloutGet(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	ch, err := parseChannel("--channel", o.Channel)
-	if err != nil {
-		return nil, err
-	}
-	tier, err := parseTier(o.Tier)
-	if err != nil {
-		return nil, err
-	}
-	return call(ctx, &cloudv1.GetRolloutRequest{Channel: ch, Tier: tier, PageSize: o.PageSize, PageToken: o.PageToken},
-		c.Admin.GetRollout)
 }
 
 // parseChannel is a channel's name (alpha, beta, stable) as the contract's

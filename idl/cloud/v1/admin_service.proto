@@ -91,16 +91,11 @@ service AdminService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Returns one channel, with the releases it offered and its conditions.
+  // Returns one channel, with the releases it offered, its conditions,
+  // its release moves, and its Kubernetes rollout planned now: tier by
+  // tier and batch by batch, each cluster with what it runs, the minor it
+  // moves to, its state and why it is blocked.
   rpc GetReleaseChannel(GetReleaseChannelRequest) returns (GetReleaseChannelResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
-
-  // Returns one channel's rollout cluster by cluster, tier 2 first: what
-  // each runs, the minor it moves to, its state and why it is blocked.
-  // Planned the way the controller plans it (pkg/rollout), from what the
-  // management cluster holds now.
-  rpc GetRollout(GetRolloutRequest) returns (GetRolloutResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }

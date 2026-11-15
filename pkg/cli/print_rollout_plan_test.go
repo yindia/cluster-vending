@@ -24,6 +24,14 @@ func batch(cs ...*cloudv1.RolloutPlanCluster) *cloudv1.RolloutBatch {
 	return &cloudv1.RolloutBatch{Clusters: cs}
 }
 
+// channelGet is admin channel get's answer for the channel of r, with r
+// as its rollout planned now.
+func channelGet(r *cloudv1.Rollout) *cloudv1.GetReleaseChannelResponse {
+	info := &cloudv1.ReleaseChannelInfo{Channel: r.GetChannel(), Release: r.GetRelease(),
+		KubernetesMinor: r.GetSummary().GetTargetMinor(), Policy: r.GetPolicy()}
+	return &cloudv1.GetReleaseChannelResponse{Channel: info, Rollout: r}
+}
+
 // The plan view: tier 2 done, tier 1 rolling batch 2 of 3 with one cluster
 // waiting on its maintenance window, tier 0 not started.
 func TestPrintRolloutPlanRolling(t *testing.T) {
@@ -49,31 +57,36 @@ func TestPrintRolloutPlanRolling(t *testing.T) {
 					batch(planCluster("globex", "prod", pending))}},
 		}}}
 
-	got := printed(t, &cloudv1.GetRolloutResponse{Rollout: r}, OutputTable)
+	got := printed(t, channelGet(r), OutputTable)
 
-	want := "Channel:        stable\n" +
-		"Kubernetes:     1.36\n" +
-		"Release:        shipped-1aed928c\n" +
-		"Policy:         maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n" +
-		"Rolling Tier:   1\n" +
-		"State:          Rolling tier 1, batch 2 of 3\n" +
-		"Waiting:        <none>\n" +
-		"Would Start:    tenant-acme/search\n" +
+	for _, want := range []string{
+		"Name:             stable\n",
+		"Kubernetes:       1.36\n",
+		"Release:          shipped-1aed928c\n",
+		"Policy:           maxInProgress 2, maxFailed 1, soak 24h (Tier1: 48h)\n",
+		"Rolling Tier:     1\n",
+		"Rollout:          Rolling tier 1, batch 2 of 3\n",
+		"Would Start:      tenant-acme/search\n",
 		"\nPlan:\n" +
-		"  TIER 2  done 2/2, failed 0/1, finished 2026-11-12 11:00 UTC, soak ended 2026-11-13 11:00 UTC\n" +
-		"    batch 1  ✓ acme/dev  ✓ acme/qa\n" +
-		"  TIER 1  rolling: done 2/7, failed 0/1, 2 at a time\n" +
-		"    batch 1  ✓ acme/a  ✓ acme/b\n" +
-		"    batch 2  ▶ acme/payments (control plane, 12m)  · acme/search\n" +
-		"    batch 3  · globex/api  · globex/core\n" +
-		"    waits    ⏸ acme/batch: the maintenance window opens Sat 02:00 UTC\n" +
-		"  TIER 0  not started: after tier 1 and its 48h soak, one at a time\n" +
-		"    batch 1  · acme/prod\n" +
-		"    batch 2  · globex/prod\n"
-	if got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+			"  TIER 2  done 2/2, failed 0/1, finished 2026-11-12 11:00 UTC, soak ended 2026-11-13 11:00 UTC\n" +
+			"    batch 1  ✓ acme/dev  ✓ acme/qa\n" +
+			"  TIER 1  rolling: done 2/7, failed 0/1, 2 at a time\n" +
+			"    batch 1  ✓ acme/a  ✓ acme/b\n" +
+			"    batch 2  ▶ acme/payments (control plane, 12m)  · acme/search\n" +
+			"    batch 3  · globex/api  · globex/core\n" +
+			"    waits    ⏸ acme/batch: the maintenance window opens Sat 02:00 UTC\n" +
+			"  TIER 0  not started: after tier 1 and its 48h soak, one at a time\n" +
+			"    batch 1  · acme/prod\n" +
+			"    batch 2  · globex/prod\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
 	}
-	if wide := printed(t, &cloudv1.GetRolloutResponse{Rollout: r}, OutputWide); !strings.Contains(wide, "\nPlan:\n") ||
+	if strings.Contains(got, "\nClusters:\n") {
+		t.Errorf("the cluster table is for -o wide:\n%s", got)
+	}
+	if wide := printed(t, channelGet(r), OutputWide); !strings.Contains(wide, "\nPlan:\n") ||
 		!strings.Contains(wide, "\nClusters:\n") {
 		t.Errorf("wide lacks the plan or the cluster table:\n%s", wide)
 	}
@@ -91,10 +104,10 @@ func TestPrintRolloutPlanHalted(t *testing.T) {
 				Batches: []*cloudv1.RolloutBatch{batch(planCluster("acme", "c", pending))}},
 		}}}
 
-	got := printed(t, &cloudv1.GetRolloutResponse{Rollout: r}, OutputTable)
+	got := printed(t, channelGet(r), OutputTable)
 
 	for _, want := range []string{
-		"State:          Halted\n",
+		"Rollout:          Halted\n",
 		"\nPlan:\n" +
 			"  TIER 2  halted: 2 failed, maxFailed 1\n" +
 			"    batch 1  ✗ acme/a  ✗ acme/b\n" +
@@ -117,10 +130,10 @@ func TestPrintRolloutPlanDone(t *testing.T) {
 				Batches: []*cloudv1.RolloutBatch{batch(planCluster("acme", "prod-eks", succeeded))}},
 		}}}
 
-	got := printed(t, &cloudv1.GetRolloutResponse{Rollout: r}, OutputTable)
+	got := printed(t, channelGet(r), OutputTable)
 
 	for _, want := range []string{
-		"Rolling Tier:   none (done)\n", "State:          Done\n",
+		"Rolling Tier:     none (done)\n", "Rollout:          Done\n",
 		"\nPlan:\n" +
 			"  TIER 2  done 1/1, failed 0/1, finished 2026-11-14 11:00 UTC, soak ends 2026-11-15 11:00 UTC\n" +
 			"    batch 1  ✓ acme/prod-eks\n",
@@ -131,8 +144,8 @@ func TestPrintRolloutPlanDone(t *testing.T) {
 	}
 	empty := &cloudv1.Rollout{Channel: beta, Policy: policy(), Summary: &cloudv1.RolloutSummary{TargetMinor: "1.36", Done: true},
 		Plan: &cloudv1.RolloutPlan{Done: true}}
-	if got := printed(t, &cloudv1.GetRolloutResponse{Rollout: empty}, OutputTable); !strings.Contains(got,
-		"Rolling Tier:   none (nothing to upgrade)\n") || strings.Contains(got, "Plan:") {
+	if got := printed(t, channelGet(empty), OutputTable); !strings.Contains(got,
+		"Rolling Tier:     none (nothing to upgrade)\n") || strings.Contains(got, "Plan:") {
 		t.Errorf("nothing to upgrade:\n%s", got)
 	}
 }

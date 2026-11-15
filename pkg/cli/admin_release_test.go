@@ -14,7 +14,6 @@ type releaseReader struct {
 	cloudv1connect.UnimplementedAdminServiceHandler
 	release  *cloudv1.GetReleaseRequest
 	channel  *cloudv1.GetReleaseChannelRequest
-	rollout  *cloudv1.GetRolloutRequest
 	releases *cloudv1.ListReleasesRequest
 }
 
@@ -33,13 +32,8 @@ func (r *releaseReader) GetReleaseChannel(_ context.Context, req *cloudv1.GetRel
 	return &cloudv1.GetReleaseChannelResponse{Channel: &cloudv1.ReleaseChannelInfo{Channel: req.GetChannel()}}, nil
 }
 
-func (r *releaseReader) GetRollout(_ context.Context, req *cloudv1.GetRolloutRequest) (*cloudv1.GetRolloutResponse, error) {
-	r.rollout = req
-	return &cloudv1.GetRolloutResponse{Rollout: &cloudv1.Rollout{Channel: req.GetChannel()}}, nil
-}
-
 // The admin release commands send what their flags name: the release's
-// name, the channel, the rollout's channel, tier and page.
+// name and page, the channel.
 func TestAdminReleaseCommandsSendTheirFlags(t *testing.T) {
 	svc := &releaseReader{}
 	clients := Clients{Admin: svc}
@@ -53,7 +47,6 @@ func TestAdminReleaseCommandsSendTheirFlags(t *testing.T) {
 	run(AdminReleaseGet, Options{ID: "shipped-1aed928c"})
 	run(AdminReleaseList, Options{PageSize: 5, PageToken: "5"})
 	run(AdminChannelGet, Options{ID: "beta"})
-	run(AdminRolloutGet, Options{Channel: "stable", Tier: "1", PageSize: 10})
 
 	if svc.release.GetName() != "shipped-1aed928c" {
 		t.Errorf("release = %v", svc.release)
@@ -64,11 +57,7 @@ func TestAdminReleaseCommandsSendTheirFlags(t *testing.T) {
 	if svc.channel.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA {
 		t.Errorf("channel = %v", svc.channel)
 	}
-	if r := svc.rollout; r.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE ||
-		r.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_1 || r.GetPageSize() != 10 {
-		t.Errorf("rollout = %v", r)
-	}
-	if err := Run(t.Context(), AdminRolloutGet, clients, Options{Tier: "1"}, &bytes.Buffer{}, OutputTable); err == nil {
-		t.Error("rollout get without --channel is refused")
+	if err := Run(t.Context(), AdminChannelGet, clients, Options{ID: "edge"}, &bytes.Buffer{}, OutputTable); err == nil {
+		t.Error("channel get of no channel is refused")
 	}
 }

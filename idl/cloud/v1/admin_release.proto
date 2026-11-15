@@ -85,6 +85,35 @@ message ReleaseChannelInfo {
   // The release an Automatic channel takes once its release soak ends;
   // unset when it waits for none.
   PendingRelease pending = 13;
+  // The rollout of the channel's release to its clusters' components
+  // (release moves), tier 2 first; unset when none is planned.
+  ChangeRollout release_moves = 14;
+}
+
+// ChangeRollout is a rollout of something other than the Kubernetes minor
+// (a release move) to a channel's clusters, planned like it.
+message ChangeRollout {
+  // What the clusters move to: a release.
+  string target = 1;
+  // The clusters (namespace/name) that may start now.
+  repeated string admitted = 2;
+  // Why no (more) cluster starts; when halted, why it halted.
+  string waiting = 3;
+  bool halted = 4;
+  // Every member has it.
+  bool done = 5;
+  // Tier 2 first.
+  repeated RolloutTier tiers = 6;
+  // Clusters kept back by their own checks: the gate's code and message.
+  repeated BlockedMember blocked = 7;
+}
+
+// BlockedMember is a cluster a rollout keeps back, and why.
+message BlockedMember {
+  // namespace/name.
+  string cluster = 1;
+  string gate = 2;
+  string reason = 3;
 }
 
 // PendingRelease is the release an Automatic channel waits to take.
@@ -192,10 +221,10 @@ message Rollout {
   RolloutPolicy policy = 4;
   bool paused = 5;
   RolloutSummary summary = 6;
-  // The channel's clusters in the rollout, tier 2 first. GetRollout only.
+  // The channel's clusters in the rollout, tier 2 first.
   repeated RolloutMember members = 7;
   // How the rollout proceeds from now, per tier and batch, as the
-  // controller plans it. GetRollout only; not paged.
+  // controller plans it.
   RolloutPlan plan = 8;
 }
 
@@ -320,25 +349,8 @@ message GetReleaseChannelRequest {
 
 message GetReleaseChannelResponse {
   ReleaseChannelInfo channel = 1;
-}
-
-// One rollout per channel: no pagination.
-message GetRolloutRequest {
-  ReleaseChannel channel = 1 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
-  // Only this tier's members; UNSPECIFIED: all.
-  ClusterTier tier = 2 [(buf.validate.field).enum.defined_only = true];
-  // Maximum members per page. Defaults to 50; values above 200 are
-  // coerced to 200.
-  int32 page_size = 3 [(buf.validate.field).int32.gte = 0];
-  // next_page_token from a previous call.
-  string page_token = 4;
-}
-
-message GetRolloutResponse {
-  Rollout rollout = 1;
-  // Empty when there are no more members.
-  string next_page_token = 2;
+  // The channel's Kubernetes rollout planned now, the way the controller
+  // plans it (pkg/rollout), from what the management cluster holds: per
+  // tier and batch, with every cluster in it, tier 2 first.
+  Rollout rollout = 2;
 }

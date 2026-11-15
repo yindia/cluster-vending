@@ -483,7 +483,7 @@ To follow it:
 ```sh
 cluster-vending cluster get --id <cluster>          # Rollout: 1.36 → 1.37 via channel alpha (tier 2): in progress since 12m
 cluster-vending cluster events --id <cluster>       # what happened, newest first
-cluster-vending admin rollout get --channel alpha   # every cluster of the channel, tier by tier
+cluster-vending admin channel get --id alpha        # the channel's rollout plan, tier by tier (-o wide: every cluster)
 ```
 
 ### Component upgrades
@@ -533,22 +533,24 @@ The same views through the API (AdminService, platform admin role only),
 without access to the management cluster:
 
 ```sh
-cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS PINNED AGE (PINNED: pauses of upgrades that keep a cluster on it)
+cluster-vending admin release list                    # NAME SHIPPED VALID CHANNELS PINNED AGE (PINNED: holds that keep a cluster on it)
 cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
 cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES ROLLING TIER STATE WAITING PAUSED AGE (wide: TIER2 TIER1 TIER0 progress, policy)
-cluster-vending admin channel get --id stable         # policy, release soak, next release, rollout, the releases it offered, conditions
-cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
+cluster-vending admin channel get --id stable [-o wide]   # policy, release soak, next release, the rollout plan, release moves, the releases it offered, conditions
 ```
 
 `channel list` shows each channel's rollout as the controller last wrote
 it to the channel's status; a rollout with nothing left to do is at
 tier `none (done)` (`none (nothing to upgrade)` when no cluster needed
-one). `rollout get` plans the channel's rollout again at the time of the
+one). `channel get` plans the channel's rollout again at the time of the
 call with the controller's rules (`pkg/rollout`), and shows its plan per
-tier and batch:
+tier and batch, then its release moves (`Release Moves:` the release its
+clusters' components move to, how far, why the rest waits, and the
+clusters kept back with their gate):
 
 ```text
-State:          Rolling tier 1, batch 2 of 3
+Rollout:          Rolling tier 1, batch 2 of 3
+Release Moves:    2026-11-a: Rolling, 3/7 done; waiting: tier 1 soaks; 1 kept back
 
 Plan:
   TIER 2  done 2/2, failed 0/1, finished 2026-11-12 11:00 UTC, soak ended 2026-11-13 11:00 UTC

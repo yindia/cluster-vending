@@ -188,15 +188,23 @@ func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide boo
 	return table(w, header, rows)
 }
 
-// describeChannel is one channel: what it offers, its policy, where its
-// rollout is, the releases it offered and its conditions.
-func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
-	pinned := c.GetPinnedRelease()
-	kv := [][2]string{{"Name", channelWord(c.GetChannel())}, {"Promotion", c.GetPromotion()}, {"Pinned Release", pinned},
+// describeChannel is admin channel get: what the channel offers, its
+// policy, where its rollout is (planned now when the server sent the
+// plan) and its release moves; then the rollout plan per tier and batch
+// (wide adds every cluster), the releases it offered and its conditions.
+func describeChannel(w io.Writer, res *cloudv1.GetReleaseChannelResponse, wide bool) error {
+	c, r := res.GetChannel(), res.GetRollout()
+	summary := c.GetRollout()
+	tier, state := rollingTierWord(c.GetRolloutTier(), summary, nil), rolloutState(summary, c.GetPaused())
+	if r != nil {
+		summary = r.GetSummary()
+		tier, state = rollingTierWord(r.GetRolloutTier(), summary, r.GetPlan()), planState(r)
+	}
+	kv := [][2]string{{"Name", channelWord(c.GetChannel())}, {"Promotion", c.GetPromotion()}, {"Pinned Release", c.GetPinnedRelease()},
 		{"Release", c.GetRelease()}, {"Kubernetes", c.GetKubernetesMinor()}, {"Paused", yesNo(c.GetPaused())},
-		{"Policy", policyLine(c.GetPolicy())}, {"Rolling Tier", rollingTierWord(c.GetRolloutTier(), c.GetRollout(), nil)},
-		{"Rollout", rolloutState(c.GetRollout(), c.GetPaused())}, {"Waiting", oneLine(c.GetRollout().GetWaiting())},
-		{"Would Start", strings.Join(c.GetRollout().GetWouldStart(), ", ")}, {"Age", age(c.GetCreateTime())}}
+		{"Policy", policyLine(c.GetPolicy())}, {"Rolling Tier", tier},
+		{"Rollout", state}, {"Waiting", oneLine(summary.GetWaiting())},
+		{"Would Start", strings.Join(summary.GetWouldStart(), ", ")}, {"Age", age(c.GetCreateTime())}}
 	if c.GetPromotion() == "Automatic" {
 		soak := c.GetPolicy().GetReleaseSoak()
 		if soak == "" {
@@ -207,7 +215,16 @@ func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
 	if p := c.GetPending(); p != nil {
 		kv = append(kv, [2]string{"Next Release", fmt.Sprintf("%s %s (%s)", p.GetRelease(), untilText(p.GetUntil()), date(p.GetUntil()))})
 	}
+	if m := c.GetReleaseMoves(); m != nil {
+		kv = append(kv, [2]string{"Release Moves", changeRolloutLine(m)})
+	}
 	if err := fields(w, kv); err != nil {
+		return err
+	}
+	if err := describePlan(w, r, wide); err != nil {
+		return err
+	}
+	if err := keptBack(w, "Release Moves Kept Back", c.GetReleaseMoves()); err != nil {
 		return err
 	}
 	history := make([][]string, 0, len(c.GetHistory()))
@@ -272,16 +289,12 @@ func tierCell(r *cloudv1.RolloutSummary, tier cloudv1.ClusterTier) string {
 
 var memberHeader = []string{"TIER", "TENANT", "CLUSTER", "RUNS", "TARGET", "STATE", "SINCE", "REASON"}
 
-// describeRollout is one channel's rollout: its summary, then its plan per
-// tier and batch; wide (or a server without plans) adds its clusters'
-// table, tier 2 first, with their IDs and gates when wide.
-func describeRollout(w io.Writer, r *cloudv1.Rollout, next string, wide bool) error {
-	s := r.GetSummary()
-	kv := [][2]string{{"Channel", channelWord(r.GetChannel())}, {"Kubernetes", s.GetTargetMinor()}, {"Release", r.GetRelease()},
-		{"Policy", policyLine(r.GetPolicy())}, {"Rolling Tier", rollingTierWord(r.GetRolloutTier(), s, r.GetPlan())},
-		{"State", planState(r)}, {"Waiting", oneLine(s.GetWaiting())}, {"Would Start", strings.Join(s.GetWouldStart(), ", ")}}
-	if err := fields(w, kv); err != nil {
-		return err
+// describePlan is a channel's rollout planned now: its plan per tier and
+// batch; wide (or a server without plans) adds its clusters' table, tier
+// 2 first, with their IDs and gates when wide. Nothing without a rollout.
+func describePlan(w io.Writer, r *cloudv1.Rollout, wide bool) error {
+	if r == nil {
+		return nil
 	}
 	if r.GetPlan() != nil {
 		if err := printRolloutPlan(w, r.GetPlan(), r.GetPolicy()); err != nil {
@@ -304,12 +317,43 @@ func describeRollout(w io.Writer, r *cloudv1.Rollout, next string, wide bool) er
 		}
 		rows = append(rows, rw)
 	}
-	if err := section(w, "Clusters", header, rows); err != nil {
-		return err
+	return section(w, "Clusters", header, rows)
+}
+
+// changeRolloutLine is a rollout of release moves in one line: "2026-11-a:
+// Rolling, 3/7 done; waiting: tier 1 soaks; 1 kept back".
+func changeRolloutLine(m *cloudv1.ChangeRollout) string {
+	var done, total int32
+	for _, t := range m.GetTiers() {
+		done += t.GetSucceeded()
+		total += t.GetPending() + t.GetInProgress() + t.GetSucceeded() + t.GetFailed() + t.GetBlocked()
 	}
-	if next != "" {
-		_, err := fmt.Fprintf(w, "\nMore clusters: --page-token %s\n", next)
-		return err
+	state := "Rolling"
+	switch {
+	case m.GetHalted():
+		state = "Halted"
+	case m.GetDone():
+		state = "Done"
 	}
-	return nil
+	line := fmt.Sprintf("%s: %s, %d/%d done", orNone(m.GetTarget()), state, done, total)
+	if w := m.GetWaiting(); w != "" {
+		line += "; waiting: " + oneLine(w)
+	}
+	if n := len(m.GetBlocked()); n > 0 {
+		line += fmt.Sprintf("; %d kept back", n)
+	}
+	return line
+}
+
+// keptBack lists the clusters a rollout of changes keeps back, and why;
+// nothing when none is.
+func keptBack(w io.Writer, title string, m *cloudv1.ChangeRollout) error {
+	if len(m.GetBlocked()) == 0 {
+		return nil
+	}
+	rows := make([][]string, 0, len(m.GetBlocked()))
+	for _, b := range m.GetBlocked() {
+		rows = append(rows, []string{b.GetCluster(), orNone(b.GetGate()), orNone(oneLine(b.GetReason()))})
+	}
+	return section(w, title, []string{"CLUSTER", "GATE", "REASON"}, rows)
 }

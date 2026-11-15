@@ -22,11 +22,10 @@ func rolloutLine(r *cloudv1.ClusterRollout, running string) string {
 	if r == nil {
 		return ""
 	}
-	switch r.GetResult() {
-	case cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_PENDING, cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_BLOCKED:
-		if !minorBefore(running, r.GetToVersion()) && running != "" {
-			return fmt.Sprintf("up to date with channel %s (%s)", r.GetChannel(), running)
-		}
+	waiting := r.GetResult() == cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_PENDING ||
+		r.GetResult() == cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_BLOCKED
+	if waiting && running != "" && !minorBefore(running, r.GetToVersion()) {
+		return fmt.Sprintf("up to date with channel %s (%s)", r.GetChannel(), running)
 	}
 	if r.GetResult() == cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_BLOCKED && strings.HasPrefix(r.GetMessage(), manualMessage) {
 		return r.GetMessage()

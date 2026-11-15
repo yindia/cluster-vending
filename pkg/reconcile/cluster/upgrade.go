@@ -177,9 +177,6 @@ func (s *Reconciler) observeUpgrade(ctx context.Context, records []model.Managed
 	return u, nil
 }
 
-// followers are the kinds that follow the control plane in an upgrade.
-var followers = map[string]bool{KindNodeGroup: true, "Addon": true}
-
 // status is ClusterStatus.upgrade: the step the upgrade is at (nextStep),
 // what it moves from and to, since when (kept from the status recorded
 // before, stored; else the row's last change, the update that asked for

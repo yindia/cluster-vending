@@ -66,6 +66,8 @@ func currentStep(name string, u *cloudv1.ClusterUpgrade) string {
 		waiting = u.GetAddonsBehind()
 	case cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS, cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS:
 		waiting = u.GetComponentsBehind()
+	case cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_UNSPECIFIED, cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_CONTROL_PLANE:
+		// nothing listed: the control plane is one resource
 	}
 	out := name
 	if len(waiting) > 0 {

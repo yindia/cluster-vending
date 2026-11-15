@@ -140,7 +140,7 @@ func TestStaleApplyDoesNotHideAChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen.AppliedGeneration = seen.Generation - 1 // the pass has something to record
-	if err := f.svc.rec().MarkApplied(ctx, seen); err != nil {
+	if err := f.svc.rec().MarkApplied(ctx, seen, nil); err != nil {
 		t.Errorf("markApplied on a changed row: %v", err)
 	}
 	got, err := f.store.Networks().Get(ctx, tenant, n.GetId())

@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -105,8 +106,10 @@ func MissingObject(row *model.Cluster) bool {
 // the target renderer: once a call stored it, after a failed apply, for the objects
 // held back until EKS is ACTIVE (add-ons, access entries), during an
 // upgrade for the node groups and add-ons once the control plane reports
-// the target version (gateUpgrade), and when the renderer changed
-// (Deps.RenderBehind). The controller calls it.
+// the target version (gateUpgrade), and for a code change (codeChange: a
+// new build renders it differently, or the renderer version is behind,
+// Deps.RenderBehind) once its channel's rollout admits it. The controller
+// calls it.
 //
 // While EKS is not ACTIVE it only starts or resumes a create
 // (resumeCreate): the objects of the first stage are applied again, the
@@ -129,9 +132,18 @@ func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
 		return err
 	}
 	var repair []model.ManagedResource
-	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
-		if repair, err = s.deps.Repairable(ctx, records); err != nil || len(repair) == 0 {
+	var code bool
+	var rendered map[string]string
+	if row.AppliedGeneration >= row.Generation {
+		if repair, err = s.deps.Repairable(ctx, records); err != nil {
 			return err
+		}
+		// Nothing to repair: applied again only for a code change (a new
+		// build renders it differently), in its turn of the rollout.
+		if len(repair) == 0 {
+			if code, rendered, err = s.codeChange(ctx, row); err != nil || !code {
+				return err
+			}
 		}
 	}
 	active, err := s.eksActive(ctx, records)
@@ -159,7 +171,16 @@ func (s *Reconciler) advance(ctx context.Context, row *model.Cluster) error {
 	if err := s.TagSubnets(ctx, row, t); err != nil {
 		return err
 	}
-	if err := s.Apply(reconcile.Repairing(ctx, repair), row, t.Account, s.RenderPlan(spec, row, t)); err != nil {
+	applyCtx := reconcile.Repairing(ctx, repair)
+	if code {
+		// What a new build no longer renders keeps its cloud resource.
+		applyCtx = managed.KeepDropped(applyCtx)
+	}
+	err = s.Apply(applyCtx, row, t.Account, s.RenderPlan(spec, row, t))
+	if code {
+		s.codeApplied(ctx, row, rendered, err)
+	}
+	if err != nil {
 		return err
 	}
 	if len(repair) > 0 {

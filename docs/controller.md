@@ -618,6 +618,50 @@ cluster-vending admin unfreeze --channel beta --tier 0
   holds back is listed with the gate `FROZEN` (`<target> is frozen:
   <reason>`).
 
+### Freeze and code changes
+
+A new controller build may render a cluster's or a network's objects
+differently (a field, a tag, a new object). That is a **code change**, and
+it is not applied at once: it rolls out like a Kubernetes upgrade.
+
+- **Seen by fingerprint.** Every full apply records a short hash per object
+  (`sequence.Fingerprints`) with the row. A pass whose render differs from
+  what was recorded (or whose renderer version is behind the target) has a
+  code change pending: `N objects change (a added, r removed)`. Objects
+  made from live values (a Build item) count by identity only. A row
+  applied by a build without fingerprints takes the first render as
+  applied.
+- **Rolled out in turn.** Each channel plans its code rollout
+  (`status.codeChanges`) with the Kubernetes rollout's rules: tier 2, then
+  1, then 0, `maxInProgress` at once, the soak between tiers, halted past
+  `maxFailed`, maintenance windows, health, pauses and freezes. Manual
+  clusters are members too: the change is the platform's, not a version.
+  A cluster on no channel goes when nothing freezes it.
+- **Networks first.** A network takes the most careful tier of its
+  clusters (tier 2 without clusters) and goes when the code rollout of each
+  of its clusters' channels reaches that tier; its clusters of that tier
+  wait for it. Earlier tiers go before it.
+- **Applied, recovered, halted.** An admitted change is applied
+  (`CodeChangeStarted`); once what is applied is what the build renders it
+  is done (`CodeChangeFinished`). A failed apply is tried again 3 times,
+  then it halts (`CodeChangeHalted`) until a newer build renders it
+  otherwise or an update applies it (a `cluster retry` of other failures
+  tries it again too).
+- **Frozen.** `admin freeze` (platform, tenant, channel or tier) keeps every
+  code change from starting, like Kubernetes upgrades, release moves and the
+  daily add-on upgrade; `admin unfreeze --cluster <id>` or `--network <id>`
+  lets one through (a cluster let through takes its network along).
+- **Where to see it.** `cluster get` has a `Code Change:` line,
+  `network get` a `Rollout:` line, and `admin channel get` a `Code Changes:`
+  line with the clusters it keeps back and why.
+- **Safety net.** Stateful objects (VPC, subnets, NAT and internet
+  gateways, EIPs, route tables, the EKS cluster and node groups, KMS keys,
+  IAM roles and policies, the OIDC provider, log groups) are managed
+  without Delete while their owner exists. Only the owner's own deletion,
+  or an update that drops an object, switches it to full management first,
+  so the cloud resource goes with it. An object a code change drops, or one
+  deleted by hand, leaves its cloud resource in place.
+
 ## What a controller does
 
 - **Event to reconciler.** The object's labels (`cloud.cluster-vending.io/tenant`,

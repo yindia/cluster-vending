@@ -70,7 +70,13 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if rerr != nil {
 		return ctrl.Result{}, rerr
 	}
-	return next(&row.Resource, netreconcile.PendingStates(), netreconcile.StateImported, err), nil
+	res := next(&row.Resource, netreconcile.PendingStates(), netreconcile.StateImported, err)
+	if netreconcile.CodeChanging(row) && res.RequeueAfter > codeDelay {
+		// A code change waits for its tier of the rollout, which admits it
+		// without waking the network.
+		res.RequeueAfter = codeDelay
+	}
+	return res, nil
 }
 
 // bump makes the reconciler apply a spec that was edited on the object:

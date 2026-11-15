@@ -28,13 +28,27 @@ const UsageKind = "Usage"
 // A 409 is the Usage webhook refusing an object still in use: Crossplane
 // records the attempt and replays the delete once the user is gone
 // (replayDeletion), so it counts as done. Other errors are collected; the
-// remaining objects are still deleted.
+// remaining objects are still deleted. An object the platform protects
+// from deletion is switched to full management first (allowDelete): its
+// cloud resource goes too.
 func (c Client) Delete(ctx context.Context, refs []Ref) error {
+	return c.delete(ctx, refs, true)
+}
+
+// delete is Delete; release switches protected objects to full management
+// first, without it they are deleted as they are.
+func (c Client) delete(ctx context.Context, refs []Ref, release bool) error {
 	var errs []error
 	for i := len(refs) - 1; i >= 0; i-- {
 		r := refs[i]
 		if r.Kind == UsageKind {
 			continue
+		}
+		if release {
+			if err := c.allowDelete(ctx, r); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
 		err := c.Kube.Delete(ctx, r.empty())
 		switch {
@@ -48,10 +62,11 @@ func (c Client) Delete(ctx context.Context, refs []Ref) error {
 
 // DeleteDropped deletes one object a render no longer contains. Unlike
 // Delete it deletes Usages too: a dropped Usage must stop protecting its
-// object.
+// object. In an apply marked KeepDropped (a code change) a protected
+// object is deleted as it is: its cloud resource stays.
 func (c Client) DeleteDropped(ctx context.Context, r Ref) error {
 	if r.Kind != UsageKind {
-		return c.Delete(ctx, []Ref{r})
+		return c.delete(ctx, []Ref{r}, !keepsDropped(ctx))
 	}
 	if err := c.Kube.Delete(ctx, r.empty()); err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 		return fmt.Errorf("delete %s %s: %w", r.Kind, r.Name, err)

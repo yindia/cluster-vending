@@ -124,7 +124,16 @@ func rolloutInput(c *cloudv1alpha1.Cluster) []any {
 	return []any{c.Spec.ReleaseChannel, c.Spec.Tier, c.Spec.UpgradeMode, c.Spec.MaintenanceWindow,
 		rollout.SpecVersion(c), c.Annotations[cloudstore.AnnotationPaused], c.DeletionTimestamp,
 		c.Status.Phase, c.Status.Conditions, c.Status.CurrentKubernetesVersion, c.Status.Upgrade,
-		c.Status.Deprecations, c.Status.PlatformComponents, recordResult(c), c.Status.PlatformRelease, movePhase(c)}
+		c.Status.Deprecations, c.Status.PlatformComponents, recordResult(c), c.Status.PlatformRelease, movePhase(c), codePhase(c)}
+}
+
+// codePhase is where the cluster's code change is: one that turns
+// pending, starts, halts or ends changes the channel's code rollout.
+func codePhase(c *cloudv1alpha1.Cluster) string {
+	if c.Status.CodeChange == nil {
+		return ""
+	}
+	return c.Status.CodeChange.Phase
 }
 
 // movePhase is where the cluster's release move is: a move that starts,
@@ -164,6 +173,10 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// are automatic for Automatic clusters.
 	moves := rollout.ComputeMoves(in)
 	status.ReleaseMoves = &moves
+	// And its code changes (a new controller build rendering the
+	// clusters' objects differently), for every cluster of the channel.
+	code := rollout.ComputeCode(in)
+	status.CodeChanges = &code
 	meta.SetStatusCondition(&status.Conditions, plan.condition(ch.Generation))
 	if !equality.Semantic.DeepEqual(status, ch.Status) {
 		was := ch.Status

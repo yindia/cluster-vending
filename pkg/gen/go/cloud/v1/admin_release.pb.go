@@ -465,7 +465,11 @@ type ReleaseChannelInfo struct {
 	Pending *PendingRelease `protobuf:"bytes,13,opt,name=pending,proto3" json:"pending,omitempty"`
 	// The rollout of the channel's release to its clusters' components
 	// (release moves), tier 2 first; unset when none is planned.
-	ReleaseMoves  *ChangeRollout `protobuf:"bytes,14,opt,name=release_moves,json=releaseMoves,proto3" json:"release_moves,omitempty"`
+	ReleaseMoves *ChangeRollout `protobuf:"bytes,14,opt,name=release_moves,json=releaseMoves,proto3" json:"release_moves,omitempty"`
+	// The rollout of code changes (a new controller build rendering the
+	// clusters' objects differently), tier 2 first; unset when none is
+	// planned.
+	CodeChanges   *ChangeRollout `protobuf:"bytes,15,opt,name=code_changes,json=codeChanges,proto3" json:"code_changes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -598,11 +602,18 @@ func (x *ReleaseChannelInfo) GetReleaseMoves() *ChangeRollout {
 	return nil
 }
 
+func (x *ReleaseChannelInfo) GetCodeChanges() *ChangeRollout {
+	if x != nil {
+		return x.CodeChanges
+	}
+	return nil
+}
+
 // ChangeRollout is a rollout of something other than the Kubernetes minor
-// (a release move) to a channel's clusters, planned like it.
+// (release moves, code changes) to a channel's clusters, planned like it.
 type ChangeRollout struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// What the clusters move to: a release.
+	// What the clusters move to: a release; empty for code changes.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// The clusters (namespace/name) that may start now.
 	Admitted []string `protobuf:"bytes,2,rep,name=admitted,proto3" json:"admitted,omitempty"`
@@ -2199,7 +2210,7 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\x10ReleaseComponent\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12/\n" +
-	"\x06values\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06values\"\xa6\x05\n" +
+	"\x06values\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06values\"\xe2\x05\n" +
 	"\x12ReleaseChannelInfo\x122\n" +
 	"\achannel\x18\x01 \x01(\x0e2\x18.cloud.v1.ReleaseChannelR\achannel\x12\x1c\n" +
 	"\tpromotion\x18\x02 \x01(\tR\tpromotion\x12%\n" +
@@ -2218,7 +2229,8 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\vcreate_time\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x122\n" +
 	"\apending\x18\r \x01(\v2\x18.cloud.v1.PendingReleaseR\apending\x12<\n" +
-	"\rrelease_moves\x18\x0e \x01(\v2\x17.cloud.v1.ChangeRolloutR\freleaseMoves\"\xe9\x01\n" +
+	"\rrelease_moves\x18\x0e \x01(\v2\x17.cloud.v1.ChangeRolloutR\freleaseMoves\x12:\n" +
+	"\fcode_changes\x18\x0f \x01(\v2\x17.cloud.v1.ChangeRolloutR\vcodeChanges\"\xe9\x01\n" +
 	"\rChangeRollout\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x1a\n" +
 	"\badmitted\x18\x02 \x03(\tR\badmitted\x12\x18\n" +
@@ -2431,46 +2443,47 @@ var file_cloud_v1_admin_release_proto_depIdxs = []int32{
 	29, // 13: cloud.v1.ReleaseChannelInfo.create_time:type_name -> google.protobuf.Timestamp
 	8,  // 14: cloud.v1.ReleaseChannelInfo.pending:type_name -> cloud.v1.PendingRelease
 	6,  // 15: cloud.v1.ReleaseChannelInfo.release_moves:type_name -> cloud.v1.ChangeRollout
-	11, // 16: cloud.v1.ChangeRollout.tiers:type_name -> cloud.v1.RolloutTier
-	7,  // 17: cloud.v1.ChangeRollout.blocked:type_name -> cloud.v1.BlockedMember
-	29, // 18: cloud.v1.PendingRelease.since:type_name -> google.protobuf.Timestamp
-	29, // 19: cloud.v1.PendingRelease.until:type_name -> google.protobuf.Timestamp
-	27, // 20: cloud.v1.RolloutPolicy.soak_per_tier:type_name -> cloud.v1.RolloutPolicy.SoakPerTierEntry
-	29, // 21: cloud.v1.ChannelHistoryEntry.from:type_name -> google.protobuf.Timestamp
-	29, // 22: cloud.v1.ChannelHistoryEntry.to:type_name -> google.protobuf.Timestamp
-	31, // 23: cloud.v1.RolloutTier.tier:type_name -> cloud.v1.ClusterTier
-	11, // 24: cloud.v1.RolloutSummary.tiers:type_name -> cloud.v1.RolloutTier
-	31, // 25: cloud.v1.RolloutMember.tier:type_name -> cloud.v1.ClusterTier
-	0,  // 26: cloud.v1.RolloutMember.state:type_name -> cloud.v1.RolloutState
-	29, // 27: cloud.v1.RolloutMember.since:type_name -> google.protobuf.Timestamp
-	28, // 28: cloud.v1.Rollout.channel:type_name -> cloud.v1.ReleaseChannel
-	31, // 29: cloud.v1.Rollout.rollout_tier:type_name -> cloud.v1.ClusterTier
-	9,  // 30: cloud.v1.Rollout.policy:type_name -> cloud.v1.RolloutPolicy
-	12, // 31: cloud.v1.Rollout.summary:type_name -> cloud.v1.RolloutSummary
-	13, // 32: cloud.v1.Rollout.members:type_name -> cloud.v1.RolloutMember
-	15, // 33: cloud.v1.Rollout.plan:type_name -> cloud.v1.RolloutPlan
-	31, // 34: cloud.v1.RolloutPlan.rolling_tier:type_name -> cloud.v1.ClusterTier
-	16, // 35: cloud.v1.RolloutPlan.tiers:type_name -> cloud.v1.RolloutTierPlan
-	31, // 36: cloud.v1.RolloutTierPlan.tier:type_name -> cloud.v1.ClusterTier
-	1,  // 37: cloud.v1.RolloutTierPlan.state:type_name -> cloud.v1.RolloutTierState
-	29, // 38: cloud.v1.RolloutTierPlan.finished_time:type_name -> google.protobuf.Timestamp
-	29, // 39: cloud.v1.RolloutTierPlan.soak_until:type_name -> google.protobuf.Timestamp
-	17, // 40: cloud.v1.RolloutTierPlan.batches:type_name -> cloud.v1.RolloutBatch
-	18, // 41: cloud.v1.RolloutTierPlan.waits:type_name -> cloud.v1.RolloutPlanCluster
-	18, // 42: cloud.v1.RolloutBatch.clusters:type_name -> cloud.v1.RolloutPlanCluster
-	0,  // 43: cloud.v1.RolloutPlanCluster.state:type_name -> cloud.v1.RolloutState
-	29, // 44: cloud.v1.RolloutPlanCluster.since:type_name -> google.protobuf.Timestamp
-	2,  // 45: cloud.v1.ListReleasesResponse.releases:type_name -> cloud.v1.Release
-	2,  // 46: cloud.v1.GetReleaseResponse.release:type_name -> cloud.v1.Release
-	5,  // 47: cloud.v1.ListReleaseChannelsResponse.channels:type_name -> cloud.v1.ReleaseChannelInfo
-	28, // 48: cloud.v1.GetReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
-	5,  // 49: cloud.v1.GetReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
-	14, // 50: cloud.v1.GetReleaseChannelResponse.rollout:type_name -> cloud.v1.Rollout
-	51, // [51:51] is the sub-list for method output_type
-	51, // [51:51] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	6,  // 16: cloud.v1.ReleaseChannelInfo.code_changes:type_name -> cloud.v1.ChangeRollout
+	11, // 17: cloud.v1.ChangeRollout.tiers:type_name -> cloud.v1.RolloutTier
+	7,  // 18: cloud.v1.ChangeRollout.blocked:type_name -> cloud.v1.BlockedMember
+	29, // 19: cloud.v1.PendingRelease.since:type_name -> google.protobuf.Timestamp
+	29, // 20: cloud.v1.PendingRelease.until:type_name -> google.protobuf.Timestamp
+	27, // 21: cloud.v1.RolloutPolicy.soak_per_tier:type_name -> cloud.v1.RolloutPolicy.SoakPerTierEntry
+	29, // 22: cloud.v1.ChannelHistoryEntry.from:type_name -> google.protobuf.Timestamp
+	29, // 23: cloud.v1.ChannelHistoryEntry.to:type_name -> google.protobuf.Timestamp
+	31, // 24: cloud.v1.RolloutTier.tier:type_name -> cloud.v1.ClusterTier
+	11, // 25: cloud.v1.RolloutSummary.tiers:type_name -> cloud.v1.RolloutTier
+	31, // 26: cloud.v1.RolloutMember.tier:type_name -> cloud.v1.ClusterTier
+	0,  // 27: cloud.v1.RolloutMember.state:type_name -> cloud.v1.RolloutState
+	29, // 28: cloud.v1.RolloutMember.since:type_name -> google.protobuf.Timestamp
+	28, // 29: cloud.v1.Rollout.channel:type_name -> cloud.v1.ReleaseChannel
+	31, // 30: cloud.v1.Rollout.rollout_tier:type_name -> cloud.v1.ClusterTier
+	9,  // 31: cloud.v1.Rollout.policy:type_name -> cloud.v1.RolloutPolicy
+	12, // 32: cloud.v1.Rollout.summary:type_name -> cloud.v1.RolloutSummary
+	13, // 33: cloud.v1.Rollout.members:type_name -> cloud.v1.RolloutMember
+	15, // 34: cloud.v1.Rollout.plan:type_name -> cloud.v1.RolloutPlan
+	31, // 35: cloud.v1.RolloutPlan.rolling_tier:type_name -> cloud.v1.ClusterTier
+	16, // 36: cloud.v1.RolloutPlan.tiers:type_name -> cloud.v1.RolloutTierPlan
+	31, // 37: cloud.v1.RolloutTierPlan.tier:type_name -> cloud.v1.ClusterTier
+	1,  // 38: cloud.v1.RolloutTierPlan.state:type_name -> cloud.v1.RolloutTierState
+	29, // 39: cloud.v1.RolloutTierPlan.finished_time:type_name -> google.protobuf.Timestamp
+	29, // 40: cloud.v1.RolloutTierPlan.soak_until:type_name -> google.protobuf.Timestamp
+	17, // 41: cloud.v1.RolloutTierPlan.batches:type_name -> cloud.v1.RolloutBatch
+	18, // 42: cloud.v1.RolloutTierPlan.waits:type_name -> cloud.v1.RolloutPlanCluster
+	18, // 43: cloud.v1.RolloutBatch.clusters:type_name -> cloud.v1.RolloutPlanCluster
+	0,  // 44: cloud.v1.RolloutPlanCluster.state:type_name -> cloud.v1.RolloutState
+	29, // 45: cloud.v1.RolloutPlanCluster.since:type_name -> google.protobuf.Timestamp
+	2,  // 46: cloud.v1.ListReleasesResponse.releases:type_name -> cloud.v1.Release
+	2,  // 47: cloud.v1.GetReleaseResponse.release:type_name -> cloud.v1.Release
+	5,  // 48: cloud.v1.ListReleaseChannelsResponse.channels:type_name -> cloud.v1.ReleaseChannelInfo
+	28, // 49: cloud.v1.GetReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	5,  // 50: cloud.v1.GetReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
+	14, // 51: cloud.v1.GetReleaseChannelResponse.rollout:type_name -> cloud.v1.Rollout
+	52, // [52:52] is the sub-list for method output_type
+	52, // [52:52] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_release_proto_init() }

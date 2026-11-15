@@ -81,6 +81,10 @@ func describeNetwork(w io.Writer, n *cloudv1.Network) error {
 	if p := st.GetPause(); p != nil {
 		kv = append(kv, [2]string{"Paused", pauseLine(p)})
 	}
+	// A network's only rollout is its code changes.
+	if line := codeChangeLine(st.GetCodeChange()); line != "" {
+		kv = append(kv, [2]string{"Rollout", "code change: " + line})
+	}
 	kv = append(kv, [2]string{"Message", oneLine(st.GetMessage())}, [2]string{"Age", age(n.GetCreateTime())})
 	if err := fields(w, kv); err != nil {
 		return err

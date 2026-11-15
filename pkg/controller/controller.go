@@ -70,6 +70,9 @@ var (
 	// upgradeDelay is how soon a cluster with an upgrade in progress is
 	// looked at again: each step is read as AWS and Helm report it.
 	upgradeDelay = 30 * time.Second
+	// codeDelay: a code change waits its turn in the rollout, or is being
+	// applied; the rollout's admissions wake no one.
+	codeDelay = time.Minute
 	// resyncDelay: settled. The safety net under the watches.
 	resyncDelay = 10 * time.Minute
 )

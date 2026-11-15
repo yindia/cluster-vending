@@ -240,20 +240,21 @@ func onlyAWS(provider model.Provider) error {
 // rowMeta is what a row has and its kind's spec does not, as stored in
 // AnnotationRow.
 type rowMeta struct {
-	ETag               string    `json:"etag"`
-	State              string    `json:"state,omitempty"`
-	Generation         int64     `json:"generation,omitempty"`
-	ObservedGeneration int64     `json:"observedGeneration,omitempty"`
-	AppliedGeneration  int64     `json:"appliedGeneration,omitempty"`
-	RenderVersion      int64     `json:"renderVersion,omitempty"`
-	Provider           string    `json:"provider,omitempty"`
-	CreateRequestID    *string   `json:"createRequestID,omitempty"`
-	ExternalID         *string   `json:"externalID,omitempty"`
-	Imported           bool      `json:"imported,omitempty"`
-	DeleteForce        bool      `json:"deleteForce,omitempty"`
-	ResolvedGeneration int64     `json:"resolvedGeneration,omitempty"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	ETag               string            `json:"etag"`
+	State              string            `json:"state,omitempty"`
+	Generation         int64             `json:"generation,omitempty"`
+	ObservedGeneration int64             `json:"observedGeneration,omitempty"`
+	AppliedGeneration  int64             `json:"appliedGeneration,omitempty"`
+	RenderVersion      int64             `json:"renderVersion,omitempty"`
+	RenderHashes       map[string]string `json:"renderHashes,omitempty"`
+	Provider           string            `json:"provider,omitempty"`
+	CreateRequestID    *string           `json:"createRequestID,omitempty"`
+	ExternalID         *string           `json:"externalID,omitempty"`
+	Imported           bool              `json:"imported,omitempty"`
+	DeleteForce        bool              `json:"deleteForce,omitempty"`
+	ResolvedGeneration int64             `json:"resolvedGeneration,omitempty"`
+	CreatedAt          time.Time         `json:"createdAt"`
+	UpdatedAt          time.Time         `json:"updatedAt"`
 }
 
 // metaOf is the row annotation of obj: the zero value for an object that
@@ -267,13 +268,15 @@ func metaOf(obj client.Object) rowMeta {
 // resourceMeta is the row annotation of a resource.
 func resourceMeta(r *model.Resource) rowMeta {
 	return rowMeta{ETag: r.ETag, State: r.State, Generation: r.Generation, ObservedGeneration: r.ObservedGeneration,
-		AppliedGeneration: r.AppliedGeneration, RenderVersion: r.RenderVersion, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		AppliedGeneration: r.AppliedGeneration, RenderVersion: r.RenderVersion, RenderHashes: r.RenderHashes,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
 // into copies the row annotation's shared columns onto a resource.
 func (m rowMeta) into(r *model.Resource) {
 	r.ETag, r.State, r.Generation, r.ObservedGeneration = m.ETag, m.State, m.Generation, m.ObservedGeneration
 	r.AppliedGeneration, r.RenderVersion, r.CreatedAt, r.UpdatedAt = m.AppliedGeneration, m.RenderVersion, m.CreatedAt, m.UpdatedAt
+	r.RenderHashes = m.RenderHashes
 }
 
 // annotate sets or, for an empty value, removes annotations of obj.

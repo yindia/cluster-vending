@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
+	xpmanaged "github.com/yindia/cluster-vending/pkg/crossplane/managed"
 )
 
 // Flow log defaults (cloud.v1 NetworkFlowLogs).
@@ -140,7 +141,7 @@ func (b networkBuilder) flowLogPolicy() string {
 // RetainAnnotation marks an imported object whose cloud resource others
 // use too (a log group or role shared with other VPCs): a takeover manages
 // it without Delete, so deleting the network leaves it in the cloud.
-const RetainAnnotation = "cluster-vending.io/retain"
+const RetainAnnotation = xpmanaged.RetainAnnotation
 
 // PolicyNoDelete owns a cloud resource except for deleting it.
 var PolicyNoDelete = xpv2.ManagementPolicies{xpv2.ManagementActionObserve, xpv2.ManagementActionCreate,

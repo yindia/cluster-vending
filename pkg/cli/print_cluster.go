@@ -136,6 +136,9 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	if line := rolloutLine(st.GetRollout(), st.GetCurrentKubernetesVersion()); line != "" {
 		kv = append(kv, [2]string{"Rollout", line})
 	}
+	if line := codeChangeLine(st.GetCodeChange()); line != "" {
+		kv = append(kv, [2]string{"Code Change", line})
+	}
 	kv = append(kv, [2]string{"Maintenance", maintenance.Describe(c.GetSpec().GetMaintenanceWindow())})
 	if u := st.GetUpgrade(); u != nil {
 		kv = append(kv, [2]string{"Upgrade", upgradeLine(u)})

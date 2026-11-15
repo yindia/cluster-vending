@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// CodeChange is a change of what the platform renders for a cluster or a
+// network that nobody asked for: a new controller build renders its
+// objects differently. It is not applied at once: it is a member of its
+// channel's rollout (tier 2 first, at most max_in_progress at once, a soak
+// between tiers, halted past max_failed, maintenance windows, pauses and
+// freezes), the way Kubernetes upgrades and release moves are. A network
+// takes the most careful tier of its clusters and goes before them.
+message CodeChange {
+  // Where it is.
+  CodeChangePhase phase = 1;
+  // What changes, for people: "3 objects change (1 added)".
+  string summary = 2;
+  // How many objects change.
+  int32 objects = 3;
+  // What it waits for, or what failed.
+  string message = 4;
+  // When it was applied first, and when it was applied in full.
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp finish_time = 6;
+  // Failed applies so far; it halts after the last one is recovered.
+  int32 failures = 7;
+  // The render it applies (a digest of its objects' fingerprints): a
+  // halted change is tried again once a newer build renders otherwise.
+  string target = 8;
+}
+
+// CodeChangePhase is where a code change is.
+enum CodeChangePhase {
+  CODE_CHANGE_PHASE_UNSPECIFIED = 0;
+  // It waits its turn in the rollout (or a freeze, a pause, a window).
+  CODE_CHANGE_PHASE_PENDING = 1;
+  // It is being applied.
+  CODE_CHANGE_PHASE_APPLYING = 2;
+  // It was applied: what is applied is what the build renders.
+  CODE_CHANGE_PHASE_DONE = 3;
+  // Its applies kept failing: nothing more is tried until a newer build
+  // renders it otherwise or an update applies it.
+  CODE_CHANGE_PHASE_HALTED = 4;
+}

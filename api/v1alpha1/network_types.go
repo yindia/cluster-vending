@@ -248,6 +248,11 @@ type NetworkStatus struct {
 	// kept as a record after the takeover.
 	// +optional
 	ImportPlan *ImportPlan `json:"importPlan,omitempty"`
+	// codeChange is a change of what the platform renders for the network
+	// (a new controller build), applied in the tier of its most careful
+	// cluster, before its clusters.
+	// +optional
+	CodeChange *CodeChange `json:"codeChange,omitempty"`
 	// inventory lists every Crossplane object of the network (VPC, subnets,
 	// NAT gateways, routes, ...) with its cloud identifier, in creation
 	// order.

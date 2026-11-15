@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,11 +29,15 @@ func (s *Reconciler) Apply(ctx context.Context, row *model.Network, a *model.Clo
 	if err != nil {
 		return fault.New(fault.Invalid, "spec.layout: "+err.Error())
 	}
+	rendered, err := s.fingerprints(set)
+	if err != nil {
+		return err
+	}
 	res, err := s.ApplySet(ctx, row, a, set)
 	if err != nil || !res.Complete() {
 		return err // held back: not applied in full yet
 	}
-	return s.MarkApplied(ctx, row)
+	return s.MarkApplied(ctx, row, rendered)
 }
 
 // ApplySet applies set as the network's objects (sequence.Engine: what
@@ -63,21 +68,26 @@ func (s *Reconciler) ApplySet(ctx context.Context, row *model.Network, a *model.
 }
 
 // MarkApplied records that every object of the row's generation was
-// applied without error, with this build's renderer.
-func (s *Reconciler) MarkApplied(ctx context.Context, row *model.Network) error {
-	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion {
+// applied without error, with this build's renderer, and the fingerprints
+// of what was applied (rendered; nil keeps those recorded).
+func (s *Reconciler) MarkApplied(ctx context.Context, row *model.Network, rendered map[string]string) error {
+	if rendered == nil {
+		rendered = row.RenderHashes
+	}
+	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion && maps.Equal(row.RenderHashes, rendered) {
 		return nil
 	}
-	before, version := row.AppliedGeneration, row.RenderVersion
-	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
+	before, version, hashes := row.AppliedGeneration, row.RenderVersion, row.RenderHashes
+	row.AppliedGeneration, row.RenderVersion, row.RenderHashes = row.Generation, crossplaneaws.RenderVersion, rendered
 	err := s.deps.Store.Networks().Record(ctx, row)
 	if errors.Is(err, repository.ErrConflict) {
 		// A call changed the row while it was applied: it is behind again
 		// (calls only store), and the next pass applies it as it is now.
-		row.AppliedGeneration, row.RenderVersion = before, version
+		row.AppliedGeneration, row.RenderVersion, row.RenderHashes = before, version, hashes
 		return nil
 	}
 	if err != nil {
+		row.AppliedGeneration, row.RenderVersion, row.RenderHashes = before, version, hashes
 		return fault.New(fault.Internal, "could not record the applied generation: "+err.Error())
 	}
 	return nil

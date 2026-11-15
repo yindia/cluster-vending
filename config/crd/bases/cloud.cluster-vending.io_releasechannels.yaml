@@ -128,6 +128,103 @@ spec:
           status:
             description: ReleaseChannelStatus is written by the controller.
             properties:
+              codeChanges:
+                description: |-
+                  codeChanges is the rollout of code changes (a new controller build
+                  rendering the clusters' objects differently) to the channel's
+                  clusters, planned like releaseMoves; its tier is where it is, which
+                  the networks of the channel's clusters wait for.
+                properties:
+                  admitted:
+                    description: admitted are the clusters (namespace/name) that may
+                      start moving now.
+                    items:
+                      type: string
+                    maxItems: 20
+                    type: array
+                  blocked:
+                    description: blocked are clusters kept back by their own checks,
+                      with why.
+                    items:
+                      description: BlockedCluster is a cluster the rollout passes
+                        over, and why.
+                      properties:
+                        cluster:
+                          description: Cluster is namespace/name.
+                          type: string
+                        gate:
+                          description: |-
+                            Gate is the code of the first reason (MANUAL, MAINTENANCE_WINDOW,
+                            DEPRECATIONS, ...).
+                          type: string
+                        message:
+                          description: Message is that reason, for the cluster's users.
+                          type: string
+                      required:
+                      - cluster
+                      - gate
+                      type: object
+                    maxItems: 20
+                    type: array
+                  done:
+                    description: 'done: every member runs the release.'
+                    type: boolean
+                  halted:
+                    description: |-
+                      halted: more clusters of a tier failed than the policy's maxFailed;
+                      none starts until one is retried.
+                    type: boolean
+                  members:
+                    description: members count the clusters of each tier by state.
+                    items:
+                      description: RolloutTierCount counts one tier's clusters by
+                        rollout state.
+                      properties:
+                        blocked:
+                          format: int32
+                          type: integer
+                        failed:
+                          format: int32
+                          type: integer
+                        inProgress:
+                          format: int32
+                          type: integer
+                        pending:
+                          format: int32
+                          type: integer
+                        succeeded:
+                          format: int32
+                          type: integer
+                        tier:
+                          description: |-
+                            ClusterTier is how sensitive a cluster is. Within a release channel a
+                            release reaches Tier2 clusters first, then Tier1, then Tier0. Stored
+                            only for now: nothing acts on it yet.
+                          enum:
+                          - Tier0
+                          - Tier1
+                          - Tier2
+                          type: string
+                      required:
+                      - tier
+                      type: object
+                    type: array
+                  release:
+                    description: release is the release the clusters move to.
+                    type: string
+                  tier:
+                    description: |-
+                      tier is the tier the rollout is at (Tier2, then Tier1, then Tier0);
+                      unset when done.
+                    enum:
+                    - Tier0
+                    - Tier1
+                    - Tier2
+                    type: string
+                  waiting:
+                    description: waiting says why no (more) cluster starts.
+                    type: string
+                type: object
               conditions:
                 description: 'Conditions: Offering.'
                 items:
@@ -328,6 +425,15 @@ spec:
                     type: array
                   release:
                     description: release is the release the clusters move to.
+                    type: string
+                  tier:
+                    description: |-
+                      tier is the tier the rollout is at (Tier2, then Tier1, then Tier0);
+                      unset when done.
+                    enum:
+                    - Tier0
+                    - Tier1
+                    - Tier2
                     type: string
                   waiting:
                     description: waiting says why no (more) cluster starts.

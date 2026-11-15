@@ -392,6 +392,12 @@ type ReleaseChannelStatus struct {
 	// the others wait.
 	// +optional
 	ReleaseMoves *ChannelReleaseMoves `json:"releaseMoves,omitempty"`
+	// codeChanges is the rollout of code changes (a new controller build
+	// rendering the clusters' objects differently) to the channel's
+	// clusters, planned like releaseMoves; its tier is where it is, which
+	// the networks of the channel's clusters wait for.
+	// +optional
+	CodeChanges *ChannelReleaseMoves `json:"codeChanges,omitempty"`
 	// History: the releases the channel offered, newest first, at most 20.
 	// +optional
 	// +kubebuilder:validation:MaxItems=20

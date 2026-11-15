@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/access.proto";
 import "cloud/v1/aws.proto";
+import "cloud/v1/code_change.proto";
 import "cloud/v1/component.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
@@ -485,6 +486,12 @@ message ClusterStatus {
   // run (current) to the one its channel offers (target), one component
   // at a time; set by the controller when component upgrades are on.
   ClusterReleaseMove release_move = 50;
+
+  // code_change is a change of what the platform renders for the cluster
+  // (a new controller build), applied in turn by its channel's rollout;
+  // unset when nothing was rendered differently since the cluster was
+  // last applied.
+  CodeChange code_change = 51;
 }
 
 // ClusterRollout is one automatic upgrade of a cluster, as the rollout

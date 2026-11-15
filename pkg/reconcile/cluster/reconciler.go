@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -153,6 +154,10 @@ func (s *Reconciler) Base(row *model.Cluster, a *model.CloudAccount) crossplanea
 // once the whole set is; until then the cluster is applied again
 // (advance).
 func (s *Reconciler) Apply(ctx context.Context, row *model.Cluster, a *model.CloudAccount, plan crossplaneaws.ClusterPlan) error {
+	rendered, err := s.fingerprints(plan)
+	if err != nil {
+		return err
+	}
 	name, retiring, err := s.NodeGroupName(ctx, row, plan)
 	if err != nil {
 		s.logger().ErrorContext(ctx, "choose node group", "cluster_id", row.ID, "error", err)
@@ -187,7 +192,7 @@ func (s *Reconciler) Apply(ctx context.Context, row *model.Cluster, a *model.Clo
 		// again (advance) until complete.
 		return nil
 	}
-	return s.markApplied(ctx, row)
+	return s.markApplied(ctx, row, rendered)
 }
 
 // kept selects the recorded objects that stay although the set applied
@@ -208,21 +213,26 @@ func (s *Reconciler) kept(retiring []client.Object) (func(sequence.Entry) bool, 
 }
 
 // markApplied records that every object of the row's generation was
-// applied without error, with this build's renderer.
-func (s *Reconciler) markApplied(ctx context.Context, row *model.Cluster) error {
-	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion {
+// applied without error, with this build's renderer, and the fingerprints
+// of what was applied (rendered; nil keeps those recorded).
+func (s *Reconciler) markApplied(ctx context.Context, row *model.Cluster, rendered map[string]string) error {
+	if rendered == nil {
+		rendered = row.RenderHashes
+	}
+	if row.AppliedGeneration == row.Generation && row.RenderVersion == crossplaneaws.RenderVersion && maps.Equal(row.RenderHashes, rendered) {
 		return nil
 	}
-	before, version := row.AppliedGeneration, row.RenderVersion
-	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
+	before, version, hashes := row.AppliedGeneration, row.RenderVersion, row.RenderHashes
+	row.AppliedGeneration, row.RenderVersion, row.RenderHashes = row.Generation, crossplaneaws.RenderVersion, rendered
 	err := s.deps.Store.Clusters().Record(ctx, row)
 	if errors.Is(err, repository.ErrConflict) {
 		// A call changed the row while it was applied: it is behind again
 		// (calls only store), and the next pass applies it as it is now.
-		row.AppliedGeneration, row.RenderVersion = before, version
+		row.AppliedGeneration, row.RenderVersion, row.RenderHashes = before, version, hashes
 		return nil
 	}
 	if err != nil {
+		row.AppliedGeneration, row.RenderVersion, row.RenderHashes = before, version, hashes
 		return fault.New(fault.Internal, "could not record the applied generation: "+err.Error())
 	}
 	return nil

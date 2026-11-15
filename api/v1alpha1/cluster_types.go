@@ -1050,6 +1050,10 @@ type ClusterStatus struct {
 	// channel offers, one at a time (automatic for Automatic clusters).
 	// +optional
 	ReleaseMove *ClusterReleaseMove `json:"releaseMove,omitempty"`
+	// codeChange is a change of what the platform renders for the cluster
+	// (a new controller build), applied in turn by its channel's rollout.
+	// +optional
+	CodeChange *CodeChange `json:"codeChange,omitempty"`
 	// recommendations summarises the usage recorded to recommend resource
 	// requests (ListClusterRecommendations).
 	// +optional

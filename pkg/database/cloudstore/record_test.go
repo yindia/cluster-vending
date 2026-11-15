@@ -109,6 +109,38 @@ func TestWritesOfAStaleRowAreRefused(t *testing.T) {
 	}
 }
 
+// The fingerprints of what was applied are recorded with the row and read
+// back, for clusters and networks, without a new etag.
+func TestRecordKeepsTheRenderHashes(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	c := w.cluster(t, "prod")
+	row, err := w.s.Clusters().Get(ctx, "acme", c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	etag, hashes := row.ETag, map[string]string{"ec2/VPC/tenant-acme/x": "0123456789abcdef"}
+	row.RenderHashes = hashes
+	if err := w.s.Clusters().Record(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.s.Clusters().Get(ctx, "acme", c.ID)
+	if err != nil || got.ETag != etag || got.RenderHashes["ec2/VPC/tenant-acme/x"] != "0123456789abcdef" {
+		t.Fatalf("cluster = etag %s hashes %v (%v)", got.ETag, got.RenderHashes, err)
+	}
+	n, err := w.s.Networks().Get(ctx, "acme", w.network.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.RenderHashes = hashes
+	if err := w.s.Networks().Record(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := w.s.Networks().Get(ctx, "acme", w.network.ID); err != nil || len(got.RenderHashes) != 1 {
+		t.Fatalf("network hashes %v (%v)", got.RenderHashes, err)
+	}
+}
+
 // Networks keep the same rule.
 func TestNetworkRecordKeepsTheETag(t *testing.T) {
 	w := newWorld(t)

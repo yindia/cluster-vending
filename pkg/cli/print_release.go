@@ -218,6 +218,9 @@ func describeChannel(w io.Writer, res *cloudv1.GetReleaseChannelResponse, wide b
 	if m := c.GetReleaseMoves(); m != nil {
 		kv = append(kv, [2]string{"Release Moves", changeRolloutLine(m)})
 	}
+	if m := c.GetCodeChanges(); m != nil {
+		kv = append(kv, [2]string{"Code Changes", changeRolloutLine(m)})
+	}
 	if err := fields(w, kv); err != nil {
 		return err
 	}
@@ -225,6 +228,9 @@ func describeChannel(w io.Writer, res *cloudv1.GetReleaseChannelResponse, wide b
 		return err
 	}
 	if err := keptBack(w, "Release Moves Kept Back", c.GetReleaseMoves()); err != nil {
+		return err
+	}
+	if err := keptBack(w, "Code Changes Kept Back", c.GetCodeChanges()); err != nil {
 		return err
 	}
 	history := make([][]string, 0, len(c.GetHistory()))
@@ -320,8 +326,9 @@ func describePlan(w io.Writer, r *cloudv1.Rollout, wide bool) error {
 	return section(w, "Clusters", header, rows)
 }
 
-// changeRolloutLine is a rollout of release moves in one line: "2026-11-a:
-// Rolling, 3/7 done; waiting: tier 1 soaks; 1 kept back".
+// changeRolloutLine is a rollout of release moves (or of code changes,
+// which have no target) in one line: "2026-11-a: Rolling, 3/7 done;
+// waiting: tier 1 soaks; 1 kept back".
 func changeRolloutLine(m *cloudv1.ChangeRollout) string {
 	var done, total int32
 	for _, t := range m.GetTiers() {
@@ -335,7 +342,10 @@ func changeRolloutLine(m *cloudv1.ChangeRollout) string {
 	case m.GetDone():
 		state = "Done"
 	}
-	line := fmt.Sprintf("%s: %s, %d/%d done", orNone(m.GetTarget()), state, done, total)
+	line := fmt.Sprintf("%s, %d/%d done", state, done, total)
+	if m.GetTarget() != "" {
+		line = m.GetTarget() + ": " + line
+	}
 	if w := m.GetWaiting(); w != "" {
 		line += "; waiting: " + oneLine(w)
 	}

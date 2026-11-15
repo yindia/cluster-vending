@@ -546,7 +546,7 @@ func TestStaleApplyDoesNotHideAChange(t *testing.T) {
 	if err := w.store.Clusters().Update(ctx, changed); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.svc.markApplied(ctx, seen); err != nil {
+	if err := w.svc.markApplied(ctx, seen, nil); err != nil {
 		t.Errorf("markApplied on a changed row: %v", err)
 	}
 	if got := w.cluster(t); got.AppliedGeneration >= got.Generation {

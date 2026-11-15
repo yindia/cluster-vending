@@ -44,7 +44,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	ctx = withTeardownHolder(reconcile.WithNotes(ctx))
+	ctx = reconcile.WithCodeHolder(withTeardownHolder(reconcile.WithNotes(ctx)))
 	// A pause asked with an until ends by itself: its scope is dropped,
 	// and when none is left the providers act on the resources again.
 	if row.PauseLapsed {
@@ -170,7 +170,7 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 		}
 		// Observed only, until TakeOverCluster. Counted as applied with this
 		// renderer, or a renderer change would list it as pending forever.
-		return s.markApplied(ctx, row)
+		return s.markApplied(ctx, row, nil)
 	}
 	if unresolved(row) {
 		// The call stored the generation without looking at the cloud: the

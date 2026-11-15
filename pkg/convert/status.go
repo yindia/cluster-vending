@@ -31,6 +31,7 @@ func NetworkStatusInto(p *cloudv1.NetworkStatus, state string, at metav1.Time, i
 	into.Clusters = unique(p.GetClusterIds())
 	into.ImportPlan = importPlan(p.GetImport())
 	into.RecentEvents = recentEvents(p.GetRecentEvents())
+	into.CodeChange = CodeChangeToAPI(p.GetCodeChange())
 }
 
 // ClusterStatusInto is NetworkStatusInto for a cluster: phase, message,
@@ -53,6 +54,7 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.Upgrade = upgrade(p.GetUpgrade())
 	into.PlatformRelease = p.GetPlatformRelease()
 	into.ReleaseMove = ReleaseMoveToAPI(p.GetReleaseMove())
+	into.CodeChange = CodeChangeToAPI(p.GetCodeChange())
 	into.Kubernetes = clusterKubernetes(p.GetKubernetes())
 	into.PlatformComponents = platformComponents(p.GetPlatformComponents())
 	into.RecentEvents = recentEvents(p.GetRecentEvents())

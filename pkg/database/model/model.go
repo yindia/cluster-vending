@@ -67,6 +67,11 @@ type Resource struct {
 	// target, the controller applies it again, so renderer changes
 	// roll out resource by resource.
 	RenderVersion int64
+	// RenderHashes are the fingerprints of the objects last applied
+	// (sequence.Fingerprints): a render that differs is a code change, which
+	// the resource's rollout applies in turn. Nil for a resource applied by
+	// a build that did not record them: its next render is taken as applied.
+	RenderHashes map[string]string
 	// ETag is the user's version of the resource: it changes when what was
 	// asked for changes (an Update: spec, labels, display name, a new
 	// generation, a delete), not when the controller records its progress

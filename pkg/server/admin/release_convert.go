@@ -163,6 +163,7 @@ func ChannelFromAPI(ch *cloudv1alpha1.ReleaseChannel, detail bool) *cloudv1.Rele
 		out.Pending = &cloudv1.PendingRelease{Release: p.Release, Since: timeOf(&p.Since), Until: timeOf(&p.Until)}
 	}
 	out.ReleaseMoves = ChangeRolloutFromAPI(ch.Status.ReleaseMoves)
+	out.CodeChanges = ChangeRolloutFromAPI(ch.Status.CodeChanges)
 	if detail {
 		for _, h := range ch.Status.History {
 			out.History = append(out.History, &cloudv1.ChannelHistoryEntry{Release: h.Release, From: timeOf(&h.From),

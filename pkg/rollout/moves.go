@@ -38,16 +38,25 @@ func ComputeMoves(in Input) cloudv1alpha1.ChannelReleaseMoves {
 		return out
 	}
 	m := memberInputs{channel: ch.Name, holds: in.Holds, now: in.Now}
+	return planChanges(out, ch, policy, in, func(c *cloudv1alpha1.Cluster) (upgrade.Member, *upgrade.Gate, bool) {
+		return m.moveMember(c, out.Release)
+	})
+}
+
+// planChanges plans a rollout of changes other than the Kubernetes minor
+// (release moves, code changes) into out: member says each cluster's
+// place in it (false: not a member), the planner (upgrade.Plan) the rest.
+func planChanges(out cloudv1alpha1.ChannelReleaseMoves, ch *cloudv1alpha1.ReleaseChannel, policy upgrade.Policy, in Input,
+	member func(*cloudv1alpha1.Cluster) (upgrade.Member, *upgrade.Gate, bool)) cloudv1alpha1.ChannelReleaseMoves {
 	var members []upgrade.Member
 	for i := range in.Clusters {
-		c := &in.Clusters[i]
-		member, gate, ok := m.moveMember(c, out.Release)
+		m, gate, ok := member(&in.Clusters[i])
 		if !ok {
 			continue
 		}
-		members = append(members, member)
+		members = append(members, m)
 		if gate != nil && len(out.Blocked) < cloudv1alpha1.MaxRolloutClusters {
-			out.Blocked = append(out.Blocked, cloudv1alpha1.BlockedCluster{Cluster: member.ID, Gate: string(gate.Code), Message: gate.Message})
+			out.Blocked = append(out.Blocked, cloudv1alpha1.BlockedCluster{Cluster: m.ID, Gate: string(gate.Code), Message: gate.Message})
 		}
 	}
 	if len(members) == 0 {
@@ -59,6 +68,9 @@ func ComputeMoves(in Input) cloudv1alpha1.ChannelReleaseMoves {
 		d.Start, d.Waiting = nil, "the channel is paused (spec.paused): no cluster starts"
 	}
 	out.Admitted, out.Waiting, out.Halted, out.Done = capped(d.Start), d.Waiting, d.Halted, d.Done
+	if !d.Done {
+		out.Tier = ClusterTier(d.Tier)
+	}
 	for _, tier := range []upgrade.Tier{upgrade.Tier2, upgrade.Tier1, upgrade.Tier0} {
 		c := d.Tiers[tier]
 		if c.Pending+c.InProgress+c.Succeeded+c.Failed+c.Blocked == 0 {

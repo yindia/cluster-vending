@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -56,7 +57,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	}
 	// What changed in a pass is reported as events of the network's
 	// object (events.go), once: when its status is recorded.
-	ctx = reconcile.WithNotes(ctx)
+	ctx = reconcile.WithCodeHolder(reconcile.WithNotes(ctx))
 	// A pause asked with an until ends by itself (cluster reconcile).
 	if row.PauseLapsed {
 		target := model.PauseTarget{NetworkID: row.ID}
@@ -99,8 +100,9 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	return errors.Join(failed, s.settle(ctx, row, failed))
 }
 
-// moveOn applies a network again while its generation or renderer version
-// is behind.
+// moveOn applies a network again while its generation is behind, or for
+// a code change (codeChange: a new build renders it differently, or its
+// renderer version is behind) once its tier of the rollout admits it.
 //
 // A network whose generation is applied is applied once more when
 // recorded objects were deleted from the management cluster and may be
@@ -117,7 +119,9 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		return fmt.Errorf("keep what the import left: %w", err)
 	}
 	var repair []model.ManagedResource
-	if row.AppliedGeneration >= row.Generation && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID) {
+	var code bool
+	var rendered map[string]string
+	if row.AppliedGeneration >= row.Generation {
 		if row.State == StateBlocked || Discovering(row) {
 			return nil
 		}
@@ -125,8 +129,21 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 		if err != nil {
 			return err
 		}
-		if repair, err = s.deps.Repairable(ctx, records); err != nil || len(repair) == 0 {
+		if repair, err = s.deps.Repairable(ctx, records); err != nil {
 			return err
+		}
+		if len(repair) == 0 {
+			imported := row.State == StateImported || StoredImport(row) != nil
+			switch {
+			case imported && !s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID):
+				return nil
+			case !imported:
+				// Applied again only for a code change (a new build renders
+				// it differently), in its tier of the rollout.
+				if code, rendered, err = s.codeChange(ctx, row); err != nil || !code {
+					return err
+				}
+			}
 		}
 	}
 	// Imported (also after takeover): its objects are rendered from the
@@ -163,7 +180,7 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 			}
 			s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerNetwork, ID: row.ID}, repair)
 		}
-		return s.MarkApplied(ctx, row)
+		return s.MarkApplied(ctx, row, nil)
 	}
 	if StoredImport(row) != nil {
 		// Taken over: the set its import discovered, applied as owned, with
@@ -173,13 +190,22 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Network) error {
 			return fmt.Errorf("apply: %w", err)
 		}
 		s.deps.LogRepaired(ctx, reconcile.Owner{TenantID: row.TenantID, Kind: model.OwnerNetwork, ID: row.ID}, repair)
-		return s.MarkApplied(ctx, row)
+		return s.MarkApplied(ctx, row, nil)
 	}
 	spec, err := SpecOf(row)
 	if err != nil {
 		return err
 	}
-	if err := s.Reapply(reconcile.Repairing(ctx, repair), row, spec); err != nil {
+	applyCtx := reconcile.Repairing(ctx, repair)
+	if code {
+		// What a new build no longer renders keeps its cloud resource.
+		applyCtx = managed.KeepDropped(applyCtx)
+	}
+	err = s.Reapply(applyCtx, row, spec)
+	if code {
+		s.codeApplied(ctx, row, rendered, err)
+	}
+	if err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}
 	if len(repair) > 0 {

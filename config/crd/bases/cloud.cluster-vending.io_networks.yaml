@@ -326,6 +326,36 @@ spec:
                   type: string
                 type: array
                 x-kubernetes-list-type: set
+              codeChange:
+                description: |-
+                  codeChange is a change of what the platform renders for the network
+                  (a new controller build), applied in the tier of its most careful
+                  cluster, before its clusters.
+                properties:
+                  finishTime:
+                    description: |-
+                      finishTime is when it was applied in full: the soak of its tier
+                      counts from there.
+                    format: date-time
+                    type: string
+                  message:
+                    description: message says what it waits for, or what failed.
+                    type: string
+                  objects:
+                    description: objects is how many objects change.
+                    format: int32
+                    type: integer
+                  phase:
+                    description: 'phase: Pending, Applying, Done or Halted.'
+                    type: string
+                  startTime:
+                    format: date-time
+                    type: string
+                  summary:
+                    description: 'summary says what changes: "3 objects change (1
+                      added)".'
+                    type: string
+                type: object
               conditions:
                 description: 'conditions: Ready and Synced.'
                 items:

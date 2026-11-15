@@ -96,6 +96,11 @@ func nextCluster(row *model.Cluster, err error) ctrl.Result {
 		// it: looked at again soon, not at the providers' poll alone.
 		res.RequeueAfter = upgradeDelay
 	}
+	if reconcilecluster.CodeChanging(row) && res.RequeueAfter > codeDelay {
+		// A code change waits for its turn in the channel's rollout, which
+		// admits it without waking the cluster.
+		res.RequeueAfter = codeDelay
+	}
 	if reconcilecluster.MissingObject(row) && res.RequeueAfter > failedDelay {
 		// An object was deleted behind the platform's back: the pass that
 		// found it missing may have created it again, and the next one says

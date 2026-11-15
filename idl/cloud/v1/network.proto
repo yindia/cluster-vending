@@ -3,6 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/code_change.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/events.proto";
 import "cloud/v1/import.proto";
@@ -412,6 +413,11 @@ message NetworkStatus {
   // since when and why. The platform then only observes the network; the
   // condition Paused is True and message says so. Unset: not paused.
   Pause pause = 45;
+
+  // code_change is a change of what the platform renders for the network
+  // (a new controller build), applied in the tier of its most careful
+  // cluster, before them; unset when nothing was rendered differently.
+  CodeChange code_change = 46;
 }
 
 // NetworkResources lists the cloud resources of a network, all owned by the

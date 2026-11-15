@@ -88,12 +88,16 @@ message ReleaseChannelInfo {
   // The rollout of the channel's release to its clusters' components
   // (release moves), tier 2 first; unset when none is planned.
   ChangeRollout release_moves = 14;
+  // The rollout of code changes (a new controller build rendering the
+  // clusters' objects differently), tier 2 first; unset when none is
+  // planned.
+  ChangeRollout code_changes = 15;
 }
 
 // ChangeRollout is a rollout of something other than the Kubernetes minor
-// (a release move) to a channel's clusters, planned like it.
+// (release moves, code changes) to a channel's clusters, planned like it.
 message ChangeRollout {
-  // What the clusters move to: a release.
+  // What the clusters move to: a release; empty for code changes.
   string target = 1;
   // The clusters (namespace/name) that may start now.
   repeated string admitted = 2;

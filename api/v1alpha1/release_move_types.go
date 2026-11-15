@@ -21,6 +21,10 @@ type ChannelReleaseMoves struct {
 	// done: every member runs the release.
 	// +optional
 	Done bool `json:"done,omitempty"`
+	// tier is the tier the rollout is at (Tier2, then Tier1, then Tier0);
+	// unset when done.
+	// +optional
+	Tier ClusterTier `json:"tier,omitempty"`
 	// members count the clusters of each tier by state.
 	// +optional
 	Members []RolloutTierCount `json:"members,omitempty"`

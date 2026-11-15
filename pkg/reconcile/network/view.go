@@ -40,6 +40,7 @@ func (s *Reconciler) view(ctx context.Context, row *model.Network, failure *clou
 		return nil, err
 	}
 	withFailure(n.GetStatus(), failure)
+	n.GetStatus().CodeChange = reconcile.CodeOf(ctx, storedStatus(row).GetCodeChange())
 	// What the controller reported last stays with the status: a read
 	// returns it, and a pass adds to it (withEvents).
 	n.GetStatus().RecentEvents = storedStatus(row).GetRecentEvents()

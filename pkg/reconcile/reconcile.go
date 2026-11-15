@@ -155,6 +155,19 @@ type MoveAdmitter interface {
 	MoveAdmitted(ctx context.Context, channel, release, tenantID, cluster string) (admitted bool, why string, err error)
 }
 
+// CodeAdmitter says whether a cluster or a network may apply its code
+// change (a new controller build rendering its objects differently) now.
+// A PlatformSource that is one gates code changes by it; one that is not
+// admits every one (a freeze still holds them).
+type CodeAdmitter interface {
+	// ClusterCodeAdmitted: the channel's code rollout admitted the cluster
+	// (tenant, name).
+	ClusterCodeAdmitted(ctx context.Context, channel, tenantID, cluster string) (admitted bool, why string, err error)
+	// NetworkCodeAdmitted: no freeze holds the network and the code rollout
+	// of each channel of its clusters reached the network's tier.
+	NetworkCodeAdmitted(ctx context.Context, tenantID, networkID string) (admitted bool, why string, err error)
+}
+
 // RenderBehind reports whether a resource last applied with renderer
 // version must be applied again: it is below the target and the rollout
 // covers its tenant or the resource itself.

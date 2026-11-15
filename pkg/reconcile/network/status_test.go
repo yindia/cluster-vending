@@ -1,6 +1,7 @@
 package network
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -76,5 +77,28 @@ func TestReadyNeedsTheProvidersToHaveCaughtUp(t *testing.T) {
 		if got := status(tt.row, []*cloudv1.ManagedResource{tt.view}, nil, nil).GetState(); got != tt.want {
 			t.Errorf("%s: %s, want %s", tt.name, got, tt.want)
 		}
+	}
+}
+
+// A VPC whose delete AWS refuses for dependencies says so, with where to
+// look: what a cluster's controllers made (load balancers, their network
+// interfaces and security groups) blocks it, and nothing the platform
+// deletes will.
+func TestDeletingNetworkNamesItsDependencies(t *testing.T) {
+	row := &model.Network{Resource: model.Resource{State: StateDeleting}}
+	vpc := &cloudv1.ManagedResource{Kind: "VPC", Name: "prod-vpc", ExternalName: "vpc-0abc", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING,
+		Synced:  cloudv1.ConditionStatus_CONDITION_STATUS_FALSE,
+		Message: "delete failed: deleting EC2 VPC (vpc-0abc): operation error EC2: DeleteVpc, api error DependencyViolation: The vpc 'vpc-0abc' has dependencies and cannot be deleted."}
+
+	st := status(row, []*cloudv1.ManagedResource{vpc}, nil, nil)
+
+	for _, want := range []string{"the VPC still has dependencies AWS reports", "DependencyViolation", "load balancers", "vpc-0abc"} {
+		if !strings.Contains(st.GetMessage(), want) {
+			t.Errorf("message = %q, want it to contain %q", st.GetMessage(), want)
+		}
+	}
+	plain := status(row, []*cloudv1.ManagedResource{{Kind: "VPC", Name: "prod-vpc", State: cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING}}, nil, nil)
+	if strings.Contains(plain.GetMessage(), "dependencies") {
+		t.Errorf("without the error: %q", plain.GetMessage())
 	}
 }

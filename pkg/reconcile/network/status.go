@@ -157,6 +157,9 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 		if kinds := crossplaneaws.NetworkDeleteOrder.Current(views); len(kinds) > 0 {
 			st.Message = fmt.Sprintf("deleting %s; %d resources left", strings.Join(kinds, ", "), resourcesLeft(views))
 		}
+		if hint := dependencyHint(views); hint != "" {
+			st.Message += "; " + hint
+		}
 	case row.State == StateBlocked:
 		st.State = cloudv1.NetworkState_NETWORK_STATE_FAILED
 		st.Message = "import blocked: " + firstBlocking(st.GetImport())
@@ -195,6 +198,40 @@ func status(row *model.Network, views []*cloudv1.ManagedResource, resources *clo
 	withEditIgnored(st, row)
 	st.Conditions = append([]*cloudv1.Condition{readyCond}, st.Conditions...)
 	return st
+}
+
+// dependencyViolation is the error AWS answers a delete of a VPC, subnet,
+// internet gateway or security group with while something still uses it.
+const dependencyViolation = "DependencyViolation"
+
+// dependencyHintMax bounds the AWS message quoted in the hint.
+const dependencyHintMax = 240
+
+// dependencyHint says, when AWS refuses to delete one of the network's
+// resources because something still uses it, what AWS reports and where
+// to look: most often a load balancer (with its network interfaces and
+// security groups) that a cluster's controller made and that was not
+// deleted with the cluster. Nothing the platform deletes removes it.
+func dependencyHint(views []*cloudv1.ManagedResource) string {
+	vpcID := "the VPC"
+	for _, v := range views {
+		if v.GetKind() == "VPC" && v.GetExternalName() != "" {
+			vpcID = v.GetExternalName()
+		}
+	}
+	for _, v := range views {
+		msg := v.GetMessage()
+		if !strings.Contains(msg, dependencyViolation) {
+			continue
+		}
+		if len(msg) > dependencyHintMax {
+			msg = msg[:dependencyHintMax] + "..."
+		}
+		return fmt.Sprintf("the VPC still has dependencies AWS reports (%s %s: %s); look for load balancers, "+
+			"network interfaces and security groups in %s that the platform did not create (left by a deleted cluster's "+
+			"controllers) and delete them", v.GetKind(), v.GetName(), msg, vpcID)
+	}
+	return ""
 }
 
 // caughtUp reports whether the network's generation is applied and every

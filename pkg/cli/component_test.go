@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -386,113 +385,6 @@ func editor(contents ...string) (func(context.Context, string) error, *[]string)
 		contents = contents[1:]
 		return os.WriteFile(path, []byte(next), 0o600)
 	}, &opened
-}
-
-func TestComponentEdit(t *testing.T) {
-	refusal := connect.NewError(connect.CodeInvalidArgument, "only the platform sets failurePolicy")
-	tests := []struct {
-		name     string
-		values   map[string]any // stored before the edit
-		typed    []string       // what the editor writes, one per opening
-		refuse   error
-		terminal bool
-		answer   string
-		// wantOpened is what the editor showed at each opening.
-		wantOpened []string
-		wantStored string // the level stored at the end
-		wantOut    string
-		wantErr    string
-	}{
-		{name: "stored values are edited and sent", values: map[string]any{"level": "restricted"}, typed: []string{"level: baseline\n"},
-			wantOpened: []string{"level: restricted\n"}, wantStored: "baseline", wantOut: "id: " + componentID},
-		{name: "without stored values the commented file is opened", typed: []string{"level: restricted\n"},
-			wantOpened: []string{policiesFile}, wantStored: "restricted"},
-		{name: "closed without a change", values: map[string]any{"level": "restricted"},
-			wantOpened: []string{"level: restricted\n"}, wantStored: "restricted", wantOut: "no changes\n"},
-		{name: "a refusal off a terminal ends the edit", values: map[string]any{"level": "restricted"}, typed: []string{"failurePolicy: Ignore\n"},
-			refuse: refusal, wantOpened: []string{"level: restricted\n"}, wantStored: "restricted", wantErr: "only the platform sets failurePolicy"},
-		{name: "a refusal on a terminal opens the editor again", values: map[string]any{"level": "restricted"},
-			typed: []string{"failurePolicy: Ignore\n", "level: baseline\n"}, refuse: refusal, terminal: true, answer: "\n",
-			wantOpened: []string{"level: restricted\n", "failurePolicy: Ignore\n"}, wantStored: "baseline"},
-		{name: "answering no ends the edit", values: map[string]any{"level": "restricted"}, typed: []string{"failurePolicy: Ignore\n"},
-			refuse: refusal, terminal: true, answer: "n\n", wantOpened: []string{"level: restricted\n"}, wantStored: "restricted",
-			wantErr: "only the platform sets failurePolicy"},
-		{name: "values that are not an object", values: map[string]any{"level": "restricted"}, typed: []string{"- a\n"},
-			wantOpened: []string{"level: restricted\n"}, wantStored: "restricted", wantErr: "values must be an object"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			api := &componentAPI{component: stored(t, tt.values), refuseValidation: tt.refuse}
-			edit, opened := editor(tt.typed...)
-			var out, progress bytes.Buffer
-			opts := Options{Tenant: "acme", ID: componentID, Edit: edit, Terminal: tt.terminal,
-				In: strings.NewReader(tt.answer), Progress: &progress}
-
-			err := Run(t.Context(), ComponentEdit, Clients{Component: api}, opts, &out, OutputYAML)
-
-			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Run = %v, want an error naming %q", err, tt.wantErr)
-				}
-			} else if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Join(*opened, "|") != strings.Join(tt.wantOpened, "|") {
-				t.Errorf("the editor showed %q, want %q", *opened, tt.wantOpened)
-			}
-			if got, _ := api.component.GetValues().AsMap()["level"].(string); got != tt.wantStored && (tt.wantStored != "restricted" || tt.values != nil) {
-				t.Errorf("stored level = %q, want %q", got, tt.wantStored)
-			}
-			if !strings.Contains(out.String(), tt.wantOut) {
-				t.Errorf("output %q lacks %q", out.String(), tt.wantOut)
-			}
-			for _, req := range api.updates {
-				if req.GetComponent().GetEtag() != "e1" {
-					t.Errorf("update without the etag the edit started from: %v", req)
-				}
-			}
-		})
-	}
-}
-
-// The temp file is private to the caller and gone afterwards.
-func TestComponentEditLeavesNoFile(t *testing.T) {
-	api := &componentAPI{component: stored(t, map[string]any{"level": "restricted"})}
-	var path string
-	edit := func(_ context.Context, p string) error {
-		path = p
-		info, err := os.Stat(p)
-		if err != nil {
-			return err
-		}
-		if info.Mode().Perm() != 0o600 {
-			return errors.New("the temp file is readable by others: " + info.Mode().String())
-		}
-		return nil
-	}
-
-	err := Run(t.Context(), ComponentEdit, Clients{Component: api}, Options{Tenant: "acme", ID: componentID, Edit: edit}, &bytes.Buffer{}, OutputYAML)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("%s is still there: %v", path, err)
-	}
-}
-
-// A component without a values file has nothing to edit.
-func TestComponentEditOfAComponentWithoutValues(t *testing.T) {
-	c := stored(t, nil)
-	c.Component = "scanner"
-	edit, opened := editor("a: 1\n")
-
-	err := Run(t.Context(), ComponentEdit, Clients{Component: &componentAPI{component: c}},
-		Options{Tenant: "acme", ID: componentID, Edit: edit}, &bytes.Buffer{}, OutputYAML)
-
-	if err == nil || !strings.Contains(err.Error(), "nothing to edit") || len(*opened) != 0 {
-		t.Fatalf("Run = %v, the editor opened %d times", err, len(*opened))
-	}
 }
 
 // A component that is off says so, and why, in front of its description.

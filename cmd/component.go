@@ -69,8 +69,6 @@ func newComponentCmd() *cobra.Command {
 			flags: all(cluster("the cluster to enable the component on (cluster ID, required)"), values, wait)},
 		{use: "update <id>", short: "Replace a component's values with the values of -f",
 			run: cli.ComponentUpdate, args: cobra.ExactArgs(1), flags: all(values, etag, wait)},
-		{use: "edit <id>", short: "Open a component's values in $VISUAL or $EDITOR and store them when they changed",
-			run: cli.ComponentEdit, args: cobra.ExactArgs(1)},
 		{use: "disable <id>", short: "Remove a component from its cluster", run: cli.ComponentDisable, args: cobra.ExactArgs(1),
 			flags: all(etag, wait)},
 		{use: "get <id>", short: "Show a component; --values prints only the values stored for it", run: cli.ComponentGet, args: cobra.ExactArgs(1),

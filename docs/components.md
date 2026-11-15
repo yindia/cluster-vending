@@ -46,7 +46,8 @@ cluster-vending component enable kyverno-policies --cluster <cluster-id> --tenan
 cluster-vending component list --cluster <cluster-id> --tenant acme
 
 # 5. Change it later, then remove it
-cluster-vending component edit <component-id> --tenant acme
+cluster-vending component get <component-id> --values --tenant acme > policies.yaml   # edit it, then:
+cluster-vending component update <component-id> -f policies.yaml --tenant acme
 cluster-vending component disable <component-id> --tenant acme
 ```
 
@@ -64,7 +65,6 @@ All take `--tenant` (except `values`), `--server` and `-o yaml|json`;
 | `component values <name>` | Prints the component's values file as the platform wrote it. Refused for a component that takes no values. |
 | `component enable <name> --cluster <cluster-id> [-f values.yaml] [--validate-only] [--wait]` | Enables the component on the cluster. Without `-f` it runs with the defaults. Running the same command again returns the same component. |
 | `component update <id> -f values.yaml [--validate-only] [--etag <etag>] [--wait]` | Replaces the component's values with the file: a key left out goes back to its default. |
-| `component edit <id>` | Opens the stored values in `$VISUAL`, else `$EDITOR`, else `vi`, and stores them when they changed. With no stored values it opens the commented values file. |
 | `component get <id> [--values]` | Shows the component. `--values` prints only its stored values, as YAML to edit and send back with `update -f`. |
 | `component disable <id> [--etag <etag>] [--wait]` | Removes the component from its cluster. Refused while another enabled component requires it. |
 | `component list [--cluster <cluster-id>]` | With `--cluster`: everything on the cluster, by name. Without: the tenant's components on all its clusters, a page at a time. |

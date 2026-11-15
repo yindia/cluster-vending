@@ -1,17 +1,14 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 
-	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -332,126 +329,6 @@ func waitComponent(ctx context.Context, c Clients, o Options, component *cloudv1
 			done:   !gone && st.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_READY,
 			failed: st.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED}, nil
 	})
-}
-
-// ComponentEdit opens the values of the component o.ID in the caller's
-// editor and sends them back when they changed: the values the tenant
-// stored, or, when it stored none, the component's values file with the
-// platform's comments. A refused change is shown and, on a terminal, the
-// editor opens again on what was typed.
-func ComponentEdit(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	if err := o.requireTenant(); err != nil {
-		return nil, err
-	}
-	res, err := call(ctx, &cloudv1.GetComponentRequest{TenantId: o.Tenant, ComponentId: o.ID}, c.Component.GetComponent)
-	if err != nil {
-		return nil, err
-	}
-	component := res.(*cloudv1.GetComponentResponse).GetComponent()
-	start, err := editStart(ctx, c, component)
-	if err != nil {
-		return nil, err
-	}
-	file, err := os.CreateTemp("", "cluster-vending-"+component.GetComponent()+"-*.yaml") // 0600
-	if err != nil {
-		return nil, err
-	}
-	path := file.Name()
-	defer func() { _ = os.Remove(path) }()
-	if _, err := file.Write(start); err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-	edit := o.Edit
-	if edit == nil {
-		edit = runEditor
-	}
-	o.ETag = component.GetEtag()
-	last := start
-	for {
-		if err := edit(ctx, path); err != nil {
-			return nil, fmt.Errorf("editor: %w", err)
-		}
-		edited, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if bytes.Equal(edited, last) {
-			_, err := fmt.Fprintln(o.Out, "no changes")
-			return nil, err
-		}
-		last = edited
-		updated, err := sendEdit(ctx, c, o, edited)
-		if err == nil {
-			return updated, nil
-		}
-		if !o.Terminal || !again(o, err) {
-			return nil, err
-		}
-	}
-}
-
-// editStart is what the editor opens with.
-func editStart(ctx context.Context, c Clients, component *cloudv1.Component) ([]byte, error) {
-	if len(component.GetValues().GetFields()) > 0 {
-		return valuesYAML(component.GetValues())
-	}
-	res, err := call(ctx, &cloudv1.GetComponentValuesRequest{Name: component.GetComponent()}, c.Component.GetComponentValues)
-	if connect.CodeOf(err) == connect.CodeFailedPrecondition {
-		return nil, fmt.Errorf("component %s takes no values: there is nothing to edit", component.GetComponent())
-	}
-	if err != nil {
-		return nil, err
-	}
-	return []byte(res.(*cloudv1.GetComponentValuesResponse).GetUserValues()), nil
-}
-
-// sendEdit checks the edited values and, when the server accepts them,
-// stores them.
-func sendEdit(ctx context.Context, c Clients, o Options, edited []byte) (*cloudv1.Component, error) {
-	values, err := parseValues(edited, "the edited values")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := updateComponent(ctx, c, o, values, true); err != nil {
-		return nil, err
-	}
-	return updateComponent(ctx, c, o, values, false)
-}
-
-// again shows why the edit was refused and asks whether to open the
-// editor again; anything but "n" is yes.
-func again(o Options, refused error) bool {
-	if o.Progress != nil {
-		_, _ = fmt.Fprintf(o.Progress, "%v\nEdit again? [Y/n] ", refused)
-	}
-	in := o.In
-	if in == nil {
-		in = os.Stdin
-	}
-	answer, _ := bufio.NewReader(in).ReadString('\n')
-	return !strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "n")
-}
-
-// runEditor opens path in the caller's editor, attached to their
-// terminal: $VISUAL, else $EDITOR, else vi. The command comes from the
-// caller's own environment only, and is run without a shell: its words
-// are the program and its arguments (e.g. "code --wait").
-func runEditor(ctx context.Context, path string) error {
-	editor := os.Getenv("VISUAL")
-	if editor == "" {
-		editor = os.Getenv("EDITOR")
-	}
-	words := strings.Fields(editor)
-	if len(words) == 0 {
-		words = []string{"vi"}
-	}
-	cmd := exec.CommandContext(ctx, words[0], append(words[1:], path)...) //nolint:gosec // the caller's own $VISUAL/$EDITOR, no shell
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
 }
 
 // printDetails writes, under the table, what it has no room for: for each

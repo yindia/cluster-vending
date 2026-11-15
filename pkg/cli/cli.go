@@ -161,12 +161,8 @@ type Options struct {
 	ValidateOnly bool
 	// Values is --values of component get: print only the stored values.
 	Values bool
-	// Edit opens a file in the caller's editor and returns when it is
-	// closed (component edit). Nil: $VISUAL, $EDITOR or vi.
-	Edit func(ctx context.Context, path string) error
-	// Terminal: a person is at the terminal, so component edit may ask
-	// whether to open the editor again; In is where the answer is read
-	// (nil: stdin).
+	// Terminal: a person is at the terminal, so account create may ask how
+	// to create the role; In is where the answer is read (nil: stdin).
 	Terminal bool
 	In       io.Reader
 	// Exec runs a local command with its output to w. Nil: the real one

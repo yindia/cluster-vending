@@ -373,7 +373,6 @@ cluster-vending component catalog [--cluster <cluster-id>]
 cluster-vending component values kyverno-policies > policies.yaml
 cluster-vending component enable kyverno-policies --cluster <cluster-id> [-f values.yaml] [--validate-only] [--wait]
 cluster-vending component update <component-id> -f values.yaml [--validate-only] [--wait]
-cluster-vending component edit <component-id>
 cluster-vending component disable <component-id> [--wait]
 cluster-vending component get <component-id> [--values]
 cluster-vending component list [--cluster <cluster-id>]

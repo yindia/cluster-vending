@@ -44,10 +44,22 @@ func TestRolloutLine(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := rolloutLine(tt.in); got != tt.want {
+			if got := rolloutLine(tt.in, "1.36"); got != tt.want {
 				t.Errorf("got %q\nwant %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A record the rollout has not started whose target the cluster already
+// runs is not shown as waiting: the cluster is up to date.
+func TestRolloutLineOfAClusterUpToDate(t *testing.T) {
+	for _, result := range []cloudv1.ClusterRolloutResult{cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_PENDING,
+		cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_BLOCKED} {
+		r := &cloudv1.ClusterRollout{Channel: "alpha", FromVersion: "1.36", ToVersion: "1.37", Tier: 2, Result: result, Message: "next to start"}
+		if got, want := rolloutLine(r, "1.37"), "up to date with channel alpha (1.37)"; got != want {
+			t.Errorf("%s: got %q, want %q", result, got, want)
+		}
 	}
 }
 
@@ -55,6 +67,7 @@ func TestRolloutLine(t *testing.T) {
 func TestPrintClusterDescribeShowsTheRollout(t *testing.T) {
 	withClock(t)
 	c := testCluster()
+	c.Status.CurrentKubernetesVersion = "1.36" // still before the hop
 	c.Status.Rollout = &cloudv1.ClusterRollout{Channel: "alpha", FromVersion: "1.36", ToVersion: "1.37", Tier: 2,
 		StartTime: ago(time.Minute), Result: cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_PENDING, Message: "next to start"}
 

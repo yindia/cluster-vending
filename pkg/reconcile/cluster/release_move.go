@@ -35,6 +35,10 @@ func moving(m *cloudv1.ClusterReleaseMove) bool {
 	return m.GetPhase() == moveComponents || m.GetPhase() == moveHalted
 }
 
+// ReleaseMoving reports whether the status recorded with the row has a
+// release move under way (moving components, or halted part way).
+func ReleaseMoving(row *model.Cluster) bool { return moving(storedStatus(row).GetReleaseMove()) }
+
 // moveFacts are what deciding one pass of a release move reads.
 type moveFacts struct {
 	// Current is the release the components run (the kept release);

@@ -351,6 +351,10 @@ func failureOf(views []*cloudv1.ManagedResource, selected func(kind string) bool
 	return ""
 }
 
+// Upgrading reports whether the status recorded with the row has an
+// upgrade in progress.
+func Upgrading(row *model.Cluster) bool { return storedUpgrade(row) != nil }
+
 // storedUpgrade is the upgrade of the status recorded with the row, or nil.
 func storedUpgrade(row *model.Cluster) *cloudv1.ClusterUpgrade {
 	if len(row.Status) == 0 {

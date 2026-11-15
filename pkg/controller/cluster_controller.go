@@ -91,6 +91,11 @@ func nextCluster(row *model.Cluster, err error) ctrl.Result {
 		// once it has been stuck long enough, and no event says when.
 		res.RequeueAfter = failedDelay
 	}
+	if reconcilecluster.Upgrading(row) && res.RequeueAfter > upgradeDelay {
+		// An upgrade moves step by step, each read as AWS and Helm report
+		// it: looked at again soon, not at the providers' poll alone.
+		res.RequeueAfter = upgradeDelay
+	}
 	if reconcilecluster.MissingObject(row) && res.RequeueAfter > failedDelay {
 		// An object was deleted behind the platform's back: the pass that
 		// found it missing may have created it again, and the next one says

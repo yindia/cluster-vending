@@ -74,9 +74,18 @@ func TestFinish(t *testing.T) {
 			c.Status.Phase, c.Status.Message = cloudv1alpha1.ClusterPhaseFailed, "UpdateClusterVersion: InvalidRequest"
 			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "ControlPlane", ToVersion: "1.36"}
 		}, cloudv1alpha1.ClusterRolloutFailed},
-		{"took too long", func(c *cloudv1alpha1.Cluster) {
+		{"no progress in one step for too long", func(c *cloudv1alpha1.Cluster) {
+			c.Status.Rollout.StartTime = metav1.NewTime(now.Add(-3 * timeout))
+			stalled := metav1.NewTime(now.Add(-timeout - time.Minute))
+			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "Addons", ToVersion: "1.36", PhaseStartTime: &stalled}
+		}, cloudv1alpha1.ClusterRolloutTimedOut},
+		{"a long upgrade that keeps moving is not timed out", func(c *cloudv1alpha1.Cluster) {
+			c.Status.Rollout.StartTime = metav1.NewTime(now.Add(-3 * timeout))
+			moving := metav1.NewTime(now.Add(-time.Minute))
+			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "PlatformComponents", ToVersion: "1.36", PhaseStartTime: &moving}
+		}, ""},
+		{"never seen upgrading for too long", func(c *cloudv1alpha1.Cluster) {
 			c.Status.Rollout.StartTime = metav1.NewTime(now.Add(-timeout - time.Minute))
-			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "ControlPlane", ToVersion: "1.36"}
 		}, cloudv1alpha1.ClusterRolloutTimedOut},
 	}
 	for _, tt := range tests {
@@ -101,6 +110,39 @@ func TestFinish(t *testing.T) {
 	idle := cluster("idle", cloudv1alpha1.ClusterTier2, "1.35")
 	if Finish(&idle, now, timeout) != nil {
 		t.Error("a cluster with no upgrade in progress has nothing to finish")
+	}
+}
+
+// A record the rollout never started (Pending, Blocked) is closed once the
+// cluster runs its target with no upgrade in progress, however the cluster
+// got there (an update a person made, a controller that did not record the
+// start): it says so, and is Succeeded with when it was seen.
+func TestFinishClosesARecordTheClusterReachedOtherwise(t *testing.T) {
+	const timeout = 90 * time.Minute
+	for _, result := range []cloudv1alpha1.ClusterRolloutResult{cloudv1alpha1.ClusterRolloutPending, cloudv1alpha1.ClusterRolloutBlocked} {
+		t.Run(string(result), func(t *testing.T) {
+			c := cluster("c", cloudv1alpha1.ClusterTier2, "1.36")
+			c.Status.Rollout = record(result, "1.35", "1.36", now.Add(-time.Hour))
+
+			got := Finish(&c, now, timeout)
+
+			if got == nil || got.Result != cloudv1alpha1.ClusterRolloutSucceeded || got.FinishTime == nil ||
+				!strings.Contains(got.Message, "reached by an update") {
+				t.Fatalf("Finish = %+v, want Succeeded, finished now, saying it was reached by an update", got)
+			}
+		})
+	}
+
+	behind := cluster("behind", cloudv1alpha1.ClusterTier2, "1.35")
+	behind.Status.Rollout = record(cloudv1alpha1.ClusterRolloutPending, "1.35", "1.36", now.Add(-time.Hour))
+	if got := Finish(&behind, now, timeout); got != nil {
+		t.Errorf("a pending record of a cluster still behind was closed: %+v", got)
+	}
+	upgradingNow := cluster("upgrading", cloudv1alpha1.ClusterTier2, "1.36")
+	upgradingNow.Status.Rollout = record(cloudv1alpha1.ClusterRolloutPending, "1.35", "1.36", now.Add(-time.Hour))
+	upgradingNow.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "NodeGroups", ToVersion: "1.36"}
+	if got := Finish(&upgradingNow, now, timeout); got != nil {
+		t.Errorf("a pending record was closed while the cluster upgrades: %+v", got)
 	}
 }
 

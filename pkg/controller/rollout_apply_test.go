@@ -294,7 +294,7 @@ func TestAutomaticUpgradeFinishes(t *testing.T) {
 		t.Errorf("fast = %+v, want succeeded", rec)
 	}
 	if rec := w.object(t, "slow").Status.Rollout; rec == nil || rec.Result != cloudv1alpha1.ClusterRolloutTimedOut ||
-		!strings.Contains(rec.Message, "not finished within 1h30m0s") {
+		!strings.Contains(rec.Message, "no progress for 1h30m0s") {
 		t.Errorf("slow = %+v, want timed out", rec)
 	}
 	if events.count(platform.ReasonAutomaticUpgradeSucceeded) != 1 || events.count(platform.ReasonAutomaticUpgradeFailed) != 1 {

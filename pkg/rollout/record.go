@@ -61,28 +61,51 @@ func upgrading(c *cloudv1alpha1.Cluster) bool {
 	return c.Status.Upgrade != nil && c.Status.Upgrade.Phase != ""
 }
 
-// Finish is the record an automatic upgrade in progress moves to at now:
-// Succeeded once the cluster runs the target and reports no upgrade,
-// Failed when the cluster failed while upgrading, TimedOut after timeout.
-// nil when it stays in progress, or the cluster has no upgrade the
-// rollout started.
+// Finish is the record a cluster's rollout record moves to at now:
+//
+//   - an upgrade in progress: Succeeded once the cluster runs the target
+//     and reports no upgrade (every step of it done), Failed when the
+//     cluster failed while upgrading, TimedOut when it made no progress
+//     for timeout: its current step started longer ago than that (or,
+//     never seen upgrading, the hop did);
+//   - a record the rollout never started (Pending, Blocked): Succeeded,
+//     "reached by an update", once the cluster runs its target with no
+//     upgrade in progress, however it got there.
+//
+// nil when the record stays as it is.
 func Finish(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration) *cloudv1alpha1.ClusterRolloutRecord {
 	rec := c.Status.Rollout
-	if rec == nil || rec.Result != cloudv1alpha1.ClusterRolloutInProgress {
+	if rec == nil {
 		return nil
 	}
 	out := rec.DeepCopy()
 	finished := metav1.NewTime(now)
 	out.FinishTime = &finished
 	reached, comparable := CompareMinors(c.Status.CurrentKubernetesVersion, rec.ToVersion)
-	switch {
-	case comparable && reached >= 0 && !upgrading(c):
+	done := comparable && reached >= 0 && !upgrading(c)
+	switch rec.Result {
+	case cloudv1alpha1.ClusterRolloutPending, cloudv1alpha1.ClusterRolloutBlocked:
+		if !done {
+			return nil
+		}
+		out.Result = cloudv1alpha1.ClusterRolloutSucceeded
+		out.Message = fmt.Sprintf("%s reached by an update, not started by the rollout", c.Status.CurrentKubernetesVersion)
+		return out
+	case cloudv1alpha1.ClusterRolloutInProgress:
+	default:
+		return nil
+	}
+	switch since := stepStart(c, rec); {
+	case done:
 		out.Result, out.Message = cloudv1alpha1.ClusterRolloutSucceeded, ""
 	case upgrading(c) && c.Status.Phase == cloudv1alpha1.ClusterPhaseFailed:
 		out.Result, out.Message = cloudv1alpha1.ClusterRolloutFailed, orDefault(c.Status.Message, "the upgrade failed")
-	case now.Sub(rec.StartTime.Time) > timeout:
+	case now.Sub(since) > timeout:
 		out.Result = cloudv1alpha1.ClusterRolloutTimedOut
-		out.Message = fmt.Sprintf("not finished within %s", timeout)
+		out.Message = fmt.Sprintf("no progress for %s", timeout)
+		if u := c.Status.Upgrade; u != nil && u.Phase != "" {
+			out.Message += fmt.Sprintf(" at step %s", u.Phase)
+		}
 		if c.Status.Message != "" {
 			out.Message += "; last: " + c.Status.Message
 		}
@@ -90,6 +113,16 @@ func Finish(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration) *clo
 		return nil
 	}
 	return out
+}
+
+// stepStart is when an upgrade in progress last made progress: when the
+// cluster's current step started, or, while the cluster reports no
+// upgrade yet, when the rollout started the hop.
+func stepStart(c *cloudv1alpha1.Cluster, rec *cloudv1alpha1.ClusterRolloutRecord) time.Time {
+	if u := c.Status.Upgrade; u != nil && u.PhaseStartTime != nil {
+		return u.PhaseStartTime.Time
+	}
+	return rec.StartTime.Time
 }
 
 func orDefault(s, def string) string {

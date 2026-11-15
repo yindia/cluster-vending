@@ -38,11 +38,15 @@ func (r *RolloutReconciler) finishUpgrades(ctx context.Context, channel string, 
 		if c.Status.Rollout == nil || !strings.EqualFold(c.Status.Rollout.Channel, channel) {
 			continue
 		}
+		started := c.Status.Rollout.Result == cloudv1alpha1.ClusterRolloutInProgress
 		next := rollout.Finish(c, now, r.upgradeTimeout())
 		if next == nil || !r.writeRecord(ctx, c, next) {
 			continue
 		}
 		c.Status.Rollout = next
+		if !started {
+			continue // a record the rollout never started, closed: no upgrade of its to report
+		}
 		obj := platform.Object{Kind: platform.KindCluster, Namespace: c.Namespace, Name: c.Name}
 		hop := fmt.Sprintf("automatic upgrade %s → %s (channel %s)", next.FromVersion, next.ToVersion, next.Channel)
 		if next.Result == cloudv1alpha1.ClusterRolloutSucceeded {
@@ -93,7 +97,12 @@ func (r *RolloutReconciler) startHop(ctx context.Context, channel string, row ro
 		log.WarnContext(ctx, "automatic upgrade: read the cluster's spec", "error", err)
 		return false
 	}
-	if why := notStartable(stored.State, stored.Paused != nil, spec, channel, row); why != "" {
+	why := notStartable(stored.State, stored.Paused != nil, spec, channel, row)
+	if why == "" && reconcilecluster.ReleaseMoving(stored) {
+		// A release move and a Kubernetes upgrade never run at once.
+		why = "its components are moving to a new release"
+	}
+	if why != "" {
 		log.InfoContext(ctx, "automatic upgrade not started", "why", why)
 		return false
 	}

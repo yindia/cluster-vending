@@ -67,6 +67,9 @@ var (
 	// failedDelay: the last pass failed, or the object waits for a person
 	// (an adoption that was refused, a deletion blocked by dependents).
 	failedDelay = 30 * time.Second
+	// upgradeDelay is how soon a cluster with an upgrade in progress is
+	// looked at again: each step is read as AWS and Helm report it.
+	upgradeDelay = 30 * time.Second
 	// resyncDelay: settled. The safety net under the watches.
 	resyncDelay = 10 * time.Minute
 )

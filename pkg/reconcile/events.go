@@ -91,6 +91,7 @@ const (
 	ReasonUpgradeNodes                = "UpgradeNodes"
 	ReasonUpgradeStep                 = "UpgradeStep"
 	ReasonAddonRecovering             = "AddonRecovering"
+	ReasonAddonUpgraded               = "AddonUpgraded"
 	ReasonUpgradeHalted               = "UpgradeHalted"
 	ReasonUpgradeFinished             = "UpgradeFinished"
 	ReasonPlatformComponentInstalling = "PlatformComponentInstalling"

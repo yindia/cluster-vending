@@ -37,10 +37,15 @@ const (
 )
 
 // Reconciler moves clusters towards their spec.
-type Reconciler struct{ deps reconcile.Deps }
+type Reconciler struct {
+	deps reconcile.Deps
+	// checks are when each cluster's add-on versions are checked again
+	// (recheckAddons); nil: never.
+	checks *addonChecks
+}
 
 // New returns the Reconciler.
-func New(d reconcile.Deps) *Reconciler { return &Reconciler{deps: d} }
+func New(d reconcile.Deps) *Reconciler { return &Reconciler{deps: d, checks: &addonChecks{}} }
 
 // Target is everything a cluster is built from: its network, account and
 // the network's private subnets in the cluster's zones.

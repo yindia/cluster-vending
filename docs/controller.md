@@ -456,6 +456,14 @@ every 30 seconds, so the rollout plans the next hop right away
 the same time: an upgrade does not start while a move is under way, and a
 move waits for the upgrade.
 
+**Add-on versions between upgrades:** once a day (and once after the
+controller starts) a Running cluster with no upgrade or release move under
+way asks AWS for the versions EKS recommends for its minor. An add-on not
+pinned by the tenant whose recommended version changed moves to it, applied
+by the same pass (`AddonUpgraded` event). A check AWS does not answer is
+logged and tried again in an hour. `pkg/catalog/release.yaml` holds no
+add-on versions.
+
 **The add-ons' watch:** add-ons that fail (the provider's error, or AWS's
 `CREATE_FAILED`, `UPDATE_FAILED`, `DEGRADED`) or do not settle within 30
 minutes are recovered: applied again now (the provider updates them with

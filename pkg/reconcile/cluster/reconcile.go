@@ -183,6 +183,9 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 			return nil // a call changed the row: the next pass sees it
 		}
 	}
+	// The add-on versions EKS recommends, checked daily (not during an
+	// upgrade or a release move): changed ones are applied by this pass.
+	s.recheckAddons(ctx, row)
 	if err := s.advance(ctx, row); err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}

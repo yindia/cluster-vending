@@ -66,6 +66,7 @@ its kind; the message has the details.
 | Cluster | `UpgradeNodes` | Normal | the control plane runs the new version; the node groups, then the add-ons, follow |
 | Cluster | `UpgradeStep` | Normal | the upgrade reached its next step: the add-ons, the platform components, the tenant components |
 | Cluster | `AddonRecovering` | Warning | add-ons failed (AWS's reason) or did not settle within 30 minutes; they are applied again (at most 3 times) |
+| Cluster | `AddonUpgraded` | Normal | the daily check found a newer version EKS recommends for an unpinned add-on; the cluster moves to it |
 | Cluster | `UpgradeHalted` | Warning | the add-ons still did not settle after 3 recoveries; the upgrade waits for `cluster retry` |
 | Cluster | `UpgradeFinished` | Normal | control plane, node groups, add-ons and components run the new version; the upgrade is cleared |
 | Cluster | `PlatformComponentInstalling` | Normal | a platform component's charts are being installed |

@@ -172,5 +172,8 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	if err := section(w, "Platform Components", []string{"NAME", "VERSION", "PHASE", "AGE", "MESSAGE"}, components); err != nil {
 		return err
 	}
+	if err := recoverySection(w, c.GetId(), st.GetPlatformComponents()); err != nil {
+		return err
+	}
 	return section(w, "Events", eventHeader, eventRows(st.GetRecentEvents()))
 }

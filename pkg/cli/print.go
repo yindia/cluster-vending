@@ -89,6 +89,8 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 		return true, mutatedCluster(w, m.GetCluster(), "updated")
 	case *cloudv1.DeleteClusterResponse:
 		return true, mutatedCluster(w, m.GetCluster(), "deletion requested")
+	case *cloudv1.RetryClusterResponse:
+		return true, printRetry(w, m.GetItems())
 	case *cloudv1.ImportClusterResponse:
 		return true, mutatedCluster(w, m.GetCluster(), "imported")
 	case *cloudv1.TakeOverClusterResponse:

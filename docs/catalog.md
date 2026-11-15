@@ -115,6 +115,32 @@ nothing.
 - Whether the chart's pods run: a component is Ready when Helm deployed
   its charts.
 
+**Recovering a failed component or upgrade.** One command:
+
+```sh
+cluster-vending cluster retry --id <cluster>                          # everything that failed
+cluster-vending cluster retry --id <cluster> --component kyverno      # only that one
+cluster-vending cluster retry --id <cluster> --upgrade                # only the automatic upgrade
+```
+
+It answers per item what happens:
+
+| Action | When | What the controller does on its next pass |
+|---|---|---|
+| `Retry` | a component whose chart failed (any Helm state) | starts its recovery count over; removes a stuck Helm revision at once (no 10-minute wait, past the 3-recovery limit); annotates its Release (`cloud.cluster-vending.io/retried-at`) so provider-helm tries now; event `ComponentRetried` |
+| `Retry` | a Failed or TimedOut automatic upgrade (`status.rollout`) | the upgrade is in progress again from now, with a new `upgrade-timeout`; it no longer counts against the channel's `maxFailed` (a halted channel resumes when no failed cluster is left); event `UpgradeRetried` |
+| `Fix` | a component that failed before it had a chart (IRSA off, a requirement missing, not in the release) | nothing: change what its message says; it installs by itself afterwards |
+| `Nothing` | it has not failed | nothing |
+
+`cluster get` lists, under the platform components, a `Recovery` line per
+failed one, and `component list --details` the same: the exact `cluster
+retry` command, or what to fix first. The request is an annotation of the
+Cluster (`cloud.cluster-vending.io/retry`), merged with one not yet acted
+on and removed once acted on; it changes no etag. A chart that keeps
+failing the same way (a hook that never completes, a node pool with no
+room) fails again: retrying is for what changed since, or what was
+transient (a network error to the workload cluster).
+
 **Bundles.** `istio` has no chart of its own: `includes` lists six
 definitions marked `internal: true`, each with its chart, namespace,
 version pin and `requires`. The members are installed in `requires` order

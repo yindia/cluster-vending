@@ -35,6 +35,8 @@ type verb struct {
 	removed, oidc, warnings, noPlatform bool
 	// live adds --live: read the status now instead of the recorded one.
 	live bool
+	// retry adds --component and --upgrade (cluster retry).
+	retry bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
 	// rollout adds --channel and --tier (admin rollout get).
@@ -168,6 +170,10 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.live {
 			f.BoolVar(&o.Live, "live", false, "read the status now from the management cluster instead of the one the controller last recorded")
+		}
+		if v.retry {
+			f.StringSliceVar(&o.RetryComponents, "component", nil, "only this component (repeat or comma-separate); default: every failed one")
+			f.BoolVar(&o.RetryUpgrade, "upgrade", false, "also retry a failed or timed-out automatic upgrade (default with no --component)")
 		}
 		if v.removed {
 			f.BoolVar(&o.OnlyRemoved, "only-removed", false, "only the objects whose API version is removed at the target version")
@@ -306,6 +312,8 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
+		verb{use: "retry <id>", short: "Try again what failed on the cluster: its failed platform and tenant components and a failed automatic upgrade (or only --component, --upgrade); says per item what happens, or what to fix first",
+			run: cli.ClusterRetry, args: cobra.ExactArgs(1), retry: true},
 		watchVerb("cluster", cli.ClusterWatch))
 	return newResourceCmd("cluster", "Manage EKS clusters (ClusterService)", verbs)
 }

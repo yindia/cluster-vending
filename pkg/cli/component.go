@@ -461,6 +461,12 @@ func printDetails(w io.Writer, components []*cloudv1.Component) error {
 	for _, comp := range components {
 		st := comp.GetStatus()
 		if st.GetChart() == "" && st.GetLastError() == "" {
+			// No chart yet: a failed one failed on a precondition; say what to fix.
+			if hint := retryHint(comp.GetClusterId(), comp.GetComponent(), st.GetPhase(), "", st.GetMessage()); hint != "" {
+				if _, err := fmt.Fprintf(w, "\n%s: %s\n", comp.GetComponent(), hint); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if _, err := fmt.Fprintf(w, "\n%s: chart %s, Helm state %s, %d failed attempts, recovered %d times\n", comp.GetComponent(),
@@ -469,6 +475,11 @@ func printDetails(w io.Writer, components []*cloudv1.Component) error {
 		}
 		if st.GetLastError() != "" {
 			if _, err := fmt.Fprintf(w, "  last error: %s\n", st.GetLastError()); err != nil {
+				return err
+			}
+		}
+		if hint := retryHint(comp.GetClusterId(), comp.GetComponent(), st.GetPhase(), st.GetChart(), st.GetMessage()); hint != "" {
+			if _, err := fmt.Fprintf(w, "  %s\n", hint); err != nil {
 				return err
 			}
 		}

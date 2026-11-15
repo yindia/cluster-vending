@@ -127,6 +127,10 @@ type Options struct {
 	PageToken string
 	// Live is --live of get: the status read now, not the recorded one.
 	Live bool
+	// RetryComponents and RetryUpgrade are --component and --upgrade of
+	// cluster retry: what to try again (neither: everything that failed).
+	RetryComponents []string
+	RetryUpgrade    bool
 	// OnlyRemoved is --only-removed of cluster deprecations.
 	OnlyRemoved bool
 	// Namespace is --namespace of cluster recommendations: one namespace of

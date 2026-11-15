@@ -368,25 +368,6 @@ func TestComponentListDetails(t *testing.T) {
 	}
 }
 
-// editor is an editor that writes content to the file it is given, once
-// for each content.
-func editor(contents ...string) (func(context.Context, string) error, *[]string) {
-	var opened []string
-	return func(_ context.Context, path string) error {
-		before, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		opened = append(opened, string(before))
-		if len(contents) == 0 {
-			return nil // closed without a change
-		}
-		next := contents[0]
-		contents = contents[1:]
-		return os.WriteFile(path, []byte(next), 0o600)
-	}, &opened
-}
-
 // A component that is off says so, and why, in front of its description.
 func TestCatalogDescriptionOfADisabledComponent(t *testing.T) {
 	tests := []struct {

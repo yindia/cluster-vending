@@ -222,16 +222,6 @@ func accountStacks(ctx context.Context, o Options, region, account string) (Role
 	return s, nil
 }
 
-// createRoleFromTerminal creates (or updates) the role's stack with the
-// caller's credentials and follows it.
-func createRoleFromTerminal(ctx context.Context, o Options, ob *cloudv1.AccountOnboarding, account string) error {
-	s, err := accountStacks(ctx, o, ob.GetRegion(), account)
-	if err != nil {
-		return err
-	}
-	return ensureStack(ctx, o, s, ob, account)
-}
-
 // checkAccess asks the controller to check the account's access and
 // waits for its verdict: a check later than the one the account has now.
 func checkAccess(ctx context.Context, c Clients, o Options, a *cloudv1.CloudAccount) (*cloudv1.CloudAccount, error) {

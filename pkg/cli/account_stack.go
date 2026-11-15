@@ -226,23 +226,6 @@ func followStack(ctx context.Context, o Options, s RoleStacks, name string, seen
 	})
 }
 
-// awaitStack waits until a stack someone else creates (in the console)
-// exists, then follows it.
-func awaitStack(ctx context.Context, o Options, s RoleStacks, name string) error {
-	o.progressf("Waiting for the stack %s to be created in the console\n", name)
-	err := poll(ctx, o, "the stack "+name, func() (bool, error) {
-		info, err := s.Stack(ctx, name)
-		if err != nil {
-			return false, fmt.Errorf("read the stack %s: %w", name, err)
-		}
-		return info != nil, nil
-	})
-	if err != nil {
-		return err
-	}
-	return followStack(ctx, o, s, name, map[string]bool{})
-}
-
 // poll calls done every poll interval until it reports true or fails,
 // for at most --timeout.
 func poll(ctx context.Context, o Options, what string, done func() (bool, error)) error {

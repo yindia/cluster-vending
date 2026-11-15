@@ -240,3 +240,51 @@ func TestRulesKnowEveryOfferedMinor(t *testing.T) {
 		}
 	}
 }
+
+// The scan targets the minor the rollout waits for (status.kubernetes.
+// available, the next hop toward the channel's minor), so the rollout's
+// deprecation check and the scan agree.
+func TestScanTargetsTheRolloutsNextMinor(t *testing.T) {
+	w, r, _ := scanWorld(t)
+	ctx := t.Context()
+	c := w.cluster(t, "prod")
+	c.Status.Kubernetes = &cloudv1alpha1.ClusterKubernetesStatus{Available: "1.37"}
+	w.must(t, w.k.Status().Update(ctx, c))
+
+	_, err := r.Reconcile(ctx, request("prod"))
+
+	if d := w.cluster(t, "prod").Status.Deprecations; err != nil || d == nil || d.TargetVersion != "1.37" {
+		t.Fatalf("Reconcile: %v, status.deprecations = %+v", err, d)
+	}
+}
+
+// The scanner wakes when what it scans for changes: the spec, the version
+// the cluster runs, or the minor it can move to next; not on other status
+// writes.
+func TestScanTriggers(t *testing.T) {
+	base := func() *cloudv1alpha1.Cluster {
+		return &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Generation: 1},
+			Status: cloudv1alpha1.ClusterStatus{CurrentKubernetesVersion: "1.36",
+				Kubernetes: &cloudv1alpha1.ClusterKubernetesStatus{Available: "1.37"}}}
+	}
+	tests := []struct {
+		name   string
+		change func(*cloudv1alpha1.Cluster)
+		want   bool
+	}{
+		{"nothing", func(*cloudv1alpha1.Cluster) {}, false},
+		{"spec", func(c *cloudv1alpha1.Cluster) { c.Generation = 2 }, true},
+		{"the running version", func(c *cloudv1alpha1.Cluster) { c.Status.CurrentKubernetesVersion = "1.37" }, true},
+		{"the next minor appears", func(c *cloudv1alpha1.Cluster) { c.Status.Kubernetes.Available = "1.38" }, true},
+		{"another status field", func(c *cloudv1alpha1.Cluster) { c.Status.Message = "x" }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old, nu := base(), base()
+			tt.change(nu)
+			if got := scanTriggered(old, nu); got != tt.want {
+				t.Errorf("scanTriggered = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -8,6 +8,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -55,11 +56,33 @@ func NewDeprecationReconciler(d Deps) (*DeprecationReconciler, error) {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=cluster-vending-kubeconfig-reader;cluster-vending-usage-history-writer,verbs=bind
 
 // SetupWithManager registers the scanner: one cluster at a time, woken by
-// a change of a cluster's spec and by its own schedule.
+// a change of what it scans for (scanTriggered) and by its own schedule.
 func (r *DeprecationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("cluster-deprecations").
-		For(&cloudv1alpha1.Cluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&cloudv1alpha1.Cluster{}, builder.WithPredicates(predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				o, okOld := e.ObjectOld.(*cloudv1alpha1.Cluster)
+				n, okNew := e.ObjectNew.(*cloudv1alpha1.Cluster)
+				return !okOld || !okNew || scanTriggered(o, n)
+			},
+		})).
 		Complete(r)
+}
+
+// scanTriggered: what the scanner scans for changed between old and nu:
+// the spec, the version the cluster runs, or the minor it can move to
+// next (status.kubernetes.available, which the rollout waits on a scan of).
+func scanTriggered(old, nu *cloudv1alpha1.Cluster) bool {
+	return old.Generation != nu.Generation ||
+		old.Status.CurrentKubernetesVersion != nu.Status.CurrentKubernetesVersion ||
+		nextMinorOf(old) != nextMinorOf(nu)
+}
+
+func nextMinorOf(c *cloudv1alpha1.Cluster) string {
+	if c.Status.Kubernetes == nil {
+		return ""
+	}
+	return c.Status.Kubernetes.Available
 }
 
 // Reconcile scans the cluster when a scan is due and comes back when the
@@ -124,6 +147,11 @@ func (r *DeprecationReconciler) kubeconfig(ctx context.Context, obj *cloudv1alph
 // release does not move that minor (the scan then judges against the next
 // minor).
 func (r *DeprecationReconciler) upgradeTo(ctx context.Context, obj *cloudv1alpha1.Cluster, current string) string {
+	// The minor the cluster's rollout moves it to next: the scan the
+	// rollout's deprecation check waits for.
+	if next := nextMinorOf(obj); next != "" {
+		return next
+	}
 	channel := strings.ToLower(string(obj.Spec.ReleaseChannel))
 	if channel == "" {
 		channel = defaultChannel

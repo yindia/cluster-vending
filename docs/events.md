@@ -55,6 +55,10 @@ its kind; the message has the details.
 | Network, Cluster | `Resumed` | Normal | the pause ended |
 | Network, Cluster | `Deleting` | Normal | deletion started, waits for something else than before, or got stuck |
 | Network, Cluster | `Deleted` | Normal | everything is gone and the object is removed |
+| Cluster | `TeardownStarted` | Normal | the deletion's first step began: the load balancers and Karpenter's nodes the cluster's controllers made are being deleted |
+| Cluster | `TeardownFinished` | Normal | they are gone; the platform components are uninstalled next |
+| Cluster | `TeardownTimedOut` | Warning | `--teardown-timeout` passed with some left (named); the deletion goes on |
+| Cluster | `TeardownSkipped` | Warning | the deletion is forced or the cluster's API cannot be reached: what they made may be left, and the network's deletion may wait on it |
 | Network, Cluster | `ImportDiscovered` | Normal | an import found the existing resources; observed, not owned |
 | Network, Cluster | `ImportBlocked` | Warning | the import found something it cannot take over |
 | Network, Cluster | `TakenOver` | Normal | the platform owns the imported resources now |

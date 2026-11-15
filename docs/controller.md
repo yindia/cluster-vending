@@ -118,6 +118,7 @@ and `--log-level`, and only these:
 | `--reconcile-workers` | default `8`: how many cloud accounts, networks and clusters of each kind are reconciled at once; one object is never reconciled twice at the same time. The release, catalog, deprecation and recommendation controllers keep one worker |
 | `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel and each cluster (`status.rollout`) only; no cluster is upgraded. `true` upgrades clusters with `upgradeMode: Automatic`, tier by tier; **irreversible** (EKS cannot downgrade). See "Rollout of a channel's Kubernetes minor" |
 | `--upgrade-timeout` | default `90m`: how long an automatic upgrade may take before it counts as failed (`TimedOut`, against the tier's `maxFailed`) |
+| `--teardown-timeout` | default `15m`: how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted before it goes on (see Deletion) |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 
@@ -530,6 +531,38 @@ cluster-vending admin resume --channel beta --tier 0 --only upgrades
   cloud resources pass by pass; when it removes the row, the store drops the
   finalizer and the object goes. A CloudAccount loses its ProviderConfig
   (the tenant namespace stays) and then its finalizer.
+- **Cluster teardown, first.** A cluster's controllers make cloud
+  resources the platform never recorded: the AWS Load Balancer Controller
+  makes a load balancer (and its security groups and network interfaces)
+  for every Service of type LoadBalancer and ALB Ingress, Karpenter makes
+  EC2 instances, launch templates and instance profiles. Uninstalling those
+  controllers first would leave them in the account, and a left load
+  balancer keeps the network's VPC from being deleted (AWS:
+  `DependencyViolation`). So a cluster's deletion starts, before any
+  component is uninstalled, by deleting in the workload cluster (with its
+  kubeconfig): the ALB Ingresses (the `alb` class, any IngressClass of
+  `ingress.k8s.aws/alb`, the old `kubernetes.io/ingress.class: alb`
+  annotation) and every Service of type LoadBalancer; once they are gone,
+  Karpenter's NodePools and NodeClaims; once those are gone, its
+  EC2NodeClasses. Each stage waits until the controllers have removed what
+  they made (the objects are gone). Meanwhile the cluster's message says
+  what it waits for, e.g. `deleting; deleting 1 load balancer (Service
+  istio-system/istio-ingressgateway) before the platform components are
+  uninstalled`, and `status.teardown` records it.
+  - **Timeout:** after `--teardown-timeout` (default 15m) the deletion goes
+    on, with a `TeardownTimedOut` warning listing what is left.
+  - **Skipped**, with a `TeardownSkipped` warning, when the deletion is
+    forced (`cluster delete --force`) or the cluster's API cannot be
+    reached (its EKS cluster is not ACTIVE): the load balancers and nodes
+    may then be left, and the network's deletion waits on them.
+  - **Not deleted: PersistentVolumeClaims.** Their EBS volumes block
+    nothing (they are not in the VPC), and deleting a claim deletes data;
+    volumes of a `Delete` reclaim policy are left as an EKS deletion leaves
+    them.
+  - A network whose VPC AWS refuses to delete for dependencies says so in
+    its message, with the VPC to look in: delete what is left there (a
+    load balancer, its network interfaces and security groups) and the
+    deletion finishes by itself.
 
 The scaffolded manifests under `config/` were adjusted to start
 `/cluster-vending controller`, but there is no image build for them yet, and

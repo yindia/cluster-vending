@@ -493,12 +493,45 @@ cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
 ```
 
 `channel list` shows each channel's rollout as the controller last wrote
-it to the channel's status. `rollout get` plans the channel's rollout again at the time of the
-call with the controller's rules (`pkg/rollout`), and lists every cluster:
-tier, tenant, the version it runs, the minor it moves to next, its state
-(Pending, InProgress, Succeeded, Failed, Blocked), since when, and why it is
-blocked (`-o wide`: the cluster ID and the gate code). All of them are
-read-only and support `-o yaml|json`.
+it to the channel's status; a rollout with nothing left to do is at
+tier `none (done)` (`none (nothing to upgrade)` when no cluster needed
+one). `rollout get` plans the channel's rollout again at the time of the
+call with the controller's rules (`pkg/rollout`), and shows its plan per
+tier and batch:
+
+```text
+State:          Rolling tier 1, batch 2 of 3
+
+Plan:
+  TIER 2  done 2/2, failed 0/1, finished 2026-11-12 11:00 UTC, soak ended 2026-11-13 11:00 UTC
+    batch 1  ✓ acme/dev  ✓ acme/qa
+  TIER 1  rolling: done 2/7, failed 0/1, 2 at a time
+    batch 1  ✓ acme/a  ✓ acme/b
+    batch 2  ▶ acme/payments (control plane, 12m)  · acme/search
+    batch 3  · globex/api  · globex/core
+    waits    ⏸ acme/batch: the maintenance window opens Sat 02:00 UTC
+  TIER 0  not started: after tier 1 and its 48h soak, one at a time
+    batch 1  · acme/prod
+    batch 2  · globex/prod
+```
+
+- Tiers go 2, 1, 0; a tier's batches hold at most `maxInProgress` clusters
+  (tier 0: one). `failed n/m` is the tier's failures against `maxFailed`:
+  one more halts the channel (`halted: …`).
+- ✓ succeeded, ✗ failed, ▶ upgrading (the step and for how long),
+  · queued. The batch with ▶ or the first · is the one starting: its queued
+  clusters are exactly those the controller starts next (Would Start).
+- Finished batches are laid out by when each cluster finished: a
+  reconstruction, not a record of how they ran.
+- `waits` are clusters blocked by their own checks (maintenance window,
+  manual upgrades, deprecations, health, a pause): they are in no batch and
+  do not hold the tier back; one joins the batch being filled once its
+  check passes.
+
+`-o wide` adds the table of every cluster: tier, tenant, the version it
+runs, the minor it moves to next, its state, since when, why it is blocked,
+its ID and the gate code. All of them are read-only and support
+`-o yaml|json` (the plan is the `plan` field).
 
 ### Admin: pause and resume
 

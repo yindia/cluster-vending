@@ -424,7 +424,13 @@ type GetNetworkRequest struct {
 	// Read the status now from the network's managed resources in the
 	// management cluster instead of the status last recorded. UNAVAILABLE
 	// when the management cluster cannot be read.
-	Live          bool `protobuf:"varint,3,opt,name=live,proto3" json:"live,omitempty"`
+	Live bool `protobuf:"varint,3,opt,name=live,proto3" json:"live,omitempty"`
+	// Return the spec, labels and display name as the client asked for
+	// them: as sent at create, with the updates since (the stored input),
+	// instead of the resolved spec. update -f compares a manifest with it.
+	// A network stored without such an input gets its resolved spec;
+	// GetNetworkResponse.as_requested says which.
+	AsRequested   bool `protobuf:"varint,4,opt,name=as_requested,json=asRequested,proto3" json:"as_requested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -480,9 +486,19 @@ func (x *GetNetworkRequest) GetLive() bool {
 	return false
 }
 
+func (x *GetNetworkRequest) GetAsRequested() bool {
+	if x != nil {
+		return x.AsRequested
+	}
+	return false
+}
+
 type GetNetworkResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Network       *Network               `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Network *Network               `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
+	// The network's spec, labels and display name are its input
+	// (GetNetworkRequest.as_requested), not the resolved ones.
+	AsRequested   bool `protobuf:"varint,2,opt,name=as_requested,json=asRequested,proto3" json:"as_requested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -522,6 +538,13 @@ func (x *GetNetworkResponse) GetNetwork() *Network {
 		return x.Network
 	}
 	return nil
+}
+
+func (x *GetNetworkResponse) GetAsRequested() bool {
+	if x != nil {
+		return x.AsRequested
+	}
+	return false
 }
 
 type WatchNetworkRequest struct {
@@ -1009,14 +1032,16 @@ const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"\x04etag\x18\x03 \x01(\tR\x04etag\x128\n" +
 	"\x18acknowledge_not_imported\x18\x04 \x01(\bR\x16acknowledgeNotImported\"F\n" +
 	"\x17TakeOverNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\x9e\x01\n" +
+	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\xc1\x01\n" +
 	"\x11GetNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
 	"network_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tnetworkId\x12\x12\n" +
-	"\x04live\x18\x03 \x01(\bR\x04live\"A\n" +
+	"\x04live\x18\x03 \x01(\bR\x04live\x12!\n" +
+	"\fas_requested\x18\x04 \x01(\bR\vasRequested\"d\n" +
 	"\x12GetNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\x8c\x01\n" +
+	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\x12!\n" +
+	"\fas_requested\x18\x02 \x01(\bR\vasRequested\"\x8c\x01\n" +
 	"\x13WatchNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +

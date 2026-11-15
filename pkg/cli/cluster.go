@@ -82,12 +82,17 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	got, err := call(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: cl.GetId()}, c.Cluster.GetCluster)
+	got, err := call(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: cl.GetId(), AsRequested: true}, c.Cluster.GetCluster)
 	if err != nil {
 		return nil, err
 	}
-	current := got.(*cloudv1.GetClusterResponse).GetCluster()
-	mask, err := inferredMask(o, "cluster "+current.GetName(), current, clusterAsStored(cl), updatemask.Cluster)
+	read := got.(*cloudv1.GetClusterResponse)
+	current, desired := read.GetCluster(), cl
+	if !read.GetAsRequested() {
+		// Only the resolved spec: compare with what the server merges in.
+		desired = clusterAsStored(cl)
+	}
+	mask, err := inferredMask(o, "cluster "+current.GetName(), current, desired, updatemask.Cluster)
 	if err != nil || len(mask) == 0 {
 		return nil, err
 	}

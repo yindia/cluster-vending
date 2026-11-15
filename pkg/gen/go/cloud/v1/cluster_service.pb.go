@@ -484,7 +484,14 @@ type GetClusterRequest struct {
 	// management cluster (their conditions, the EKS endpoint, versions, ...)
 	// instead of the status last recorded. UNAVAILABLE when the management
 	// cluster cannot be read.
-	Live          bool `protobuf:"varint,3,opt,name=live,proto3" json:"live,omitempty"`
+	Live bool `protobuf:"varint,3,opt,name=live,proto3" json:"live,omitempty"`
+	// Return the spec, labels and display name as the client asked for
+	// them: as sent at create, with the updates since (the stored input),
+	// instead of the spec the server resolved (defaults, add-on versions,
+	// zones). update -f compares a manifest with it. A cluster stored
+	// without such an input (an import, or one older than inputs) gets its
+	// resolved spec; GetClusterResponse.as_requested says which.
+	AsRequested   bool `protobuf:"varint,4,opt,name=as_requested,json=asRequested,proto3" json:"as_requested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -536,6 +543,13 @@ func (x *GetClusterRequest) GetClusterId() string {
 func (x *GetClusterRequest) GetLive() bool {
 	if x != nil {
 		return x.Live
+	}
+	return false
+}
+
+func (x *GetClusterRequest) GetAsRequested() bool {
+	if x != nil {
+		return x.AsRequested
 	}
 	return false
 }
@@ -658,8 +672,11 @@ func (x *WatchClusterResponse) GetDeleted() bool {
 }
 
 type GetClusterResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Cluster       *Cluster               `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Cluster *Cluster               `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	// The cluster's spec, labels and display name are its input
+	// (GetClusterRequest.as_requested), not the resolved ones.
+	AsRequested   bool `protobuf:"varint,2,opt,name=as_requested,json=asRequested,proto3" json:"as_requested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -699,6 +716,13 @@ func (x *GetClusterResponse) GetCluster() *Cluster {
 		return x.Cluster
 	}
 	return nil
+}
+
+func (x *GetClusterResponse) GetAsRequested() bool {
+	if x != nil {
+		return x.AsRequested
+	}
+	return false
 }
 
 type ListClustersRequest struct {
@@ -1159,12 +1183,13 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\trequestId\"D\n" +
 	"\x15CreateClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\x9e\x01\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\xc1\x01\n" +
 	"\x11GetClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12\x12\n" +
-	"\x04live\x18\x03 \x01(\bR\x04live\"\x8c\x01\n" +
+	"\x04live\x18\x03 \x01(\bR\x04live\x12!\n" +
+	"\fas_requested\x18\x04 \x01(\bR\vasRequested\"\x8c\x01\n" +
 	"\x13WatchClusterRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -1172,9 +1197,10 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"\x14WatchClusterResponse\x12+\n" +
 	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\x126\n" +
 	"\x06events\x18\x02 \x03(\v2\x1e.cloud.v1.ManagedResourceEventR\x06events\x12\x18\n" +
-	"\adeleted\x18\x03 \x01(\bR\adeleted\"A\n" +
+	"\adeleted\x18\x03 \x01(\bR\adeleted\"d\n" +
 	"\x12GetClusterResponse\x12+\n" +
-	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\"\xa8\x01\n" +
+	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\x12!\n" +
+	"\fas_requested\x18\x02 \x01(\bR\vasRequested\"\xa8\x01\n" +
 	"\x13ListClustersRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12$\n" +
 	"\tpage_size\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x12\x1d\n" +

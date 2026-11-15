@@ -78,12 +78,17 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
-	got, err := call(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}, c.Network.GetNetwork)
+	got, err := call(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), AsRequested: true}, c.Network.GetNetwork)
 	if err != nil {
 		return nil, err
 	}
-	current := got.(*cloudv1.GetNetworkResponse).GetNetwork()
-	mask, err := inferredMask(o, "network "+current.GetName(), current, networkAsStored(n), updatemask.Network)
+	read := got.(*cloudv1.GetNetworkResponse)
+	current, desired := read.GetNetwork(), n
+	if !read.GetAsRequested() {
+		// Only the resolved spec: compare with the defaults the server stores.
+		desired = networkAsStored(n)
+	}
+	mask, err := inferredMask(o, "network "+current.GetName(), current, desired, updatemask.Network)
 	if err != nil || len(mask) == 0 {
 		return nil, err
 	}

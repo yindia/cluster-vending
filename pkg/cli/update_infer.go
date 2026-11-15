@@ -39,7 +39,8 @@ func inferredMask(o Options, what string, current, desired proto.Message, accept
 }
 
 // clusterAsStored is the manifest's cluster with what the server merges in
-// itself (the default add-ons), so it compares with the stored spec.
+// itself (the default add-ons), so it compares with the resolved spec: for
+// a server that cannot answer the cluster as requested.
 func clusterAsStored(cl *cloudv1.Cluster) *cloudv1.Cluster {
 	out := proto.CloneOf(cl)
 	if aws := out.GetSpec().GetAws(); len(aws.GetAddons()) > 0 {

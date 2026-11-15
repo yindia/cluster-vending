@@ -274,6 +274,13 @@ message GetClusterRequest {
   // instead of the status last recorded. UNAVAILABLE when the management
   // cluster cannot be read.
   bool live = 3;
+  // Return the spec, labels and display name as the client asked for
+  // them: as sent at create, with the updates since (the stored input),
+  // instead of the spec the server resolved (defaults, add-on versions,
+  // zones). update -f compares a manifest with it. A cluster stored
+  // without such an input (an import, or one older than inputs) gets its
+  // resolved spec; GetClusterResponse.as_requested says which.
+  bool as_requested = 4;
 }
 
 message WatchClusterRequest {
@@ -298,6 +305,9 @@ message WatchClusterResponse {
 
 message GetClusterResponse {
   Cluster cluster = 1;
+  // The cluster's spec, labels and display name are its input
+  // (GetClusterRequest.as_requested), not the resolved ones.
+  bool as_requested = 2;
 }
 
 message ListClustersRequest {

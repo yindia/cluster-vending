@@ -130,7 +130,23 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
-	return &cloudv1.GetClusterResponse{Cluster: c}, nil
+	return &cloudv1.GetClusterResponse{Cluster: c, AsRequested: req.GetAsRequested() && asRequested(row, c)}, nil
+}
+
+// asRequested gives c the spec, labels and display name its client asked
+// for: the stored input (as created, with the updates since), and reports
+// whether there was one. An import's input is its import request, which
+// has no spec: c keeps its resolved spec.
+func asRequested(row *model.Cluster, c *cloudv1.Cluster) bool {
+	if len(row.Input) == 0 {
+		return false
+	}
+	in := &cloudv1.Cluster{}
+	if err := reconcilecluster.Lenient.Unmarshal(row.Input, in); err != nil || in.GetSpec() == nil {
+		return false
+	}
+	c.Spec, c.Labels, c.DisplayName = in.GetSpec(), in.GetLabels(), in.GetDisplayName()
+	return true
 }
 
 // ListClusters returns a page of the tenant's clusters, oldest first, from

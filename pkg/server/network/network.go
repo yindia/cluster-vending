@@ -138,12 +138,30 @@ func (s *NetworkService) GetNetwork(ctx context.Context, req *cloudv1.GetNetwork
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
+	read := func() (*cloudv1.Network, error) { return s.stored(ctx, row) }
 	if req.GetLive() {
-		n, err := s.rec().View(ctx, row)
-		return &cloudv1.GetNetworkResponse{Network: n}, service.ToConnect(err)
+		read = func() (*cloudv1.Network, error) { return s.rec().View(ctx, row) }
 	}
-	n, err := s.stored(ctx, row)
-	return &cloudv1.GetNetworkResponse{Network: n}, service.ToConnect(err)
+	n, err := read()
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	return &cloudv1.GetNetworkResponse{Network: n, AsRequested: req.GetAsRequested() && asRequested(row, n)}, nil
+}
+
+// asRequested gives n the spec, labels and display name its client asked
+// for: the stored input (as created, with the updates since), and reports
+// whether there was one with a spec.
+func asRequested(row *model.Network, n *cloudv1.Network) bool {
+	if len(row.Input) == 0 {
+		return false
+	}
+	in := &cloudv1.Network{}
+	if err := netreconcile.Lenient.Unmarshal(row.Input, in); err != nil || in.GetSpec() == nil {
+		return false
+	}
+	n.Spec, n.Labels, n.DisplayName = in.GetSpec(), in.GetLabels(), in.GetDisplayName()
+	return true
 }
 
 // ListNetworks returns a page of the tenant's networks, ordered by id,

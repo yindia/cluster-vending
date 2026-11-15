@@ -22,10 +22,16 @@ const inferCluster = "01a1d0a6-69d5-7e15-965e-fc6a53fa3d33"
 type updateCluster struct {
 	cloudv1connect.ClusterServiceClient
 	current *cloudv1.Cluster
-	updated *cloudv1.UpdateClusterRequest
+	// requested: the cluster as its client asked for it (as_requested);
+	// nil: the server has no such view and answers the resolved one.
+	requested *cloudv1.Cluster
+	updated   *cloudv1.UpdateClusterRequest
 }
 
-func (s *updateCluster) GetCluster(context.Context, *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
+func (s *updateCluster) GetCluster(_ context.Context, req *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
+	if req.GetAsRequested() && s.requested != nil {
+		return &cloudv1.GetClusterResponse{Cluster: s.requested, AsRequested: true}, nil
+	}
 	return &cloudv1.GetClusterResponse{Cluster: s.current}, nil
 }
 
@@ -173,5 +179,58 @@ func TestNetworkUpdateInfersTheMask(t *testing.T) {
 	}
 	if !strings.Contains(progress.String(), "spec.flow_logs:") {
 		t.Errorf("progress = %q", progress.String())
+	}
+}
+
+// The main use: the whole manifest the cluster was created from, applied
+// again. Compared with what was asked for (not the resolved spec, whose
+// defaults it never states), it changes nothing, immutable fields and all;
+// with only its release channel edited it changes exactly that.
+func TestClusterUpdateReapplyingTheCreateManifest(t *testing.T) {
+	const example = "../../examples/cluster.yaml"
+	raw, err := os.ReadFile(example)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadManifest(example, KindCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := m.Cluster()
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Id, created.Etag = inferCluster, "etag-1"
+	edited := strings.Replace(string(raw), "\nspec:\n", "\nspec:\n  releaseChannel: RELEASE_CHANNEL_ALPHA\n", 1)
+	tests := []struct {
+		name     string
+		manifest string
+		wantMask []string
+	}{
+		{name: "the same manifest: nothing to change", manifest: string(raw)},
+		{name: "only the release channel edited", manifest: edited, wantMask: []string{"spec.release_channel"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &updateCluster{current: storedCluster(), requested: created}
+			var out, progress bytes.Buffer
+
+			err := Run(t.Context(), ClusterUpdate, Clients{Cluster: api},
+				Options{Input: writeManifest(t, tt.manifest), ID: inferCluster, Progress: &progress}, &out, OutputTable)
+
+			if err != nil {
+				t.Fatalf("%v\n%s", err, progress.String())
+			}
+			t.Logf("progress:\n%s", progress.String())
+			if tt.wantMask == nil {
+				if api.updated != nil || !strings.Contains(progress.String(), "nothing to change") {
+					t.Errorf("updated %v; progress %q", api.updated, progress.String())
+				}
+				return
+			}
+			if got := api.updated.GetUpdateMask().GetPaths(); !slices.Equal(got, tt.wantMask) || api.updated.GetCluster().GetEtag() != "etag-1" {
+				t.Errorf("mask %v, etag %q; want %v", got, api.updated.GetCluster().GetEtag(), tt.wantMask)
+			}
+		})
 	}
 }

@@ -194,10 +194,19 @@ message GetNetworkRequest {
   // management cluster instead of the status last recorded. UNAVAILABLE
   // when the management cluster cannot be read.
   bool live = 3;
+  // Return the spec, labels and display name as the client asked for
+  // them: as sent at create, with the updates since (the stored input),
+  // instead of the resolved spec. update -f compares a manifest with it.
+  // A network stored without such an input gets its resolved spec;
+  // GetNetworkResponse.as_requested says which.
+  bool as_requested = 4;
 }
 
 message GetNetworkResponse {
   Network network = 1;
+  // The network's spec, labels and display name are its input
+  // (GetNetworkRequest.as_requested), not the resolved ones.
+  bool as_requested = 2;
 }
 
 message WatchNetworkRequest {

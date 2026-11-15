@@ -301,10 +301,14 @@ A launch template is either an existing one (`id` or `name`, with a numeric
 `version`) or one the platform renders (`security_group_ids`, and for a
 custom AMI `image_id` with `user_data`).
 
-The CLI's `update -f` fills `update_mask` itself: the paths below whose
-fields the manifest states with a value other than the object's
-(`pkg/updatemask`); a changed field that no path covers is refused before
-the call (`spec.region cannot be changed`).
+The CLI's `update -f` fills `update_mask` itself. It reads the cluster
+with `GetClusterRequest.as_requested` (the spec, labels and display name
+as the client sent them, with the updates since, instead of the resolved
+spec with its defaults), compares the manifest with it, and sends the
+paths below whose fields the manifest states with another value
+(`pkg/updatemask`). Re-applying the manifest a cluster was created from
+changes nothing; a changed field that no path covers is refused before
+the call (`spec.region cannot be changed`). Networks work the same way.
 
 `UpdateCluster` accepts these `update_mask` paths:
 

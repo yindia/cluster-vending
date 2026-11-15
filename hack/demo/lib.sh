@@ -101,15 +101,31 @@ until_() {
 # name, or nothing.
 id_of() { json "$1" list | jq -r --arg n "$3" ".$2[]? | select(.$4==\$n) | .id"; }
 
+# account_verified: the account's access is verified, in DEMO_REGION too
+# (where the network goes). A check that never covered the region asks
+# for it once (account verify --region) and keeps waiting.
 account_verified() {
 	local a
 	a="$(json account get --id "$ACCOUNT")" || return 1
-	if jq -e '.account.status.access.verified' <<<"$a" >/dev/null; then return 0; fi
+	if jq -e --arg r "$DEMO_REGION" '.account.status.access.verified and
+		any(.account.status.access.regions[]?; .region == $r and .ok)' <<<"$a" >/dev/null; then
+		return 0
+	fi
 	if jq -e '.account.status.access.checkedTime and (.account.status.access.verified | not)' <<<"$a" >/dev/null; then
 		jq -r '.account.status.access | "\(.reason): \(.message)"' <<<"$a"
 		return 2
 	fi
+	if [ -z "${_DEMO_REGION_ASKED:-}" ] && jq -e '.account.status.access.verified' <<<"$a" >/dev/null; then
+		_DEMO_REGION_ASKED=1
+		cluster-vending account verify --id "$ACCOUNT" --tenant "$T" --region "$DEMO_REGION" >/dev/null 2>&1 || true
+	fi
 	return 1
+}
+
+# ensure_region n: the account is verified in DEMO_REGION before anything
+# is created there; prints __region_ok__ or fails step n.
+ensure_region() {
+	until_ "$1" 900 "the access check of the account in $DEMO_REGION" account_verified && echo __region_ok__
 }
 
 found_account() {

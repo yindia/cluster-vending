@@ -20,6 +20,11 @@ Source hack/demo/setup.tape
 
 Hide
 Type "fill network.yaml; clear" Enter
+Type "ensure_region 2" Enter
+Wait+Screen@20m /__region_ok__|__step_2_failed__/
+Type "check" Enter
+Wait+Screen@10s /__continue__/
+Type "clear" Enter
 Show
 Type "# 2. A network: VPC, two zones, public and private subnets, one NAT gateway" Enter
 Sleep 1s

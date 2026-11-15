@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package cloud.v1;
 
+import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -46,4 +47,40 @@ message ListPausesRequest {}
 message ListPausesResponse {
   // Every pause in effect, full ones first, each by target.
   repeated PauseRecord pauses = 1;
+}
+
+message FreezeRequest {
+  // Why, shown on every frozen cluster ("the platform is frozen: <reason>").
+  string reason = 1 [(buf.validate.field).string.max_len = 512];
+}
+
+message FreezeResponse {
+  // How many clusters it holds now.
+  int32 clusters = 1;
+}
+
+message UnfreezeRequest {
+  // Set: let this cluster through (and its network), the platform stays
+  // frozen. Not with network_id. Neither: lift the freeze.
+  string cluster_id = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+  // Set: let this network through, the platform stays frozen.
+  string network_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+
+  option (buf.validate.message).cel = {
+    id: "unfreeze.one_target"
+    message: "set cluster_id or network_id, not both"
+    expression: "this.cluster_id == '' || this.network_id == ''"
+  };
+}
+
+message UnfreezeResponse {
+  // What happened, for people: "the platform is not frozen any more", or
+  // "cluster <id> is let through; 3 clusters are let through".
+  string note = 1;
 }

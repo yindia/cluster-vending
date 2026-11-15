@@ -7,6 +7,7 @@
 package cloudv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -299,11 +300,202 @@ func (x *ListPausesResponse) GetPauses() []*PauseRecord {
 	return nil
 }
 
+type FreezeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Why, shown on every frozen cluster ("the platform is frozen: <reason>").
+	Reason        string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FreezeRequest) Reset() {
+	*x = FreezeRequest{}
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FreezeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FreezeRequest) ProtoMessage() {}
+
+func (x *FreezeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FreezeRequest.ProtoReflect.Descriptor instead.
+func (*FreezeRequest) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_pause_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *FreezeRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type FreezeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many clusters it holds now.
+	Clusters      int32 `protobuf:"varint,1,opt,name=clusters,proto3" json:"clusters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FreezeResponse) Reset() {
+	*x = FreezeResponse{}
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FreezeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FreezeResponse) ProtoMessage() {}
+
+func (x *FreezeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FreezeResponse.ProtoReflect.Descriptor instead.
+func (*FreezeResponse) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_pause_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *FreezeResponse) GetClusters() int32 {
+	if x != nil {
+		return x.Clusters
+	}
+	return 0
+}
+
+type UnfreezeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Set: let this cluster through (and its network), the platform stays
+	// frozen. Not with network_id. Neither: lift the freeze.
+	ClusterId string `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	// Set: let this network through, the platform stays frozen.
+	NetworkId     string `protobuf:"bytes,2,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnfreezeRequest) Reset() {
+	*x = UnfreezeRequest{}
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnfreezeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnfreezeRequest) ProtoMessage() {}
+
+func (x *UnfreezeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnfreezeRequest.ProtoReflect.Descriptor instead.
+func (*UnfreezeRequest) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_pause_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *UnfreezeRequest) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *UnfreezeRequest) GetNetworkId() string {
+	if x != nil {
+		return x.NetworkId
+	}
+	return ""
+}
+
+type UnfreezeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What happened, for people: "the platform is not frozen any more", or
+	// "cluster <id> is let through; 3 clusters are let through".
+	Note          string `protobuf:"bytes,1,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnfreezeResponse) Reset() {
+	*x = UnfreezeResponse{}
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnfreezeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnfreezeResponse) ProtoMessage() {}
+
+func (x *UnfreezeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_admin_pause_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnfreezeResponse.ProtoReflect.Descriptor instead.
+func (*UnfreezeResponse) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_admin_pause_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *UnfreezeResponse) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
 var File_cloud_v1_admin_pause_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_pause_proto_rawDesc = "" +
 	"\n" +
-	"\x1acloud/v1/admin_pause.proto\x12\bcloud.v1\x1a\x16cloud/v1/cluster.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb0\x03\n" +
+	"\x1acloud/v1/admin_pause.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb0\x03\n" +
 	"\vPauseRecord\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1d\n" +
@@ -322,7 +514,19 @@ const file_cloud_v1_admin_pause_proto_rawDesc = "" +
 	"\bclusters\x18\f \x01(\x05R\bclusters\"\x13\n" +
 	"\x11ListPausesRequest\"C\n" +
 	"\x12ListPausesResponse\x12-\n" +
-	"\x06pauses\x18\x01 \x03(\v2\x15.cloud.v1.PauseRecordR\x06pauses*[\n" +
+	"\x06pauses\x18\x01 \x03(\v2\x15.cloud.v1.PauseRecordR\x06pauses\"1\n" +
+	"\rFreezeRequest\x12 \n" +
+	"\x06reason\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\x06reason\",\n" +
+	"\x0eFreezeResponse\x12\x1a\n" +
+	"\bclusters\x18\x01 \x01(\x05R\bclusters\"\xdd\x01\n" +
+	"\x0fUnfreezeRequest\x12*\n" +
+	"\n" +
+	"cluster_id\x18\x01 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12*\n" +
+	"\n" +
+	"network_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:r\xbaHo\x1am\n" +
+	"\x13unfreeze.one_target\x12&set cluster_id or network_id, not both\x1a.this.cluster_id == '' || this.network_id == ''\"&\n" +
+	"\x10UnfreezeResponse\x12\x12\n" +
+	"\x04note\x18\x01 \x01(\tR\x04note*[\n" +
 	"\tPauseKind\x12\x1a\n" +
 	"\x16PAUSE_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PAUSE_KIND_EVERYTHING\x10\x01\x12\x17\n" +
@@ -342,28 +546,32 @@ func file_cloud_v1_admin_pause_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_admin_pause_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_cloud_v1_admin_pause_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_cloud_v1_admin_pause_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_cloud_v1_admin_pause_proto_goTypes = []any{
 	(PauseKind)(0),                // 0: cloud.v1.PauseKind
 	(*PauseRecord)(nil),           // 1: cloud.v1.PauseRecord
 	(*ListPausesRequest)(nil),     // 2: cloud.v1.ListPausesRequest
 	(*ListPausesResponse)(nil),    // 3: cloud.v1.ListPausesResponse
-	(ReleaseChannel)(0),           // 4: cloud.v1.ReleaseChannel
-	(ClusterTier)(0),              // 5: cloud.v1.ClusterTier
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
+	(*FreezeRequest)(nil),         // 4: cloud.v1.FreezeRequest
+	(*FreezeResponse)(nil),        // 5: cloud.v1.FreezeResponse
+	(*UnfreezeRequest)(nil),       // 6: cloud.v1.UnfreezeRequest
+	(*UnfreezeResponse)(nil),      // 7: cloud.v1.UnfreezeResponse
+	(ReleaseChannel)(0),           // 8: cloud.v1.ReleaseChannel
+	(ClusterTier)(0),              // 9: cloud.v1.ClusterTier
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
 }
 var file_cloud_v1_admin_pause_proto_depIdxs = []int32{
-	4, // 0: cloud.v1.PauseRecord.channel:type_name -> cloud.v1.ReleaseChannel
-	5, // 1: cloud.v1.PauseRecord.tier:type_name -> cloud.v1.ClusterTier
-	0, // 2: cloud.v1.PauseRecord.kind:type_name -> cloud.v1.PauseKind
-	6, // 3: cloud.v1.PauseRecord.since:type_name -> google.protobuf.Timestamp
-	6, // 4: cloud.v1.PauseRecord.until:type_name -> google.protobuf.Timestamp
-	1, // 5: cloud.v1.ListPausesResponse.pauses:type_name -> cloud.v1.PauseRecord
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	8,  // 0: cloud.v1.PauseRecord.channel:type_name -> cloud.v1.ReleaseChannel
+	9,  // 1: cloud.v1.PauseRecord.tier:type_name -> cloud.v1.ClusterTier
+	0,  // 2: cloud.v1.PauseRecord.kind:type_name -> cloud.v1.PauseKind
+	10, // 3: cloud.v1.PauseRecord.since:type_name -> google.protobuf.Timestamp
+	10, // 4: cloud.v1.PauseRecord.until:type_name -> google.protobuf.Timestamp
+	1,  // 5: cloud.v1.ListPausesResponse.pauses:type_name -> cloud.v1.PauseRecord
+	6,  // [6:6] is the sub-list for method output_type
+	6,  // [6:6] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_pause_proto_init() }
@@ -378,7 +586,7 @@ func file_cloud_v1_admin_pause_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_admin_pause_proto_rawDesc), len(file_cloud_v1_admin_pause_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   3,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

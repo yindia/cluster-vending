@@ -57,6 +57,9 @@ var scopeOverrides = map[protoreflect.FullName]Scope{
 	"cloud.v1.AdminService.PauseReconcile":  ScopePlatform,
 	"cloud.v1.AdminService.ResumeReconcile": ScopePlatform,
 	"cloud.v1.AdminService.ListPauses":      ScopePlatform,
+	// The platform freeze.
+	"cloud.v1.AdminService.Freeze":   ScopePlatform,
+	"cloud.v1.AdminService.Unfreeze": ScopePlatform,
 	// The platform's release configuration and its rollouts.
 	"cloud.v1.AdminService.ListReleases":        ScopePlatform,
 	"cloud.v1.AdminService.GetRelease":          ScopePlatform,

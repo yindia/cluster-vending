@@ -32,6 +32,10 @@ const (
 	AdminServiceResumeReconcileProcedure = "/cloud.v1.AdminService/ResumeReconcile"
 	// AdminServiceListPausesProcedure is the procedure name of the AdminService's ListPauses RPC.
 	AdminServiceListPausesProcedure = "/cloud.v1.AdminService/ListPauses"
+	// AdminServiceFreezeProcedure is the procedure name of the AdminService's Freeze RPC.
+	AdminServiceFreezeProcedure = "/cloud.v1.AdminService/Freeze"
+	// AdminServiceUnfreezeProcedure is the procedure name of the AdminService's Unfreeze RPC.
+	AdminServiceUnfreezeProcedure = "/cloud.v1.AdminService/Unfreeze"
 	// AdminServiceListReleasesProcedure is the procedure name of the AdminService's ListReleases RPC.
 	AdminServiceListReleasesProcedure = "/cloud.v1.AdminService/ListReleases"
 	// AdminServiceGetReleaseProcedure is the procedure name of the AdminService's GetRelease RPC.
@@ -67,6 +71,20 @@ var (
 			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListPauses"),
 			Procedure:        AdminServiceListPausesProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	adminServiceFreezeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("Freeze"),
+			Procedure:  AdminServiceFreezeProcedure,
+		}
+	})
+	adminServiceUnfreezeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("Unfreeze"),
+			Procedure:  AdminServiceUnfreezeProcedure,
 		}
 	})
 	adminServiceListReleasesSpec = sync.OnceValue(func() connect.Spec {
@@ -150,6 +168,17 @@ type AdminServiceClient interface {
 	// cluster, or of a channel's clusters) and pauses of upgrades only, with
 	// who asked, when, why, until when and how many clusters each covers.
 	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
+	// Freezes the platform: no automatic change starts anywhere (Kubernetes
+	// upgrades, release moves, add-on upgrades, code changes from a new
+	// controller build) until Unfreeze; what is under way finishes, and
+	// what users ask for (create, update, delete) is done as usual. Freezing
+	// again changes the reason and keeps the clusters let through.
+	Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error)
+	// Lifts the freeze; with a cluster_id (or a network_id), lets only that
+	// cluster and its network (that network) take their pending changes
+	// while the platform stays frozen. Lifting the freeze forgets what was
+	// let through.
+	Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
 	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
@@ -215,6 +244,17 @@ type AdminServiceHandler interface {
 	// cluster, or of a channel's clusters) and pauses of upgrades only, with
 	// who asked, when, why, until when and how many clusters each covers.
 	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
+	// Freezes the platform: no automatic change starts anywhere (Kubernetes
+	// upgrades, release moves, add-on upgrades, code changes from a new
+	// controller build) until Unfreeze; what is under way finishes, and
+	// what users ask for (create, update, delete) is done as usual. Freezing
+	// again changes the reason and keeps the clusters let through.
+	Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error)
+	// Lifts the freeze; with a cluster_id (or a network_id), lets only that
+	// cluster and its network (that network) take their pending changes
+	// while the platform stays frozen. Lifting the freeze forgets what was
+	// let through.
+	Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
 	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
@@ -242,6 +282,8 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 		connect.Method{Spec: adminServicePauseReconcileSpec(), Handler: adapter.pauseReconcile},
 		connect.Method{Spec: adminServiceResumeReconcileSpec(), Handler: adapter.resumeReconcile},
 		connect.Method{Spec: adminServiceListPausesSpec(), Handler: adapter.listPauses},
+		connect.Method{Spec: adminServiceFreezeSpec(), Handler: adapter.freeze},
+		connect.Method{Spec: adminServiceUnfreezeSpec(), Handler: adapter.unfreeze},
 		connect.Method{Spec: adminServiceListReleasesSpec(), Handler: adapter.listReleases},
 		connect.Method{Spec: adminServiceGetReleaseSpec(), Handler: adapter.getRelease},
 		connect.Method{Spec: adminServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
@@ -263,6 +305,14 @@ func (UnimplementedAdminServiceHandler) ResumeReconcile(context.Context, *v1.Res
 
 func (UnimplementedAdminServiceHandler) ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListPauses is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.Freeze is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.Unfreeze is not implemented")
 }
 
 func (UnimplementedAdminServiceHandler) ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error) {
@@ -308,6 +358,22 @@ func (c *adminServiceClient) ResumeReconcile(ctx context.Context, req *v1.Resume
 func (c *adminServiceClient) ListPauses(ctx context.Context, req *v1.ListPausesRequest) (*v1.ListPausesResponse, error) {
 	var res v1.ListPausesResponse
 	if err := c.client.CallUnary(ctx, adminServiceListPausesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) Freeze(ctx context.Context, req *v1.FreezeRequest) (*v1.FreezeResponse, error) {
+	var res v1.FreezeResponse
+	if err := c.client.CallUnary(ctx, adminServiceFreezeSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) Unfreeze(ctx context.Context, req *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error) {
+	var res v1.UnfreezeResponse
+	if err := c.client.CallUnary(ctx, adminServiceUnfreezeSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -385,6 +451,30 @@ func (h adminServiceHandler) listPauses(ctx context.Context, _ connect.Spec, str
 		return err
 	}
 	res, err := h.svc.ListPauses(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) freeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.FreezeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.Freeze(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) unfreeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.UnfreezeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.Unfreeze(ctx, &req)
 	if err != nil {
 		return err
 	}

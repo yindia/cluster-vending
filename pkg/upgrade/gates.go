@@ -24,6 +24,7 @@ const (
 	GateManual       GateCode = "MANUAL"
 	GateHalted       GateCode = "HALTED"
 	GateUpgrading    GateCode = "UPGRADING"
+	GateFrozen       GateCode = "FROZEN"
 	GatePaused       GateCode = "PAUSED"
 	GateHeld         GateCode = "UPGRADES_PAUSED"
 	GateNotReady     GateCode = "NOT_READY"
@@ -49,6 +50,10 @@ type Facts struct {
 	// Ready: the cluster is Ready; PlatformReady: every platform
 	// component is Ready.
 	Ready, PlatformReady bool
+	// Frozen: the platform is frozen (AdminService.Freeze) and the cluster
+	// is not let through; FrozenMessage says why.
+	Frozen        bool
+	FrozenMessage string
 	// Paused: the cluster's resources are paused; Held: its upgrades are
 	// paused (a ReleaseHold), HeldMessage says why and until when.
 	Paused, Held bool
@@ -83,6 +88,9 @@ func Check(f Facts) []Gate {
 	}
 	if f.Upgrading {
 		block(GateUpgrading, "an upgrade is already running")
+	}
+	if f.Frozen {
+		block(GateFrozen, f.FrozenMessage)
 	}
 	if f.Paused {
 		block(GatePaused, "the cluster is paused")

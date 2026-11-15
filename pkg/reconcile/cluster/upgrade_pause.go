@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,4 +56,25 @@ func holdView(row *model.Cluster, spec *cloudv1.ClusterSpec) *cloudv1alpha1.Clus
 		c.Spec.Tier = cloudv1alpha1.ClusterTier("Tier" + strings.TrimPrefix(tier.String(), "CLUSTER_TIER_"))
 	}
 	return c
+}
+
+// frozen reports whether the platform freeze holds the cluster of id: no
+// automatic change of it may start (the daily add-on upgrade, a code
+// change); why is what its status says. Holds that cannot be read count
+// as frozen, so nothing automatic starts blind; no source of holds, not.
+func (s *Reconciler) frozen(ctx context.Context, id string) (bool, string) {
+	src, ok := s.releases().(reconcile.HoldReader)
+	if !ok {
+		return false, ""
+	}
+	holds, err := src.Holds(ctx)
+	if err != nil {
+		s.logger().WarnContext(ctx, "read the platform freeze", "cluster_id", id, "error", err)
+		return true, "cannot read whether the platform is frozen; waiting"
+	}
+	f := rollout.Freeze(holds, time.Now())
+	if f == nil || slices.Contains(f.Spec.Except, id) {
+		return false, ""
+	}
+	return true, rollout.FreezeMessage(f)
 }

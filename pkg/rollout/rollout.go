@@ -11,6 +11,7 @@ package rollout
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -319,7 +320,11 @@ func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Fa
 		Paused:        model.ParsePause(c.Annotations[cloudstore.AnnotationPaused]) != nil,
 	}
 	if h := HoldOf(in.holds, c, in.now); h != nil {
-		f.Held, f.HeldMessage = true, HoldMessage(h)
+		if h.Spec.Platform {
+			f.Frozen, f.FrozenMessage = true, FreezeMessage(h)
+		} else {
+			f.Held, f.HeldMessage = true, HoldMessage(h)
+		}
 	}
 	if dep := c.Status.Deprecations; dep != nil {
 		f.DeprecationsScanned = dep.ScannedAt != nil
@@ -374,6 +379,8 @@ func HoldOf(holds []cloudv1alpha1.ReleaseHold, c *cloudv1alpha1.Cluster, now tim
 // tier, when it names one; a cluster with no tier is tier 0).
 func Matches(h cloudv1alpha1.ReleaseHoldSpec, c *cloudv1alpha1.Cluster) bool {
 	switch {
+	case h.Platform:
+		return !slices.Contains(h.Except, c.Labels[cloudstore.LabelID])
 	case h.ClusterID != "":
 		return c.Labels[cloudstore.LabelID] == h.ClusterID
 	case h.TenantID != "":
@@ -391,6 +398,8 @@ func Matches(h cloudv1alpha1.ReleaseHoldSpec, c *cloudv1alpha1.Cluster) bool {
 // "tenant acme", "channel beta", "channel beta tier 0".
 func HoldTarget(h cloudv1alpha1.ReleaseHoldSpec) string {
 	switch {
+	case h.Platform:
+		return "the platform"
 	case h.ClusterID != "":
 		return "cluster " + h.ClusterID
 	case h.TenantID != "":
@@ -531,4 +540,36 @@ func Earliest(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+// FreezeName is the name of the release hold that is the platform freeze:
+// one for the platform.
+const FreezeName = "platform-freeze"
+
+// FreezeMessage is what a cluster the platform freeze holds says: "the
+// platform is frozen: provider upgrade".
+func FreezeMessage(h *cloudv1alpha1.ReleaseHold) string {
+	out := "the platform is frozen"
+	if h.Spec.Reason != "" {
+		out += ": " + h.Spec.Reason
+	}
+	return out
+}
+
+// Freeze is the active platform freeze among holds; nil when the
+// platform is not frozen.
+func Freeze(holds []cloudv1alpha1.ReleaseHold, now time.Time) *cloudv1alpha1.ReleaseHold {
+	for i := range holds {
+		if holds[i].Spec.Platform && Active(holds[i], now) {
+			return &holds[i]
+		}
+	}
+	return nil
+}
+
+// Frozen reports whether the platform freeze holds the cluster of id: the
+// platform is frozen and does not let the cluster through.
+func Frozen(holds []cloudv1alpha1.ReleaseHold, id string, now time.Time) bool {
+	f := Freeze(holds, now)
+	return f != nil && !slices.Contains(f.Spec.Except, id)
 }

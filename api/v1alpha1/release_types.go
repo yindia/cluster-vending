@@ -437,11 +437,27 @@ type ReleaseChannelList struct {
 
 // ReleaseHoldSpec keeps clusters out of rollouts (AdminService.PauseReconcile
 // with only_upgrades): one cluster, a tenant's clusters, or a release
-// channel's (every tier, or one). Exactly one of clusterID, tenantID and
-// channel is set; tier only with channel.
-// +kubebuilder:validation:XValidation:rule="[has(self.clusterID), has(self.tenantID), has(self.channel)].filter(x, x).size() == 1",message="set exactly one of clusterID, tenantID and channel"
+// channel's (every tier, or one); or, with platform, every cluster and
+// network: the platform freeze (AdminService.Freeze). Exactly one of
+// clusterID, tenantID, channel and platform is set; tier only with
+// channel, except only with platform.
+// +kubebuilder:validation:XValidation:rule="[has(self.clusterID), has(self.tenantID), has(self.channel), has(self.platform) && self.platform].filter(x, x).size() == 1",message="set exactly one of clusterID, tenantID, channel and platform"
 // +kubebuilder:validation:XValidation:rule="!has(self.tier) || has(self.channel)",message="tier needs channel"
+// +kubebuilder:validation:XValidation:rule="!has(self.except) || (has(self.platform) && self.platform)",message="except needs platform"
 type ReleaseHoldSpec struct {
+	// Platform holds every cluster and network: no automatic change starts
+	// anywhere (Kubernetes upgrades, release moves, add-on upgrades, code
+	// changes) while it exists. AdminService.Freeze writes it.
+	// +optional
+	Platform bool `json:"platform,omitempty"`
+	// Except are the IDs of the clusters and networks a platform freeze
+	// lets through (AdminService.Unfreeze with a cluster or a network):
+	// their pending changes may start; a cluster let through lets its
+	// network through too.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=200
+	Except []string `json:"except,omitempty"`
 	// ClusterID is the held cluster's ID (the API's Cluster.id).
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`

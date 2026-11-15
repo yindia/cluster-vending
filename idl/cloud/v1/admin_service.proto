@@ -55,6 +55,19 @@ service AdminService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // Freezes the platform: no automatic change starts anywhere (Kubernetes
+  // upgrades, release moves, add-on upgrades, code changes from a new
+  // controller build) until Unfreeze; what is under way finishes, and
+  // what users ask for (create, update, delete) is done as usual. Freezing
+  // again changes the reason and keeps the clusters let through.
+  rpc Freeze(FreezeRequest) returns (FreezeResponse);
+
+  // Lifts the freeze; with a cluster_id (or a network_id), lets only that
+  // cluster and its network (that network) take their pending changes
+  // while the platform stays frozen. Lifting the freeze forgets what was
+  // let through.
+  rpc Unfreeze(UnfreezeRequest) returns (UnfreezeResponse);
+
   // Lists the releases, newest first: valid or not, shipped or published,
   // and the channels and holds naming them. Read-only.
   rpc ListReleases(ListReleasesRequest) returns (ListReleasesResponse) {

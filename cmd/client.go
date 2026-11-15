@@ -241,6 +241,10 @@ func newAdminCmd() *cobra.Command {
 			run: cli.AdminPauseList, args: cobra.NoArgs, parent: "pause"},
 		{use: "resume", short: "Resume what pause paused, with the same target and --only: a tenant (a network or cluster also paused on its own stays paused), one network or cluster, or a channel's clusters",
 			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true, pauseTargets: true},
+		{use: "freeze", short: "Freeze the platform before a risky deploy (new controller build, provider upgrade): no automatic change starts anywhere (Kubernetes upgrades, component and add-on upgrades, code changes) until unfreeze; users' own changes still apply",
+			run: cli.AdminFreeze, args: cobra.NoArgs, reason: true},
+		{use: "unfreeze", short: "Lift the freeze: automatic changes start again, tier by tier; with --cluster or --network, let only that one take its pending changes while the platform stays frozen",
+			run: cli.AdminUnfreeze, args: cobra.NoArgs, cluster: true, pauseNetwork: true},
 	})
 	admin.AddCommand(newAdminReleaseCmds()...)
 	return admin

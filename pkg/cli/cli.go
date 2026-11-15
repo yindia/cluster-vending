@@ -73,8 +73,6 @@ type Options struct {
 	Output string
 	// ETag is --etag, for optimistic concurrency on update and delete.
 	ETag string
-	// UpdateMask is --update-mask: the fields an update changes.
-	UpdateMask []string
 	// Plan is --plan of cluster update: only show what the update would do
 	// (validate_only); PlanID is --plan-id: apply only if that plan still
 	// holds.

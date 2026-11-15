@@ -301,6 +301,11 @@ A launch template is either an existing one (`id` or `name`, with a numeric
 `version`) or one the platform renders (`security_group_ids`, and for a
 custom AMI `image_id` with `user_data`).
 
+The CLI's `update -f` fills `update_mask` itself: the paths below whose
+fields the manifest states with a value other than the object's
+(`pkg/updatemask`); a changed field that no path covers is refused before
+the call (`spec.region cannot be changed`).
+
 `UpdateCluster` accepts these `update_mask` paths:
 
 ```

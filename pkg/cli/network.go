@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/updatemask"
 )
 
 // NetworkCreate calls NetworkService.CreateNetwork with the Network
@@ -59,7 +60,8 @@ func NetworkList(ctx context.Context, c Clients, o Options) (proto.Message, erro
 }
 
 // NetworkUpdate calls NetworkService.UpdateNetwork with the Network
-// manifest and --update-mask; the network is the argument or metadata.id.
+// manifest; the network is the argument or metadata.id. The mask is what
+// the manifest changes (inferredMask), sent with the network's etag.
 func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	m, err := LoadManifest(o.Input, KindNetwork)
 	if err != nil {
@@ -76,11 +78,21 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
+	got, err := call(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()}, c.Network.GetNetwork)
+	if err != nil {
+		return nil, err
+	}
+	current := got.(*cloudv1.GetNetworkResponse).GetNetwork()
+	mask, err := inferredMask(o, "network "+current.GetName(), current, networkAsStored(n), updatemask.Network)
+	if err != nil || len(mask) == 0 {
+		return nil, err
+	}
+	n.Etag = current.GetEtag()
 	if o.ETag != "" {
 		n.Etag = o.ETag
 	}
 	return call(ctx, &cloudv1.UpdateNetworkRequest{
-		TenantId: tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
+		TenantId: tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask},
 	}, c.Network.UpdateNetwork)
 }
 

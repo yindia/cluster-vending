@@ -128,7 +128,10 @@ bin/cluster-vending network delete NETWORK_ID --tenant acme --wait
 
 `cluster import` and `cluster takeover` work the same way for an existing
 EKS cluster in an imported network (`examples/cluster-import.yaml`).
-`update` changes the fields named in `--update-mask`, `watch` streams state
+`update -f` applies what the manifest changes: it compares the manifest with
+the object, prints each change (`spec.release_channel: Beta → Alpha`) and
+applies only those, refused if the object changed meanwhile; `--plan` shows
+them without applying. A field the manifest leaves out is left as it is. `watch` streams state
 and resource events, and `list` lists. Each command has `--help`. The
 controller's samples (`config/samples`) are the same account, network and
 cluster as objects of its kinds.

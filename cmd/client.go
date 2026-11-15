@@ -16,11 +16,11 @@ type verb struct {
 	short string
 	run   cli.Command
 	args  cobra.PositionalArgs
-	// id adds --id, input -f (the manifest), etag --etag, mask
-	// --update-mask, page --page-size and --page-token, ack
+	// id adds --id, input -f (the manifest), etag --etag, page
+	// --page-size and --page-token, ack
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
 	// --plan-id, force --force, cluster --cluster.
-	id, input, etag, mask, page, ack, wait, plan, force, cluster bool
+	id, input, etag, page, ack, wait, plan, force, cluster bool
 	// reason adds --reason (admin pause), pauseNetwork --network (admin
 	// pause and resume), regions --region (account verify).
 	reason, pauseNetwork, regions bool
@@ -59,8 +59,8 @@ func crud(noun, kind string, create, get, list, update, del cli.Command) []verb 
 			run: create, args: cobra.NoArgs, input: true, wait: true},
 		{use: "get <id>", short: "Show a " + noun + "; --live reads its status now instead of the one last recorded", run: get, args: cobra.ExactArgs(1), live: true},
 		{use: "list", short: "List " + noun + "s", run: list, args: cobra.NoArgs, page: true},
-		{use: "update [id]", short: fmt.Sprintf("Update the --update-mask fields of a %s from a %s manifest (-f); the id is --id or metadata.id", noun, kind),
-			run: update, args: cobra.MaximumNArgs(1), input: true, etag: true, mask: true, wait: true},
+		{use: "update [id]", short: fmt.Sprintf("Update a %s from a %s manifest (-f): what the manifest changes is shown, then applied; the id is --id or metadata.id", noun, kind),
+			run: update, args: cobra.MaximumNArgs(1), input: true, etag: true, wait: true},
 		{use: "delete <id>", short: fmt.Sprintf("Delete a %s; its resources are deleted in order", noun), run: del,
 			args: cobra.ExactArgs(1), etag: true, wait: true},
 	}
@@ -139,9 +139,6 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.etag {
 			f.StringVar(&o.ETag, "etag", "", "fail unless the resource still has this etag")
-		}
-		if v.mask {
-			f.StringSliceVar(&o.UpdateMask, "update-mask", nil, "fields to change, e.g. display_name,spec.access (required)")
 		}
 		if v.ack {
 			f.BoolVar(&o.AcknowledgeNotImported, "acknowledge-not-imported", false,

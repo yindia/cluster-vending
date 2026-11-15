@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/updatemask"
 )
 
 // ClusterCreate calls ClusterService.CreateCluster with the Cluster
@@ -60,8 +61,11 @@ func ClusterList(ctx context.Context, c Clients, o Options) (proto.Message, erro
 }
 
 // ClusterUpdate calls ClusterService.UpdateCluster with the Cluster
-// manifest and --update-mask; the cluster is the argument or metadata.id.
-// With --wait it returns once the cluster is RUNNING again.
+// manifest; the cluster is the argument or metadata.id. The mask is what
+// the manifest changes: it reads the cluster, prints each change and sends
+// the cluster's etag with them, so a change made meanwhile is refused
+// (inferredMask). With --wait it
+// returns once the cluster is RUNNING again.
 func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	m, err := LoadManifest(o.Input, KindCluster)
 	if err != nil {
@@ -78,11 +82,21 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
+	got, err := call(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: cl.GetId()}, c.Cluster.GetCluster)
+	if err != nil {
+		return nil, err
+	}
+	current := got.(*cloudv1.GetClusterResponse).GetCluster()
+	mask, err := inferredMask(o, "cluster "+current.GetName(), current, clusterAsStored(cl), updatemask.Cluster)
+	if err != nil || len(mask) == 0 {
+		return nil, err
+	}
+	cl.Etag = current.GetEtag()
 	if o.ETag != "" {
 		cl.Etag = o.ETag
 	}
 	res, err := call(ctx, &cloudv1.UpdateClusterRequest{
-		TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: o.UpdateMask},
+		TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask},
 		ValidateOnly: o.Plan, PlanId: o.PlanID,
 	}, c.Cluster.UpdateCluster)
 	if err != nil || !o.Wait || o.Plan {

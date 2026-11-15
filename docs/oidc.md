@@ -60,7 +60,7 @@ Set, change or remove it on a cluster that exists with the update mask
 `spec.access.oidc`:
 
 ```sh
-cluster-vending cluster update <cluster-id> --tenant acme -f cluster.yaml --update-mask spec.access.oidc
+cluster-vending cluster update --id <cluster-id> --tenant acme -f cluster.yaml   # prints: spec.access.oidc: <none> → …
 ```
 
 ## What the platform does

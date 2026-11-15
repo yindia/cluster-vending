@@ -75,6 +75,16 @@ kubernetes:
 components: {karpenter: "1.15.1"}
 `, []string{"values for nope"}},
 		{"a bad channel", valid + "- {name: gamma, promotion: Sometimes}\n", []string{`"gamma"`, `"Sometimes"`}},
+		{"a minor's own version", `
+kubernetes:
+- {minor: "1.37", default: true, endOfSupport: "2028-01-31", components: {karpenter: "1.14.2"}}
+components: {karpenter: "1.15.1"}
+`, nil},
+		{"a minor's version of an unknown component, and an empty one", `
+kubernetes:
+- {minor: "1.37", default: true, endOfSupport: "2028-01-31", components: {nope: "1.0.0", karpenter: ""}}
+components: {karpenter: "1.15.1"}
+`, []string{"kubernetes 1.37: components: nope has no version under components", "kubernetes 1.37: components: karpenter has no version"}},
 		{"a channel per minor, and a minor on none", fmt.Sprintf(three, "alpha", "beta", "stable"), nil},
 		{"a channel on no minor", fmt.Sprintf(three, "alpha", "beta", `""`),
 			[]string{"channel stable is on no minor"}},
@@ -101,5 +111,27 @@ components: {karpenter: "1.15.1"}
 				}
 			}
 		})
+	}
+}
+
+// A minor's components override the file's version on that minor only.
+func TestVersionOn(t *testing.T) {
+	rel, err := catalog.ParseRelease([]byte(`
+kubernetes:
+- {minor: "1.37", default: true, endOfSupport: "2028-01-31"}
+- {minor: "1.35", endOfSupport: "2027-05-31", components: {karpenter: "1.14.2"}}
+components: {karpenter: "1.15.1", external-secrets: "2.15.0"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ minor, name, want string }{
+		{"1.37", "karpenter", "1.15.1"},
+		{"1.35", "karpenter", "1.14.2"},
+		{"1.35", "external-secrets", "2.15.0"},
+	} {
+		if got := rel.VersionOn(rel.Kubernetes[map[string]int{"1.37": 0, "1.35": 1}[tt.minor]], tt.name); got != tt.want {
+			t.Errorf("%s on %s = %s, want %s", tt.name, tt.minor, got, tt.want)
+		}
 	}
 }

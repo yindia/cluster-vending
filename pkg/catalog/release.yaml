@@ -37,7 +37,9 @@ kubernetes:
   values:
     cluster-autoscaler: {image: {tag: v1.35.3}}
 
-# Chart version of every component, the same on every minor above.
+# Chart version of every component on every minor above. A minor's own
+# `components: {name: version}` overrides it on that minor only (a version
+# group, istio-* or kyverno*, is overridden together).
 components:
   aws-load-balancer-controller: "3.6.2"
   cluster-autoscaler: "9.60.0"

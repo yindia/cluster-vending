@@ -636,6 +636,27 @@ chart ships an image for 1.36. The shipped release pins chart 9.60.0 on
 every minor with `image.tag` `v1.37.0`, `v1.36.2` and `v1.35.3`; a test
 holds that a pin's image minor is the minor it is pinned under.
 
+## Chart versions per Kubernetes minor
+
+`components:` in `pkg/catalog/release.yaml` is every component's chart
+version on every minor. A minor's own `components:` overrides it on that
+minor only, for a version that does not run there, or one the channel on
+that minor keeps while the others move on:
+
+```yaml
+kubernetes:
+- minor: "1.35"
+  channel: stable
+  components: {karpenter: "1.14.2"}   # stable's clusters stay on 1.14.2
+components:
+  karpenter: "1.15.1"                 # every other minor
+```
+
+An override must name a component under `components:` and give a version.
+A version group stays one version per minor: overriding `istiod` alone
+makes the release not Valid (override every `istio-*` member together).
+`admin release get --id <release>` lists the versions minor by minor.
+
 ## Caveats
 
 **Cluster autoscaler**

@@ -47,6 +47,10 @@ type KubernetesVersion struct {
 	EndOfSupport string `json:"endOfSupport"`
 	// Values are locked Helm values of a component on this minor only.
 	Values map[string]map[string]any `json:"values,omitempty"`
+	// Components are chart versions on this minor only, overriding the
+	// file's components: a version that does not run on this minor (or one
+	// a channel's clusters keep while the others move on).
+	Components map[string]string `json:"components,omitempty"`
 }
 
 // Channel is a release channel a new management cluster gets.
@@ -89,6 +93,15 @@ func (k KubernetesVersion) EndOfSupportTime() (time.Time, error) {
 	return time.ParseInLocation(dayLayout, k.EndOfSupport, time.UTC)
 }
 
+// VersionOn is the chart version of component name on minor k: its own,
+// else the file's.
+func (r Release) VersionOn(k KubernetesVersion, name string) string {
+	if v, ok := k.Components[name]; ok {
+		return v
+	}
+	return r.Components[name]
+}
+
 // ComponentNames are the components with a version, sorted.
 func (r Release) ComponentNames() []string {
 	out := make([]string, 0, len(r.Components))
@@ -125,6 +138,19 @@ func (r Release) check() error {
 		for name := range k.Values {
 			if _, ok := r.Components[name]; !ok {
 				errs = append(errs, fmt.Errorf("kubernetes %s: values for %s, which has no version under components", k.Minor, name))
+			}
+		}
+		overrides := make([]string, 0, len(k.Components))
+		for name := range k.Components {
+			overrides = append(overrides, name)
+		}
+		sort.Strings(overrides)
+		for _, name := range overrides {
+			switch {
+			case r.Components[name] == "":
+				errs = append(errs, fmt.Errorf("kubernetes %s: components: %s has no version under components", k.Minor, name))
+			case k.Components[name] == "":
+				errs = append(errs, fmt.Errorf("kubernetes %s: components: %s has no version", k.Minor, name))
 			}
 		}
 	}

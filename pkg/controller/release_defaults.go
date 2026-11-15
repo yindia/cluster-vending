@@ -91,7 +91,7 @@ func ContentOf(rel catalog.Release) cloudv1alpha1.ReleaseContent {
 		minor := cloudv1alpha1.KubernetesRelease{Minor: k.Minor, Default: k.Default, Channel: k.Channel, UpgradeTo: k.UpgradeTo,
 			EndOfSupport: metav1.NewTime(end)}
 		for _, name := range rel.ComponentNames() {
-			pin := cloudv1alpha1.ComponentPin{Name: name, Version: rel.Components[name]}
+			pin := cloudv1alpha1.ComponentPin{Name: name, Version: rel.VersionOn(k, name)}
 			if values, ok := k.Values[name]; ok {
 				raw, _ := json.Marshal(values) // YAML maps of the file: always JSON
 				pin.Values = &runtime.RawExtension{Raw: raw}

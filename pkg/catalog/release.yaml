@@ -59,6 +59,6 @@ components:
 channels:
 - {name: alpha, promotion: Pinned}
 # releaseSoak: how long the channel before must have offered a release
-# before an Automatic channel takes it (admin channel promote takes it now).
+# before an Automatic channel takes it.
 - {name: beta, promotion: Automatic, releaseSoak: 168h}     # 7 days on alpha
 - {name: stable, promotion: Automatic, releaseSoak: 336h}   # 14 days on beta

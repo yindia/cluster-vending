@@ -89,8 +89,7 @@ spec:
                     description: |-
                       ReleaseSoak is how long an Automatic channel's upstream must have
                       offered a release before the channel takes it (unset: 7 days for
-                      beta, 14 for stable; 0: at once). An admin's promotion (AdminService
-                      PromoteReleaseChannel) takes it before.
+                      beta, 14 for stable; 0: at once).
                     type: string
                   soak:
                     default: 24h

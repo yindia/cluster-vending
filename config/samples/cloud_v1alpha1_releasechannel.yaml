@@ -13,7 +13,7 @@ metadata:
 spec:
   promotion: Automatic
   policy:
-    releaseSoak: 168h   # takes alpha's release after 7 days (admin channel promote: now)
+    releaseSoak: 168h   # takes alpha's release after 7 days
 ---
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: ReleaseChannel

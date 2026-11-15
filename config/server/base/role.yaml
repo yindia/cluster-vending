@@ -58,14 +58,6 @@ rules:
   - create
   - update
   - delete
-# A promotion (AdminService.PromoteReleaseChannel) is an annotation the
-# server patches onto a release channel for the platform admin.
-- apiGroups:
-  - cloud.cluster-vending.io
-  resources:
-  - releasechannels
-  verbs:
-  - patch
 # What the controller reported about a network or a cluster: the
 # Kubernetes events in the tenants' namespaces, read for
 # ListNetworkEvents and ListClusterEvents (pkg/database/cloudstore

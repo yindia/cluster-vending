@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -34,28 +33,20 @@ func TestChannelWaitsOutTheReleaseSoak(t *testing.T) {
 	beta.Status.History = []cloudv1alpha1.ChannelHistoryEntry{{Release: older.Name, From: metav1.NewTime(start.Add(-30 * 24 * time.Hour))}}
 
 	tests := []struct {
-		name       string
-		after      time.Duration
-		soak       *metav1.Duration
-		promote    *cloudv1alpha1.ChannelPromotion
-		want       string
-		waiting    bool
-		promotedBy string
+		name    string
+		after   time.Duration
+		soak    *metav1.Duration
+		want    string
+		waiting bool
 	}{
 		{name: "within the default soak (7d for beta)", after: 24 * time.Hour, want: older.Name, waiting: true},
 		{name: "after it", after: 8 * 24 * time.Hour, want: newer.Name},
 		{name: "a soak of its own", after: 2 * 24 * time.Hour, soak: &metav1.Duration{Duration: 24 * time.Hour}, want: newer.Name},
-		{name: "promoted by an admin", after: time.Hour, promote: &cloudv1alpha1.ChannelPromotion{Release: newer.Name, By: "alice"},
-			want: newer.Name, promotedBy: "alice"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ch := beta.DeepCopy()
 			ch.Spec.Policy.ReleaseSoak = tt.soak
-			if tt.promote != nil {
-				raw, _ := json.Marshal(tt.promote)
-				ch.Annotations = map[string]string{cloudv1alpha1.AnnotationPromote: string(raw)}
-			}
 			c := releaseClient(t, older.DeepCopy(), newer.DeepCopy(), alpha.DeepCopy(), ch)
 			now := start.Add(tt.after)
 			r := &ReleaseChannelReconciler{c: c, now: func() time.Time { return now }}
@@ -85,14 +76,6 @@ func TestChannelWaitsOutTheReleaseSoak(t *testing.T) {
 			}
 			if got.Status.Pending != nil {
 				t.Errorf("pending = %+v, want none", got.Status.Pending)
-			}
-			if tt.promotedBy != "" {
-				if h := got.Status.History; len(h) == 0 || !strings.Contains(h[0].Reason, "promoted by "+tt.promotedBy) {
-					t.Errorf("history = %+v, want the promotion recorded", h)
-				}
-				if _, ok := got.Annotations[cloudv1alpha1.AnnotationPromote]; ok {
-					t.Error("the promotion is still asked for once done")
-				}
 			}
 		})
 	}

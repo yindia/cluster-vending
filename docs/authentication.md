@@ -118,7 +118,6 @@ tenant. The exceptions are listed in `pkg/auth/access.go`:
 | Every other RPC with `tenant_id` (create, update, delete, import, takeover, bootstrap, enable, disable) | `TenantAdmin` for the tenant |
 | `AdminService.PauseReconcile`, `AdminService.ResumeReconcile` | `PlatformAdmin`, whatever tenant they name |
 | `AdminService.ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel`, `GetRollout` | `PlatformAdmin` (read-only) |
-| `AdminService.PromoteReleaseChannel` | `PlatformAdmin` (a write) |
 | `ComponentService.GetComponentValues`, `TenantService.WhoAmI` | Any accepted caller |
 
 An RPC that is neither listed nor carries a `tenant_id` is refused, and a

@@ -205,8 +205,7 @@ func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
 		kv = append(kv, [2]string{"Release Soak", soak})
 	}
 	if p := c.GetPending(); p != nil {
-		kv = append(kv, [2]string{"Next Release", fmt.Sprintf("%s %s (%s); admin channel promote --id %s takes it now",
-			p.GetRelease(), untilText(p.GetUntil()), date(p.GetUntil()), channelWord(c.GetChannel()))})
+		kv = append(kv, [2]string{"Next Release", fmt.Sprintf("%s %s (%s)", p.GetRelease(), untilText(p.GetUntil()), date(p.GetUntil()))})
 	}
 	if err := fields(w, kv); err != nil {
 		return err

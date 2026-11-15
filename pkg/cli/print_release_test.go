@@ -116,7 +116,7 @@ func TestPrintChannelWaitingForARelease(t *testing.T) {
 	if !strings.Contains(list, "takes 2026-11-a in 6d") {
 		t.Errorf("channel list lacks the pending release:\n%s", list)
 	}
-	for _, want := range []string{"Release Soak:", "168h", "Next Release:", "2026-11-a in 6d", "admin channel promote --id beta"} {
+	for _, want := range []string{"Release Soak:", "168h", "Next Release:", "2026-11-a in 6d"} {
 		if !strings.Contains(get, want) {
 			t.Errorf("channel get lacks %q:\n%s", want, get)
 		}

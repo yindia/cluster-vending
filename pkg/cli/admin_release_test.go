@@ -16,7 +16,6 @@ type releaseReader struct {
 	channel  *cloudv1.GetReleaseChannelRequest
 	rollout  *cloudv1.GetRolloutRequest
 	releases *cloudv1.ListReleasesRequest
-	promote  *cloudv1.PromoteReleaseChannelRequest
 }
 
 func (r *releaseReader) GetRelease(_ context.Context, req *cloudv1.GetReleaseRequest) (*cloudv1.GetReleaseResponse, error) {
@@ -32,31 +31,6 @@ func (r *releaseReader) ListReleases(_ context.Context, req *cloudv1.ListRelease
 func (r *releaseReader) GetReleaseChannel(_ context.Context, req *cloudv1.GetReleaseChannelRequest) (*cloudv1.GetReleaseChannelResponse, error) {
 	r.channel = req
 	return &cloudv1.GetReleaseChannelResponse{Channel: &cloudv1.ReleaseChannelInfo{Channel: req.GetChannel()}}, nil
-}
-
-func (r *releaseReader) PromoteReleaseChannel(_ context.Context, req *cloudv1.PromoteReleaseChannelRequest) (*cloudv1.PromoteReleaseChannelResponse, error) {
-	r.promote = req
-	return &cloudv1.PromoteReleaseChannelResponse{Note: "beta takes " + req.GetRelease() + " on the controller's next pass",
-		Channel: &cloudv1.ReleaseChannelInfo{Channel: req.GetChannel()}}, nil
-}
-
-// admin channel promote sends the channel and the release, and prints
-// what happens next.
-func TestAdminChannelPromote(t *testing.T) {
-	svc := &releaseReader{}
-	var out bytes.Buffer
-
-	err := Run(t.Context(), AdminChannelPromote, Clients{Admin: svc}, Options{ID: "beta", PromoteRelease: "2026-11-a"}, &out, OutputTable)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p := svc.promote; p.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || p.GetRelease() != "2026-11-a" {
-		t.Errorf("request = %v", p)
-	}
-	if !bytes.Contains(out.Bytes(), []byte("beta takes 2026-11-a on the controller's next pass")) {
-		t.Errorf("output:\n%s", out.String())
-	}
 }
 
 func (r *releaseReader) GetRollout(_ context.Context, req *cloudv1.GetRolloutRequest) (*cloudv1.GetRolloutResponse, error) {

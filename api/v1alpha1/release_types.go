@@ -223,26 +223,9 @@ type RolloutPolicy struct {
 	SoakPerTier map[ClusterTier]metav1.Duration `json:"soakPerTier,omitempty"`
 	// ReleaseSoak is how long an Automatic channel's upstream must have
 	// offered a release before the channel takes it (unset: 7 days for
-	// beta, 14 for stable; 0: at once). An admin's promotion (AdminService
-	// PromoteReleaseChannel) takes it before.
+	// beta, 14 for stable; 0: at once).
 	// +optional
 	ReleaseSoak *metav1.Duration `json:"releaseSoak,omitempty"`
-}
-
-// AnnotationPromote on a ReleaseChannel asks the controller to take a
-// release now, before its release soak ends: a ChannelPromotion as JSON.
-// The controller removes it once the channel offers that release.
-const AnnotationPromote = "cloud.cluster-vending.io/promote"
-
-// ChannelPromotion is an admin's request that a channel offer a release
-// now (AnnotationPromote).
-type ChannelPromotion struct {
-	// Release to offer: the upstream channel's, or another valid release.
-	Release string `json:"release"`
-	// By is who asked.
-	By string `json:"by,omitempty"`
-	// At is when.
-	At metav1.Time `json:"at,omitempty"`
 }
 
 // PendingRelease is the release an Automatic channel takes once its

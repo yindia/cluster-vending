@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -377,8 +376,8 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		offering.Message += "; still offers " + status.Release
 	}
 	if p := status.Pending; p != nil {
-		offering.Message += fmt.Sprintf("; waiting to take %s: its release soak ends in %s (%s), or admin channel promote --id %s takes it now",
-			p.Release, shortDuration(p.Until.Sub(r.clock().Time)), p.Until.UTC().Format(time.RFC3339), ch.Name)
+		offering.Message += fmt.Sprintf("; waiting to take %s: its release soak ends in %s (%s)",
+			p.Release, shortDuration(p.Until.Sub(r.clock().Time)), p.Until.UTC().Format(time.RFC3339))
 	}
 	if status.KubernetesMinor, err = r.channelMinor(ctx, status.Release, ch.Name); err != nil {
 		return ctrl.Result{}, err
@@ -397,13 +396,6 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 		}
 	}
-	// A promotion is done once the channel offers its release.
-	if p := promotionOf(ch); p != nil && status.Release == p.Release {
-		delete(ch.Annotations, cloudv1alpha1.AnnotationPromote)
-		if err := r.c.Update(ctx, ch); err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(err)
-		}
-	}
 	return res, nil
 }
 
@@ -418,8 +410,7 @@ type soakWait struct {
 // reason when there is none). An Automatic channel takes its upstream's
 // release once the upstream has offered it for the release soak; until
 // then it keeps its own and wait says what it waits for. A channel that
-// offers nothing yet takes it at once, and an admin's promotion
-// (AnnotationPromote) takes its release at once.
+// offers nothing yet takes it at once.
 func (r *ReleaseChannelReconciler) target(ctx context.Context, ch *cloudv1alpha1.ReleaseChannel) (string, string, soakWait, error) {
 	promotion := ch.Spec.Promotion
 	if promotion == "" {
@@ -427,9 +418,6 @@ func (r *ReleaseChannelReconciler) target(ctx context.Context, ch *cloudv1alpha1
 	}
 	if promotion != cloudv1alpha1.PromotionAutomatic {
 		return ch.Spec.Release, string(promotion), soakWait{}, nil
-	}
-	if p := promotionOf(ch); p != nil {
-		return p.Release, "promoted by " + orUnknown(p.By), soakWait{}, nil
 	}
 	up := upstream(ch.Name)
 	if up == "" {
@@ -490,27 +478,6 @@ func offeredSince(ch *cloudv1alpha1.ReleaseChannel, now time.Time) time.Time {
 		return c.LastTransitionTime.Time
 	}
 	return now
-}
-
-// promotionOf is the admin's promotion the channel carries
-// (AnnotationPromote); nil for none or one that does not parse.
-func promotionOf(ch *cloudv1alpha1.ReleaseChannel) *cloudv1alpha1.ChannelPromotion {
-	raw, ok := ch.Annotations[cloudv1alpha1.AnnotationPromote]
-	if !ok {
-		return nil
-	}
-	p := &cloudv1alpha1.ChannelPromotion{}
-	if err := json.Unmarshal([]byte(raw), p); err != nil || p.Release == "" {
-		return nil
-	}
-	return p
-}
-
-func orUnknown(s string) string {
-	if s == "" {
-		return "an admin"
-	}
-	return s
 }
 
 // shortDuration is d in days, hours or minutes, rounded: "7d", "3h", "12m".

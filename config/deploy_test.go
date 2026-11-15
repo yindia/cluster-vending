@@ -274,14 +274,6 @@ func TestReleaseObjectRoles(t *testing.T) {
 				}
 				delete(roles, "server")
 			}
-			if kind == "releasechannels" && verb == "patch" {
-				// A promotion (admin channel promote) is an annotation the
-				// API server patches onto the channel for the admin.
-				if !allows(server, group, kind, verb) {
-					t.Errorf("server: no patch on releasechannels; admin channel promote writes it")
-				}
-				delete(roles, "server")
-			}
 			for name, role := range roles {
 				if allows(role, group, kind, verb) {
 					t.Errorf("%s: may %s %s; only the operator writes release objects", name, verb, kind)

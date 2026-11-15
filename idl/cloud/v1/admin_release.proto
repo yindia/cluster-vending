@@ -96,25 +96,6 @@ message PendingRelease {
   google.protobuf.Timestamp until = 3;
 }
 
-message PromoteReleaseChannelRequest {
-  // beta or stable: alpha takes its release from the build (Pinned).
-  ReleaseChannel channel = 1 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [
-      0,
-      1
-    ]
-  }];
-  // The release to offer now; empty: the upstream channel's.
-  string release = 2 [(buf.validate.field).string.max_len = 63];
-}
-
-message PromoteReleaseChannelResponse {
-  ReleaseChannelInfo channel = 1;
-  // What happens next, e.g. "beta takes 2026-11-a on the controller's next pass".
-  string note = 2;
-}
-
 // RolloutPolicy is how a channel's rollout moves through the tiers.
 message RolloutPolicy {
   // Clusters upgrading at once per tier (tier 0: always 1).

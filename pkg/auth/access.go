@@ -58,12 +58,11 @@ var scopeOverrides = map[protoreflect.FullName]Scope{
 	"cloud.v1.AdminService.ResumeReconcile": ScopePlatform,
 	"cloud.v1.AdminService.ListPauses":      ScopePlatform,
 	// The platform's release configuration and its rollouts.
-	"cloud.v1.AdminService.ListReleases":          ScopePlatform,
-	"cloud.v1.AdminService.GetRelease":            ScopePlatform,
-	"cloud.v1.AdminService.ListReleaseChannels":   ScopePlatform,
-	"cloud.v1.AdminService.GetReleaseChannel":     ScopePlatform,
-	"cloud.v1.AdminService.PromoteReleaseChannel": ScopePlatform,
-	"cloud.v1.AdminService.GetRollout":            ScopePlatform,
+	"cloud.v1.AdminService.ListReleases":        ScopePlatform,
+	"cloud.v1.AdminService.GetRelease":          ScopePlatform,
+	"cloud.v1.AdminService.ListReleaseChannels": ScopePlatform,
+	"cloud.v1.AdminService.GetReleaseChannel":   ScopePlatform,
+	"cloud.v1.AdminService.GetRollout":          ScopePlatform,
 	// The catalog's values file is the same for every tenant.
 	"cloud.v1.ComponentService.GetComponentValues": ScopeAuthenticated,
 	// The caller, as the server sees it.

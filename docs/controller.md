@@ -349,19 +349,8 @@ but only once the channel before has offered it for the channel's
 the channel keeps its release, `status.pending` names the one it takes and
 when, its Offering condition says so, and a `PromotionWaiting` event is
 emitted once. A channel that offers nothing yet (a new management cluster)
-takes its upstream's release at once.
-
-An admin takes it sooner:
-
-```sh
-cluster-vending admin channel promote --id beta [--release 2026-11-a]   # the upstream's release, or one named
-```
-
-The release must exist, be valid and not withdrawn. The request is an
-annotation on the channel (`cloud.cluster-vending.io/promote`, with who
-asked); the controller offers the release on its next pass, records "promoted
-by <who>" in the channel's history and removes the annotation. A soak of
-`0s` makes a channel follow at once, as before.
+takes its upstream's release at once. A soak of `0s` makes a channel follow
+at once.
 
 A release a channel offers is what new clusters on it install; clusters
 that have one keep it (their move to a new release is its own step).
@@ -488,7 +477,6 @@ cluster-vending admin release list                    # NAME SHIPPED VALID CHANN
 cluster-vending admin release get --id shipped-1aed928c [-o wide]   # each minor: channel, upgrade target, end of support, ending; its components (wide: locked values)
 cluster-vending admin channel list [-o wide]          # NAME PROMOTION RELEASE KUBERNETES ROLLING TIER STATE WAITING PAUSED AGE (wide: TIER2 TIER1 TIER0 progress, policy)
 cluster-vending admin channel get --id stable         # policy, release soak, next release, rollout, the releases it offered, conditions
-cluster-vending admin channel promote --id beta [--release <name>]   # take the upstream's (or a named) release now, before the soak ends
 cluster-vending admin rollout get --channel stable [--tier 1] [-o wide]
 ```
 

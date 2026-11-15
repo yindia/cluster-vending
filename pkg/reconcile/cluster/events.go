@@ -32,6 +32,7 @@ func statusEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	out = append(out, stateEvents(before, after)...)
 	out = append(out, upgradeEvents(before, after)...)
 	out = append(out, platformEvents(before, after)...)
+	out = append(out, moveEvents(before, after)...)
 	out = append(out, kubernetesEvents(before, after)...)
 	return out
 }

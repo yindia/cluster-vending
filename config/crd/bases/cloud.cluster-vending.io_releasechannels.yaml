@@ -247,6 +247,93 @@ spec:
                   release counts as completed upstream as soon as the upstream offers
                   it).
                 type: string
+              releaseMoves:
+                description: |-
+                  releaseMoves is the rollout of the channel's release to its
+                  automatic clusters' components (the controller's component-upgrades
+                  setting): which may start moving now, and why the others wait.
+                properties:
+                  admitted:
+                    description: admitted are the clusters (namespace/name) that may
+                      start moving now.
+                    items:
+                      type: string
+                    maxItems: 20
+                    type: array
+                  blocked:
+                    description: blocked are clusters kept back by their own checks,
+                      with why.
+                    items:
+                      description: BlockedCluster is a cluster the rollout passes
+                        over, and why.
+                      properties:
+                        cluster:
+                          description: Cluster is namespace/name.
+                          type: string
+                        gate:
+                          description: |-
+                            Gate is the code of the first reason (MANUAL, MAINTENANCE_WINDOW,
+                            DEPRECATIONS, ...).
+                          type: string
+                        message:
+                          description: Message is that reason, for the cluster's users.
+                          type: string
+                      required:
+                      - cluster
+                      - gate
+                      type: object
+                    maxItems: 20
+                    type: array
+                  done:
+                    description: 'done: every member runs the release.'
+                    type: boolean
+                  halted:
+                    description: |-
+                      halted: more clusters of a tier failed than the policy's maxFailed;
+                      none starts until one is retried.
+                    type: boolean
+                  members:
+                    description: members count the clusters of each tier by state.
+                    items:
+                      description: RolloutTierCount counts one tier's clusters by
+                        rollout state.
+                      properties:
+                        blocked:
+                          format: int32
+                          type: integer
+                        failed:
+                          format: int32
+                          type: integer
+                        inProgress:
+                          format: int32
+                          type: integer
+                        pending:
+                          format: int32
+                          type: integer
+                        succeeded:
+                          format: int32
+                          type: integer
+                        tier:
+                          description: |-
+                            ClusterTier is how sensitive a cluster is. Within a release channel a
+                            release reaches Tier2 clusters first, then Tier1, then Tier0. Stored
+                            only for now: nothing acts on it yet.
+                          enum:
+                          - Tier0
+                          - Tier1
+                          - Tier2
+                          type: string
+                      required:
+                      - tier
+                      type: object
+                    type: array
+                  release:
+                    description: release is the release the clusters move to.
+                    type: string
+                  waiting:
+                    description: waiting says why no (more) cluster starts.
+                    type: string
+                type: object
               rollout:
                 description: |-
                   Rollout is what the rollout of the channel's Kubernetes minor does

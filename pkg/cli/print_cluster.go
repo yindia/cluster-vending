@@ -131,7 +131,7 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 		{"Version", versionLine(c)},
 	}
 	kv = append(kv, kubernetesLines(st.GetKubernetes())...)
-	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", st.GetPlatformRelease()}}...)
+	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", releaseLine(st)}}...)
 	kv = append(kv, releaseLines(c.GetSpec())...)
 	if line := rolloutLine(st.GetRollout()); line != "" {
 		kv = append(kv, [2]string{"Rollout", line})

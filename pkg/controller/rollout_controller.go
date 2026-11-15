@@ -48,7 +48,10 @@ type RolloutReconciler struct {
 	// its upgrade-timeout (0: the default).
 	automatic bool
 	timeout   time.Duration
-	events    platform.Events
+	// moves is the component-upgrades setting: the channel's release moves
+	// are planned too (status.releaseMoves), which the clusters start by.
+	moves  bool
+	events platform.Events
 	// store writes clusters: their version (etag-guarded) and their
 	// rollout record. Nil: nothing is written to clusters.
 	store repository.Store
@@ -58,7 +61,7 @@ type RolloutReconciler struct {
 // NewRolloutReconciler returns the rollout controller on d's manager
 // client (SetupWithManager sets it).
 func NewRolloutReconciler(d Deps) *RolloutReconciler {
-	return &RolloutReconciler{automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, events: d.Events,
+	return &RolloutReconciler{automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, moves: d.ComponentUpgrades, events: d.Events,
 		store: d.Store, log: d.Logger}
 }
 
@@ -124,7 +127,16 @@ func rolloutInput(c *cloudv1alpha1.Cluster) []any {
 	return []any{c.Spec.ReleaseChannel, c.Spec.Tier, c.Spec.UpgradeMode, c.Spec.MaintenanceWindow,
 		rollout.SpecVersion(c), c.Annotations[cloudstore.AnnotationPaused], c.DeletionTimestamp,
 		c.Status.Phase, c.Status.Conditions, c.Status.CurrentKubernetesVersion, c.Status.Upgrade,
-		c.Status.Deprecations, c.Status.PlatformComponents, recordResult(c)}
+		c.Status.Deprecations, c.Status.PlatformComponents, recordResult(c), c.Status.PlatformRelease, movePhase(c)}
+}
+
+// movePhase is where the cluster's release move is: a move that starts,
+// halts or ends changes the channel's release rollout.
+func movePhase(c *cloudv1alpha1.Cluster) string {
+	if c.Status.ReleaseMove == nil {
+		return ""
+	}
+	return c.Status.ReleaseMove.Phase
 }
 
 // recordResult is the result of the cluster's rollout record: a retried
@@ -150,6 +162,11 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	status := *ch.Status.DeepCopy()
 	status.RolloutTier, status.Tiers, status.Rollout = plan.Tier, plan.Tiers, plan.Rollout
+	status.ReleaseMoves = nil
+	if r.moves {
+		moves := rollout.ComputeMoves(in)
+		status.ReleaseMoves = &moves
+	}
 	meta.SetStatusCondition(&status.Conditions, plan.condition(ch.Generation))
 	if !equality.Semantic.DeepEqual(status, ch.Status) {
 		was := ch.Status

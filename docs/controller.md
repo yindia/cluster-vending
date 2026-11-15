@@ -119,6 +119,8 @@ and `--log-level`, and only these:
 | `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel and each cluster (`status.rollout`) only; no cluster is upgraded. `true` upgrades clusters with `upgradeMode: Automatic`, tier by tier; **irreversible** (EKS cannot downgrade). See "Rollout of a channel's Kubernetes minor" |
 | `--upgrade-timeout` | default `90m`: how long an automatic upgrade may take before it counts as failed (`TimedOut`, against the tier's `maxFailed`) |
 | `--teardown-timeout` | default `15m`: how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted before it goes on (see Deletion) |
+| `--component-upgrades` | default `false`: a cluster keeps the release its components were installed from. `true` moves clusters with `upgradeMode: Automatic` to the release their channel offers, one component at a time, tier by tier. See "Component upgrades" |
+| `--component-upgrade-timeout` | default `30m`: how long one component of a release move may take to run its new version and be Ready before the move halts |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 
@@ -438,6 +440,43 @@ cluster-vending cluster get --id <cluster>          # Rollout: 1.36 → 1.37 via
 cluster-vending cluster watch --id <cluster>        # every change as it happens
 cluster-vending admin rollout get --channel alpha   # every cluster of the channel, tier by tier
 ```
+
+### Component upgrades (`--component-upgrades=true`)
+
+Off (the default) a cluster keeps the release its components were
+installed from: a new chart version in `pkg/catalog/release.yaml` reaches new
+clusters only. On, a cluster with `upgradeMode: Automatic` moves its platform
+components to the release its channel offers:
+
+- **One component at a time, in install order** (requirements first). A
+  component takes the new release's version only when every changed
+  component before it runs its own and is Ready, as read by a pass after the
+  one that applied it. Components whose version and values do not change are
+  not a step. A component only in the new release is installed at its turn;
+  one only in the old release is removed when the move is done. Tenant
+  components take the new release when the move is done.
+- **When** (the channel's rollout of its release, `status.releaseMoves` on the
+  ReleaseChannel): tier 2 first, at most `maxInProgress` moving at once per
+  tier (tier 0: one), `soak` between tiers, halted past `maxFailed`. A cluster
+  starts only when it is Running, its components are Ready, it is not paused
+  (nor its upgrades), inside its maintenance window, and no Kubernetes upgrade
+  of it is running; one kept back does not hold its tier back. A started move
+  finishes on the release it started for, even if the channel moves on.
+- **Halt:** the component being moved failed (FAILED at its new version) or
+  did not settle within `--component-upgrade-timeout`. Nothing moves until
+  `cluster retry --id <cluster>`; there is no rollback. A move whose target
+  release is gone or not valid any more installs nothing until it is fixed,
+  so no moved component is taken back.
+- **Manual clusters** do not move: `cluster get` says the new release is
+  available. Set `upgradeMode: Automatic` (`cluster update -f`) to move one.
+- **Status:** `status.release_move` (`releaseMove` on the kind), events
+  `ReleaseMoveStarted`, `ComponentUpgraded`, `ReleaseMoveHalted`,
+  `ReleaseMoveFinished`. `cluster get` shows
+  `Release: shipped-a → shipped-b: karpenter (3 of 9), since 4m`.
+
+Not done yet: a chart whose CRDs are in its own `crds/` directory (Helm does
+not upgrade them) moves with its old CRDs; a chart with a separate CRD chart
+(`install.helm.crds`) gets both in the same pass, the CRD chart first.
 
 ### Admin: releases, channels and rollouts
 

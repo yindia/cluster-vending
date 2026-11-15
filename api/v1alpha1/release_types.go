@@ -404,6 +404,11 @@ type ReleaseChannelStatus struct {
 	// now: which clusters start, or why none does.
 	// +optional
 	Rollout *ChannelRollout `json:"rollout,omitempty"`
+	// releaseMoves is the rollout of the channel's release to its
+	// automatic clusters' components (the controller's component-upgrades
+	// setting): which may start moving now, and why the others wait.
+	// +optional
+	ReleaseMoves *ChannelReleaseMoves `json:"releaseMoves,omitempty"`
 	// History: the releases the channel offered, newest first, at most 20.
 	// +optional
 	// +kubebuilder:validation:MaxItems=20

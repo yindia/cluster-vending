@@ -78,7 +78,7 @@ func (s *Reconciler) resolve(ctx context.Context, row *model.Cluster) (bool, err
 	}
 	before, resolved := row.Spec, row.ResolvedGeneration
 	row.Spec, row.ResolvedGeneration = raw, row.Generation
-	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
+	if err := s.deps.Store.Clusters().Record(ctx, row); err != nil {
 		row.Spec, row.ResolvedGeneration = before, resolved
 		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
 			return false, nil

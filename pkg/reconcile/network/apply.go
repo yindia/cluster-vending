@@ -70,7 +70,7 @@ func (s *Reconciler) MarkApplied(ctx context.Context, row *model.Network) error 
 	}
 	before, version := row.AppliedGeneration, row.RenderVersion
 	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
-	err := s.deps.Store.Networks().Update(ctx, row)
+	err := s.deps.Store.Networks().Record(ctx, row)
 	if errors.Is(err, repository.ErrConflict) {
 		// A call changed the row while it was applied: it is behind again
 		// (calls only store), and the next pass applies it as it is now.

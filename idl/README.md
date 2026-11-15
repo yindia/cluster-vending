@@ -177,7 +177,7 @@ resource has converged when `status.observed_generation` equals
 | `display_name` | Free text, at most 128 characters. Mutable. |
 | `labels` | At most 40 pairs. They are also the cloud tags of every resource (AWS tag character rules; keys starting with `aws:` are refused by the server). Mutable: an update re-tags. |
 | `generation` | Output only: incremented by the server when the spec or labels change. |
-| `etag` | Output only: changes with every stored change. Sent back on update, delete or takeover, it must match. |
+| `etag` | Output only: changes when what was asked for changes (spec, labels, display name, a delete), not when the controller records its progress (state, generations, status). Sent back on update, delete or takeover, it must match. |
 | `create_time`, `update_time` | Output only. |
 
 ### CloudAccount (`tenant_service.proto`)
@@ -543,7 +543,10 @@ for (for example node groups during a Kubernetes upgrade).
    example `"spec.controlPlane.kubernetesVersion,labels"`.
 8. **Etags.** An `etag` sent with an update, delete or takeover must match
    the stored one, or the call fails with `ABORTED`. Without one the call
-   applies to the current state.
+   applies to the current state. The etag is the user's version: the
+   controller applying the resource and recording it Ready or Running
+   does not change it, so an etag from a get stays good until someone
+   changes what the resource asks for.
 9. **Request IDs.** `request_id` (a UUID) on create and import makes a retry
    return the resource of the first call.
 10. **Pagination.** `page_size` defaults to 50 and is capped at 200.

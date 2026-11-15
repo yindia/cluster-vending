@@ -197,7 +197,7 @@ func (s *Reconciler) settle(ctx context.Context, row *model.Network, failed erro
 	}
 	before, status := row.State, row.Status
 	row.State, row.Status = StateReady, raw
-	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
+	if err := s.deps.Store.Networks().Record(ctx, row); err != nil {
 		row.State, row.Status = before, status
 		if errors.Is(err, repository.ErrConflict) {
 			return nil // an API call changed the row; the next pass sees it

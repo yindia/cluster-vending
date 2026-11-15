@@ -210,7 +210,7 @@ func (s *Reconciler) markApplied(ctx context.Context, row *model.Cluster) error 
 	}
 	before, version := row.AppliedGeneration, row.RenderVersion
 	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
-	err := s.deps.Store.Clusters().Update(ctx, row)
+	err := s.deps.Store.Clusters().Record(ctx, row)
 	if errors.Is(err, repository.ErrConflict) {
 		// A call changed the row while it was applied: it is behind again
 		// (calls only store), and the next pass applies it as it is now.

@@ -196,7 +196,7 @@ func (s *Reconciler) recordConverged(ctx context.Context, row *model.Cluster, st
 		return nil
 	}
 	row.ObservedGeneration, row.State = row.Generation, StateRunning
-	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil && !errors.Is(err, repository.ErrConflict) {
+	if err := s.deps.Store.Clusters().Record(ctx, row); err != nil && !errors.Is(err, repository.ErrConflict) {
 		return err // a conflict: an API call changed the row; the next pass sees it
 	}
 	return nil

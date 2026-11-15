@@ -122,7 +122,7 @@ func (s *Reconciler) discoverImport(ctx context.Context, row *model.Cluster) (bo
 		*row = before
 		return false, err
 	}
-	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
+	if err := s.deps.Store.Clusters().Record(ctx, row); err != nil {
 		*row = before
 		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
 			return false, nil

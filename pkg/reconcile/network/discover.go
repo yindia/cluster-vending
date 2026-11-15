@@ -99,7 +99,7 @@ func (s *Reconciler) discoverImport(ctx context.Context, row *model.Network) (bo
 	}
 	before := *row
 	row.Spec, row.Input, row.Status, row.State = spec, input, status, state
-	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
+	if err := s.deps.Store.Networks().Record(ctx, row); err != nil {
 		*row = before
 		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
 			return false, nil

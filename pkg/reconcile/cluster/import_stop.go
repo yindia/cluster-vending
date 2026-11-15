@@ -28,7 +28,7 @@ func (s *Reconciler) stopImport(ctx context.Context, row *model.Cluster, cause e
 	before := *row
 	row.State, row.Status = StateBlocked, status
 	row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
-	if err := s.deps.Store.Clusters().Update(ctx, row); err != nil {
+	if err := s.deps.Store.Clusters().Record(ctx, row); err != nil {
 		*row = before
 		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
 			return nil

@@ -31,7 +31,7 @@ func (s *Reconciler) stopImport(ctx context.Context, row *model.Network, cause e
 	}
 	before := *row
 	row.State, row.Status = StateBlocked, status
-	if err := s.deps.Store.Networks().Update(ctx, row); err != nil {
+	if err := s.deps.Store.Networks().Record(ctx, row); err != nil {
 		*row = before
 		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
 			return nil

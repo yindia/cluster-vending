@@ -116,14 +116,15 @@ func TestGetNetworkReadsOnlyTheDatabase(t *testing.T) {
 	if r := row(); r.AppliedGeneration != r.Generation {
 		t.Errorf("applied generation %d of %d: the network is not settled", r.AppliedGeneration, r.Generation)
 	}
-	// Recording a status alone does not change the etag.
+	// The controller's progress (READY stored, a status recorded) is not a
+	// change of what was asked for: the user's etag stays.
 	settled := row().ETag
 	f.allReady(t, n.GetId())
 	if err := f.svc.Reconcile(ctx, tenant, n.GetId()); err != nil {
 		t.Fatal(err)
 	}
-	if row().ETag != settled || settled == etag {
-		t.Errorf("etags: before %s, settled %s, after another pass %s; want one change (READY stored) and none after", etag, settled, row().ETag)
+	if row().ETag != settled || settled != etag {
+		t.Errorf("etags: before %s, settled %s, after another pass %s; want none changed by the controller", etag, settled, row().ETag)
 	}
 
 	// A change is stored: GetNetwork shows it at once, before any pass.

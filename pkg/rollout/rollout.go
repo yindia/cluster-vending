@@ -84,6 +84,8 @@ type Result struct {
 	// cluster to start now (WouldStart, uncapped).
 	Channel string
 	Start   []string
+	// Plan lays the decision out per tier and batch (upgrade.Project).
+	Plan upgrade.Projection
 	// waiting is why the plan starts nothing (more), before a report-only
 	// plan's wording replaced it.
 	waiting string
@@ -135,6 +137,7 @@ func Compute(in Input) Result {
 		d.Start, d.Waiting = nil, "the channel is paused (spec.paused): no cluster starts"
 	}
 	d = notDoneWhileBelow(d, members, blocked)
+	out.Plan = upgrade.Project(policy, d, members)
 	out.fill(d, members, blocked)
 	return out
 }
@@ -169,7 +172,10 @@ func (p *Result) fill(d upgrade.Decision, members []upgrade.Member, blocked []cl
 		p.Rollout.Done = true
 		return
 	}
-	p.Tier = ClusterTier(d.Tier)
+	if !d.Done {
+		// A done rollout is at no tier (status.rolloutTier unset).
+		p.Tier = ClusterTier(d.Tier)
+	}
 	p.Rollout.Waiting, p.Rollout.Halted, p.Rollout.Done = d.Waiting, d.Halted, d.Done
 	p.Rollout.WouldStart = capped(d.Start)
 	p.Start, p.waiting = d.Start, d.Waiting

@@ -81,7 +81,7 @@ spec:
 ```
 
 ```sh
-cluster-vending account create -f cloudaccount.yaml [--create-role terminal|browser|skip] [--profile <aws profile>] [--region us-east-1]
+cluster-vending account create -f cloudaccount.yaml [--create-role terminal|skip] [--profile <aws profile>] [--region us-east-1]
 ```
 
 1. **How the role is created.** When `spec.aws.role` is a name the
@@ -97,14 +97,6 @@ cluster-vending account create -f cloudaccount.yaml [--create-role terminal|brow
      nothing is created. A stack that already has the role's template and
      management role is left alone; one with an older template is updated.
      Each stack event is printed as it happens.
-   - `browser`: opens the CloudFormation console's quick-create link (and
-     prints it, for a session without a browser). Sign in to the account,
-     acknowledge that the stack creates IAM resources and choose **Create
-     stack**. With credentials of the account here, the CLI follows the
-     stack until it is created; without, it goes on and the access check
-     tells whether the role works. The link needs the templates on S3
-     (`cloudformation-template-url`, below); without it the CLI creates the
-     stack from the terminal instead.
    - `skip`: the role exists already.
 
    Not at a terminal (CI), `--create-role` is required. A role that is not
@@ -154,7 +146,6 @@ cluster-vending account delete --id <account id> --tenant acme [--wait] [--delet
 | Setting | |
 |---|---|
 | `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account create` cannot create a stack: `GetAccountOnboarding` fails with `FAILED_PRECONDITION`, saying so. The server makes no AWS call with it. |
-| `cloudformation-template-url` | Optional: an `https` location the templates are uploaded to, by file name. CloudFormation reads a template URL only from S3, so for the console link upload `pkg/cloudformation/templates/` to a bucket the tenant accounts can read and set this to it (for example `https://<bucket>.s3.amazonaws.com/cluster-vending`). The server's own `/cloudformation/` URL is for downloading: the console cannot use it. |
 
 ## Changing the templates
 

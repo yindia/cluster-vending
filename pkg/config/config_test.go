@@ -126,30 +126,28 @@ func TestLoadServeDefaults(t *testing.T) {
 		flags = append(flags, s.Flag)
 	}
 	if want := []string{config.FlagConfig, config.FlagHTTPAddr, config.FlagShutdownTimeout,
-		config.FlagAWSManagementRoleARN, config.FlagCloudFormationTemplateURL}; !slices.Equal(flags, want) {
+		config.FlagAWSManagementRoleARN}; !slices.Equal(flags, want) {
 		t.Errorf("serve settings = %v, want only %v", flags, want)
 	}
 }
 
-// The account onboarding settings are optional; when set they must be a
-// role ARN and an https URL.
+// The account onboarding setting is optional; when set it must be a role
+// ARN.
 func TestLoadServeOnboarding(t *testing.T) {
 	cfg, err := config.LoadServe(lookup(map[string]string{
-		config.FlagAWSManagementRoleARN:      "arn:aws:iam::111122223333:role/platform",
-		config.FlagCloudFormationTemplateURL: "https://bucket.s3.amazonaws.com/cv",
+		config.FlagAWSManagementRoleARN: "arn:aws:iam::111122223333:role/platform",
 	}), lookup(nil), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ManagementRoleARN != "arn:aws:iam::111122223333:role/platform" || cfg.CloudFormationTemplateURL != "https://bucket.s3.amazonaws.com/cv" {
+	if cfg.ManagementRoleARN != "arn:aws:iam::111122223333:role/platform" {
 		t.Errorf("got %+v", cfg)
 	}
 
 	_, err = config.LoadServe(lookup(map[string]string{
-		config.FlagAWSManagementRoleARN:      "platform",
-		config.FlagCloudFormationTemplateURL: "http://bucket/cv",
+		config.FlagAWSManagementRoleARN: "platform",
 	}), lookup(nil), nil)
-	requireErrorNaming(t, err, config.FlagAWSManagementRoleARN, config.FlagCloudFormationTemplateURL)
+	requireErrorNaming(t, err, config.FlagAWSManagementRoleARN)
 }
 
 func TestLoadServeFlagsOverrideEnv(t *testing.T) {

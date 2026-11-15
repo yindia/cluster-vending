@@ -1,7 +1,6 @@
 package cloudformation
 
 import (
-	"net/url"
 	"strings"
 	"testing"
 
@@ -103,38 +102,5 @@ func TestRoleOfName(t *testing.T) {
 	}
 	if DefaultRole != "provisioner" {
 		t.Errorf("DefaultRole = %q", DefaultRole)
-	}
-}
-
-// The console's quick-create link needs the template at an HTTPS URL; it
-// names the stack after the role and passes the role's name.
-func TestQuickCreateURL(t *testing.T) {
-	stack := Stack{Role: "reader", RoleName: "cluster-vending-demo-reader", Region: "eu-west-1",
-		ManagementRoleARN: "arn:aws:iam::111122223333:role/platform", ExternalID: strings.Repeat("e", 40)}
-
-	got, err := QuickCreateURL("https://bucket.s3.amazonaws.com/cv/", stack)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := url.Parse(got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u.Host != "console.aws.amazon.com" || !strings.HasPrefix(u.Fragment, "/stacks/quickcreate?") {
-		t.Fatalf("url = %s", got)
-	}
-	q, err := url.ParseQuery(strings.TrimPrefix(u.Fragment, "/stacks/quickcreate?"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if q.Get("templateURL") != "https://bucket.s3.amazonaws.com/cv/cluster-vending-reader-role.template.yaml" ||
-		q.Get("stackName") != "cluster-vending-demo-reader" || q.Get("param_RoleName") != "cluster-vending-demo-reader" ||
-		q.Get("param_ManagementRoleArn") != stack.ManagementRoleARN || q.Get("param_ExternalId") != stack.ExternalID ||
-		u.Query().Get("region") != "eu-west-1" {
-		t.Errorf("query = %v (region %q)", q, u.Query().Get("region"))
-	}
-	if _, err := QuickCreateURL("", stack); err == nil {
-		t.Error("no base URL accepted")
 	}
 }

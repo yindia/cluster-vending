@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"os/exec"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -145,18 +143,4 @@ func stackParameters(in StackInput) []cfntypes.Parameter {
 func isAPIError(err error, code, text string) bool {
 	var api smithy.APIError
 	return errors.As(err, &api) && api.ErrorCode() == code && strings.Contains(api.ErrorMessage(), text)
-}
-
-// openURL opens url in the default browser, without waiting for it.
-func openURL(ctx context.Context, url string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.CommandContext(ctx, "open", url) //nolint:gosec // the console link the API server built
-	case "windows":
-		cmd = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", url) //nolint:gosec // as above
-	default:
-		cmd = exec.CommandContext(ctx, "xdg-open", url) //nolint:gosec // as above
-	}
-	return cmd.Start()
 }

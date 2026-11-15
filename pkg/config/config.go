@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"slices"
 	"time"
@@ -45,11 +44,6 @@ const (
 	EnvHTTPAddr         = "CV_HTTP_ADDR"
 	FlagShutdownTimeout = "shutdown-timeout"
 	EnvShutdownTimeout  = "CV_SHUTDOWN_TIMEOUT"
-	// FlagCloudFormationTemplateURL is where the account role templates
-	// are hosted (account onboarding); the server's other onboarding
-	// setting is FlagAWSManagementRoleARN, the controller's setting too.
-	FlagCloudFormationTemplateURL = "cloudformation-template-url"
-	EnvCloudFormationTemplateURL  = "CV_CLOUDFORMATION_TEMPLATE_URL"
 )
 
 // Flag names and environment variables of the controller's reconciling
@@ -132,8 +126,6 @@ var serveSettings = []Setting{
 		Usage: "how long in-flight requests get to finish on shutdown"},
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
 		Usage: "the platform's management role (the controller's aws-management-role-arn): the principal the account role templates trust, which account create puts in the role's stack; the server makes no AWS call with it. Empty: account create cannot create a stack, saying to set it"},
-	{Flag: FlagCloudFormationTemplateURL, Env: EnvCloudFormationTemplateURL,
-		Usage: "https URL the account role templates are uploaded to (pkg/cloudformation/templates, by file name; for example an S3 bucket): account create --create-role browser then opens the CloudFormation console's quick-create link. Empty: the stack is created from the terminal only"},
 }
 
 // GlobalSettings returns the settings every command accepts.
@@ -159,10 +151,9 @@ type Global struct {
 type Serve struct {
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
-	// ManagementRoleARN and CloudFormationTemplateURL are what account
-	// onboarding prints (optional).
-	ManagementRoleARN         string
-	CloudFormationTemplateURL string
+	// ManagementRoleARN is what account onboarding puts in the role's stack
+	// (optional).
+	ManagementRoleARN string
 }
 
 // LoadGlobal resolves and validates the global settings from the flags, the
@@ -188,8 +179,7 @@ func LoadGlobal(flags, env, file LookupFunc) (Global, error) {
 // reported together.
 func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 	v, errs := resolve(serveSettings, flags, env, file)
-	cfg := Serve{HTTPAddr: v[FlagHTTPAddr], ManagementRoleARN: v[FlagAWSManagementRoleARN],
-		CloudFormationTemplateURL: v[FlagCloudFormationTemplateURL]}
+	cfg := Serve{HTTPAddr: v[FlagHTTPAddr], ManagementRoleARN: v[FlagAWSManagementRoleARN]}
 	timeout, err := parseTimeout(v[FlagShutdownTimeout])
 	if err != nil {
 		errs = append(errs, err)
@@ -207,19 +197,12 @@ func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 	return cfg, nil
 }
 
-// validateOnboarding checks the optional onboarding settings: a role ARN
-// and an https URL.
+// validateOnboarding checks the optional onboarding setting: a role ARN.
 func (s Serve) validateOnboarding() []error {
 	var errs []error
 	if s.ManagementRoleARN != "" && !roleARNPattern.MatchString(s.ManagementRoleARN) {
 		errs = append(errs, fmt.Errorf("%s must be an IAM role ARN (arn:aws:iam::<account>:role/<name>), got %q",
 			setting(FlagAWSManagementRoleARN), s.ManagementRoleARN))
-	}
-	if s.CloudFormationTemplateURL != "" {
-		u, err := url.Parse(s.CloudFormationTemplateURL)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			errs = append(errs, fmt.Errorf("%s must be an https URL, got %q", setting(FlagCloudFormationTemplateURL), s.CloudFormationTemplateURL))
-		}
 	}
 	return errs
 }

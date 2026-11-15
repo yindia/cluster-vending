@@ -76,8 +76,7 @@ service TenantService {
   //   role the platform assumes there: the CloudFormation template of the
   //   role (reader, updater or provisioner; the controller needs
   //   provisioner), the stack's name and parameters (the platform's
-  //   management role, which the role trusts), and a console quick-create
-  //   link when the server knows where the templates are hosted. The server
+  //   management role, which the role trusts). The server
   //   makes no AWS call: the tenant creates the stack with its own
   //   credentials, then bootstraps the account with the role's name and
   //   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
@@ -277,11 +276,10 @@ message AccountOnboarding {
   string template_body = 7;
   // The template's file name; also its name under the hosted location.
   string template_file = 8;
-  // The template's HTTPS URL and the console's quick-create link, when the
-  // server knows where the templates are hosted
-  // (cloudformation-template-url); empty otherwise.
-  string template_url = 9;
-  string console_url = 10;
+  // 9 and 10 were the hosted template's URL and the console's quick-create
+  // link (account create in the browser), removed.
+  reserved 9, 10;
+  reserved "template_url", "console_url";
   // The template's ExternalId parameter: the account's external ID, which
   // the management role passes when it assumes the role (sts:ExternalId).
   // Set when the request named an account (id) that has one; give it to

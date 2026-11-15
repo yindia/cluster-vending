@@ -16,14 +16,13 @@ const platformRole = "arn:aws:iam::111122223333:role/platform"
 
 func TestAccountOnboarding(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  tenant.Onboarding
-		req     *cloudv1.GetAccountOnboardingRequest
-		want    *cloudv1.AccountOnboarding
-		console bool
+		name   string
+		config tenant.Onboarding
+		req    *cloudv1.GetAccountOnboardingRequest
+		want   *cloudv1.AccountOnboarding
 	}{
 		{
-			name:   "the default role and region, no hosted templates",
+			name:   "the default role and region",
 			config: tenant.Onboarding{ManagementRoleARN: platformRole},
 			req:    &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", AccountId: "444455556666"},
 			want: &cloudv1.AccountOnboarding{Role: "provisioner", RoleName: "cluster-vending-provisioner",
@@ -31,25 +30,21 @@ func TestAccountOnboarding(t *testing.T) {
 				ManagementRoleArn: platformRole, TemplateFile: "cluster-vending-provisioner-role.template.yaml"},
 		},
 		{
-			name:   "hosted templates: a console link",
-			config: tenant.Onboarding{ManagementRoleARN: platformRole, TemplateURL: "https://bucket.s3.amazonaws.com/cv"},
+			name:   "another role and region",
+			config: tenant.Onboarding{ManagementRoleARN: platformRole},
 			req:    &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "reader", Region: "eu-west-1"},
 			want: &cloudv1.AccountOnboarding{Role: "reader", RoleName: "cluster-vending-reader",
 				StackName: "cluster-vending-reader", Region: "eu-west-1", ManagementRoleArn: platformRole,
-				TemplateFile: "cluster-vending-reader-role.template.yaml",
-				TemplateUrl:  "https://bucket.s3.amazonaws.com/cv/cluster-vending-reader-role.template.yaml"},
-			console: true,
+				TemplateFile: "cluster-vending-reader-role.template.yaml"},
 		},
 		{
 			name:   "a role name of its own: its own stack, so stacks of one role do not collide",
-			config: tenant.Onboarding{ManagementRoleARN: platformRole, TemplateURL: "https://bucket.s3.amazonaws.com/cv"},
+			config: tenant.Onboarding{ManagementRoleARN: platformRole},
 			req: &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "provisioner",
 				RoleName: "cluster-vending-demo-0115-provisioner"},
 			want: &cloudv1.AccountOnboarding{Role: "provisioner", RoleName: "cluster-vending-demo-0115-provisioner",
 				StackName: "cluster-vending-demo-0115-provisioner", Region: "us-east-1", ManagementRoleArn: platformRole,
-				TemplateFile: "cluster-vending-provisioner-role.template.yaml",
-				TemplateUrl:  "https://bucket.s3.amazonaws.com/cv/cluster-vending-provisioner-role.template.yaml"},
-			console: true,
+				TemplateFile: "cluster-vending-provisioner-role.template.yaml"},
 		},
 	}
 	for _, tt := range tests {
@@ -65,10 +60,7 @@ func TestAccountOnboarding(t *testing.T) {
 			if !strings.Contains(got.GetTemplateBody(), "AWS::IAM::Role") {
 				t.Errorf("template body = %.80q", got.GetTemplateBody())
 			}
-			if tt.console != strings.HasPrefix(got.GetConsoleUrl(), "https://console.aws.amazon.com/cloudformation/") {
-				t.Errorf("console url = %q", got.GetConsoleUrl())
-			}
-			got.TemplateBody, got.ConsoleUrl = "", ""
+			got.TemplateBody = ""
 			if got.String() != tt.want.String() {
 				t.Errorf("got  %v\nwant %v", got, tt.want)
 			}

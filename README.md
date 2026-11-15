@@ -92,8 +92,8 @@ later manifest needs is a placeholder in it, named in the file's header:
 
 ```sh
 # 1. Onboard acme's AWS account (docs/onboarding.md). It creates the
-#    platform's IAM role in the account with CloudFormation (terminal: your
-#    AWS credentials of the account; browser: the console), onboards the
+#    platform's IAM role in the account with CloudFormation (with your AWS
+#    credentials of the account), onboards the
 #    account and waits for the controller's access check. The answer has
 #    the account's id (BOOTSTRAP_ID, the bootstrap id that networks refer to).
 bin/cluster-vending account create -f examples/cloudaccount.yaml --create-role terminal

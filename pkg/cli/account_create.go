@@ -19,7 +19,6 @@ import (
 // (--create-role).
 const (
 	CreateRoleTerminal = "terminal"
-	CreateRoleBrowser  = "browser"
 	CreateRoleSkip     = "skip"
 )
 
@@ -29,8 +28,8 @@ const (
 //     -updater, -provisioner), it settles how the role's CloudFormation
 //     stack is created: from the terminal with the caller's AWS
 //     credentials (checked to be of the account, before anything is
-//     made), or in the browser (the console's quick-create link);
-//     --create-role says which, or the one question asked at a terminal.
+//     made), or not at all (skip: the role exists); --create-role says
+//     which, or the one question asked at a terminal.
 //  2. TenantService.BootstrapTenant: the account, with its external ID.
 //  3. The role's stack, from GetAccountOnboarding of that account: its
 //     trust requires the account's external ID.
@@ -152,9 +151,6 @@ func (p *rolePlan) create(ctx context.Context, c Clients, o Options, account *cl
 		return err
 	}
 	ob := res.(*cloudv1.GetAccountOnboardingResponse).GetOnboarding()
-	if p.mode == CreateRoleBrowser {
-		return createRoleInBrowser(ctx, o, ob, p.aws.GetAccountId())
-	}
 	return ensureStack(ctx, o, p.stacks, ob, p.aws.GetAccountId())
 }
 
@@ -171,20 +167,19 @@ func stackRegion(o Options) string {
 // account create asks at a terminal.
 func chooseCreateRole(o Options, aws *cloudv1.AwsAccount) (string, error) {
 	switch o.CreateRole {
-	case CreateRoleTerminal, CreateRoleBrowser, CreateRoleSkip:
+	case CreateRoleTerminal, CreateRoleSkip:
 		return o.CreateRole, nil
 	case "":
 	default:
-		return "", fmt.Errorf("--create-role %q: want terminal, browser or skip", o.CreateRole)
+		return "", fmt.Errorf("--create-role %q: want terminal or skip", o.CreateRole)
 	}
 	if !o.Terminal {
-		return "", fmt.Errorf("how to create the role %s in account %s: pass --create-role terminal (your AWS credentials), browser (the CloudFormation console) or skip (it exists)",
+		return "", fmt.Errorf("how to create the role %s in account %s: pass --create-role terminal (your AWS credentials) or skip (it exists)",
 			aws.GetRole(), aws.GetAccountId())
 	}
 	o.progressf("Create the IAM role %s in account %s with CloudFormation:\n"+
 		"  1) terminal: here, with your AWS credentials of the account\n"+
-		"  2) browser: in the CloudFormation console\n"+
-		"  3) skip: the role exists already\n"+
+		"  2) skip: the role exists already\n"+
 		"Choose [1]: ", aws.GetRole(), aws.GetAccountId())
 	in := o.In
 	if in == nil {
@@ -197,12 +192,10 @@ func chooseCreateRole(o Options, aws *cloudv1.AwsAccount) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "", "1", CreateRoleTerminal:
 		return CreateRoleTerminal, nil
-	case "2", CreateRoleBrowser:
-		return CreateRoleBrowser, nil
-	case "3", CreateRoleSkip:
+	case "2", CreateRoleSkip:
 		return CreateRoleSkip, nil
 	default:
-		return "", fmt.Errorf("%q: answer 1, 2 or 3", strings.TrimSpace(answer))
+		return "", fmt.Errorf("%q: answer 1 or 2", strings.TrimSpace(answer))
 	}
 }
 
@@ -237,34 +230,6 @@ func createRoleFromTerminal(ctx context.Context, o Options, ob *cloudv1.AccountO
 		return err
 	}
 	return ensureStack(ctx, o, s, ob, account)
-}
-
-// createRoleInBrowser opens the console's quick-create link and, when the
-// caller's credentials reach the account, follows the stack the person
-// creates there. Without a link (the server has no
-// cloudformation-template-url) it creates the stack from the terminal.
-func createRoleInBrowser(ctx context.Context, o Options, ob *cloudv1.AccountOnboarding, account string) error {
-	url := ob.GetConsoleUrl()
-	if url == "" {
-		o.progressf("The browser needs the console's quick-create link, and the API server has no cloudformation-template-url " +
-			"(the templates must be on S3 for the console): creating the stack from the terminal instead\n")
-		return createRoleFromTerminal(ctx, o, ob, account)
-	}
-	o.progressf("Opening the CloudFormation console: sign in to account %s, acknowledge that it creates IAM resources and choose Create stack.\n  %s\n",
-		account, url)
-	open := o.OpenURL
-	if open == nil {
-		open = openURL
-	}
-	if err := open(ctx, url); err != nil {
-		o.progressf("Could not open a browser (%v): open the link above\n", err)
-	}
-	s, err := accountStacks(ctx, o, ob.GetRegion(), account)
-	if err != nil {
-		o.progressf("%v: not following the stack; the access check says whether the role works\n", err)
-		return nil
-	}
-	return awaitStack(ctx, o, s, ob.GetStackName())
 }
 
 // checkAccess asks the controller to check the account's access and

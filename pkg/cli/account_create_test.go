@@ -32,7 +32,6 @@ const (
 // bootstrap, and an access check that ends with verdict.
 type accountAPI struct {
 	cloudv1connect.TenantServiceClient
-	console      string
 	onboarded    *cloudv1.GetAccountOnboardingRequest
 	bootstrapped *cloudv1.BootstrapTenantRequest
 	verified     bool
@@ -73,8 +72,8 @@ func (f *accountAPI) GetAccountOnboarding(_ context.Context, req *cloudv1.GetAcc
 	return &cloudv1.GetAccountOnboardingResponse{Onboarding: &cloudv1.AccountOnboarding{Role: role,
 		RoleName: name, StackName: name, Region: "us-east-1",
 		AccountId: req.GetAccountId(), ManagementRoleArn: managementRole, TemplateBody: roleTemplate,
-		TemplateFile: "cluster-vending-" + role + "-role.template.yaml", ConsoleUrl: f.console,
-		ExternalId: map[bool]string{true: f.externalID}[req.GetId() != ""]}}, nil
+		TemplateFile: "cluster-vending-" + role + "-role.template.yaml",
+		ExternalId:   map[bool]string{true: f.externalID}[req.GetId() != ""]}}, nil
 }
 
 func (f *accountAPI) BootstrapTenant(_ context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
@@ -186,7 +185,6 @@ func manifest(t *testing.T, role string) string {
 type run struct {
 	api      *accountAPI
 	stacks   *fakeStacks
-	opened   []string
 	out      string
 	progress string
 	err      error
@@ -207,10 +205,6 @@ func createAccount(t *testing.T, o Options, api *accountAPI, stacks *fakeStacks)
 			return nil, errors.New("no AWS credentials")
 		}
 		return stacks, nil
-	}
-	o.OpenURL = func(_ context.Context, url string) error {
-		r.opened = append(r.opened, url)
-		return nil
 	}
 	r.err = Run(t.Context(), AccountCreate, Clients{Tenant: api}, o, &out, OutputTable)
 	r.out, r.progress = out.String(), progress.String()
@@ -438,54 +432,27 @@ func TestAccountCreateNotAtATerminal(t *testing.T) {
 	}
 }
 
-// At a terminal the one question is how to create the role; the browser
-// needs the console link, and without one the terminal is used.
-func TestAccountCreateAsksBrowserOrTerminal(t *testing.T) {
-	api := &accountAPI{}
-	stacks := &fakeStacks{caller: tenantAccount, states: []*StackInfo{nil, stack("CREATE_COMPLETE")}}
-
-	r := createAccount(t, Options{Input: manifest(t, "cluster-vending-provisioner"), Terminal: true, In: strings.NewReader("2\n")},
-		api, stacks)
-
-	if r.err != nil {
-		t.Fatalf("%v\n%s", r.err, r.progress)
-	}
-	contains(t, "progress", r.progress, "1) terminal", "2) browser", "3) skip", "cloudformation-template-url", "from the terminal instead")
-	if len(r.opened) > 0 || len(stacks.created) != 1 || api.bootstrapped == nil {
-		t.Errorf("opened %v, created %v, bootstrapped %v", r.opened, stacks.created, api.bootstrapped)
-	}
-}
-
-// The browser opens the console's quick-create link; with credentials of
-// the account the stack is followed until it is created.
-func TestAccountCreateInTheBrowser(t *testing.T) {
-	const console = "https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=x"
+// At a terminal the one question is how to create the role: from the
+// terminal (the default) or not at all.
+func TestAccountCreateAsksTerminalOrSkip(t *testing.T) {
 	tests := []struct {
-		name   string
-		stacks *fakeStacks
-		want   string
-	}{
-		{name: "followed", want: "Stack cluster-vending-provisioner: CREATE_COMPLETE",
-			stacks: &fakeStacks{caller: tenantAccount, states: []*StackInfo{nil, nil, stack("CREATE_IN_PROGRESS"), stack("CREATE_COMPLETE")}}},
-		{name: "no credentials here", want: "not following the stack"},
-	}
+		answer  string
+		created int
+	}{{"\n", 1}, {"1\n", 1}, {"2\n", 0}}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			api := &accountAPI{console: console}
+		api := &accountAPI{}
+		stacks := &fakeStacks{caller: tenantAccount, states: []*StackInfo{nil, stack("CREATE_COMPLETE")}}
 
-			r := createAccount(t, Options{Input: manifest(t, "cluster-vending-provisioner"), CreateRole: "browser"}, api, tt.stacks)
+		r := createAccount(t, Options{Input: manifest(t, "cluster-vending-provisioner"), Terminal: true, In: strings.NewReader(tt.answer)},
+			api, stacks)
 
-			if r.err != nil {
-				t.Fatalf("%v\n%s", r.err, r.progress)
-			}
-			if len(r.opened) != 1 || r.opened[0] != console || api.bootstrapped == nil {
-				t.Errorf("opened %v, bootstrapped %v", r.opened, api.bootstrapped)
-			}
-			contains(t, "progress", r.progress, console, tt.want)
-			if tt.stacks != nil && len(tt.stacks.created) > 0 {
-				t.Errorf("the CLI created the stack itself: %v", tt.stacks.created)
-			}
-		})
+		if r.err != nil {
+			t.Fatalf("%q: %v\n%s", tt.answer, r.err, r.progress)
+		}
+		contains(t, "progress", r.progress, "1) terminal", "2) skip")
+		if len(stacks.created) != tt.created || api.bootstrapped == nil {
+			t.Errorf("%q: created %v, bootstrapped %v", tt.answer, stacks.created, api.bootstrapped)
+		}
 	}
 }
 

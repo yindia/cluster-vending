@@ -25,9 +25,6 @@ type Onboarding struct {
 	// ManagementRoleARN is the role the tenant role trusts; empty: the
 	// server cannot say, and GetAccountOnboarding fails.
 	ManagementRoleARN string
-	// TemplateURL is the HTTPS location the templates are hosted at (an S3
-	// bucket); empty: no console link.
-	TemplateURL string
 }
 
 // Option configures the TenantService.
@@ -92,16 +89,6 @@ func (s *TenantService) GetAccountOnboarding(ctx context.Context, req *cloudv1.G
 		TemplateBody: string(body), TemplateFile: cloudformation.FileName(role)}
 	if account != nil {
 		out.AccountId, out.ExternalId = account.AccountID, account.ExternalID
-	}
-	if s.onboarding.TemplateURL != "" {
-		stack := cloudformation.Stack{Role: role, RoleName: name, Region: region, ManagementRoleARN: s.onboarding.ManagementRoleARN,
-			ExternalID: out.GetExternalId()}
-		console, err := cloudformation.QuickCreateURL(s.onboarding.TemplateURL, stack)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err.Error())
-		}
-		out.ConsoleUrl = console
-		out.TemplateUrl = cloudformation.TemplateURL(s.onboarding.TemplateURL, role)
 	}
 	return &cloudv1.GetAccountOnboardingResponse{Onboarding: out}, nil
 }

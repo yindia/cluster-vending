@@ -104,8 +104,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
 				server.WithCatalog(catalog),
 				// What account onboarding prints; the server makes no AWS call.
-				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN,
-					TemplateURL: cfg.CloudFormationTemplateURL}))
+				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN}))
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}

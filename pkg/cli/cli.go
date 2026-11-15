@@ -95,8 +95,8 @@ type Options struct {
 	// those of the account's networks.
 	Regions []string
 	// CreateRole is account create's --create-role: how the platform's
-	// role is created in the AWS account (CreateRoleTerminal,
-	// CreateRoleBrowser, CreateRoleSkip; empty: asked at a terminal).
+	// role is created in the AWS account (CreateRoleTerminal or
+	// CreateRoleSkip; empty: asked at a terminal).
 	// Profile is --profile, the AWS profile of the account's credentials;
 	// StackRegion --region, the region of the role's stack (empty: the
 	// server's default).
@@ -105,11 +105,9 @@ type Options struct {
 	// the account's role too, when account create made it.
 	DeleteRole bool
 	// RoleStacks opens the account's CloudFormation with the caller's AWS
-	// credentials; nil: the AWS SDK. OpenURL opens a link in a browser;
-	// nil: the system's opener. PollInterval is how often account create
-	// looks at the stack and the access check; zero: 5s.
+	// credentials; nil: the AWS SDK. PollInterval is how often account
+	// create looks at the stack and the access check; zero: 5s.
 	RoleStacks   func(ctx context.Context, profile, region string) (RoleStacks, error)
-	OpenURL      func(ctx context.Context, url string) error
 	PollInterval time.Duration
 	// Server is the API's base URL (--server): where the account role
 	// templates are served too.

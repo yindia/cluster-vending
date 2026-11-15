@@ -155,8 +155,7 @@ type TenantServiceClient interface {
 	//   role the platform assumes there: the CloudFormation template of the
 	//   role (reader, updater or provisioner; the controller needs
 	//   provisioner), the stack's name and parameters (the platform's
-	//   management role, which the role trusts), and a console quick-create
-	//   link when the server knows where the templates are hosted. The server
+	//   management role, which the role trusts). The server
 	//   makes no AWS call: the tenant creates the stack with its own
 	//   credentials, then bootstraps the account with the role's name and
 	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
@@ -225,8 +224,7 @@ type TenantServiceHandler interface {
 	//   role the platform assumes there: the CloudFormation template of the
 	//   role (reader, updater or provisioner; the controller needs
 	//   provisioner), the stack's name and parameters (the platform's
-	//   management role, which the role trusts), and a console quick-create
-	//   link when the server knows where the templates are hosted. The server
+	//   management role, which the role trusts). The server
 	//   makes no AWS call: the tenant creates the stack with its own
 	//   credentials, then bootstraps the account with the role's name and
 	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has

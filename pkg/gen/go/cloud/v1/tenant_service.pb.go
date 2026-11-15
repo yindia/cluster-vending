@@ -891,11 +891,6 @@ type AccountOnboarding struct {
 	TemplateBody string `protobuf:"bytes,7,opt,name=template_body,json=templateBody,proto3" json:"template_body,omitempty"`
 	// The template's file name; also its name under the hosted location.
 	TemplateFile string `protobuf:"bytes,8,opt,name=template_file,json=templateFile,proto3" json:"template_file,omitempty"`
-	// The template's HTTPS URL and the console's quick-create link, when the
-	// server knows where the templates are hosted
-	// (cloudformation-template-url); empty otherwise.
-	TemplateUrl string `protobuf:"bytes,9,opt,name=template_url,json=templateUrl,proto3" json:"template_url,omitempty"`
-	ConsoleUrl  string `protobuf:"bytes,10,opt,name=console_url,json=consoleUrl,proto3" json:"console_url,omitempty"`
 	// The template's ExternalId parameter: the account's external ID, which
 	// the management role passes when it assumes the role (sts:ExternalId).
 	// Set when the request named an account (id) that has one; give it to
@@ -987,20 +982,6 @@ func (x *AccountOnboarding) GetTemplateBody() string {
 func (x *AccountOnboarding) GetTemplateFile() string {
 	if x != nil {
 		return x.TemplateFile
-	}
-	return ""
-}
-
-func (x *AccountOnboarding) GetTemplateUrl() string {
-	if x != nil {
-		return x.TemplateUrl
-	}
-	return ""
-}
-
-func (x *AccountOnboarding) GetConsoleUrl() string {
-	if x != nil {
-		return x.ConsoleUrl
 	}
 	return ""
 }
@@ -1667,7 +1648,7 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\x1cGetAccountOnboardingResponse\x12;\n" +
 	"\n" +
 	"onboarding\x18\x01 \x01(\v2\x1b.cloud.v1.AccountOnboardingR\n" +
-	"onboarding\"\xf9\x02\n" +
+	"onboarding\"\xdc\x02\n" +
 	"\x11AccountOnboarding\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1b\n" +
 	"\trole_name\x18\x02 \x01(\tR\broleName\x12\x1d\n" +
@@ -1678,13 +1659,11 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"account_id\x18\x05 \x01(\tR\taccountId\x12.\n" +
 	"\x13management_role_arn\x18\x06 \x01(\tR\x11managementRoleArn\x12#\n" +
 	"\rtemplate_body\x18\a \x01(\tR\ftemplateBody\x12#\n" +
-	"\rtemplate_file\x18\b \x01(\tR\ftemplateFile\x12!\n" +
-	"\ftemplate_url\x18\t \x01(\tR\vtemplateUrl\x12\x1f\n" +
-	"\vconsole_url\x18\n" +
-	" \x01(\tR\n" +
-	"consoleUrl\x12\x1f\n" +
+	"\rtemplate_file\x18\b \x01(\tR\ftemplateFile\x12\x1f\n" +
 	"\vexternal_id\x18\v \x01(\tR\n" +
-	"externalId\"h\n" +
+	"externalIdJ\x04\b\t\x10\n" +
+	"J\x04\b\n" +
+	"\x10\vR\ftemplate_urlR\vconsole_url\"h\n" +
 	"\x18ListCloudAccountsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"O\n" +
 	"\x19ListCloudAccountsResponse\x122\n" +

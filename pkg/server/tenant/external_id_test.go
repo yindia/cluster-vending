@@ -48,7 +48,7 @@ func TestBootstrapGivesAnExternalID(t *testing.T) {
 func TestOnboardingCarriesTheAccountsExternalID(t *testing.T) {
 	const id = "6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 	f := newFixture(t)
-	f.svc.onboarding = Onboarding{ManagementRoleARN: "arn:aws:iam::111122223333:role/platform", TemplateURL: "https://bucket.s3.amazonaws.com/cv"}
+	f.svc.onboarding = Onboarding{ManagementRoleARN: "arn:aws:iam::111122223333:role/platform"}
 	row := stored(account)
 	row.ID, row.ExternalID = id, strings.Repeat("e", 40)
 	f.tenants.EXPECT().GetCloudAccountByID(gomock.Any(), "acme", id).Return(row, nil)
@@ -61,9 +61,6 @@ func TestOnboardingCarriesTheAccountsExternalID(t *testing.T) {
 	ob := res.GetOnboarding()
 	if ob.GetExternalId() != row.ExternalID || ob.GetAccountId() != account || ob.GetRoleName() != "cluster-vending-provisioner" {
 		t.Errorf("onboarding = %v, want the account's external ID, account and role", ob)
-	}
-	if !strings.Contains(ob.GetConsoleUrl(), "param_ExternalId="+row.ExternalID) {
-		t.Errorf("console url %q does not pass the external ID", ob.GetConsoleUrl())
 	}
 
 	plain, err := f.svc.GetAccountOnboarding(t.Context(), &cloudv1.GetAccountOnboardingRequest{TenantId: "acme"})

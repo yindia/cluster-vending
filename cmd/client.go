@@ -195,7 +195,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.createRole {
 			f.StringVar(&o.CreateRole, "create-role", "", "how to create the platform's role (spec.aws.role) in the AWS account with CloudFormation: "+
-				"terminal (here, with your AWS credentials of the account), browser (the CloudFormation console) or skip (it exists); asked when at a terminal")
+				"terminal (here, with your AWS credentials of the account) or skip (it exists); asked when at a terminal")
 			f.StringVar(&o.Profile, "profile", "", "the AWS profile with credentials of the account (default: AWS_PROFILE and the SDK's default chain)")
 			f.StringVar(&o.StackRegion, "region", "", "the AWS region of the role's stack (IAM is global), also checked by the account's access check; default us-east-1")
 		}
@@ -229,7 +229,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 func newAccountCmd() *cobra.Command {
 	return newResourceCmd("account", "Onboard and check a tenant's cloud accounts (TenantService)", []verb{
 		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): create the platform's IAM role in it with CloudFormation " +
-			"(--create-role terminal or browser), then its namespace and ProviderConfig, and wait for its access check",
+			"(--create-role terminal), then its namespace and ProviderConfig, and wait for its access check",
 			run: cli.AccountCreate, args: cobra.NoArgs, input: true, wait: true, createRole: true},
 		{use: "get", short: "Show the account --id, with its access check", run: cli.BootstrapGet, args: cobra.MaximumNArgs(1), id: true},
 		{use: "list", short: "List the tenant's accounts", run: cli.BootstrapList, args: cobra.NoArgs},

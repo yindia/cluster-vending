@@ -73,6 +73,8 @@ its kind; the message has the details.
 | Cluster | `RecoveryLimitReached` | Warning | a stuck Helm release was recovered as often as allowed (3 times) |
 | Cluster | `PlatformComponentsReady` | Normal | every platform component is installed |
 | Cluster | `TenantComponentsReady` | Normal | every tenant component enabled on the cluster is installed (told when the last one becomes Ready) |
+| Cluster | `ComponentRetried` | Normal | `cluster retry`: a failed component's chart is tried again (a stuck Helm revision removed, provider-helm told to install it now) |
+| Cluster | `UpgradeRetried` | Normal | `cluster retry`: a failed or timed-out automatic upgrade is in progress again, with a new upgrade-timeout |
 | Cluster | `DeprecatedAPIs` | Warning | the scan found API versions the next Kubernetes version removes |
 | Cluster | `DeprecationScanFailed` | Warning | the scan for deprecated API versions failed |
 | Cluster | `DeprecationScanClean` | Normal | a scan that had findings, or had failed, finds nothing removed now |

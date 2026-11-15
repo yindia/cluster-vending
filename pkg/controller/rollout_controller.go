@@ -124,7 +124,17 @@ func rolloutInput(c *cloudv1alpha1.Cluster) []any {
 	return []any{c.Spec.ReleaseChannel, c.Spec.Tier, c.Spec.UpgradeMode, c.Spec.MaintenanceWindow,
 		rollout.SpecVersion(c), c.Annotations[cloudstore.AnnotationPaused], c.DeletionTimestamp,
 		c.Status.Phase, c.Status.Conditions, c.Status.CurrentKubernetesVersion, c.Status.Upgrade,
-		c.Status.Deprecations, c.Status.PlatformComponents}
+		c.Status.Deprecations, c.Status.PlatformComponents, recordResult(c)}
+}
+
+// recordResult is the result of the cluster's rollout record: a retried
+// upgrade (failed to in progress again) is planned at once. The rollout's
+// own writes of it are transition-only, so this wakes it once each.
+func recordResult(c *cloudv1alpha1.Cluster) cloudv1alpha1.ClusterRolloutResult {
+	if c.Status.Rollout == nil {
+		return ""
+	}
+	return c.Status.Rollout.Result
 }
 
 // Reconcile plans the channel's rollout now and writes it to its status.

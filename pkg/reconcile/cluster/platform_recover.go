@@ -86,13 +86,19 @@ func stuck(d *releaseDetail, at time.Time) bool {
 // revision Helm wrote less than stuckAfter ago: that is an operation
 // still running (provider-helm retrying an install), not a stuck one.
 func recordToRemove(records []reconcile.HelmRecord, at time.Time) (reconcile.HelmRecord, bool) {
+	return stuckRecord(records, at, stuckAfter)
+}
+
+// stuckRecord is recordToRemove for a revision at least minAge old: a
+// retry a person asked for (cluster retry) takes it at once (0).
+func stuckRecord(records []reconcile.HelmRecord, at time.Time, minAge time.Duration) (reconcile.HelmRecord, bool) {
 	var newest reconcile.HelmRecord
 	for _, r := range records {
 		if r.Revision > newest.Revision {
 			newest = r
 		}
 	}
-	if newest.Name == "" || !stuckStates[newest.Status] || at.Sub(newest.Changed) < stuckAfter {
+	if newest.Name == "" || !stuckStates[newest.Status] || at.Sub(newest.Changed) < minAge {
 		return reconcile.HelmRecord{}, false
 	}
 	return newest, true

@@ -61,6 +61,16 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if row.Paused != nil {
 		return s.observePaused(ctx, row)
 	}
+	// A person asked to try again what failed (cluster retry): the failed
+	// upgrade now, the components where this pass installs them.
+	if row.Retry != nil {
+		ctx = withRetry(ctx, row.Retry)
+		if row.Retry.Upgrade {
+			if err := s.retryUpgrade(ctx, row); err != nil {
+				return err
+			}
+		}
+	}
 	// What went wrong is the cluster's status (below) and the error of the
 	// pass: the loop logs it and comes back.
 	failed := s.moveOn(ctx, row)
@@ -91,6 +101,13 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	// require one of them); each writes its own status.
 	if terr := s.installTenant(ctx, current, installed); terr != nil {
 		perr = errors.Join(perr, fmt.Errorf("tenant components: %w", terr))
+	}
+	// The retry was acted on once the components were installed in this
+	// pass (or it named none); a pass that did not get to them keeps it.
+	if r := row.Retry; r != nil && (installed != nil || len(r.Components) == 0) {
+		if err := s.deps.Store.Clusters().ClearRetry(ctx, tenantID, id, r.At); err != nil {
+			perr = errors.Join(perr, fmt.Errorf("clear the retry: %w", err))
+		}
 	}
 	c, err := s.viewWith(ctx, current, FailureCondition(failed), installed)
 	if err != nil {

@@ -110,7 +110,7 @@ func (s *Reconciler) describe(ctx context.Context, row *model.Cluster, namespace
 		if object := objects[c.GetName()]; object != "" {
 			if d := s.releaseDetail(ctx, namespace, object); d != nil {
 				c.Chart, c.HelmState, c.LastError, c.Failures = d.Chart, d.HelmState, d.LastError, d.Failures
-				s.recoverStuck(ctx, row, namespace, c, d, at)
+				s.recover(ctx, row, namespace, object, c, d, at)
 			}
 		}
 		if prev != nil && prev.GetPhase() == c.GetPhase() && prev.GetSince() != nil {

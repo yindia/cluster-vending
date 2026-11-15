@@ -237,4 +237,10 @@ func TestRolloutInputChanged(t *testing.T) {
 	if reflect.DeepEqual(rolloutInput(was), rolloutInput(moved)) {
 		t.Error("the running version changing is not an input change")
 	}
+	failed, retried := was.DeepCopy(), was.DeepCopy()
+	failed.Status.Rollout = &cloudv1alpha1.ClusterRolloutRecord{Result: cloudv1alpha1.ClusterRolloutTimedOut}
+	retried.Status.Rollout = &cloudv1alpha1.ClusterRolloutRecord{Result: cloudv1alpha1.ClusterRolloutInProgress}
+	if reflect.DeepEqual(rolloutInput(failed), rolloutInput(retried)) {
+		t.Error("a retried upgrade (timed out to in progress) is not an input change")
+	}
 }

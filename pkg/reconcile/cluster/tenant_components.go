@@ -203,7 +203,7 @@ func (s *Reconciler) installOneTenant(ctx context.Context, row *model.Cluster, c
 	if object := objects[c.Component]; object != "" {
 		if d := s.releaseDetail(ctx, plan.Namespace, object); d != nil {
 			pc.Chart, pc.HelmState, pc.LastError, pc.Failures = d.Chart, d.HelmState, d.LastError, d.Failures
-			s.recoverStuck(ctx, row, plan.Namespace, pc, d, now())
+			s.recover(ctx, row, plan.Namespace, object, pc, d, now())
 		}
 	}
 	return s.setTenantStatus(ctx, row, c, pc, release)

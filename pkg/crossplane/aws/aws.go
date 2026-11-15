@@ -40,7 +40,11 @@ const ProviderVersion = "v2.9.0"
 //	4  coredns and the EBS CSI controller follow the default node pool:
 //	   its labels as their nodeSelector, a toleration per taint (only for
 //	   clusters whose default pool has labels or taints)
-const RenderVersion = 4
+//	5  stateful objects (VPC, subnets, gateways, EIPs, route tables, the
+//	   EKS cluster and node groups, keys, roles, policies, the OIDC
+//	   provider, log groups) are managed without Delete while their owner
+//	   exists (protect)
+const RenderVersion = 5
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.

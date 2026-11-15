@@ -14,7 +14,7 @@ metadata:
 spec:
   notes: "The shipped versions, with our end-of-support dates."
   content:
-    renderVersion: 4
+    renderVersion: 5
     kubernetes:
       - minor: "1.37"
         channel: alpha

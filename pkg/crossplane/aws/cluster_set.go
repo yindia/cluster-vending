@@ -113,5 +113,5 @@ func usagesAfterTheirUsers(set sequence.Set, active []sequence.Condition) sequen
 			set[i].After = active
 		}
 	}
-	return set
+	return protected(set)
 }

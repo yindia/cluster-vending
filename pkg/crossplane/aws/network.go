@@ -238,7 +238,7 @@ func NetworkSet(p NetworkPlan) (sequence.Set, error) {
 			set[i].After = []sequence.Condition{sequence.Ready(gateway)}
 		}
 	}
-	return set, nil
+	return protected(set), nil
 }
 
 func containsName(objects []client.Object, name string) bool {

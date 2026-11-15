@@ -436,8 +436,11 @@ func TestTakeOverCluster(t *testing.T) {
 			if slices.Contains(got, "Delete") || slices.Contains(got, "*") || !slices.Contains(got, "Update") {
 				t.Errorf("the KMS key's managementPolicies = %v, want everything but Delete", got)
 			}
-		case len(got) != 0 && !slices.Equal(got, []string{"*"}):
-			t.Errorf("%s managementPolicies = %v, want full management", name, got)
+		case len(got) != 0 && !slices.Equal(got, []string{"*"}) &&
+			!slices.Equal(got, []string{"Observe", "Create", "Update", "LateInitialize"}):
+			// Owned: in full, or a stateful kind without Delete while the
+			// cluster exists (the safety net; its deletion switches it).
+			t.Errorf("%s managementPolicies = %v, want owned", name, got)
 		}
 	}
 	if n := len(objectsOfKind(after, "NodeGroup")); n != 1 {

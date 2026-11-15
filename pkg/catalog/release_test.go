@@ -75,6 +75,8 @@ kubernetes:
 components: {karpenter: "1.15.1"}
 `, []string{"values for nope"}},
 		{"a bad channel", valid + "- {name: gamma, promotion: Sometimes}\n", []string{`"gamma"`, `"Sometimes"`}},
+		{"a release soak", strings.Replace(valid, "promotion: Pinned}", "promotion: Pinned, releaseSoak: soon}", 1),
+			[]string{`releaseSoak "soon"`, "alpha is Pinned: a releaseSoak is for an Automatic channel"}},
 		{"a minor's own version", `
 kubernetes:
 - {minor: "1.37", default: true, endOfSupport: "2028-01-31", components: {karpenter: "1.14.2"}}

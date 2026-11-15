@@ -85,6 +85,13 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                  releaseSoak:
+                    description: |-
+                      ReleaseSoak is how long an Automatic channel's upstream must have
+                      offered a release before the channel takes it (unset: 7 days for
+                      beta, 14 for stable; 0: at once). An admin's promotion (AdminService
+                      PromoteReleaseChannel) takes it before.
+                    type: string
                   soak:
                     default: 24h
                     description: Soak is the healthy time after a tier before the
@@ -213,6 +220,26 @@ spec:
                   KubernetesMinor is the minor that release puts on this channel: the
                   minor its automatic clusters run. Empty when it puts none.
                 type: string
+              pending:
+                description: |-
+                  Pending is the release an Automatic channel waits to take: its
+                  upstream offers it, and the release soak has not ended yet.
+                properties:
+                  release:
+                    type: string
+                  since:
+                    description: Since the upstream channel offered it.
+                    format: date-time
+                    type: string
+                  until:
+                    description: Until the soak ends and the channel takes it.
+                    format: date-time
+                    type: string
+                required:
+                - release
+                - since
+                - until
+                type: object
               release:
                 description: |-
                   Release the channel offers now: spec.release, or for an Automatic

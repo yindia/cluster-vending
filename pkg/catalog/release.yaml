@@ -58,5 +58,7 @@ components:
 # this build's release; an Automatic one follows the channel before it.
 channels:
 - {name: alpha, promotion: Pinned}
-- {name: beta, promotion: Automatic}
-- {name: stable, promotion: Automatic}
+# releaseSoak: how long the channel before must have offered a release
+# before an Automatic channel takes it (admin channel promote takes it now).
+- {name: beta, promotion: Automatic, releaseSoak: 168h}     # 7 days on alpha
+- {name: stable, promotion: Automatic, releaseSoak: 336h}   # 14 days on beta

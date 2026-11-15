@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -182,6 +183,10 @@ func channelEvents(was, is cloudv1alpha1.ReleaseChannelStatus) []platform.Note {
 		(before == nil || before.Status != metav1.ConditionFalse || before.Message != offering.Message) {
 		out = append(out, platform.Warning(platform.ReasonChannelCannotMove, offering.Message))
 	}
+	if p := is.Pending; p != nil && (was.Pending == nil || was.Pending.Release != p.Release) {
+		out = append(out, platform.Normal(platform.ReasonPromotionWaiting, fmt.Sprintf(
+			"waiting to take %s once its release soak ends (%s)", p.Release, p.Until.UTC().Format(time.RFC3339))))
+	}
 	return out
 }
 
@@ -344,11 +349,12 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.c.Get(ctx, req.NamespacedName, ch); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	want, why, err := r.target(ctx, ch)
+	want, why, wait, err := r.target(ctx, ch)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	status := *ch.Status.DeepCopy()
+	status.Pending = wait.pending
 	offering := metav1.Condition{Type: cloudv1alpha1.ChannelConditionOffering, ObservedGeneration: ch.Generation}
 	problem := r.unusable(ctx, want, why)
 	if problem == "" {
@@ -370,51 +376,153 @@ func (r *ReleaseChannelReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if status.Release != "" && offering.Status == metav1.ConditionFalse {
 		offering.Message += "; still offers " + status.Release
 	}
+	if p := status.Pending; p != nil {
+		offering.Message += fmt.Sprintf("; waiting to take %s: its release soak ends in %s (%s), or admin channel promote --id %s takes it now",
+			p.Release, shortDuration(p.Until.Sub(r.clock().Time)), p.Until.UTC().Format(time.RFC3339), ch.Name)
+	}
 	if status.KubernetesMinor, err = r.channelMinor(ctx, status.Release, ch.Name); err != nil {
 		return ctrl.Result{}, err
 	}
 	meta.SetStatusCondition(&status.Conditions, offering)
-	if equality.Semantic.DeepEqual(status, ch.Status) {
-		return ctrl.Result{}, nil
-	}
-	was := ch.Status
-	ch.Status = status
-	if err := r.c.Status().Update(ctx, ch); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	if r.events != nil {
-		for _, n := range channelEvents(was, status) {
-			r.events.Event(ctx, platform.Object{Kind: platform.KindReleaseChannel, Name: ch.Name}, n.Type, n.Reason, n.Message)
+	res := ctrl.Result{RequeueAfter: wait.after}
+	if !equality.Semantic.DeepEqual(status, ch.Status) {
+		was := ch.Status
+		ch.Status = status
+		if err := r.c.Status().Update(ctx, ch); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		if r.events != nil {
+			for _, n := range channelEvents(was, status) {
+				r.events.Event(ctx, platform.Object{Kind: platform.KindReleaseChannel, Name: ch.Name}, n.Type, n.Reason, n.Message)
+			}
 		}
 	}
-	return ctrl.Result{}, nil
+	// A promotion is done once the channel offers its release.
+	if p := promotionOf(ch); p != nil && status.Release == p.Release {
+		delete(ch.Annotations, cloudv1alpha1.AnnotationPromote)
+		if err := r.c.Update(ctx, ch); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+	}
+	return res, nil
+}
+
+// soakWait is an Automatic channel waiting out its release soak: the
+// release it takes next, and when to look again.
+type soakWait struct {
+	pending *cloudv1alpha1.PendingRelease
+	after   time.Duration
 }
 
 // target is the release the channel should offer and why ("" with the
-// reason when there is none).
-func (r *ReleaseChannelReconciler) target(ctx context.Context, ch *cloudv1alpha1.ReleaseChannel) (string, string, error) {
+// reason when there is none). An Automatic channel takes its upstream's
+// release once the upstream has offered it for the release soak; until
+// then it keeps its own and wait says what it waits for. A channel that
+// offers nothing yet takes it at once, and an admin's promotion
+// (AnnotationPromote) takes its release at once.
+func (r *ReleaseChannelReconciler) target(ctx context.Context, ch *cloudv1alpha1.ReleaseChannel) (string, string, soakWait, error) {
 	promotion := ch.Spec.Promotion
 	if promotion == "" {
 		promotion = cloudv1alpha1.PromotionAutomatic
 	}
 	if promotion != cloudv1alpha1.PromotionAutomatic {
-		return ch.Spec.Release, string(promotion), nil
+		return ch.Spec.Release, string(promotion), soakWait{}, nil
+	}
+	if p := promotionOf(ch); p != nil {
+		return p.Release, "promoted by " + orUnknown(p.By), soakWait{}, nil
 	}
 	up := upstream(ch.Name)
 	if up == "" {
-		return "", "alpha has no upstream channel: make it Pinned or Manual to a release", nil
+		return "", "alpha has no upstream channel: make it Pinned or Manual to a release", soakWait{}, nil
 	}
 	upper := &cloudv1alpha1.ReleaseChannel{}
 	if err := r.c.Get(ctx, client.ObjectKey{Name: up}, upper); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			return "", fmt.Sprintf("its upstream channel %s does not exist", up), nil
+			return "", fmt.Sprintf("its upstream channel %s does not exist", up), soakWait{}, nil
 		}
-		return "", "", err
+		return "", "", soakWait{}, err
 	}
-	if upper.Status.Release == "" {
-		return "", fmt.Sprintf("its upstream channel %s offers no release yet", up), nil
+	next := upper.Status.Release
+	if next == "" {
+		return "", fmt.Sprintf("its upstream channel %s offers no release yet", up), soakWait{}, nil
 	}
-	return upper.Status.Release, "Automatic: follows " + up, nil
+	why := "Automatic: follows " + up
+	if ch.Status.Release == "" || ch.Status.Release == next {
+		return next, why, soakWait{}, nil
+	}
+	since := offeredSince(upper, r.clock().Time)
+	until := since.Add(releaseSoak(ch))
+	if now := r.clock().Time; now.Before(until) {
+		return ch.Status.Release, why, soakWait{after: until.Sub(now), pending: &cloudv1alpha1.PendingRelease{
+			Release: next, Since: metav1.NewTime(since), Until: metav1.NewTime(until)}}, nil
+	}
+	return next, fmt.Sprintf("%s, after its release soak of %s", why, shortDuration(releaseSoak(ch))), soakWait{}, nil
+}
+
+// Release soaks of an Automatic channel that sets none.
+const (
+	defaultBetaReleaseSoak   = 7 * 24 * time.Hour
+	defaultStableReleaseSoak = 14 * 24 * time.Hour
+)
+
+// releaseSoak is how long the channel's upstream must have offered a
+// release before the channel takes it: spec.policy.releaseSoak, else 7
+// days for beta and 14 for stable.
+func releaseSoak(ch *cloudv1alpha1.ReleaseChannel) time.Duration {
+	if s := ch.Spec.Policy.ReleaseSoak; s != nil {
+		return s.Duration
+	}
+	if ch.Name == cloudv1alpha1.ChannelStable {
+		return defaultStableReleaseSoak
+	}
+	return defaultBetaReleaseSoak
+}
+
+// offeredSince is when the channel started offering its release: its
+// history entry, else its Offering condition's last change, else now.
+func offeredSince(ch *cloudv1alpha1.ReleaseChannel, now time.Time) time.Time {
+	for _, h := range ch.Status.History {
+		if h.Release == ch.Status.Release && h.To == nil {
+			return h.From.Time
+		}
+	}
+	if c := meta.FindStatusCondition(ch.Status.Conditions, cloudv1alpha1.ChannelConditionOffering); c != nil && !c.LastTransitionTime.IsZero() {
+		return c.LastTransitionTime.Time
+	}
+	return now
+}
+
+// promotionOf is the admin's promotion the channel carries
+// (AnnotationPromote); nil for none or one that does not parse.
+func promotionOf(ch *cloudv1alpha1.ReleaseChannel) *cloudv1alpha1.ChannelPromotion {
+	raw, ok := ch.Annotations[cloudv1alpha1.AnnotationPromote]
+	if !ok {
+		return nil
+	}
+	p := &cloudv1alpha1.ChannelPromotion{}
+	if err := json.Unmarshal([]byte(raw), p); err != nil || p.Release == "" {
+		return nil
+	}
+	return p
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "an admin"
+	}
+	return s
+}
+
+// shortDuration is d in days, hours or minutes, rounded: "7d", "3h", "12m".
+func shortDuration(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Round(time.Hour).Hours())/24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", int(d.Round(time.Minute).Hours()))
+	default:
+		return fmt.Sprintf("%dm", int(d.Round(time.Minute).Minutes()))
+	}
 }
 
 // unusable says why release cannot be offered; "" when it can. why is the

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -156,6 +157,12 @@ func TestReleaseEvent(t *testing.T) {
 	}
 }
 
+func pending(st cloudv1alpha1.ReleaseChannelStatus, release string) cloudv1alpha1.ReleaseChannelStatus {
+	until := metav1.NewTime(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
+	st.Pending = &cloudv1alpha1.PendingRelease{Release: release, Until: until}
+	return st
+}
+
 func TestChannelEvents(t *testing.T) {
 	status := func(release string, offering metav1.ConditionStatus, message string) cloudv1alpha1.ReleaseChannelStatus {
 		st := cloudv1alpha1.ReleaseChannelStatus{Release: release}
@@ -178,6 +185,10 @@ func TestChannelEvents(t *testing.T) {
 			is: status("r1", metav1.ConditionFalse, "release r2 is not valid; still offers r1")},
 		{name: "cannot move for another reason", was: status("r1", metav1.ConditionFalse, "release r2 is not valid; still offers r1"),
 			is: status("r1", metav1.ConditionFalse, "release r2 is withdrawn; still offers r1"), want: []string{"Warning ChannelCannotMove"}},
+		{name: "starts waiting out a release soak", was: status("r1", metav1.ConditionTrue, "offers r1"),
+			is: pending(status("r1", metav1.ConditionTrue, "offers r1"), "r2"), want: []string{"Normal PromotionWaiting"}},
+		{name: "still waiting", was: pending(status("r1", metav1.ConditionTrue, "offers r1"), "r2"),
+			is: pending(status("r1", metav1.ConditionTrue, "offers r1"), "r2")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

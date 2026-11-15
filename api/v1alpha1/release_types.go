@@ -221,6 +221,38 @@ type RolloutPolicy struct {
 	// +optional
 	// +kubebuilder:validation:MaxProperties=3
 	SoakPerTier map[ClusterTier]metav1.Duration `json:"soakPerTier,omitempty"`
+	// ReleaseSoak is how long an Automatic channel's upstream must have
+	// offered a release before the channel takes it (unset: 7 days for
+	// beta, 14 for stable; 0: at once). An admin's promotion (AdminService
+	// PromoteReleaseChannel) takes it before.
+	// +optional
+	ReleaseSoak *metav1.Duration `json:"releaseSoak,omitempty"`
+}
+
+// AnnotationPromote on a ReleaseChannel asks the controller to take a
+// release now, before its release soak ends: a ChannelPromotion as JSON.
+// The controller removes it once the channel offers that release.
+const AnnotationPromote = "cloud.cluster-vending.io/promote"
+
+// ChannelPromotion is an admin's request that a channel offer a release
+// now (AnnotationPromote).
+type ChannelPromotion struct {
+	// Release to offer: the upstream channel's, or another valid release.
+	Release string `json:"release"`
+	// By is who asked.
+	By string `json:"by,omitempty"`
+	// At is when.
+	At metav1.Time `json:"at,omitempty"`
+}
+
+// PendingRelease is the release an Automatic channel takes once its
+// release soak ends.
+type PendingRelease struct {
+	Release string `json:"release"`
+	// Since the upstream channel offered it.
+	Since metav1.Time `json:"since"`
+	// Until the soak ends and the channel takes it.
+	Until metav1.Time `json:"until"`
 }
 
 // ReleaseChannelSpec is the operator's settings for one channel.
@@ -356,6 +388,10 @@ type ReleaseChannelStatus struct {
 	// minor its automatic clusters run. Empty when it puts none.
 	// +optional
 	KubernetesMinor string `json:"kubernetesMinor,omitempty"`
+	// Pending is the release an Automatic channel waits to take: its
+	// upstream offers it, and the release soak has not ended yet.
+	// +optional
+	Pending *PendingRelease `json:"pending,omitempty"`
 	// RolloutTier is the tier the Kubernetes rollout is at (or waits for):
 	// Tier2 first, then Tier1, then Tier0.
 	// +optional

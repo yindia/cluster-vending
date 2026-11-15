@@ -60,6 +60,10 @@ type Channel struct {
 	// Promotion: Pinned (offers this build's release) or Automatic
 	// (follows the channel before it).
 	Promotion string `json:"promotion"`
+	// ReleaseSoak (a Go duration, e.g. 168h) is how long the channel
+	// before an Automatic channel must have offered a release before this
+	// one takes it; unset: the controller's default.
+	ReleaseSoak string `json:"releaseSoak,omitempty"`
 }
 
 // Channel promotions release.yaml may name.
@@ -179,6 +183,14 @@ func (r Release) check() error {
 		names[ch.Name] = true
 		if ch.Promotion != PromotionPinned && ch.Promotion != PromotionAutomatic {
 			errs = append(errs, fmt.Errorf("channels: %s promotion %q is not Pinned or Automatic", ch.Name, ch.Promotion))
+		}
+		if ch.ReleaseSoak != "" {
+			if d, err := time.ParseDuration(ch.ReleaseSoak); err != nil || d < 0 {
+				errs = append(errs, fmt.Errorf("channels: %s releaseSoak %q is not a duration like 168h", ch.Name, ch.ReleaseSoak))
+			}
+			if ch.Promotion == PromotionPinned {
+				errs = append(errs, fmt.Errorf("channels: %s is Pinned: a releaseSoak is for an Automatic channel", ch.Name))
+			}
 		}
 	}
 	return errors.Join(errs...)

@@ -112,6 +112,7 @@ const (
 	ReasonReleaseInvalid              = "ReleaseInvalid"
 	ReasonChannelOffers               = "ChannelOffers"
 	ReasonChannelCannotMove           = "ChannelCannotMove"
+	ReasonPromotionWaiting            = "PromotionWaiting"
 	ReasonRolloutTier                 = "RolloutTier"
 	ReasonRolloutHalted               = "RolloutHalted"
 	ReasonAutomaticUpgradeStarted     = "AutomaticUpgradeStarted"

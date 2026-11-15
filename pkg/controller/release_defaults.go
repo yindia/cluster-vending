@@ -111,6 +111,9 @@ func DefaultChannels() []*cloudv1alpha1.ReleaseChannel {
 	out := make([]*cloudv1alpha1.ReleaseChannel, 0, len(channels))
 	for _, ch := range channels {
 		spec := cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.Promotion(ch.Promotion)}
+		if d, err := time.ParseDuration(ch.ReleaseSoak); ch.ReleaseSoak != "" && err == nil { // checked by catalog.ParseRelease
+			spec.Policy.ReleaseSoak = &metav1.Duration{Duration: d}
+		}
 		if ch.Promotion == catalog.PromotionPinned {
 			spec.Release = DefaultReleaseName
 		}

@@ -2,8 +2,15 @@ package tenant
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"connectrpc.com/connect/v2"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 
 	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	"github.com/yindia/cluster-vending/pkg/config"
@@ -33,9 +40,25 @@ func WithOnboarding(o Onboarding) Option {
 
 // GetAccountOnboarding answers with the CloudFormation template of the
 // role and how to create its stack. It reads nothing and calls no AWS.
-func (s *TenantService) GetAccountOnboarding(_ context.Context, req *cloudv1.GetAccountOnboardingRequest) (*cloudv1.GetAccountOnboardingResponse, error) {
+func (s *TenantService) GetAccountOnboarding(ctx context.Context, req *cloudv1.GetAccountOnboardingRequest) (*cloudv1.GetAccountOnboardingResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
+	}
+	var account *model.CloudAccount
+	if req.GetId() != "" {
+		a, err := s.deps.Store.Tenants().GetCloudAccountByID(ctx, req.GetTenantId(), req.GetId())
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound,
+				fmt.Sprintf("tenant %s has no bootstrapped account %s", req.GetTenantId(), req.GetId()))
+		}
+		if err != nil {
+			return nil, service.ToConnect(err)
+		}
+		account = a
+		if req.GetRoleName() == "" && req.GetRole() == "" {
+			req = proto.CloneOf(req)
+			req.RoleName = accountreconcile.RoleName(a.Identity)
+		}
 	}
 	if s.onboarding.ManagementRoleARN == "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
@@ -67,8 +90,12 @@ func (s *TenantService) GetAccountOnboarding(_ context.Context, req *cloudv1.Get
 	out := &cloudv1.AccountOnboarding{Role: role, RoleName: name, StackName: name,
 		Region: region, AccountId: req.GetAccountId(), ManagementRoleArn: s.onboarding.ManagementRoleARN,
 		TemplateBody: string(body), TemplateFile: cloudformation.FileName(role)}
+	if account != nil {
+		out.AccountId, out.ExternalId = account.AccountID, account.ExternalID
+	}
 	if s.onboarding.TemplateURL != "" {
-		stack := cloudformation.Stack{Role: role, RoleName: name, Region: region, ManagementRoleARN: s.onboarding.ManagementRoleARN}
+		stack := cloudformation.Stack{Role: role, RoleName: name, Region: region, ManagementRoleARN: s.onboarding.ManagementRoleARN,
+			ExternalID: out.GetExternalId()}
 		console, err := cloudformation.QuickCreateURL(s.onboarding.TemplateURL, stack)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err.Error())

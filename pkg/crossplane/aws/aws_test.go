@@ -1,6 +1,7 @@
 package aws_test
 
 import (
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -90,7 +91,7 @@ func TestAWSProviders(t *testing.T) {
 // as it was before the Secret existed; with one, only the credentials
 // source changes: the tenant role is assumed either way.
 func TestAWSProviderConfigCredentials(t *testing.T) {
-	irsa, err := yaml.Marshal(crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, nil))
+	irsa, err := yaml.Marshal(crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, "", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ status: {}
 		t.Errorf("IRSA ProviderConfig changed:\n%s\nwant:\n%s", irsa, want)
 	}
 
-	local := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole,
+	local := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, "",
 		&crossplaneaws.CredentialsSecret{Namespace: "crossplane-system", Name: "aws-local", Key: "credentials"})
 	ref := local.Spec.Credentials.SecretRef
 	if local.Spec.Credentials.Source != "Secret" || ref == nil || ref.Namespace != "crossplane-system" ||
@@ -126,7 +127,7 @@ status: {}
 }
 
 func TestAWSProviderConfig(t *testing.T) {
-	pc := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, nil)
+	pc := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, "", nil)
 	if pc.Name != "aws-0a1b2c3d" || pc.Namespace != "tenant-acme" || pc.Labels[crossplane.LabelTenantID] != "acme" {
 		t.Errorf("metadata = %+v", pc.ObjectMeta)
 	}
@@ -144,12 +145,29 @@ func TestAWSProviderConfig(t *testing.T) {
 // With a direct credentials Secret (--skip-tenant-role) the ProviderConfig
 // uses the keys as they are: no role is assumed.
 func TestAWSProviderConfigDirectCredentials(t *testing.T) {
-	direct := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole,
+	direct := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, "",
 		&crossplaneaws.CredentialsSecret{Namespace: "tenant-acme", Name: "aws-0a1b2c3d-credentials", Key: "credentials", Direct: true})
 	if direct.Spec.Credentials.Source != "Secret" || direct.Spec.Credentials.SecretRef == nil {
 		t.Errorf("credentials = %+v, want the Secret", direct.Spec.Credentials)
 	}
 	if len(direct.Spec.AssumeRoleChain) != 0 {
 		t.Errorf("assumeRoleChain = %+v, want none", direct.Spec.AssumeRoleChain)
+	}
+}
+
+// With the account's external ID the tenant role is assumed passing it
+// (sts:ExternalId); a direct Secret assumes nothing, so passes nothing.
+func TestAWSProviderConfigExternalID(t *testing.T) {
+	ext := strings.Repeat("e", 40)
+
+	pc := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, ext, nil)
+
+	if chain := pc.Spec.AssumeRoleChain; len(chain) != 1 || chain[0].ExternalID == nil || *chain[0].ExternalID != ext {
+		t.Errorf("assumeRoleChain = %+v, want the tenant role with the external ID", chain)
+	}
+	direct := crossplaneaws.ProviderConfig("tenant-acme", "aws-0a1b2c3d", "acme", tenantRole, ext,
+		&crossplaneaws.CredentialsSecret{Namespace: "tenant-acme", Name: "k", Key: "credentials", Direct: true})
+	if len(direct.Spec.AssumeRoleChain) != 0 {
+		t.Errorf("direct assumeRoleChain = %+v, want none", direct.Spec.AssumeRoleChain)
 	}
 }

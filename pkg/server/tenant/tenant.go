@@ -71,6 +71,10 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 	}
 
 	namespace := kube.TenantNamespace(req.GetTenantId())
+	externalID, err := newExternalID()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, "generate the account's external ID: "+err.Error())
+	}
 	stored, err := s.record(ctx, &model.CloudAccount{
 		TenantID:    req.GetTenantId(),
 		Provider:    model.ProviderAWS,
@@ -78,6 +82,9 @@ func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.Bootst
 		AccountName: req.GetAccount().GetAccountName(),
 		Namespace:   namespace,
 		Identity:    roleARN,
+		// Kept only on the account's first bootstrap that has one
+		// (the store keeps the first): the role's trust requires it.
+		ExternalID: externalID,
 	})
 	if err != nil {
 		return nil, err

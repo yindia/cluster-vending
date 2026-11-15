@@ -48,7 +48,10 @@ func (s *StackInfo) createdByCLI() bool {
 // role the role trusts, the role's name, and the stack's tags.
 type StackInput struct {
 	Name, Body, ManagementRoleARN, RoleName string
-	Tags                                    map[string]string
+	// ExternalID is the account's (the template's ExternalId parameter);
+	// empty: none.
+	ExternalID string
+	Tags       map[string]string
 }
 
 // StackEvent is one event of a stack.
@@ -83,7 +86,12 @@ func stackFailed(status string) bool {
 // end, printing its events.
 func ensureStack(ctx context.Context, o Options, s RoleStacks, ob *cloudv1.AccountOnboarding, account string) error {
 	in := StackInput{Name: ob.GetStackName(), Body: ob.GetTemplateBody(), ManagementRoleARN: ob.GetManagementRoleArn(),
-		RoleName: ob.GetRoleName(), Tags: map[string]string{cloudformation.ManagedByTag: cloudformation.Platform}}
+		RoleName: ob.GetRoleName(), ExternalID: ob.GetExternalId(), Tags: map[string]string{cloudformation.ManagedByTag: cloudformation.Platform}}
+	if in.ExternalID != "" {
+		// CloudFormation shows a NoEcho parameter masked: the tag says
+		// which external ID the stack has, without it.
+		in.Tags[cloudformation.ExternalIDTag] = cloudformation.ExternalIDFingerprint(in.ExternalID)
+	}
 	info, err := s.Stack(ctx, in.Name)
 	if err != nil {
 		return fmt.Errorf("read the stack %s in account %s: %w", in.Name, account, err)
@@ -108,7 +116,7 @@ func ensureStack(ctx context.Context, o Options, s RoleStacks, ob *cloudv1.Accou
 			o.progressf("The stack %s already creates the role %s: nothing to do\n", in.Name, ob.GetRoleName())
 			return nil
 		}
-		o.progressf("Updating the stack %s in account %s: its template or management role changed\n", in.Name, account)
+		o.progressf("Updating the stack %s in account %s: its template, management role or external ID changed\n", in.Name, account)
 		changed, err := s.UpdateStack(ctx, in)
 		if err != nil {
 			return fmt.Errorf("update the stack %s: %w", in.Name, err)
@@ -133,6 +141,9 @@ func sameStack(ctx context.Context, s RoleStacks, in StackInput, info *StackInfo
 	// template differs, which the comparison below finds.
 	if info.ManagementRoleARN != in.ManagementRoleARN || (info.RoleName != "" && info.RoleName != in.RoleName) {
 		return false, nil
+	}
+	if in.ExternalID != "" && info.Tags[cloudformation.ExternalIDTag] != in.Tags[cloudformation.ExternalIDTag] {
+		return false, nil // made without the account's external ID (or with another)
 	}
 	body, err := s.TemplateBody(ctx, in.Name)
 	if err != nil {

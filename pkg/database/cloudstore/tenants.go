@@ -33,6 +33,7 @@ type accountMeta struct {
 	Namespace          string    `json:"namespace,omitempty"`
 	Identity           string    `json:"identity,omitempty"`
 	DirectoryID        string    `json:"directoryID,omitempty"`
+	ExternalID         string    `json:"externalID,omitempty"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
@@ -155,6 +156,10 @@ func fillAccount(a *model.CloudAccount, obj *cloudv1alpha1.CloudAccount) error {
 		m.ProviderConfigName, m.CreatedAt = a.ProviderConfigName, now()
 	}
 	m.Namespace, m.Identity, m.DirectoryID, m.UpdatedAt = a.Namespace, a.Identity, a.DirectoryID, now()
+	if m.ExternalID == "" {
+		// The first one given stays: the role's trust requires it.
+		m.ExternalID = a.ExternalID
+	}
 	raw, err := json.Marshal(m)
 	if err != nil {
 		return err
@@ -178,6 +183,7 @@ func accountRow(obj *cloudv1alpha1.CloudAccount) *model.CloudAccount {
 		Base:     model.Base{ID: obj.Labels[LabelID], CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt},
 		TenantID: obj.Labels[LabelTenant], Provider: model.ProviderAWS, ProviderConfigName: m.ProviderConfigName,
 		Namespace: m.Namespace, Identity: m.Identity, DirectoryID: m.DirectoryID, AccountName: obj.Spec.AccountName,
+		ExternalID: m.ExternalID,
 	}
 	if obj.Spec.AWS != nil {
 		a.AccountID = obj.Spec.AWS.AccountID

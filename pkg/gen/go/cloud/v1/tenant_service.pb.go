@@ -744,7 +744,11 @@ type GetAccountOnboardingRequest struct {
 	// The IAM role's name, also the stack's: cluster-vending-<role> (the
 	// default) or cluster-vending-<anything>-<role>, so several stacks of
 	// one role fit in one account (the template's RoleName parameter).
-	RoleName      string `protobuf:"bytes,5,opt,name=role_name,json=roleName,proto3" json:"role_name,omitempty"`
+	RoleName string `protobuf:"bytes,5,opt,name=role_name,json=roleName,proto3" json:"role_name,omitempty"`
+	// The bootstrap ID of the onboarded account the stack is for: the
+	// answer then carries the account's external ID (and its account ID).
+	// Empty: the template only, with no external ID.
+	Id            string `protobuf:"bytes,6,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -810,6 +814,13 @@ func (x *GetAccountOnboardingRequest) GetAccountId() string {
 func (x *GetAccountOnboardingRequest) GetRoleName() string {
 	if x != nil {
 		return x.RoleName
+	}
+	return ""
+}
+
+func (x *GetAccountOnboardingRequest) GetId() string {
+	if x != nil {
+		return x.Id
 	}
 	return ""
 }
@@ -883,8 +894,13 @@ type AccountOnboarding struct {
 	// The template's HTTPS URL and the console's quick-create link, when the
 	// server knows where the templates are hosted
 	// (cloudformation-template-url); empty otherwise.
-	TemplateUrl   string `protobuf:"bytes,9,opt,name=template_url,json=templateUrl,proto3" json:"template_url,omitempty"`
-	ConsoleUrl    string `protobuf:"bytes,10,opt,name=console_url,json=consoleUrl,proto3" json:"console_url,omitempty"`
+	TemplateUrl string `protobuf:"bytes,9,opt,name=template_url,json=templateUrl,proto3" json:"template_url,omitempty"`
+	ConsoleUrl  string `protobuf:"bytes,10,opt,name=console_url,json=consoleUrl,proto3" json:"console_url,omitempty"`
+	// The template's ExternalId parameter: the account's external ID, which
+	// the management role passes when it assumes the role (sts:ExternalId).
+	// Set when the request named an account (id) that has one; give it to
+	// nobody else. Empty: the role is created without one.
+	ExternalId    string `protobuf:"bytes,11,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -985,6 +1001,13 @@ func (x *AccountOnboarding) GetTemplateUrl() string {
 func (x *AccountOnboarding) GetConsoleUrl() string {
 	if x != nil {
 		return x.ConsoleUrl
+	}
+	return ""
+}
+
+func (x *AccountOnboarding) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
 	}
 	return ""
 }
@@ -1218,7 +1241,13 @@ type AwsAccount struct {
 	// Name of the IAM role the platform assumes in the account (no path),
 	// e.g. "cluster-vending-provisioner". The tenant creates it with admin
 	// rights, trusting the platform's management role.
-	Role          string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	Role string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	// Output only. The account has an external ID: the platform passes it
+	// when it assumes the role, whose trust should require it (account
+	// create creates the role's stack with it). False for an account
+	// onboarded before external IDs: account create again adds one. The
+	// ID itself is only in GetAccountOnboarding.
+	ExternalIdSet bool `protobuf:"varint,3,opt,name=external_id_set,json=externalIdSet,proto3" json:"external_id_set,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1265,6 +1294,13 @@ func (x *AwsAccount) GetRole() string {
 		return x.Role
 	}
 	return ""
+}
+
+func (x *AwsAccount) GetExternalIdSet() bool {
+	if x != nil {
+		return x.ExternalIdSet
+	}
+	return false
 }
 
 // CloudAccountStatus is the observed state of a tenant's cloud account.
@@ -1619,18 +1655,19 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\aregions\x18\x03 \x03(\tB/\xbaH,\x92\x01)\x10\n" +
 	"\x18\x01\"#r!\x10\x01\x18 2\x1b^[a-z]{2}(-[a-z]+)+-[0-9]+$R\aregions\"N\n" +
 	"\x1aVerifyCloudAccountResponse\x120\n" +
-	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\x8d\x03\n" +
+	"\aaccount\x18\x01 \x01(\v2\x16.cloud.v1.CloudAccountR\aaccount\"\xaa\x03\n" +
 	"\x1bGetAccountOnboardingRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x129\n" +
 	"\x04role\x18\x02 \x01(\tB%\xbaH\"r R\x00R\x06readerR\aupdaterR\vprovisionerR\x04role\x12?\n" +
 	"\x06region\x18\x03 \x01(\tB'\xbaH$r\"\x18 2\x1e^([a-z]{2}(-[a-z]+)+-[0-9]+)?$R\x06region\x124\n" +
 	"\n" +
 	"account_id\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^([0-9]{12})?$R\taccountId\x12n\n" +
-	"\trole_name\x18\x05 \x01(\tBQ\xbaHNrL\x18@2H^(cluster-vending-([A-Za-z0-9+=,.@_-]+-)?(reader|updater|provisioner))?$R\broleName\"[\n" +
+	"\trole_name\x18\x05 \x01(\tBQ\xbaHNrL\x18@2H^(cluster-vending-([A-Za-z0-9+=,.@_-]+-)?(reader|updater|provisioner))?$R\broleName\x12\x1b\n" +
+	"\x02id\x18\x06 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\x02id\"[\n" +
 	"\x1cGetAccountOnboardingResponse\x12;\n" +
 	"\n" +
 	"onboarding\x18\x01 \x01(\v2\x1b.cloud.v1.AccountOnboardingR\n" +
-	"onboarding\"\xd8\x02\n" +
+	"onboarding\"\xf9\x02\n" +
 	"\x11AccountOnboarding\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1b\n" +
 	"\trole_name\x18\x02 \x01(\tR\broleName\x12\x1d\n" +
@@ -1645,7 +1682,9 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\ftemplate_url\x18\t \x01(\tR\vtemplateUrl\x12\x1f\n" +
 	"\vconsole_url\x18\n" +
 	" \x01(\tR\n" +
-	"consoleUrl\"h\n" +
+	"consoleUrl\x12\x1f\n" +
+	"\vexternal_id\x18\v \x01(\tR\n" +
+	"externalId\"h\n" +
 	"\x18ListCloudAccountsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"O\n" +
 	"\x19ListCloudAccountsResponse\x122\n" +
@@ -1661,12 +1700,13 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"updateTime\x12(\n" +
 	"\x03aws\x18\n" +
 	" \x01(\v2\x14.cloud.v1.AwsAccountH\x00R\x03awsB\x11\n" +
-	"\bprovider\x12\x05\xbaH\x02\b\x01\"n\n" +
+	"\bprovider\x12\x05\xbaH\x02\b\x01\"\x96\x01\n" +
 	"\n" +
 	"AwsAccount\x121\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^[0-9]{12}$R\taccountId\x12-\n" +
-	"\x04role\x18\x02 \x01(\tB\x19\xbaH\x16r\x142\x12^[\\w+=,.@-]{1,64}$R\x04role\"\x88\x03\n" +
+	"\x04role\x18\x02 \x01(\tB\x19\xbaH\x16r\x142\x12^[\\w+=,.@-]{1,64}$R\x04role\x12&\n" +
+	"\x0fexternal_id_set\x18\x03 \x01(\bR\rexternalIdSet\"\x88\x03\n" +
 	"\x12CloudAccountStatus\x121\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x1b.cloud.v1.CloudAccountStateR\x05state\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x120\n" +

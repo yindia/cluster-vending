@@ -226,7 +226,7 @@ type CredentialsSecret struct {
 // name is the account's stored ProviderConfig name
 // (model.CloudAccount.ProviderConfigName): a tenant has one ProviderConfig
 // per account, and the managed resources in that account reference it.
-func ProviderConfig(namespace, name, tenantID, tenantRoleARN string, secret *CredentialsSecret) *awsv1beta1.ProviderConfig {
+func ProviderConfig(namespace, name, tenantID, tenantRoleARN, externalID string, secret *CredentialsSecret) *awsv1beta1.ProviderConfig {
 	credentials := awsv1beta1.ProviderCredentials{Source: credentialsSourceIRSA}
 	if secret != nil {
 		credentials = awsv1beta1.ProviderCredentials{Source: xpv2.CredentialsSourceSecret,
@@ -242,18 +242,24 @@ func ProviderConfig(namespace, name, tenantID, tenantRoleARN string, secret *Cre
 		},
 		Spec: awsv1beta1.ProviderConfigSpec{
 			Credentials:     credentials,
-			AssumeRoleChain: assumeRoleChain(tenantRoleARN, secret),
+			AssumeRoleChain: assumeRoleChain(tenantRoleARN, externalID, secret),
 		},
 	}
 }
 
-// assumeRoleChain is the tenant role, unless the credentials Secret is
-// used directly.
-func assumeRoleChain(tenantRoleARN string, secret *CredentialsSecret) []awsv1beta1.AssumeRoleOptions {
+// assumeRoleChain is the tenant role, passing the account's external ID
+// when it has one (sts:ExternalId, which the role's trust requires once
+// its stack is created with it), unless the credentials Secret is used
+// directly.
+func assumeRoleChain(tenantRoleARN, externalID string, secret *CredentialsSecret) []awsv1beta1.AssumeRoleOptions {
 	if secret != nil && secret.Direct {
 		return nil
 	}
-	return []awsv1beta1.AssumeRoleOptions{{RoleARN: ptr.To(tenantRoleARN)}}
+	role := awsv1beta1.AssumeRoleOptions{RoleARN: ptr.To(tenantRoleARN)}
+	if externalID != "" {
+		role.ExternalID = ptr.To(externalID)
+	}
+	return []awsv1beta1.AssumeRoleOptions{role}
 }
 
 // ProviderConfigRef is the spec.providerConfigRef of a namespaced managed

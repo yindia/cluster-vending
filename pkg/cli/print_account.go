@@ -76,6 +76,15 @@ func mutatedAccount(w io.Writer, a *cloudv1.CloudAccount, verb string) error {
 	return table(w, accountHeader, [][]string{accountRow(a)})
 }
 
+// externalIDWord says whether the account has an external ID (the ID
+// itself is only in GetAccountOnboarding).
+func externalIDWord(a *cloudv1.AwsAccount) string {
+	if a.GetExternalIdSet() {
+		return "set"
+	}
+	return "none: account create again adds one"
+}
+
 // describeAccount is one cloud account: its fields, its access check,
 // its resources and conditions.
 func describeAccount(w io.Writer, a *cloudv1.CloudAccount) error {
@@ -84,7 +93,7 @@ func describeAccount(w io.Writer, a *cloudv1.CloudAccount) error {
 		{"Name", a.GetAccountName()}, {"ID", a.GetId()}, {"Tenant", a.GetTenantId()},
 		{"State", word(st.GetState().String(), "CLOUD_ACCOUNT_STATE_")}, {"AWS Account", a.GetAws().GetAccountId()},
 		{"Role", a.GetAws().GetRole()}, {"Namespace", st.GetNamespace()}, {"Provider Config", st.GetProviderConfigName()},
-		{"Identity", st.GetIdentity()},
+		{"Identity", st.GetIdentity()}, {"External ID", externalIDWord(a.GetAws())},
 	}
 	if p := st.GetPause(); p != nil {
 		kv = append(kv, [2]string{"Paused", pauseLine(p)})

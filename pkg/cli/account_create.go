@@ -26,15 +26,18 @@ const (
 // AccountCreate onboards the account of a CloudAccount manifest (-f):
 //
 //  1. When its role is one of the platform's (cluster-vending-reader,
-//     -updater, -provisioner), it creates the role's CloudFormation stack
-//     in the account: from the terminal with the caller's AWS
-//     credentials, or in the browser (the console's quick-create link);
+//     -updater, -provisioner), it settles how the role's CloudFormation
+//     stack is created: from the terminal with the caller's AWS
+//     credentials (checked to be of the account, before anything is
+//     made), or in the browser (the console's quick-create link);
 //     --create-role says which, or the one question asked at a terminal.
-//  2. TenantService.BootstrapTenant.
-//  3. With --wait: the access check (VerifyCloudAccount), until the
+//  2. TenantService.BootstrapTenant: the account, with its external ID.
+//  3. The role's stack, from GetAccountOnboarding of that account: its
+//     trust requires the account's external ID.
+//  4. With --wait: the access check (VerifyCloudAccount), until the
 //     controller gives its verdict.
 //
-// A stack that fails stops it before the account is onboarded.
+// A stack that fails stops it, saying how to retry or remove the account.
 func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	m, err := LoadManifest(o.Input, KindCloudAccount)
 	if err != nil {
@@ -48,8 +51,9 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
+	var plan *rolePlan
 	if aws := account.GetAws(); aws != nil {
-		if err := createRole(ctx, c, o, tenant, aws); err != nil {
+		if plan, err = planRole(ctx, o, aws); err != nil {
 			return nil, err
 		}
 	}
@@ -58,6 +62,13 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		return nil, err
 	}
 	created := res.(*cloudv1.BootstrapTenantResponse)
+	if plan != nil {
+		if err := plan.create(ctx, c, o, created.GetAccount()); err != nil {
+			a := created.GetAccount()
+			return nil, fmt.Errorf("%w\nThe account %s is onboarded, its role is not: fix the stack and run account create again, "+
+				"or remove the account: cluster-vending account delete --id %s --tenant %s", err, a.GetId(), a.GetId(), a.GetTenantId())
+		}
+	}
 	if !o.Wait || created.GetAccount().GetAws() == nil {
 		return created, nil
 	}
@@ -76,33 +87,67 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	return out, nil
 }
 
-// createRole creates the account's role with CloudFormation, the way
-// --create-role (or the question) says.
-func createRole(ctx context.Context, c Clients, o Options, tenant string, aws *cloudv1.AwsAccount) error {
+// rolePlan is how account create makes the account's role: settled
+// before the account is onboarded (planRole), done after (create), when
+// the account has its external ID.
+type rolePlan struct {
+	mode, role string
+	aws        *cloudv1.AwsAccount
+	// stacks: the account's stacks through the caller's credentials
+	// (terminal), checked to be of the account.
+	stacks RoleStacks
+}
+
+// planRole settles how the account's role is created, the way
+// --create-role (or the question) says; nil: no stack (a role of the
+// tenant's own, or skip).
+func planRole(ctx context.Context, o Options, aws *cloudv1.AwsAccount) (*rolePlan, error) {
 	role := cloudformation.RoleOf(aws.GetRole())
 	if role == "" {
 		o.progressf("%s is not a role the platform's templates create: it is yours to create in account %s, trusting the platform's management role. Not creating a stack.\n",
 			aws.GetRole(), aws.GetAccountId())
-		return nil
+		return nil, nil
 	}
 	mode, err := chooseCreateRole(o, aws)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if mode == CreateRoleSkip {
 		o.progressf("Not creating the role %s: it is expected to exist in account %s already\n", aws.GetRole(), aws.GetAccountId())
-		return nil
+		return nil, nil
 	}
-	res, err := call(ctx, &cloudv1.GetAccountOnboardingRequest{TenantId: tenant, Role: role, Region: o.StackRegion,
-		AccountId: aws.GetAccountId(), RoleName: aws.GetRole()}, c.Tenant.GetAccountOnboarding)
+	plan := &rolePlan{mode: mode, role: role, aws: aws}
+	if mode == CreateRoleTerminal {
+		if plan.stacks, err = accountStacks(ctx, o, stackRegion(o), aws.GetAccountId()); err != nil {
+			return nil, err
+		}
+	}
+	return plan, nil
+}
+
+// create makes the role's stack for the onboarded account: its template
+// and parameters, the account's external ID among them, from
+// GetAccountOnboarding.
+func (p *rolePlan) create(ctx context.Context, c Clients, o Options, account *cloudv1.CloudAccount) error {
+	res, err := call(ctx, &cloudv1.GetAccountOnboardingRequest{TenantId: account.GetTenantId(), Id: account.GetId(), Role: p.role,
+		Region: o.StackRegion, AccountId: p.aws.GetAccountId(), RoleName: p.aws.GetRole()}, c.Tenant.GetAccountOnboarding)
 	if err != nil {
 		return err
 	}
 	ob := res.(*cloudv1.GetAccountOnboardingResponse).GetOnboarding()
-	if mode == CreateRoleBrowser {
-		return createRoleInBrowser(ctx, o, ob, aws.GetAccountId())
+	if p.mode == CreateRoleBrowser {
+		return createRoleInBrowser(ctx, o, ob, p.aws.GetAccountId())
 	}
-	return createRoleFromTerminal(ctx, o, ob, aws.GetAccountId())
+	return ensureStack(ctx, o, p.stacks, ob, p.aws.GetAccountId())
+}
+
+// stackRegion is the region of the role's stack: --region, else the API
+// server's default (GetAccountOnboarding), us-east-1.
+func stackRegion(o Options) string {
+	if o.StackRegion != "" {
+		return o.StackRegion
+	}
+	return "us-east-1"
 }
 
 // chooseCreateRole is --create-role, or the answer to the one question

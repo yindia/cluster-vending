@@ -82,7 +82,7 @@ func objects(a *model.CloudAccount, keys *corev1.Secret, direct bool) []client.O
 		ref = &crossplaneaws.CredentialsSecret{Namespace: keys.Namespace, Name: keys.Name, Key: credentialsKey(keys),
 			Direct: direct}
 	}
-	return append(objs, crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, ref))
+	return append(objs, crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, a.ExternalID, ref))
 }
 
 // credentialsKey is the one key of an account's credentials copy.
@@ -258,7 +258,7 @@ func (r *Reconciler) View(ctx context.Context, a *model.CloudAccount) (*cloudv1.
 func Proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 	out := proto(a)
 	out.Status.Access = accessProto(a.Access)
-	out.Status.Conditions = append(out.Status.Conditions, AccessCondition(a.Access))
+	out.Status.Conditions = append(out.Status.Conditions, withExternalIDWarning(AccessCondition(a.Access), a))
 	if AccessDenied(a.Access) {
 		// Bootstrapped, but the platform cannot act in it.
 		out.Status.State = cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_FAILED
@@ -285,9 +285,10 @@ func proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 		Id:          a.ID,
 		TenantId:    a.TenantID,
 		AccountName: a.AccountName,
-		Provider:    &cloudv1.CloudAccount_Aws{Aws: &cloudv1.AwsAccount{AccountId: a.AccountID, Role: RoleName(a.Identity)}},
-		CreateTime:  timestamppb.New(a.CreatedAt),
-		UpdateTime:  timestamppb.New(a.UpdatedAt),
+		Provider: &cloudv1.CloudAccount_Aws{Aws: &cloudv1.AwsAccount{AccountId: a.AccountID, Role: RoleName(a.Identity),
+			ExternalIdSet: a.ExternalID != ""}},
+		CreateTime: timestamppb.New(a.CreatedAt),
+		UpdateTime: timestamppb.New(a.UpdatedAt),
 		Status: &cloudv1.CloudAccountStatus{
 			State:              cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_READY,
 			Namespace:          a.Namespace,

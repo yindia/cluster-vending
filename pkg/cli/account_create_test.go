@@ -13,6 +13,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 )
@@ -45,6 +46,9 @@ type accountAPI struct {
 	deleteErr error
 	// role is the onboarded account's role (account delete reads it).
 	role string
+	// externalID is the onboarded account's: GetAccountOnboarding of the
+	// account (its id) answers with it.
+	externalID string
 }
 
 func (f *accountAPI) DeleteCloudAccount(_ context.Context, _ *cloudv1.DeleteCloudAccountRequest) (*cloudv1.DeleteCloudAccountResponse, error) {
@@ -64,7 +68,8 @@ func (f *accountAPI) GetAccountOnboarding(_ context.Context, req *cloudv1.GetAcc
 	return &cloudv1.GetAccountOnboardingResponse{Onboarding: &cloudv1.AccountOnboarding{Role: role,
 		RoleName: name, StackName: name, Region: "us-east-1",
 		AccountId: req.GetAccountId(), ManagementRoleArn: managementRole, TemplateBody: roleTemplate,
-		TemplateFile: "cluster-vending-" + role + "-role.template.yaml", ConsoleUrl: f.console}}, nil
+		TemplateFile: "cluster-vending-" + role + "-role.template.yaml", ConsoleUrl: f.console,
+		ExternalId: map[bool]string{true: f.externalID}[req.GetId() != ""]}}, nil
 }
 
 func (f *accountAPI) BootstrapTenant(_ context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
@@ -314,7 +319,9 @@ func TestAccountCreateWithTheStackThere(t *testing.T) {
 	}
 }
 
-// A stack that fails says why, and the account is not onboarded.
+// A stack that fails says why; the account, onboarded first (it has the
+// external ID the stack needs), stays, and the error says how to retry
+// or remove it.
 func TestAccountCreateWhenTheStackFails(t *testing.T) {
 	api := &accountAPI{}
 	stacks := &fakeStacks{caller: tenantAccount,
@@ -332,8 +339,49 @@ func TestAccountCreateWhenTheStackFails(t *testing.T) {
 		!strings.Contains(r.err.Error(), "Role: cluster-vending-provisioner already exists in stack other") {
 		t.Fatalf("err = %v", r.err)
 	}
-	if api.bootstrapped != nil {
-		t.Error("the account was onboarded")
+	if api.bootstrapped == nil || !strings.Contains(r.err.Error(), "account delete --id "+accountID) {
+		t.Errorf("bootstrapped %v, err %v: want the account onboarded and how to remove it", api.bootstrapped, r.err)
+	}
+}
+
+// The role's stack is created with the account's external ID, which
+// GetAccountOnboarding gives for the onboarded account, and tagged with
+// its fingerprint; a stack made without it (or before external IDs) is
+// updated.
+func TestAccountCreatePassesTheExternalID(t *testing.T) {
+	ext := strings.Repeat("e", 40)
+	tests := []struct {
+		name         string
+		states       []*StackInfo
+		created, upd int
+	}{
+		{name: "a new stack", states: []*StackInfo{nil, stack("CREATE_COMPLETE")}, created: 1},
+		{name: "a stack without it", states: []*StackInfo{stack("CREATE_COMPLETE"), stack("UPDATE_COMPLETE")}, upd: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &accountAPI{externalID: ext}
+			stacks := &fakeStacks{caller: tenantAccount, states: tt.states, body: roleTemplate}
+
+			r := createAccount(t, Options{Input: manifest(t, "cluster-vending-provisioner"), CreateRole: "terminal"}, api, stacks)
+
+			if r.err != nil {
+				t.Fatalf("%v\n%s", r.err, r.progress)
+			}
+			if api.onboarded.GetId() != accountID {
+				t.Errorf("onboarding asked for %q, want the onboarded account %s", api.onboarded.GetId(), accountID)
+			}
+			if len(stacks.created) != tt.created || len(stacks.updated) != tt.upd {
+				t.Fatalf("created %d, updated %d; want %d, %d", len(stacks.created), len(stacks.updated), tt.created, tt.upd)
+			}
+			in := append(stacks.created, stacks.updated...)[0]
+			if in.ExternalID != ext || in.Tags[cloudformation.ExternalIDTag] != cloudformation.ExternalIDFingerprint(ext) {
+				t.Errorf("stack input = %+v, want the external ID and its fingerprint tag", in)
+			}
+			if strings.Contains(r.progress+r.out, ext) {
+				t.Error("the external ID was printed")
+			}
+		})
 	}
 }
 

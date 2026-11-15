@@ -133,6 +133,10 @@ func stackParameters(in StackInput) []cfntypes.Parameter {
 		params = append(params, cfntypes.Parameter{ParameterKey: aws.String(cloudformation.ParameterRoleName),
 			ParameterValue: aws.String(in.RoleName)})
 	}
+	if in.ExternalID != "" {
+		params = append(params, cfntypes.Parameter{ParameterKey: aws.String(cloudformation.ParameterExternalID),
+			ParameterValue: aws.String(in.ExternalID)})
+	}
 	return params
 }
 

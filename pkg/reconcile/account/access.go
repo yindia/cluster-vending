@@ -241,3 +241,17 @@ func timestamp(t time.Time) *timestamppb.Timestamp {
 	}
 	return timestamppb.New(t)
 }
+
+// NoExternalIDWarning is added to a verified account's AccessVerified
+// message when the account has no external ID (onboarded before them): it
+// works, but its role trusts the management role without one.
+const NoExternalIDWarning = "warning: no external ID: run account create again, so the role's stack requires one"
+
+// withExternalIDWarning is c with NoExternalIDWarning when a is verified
+// and has no external ID; the condition stays True.
+func withExternalIDWarning(c *cloudv1.Condition, a *model.CloudAccount) *cloudv1.Condition {
+	if c.GetStatus() == cloudv1.ConditionStatus_CONDITION_STATUS_TRUE && a.ExternalID == "" {
+		c.Message += "; " + NoExternalIDWarning
+	}
+	return c
+}

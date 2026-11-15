@@ -243,6 +243,13 @@ message GetAccountOnboardingRequest {
     max_len: 64
     pattern: "^(cluster-vending-([A-Za-z0-9+=,.@_-]+-)?(reader|updater|provisioner))?$"
   }];
+  // The bootstrap ID of the onboarded account the stack is for: the
+  // answer then carries the account's external ID (and its account ID).
+  // Empty: the template only, with no external ID.
+  string id = 6 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
 }
 
 message GetAccountOnboardingResponse {
@@ -275,6 +282,11 @@ message AccountOnboarding {
   // (cloudformation-template-url); empty otherwise.
   string template_url = 9;
   string console_url = 10;
+  // The template's ExternalId parameter: the account's external ID, which
+  // the management role passes when it assumes the role (sts:ExternalId).
+  // Set when the request named an account (id) that has one; give it to
+  // nobody else. Empty: the role is created without one.
+  string external_id = 11;
 }
 
 message ListCloudAccountsRequest {
@@ -336,6 +348,13 @@ message AwsAccount {
   // e.g. "cluster-vending-provisioner". The tenant creates it with admin
   // rights, trusting the platform's management role.
   string role = 2 [(buf.validate.field).string.pattern = "^[\\w+=,.@-]{1,64}$"];
+
+  // Output only. The account has an external ID: the platform passes it
+  // when it assumes the role, whose trust should require it (account
+  // create creates the role's stack with it). False for an account
+  // onboarded before external IDs: account create again adds one. The
+  // ID itself is only in GetAccountOnboarding.
+  bool external_id_set = 3;
 }
 
 // CloudAccountState is the coarse state of a tenant's cloud account.

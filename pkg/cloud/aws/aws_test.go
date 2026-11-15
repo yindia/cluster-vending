@@ -33,7 +33,7 @@ type fakeSTS struct {
 	callerAccount string // GetCallerIdentity's answer
 }
 
-type stsCall struct{ role, session, signedBy string }
+type stsCall struct{ role, session, signedBy, externalID string }
 
 func (f *fakeSTS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -66,7 +66,8 @@ func (f *fakeSTS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, after, ok := strings.Cut(auth, "Credential="); ok {
 		signedBy, _, _ = strings.Cut(after, "/")
 	}
-	f.calls = append(f.calls, stsCall{role: r.Form.Get("RoleArn"), session: r.Form.Get("RoleSessionName"), signedBy: signedBy})
+	f.calls = append(f.calls, stsCall{role: r.Form.Get("RoleArn"), session: r.Form.Get("RoleSessionName"), signedBy: signedBy,
+		externalID: r.Form.Get("ExternalId")})
 	w.Header().Set("Content-Type", "text/xml")
 	_, _ = fmt.Fprintf(w, `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult>
 <Credentials><AccessKeyId>ASIA%d</AccessKeyId><SecretAccessKey>secret</SecretAccessKey>
@@ -104,7 +105,7 @@ func TestAssumesTenantRoleFromAmbientCredentials(t *testing.T) {
 	sts := &fakeSTS{}
 	c := newTestClient(t, sts, Config{})
 
-	got, err := c.tenantCredentials(tenantRole, "eu-west-1").Retrieve(t.Context())
+	got, err := c.tenantCredentials(tenantRole, "", "eu-west-1").Retrieve(t.Context())
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestCredentialsAreCachedPerAccountAndRegion(t *testing.T) {
 	c := newTestClient(t, sts, Config{})
 	retrieve := func(account, region string) {
 		t.Helper()
-		if _, err := c.tenantCredentials(tenantRoleARN(account), region).Retrieve(t.Context()); err != nil {
+		if _, err := c.tenantCredentials(tenantRoleARN(account), "", region).Retrieve(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -277,5 +278,25 @@ func TestDirectAccessAssumesNoRole(t *testing.T) {
 	}
 	if _, err := c.TenantFor(Access{AccountID: tenantAccount, RoleARN: tenantRole, Direct: true}, "us-west-1"); !errors.Is(err, ErrInvalid) {
 		t.Errorf("direct access with a role: %v, want ErrInvalid", err)
+	}
+}
+
+// An account with an external ID is reached passing it to AssumeRole
+// (sts:ExternalId), cached apart from the same role without one.
+func TestAssumePassesTheExternalID(t *testing.T) {
+	sts := &fakeSTS{}
+	c := newTestClient(t, sts, Config{})
+	ext := strings.Repeat("e", 40)
+
+	if _, err := c.tenantCredentials(tenantRole, ext, "us-east-1").Retrieve(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.tenantCredentials(tenantRole, "", "us-east-1").Retrieve(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := sts.recorded()
+	if len(calls) != 2 || calls[0].externalID != ext || calls[1].externalID != "" {
+		t.Errorf("STS calls = %+v, want one with the external ID, one without", calls)
 	}
 }

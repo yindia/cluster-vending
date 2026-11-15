@@ -122,6 +122,10 @@ type Access struct {
 	// assuming a role (local testing, --skip-tenant-role). RoleARN must
 	// then be empty.
 	Direct bool
+	// ExternalID is passed to AssumeRole (sts:ExternalId) when set: the
+	// account's, which the role's trust requires once its stack is created
+	// with it.
+	ExternalID string
 }
 
 // Tenant is TenantFor(Access{accountID, roleARN}, region).
@@ -166,15 +170,15 @@ func (c *Client) regionConfig(a Access, region string) (awssdk.Config, error) {
 	cfg := c.base.Copy()
 	cfg.Region = region
 	if !a.Direct {
-		cfg.Credentials = c.tenantCredentials(a.RoleARN, region)
+		cfg.Credentials = c.tenantCredentials(a.RoleARN, a.ExternalID, region)
 	}
 	return cfg, nil
 }
 
-// tenantCredentials are the credentials of a tenant role, cached per role
-// and region, assumed with the client's own credentials.
-func (c *Client) tenantCredentials(roleARN, region string) *awssdk.CredentialsCache {
-	key := roleARN + "/" + region
+// tenantCredentials are the credentials of a tenant role, cached per role,
+// external ID and region, assumed with the client's own credentials.
+func (c *Client) tenantCredentials(roleARN, externalID, region string) *awssdk.CredentialsCache {
+	key := roleARN + "/" + region + "/" + externalID
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if cached, ok := c.creds[key]; ok {
@@ -182,17 +186,20 @@ func (c *Client) tenantCredentials(roleARN, region string) *awssdk.CredentialsCa
 	}
 	source := c.base.Copy()
 	source.Region = region // regional STS endpoint, next to the calls
-	creds := c.assume(source, roleARN)
+	creds := c.assume(source, roleARN, externalID)
 	c.creds[key] = creds
 	return creds
 }
 
 // assume returns cached credentials of roleARN, assumed with from's
-// credentials.
-func (c *Client) assume(from awssdk.Config, roleARN string) *awssdk.CredentialsCache {
+// credentials, passing externalID when set.
+func (c *Client) assume(from awssdk.Config, roleARN, externalID string) *awssdk.CredentialsCache {
 	provider := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(from), roleARN, func(o *stscreds.AssumeRoleOptions) {
 		o.RoleSessionName = c.cfg.SessionName
 		o.Duration = sessionDuration
+		if externalID != "" {
+			o.ExternalID = awssdk.String(externalID)
+		}
 	})
 	return awssdk.NewCredentialsCache(provider)
 }

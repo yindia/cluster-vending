@@ -40,5 +40,5 @@ func (d Deps) AWSAccess(_ context.Context, a *model.CloudAccount) (awscloud.Acce
 		// as they are.
 		return awscloud.Access{AccountID: a.AccountID, Direct: true}, nil
 	}
-	return awscloud.Access{AccountID: a.AccountID, RoleARN: a.Identity}, nil
+	return awscloud.Access{AccountID: a.AccountID, RoleARN: a.Identity, ExternalID: a.ExternalID}, nil
 }

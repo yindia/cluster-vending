@@ -37,6 +37,7 @@ type accountAPI struct {
 	bootstrapped *cloudv1.BootstrapTenantRequest
 	verified     bool
 	verifiedIn   []string // the regions VerifyCloudAccount was asked to check
+	onboardErr   error    // what GetAccountOnboarding answers instead
 	// verdict is the access check's result once verify was asked; nil:
 	// the controller never checks.
 	verdict *cloudv1.AccountAccess
@@ -62,6 +63,9 @@ func (f *accountAPI) DeleteCloudAccount(_ context.Context, _ *cloudv1.DeleteClou
 
 func (f *accountAPI) GetAccountOnboarding(_ context.Context, req *cloudv1.GetAccountOnboardingRequest) (*cloudv1.GetAccountOnboardingResponse, error) {
 	f.onboarded = req
+	if f.onboardErr != nil {
+		return nil, f.onboardErr
+	}
 	role, name := req.GetRole(), req.GetRoleName()
 	if name == "" {
 		name = "cluster-vending-" + role
@@ -262,6 +266,23 @@ func TestAccountCreateFromTheTerminal(t *testing.T) {
 		"Access: verified")
 	contains(t, "output", r.out, "bootstrapped", "cluster-vending network create")
 	t.Logf("stderr:\n%s\nstdout:\n%s", r.progress, r.out)
+}
+
+// The server cannot onboard the role (no management role configured):
+// account create stops before onboarding the account, so nothing is left.
+func TestAccountCreateStopsBeforeOnboardingWhenTheRoleCannotBeMade(t *testing.T) {
+	api := &accountAPI{verdict: verified(), onboardErr: connect.NewError(connect.CodeFailedPrecondition,
+		"the API server has no management role configured (aws-management-role-arn)")}
+	stacks := &fakeStacks{caller: tenantAccount}
+
+	r := createAccount(t, Options{Input: manifest(t, "cluster-vending-provisioner"), CreateRole: "terminal", Wait: true}, api, stacks)
+
+	if r.err == nil || !strings.Contains(r.err.Error(), "aws-management-role-arn") {
+		t.Fatalf("err = %v, want the server's reason", r.err)
+	}
+	if api.bootstrapped != nil || len(stacks.created) != 0 {
+		t.Errorf("bootstrapped %v, created %v: want nothing", api.bootstrapped, stacks.created)
+	}
 }
 
 // --region is where the account is used: its access check covers that

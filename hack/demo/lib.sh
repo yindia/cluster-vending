@@ -137,12 +137,31 @@ found_account() {
 # wait_account n status: account create (status: its exit code) onboarded
 # demo-<run> and its access is verified. A create that failed is fine when
 # the account exists: an earlier attempt of the phase made it.
+# role_stack_ready: the role's CloudFormation stack (account create made
+# it) is complete; prints its status otherwise.
+role_stack_ready() {
+	local st
+	st="$(aws cloudformation describe-stacks --stack-name "cluster-vending-demo-$RUN-provisioner" \
+		--region "$DEMO_REGION" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" || {
+		echo "the stack cluster-vending-demo-$RUN-provisioner does not exist"
+		return 1
+	}
+	case $st in
+	CREATE_COMPLETE | UPDATE_COMPLETE) return 0 ;;
+	*FAILED | ROLLBACK_COMPLETE | *ROLLBACK_COMPLETE) echo "stack $st" && return 2 ;;
+	*) echo "stack $st" && return 1 ;;
+	esac
+}
+
 wait_account() {
-	if [ "$2" -ne 0 ] && ! found_account; then
+	# A failed create is fine only on a re-run: the account and its role's
+	# stack exist from an earlier attempt.
+	if [ "$2" -ne 0 ] && ! { found_account && role_stack_ready >/dev/null; }; then
 		fail "$1" "account create exited $2 (its output is above)"
 		return
 	fi
 	until_ "$1" 60 "the account demo-$RUN does not exist" found_account || return
+	until_ "$1" 600 "the role's stack" role_stack_ready || return
 	until_ "$1" 1200 "the access check of the account" account_verified || return
 	done_ "$1"
 }
@@ -287,7 +306,7 @@ wait_account_gone() {
 # cluster upgraded to 1.37, the run's cleanup finished.
 phase_done() {
 	case $1 in
-	account) [ -n "${ACCOUNT:-}" ] && account_verified >/dev/null 2>&1 ;;
+	account) [ -n "${ACCOUNT:-}" ] && role_stack_ready >/dev/null 2>&1 && account_verified >/dev/null 2>&1 ;;
 	network) [ -n "${NETWORK:-}" ] && network_ready >/dev/null 2>&1 ;;
 	cluster) [ -n "${CLUSTER:-}" ] && cluster_running >/dev/null 2>&1 ;;
 	upgrade) [ -n "${CLUSTER:-}" ] && upgraded >/dev/null 2>&1 ;;

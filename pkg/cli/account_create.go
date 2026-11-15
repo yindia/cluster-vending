@@ -57,6 +57,13 @@ func AccountCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 			return nil, err
 		}
 	}
+	if plan != nil {
+		// The server must be able to onboard the role (its management role
+		// is configured, the role name is valid) before the account is.
+		if err := plan.preflight(ctx, c, o, tenant); err != nil {
+			return nil, fmt.Errorf("%w\nNothing was created", err)
+		}
+	}
 	res, err := call(ctx, &cloudv1.BootstrapTenantRequest{TenantId: tenant, Account: account}, c.Tenant.BootstrapTenant)
 	if err != nil {
 		return nil, err
@@ -123,6 +130,16 @@ func planRole(ctx context.Context, o Options, aws *cloudv1.AwsAccount) (*rolePla
 		}
 	}
 	return plan, nil
+}
+
+// preflight asks the server for the role's onboarding before the account
+// exists: what it refuses (no management role configured, a role name
+// that does not match its template) stops account create with nothing
+// made. The external ID comes later, with the account (create).
+func (p *rolePlan) preflight(ctx context.Context, c Clients, o Options, tenant string) error {
+	_, err := call(ctx, &cloudv1.GetAccountOnboardingRequest{TenantId: tenant, Role: p.role,
+		Region: o.StackRegion, AccountId: p.aws.GetAccountId(), RoleName: p.aws.GetRole()}, c.Tenant.GetAccountOnboarding)
+	return err
 }
 
 // create makes the role's stack for the onboarded account: its template

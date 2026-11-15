@@ -1623,8 +1623,7 @@ spec:
               releaseMove:
                 description: |-
                   releaseMove is the cluster moving its components to the release its
-                  channel offers, one at a time (the controller's component-upgrades
-                  setting).
+                  channel offers, one at a time (automatic for Automatic clusters).
                 properties:
                   component:
                     description: component is the one being moved now; step its place
@@ -1733,6 +1732,8 @@ spec:
                   fromVersion:
                     description: fromVersion is the version the upgrade started from.
                     type: string
+                  halted:
+                    type: boolean
                   message:
                     description: |-
                       message is what the step waits for or, when the cloud refuses or
@@ -1781,6 +1782,13 @@ spec:
                       step.
                     format: date-time
                     type: string
+                  recoveries:
+                    description: |-
+                      recoveries counts the automatic recoveries of the add-ons' step;
+                      halted: the add-ons still did not settle after the last one, and the
+                      upgrade waits for cluster retry.
+                    format: int32
+                    type: integer
                   startTime:
                     description: startTime is when the upgrade was first seen in progress.
                     format: date-time

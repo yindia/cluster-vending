@@ -887,6 +887,13 @@ type ClusterUpgrade struct {
 	// componentsBehind are the components (of the step) not settled yet.
 	// +optional
 	ComponentsBehind []string `json:"componentsBehind,omitempty"`
+	// recoveries counts the automatic recoveries of the add-ons' step;
+	// halted: the add-ons still did not settle after the last one, and the
+	// upgrade waits for cluster retry.
+	// +optional
+	Recoveries int32 `json:"recoveries,omitempty"`
+	// +optional
+	Halted bool `json:"halted,omitempty"`
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes
@@ -1040,8 +1047,7 @@ type ClusterStatus struct {
 	// +optional
 	Rollout *ClusterRolloutRecord `json:"rollout,omitempty"`
 	// releaseMove is the cluster moving its components to the release its
-	// channel offers, one at a time (the controller's component-upgrades
-	// setting).
+	// channel offers, one at a time (automatic for Automatic clusters).
 	// +optional
 	ReleaseMove *ClusterReleaseMove `json:"releaseMove,omitempty"`
 	// recommendations summarises the usage recorded to recommend resource

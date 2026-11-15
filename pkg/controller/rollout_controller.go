@@ -48,10 +48,7 @@ type RolloutReconciler struct {
 	// its upgrade-timeout (0: the default).
 	automatic bool
 	timeout   time.Duration
-	// moves is the component-upgrades setting: the channel's release moves
-	// are planned too (status.releaseMoves), which the clusters start by.
-	moves  bool
-	events platform.Events
+	events    platform.Events
 	// store writes clusters: their version (etag-guarded) and their
 	// rollout record. Nil: nothing is written to clusters.
 	store repository.Store
@@ -61,7 +58,7 @@ type RolloutReconciler struct {
 // NewRolloutReconciler returns the rollout controller on d's manager
 // client (SetupWithManager sets it).
 func NewRolloutReconciler(d Deps) *RolloutReconciler {
-	return &RolloutReconciler{automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, moves: d.ComponentUpgrades, events: d.Events,
+	return &RolloutReconciler{automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, events: d.Events,
 		store: d.Store, log: d.Logger}
 }
 
@@ -162,11 +159,11 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	status := *ch.Status.DeepCopy()
 	status.RolloutTier, status.Tiers, status.Rollout = plan.Tier, plan.Tiers, plan.Rollout
-	status.ReleaseMoves = nil
-	if r.moves {
-		moves := rollout.ComputeMoves(in)
-		status.ReleaseMoves = &moves
-	}
+	// The channel's release moves (which clusters may start moving their
+	// components to its release) are always planned: component upgrades
+	// are automatic for Automatic clusters.
+	moves := rollout.ComputeMoves(in)
+	status.ReleaseMoves = &moves
 	meta.SetStatusCondition(&status.Conditions, plan.condition(ch.Generation))
 	if !equality.Semantic.DeepEqual(status, ch.Status) {
 		was := ch.Status

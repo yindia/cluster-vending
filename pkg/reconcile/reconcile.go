@@ -93,13 +93,6 @@ type Deps struct {
 	Teardowns Teardowns
 	// TeardownTimeout bounds that teardown; 0 is DefaultTeardownTimeout.
 	TeardownTimeout time.Duration
-	// ComponentUpgrades: a cluster moves its components to the release its
-	// channel offers, one at a time (release_move.go); off, it keeps the
-	// release its components were installed from.
-	ComponentUpgrades bool
-	// ComponentUpgradeTimeout is how long one component of a move may take
-	// to settle before the move halts; 0 is DefaultComponentUpgradeTimeout.
-	ComponentUpgradeTimeout time.Duration
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool

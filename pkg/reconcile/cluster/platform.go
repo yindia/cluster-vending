@@ -165,7 +165,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if err != nil {
 		return nil, err
 	}
-	// The release move (component-upgrades): this pass's pins while the
+	// The release move: this pass's pins while the
 	// cluster moves to the release its channel offers, one component at a
 	// time; the release recorded once it is done.
 	var move *cloudv1.ClusterReleaseMove
@@ -174,7 +174,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		if err != nil {
 			return nil, err
 		}
-		if move, release, problem, err = s.moveRelease(ctx, row, spec, &in, release); err != nil {
+		if ctx, move, release, problem, err = s.moveRelease(ctx, row, spec, &in, release); err != nil {
 			return nil, err
 		}
 	}

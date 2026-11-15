@@ -217,7 +217,65 @@ func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, st
 		out.FromVersion = orName(u.nodesBehind(), u.controlPlane)
 	}
 	out.Message = u.stepMessage(out, views, comps)
+	if step == stepAddonsPhase && stepOf(prev) == step {
+		watchAddons(row, prev, out, views)
+	}
 	return out
+}
+
+// watchAddons is the add-ons' step watched as a release move watches a
+// component: add-ons that fail (the provider's error, e.g. AWS's
+// UPDATE_FAILED or DEGRADED) or do not settle within componentWatch are
+// recovered, applied again (recoverAddons: the provider updates them with
+// resolveConflicts OVERWRITE), up to maxMoveRecoveries times; then the
+// upgrade halts, saying why, until cluster retry.
+func watchAddons(row *model.Cluster, prev, out *cloudv1.ClusterUpgrade, views []*cloudv1.ManagedResource) {
+	if row.Retry != nil {
+		return // a person retried: the watch starts over (recoveries 0)
+	}
+	out.Recoveries, out.Halted = prev.GetRecoveries(), prev.GetHalted()
+	if out.GetHalted() {
+		out.Message = prev.GetMessage()
+		return
+	}
+	since := now().Sub(out.GetPhaseStartTime().AsTime())
+	failure := addonFailure(views)
+	failed := failure != "" && (out.GetRecoveries() == 0 || since > recoveryGrace)
+	if !out.GetApplied() || (!failed && since <= componentWatch) {
+		return
+	}
+	why := orDefault(failure, fmt.Sprintf("not settled within %s", componentWatch))
+	names := strings.Join(out.GetAddonsBehind(), ", ")
+	if out.GetRecoveries() < maxMoveRecoveries {
+		out.Recoveries++
+		out.PhaseStartTime = timestamppb.New(now()) // the watch starts over
+		out.Message = fmt.Sprintf("recovering the add-ons %s (attempt %d of %d): %s", names, out.GetRecoveries(), maxMoveRecoveries, why)
+		return
+	}
+	out.Halted = true
+	out.Message = fmt.Sprintf("halted: the add-ons %s did not settle after %d recoveries: %s; cluster retry --id %s tries again",
+		names, maxMoveRecoveries, why, row.ID)
+}
+
+// addonFailure is why an add-on fails: the provider's error, or the
+// failed state AWS reports (CREATE_FAILED, UPDATE_FAILED, DEGRADED come as
+// a Ready condition that is False, with its reason); "" when none fails.
+func addonFailure(views []*cloudv1.ManagedResource) string {
+	if failure := failureOf(views, func(kind string) bool { return kind == "Addon" }); failure != "" {
+		return failure
+	}
+	for _, v := range views {
+		if v.GetKind() == "Addon" && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
+			return strings.TrimSpace(fmt.Sprintf("Addon %s: %s %s", v.GetName(), v.GetReason(), v.GetMessage()))
+		}
+	}
+	return ""
+}
+
+// addonsRecovering reports whether a pass's upgrade status recovers the
+// add-ons: it counts one more recovery than the status stored before.
+func addonsRecovering(before, after *cloudv1.ClusterUpgrade) bool {
+	return after.GetPhase() == stepAddonsPhase && after.GetRecoveries() > before.GetRecoveries() && !after.GetHalted()
 }
 
 // stepMessage says what the upgrade's step waits for, setting the step's

@@ -160,6 +160,10 @@ func upgradeEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	case was != nil && is == nil && after.GetState() != cloudv1.ClusterState_CLUSTER_STATE_DELETING:
 		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeFinished,
 			fmt.Sprintf("Kubernetes %s: control plane, node groups, add-ons and components upgraded", was.GetToVersion()))}
+	case was != nil && is != nil && is.GetHalted() && !was.GetHalted():
+		return []reconcile.Note{reconcile.Warning(reconcile.ReasonUpgradeHalted, is.GetMessage())}
+	case addonsRecovering(was, is) && stepOf(was) == stepOf(is):
+		return []reconcile.Note{reconcile.Warning(reconcile.ReasonAddonRecovering, is.GetMessage())}
 	case was == nil || stepOf(was) == stepOf(is):
 		return nil
 	}

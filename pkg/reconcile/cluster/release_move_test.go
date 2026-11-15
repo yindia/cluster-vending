@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yindia/cluster-vending/pkg/component"
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
@@ -24,7 +25,7 @@ func moveBase() moveFacts {
 			"istio-base": {Name: "istio-base", Version: "1.32.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY},
 			"karpenter":  {Name: "karpenter", Version: "1.15.1", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY},
 		},
-		Now: moveNow, Timeout: 30 * time.Minute, ClusterID: "c1"}
+		Now: moveNow, ClusterID: "c1"}
 }
 
 func moveAt(phase cloudv1.ClusterReleaseMovePhase, comp string, step int32, since time.Time) *cloudv1.ClusterReleaseMove {
@@ -44,6 +45,8 @@ func TestDecideMove(t *testing.T) {
 		// wantFreeze: nothing is installed this pass (a moved component is
 		// never taken back to Current's pin).
 		wantFreeze bool
+		// wantRecover: the component this pass tries again.
+		wantRecover string
 	}{
 		{name: "nothing to move", change: func(f *moveFacts) { f.Target = "rel-a" }, wantPhase: moveIdle, wantRelease: "rel-a"},
 		{name: "manual: available, not started", change: func(f *moveFacts) { f.Automatic = false },
@@ -70,19 +73,43 @@ func TestDecideMove(t *testing.T) {
 			},
 			wantPhase: moveComponents, wantComp: "karpenter", wantRelease: "rel-a",
 			wantPins: map[string]string{"istio-base": "1.33.0", "karpenter": "1.16.0"}},
-		{name: "the component failed: halted, with the retry",
+		{name: "the component failed: recovered",
 			change: func(f *moveFacts) {
 				f.Prev = moveAt(moveComponents, "karpenter", 2, moveNow.Add(-5*time.Minute))
 				f.Components["karpenter"] = &cloudv1.PlatformComponent{Version: "1.16.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "chart karpenter: boom"}
 			},
-			wantPhase: moveHalted, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "cluster retry --id c1",
+			wantPhase: moveComponents, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "recovering karpenter (attempt 1 of 3): it 1.16.0 failed: chart karpenter: boom",
+			wantPins: map[string]string{"karpenter": "1.16.0"}, wantRecover: "karpenter"},
+		{name: "a recovered component's failure waits for the grace period",
+			change: func(f *moveFacts) {
+				f.Prev = moveAt(moveComponents, "karpenter", 2, moveNow.Add(-time.Minute))
+				f.Prev.Recoveries = 1
+				f.Components["karpenter"] = &cloudv1.PlatformComponent{Version: "1.16.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "boom"}
+			},
+			wantPhase: moveComponents, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "upgrading karpenter",
 			wantPins: map[string]string{"karpenter": "1.16.0"}},
-		{name: "not settled in time: halted",
+		{name: "still failed after the last recovery: halted, with the retry",
+			change: func(f *moveFacts) {
+				f.Prev = moveAt(moveComponents, "karpenter", 2, moveNow.Add(-10*time.Minute))
+				f.Prev.Recoveries = maxMoveRecoveries
+				f.Components["karpenter"] = &cloudv1.PlatformComponent{Version: "1.16.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "chart karpenter: boom"}
+			},
+			wantPhase: moveHalted, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "boom after 3 recoveries; cluster retry --id c1",
+			wantPins: map[string]string{"karpenter": "1.16.0"}},
+		{name: "not settled within the watch: recovered",
 			change: func(f *moveFacts) {
 				f.Prev = moveAt(moveComponents, "karpenter", 2, moveNow.Add(-31*time.Minute))
 				f.Components["karpenter"] = &cloudv1.PlatformComponent{Version: "1.16.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING}
 			},
-			wantPhase: moveHalted, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "within 30m",
+			wantPhase: moveComponents, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "within 30m",
+			wantPins: map[string]string{"istio-base": "1.33.0", "karpenter": "1.16.0"}, wantRecover: "karpenter"},
+		{name: "not settled after the last recovery: halted",
+			change: func(f *moveFacts) {
+				f.Prev = moveAt(moveComponents, "karpenter", 2, moveNow.Add(-31*time.Minute))
+				f.Prev.Recoveries = maxMoveRecoveries
+				f.Components["karpenter"] = &cloudv1.PlatformComponent{Version: "1.16.0", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING}
+			},
+			wantPhase: moveHalted, wantComp: "karpenter", wantRelease: "rel-a", wantMessage: "within 30m0s after 3 recoveries",
 			wantPins: map[string]string{"istio-base": "1.33.0", "karpenter": "1.16.0"}},
 		{name: "halted stays halted, even once the component is Ready",
 			change: func(f *moveFacts) {
@@ -133,6 +160,12 @@ func TestDecideMove(t *testing.T) {
 			if d.Freeze != tt.wantFreeze {
 				t.Errorf("freeze = %v, want %v", d.Freeze, tt.wantFreeze)
 			}
+			if d.Recover != tt.wantRecover {
+				t.Errorf("recover = %q, want %q", d.Recover, tt.wantRecover)
+			}
+			if tt.wantRecover != "" && !st.GetComponentStartTime().AsTime().Equal(moveNow) {
+				t.Errorf("a recovery's watch starts at %v, want now", st.GetComponentStartTime().AsTime())
+			}
 			if tt.wantPins == nil && d.Pins != nil {
 				t.Errorf("pins changed: %v", d.Pins)
 			}
@@ -142,6 +175,20 @@ func TestDecideMove(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A recovery is the pass's retry of the component, on top of what a person
+// asked to retry.
+func TestRetryWith(t *testing.T) {
+	at := moveNow
+	if r := retryWith(nil, "karpenter", at); !r.Has("karpenter") || r.Has("base") || !r.At.Equal(at) {
+		t.Errorf("alone: %+v", r)
+	}
+	asked := &model.Retry{At: at.Add(-time.Minute), By: "alice", Components: []string{"base"}, Upgrade: true}
+	r := retryWith(asked, "karpenter", at)
+	if !r.Has("karpenter") || !r.Has("base") || !r.Upgrade || r.By != "alice" || len(asked.Components) != 1 {
+		t.Errorf("with a person's retry: %+v (asked %+v)", r, asked)
 	}
 }
 

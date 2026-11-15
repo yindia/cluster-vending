@@ -64,7 +64,10 @@ its kind; the message has the details.
 | Network, Cluster | `TakenOver` | Normal | the platform owns the imported resources now |
 | Cluster | `UpgradeStarted` | Normal | a Kubernetes upgrade began (the control plane first) |
 | Cluster | `UpgradeNodes` | Normal | the control plane runs the new version; the node groups, then the add-ons, follow |
-| Cluster | `UpgradeFinished` | Normal | control plane, node groups and add-ons run the new version |
+| Cluster | `UpgradeStep` | Normal | the upgrade reached its next step: the add-ons, the platform components, the tenant components |
+| Cluster | `AddonRecovering` | Warning | add-ons failed (AWS's reason) or did not settle within 30 minutes; they are applied again (at most 3 times) |
+| Cluster | `UpgradeHalted` | Warning | the add-ons still did not settle after 3 recoveries; the upgrade waits for `cluster retry` |
+| Cluster | `UpgradeFinished` | Normal | control plane, node groups, add-ons and components run the new version; the upgrade is cleared |
 | Cluster | `PlatformComponentInstalling` | Normal | a platform component's charts are being installed |
 | Cluster | `PlatformComponentReady` | Normal | a platform component is installed |
 | Cluster | `PlatformComponentFailed` | Warning | a platform component failed: its chart, Helm's state, the failures and the provider's last error |
@@ -73,9 +76,10 @@ its kind; the message has the details.
 | Cluster | `RecoveryLimitReached` | Warning | a stuck Helm release was recovered as often as allowed (3 times) |
 | Cluster | `PlatformComponentsReady` | Normal | every platform component is installed |
 | Cluster | `TenantComponentsReady` | Normal | every tenant component enabled on the cluster is installed (told when the last one becomes Ready) |
-| Cluster | `ReleaseMoveStarted` | Normal | the cluster starts moving its components to the release its channel offers, one at a time (component-upgrades) |
+| Cluster | `ReleaseMoveStarted` | Normal | the cluster starts moving its components to the release its channel offers, one at a time |
 | Cluster | `ComponentUpgraded` | Normal | a component of a release move runs its new version and is Ready; the next one starts |
-| Cluster | `ReleaseMoveHalted` | Warning | a component of a release move failed or did not settle in time; nothing moves until `cluster retry` |
+| Cluster | `ReleaseMoveRecovering` | Warning | the component being moved failed or did not settle within 30 minutes; its chart is tried again (at most 3 times) |
+| Cluster | `ReleaseMoveHalted` | Warning | the component still failed or did not settle after 3 recoveries; nothing moves until `cluster retry` |
 | Cluster | `ReleaseMoveFinished` | Normal | every component runs the new release |
 | Cluster | `ComponentRetried` | Normal | `cluster retry`: a failed component's chart is tried again (a stuck Helm revision removed, provider-helm told to install it now) |
 | Cluster | `UpgradeRetried` | Normal | `cluster retry`: a failed or timed-out automatic upgrade is in progress again, with a new upgrade-timeout |
@@ -97,7 +101,7 @@ its kind; the message has the details.
 | ReleaseChannel | `RolloutHalted` | Warning | more upgrades failed in a tier than `spec.policy.maxFailed` allows; nothing more starts |
 | Cluster, ReleaseChannel | `AutomaticUpgradeStarted` | Normal | the rollout set the cluster's next Kubernetes minor, e.g. "automatic upgrade 1.36 → 1.37 (channel alpha, tier 2)" (`--automatic-upgrades`) |
 | Cluster | `AutomaticUpgradeSucceeded` | Normal | an automatic upgrade finished: the cluster runs the new minor (`status.rollout`) |
-| Cluster | `AutomaticUpgradeFailed` | Warning | an automatic upgrade failed, or did not finish within `--upgrade-timeout`; it counts against the tier's `maxFailed` |
+| Cluster | `AutomaticUpgradeFailed` | Warning | an automatic upgrade failed, halted, or made no progress in one step for `--upgrade-timeout`; it counts against the tier's `maxFailed`. A Pending or Blocked record the cluster reached by other means is closed without an event |
 
 The constants are in `pkg/reconcile/events.go`.
 

@@ -113,6 +113,11 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return errors.Join(failed, perr, fmt.Errorf("observe: %w", err))
 	}
+	if addonsRecovering(storedUpgrade(current), c.GetStatus().GetUpgrade()) {
+		if rerr := s.recoverAddons(ctx, current, now()); rerr != nil {
+			perr = errors.Join(perr, fmt.Errorf("recover the add-ons: %w", rerr))
+		}
+	}
 	return errors.Join(failed, perr, s.remember(ctx, current, c.GetStatus()))
 }
 

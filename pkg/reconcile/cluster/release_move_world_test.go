@@ -10,7 +10,6 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // movePlatform is platformWorld's catalog with several releases, stable
@@ -43,7 +42,7 @@ func moveRelease(name, base, mesh string) *cloudv1alpha1.Release {
 func moveWorld(t *testing.T) (world, *movePlatform, *model.Cluster) {
 	t.Helper()
 	mp := &movePlatform{admitted: true, releases: map[string]*cloudv1alpha1.Release{"2026-11-a": moveRelease("2026-11-a", "1.2.0", "2.0.0")}}
-	w, src := platformWorld(t, func(d *reconcile.Deps) { d.ComponentUpgrades = true })
+	w, src := platformWorld(t)
 	mp.fakePlatform = src
 	w.svc.deps.Platform = mp
 	w.helmConfig(t)
@@ -129,21 +128,6 @@ func TestReleaseMoveOneComponentAtATime(t *testing.T) {
 
 	if p := storedPlatform(row); p.release != "2026-12-a" || p.move.GetPhase() != moveIdle || p.move.GetCurrent() != "2026-12-a" {
 		t.Fatalf("done: release %s, move %v", p.release, p.move)
-	}
-}
-
-// With component upgrades off (the default) the cluster keeps the release
-// it was installed from, as before.
-func TestReleaseMoveOff(t *testing.T) {
-	w, mp, row := moveWorld(t)
-	w.svc.deps.ComponentUpgrades = false
-	mp.releases["2026-12-a"] = moveRelease("2026-12-a", "1.3.0", "2.1.0")
-	mp.offered = "2026-12-a"
-
-	row = w.pass(t, row)
-
-	if p := storedPlatform(row); p.release != "2026-11-a" || p.move != nil || w.chartVersion(t, "base") != "1.2.0" {
-		t.Fatalf("off: release %s, move %v, base %s", p.release, p.move, w.chartVersion(t, "base"))
 	}
 }
 

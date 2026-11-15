@@ -117,10 +117,8 @@ and `--log-level`, and only these:
 | `--recommendations` | default `true`: every five minutes, sample each running cluster for resource recommendations (read-only: workloads, metrics-server usage, the cluster's own Vertical Pod Autoscalers) and record a week of usage in the tenant namespace ([recommendations.md](recommendations.md)); `false` records nothing |
 | `--reconcile-workers` | default `8`: how many cloud accounts, networks and clusters of each kind are reconciled at once; one object is never reconciled twice at the same time. The release, catalog, deprecation and recommendation controllers keep one worker |
 | `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel and each cluster (`status.rollout`) only; no cluster is upgraded. `true` upgrades clusters with `upgradeMode: Automatic`, tier by tier; **irreversible** (EKS cannot downgrade). See "Rollout of a channel's Kubernetes minor" |
-| `--upgrade-timeout` | default `90m`: how long an automatic upgrade may take before it counts as failed (`TimedOut`, against the tier's `maxFailed`) |
+| `--upgrade-timeout` | default `90m`: how long one step of an automatic upgrade (control plane, node groups, add-ons, platform components, tenant components) may go without progress before the upgrade counts as failed (`TimedOut`, against the tier's `maxFailed`). A long upgrade that keeps moving is not timed out |
 | `--teardown-timeout` | default `15m`: how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted before it goes on (see Deletion) |
-| `--component-upgrades` | default `false`: a cluster keeps the release its components were installed from. `true` moves clusters with `upgradeMode: Automatic` to the release their channel offers, one component at a time, tier by tier. See "Component upgrades" |
-| `--component-upgrade-timeout` | default `30m`: how long one component of a release move may take to run its new version and be Ready before the move halts |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 
@@ -404,8 +402,8 @@ plan saw, and is not paused or being deleted. It then sets
 (the etag-guarded update an API call would make; a write that loses to
 another change is skipped and planned again next pass), records the upgrade
 and emits `AutomaticUpgradeStarted` on the cluster and the channel. The
-cluster's own reconcile runs the upgrade as for any version change: control
-plane first, then the node group and the add-ons.
+cluster's own reconcile runs the upgrade as for any version change (see
+"How a Kubernetes upgrade runs" below).
 
 The record (`status.rollout` on the Cluster, `rollout` in `GetCluster`):
 
@@ -416,11 +414,55 @@ The record (`status.rollout` on the Cluster, `rollout` in `GetCluster`):
 | `InProgress` | the rollout set the new version; counts against `maxInProgress` before the cluster reports the upgrade |
 | `Succeeded` | the cluster runs the new minor and reports no upgrade; `finishTime` starts the tier's soak |
 | `Failed` | the cluster failed while upgrading (`message`); counts against `maxFailed` until the cluster runs the minor |
-| `TimedOut` | not finished within `--upgrade-timeout`; counted as failed |
+| `TimedOut` | one step made no progress for `--upgrade-timeout`; counted as failed |
 
 `Pending` and `Blocked` are written only when they change, and never over an
 upgrade in progress or one that failed. A version a person changes
-(`cluster update`) writes no record and is not counted as the rollout's.
+(`cluster update`) writes no record and is not counted as the rollout's. A
+`Pending` or `Blocked` record whose target the cluster already runs (a person
+upgraded it, or it was upgraded before the record was written) is closed as
+`Succeeded`, "reached by an update, not started by the rollout", with no
+event; `cluster get` never shows such a record as waiting: it says
+`Rollout: up to date with channel alpha (1.37)`.
+
+`--upgrade-timeout` is kept, as a stall timeout: it bounds one step without
+progress, not the whole upgrade, so a two-hour upgrade whose steps keep
+finishing is fine. The add-ons' step has its own watch (below), which fails
+the record as soon as it halts.
+
+### How a Kubernetes upgrade runs
+
+An upgrade runs in the order a cluster is created, one step at a time, each
+left only when it is settled as AWS and Helm report it, read by a pass after
+the one that applied it (the cache may still hold the old state):
+
+1. **Control plane**: EKS runs the new minor (`atProvider.version`).
+2. **Node groups**: each runs the new minor, Ready, provider caught up. Until
+   then the node groups render at the version the control plane reports.
+3. **Add-ons**: the add-ons take the versions EKS recommends for the new
+   minor (always read from AWS, `DescribeAddonVersions`, never from
+   `release.yaml`; a pinned add-on keeps its pin). Until this step they keep
+   the versions they run. Skipped in effect when no version changes.
+4. **Platform components**: they switch to the new minor's pins of the
+   cluster's release (when a version or values change).
+5. **Tenant components**: the same, for the tenant's components.
+
+`status.upgrade.phase` is the step (`ControlPlane`, `NodeGroups`, `Addons`,
+`PlatformComponents`, `TenantComponents`); `phaseStartTime` when it started.
+When the last step settles the upgrade is cleared at once (`UpgradeFinished`),
+the rollout record turns `Succeeded`, and an upgrading cluster is looked at
+every 30 seconds, so the rollout plans the next hop right away
+(1.35 → 1.36 → 1.37). A release move and a Kubernetes upgrade never run at
+the same time: an upgrade does not start while a move is under way, and a
+move waits for the upgrade.
+
+**The add-ons' watch:** add-ons that fail (the provider's error, or AWS's
+`CREATE_FAILED`, `UPDATE_FAILED`, `DEGRADED`) or do not settle within 30
+minutes are recovered: applied again now (the provider updates them with
+`resolveConflicts: OVERWRITE`), the watch starting over, up to 3 times
+(`AddonRecovering` events). Still not settled, the upgrade halts
+(`status.upgrade.halted`, `UpgradeHalted`, the AWS reason in the message) and
+the rollout record is `Failed`; `cluster retry --id <cluster>` tries again.
 
 To follow it:
 
@@ -430,12 +472,11 @@ cluster-vending cluster watch --id <cluster>        # every change as it happens
 cluster-vending admin rollout get --channel alpha   # every cluster of the channel, tier by tier
 ```
 
-### Component upgrades (`--component-upgrades=true`)
+### Component upgrades
 
-Off (the default) a cluster keeps the release its components were
-installed from: a new chart version in `pkg/catalog/release.yaml` reaches new
-clusters only. On, a cluster with `upgradeMode: Automatic` moves its platform
-components to the release its channel offers:
+Component upgrades are automatic; there is no setting. A cluster with
+`upgradeMode: Automatic` moves its platform components to the release its
+channel offers:
 
 - **One component at a time, in install order** (requirements first). A
   component takes the new release's version only when every changed
@@ -451,16 +492,21 @@ components to the release its channel offers:
   (nor its upgrades), inside its maintenance window, and no Kubernetes upgrade
   of it is running; one kept back does not hold its tier back. A started move
   finishes on the release it started for, even if the channel moves on.
-- **Halt:** the component being moved failed (FAILED at its new version) or
-  did not settle within `--component-upgrade-timeout`. Nothing moves until
-  `cluster retry --id <cluster>`; there is no rollback. A move whose target
+- **Watch, recover, halt:** the component being moved has 30 minutes to run
+  its new version and be Ready. One that fails (FAILED at its new version) or
+  does not settle in that time is recovered: its chart is tried again now (a
+  stuck Helm revision removed, provider-helm told to act), the 30 minutes
+  starting over, up to 3 times (`ReleaseMoveRecovering` events; a failure
+  after a recovery counts only after 5 minutes). Still failing, the move
+  halts, saying why. Nothing moves until `cluster retry --id <cluster>`;
+  there is no rollback. A move whose target
   release is gone or not valid any more installs nothing until it is fixed,
   so no moved component is taken back.
 - **Manual clusters** do not move: `cluster get` says the new release is
   available. Set `upgradeMode: Automatic` (`cluster update -f`) to move one.
 - **Status:** `status.release_move` (`releaseMove` on the kind), events
-  `ReleaseMoveStarted`, `ComponentUpgraded`, `ReleaseMoveHalted`,
-  `ReleaseMoveFinished`. `cluster get` shows
+  `ReleaseMoveStarted`, `ComponentUpgraded`, `ReleaseMoveRecovering`,
+  `ReleaseMoveHalted`, `ReleaseMoveFinished`. `cluster get` shows
   `Release: shipped-a → shipped-b: karpenter (3 of 9), since 4m`.
 
 Not done yet: a chart whose CRDs are in its own `crds/` directory (Helm does

@@ -106,7 +106,8 @@ func upgrade(p *cloudv1.ClusterUpgrade) *cloudv1alpha1.ClusterUpgrade {
 	}
 	out := &cloudv1alpha1.ClusterUpgrade{FromVersion: p.GetFromVersion(), ToVersion: p.GetToVersion(),
 		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage(), AddonsBehind: p.GetAddonsBehind(),
-		PhaseStartTime: timeOf(p.GetPhaseStartTime()), ComponentsBehind: p.GetComponentsBehind()}
+		PhaseStartTime: timeOf(p.GetPhaseStartTime()), ComponentsBehind: p.GetComponentsBehind(),
+		Recoveries: p.GetRecoveries(), Halted: p.GetHalted()}
 	for _, g := range p.GetNodeGroups() {
 		out.NodeGroups = append(out.NodeGroups, cloudv1alpha1.ClusterUpgradeNodeGroup{Name: g.GetName(),
 			FromVersion: g.GetFromVersion(), ToVersion: g.GetToVersion(), State: camel(g.GetState(), "MANAGED_RESOURCE_STATE_")})

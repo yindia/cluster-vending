@@ -84,6 +84,11 @@ func TestFinish(t *testing.T) {
 			moving := metav1.NewTime(now.Add(-time.Minute))
 			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "PlatformComponents", ToVersion: "1.36", PhaseStartTime: &moving}
 		}, ""},
+		{"the add-ons halted after their recoveries", func(c *cloudv1alpha1.Cluster) {
+			moving := metav1.NewTime(now.Add(-time.Minute))
+			c.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{Phase: "Addons", ToVersion: "1.36", PhaseStartTime: &moving,
+				Recoveries: 3, Halted: true, Message: "halted: the add-ons coredns did not settle after 3 recoveries: UPDATE_FAILED"}
+		}, cloudv1alpha1.ClusterRolloutFailed},
 		{"never seen upgrading for too long", func(c *cloudv1alpha1.Cluster) {
 			c.Status.Rollout.StartTime = metav1.NewTime(now.Add(-timeout - time.Minute))
 		}, cloudv1alpha1.ClusterRolloutTimedOut},

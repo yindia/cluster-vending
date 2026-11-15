@@ -17,9 +17,17 @@ import (
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
-// DefaultComponentUpgradeTimeout is how long one component of a release
-// move may take to settle when the setting names none.
-const DefaultComponentUpgradeTimeout = 30 * time.Minute
+// How a release move watches the component it moves: it has
+// componentWatch to run its new version and be Ready; one that fails or
+// does not settle in that time is recovered (its chart tried again, the
+// watch starting over) up to maxMoveRecoveries times, then the move halts.
+// A recovered component's failure counts again only after recoveryGrace:
+// the provider needs a moment to act on the new try.
+const (
+	componentWatch    = 30 * time.Minute
+	maxMoveRecoveries = 3
+	recoveryGrace     = 5 * time.Minute
+)
 
 // Release move phases.
 const (
@@ -65,9 +73,8 @@ type moveFacts struct {
 	// them, by name.
 	Components map[string]*cloudv1.PlatformComponent
 	// Retry: a person asked to try the cluster's failed work again.
-	Retry   bool
-	Now     time.Time
-	Timeout time.Duration
+	Retry bool
+	Now   time.Time
 	// ClusterID, for the retry hint.
 	ClusterID string
 }
@@ -83,13 +90,17 @@ type moveDecision struct {
 	// cannot be read has no pins for what it moved already; Current's would
 	// take those components back.
 	Freeze bool
+	// Recover names the component this pass tries again (its chart
+	// installed again now): it failed or did not settle in time.
+	Recover string
 }
 
 // decideMove is one pass of moving a cluster's components from Current to
 // Target, one component at a time (component.PlanMove): a move starts
 // when the cluster is Automatic, Running, not upgrading Kubernetes and
-// admitted by its channel's rollout; it halts when the component being
-// moved fails or does not settle within Timeout, and stays halted until a
+// admitted by its channel's rollout. The component being moved is watched
+// for componentWatch: one that fails or does not settle is recovered up to
+// maxMoveRecoveries times, then the move halts, and stays halted until a
 // retry. A started move goes on although the channel moved on: its target
 // is kept until it is done.
 func decideMove(f moveFacts) moveDecision {
@@ -155,35 +166,51 @@ func decideMove(f moveFacts) moveDecision {
 	st.ComponentStartTime = timestamppb.New(f.Now)
 	if f.Prev.GetComponent() == m.Component && f.Prev.GetComponentStartTime() != nil && !f.Retry {
 		st.ComponentStartTime, st.ComponentApplied = f.Prev.GetComponentStartTime(), true
+		st.Recoveries = f.Prev.GetRecoveries()
 	}
-	retry := fmt.Sprintf("; cluster retry --id %s resumes the move", f.ClusterID)
-	c := f.Components[m.Component]
+	watchComponent(f, m.Component, halted, st, &d)
+	return d
+}
+
+// watchComponent is how the component being moved is doing: upgrading,
+// recovered (d.Recover) when it failed or did not settle within
+// componentWatch, or halted after the last recovery.
+func watchComponent(f moveFacts, name string, halted bool, st *cloudv1.ClusterReleaseMove, d *moveDecision) {
+	version := f.To[name].Version
+	c := f.Components[name]
+	since := f.Now.Sub(st.GetComponentStartTime().AsTime())
+	failed := c.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED && c.GetVersion() == version &&
+		(st.GetRecoveries() == 0 || since > recoveryGrace)
+	stalled := st.GetComponentApplied() && since > componentWatch
+	why := fmt.Sprintf("did not run %s and become Ready within %s", version, componentWatch)
+	if failed {
+		why = fmt.Sprintf("%s failed: %s", version, oneLine(c.GetMessage()))
+	}
 	switch {
 	case halted:
 		st.Phase, st.Message = moveHalted, f.Prev.GetMessage()
-	case c.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED && c.GetVersion() == f.To[m.Component].Version:
+	case (failed || stalled) && st.GetRecoveries() < maxMoveRecoveries:
+		st.Recoveries++
+		st.ComponentStartTime = timestamppb.New(f.Now) // the watch starts over
+		d.Recover = name
+		st.Message = fmt.Sprintf("recovering %s (attempt %d of %d): it %s", name, st.GetRecoveries(), maxMoveRecoveries, why)
+	case failed || stalled:
 		st.Phase = moveHalted
-		st.Message = fmt.Sprintf("%s %s failed: %s%s", m.Component, c.GetVersion(), oneLine(c.GetMessage()), retry)
-	case f.Timeout > 0 && f.Now.Sub(st.GetComponentStartTime().AsTime()) > f.Timeout:
-		st.Phase = moveHalted
-		st.Message = fmt.Sprintf("%s did not run %s and become Ready within %s%s", m.Component, f.To[m.Component].Version, f.Timeout, retry)
+		st.Message = fmt.Sprintf("%s %s after %d recoveries; cluster retry --id %s resumes the move", name, why, maxMoveRecoveries, f.ClusterID)
 	default:
-		st.Message = fmt.Sprintf("upgrading %s to %s", m.Component, f.To[m.Component].Version)
+		st.Message = fmt.Sprintf("upgrading %s to %s", name, version)
 	}
-	return d
 }
 
 // moveRelease is this pass's release move (decideMove) with what it reads
 // gathered: it changes in's pins (and the release recorded) while the
-// cluster moves; nil when component upgrades are off. problem, when set,
-// says why nothing is installed this pass (a frozen move).
-func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, in *component.PlatformInput, release string) (move *cloudv1.ClusterReleaseMove, recorded, problem string, err error) {
-	if !s.deps.ComponentUpgrades {
-		return nil, release, "", nil
-	}
+// cluster moves. problem, when set, says why nothing is installed this
+// pass (a frozen move). The context returned is the pass's: with the
+// component the move recovers marked to be tried again (withRetry).
+func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, in *component.PlatformInput, release string) (_ context.Context, move *cloudv1.ClusterReleaseMove, recorded, problem string, err error) {
 	stored := storedStatus(row)
 	prev := stored.GetReleaseMove()
-	f := moveFacts{Current: release, Prev: prev, Now: now(), Timeout: s.componentTimeout(), ClusterID: row.ID,
+	f := moveFacts{Current: release, Prev: prev, Now: now(), ClusterID: row.ID,
 		Automatic:           spec.GetUpgradeMode() == cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
 		Running:             row.State == StateRunning,
 		KubernetesUpgrading: stored.GetUpgrade() != nil,
@@ -199,7 +226,7 @@ func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *
 	} else {
 		offered, err := s.deps.Platform.Offered(ctx, channel)
 		if err != nil {
-			return nil, release, "", fmt.Errorf("read release channel %s: %w", channel, err)
+			return ctx, nil, release, "", fmt.Errorf("read release channel %s: %w", channel, err)
 		}
 		f.Target = offered
 	}
@@ -211,13 +238,27 @@ func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *
 	}
 	d := decideMove(f)
 	if d.Freeze {
-		return d.Status, d.Release, "the release move is halted: " + d.Status.GetMessage(), nil
+		return ctx, d.Status, d.Release, "the release move is halted: " + d.Status.GetMessage(), nil
 	}
 	if d.Pins != nil {
 		in.Pins = d.Pins
 	}
 	in.Release = d.Release
-	return d.Status, d.Release, "", nil
+	if d.Recover != "" {
+		ctx = withRetry(ctx, retryWith(row.Retry, d.Recover, f.Now))
+	}
+	return ctx, d.Status, d.Release, "", nil
+}
+
+// retryWith is the pass's retry with component added: what a person's
+// cluster retry of it would be.
+func retryWith(r *model.Retry, component string, at time.Time) *model.Retry {
+	out := &model.Retry{At: at, By: "release move recovery", Components: []string{component}}
+	if r != nil {
+		out.At, out.By, out.Upgrade = r.At, r.By, r.Upgrade
+		out.Components = append(append([]string{}, r.Components...), component)
+	}
+	return out
 }
 
 // movePins are the target release's pins on minor; nil and why when it
@@ -251,13 +292,6 @@ func (s *Reconciler) moveAdmitted(ctx context.Context, channel, release string, 
 		return false, fmt.Sprintf("cannot read channel %s's rollout: %v", channel, err)
 	}
 	return admitted, why
-}
-
-func (s *Reconciler) componentTimeout() time.Duration {
-	if s.deps.ComponentUpgradeTimeout > 0 {
-		return s.deps.ComponentUpgradeTimeout
-	}
-	return DefaultComponentUpgradeTimeout
 }
 
 // oneLine is s on one line, for a move's message.

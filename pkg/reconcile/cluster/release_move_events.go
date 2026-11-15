@@ -22,6 +22,9 @@ func moveEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 		out = append(out, reconcile.Normal(reconcile.ReasonComponentUpgraded,
 			fmt.Sprintf("%s runs its version of release %s (%d of %d)", was.GetComponent(), was.GetTarget(), was.GetStep(), was.GetSteps())))
 	}
+	if is.GetComponent() != "" && is.GetComponent() == was.GetComponent() && is.GetRecoveries() > was.GetRecoveries() {
+		out = append(out, reconcile.Warning(reconcile.ReasonReleaseMoveRecovering, is.GetMessage()))
+	}
 	if is.GetPhase() == moveHalted && was.GetPhase() != moveHalted {
 		out = append(out, reconcile.Warning(reconcile.ReasonReleaseMoveHalted, is.GetMessage()))
 	}

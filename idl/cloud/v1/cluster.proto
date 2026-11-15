@@ -660,6 +660,13 @@ message ClusterUpgrade {
   // The components (platform or tenant, by the step) not settled on their
   // new version yet.
   repeated string components_behind = 10;
+
+  // How many times the add-ons' step was recovered automatically (the
+  // add-ons that failed, or did not settle within 30 minutes, applied
+  // again); halted: still not settled after the last recovery. A halted
+  // upgrade waits for cluster retry.
+  int32 recoveries = 11;
+  bool halted = 12;
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes
@@ -774,6 +781,10 @@ message ClusterReleaseMove {
   // state is read from then on (the pass that applied it may still see the
   // old version's Ready).
   bool component_applied = 10;
+  // How many times the current component was recovered automatically
+  // (its chart tried again) after it failed or did not settle within the
+  // watch period; the move halts after the last one.
+  int32 recoveries = 11;
 }
 
 // ClusterReleaseMovePhase is where a release move is.
@@ -786,7 +797,7 @@ enum ClusterReleaseMovePhase {
   CLUSTER_RELEASE_MOVE_PHASE_PENDING = 2;
   // Moving components, one at a time.
   CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS = 3;
-  // Stopped: a component failed or did not settle in time; nothing moves
-  // until cluster retry.
+  // Stopped: a component still failed, or did not settle, after the
+  // automatic recoveries; nothing moves until cluster retry.
   CLUSTER_RELEASE_MOVE_PHASE_HALTED = 4;
 }

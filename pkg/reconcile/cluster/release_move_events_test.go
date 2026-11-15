@@ -21,6 +21,8 @@ func TestMoveEvents(t *testing.T) {
 	halted := &cloudv1.ClusterReleaseMove{Current: "a", Target: "b", Phase: moveHalted, Component: "mesh", Step: 2, Steps: 2,
 		Message: "mesh 2.1.0 failed: boom"}
 	done := &cloudv1.ClusterReleaseMove{Current: "b", Phase: moveIdle, Steps: 2, Step: 2}
+	recovering := &cloudv1.ClusterReleaseMove{Current: "a", Target: "b", Phase: moveComponents, Component: "mesh", Step: 2, Steps: 2,
+		Recoveries: 1, Message: "recovering mesh (attempt 1 of 3): it 2.1.0 failed: boom"}
 	tests := []struct {
 		name          string
 		before, after *cloudv1.ClusterReleaseMove
@@ -31,6 +33,8 @@ func TestMoveEvents(t *testing.T) {
 		{name: "halts", before: second, after: halted, want: []string{reconcile.ReasonReleaseMoveHalted + ": boom"}},
 		{name: "ends", before: second, after: done,
 			want: []string{reconcile.ReasonComponentUpgraded + ": mesh", reconcile.ReasonReleaseMoveFinished + ": release b"}},
+		{name: "recovers", before: second, after: recovering,
+			want: []string{reconcile.ReasonReleaseMoveRecovering + ": attempt 1 of 3"}},
 		{name: "unchanged", before: first, after: first},
 	}
 	for _, tt := range tests {

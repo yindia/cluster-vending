@@ -555,8 +555,8 @@ const (
 	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_PENDING ClusterReleaseMovePhase = 2
 	// Moving components, one at a time.
 	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS ClusterReleaseMovePhase = 3
-	// Stopped: a component failed or did not settle in time; nothing moves
-	// until cluster retry.
+	// Stopped: a component still failed, or did not settle, after the
+	// automatic recoveries; nothing moves until cluster retry.
 	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_HALTED ClusterReleaseMovePhase = 4
 )
 
@@ -1732,8 +1732,14 @@ type ClusterUpgrade struct {
 	// The components (platform or tenant, by the step) not settled on their
 	// new version yet.
 	ComponentsBehind []string `protobuf:"bytes,10,rep,name=components_behind,json=componentsBehind,proto3" json:"components_behind,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// How many times the add-ons' step was recovered automatically (the
+	// add-ons that failed, or did not settle within 30 minutes, applied
+	// again); halted: still not settled after the last recovery. A halted
+	// upgrade waits for cluster retry.
+	Recoveries    int32 `protobuf:"varint,11,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
+	Halted        bool  `protobuf:"varint,12,opt,name=halted,proto3" json:"halted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ClusterUpgrade) Reset() {
@@ -1834,6 +1840,20 @@ func (x *ClusterUpgrade) GetComponentsBehind() []string {
 		return x.ComponentsBehind
 	}
 	return nil
+}
+
+func (x *ClusterUpgrade) GetRecoveries() int32 {
+	if x != nil {
+		return x.Recoveries
+	}
+	return 0
+}
+
+func (x *ClusterUpgrade) GetHalted() bool {
+	if x != nil {
+		return x.Halted
+	}
+	return false
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes
@@ -2074,8 +2094,12 @@ type ClusterReleaseMove struct {
 	// state is read from then on (the pass that applied it may still see the
 	// old version's Ready).
 	ComponentApplied bool `protobuf:"varint,10,opt,name=component_applied,json=componentApplied,proto3" json:"component_applied,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// How many times the current component was recovered automatically
+	// (its chart tried again) after it failed or did not settle within the
+	// watch period; the move halts after the last one.
+	Recoveries    int32 `protobuf:"varint,11,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ClusterReleaseMove) Reset() {
@@ -2176,6 +2200,13 @@ func (x *ClusterReleaseMove) GetComponentApplied() bool {
 		return x.ComponentApplied
 	}
 	return false
+}
+
+func (x *ClusterReleaseMove) GetRecoveries() int32 {
+	if x != nil {
+		return x.Recoveries
+	}
+	return 0
 }
 
 var File_cloud_v1_cluster_proto protoreflect.FileDescriptor
@@ -2301,7 +2332,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"recoveries\x18\n" +
 	" \x01(\x05R\n" +
-	"recoveries\"\xd2\x03\n" +
+	"recoveries\"\x8a\x04\n" +
 	"\x0eClusterUpgrade\x12!\n" +
 	"\ffrom_version\x18\x01 \x01(\tR\vfromVersion\x12\x1d\n" +
 	"\n" +
@@ -2316,7 +2347,11 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\aapplied\x18\b \x01(\bR\aapplied\x12D\n" +
 	"\x10phase_start_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0ephaseStartTime\x12+\n" +
 	"\x11components_behind\x18\n" +
-	" \x03(\tR\x10componentsBehind\"\xa5\x01\n" +
+	" \x03(\tR\x10componentsBehind\x12\x1e\n" +
+	"\n" +
+	"recoveries\x18\v \x01(\x05R\n" +
+	"recoveries\x12\x16\n" +
+	"\x06halted\x18\f \x01(\bR\x06halted\"\xa5\x01\n" +
 	"\x17ClusterUpgradeNodeGroup\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\ffrom_version\x18\x02 \x01(\tR\vfromVersion\x12\x1d\n" +
@@ -2333,7 +2368,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"finishTime\x127\n" +
 	"\x06result\x18\x03 \x01(\x0e2\x1f.cloud.v1.ClusterTeardownResultR\x06result\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12\x18\n" +
-	"\awaiting\x18\x05 \x03(\tR\awaiting\"\x97\x03\n" +
+	"\awaiting\x18\x05 \x03(\tR\awaiting\"\xb7\x03\n" +
 	"\x12ClusterReleaseMove\x12\x18\n" +
 	"\acurrent\x18\x01 \x01(\tR\acurrent\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x127\n" +
@@ -2346,7 +2381,10 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"start_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x12L\n" +
 	"\x14component_start_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x12componentStartTime\x12+\n" +
 	"\x11component_applied\x18\n" +
-	" \x01(\bR\x10componentApplied*\x82\x01\n" +
+	" \x01(\bR\x10componentApplied\x12\x1e\n" +
+	"\n" +
+	"recoveries\x18\v \x01(\x05R\n" +
+	"recoveries*\x82\x01\n" +
 	"\x0eReleaseChannel\x12\x1f\n" +
 	"\x1bRELEASE_CHANNEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RELEASE_CHANNEL_ALPHA\x10\x01\x12\x18\n" +

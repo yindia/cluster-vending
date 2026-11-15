@@ -249,8 +249,8 @@ spec:
               releaseMoves:
                 description: |-
                   releaseMoves is the rollout of the channel's release to its
-                  automatic clusters' components (the controller's component-upgrades
-                  setting): which may start moving now, and why the others wait.
+                  automatic clusters' components: which may start moving now, and why
+                  the others wait.
                 properties:
                   admitted:
                     description: admitted are the clusters (namespace/name) that may

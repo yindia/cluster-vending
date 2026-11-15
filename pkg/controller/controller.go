@@ -111,9 +111,6 @@ type Deps struct {
 	// UpgradeTimeout is how long an automatic upgrade may take before the
 	// rollout counts it as failed; 0 is config.DefaultUpgradeTimeout.
 	UpgradeTimeout time.Duration
-	// ComponentUpgrades: the rollout controller also plans each channel's
-	// release moves (which clusters may start moving their components).
-	ComponentUpgrades bool
 }
 
 func (d Deps) logger() *slog.Logger {

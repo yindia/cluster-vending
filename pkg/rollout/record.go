@@ -100,6 +100,9 @@ func Finish(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration) *clo
 		out.Result, out.Message = cloudv1alpha1.ClusterRolloutSucceeded, ""
 	case upgrading(c) && c.Status.Phase == cloudv1alpha1.ClusterPhaseFailed:
 		out.Result, out.Message = cloudv1alpha1.ClusterRolloutFailed, orDefault(c.Status.Message, "the upgrade failed")
+	case c.Status.Upgrade != nil && c.Status.Upgrade.Halted:
+		// The add-ons did not settle after the automatic recoveries.
+		out.Result, out.Message = cloudv1alpha1.ClusterRolloutFailed, c.Status.Upgrade.Message
 	case now.Sub(since) > timeout:
 		out.Result = cloudv1alpha1.ClusterRolloutTimedOut
 		out.Message = fmt.Sprintf("no progress for %s", timeout)

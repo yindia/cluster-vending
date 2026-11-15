@@ -1,39 +1,21 @@
 # End-to-end demo (vhs)
 
-`demo.tape` records the CLI through everything a tenant does, and removes
-everything it made:
+The demo records the CLI through everything a tenant does, and removes
+everything it made. It is five phases, each its own tape and recording, so a
+phase that fails is run again on its own, not the whole demo:
 
-1. `account create`: the CLI creates the platform's IAM role in the AWS
-   account with CloudFormation (its own role, `cluster-vending-demo-<run>-provisioner`),
-   onboards the account, and the controller verifies its access;
-2. `network create`: a VPC with two zones and one NAT gateway;
-3. `cluster create`: EKS on Kubernetes 1.36, on the alpha channel (1.37),
-   upgrades automatic, tier 2;
-4. the alpha rollout upgrades it to 1.37 (control plane, then node groups and
-   add-ons): `admin rollout get`, `cluster get`, `cluster events`;
-5. `cluster delete`, `network delete`, then `account delete --delete-role`:
-   the account, and the role's stack.
+| Phase | Tape | `make` | Shows |
+|---|---|---|---|
+| 1 | `01-account.tape` | `demo-account` | `account create`: the CLI creates the platform's role (`cluster-vending-demo-<run>-provisioner`) with CloudFormation, onboards the account; the controller verifies its access |
+| 2 | `02-network.tape` | `demo-network` | `network create`: a VPC, two zones, one NAT gateway |
+| 3 | `03-cluster.tape` | `demo-cluster` | `cluster create`: EKS on 1.36, alpha channel (1.37), upgrades automatic, tier 2 |
+| 4 | `04-upgrade.tape` | `demo-upgrade` | the alpha rollout upgrades it to 1.37 by itself: `admin rollout get`, `cluster get`, `cluster events` |
+| 5 | `05-cleanup.tape` | `demo-cleanup` | `cluster delete`, `network delete`, `account delete --delete-role` |
 
-It is real: it creates and deletes AWS resources (an IAM role, EKS, a NAT
-gateway) and takes about 90 minutes. The waits are hidden, so the recording
-lasts a few minutes. A step that fails stops the recording, and `make demo`
-prints why (`bin/demo-failed.txt`).
-
-## Each run is independent
-
-Every run has its own names, from `DEMO_RUN` (default: the time, `MMDDHHMM`):
-
-| What | Name |
-|---|---|
-| tenant | `demo-<run>` (or `DEMO_TENANT`) |
-| account | `demo-<run>` |
-| IAM role and its stack | `cluster-vending-demo-<run>-provisioner` |
-| network | `demo-<run>-net` |
-| cluster | `demo-<run>-eks` |
-
-So a new run can start while an earlier one is still deleting, and a run
-never touches another run's resources or anything else in the account (an
-existing `cluster-vending-provisioner` role, other tenants).
+`make demo` runs them in order and stops at the first that fails. It is real:
+it creates and deletes AWS resources (an IAM role, EKS, a NAT gateway) and
+takes about 90 minutes; the waits are hidden, so each recording lasts a
+minute or two.
 
 ## Run
 
@@ -44,23 +26,60 @@ existing `cluster-vending-provisioner` role, other tenants).
 make run-controller        # one terminal
 make run                   # another
 
-# 2. Credentials of the demo account, in the shell that runs vhs (never typed on screen):
+# 2. Credentials of the demo account, in the shell that records (never typed on screen;
+#    needed by the account and cleanup phases, which create and delete the role's stack):
 export AWS_PROFILE=<profile>          # or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 export DEMO_ACCOUNT_ID=<12-digit account ID>
-# optional: DEMO_RUN, DEMO_REGION (us-west-1), DEMO_ZONE_A (usw1-az1), DEMO_ZONE_B (usw1-az3)
+# optional, fixed for a run once its first phase ran: DEMO_REGION (us-west-1),
+# DEMO_ZONE_A (usw1-az1), DEMO_ZONE_B (usw1-az3), DEMO_TENANT (demo-<run>)
 
 # 3. Record:
-make demo                  # bin/demo.gif and bin/demo.mp4
-make demo-validate         # only parse the tape
+make demo                  # every phase: bin/demo/<run>-<phase>.gif and .mp4
+make demo-video            # one bin/demo/<run>.mp4 of the phases (needs ffmpeg)
+make demo-validate         # only parse the tapes
 ```
 
-`go test ./pkg/cli -run TestDemoManifestsAreValid` checks the manifests the
-tape fills, without a server.
+## A run and its state
 
-## Cleaning up a run that stopped
+Every run has its own names, from its id (`DEMO_RUN`, default the time,
+`MMDDHHMM`): tenant and account `demo-<run>`, role and stack
+`cluster-vending-demo-<run>-provisioner`, network `demo-<run>-net`, cluster
+`demo-<run>-eks`. A run never touches another run's resources or anything
+else in the account, so a new run can start while an older one is still
+deleting.
 
-With the run's id (its names above, e.g. `demo-01151430-eks`), delete in
-this order; each waits until the resource is gone:
+What the phases learn (the run id, tenant, region and zones, the account,
+network and cluster ids) is kept in `bin/demo/<run>.env`. A phase reads it,
+so the phases of a run can be recorded at different times.
+
+The run a phase acts on: `DEMO_RUN` when set; else the newest run whose
+cleanup has not finished; else a new run.
+
+```sh
+make demo-status           # the run's state, which phases are done, and each piece now
+```
+
+## When a phase fails
+
+The recording stops, and `make` prints why (also in
+`bin/demo/<run>-<phase>-failed.txt`) and the command to run again, e.g.:
+
+```
+demo 01151430, cluster step 3 failed: the cluster demo-01151430-eks: ...
+demo 01151430: cluster stopped; run it again with: make demo-cluster DEMO_RUN=01151430
+```
+
+Running a phase again resumes it: what an earlier attempt made is found by
+its name (a create the platform refuses because it exists is not a failure),
+and a phase whose result is there already (account verified, network READY,
+cluster RUNNING, cluster on 1.37) is skipped. So after a fix, `make demo` or
+the one phase picks up where the run stopped.
+
+## Cleaning up a run
+
+`make demo-cleanup` deletes the current run's cluster, network, then account
+and the role's stack, skipping what is gone already. For another run, name
+it: `make demo-cleanup DEMO_RUN=01151430`. By hand, in this order:
 
 ```sh
 RUN=01151430 T=demo-$RUN
@@ -75,3 +94,9 @@ cluster-vending account delete --tenant $T --id "$(ID account accounts accountNa
 `account delete --delete-role` deletes the role's stack only when `account
 create` made it (its `cluster-vending.io/managed-by` tag), and refuses any
 other before deleting anything.
+
+## Tests
+
+`go test ./pkg/cli -run TestDemo` checks the manifests the tapes fill (as
+requests, without a server) and the run state and resume logic of `lib.sh`
+and `state.sh` (with a fake `cluster-vending`).

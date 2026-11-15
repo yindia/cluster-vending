@@ -20,7 +20,10 @@ Three roles, each a superset of the one before:
 
 Every role trusts one principal: the platform's management role (the
 ManagementRoleArn parameter), the identity the controller and the
-Crossplane providers run as. The platform names its resources after the
+Crossplane providers run as; with the ExternalId parameter (the account's,
+which the API server generates at account create) only when it passes
+that external ID (sts:ExternalId), so another tenant's account onboarded
+with the same management role cannot reach this one. The platform names its resources after the
 network or cluster, without a common prefix, and adopts resources that it
 did not create (import, take over), so mutations cannot be scoped by name
 or by the platform's tags; IAM actions are limited by conditions where
@@ -46,7 +49,18 @@ from awacs.aws import (
     StringEquals,
 )
 from awacs.sts import AssumeRole
-from troposphere import GetAtt, Output, Parameter, Ref, Sub, Tags, Template
+from troposphere import (
+    Equals,
+    GetAtt,
+    If,
+    Not,
+    Output,
+    Parameter,
+    Ref,
+    Sub,
+    Tags,
+    Template,
+)
 from troposphere.iam import ManagedPolicy, Role
 
 # The platform's name, on every role, policy and stack.
@@ -416,6 +430,21 @@ def managed_policy(role, suffix, statements):
     )
 
 
+def trust(management_role, external_id):
+    """Return the role's trust policy: the management role, passing the
+    external ID when there is one."""
+    statement = Statement(
+        Effect=Allow,
+        Action=[AssumeRole],
+        Principal=Principal("AWS", Ref(management_role)),
+    )
+    if external_id is not None:
+        statement.Condition = Condition(
+            StringEquals("sts:ExternalId", Ref(external_id))
+        )
+    return PolicyDocument(Version="2012-10-17", Statement=[statement])
+
+
 def template_of(role):
     """Return the CloudFormation template of one role."""
     template = Template()
@@ -447,6 +476,22 @@ def template_of(role):
             AllowedPattern=rf"^{PLATFORM}-([A-Za-z0-9+=,.@_-]+-)?{role}$",
         )
     )
+    external_id = template.add_parameter(
+        Parameter(
+            "ExternalId",
+            Type="String",
+            Default="",
+            NoEcho=True,
+            Description=(
+                "The account's external ID (cluster-vending account create fills "
+                "it in): the management role must pass it to assume this role. "
+                "Empty: none is required (accounts onboarded before external IDs)."
+            ),
+            MaxLength=1224,
+            AllowedPattern=r"^$|^[A-Za-z0-9+=,.@:/_-]{32,1224}$",
+        )
+    )
+    template.add_condition("HasExternalId", Not(Equals(Ref(external_id), "")))
     refs = [
         Ref(template.add_resource(managed_policy(role, suffix, statements)))
         for suffix, statements in policies_of(role)
@@ -456,15 +501,10 @@ def template_of(role):
             "Role",
             RoleName=Ref(role_name),
             Description=f"Assumed by the {PLATFORM} platform ({role})",
-            AssumeRolePolicyDocument=PolicyDocument(
-                Version="2012-10-17",
-                Statement=[
-                    Statement(
-                        Effect=Allow,
-                        Action=[AssumeRole],
-                        Principal=Principal("AWS", Ref(management_role)),
-                    )
-                ],
+            AssumeRolePolicyDocument=If(
+                "HasExternalId",
+                trust(management_role, external_id),
+                trust(management_role, None),
             ),
             ManagedPolicyArns=refs,
             Tags=Tags({"managed-by": PLATFORM, f"{PLATFORM}.io/role": role}),

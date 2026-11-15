@@ -1,4 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
+Conditions:
+  HasExternalId: !Not
+    - !Equals
+      - !Ref 'ExternalId'
+      - ''
 Description: 'cluster-vending updater role: the reader role, and changes to existing networks and EKS clusters (tags, attributes, versions). It cannot create or delete resources.'
 Outputs:
   RoleArn:
@@ -8,6 +13,14 @@ Outputs:
     Description: 'The role''s name: spec.aws.role of the CloudAccount'
     Value: !Ref 'Role'
 Parameters:
+  ExternalId:
+    AllowedPattern: ^$|^[A-Za-z0-9+=,.@:/_-]{32,1224}$
+    Default: ''
+    Description: 'The account''s external ID (cluster-vending account create fills it in): the management role must pass it to assume this role. Empty: none is required (accounts onboarded before external
+      IDs).'
+    MaxLength: 1224
+    NoEcho: true
+    Type: String
   ManagementRoleArn:
     AllowedPattern: ^arn:aws[a-z-]*:iam::\d{12}:role/.+$
     Description: ARN of the cluster-vending management role (the identity the controller and the Crossplane providers run as); the role trusts only it. cluster-vending account create fills it in from the
@@ -101,14 +114,25 @@ Resources:
     Type: AWS::IAM::ManagedPolicy
   Role:
     Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action:
-              - sts:AssumeRole
-            Effect: Allow
-            Principal:
-              AWS: !Ref 'ManagementRoleArn'
-        Version: '2012-10-17'
+      AssumeRolePolicyDocument: !If
+        - HasExternalId
+        - Statement:
+            - Action:
+                - sts:AssumeRole
+              Condition:
+                StringEquals:
+                  sts:ExternalId: !Ref 'ExternalId'
+              Effect: Allow
+              Principal:
+                AWS: !Ref 'ManagementRoleArn'
+          Version: '2012-10-17'
+        - Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Principal:
+                AWS: !Ref 'ManagementRoleArn'
+          Version: '2012-10-17'
       Description: Assumed by the cluster-vending platform (updater)
       ManagedPolicyArns:
         - !Ref 'ReadNetworkPolicy'

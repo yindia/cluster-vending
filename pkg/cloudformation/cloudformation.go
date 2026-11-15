@@ -7,7 +7,9 @@
 package cloudformation
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"slices"
@@ -28,6 +30,28 @@ const ParameterManagementRoleARN = "ManagementRoleArn"
 // its policies' prefix): RoleName(role) by default, or
 // cluster-vending-<anything>-<role> for a stack of its own.
 const ParameterRoleName = "RoleName"
+
+// ParameterExternalID is the templates' parameter of the account's
+// external ID (NoEcho): set, the role's trust requires the management role
+// to pass it (sts:ExternalId); empty, none (accounts onboarded before
+// external IDs). ConditionHasExternalID is the template condition on it.
+const (
+	ParameterExternalID    = "ExternalId"
+	ConditionHasExternalID = "HasExternalId"
+)
+
+// ExternalIDTag is the stack tag account create sets to the fingerprint
+// of the external ID it created the stack with (ExternalIDFingerprint):
+// CloudFormation reports ParameterExternalID masked, so this is how a
+// stack without the account's external ID is told apart.
+const ExternalIDTag = "cluster-vending.io/external-id-sha256"
+
+// ExternalIDFingerprint is a short SHA-256 of an external ID: it says
+// whether two are the same without being one.
+func ExternalIDFingerprint(externalID string) string {
+	sum := sha256.Sum256([]byte(externalID))
+	return hex.EncodeToString(sum[:8])
+}
 
 // ManagedByTag is the tag of every stack the CLI creates: account delete
 // --delete-role deletes only a stack that carries it.
@@ -85,6 +109,8 @@ type Stack struct {
 	Region string
 	// ManagementRoleARN is the value of ParameterManagementRoleARN.
 	ManagementRoleARN string
+	// ExternalID is the value of ParameterExternalID; empty: none.
+	ExternalID string
 }
 
 // TemplateURL is where a role's template is under baseURL (the templates
@@ -115,6 +141,9 @@ func QuickCreateURL(baseURL string, s Stack) (string, error) {
 	query.Set("stackName", name)
 	query.Set("param_"+ParameterRoleName, name)
 	query.Set("param_"+ParameterManagementRoleARN, s.ManagementRoleARN)
+	if s.ExternalID != "" {
+		query.Set("param_"+ParameterExternalID, s.ExternalID)
+	}
 	console := url.URL{Scheme: "https", Host: "console.aws.amazon.com", Path: "/cloudformation/home",
 		RawQuery: url.Values{"region": {s.Region}}.Encode(), Fragment: "/stacks/quickcreate?" + query.Encode()}
 	return console.String(), nil

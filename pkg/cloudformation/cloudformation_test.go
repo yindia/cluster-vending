@@ -22,6 +22,7 @@ func TestTemplatesAreEmbedded(t *testing.T) {
 				Parameters map[string]struct {
 					Default        string `json:"Default"`
 					AllowedPattern string `json:"AllowedPattern"`
+					NoEcho         bool   `json:"NoEcho"`
 				} `json:"Parameters"`
 				Resources map[string]struct {
 					Type       string         `json:"Type"`
@@ -31,8 +32,14 @@ func TestTemplatesAreEmbedded(t *testing.T) {
 			if err := yaml.Unmarshal(body, &doc); err != nil {
 				t.Fatalf("not YAML: %v", err)
 			}
-			if _, ok := doc.Parameters[ParameterManagementRoleARN]; !ok || len(doc.Parameters) != 2 {
-				t.Errorf("parameters = %v, want %s and %s", doc.Parameters, ParameterManagementRoleARN, ParameterRoleName)
+			if _, ok := doc.Parameters[ParameterManagementRoleARN]; !ok || len(doc.Parameters) != 3 {
+				t.Errorf("parameters = %v, want %s, %s and %s", doc.Parameters, ParameterManagementRoleARN, ParameterRoleName, ParameterExternalID)
+			}
+			// The external ID is optional (older accounts have none) and never
+			// shown back by CloudFormation.
+			if ext, ok := doc.Parameters[ParameterExternalID]; !ok || !ext.NoEcho || ext.Default != "" ||
+				!strings.HasPrefix(ext.AllowedPattern, "^$|") {
+				t.Errorf("%s = %+v, want NoEcho, default empty, empty allowed", ParameterExternalID, ext)
 			}
 			name, ok := doc.Parameters[ParameterRoleName]
 			if !ok || name.Default != RoleName(role) || !strings.HasSuffix(name.AllowedPattern, role+"$") {
@@ -45,6 +52,10 @@ func TestTemplatesAreEmbedded(t *testing.T) {
 			// The YAML has CloudFormation's short forms (!Ref, !Sub), which a
 			// YAML decoder drops: read those lines as written.
 			text := string(body)
+			// With an external ID the trust requires it; without one, not.
+			if !strings.Contains(text, "sts:ExternalId: !Ref '"+ParameterExternalID+"'") || !strings.Contains(text, "- "+ConditionHasExternalID) {
+				t.Errorf("the trust does not require sts:ExternalId under %s", ConditionHasExternalID)
+			}
 			if !strings.Contains(text, "RoleName: !Ref '"+ParameterRoleName+"'") {
 				t.Errorf("the role is not named !Ref %s", ParameterRoleName)
 			}
@@ -99,7 +110,7 @@ func TestRoleOfName(t *testing.T) {
 // names the stack after the role and passes the role's name.
 func TestQuickCreateURL(t *testing.T) {
 	stack := Stack{Role: "reader", RoleName: "cluster-vending-demo-reader", Region: "eu-west-1",
-		ManagementRoleARN: "arn:aws:iam::111122223333:role/platform"}
+		ManagementRoleARN: "arn:aws:iam::111122223333:role/platform", ExternalID: strings.Repeat("e", 40)}
 
 	got, err := QuickCreateURL("https://bucket.s3.amazonaws.com/cv/", stack)
 
@@ -119,7 +130,8 @@ func TestQuickCreateURL(t *testing.T) {
 	}
 	if q.Get("templateURL") != "https://bucket.s3.amazonaws.com/cv/cluster-vending-reader-role.template.yaml" ||
 		q.Get("stackName") != "cluster-vending-demo-reader" || q.Get("param_RoleName") != "cluster-vending-demo-reader" ||
-		q.Get("param_ManagementRoleArn") != stack.ManagementRoleARN || u.Query().Get("region") != "eu-west-1" {
+		q.Get("param_ManagementRoleArn") != stack.ManagementRoleARN || q.Get("param_ExternalId") != stack.ExternalID ||
+		u.Query().Get("region") != "eu-west-1" {
 		t.Errorf("query = %v (region %q)", q, u.Query().Get("region"))
 	}
 	if _, err := QuickCreateURL("", stack); err == nil {

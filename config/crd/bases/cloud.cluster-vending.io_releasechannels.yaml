@@ -446,7 +446,7 @@ spec:
               tiers:
                 description: |-
                   Tiers is the rollout's progress per tier: Done clusters run the
-                  channel's minor, Held ones are kept back by a ReleaseHold.
+                  channel's minor, Held ones are kept back by a freeze.
                 items:
                   description: TierStatus is the progress of the offered release in
                     one tier.

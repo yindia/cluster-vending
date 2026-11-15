@@ -131,9 +131,11 @@ A cluster cannot be deleted while it has components.
 
 | RPC | What it does |
 |---|---|
-| `PauseReconcile` | Pauses a tenant, one of its networks or clusters, or a release channel's clusters (`channel`, with `tier` for one tier): everything (the rows get the pause, their managed resources `crossplane.io/paused`), or with `only_upgrades` their automatic upgrades only. `until` ends it by itself. |
+| `PauseReconcile` | Pauses a tenant, one of its networks or clusters, or a release channel's clusters (`channel`, with `tier` for one tier): everything: the rows get the pause, their managed resources `crossplane.io/paused` (to stop automatic changes only, `Freeze`). `until` ends it by itself. |
 | `ResumeReconcile` | Ends the pause of the same target and kind; other pauses of a cluster stay. |
-| `ListPauses` | Every pause in effect: target, everything or upgrades only, who, since, until, why, how many clusters. |
+| `ListPauses` | Every pause and freeze in effect: target, everything or automatic changes, who, since, until, why, how many clusters. |
+| `Freeze` | Freezes the platform, or a tenant's or a channel's (`tier`) clusters: no automatic change starts (Kubernetes upgrades, release moves, add-on upgrades, code changes); users' own changes still apply. `until` ends it by itself. |
+| `Unfreeze` | Lifts the freeze of a target, or with `cluster_id` / `network_id` lets one through while it stays. |
 | `ListReleases`, `GetRelease` | The releases, newest first; one release per Kubernetes minor: channel, default, upgrade target, end of support, ending, components with versions and locked values. Read-only. |
 | `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy (with `release_soak`) and the tier its rollout is at, and `pending`: the release an Automatic channel takes once its release soak ends; one channel adds the releases it offered and its conditions. |
 | `GetRollout` | One channel's rollout planned now with the controller's rules (`pkg/rollout`), cluster by cluster (filter by tier, paged). |

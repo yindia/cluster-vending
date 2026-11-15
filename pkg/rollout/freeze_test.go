@@ -3,6 +3,9 @@ package rollout
 import (
 	"strings"
 	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/upgrade"
@@ -26,10 +29,34 @@ func TestPlatformFreeze(t *testing.T) {
 	if d := rowOf(t, res, "dev"); d.Gate != nil && d.Gate.Code == upgrade.GateFrozen {
 		t.Errorf("dev is let through, gate %+v", d.Gate)
 	}
-	if !Frozen([]cloudv1alpha1.ReleaseHold{freeze}, "id-prod", now) || Frozen([]cloudv1alpha1.ReleaseHold{freeze}, "id-dev", now) {
-		t.Error("Frozen: prod frozen and dev let through")
+	if Freeze(in.Holds, now) == nil {
+		t.Error("Freeze: the platform is frozen")
 	}
 	if got := HoldTarget(freeze.Spec); got != "the platform" {
 		t.Errorf("HoldTarget = %q", got)
+	}
+}
+
+// Each freeze target has its own hold name, and says what it froze, why
+// and until when.
+func TestFreezeNameAndMessage(t *testing.T) {
+	until := metav1.NewTime(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))
+	tests := []struct {
+		spec          cloudv1alpha1.ReleaseHoldSpec
+		name, message string
+	}{
+		{cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "provider upgrade"}, "platform-freeze", "the platform is frozen: provider upgrade"},
+		{cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme"}, "freeze-tenant-acme", "tenant acme is frozen"},
+		{cloudv1alpha1.ReleaseHoldSpec{Channel: "beta", Reason: "quarter end", Until: &until}, "freeze-channel-beta",
+			"channel beta is frozen: quarter end (until 2026-12-31T00:00:00Z)"},
+		{cloudv1alpha1.ReleaseHoldSpec{Channel: "beta", Tier: cloudv1alpha1.ClusterTier0}, "freeze-channel-beta-tier0", "channel beta tier 0 is frozen"},
+	}
+	for _, tt := range tests {
+		if got := FreezeNameOf(tt.spec); got != tt.name {
+			t.Errorf("FreezeNameOf(%+v) = %q, want %q", tt.spec, got, tt.name)
+		}
+		if got := FreezeMessage(&cloudv1alpha1.ReleaseHold{Spec: tt.spec}); got != tt.message {
+			t.Errorf("FreezeMessage(%+v) = %q, want %q", tt.spec, got, tt.message)
+		}
 	}
 }

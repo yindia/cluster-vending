@@ -1104,10 +1104,10 @@ type ClusterStatus struct {
 	// setting) and how it ended. Unset until the rollout upgraded the
 	// cluster; a version a person changed writes none.
 	Rollout *ClusterRollout `protobuf:"bytes,47,opt,name=rollout,proto3" json:"rollout,omitempty"`
-	// upgrade_pause is set while an operator paused the cluster's automatic
-	// upgrades (AdminService.PauseReconcile with only_upgrades: of this
-	// cluster, its tenant or its channel): who, why, until when, and its
-	// scope. The cluster is reconciled as usual; rollouts skip it.
+	// upgrade_pause is set while a freeze holds the cluster
+	// (AdminService.Freeze: of the platform, its tenant or its channel):
+	// who, why, until when, and its scope. No automatic change of it starts;
+	// it is reconciled and updated as usual.
 	UpgradePause *Pause `protobuf:"bytes,48,opt,name=upgrade_pause,json=upgradePause,proto3" json:"upgrade_pause,omitempty"`
 	// teardown is the first step of the cluster's deletion: what its
 	// controllers made in the cloud (load balancers of Services and

@@ -142,10 +142,10 @@ func TestComputeWithoutAReleaseSaysWhy(t *testing.T) {
 	}
 }
 
-// A hold matches the cluster it names, or every cluster of its tenant, or
-// of its channel (of one tier, with a tier), while its until has not
-// passed. A matched cluster is blocked with the hold's reason, in words
-// that say upgrades are paused.
+// A freeze matches the cluster it names, or every cluster of its tenant,
+// or of its channel (of one tier, with a tier), while its until has not
+// passed, unless it lets the cluster through. A matched cluster is
+// blocked with the freeze's reason, in words that say it is frozen.
 func TestHoldsMatchClusters(t *testing.T) {
 	past, future := metav1.NewTime(now.Add(-time.Minute)), metav1.NewTime(now.Add(time.Hour))
 	c := cluster("prod", cloudv1alpha1.ClusterTier0, "1.35")
@@ -164,6 +164,8 @@ func TestHoldsMatchClusters(t *testing.T) {
 		{"its channel and tier", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Tier: cloudv1alpha1.ClusterTier0}, true},
 		{"its channel, another tier", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Tier: cloudv1alpha1.ClusterTier2}, false},
 		{"another channel", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta"}, false},
+		{"its channel, let through", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Except: []string{"id-prod"}}, false},
+		{"its tenant, another let through", cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme", Except: []string{"id-dev"}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -178,11 +180,11 @@ func TestHoldsMatchClusters(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("HoldOf = %v, want %v", got, tt.want)
 			}
-			held := row.Gate != nil && row.Gate.Code == upgrade.GateHeld
-			if held != tt.want {
-				t.Fatalf("row %+v: held %v, want %v", row, held, tt.want)
+			frozen := row.Gate != nil && row.Gate.Code == upgrade.GateFrozen
+			if frozen != tt.want {
+				t.Fatalf("row %+v: frozen %v, want %v", row, frozen, tt.want)
 			}
-			if held && (!strings.Contains(row.Gate.Message, "upgrades paused: quarter-end freeze") || strings.Contains(row.Gate.Message, "hold")) {
+			if frozen && (!strings.Contains(row.Gate.Message, "is frozen: quarter-end freeze") || strings.Contains(row.Gate.Message, "hold")) {
 				t.Errorf("message %q", row.Gate.Message)
 			}
 		})

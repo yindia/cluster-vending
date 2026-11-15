@@ -35,17 +35,14 @@ type PauseReconcileRequest struct {
 	// Only this network (Network.id): the network row and its own managed
 	// resources, not its clusters. Not with cluster_id.
 	NetworkId string `protobuf:"bytes,4,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
-	// Every cluster on this release channel, of every tenant: with
-	// only_upgrades, those that join it later too; without, the clusters on
-	// it now, each paused as by cluster_id (a cluster that joins later is
-	// not). Not with tenant_id.
+	// Every cluster on this release channel now, of every tenant, each
+	// paused as by cluster_id (a cluster that joins later is not: freeze the
+	// channel to keep automatic changes from what joins it). Not with
+	// tenant_id.
 	Channel ReleaseChannel `protobuf:"varint,5,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
 	// Only the channel's clusters of this tier (a cluster with no tier is
 	// tier 0). Only with channel.
 	Tier ClusterTier `protobuf:"varint,6,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
-	// Pause automatic upgrades only: the rollouts skip the clusters; they are
-	// reconciled, repaired and updated as usual. Not for a network.
-	OnlyUpgrades bool `protobuf:"varint,7,opt,name=only_upgrades,json=onlyUpgrades,proto3" json:"only_upgrades,omitempty"`
 	// When the pause ends by itself; unset: at a resume only. In the future.
 	Until         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=until,proto3" json:"until,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -124,13 +121,6 @@ func (x *PauseReconcileRequest) GetTier() ClusterTier {
 	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
 }
 
-func (x *PauseReconcileRequest) GetOnlyUpgrades() bool {
-	if x != nil {
-		return x.OnlyUpgrades
-	}
-	return false
-}
-
 func (x *PauseReconcileRequest) GetUntil() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Until
@@ -140,8 +130,7 @@ func (x *PauseReconcileRequest) GetUntil() *timestamppb.Timestamp {
 
 type PauseReconcileResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Managed resources that are paused now (already paused ones included);
-	// 0 for a pause of upgrades only.
+	// Managed resources that are paused now (already paused ones included).
 	Resources int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
 	// Clusters the pause covers now.
 	Clusters int32 `protobuf:"varint,2,opt,name=clusters,proto3" json:"clusters,omitempty"`
@@ -218,9 +207,7 @@ type ResumeReconcileRequest struct {
 	// also paused on its own, or by another pause, stays paused.
 	Channel ReleaseChannel `protobuf:"varint,4,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
 	// The tier the channel's pause was asked for (none: the whole channel's).
-	Tier ClusterTier `protobuf:"varint,5,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
-	// Resume a pause of upgrades only, of exactly this target.
-	OnlyUpgrades  bool `protobuf:"varint,6,opt,name=only_upgrades,json=onlyUpgrades,proto3" json:"only_upgrades,omitempty"`
+	Tier          ClusterTier `protobuf:"varint,5,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -290,19 +277,11 @@ func (x *ResumeReconcileRequest) GetTier() ClusterTier {
 	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
 }
 
-func (x *ResumeReconcileRequest) GetOnlyUpgrades() bool {
-	if x != nil {
-		return x.OnlyUpgrades
-	}
-	return false
-}
-
 type ResumeReconcileResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Managed resources that are reconciled again now; 0 for upgrades only.
+	// Managed resources that are reconciled again now.
 	Resources int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
-	// Clusters resumed (of a channel's pause), or whose upgrades start
-	// again.
+	// Clusters resumed (of a channel's pause).
 	Clusters      int32 `protobuf:"varint,2,opt,name=clusters,proto3" json:"clusters,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -356,7 +335,7 @@ var File_cloud_v1_admin_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1acloud/v1/admin_pause.proto\x1a\x1ccloud/v1/admin_release.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa8\b\n" +
+	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1acloud/v1/admin_pause.proto\x1a\x1ccloud/v1/admin_release.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8d\a\n" +
 	"\x15PauseReconcileRequest\x12M\n" +
 	"\ttenant_id\x18\x01 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
 	"\n" +
@@ -365,19 +344,17 @@ const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\n" +
 	"network_id\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId\x12<\n" +
 	"\achannel\x18\x05 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
-	"\x04tier\x18\x06 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12#\n" +
-	"\ronly_upgrades\x18\a \x01(\bR\fonlyUpgrades\x120\n" +
-	"\x05until\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05until:\xfb\x04\xbaH\xf7\x04\x1as\n" +
+	"\x04tier\x18\x06 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x120\n" +
+	"\x05until\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05until:\xf0\x03\xbaH\xec\x03\x1as\n" +
 	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\x1a\x93\x01\n" +
 	"\n" +
 	"target.one\x12Rset tenant_id (with cluster_id or network_id for one of its), or channel; not both\x1a1(size(this.tenant_id) > 0) != (this.channel != 0)\x1a\x95\x01\n" +
 	"\rchannel.alone\x123a channel's pause takes no cluster_id or network_id\x1aOthis.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)\x1aG\n" +
-	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0\x1a\x88\x01\n" +
-	"\x10upgrades.network\x12Aa network has no upgrades: pause it whole (without only_upgrades)\x1a1!this.only_upgrades || size(this.network_id) == 0\"f\n" +
+	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0J\x04\b\a\x10\bR\ronly_upgrades\"f\n" +
 	"\x16PauseReconcileResponse\x12\x1c\n" +
 	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
 	"\bclusters\x18\x02 \x01(\x05R\bclusters\x12\x12\n" +
-	"\x04note\x18\x03 \x01(\tR\x04note\"\xd7\a\n" +
+	"\x04note\x18\x03 \x01(\tR\x04note\"\xbb\x06\n" +
 	"\x16ResumeReconcileRequest\x12M\n" +
 	"\ttenant_id\x18\x01 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
 	"\n" +
@@ -385,14 +362,12 @@ const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\n" +
 	"network_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId\x12<\n" +
 	"\achannel\x18\x04 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
-	"\x04tier\x18\x05 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12#\n" +
-	"\ronly_upgrades\x18\x06 \x01(\bR\fonlyUpgrades:\xfd\x04\xbaH\xf9\x04\x1as\n" +
+	"\x04tier\x18\x05 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier:\xf1\x03\xbaH\xed\x03\x1as\n" +
 	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\x1a\x93\x01\n" +
 	"\n" +
 	"target.one\x12Rset tenant_id (with cluster_id or network_id for one of its), or channel; not both\x1a1(size(this.tenant_id) > 0) != (this.channel != 0)\x1a\x96\x01\n" +
 	"\rchannel.alone\x124a channel's resume takes no cluster_id or network_id\x1aOthis.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)\x1aG\n" +
-	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0\x1a\x89\x01\n" +
-	"\x10upgrades.network\x12Ba network has no upgrades: resume it whole (without only_upgrades)\x1a1!this.only_upgrades || size(this.network_id) == 0\"S\n" +
+	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0J\x04\b\x06\x10\aR\ronly_upgrades\"S\n" +
 	"\x17ResumeReconcileResponse\x12\x1c\n" +
 	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
 	"\bclusters\x18\x02 \x01(\x05R\bclusters2\xc5\x06\n" +

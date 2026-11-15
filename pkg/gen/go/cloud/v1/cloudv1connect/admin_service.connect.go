@@ -164,20 +164,23 @@ type AdminServiceClient interface {
 	// (the rest of the tenant stays paused). The controller then observes
 	// each resource and applies what changed meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
-	// Lists every pause in effect: full pauses (of a tenant, a network, a
-	// cluster, or of a channel's clusters) and pauses of upgrades only, with
-	// who asked, when, why, until when and how many clusters each covers.
+	// Lists every pause and freeze in effect: full pauses (of a tenant, a
+	// network, a cluster, or of a channel's clusters) and freezes (of the
+	// platform, a tenant or a channel), with who asked, when, why, until
+	// when and how many clusters each covers.
 	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
-	// Freezes the platform: no automatic change starts anywhere (Kubernetes
-	// upgrades, release moves, add-on upgrades, code changes from a new
-	// controller build) until Unfreeze; what is under way finishes, and
-	// what users ask for (create, update, delete) is done as usual. Freezing
-	// again changes the reason and keeps the clusters let through.
+	// Freezes the platform, or a tenant's or a channel's (one tier's)
+	// clusters: no automatic change starts for them (Kubernetes upgrades,
+	// release moves, add-on upgrades, code changes from a new controller
+	// build) until Unfreeze; what is under way finishes, and what users ask
+	// for (create, update, delete) is done as usual. Clusters that join the
+	// tenant or channel later are frozen too. Freezing again changes the
+	// reason and until, and keeps what was let through.
 	Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error)
-	// Lifts the freeze; with a cluster_id (or a network_id), lets only that
-	// cluster and its network (that network) take their pending changes
-	// while the platform stays frozen. Lifting the freeze forgets what was
-	// let through.
+	// Lifts the freeze of the target (as Freeze named it); with a cluster_id
+	// (or a network_id), lets only that cluster and its network (that
+	// network) take their pending changes while the freeze stays. Lifting
+	// the freeze forgets what was let through.
 	Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
@@ -240,20 +243,23 @@ type AdminServiceHandler interface {
 	// (the rest of the tenant stays paused). The controller then observes
 	// each resource and applies what changed meanwhile, once. Idempotent.
 	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
-	// Lists every pause in effect: full pauses (of a tenant, a network, a
-	// cluster, or of a channel's clusters) and pauses of upgrades only, with
-	// who asked, when, why, until when and how many clusters each covers.
+	// Lists every pause and freeze in effect: full pauses (of a tenant, a
+	// network, a cluster, or of a channel's clusters) and freezes (of the
+	// platform, a tenant or a channel), with who asked, when, why, until
+	// when and how many clusters each covers.
 	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
-	// Freezes the platform: no automatic change starts anywhere (Kubernetes
-	// upgrades, release moves, add-on upgrades, code changes from a new
-	// controller build) until Unfreeze; what is under way finishes, and
-	// what users ask for (create, update, delete) is done as usual. Freezing
-	// again changes the reason and keeps the clusters let through.
+	// Freezes the platform, or a tenant's or a channel's (one tier's)
+	// clusters: no automatic change starts for them (Kubernetes upgrades,
+	// release moves, add-on upgrades, code changes from a new controller
+	// build) until Unfreeze; what is under way finishes, and what users ask
+	// for (create, update, delete) is done as usual. Clusters that join the
+	// tenant or channel later are frozen too. Freezing again changes the
+	// reason and until, and keeps what was let through.
 	Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error)
-	// Lifts the freeze; with a cluster_id (or a network_id), lets only that
-	// cluster and its network (that network) take their pending changes
-	// while the platform stays frozen. Lifting the freeze forgets what was
-	// let through.
+	// Lifts the freeze of the target (as Freeze named it); with a cluster_id
+	// (or a network_id), lets only that cluster and its network (that
+	// network) take their pending changes while the freeze stays. Lifting
+	// the freeze forgets what was let through.
 	Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
@@ -20,28 +22,34 @@ func (h freezeSource) Holds(context.Context) ([]cloudv1alpha1.ReleaseHold, error
 	return h.holds, h.err
 }
 
-// The platform freeze stops what the cluster reconciler starts on its own
-// (the daily add-on upgrade, a code change); a cluster it lets through, or
-// no freeze, does not stop it. Holds that cannot be read count as frozen:
+// A freeze (of the platform, or of the cluster's tenant) stops what the
+// cluster reconciler starts on its own (the daily add-on upgrade, a code
+// change); a cluster it lets through, another tenant's freeze, or no
+// freeze, does not stop it. Freezes that cannot be read count as frozen:
 // nothing automatic starts blind.
 func TestReconcilerFrozen(t *testing.T) {
-	freeze := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy", Except: []string{"let-through"}}}
+	platform := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy", Except: []string{"let-through"}}}
+	acme := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme", Reason: "audit"}}
 	tests := []struct {
-		name string
-		src  freezeSource
-		id   string
-		want bool
+		name, id, tenant string
+		src              freezeSource
+		want             bool
+		why              string
 	}{
-		{"frozen", freezeSource{holds: []cloudv1alpha1.ReleaseHold{freeze}}, "c1", true},
-		{"let through", freezeSource{holds: []cloudv1alpha1.ReleaseHold{freeze}}, "let-through", false},
-		{"not frozen", freezeSource{}, "c1", false},
-		{"holds unreadable", freezeSource{err: errors.New("down")}, "c1", true},
+		{"frozen", "c1", "acme", freezeSource{holds: []cloudv1alpha1.ReleaseHold{platform}}, true, "the platform is frozen: deploy"},
+		{"let through", "let-through", "acme", freezeSource{holds: []cloudv1alpha1.ReleaseHold{platform}}, false, ""},
+		{"its tenant frozen", "c1", "acme", freezeSource{holds: []cloudv1alpha1.ReleaseHold{acme}}, true, "tenant acme is frozen: audit"},
+		{"another tenant frozen", "c1", "globex", freezeSource{holds: []cloudv1alpha1.ReleaseHold{acme}}, false, ""},
+		{"not frozen", "c1", "acme", freezeSource{}, false, ""},
+		{"holds unreadable", "c1", "acme", freezeSource{err: errors.New("down")}, true, "cannot read whether the cluster is frozen; waiting"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := New(reconcile.Deps{Releases: tt.src})
-			if got, _ := s.frozen(t.Context(), tt.id); got != tt.want {
-				t.Errorf("frozen = %v, want %v", got, tt.want)
+			row := &model.Cluster{ID: tt.id, TenantID: tt.tenant}
+			got, why := s.frozen(t.Context(), row, &cloudv1.ClusterSpec{})
+			if got != tt.want || why != tt.why {
+				t.Errorf("frozen = %v %q, want %v %q", got, why, tt.want, tt.why)
 			}
 		})
 	}

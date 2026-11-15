@@ -138,8 +138,8 @@ type ReleaseReader interface {
 	Release(ctx context.Context, name string) (*cloudv1alpha1.Release, error)
 }
 
-// HoldReader reads the release holds: the pauses of upgrades
-// (AdminService.PauseReconcile with only_upgrades). A ReleaseReader that
+// HoldReader reads the release holds: the freezes
+// (AdminService.Freeze). A ReleaseReader that
 // is one too lets a cluster's status say its upgrades are paused.
 type HoldReader interface {
 	Holds(ctx context.Context) ([]cloudv1alpha1.ReleaseHold, error)

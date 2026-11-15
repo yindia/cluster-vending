@@ -29,11 +29,12 @@ type PauseKind int32
 const (
 	PauseKind_PAUSE_KIND_UNSPECIFIED PauseKind = 0
 	// Everything: the platform and the Crossplane providers do not act on
-	// what is paused (AdminService.PauseReconcile without only_upgrades).
+	// what is paused (AdminService.PauseReconcile).
 	PauseKind_PAUSE_KIND_EVERYTHING PauseKind = 1
-	// Automatic upgrades only: the rollouts skip the clusters; they are
-	// reconciled, repaired and updated as usual.
-	PauseKind_PAUSE_KIND_UPGRADES PauseKind = 2
+	// Automatic changes only (AdminService.Freeze): no Kubernetes upgrade,
+	// release move, add-on upgrade or code change starts; the clusters are
+	// reconciled, repaired and updated as users ask.
+	PauseKind_PAUSE_KIND_AUTOMATIC_CHANGES PauseKind = 2
 )
 
 // Enum value maps for PauseKind.
@@ -41,12 +42,12 @@ var (
 	PauseKind_name = map[int32]string{
 		0: "PAUSE_KIND_UNSPECIFIED",
 		1: "PAUSE_KIND_EVERYTHING",
-		2: "PAUSE_KIND_UPGRADES",
+		2: "PAUSE_KIND_AUTOMATIC_CHANGES",
 	}
 	PauseKind_value = map[string]int32{
-		"PAUSE_KIND_UNSPECIFIED": 0,
-		"PAUSE_KIND_EVERYTHING":  1,
-		"PAUSE_KIND_UPGRADES":    2,
+		"PAUSE_KIND_UNSPECIFIED":       0,
+		"PAUSE_KIND_EVERYTHING":        1,
+		"PAUSE_KIND_AUTOMATIC_CHANGES": 2,
 	}
 )
 
@@ -97,9 +98,9 @@ type PauseRecord struct {
 	// When it ends by itself; unset: at a resume only.
 	Until  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=until,proto3" json:"until,omitempty"`
 	Reason string                 `protobuf:"bytes,11,opt,name=reason,proto3" json:"reason,omitempty"`
-	// How many clusters it covers now: a pause of a channel's (or a
-	// tenant's) upgrades covers the clusters that join it later too; a full
-	// pause by channel covers the clusters that matched when it was asked.
+	// How many clusters it covers now: a freeze of a channel (or a tenant)
+	// covers the clusters that join it later too; a full pause by channel
+	// covers the clusters that matched when it was asked.
 	Clusters      int32 `protobuf:"varint,12,opt,name=clusters,proto3" json:"clusters,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -257,7 +258,7 @@ func (*ListPausesRequest) Descriptor() ([]byte, []int) {
 
 type ListPausesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Every pause in effect, full ones first, each by target.
+	// Every pause and freeze in effect, full pauses first, each by target.
 	Pauses        []*PauseRecord `protobuf:"bytes,1,rep,name=pauses,proto3" json:"pauses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -300,10 +301,24 @@ func (x *ListPausesResponse) GetPauses() []*PauseRecord {
 	return nil
 }
 
+// FreezeRequest names what a freeze covers: nothing set is the platform
+// (every cluster and network); else a tenant, or a release channel with an
+// optional tier.
 type FreezeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Why, shown on every frozen cluster ("the platform is frozen: <reason>").
-	Reason        string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	// Freeze only this tenant's clusters (and their networks), those
+	// created later too.
+	TenantId string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// Freeze only the clusters on this channel, those that join it later
+	// too.
+	Channel ReleaseChannel `protobuf:"varint,3,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
+	// Only the channel's clusters of this tier (no tier: tier 0).
+	Tier ClusterTier `protobuf:"varint,4,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
+	// When the freeze ends by itself; unset: at an unfreeze only. In the
+	// future.
+	Until         *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=until,proto3" json:"until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -343,6 +358,34 @@ func (x *FreezeRequest) GetReason() string {
 		return x.Reason
 	}
 	return ""
+}
+
+func (x *FreezeRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *FreezeRequest) GetChannel() ReleaseChannel {
+	if x != nil {
+		return x.Channel
+	}
+	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
+}
+
+func (x *FreezeRequest) GetTier() ClusterTier {
+	if x != nil {
+		return x.Tier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
+}
+
+func (x *FreezeRequest) GetUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Until
+	}
+	return nil
 }
 
 type FreezeResponse struct {
@@ -392,10 +435,15 @@ func (x *FreezeResponse) GetClusters() int32 {
 
 type UnfreezeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Set: let this cluster through (and its network), the platform stays
-	// frozen. Not with network_id. Neither: lift the freeze.
+	// The freeze, named as it was asked for (FreezeRequest): none of
+	// tenant_id and channel is the platform's.
+	TenantId string         `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Channel  ReleaseChannel `protobuf:"varint,4,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
+	Tier     ClusterTier    `protobuf:"varint,5,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
+	// Set: let this cluster through (and its network), the freeze stays.
+	// Not with network_id. Neither: lift the freeze.
 	ClusterId string `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	// Set: let this network through, the platform stays frozen.
+	// Set: let this network through, the freeze stays.
 	NetworkId     string `protobuf:"bytes,2,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -429,6 +477,27 @@ func (x *UnfreezeRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UnfreezeRequest.ProtoReflect.Descriptor instead.
 func (*UnfreezeRequest) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_admin_pause_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *UnfreezeRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *UnfreezeRequest) GetChannel() ReleaseChannel {
+	if x != nil {
+		return x.Channel
+	}
+	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
+}
+
+func (x *UnfreezeRequest) GetTier() ClusterTier {
+	if x != nil {
+		return x.Tier
+	}
+	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
 }
 
 func (x *UnfreezeRequest) GetClusterId() string {
@@ -514,23 +583,34 @@ const file_cloud_v1_admin_pause_proto_rawDesc = "" +
 	"\bclusters\x18\f \x01(\x05R\bclusters\"\x13\n" +
 	"\x11ListPausesRequest\"C\n" +
 	"\x12ListPausesResponse\x12-\n" +
-	"\x06pauses\x18\x01 \x03(\v2\x15.cloud.v1.PauseRecordR\x06pauses\"1\n" +
+	"\x06pauses\x18\x01 \x03(\v2\x15.cloud.v1.PauseRecordR\x06pauses\"\xfd\x03\n" +
 	"\rFreezeRequest\x12 \n" +
-	"\x06reason\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\x06reason\",\n" +
+	"\x06reason\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\x06reason\x12M\n" +
+	"\ttenant_id\x18\x02 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12<\n" +
+	"\achannel\x18\x03 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
+	"\x04tier\x18\x04 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x120\n" +
+	"\x05until\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x05until:\xd5\x01\xbaH\xd1\x01\x1a\x7f\n" +
+	"\x11freeze.one_target\x12:set tenant_id or channel, not both (neither: the platform)\x1a.size(this.tenant_id) == 0 || this.channel == 0\x1aN\n" +
+	"\x13freeze.tier_channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0\",\n" +
 	"\x0eFreezeResponse\x12\x1a\n" +
-	"\bclusters\x18\x01 \x01(\x05R\bclusters\"\xdd\x01\n" +
-	"\x0fUnfreezeRequest\x12*\n" +
+	"\bclusters\x18\x01 \x01(\x05R\bclusters\"\xfa\x04\n" +
+	"\x0fUnfreezeRequest\x12M\n" +
+	"\ttenant_id\x18\x03 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12<\n" +
+	"\achannel\x18\x04 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
+	"\x04tier\x18\x05 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12*\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12*\n" +
 	"\n" +
-	"network_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:r\xbaHo\x1am\n" +
-	"\x13unfreeze.one_target\x12&set cluster_id or network_id, not both\x1a.this.cluster_id == '' || this.network_id == ''\"&\n" +
+	"network_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId:\xcc\x02\xbaH\xc8\x02\x1am\n" +
+	"\x13unfreeze.one_target\x12&set cluster_id or network_id, not both\x1a.this.cluster_id == '' || this.network_id == ''\x1a\x84\x01\n" +
+	"\x16unfreeze.freeze_target\x12:set tenant_id or channel, not both (neither: the platform)\x1a.size(this.tenant_id) == 0 || this.channel == 0\x1aP\n" +
+	"\x15unfreeze.tier_channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0\"&\n" +
 	"\x10UnfreezeResponse\x12\x12\n" +
-	"\x04note\x18\x01 \x01(\tR\x04note*[\n" +
+	"\x04note\x18\x01 \x01(\tR\x04note*d\n" +
 	"\tPauseKind\x12\x1a\n" +
 	"\x16PAUSE_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
-	"\x15PAUSE_KIND_EVERYTHING\x10\x01\x12\x17\n" +
-	"\x13PAUSE_KIND_UPGRADES\x10\x02B\x9f\x01\n" +
+	"\x15PAUSE_KIND_EVERYTHING\x10\x01\x12 \n" +
+	"\x1cPAUSE_KIND_AUTOMATIC_CHANGES\x10\x02B\x9f\x01\n" +
 	"\fcom.cloud.v1B\x0fAdminPauseProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -567,11 +647,16 @@ var file_cloud_v1_admin_pause_proto_depIdxs = []int32{
 	10, // 3: cloud.v1.PauseRecord.since:type_name -> google.protobuf.Timestamp
 	10, // 4: cloud.v1.PauseRecord.until:type_name -> google.protobuf.Timestamp
 	1,  // 5: cloud.v1.ListPausesResponse.pauses:type_name -> cloud.v1.PauseRecord
-	6,  // [6:6] is the sub-list for method output_type
-	6,  // [6:6] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	8,  // 6: cloud.v1.FreezeRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	9,  // 7: cloud.v1.FreezeRequest.tier:type_name -> cloud.v1.ClusterTier
+	10, // 8: cloud.v1.FreezeRequest.until:type_name -> google.protobuf.Timestamp
+	8,  // 9: cloud.v1.UnfreezeRequest.channel:type_name -> cloud.v1.ReleaseChannel
+	9,  // 10: cloud.v1.UnfreezeRequest.tier:type_name -> cloud.v1.ClusterTier
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_pause_proto_init() }

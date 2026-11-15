@@ -374,7 +374,7 @@ The plan (`pkg/upgrade`):
   upgrade ended. More than `spec.policy.maxFailed` failures in a tier halt the
   channel (`rollout.halted`, a `RolloutHalted` event).
 - Before a cluster starts, its own gates are checked: Manual mode, paused,
-  its upgrades paused (`admin pause --only upgrades`), not Ready, platform components not Ready, no
+  frozen (`admin freeze`), not Ready, platform components not Ready, no
   deprecation scan for the target minor or removed APIs in use, outside its
   maintenance window. A cluster blocked by its gates is listed in
   `rollout.blocked` with the first reason and does not hold the rollout back.
@@ -581,40 +581,40 @@ runs, the minor it moves to next, its state, since when, why it is blocked,
 its ID and the gate code. All of them are read-only and support
 `-o yaml|json` (the plan is the `plan` field).
 
-### Admin: pause and resume
+### Admin: pause and freeze
 
-One command pauses, one resumes. The target is a tenant (`--tenant`), one of
-its networks or clusters (`--tenant` with `--network` or `--cluster`), or the
-clusters of a release channel, of every tenant (`--channel`, with `--tier`
-for one tier). What stops is everything, or with `--only upgrades` the
-automatic upgrades only:
+Two things stop the platform, each with its own pair of commands:
 
-| | `admin pause …` | `admin pause … --only upgrades` |
+| | `admin pause` / `admin resume` | `admin freeze` / `admin unfreeze` |
 |---|---|---|
-| Stops | everything: the platform and the Crossplane providers do not act on it | only automatic upgrades: the rollouts skip the clusters |
-| The clusters | keep running in AWS; nothing is created, changed, repaired or deleted; what is asked for meanwhile is done after the resume | are reconciled, repaired and updated as usual |
-| Use it for | a provider upgrade, an incident, a fix by hand | a freeze ("not this quarter"), a team testing on the version it runs |
-| Networks | `--network` or `--tenant` | not for a network: it has no upgrades |
-| By channel or tier | pauses the clusters on it now; one that joins later is not paused | covers the clusters that join later too |
+| Stops | everything: the platform and the Crossplane providers do not act on it | automatic changes only: Kubernetes upgrades, release moves, add-on upgrades, code changes |
+| The clusters | keep running in AWS; nothing is created, changed, repaired or deleted; what is asked for meanwhile is done after the resume | are reconciled, repaired and updated as users ask |
+| Use it for | an incident, a provider upgrade, a fix by hand | a risky deploy (a new controller build), a quiet period ("not this quarter") |
+| Target | a tenant (`--tenant`), one of its networks or clusters (`--network`, `--cluster`), or a channel's clusters (`--channel`, `--tier`) | the platform (no flag), a tenant (`--tenant`), or a channel's clusters (`--channel`, `--tier`) |
+| By tenant or channel | pauses the clusters on it now; one that joins later is not paused | covers the clusters that join later too |
+| One let through | resume it on its own | `admin unfreeze <target> --cluster <id>` or `--network <id>` |
 
 ```sh
 cluster-vending admin pause --tenant acme --reason "provider-aws upgrade"
-cluster-vending admin pause --channel beta --tier 0 --only upgrades --reason "quarter-end freeze" --until 2026-12-31
-cluster-vending admin pause --tenant acme --cluster <id> --only upgrades --reason "app team testing 1.36"
-cluster-vending admin pause list        # TARGET WHAT BY SINCE UNTIL CLUSTERS REASON
-cluster-vending admin resume --channel beta --tier 0 --only upgrades
+cluster-vending admin freeze --reason "controller 0.9 rollout"
+cluster-vending admin freeze --channel beta --tier 0 --reason "quarter-end" --until 2026-12-31
+cluster-vending admin pause list        # TARGET WHAT BY SINCE UNTIL CLUSTERS REASON; WHAT: everything | automatic changes
+cluster-vending admin unfreeze --cluster <id>              # the platform stays frozen; this cluster and its network go ahead
+cluster-vending admin unfreeze --channel beta --tier 0
 ```
 
-- `--until` (RFC 3339, or a date: its start in UTC) ends a pause by itself:
-  the controller lifts it then and the providers act again. Without it a
-  pause lasts until `admin resume`.
-- Pauses add up: a resume removes the pause it names (same target, same
-  `--only`) and nothing else. A cluster paused on its own stays paused when
-  its channel's tier or its tenant is resumed; a tenant's resume leaves a
-  network or cluster paused on its own.
-- `cluster get` shows each pause on its `Paused:` line: `everything: …` or
-  `upgrades only: …`, with why, the scope it was asked at, who, since and
-  until when.
+- `--until` (RFC 3339, or a date: its start in UTC) ends a pause or a freeze
+  by itself. Without it, it lasts until `admin resume` or `admin unfreeze`.
+- Pauses add up, and so do freezes: a resume or unfreeze removes the one it
+  names (same target) and nothing else. A cluster paused on its own stays
+  paused when its channel's tier or its tenant is resumed.
+- To keep one cluster on the version it runs, set its `upgradeMode` to
+  Manual rather than freezing it.
+- `cluster get` shows a pause on its `Paused:` line (`everything: …`) and a
+  freeze on its `Frozen:` line (`automatic changes: …`), with why, the
+  scope it was asked at, who, since and until when; a cluster a freeze
+  holds back is listed with the gate `FROZEN` (`<target> is frozen:
+  <reason>`).
 
 ## What a controller does
 

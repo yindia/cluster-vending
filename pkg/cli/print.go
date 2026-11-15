@@ -296,10 +296,10 @@ func eventRows(events []*cloudv1.Event) [][]string {
 var eventHeader = []string{"LAST SEEN", "TYPE", "REASON", "MESSAGE"}
 
 // pauseLine says who paused something, since when and why.
-func pauseLine(p *cloudv1.Pause) string { return pauseWith(p, "everything") }
+func pauseLine(p *cloudv1.Pause) string { return pauseWith(p, whatEverything) }
 
-// upgradePauseLine is a pause of the automatic upgrades only.
-func upgradePauseLine(p *cloudv1.Pause) string { return pauseWith(p, "upgrades only") }
+// freezeLine is a freeze: automatic changes stop.
+func freezeLine(p *cloudv1.Pause) string { return pauseWith(p, whatAutomaticChanges) }
 
 // pauseWith is a pause as describe prints it: what it stops, why, then
 // what it was asked for at (when wider than the object), who, since and

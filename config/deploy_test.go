@@ -267,10 +267,10 @@ func TestReleaseObjectRoles(t *testing.T) {
 		for _, verb := range []string{"create", "update", "patch", "delete"} {
 			roles := map[string]*rbacv1.ClusterRole{"release-viewer": viewer, "server": server}
 			if kind == "releaseholds" {
-				// A pause of upgrades (admin pause --only upgrades) is a
+				// A freeze (admin freeze) is a
 				// release hold the API server writes for the admin.
 				if verb != "patch" && !allows(server, group, kind, verb) {
-					t.Errorf("server: no %s on %s; admin pause --only upgrades writes them", verb, kind)
+					t.Errorf("server: no %s on %s; admin freeze writes them", verb, kind)
 				}
 				delete(roles, "server")
 			}

@@ -37,9 +37,9 @@ var _ cloudv1connect.AdminServiceHandler = (*Service)(nil)
 func NewService(d reconcile.Deps) *Service { return &Service{deps: d, now: time.Now} }
 
 // PauseReconcile pauses a tenant, one of its networks or clusters, or a
-// release channel's clusters (one tier, or all): everything (the rows and
-// their managed resources: pauseRows), or with only_upgrades their
-// automatic upgrades (a release hold: pauseUpgrades).
+// release channel's clusters (one tier, or all): the rows and their
+// managed resources (pauseRows, pauseChannel). AdminService.Freeze stops
+// automatic changes only.
 func (s *Service) PauseReconcile(ctx context.Context, req *cloudv1.PauseReconcileRequest) (*cloudv1.PauseReconcileResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -53,27 +53,20 @@ func (s *Service) PauseReconcile(ctx context.Context, req *cloudv1.PauseReconcil
 		pause.Until = &until
 	}
 	t := pauseTargetOf(req.GetTenantId(), req.GetClusterId(), req.GetNetworkId(), req.GetChannel(), req.GetTier())
-	switch {
-	case req.GetOnlyUpgrades():
-		return s.pauseUpgrades(ctx, t, pause)
-	case t.channel != "":
+	if t.channel != "" {
 		return s.pauseChannel(ctx, t, pause)
 	}
 	return s.pauseRows(ctx, t, pause)
 }
 
 // ResumeReconcile ends what PauseReconcile of the same target asked for:
-// a full pause (resumeRows, resumeChannel) or, with only_upgrades, the
-// pause of upgrades of exactly that target.
+// a full pause (resumeRows, resumeChannel).
 func (s *Service) ResumeReconcile(ctx context.Context, req *cloudv1.ResumeReconcileRequest) (*cloudv1.ResumeReconcileResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
 	t := pauseTargetOf(req.GetTenantId(), req.GetClusterId(), req.GetNetworkId(), req.GetChannel(), req.GetTier())
-	switch {
-	case req.GetOnlyUpgrades():
-		return s.resumeUpgrades(ctx, t)
-	case t.channel != "":
+	if t.channel != "" {
 		return s.resumeChannel(ctx, t)
 	}
 	return s.resumeRows(ctx, t)

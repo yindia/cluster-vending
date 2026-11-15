@@ -14,8 +14,6 @@ import (
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -50,7 +48,7 @@ func (t pauseTarget) rows() model.PauseTarget {
 	return model.PauseTarget{ClusterID: t.cluster, NetworkID: t.network}
 }
 
-// holdSpec is the target as a release hold names it.
+// holdSpec is the target as a release hold (a freeze) names it.
 func (t pauseTarget) holdSpec() cloudv1alpha1.ReleaseHoldSpec {
 	switch {
 	case t.cluster != "":
@@ -114,7 +112,7 @@ func (s *Service) pauseChannel(ctx context.Context, t pauseTarget, pause *model.
 	scope := model.ChannelScope(t.channel, t.tier)
 	matched := matching(all, t.holdSpec())
 	out := &cloudv1.PauseReconcileResponse{Clusters: count(matched), Note: fmt.Sprintf(
-		"paused the %d clusters on %s now; a cluster that joins it later is not paused (pause it with --cluster, or pause the channel's upgrades with --only upgrades)",
+		"paused the %d clusters on %s now; a cluster that joins it later is not paused (pause it with --cluster, or freeze the channel to stop automatic changes of what joins it)",
 		len(matched), scope.Text())}
 	for _, c := range matched {
 		tenant, id := tenantOf(&c), c.Labels[cloudstore.LabelID]
@@ -171,97 +169,6 @@ func (s *Service) resumeChannel(ctx context.Context, t pauseTarget) (*cloudv1.Re
 	return out, nil
 }
 
-// holdName is the name of the release hold that pauses the upgrades of a
-// target: one per target, so pausing again changes it.
-func holdName(spec cloudv1alpha1.ReleaseHoldSpec) string {
-	switch {
-	case spec.ClusterID != "":
-		return "upgrades-cluster-" + spec.ClusterID
-	case spec.TenantID != "":
-		return "upgrades-tenant-" + spec.TenantID
-	case spec.Tier != "":
-		return "upgrades-channel-" + spec.Channel + "-" + strings.ToLower(string(spec.Tier))
-	}
-	return "upgrades-channel-" + spec.Channel
-}
-
-// sameTarget reports whether two holds name the same clusters' target.
-func sameTarget(a, b cloudv1alpha1.ReleaseHoldSpec) bool {
-	return a.ClusterID == b.ClusterID && a.TenantID == b.TenantID && a.Channel == b.Channel && a.Tier == b.Tier
-}
-
-// pauseUpgrades records a release hold of the target: the rollouts skip
-// its clusters (rollout.HoldOf), those of a tenant or a channel that join
-// later too. Pausing again changes why, until when and by whom.
-func (s *Service) pauseUpgrades(ctx context.Context, t pauseTarget, pause *model.Pause) (*cloudv1.PauseReconcileResponse, error) {
-	if t.cluster != "" {
-		if _, err := s.deps.Store.Clusters().Get(ctx, t.tenant, t.cluster); err != nil {
-			return nil, s.storeError(ctx, "pause", t.tenant, t.rows(), err)
-		}
-	} else if t.tenant != "" {
-		if _, err := s.deps.Store.Tenants().Get(ctx, t.tenant); err != nil {
-			return nil, s.storeError(ctx, "pause", t.tenant, t.rows(), err)
-		}
-	}
-	spec := t.holdSpec()
-	spec.Reason, spec.By = pause.Reason, pause.By
-	if spec.Reason == "" {
-		spec.Reason = "paused by " + pause.By // a hold needs a reason
-	}
-	if pause.Until != nil {
-		until := metav1.NewTime(*pause.Until)
-		spec.Until = &until
-	}
-	hold := &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: holdName(spec)}, Spec: spec}
-	if err := s.writeHold(ctx, hold); err != nil {
-		return nil, err
-	}
-	out := &cloudv1.PauseReconcileResponse{Clusters: s.clustersOf(ctx, t)}
-	if t.cluster == "" {
-		out.Note = fmt.Sprintf("the upgrades of %s are paused; a cluster that joins it later is covered too", rollout.HoldTarget(spec))
-	}
-	return out, nil
-}
-
-// writeHold creates the hold, or sets the spec of the one of that name.
-func (s *Service) writeHold(ctx context.Context, hold *cloudv1alpha1.ReleaseHold) error {
-	err := s.deps.Kube.Create(ctx, hold)
-	if apierrors.IsAlreadyExists(err) {
-		current := &cloudv1alpha1.ReleaseHold{}
-		if err = s.deps.Kube.Get(ctx, client.ObjectKeyFromObject(hold), current); err == nil {
-			current.Spec = hold.Spec
-			err = s.deps.Kube.Update(ctx, current)
-		}
-	}
-	if err != nil {
-		s.logger().ErrorContext(ctx, "write the pause of upgrades", "name", hold.Name, "error", err)
-		return connect.NewError(connect.CodeUnavailable, "cannot record the pause of upgrades; try again")
-	}
-	return nil
-}
-
-// resumeUpgrades deletes the release holds of exactly the target: a
-// cluster's own stays when its tenant's upgrades are resumed, and so on.
-func (s *Service) resumeUpgrades(ctx context.Context, t pauseTarget) (*cloudv1.ResumeReconcileResponse, error) {
-	holds := &cloudv1alpha1.ReleaseHoldList{}
-	if err := s.deps.Reader().List(ctx, holds); err != nil {
-		s.logger().ErrorContext(ctx, "list release holds", "error", err)
-		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the pauses of upgrades; try again")
-	}
-	want := t.holdSpec()
-	for i := range holds.Items {
-		if !sameTarget(holds.Items[i].Spec, want) {
-			continue
-		}
-		err := client.IgnoreNotFound(s.deps.Kube.Delete(ctx, &holds.Items[i]))
-		if err != nil {
-			s.logger().ErrorContext(ctx, "delete the pause of upgrades", "name", holds.Items[i].Name, "error", err)
-			return nil, connect.NewError(connect.CodeUnavailable, "cannot remove the pause of upgrades; try again")
-		}
-	}
-	return &cloudv1.ResumeReconcileResponse{Clusters: s.clustersOf(ctx, t)}, nil
-}
-
 // tenantOf is a cluster's tenant: its label, else its namespace's name.
 func tenantOf(c *cloudv1alpha1.Cluster) string {
 	if t := c.Labels[cloudstore.LabelTenant]; t != "" {
@@ -272,8 +179,8 @@ func tenantOf(c *cloudv1alpha1.Cluster) string {
 
 // ListPauses lists every pause in effect, once per target: a tenant's (on
 // its namespace), a network's or a cluster's own, a channel's (and
-// tier's) with the clusters it paused, then the pauses of upgrades. A
-// scope whose until has passed is left out.
+// tier's) with the clusters it paused, then the freezes. A scope whose
+// until has passed is left out.
 func (s *Service) ListPauses(ctx context.Context, _ *cloudv1.ListPausesRequest) (*cloudv1.ListPausesResponse, error) {
 	all, err := s.clusters(ctx)
 	if err != nil {
@@ -317,7 +224,7 @@ func (s *Service) ListPauses(ctx context.Context, _ *cloudv1.ListPausesRequest) 
 		if !rollout.Active(*h, l.now) {
 			continue
 		}
-		out.Pauses = append(out.Pauses, holdRecord(h, count(matching(all, h.Spec))))
+		out.Pauses = append(out.Pauses, freezeRecord(h, count(matching(all, h.Spec))))
 	}
 	slices.SortFunc(out.Pauses, func(a, b *cloudv1.PauseRecord) int {
 		return cmp.Or(cmp.Compare(a.GetKind(), b.GetKind()), cmp.Compare(a.GetTarget(), b.GetTarget()))
@@ -370,20 +277,6 @@ func (l pauseList) add(annotations map[string]string, own model.PauseScope, reco
 		}
 		l.byTarget[r.Target] = r
 	}
-}
-
-// holdRecord is a release hold as a pause of upgrades.
-func holdRecord(h *cloudv1alpha1.ReleaseHold, clusters int32) *cloudv1.PauseRecord {
-	r := &cloudv1.PauseRecord{Target: rollout.HoldTarget(h.Spec), TenantId: h.Spec.TenantID, ClusterId: h.Spec.ClusterID,
-		Channel: channelEnum(h.Spec.Channel), Kind: cloudv1.PauseKind_PAUSE_KIND_UPGRADES, By: h.Spec.By,
-		Since: timestamppb.New(h.CreationTimestamp.Time), Reason: h.Spec.Reason, Clusters: clusters}
-	if h.Spec.Tier != "" {
-		r.Tier = tierEnum(strings.TrimPrefix(string(h.Spec.Tier), "Tier"))
-	}
-	if h.Spec.Until != nil {
-		r.Until = timestamppb.New(h.Spec.Until.Time)
-	}
-	return r
 }
 
 func channelEnum(channel string) cloudv1.ReleaseChannel {

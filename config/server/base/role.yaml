@@ -48,7 +48,7 @@ rules:
   - get
   - list
   - watch
-# A pause of upgrades (AdminService.PauseReconcile with only_upgrades) is a
+# A freeze (AdminService.Freeze) is a
 # release hold: the server writes it for the platform admin.
 - apiGroups:
   - cloud.cluster-vending.io

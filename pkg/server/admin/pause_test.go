@@ -1,13 +1,11 @@
 package admin
 
 import (
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -122,86 +120,6 @@ func TestPauseOfAChannelsTier(t *testing.T) {
 	}
 }
 
-// A pause of upgrades only records a hold of exactly its target: a
-// cluster, a tenant, a channel or a channel's tier. Nothing is paused
-// otherwise. Pausing again changes why and until when; its resume removes
-// that hold only.
-func TestPauseOfUpgradesOnly(t *testing.T) {
-	until := timestamppb.New(pauseNow.Add(24 * time.Hour))
-	tests := []struct {
-		name    string
-		pause   *cloudv1.PauseReconcileRequest
-		resume  *cloudv1.ResumeReconcileRequest
-		want    cloudv1alpha1.ReleaseHoldSpec
-		matched int32
-	}{
-		{"one cluster",
-			&cloudv1.PauseReconcileRequest{TenantId: "acme", ClusterId: acmeProd, OnlyUpgrades: true, Reason: "testing 1.36"},
-			&cloudv1.ResumeReconcileRequest{TenantId: "acme", ClusterId: acmeProd, OnlyUpgrades: true},
-			cloudv1alpha1.ReleaseHoldSpec{ClusterID: acmeProd}, 1},
-		{"a tenant",
-			&cloudv1.PauseReconcileRequest{TenantId: "globex", OnlyUpgrades: true, Reason: "audit", Until: until},
-			&cloudv1.ResumeReconcileRequest{TenantId: "globex", OnlyUpgrades: true},
-			cloudv1alpha1.ReleaseHoldSpec{TenantID: "globex"}, 2},
-		{"a channel's tier",
-			&cloudv1.PauseReconcileRequest{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_0,
-				OnlyUpgrades: true, Reason: "quarter-end freeze", Until: until},
-			&cloudv1.ResumeReconcileRequest{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_0, OnlyUpgrades: true},
-			cloudv1alpha1.ReleaseHoldSpec{Channel: "beta", Tier: cloudv1alpha1.ClusterTier0}, 2},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newFleet(t)
-			ctx := auth.WithIdentity(t.Context(), &auth.Identity{Username: "alice"})
-			// Another hold, of the whole channel, that the resume must leave.
-			other := &cloudv1.PauseReconcileRequest{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE, OnlyUpgrades: true, Reason: "other"}
-			if _, err := f.s.PauseReconcile(ctx, other); err != nil {
-				t.Fatal(err)
-			}
-
-			res, err := f.s.PauseReconcile(ctx, tt.pause)
-
-			if err != nil {
-				t.Fatal(err)
-			}
-			if res.GetClusters() != tt.matched || res.GetResources() != 0 {
-				t.Errorf("response %v, want %d clusters", res, tt.matched)
-			}
-			holds := f.holds(t)
-			if len(holds) != 2 {
-				t.Fatalf("holds %+v", holds)
-			}
-			h := holds[slices.IndexFunc(holds, func(h cloudv1alpha1.ReleaseHold) bool { return h.Spec.Reason != "other" })]
-			if h.Spec.ClusterID != tt.want.ClusterID || h.Spec.TenantID != tt.want.TenantID || h.Spec.Channel != tt.want.Channel ||
-				h.Spec.Tier != tt.want.Tier || h.Spec.By != "alice" || h.Spec.Reason != tt.pause.GetReason() ||
-				(tt.pause.GetUntil() != nil) != (h.Spec.Until != nil) {
-				t.Errorf("hold %+v", h.Spec)
-			}
-			for _, id := range []string{acmeProd, acmeDev} {
-				if f.paused(t, "acme", id) != nil {
-					t.Errorf("%s is paused whole by a pause of upgrades", id)
-				}
-			}
-
-			again := proto.CloneOf(tt.pause)
-			again.Reason = "changed"
-			if _, err := f.s.PauseReconcile(ctx, again); err != nil {
-				t.Fatal(err)
-			}
-			if got := f.holds(t); len(got) != 2 || !slices.ContainsFunc(got, func(h cloudv1alpha1.ReleaseHold) bool { return h.Spec.Reason == "changed" }) {
-				t.Errorf("holds after pausing again %+v", got)
-			}
-
-			if _, err := f.s.ResumeReconcile(ctx, tt.resume); err != nil {
-				t.Fatal(err)
-			}
-			if got := f.holds(t); len(got) != 1 || got[0].Spec.Reason != "other" {
-				t.Errorf("holds after the resume %+v", got)
-			}
-		})
-	}
-}
-
 func (f fleet) holds(t *testing.T) []cloudv1alpha1.ReleaseHold {
 	t.Helper()
 	list := &cloudv1alpha1.ReleaseHoldList{}
@@ -211,8 +129,7 @@ func (f fleet) holds(t *testing.T) []cloudv1alpha1.ReleaseHold {
 	return list.Items
 }
 
-// What the API refuses: a network's upgrades (it has none), a tier
-// without a channel, a channel with a tenant, an until that has passed.
+// What the API refuses: a tier without a channel, a channel with a tenant, an until that has passed.
 func TestPauseRefusesWhatItCannotDo(t *testing.T) {
 	f := newFleet(t)
 	ctx := t.Context()
@@ -220,7 +137,6 @@ func TestPauseRefusesWhatItCannotDo(t *testing.T) {
 		name string
 		req  *cloudv1.PauseReconcileRequest
 	}{
-		{"a network's upgrades", &cloudv1.PauseReconcileRequest{TenantId: "acme", NetworkId: acmeDev, OnlyUpgrades: true}},
 		{"a tier without a channel", &cloudv1.PauseReconcileRequest{TenantId: "acme", Tier: cloudv1.ClusterTier_CLUSTER_TIER_0}},
 		{"a channel and a tenant", &cloudv1.PauseReconcileRequest{TenantId: "acme", Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA}},
 		{"no target", &cloudv1.PauseReconcileRequest{}},
@@ -237,7 +153,7 @@ func TestPauseRefusesWhatItCannotDo(t *testing.T) {
 
 // The list shows every pause in effect once, by target: a tenant's, a
 // cluster's own, a channel tier's (with how many clusters it paused), and
-// the pauses of upgrades; one whose until passed is not listed.
+// the freezes; one whose until passed is not listed.
 func TestListPauses(t *testing.T) {
 	f := newFleet(t)
 	ctx := auth.WithIdentity(t.Context(), &auth.Identity{Username: "alice"})
@@ -246,11 +162,14 @@ func TestListPauses(t *testing.T) {
 		{TenantId: "acme", Reason: "provider upgrade"},
 		{TenantId: "globex", ClusterId: globexQA, Reason: "by hand", Until: future},
 		{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_0, Reason: "tier freeze"},
-		{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, OnlyUpgrades: true, Reason: "quarter end", Until: future},
 	} {
 		if _, err := f.s.PauseReconcile(ctx, req); err != nil {
 			t.Fatalf("%v: %v", req, err)
 		}
+	}
+	freeze := &cloudv1.FreezeRequest{Channel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Reason: "quarter end", Until: future}
+	if _, err := f.s.Freeze(ctx, freeze); err != nil {
+		t.Fatal(err)
 	}
 
 	res, err := f.s.ListPauses(ctx, &cloudv1.ListPausesRequest{})
@@ -267,16 +186,16 @@ func TestListPauses(t *testing.T) {
 		reason   string
 		clusters int32
 	}{
-		"tenant acme":             {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "provider upgrade", 2},
-		"cluster " + globexQA:     {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "by hand", 1},
-		"channel beta tier 0":     {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "tier freeze", 2},
-		"channel beta (upgrades)": {cloudv1.PauseKind_PAUSE_KIND_UPGRADES, "quarter end", 3},
+		"tenant acme":           {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "provider upgrade", 2},
+		"cluster " + globexQA:   {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "by hand", 1},
+		"channel beta tier 0":   {cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, "tier freeze", 2},
+		"channel beta (frozen)": {cloudv1.PauseKind_PAUSE_KIND_AUTOMATIC_CHANGES, "quarter end", 3},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("pauses %v", res.GetPauses())
 	}
 	for target, w := range want {
-		key := strings.TrimSuffix(target, " (upgrades)")
+		key := strings.TrimSuffix(target, " (frozen)")
 		p := got[key]
 		if p == nil || p.GetKind() != w.kind || p.GetReason() != w.reason || p.GetClusters() != w.clusters || p.GetBy() != "alice" {
 			t.Errorf("%s: %v, want %+v", target, p, w)

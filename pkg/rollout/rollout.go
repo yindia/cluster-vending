@@ -189,7 +189,7 @@ func (p *Result) fill(d upgrade.Decision, members []upgrade.Member, blocked []cl
 	p.Rollout.Blocked = blocked[:min(len(blocked), cloudv1alpha1.MaxRolloutClusters)]
 	heldPerTier := [3]int32{}
 	for _, b := range blocked {
-		if b.Gate == string(upgrade.GateHeld) {
+		if b.Gate == string(upgrade.GateFrozen) {
 			for _, m := range members {
 				if m.ID == b.Cluster {
 					heldPerTier[m.Tier]++
@@ -217,7 +217,7 @@ func (p *Result) fill(d upgrade.Decision, members []upgrade.Member, blocked []cl
 type memberInputs struct {
 	channel, target string
 	offered         []string
-	// holds are the release holds: the pauses of upgrades (HoldOf).
+	// holds are the release holds: the freezes (HoldOf).
 	holds []cloudv1alpha1.ReleaseHold
 	now   time.Time
 }
@@ -320,11 +320,7 @@ func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Fa
 		Paused:        model.ParsePause(c.Annotations[cloudstore.AnnotationPaused]) != nil,
 	}
 	if h := HoldOf(in.holds, c, in.now); h != nil {
-		if h.Spec.Platform {
-			f.Frozen, f.FrozenMessage = true, FreezeMessage(h)
-		} else {
-			f.Held, f.HeldMessage = true, HoldMessage(h)
-		}
+		f.Frozen, f.FrozenMessage = true, FreezeMessage(h)
 	}
 	if dep := c.Status.Deprecations; dep != nil {
 		f.DeprecationsScanned = dep.ScannedAt != nil
@@ -363,8 +359,8 @@ func FinishedAt(c *cloudv1alpha1.Cluster) time.Time {
 	return c.CreationTimestamp.Time
 }
 
-// HoldOf is the first unexpired hold that matches c at now (Matches): its
-// upgrades are paused. Nil when none does.
+// HoldOf is the first unexpired freeze that matches c at now (Matches):
+// no automatic change of it starts. Nil when none does.
 func HoldOf(holds []cloudv1alpha1.ReleaseHold, c *cloudv1alpha1.Cluster, now time.Time) *cloudv1alpha1.ReleaseHold {
 	for i := range holds {
 		if Active(holds[i], now) && Matches(holds[i].Spec, c) {
@@ -374,13 +370,17 @@ func HoldOf(holds []cloudv1alpha1.ReleaseHold, c *cloudv1alpha1.Cluster, now tim
 	return nil
 }
 
-// Matches reports whether a hold's target covers c: c is the cluster it
-// names, or of the tenant it names, or on the channel it names (and of its
-// tier, when it names one; a cluster with no tier is tier 0).
+// Matches reports whether a freeze's target covers c: the platform, or c
+// is the cluster it names, or of the tenant it names, or on the channel it
+// names (and of its tier, when it names one; a cluster with no tier is
+// tier 0). A cluster the freeze lets through (Except) is not covered.
 func Matches(h cloudv1alpha1.ReleaseHoldSpec, c *cloudv1alpha1.Cluster) bool {
+	if slices.Contains(h.Except, c.Labels[cloudstore.LabelID]) {
+		return false
+	}
 	switch {
 	case h.Platform:
-		return !slices.Contains(h.Except, c.Labels[cloudstore.LabelID])
+		return true
 	case h.ClusterID != "":
 		return c.Labels[cloudstore.LabelID] == h.ClusterID
 	case h.TenantID != "":
@@ -408,20 +408,6 @@ func HoldTarget(h cloudv1alpha1.ReleaseHoldSpec) string {
 		return fmt.Sprintf("channel %s tier %d", h.Channel, Tier(h.Tier))
 	}
 	return "channel " + h.Channel
-}
-
-// HoldMessage is what a cluster whose upgrades a hold pauses says: "upgrades
-// paused: quarter-end freeze (channel beta tier 0, until 2026-12-31)".
-func HoldMessage(h *cloudv1alpha1.ReleaseHold) string {
-	out := "upgrades paused"
-	if h.Spec.Reason != "" {
-		out += ": " + h.Spec.Reason
-	}
-	detail := HoldTarget(h.Spec)
-	if h.Spec.Until != nil {
-		detail += ", until " + h.Spec.Until.UTC().Format(time.RFC3339)
-	}
-	return out + " (" + detail + ")"
 }
 
 // Active reports whether the hold holds its cluster at now.
@@ -546,12 +532,32 @@ func Earliest(a, b time.Time) time.Time {
 // one for the platform.
 const FreezeName = "platform-freeze"
 
-// FreezeMessage is what a cluster the platform freeze holds says: "the
-// platform is frozen: provider upgrade".
+// FreezeNameOf is the name of the release hold that freezes a target: one
+// per target, so freezing again changes it.
+func FreezeNameOf(spec cloudv1alpha1.ReleaseHoldSpec) string {
+	switch {
+	case spec.Platform:
+		return FreezeName
+	case spec.ClusterID != "":
+		return "freeze-cluster-" + spec.ClusterID
+	case spec.TenantID != "":
+		return "freeze-tenant-" + spec.TenantID
+	case spec.Tier != "":
+		return "freeze-channel-" + strings.ToLower(spec.Channel) + "-" + strings.ToLower(string(spec.Tier))
+	}
+	return "freeze-channel-" + strings.ToLower(spec.Channel)
+}
+
+// FreezeMessage is what a cluster a freeze holds says: "the platform is
+// frozen: provider upgrade", "channel beta tier 0 is frozen: quarter end
+// (until 2026-12-31T00:00:00Z)".
 func FreezeMessage(h *cloudv1alpha1.ReleaseHold) string {
-	out := "the platform is frozen"
+	out := HoldTarget(h.Spec) + " is frozen"
 	if h.Spec.Reason != "" {
 		out += ": " + h.Spec.Reason
+	}
+	if h.Spec.Until != nil {
+		out += " (until " + h.Spec.Until.UTC().Format(time.RFC3339) + ")"
 	}
 	return out
 }
@@ -565,11 +571,4 @@ func Freeze(holds []cloudv1alpha1.ReleaseHold, now time.Time) *cloudv1alpha1.Rel
 		}
 	}
 	return nil
-}
-
-// Frozen reports whether the platform freeze holds the cluster of id: the
-// platform is frozen and does not let the cluster through.
-func Frozen(holds []cloudv1alpha1.ReleaseHold, id string, now time.Time) bool {
-	f := Freeze(holds, now)
-	return f != nil && !slices.Contains(f.Spec.Except, id)
 }

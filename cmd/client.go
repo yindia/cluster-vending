@@ -21,8 +21,8 @@ type verb struct {
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, page, ack, wait, plan, force, cluster bool
-	// reason adds --reason (admin pause), pauseNetwork --network (admin
-	// pause and resume), regions --region (account verify).
+	// reason adds --reason (admin pause and freeze), pauseNetwork --network
+	// (admin pause and resume), regions --region (account verify).
 	reason, pauseNetwork, regions bool
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
@@ -35,9 +35,10 @@ type verb struct {
 	recommend bool
 	// rollout adds --channel and --tier (admin rollout get).
 	rollout bool
-	// pauseTargets adds --channel, --tier and --only (admin pause and
-	// resume), until --until (admin pause).
-	pauseTargets, until bool
+	// pauseTargets adds --channel and --tier (admin pause, resume, freeze
+	// and unfreeze), until --until (admin pause and freeze), letThrough
+	// --cluster and --network of admin unfreeze.
+	pauseTargets, until, letThrough bool
 	// parent makes the verb a subcommand of the group's verb of that name
 	// (admin pause list).
 	parent string
@@ -123,10 +124,13 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.pauseTargets {
 			f.StringVar(&o.Channel, "channel", "", "every cluster on this release channel, of every tenant: alpha, beta or stable; not with --tenant")
 			f.StringVar(&o.Tier, "tier", "", "only the channel's clusters of this tier: 0, 1 or 2 (a cluster with no tier is 0)")
-			f.StringVar(&o.Only, "only", "", "upgrades: pause only the automatic upgrades; the clusters are reconciled as usual")
 		}
 		if v.until {
-			f.StringVar(&o.Until, "until", "", "end the pause by itself at this time: RFC 3339 (2026-12-31T18:00:00Z) or a date (2026-12-31, its start in UTC)")
+			f.StringVar(&o.Until, "until", "", "end it by itself at this time: RFC 3339 (2026-12-31T18:00:00Z) or a date (2026-12-31, its start in UTC)")
+		}
+		if v.letThrough {
+			f.StringVar(&o.Cluster, "cluster", "", "let only this cluster (cluster ID) and its network through: their pending changes start, the freeze stays")
+			f.StringVar(&o.PauseNetwork, "network", "", "let only this network (network ID) through: its pending changes start, the freeze stays; not with --cluster")
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
@@ -178,7 +182,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.Cluster, "cluster", "", "only this cluster (cluster ID); default: the tenant and everything it has")
 		}
 		if v.reason {
-			f.StringVar(&o.Reason, "reason", "", "why, shown with the pause in the status of what is paused")
+			f.StringVar(&o.Reason, "reason", "", "why, shown with the pause or freeze in the status of what it holds")
 		}
 		if v.regions {
 			f.StringSliceVar(&o.Regions, "region", nil, "also check these regions (repeat or comma-separate), e.g. the region of a network not created yet; kept for later checks")
@@ -235,16 +239,16 @@ func newNetworkCmd() *cobra.Command {
 
 func newAdminCmd() *cobra.Command {
 	admin := newResourceCmd("admin", "Operator actions (AdminService)", []verb{
-		{use: "pause", short: "Pause a tenant, one network or cluster, or a channel's clusters (--channel, --tier): everything (the platform and the Crossplane providers stop acting on it, e.g. during a provider upgrade; what is asked for meanwhile is done after resume), or with --only upgrades its automatic upgrades only",
+		{use: "pause", short: "Pause a tenant, one network or cluster, or a channel's clusters (--channel, --tier): everything (the platform and the Crossplane providers stop acting on it, e.g. during an incident or a provider upgrade; what is asked for meanwhile is done after resume); to stop automatic changes only, use admin freeze",
 			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true, pauseNetwork: true, pauseTargets: true, until: true},
-		{use: "list", short: "List every pause in effect: what it covers, whether everything or only upgrades, who, since and until when, why, how many clusters",
+		{use: "list", short: "List every pause and freeze in effect: what it covers, what it stops (everything, or automatic changes), who, since and until when, why, how many clusters",
 			run: cli.AdminPauseList, args: cobra.NoArgs, parent: "pause"},
-		{use: "resume", short: "Resume what pause paused, with the same target and --only: a tenant (a network or cluster also paused on its own stays paused), one network or cluster, or a channel's clusters",
+		{use: "resume", short: "Resume what pause paused, with the same target: a tenant (a network or cluster also paused on its own stays paused), one network or cluster, or a channel's clusters",
 			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true, pauseTargets: true},
-		{use: "freeze", short: "Freeze the platform before a risky deploy (new controller build, provider upgrade): no automatic change starts anywhere (Kubernetes upgrades, component and add-on upgrades, code changes) until unfreeze; users' own changes still apply",
-			run: cli.AdminFreeze, args: cobra.NoArgs, reason: true},
-		{use: "unfreeze", short: "Lift the freeze: automatic changes start again, tier by tier; with --cluster or --network, let only that one take its pending changes while the platform stays frozen",
-			run: cli.AdminUnfreeze, args: cobra.NoArgs, cluster: true, pauseNetwork: true},
+		{use: "freeze", short: "Freeze the platform (or --tenant, or --channel and --tier) before a risky deploy (new controller build, provider upgrade) or for a quiet period: no automatic change starts (Kubernetes upgrades, component and add-on upgrades, code changes) until unfreeze; users' own changes still apply",
+			run: cli.AdminFreeze, args: cobra.NoArgs, reason: true, pauseTargets: true, until: true},
+		{use: "unfreeze", short: "Lift the freeze of the platform (or of --tenant, --channel and --tier, as frozen): automatic changes start again, tier by tier; with --cluster or --network, let only that one take its pending changes while the freeze stays",
+			run: cli.AdminUnfreeze, args: cobra.NoArgs, pauseTargets: true, letThrough: true},
 	})
 	admin.AddCommand(newAdminReleaseCmds()...)
 	return admin

@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"time"
 
@@ -17,9 +16,8 @@ import (
 	"github.com/yindia/cluster-vending/pkg/rollout"
 )
 
-// withUpgradePause writes into st whether the cluster's automatic upgrades
-// are paused (a release hold of it, its tenant or its channel: rollout.
-// HoldOf), and why. Without a source of holds, or when they cannot be
+// withUpgradePause writes into st whether a freeze holds the cluster (of
+// the platform, its tenant or its channel: rollout.HoldOf), and why. Without a source of holds, or when they cannot be
 // read, nothing is said.
 func (s *Reconciler) withUpgradePause(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, st *cloudv1.ClusterStatus) {
 	src, ok := s.releases().(reconcile.HoldReader)
@@ -28,7 +26,7 @@ func (s *Reconciler) withUpgradePause(ctx context.Context, row *model.Cluster, s
 	}
 	holds, err := src.Holds(ctx)
 	if err != nil {
-		s.logger().WarnContext(ctx, "read the pauses of upgrades", "cluster_id", row.ID, "error", err)
+		s.logger().WarnContext(ctx, "read the freezes", "cluster_id", row.ID, "error", err)
 		return
 	}
 	h := rollout.HoldOf(holds, holdView(row, spec), time.Now())
@@ -58,23 +56,24 @@ func holdView(row *model.Cluster, spec *cloudv1.ClusterSpec) *cloudv1alpha1.Clus
 	return c
 }
 
-// frozen reports whether the platform freeze holds the cluster of id: no
-// automatic change of it may start (the daily add-on upgrade, a code
-// change); why is what its status says. Holds that cannot be read count
-// as frozen, so nothing automatic starts blind; no source of holds, not.
-func (s *Reconciler) frozen(ctx context.Context, id string) (bool, string) {
+// frozen reports whether a freeze (of the platform, the cluster's tenant
+// or its channel: rollout.HoldOf) holds the cluster: no automatic change
+// of it may start (the daily add-on upgrade, a code change); why is what
+// its status says. Freezes that cannot be read count as frozen, so
+// nothing automatic starts blind; no source of freezes, not.
+func (s *Reconciler) frozen(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec) (bool, string) {
 	src, ok := s.releases().(reconcile.HoldReader)
 	if !ok {
 		return false, ""
 	}
 	holds, err := src.Holds(ctx)
 	if err != nil {
-		s.logger().WarnContext(ctx, "read the platform freeze", "cluster_id", id, "error", err)
-		return true, "cannot read whether the platform is frozen; waiting"
+		s.logger().WarnContext(ctx, "read the freezes", "cluster_id", row.ID, "error", err)
+		return true, "cannot read whether the cluster is frozen; waiting"
 	}
-	f := rollout.Freeze(holds, time.Now())
-	if f == nil || slices.Contains(f.Spec.Except, id) {
+	h := rollout.HoldOf(holds, holdView(row, spec), time.Now())
+	if h == nil {
 		return false, ""
 	}
-	return true, rollout.FreezeMessage(f)
+	return true, rollout.FreezeMessage(h)
 }

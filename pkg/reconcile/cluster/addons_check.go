@@ -116,8 +116,13 @@ func (s *Reconciler) recheckAddons(ctx context.Context, row *model.Cluster) {
 	if s.deps.AWSClusters == nil || !addonsCheckable(row) || !s.checks.due(row.ID, at) {
 		return
 	}
-	// A frozen platform starts nothing on its own; checked again later.
-	if frozen, why := s.frozen(ctx, row.ID); frozen {
+	// A frozen cluster starts nothing on its own; checked again later.
+	spec, err := SpecOf(row)
+	if err != nil {
+		s.logger().WarnContext(ctx, "add-on versions not checked", "cluster_id", row.ID, "error", err)
+		return
+	}
+	if frozen, why := s.frozen(ctx, row, spec); frozen {
 		s.logger().DebugContext(ctx, "add-on versions not checked", "cluster_id", row.ID, "why", why)
 		return
 	}

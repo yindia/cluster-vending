@@ -380,7 +380,7 @@ type ReleaseChannelStatus struct {
 	// +optional
 	RolloutTier ClusterTier `json:"rolloutTier,omitempty"`
 	// Tiers is the rollout's progress per tier: Done clusters run the
-	// channel's minor, Held ones are kept back by a ReleaseHold.
+	// channel's minor, Held ones are kept back by a freeze.
 	// +optional
 	Tiers []TierStatus `json:"tiers,omitempty"`
 	// Rollout is what the rollout of the channel's Kubernetes minor does
@@ -435,25 +435,23 @@ type ReleaseChannelList struct {
 	Items           []ReleaseChannel `json:"items"`
 }
 
-// ReleaseHoldSpec keeps clusters out of rollouts (AdminService.PauseReconcile
-// with only_upgrades): one cluster, a tenant's clusters, or a release
-// channel's (every tier, or one); or, with platform, every cluster and
-// network: the platform freeze (AdminService.Freeze). Exactly one of
-// clusterID, tenantID, channel and platform is set; tier only with
-// channel, except only with platform.
+// ReleaseHoldSpec is a freeze (AdminService.Freeze): no automatic change
+// starts for what it covers. It covers every cluster and network (platform:
+// the platform freeze), a tenant's clusters, a release channel's (every
+// tier, or one), or one cluster. Exactly one of clusterID, tenantID,
+// channel and platform is set; tier only with channel.
 // +kubebuilder:validation:XValidation:rule="[has(self.clusterID), has(self.tenantID), has(self.channel), has(self.platform) && self.platform].filter(x, x).size() == 1",message="set exactly one of clusterID, tenantID, channel and platform"
 // +kubebuilder:validation:XValidation:rule="!has(self.tier) || has(self.channel)",message="tier needs channel"
-// +kubebuilder:validation:XValidation:rule="!has(self.except) || (has(self.platform) && self.platform)",message="except needs platform"
 type ReleaseHoldSpec struct {
 	// Platform holds every cluster and network: no automatic change starts
 	// anywhere (Kubernetes upgrades, release moves, add-on upgrades, code
 	// changes) while it exists. AdminService.Freeze writes it.
 	// +optional
 	Platform bool `json:"platform,omitempty"`
-	// Except are the IDs of the clusters and networks a platform freeze
-	// lets through (AdminService.Unfreeze with a cluster or a network):
-	// their pending changes may start; a cluster let through lets its
-	// network through too.
+	// Except are the IDs of the clusters and networks the freeze lets
+	// through (AdminService.Unfreeze with a cluster or a network): their
+	// pending changes may start; a cluster let through lets its network
+	// through too.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=200
@@ -491,7 +489,7 @@ type ReleaseHoldSpec struct {
 	// Until, when set, ends the hold by itself.
 	// +optional
 	Until *metav1.Time `json:"until,omitempty"`
-	// By is who asked for it (AdminService.PauseReconcile sets it).
+	// By is who asked for it (AdminService.Freeze sets it).
 	// +optional
 	// +kubebuilder:validation:MaxLength=256
 	By string `json:"by,omitempty"`
@@ -519,7 +517,7 @@ type ReleaseHoldStatus struct {
 // ReleaseHold keeps clusters out of rollouts: one cluster on a named
 // release (a lock) or where it is (a freeze), or a tenant's or a channel's
 // clusters where they are. Only the operator holds a cluster; users see it
-// as a pause of upgrades (admin pause --only upgrades).
+// as a freeze (admin freeze).
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=cvhold
 // +kubebuilder:subresource:status

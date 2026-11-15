@@ -26,7 +26,6 @@ const (
 	GateUpgrading    GateCode = "UPGRADING"
 	GateFrozen       GateCode = "FROZEN"
 	GatePaused       GateCode = "PAUSED"
-	GateHeld         GateCode = "UPGRADES_PAUSED"
 	GateNotReady     GateCode = "NOT_READY"
 	GatePlatform     GateCode = "PLATFORM_NOT_READY"
 	GateDeprecations GateCode = "DEPRECATIONS"
@@ -50,14 +49,13 @@ type Facts struct {
 	// Ready: the cluster is Ready; PlatformReady: every platform
 	// component is Ready.
 	Ready, PlatformReady bool
-	// Frozen: the platform is frozen (AdminService.Freeze) and the cluster
-	// is not let through; FrozenMessage says why.
+	// Frozen: a freeze (AdminService.Freeze: of the platform, the
+	// cluster's tenant or its channel) holds the cluster and does not let
+	// it through; FrozenMessage says which, why and until when.
 	Frozen        bool
 	FrozenMessage string
-	// Paused: the cluster's resources are paused; Held: its upgrades are
-	// paused (a ReleaseHold), HeldMessage says why and until when.
-	Paused, Held bool
-	HeldMessage  string
+	// Paused: the cluster's resources are paused.
+	Paused bool
 	// DeprecationsScanned: a deprecation scan finished; DeprecationsTarget
 	// is the minor it checked against; RemovedInUse counts the objects it
 	// found on APIs the target removes.
@@ -90,17 +88,14 @@ func Check(f Facts) []Gate {
 		block(GateUpgrading, "an upgrade is already running")
 	}
 	if f.Frozen {
-		block(GateFrozen, f.FrozenMessage)
+		message := f.FrozenMessage
+		if message == "" {
+			message = "frozen"
+		}
+		block(GateFrozen, message)
 	}
 	if f.Paused {
 		block(GatePaused, "the cluster is paused")
-	}
-	if f.Held {
-		message := f.HeldMessage
-		if message == "" {
-			message = "upgrades paused"
-		}
-		block(GateHeld, message)
 	}
 	if !f.Ready {
 		block(GateNotReady, "the cluster is not Ready")

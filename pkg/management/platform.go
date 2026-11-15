@@ -37,7 +37,7 @@ func (p platformSource) Offered(ctx context.Context, channel string) (string, er
 	return ch.Status.Release, nil
 }
 
-// Holds are the release holds: the pauses of upgrades.
+// Holds are the release holds: the freezes.
 func (p platformSource) Holds(ctx context.Context) ([]cloudv1alpha1.ReleaseHold, error) {
 	list := &cloudv1alpha1.ReleaseHoldList{}
 	if err := p.c.List(ctx, list); err != nil {

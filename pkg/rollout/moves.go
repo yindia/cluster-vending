@@ -21,8 +21,8 @@ const GateKubernetes upgrade.GateCode = "KUBERNETES_UPGRADING"
 // (tier 0: one), a soak between tiers, halted past maxFailed. A member is
 // an automatic cluster of the channel with components installed: one on
 // the release is done, one moving (status.releaseMove Components) in
-// progress, a halted one failed; one kept back by its own checks (paused,
-// upgrades paused, not Ready, components not Ready, outside its
+// progress, a halted one failed; one kept back by its own checks (frozen,
+// paused, not Ready, components not Ready, outside its
 // maintenance window, a Kubernetes upgrade running) is blocked and does
 // not hold its tier back.
 func ComputeMoves(in Input) cloudv1alpha1.ChannelReleaseMoves {

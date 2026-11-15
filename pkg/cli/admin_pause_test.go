@@ -28,11 +28,11 @@ func (l *listRecorder) ListPauses(context.Context, *cloudv1.ListPausesRequest) (
 	return &cloudv1.ListPausesResponse{Pauses: l.pauses}, nil
 }
 
-// admin pause by channel and tier, of upgrades only and until a time, sends
-// exactly that; admin resume the same target.
+// admin pause by channel and tier, until a time, sends exactly that; admin
+// resume the same target.
 func TestAdminPauseOfAChannel(t *testing.T) {
 	svc := &listRecorder{}
-	opts := Options{Channel: "beta", Tier: "0", Only: "upgrades", Until: "2026-12-31", Reason: "quarter-end freeze"}
+	opts := Options{Channel: "beta", Tier: "0", Until: "2026-12-31", Reason: "quarter-end freeze"}
 
 	if err := Run(t.Context(), AdminPause, Clients{Admin: svc}, opts, &bytes.Buffer{}, OutputYAML); err != nil {
 		t.Fatal(err)
@@ -43,11 +43,11 @@ func TestAdminPauseOfAChannel(t *testing.T) {
 
 	p, r := svc.paused[0], svc.resumed[0]
 	if p.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || p.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_0 ||
-		!p.GetOnlyUpgrades() || p.GetTenantId() != "" || p.GetReason() != "quarter-end freeze" ||
+		p.GetTenantId() != "" || p.GetReason() != "quarter-end freeze" ||
 		!p.GetUntil().AsTime().Equal(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("pause request %v", p)
 	}
-	if r.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || r.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_0 || !r.GetOnlyUpgrades() {
+	if r.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || r.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_0 {
 		t.Errorf("resume request %v", r)
 	}
 }
@@ -64,8 +64,6 @@ func TestAdminPauseRefuses(t *testing.T) {
 		{"a tier without a channel", Options{Tenant: "acme", Tier: "0"}, "--tier needs --channel"},
 		{"an unknown channel", Options{Channel: "gamma"}, "alpha, beta or stable"},
 		{"an unknown tier", Options{Channel: "beta", Tier: "3"}, "0, 1 or 2"},
-		{"only what", Options{Tenant: "acme", Only: "nodes"}, "--only upgrades"},
-		{"a network's upgrades", Options{Tenant: "acme", PauseNetwork: "n", Only: "upgrades"}, "has no upgrades"},
 		{"an until that is no time", Options{Tenant: "acme", Until: "soon"}, "--until"},
 	}
 	for _, tt := range tests {
@@ -96,8 +94,8 @@ func TestAdminPauseOfAChannelTable(t *testing.T) {
 	}
 }
 
-// admin pause list prints one row per pause: what it covers, whether it
-// stops everything or only upgrades, who, since and until when, why, and
+// admin pause list prints one row per pause and freeze: what it covers,
+// whether it stops everything or automatic changes, who, since and until when, why, and
 // how many clusters.
 func TestAdminPauseList(t *testing.T) {
 	withClock(t)
@@ -105,16 +103,16 @@ func TestAdminPauseList(t *testing.T) {
 	svc := &listRecorder{pauses: []*cloudv1.PauseRecord{
 		{Target: "tenant acme", Kind: cloudv1.PauseKind_PAUSE_KIND_EVERYTHING, By: "alice", Since: timestamppb.New(clock().Add(-2 * time.Hour)),
 			Reason: "provider upgrade", Clusters: 3},
-		{Target: "channel beta tier 0", Kind: cloudv1.PauseKind_PAUSE_KIND_UPGRADES, By: "bob", Since: timestamppb.New(clock().Add(-time.Hour)),
+		{Target: "channel beta tier 0", Kind: cloudv1.PauseKind_PAUSE_KIND_AUTOMATIC_CHANGES, By: "bob", Since: timestamppb.New(clock().Add(-time.Hour)),
 			Until: until, Reason: "quarter-end freeze", Clusters: 4},
 	}}
 	var out bytes.Buffer
 
 	err := Run(t.Context(), AdminPauseList, Clients{Admin: svc}, Options{}, &out, OutputTable)
 
-	want := "TARGET                WHAT         BY      SINCE   UNTIL    CLUSTERS   REASON\n" +
-		"tenant acme           everything   alice   120m    <none>   3          provider upgrade\n" +
-		"channel beta tier 0   upgrades     bob     60m     in 2d    4          quarter-end freeze\n"
+	want := "TARGET                WHAT                BY      SINCE   UNTIL    CLUSTERS   REASON\n" +
+		"tenant acme           everything          alice   120m    <none>   3          provider upgrade\n" +
+		"channel beta tier 0   automatic changes   bob     60m     in 2d    4          quarter-end freeze\n"
 	if err != nil || out.String() != want {
 		t.Fatalf("got %v\n%s\nwant\n%s", err, out.String(), want)
 	}

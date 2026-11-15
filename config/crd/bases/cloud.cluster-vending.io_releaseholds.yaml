@@ -54,7 +54,7 @@ spec:
           ReleaseHold keeps clusters out of rollouts: one cluster on a named
           release (a lock) or where it is (a freeze), or a tenant's or a channel's
           clusters where they are. Only the operator holds a cluster; users see it
-          as a pause of upgrades (admin pause --only upgrades).
+          as a freeze (admin freeze).
         properties:
           apiVersion:
             description: |-
@@ -75,16 +75,14 @@ spec:
             type: object
           spec:
             description: |-
-              ReleaseHoldSpec keeps clusters out of rollouts (AdminService.PauseReconcile
-              with only_upgrades): one cluster, a tenant's clusters, or a release
-              channel's (every tier, or one); or, with platform, every cluster and
-              network: the platform freeze (AdminService.Freeze). Exactly one of
-              clusterID, tenantID, channel and platform is set; tier only with
-              channel, except only with platform.
+              ReleaseHoldSpec is a freeze (AdminService.Freeze): no automatic change
+              starts for what it covers. It covers every cluster and network (platform:
+              the platform freeze), a tenant's clusters, a release channel's (every
+              tier, or one), or one cluster. Exactly one of clusterID, tenantID,
+              channel and platform is set; tier only with channel.
             properties:
               by:
-                description: By is who asked for it (AdminService.PauseReconcile sets
-                  it).
+                description: By is who asked for it (AdminService.Freeze sets it).
                 maxLength: 256
                 type: string
               channel:
@@ -108,10 +106,10 @@ spec:
                   rule: self == oldSelf
               except:
                 description: |-
-                  Except are the IDs of the clusters and networks a platform freeze
-                  lets through (AdminService.Unfreeze with a cluster or a network):
-                  their pending changes may start; a cluster let through lets its
-                  network through too.
+                  Except are the IDs of the clusters and networks the freeze lets
+                  through (AdminService.Unfreeze with a cluster or a network): their
+                  pending changes may start; a cluster let through lets its network
+                  through too.
                 items:
                   type: string
                 maxItems: 200
@@ -165,8 +163,6 @@ spec:
                 has(self.platform) && self.platform].filter(x, x).size() == 1'
             - message: tier needs channel
               rule: '!has(self.tier) || has(self.channel)'
-            - message: except needs platform
-              rule: '!has(self.except) || (has(self.platform) && self.platform)'
           status:
             description: ReleaseHoldStatus is written by the controller.
             properties:

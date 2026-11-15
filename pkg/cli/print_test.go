@@ -147,7 +147,7 @@ func TestPrintClusterDescribePausedAndEmpty(t *testing.T) {
 
 	for _, want := range []string{
 		"Paused:        everything: provider upgrade (tenant, by alice since 2026-11-14T11:00:00Z)\n",
-		"Paused:        upgrades only: quarter-end freeze (channel beta tier 0, by bob since 2026-11-14T10:00:00Z, until 2026-12-31T00:00:00Z)\n",
+		"Frozen:        automatic changes: quarter-end freeze (channel beta tier 0, by bob since 2026-11-14T10:00:00Z, until 2026-12-31T00:00:00Z)\n",
 		"\nResources:\n  <none>\n", "\nEvents:\n  <none>\n",
 	} {
 		if !strings.Contains(got, want) {

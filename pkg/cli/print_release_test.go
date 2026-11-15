@@ -79,9 +79,9 @@ func TestPrintChannels(t *testing.T) {
 	}
 
 	if got, want := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputTable),
-		"NAME     PROMOTION   RELEASE            KUBERNETES   ROLLING TIER   STATE     WAITING                                              PAUSED   AGE\n"+
-			"alpha    Pinned      shipped-1aed928c   1.37         <none>         Done      <none>                                               no       3d\n"+
-			"stable   Automatic   shipped-1aed928c   1.35         2              Rolling   would start 1 cluster (automatic upgrades are off)   no       3d\n"; got != want {
+		"NAME     PROMOTION   RELEASE            KUBERNETES   ROLLING TIER                STATE     WAITING                                              PAUSED   AGE\n"+
+			"alpha    Pinned      shipped-1aed928c   1.37         none (nothing to upgrade)   Done      <none>                                               no       3d\n"+
+			"stable   Automatic   shipped-1aed928c   1.35         2                           Rolling   would start 1 cluster (automatic upgrades are off)   no       3d\n"; got != want {
 		t.Errorf("channels: got\n%s\nwant\n%s", got, want)
 	}
 	wide := printed(t, &cloudv1.ListReleaseChannelsResponse{Channels: channels}, OutputWide)

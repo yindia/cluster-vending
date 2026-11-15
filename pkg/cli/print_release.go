@@ -177,7 +177,7 @@ func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide boo
 	for _, c := range channels {
 		r := c.GetRollout()
 		rw := []string{channelWord(c.GetChannel()), orNone(c.GetPromotion()), orNone(c.GetRelease()), orNone(c.GetKubernetesMinor()),
-			tierWord(c.GetRolloutTier()), rolloutState(r, c.GetPaused()), orNone(channelWaiting(c)), yesNo(c.GetPaused()),
+			rollingTierWord(c.GetRolloutTier(), r, nil), rolloutState(r, c.GetPaused()), orNone(channelWaiting(c)), yesNo(c.GetPaused()),
 			age(c.GetCreateTime())}
 		if wide {
 			rw = append(rw, tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_2), tierCell(r, cloudv1.ClusterTier_CLUSTER_TIER_1),
@@ -194,7 +194,7 @@ func describeChannel(w io.Writer, c *cloudv1.ReleaseChannelInfo) error {
 	pinned := c.GetPinnedRelease()
 	kv := [][2]string{{"Name", channelWord(c.GetChannel())}, {"Promotion", c.GetPromotion()}, {"Pinned Release", pinned},
 		{"Release", c.GetRelease()}, {"Kubernetes", c.GetKubernetesMinor()}, {"Paused", yesNo(c.GetPaused())},
-		{"Policy", policyLine(c.GetPolicy())}, {"Rolling Tier", tierWord(c.GetRolloutTier())},
+		{"Policy", policyLine(c.GetPolicy())}, {"Rolling Tier", rollingTierWord(c.GetRolloutTier(), c.GetRollout(), nil)},
 		{"Rollout", rolloutState(c.GetRollout(), c.GetPaused())}, {"Waiting", oneLine(c.GetRollout().GetWaiting())},
 		{"Would Start", strings.Join(c.GetRollout().GetWouldStart(), ", ")}, {"Age", age(c.GetCreateTime())}}
 	if c.GetPromotion() == "Automatic" {
@@ -273,15 +273,24 @@ func tierCell(r *cloudv1.RolloutSummary, tier cloudv1.ClusterTier) string {
 
 var memberHeader = []string{"TIER", "TENANT", "CLUSTER", "RUNS", "TARGET", "STATE", "SINCE", "REASON"}
 
-// describeRollout is one channel's rollout: its summary, then its
-// clusters, tier 2 first (wide adds their IDs and gates).
+// describeRollout is one channel's rollout: its summary, then its plan per
+// tier and batch; wide (or a server without plans) adds its clusters'
+// table, tier 2 first, with their IDs and gates when wide.
 func describeRollout(w io.Writer, r *cloudv1.Rollout, next string, wide bool) error {
 	s := r.GetSummary()
 	kv := [][2]string{{"Channel", channelWord(r.GetChannel())}, {"Kubernetes", s.GetTargetMinor()}, {"Release", r.GetRelease()},
-		{"Policy", policyLine(r.GetPolicy())}, {"Rolling Tier", tierWord(r.GetRolloutTier())}, {"State", rolloutState(s, r.GetPaused())},
-		{"Waiting", oneLine(s.GetWaiting())}, {"Would Start", strings.Join(s.GetWouldStart(), ", ")}}
+		{"Policy", policyLine(r.GetPolicy())}, {"Rolling Tier", rollingTierWord(r.GetRolloutTier(), s, r.GetPlan())},
+		{"State", planState(r)}, {"Waiting", oneLine(s.GetWaiting())}, {"Would Start", strings.Join(s.GetWouldStart(), ", ")}}
 	if err := fields(w, kv); err != nil {
 		return err
+	}
+	if r.GetPlan() != nil {
+		if err := printRolloutPlan(w, r.GetPlan(), r.GetPolicy()); err != nil {
+			return err
+		}
+		if !wide {
+			return nil
+		}
 	}
 	header := memberHeader
 	if wide {

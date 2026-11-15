@@ -218,7 +218,14 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
 	}
-	paths := req.GetUpdateMask().GetPaths()
+	// On an automatic cluster the channel sets the version: a manifest's is
+	// not a request (the rollout moves it), so it is left out.
+	paths, dropped := updatemask.WithoutAutomaticVersion(spec, in.GetSpec(), req.GetUpdateMask().GetPaths())
+	if dropped && len(paths) == 0 {
+		// Only the version was asked for: nothing changes.
+		c, err := stored(row)
+		return &cloudv1.UpdateClusterResponse{Cluster: c}, err
+	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {

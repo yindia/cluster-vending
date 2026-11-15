@@ -234,3 +234,40 @@ func TestClusterUpdateReapplyingTheCreateManifest(t *testing.T) {
 		})
 	}
 }
+
+// On an automatic cluster a manifest's Kubernetes version is not a change:
+// the release channel sets it. Said once; only the other changes are sent.
+// On a manual cluster it is a change as usual.
+func TestClusterUpdateIgnoresTheVersionOfAnAutomaticCluster(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     cloudv1.UpgradeMode
+		wantMask []string
+		note     bool
+	}{
+		{"automatic", cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC, []string{"spec.tier"}, true},
+		{"manual", cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL, []string{"spec.control_plane.kubernetes_version", "spec.tier"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := storedCluster()
+			current.Spec.UpgradeMode = tt.mode
+			api := &updateCluster{current: current}
+			manifest := clusterHead + "spec:\n  controlPlane: {kubernetesVersion: \"1.35\"}\n  tier: CLUSTER_TIER_1\n"
+			var out, progress bytes.Buffer
+
+			err := Run(t.Context(), ClusterUpdate, Clients{Cluster: api},
+				Options{Input: writeManifest(t, manifest), ID: inferCluster, Progress: &progress}, &out, OutputTable)
+
+			if err != nil {
+				t.Fatalf("%v\n%s", err, progress.String())
+			}
+			if api.updated == nil || !slices.Equal(api.updated.GetUpdateMask().GetPaths(), tt.wantMask) {
+				t.Fatalf("mask = %v, want %v\n%s", api.updated.GetUpdateMask().GetPaths(), tt.wantMask, progress.String())
+			}
+			if got := strings.Contains(progress.String(), "ignored: upgrades are automatic"); got != tt.note {
+				t.Errorf("note = %v, want %v\n%s", got, tt.note, progress.String())
+			}
+		})
+	}
+}

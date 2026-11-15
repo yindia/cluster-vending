@@ -148,3 +148,42 @@ func TestUpdateOnAChannel(t *testing.T) {
 		t.Fatalf("stable, 1.37 = %v, want INVALID_ARGUMENT", err)
 	}
 }
+
+// On an automatic cluster the channel sets the Kubernetes version: an
+// update's version (even one that would be refused) is left out, and the
+// cluster keeps its own; switched back to manual, the version counts again.
+func TestUpdateOfAnAutomaticClusterLeavesItsVersion(t *testing.T) {
+	w := newWorld(t, interceptor.Funcs{}, nil, withVersions, func(d *recon.Deps) { d.Releases = releases{} })
+	ctx := t.Context()
+	if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+		t.Fatal(err)
+	}
+	update := func(spec *cloudv1.ClusterSpec, paths ...string) error {
+		t.Helper()
+		_, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, paths...))
+		return err
+	}
+	version := func() string {
+		t.Helper()
+		got, err := w.svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: worldTenant, ClusterId: w.row.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.GetCluster().GetSpec().GetControlPlane().GetKubernetesVersion()
+	}
+	if err := update(&cloudv1.ClusterSpec{UpgradeMode: cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC}, pathUpgradeMode); err != nil {
+		t.Fatalf("to automatic: %v", err)
+	}
+	before := version()
+
+	err := update(&cloudv1.ClusterSpec{ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.20"}}, pathKubernetesVersion)
+
+	if err != nil || version() != before {
+		t.Fatalf("automatic, version 1.20: %v, version %q, want it left out (still %q)", err, version(), before)
+	}
+	err = update(&cloudv1.ClusterSpec{UpgradeMode: cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL,
+		ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.20"}}, pathUpgradeMode, pathKubernetesVersion)
+	if err == nil {
+		t.Fatalf("manual, version 1.20: accepted, want it to count (and be refused as a downgrade)")
+	}
+}

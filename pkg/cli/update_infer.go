@@ -149,3 +149,23 @@ func cut(s string) string {
 	}
 	return s
 }
+
+// withoutAutomaticVersion is desired with the cluster's own Kubernetes
+// version when its upgrades are automatic after the update (the manifest's
+// mode when it states one, else the cluster's): the channel sets the
+// version, so a manifest's is not a change. Said once when they differ.
+func withoutAutomaticVersion(o Options, current, desired *cloudv1.Cluster) *cloudv1.Cluster {
+	mode := current.GetSpec().GetUpgradeMode()
+	if m := desired.GetSpec().GetUpgradeMode(); m != cloudv1.UpgradeMode_UPGRADE_MODE_UNSPECIFIED {
+		mode = m
+	}
+	want, have := desired.GetSpec().GetControlPlane().GetKubernetesVersion(), current.GetSpec().GetControlPlane().GetKubernetesVersion()
+	if mode != cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC || want == "" || want == have {
+		return desired
+	}
+	o.progressf("cluster %s: kubernetesVersion %s ignored: upgrades are automatic, the release channel sets the version (now %s)\n",
+		current.GetName(), want, have)
+	out := proto.CloneOf(desired)
+	out.Spec.ControlPlane.KubernetesVersion = have
+	return out
+}

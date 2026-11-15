@@ -92,6 +92,7 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		// Only the resolved spec: compare with what the server merges in.
 		desired = clusterAsStored(cl)
 	}
+	desired = withoutAutomaticVersion(o, current, desired)
 	mask, err := inferredMask(o, "cluster "+current.GetName(), current, desired, updatemask.Cluster)
 	if err != nil || len(mask) == 0 {
 		return nil, err

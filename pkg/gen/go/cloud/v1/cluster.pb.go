@@ -526,6 +526,68 @@ func (ClusterTeardownResult) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{7}
 }
 
+// ClusterReleaseMovePhase is where a release move is.
+type ClusterReleaseMovePhase int32
+
+const (
+	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_UNSPECIFIED ClusterReleaseMovePhase = 0
+	// Nothing to move: the components run the target, or there is none.
+	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_IDLE ClusterReleaseMovePhase = 1
+	// A release to move to, not started: waiting its turn in the channel's
+	// rollout, a Kubernetes upgrade, or a manual cluster (message says).
+	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_PENDING ClusterReleaseMovePhase = 2
+	// Moving components, one at a time.
+	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS ClusterReleaseMovePhase = 3
+	// Stopped: a component failed or did not settle in time; nothing moves
+	// until cluster retry.
+	ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_HALTED ClusterReleaseMovePhase = 4
+)
+
+// Enum value maps for ClusterReleaseMovePhase.
+var (
+	ClusterReleaseMovePhase_name = map[int32]string{
+		0: "CLUSTER_RELEASE_MOVE_PHASE_UNSPECIFIED",
+		1: "CLUSTER_RELEASE_MOVE_PHASE_IDLE",
+		2: "CLUSTER_RELEASE_MOVE_PHASE_PENDING",
+		3: "CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS",
+		4: "CLUSTER_RELEASE_MOVE_PHASE_HALTED",
+	}
+	ClusterReleaseMovePhase_value = map[string]int32{
+		"CLUSTER_RELEASE_MOVE_PHASE_UNSPECIFIED": 0,
+		"CLUSTER_RELEASE_MOVE_PHASE_IDLE":        1,
+		"CLUSTER_RELEASE_MOVE_PHASE_PENDING":     2,
+		"CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS":  3,
+		"CLUSTER_RELEASE_MOVE_PHASE_HALTED":      4,
+	}
+)
+
+func (x ClusterReleaseMovePhase) Enum() *ClusterReleaseMovePhase {
+	p := new(ClusterReleaseMovePhase)
+	*p = x
+	return p
+}
+
+func (x ClusterReleaseMovePhase) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ClusterReleaseMovePhase) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_cluster_proto_enumTypes[8].Descriptor()
+}
+
+func (ClusterReleaseMovePhase) Type() protoreflect.EnumType {
+	return &file_cloud_v1_cluster_proto_enumTypes[8]
+}
+
+func (x ClusterReleaseMovePhase) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ClusterReleaseMovePhase.Descriptor instead.
+func (ClusterReleaseMovePhase) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{8}
+}
+
 // Cluster is a managed Kubernetes cluster owned by exactly one tenant.
 type Cluster struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1036,7 +1098,11 @@ type ClusterStatus struct {
 	// workload cluster while those controllers still run, before the
 	// platform components are uninstalled. Unset until the cluster is
 	// deleted.
-	Teardown      *ClusterTeardown `protobuf:"bytes,49,opt,name=teardown,proto3" json:"teardown,omitempty"`
+	Teardown *ClusterTeardown `protobuf:"bytes,49,opt,name=teardown,proto3" json:"teardown,omitempty"`
+	// release_move is the cluster's move from the release its components
+	// run (current) to the one its channel offers (target), one component
+	// at a time; set by the controller when component upgrades are on.
+	ReleaseMove   *ClusterReleaseMove `protobuf:"bytes,50,opt,name=release_move,json=releaseMove,proto3" json:"release_move,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1244,6 +1310,13 @@ func (x *ClusterStatus) GetUpgradePause() *Pause {
 func (x *ClusterStatus) GetTeardown() *ClusterTeardown {
 	if x != nil {
 		return x.Teardown
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetReleaseMove() *ClusterReleaseMove {
+	if x != nil {
+		return x.ReleaseMove
 	}
 	return nil
 }
@@ -1929,6 +2002,134 @@ func (x *ClusterTeardown) GetWaiting() []string {
 	return nil
 }
 
+// ClusterReleaseMove is a cluster moving its platform components from one
+// release to another, one component at a time in install order.
+type ClusterReleaseMove struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The release the components run (all of them, once a move is done).
+	Current string `protobuf:"bytes,1,opt,name=current,proto3" json:"current,omitempty"`
+	// The release they move to; empty when there is none to move to.
+	Target string `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	// Where the move is.
+	Phase ClusterReleaseMovePhase `protobuf:"varint,3,opt,name=phase,proto3,enum=cloud.v1.ClusterReleaseMovePhase" json:"phase,omitempty"`
+	// The component being moved now.
+	Component string `protobuf:"bytes,4,opt,name=component,proto3" json:"component,omitempty"`
+	// Its place among the components that change (1-based), and how many.
+	Step  int32 `protobuf:"varint,5,opt,name=step,proto3" json:"step,omitempty"`
+	Steps int32 `protobuf:"varint,6,opt,name=steps,proto3" json:"steps,omitempty"`
+	// Why it waits, what failed, or what is available.
+	Message string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	// When the move started; when the current component started.
+	StartTime          *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	ComponentStartTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=component_start_time,json=componentStartTime,proto3" json:"component_start_time,omitempty"`
+	// A pass after the one that set the component's new pin recorded it: its
+	// state is read from then on (the pass that applied it may still see the
+	// old version's Ready).
+	ComponentApplied bool `protobuf:"varint,10,opt,name=component_applied,json=componentApplied,proto3" json:"component_applied,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ClusterReleaseMove) Reset() {
+	*x = ClusterReleaseMove{}
+	mi := &file_cloud_v1_cluster_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClusterReleaseMove) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClusterReleaseMove) ProtoMessage() {}
+
+func (x *ClusterReleaseMove) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_cluster_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClusterReleaseMove.ProtoReflect.Descriptor instead.
+func (*ClusterReleaseMove) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_cluster_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ClusterReleaseMove) GetCurrent() string {
+	if x != nil {
+		return x.Current
+	}
+	return ""
+}
+
+func (x *ClusterReleaseMove) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *ClusterReleaseMove) GetPhase() ClusterReleaseMovePhase {
+	if x != nil {
+		return x.Phase
+	}
+	return ClusterReleaseMovePhase_CLUSTER_RELEASE_MOVE_PHASE_UNSPECIFIED
+}
+
+func (x *ClusterReleaseMove) GetComponent() string {
+	if x != nil {
+		return x.Component
+	}
+	return ""
+}
+
+func (x *ClusterReleaseMove) GetStep() int32 {
+	if x != nil {
+		return x.Step
+	}
+	return 0
+}
+
+func (x *ClusterReleaseMove) GetSteps() int32 {
+	if x != nil {
+		return x.Steps
+	}
+	return 0
+}
+
+func (x *ClusterReleaseMove) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ClusterReleaseMove) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *ClusterReleaseMove) GetComponentStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ComponentStartTime
+	}
+	return nil
+}
+
+func (x *ClusterReleaseMove) GetComponentApplied() bool {
+	if x != nil {
+		return x.ComponentApplied
+	}
+	return false
+}
+
 var File_cloud_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_proto_rawDesc = "" +
@@ -1984,7 +2185,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x04days\x18\x01 \x03(\x0e2\x11.cloud.v1.WeekdayB\x13\xbaH\x10\x92\x01\r\x10\a\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x04days\x12<\n" +
 	"\x05start\x18\x02 \x01(\tB&\xbaH#r!2\x1f^([01][0-9]|2[0-3]):[0-5][0-9]$R\x05start\x12\x1a\n" +
 	"\bduration\x18\x03 \x01(\tR\bduration:\x88\x02\xbaH\x84\x02\x1a\x81\x02\n" +
-	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xa7\n" +
+	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xe8\n" +
 	"\n" +
 	"\rClusterStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
@@ -2015,7 +2216,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"kubernetes\x122\n" +
 	"\arollout\x18/ \x01(\v2\x18.cloud.v1.ClusterRolloutR\arollout\x124\n" +
 	"\rupgrade_pause\x180 \x01(\v2\x0f.cloud.v1.PauseR\fupgradePause\x125\n" +
-	"\bteardown\x181 \x01(\v2\x19.cloud.v1.ClusterTeardownR\bteardownB\n" +
+	"\bteardown\x181 \x01(\v2\x19.cloud.v1.ClusterTeardownR\bteardown\x12?\n" +
+	"\frelease_move\x182 \x01(\v2\x1c.cloud.v1.ClusterReleaseMoveR\vreleaseMoveB\n" +
 	"\n" +
 	"\bprovider\"\xca\x02\n" +
 	"\x0eClusterRollout\x12\x18\n" +
@@ -2079,7 +2281,20 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"finishTime\x127\n" +
 	"\x06result\x18\x03 \x01(\x0e2\x1f.cloud.v1.ClusterTeardownResultR\x06result\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12\x18\n" +
-	"\awaiting\x18\x05 \x03(\tR\awaiting*\x82\x01\n" +
+	"\awaiting\x18\x05 \x03(\tR\awaiting\"\x97\x03\n" +
+	"\x12ClusterReleaseMove\x12\x18\n" +
+	"\acurrent\x18\x01 \x01(\tR\acurrent\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\x127\n" +
+	"\x05phase\x18\x03 \x01(\x0e2!.cloud.v1.ClusterReleaseMovePhaseR\x05phase\x12\x1c\n" +
+	"\tcomponent\x18\x04 \x01(\tR\tcomponent\x12\x12\n" +
+	"\x04step\x18\x05 \x01(\x05R\x04step\x12\x14\n" +
+	"\x05steps\x18\x06 \x01(\x05R\x05steps\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x129\n" +
+	"\n" +
+	"start_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x12L\n" +
+	"\x14component_start_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x12componentStartTime\x12+\n" +
+	"\x11component_applied\x18\n" +
+	" \x01(\bR\x10componentApplied*\x82\x01\n" +
 	"\x0eReleaseChannel\x12\x1f\n" +
 	"\x1bRELEASE_CHANNEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RELEASE_CHANNEL_ALPHA\x10\x01\x12\x18\n" +
@@ -2127,7 +2342,13 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"#CLUSTER_TEARDOWN_RESULT_UNSPECIFIED\x10\x00\x12$\n" +
 	" CLUSTER_TEARDOWN_RESULT_FINISHED\x10\x01\x12%\n" +
 	"!CLUSTER_TEARDOWN_RESULT_TIMED_OUT\x10\x02\x12#\n" +
-	"\x1fCLUSTER_TEARDOWN_RESULT_SKIPPED\x10\x03B\x9c\x01\n" +
+	"\x1fCLUSTER_TEARDOWN_RESULT_SKIPPED\x10\x03*\xe4\x01\n" +
+	"\x17ClusterReleaseMovePhase\x12*\n" +
+	"&CLUSTER_RELEASE_MOVE_PHASE_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fCLUSTER_RELEASE_MOVE_PHASE_IDLE\x10\x01\x12&\n" +
+	"\"CLUSTER_RELEASE_MOVE_PHASE_PENDING\x10\x02\x12)\n" +
+	"%CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS\x10\x03\x12%\n" +
+	"!CLUSTER_RELEASE_MOVE_PHASE_HALTED\x10\x04B\x9c\x01\n" +
 	"\fcom.cloud.v1B\fClusterProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -2142,8 +2363,8 @@ func file_cloud_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_cluster_proto_rawDescData
 }
 
-var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_cloud_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_cloud_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_cloud_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_cloud_v1_cluster_proto_goTypes = []any{
 	(ReleaseChannel)(0),             // 0: cloud.v1.ReleaseChannel
 	(ClusterTier)(0),                // 1: cloud.v1.ClusterTier
@@ -2153,88 +2374,94 @@ var file_cloud_v1_cluster_proto_goTypes = []any{
 	(ClusterRolloutResult)(0),       // 5: cloud.v1.ClusterRolloutResult
 	(ClusterUpgradePhase)(0),        // 6: cloud.v1.ClusterUpgradePhase
 	(ClusterTeardownResult)(0),      // 7: cloud.v1.ClusterTeardownResult
-	(*Cluster)(nil),                 // 8: cloud.v1.Cluster
-	(*ClusterSpec)(nil),             // 9: cloud.v1.ClusterSpec
-	(*MaintenanceWindow)(nil),       // 10: cloud.v1.MaintenanceWindow
-	(*ClusterStatus)(nil),           // 11: cloud.v1.ClusterStatus
-	(*ClusterRollout)(nil),          // 12: cloud.v1.ClusterRollout
-	(*ClusterKubernetes)(nil),       // 13: cloud.v1.ClusterKubernetes
-	(*PlatformComponent)(nil),       // 14: cloud.v1.PlatformComponent
-	(*ClusterUpgrade)(nil),          // 15: cloud.v1.ClusterUpgrade
-	(*ClusterUpgradeNodeGroup)(nil), // 16: cloud.v1.ClusterUpgradeNodeGroup
-	(*ClusterEndpoint)(nil),         // 17: cloud.v1.ClusterEndpoint
-	(*ClusterTeardown)(nil),         // 18: cloud.v1.ClusterTeardown
-	nil,                             // 19: cloud.v1.Cluster.LabelsEntry
-	(*timestamppb.Timestamp)(nil),   // 20: google.protobuf.Timestamp
-	(*ClusterNetwork)(nil),          // 21: cloud.v1.ClusterNetwork
-	(*ControlPlaneSpec)(nil),        // 22: cloud.v1.ControlPlaneSpec
-	(*NodePoolSpec)(nil),            // 23: cloud.v1.NodePoolSpec
-	(*AccessSpec)(nil),              // 24: cloud.v1.AccessSpec
-	(*AwsClusterSpec)(nil),          // 25: cloud.v1.AwsClusterSpec
-	(*Condition)(nil),               // 26: cloud.v1.Condition
-	(*NetworkResources)(nil),        // 27: cloud.v1.NetworkResources
-	(*AwsClusterStatus)(nil),        // 28: cloud.v1.AwsClusterStatus
-	(*ImportStatus)(nil),            // 29: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),        // 30: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),         // 31: cloud.v1.ManagedResource
-	(*ClusterDeprecations)(nil),     // 32: cloud.v1.ClusterDeprecations
-	(*Event)(nil),                   // 33: cloud.v1.Event
-	(*Pause)(nil),                   // 34: cloud.v1.Pause
-	(*ClusterRecommendations)(nil),  // 35: cloud.v1.ClusterRecommendations
-	(ComponentPhase)(0),             // 36: cloud.v1.ComponentPhase
-	(ManagedResourceState)(0),       // 37: cloud.v1.ManagedResourceState
+	(ClusterReleaseMovePhase)(0),    // 8: cloud.v1.ClusterReleaseMovePhase
+	(*Cluster)(nil),                 // 9: cloud.v1.Cluster
+	(*ClusterSpec)(nil),             // 10: cloud.v1.ClusterSpec
+	(*MaintenanceWindow)(nil),       // 11: cloud.v1.MaintenanceWindow
+	(*ClusterStatus)(nil),           // 12: cloud.v1.ClusterStatus
+	(*ClusterRollout)(nil),          // 13: cloud.v1.ClusterRollout
+	(*ClusterKubernetes)(nil),       // 14: cloud.v1.ClusterKubernetes
+	(*PlatformComponent)(nil),       // 15: cloud.v1.PlatformComponent
+	(*ClusterUpgrade)(nil),          // 16: cloud.v1.ClusterUpgrade
+	(*ClusterUpgradeNodeGroup)(nil), // 17: cloud.v1.ClusterUpgradeNodeGroup
+	(*ClusterEndpoint)(nil),         // 18: cloud.v1.ClusterEndpoint
+	(*ClusterTeardown)(nil),         // 19: cloud.v1.ClusterTeardown
+	(*ClusterReleaseMove)(nil),      // 20: cloud.v1.ClusterReleaseMove
+	nil,                             // 21: cloud.v1.Cluster.LabelsEntry
+	(*timestamppb.Timestamp)(nil),   // 22: google.protobuf.Timestamp
+	(*ClusterNetwork)(nil),          // 23: cloud.v1.ClusterNetwork
+	(*ControlPlaneSpec)(nil),        // 24: cloud.v1.ControlPlaneSpec
+	(*NodePoolSpec)(nil),            // 25: cloud.v1.NodePoolSpec
+	(*AccessSpec)(nil),              // 26: cloud.v1.AccessSpec
+	(*AwsClusterSpec)(nil),          // 27: cloud.v1.AwsClusterSpec
+	(*Condition)(nil),               // 28: cloud.v1.Condition
+	(*NetworkResources)(nil),        // 29: cloud.v1.NetworkResources
+	(*AwsClusterStatus)(nil),        // 30: cloud.v1.AwsClusterStatus
+	(*ImportStatus)(nil),            // 31: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),        // 32: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),         // 33: cloud.v1.ManagedResource
+	(*ClusterDeprecations)(nil),     // 34: cloud.v1.ClusterDeprecations
+	(*Event)(nil),                   // 35: cloud.v1.Event
+	(*Pause)(nil),                   // 36: cloud.v1.Pause
+	(*ClusterRecommendations)(nil),  // 37: cloud.v1.ClusterRecommendations
+	(ComponentPhase)(0),             // 38: cloud.v1.ComponentPhase
+	(ManagedResourceState)(0),       // 39: cloud.v1.ManagedResourceState
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
-	19, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
-	9,  // 1: cloud.v1.Cluster.spec:type_name -> cloud.v1.ClusterSpec
-	11, // 2: cloud.v1.Cluster.status:type_name -> cloud.v1.ClusterStatus
-	20, // 3: cloud.v1.Cluster.create_time:type_name -> google.protobuf.Timestamp
-	20, // 4: cloud.v1.Cluster.update_time:type_name -> google.protobuf.Timestamp
-	21, // 5: cloud.v1.ClusterSpec.network:type_name -> cloud.v1.ClusterNetwork
-	22, // 6: cloud.v1.ClusterSpec.control_plane:type_name -> cloud.v1.ControlPlaneSpec
-	23, // 7: cloud.v1.ClusterSpec.default_node_pool:type_name -> cloud.v1.NodePoolSpec
-	24, // 8: cloud.v1.ClusterSpec.access:type_name -> cloud.v1.AccessSpec
+	21, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
+	10, // 1: cloud.v1.Cluster.spec:type_name -> cloud.v1.ClusterSpec
+	12, // 2: cloud.v1.Cluster.status:type_name -> cloud.v1.ClusterStatus
+	22, // 3: cloud.v1.Cluster.create_time:type_name -> google.protobuf.Timestamp
+	22, // 4: cloud.v1.Cluster.update_time:type_name -> google.protobuf.Timestamp
+	23, // 5: cloud.v1.ClusterSpec.network:type_name -> cloud.v1.ClusterNetwork
+	24, // 6: cloud.v1.ClusterSpec.control_plane:type_name -> cloud.v1.ControlPlaneSpec
+	25, // 7: cloud.v1.ClusterSpec.default_node_pool:type_name -> cloud.v1.NodePoolSpec
+	26, // 8: cloud.v1.ClusterSpec.access:type_name -> cloud.v1.AccessSpec
 	0,  // 9: cloud.v1.ClusterSpec.release_channel:type_name -> cloud.v1.ReleaseChannel
 	1,  // 10: cloud.v1.ClusterSpec.tier:type_name -> cloud.v1.ClusterTier
 	3,  // 11: cloud.v1.ClusterSpec.upgrade_mode:type_name -> cloud.v1.UpgradeMode
-	10, // 12: cloud.v1.ClusterSpec.maintenance_window:type_name -> cloud.v1.MaintenanceWindow
-	25, // 13: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
+	11, // 12: cloud.v1.ClusterSpec.maintenance_window:type_name -> cloud.v1.MaintenanceWindow
+	27, // 13: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
 	2,  // 14: cloud.v1.MaintenanceWindow.days:type_name -> cloud.v1.Weekday
 	4,  // 15: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
-	26, // 16: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
-	17, // 17: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
-	27, // 18: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
-	28, // 19: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
-	29, // 20: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
-	30, // 21: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	31, // 22: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	15, // 23: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
-	14, // 24: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
-	32, // 25: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
-	33, // 26: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
-	34, // 27: cloud.v1.ClusterStatus.pause:type_name -> cloud.v1.Pause
-	35, // 28: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
-	13, // 29: cloud.v1.ClusterStatus.kubernetes:type_name -> cloud.v1.ClusterKubernetes
-	12, // 30: cloud.v1.ClusterStatus.rollout:type_name -> cloud.v1.ClusterRollout
-	34, // 31: cloud.v1.ClusterStatus.upgrade_pause:type_name -> cloud.v1.Pause
-	18, // 32: cloud.v1.ClusterStatus.teardown:type_name -> cloud.v1.ClusterTeardown
-	20, // 33: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
-	20, // 34: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
-	5,  // 35: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
-	36, // 36: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	20, // 37: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
-	6,  // 38: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	20, // 39: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	16, // 40: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
-	37, // 41: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
-	20, // 42: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
-	20, // 43: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
-	7,  // 44: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
-	45, // [45:45] is the sub-list for method output_type
-	45, // [45:45] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	28, // 16: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
+	18, // 17: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
+	29, // 18: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
+	30, // 19: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
+	31, // 20: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
+	32, // 21: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	33, // 22: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	16, // 23: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
+	15, // 24: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
+	34, // 25: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
+	35, // 26: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
+	36, // 27: cloud.v1.ClusterStatus.pause:type_name -> cloud.v1.Pause
+	37, // 28: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
+	14, // 29: cloud.v1.ClusterStatus.kubernetes:type_name -> cloud.v1.ClusterKubernetes
+	13, // 30: cloud.v1.ClusterStatus.rollout:type_name -> cloud.v1.ClusterRollout
+	36, // 31: cloud.v1.ClusterStatus.upgrade_pause:type_name -> cloud.v1.Pause
+	19, // 32: cloud.v1.ClusterStatus.teardown:type_name -> cloud.v1.ClusterTeardown
+	20, // 33: cloud.v1.ClusterStatus.release_move:type_name -> cloud.v1.ClusterReleaseMove
+	22, // 34: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
+	22, // 35: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
+	5,  // 36: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
+	38, // 37: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
+	22, // 38: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	6,  // 39: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	22, // 40: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	17, // 41: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
+	39, // 42: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
+	22, // 43: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
+	22, // 44: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
+	7,  // 45: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
+	8,  // 46: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
+	22, // 47: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
+	22, // 48: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
+	49, // [49:49] is the sub-list for method output_type
+	49, // [49:49] is the sub-list for method input_type
+	49, // [49:49] is the sub-list for extension type_name
+	49, // [49:49] is the sub-list for extension extendee
+	0,  // [0:49] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -2266,8 +2493,8 @@ func file_cloud_v1_cluster_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_cluster_proto_rawDesc), len(file_cloud_v1_cluster_proto_rawDesc)),
-			NumEnums:      8,
-			NumMessages:   12,
+			NumEnums:      9,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

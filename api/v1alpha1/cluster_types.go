@@ -1021,6 +1021,11 @@ type ClusterStatus struct {
 	// only; a version a person changed writes none.
 	// +optional
 	Rollout *ClusterRolloutRecord `json:"rollout,omitempty"`
+	// releaseMove is the cluster moving its components to the release its
+	// channel offers, one at a time (the controller's component-upgrades
+	// setting).
+	// +optional
+	ReleaseMove *ClusterReleaseMove `json:"releaseMove,omitempty"`
 	// recommendations summarises the usage recorded to recommend resource
 	// requests (ListClusterRecommendations).
 	// +optional
@@ -1095,4 +1100,32 @@ func init() {
 		s.AddKnownTypes(SchemeGroupVersion, &Cluster{}, &ClusterList{})
 		return nil
 	})
+}
+
+// ClusterReleaseMove is a cluster moving its platform components from one
+// release to another, one component at a time.
+type ClusterReleaseMove struct {
+	// current is the release the components run.
+	// +optional
+	Current string `json:"current,omitempty"`
+	// target is the release they move to.
+	// +optional
+	Target string `json:"target,omitempty"`
+	// phase: Idle, Pending, Components or Halted.
+	// +optional
+	Phase string `json:"phase,omitempty"`
+	// component is the one being moved now; step its place among steps.
+	// +optional
+	Component string `json:"component,omitempty"`
+	// +optional
+	Step int32 `json:"step,omitempty"`
+	// +optional
+	Steps int32 `json:"steps,omitempty"`
+	// message says why it waits or what failed.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// +optional
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+	// +optional
+	ComponentStartTime *metav1.Time `json:"componentStartTime,omitempty"`
 }

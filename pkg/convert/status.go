@@ -52,6 +52,7 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.KubeconfigSecret = p.GetKubeconfigSecret()
 	into.Upgrade = upgrade(p.GetUpgrade())
 	into.PlatformRelease = p.GetPlatformRelease()
+	into.ReleaseMove = ReleaseMoveToAPI(p.GetReleaseMove())
 	into.Kubernetes = clusterKubernetes(p.GetKubernetes())
 	into.PlatformComponents = platformComponents(p.GetPlatformComponents())
 	into.RecentEvents = recentEvents(p.GetRecentEvents())

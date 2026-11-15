@@ -1620,6 +1620,41 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              releaseMove:
+                description: |-
+                  releaseMove is the cluster moving its components to the release its
+                  channel offers, one at a time (the controller's component-upgrades
+                  setting).
+                properties:
+                  component:
+                    description: component is the one being moved now; step its place
+                      among steps.
+                    type: string
+                  componentStartTime:
+                    format: date-time
+                    type: string
+                  current:
+                    description: current is the release the components run.
+                    type: string
+                  message:
+                    description: message says why it waits or what failed.
+                    type: string
+                  phase:
+                    description: 'phase: Idle, Pending, Components or Halted.'
+                    type: string
+                  startTime:
+                    format: date-time
+                    type: string
+                  step:
+                    format: int32
+                    type: integer
+                  steps:
+                    format: int32
+                    type: integer
+                  target:
+                    description: target is the release they move to.
+                    type: string
+                type: object
               rollout:
                 description: |-
                   rollout is the cluster's last automatic upgrade, as its release

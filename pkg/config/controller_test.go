@@ -33,8 +33,8 @@ func TestLoadController(t *testing.T) {
 	want := config.Controller{MetricsAddr: "0", ProbeAddr: ":8081", LeaderElect: true, LeaseNamespace: config.DefaultLeaseNamespace,
 		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true, Recommendations: true,
 		ReconcileWorkers: config.DefaultReconcileWorkers, UpgradeTimeout: config.DefaultUpgradeTimeout,
-		TeardownTimeout: config.DefaultTeardownTimeout,
-		AWS:             config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
+		TeardownTimeout: config.DefaultTeardownTimeout, ComponentUpgradeTimeout: config.DefaultComponentUpgradeTimeout,
+		AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("defaults = %+v, want %+v", cfg, want)
 	}
@@ -69,6 +69,8 @@ func TestLoadController(t *testing.T) {
 		"timeout zero":    {config.FlagUpgradeTimeout: "0s"},
 		"teardown word":   {config.FlagTeardownTimeout: "soon"},
 		"teardown zero":   {config.FlagTeardownTimeout: "0s"},
+		"components word": {config.FlagComponentUpgrades: "soon"},
+		"component zero":  {config.FlagComponentUpgradeTimeout: "0s"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
 			t.Errorf("%s: %v, want an error naming the flag", name, err)
@@ -98,6 +100,21 @@ func TestAutomaticUpgrades(t *testing.T) {
 	cfg, err = config.LoadController(nil, lookupIn(management(map[string]string{config.EnvAutomaticUpgrades: "true"})), nil)
 	if err != nil || !cfg.AutomaticUpgrades {
 		t.Errorf("CV_AUTOMATIC_UPGRADES=true: %v (%v), want on", cfg.AutomaticUpgrades, err)
+	}
+}
+
+// --component-upgrades is off unless turned on: a cluster then keeps the
+// release its components were installed from, as before.
+func TestComponentUpgrades(t *testing.T) {
+	cfg, err := config.LoadController(nil, lookupIn(management(nil)), nil)
+	if err != nil || cfg.ComponentUpgrades || cfg.ComponentUpgradeTimeout != config.DefaultComponentUpgradeTimeout {
+		t.Errorf("default: %v %v (%v), want off and %v", cfg.ComponentUpgrades, cfg.ComponentUpgradeTimeout, err,
+			config.DefaultComponentUpgradeTimeout)
+	}
+	cfg, err = config.LoadController(nil, lookupIn(management(map[string]string{config.EnvComponentUpgrades: "true",
+		config.EnvComponentUpgradeTimeout: "45m"})), nil)
+	if err != nil || !cfg.ComponentUpgrades || cfg.ComponentUpgradeTimeout.Minutes() != 45 {
+		t.Errorf("on, 45m: %v %v (%v)", cfg.ComponentUpgrades, cfg.ComponentUpgradeTimeout, err)
 	}
 }
 
@@ -136,6 +153,7 @@ func TestControllerSettingsAreFew(t *testing.T) {
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagRecommendations,
 		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
+		config.FlagComponentUpgrades, config.FlagComponentUpgradeTimeout,
 		config.FlagProviderCredentialsSecret,
 		config.FlagSkipTenantRole}
 	if !reflect.DeepEqual(got, want) {

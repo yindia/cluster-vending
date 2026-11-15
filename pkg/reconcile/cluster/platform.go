@@ -41,6 +41,9 @@ const (
 type platform struct {
 	release    string
 	components []*cloudv1.PlatformComponent
+	// move is the release move (release_move.go); nil when component
+	// upgrades are off.
+	move *cloudv1.ClusterReleaseMove
 }
 
 // storedStatus decodes the status recorded with the row; empty when there
@@ -77,7 +80,7 @@ func startedPlatform(row *model.Cluster) map[string]bool {
 // not look reports again.
 func storedPlatform(row *model.Cluster) *platform {
 	st := storedStatus(row)
-	return &platform{release: st.GetPlatformRelease(), components: st.GetPlatformComponents()}
+	return &platform{release: st.GetPlatformRelease(), components: st.GetPlatformComponents(), move: st.GetReleaseMove()}
 }
 
 // PlatformPending reports whether the row's recorded status says platform
@@ -98,7 +101,7 @@ func withPlatform(st *cloudv1.ClusterStatus, p *platform) {
 	if p == nil {
 		return
 	}
-	st.PlatformRelease, st.PlatformComponents = p.release, p.components
+	st.PlatformRelease, st.PlatformComponents, st.ReleaseMove = p.release, p.components, p.move
 	if len(p.components) == 0 {
 		return
 	}
@@ -162,8 +165,22 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if err != nil {
 		return nil, err
 	}
+	// The release move (component-upgrades): this pass's pins while the
+	// cluster moves to the release its channel offers, one component at a
+	// time; the release recorded once it is done.
+	var move *cloudv1.ClusterReleaseMove
+	if problem == "" && len(records) > 0 {
+		spec, err := SpecOf(row)
+		if err != nil {
+			return nil, err
+		}
+		if move, release, problem, err = s.moveRelease(ctx, row, spec, &in, release); err != nil {
+			return nil, err
+		}
+	}
 	if problem != "" {
 		p := unavailable(in.Entries, release, problem)
+		p.move = move
 		s.describe(ctx, row, in.Plan.Namespace, p, nil)
 		return p, nil
 	}
@@ -183,7 +200,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		return nil, err
 	}
 	components, objects := platformStatus(in, plan, skipped, res, views)
-	p := &platform{release: release, components: components}
+	p := &platform{release: release, components: components, move: move}
 	s.describe(ctx, row, in.Plan.Namespace, p, objects)
 	explainTakenOver(row, p.components)
 	return p, nil

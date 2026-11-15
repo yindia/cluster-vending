@@ -86,6 +86,10 @@ type Options struct {
 	// TeardownTimeout bounds a cluster deletion's teardown (0:
 	// reconcile.DefaultTeardownTimeout).
 	TeardownTimeout time.Duration
+	// ComponentUpgrades: clusters move their components to their channel's
+	// release; ComponentUpgradeTimeout bounds one component (0: default).
+	ComponentUpgrades       bool
+	ComponentUpgradeTimeout time.Duration
 	// AWS is the management role the providers run as, the providers'
 	// credentials Secret when there is no IRSA, and whether keys were
 	// found in the environment (local testing).
@@ -196,10 +200,12 @@ func Run(ctx context.Context, o Options) error {
 		RecoverStuckReleases: o.RecoverStuckReleases,
 		// The same, first in a cluster's deletion: its load balancers and
 		// Karpenter's nodes, while their controllers still run.
-		Teardowns:         management.Teardowns(direct),
-		TeardownTimeout:   o.TeardownTimeout,
-		NoRecommendations: !o.Recommendations,
-		Logger:            logger,
+		Teardowns:               management.Teardowns(direct),
+		TeardownTimeout:         o.TeardownTimeout,
+		ComponentUpgrades:       o.ComponentUpgrades,
+		ComponentUpgradeTimeout: o.ComponentUpgradeTimeout,
+		NoRecommendations:       !o.Recommendations,
+		Logger:                  logger,
 	})
 	if err != nil {
 		return err
@@ -209,7 +215,7 @@ func Run(ctx context.Context, o Options) error {
 	// Kubernetes event of the object (docs/events.md).
 	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
 	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades,
-		UpgradeTimeout: o.UpgradeTimeout}
+		UpgradeTimeout: o.UpgradeTimeout, ComponentUpgrades: o.ComponentUpgrades}
 	if err := Setup(mgr, deps); err != nil {
 		return err
 	}

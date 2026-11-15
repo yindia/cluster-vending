@@ -480,6 +480,11 @@ message ClusterStatus {
   // platform components are uninstalled. Unset until the cluster is
   // deleted.
   ClusterTeardown teardown = 49;
+
+  // release_move is the cluster's move from the release its components
+  // run (current) to the one its channel offers (target), one component
+  // at a time; set by the controller when component upgrades are on.
+  ClusterReleaseMove release_move = 50;
 }
 
 // ClusterRollout is one automatic upgrade of a cluster, as the rollout
@@ -718,4 +723,44 @@ enum ClusterTeardownResult {
   // Not run: the deletion is forced, or the cluster's API cannot be
   // reached; their cloud resources may be left behind.
   CLUSTER_TEARDOWN_RESULT_SKIPPED = 3;
+}
+
+// ClusterReleaseMove is a cluster moving its platform components from one
+// release to another, one component at a time in install order.
+message ClusterReleaseMove {
+  // The release the components run (all of them, once a move is done).
+  string current = 1;
+  // The release they move to; empty when there is none to move to.
+  string target = 2;
+  // Where the move is.
+  ClusterReleaseMovePhase phase = 3;
+  // The component being moved now.
+  string component = 4;
+  // Its place among the components that change (1-based), and how many.
+  int32 step = 5;
+  int32 steps = 6;
+  // Why it waits, what failed, or what is available.
+  string message = 7;
+  // When the move started; when the current component started.
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp component_start_time = 9;
+  // A pass after the one that set the component's new pin recorded it: its
+  // state is read from then on (the pass that applied it may still see the
+  // old version's Ready).
+  bool component_applied = 10;
+}
+
+// ClusterReleaseMovePhase is where a release move is.
+enum ClusterReleaseMovePhase {
+  CLUSTER_RELEASE_MOVE_PHASE_UNSPECIFIED = 0;
+  // Nothing to move: the components run the target, or there is none.
+  CLUSTER_RELEASE_MOVE_PHASE_IDLE = 1;
+  // A release to move to, not started: waiting its turn in the channel's
+  // rollout, a Kubernetes upgrade, or a manual cluster (message says).
+  CLUSTER_RELEASE_MOVE_PHASE_PENDING = 2;
+  // Moving components, one at a time.
+  CLUSTER_RELEASE_MOVE_PHASE_COMPONENTS = 3;
+  // Stopped: a component failed or did not settle in time; nothing moves
+  // until cluster retry.
+  CLUSTER_RELEASE_MOVE_PHASE_HALTED = 4;
 }

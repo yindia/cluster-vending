@@ -93,6 +93,13 @@ type Deps struct {
 	Teardowns Teardowns
 	// TeardownTimeout bounds that teardown; 0 is DefaultTeardownTimeout.
 	TeardownTimeout time.Duration
+	// ComponentUpgrades: a cluster moves its components to the release its
+	// channel offers, one at a time (release_move.go); off, it keeps the
+	// release its components were installed from.
+	ComponentUpgrades bool
+	// ComponentUpgradeTimeout is how long one component of a move may take
+	// to settle before the move halts; 0 is DefaultComponentUpgradeTimeout.
+	ComponentUpgradeTimeout time.Duration
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool
@@ -143,6 +150,16 @@ type ReleaseReader interface {
 // is one too lets a cluster's status say its upgrades are paused.
 type HoldReader interface {
 	Holds(ctx context.Context) ([]cloudv1alpha1.ReleaseHold, error)
+}
+
+// MoveAdmitter says whether a cluster may start moving its components to
+// a release now: the channel's rollout of release moves (tiers, batches,
+// soaks, pauses) admitted it. A PlatformSource that is one gates release
+// moves by it; one that is not admits every move.
+type MoveAdmitter interface {
+	// MoveAdmitted: the cluster (tenant, name) may start moving to release
+	// on channel; why says what it waits for when it may not.
+	MoveAdmitted(ctx context.Context, channel, release, tenantID, cluster string) (admitted bool, why string, err error)
 }
 
 // RenderBehind reports whether a resource last applied with renderer

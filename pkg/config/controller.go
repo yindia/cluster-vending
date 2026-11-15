@@ -31,6 +31,15 @@ const (
 	// deleting the load balancers and Karpenter nodes its controllers made.
 	FlagTeardownTimeout = "teardown-timeout"
 	EnvTeardownTimeout  = "CV_TEARDOWN_TIMEOUT"
+	// FlagComponentUpgrades: clusters move their components to the release
+	// their channel offers, one at a time. Off, a cluster keeps the release
+	// its components were installed from.
+	FlagComponentUpgrades = "component-upgrades"
+	EnvComponentUpgrades  = "CV_COMPONENT_UPGRADES"
+	// FlagComponentUpgradeTimeout is how long one component of a release
+	// move may take to settle before the move halts.
+	FlagComponentUpgradeTimeout = "component-upgrade-timeout"
+	EnvComponentUpgradeTimeout  = "CV_COMPONENT_UPGRADE_TIMEOUT"
 )
 
 // Defaults of the controller command.
@@ -48,6 +57,9 @@ const (
 	// DefaultTeardownTimeout: deleting a load balancer takes a minute or
 	// two, draining and terminating Karpenter's nodes a few minutes more.
 	DefaultTeardownTimeout = 15 * time.Minute
+	// DefaultComponentUpgradeTimeout: a chart upgrade that waits for its
+	// workloads (Istio's daemonsets roll node by node) settles well within.
+	DefaultComponentUpgradeTimeout = 30 * time.Minute
 )
 
 // controllerSettings are all the controller takes. How the providers run
@@ -87,6 +99,10 @@ var controllerSettings = []Setting{
 		Usage: "how long an automatic upgrade may take before the rollout counts it as failed (TimedOut, against the tier's maxFailed), e.g. 2h"},
 	{Flag: FlagTeardownTimeout, Env: EnvTeardownTimeout, Default: DefaultTeardownTimeout.String(),
 		Usage: "how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted, before it goes on (what is left is reported), e.g. 30m"},
+	{Flag: FlagComponentUpgrades, Env: EnvComponentUpgrades, Default: "false",
+		Usage: "move clusters with upgradeMode Automatic to the release their channel offers, one platform component at a time, tier by tier, halting on a failure (cluster retry resumes); false keeps each cluster on the release its components were installed from"},
+	{Flag: FlagComponentUpgradeTimeout, Env: EnvComponentUpgradeTimeout, Default: DefaultComponentUpgradeTimeout.String(),
+		Usage: "how long one component of a release move may take to run its new version and be Ready before the move halts, e.g. 45m"},
 	providerCredentialsSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
@@ -125,6 +141,11 @@ type Controller struct {
 	UpgradeTimeout time.Duration
 	// TeardownTimeout bounds a cluster deletion's teardown.
 	TeardownTimeout time.Duration
+	// ComponentUpgrades: clusters move their components to their channel's
+	// release; off, they keep the release they were installed from.
+	ComponentUpgrades bool
+	// ComponentUpgradeTimeout is how long one component of a move may take.
+	ComponentUpgradeTimeout time.Duration
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -184,6 +205,12 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.TeardownTimeout, err = time.ParseDuration(v[FlagTeardownTimeout]); err != nil || cfg.TeardownTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("%s must be a positive duration like 15m, got %q", setting(FlagTeardownTimeout), v[FlagTeardownTimeout]))
+	}
+	if cfg.ComponentUpgrades, err = strconv.ParseBool(v[FlagComponentUpgrades]); err != nil {
+		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagComponentUpgrades), v[FlagComponentUpgrades]))
+	}
+	if cfg.ComponentUpgradeTimeout, err = time.ParseDuration(v[FlagComponentUpgradeTimeout]); err != nil || cfg.ComponentUpgradeTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a positive duration like 30m, got %q", setting(FlagComponentUpgradeTimeout), v[FlagComponentUpgradeTimeout]))
 	}
 	if cfg.LeaderElect, err = strconv.ParseBool(v[FlagLeaderElect]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagLeaderElect), v[FlagLeaderElect]))

@@ -66,9 +66,6 @@ const DefaultRole = "provisioner"
 // roles, each a superset of the one before (scripts/generate.py).
 var roles = []string{"reader", "updater", "provisioner"}
 
-// Roles are the roles there is a template for.
-func Roles() []string { return slices.Clone(roles) }
-
 // RoleName is the IAM role (and stack) name of a role.
 func RoleName(role string) string { return Platform + "-" + role }
 

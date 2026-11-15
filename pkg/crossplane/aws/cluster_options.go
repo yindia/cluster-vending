@@ -240,8 +240,7 @@ func (b clusterBuilder) accessPolicyOf(entry, principal string, policy AccessPol
 // managedIdentityProvider is the OIDC identity provider of the Kubernetes
 // API the plan asks for: an IdentityProviderConfig
 // "<prefix>-idp-<hash8 of all its settings>" whose external name, the
-// EKS association's name, is "<name>-<the same hash8>"
-// (IdentityProviderAssociationName).
+// EKS association's name, is "<name>-<the same hash8>".
 //
 // EKS cannot change an association, so every setting is part of both
 // names: a change renders a new object for a new association and the old
@@ -271,12 +270,6 @@ func (idp IdentityProviderPlan) hash() string {
 	slices.Sort(claims)
 	return shortHash(idp.Name, idp.IssuerURL, idp.ClientID, idp.UsernameClaim, idp.UsernamePrefix,
 		idp.GroupsClaim, idp.GroupsPrefix, strings.Join(claims, ","))
-}
-
-// IdentityProviderAssociationName is the name of the EKS association a
-// managed identity provider gets: "<name>-<hash8 of its settings>".
-func IdentityProviderAssociationName(idp IdentityProviderPlan) string {
-	return idp.Name + "-" + idp.hash()
 }
 
 // oidc is the plan as the provider's parameters; the association's name is

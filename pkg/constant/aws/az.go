@@ -1,7 +1,6 @@
 package aws
 
 import (
-	"maps"
 	"slices"
 )
 
@@ -72,9 +71,4 @@ func ZoneIDs(region RegionCode) []ZoneID {
 func LookupZone(id string) (RegionCode, bool) {
 	region, ok := zoneRegion[ZoneID(id)]
 	return region, ok
-}
-
-// ZoneRegions returns the Regions that have zone data, sorted by code.
-func ZoneRegions() []RegionCode {
-	return slices.Sorted(maps.Keys(zoneIDs))
 }

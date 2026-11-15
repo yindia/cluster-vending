@@ -11,7 +11,7 @@ import (
 // parameter and names its role and policies after the RoleName parameter,
 // whose default is cluster-vending-<role>.
 func TestTemplatesAreEmbedded(t *testing.T) {
-	for _, role := range Roles() {
+	for _, role := range roles {
 		t.Run(role, func(t *testing.T) {
 			body, err := Template(role)
 			if err != nil {

@@ -130,34 +130,6 @@ func TestEvaluateRefusesABadTarget(t *testing.T) {
 	}
 }
 
-func TestBlocksUpgrade(t *testing.T) {
-	removed := deprecation.Finding{Namespace: "web", Kind: "Ingress", Name: "site", APIVersion: "extensions/v1beta1",
-		ReplacementAPI: "networking.k8s.io/v1", Removed: true}
-	clusterScoped := deprecation.Finding{Kind: "DeviceClass", Name: "gpu", APIVersion: "resource.k8s.io/v1alpha3", Removed: true}
-	deprecated := deprecation.Finding{Kind: "VolumeAttributesClass", Name: "vac"}
-	tests := []struct {
-		name     string
-		findings []deprecation.Finding
-		want     bool
-		reason   string
-	}{
-		{"nothing found", nil, false, ""},
-		{"deprecated only", []deprecation.Finding{deprecated}, false, ""},
-		{"one removed", []deprecation.Finding{deprecated, removed}, true,
-			"1 object(s) use an API version removed in Kubernetes 1.37, e.g. Ingress web/site (extensions/v1beta1, use networking.k8s.io/v1)"},
-		{"cluster-scoped, no replacement", []deprecation.Finding{clusterScoped, removed}, true,
-			"2 object(s) use an API version removed in Kubernetes 1.37, e.g. DeviceClass gpu (resource.k8s.io/v1alpha3)"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, reason := deprecation.BlocksUpgrade(tt.findings, "1.37")
-			if got != tt.want || reason != tt.reason {
-				t.Fatalf("BlocksUpgrade = %v, %q; want %v, %q", got, reason, tt.want, tt.reason)
-			}
-		})
-	}
-}
-
 func TestTarget(t *testing.T) {
 	tests := []struct{ current, upgradeTo, want string }{
 		{"1.36", "", "1.37"},

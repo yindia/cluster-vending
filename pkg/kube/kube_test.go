@@ -115,7 +115,11 @@ func fakeAPIServer(t *testing.T) *httptest.Server {
 
 func TestClientReadsTypedManagedResources(t *testing.T) {
 	srv := fakeAPIServer(t)
-	c, err := kube.Connect(writeKubeconfig(t, srv.URL), "prod")
+	cfg, err := kube.RESTConfig(writeKubeconfig(t, srv.URL), "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := kube.New(cfg)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

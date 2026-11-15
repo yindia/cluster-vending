@@ -37,9 +37,6 @@ type SecretKeyRef struct {
 	Direct bool
 }
 
-// String is the setting's own spelling of the reference.
-func (r SecretKeyRef) String() string { return r.Namespace + "/" + r.Name + ":" + r.Key }
-
 var (
 	// A namespace is a DNS label; a Secret name a DNS subdomain.
 	dnsLabelPattern     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)

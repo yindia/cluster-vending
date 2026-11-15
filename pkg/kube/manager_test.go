@@ -41,7 +41,7 @@ func TestManagerCachesOnlyTheGivenKinds(t *testing.T) {
 		}
 	}))
 	t.Cleanup(api.Close)
-	mgr, err := kube.NewManager(&rest.Config{Host: api.URL}, []schema.GroupVersionKind{vpc}, kube.LeaderElection{})
+	mgr, err := kube.NewManagerWith(&rest.Config{Host: api.URL}, kube.ManagerOptions{Cached: []schema.GroupVersionKind{vpc}})
 	if err != nil {
 		t.Fatal(err)
 	}

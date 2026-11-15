@@ -220,35 +220,6 @@ func reached(at version, in string) bool {
 	return ok && at.compare(v) >= 0
 }
 
-// BlocksUpgrade says whether findings stop an upgrade to target: true
-// when any of them is removed there, with the reason to show. Deprecated
-// only never blocks.
-func BlocksUpgrade(findings []Finding, target string) (bool, string) {
-	removed := 0
-	var first Finding
-	for _, f := range findings {
-		if !f.Removed {
-			continue
-		}
-		if removed == 0 {
-			first = f
-		}
-		removed++
-	}
-	if removed == 0 {
-		return false, ""
-	}
-	where := first.Name
-	if first.Namespace != "" {
-		where = first.Namespace + "/" + first.Name
-	}
-	reason := fmt.Sprintf("%d object(s) use an API version removed in Kubernetes %s, e.g. %s %s (%s", removed, target, first.Kind, where, first.APIVersion)
-	if first.ReplacementAPI != "" {
-		reason += ", use " + first.ReplacementAPI
-	}
-	return true, reason + ")"
-}
-
 // NextMinor is the minor after a Kubernetes version: "1.36" or "1.36.2"
 // gives "1.37".
 func NextMinor(current string) (string, error) {

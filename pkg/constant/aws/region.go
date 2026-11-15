@@ -117,11 +117,6 @@ var regions = []Region{
 	{USWest2, "US West (Oregon)", "United States of America", PartitionAWS, false},
 }
 
-// Regions returns every Region, sorted by code.
-func Regions() []Region {
-	return slices.Clone(regions)
-}
-
 // LookupRegion returns the Region with the given code. Codes are
 // case-sensitive, as in AWS.
 func LookupRegion(code string) (Region, bool) {

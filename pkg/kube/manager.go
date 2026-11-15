@@ -22,25 +22,11 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 )
 
-// NewManager returns a controller-runtime manager for the management
-// cluster. Its client reads from an informer cache and writes to the API
-// server. The cache holds exactly the kinds in cached (unstructured: one
-// informer per kind), only the platform's objects (the managed-by label),
-// without managedFields, so 100+ clusters' ~5,000 objects stay in memory
-// cheaply and reads cost no API calls. Reads of any other kind fail
-// (cache.ErrResourceNotCached) instead of starting an informer, and
-// Secrets are never cached: read those, and objects that must be current,
-// with GetAPIReader. Every cached kind must be served already
-// (WaitForKinds). Start the informers with StartInformers.
-func NewManager(cfg *rest.Config, cached []schema.GroupVersionKind, election LeaderElection) (manager.Manager, error) {
-	return NewManagerWith(cfg, ManagerOptions{Cached: cached, Election: election})
-}
-
 // ManagerOptions are what a manager of the management cluster is built
 // with (NewManagerWith).
 type ManagerOptions struct {
 	// Cached are the kinds the cache holds, the platform's objects only
-	// (the managed-by label): see NewManager.
+	// (the managed-by label): see NewManagerWith.
 	Cached []schema.GroupVersionKind
 	// Unfiltered are kinds the cache holds whatever their labels: the
 	// platform's own kinds, which a controller watches and which someone
@@ -54,7 +40,16 @@ type ManagerOptions struct {
 	MetricsAddr, ProbeAddr string
 }
 
-// NewManagerWith is NewManager with every option.
+// NewManagerWith returns a controller-runtime manager for the management
+// cluster. Its client reads from an informer cache and writes to the API
+// server. The cache holds exactly the kinds in o.Cached (unstructured: one
+// informer per kind), only the platform's objects (the managed-by label),
+// without managedFields, so 100+ clusters' ~5,000 objects stay in memory
+// cheaply and reads cost no API calls. Reads of any other kind fail
+// (cache.ErrResourceNotCached) instead of starting an informer, and
+// Secrets are never cached: read those, and objects that must be current,
+// with GetAPIReader. Every cached kind must be served already
+// (WaitForKinds). Start the informers with StartInformers.
 func NewManagerWith(cfg *rest.Config, o ManagerOptions) (manager.Manager, error) {
 	scheme, err := Scheme()
 	if err != nil {
@@ -136,7 +131,7 @@ func NewRESTMapper(cfg *rest.Config) (meta.RESTMapper, error) {
 }
 
 // WaitForKinds waits until the API server serves every kind (their CRDs
-// exist). It must run before NewManager: the manager's cache looks every
+// exist). It must run before NewManagerWith: the manager's cache looks every
 // cached kind up when it is built and fails on a missing one. A fresh
 // management cluster, or one whose server was upgraded to use more
 // providers, gets the providers' CRDs a minute or two after the providers

@@ -112,12 +112,3 @@ func New(cfg *rest.Config) (client.Client, error) {
 	}
 	return c, nil
 }
-
-// Connect is RESTConfig followed by New.
-func Connect(kubeconfig, kubeContext string) (client.Client, error) {
-	cfg, err := RESTConfig(kubeconfig, kubeContext)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg)
-}

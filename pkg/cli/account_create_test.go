@@ -36,6 +36,7 @@ type accountAPI struct {
 	onboarded    *cloudv1.GetAccountOnboardingRequest
 	bootstrapped *cloudv1.BootstrapTenantRequest
 	verified     bool
+	verifiedIn   []string // the regions VerifyCloudAccount was asked to check
 	// verdict is the access check's result once verify was asked; nil:
 	// the controller never checks.
 	verdict *cloudv1.AccountAccess
@@ -77,8 +78,8 @@ func (f *accountAPI) BootstrapTenant(_ context.Context, req *cloudv1.BootstrapTe
 	return &cloudv1.BootstrapTenantResponse{Account: f.account()}, nil
 }
 
-func (f *accountAPI) VerifyCloudAccount(_ context.Context, _ *cloudv1.VerifyCloudAccountRequest) (*cloudv1.VerifyCloudAccountResponse, error) {
-	f.verified = true
+func (f *accountAPI) VerifyCloudAccount(_ context.Context, req *cloudv1.VerifyCloudAccountRequest) (*cloudv1.VerifyCloudAccountResponse, error) {
+	f.verified, f.verifiedIn = true, req.GetRegions()
 	return &cloudv1.VerifyCloudAccountResponse{Account: f.account()}, nil
 }
 
@@ -261,6 +262,23 @@ func TestAccountCreateFromTheTerminal(t *testing.T) {
 		"Access: verified")
 	contains(t, "output", r.out, "bootstrapped", "cluster-vending network create")
 	t.Logf("stderr:\n%s\nstdout:\n%s", r.progress, r.out)
+}
+
+// --region is where the account is used: its access check covers that
+// region too, so a network there is not refused as "not verified yet".
+func TestAccountCreateChecksTheRegion(t *testing.T) {
+	api := &accountAPI{verdict: verified()}
+	stacks := &fakeStacks{caller: tenantAccount, states: []*StackInfo{nil, stack("CREATE_COMPLETE")}}
+
+	r := createAccount(t, Options{Input: manifest(t, "cluster-vending-provisioner"), CreateRole: "terminal", Wait: true,
+		StackRegion: "us-west-1"}, api, stacks)
+
+	if r.err != nil {
+		t.Fatalf("%v\n%s", r.err, r.progress)
+	}
+	if len(api.verifiedIn) != 1 || api.verifiedIn[0] != "us-west-1" {
+		t.Errorf("access check regions = %v, want [us-west-1]", api.verifiedIn)
+	}
 }
 
 // The caller's credentials are for another account: nothing is created,

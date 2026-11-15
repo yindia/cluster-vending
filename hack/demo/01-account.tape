@@ -29,9 +29,10 @@ Sleep 1s
 Type `cat $D/cloudaccount.yaml | grep -v '^#'` Enter
 Sleep 3s
 Type `cluster-vending account create -f $D/cloudaccount.yaml --create-role terminal --region $DEMO_REGION` Enter
-Sleep 5s
-Hide
+# Shown until it returns: the stack's events, then the access check.
 Wait@40m /^❯\s*$/
+Sleep 4s
+Hide
 Type `wait_account 1 $?` Enter
 Wait+Screen@30m /__step_1_(done|failed)__/
 Type "check" Enter

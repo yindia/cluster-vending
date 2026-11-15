@@ -254,7 +254,13 @@ func createRoleInBrowser(ctx context.Context, o Options, ob *cloudv1.AccountOnbo
 // waits for its verdict: a check later than the one the account has now.
 func checkAccess(ctx context.Context, c Clients, o Options, a *cloudv1.CloudAccount) (*cloudv1.CloudAccount, error) {
 	before := a.GetStatus().GetAccess().GetCheckedTime().AsTime()
-	if _, err := call(ctx, &cloudv1.VerifyCloudAccountRequest{TenantId: a.GetTenantId(), Id: a.GetId()}, c.Tenant.VerifyCloudAccount); err != nil {
+	// --region is where the account is used: the check covers it, so a
+	// network there is not refused as not verified yet.
+	var regions []string
+	if o.StackRegion != "" {
+		regions = []string{o.StackRegion}
+	}
+	if _, err := call(ctx, &cloudv1.VerifyCloudAccountRequest{TenantId: a.GetTenantId(), Id: a.GetId(), Regions: regions}, c.Tenant.VerifyCloudAccount); err != nil {
 		return nil, err
 	}
 	o.progressf("Checking the account's access: the controller assumes %s in account %s\n",

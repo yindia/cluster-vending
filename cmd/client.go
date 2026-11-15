@@ -202,7 +202,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.CreateRole, "create-role", "", "how to create the platform's role (spec.aws.role) in the AWS account with CloudFormation: "+
 				"terminal (here, with your AWS credentials of the account), browser (the CloudFormation console) or skip (it exists); asked when at a terminal")
 			f.StringVar(&o.Profile, "profile", "", "the AWS profile with credentials of the account (default: AWS_PROFILE and the SDK's default chain)")
-			f.StringVar(&o.StackRegion, "region", "", "the AWS region of the role's stack (IAM is global); default us-east-1")
+			f.StringVar(&o.StackRegion, "region", "", "the AWS region of the role's stack (IAM is global), also checked by the account's access check; default us-east-1")
 		}
 		if v.deleteRole {
 			f.BoolVar(&o.DeleteRole, "delete-role", false, "also delete the CloudFormation stack of the account's role (spec.aws.role), "+

@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { create, fromJsonString } from "@bufbuild/protobuf";
-import { SubTenantSchema, SubTenantAccessSchema } from "@/gen/cloud/v1/subtenant_pb";
-import { CreateSubTenantRequestSchema, UpdateSubTenantRequestSchema } from "@/gen/cloud/v1/subtenant_service_pb";
+import { create, fromJsonString, toJson } from "@bufbuild/protobuf";
+import { SubTenantSchema, SubTenantAccessSchema, SubTenantSpecSchema, SubTenantState } from "@/gen/cloud/v1/subtenant_pb";
+import { CreateSubTenantRequestSchema, GetSubTenantResponseSchema, UpdateSubTenantRequestSchema, UpdateSubTenantResponseSchema } from "@/gen/cloud/v1/subtenant_service_pb";
 import type { BrowserClients } from "@/lib/api/client";
 import { emptySubTenantDraft } from "./subtenant-drafts";
-import { applySubTenantReview, deleteSubTenantRequest, draftSubTenantSpec, reviewSubTenant, scopedSubTenant, subTenantYaml, yamlSubTenantSpec } from "./subtenants";
+import { applySubTenantReview, deleteSubTenantRequest, disableSubTenantProtection, draftSubTenantSpec, reviewSubTenant, scopedSubTenant, subTenantDraft, subTenantYaml, yamlSubTenantSpec } from "./subtenants";
 const scope = { tenantId: "acme", clusterId: "00000000-0000-4000-8000-000000000003" };
 const id = "00000000-0000-4000-8000-000000000004";
 const requestId = "00000000-0000-4000-8000-000000000005";
-const draft = { ...emptySubTenantDraft, displayName: "Payments", namespaceKeys: "payments", quotas: "pods=10\nrequests.cpu=2" };
+const draft = { ...emptySubTenantDraft, name: "payments", displayName: "Payments", namespaceKeys: "payments", quotas: "pods=10\nrequests.cpu=2" };
 const spec = () => draftSubTenantSpec(draft);
 const resource = () => create(SubTenantSchema, { ...scope, id, etag: "etag-1", generation: 1n, spec: spec() });
 
@@ -53,7 +53,7 @@ test("updates require etags, retain namespace keys and mask only changed setting
 });
 
 test("delete has mandatory etag, exact confirmation and no force; canonical results fail closed", async () => {
-  const before = resource();
+  const before = resource(); before.spec!.deletionProtection = false;
   const request = deleteSubTenantRequest(scope, before, id);
   assert.equal(request.etag, before.etag);
   assert.equal("force" in request, false);
@@ -63,4 +63,70 @@ test("delete has mandatory etag, exact confirmation and no force; canonical resu
   const api = { subtenant: { createSubTenant: async () => ({ subtenant: { ...before, tenantId: "foreign" } }) } } as unknown as BrowserClients;
   await assert.rejects(applySubTenantReview(api, reviewSubTenant(scope, spec(), requestId), scope, new AbortController().signal), /active tenant/);
   await assert.rejects(applySubTenantReview(api, reviewSubTenant(scope, spec(), requestId), scope, AbortSignal.abort()), /abort/i);
+});
+
+
+test("names are required on creation, immutable on updates, and legacy names stay blank", () => {
+  assert.throws(() => draftSubTenantSpec({ ...draft, name: "" }), /name/i);
+  for (const name of ["Upper", "a.b", "-start", "end-", "a".repeat(36)]) assert.throws(() => draftSubTenantSpec({ ...draft, name }), /name/i);
+  assert.doesNotThrow(() => draftSubTenantSpec({ ...draft, name: "a".repeat(35) }));
+  const before = resource();
+  assert.throws(() => reviewSubTenant(scope, create(SubTenantSpecSchema, { ...spec(), name: "renamed" }), requestId, before), /immutable/);
+  assert.throws(() => yamlSubTenantSpec(subTenantYaml(scope, { ...before, spec: create(SubTenantSpecSchema, { ...spec(), name: "renamed" }) }), scope, before), /immutable/);
+  before.spec!.name = "";
+  assert.equal(draftSubTenantSpec({ ...draft, name: "", displayName: "Legacy team" }, before).name, "");
+});
+
+test("omitted protection is on, false is explicit in masks and required before deletion", () => {
+  const before = resource(); before.spec!.deletionProtection = undefined;
+  assert.throws(() => deleteSubTenantRequest(scope, before, id), /Disable deletion protection/);
+  const changed = draftSubTenantSpec({ ...draft, deletionProtection: false }, before);
+  const patch = fromJsonString(UpdateSubTenantRequestSchema, reviewSubTenant(scope, changed, requestId, before).requestJson);
+  assert.deepEqual(patch.updateMask?.paths, ["spec.deletion_protection"]);
+  assert.equal(patch.subtenant?.spec?.deletionProtection, false);
+  before.spec!.deletionProtection = false;
+  const protectedAgain = fromJsonString(UpdateSubTenantRequestSchema, reviewSubTenant(scope, create(SubTenantSpecSchema, { ...spec(), deletionProtection: undefined }), requestId, before).requestJson);
+  assert.equal(protectedAgain.subtenant?.spec?.deletionProtection, true);
+  assert.doesNotThrow(() => deleteSubTenantRequest(scope, before, id));
+});
+
+test("protection-only recovery reads latest etag, preserves deleting state and rejects unconfirmed or foreign replies", async () => {
+  const before = resource(); before.etag = "latest-etag"; before.status = { $typeName: "cloud.v1.SubTenantStatus", observedGeneration: 1n, state: SubTenantState.DELETING, message: "", conditions: [], remoteCapsuleTenant: "payments", remoteCapsuleTenantUid: "", templateRevision: "", namespaces: [], deletionBlockers: [] };
+  const requests: Parameters<BrowserClients["subtenant"]["updateSubTenant"]>[0][] = [];
+  const originalSpec = create(SubTenantSpecSchema, before.spec);
+  const subtenant: Pick<BrowserClients["subtenant"], "getSubTenant" | "updateSubTenant"> = {
+    getSubTenant: async () => create(GetSubTenantResponseSchema, { subtenant: before }),
+    updateSubTenant: async (request) => {
+      requests.push(request);
+      return create(UpdateSubTenantResponseSchema, { subtenant: create(SubTenantSchema, { ...before, spec: create(SubTenantSpecSchema, { ...originalSpec, deletionProtection: false }) }) });
+    },
+  };
+  const api = { subtenant } as unknown as BrowserClients;
+  const result = await disableSubTenantProtection(api, scope, id, new AbortController().signal);
+  assert.equal(result.status?.state, SubTenantState.DELETING);
+  assert.deepEqual(requests[0].updateMask?.paths, ["spec.deletion_protection"]);
+  assert.equal(requests[0].subtenant?.etag, "latest-etag");
+  assert.deepEqual(toJson(SubTenantSpecSchema, create(SubTenantSpecSchema, requests[0].subtenant?.spec)), { deletionProtection: false });
+  assert.equal(requests[0].subtenant?.spec?.deletionProtection, false);
+  subtenant.updateSubTenant = async () => create(UpdateSubTenantResponseSchema, { subtenant: before });
+  await assert.rejects(disableSubTenantProtection(api, scope, id, new AbortController().signal), /did not confirm/);
+  subtenant.getSubTenant = async () => create(GetSubTenantResponseSchema, { subtenant: create(SubTenantSchema, { ...before, tenantId: "foreign" }) });
+  await assert.rejects(disableSubTenantProtection(api, scope, id, new AbortController().signal), /active tenant/);
+});
+
+
+test("guided and YAML group arrays round trip and access-only updates explicitly clear groups", () => {
+  assert.match(subTenantYaml(scope), /adminGroups: \[\]/);
+  assert.match(subTenantYaml(scope), /viewerGroups: \[\]/);
+  const withGroups = draftSubTenantSpec({ ...draft, adminGroups: "payments-admins,engineering:payments", viewerGroups: "payments-viewers" });
+  assert.deepEqual(withGroups.access?.adminGroups, ["payments-admins", "engineering:payments"]);
+  const current = resource(); current.spec = withGroups;
+  assert.equal(subTenantDraft(current).viewerGroups, "payments-viewers");
+  assert.deepEqual(yamlSubTenantSpec(subTenantYaml(scope, current), scope, current), withGroups);
+  const empty = draftSubTenantSpec({ ...draft, adminGroups: "", viewerGroups: "" }, current);
+  const patch = fromJsonString(UpdateSubTenantRequestSchema, reviewSubTenant(scope, empty, requestId, current).requestJson);
+  assert.deepEqual(patch.updateMask?.paths, ["spec.access"]);
+  assert.deepEqual(patch.subtenant?.spec?.access?.adminGroups, []);
+  assert.deepEqual(patch.subtenant?.spec?.access?.viewerGroups, []);
+  assert.throws(() => draftSubTenantSpec({ ...draft, adminGroups: "shared", viewerGroups: "shared" }), /both/);
 });

@@ -14,9 +14,13 @@ apiVersion: cluster-vending.io/v1
 kind: SubTenant
 metadata:
   tenant: acme
-  clusterId: 00000000-0000-0000-0000-000000000003  # replace with CLUSTER_ID
+  clusterId: 01a1e418-bddd-77b4-8b4f-c7de9131a16b  # replace with CLUSTER_ID
   # id: <SUBTENANT_ID>  # edit only; allocation identity is assigned on create
 spec:
+  # Immutable canonical name, unique within this workload cluster (1-35 DNS chars).
+  name: payments
+  # Default true, including when omitted. Disable explicitly before deleting.
+  deletionProtection: true
   displayName: Payments
   # Logical keys, not physical namespace names. Use 1-64 unique lowercase DNS
   # labels, each at most 27 characters. Keys may be added but not removed/renamed.
@@ -29,11 +33,11 @@ spec:
     namespaceCount: 3
     hard:
       requests.cpu: "4"
-      requests.memory: 8Gi
-      limits.memory: 8Gi
-      requests.ephemeral-storage: 20Gi
-      limits.ephemeral-storage: 40Gi
-      requests.storage: 100Gi
+      requests.memory: 3Gi
+      limits.memory: 3Gi
+      requests.ephemeral-storage: 10Gi
+      limits.ephemeral-storage: 10Gi
+      requests.storage: 10Gi
       persistentvolumeclaims: "10"
       pods: "30"
       services: "20"

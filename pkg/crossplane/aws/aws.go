@@ -81,10 +81,11 @@ type ProviderRuntime struct {
 	// (IRSA: an annotation on their service account). Empty: none (local
 	// clusters, credentials from the ProviderConfig Secret).
 	ManagementRoleARN string
-	// Poll is how often a provider checks each resource for drift; EC2Poll
+	// Poll is how often an AWS provider checks each resource for drift; EC2Poll
 	// the same for provider-aws-ec2, whose network resources are many and
-	// change rarely.
-	Poll, EC2Poll time.Duration
+	// change rarely. HelmPoll independently checks Helm release readiness;
+	// zero uses the one-minute default for callers predating this field.
+	Poll, EC2Poll, HelmPoll time.Duration
 	// MaxReconcileRate caps a provider's reconciles per second (and so its
 	// AWS API calls).
 	MaxReconcileRate int
@@ -101,13 +102,16 @@ type ProviderRuntime struct {
 // DefaultProviderRuntime is the providers' runtime for ~100 clusters of
 // ~80 managed resources each on one management cluster. Poll 10m (the
 // providers' own default) and 30m for EC2's many, rarely changing network
-// resources; at most 10 reconciles a second per provider (the providers
+// resources. Helm polls every minute to observe release readiness promptly,
+// without increasing AWS drift polling; at most 10 reconciles a second per provider (the providers
 // default to 100, which AWS API throttling punishes at this size). Two
 // replicas with leader election: one active, one hot standby.
 func DefaultProviderRuntime() ProviderRuntime {
-	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, MaxReconcileRate: 10,
+	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, HelmPoll: defaultHelmPoll, MaxReconcileRate: 10,
 		CPURequest: "1", MemoryRequest: "2Gi", CPULimit: "4", MemoryLimit: "4Gi", Replicas: 2}
 }
+
+const defaultHelmPoll = time.Minute
 
 // leaderElectionArg turns on leader election in provider-upjet-aws
 // (v2.9.0) and provider-helm (v1.5.0): both read the same flag (default
@@ -120,6 +124,12 @@ const leaderElectionArg = "--leader-election"
 // provider-helm (no AWS identity: it reaches the workload clusters with
 // their kubeconfigs). Cluster-scoped and shared by every tenant.
 func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, error) {
+	if rt.HelmPoll < 0 {
+		return nil, fmt.Errorf("provider Helm poll interval must be positive")
+	}
+	if rt.HelmPoll == 0 {
+		rt.HelmPoll = defaultHelmPoll
+	}
 	resources, err := rt.resources()
 	if err != nil {
 		return nil, err
@@ -147,7 +157,7 @@ func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, 
 		return c
 	}
 	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll, true), config(RuntimeConfigEC2Name, rt.EC2Poll, true),
-		config(RuntimeConfigHelmName, rt.Poll, false)}, nil
+		config(RuntimeConfigHelmName, rt.HelmPoll, false)}, nil
 }
 
 // HelmProvider is provider-helm (crossplane.HelmProvider) running with

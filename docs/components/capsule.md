@@ -59,20 +59,98 @@ Two controller replicas use leader election, preferred node anti-affinity and a
 PDB retaining one pod. Resource requests are 100m CPU / 128Mi memory, with a 512Mi
 memory limit; tune from observed workload, not an assumed tenant count.
 
-Strict RBAC is enabled instead of a cluster-admin binding. In this exact chart,
-strict mode still includes broad read/delete/patch permissions needed for generic
-namespace cleanup; it does not isolate the controller to tenant namespaces.
-Custom owner roles or resource replication may need additional permissions.
+New shipped release pins include the shared NaaS bootstrap described below.
+They disable chart-generated manager RBAC and provide explicit controller roles
+instead of a cluster-admin binding. The pinned upstream strict role grants
+impersonation of **every** ServiceAccount; a supplementary restricted role cannot
+subtract that grant. The replacement retains upstream controller permissions,
+including broad read/delete/patch permissions needed for generic namespace
+cleanup, but removes cluster-wide impersonation. A Role in `naas-system` permits
+the controller to impersonate only its `provisioner` ServiceAccount. The controller
+remains trusted across the cluster; this is not a hard security boundary against
+a compromised Capsule controller or cluster administrator.
 Admission hooks retain upstream failure policies, with trusted system callers and
 nodes excluded from admission matching. The Node webhook stays off. Kyverno's
 platform namespace exclusions include `capsule-system`.
 
-This step installs the operator. It does **not** create Capsule Tenant objects,
-map platform Tenant CRs into Capsule Tenants, configure IAM/OIDC owner identities,
-or deploy capsule-proxy. The default Capsule identity group remains
-`projectcapsule.dev`; cluster authentication must map intended users into it.
-The platform's `cloud.cluster-vending.io` Tenant and Capsule's
-`capsule.clastix.io` Tenant are distinct resources.
+The shared installation creates no per-SubTenant Capsule Tenant, developer access,
+IAM/OIDC mapping or capsule-proxy. Per-SubTenant provisioning is a separate
+controller responsibility. The platform's `cloud.cluster-vending.io` Tenant and
+Capsule's `capsule.clastix.io` Tenant remain distinct resources.
+
+## Shared bootstrap and release updates
+
+The canonical payload is [bootstrap.yaml](../../pkg/naas/assets/bootstrap.yaml),
+loaded by [pkg/naas](../../pkg/naas/bootstrap.go). The new-release composition in
+[catalog/bootstrap.go](../../pkg/catalog/bootstrap.go) snapshots the platform
+values, retains the Capsule PDB, and appends the escaped bootstrap manifests to
+each minor's Capsule pin. Capsule 0.15.2 evaluates `tpl(toYaml(...))` for
+`extraManifests`; escaping preserves Capsule's generator expressions through that
+Helm pass. The pin also records the deterministic bootstrap revision on its
+resources. A template-only edit therefore changes shipped release content and its
+hash even with chart version 0.15.2 unchanged. The normal tier/channel, freeze and
+release-move gates govern when a cluster receives those values. Existing
+published Releases are not augmented or rewritten on read, and the mutable
+ComponentDefinition does not receive the bootstrap authority.
+
+The shared payload installs these prerequisites once per workload cluster:
+
+- `naas-system` and a token-unmounted `provisioner` ServiceAccount. No pod or
+  long-lived token is created for it.
+- A replication ClusterRole/Binding for Namespace creation and update, native
+  NetworkPolicy, Istio PeerAuthentication/AuthorizationPolicy, LimitRange,
+  ServiceAccount and RoleBinding reconciliation. Its only explicit `bind` grant
+  names `naas-workload-editor`; it cannot delete namespaces, read Secrets, mint
+  ServiceAccount tokens, edit nodes or grant `admin`/`cluster-admin`.
+- Explicit Capsule controller roles/bindings, a namespaced impersonation Role,
+  and the constrained `naas-workload-editor` ClusterRole. The controller's
+  ordinary leader-election and local Secret permissions are retained. Controller
+  cleanup is broader than replication and is trusted cluster-wide.
+- Three GlobalTenantResources: namespace bootstrap (`scope: Tenant`), isolation
+  baseline (`scope: Namespace`), and selector-gated developer access
+  (`scope: Namespace`). Namespace owner references use the actual Capsule Tenant
+  UID. Namespace/security replication uses `Orphan` retention; access uses
+  `Remove` so selector withdrawal eventually removes its RoleBindings.
+
+The release pins the chart's controller ServiceAccount to `capsule-system/capsule`
+and its full name to `capsule`, matching the explicit bindings and webhook role
+resource names. It maps **only**
+`system:serviceaccount:naas-system:provisioner` into Capsule `users` and
+`administrators`, using the supported `kind: ServiceAccount` and full username
+format. There is no human administrator mapping. Automatic administrator and
+promoted-owner role lists are empty; ServiceAccount owner promotion is off.
+Capsule may maintain its own namespace-provisioner binding for this trusted
+identity. Do not introduce human owners with default `admin` roles as a shortcut.
+
+Before enabling workload provisioning, installation guards must verify Capsule
+CRDs/admission/certificates, these exact ServiceAccounts and effective RBAC,
+CapsuleConfiguration identity mapping, the expected GTR specs/revision and existing
+Istio ambient APIs/controllers. The cluster's existing cert-manager is required;
+none is installed here. Native CNI enforcement, EKS/VPC-CNI HBONE behavior, DNS,
+IPv4/IPv6 and bypass/adversarial tests still need cluster-specific qualification.
+The supplied same-SubTenant namespace selector on HBONE port 15008 is not a
+blanket mesh-port allowance or evidence that native policy interoperates correctly
+with ambient on a particular cluster.
+
+**Keep `access-ready: "false"` until independent baseline qualification exists.**
+Helm deployed, GTR Ready, successful API reads, mTLS configuration and matching
+revision do not prove packet isolation. This bootstrap integration implements no
+probe qualification and grants no developer access itself. A controller changing
+the expected revision must invalidate the Tenant access gate before accepting a
+new baseline; withdrawing the selector revokes replicated access eventually, not
+atomically. Stopping management Tenant writes under freeze does not stop Capsule
+replication. `Orphan` replication policy also does not defeat Namespace owner-GC:
+deleting the Capsule Tenant still requires the reviewed require-empty lifecycle.
+
+The version-specific authority and identity behavior is checked against the
+[0.15.2 chart](https://projectcapsule.github.io/charts/capsule-0.15.2.tgz)
+(`templates/rbac.yaml`, `configuration.yaml`, `extra-manifests.yaml`,
+`values.yaml`) and the corresponding
+[ServiceAccount identity implementation](https://github.com/projectcapsule/capsule/blob/v0.15.2/pkg/api/rbac/users.go),
+[impersonated client](https://github.com/projectcapsule/capsule/blob/v0.15.2/pkg/users/serviceaccounts.go)
+and [managed RBAC controller](https://github.com/projectcapsule/capsule/blob/v0.15.2/internal/controllers/rbac/manager.go).
+The broader [NaaS design](../design/namespace-as-a-service.md) describes the
+remaining retention, readiness, freeze and isolation constraints.
 
 ## Complete Helm values reference
 
@@ -99,9 +177,9 @@ Platform values are locked to the platform team, not exposed as tenant Helm inpu
 | `tls`, `certManager` | Existing Secret, built-in TLS reconciliation versus cert-manager, additional certificate SANs. Use existing cert-manager. |
 | `proxy` | Optional capsule-proxy subchart and its own values; disabled. |
 | `rbac` | Optional tenant-facing roles for TenantResources, ResourcePoolClaims and CustomQuotas; defaults retained. |
-| `manager.rbac` | Role creation, strict/minimal mode, bindable or existing roles, extra namespaced/cluster rules. Strict enabled; `minimal` is deprecated. |
+| `manager.rbac` | Role creation, strict/minimal mode, bindable or existing roles, extra namespaced/cluster rules. New bootstrap pins disable generated manager roles and supply explicit strict-derived roles with restricted impersonation; `minimal` is deprecated. |
 | `manager` deployment/image/network settings | Deployment/DaemonSet strategies, image, hostNetwork, hostPID, hostUsers and webhook port; EKS default VPC CNI settings retained. Custom CNIs may require host networking and firewall review. |
-| `manager.options` | Configuration CR creation/name/metadata; workers, QPS/burst, cache timings, leader election; users/administrators/ignored groups; owner promotion, namespace prefixes/protection, node metadata, role names, impersonation and tracing. Do not invent identity mappings during installation. |
+| `manager.options` | Configuration CR creation/name/metadata; workers, QPS/burst, cache timings, leader election; users/administrators/ignored groups; owner promotion, namespace prefixes/protection, node metadata, role names, impersonation and tracing. New bootstrap pins map only the trusted provisioner ServiceAccount as described above. |
 | `manager.apiPriorityAndFairness` | Optional FlowSchema/PriorityLevel configuration, precedence and API version; off until cluster API fairness policy is chosen. |
 | `manager.extraArgs`, `env`, probes, resources, volumes, volumeMounts, securityContext | Controller flags, environment, health checks and runtime configuration; fixed resource budget in the definition. These keys are under `manager`. |
 | `imagePullSecrets`, `podLabels`, `podAnnotations`, `customLabels`, `customAnnotations` | Pod/global metadata and private image credentials. |

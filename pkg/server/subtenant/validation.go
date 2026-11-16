@@ -2,10 +2,32 @@ package subtenant
 
 import (
 	"errors"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
+
+func validateGroups(admin, viewer []string) error {
+	seen := map[string]bool{}
+	for _, groups := range [][]string{admin, viewer} {
+		if len(groups) > 32 {
+			return invalid("each access group role permits at most 32 exact groups")
+		}
+		for _, group := range groups {
+			if group == "" || utf8.RuneCountInString(group) > 256 || group != strings.TrimSpace(group) || strings.HasPrefix(group, "system:") || strings.ContainsAny(group, "*?") || strings.ContainsFunc(group, unicode.IsControl) {
+				return invalid("access groups must be exact nonreserved claim values of 1 to 256 characters, without wildcards or control characters")
+			}
+			if seen[group] {
+				return invalid("access groups must be unique and cannot occur in both roles")
+			}
+			seen[group] = true
+		}
+	}
+	return nil
+}
 
 func validateKeys(keys []string) error {
 	if len(keys) < 1 || len(keys) > 64 {

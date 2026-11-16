@@ -175,8 +175,8 @@ build: ## Build bin/cluster-vending
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY) .
 
 .PHONY: run
-run: build ## Run the API server against the kind cluster (hack/config.local.yaml); start run-controller first
-	$(BINARY) serve --config hack/config.local.yaml
+run: build ## Run the API with local Keycloak authentication; start run-controller first
+	KEYCLOAK_API_BINARY="$(abspath $(BINARY))" bash hack/keycloak.sh run
 
 .PHONY: run-controller
 run-controller: build ## Run the controller against the kind cluster (hack/controller.local.yaml); AWS keys from the environment

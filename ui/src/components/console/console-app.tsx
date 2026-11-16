@@ -16,6 +16,7 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { useAppearance } from "@/app/providers";
 import { usePlatform } from "@/components/platform-provider";
+import { useBrowserAuth } from "@/components/auth-boundary";
 import { useAsyncQuery } from "@/lib/api/use-query";
 import type { Section } from "@/lib/navigation";
 import { tenantSwitchPath } from "@/lib/workflows/tenants";
@@ -67,6 +68,7 @@ function SectionPage({ section, resourceId, channelId, componentClusterId, freez
 
 export default function ConsoleApp({ section = "overview", resourceId, channelId, componentClusterId, freezeSelection }: { section?: Section; resourceId?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
   const { mode, setMode } = useAppearance();
+  const browserAuth = useBrowserAuth();
   const { scopeKey, identity, liveUpdates, setLiveUpdates, connect } = usePlatform();
   const router = useRouter();
   const routeContext = JSON.stringify([section, resourceId, channelId, componentClusterId, freezeSelection?.scope, freezeSelection?.id]);
@@ -95,7 +97,7 @@ export default function ConsoleApp({ section = "overview", resourceId, channelId
         header={<DialogHeader title="Settings" subtitle="Manage your workspace connection and display preferences." onOpenChange={setConnectionOpen} />}
         content={<LayoutContent padding={6}><VStack gap={6}>
           <VStack as="section" gap={4} width="100%" aria-labelledby={`${settingsId}-connection`}>
-            <Heading level={2} id={`${settingsId}-connection`}>Workspace connection</Heading>
+            <Heading level={2} id={`${settingsId}-connection`}>{browserAuth.enabled ? "Your session" : "Workspace connection"}</Heading>
             <ConnectionPanel formId={`${settingsId}-form`} showHeading={false} showConnectAction={false} onConnect={() => setConnectionOpen(false)} />
           </VStack>
           <Divider />
@@ -108,7 +110,7 @@ export default function ConsoleApp({ section = "overview", resourceId, channelId
             </VStack>
           </VStack>
         </VStack></LayoutContent>}
-        footer={<LayoutFooter padding={6} hasDivider><HStack gap={2} hAlign="end" wrap="wrap"><Button label="Close" onClick={() => setConnectionOpen(false)} /><Button label="Connect" variant="primary" type="submit" form={`${settingsId}-form`} /></HStack></LayoutFooter>}
+        footer={<LayoutFooter padding={6} hasDivider><HStack gap={2} hAlign="end" wrap="wrap"><Button label="Close" onClick={() => setConnectionOpen(false)} />{!browserAuth.enabled && <Button label="Connect" variant="primary" type="submit" form={`${settingsId}-form`} />}</HStack></LayoutFooter>}
       />
     </Dialog>
     {leavingResource === routeContext && hasResourceContext ? <Text role="status">Switching tenant and opening Overview…</Text> : <SessionGate key={scopeKey} onConfigure={() => setConnectionOpen(true)}><SectionPage key={`${section}:${channelId ?? resourceId ?? "list"}:${componentClusterId ?? ""}:${freezeSelection?.scope ?? ""}:${freezeSelection?.id ?? ""}`} section={section} resourceId={resourceId} channelId={channelId} componentClusterId={componentClusterId} freezeSelection={freezeSelection} /></SessionGate>}

@@ -256,6 +256,9 @@ a token for the API.
 
 ## Another issuer (Keycloak)
 
+For the runnable local realm, private client settings, tenant-scoped test
+users and auth-required server startup, see [Local Keycloak login](local-keycloak.md).
+
 ```yaml
 auth:
   mode: required
@@ -274,9 +277,11 @@ auth:
 cluster-vending login --issuer https://login.example.com/realms/platform --client-id cluster-vending-cli
 ```
 
-The CLI's client is a public client (no secret) that may use the device
-authorization grant and, for `--browser`, has the redirect URI
-`http://localhost/callback`. The access token must be a JWT whose `aud`
+The CLI uses a public client by default. Device authorization uses a public
+client; `--browser` also supports an optional confidential client using the
+private secret sources below. The default browser redirect is
+`http://localhost:<ephemeral-port>/callback`; a provider may require an explicit
+registered port. The access token must be a JWT whose `aud`
 is one of `audiences` and that carries the roles claim; how a client is
 made to issue such a token is the issuer's to document, and is not
 verified here for Keycloak. For an issuer whose access tokens are opaque or not
@@ -293,8 +298,10 @@ client ID in `audiences`: the ID token is then sent.
 
 - The tokens are kept in `token.json` in the `cluster-vending` directory of
   your configuration directory (`~/.config` on Linux,
-  `~/Library/Application Support` on macOS), mode `0600`. A file other
-  users can read is refused.
+  `~/Library/Application Support` on macOS), mode `0600`, in a `0700`
+  directory. Confidential-client secrets needed for refresh are stored in the
+  same private file. Saves replace the file atomically; shared-readable files,
+  shared-readable directories and token-file symlinks are refused on load.
 - Every command that calls the API sends the stored token, renewing it
   with the refresh token when it has expired. Without a login nothing is
   sent; a server in mode `required` then answers how to log in.
@@ -302,6 +309,60 @@ client ID in `audiences`: the ID token is then sent.
 - A token is never sent over plain `http` to another machine: use an
   `https` `--server`. `http://127.0.0.1` and `http://localhost` are
   allowed, for local testing.
+
+### Browser redirects and confidential clients
+
+For the local Keycloak realm, register the following exact redirect on public
+client `cv-cli` and optional confidential client `cv-cli-confidential`:
+
+```text
+http://127.0.0.1:18081/callback
+```
+
+Then use the matching explicit callback flags:
+
+```sh
+cluster-vending login --browser \
+  --issuer http://localhost:18080/realms/cluster-vending \
+  --client-id cv-cli --redirect-host 127.0.0.1 --callback-port 18081
+```
+
+Configure Keycloak to include API audience `cv-api` in the **access token**, and
+configure the API to accept that issuer/audience. The CLI client ID is the
+audience of its ID token; these are separate audiences. Client setup does not
+itself grant platform permissions. The server's existing JWT and authorization
+checks still govern API requests.
+
+For `cv-cli-confidential`, append exactly one of:
+
+- `--client-secret-env CV_CLI_CLIENT_SECRET`: read an already-populated environment
+  variable. The flag takes its name, never the secret value.
+- `--client-secret-file /private/path/client-secret`: read a regular `0600` or
+  `0400` file. Symlinks and files readable by other users are rejected.
+- `--client-secret-prompt`: read without echo from the interactive terminal.
+
+Use `--client-id cv-cli-confidential` with that choice. There is no raw
+`--client-secret` flag; do not put secret values in shell commands, URLs or logs.
+Provision the environment/file through your secret tooling, or use the hidden
+prompt. The issuer must support `client_secret_basic`: the CLI sends the secret
+only to the token endpoint, including refresh requests, and retains it in the
+private credential store. `logout` removes that store.
+
+Without `--callback-port`, the CLI binds an available ephemeral port. The default
+redirect host is `localhost`; `127.0.0.1` and `::1` are also accepted, with the
+listener bound to the corresponding loopback address. Register the exact host
+and any fixed port your provider requires. `--callback-port 0` keeps ephemeral
+port selection. A port already occupied fails rather than moving to another
+redirect. Browser login expires after five minutes.
+
+Both public and confidential browser flows use PKCE S256, state and an OIDC
+nonce. Returned ID tokens are checked for signature, issuer, client audience,
+expiry, nonce and authorized party before credentials are saved. Refreshed ID
+tokens, when supplied, are checked again and must retain the subject. Issuer
+error bodies/descriptions are suppressed because they may echo credentials.
+OAuth discovery/token endpoints require HTTPS except for loopback development.
+These checks follow [OIDC token validation](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation)
+and the [native loopback redirect model](https://www.rfc-editor.org/rfc/rfc8252#section-7.3).
 
 ## Rolling it out
 

@@ -16,11 +16,12 @@ function failure(status: number, code: string, message: string) {
 export async function proxyRPC(request: Request, service: string, method: string, options: {
   baseUrl?: string;
   fetch?: typeof fetch;
+  trustedOrigin?: string;
 } = {}): Promise<Response> {
   if (request.method !== "POST") return failure(405, "unimplemented", "Only Connect POST requests are supported.");
   if (!routes.has(`${service}/${method}`)) return failure(404, "unimplemented", "Unknown platform RPC.");
   const origin = request.headers.get("Origin");
-  if ((origin && origin !== new URL(request.url).origin) || request.headers.get("Sec-Fetch-Site") === "cross-site") {
+  if ((origin && origin !== (options.trustedOrigin ?? new URL(request.url).origin)) || request.headers.get("Sec-Fetch-Site") === "cross-site") {
     return failure(403, "permission_denied", "Cross-origin API requests are not allowed.");
   }
   const contentType = request.headers.get("Content-Type") ?? "";

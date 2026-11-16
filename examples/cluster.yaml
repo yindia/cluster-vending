@@ -26,7 +26,7 @@ spec:
   # and finish cleanup; active or terminating SubTenants block disabling.
   region: us-west-1          # the network's region
   network:
-    networkId: 00000000-0000-0000-0000-000000000002   # NETWORK_ID
+    networkId: 01a1dfca-f5dd-7144-97b5-baeefe0e4a39   # NETWORK_ID
     # Immutable: choose private subnets in these network zones; empty uses all.
     # AWS requires at least two zones, using zone IDs rather than zone names.
     # zoneIds: [usw1-az1, usw1-az3]
@@ -53,7 +53,7 @@ spec:
     instanceTypes: [t3.medium]
     diskSizeGb: 30
     scalingConfig: {minSize: 2, maxSize: 3}
-    # capacityType: CAPACITY_TYPE_ON_DEMAND  # default; or CAPACITY_TYPE_SPOT
+    capacityType: CAPACITY_TYPE_SPOT  # default; or CAPACITY_TYPE_SPOT
     # instanceTypes: 1-20 unique AWS types. diskSizeGb: 20-16384 GiB.
     # Changing instanceTypes, capacityType or diskSizeGb replaces the node group.
     # Optional Kubernetes node labels (up to 64); separate from metadata cloud tags.

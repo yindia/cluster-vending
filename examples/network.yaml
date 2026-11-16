@@ -24,7 +24,7 @@ spec:
   # TIER_UNSPECIFIED also resolves to TIER_0.
   tier: TIER_2
   region: us-west-1           # immutable; must match the account's verified region
-  bootstrapId: 00000000-0000-0000-0000-000000000001   # BOOTSTRAP_ID
+  bootstrapId: 01a1d0a0-4a34-735f-be7d-19d1662f1138   # BOOTSTRAP_ID
   # bootstrapId is immutable: the CloudAccount UUID, not the AWS account number.
   # Provider comes from that account; no spec.aws or spec.provider setting.
   # Immutable after creation. Omit layout for 10.0.0.0/16, 3 zones, one NAT.

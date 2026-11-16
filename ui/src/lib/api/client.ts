@@ -10,6 +10,7 @@ import { SubTenantService } from "../../gen/cloud/v1/subtenant_service_pb";
 export interface BrowserClientOptions {
   /** The caller's trusted Connect server URL, optionally including a path prefix. */
   baseUrl: string;
+  csrfToken?: string;
   /** A raw access token, or a provider evaluated for each RPC to support refresh. */
   bearerToken?:
     | string
@@ -28,14 +29,20 @@ export interface BrowserClients {
 export function createBrowserClients({
   baseUrl,
   bearerToken,
+  csrfToken,
 }: BrowserClientOptions): BrowserClients {
   const authorization: Interceptor = (next) => async (request) => {
+    if (csrfToken) request.header.set("X-CV-CSRF", csrfToken);
     const token =
       typeof bearerToken === "function" ? await bearerToken() : bearerToken;
     if (token) {
       request.header.set("Authorization", `Bearer ${token}`);
     }
-    return next(request);
+    try { return await next(request); }
+    catch (error) {
+      if (csrfToken && error instanceof Error && "code" in error && error.code === 16 && typeof window !== "undefined") window.dispatchEvent(new Event("cv:session-expired"));
+      throw error;
+    }
   };
 
   const transport = createConnectTransport({

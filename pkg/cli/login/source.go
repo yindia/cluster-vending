@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
 
@@ -15,6 +17,8 @@ import (
 // token, whatever is stored: for automation that gets its token elsewhere
 // (Microsoft Entra ID: the client credentials flow).
 const EnvToken = "CV_TOKEN"
+
+var refreshLocks sync.Map
 
 const (
 	// expirySlack refreshes a token this long before it expires: a request
@@ -49,6 +53,10 @@ func (s Source) Token(ctx context.Context) (string, error) {
 	if token, ok := env(EnvToken); ok && token != "" {
 		return token, nil
 	}
+	lock, _ := refreshLocks.LoadOrStore(s.Store.Path, &sync.Mutex{})
+	mutex := lock.(*sync.Mutex)
+	mutex.Lock()
+	defer mutex.Unlock()
 	creds, err := s.Store.Load()
 	if err != nil || creds == nil {
 		return "", err
@@ -71,13 +79,33 @@ func (s Source) Token(ctx context.Context) (string, error) {
 
 // refresh trades the refresh token for new tokens and stores them.
 func (s Source) refresh(ctx context.Context, creds *Credentials) error {
-	conf := oauth2.Config{ClientID: creds.ClientID, Scopes: creds.Scopes,
-		Endpoint: oauth2.Endpoint{TokenURL: creds.TokenURL, AuthStyle: oauth2.AuthStyleInParams}}
+	if !safeEndpoint(creds.TokenURL) || !safeEndpoint(creds.Issuer) {
+		return errors.New("stored issuer/token endpoint is unsafe; log in again")
+	}
+	conf := oauth2.Config{ClientID: creds.ClientID, ClientSecret: creds.ClientSecret, Scopes: creds.Scopes,
+		Endpoint: oauth2.Endpoint{TokenURL: creds.TokenURL, AuthStyle: clientAuthStyle(creds.ClientSecret)}}
 	ctx, cancel := context.WithTimeout(context.WithValue(ctx, oauth2.HTTPClient, s.client()), requestTimeout)
 	defer cancel()
 	token, err := conf.TokenSource(ctx, &oauth2.Token{RefreshToken: creds.RefreshToken}).Token()
 	if err != nil {
-		return fmt.Errorf("your login has expired and could not be renewed (%w): run `cluster-vending login` again", err)
+		return fmt.Errorf("your login has expired and could not be renewed (%w): run `cluster-vending login` again", safeOAuthError(err))
+	}
+	rawID, _ := token.Extra("id_token").(string)
+	if rawID != "" || creds.UseIDToken {
+		provider, err := oidc.NewProvider(oidc.ClientContext(ctx, s.client()), creds.Issuer)
+		if err != nil {
+			return errors.New("could not verify renewed ID token; log in again")
+		}
+		id, err := verifyLoginIDToken(ctx, provider, creds.ClientID, token, creds.Nonce, creds.UseIDToken, false)
+		if err != nil {
+			return err
+		}
+		if id != nil && creds.Subject != "" && id.Subject != creds.Subject {
+			return errors.New("renewed ID token changed subject; log in again")
+		}
+		if id != nil && creds.UseIDToken && (token.Expiry.IsZero() || id.Expiry.Before(token.Expiry)) {
+			token.Expiry = id.Expiry
+		}
 	}
 	creds.apply(token)
 	return s.Store.Save(creds)

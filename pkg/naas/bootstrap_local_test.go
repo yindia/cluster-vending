@@ -80,8 +80,20 @@ func TestLocalPinnedHelmChartRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Helm YAML: %v\n%s", err, out)
 	}
-	if !reflect.DeepEqual(rendered.Objects(), b.Objects()) || rendered.Revision() != b.Revision() {
-		t.Fatal("actual pinned Helm tpl changed the bootstrap or Capsule template content")
+	// Helm sorts documents by installation kind after evaluating tpl. Compare
+	// complete objects by identity; the canonical revision retains asset order.
+	want := map[string]map[string]any{}
+	for _, object := range b.Objects() {
+		want[object.GetKind()+"/"+object.GetNamespace()+"/"+object.GetName()] = object.Object
+	}
+	if len(rendered.objects) != len(want) {
+		t.Fatal("actual pinned Helm render changed the resource inventory")
+	}
+	for _, object := range rendered.Objects() {
+		key := object.GetKind() + "/" + object.GetNamespace() + "/" + object.GetName()
+		if !reflect.DeepEqual(object.Object, want[key]) {
+			t.Fatalf("actual pinned Helm tpl changed %s", key)
+		}
 	}
 	checkGenerators(t, rendered)
 }

@@ -6,18 +6,19 @@ import { Theme } from "@astryxdesign/core/theme";
 import { LinkProvider } from "@astryxdesign/core/Link";
 import { themes, defaultThemeSlug } from "../astryx-themes";
 import { PlatformProvider } from "@/components/platform-provider";
+import { AuthBoundary } from "@/components/auth-boundary";
 
 type Mode = "light" | "dark" | "system";
 const Appearance = createContext<{ mode: Mode; setMode: (value: string) => void } | null>(null);
 
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({ children, authEnabled = false }: { children: ReactNode; authEnabled?: boolean }) {
   const [mode, setMode] = useState<Mode>("light");
   const changeMode = (value: string) => {
     if (value === "light" || value === "dark" || value === "system") setMode(value);
   };
   return <Appearance value={{ mode, setMode: changeMode }}>
     <Theme theme={themes[defaultThemeSlug]} mode={mode}>
-      <LinkProvider component={NextLink}><PlatformProvider>{children}</PlatformProvider></LinkProvider>
+      <LinkProvider component={NextLink}><AuthBoundary enabled={authEnabled}><PlatformProvider>{children}</PlatformProvider></AuthBoundary></LinkProvider>
     </Theme>
   </Appearance>;
 }

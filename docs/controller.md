@@ -155,8 +155,9 @@ server installs nothing; it waits for the kinds the controller installs, so
 start the controller first.
 
 How the providers run is the platform's, sized for ~100 clusters of ~80
-managed resources each: a drift check every 10 minutes (30 for
-provider-aws-ec2), at most 10 reconciles per second, 1 CPU and 2Gi memory
+managed resources each: an AWS drift check every 10 minutes (30 for
+provider-aws-ec2), a separate Helm readiness/drift check every minute,
+at most 10 reconciles per second, 1 CPU and 2Gi memory
 requested, 4 CPU and 4Gi limits, and 2 replicas with leader election (one
 reconciles, the other is a hot standby) (`crossplaneaws.DefaultProviderRuntime`).
 The AWS providers run with the `DeploymentRuntimeConfig`s
@@ -165,10 +166,23 @@ The AWS providers run with the `DeploymentRuntimeConfig`s
 otherwise, set `--install-providers=false` and manage the `Provider` and
 `DeploymentRuntimeConfig` objects yourself.
 
+Helm's shorter interval lets release readiness catch up after workloads become
+healthy without increasing AWS resource polling. In code, `ProviderRuntime.HelmPoll`
+can override it; zero falls back to one minute and negative intervals are rejected.
+
 The controller creates these objects only when they are missing: a
 management cluster installed by an older build keeps its runtime configs
 (and provider-helm keeps running without one) until they are deleted, so
 the controller recreates them on its next start, or edited by hand.
+In particular, an existing `cluster-vending-helm` using `--poll=10m0s` keeps that
+interval after upgrading; the one-minute default applies only to newly created
+runtime configs. An operator must explicitly update an existing config to adopt it.
+Existing `Provider` runtime references are also preserved. A provider-helm using
+the default runtime (no explicit reference) does not adopt `cluster-vending-helm`
+on upgrade; its provider default remains in effect until an operator explicitly
+changes that reference. A dedicated observation-only runtime config can change
+the poll argument without adopting the platform's replica/resource profile; see
+`config/samples/provider_helm_observation_runtime.yaml`.
 
 The controller always brings every resource to this build's renderer. The
 former `--render-target` and `--render-rollout` settings are gone; release

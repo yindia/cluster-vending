@@ -24,14 +24,15 @@ spec:
       serviceAccounts: [{namespace: kube-system, name: karpenter}]
       # Official Karpenter v1.15.1 controller policy (website/content/en/v1.15/getting-started/
       # getting-started-with-karpenter/cloudformation.yaml): NodeLifecycle + IAMIntegration + EKSIntegration
-      # + ZonalShift + ResourceDiscovery statements, verbatim except placeholders. The InterruptionPolicy
-      # (SQS) statement is dropped: no interruption queue exists. PassRole targets the managed node group role.
+      # + ZonalShift + ResourceDiscovery statements. Permission semantics match upstream except
+      # the omitted InterruptionPolicy (SQS): no interruption queue exists. Placeholders scope the
+      # cluster/account; PassRole targets the managed node group role. Optional Sid fields are
+      # omitted to keep the expanded managed policy below IAM's 6144-character limit.
       policy: |
         {
           "Version": "2012-10-17",
           "Statement": [
             {
-              "Sid": "AllowScopedEC2InstanceAccessActions",
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:ec2:${region}::image/*",
@@ -47,7 +48,6 @@ spec:
               ]
             },
             {
-              "Sid": "AllowScopedEC2LaunchTemplateAccessActions",
               "Effect": "Allow",
               "Resource": "arn:aws:ec2:${region}:*:launch-template/*",
               "Action": [
@@ -64,7 +64,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedEC2InstanceActionsWithTags",
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:ec2:${region}:*:fleet/*",
@@ -90,7 +89,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedResourceCreationTagging",
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:ec2:${region}:*:fleet/*",
@@ -117,7 +115,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedResourceTagging",
               "Effect": "Allow",
               "Resource": "arn:aws:ec2:${region}:*:instance/*",
               "Action": "ec2:CreateTags",
@@ -141,7 +138,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedDeletion",
               "Effect": "Allow",
               "Resource": [
                 "arn:aws:ec2:${region}:*:instance/*",
@@ -162,7 +158,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowPassingInstanceRole",
               "Effect": "Allow",
               "Resource": "${cluster.nodeRoleArn}",
               "Action": "iam:PassRole",
@@ -176,7 +171,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedInstanceProfileCreationActions",
               "Effect": "Allow",
               "Resource": "arn:aws:iam::${account.id}:instance-profile/*",
               "Action": [
@@ -194,7 +188,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedInstanceProfileTagActions",
               "Effect": "Allow",
               "Resource": "arn:aws:iam::${account.id}:instance-profile/*",
               "Action": [
@@ -215,7 +208,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowScopedInstanceProfileActions",
               "Effect": "Allow",
               "Resource": "arn:aws:iam::${account.id}:instance-profile/*",
               "Action": [
@@ -234,13 +226,11 @@ spec:
               }
             },
             {
-              "Sid": "AllowAPIServerEndpointDiscovery",
               "Effect": "Allow",
               "Resource": "arn:aws:eks:${region}:${account.id}:cluster/${cluster.name}",
               "Action": "eks:DescribeCluster"
             },
             {
-              "Sid": "AllowZonalShiftStatusReadOnly",
               "Effect": "Allow",
               "Resource": "*",
               "Action": [
@@ -253,7 +243,6 @@ spec:
               }
             },
             {
-              "Sid": "AllowRegionalReadActions",
               "Effect": "Allow",
               "Resource": "*",
               "Action": [
@@ -276,25 +265,21 @@ spec:
               }
             },
             {
-              "Sid": "AllowSSMReadActions",
               "Effect": "Allow",
               "Resource": "arn:aws:ssm:${region}::parameter/aws/service/*",
               "Action": "ssm:GetParameter"
             },
             {
-              "Sid": "AllowPricingReadActions",
               "Effect": "Allow",
               "Resource": "*",
               "Action": "pricing:GetProducts"
             },
             {
-              "Sid": "AllowUnscopedInstanceProfileListAction",
               "Effect": "Allow",
               "Resource": "*",
               "Action": "iam:ListInstanceProfiles"
             },
             {
-              "Sid": "AllowInstanceProfileReadActions",
               "Effect": "Allow",
               "Resource": "arn:aws:iam::${account.id}:instance-profile/*",
               "Action": "iam:GetInstanceProfile"

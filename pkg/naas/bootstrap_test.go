@@ -12,6 +12,7 @@ import (
 	"text/template"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
 )
 
@@ -145,7 +146,8 @@ func checkGenerators(t *testing.T, b *Bootstrap) {
 			"cloud.cluster-vending.io/access-ready": "false",
 		}},
 		"spec": map[string]any{"data": map[string]any{"naas": map[string]any{
-			"namespaceKeys": []string{"app", "worker"}, "developerGroup": group, "pssVersion": "v1.35",
+			"namespaceKeys": []any{"app", "worker"}, "developerGroup": group, "pssVersion": "v1.35",
+			"accessBindings": []any{map[string]any{"id": "admin-binding", "group": group, "role": WorkloadAdminRole}, map[string]any{"id": "viewer-binding", "group": "oidc:Observers", "role": WorkloadViewerRole}},
 		}}},
 	}}
 	for _, object := range b.Objects() {
@@ -157,10 +159,15 @@ func checkGenerators(t *testing.T, b *Bootstrap) {
 		if scope == "Namespace" {
 			contexts = nil
 			for _, key := range []string{"app", "worker"} {
-				contexts = append(contexts, map[string]any{"tenant": context["tenant"], "namespace": map[string]any{"metadata": map[string]any{"name": tenantName + "-" + key}}})
+				contexts = append(contexts, map[string]any{"tenant": context["tenant"], "namespace": map[string]any{"metadata": map[string]any{"name": tenantName + "-" + key,
+					"ownerReferences": []any{map[string]any{"apiVersion": "capsule.clastix.io/v1beta2", "kind": "Tenant", "name": tenantName, "uid": "tenant-uid"}}}}})
 			}
 		}
 		for _, ctx := range contexts {
+			if object.GetName() == "naas-developer-access" {
+				ctx = runtime.DeepCopyJSON(ctx)
+				ctx["tenant"].(map[string]any)["metadata"].(map[string]any)["labels"].(map[string]any)[LabelAccessReady] = "true"
+			}
 			var rendered bytes.Buffer
 			resources, _, _ := unstructured.NestedSlice(object.Object, "spec", "resources")
 			for _, resource := range resources {
@@ -207,7 +214,7 @@ func checkGenerators(t *testing.T, b *Bootstrap) {
 					}
 				}
 			case "naas-developer-access":
-				if len(generated.objects) != 1 {
+				if len(generated.objects) != 2 {
 					t.Fatal("unexpected access resources")
 				}
 				subjects, _, _ := unstructured.NestedSlice(generated.objects[0].Object, "subjects")
@@ -221,14 +228,11 @@ func checkGenerators(t *testing.T, b *Bootstrap) {
 
 func TestBootstrapAuthorityAndRetention(t *testing.T) {
 	b := mustLoad(t)
-	if len(b.objects) != 4 {
-		t.Fatalf("got %d bootstrap objects, want one ClusterRole and three GTRs", len(b.objects))
+	if len(b.objects) != 16 {
+		t.Fatalf("got %d bootstrap objects, want three GTRs, three workload roles and ten trusted prerequisites", len(b.objects))
 	}
 	for _, object := range b.Objects() {
-		if object.GetKind() == "ClusterRole" {
-			if object.GetName() != "naas-workload-editor" {
-				t.Fatal("unexpected bootstrap authority")
-			}
+		if object.GetKind() == "ClusterRole" && object.GetName() == "naas-workload-editor" {
 			encoded, _ := json.Marshal(object.Object["rules"])
 			for _, forbidden := range []string{`"*"`, `"bind"`, `"escalate"`, `"impersonate"`, `"secrets"`, `"rolebindings"`, `"networkpolicies"`} {
 				if strings.Contains(string(encoded), forbidden) {
@@ -238,7 +242,7 @@ func TestBootstrapAuthorityAndRetention(t *testing.T) {
 			continue
 		}
 		if object.GetKind() != "GlobalTenantResource" {
-			t.Fatalf("unexpected per-tenant or authority object: %s", object.GetKind())
+			continue // Trusted bootstrap authority is checked separately below.
 		}
 		deletion := "Orphan"
 		if object.GetName() == "naas-developer-access" {
@@ -252,6 +256,118 @@ func TestBootstrapAuthorityAndRetention(t *testing.T) {
 		for _, resource := range resources {
 			if resource.(map[string]any)["policy"].(map[string]any)["deletion"] != deletion {
 				t.Fatalf("%s has the wrong retention policy", object.GetName())
+			}
+		}
+	}
+}
+
+// Resolve the actual embedded RBAC bindings, including namespace scope. This
+// catches additive grants that a check of a single restricted Role would miss.
+func bootstrapAllows(t *testing.T, b *Bootstrap, subjectNS, subject, namespace, group, resource, name, verb string) bool {
+	t.Helper()
+	objects := b.Objects()
+	for _, binding := range objects {
+		kind := binding.GetKind()
+		if kind != "RoleBinding" && kind != "ClusterRoleBinding" {
+			continue
+		}
+		if kind == "RoleBinding" && binding.GetNamespace() != namespace {
+			continue
+		}
+		subjects, _, _ := unstructured.NestedSlice(binding.Object, "subjects")
+		matched := false
+		for _, item := range subjects {
+			s := item.(map[string]any)
+			if s["kind"] == "ServiceAccount" && s["name"] == subject && s["namespace"] == subjectNS {
+				matched = true
+			}
+		}
+		if !matched {
+			continue
+		}
+		ref := binding.Object["roleRef"].(map[string]any)
+		for _, role := range objects {
+			if role.GetKind() != ref["kind"] || role.GetName() != ref["name"] {
+				continue
+			}
+			if role.GetKind() == "Role" && role.GetNamespace() != binding.GetNamespace() {
+				continue
+			}
+			rules, _, _ := unstructured.NestedSlice(role.Object, "rules")
+			for _, item := range rules {
+				r := item.(map[string]any)
+				matches := func(field, value string) bool {
+					values, present := r[field].([]any)
+					if field == "resourceNames" && !present {
+						return true
+					}
+					for _, entry := range values {
+						if entry == value || (entry == "*" && field != "resourceNames") {
+							return true
+						}
+					}
+					return false
+				}
+				if matches("apiGroups", group) && matches("resources", resource) && matches("resourceNames", name) && matches("verbs", verb) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func TestBootstrapReplicationAuthorityIsConstrained(t *testing.T) {
+	b := mustLoad(t)
+	for _, test := range []struct {
+		subjectNS, subject, namespace, group, resource, name, verb string
+		want                                                       bool
+	}{
+		{"capsule-system", "capsule", "naas-system", "", "serviceaccounts", "provisioner", "impersonate", true},
+		{"capsule-system", "capsule", "other-system", "", "serviceaccounts", "provisioner", "impersonate", false},
+		{"capsule-system", "capsule", "naas-system", "", "serviceaccounts", "other", "impersonate", false},
+		{"capsule-system", "capsule", "", "", "users", "system:admin", "impersonate", false},
+		{"capsule-system", "capsule", "", "", "groups", "system:masters", "impersonate", false},
+		{"capsule-system", "capsule", "", "rbac.authorization.k8s.io", "clusterroles", "naas-workload-editor", "bind", true},
+		{"capsule-system", "capsule", "", "rbac.authorization.k8s.io", "clusterroles", "admin", "bind", false},
+		{"capsule-system", "capsule", "", "rbac.authorization.k8s.io", "clusterroles", "cluster-admin", "bind", false},
+		{"naas-system", "provisioner", "", "", "namespaces", "st-example-app", "create", true},
+		{"naas-system", "provisioner", "", "", "namespaces", "st-example-app", "delete", false},
+		{"naas-system", "provisioner", "st-example-app", "networking.k8s.io", "networkpolicies", "naas-deny-by-default", "create", true},
+		{"naas-system", "provisioner", "st-example-app", "security.istio.io", "authorizationpolicies", "naas-allow-owned-namespaces", "create", true},
+		{"naas-system", "provisioner", "st-example-app", "", "limitranges", "naas-container-defaults", "create", true},
+		{"naas-system", "provisioner", "st-example-app", "", "serviceaccounts", "app", "create", true},
+		{"naas-system", "provisioner", "st-example-app", "rbac.authorization.k8s.io", "rolebindings", "naas-developers", "create", true},
+		{"naas-system", "provisioner", "", "rbac.authorization.k8s.io", "clusterroles", "naas-workload-editor", "bind", true},
+		{"naas-system", "provisioner", "", "rbac.authorization.k8s.io", "clusterroles", "admin", "bind", false},
+		{"naas-system", "provisioner", "", "rbac.authorization.k8s.io", "clusterroles", "cluster-admin", "bind", false},
+		{"naas-system", "provisioner", "", "rbac.authorization.k8s.io", "clusterroles", "naas-workload-editor", "escalate", false},
+		{"naas-system", "provisioner", "st-example-app", "", "secrets", "credentials", "get", false},
+		{"naas-system", "provisioner", "naas-system", "", "serviceaccounts/token", "provisioner", "create", false},
+		{"naas-system", "provisioner", "", "", "nodes", "node", "patch", false},
+	} {
+		if got := bootstrapAllows(t, b, test.subjectNS, test.subject, test.namespace, test.group, test.resource, test.name, test.verb); got != test.want {
+			t.Errorf("%s/%s %s %s/%s in %q: allowed=%t want %t", test.subjectNS, test.subject, test.verb, test.resource, test.name, test.namespace, got, test.want)
+		}
+	}
+	for _, object := range b.Objects() {
+		if object.GetKind() == "ServiceAccount" {
+			value, found, _ := unstructured.NestedBool(object.Object, "automountServiceAccountToken")
+			if !found || value {
+				t.Fatal("bootstrap provisioner must not mount a credential")
+			}
+		}
+		if object.GetKind() != "RoleBinding" && object.GetKind() != "ClusterRoleBinding" {
+			continue
+		}
+		ref := object.Object["roleRef"].(map[string]any)
+		if ref["name"] == "cluster-admin" {
+			t.Fatal("bootstrap binds cluster-admin")
+		}
+		subjects, _, _ := unstructured.NestedSlice(object.Object, "subjects")
+		for _, subject := range subjects {
+			if subject.(map[string]any)["kind"] != "ServiceAccount" {
+				t.Fatal("bootstrap grants human access")
 			}
 		}
 	}

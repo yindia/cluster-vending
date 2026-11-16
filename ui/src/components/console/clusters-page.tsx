@@ -40,7 +40,8 @@ import {
   ClusterState, ClusterUpgradePhase, UpgradeMode, type Cluster, type PlatformComponent,
 } from "@/gen/cloud/v1/cluster_pb";
 import { CreateClusterRequestSchema, ImportClusterRequestSchema, UpdateClusterRequestSchema, type CreateClusterRequest, type ImportClusterRequest } from "@/gen/cloud/v1/cluster_service_pb";
-import { ComponentPhase } from "@/gen/cloud/v1/component_pb";
+import { platformInstallationStatus } from "@/lib/workflows/installation-status";
+import { awsAddonInventory } from "@/lib/providers/aws-addons";
 import { ManagedResourceState, type ManagedResource } from "@/gen/cloud/v1/managed_resource_pb";
 import { ConditionStatus } from "@/gen/cloud/v1/conditions_pb";
 import { Disposition, ImportPhase } from "@/gen/cloud/v1/import_pb";
@@ -54,6 +55,7 @@ import { ClusterTakeoverButton } from "./cluster-takeover";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
+import { ClusterConfiguration } from "./cluster-configuration";
 import { RefreshButton } from "./refresh-button";
 import { ProviderIcon, KubernetesIcon } from "./provider-icons";
 import { ActivityEventTable, ActivityEventFilters, filterActivityEvents, type ActivityFilters } from "./activity-event-table";
@@ -503,12 +505,12 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const channel = ["Server default", "Alpha", "Beta", "Stable"][cluster?.spec?.releaseChannel ?? 0] || "Unknown";
   const channelSlug = [undefined, "alpha", "beta", "stable"][cluster?.spec?.releaseChannel ?? 0];
   const desiredAws = cluster?.spec?.provider.case === "aws" ? cluster.spec.provider.value : undefined;
-  const addonNames = [...new Set([...(desiredAws?.addons.map((addon) => addon.name) ?? []), ...(aws?.addons.map((addon) => addon.name) ?? [])])];
+  const addons = desiredAws || aws ? awsAddonInventory(desiredAws?.addons, aws?.addons) : [];
   const pageEvents = events.data?.events.length ? events.data.events : eventToken ? [] : status?.recentEvents ?? [];
   const activityEvents = filteringActivity ? allEvents.data ?? [] : pageEvents;
   const filteredEvents = filterActivityEvents(activityEvents, activityFilters);
   const availableEventKinds = [...pageEvents, ...(allEvents.data ?? [])];
-  const panels = ["overview", "resources", "activity", "components", "deprecations", "recommendations", ...(cluster?.spec?.naas ? ["subtenants"] : [])];
+  const panels = ["overview", "configuration", "resources", "activity", "components", "deprecations", "recommendations", ...(cluster?.spec?.naas ? ["subtenants"] : [])];
   const activeTab = tab === "subtenants" && !cluster?.spec?.naas ? "overview" : tab;
   const panelId = (name: string) => `${panelPrefix}-${name}`;
   function openTab(name: string) { setTab(name); if (name === "activity") setRequestedEventKinds(true); }
@@ -539,7 +541,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         { label: "Release channel", value: channelSlug ? <Link href={`/channels/${channelSlug}`}>{channel}</Link> : channel, note: cluster.spec?.upgradeMode === UpgradeMode.AUTOMATIC ? "Automatic upgrades" : "Manual upgrades" },
       ]} />
       <TabList value={activeTab} onChange={openTab} role="tablist" aria-label="Cluster detail sections" hasDivider>
-        {panels.map((name) => <Tab key={name} value={name} label={name === "subtenants" ? "SubTenants" : name === "deprecations" ? "Deprecated APIs" : name[0].toUpperCase() + name.slice(1)} panelId={panelId(name)} />)}
+        {panels.map((name) => <Tab key={name} value={name} label={name === "subtenants" ? "Sub Tenants" : name === "deprecations" ? "Deprecated APIs" : name[0].toUpperCase() + name.slice(1)} panelId={panelId(name)} />)}
       </TabList>
       {activeTab === "overview" && <VStack id={panelId("overview")} role="tabpanel" aria-label="Overview" tabIndex={0} gap={8}>
         {status?.message && <Text color="secondary">{status.message}</Text>}
@@ -574,7 +576,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           <HStack hAlign="between" gap={3} wrap="wrap"><Heading level={3}>Related resources</Heading><Link href={`#${panelId("resources")}`} onClick={() => openTab("resources")}>View all {resources.length} resources</Link></HStack>
           <DetailRows title="Related cluster resources" rows={[
             ...nodeGroups.map((resource) => ({ name: resource.name, copyName: resource.name, state: statusValue(ManagedResourceState, resource.state), detail: <VStack gap={1}>{resource.externalName && <CopyValue value={resource.externalName} label="node group cloud ID" />}<Text type="supporting">{resource.message || "Node group"}</Text></VStack>, href: `#${panelId("resources")}`, activate: () => openTab("resources") })),
-            ...(aws?.addons ?? []).map((addon) => ({ name: addon.name, state: statusValue(ManagedResourceState, addon.state), detail: `Add-on · ${addon.version}`, href: `#${panelId("components")}`, activate: () => openTab("components") })),
+            ...(aws?.addons ?? []).map((addon) => { const display = addons.find((item) => item.name === addon.name)?.status; return { name: addon.name, state: display ? <StatusValue label={display.label} tone={display.tone} /> : statusValue(ManagedResourceState, addon.state), detail: `Add-on · ${addon.version}`, href: `#${panelId("components")}`, activate: () => openTab("components") }; }),
           ]} />
         </VStack>
         <VStack gap={4}>
@@ -604,6 +606,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           ]} />
         </VStack>
       </VStack>}
+      {activeTab === "configuration" && <VStack id={panelId("configuration")} role="tabpanel" aria-label="Configuration" tabIndex={0} gap={6}><ClusterConfiguration cluster={cluster} /></VStack>}
       {activeTab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Resources" tabIndex={0} gap={6}>
         <ManagedInventory resources={resources} title="Cluster managed resource inventory" />
         {status?.import && <Collapsible trigger={`Import discovery · ${label(ImportPhase, status.import.phase)}`} defaultIsOpen={false}>
@@ -629,26 +632,23 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         <VStack gap={3}>
           <Heading level={3}>EKS add-ons</Heading>
           <Text type="supporting">Target is the resolved desired version; running is the last observed version. AWS resolves add-ons for the Kubernetes minor unless an explicit version was requested. Release channels do not pin add-on versions.</Text>
-          {addonNames.length ? <Table aria-label="Cluster EKS add-on target and running versions" density="compact" hasHover textOverflow="wrap" idKey="name" data={addonNames.map((name) => ({
-            name, target: desiredAws?.addons.find((addon) => addon.name === name)?.version || "Not reported",
-            running: aws?.addons.find((addon) => addon.name === name),
-          }))} columns={[
+          {addons.length ? <Table aria-label="Cluster EKS add-on target and running versions" density="compact" hasHover textOverflow="wrap" idKey="name" data={addons} columns={[
             { key: "name", header: "Add-on", width: proportional(2, { minWidth: 80 }) },
             { key: "target", header: "Target (resolved)", width: proportional(1, { minWidth: 80 }) },
-            { key: "version", header: "Running", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <Text>{row.running?.version || "Not observed"}</Text> },
-            { key: "state", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (row) => statusValue(ManagedResourceState, row.running?.state) },
-            { key: "message", header: "Message", width: proportional(2, { minWidth: 80 }), renderCell: (row) => <Text type="supporting">{row.running?.message || (row.running ? "No message reported" : "Waiting for observation")}</Text> },
+            { key: "version", header: "Running", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <Text>{row.running?.version || (row.status.key === "disabled" ? "—" : "Not observed")}</Text> },
+            { key: "state", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <StatusValue label={row.status.label} tone={row.status.tone} /> },
+            { key: "message", header: "Message", width: proportional(2, { minWidth: 80 }), renderCell: (row) => <Text type="supporting">{row.message}</Text> },
           ]} /> : <Text type="supporting">No EKS add-on targets or running versions reported.</Text>}
         </VStack>
         <VStack gap={3}>
           <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center"><Heading level={3}>Platform components</Heading>{status?.platformRelease && <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>Release {status.platformRelease}</Link>}</HStack>
           <Text type="supporting">The platform release pins chart versions. Installed versions show the last observed ready version and can lag during rollout.</Text>
-          <PlatformComponentInventory components={status?.platformComponents ?? []} />
+          <PlatformComponentInventory components={status?.platformComponents ?? []} naasEnabled={cluster.spec?.naas ?? false} />
         </VStack>
         <ClusterTenantComponents clusterId={clusterId} />
       </VStack>}
       {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
-      {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="SubTenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
+      {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="Sub Tenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
       {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
       {editing && canWrite && <EditCluster clusterId={clusterId} currentEtag={cluster.etag} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
       {deleting && canWrite && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
@@ -661,12 +661,12 @@ function CopyReference({ value, href, display, label: copyLabel }: { value: stri
   return <HStack gap={2} wrap="wrap" vAlign="center"><Link href={href}>{display || value}</Link><CopyButton value={value} label={copyLabel} /></HStack>;
 }
 
-function PlatformComponentInventory({ components }: { components: PlatformComponent[] }) {
+function PlatformComponentInventory({ components, naasEnabled }: { components: PlatformComponent[]; naasEnabled: boolean }) {
   const columns: TableColumn<PlatformComponent>[] = [
     { key: "name", header: "Component", width: proportional(2, { minWidth: 80 }) },
     { key: "version", header: "Release-pinned version", width: proportional(1, { minWidth: 80 }), renderCell: (component) => <Text>{component.version || "No release pin reported"}</Text> },
     { key: "installedVersion", header: "Installed version", width: proportional(1, { minWidth: 80 }), renderCell: (component) => <Text>{component.installedVersion || "Not observed"}</Text> },
-    { key: "phase", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (component) => statusValue(ComponentPhase, component.phase) },
+    { key: "phase", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (component) => { const state = platformInstallationStatus(component, component.name !== "capsule" || naasEnabled); return <StatusValue label={state.label} tone={state.tone} />; } },
     { key: "message", header: "Details", width: proportional(2, { minWidth: 80 }), renderCell: (component) => <VStack gap={1}><Text type="supporting">{component.message || component.helmState || "No message reported"}</Text>{component.lastError && <Text type="supporting">{component.lastError}</Text>}</VStack> },
   ];
   return components.length ? <Table aria-label="Cluster platform component pinned and installed versions" data={components} columns={columns} idKey="name" density="compact" hasHover textOverflow="wrap" /> : <Text type="supporting">No platform components reported.</Text>;
@@ -742,7 +742,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
   const { api, tenantId, canWrite } = usePlatform();
   const loadSubTenants = useCallback(async (signal: AbortSignal) => baseline.spec?.naas ? api.subtenant.listSubTenants({ tenantId, clusterId: baseline.id, pageSize: 1 }, { signal }) : undefined, [api, tenantId, baseline.id, baseline.spec?.naas]);
   const allocations = useAsyncQuery(loadSubTenants);
-  const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing SubTenants before allowing NaaS to be disabled…" : allocations.error ? "SubTenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all SubTenants, including those still deleting, before disabling NaaS." : undefined;
+  const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing Sub Tenants before allowing NaaS to be disabled…" : allocations.error ? "Sub Tenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all Sub Tenants, including those still deleting, before disabling NaaS." : undefined;
   const [form, setForm] = useState(() => clusterForm(baseline));
   const [step, setStep] = useState(0);
   const formId = useId();

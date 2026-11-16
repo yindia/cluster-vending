@@ -18,13 +18,14 @@ health-probe-addr: 127.0.0.1:8081
 # management account is taken from it. PLACEHOLDER: on kind there is no
 # IRSA, the providers use the Secret below, and this only has to be a valid
 # role ARN of the management account.
-aws-management-role-arn: arn:aws:iam::111122223333:role/crossplane-provider-aws
+aws-management-role-arn: arn:aws:iam::642299167759:role/cluster-vending-provisioner
 # Kind has no IRSA: the providers authenticate with the AWS keys in this
 # Secret (an AWS shared credentials file under the key, default
 # "credentials"), then assume each account's tenant role. Create it once
 # (docs/controller.md, "Local run"), then uncomment:
-# provider-credentials-secret: crossplane-system/aws-local-credentials
+provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
 # Local testing only: act with the Secret's keys directly, without assuming
 # the account's tenant role (for an account whose organization policy
 # forbids assuming roles). Needs provider-credentials-secret.
-# skip-tenant-role: true
+automatic-upgrades: true
+skip-tenant-role: true

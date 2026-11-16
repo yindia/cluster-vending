@@ -2,11 +2,13 @@ package subtenant
 
 import (
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
 	v1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -17,12 +19,12 @@ const requestAnnotation = "cloud.cluster-vending.io/subtenant-request-id"
 const hashAnnotation = "cloud.cluster-vending.io/subtenant-create-hash"
 
 func specToCR(in *v1.SubTenantSpec) cloud.SubTenantSpec {
-	out := cloud.SubTenantSpec{DisplayName: in.GetDisplayName(), PolicyProfile: in.GetPolicyProfile(), Quota: cloud.SubTenantQuota{NamespaceCount: in.GetQuota().GetNamespaceCount(), Hard: maps.Clone(in.GetQuota().GetHard())}}
+	out := cloud.SubTenantSpec{Name: in.GetName(), DeletionProtection: ptr.To(in.DeletionProtection == nil || in.GetDeletionProtection()), DisplayName: in.GetDisplayName(), PolicyProfile: in.GetPolicyProfile(), Quota: cloud.SubTenantQuota{NamespaceCount: in.GetQuota().GetNamespaceCount(), Hard: maps.Clone(in.GetQuota().GetHard())}}
 	for _, key := range in.GetNamespaceKeys() {
 		out.NamespaceKeys = append(out.NamespaceKeys, cloud.SubTenantNamespaceKey(key))
 	}
 	if in.Access != nil {
-		out.Access = &cloud.SubTenantAccess{}
+		out.Access = &cloud.SubTenantAccess{AdminGroups: slices.Clone(in.Access.AdminGroups), ViewerGroups: slices.Clone(in.Access.ViewerGroups)}
 		for _, binding := range in.Access.Bindings {
 			out.Access.Bindings = append(out.Access.Bindings, cloud.SubTenantAccessBinding{IdentityRef: binding.IdentityRef, RoleProfile: binding.RoleProfile})
 		}
@@ -30,12 +32,12 @@ func specToCR(in *v1.SubTenantSpec) cloud.SubTenantSpec {
 	return out
 }
 func specFromCR(in cloud.SubTenantSpec) *v1.SubTenantSpec {
-	out := &v1.SubTenantSpec{DisplayName: in.DisplayName, PolicyProfile: in.PolicyProfile, Quota: &v1.SubTenantQuota{NamespaceCount: in.Quota.NamespaceCount, Hard: maps.Clone(in.Quota.Hard)}}
+	out := &v1.SubTenantSpec{Name: in.Name, DeletionProtection: ptr.To(in.DeletionProtection == nil || *in.DeletionProtection), DisplayName: in.DisplayName, PolicyProfile: in.PolicyProfile, Quota: &v1.SubTenantQuota{NamespaceCount: in.Quota.NamespaceCount, Hard: maps.Clone(in.Quota.Hard)}}
 	for _, key := range in.NamespaceKeys {
 		out.NamespaceKeys = append(out.NamespaceKeys, string(key))
 	}
 	if in.Access != nil {
-		out.Access = &v1.SubTenantAccess{}
+		out.Access = &v1.SubTenantAccess{AdminGroups: slices.Clone(in.Access.AdminGroups), ViewerGroups: slices.Clone(in.Access.ViewerGroups)}
 		for _, binding := range in.Access.Bindings {
 			out.Access.Bindings = append(out.Access.Bindings, &v1.SubTenantAccessBinding{IdentityRef: binding.IdentityRef, RoleProfile: binding.RoleProfile})
 		}

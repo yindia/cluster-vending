@@ -30,6 +30,7 @@ const clientID = "cluster-vending-cli"
 // the PKCE verifier matches the challenge, and the refresh grant.
 type idp struct {
 	*authtest.Issuer
+	t  testing.TB
 	mu sync.Mutex
 	// pending is how many polls answer authorization_pending first.
 	pending int
@@ -41,12 +42,20 @@ type idp struct {
 	grants    []string
 	forms     []url.Values
 	// refreshFails makes the refresh grant fail.
-	refreshFails bool
+	refreshFails           bool
+	nonce                  string
+	lastIDToken            string
+	changeClaims           func(map[string]any)
+	clientSecret           string
+	basicUser, basicSecret string
+	refreshID              bool
+	wrongSigner            bool
+	omitID                 bool
 }
 
 func newIDP(t *testing.T) *idp {
 	t.Helper()
-	i := &idp{Issuer: authtest.New(t)}
+	i := &idp{Issuer: authtest.New(t), t: t}
 	i.Mux.HandleFunc("POST /device", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		i.record(r.Form, "device_authorization")
@@ -58,6 +67,7 @@ func newIDP(t *testing.T) *idp {
 		q := r.URL.Query()
 		i.mu.Lock()
 		i.challenge = q.Get("code_challenge")
+		i.nonce = q.Get("nonce")
 		i.mu.Unlock()
 		back, _ := url.Parse(q.Get("redirect_uri"))
 		back.RawQuery = url.Values{"code": {"code-1"}, "state": {q.Get("state")}}.Encode()
@@ -79,6 +89,13 @@ func (i *idp) token(w http.ResponseWriter, r *http.Request) {
 	i.record(r.Form, grant)
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	i.basicUser, i.basicSecret, _ = r.BasicAuth()
+	i.basicUser, _ = url.QueryUnescape(i.basicUser)
+	i.basicSecret, _ = url.QueryUnescape(i.basicSecret)
+	if i.clientSecret != "" && (i.basicUser != clientID || i.basicSecret != i.clientSecret) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_client", "error_description": "rejected " + i.clientSecret})
+		return
+	}
 	switch grant {
 	case "urn:ietf:params:oauth:grant-type:device_code":
 		if i.deny {
@@ -101,16 +118,38 @@ func (i *idp) token(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_grant"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"token_type": "Bearer", "access_token": "access-2",
-			"refresh_token": "refresh-2", "expires_in": 3600})
+		answer := map[string]any{"token_type": "Bearer", "access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 3600}
+		if i.refreshID {
+			answer["id_token"] = i.signedID()
+		}
+		writeJSON(w, http.StatusOK, answer)
 		return
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unsupported_grant_type"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"token_type": "Bearer", "access_token": "access-1",
-		"refresh_token": "refresh-1", "id_token": "id-1", "expires_in": 3600})
+		"refresh_token": "refresh-1", "id_token": i.signedID(), "expires_in": 3600})
 }
+
+// Called with i.mu held, just like the token endpoint state it models.
+func (i *idp) signedID() string {
+	if i.omitID {
+		return ""
+	}
+	claims := i.Claims(clientID, "cli-user", map[string]any{"nonce": i.nonce})
+	if i.changeClaims != nil {
+		i.changeClaims(claims)
+	}
+	if i.wrongSigner {
+		i.lastIDToken = i.SignWithOtherKey(i.t, claims)
+	} else {
+		i.lastIDToken = i.Sign(i.t, claims)
+	}
+	return i.lastIDToken
+}
+
+func (i *idp) issuedID() string { i.mu.Lock(); defer i.mu.Unlock(); return i.lastIDToken }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -136,7 +175,7 @@ func TestLoginWithADeviceCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creds.AccessToken != "access-1" || creds.RefreshToken != "refresh-1" || creds.IDToken != "id-1" || creds.Bearer() != "access-1" {
+	if creds.AccessToken != "access-1" || creds.RefreshToken != "refresh-1" || creds.IDToken != i.issuedID() || creds.Bearer() != "access-1" {
 		t.Errorf("credentials = %+v", creds)
 	}
 	if creds.Issuer != i.URL || creds.ClientID != clientID || creds.TokenURL != i.URL+"/token" || creds.Expiry.Before(time.Now()) {
@@ -191,7 +230,7 @@ func TestLoginThroughTheBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creds.Bearer() != "id-1" || !creds.UseIDToken {
+	if creds.Bearer() != i.issuedID() || !creds.UseIDToken {
 		t.Errorf("credentials = %+v, want the ID token as bearer", creds)
 	}
 	u, _ := url.Parse(opened)

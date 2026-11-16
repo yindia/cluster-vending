@@ -596,13 +596,13 @@ var File_cloud_v1_subtenant_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_subtenant_service_proto_rawDesc = "" +
 	"\n" +
-	" cloud/v1/subtenant_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18cloud/v1/subtenant.proto\x1a google/protobuf/field_mask.proto\"\xb9\x02\n" +
+	" cloud/v1/subtenant_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18cloud/v1/subtenant.proto\x1a google/protobuf/field_mask.proto\"\xfb\x02\n" +
 	"\x16CreateSubTenantRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12\x7f\n" +
-	"\tsubtenant\x18\x03 \x01(\v2\x13.cloud.v1.SubTenantBL\xbaHI\xba\x01C\n" +
-	"\x15subtenant.create_spec\x12\x1asubtenant.spec is required\x1a\x0ehas(this.spec)\xc8\x01\x01R\tsubtenant\x12'\n" +
+	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12\xc0\x01\n" +
+	"\tsubtenant\x18\x03 \x01(\v2\x13.cloud.v1.SubTenantB\x8c\x01\xbaH\x88\x01\xba\x01\x81\x01\n" +
+	"\x15subtenant.create_spec\x12<subtenant.spec and its canonical name are required on create\x1a*has(this.spec) && size(this.spec.name) > 0\xc8\x01\x01R\tsubtenant\x12'\n" +
 	"\n" +
 	"request_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\trequestId\"L\n" +
 	"\x17CreateSubTenantResponse\x121\n" +
@@ -626,14 +626,14 @@ const file_cloud_v1_subtenant_service_proto_rawDesc = "" +
 	"\n" +
 	"subtenants\x18\x01 \x03(\v2\x13.cloud.v1.SubTenantR\n" +
 	"subtenants\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xcc\x05\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xe8\x05\n" +
 	"\x16UpdateSubTenantRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x129\n" +
-	"\tsubtenant\x18\x03 \x01(\v2\x13.cloud.v1.SubTenantB\x06\xbaH\x03\xd8\x01\x03R\tsubtenant\x12\xa0\x02\n" +
-	"\vupdate_mask\x18\x04 \x01(\v2\x1a.google.protobuf.FieldMaskB\xe2\x01\xbaH\xde\x01\xba\x01\xd7\x01\n" +
-	"\x16subtenant.update_paths\x12*unsupported or empty SubTenant update mask\x1a\x90\x01size(this.paths) > 0 && this.paths.all(p, p in ['spec.display_name', 'spec.namespace_keys', 'spec.quota', 'spec.policy_profile', 'spec.access'])\xc8\x01\x01R\n" +
+	"\tsubtenant\x18\x03 \x01(\v2\x13.cloud.v1.SubTenantB\x06\xbaH\x03\xd8\x01\x03R\tsubtenant\x12\xbc\x02\n" +
+	"\vupdate_mask\x18\x04 \x01(\v2\x1a.google.protobuf.FieldMaskB\xfe\x01\xbaH\xfa\x01\xba\x01\xf3\x01\n" +
+	"\x16subtenant.update_paths\x12*unsupported or empty SubTenant update mask\x1a\xac\x01size(this.paths) > 0 && this.paths.all(p, p in ['spec.display_name', 'spec.namespace_keys', 'spec.quota', 'spec.policy_profile', 'spec.access', 'spec.deletion_protection'])\xc8\x01\x01R\n" +
 	"updateMask:\xdc\x01\xbaH\xd8\x01\x1a\xd5\x01\n" +
 	"\x19subtenant.update_identity\x12\"subtenant id and etag are required\x1a\x93\x01has(this.subtenant) && this.subtenant.id.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') && size(this.subtenant.etag) > 0\"L\n" +
 	"\x17UpdateSubTenantResponse\x121\n" +

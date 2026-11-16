@@ -1,9 +1,13 @@
 package aws_test
 
 import (
+	"context"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
@@ -23,7 +27,7 @@ func TestAWSRuntimeConfigs(t *testing.T) {
 		t.Fatalf("configs = %d, %v", len(configs), err)
 	}
 	wantPoll := map[string]string{crossplaneaws.RuntimeConfigName: "--poll=10m0s", crossplaneaws.RuntimeConfigEC2Name: "--poll=30m0s",
-		crossplaneaws.RuntimeConfigHelmName: "--poll=10m0s"}
+		crossplaneaws.RuntimeConfigHelmName: "--poll=1m0s"}
 	for _, rc := range configs {
 		if rc.Namespace != "" || wantPoll[rc.Name] == "" {
 			t.Errorf("metadata = %+v", rc.ObjectMeta)
@@ -67,6 +71,79 @@ func TestAWSRuntimeConfigs(t *testing.T) {
 	rt.MemoryLimit = "lots"
 	if _, err := crossplaneaws.RuntimeConfigs(rt); err == nil {
 		t.Error("a bad quantity must fail")
+	}
+}
+
+func TestAWSRuntimeConfigsIndependentHelmPoll(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		helmPoll time.Duration
+		want     string
+	}{
+		{"override", 20 * time.Second, "--poll=20s"},
+		{"legacy-zero-fallback", 0, "--poll=1m0s"},
+		{"small-positive", time.Nanosecond, "--poll=1ns"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rt := crossplaneaws.DefaultProviderRuntime()
+			rt.Poll, rt.EC2Poll, rt.HelmPoll = 7*time.Minute, 19*time.Minute, test.helmPoll
+			configs, err := crossplaneaws.RuntimeConfigs(rt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{
+				crossplaneaws.RuntimeConfigName:     "--poll=7m0s",
+				crossplaneaws.RuntimeConfigEC2Name:  "--poll=19m0s",
+				crossplaneaws.RuntimeConfigHelmName: test.want,
+			}
+			for _, rc := range configs {
+				if got := rc.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0].Args[0]; got != want[rc.Name] {
+					t.Errorf("%s poll = %q; want %q", rc.Name, got, want[rc.Name])
+				}
+			}
+			if rt.HelmPoll != test.helmPoll {
+				t.Fatal("renderer mutated caller runtime settings")
+			}
+		})
+	}
+	for _, interval := range []time.Duration{-time.Nanosecond, -time.Minute} {
+		rt := crossplaneaws.DefaultProviderRuntime()
+		rt.HelmPoll = interval
+		if configs, err := crossplaneaws.RuntimeConfigs(rt); err == nil || configs != nil {
+			t.Fatalf("negative Helm poll %s produced runtime configs: %v, %v", interval, configs, err)
+		}
+	}
+}
+
+func TestHelmPollDefaultPreservesExistingInstallation(t *testing.T) {
+	ctx := context.Background()
+	old := crossplaneaws.DefaultProviderRuntime()
+	old.HelmPoll = 10 * time.Minute
+	configs, err := crossplaneaws.RuntimeConfigs(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helmConfig := configs[2]
+	if helmConfig.Name != crossplaneaws.RuntimeConfigHelmName {
+		t.Fatal("expected Helm runtime config")
+	}
+	// Older/operator-managed Providers may use Crossplane's default runtime.
+	provider := crossplane.HelmProvider()
+	provider.Spec.RuntimeConfigReference = nil
+	k := fakeKube(t, helmConfig, provider)
+	if _, err := crossplaneaws.InstallProviders(ctx, k, crossplaneaws.DefaultProviderRuntime()); err != nil {
+		t.Fatal(err)
+	}
+	gotConfig := helmConfig.DeepCopy()
+	if err := k.Get(ctx, client.ObjectKeyFromObject(helmConfig), gotConfig); err != nil {
+		t.Fatal(err)
+	}
+	gotProvider := provider.DeepCopy()
+	if err := k.Get(ctx, client.ObjectKeyFromObject(provider), gotProvider); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotConfig.Spec, helmConfig.Spec) || !reflect.DeepEqual(gotProvider.Spec, provider.Spec) {
+		t.Fatal("new Helm polling default overwrote existing runtime configuration or Provider reference")
 	}
 }
 

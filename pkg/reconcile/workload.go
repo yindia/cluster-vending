@@ -45,6 +45,12 @@ type Workloads interface {
 	HelmStorage(ctx context.Context, namespace, secretRef string) (HelmStorage, error)
 }
 
+// SubTenantWorkloads opens the target cluster without exposing its credentials
+// through RPCs. A per-subtenant reconciler writes only its Capsule Tenant there.
+type SubTenantWorkloads interface {
+	Client(ctx context.Context, namespace, secretRef string) (client.Client, error)
+}
+
 // ReadKubeconfig reads a workload cluster's kubeconfig from the Secret a
 // cluster's status names (ref: "<namespace>/<name>", or a bare name). The
 // Secret is always in the cluster's own namespace: a reference to another

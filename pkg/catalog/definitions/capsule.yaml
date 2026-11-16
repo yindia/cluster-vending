@@ -44,7 +44,10 @@ spec:
             labelSelector:
               matchLabels:
                 cluster-vending.io/platform-component: capsule
-    # No native PDB value: use the chart's extraManifests extension.
+    # No native PDB value: use the chart's extraManifests extension. NEW shipped
+    # release pins snapshot these values and append versioned NaaS bootstrap
+    # (pkg/catalog/bootstrap.go). Keep bootstrap authority out of this mutable
+    # definition so older published releases are not silently upgraded.
     extraManifests:
     - apiVersion: policy/v1
       kind: PodDisruptionBudget

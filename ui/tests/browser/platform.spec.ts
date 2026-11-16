@@ -632,7 +632,7 @@ test("detail table search keeps reset accessible when no rows match", async ({ p
   await expect(page.getByRole("table", { name: "Cluster health conditions", exact: true })).toContainText("Reconciled");
 });
 
-test("release and component filters include inventories beyond the first API page", async ({ page }) => {
+test("release pagination and pure component catalog filters retain complete inventories", async ({ page }) => {
   const calls = await mockAPI(page, { richTables: true, componentCatalog: true });
   await page.goto("/releases");
   await page.getByRole("searchbox", { name: "Search releases", exact: true }).fill("release-second");
@@ -645,17 +645,15 @@ test("release and component filters include inventories beyond the first API pag
   await page.getByRole("button", { name: "Clear release filters", exact: true }).click();
   await expect(releases.getByRole("row")).toHaveCount(3);
   await page.goto(`/components?cluster=${clusterId}`);
-  await page.getByRole("searchbox", { name: "Search installed components", exact: true }).fill("ingress");
-  const installed = page.getByRole("table", { name: "Installed components", exact: true });
-  await expect(installed).toContainText("ingress");
-  await expect(installed).not.toContainText("external-dns");
-  await page.getByRole("combobox", { name: "Installed component phase", exact: true }).click();
-  await page.getByRole("option", { name: "Installing", exact: true }).click();
-  await expect(installed.getByRole("row")).toHaveCount(2);
-  await page.getByRole("button", { name: "Clear installed component filters", exact: true }).click();
-  await expect(installed.getByRole("row")).toHaveCount(3);
+  await page.getByRole("searchbox", { name: "Search component catalog", exact: true }).fill("policies");
+  const catalog = page.getByRole("table", { name: "Component catalog", exact: true });
+  await expect(catalog).toContainText("policies");
+  await expect(catalog).not.toContainText("external-dns");
+  await page.getByRole("button", { name: "Clear catalog filters", exact: true }).click();
+  await expect(catalog.getByRole("row")).toHaveCount(4);
   expect(calls.some(call => call.method === "ListReleases" && call.body.pageToken === "release-page-2")).toBe(true);
-  expect(calls.some(call => call.method === "ListComponents" && call.body.pageToken === "component-page-2")).toBe(true);
+  expect(calls.filter(call => call.method === "ListComponentDefinitions").every(call => !call.body.clusterId)).toBe(true);
+  expect(calls.some(call => call.method === "ListComponents")).toBe(false);
 });
 
 test("release inventory distinguishes current channel offerings from other valid releases", async ({ page }) => {
@@ -761,7 +759,7 @@ test("cluster tenant catalog enables configured components only after exact revi
   await expect(blocked).toContainText("Disabled by platform policy");
   await expect(blocked.getByRole("button", { name: "Enable component", exact: true })).toHaveAttribute("aria-disabled", "true");
   const row = table.getByRole("row").filter({ has: page.getByRole("link", { name: "policies", exact: true }) });
-  await expect(row).toContainText("Not enabled");
+  await expect(row).toContainText("Disabled");
   await row.getByRole("button", { name: "Enable component", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Enable policies", exact: true });
   await dialog.getByRole("textbox", { name: "Tenant values (YAML object)", exact: true }).fill("replicaCount: 3\n");
@@ -900,17 +898,12 @@ test("channel Clusters tab lists subscriptions across all tenant pages, includin
   expect(calls.filter(call => call.method === "ListClusters").every(call => call.body.tenantId === "acme")).toBe(true);
 });
 
-test("component details use YAML code editors and validate before applying exact values", async ({ page }) => {
+test("cluster component values validate before applying exact reviewed settings", async ({ page }) => {
   const calls = await mockAPI(page);
-  await page.goto(`/components/external-dns?cluster=${clusterId}`);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("external-dns");
-  await expect(page.getByRole("table", { name: "Component catalog", exact: true })).toHaveCount(0);
-  await page.getByRole("tab", { name: "Values", exact: true }).click();
-  const stored = page.getByRole("textbox", { name: "Tenant values", exact: true });
-  await expect(stored).toContainText("replicaCount: 2");
-  await expect(stored).toHaveAttribute("aria-readonly", "true");
-  await page.screenshot({ path: "/tmp/cv-ui-component-values.png", fullPage: true });
-  await page.getByRole("button", { name: "Manage component", exact: true }).click();
+  await page.goto(`/clusters/${clusterId}`);
+  await page.getByRole("tab", { name: "Components", exact: true }).click();
+  const row = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true }).getByRole("row").filter({ has: page.getByRole("link", { name: "external-dns", exact: true }) });
+  await row.getByRole("button", { name: "Manage component", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Manage external-dns", exact: true });
   await dialog.getByRole("textbox", { name: "Tenant values (YAML object)", exact: true }).fill("# Scale DNS workers\nreplicaCount: 3\n");
   await dialog.getByRole("button", { name: "Validate and review", exact: true }).click();
@@ -1253,4 +1246,48 @@ test("a stale plan is surfaced without silently replanning or retrying", async (
   await page.getByRole("button", { name: "Apply reviewed plan", exact: true }).click();
   await expect(page.getByText(/reviewed plan is stale; plan again/i)).toBeVisible();
   expect(calls.filter((call) => call.method === "UpdateNetwork")).toHaveLength(2);
+});
+
+
+test("disabled add-ons and catalog components never appear Ready", async ({ page }) => {
+  await mockAPI(page, { componentCatalog: true });
+  await page.route("**/api/rpc/**", async route => {
+    const method = new URL(route.request().url()).pathname.split("/").at(-1);
+    if (method === "GetCluster") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ cluster: { ...cluster,
+        spec: { ...cluster.spec, naas: false, aws: { ...cluster.spec.aws, addons: [{ name: "metrics-server", version: "v1" }] } },
+        status: { ...cluster.status, aws: { addons: [
+          { name: "metrics-server", version: "v1", state: "MANAGED_RESOURCE_STATE_READY" },
+          { name: "aws-efs-csi-driver", version: "v1", state: "MANAGED_RESOURCE_STATE_DELETING" },
+          { name: "cert-manager", version: "v1", state: "MANAGED_RESOURCE_STATE_READY" },
+        ] }, platformComponents: [{ name: "capsule", phase: "COMPONENT_PHASE_READY", installedVersion: "0.15.2" }] },
+      } }) }); return;
+    }
+    if (method === "ListComponents") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ components: [component,
+        { tenantId: "acme", clusterId, component: "policies", management: "COMPONENT_MANAGEMENT_TENANT", status: { phase: "COMPONENT_PHASE_READY" } },
+      ] }) }); return;
+    }
+    await route.fallback();
+  });
+  await page.goto(`/clusters/${clusterId}`);
+  await page.getByRole("tab", { name: "Components", exact: true }).click();
+  const addons = page.getByRole("table", { name: "Cluster EKS add-on target and running versions", exact: true });
+  const addon = (name: string) => addons.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
+  await expect(addon("snapshot-controller")).toContainText("Disabled");
+  await expect(addon("snapshot-controller")).not.toContainText("Ready");
+  await expect(addon("metrics-server")).toContainText("Ready");
+  await expect(addon("aws-efs-csi-driver")).toContainText("Deleting");
+  await expect(addon("cert-manager")).toContainText("Disabling");
+  await expect(page.getByRole("table", { name: "Cluster platform component pinned and installed versions", exact: true })).toContainText("Disabling");
+  const policies = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true }).getByRole("row").filter({ has: page.getByRole("link", { name: "policies", exact: true }) });
+  await expect(policies).toContainText("Disabled");
+  await expect(policies.getByRole("button", { name: "Enable component", exact: true })).toBeEnabled();
+  await page.goto(`/components/policies?cluster=${clusterId}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("policies");
+  await expect(page.getByRole("button", { name: "Enable component", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Manage component", exact: true })).toHaveCount(0);
+  await page.goto(`/components?cluster=${clusterId}`);
+  await expect(page.getByRole("table", { name: "Component catalog", exact: true })).toContainText("policies");
+  await expect(page.getByRole("table", { name: "Installed components", exact: true })).toHaveCount(0);
 });

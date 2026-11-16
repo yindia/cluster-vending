@@ -1,24 +1,32 @@
-# Settings for `make run`: the API server against the kind cluster from
-# hack/start.sh. Flags and CV_* environment variables win over this file.
-#
-# The server only validates and stores: its state is CloudAccount, Network
-# and Cluster objects in the tenants' namespaces, and `make
-# run-controller` (hack/controller.local.yaml) applies them. It needs no
-# AWS setting and no AWS credentials. Start the controller first: it
-# installs the CRDs and the Crossplane providers the server waits for.
+auth:
+    mode: required
+    issuers:
+        - name: keycloak
+          issuer: http://localhost:18080/realms/cluster-vending
+          audiences:
+            - cv-api
+          entra: null
+          usernameClaim: preferred_username
+          tenantClaim: ""
+          rolesClaim: groups
+    rules:
+        - match:
+            issuer: keycloak
+            role: tenant-acme-admin
+          grant:
+            role: TenantAdmin
+            tenants:
+                - acme
+        - match:
+            issuer: keycloak
+            role: tenant-acme-viewer
+          grant:
+            role: TenantViewer
+            tenants:
+                - acme
+aws-management-role-arn: arn:aws:iam::642299167759:role/cluster-vending-provisioner
 context: kind-cluster-vending
+http-addr: 127.0.0.1:8080
 log-format: text
 log-level: debug
-http-addr: 127.0.0.1:8080
-# Authentication is off (mode none) unless an auth section says otherwise:
-# every caller may then act for every tenant, which is what a local run
-# wants. To try it, uncomment and fill in (docs/authentication.md):
-# auth:
-#   mode: optional            # none | optional | required
-#   issuers:
-#   - name: entra
-#     audiences: ["<the API's client ID>", "api://<the API's client ID>"]
-#     entra: {tenantId: "<directory ID>", acceptV1: true}
-#   rules:
-#   - {match: {issuer: entra, role: Platform.Admin}, grant: {role: PlatformAdmin}}
-#   - {match: {issuer: entra, role: Acme.Admin}, grant: {role: TenantAdmin, tenants: [acme]}}
+provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials

@@ -1,0 +1,21 @@
+# Optional migration for an existing provider-helm using the empty `default`
+# DeploymentRuntimeConfig. This changes only Helm polling; it does not adopt the
+# platform's separate replica/resource/rate settings or change AWS providers.
+# For an already customized runtime, merge the poll setting into that profile
+# instead, preserving its other package-runtime arguments and identity settings.
+# After creating, explicitly point Provider/provider-helm runtimeConfigRef here.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: cluster-vending-helm-observation
+  labels:
+    app.kubernetes.io/managed-by: cluster-vending
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              args: ["--poll=1m0s"]

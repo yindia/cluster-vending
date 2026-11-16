@@ -3,12 +3,14 @@ package login
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,10 +38,12 @@ const (
 
 // Options are what a login needs.
 type Options struct {
-	// Issuer is the OIDC issuer URL; ClientID the public client the CLI
-	// logs in as (no secret).
+	// Issuer is the OIDC issuer URL; ClientID is the CLI's registered client.
 	Issuer   string
 	ClientID string
+	// ClientSecret is optional confidential-client authentication, sent only to
+	// the token endpoint. CLI callers obtain it from a private source, not argv.
+	ClientSecret string
 	// Scopes to ask for; empty: openid and offline_access.
 	Scopes []string
 
@@ -68,6 +72,9 @@ type Options struct {
 	// RedirectHost is the host of the browser flow's redirect URI; empty:
 	// localhost.
 	RedirectHost string
+	// CallbackPort is the loopback listener port; zero selects an ephemeral port.
+	CallbackPort int
+	nonce        string
 }
 
 // resolved applies the Entra preset and the defaults, and reports what is
@@ -105,6 +112,18 @@ func (o Options) resolved() (Options, error) {
 	if o.RedirectHost == "" {
 		o.RedirectHost = defaultRedirectHost
 	}
+	if o.RedirectHost != "localhost" && o.RedirectHost != "127.0.0.1" && o.RedirectHost != "::1" {
+		return o, errors.New("--redirect-host must be localhost, 127.0.0.1 or ::1")
+	}
+	if o.CallbackPort < 0 || o.CallbackPort > 65535 {
+		return o, errors.New("--callback-port must be between 0 and 65535")
+	}
+	if o.ClientSecret != "" && !o.Browser {
+		return o, errors.New("confidential clients require --browser; device-code login uses a public client")
+	}
+	if !safeEndpoint(o.Issuer) {
+		return o, errors.New("issuer must use HTTPS, or HTTP on a loopback host, without URL credentials")
+	}
 	return o, nil
 }
 
@@ -116,24 +135,45 @@ func Login(ctx context.Context, opts Options) (*Credentials, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 	ctx = oidc.ClientContext(ctx, o.HTTPClient)
 	provider, err := oidc.NewProvider(ctx, o.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("read the issuer's configuration: %w", err)
 	}
-	conf := &oauth2.Config{ClientID: o.ClientID, Scopes: o.Scopes, Endpoint: provider.Endpoint()}
-	conf.Endpoint.AuthStyle = oauth2.AuthStyleInParams // a public client: no secret to send
+	conf := &oauth2.Config{ClientID: o.ClientID, ClientSecret: o.ClientSecret, Scopes: o.Scopes, Endpoint: provider.Endpoint()}
+	for _, endpoint := range []string{conf.Endpoint.AuthURL, conf.Endpoint.TokenURL, conf.Endpoint.DeviceAuthURL} {
+		if endpoint != "" && !safeEndpoint(endpoint) {
+			return nil, errors.New("issuer advertised an unsafe OAuth endpoint")
+		}
+	}
+	conf.Endpoint.AuthStyle = clientAuthStyle(o.ClientSecret)
 	flow := o.device
 	if o.Browser {
+		o.nonce, err = randomState()
+		if err != nil {
+			return nil, err
+		}
 		flow = o.browser
 	}
 	token, err := flow(ctx, conf)
 	if err != nil {
 		return nil, err
 	}
-	creds := &Credentials{Issuer: o.Issuer, ClientID: o.ClientID, TokenURL: conf.Endpoint.TokenURL,
-		Scopes: o.Scopes, UseIDToken: o.UseIDToken}
+	id, err := verifyLoginIDToken(ctx, provider, o.ClientID, token, o.nonce, slices.Contains(o.Scopes, oidc.ScopeOpenID) || o.UseIDToken, true)
+	if err != nil {
+		return nil, err
+	}
+	creds := &Credentials{Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: o.ClientSecret, TokenURL: conf.Endpoint.TokenURL,
+		Scopes: o.Scopes, UseIDToken: o.UseIDToken, Nonce: o.nonce}
+	if id != nil {
+		creds.Subject = id.Subject
+	}
 	creds.apply(token)
+	if id != nil && o.UseIDToken && (creds.Expiry.IsZero() || id.Expiry.Before(creds.Expiry)) {
+		creds.Expiry = id.Expiry
+	}
 	if creds.Bearer() == "" {
 		return nil, errors.New("the issuer returned no token to call the API with (with --use-id-token: no ID token)")
 	}
@@ -148,7 +188,7 @@ func (o Options) device(ctx context.Context, conf *oauth2.Config) (*oauth2.Token
 	}
 	grant, err := conf.DeviceAuth(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("start the login: %w", err)
+		return nil, fmt.Errorf("start the login: %w", safeOAuthError(err))
 	}
 	if grant.VerificationURIComplete != "" {
 		_, _ = fmt.Fprintf(o.Out, "To log in, open %s\n(or %s and enter the code %s)\n",
@@ -159,7 +199,7 @@ func (o Options) device(ctx context.Context, conf *oauth2.Config) (*oauth2.Token
 	_, _ = fmt.Fprintln(o.Out, "Waiting for you to finish in the browser...")
 	token, err := conf.DeviceAccessToken(ctx, grant)
 	if err != nil {
-		return nil, fmt.Errorf("login not completed: %w", err)
+		return nil, fmt.Errorf("login not completed: %w", safeOAuthError(err))
 	}
 	return token, nil
 }
@@ -174,7 +214,11 @@ type callback struct {
 // redirect to a loopback port (RFC 8252): the user logs in in the browser
 // of this machine.
 func (o Options) browser(ctx context.Context, conf *oauth2.Config) (*oauth2.Token, error) {
-	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
+	listenHost := "127.0.0.1"
+	if o.RedirectHost == "::1" {
+		listenHost = "::1"
+	}
+	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", net.JoinHostPort(listenHost, fmt.Sprint(o.CallbackPort)))
 	if err != nil {
 		return nil, fmt.Errorf("listen for the browser's return: %w", err)
 	}
@@ -191,11 +235,11 @@ func (o Options) browser(ctx context.Context, conf *oauth2.Config) (*oauth2.Toke
 	port := listener.Addr().(*net.TCPAddr).Port
 	conf.RedirectURL = fmt.Sprintf("http://%s%s", net.JoinHostPort(o.RedirectHost, fmt.Sprint(port)), callbackPath)
 	verifier := oauth2.GenerateVerifier()
-	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
+	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oidc.Nonce(o.nonce))
 	_, _ = fmt.Fprintf(o.Out, "To log in, open this URL in your browser:\n%s\n", authURL)
 	if o.OpenBrowser != nil {
 		if err := o.OpenBrowser(authURL); err != nil {
-			_, _ = fmt.Fprintf(o.Out, "(could not open the browser: %v)\n", err)
+			_, _ = fmt.Fprintln(o.Out, "(could not open the browser; open the URL above manually)")
 		}
 	}
 	select {
@@ -207,7 +251,7 @@ func (o Options) browser(ctx context.Context, conf *oauth2.Config) (*oauth2.Toke
 		}
 		token, err := conf.Exchange(ctx, result.code, oauth2.VerifierOption(verifier))
 		if err != nil {
-			return nil, fmt.Errorf("login not completed: %w", err)
+			return nil, fmt.Errorf("login not completed: %w", safeOAuthError(err))
 		}
 		return token, nil
 	}
@@ -218,13 +262,17 @@ func (o Options) browser(ctx context.Context, conf *oauth2.Config) (*oauth2.Toke
 func callbackHandler(state string, results chan<- callback) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+callbackPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		q := r.URL.Query()
 		result := callback{code: q.Get("code")}
 		switch {
-		case q.Get("state") != state:
+		case len(q["state"]) != 1 || subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1:
 			result.err = errors.New("the browser came back with another login's state")
 		case q.Get("error") != "":
-			result.err = fmt.Errorf("the issuer refused: %s %s", q.Get("error"), q.Get("error_description"))
+			result.err = fmt.Errorf("the issuer refused: %s", safeOAuthCode(q.Get("error")))
+		case len(q["code"]) > 1:
+			result.err = errors.New("the browser came back with duplicate codes")
 		case result.code == "":
 			result.err = errors.New("the browser came back without a code")
 		}
@@ -239,6 +287,75 @@ func callbackHandler(state string, results chan<- callback) http.Handler {
 		}
 	})
 	return mux
+}
+
+func safeEndpoint(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return false
+	}
+	return u.Scheme == "https" || u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
+}
+
+func clientAuthStyle(secret string) oauth2.AuthStyle {
+	if secret != "" {
+		return oauth2.AuthStyleInHeader
+	}
+	return oauth2.AuthStyleInParams
+}
+
+func safeOAuthCode(code string) string {
+	switch code {
+	case "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "server_error", "temporarily_unavailable", "expired_token":
+		return code
+	default:
+		return "request_failed"
+	}
+}
+
+// OAuth response bodies/descriptions can echo a credential. Never surface them.
+func safeOAuthError(err error) error {
+	var response *oauth2.RetrieveError
+	if errors.As(err, &response) {
+		return errors.New(safeOAuthCode(response.ErrorCode))
+	}
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return errors.New("issuer request failed")
+}
+
+func verifyLoginIDToken(ctx context.Context, provider *oidc.Provider, clientID string, token *oauth2.Token, nonce string, required, requireNonce bool) (*oidc.IDToken, error) {
+	raw, _ := token.Extra("id_token").(string)
+	if raw == "" {
+		if required {
+			return nil, errors.New("issuer returned no required ID token")
+		}
+		return nil, nil
+	}
+	id, err := provider.Verifier(&oidc.Config{ClientID: clientID, SupportedSigningAlgs: []string{oidc.RS256, oidc.ES256}}).Verify(ctx, raw)
+	if err != nil {
+		return nil, errors.New("issuer returned an invalid ID token")
+	}
+	if id.Subject == "" {
+		return nil, errors.New("issuer returned an ID token without a subject")
+	}
+	if nonce != "" && (requireNonce || id.Nonce != "") && subtle.ConstantTimeCompare([]byte(nonce), []byte(id.Nonce)) != 1 {
+		return nil, errors.New("issuer returned an ID token with an invalid nonce")
+	}
+	var claims struct {
+		AuthorizedParty string `json:"azp"`
+	}
+	if err := id.Claims(&claims); err != nil || (claims.AuthorizedParty != "" && claims.AuthorizedParty != clientID) || (len(id.Audience) > 1 && claims.AuthorizedParty != clientID) {
+		return nil, errors.New("issuer returned an ID token with an invalid authorized party")
+	}
+	if id.AccessTokenHash != "" && id.VerifyAccessToken(token.AccessToken) != nil {
+		return nil, errors.New("issuer returned an ID token with an invalid access token hash")
+	}
+	return id, nil
 }
 
 // randomState is an unguessable value tying the browser's return to this

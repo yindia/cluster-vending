@@ -10,9 +10,9 @@
 apiVersion: cluster-vending.io/v1
 kind: CloudAccount
 metadata:
-  name: acme-prod            # account name (not unique)
+  name: acme-def            # account name (not unique)
   tenant: acme
 spec:
   aws:
-    accountId: "111122223333"
+    accountId: "642299167759"
     role: cluster-vending-provisioner   # role in the account that trusts the platform

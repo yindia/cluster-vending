@@ -49,6 +49,7 @@ rules:
   - components/finalizers
   - networks/finalizers
   - releases/finalizers
+  - subtenants/finalizers
   - tenants/finalizers
   verbs:
   - update
@@ -63,6 +64,7 @@ rules:
   - releasechannels/status
   - releaseholds/status
   - releases/status
+  - subtenants/status
   - tenants/status
   verbs:
   - get
@@ -84,10 +86,19 @@ rules:
   - cloud.cluster-vending.io
   resources:
   - releaseholds
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
   - subtenants
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io

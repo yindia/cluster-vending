@@ -1,0 +1,40 @@
+# LAB ONLY. Operator-reviewed, temporary access for ONE generated namespace.
+# Render SUBTENANT_TEST_USER, then the operator explicitly chooses -n <namespace>.
+# Do not add this user to Capsule owners, administrators, or the access-ready gate.
+# This fixture grants RBAC only; it does not bypass readiness/admission checks.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: subtenant-test-workloads
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: naas-workload-editor
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: ${SUBTENANT_TEST_USER}
+---
+# Extra permission solely for traffic probes in disposable test namespaces.
+# The shipped workload-editor role deliberately does NOT grant pods/exec.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: subtenant-test-exec
+rules:
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: subtenant-test-exec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: subtenant-test-exec
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: ${SUBTENANT_TEST_USER}

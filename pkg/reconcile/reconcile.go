@@ -89,6 +89,9 @@ type Deps struct {
 	// component's Helm release that is stuck (RecoverStuckReleases). Nil:
 	// nothing is recovered.
 	Workloads Workloads
+	// SubTenantWorkloads opens provider-neutral workload clients using the parent
+	// cluster's namespaced kubeconfig reference. Only the controller has this.
+	SubTenantWorkloads SubTenantWorkloads
 	// RecoverStuckReleases lets the cluster reconcile remove the Helm
 	// record of a stuck revision in a workload cluster, so provider-helm
 	// can install again.

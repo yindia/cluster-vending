@@ -8,6 +8,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
 import { usePlatform } from "@/components/platform-provider";
+import { SignOutForm, useBrowserAuth } from "@/components/auth-boundary";
 
 export function ConnectionPanel({ onConnect, showHeading = true, formId, showConnectAction = true }: {
   onConnect?: () => void;
@@ -16,6 +17,7 @@ export function ConnectionPanel({ onConnect, showHeading = true, formId, showCon
   showConnectAction?: boolean;
 }) {
   const { tenantId, connect, disconnect, identity } = usePlatform();
+  const session = useBrowserAuth();
   const inputId = useId();
   const [token, setToken] = useState("");
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -23,6 +25,12 @@ export function ConnectionPanel({ onConnect, showHeading = true, formId, showCon
     connect(tenantId, token.trim() || undefined);
     setToken(""); onConnect?.();
   }
+  if (session.enabled) return <VStack gap={4} width="100%">
+    {showHeading && <Heading level={2}>Your session</Heading>}
+    <Text>Signed in as {session.username || identity?.username || "your organization account"}.</Text>
+    <Text color="secondary">Choose your tenant in the top bar.</Text>
+    <SignOutForm />
+  </VStack>;
   return <VStack gap={4} width="100%">
     {showHeading && <Heading level={2}>Workspace connection</Heading>}
     <Text color="secondary">Connect to the current tenant ({tenantId || "not selected"}) with an access token if required. Choose tenants in the top bar. Credentials stay in this tab’s memory.</Text>

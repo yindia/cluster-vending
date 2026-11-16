@@ -43,8 +43,8 @@ message CreateSubTenantRequest {
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "subtenant.create_spec"
-      message: "subtenant.spec is required"
-      expression: "has(this.spec)"
+      message: "subtenant.spec and its canonical name are required on create"
+      expression: "has(this.spec) && size(this.spec.name) > 0"
     }
   ];
   // Required UUID idempotency key. Retry the same payload and key to receive
@@ -106,7 +106,7 @@ message UpdateSubTenantRequest {
     (buf.validate.field).cel = {
       id: "subtenant.update_paths"
       message: "unsupported or empty SubTenant update mask"
-      expression: "size(this.paths) > 0 && this.paths.all(p, p in ['spec.display_name', 'spec.namespace_keys', 'spec.quota', 'spec.policy_profile', 'spec.access'])"
+      expression: "size(this.paths) > 0 && this.paths.all(p, p in ['spec.display_name', 'spec.namespace_keys', 'spec.quota', 'spec.policy_profile', 'spec.access', 'spec.deletion_protection'])"
     }
   ];
   option (buf.validate.message).cel = {
@@ -129,6 +129,7 @@ message DeleteSubTenantRequest {
   string subtenant_id = 3 [(buf.validate.field).string.uuid = true];
   string etag = 4 [(buf.validate.field).string.min_len = 1];
   // Require-empty only: there is deliberately no force/orphan/reset option.
+  // Explicitly disable spec.deletion_protection with UpdateSubTenant first.
   // The observer reports deletion blockers until removal can proceed safely.
 }
 message DeleteSubTenantResponse {

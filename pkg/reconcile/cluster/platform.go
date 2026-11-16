@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -220,9 +221,9 @@ func unavailable(entries []component.PlatformEntry, release, problem string) *pl
 // platformStatus is the state of each Platform component, in install
 // order: left out (FAILED, why), waiting (PENDING, what for), being
 // installed (INSTALLING) or with every chart deployed (READY). A chart
-// whose install failed makes its component FAILED. objects names, for
-// each component that is not READY, the Release object its phase is about
-// (the chart that failed, waits or is being installed).
+// whose install failed, or a failed IAM prerequisite, makes its component
+// FAILED. objects names, for each component that is not READY, the Release
+// object its phase is about (the chart that failed, waits or is being installed).
 func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan, skipped []component.NotInstalled,
 	res sequence.Result, views []*cloudv1.ManagedResource) (components []*cloudv1.PlatformComponent, objects map[string]string) {
 	objects = map[string]string{}
@@ -255,6 +256,11 @@ func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan,
 			out = append(out, pc)
 			continue
 		}
+		if message := componentIAMFailure(c, views); message != "" {
+			pc.Phase, pc.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, message
+			out = append(out, pc)
+			continue
+		}
 		var object string
 		pc.Phase, pc.Message, object = componentPhase(plan.ReleaseObjectNames(c), state, waiting)
 		if object != "" {
@@ -266,6 +272,25 @@ func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan,
 		out = append(out, pc)
 	}
 	return out, objects
+}
+
+// IAM failures belong to the component that rendered the exact object, not
+// to a Helm Release. Keep objects empty so describe does not report IAM
+// policy metadata as chart metadata. Missing or pending IAM is ordinary waiting.
+func componentIAMFailure(c crossplaneaws.PlatformComponentPlan, views []*cloudv1.ManagedResource) string {
+	if c.IAM == nil {
+		return ""
+	}
+	for _, object := range crossplaneaws.ComponentIAMResources(*c.IAM) {
+		kind := reflect.TypeOf(object).Elem().Name()
+		for _, v := range views {
+			if v.GetName() == object.GetName() && (v.GetKind() == "" || v.GetKind() == kind) &&
+				v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
+				return fmt.Sprintf("%s %s: %s", kind, v.GetName(), v.GetMessage())
+			}
+		}
+	}
+	return ""
 }
 
 // removingMessage is a platform component whose chart is being

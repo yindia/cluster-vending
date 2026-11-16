@@ -198,15 +198,21 @@ func (x *SubTenant) GetUpdateTime() *timestamppb.Timestamp {
 type SubTenantSpec struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	DisplayName string                 `protobuf:"bytes,1,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	// Append-only on update. Names are derived from the allocation UUID and key;
-	// callers cannot supply physical Namespace names or owner references.
+	// Append-only on update. Names use the canonical allocation name and key,
+	// with UUID fallback for legacy unnamed allocations. Callers cannot supply
+	// arbitrary physical Namespace names or owner references.
 	NamespaceKeys []string        `protobuf:"bytes,2,rep,name=namespace_keys,json=namespaceKeys,proto3" json:"namespace_keys,omitempty"`
 	Quota         *SubTenantQuota `protobuf:"bytes,3,opt,name=quota,proto3" json:"quota,omitempty"`
 	PolicyProfile string          `protobuf:"bytes,4,opt,name=policy_profile,json=policyProfile,proto3" json:"policy_profile,omitempty"`
 	// Omission grants no developer access. Trusted resolution is mandatory.
-	Access        *SubTenantAccess `protobuf:"bytes,5,opt,name=access,proto3" json:"access,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Access *SubTenantAccess `protobuf:"bytes,5,opt,name=access,proto3" json:"access,omitempty"`
+	// Immutable canonical DNS label. Required on new creation; legacy empty names
+	// remain readable/updatable but cannot be renamed.
+	Name string `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
+	// Omitted means protected. Explicitly set false before deleting an allocation.
+	DeletionProtection *bool `protobuf:"varint,7,opt,name=deletion_protection,json=deletionProtection,proto3,oneof" json:"deletion_protection,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SubTenantSpec) Reset() {
@@ -274,6 +280,20 @@ func (x *SubTenantSpec) GetAccess() *SubTenantAccess {
 	return nil
 }
 
+func (x *SubTenantSpec) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SubTenantSpec) GetDeletionProtection() bool {
+	if x != nil && x.DeletionProtection != nil {
+		return *x.DeletionProtection
+	}
+	return false
+}
+
 // SubTenantQuota is a SubTenant-wide budget, not a per-Namespace duplicate budget.
 type SubTenantQuota struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -329,8 +349,12 @@ func (x *SubTenantQuota) GetHard() map[string]string {
 }
 
 type SubTenantAccess struct {
-	state         protoimpl.MessageState    `protogen:"open.v1"`
-	Bindings      []*SubTenantAccessBinding `protobuf:"bytes,1,rep,name=bindings,proto3" json:"bindings,omitempty"`
+	state    protoimpl.MessageState    `protogen:"open.v1"`
+	Bindings []*SubTenantAccessBinding `protobuf:"bytes,1,rep,name=bindings,proto3" json:"bindings,omitempty"`
+	// Exact OIDC group claims. May be stored before OIDC is ready; readiness is
+	// observed separately. Reserved system: subjects and wildcards are refused.
+	AdminGroups   []string `protobuf:"bytes,2,rep,name=admin_groups,json=adminGroups,proto3" json:"admin_groups,omitempty"`
+	ViewerGroups  []string `protobuf:"bytes,3,rep,name=viewer_groups,json=viewerGroups,proto3" json:"viewer_groups,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -368,6 +392,20 @@ func (*SubTenantAccess) Descriptor() ([]byte, []int) {
 func (x *SubTenantAccess) GetBindings() []*SubTenantAccessBinding {
 	if x != nil {
 		return x.Bindings
+	}
+	return nil
+}
+
+func (x *SubTenantAccess) GetAdminGroups() []string {
+	if x != nil {
+		return x.AdminGroups
+	}
+	return nil
+}
+
+func (x *SubTenantAccess) GetViewerGroups() []string {
+	if x != nil {
+		return x.ViewerGroups
 	}
 	return nil
 }
@@ -631,14 +669,17 @@ const file_cloud_v1_subtenant_proto_rawDesc = "" +
 	"\vcreate_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x12;\n" +
 	"\vupdate_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"updateTime\"\xfc\x03\n" +
+	"updateTime\"\x90\x05\n" +
 	"\rSubTenantSpec\x12+\n" +
 	"\fdisplay_name\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\vdisplayName\x12a\n" +
 	"\x0enamespace_keys\x18\x02 \x03(\tB:\xbaH7\x92\x014\b\x01\x10@\x18\x01\",r*\x10\x01\x18\x1b2$^[a-z0-9]([-a-z0-9]{0,25}[a-z0-9])?$R\rnamespaceKeys\x126\n" +
 	"\x05quota\x18\x03 \x01(\v2\x18.cloud.v1.SubTenantQuotaB\x06\xbaH\x03\xc8\x01\x01R\x05quota\x12C\n" +
 	"\x0epolicy_profile\x18\x04 \x01(\tB\x1c\xbaH\x19r\x17R\x15restricted-ambient-v1R\rpolicyProfile\x121\n" +
-	"\x06access\x18\x05 \x01(\v2\x19.cloud.v1.SubTenantAccessR\x06access:\xaa\x01\xbaH\xa6\x01\x1a\xa3\x01\n" +
-	"\x1asubtenant.namespace_budget\x128namespace_count must cover every requested namespace key\x1aK!has(this.quota) || this.quota.namespace_count >= size(this.namespace_keys)\"\x92\x03\n" +
+	"\x06access\x18\x05 \x01(\v2\x19.cloud.v1.SubTenantAccessR\x06access\x12D\n" +
+	"\x04name\x18\x06 \x01(\tB0\xbaH-r+\x18#2'^$|^[a-z0-9]([-a-z0-9]{0,33}[a-z0-9])?$R\x04name\x124\n" +
+	"\x13deletion_protection\x18\a \x01(\bH\x00R\x12deletionProtection\x88\x01\x01:\xaa\x01\xbaH\xa6\x01\x1a\xa3\x01\n" +
+	"\x1asubtenant.namespace_budget\x128namespace_count must cover every requested namespace key\x1aK!has(this.quota) || this.quota.namespace_count >= size(this.namespace_keys)B\x16\n" +
+	"\x14_deletion_protection\"\x92\x03\n" +
 	"\x0eSubTenantQuota\x122\n" +
 	"\x0fnamespace_count\x18\x01 \x01(\x05B\t\xbaH\x06\x1a\x04\x18@(\x01R\x0enamespaceCount\x12\x92\x02\n" +
 	"\x04hard\x18\x02 \x03(\v2\".cloud.v1.SubTenantQuota.HardEntryB\xd9\x01\xbaH\xd5\x01\x9a\x01\xd1\x01\b\x01\x10\f\"\xc2\x01r\xbf\x01R\frequests.cpuR\x0frequests.memoryR\n" +
@@ -646,9 +687,12 @@ const file_cloud_v1_subtenant_proto_rawDesc = "" +
 	"configmaps*\x06r\x04\x10\x01\x18@R\x04hard\x1a7\n" +
 	"\tHardEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x85\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x04\n" +
 	"\x0fSubTenantAccess\x12F\n" +
-	"\bbindings\x18\x01 \x03(\v2 .cloud.v1.SubTenantAccessBindingB\b\xbaH\x05\x92\x01\x02\x10 R\bbindings:\xa9\x01\xbaH\xa5\x01\x1a\xa2\x01\n" +
+	"\bbindings\x18\x01 \x03(\v2 .cloud.v1.SubTenantAccessBindingB\b\xbaH\x05\x92\x01\x02\x10 R\bbindings\x126\n" +
+	"\fadmin_groups\x18\x02 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10 \x18\x01\"\ar\x05\x10\x01\x18\x80\x02R\vadminGroups\x128\n" +
+	"\rviewer_groups\x18\x03 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10 \x18\x01\"\ar\x05\x10\x01\x18\x80\x02R\fviewerGroups:\xb3\x02\xbaH\xaf\x02\x1a\x87\x01\n" +
+	"\x1esubtenant.group_roles_disjoint\x12/a group cannot be both administrator and viewer\x1a4this.admin_groups.all(g, !(g in this.viewer_groups))\x1a\xa2\x01\n" +
 	"\x1esubtenant.identity_refs_unique\x12#identity_ref entries must be unique\x1a[this.bindings.all(b, this.bindings.filter(x, x.identity_ref == b.identity_ref).size() == 1)\"\xa7\x01\n" +
 	"\x16SubTenantAccessBinding\x12R\n" +
 	"\fidentity_ref\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x18?2$^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$R\videntityRef\x129\n" +
@@ -738,6 +782,7 @@ func file_cloud_v1_subtenant_proto_init() {
 		return
 	}
 	file_cloud_v1_conditions_proto_init()
+	file_cloud_v1_subtenant_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

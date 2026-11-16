@@ -1,0 +1,79 @@
+# LAB ONLY. Render SUBTENANT_TEST_IMAGE to an approved Python 3 image@sha256:digest.
+# Requires the generated app ServiceAccount. Contains no credentials or volumes.
+# Apply only after operator approval of the qualification test identity/admission.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subtenant-probe
+  labels:
+    app.kubernetes.io/name: subtenant-probe
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: subtenant-probe
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: subtenant-probe
+    spec:
+      serviceAccountName: app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: probe
+          image: ${SUBTENANT_TEST_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: [python, -u, -c]
+          args:
+            - |
+              from http.server import BaseHTTPRequestHandler, HTTPServer
+              class Handler(BaseHTTPRequestHandler):
+                  def do_GET(self):
+                      body = b"subtenant-probe\n"
+                      self.send_response(200)
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+              HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: subtenant-probe
+  labels:
+    app.kubernetes.io/name: subtenant-probe
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: subtenant-probe
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

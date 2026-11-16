@@ -35,6 +35,11 @@ type Credentials struct {
 	ClientID string   `json:"clientId"`
 	TokenURL string   `json:"tokenUrl"`
 	Scopes   []string `json:"scopes,omitempty"`
+	// Confidential credentials are kept alongside refresh tokens in the same
+	// private file, never printed or included in browser URLs.
+	ClientSecret string `json:"clientSecret,omitempty"`
+	Subject      string `json:"subject,omitempty"`
+	Nonce        string `json:"nonce,omitempty"`
 	// UseIDToken sends the ID token to the API, not the access token: for
 	// issuers whose access tokens are not JWTs for this API.
 	UseIDToken bool `json:"useIdToken,omitempty"`
@@ -72,12 +77,18 @@ func DefaultStore() (Store, error) {
 // Load reads the credentials; nil when nobody is logged in. A file other
 // users can read is refused: it holds tokens.
 func (s Store) Load() (*Credentials, error) {
-	info, err := os.Stat(s.Path)
+	info, err := os.Lstat(s.Path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read the login: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("login file must be a regular file, not a symbolic link")
+	}
+	if err := privateDirectory(filepath.Dir(s.Path)); err != nil {
+		return nil, err
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("%s is readable by other users (mode %04o): it holds tokens; run `chmod 600 %s` or log in again",
@@ -101,6 +112,15 @@ func (s Store) Save(c *Credentials) error {
 	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return fmt.Errorf("save the login: %w", err)
 	}
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return errors.New("login directory must be a regular directory, not a symbolic link")
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, dirMode); err != nil {
+			return fmt.Errorf("protect the login directory: %w", err)
+		}
+	}
 	//nolint:gosec // the tokens are what this file is for: it is written 0600 in the user's own directory
 	raw, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -119,11 +139,26 @@ func (s Store) Save(c *Credentials) error {
 		_ = tmp.Close()
 		return fmt.Errorf("save the login: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("save the login: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("save the login: %w", err)
 	}
 	if err := os.Rename(tmp.Name(), s.Path); err != nil {
 		return fmt.Errorf("save the login: %w", err)
+	}
+	return nil
+}
+
+func privateDirectory(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("read the login directory: %w", err)
+	}
+	if !info.IsDir() || runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return errors.New("login directory must be private (mode 0700), not a symbolic link")
 	}
 	return nil
 }

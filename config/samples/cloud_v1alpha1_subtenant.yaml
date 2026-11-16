@@ -11,6 +11,9 @@ metadata:
     cloud.cluster-vending.io/id: 00000000-0000-4000-8000-000000000021
     cloud.cluster-vending.io/cluster-id: 00000000-0000-4000-8000-000000000003
 spec:
+  name: payments
+  # Explicitly disable before require-empty deletion; omission is protected.
+  deletionProtection: true
   tenantRef:
     name: acme
     uid: 00000000-0000-4000-8000-000000000011

@@ -5,6 +5,7 @@ import { createBrowserClients, type BrowserClients } from "@/lib/api/client";
 import type { WhoAmIResponse } from "@/gen/cloud/v1/tenant_service_pb";
 import type { TenantInfo } from "@/gen/cloud/v1/tenant_directory_pb";
 import { sessionAccess } from "@/lib/api/access";
+import { useBrowserAuth } from "./auth-boundary";
 
 interface Session { tenantId: string; token: string; revision: number; connectionRevision: number }
 interface PlatformContext {
@@ -23,16 +24,13 @@ interface PlatformContext {
 }
 const Platform = createContext<PlatformContext | null>(null);
 
-function sessionClients(session: Session) {
-  return createBrowserClients({ baseUrl: "/api/rpc", bearerToken: session.token || undefined });
-}
-
 export function PlatformProvider({ children }: { children: ReactNode }) {
+  const browserAuth = useBrowserAuth();
   const [session, setSession] = useState<Session>({ tenantId: "acme", token: "", revision: 0, connectionRevision: 0 });
   const [identity, setIdentity] = useState<WhoAmIResponse>();
   const [confirmed, setConfirmed] = useState<{ scope: string; tenants: TenantInfo[] }>();
   const [liveUpdates, setLiveUpdates] = useState(false);
-  const api = useMemo(() => sessionClients(session), [session]);
+  const api = useMemo(() => createBrowserClients({ baseUrl: "/api/rpc", bearerToken: browserAuth.enabled ? undefined : session.token || undefined, csrfToken: browserAuth.csrfToken }), [session, browserAuth.enabled, browserAuth.csrfToken]);
   const { canWrite } = sessionAccess(identity, session.tenantId);
   // Tenant switches remount the console, but do not change the credential connection.
   // Never expose prior confirmations before WhoAmI verifies the same principal and grants again.

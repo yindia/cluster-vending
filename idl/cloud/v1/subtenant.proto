@@ -28,8 +28,9 @@ message SubTenantSpec {
     expression: "!has(this.quota) || this.quota.namespace_count >= size(this.namespace_keys)"
   };
   string display_name = 1 [(buf.validate.field).string.max_len = 128];
-  // Append-only on update. Names are derived from the allocation UUID and key;
-  // callers cannot supply physical Namespace names or owner references.
+  // Append-only on update. Names use the canonical allocation name and key,
+  // with UUID fallback for legacy unnamed allocations. Callers cannot supply
+  // arbitrary physical Namespace names or owner references.
   repeated string namespace_keys = 2 [(buf.validate.field).repeated = {
     min_items: 1
     max_items: 64
@@ -46,6 +47,14 @@ message SubTenantSpec {
   string policy_profile = 4 [(buf.validate.field).string.in = "restricted-ambient-v1"];
   // Omission grants no developer access. Trusted resolution is mandatory.
   SubTenantAccess access = 5;
+  // Immutable canonical DNS label. Required on new creation; legacy empty names
+  // remain readable/updatable but cannot be renamed.
+  string name = 6 [(buf.validate.field).string = {
+    max_len: 35
+    pattern: "^$|^[a-z0-9]([-a-z0-9]{0,33}[a-z0-9])?$"
+  }];
+  // Omitted means protected. Explicitly set false before deleting an allocation.
+  optional bool deletion_protection = 7;
 }
 
 // SubTenantQuota is a SubTenant-wide budget, not a per-Namespace duplicate budget.
@@ -87,11 +96,38 @@ message SubTenantQuota {
 
 message SubTenantAccess {
   option (buf.validate.message).cel = {
+    id: "subtenant.group_roles_disjoint"
+    message: "a group cannot be both administrator and viewer"
+    expression: "this.admin_groups.all(g, !(g in this.viewer_groups))"
+  };
+  option (buf.validate.message).cel = {
     id: "subtenant.identity_refs_unique"
     message: "identity_ref entries must be unique"
     expression: "this.bindings.all(b, this.bindings.filter(x, x.identity_ref == b.identity_ref).size() == 1)"
   };
   repeated SubTenantAccessBinding bindings = 1 [(buf.validate.field).repeated.max_items = 32];
+  // Exact OIDC group claims. May be stored before OIDC is ready; readiness is
+  // observed separately. Reserved system: subjects and wildcards are refused.
+  repeated string admin_groups = 2 [(buf.validate.field).repeated = {
+    max_items: 32
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 256
+      }
+    }
+  }];
+  repeated string viewer_groups = 3 [(buf.validate.field).repeated = {
+    max_items: 32
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 256
+      }
+    }
+  }];
 }
 
 message SubTenantAccessBinding {

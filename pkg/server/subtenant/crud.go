@@ -44,6 +44,9 @@ func validateSpec(spec *v1.SubTenantSpec) error {
 	if len(spec.GetAccess().GetBindings()) != 0 {
 		return connect.NewError(connect.CodeFailedPrecondition, unresolvedIdentities().Error())
 	}
+	if err := validateGroups(spec.GetAccess().GetAdminGroups(), spec.GetAccess().GetViewerGroups()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -89,6 +92,9 @@ func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRe
 	if err := validateSpec(in.Spec); err != nil {
 		return nil, err
 	}
+	if in.Spec.Name == "" {
+		return nil, invalid("spec.name is required for new allocations")
+	}
 	id, hash, err := createIdentity(req)
 	if err != nil {
 		return nil, err
@@ -104,11 +110,14 @@ func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRe
 	key := client.ObjectKey{Namespace: kube.TenantNamespace(req.TenantId), Name: id}
 	existing := &cloud.SubTenant{}
 	if err := s.reader().Get(ctx, key, existing); err == nil {
-		return replayCreate(existing, registration, parent, hash)
+		return s.replayCreate(ctx, existing, registration, parent, hash)
 	} else if !apierrors.IsNotFound(err) {
 		return nil, kubeError(err)
 	}
 	if err := s.claimParent(ctx, parent); err != nil {
+		return nil, err
+	}
+	if err := s.reserveName(ctx, key.Namespace, registration, parent, in.Spec.Name, id, hash); err != nil {
 		return nil, err
 	}
 	desired := specToCR(in.Spec)
@@ -129,7 +138,10 @@ func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRe
 		if err := s.reader().Get(ctx, key, existing); err != nil {
 			return nil, kubeError(err)
 		}
-		return replayCreate(existing, registration, parent, hash)
+		return s.replayCreate(ctx, existing, registration, parent, hash)
+	}
+	if err := s.bindNameClaim(ctx, obj, hash); err != nil {
+		return nil, err
 	}
 	currentParent, parentErr := s.parent(ctx, req.TenantId, req.ClusterId)
 	currentTenant, tenantErr := s.tenant(ctx, req.TenantId, true)
@@ -140,7 +152,7 @@ func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRe
 	}
 	if parentErr != nil || tenantErr != nil || !parentUnchanged(parent, currentParent) || currentTenant.UID != registration.UID {
 		// Never strip finalizers: a controller could have observed the CR already.
-		cleanupErr := s.deps.Kube.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan), client.Preconditions{ResourceVersion: &obj.ResourceVersion})
+		cleanupErr := s.deps.Kube.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationBackground), client.Preconditions{ResourceVersion: &obj.ResourceVersion})
 		if cleanupErr != nil && !apierrors.IsNotFound(cleanupErr) {
 			return nil, connect.NewError(connect.CodeUnavailable, fmt.Sprintf("parent changed and allocation %s could not be marked for cleanup; inspect it before retrying", id))
 		}
@@ -153,7 +165,7 @@ func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRe
 	return &v1.CreateSubTenantResponse{Subtenant: resourceView(obj)}, nil
 }
 
-func replayCreate(obj *cloud.SubTenant, tenant *cloud.Tenant, parent *cloud.Cluster, hash string) (*v1.CreateSubTenantResponse, error) {
+func (s *Service) replayCreate(ctx context.Context, obj *cloud.SubTenant, tenant *cloud.Tenant, parent *cloud.Cluster, hash string) (*v1.CreateSubTenantResponse, error) {
 	if !belongs(obj, tenant, parent.Labels[cloudstore.LabelID]) || obj.Spec.ClusterRef.UID != string(parent.UID) || obj.Spec.ClusterRef.Name != parent.Name {
 		return nil, connect.NewError(connect.CodeAlreadyExists, "request_id belongs to another parent incarnation or allocation")
 	}
@@ -162,6 +174,12 @@ func replayCreate(obj *cloud.SubTenant, tenant *cloud.Tenant, parent *cloud.Clus
 	}
 	if !obj.DeletionTimestamp.IsZero() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, "the allocation for this request_id is being deleted")
+	}
+	if err := s.reserveName(ctx, obj.Namespace, tenant, parent, obj.Spec.Name, obj.Name, hash); err != nil {
+		return nil, err
+	}
+	if err := s.bindNameClaim(ctx, obj, hash); err != nil {
+		return nil, err
 	}
 	return &v1.CreateSubTenantResponse{Subtenant: resourceView(obj)}, nil
 }
@@ -192,22 +210,26 @@ func (s *Service) UpdateSubTenant(ctx context.Context, req *v1.UpdateSubTenantRe
 	if in.TenantId != "" && in.TenantId != req.TenantId || in.ClusterId != "" && in.ClusterId != req.ClusterId {
 		return nil, invalid("tenant and parent cluster are immutable")
 	}
-	tenant, err := s.tenant(ctx, req.TenantId, true)
+	unprotectOnly := len(req.GetUpdateMask().GetPaths()) == 1 && req.UpdateMask.Paths[0] == "spec.deletion_protection" && in.GetSpec() != nil && in.Spec.DeletionProtection != nil && !in.Spec.GetDeletionProtection()
+	tenant, err := s.tenant(ctx, req.TenantId, !unprotectOnly)
 	if err != nil {
 		return nil, err
 	}
-	parent, err := s.parent(ctx, req.TenantId, req.ClusterId)
-	if err != nil {
-		return nil, err
+	var parent *cloud.Cluster
+	if !unprotectOnly {
+		parent, err = s.parent(ctx, req.TenantId, req.ClusterId)
+		if err != nil {
+			return nil, err
+		}
 	}
 	obj, err := s.get(ctx, tenant, req.ClusterId, in.Id)
 	if err != nil {
 		return nil, err
 	}
-	if obj.Spec.ClusterRef.UID != string(parent.UID) || obj.Spec.ClusterRef.Name != parent.Name {
+	if parent != nil && (obj.Spec.ClusterRef.UID != string(parent.UID) || obj.Spec.ClusterRef.Name != parent.Name) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, "the original parent cluster no longer exists")
 	}
-	if !obj.DeletionTimestamp.IsZero() {
+	if !obj.DeletionTimestamp.IsZero() && !unprotectOnly {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, "subtenant is being deleted")
 	}
 	if obj.ResourceVersion != in.Etag {
@@ -235,12 +257,19 @@ func (s *Service) UpdateSubTenant(ctx context.Context, req *v1.UpdateSubTenantRe
 			merged.PolicyProfile = in.GetSpec().GetPolicyProfile()
 		case "spec.access":
 			merged.Access = proto.CloneOf(in.GetSpec().GetAccess())
+		case "spec.deletion_protection":
+			if in.GetSpec() == nil || in.Spec.DeletionProtection == nil {
+				return nil, invalid("spec.deletion_protection must be explicitly true or false")
+			}
+			merged.DeletionProtection = ptr.To(in.Spec.GetDeletionProtection())
 		default:
 			return nil, invalid("unsupported update mask %q", path)
 		}
 	}
-	if err := validateSpec(merged); err != nil {
-		return nil, err
+	if !unprotectOnly {
+		if err := validateSpec(merged); err != nil {
+			return nil, err
+		}
 	}
 	if err := appendOnlyKeys(specFromCR(obj.Spec).NamespaceKeys, merged.NamespaceKeys); err != nil {
 		return nil, err
@@ -259,8 +288,10 @@ func (s *Service) UpdateSubTenant(ctx context.Context, req *v1.UpdateSubTenantRe
 		obj.Annotations = map[string]string{}
 	}
 	obj.Annotations[updatedAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := s.claimParent(ctx, parent); err != nil {
-		return nil, err
+	if parent != nil {
+		if err := s.claimParent(ctx, parent); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.deps.Kube.Patch(ctx, obj, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 		return nil, kubeError(err)
@@ -283,6 +314,9 @@ func (s *Service) DeleteSubTenant(ctx context.Context, req *v1.DeleteSubTenantRe
 	if req.Etag == "" || obj.ResourceVersion != req.Etag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch; refresh before deleting")
 	}
+	if obj.Spec.DeletionProtection == nil || *obj.Spec.DeletionProtection {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "deletion protection is enabled; explicitly update spec.deletion_protection to false before deleting")
+	}
 	if !obj.DeletionTimestamp.IsZero() {
 		return &v1.DeleteSubTenantResponse{Subtenant: resourceView(obj)}, nil
 	}
@@ -294,7 +328,7 @@ func (s *Service) DeleteSubTenant(ctx context.Context, req *v1.DeleteSubTenantRe
 	}
 	snapshot := obj.DeepCopy()
 	snapshot.DeletionTimestamp = ptr.To(metav1.Now())
-	if err := s.deps.Kube.Delete(ctx, obj, client.Preconditions{ResourceVersion: &obj.ResourceVersion}, client.PropagationPolicy(metav1.DeletePropagationOrphan)); err != nil {
+	if err := s.deps.Kube.Delete(ctx, obj, client.Preconditions{ResourceVersion: &obj.ResourceVersion}, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil {
 		return nil, kubeError(err)
 	}
 	if err := s.reader().Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {

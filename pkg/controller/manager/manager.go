@@ -195,6 +195,7 @@ func Run(ctx context.Context, o Options) error {
 		// the API server, in tenant namespaces only): to recover a stuck
 		// Helm release of a platform component.
 		Workloads:            management.Workloads(direct),
+		SubTenantWorkloads:   management.SubTenantWorkloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
 		// The same, first in a cluster's deletion: its load balancers and
 		// Karpenter's nodes, while their controllers still run.

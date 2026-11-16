@@ -123,7 +123,7 @@ approved identity references and the `workload-editor` role profile, never raw
 groups or arbitrary Kubernetes roles. Without a trusted identity resolver,
 nonempty access bindings fail with `FAILED_PRECONDITION`; omission grants no access.
 
-The future workload controller must add `SubTenantFinalizer` before its first
+The workload controller adds `SubTenantFinalizer` before its first
 remote write. CRUD never removes that finalizer. Atomic resource-version
 preconditions protect deletion against concurrent controller adoption, and
 recorded remote state without that protection causes deletion to fail closed.
@@ -131,8 +131,12 @@ recorded remote state without that protection causes deletion to fail closed.
 Cluster deletion and disabling `spec.naas` are refused while dependent SubTenant
 records remain, including terminating records. The [isolation design](../docs/design/namespace-as-a-service.md)
 separates management intent, the single per-allocation workload Capsule Tenant,
-and shared GlobalTenantResource templates. Its workload provisioning and isolation
-qualification requirements must be implemented and verified separately from CRUD.
+and shared GlobalTenantResource templates. The controller waits asynchronously
+for Capsule, shared bootstrap and workload API access; cluster upgrades and
+unrelated component failures do not gate provisioning. `PrerequisitesReady`,
+`Ready` and `status.message` identify progress and blockers. It writes only the
+owned workload Capsule Tenant. Identity resolution and runtime isolation
+qualification remain required before developer access can open.
 
 ### ComponentService
 

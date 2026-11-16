@@ -10,6 +10,7 @@ import (
 	"runtime"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/yindia/cluster-vending/pkg/cli"
 	"github.com/yindia/cluster-vending/pkg/cli/login"
@@ -30,6 +31,8 @@ func apiToken(ctx context.Context) (string, error) {
 func newLoginCmd() *cobra.Command {
 	var o login.Options
 	var deviceCode bool
+	var secretEnv, secretFile string
+	var secretPrompt bool
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in at the API's OIDC issuer; the commands then send your token",
@@ -47,6 +50,25 @@ func newLoginCmd() *cobra.Command {
 			"stored login. See docs/authentication.md.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var prompt func() (string, error)
+			if secretPrompt {
+				input, ok := cmd.InOrStdin().(*os.File)
+				if !ok || !term.IsTerminal(int(input.Fd())) {
+					return errors.New("--client-secret-prompt requires a terminal; use --client-secret-env or --client-secret-file otherwise")
+				}
+				prompt = func() (string, error) {
+					_, _ = fmt.Fprint(cmd.ErrOrStderr(), "OIDC client secret: ")
+					value, err := term.ReadPassword(int(input.Fd()))
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr())
+					defer clear(value)
+					return string(value), err
+				}
+			}
+			secret, err := login.ReadClientSecret(secretEnv, secretFile, prompt)
+			if err != nil {
+				return err
+			}
+			o.ClientSecret = secret
 			store, err := login.DefaultStore()
 			if err != nil {
 				return err
@@ -65,7 +87,12 @@ func newLoginCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&o.Issuer, "issuer", "", "OIDC issuer URL")
-	f.StringVar(&o.ClientID, "client-id", "", "the CLI's public client at the issuer")
+	f.StringVar(&o.ClientID, "client-id", "", "the CLI's client ID at the issuer (public by default)")
+	f.StringVar(&secretEnv, "client-secret-env", "", "environment variable NAME containing the optional confidential client secret; requires --browser")
+	f.StringVar(&secretFile, "client-secret-file", "", "private file containing the optional confidential client secret; requires --browser")
+	f.BoolVar(&secretPrompt, "client-secret-prompt", false, "read the optional confidential client secret without terminal echo; requires --browser")
+	f.StringVar(&o.RedirectHost, "redirect-host", "localhost", "browser callback loopback host: localhost, 127.0.0.1 or ::1")
+	f.IntVar(&o.CallbackPort, "callback-port", 0, "browser callback port (0 chooses an ephemeral port); path is /callback")
 	f.StringSliceVar(&o.Scopes, "scopes", nil, "scopes to ask for (default openid,offline_access; with --entra-scope: that scope and offline_access)")
 	f.BoolVar(&deviceCode, "device-code", true, "log in with a code entered on any device")
 	f.BoolVar(&o.Browser, "browser", false, "log in through the browser of this machine")
@@ -74,6 +101,7 @@ func newLoginCmd() *cobra.Command {
 	f.StringVar(&o.EntraScope, "entra-scope", "", "Microsoft Entra ID: the API's scope, e.g. api://<app-id>/.default")
 	f.BoolVar(&o.UseIDToken, "use-id-token", false, "send the ID token to the API, for issuers whose access tokens are not JWTs for it")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "browser")
+	cmd.MarkFlagsMutuallyExclusive("client-secret-env", "client-secret-file", "client-secret-prompt")
 	return cmd
 }
 

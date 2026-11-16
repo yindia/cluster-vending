@@ -2,9 +2,11 @@
 # Bootstraps a local management cluster for cluster-vending:
 #
 #   1. a kind cluster (KIND_CLUSTER, default cluster-vending)
-#   2. Crossplane (CROSSPLANE_VERSION) from the crossplane-stable Helm chart
+#   2. local Keycloak on loopback (hack/keycloak.sh)
+#   3. Crossplane (CROSSPLANE_VERSION) from the crossplane-stable Helm chart
+#   4. the API server with required auth (START_API=0 for infra only)
 #
-# That is all. The controller (`make run-controller`) creates the rest: on
+# The controller (`make run-controller`) creates the rest: on
 # startup the platform's CRDs, the Crossplane AWS providers (ec2, eks, iam,
 # cloudwatchlogs, kms), provider-helm and their runtime config, when
 # missing (--install-providers); tenant namespaces, ProviderConfigs and
@@ -14,6 +16,9 @@
 # Safe to re-run: every step is idempotent. Delete the cluster with
 # hack/stop.sh.
 set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 
 KIND_CLUSTER="${KIND_CLUSTER:-cluster-vending}"
 CROSSPLANE_VERSION="${CROSSPLANE_VERSION:-2.4.3}"
@@ -34,6 +39,10 @@ else
   kind create cluster --name "$KIND_CLUSTER" --wait 120s
 fi
 
+# After kind starts, prepare the clients, private credentials and auth-required
+# overlay, and wait for discovery/JWKS before any API server is launched.
+bash "$ROOT/hack/keycloak.sh" start
+
 # provider.defaultActivations=null: no catch-all activation policy. The AWS
 # providers define ~280 managed resource kinds; activating all of them makes
 # ~300 CRDs and starves a laptop kind cluster. The controller activates only
@@ -50,12 +59,21 @@ helm upgrade --install crossplane crossplane-stable/crossplane \
 kubectl --context "$CONTEXT" wait crd/providers.pkg.crossplane.io \
   --for=condition=Established --timeout=2m >/dev/null
 
+if [[ "${START_API:-1}" == 1 ]]; then
+  bash "$ROOT/hack/keycloak.sh" serve
+fi
+
 cat <<MSG
 
 Ready. kubectl context: $CONTEXT
 
   1. create the providers' credentials Secret (docs/controller.md, "Local run")
   2. make run-controller   the controller (AWS keys exported in its shell)
-  3. make run              the API server
+  3. bash hack/keycloak.sh serve   API with required auth (if not running)
+
+Keycloak: http://localhost:18080/realms/cluster-vending
+Private login settings: hack/.keycloak/ui.env and hack/.keycloak/secrets.env
+For a fresh cluster, start the controller before the API; START_API=0
+bootstraps the infrastructure without starting the API.
 
 MSG

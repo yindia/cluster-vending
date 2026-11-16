@@ -34,7 +34,8 @@ type SubTenantClusterReference struct {
 }
 
 // SubTenantNamespaceKey is a logical key, not a caller-selected remote namespace.
-// Generated namespaces use the UUID-derived tenant prefix followed by this key.
+// Generated namespaces use the canonical allocation name (legacy UUID fallback)
+// followed by this key; a 35-character name plus separator and key fits 63.
 // +kubebuilder:validation:MinLength=1
 // +kubebuilder:validation:MaxLength=27
 // +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,25}[a-z0-9])?$`
@@ -70,24 +71,58 @@ type SubTenantAccessBinding struct {
 	RoleProfile string `json:"roleProfile"`
 }
 
-// SubTenantAccess requests approved identity bindings; omission grants no access.
+// SubTenantAccess stores exact OIDC group claims and legacy identity bindings.
+// Group intent may be stored before OIDC is configured; readiness is observed.
+// +kubebuilder:validation:XValidation:rule="!has(self.adminGroups) || !has(self.viewerGroups) || self.adminGroups.all(g, !(g in self.viewerGroups))",message="a group cannot be both administrator and viewer"
 type SubTenantAccess struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=map
 	// +listMapKey=identityRef
 	Bindings []SubTenantAccessBinding `json:"bindings,omitempty"`
+	// adminGroups are exact group-claim values, never wildcard subjects.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=256
+	// +listType=set
+	// +kubebuilder:validation:XValidation:rule="self.all(g, self.filter(x, x == g).size() == 1)",message="group claims must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(g, size(g) >= 1 && size(g) <= 256 && !g.startsWith('system:') && !g.matches('[*?\\x00-\\x1f\\x7f]') && g == g.trim())",message="groups must be exact nonreserved claim values of 1 to 256 characters"
+	AdminGroups []string `json:"adminGroups,omitempty"`
+	// viewerGroups grant the viewer role only; no implicit workload editor grant.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=256
+	// +listType=set
+	// +kubebuilder:validation:XValidation:rule="self.all(g, self.filter(x, x == g).size() == 1)",message="group claims must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(g, size(g) >= 1 && size(g) <= 256 && !g.startsWith('system:') && !g.matches('[*?\\x00-\\x1f\\x7f]') && g == g.trim())",message="groups must be exact nonreserved claim values of 1 to 256 characters"
+	ViewerGroups []string `json:"viewerGroups,omitempty"`
 }
 
 // SubTenantSpec is the desired state stored only in the owning tenant namespace.
 // Canonical references are resolved by the service, not trusted from RPC input.
 // +kubebuilder:validation:XValidation:rule="self.tenantRef == oldSelf.tenantRef",message="tenantRef is immutable"
 // +kubebuilder:validation:XValidation:rule="self.clusterRef == oldSelf.clusterRef",message="clusterRef is immutable"
+// +kubebuilder:validation:XValidation:rule="oldSelf.hasValue() || has(self.name)",message="name is required for new allocations",optionalOldSelf=true
+// +kubebuilder:validation:XValidation:rule="has(self.name) == has(oldSelf.name) && (!has(self.name) || self.name == oldSelf.name)",message="name is immutable, including legacy unnamed allocations"
 // +kubebuilder:validation:XValidation:rule="oldSelf.namespaceKeys.all(k, k in self.namespaceKeys)",message="namespaceKeys are append-only; namespace removal requires a separate safe lifecycle"
 // +kubebuilder:validation:XValidation:rule="self.quota.namespaceCount >= size(self.namespaceKeys)",message="namespaceCount must cover every requested namespace key"
 type SubTenantSpec struct {
 	TenantRef  SubTenantTenantReference  `json:"tenantRef"`
 	ClusterRef SubTenantClusterReference `json:"clusterRef"`
+	// name is the immutable canonical allocation name. Omission is legacy-only;
+	// new allocations must supply a DNS label containing 1 to 35 characters.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=35
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,33}[a-z0-9])?$`
+	Name string `json:"name,omitempty"`
+	// deletionProtection must be explicitly false before deletion may proceed.
+	// Nil remains protected for legacy objects and callers that omit this field.
+	// +optional
+	// +kubebuilder:default=true
+	DeletionProtection *bool `json:"deletionProtection,omitempty"`
 	// +optional
 	// +kubebuilder:validation:MaxLength=128
 	DisplayName string `json:"displayName,omitempty"`

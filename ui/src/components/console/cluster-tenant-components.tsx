@@ -20,7 +20,8 @@ import {
   ComponentManagement, ComponentPhase, type Component, type ComponentDefinition,
 } from "@/gen/cloud/v1/component_pb";
 import { useAsyncQuery } from "@/lib/api/use-query";
-import { componentReady, loadClusterComponents, type ComponentAction } from "@/lib/workflows/components";
+import { loadClusterComponents, type ComponentAction } from "@/lib/workflows/components";
+import { componentInstallationStatus } from "@/lib/workflows/installation-status";
 import { ComponentMutationForm, ComponentObservation } from "./components-page";
 import { ConsoleTable } from "./console-table";
 import { CopyValue } from "./copy-value";
@@ -34,10 +35,6 @@ type TenantComponentRow = {
   ambiguous: boolean;
 };
 const PAGE_SIZE = 25;
-
-function phaseLabel(phase: ComponentPhase) {
-  return ComponentPhase[phase]?.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()) ?? `Unknown (${phase})`;
-}
 
 /** Keep table drafts and operation observation isolated when the selected scope changes. */
 export function ClusterTenantComponents({ clusterId }: { clusterId: string }) {
@@ -74,6 +71,7 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
 
   const installedByName = new Map<string, Component[]>();
   for (const component of inventory.data ?? []) {
+    if (component.management === ComponentManagement.TENANT && !component.id) continue;
     const existing = installedByName.get(component.component) ?? [];
     installedByName.set(component.component, [...existing, component]);
   }
@@ -128,11 +126,9 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
     { key: "name", header: "Component", renderCell: (row) => row.name ? <Link href={`/components/${encodeURIComponent(row.name)}?cluster=${encodeURIComponent(clusterId)}`}>{row.name}</Link> : <Text>Unnamed inventory entry</Text> },
     { key: "status", header: "Status", renderCell: ({ current }) => {
       if (!inventoryComplete) return <StatusValue label={inventory.error ? "Inventory unavailable" : "Loading inventory"} />;
-      if (!current) return <StatusValue label="Not enabled" />;
-      const ready = componentReady(current);
-      const phase = current.status?.phase;
-      const label = phase === undefined ? "Not reported" : phase === ComponentPhase.READY && !ready ? "Reconciling" : phaseLabel(phase);
-      return <StatusValue label={label} tone={ready ? "success" : phase === ComponentPhase.FAILED ? "error" : phase === ComponentPhase.DEGRADED ? "warning" : "neutral"} />;
+      if (!current) return <StatusValue label="Disabled" />;
+      const status = componentInstallationStatus(current);
+      return <StatusValue label={status.label} tone={status.tone} />;
     } },
     { key: "installed", header: "Installed", renderCell: ({ current }) => current?.status?.installedVersion ? <CopyValue value={current.status.installedVersion} label="Installed component version" /> : <Text>{current ? "Not reported" : "—"}</Text> },
     { key: "target", header: "Target", renderCell: ({ current }) => current?.status?.targetVersion || current?.version ? <CopyValue value={current.status?.targetVersion || current.version} label="Target component version" /> : <Text>Selected by release</Text> },
@@ -163,7 +159,7 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
       <TextInput label="Search tenant components" type="search" placeholder="Name, description, ID or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />
       <Selector label="Component availability" value={availability} onChange={(value) => { setAvailability(value); setPage(1); }} options={[
         { value: "all", label: "All tenant entries" }, { value: "available", label: "Available in catalog" },
-        { value: "enabled", label: "In cluster inventory" }, { value: "not-enabled", label: "Not enabled" },
+        { value: "enabled", label: "In cluster inventory" }, { value: "not-enabled", label: "Disabled" },
         { value: "unavailable", label: "Platform disabled" }, { value: "read-only", label: "Unknown / read-only" },
       ]} />
       {(search || availability !== "all") && <Button label="Clear tenant component filters" onClick={() => { setSearch(""); setAvailability("all"); setPage(1); }} />}

@@ -57,11 +57,23 @@ func newWorld(t *testing.T, funcs interceptor.Funcs) world {
 			objects = append(objects, &cloud.Cluster{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("cluster-%d", i), Namespace: kube.TenantNamespace(tenant), UID: types.UID(tenant + id), Finalizers: []string{cloud.ClusterFinalizer}, Labels: map[string]string{cloudstore.LabelTenant: tenant, cloudstore.LabelID: id}, Annotations: map[string]string{cloudstore.AnnotationRow: `{"etag":"before","state":"CLUSTER_STATE_RUNNING"}`}}, Spec: cloud.ClusterSpec{NaaS: ptr.To(true)}})
 		}
 	}
+	create := funcs.Create
+	funcs.Create = func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+		// The real API server assigns UIDs; fake clients do not.
+		if child, ok := obj.(*cloud.SubTenant); ok && child.UID == "" {
+			child.UID = types.UID(uuid.NewString())
+		}
+		if create != nil {
+			return create(ctx, c, obj, opts...)
+		}
+		return c.Create(ctx, obj, opts...)
+	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&cloud.SubTenant{}, &cloud.Cluster{}, &cloud.Tenant{}).WithInterceptorFuncs(funcs).Build()
 	return world{service: NewService(reconcile.Deps{Kube: c}), kube: c}
 }
 func createRequest() *v1.CreateSubTenantRequest {
-	return &v1.CreateSubTenantRequest{TenantId: "acme", ClusterId: clusterID, RequestId: uuid.NewString(), Subtenant: &v1.SubTenant{Spec: &v1.SubTenantSpec{DisplayName: "Payments", NamespaceKeys: []string{"app"}, Quota: &v1.SubTenantQuota{NamespaceCount: 2, Hard: map[string]string{"requests.cpu": "500m", "requests.memory": "1Gi", "pods": "10"}}, PolicyProfile: "restricted-ambient-v1"}}}
+	// Lifecycle tests explicitly opt out; default protection is tested separately.
+	return &v1.CreateSubTenantRequest{TenantId: "acme", ClusterId: clusterID, RequestId: uuid.NewString(), Subtenant: &v1.SubTenant{Spec: &v1.SubTenantSpec{Name: "allocation-" + uuid.NewString()[:12], DeletionProtection: ptr.To(false), DisplayName: "Payments", NamespaceKeys: []string{"app"}, Quota: &v1.SubTenantQuota{NamespaceCount: 2, Hard: map[string]string{"requests.cpu": "500m", "requests.memory": "1Gi", "pods": "10"}}, PolicyProfile: "restricted-ambient-v1"}}}
 }
 func (w world) create(t *testing.T) *v1.SubTenant {
 	t.Helper()

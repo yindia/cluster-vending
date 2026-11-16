@@ -775,6 +775,27 @@ test("cluster tables show status, Kubernetes, network, channel and inherited tie
   await page.screenshot({ path: "/tmp/cv-ui-clusters-table.png", fullPage: true });
 });
 
+test("table statuses preserve the full ink height of deleting and missing labels", async ({ page }) => {
+  await mockAPI(page);
+  await page.route("**/api/rpc/cloud.v1.ClusterService/ListClusters", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ clusters: [{ ...cluster, status: { ...cluster.status, state: "CLUSTER_STATE_DELETING" } }] }) }));
+  await page.route("**/api/rpc/cloud.v1.NetworkService/GetNetwork", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ network: { ...network, status: { ...network.status, managedResources: [{ ...network.status.managedResources[0], state: "MANAGED_RESOURCE_STATE_MISSING", ready: "CONDITION_STATUS_FALSE", synced: "CONDITION_STATUS_FALSE" }] } }, asRequested: true }) }));
+  for (const [url, label, tableName] of [["/clusters", "Deleting", "Clusters"], [`/networks/${networkId}`, "Missing", "Network managed resource inventory"]]) {
+    await page.goto(url);
+    if (label === "Missing") await page.getByRole("tab", { name: "Resources", exact: true }).click();
+    const text = page.getByRole("table", { name: tableName, exact: true }).getByText(label, { exact: true });
+    await expect(text).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const metrics = await text.evaluate(element => {
+      const context = document.createElement("canvas").getContext("2d")!;
+      context.font = getComputedStyle(element).font;
+      const ink = context.measureText(element.textContent!);
+      return { available: element.getBoundingClientRect().height, ink: ink.actualBoundingBoxAscent + ink.actualBoundingBoxDescent };
+    });
+    expect(metrics.available).toBeGreaterThanOrEqual(metrics.ink);
+    await page.screenshot({ path: `/tmp/cv-ui-${label.toLowerCase()}-descenders.png`, fullPage: true });
+  }
+});
+
 test("resource and operator detail headers use the same page gutter", async ({ page }) => {
   await mockAPI(page);
   for (const [url, name] of [[`/accounts/${accountId}`, "Production"], [`/networks/${networkId}`, "Production network"], [`/clusters/${clusterId}`, "payments"], ["/releases/release-stable", "release-stable"], ["/channels/stable", "Stable"], ["/freeze", "Freeze controls"], [`/components/external-dns?cluster=${clusterId}`, "external-dns"]]) {

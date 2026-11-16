@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -185,12 +186,21 @@ func (s *Reconciler) observeUpgrade(ctx context.Context, records []model.Managed
 // that are not applied (deleting, imported read-only).
 func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, stored *cloudv1.ClusterUpgrade, comps componentsState) *cloudv1.ClusterUpgrade {
 	if row.State == StateDeleting || row.State == StateImported || row.State == StateBlocked ||
-		u.target == "" || u.controlPlane == "" {
+		u.target == "" {
 		return nil
 	}
 	var prev *cloudv1.ClusterUpgrade
 	if sameMinor(stored.GetToVersion(), u.target) {
 		prev = stored
+	}
+	if prev != nil {
+		if upgradePauseReason(row, prev, views) != "" {
+			return proto.CloneOf(prev)
+		}
+		prev = resumeUpgradeClock(row, prev)
+	}
+	if u.controlPlane == "" {
+		return nil
 	}
 	steps := settledSteps{controlPlane: !u.controlPlaneBehind(), nodes: u.nodesSettled(views),
 		addons: addonsSettled(row, views), platform: comps.platformReady, tenant: comps.tenantReady}
@@ -214,7 +224,9 @@ func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, st
 		out.FromVersion = orName(u.nodesBehind(), u.controlPlane)
 	}
 	out.Message = u.stepMessage(out, views, comps)
-	if step == stepAddonsPhase && stepOf(prev) == step {
+	if upgradePauseReason(row, out, views) != "" {
+		out.Applied = false
+	} else if step == stepAddonsPhase && stepOf(prev) == step {
 		watchAddons(row, prev, out, views)
 	}
 	return out

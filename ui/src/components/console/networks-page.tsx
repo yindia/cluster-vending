@@ -670,7 +670,7 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
             {network && canWrite && <Button label="Edit network" onClick={() => setEditing(true)} isDisabled={editing || !network.etag || !networkProvider(account) || status?.state === NetworkState.IMPORTED || status?.state === NetworkState.DELETING} />}
             <RefreshButton label="Refresh details" onClick={query.refresh} isLoading={query.refreshing} />
             {network && <ResourceYamlButton kind="Network" resourceId={network.id} />}
-            {network && canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze network" : "Freeze network"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "destructive"} href={`/freeze?scope=network&id=${encodeURIComponent(network.id)}`} />}
+            {network && canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze network" : "Freeze network"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "secondary"} href={`/freeze?scope=network&id=${encodeURIComponent(network.id)}`} />}
             {network && canWrite && <DeleteNetwork network={network} onAccepted={accepted} />}
             {network && canWrite && status?.import && (status.state === NetworkState.IMPORTED || status.state === NetworkState.FAILED) && <TakeOverNetworkForm network={network} accounts={accounts} onAccepted={accepted} onReload={query.refresh} />}
       </>} />

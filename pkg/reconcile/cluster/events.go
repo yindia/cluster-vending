@@ -154,6 +154,22 @@ func count(st *cloudv1.ClusterStatus, kind string) int {
 // groups, and finishing.
 func upgradeEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	was, is := before.GetUpgrade(), after.GetUpgrade()
+	paused, previouslyPaused := upgradePauseCondition(after), upgradePauseCondition(before)
+	if paused != nil {
+		if previouslyPaused == nil || previouslyPaused.GetMessage() != paused.GetMessage() || !sameMinor(was.GetToVersion(), is.GetToVersion()) {
+			return []reconcile.Note{reconcile.Normal(ConditionUpgradePaused, paused.GetMessage())}
+		}
+		return nil
+	}
+	var notes []reconcile.Note
+	if previouslyPaused != nil && is != nil && !is.GetHalted() {
+		notes = append(notes, reconcile.Normal("UpgradeResumed", fmt.Sprintf("Kubernetes upgrade from %s to %s resumed: %s", is.GetFromVersion(), is.GetToVersion(), is.GetMessage())))
+	}
+	return append(notes, upgradeProgressEvents(before, after)...)
+}
+
+func upgradeProgressEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
+	was, is := before.GetUpgrade(), after.GetUpgrade()
 	switch {
 	case was == nil && is != nil:
 		return []reconcile.Note{reconcile.Normal(reconcile.ReasonUpgradeStarted,

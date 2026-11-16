@@ -505,7 +505,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           <ResourceYamlButton kind="Cluster" resourceId={cluster.id} />
           <ClusterAccessButton cluster={cluster} />
           {canWrite && status?.import && <ClusterTakeoverButton cluster={cluster} onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously; readiness is not yet confirmed."); refresh(); }} />}
-          {canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze cluster" : "Freeze cluster"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "destructive"} href={`/freeze?scope=cluster&id=${encodeURIComponent(cluster.id)}`} />}
+          {canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze cluster" : "Freeze cluster"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "secondary"} href={`/freeze?scope=cluster&id=${encodeURIComponent(cluster.id)}`} />}
           {canWrite && <><Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} /><Button label="Delete" variant="destructive" onClick={() => setDeleting(true)} /></>}
         </HStack>}
       />

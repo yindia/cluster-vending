@@ -41,5 +41,5 @@ export function CopyButton({ value, label = "value" }: { value: string; label?: 
 }
 
 export function CopyValue({ value, label = "value", display, isSecondary = false, type }: { value: string; label?: string; display?: string; isSecondary?: boolean; type?: TextProps["type"] }) {
-  return <HStack gap={1} className="cv-copy-target" vAlign="center" minHeight="1.5rem" maxWidth="100%"><Text maxLines={1} type={type ?? (isSecondary ? "supporting" : "body")} weight={type === "large" ? "semibold" : undefined} color={isSecondary ? "secondary" : "primary"}>{display ?? (value || "Not reported")}</Text>{value && <CopyButton key={value} value={value} label={label} />}</HStack>;
+  return <HStack gap={1} className="cv-copy-target" vAlign="center" minHeight="1.5rem" maxWidth="100%"><Text hasCapsize={false} maxLines={1} type={type ?? (isSecondary ? "supporting" : "body")} weight={type === "large" ? "semibold" : undefined} color={isSecondary ? "secondary" : "primary"}>{display ?? (value || "Not reported")}</Text>{value && <CopyButton key={value} value={value} label={label} />}</HStack>;
 }

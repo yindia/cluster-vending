@@ -64,6 +64,8 @@ its kind; the message has the details.
 | Network, Cluster | `ImportBlocked` | Warning | the import found something it cannot take over |
 | Network, Cluster | `TakenOver` | Normal | the platform owns the imported resources now |
 | Cluster | `UpgradeStarted` | Normal | a Kubernetes upgrade began (the control plane first) |
+| Cluster | `UpgradePaused` | Normal | a platform, tenant, network or cluster freeze, or a paused Crossplane resource needed by the current upgrade step, holds the upgrade; the message names the cause |
+| Cluster | `UpgradeResumed` | Normal | the pause was lifted and the existing upgrade can continue |
 | Cluster | `UpgradeNodes` | Normal | the control plane runs the new version; the node groups, then the add-ons, follow |
 | Cluster | `UpgradeStep` | Normal | the upgrade reached its next step: the add-ons, the platform components, the tenant components |
 | Cluster | `AddonRecovering` | Warning | add-ons failed (AWS's reason) or did not settle within 30 minutes; they are applied again (at most 3 times) |
@@ -108,7 +110,14 @@ its kind; the message has the details.
 | Cluster | `AutomaticUpgradeSucceeded` | Normal | an automatic upgrade finished: the cluster runs the new minor (`status.rollout`) |
 | Cluster | `AutomaticUpgradeFailed` | Warning | an automatic upgrade failed, halted, or made no progress in one step for `--upgrade-timeout`; it counts against the tier's `maxFailed`. A Pending or Blocked record the cluster reached by other means is closed without an event |
 
-The constants are in `pkg/reconcile/events.go`.
+A paused upgrade reports `UpgradePaused=True` and `Ready=False`, with the pause
+reason in its status and upgrade message. Its phase and original start time stay
+intact; intentional pause time does not count toward add-on recovery. Repeated
+passes with the same cause emit no duplicate pause event. An idle frozen cluster
+does not report an upgrade pause.
+
+The shared constants are in `pkg/reconcile/events.go`; upgrade pause observation
+is in `pkg/reconcile/cluster/upgrade_observation_pause.go`.
 
 ## How it works
 

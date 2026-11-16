@@ -247,7 +247,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
           <TextInput ref={reasonRef} label="Reason" htmlName="reason" value={reason} isRequired isDisabled={busy} onChange={value => { setReason(value); invalidateReview(); }} />
           <TextInput label="Optional expiry (UTC)" htmlName="until" description="YYYY-MM-DDTHH:mm:ssZ; leave empty for no automatic expiry." value={until} isDisabled={busy} onChange={value => { setUntil(value); invalidateReview(); }} />
         </>}
-        <Button label={`Review ${action}`} type="submit" variant={action === "freeze" ? "destructive" : "primary"} aria-haspopup="dialog" isDisabled={busy} isLoading={submitting} />
+        <Button label={`Review ${action}`} type="submit" variant={action === "freeze" ? "secondary" : "primary"} aria-haspopup="dialog" isDisabled={busy} isLoading={submitting} />
       </VStack>
     </form>
     </>}
@@ -281,7 +281,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
         {submitting && <Text role="status">Submitting the request. Keep this dialog open until the API responds.</Text>}
         <HStack gap={3} wrap="wrap" hAlign="end">
           <Button ref={cancelRef} label="Cancel confirmation" type="button" isDisabled={submitting} onClick={() => closeConfirmation(false)} />
-          <Button label={`Confirm ${review.action} for ${scopeLabel}`} type="submit" variant={review.action === "freeze" ? "destructive" : "primary"} isLoading={submitting} isDisabled={reviewBusy} />
+          <Button label={`Confirm ${review.action} for ${scopeLabel}`} type="submit" variant={review.action === "freeze" ? "secondary" : "primary"} isLoading={submitting} isDisabled={reviewBusy} />
         </HStack>
         </VStack>
         </form>

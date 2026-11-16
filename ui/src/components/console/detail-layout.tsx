@@ -9,9 +9,10 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { StatusDot, type StatusDotVariant } from "@astryxdesign/core/StatusDot";
 
 export function StatusValue({ label, tone = "neutral" }: { label: string; tone?: StatusDotVariant }) {
+  // Cap-height trimming and ellipsis clipping together cut off g/p/y descenders.
   return <HStack gap={2} vAlign="center" minHeight="1.5rem">
     <StatusDot label={label} variant={tone} aria-hidden="true" />
-    <Text type="label" maxLines={1}>{label}</Text>
+    <Text type="label" hasCapsize={false} maxLines={1}>{label}</Text>
   </HStack>;
 }
 

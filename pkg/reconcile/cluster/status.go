@@ -101,6 +101,11 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 	c.Status.Freeze = reconcile.FreezeProto(row.Frozen)
 	withTeardownStatus(ctx, c.GetStatus(), storedStatus(row))
 	c.GetStatus().CodeChange = reconcile.CodeOf(ctx, storedStatus(row).GetCodeChange())
+	pauseViews, err := s.upgradePauseViews(ctx, row, c.GetStatus())
+	if err != nil {
+		return nil, fmt.Errorf("observe upgrade pauses: %w", err)
+	}
+	withUpgradePause(row, c.GetStatus(), pauseViews)
 	// What the controller reported last stays with the status: a read
 	// returns it, and a pass adds to it (remember).
 	c.GetStatus().RecentEvents = storedStatus(row).GetRecentEvents()

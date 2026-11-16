@@ -25,6 +25,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/component"
 	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/server/subtenant"
 	"github.com/yindia/cluster-vending/pkg/server/tenant"
 	"github.com/yindia/cluster-vending/pkg/telemetry"
 	"github.com/yindia/cluster-vending/pkg/version"
@@ -90,6 +91,7 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d, tenant.WithOnboarding(o.onboarding)))
 	cloudv1connect.RegisterAdminServiceHandler(server, admin.NewService(d))
 	cloudv1connect.RegisterComponentServiceHandler(server, component.NewService(d, o.catalog))
+	cloudv1connect.RegisterSubTenantServiceHandler(server, subtenant.NewService(d))
 
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)

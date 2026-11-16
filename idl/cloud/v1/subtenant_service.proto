@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/subtenant.proto";
+import "google/protobuf/field_mask.proto";
+
+// SubTenantService stores desired allocations in tenant-<tenant_id>. All RPCs
+// authorize tenant scope; mutations require tenant administration. Referenced
+// clusters must belong to that tenant and have spec.naas enabled. Identity refs
+// require trusted resolution; this service never accepts arbitrary RBAC/groups.
+// Mutations acknowledge persistence, not remote readiness. Observe GetSubTenant
+// until status.observed_generation catches up and current qualification is Ready.
+service SubTenantService {
+  rpc CreateSubTenant(CreateSubTenantRequest) returns (CreateSubTenantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  rpc GetSubTenant(GetSubTenantRequest) returns (GetSubTenantResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListSubTenants(ListSubTenantsRequest) returns (ListSubTenantsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc UpdateSubTenant(UpdateSubTenantRequest) returns (UpdateSubTenantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  rpc DeleteSubTenant(DeleteSubTenantRequest) returns (DeleteSubTenantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+message CreateSubTenantRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // spec is required. Identity/status fields are output-only; canonical cluster
+  // and Tenant names/UIDs are resolved by the service, never accepted from input.
+  SubTenant subtenant = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "subtenant.create_spec"
+      message: "subtenant.spec is required"
+      expression: "has(this.spec)"
+    }
+  ];
+  // Required UUID idempotency key. Retry the same payload and key to receive
+  // the same UUID allocation; reusing a key for another payload is a conflict.
+  string request_id = 4 [(buf.validate.field).string.uuid = true];
+}
+message CreateSubTenantResponse {
+  SubTenant subtenant = 1;
+}
+
+message GetSubTenantRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  string subtenant_id = 3 [(buf.validate.field).string.uuid = true];
+}
+message GetSubTenantResponse {
+  SubTenant subtenant = 1;
+}
+
+message ListSubTenantsRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Optional filter; omission lists only the caller's authorized tenant scope.
+  string cluster_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+  // Zero selects the server default. Results have stable pagination order.
+  int32 page_size = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 200
+  }];
+  string page_token = 4 [(buf.validate.field).string.max_len = 4096];
+}
+message ListSubTenantsResponse {
+  repeated SubTenant subtenants = 1;
+  string next_page_token = 2;
+}
+
+message UpdateSubTenantRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // id and etag are required. Cluster binding is immutable. Only masked spec
+  // paths are copied; partial specs are validated after merging with stored state.
+  SubTenant subtenant = 3 [(buf.validate.field).ignore = IGNORE_ALWAYS];
+  google.protobuf.FieldMask update_mask = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "subtenant.update_paths"
+      message: "unsupported or empty SubTenant update mask"
+      expression: "size(this.paths) > 0 && this.paths.all(p, p in ['spec.display_name', 'spec.namespace_keys', 'spec.quota', 'spec.policy_profile', 'spec.access'])"
+    }
+  ];
+  option (buf.validate.message).cel = {
+    id: "subtenant.update_identity"
+    message: "subtenant id and etag are required"
+    expression: "has(this.subtenant) && this.subtenant.id.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') && size(this.subtenant.etag) > 0"
+  };
+}
+message UpdateSubTenantResponse {
+  SubTenant subtenant = 1;
+}
+
+message DeleteSubTenantRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  string subtenant_id = 3 [(buf.validate.field).string.uuid = true];
+  string etag = 4 [(buf.validate.field).string.min_len = 1];
+  // Require-empty only: there is deliberately no force/orphan/reset option.
+  // The observer reports deletion blockers until removal can proceed safely.
+}
+message DeleteSubTenantResponse {
+  // Accepted desired deletion, not proof that remote resources are gone.
+  SubTenant subtenant = 1;
+}

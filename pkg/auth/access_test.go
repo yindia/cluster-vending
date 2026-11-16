@@ -65,6 +65,11 @@ func TestEveryRPCIsClassified(t *testing.T) {
 		"cloud.v1.NetworkService.UpdateNetwork":        {Scope: auth.ScopeTenant, Write: true},
 		"cloud.v1.NetworkService.ListNetworks":         {Scope: auth.ScopeTenant},
 		"cloud.v1.ComponentService.EnableComponent":    {Scope: auth.ScopeTenant, Write: true},
+		"cloud.v1.SubTenantService.CreateSubTenant":    {Scope: auth.ScopeTenant, Write: true},
+		"cloud.v1.SubTenantService.GetSubTenant":       {Scope: auth.ScopeTenant},
+		"cloud.v1.SubTenantService.ListSubTenants":     {Scope: auth.ScopeTenant},
+		"cloud.v1.SubTenantService.UpdateSubTenant":    {Scope: auth.ScopeTenant, Write: true},
+		"cloud.v1.SubTenantService.DeleteSubTenant":    {Scope: auth.ScopeTenant, Write: true},
 	}
 	seen := map[protoreflect.FullName]bool{}
 	for _, m := range methods(t) {

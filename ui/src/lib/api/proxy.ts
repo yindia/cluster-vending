@@ -2,8 +2,9 @@ import { TenantService } from "@/gen/cloud/v1/tenant_service_pb";
 import { NetworkService } from "@/gen/cloud/v1/network_service_pb";
 import { ClusterService } from "@/gen/cloud/v1/cluster_service_pb";
 import { ComponentService } from "@/gen/cloud/v1/component_service_pb";
+import { SubTenantService } from "@/gen/cloud/v1/subtenant_service_pb";
 
-const services = [TenantService, NetworkService, ClusterService, ComponentService];
+const services = [TenantService, NetworkService, ClusterService, ComponentService, SubTenantService];
 const routes = new Set(services.flatMap((service) => service.methods.map((method) => `${service.typeName}/${method.name}`)));
 const maxBodyBytes = 2 * 1024 * 1024;
 

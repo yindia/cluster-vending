@@ -84,6 +84,7 @@ rules:
   - cloud.cluster-vending.io
   resources:
   - releaseholds
+  - subtenants
   verbs:
   - get
   - list

@@ -5,6 +5,7 @@ import { ClusterService } from "../../gen/cloud/v1/cluster_service_pb";
 import { ComponentService } from "../../gen/cloud/v1/component_service_pb";
 import { NetworkService } from "../../gen/cloud/v1/network_service_pb";
 import { TenantService } from "../../gen/cloud/v1/tenant_service_pb";
+import { SubTenantService } from "../../gen/cloud/v1/subtenant_service_pb";
 
 export interface BrowserClientOptions {
   /** The caller's trusted Connect server URL, optionally including a path prefix. */
@@ -20,6 +21,7 @@ export interface BrowserClients {
   component: Client<typeof ComponentService>;
   network: Client<typeof NetworkService>;
   tenant: Client<typeof TenantService>;
+  subtenant: Client<typeof SubTenantService>;
 }
 
 /** Creates clients without making requests; authorization remains on the Go server. */
@@ -47,5 +49,6 @@ export function createBrowserClients({
     component: createClient(ComponentService, transport),
     network: createClient(NetworkService, transport),
     tenant: createClient(TenantService, transport),
+    subtenant: createClient(SubTenantService, transport),
   };
 }

@@ -26,6 +26,9 @@ rules:
   - networks/status
   - clusters
   - clusters/status
+  - subtenants
+  - subtenants/status
+  - subtenants/finalizers
   - components
   - components/status
   verbs:

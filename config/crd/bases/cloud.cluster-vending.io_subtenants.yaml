@@ -1,0 +1,398 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: subtenants.cloud.cluster-vending.io
+spec:
+  group: cloud.cluster-vending.io
+  names:
+    categories:
+    - cluster-vending
+    kind: SubTenant
+    listKind: SubTenantList
+    plural: subtenants
+    shortNames:
+    - cvst
+    singular: subtenant
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterRef.name
+      name: Cluster
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SubTenant records one namespace-as-a-service allocation in tenant-<tenantID>.
+          Kubernetes is its source of truth; no database or arbitrary policy payload exists.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SubTenantSpec is the desired state stored only in the owning tenant namespace.
+              Canonical references are resolved by the service, not trusted from RPC input.
+            properties:
+              access:
+                description: SubTenantAccess requests approved identity bindings;
+                  omission grants no access.
+                properties:
+                  bindings:
+                    items:
+                      description: |-
+                        SubTenantAccessBinding refers to an identity approved for this tenant. It is
+                        never a raw Kubernetes subject, OIDC group, role name or bearer credential.
+                      properties:
+                        identityRef:
+                          description: |-
+                            identityRef must be resolved and authorized by a trusted platform resolver.
+                            A missing resolver or unknown reference must fail closed.
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                          type: string
+                        roleProfile:
+                          enum:
+                          - workload-editor
+                          type: string
+                      required:
+                      - identityRef
+                      - roleProfile
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - identityRef
+                    x-kubernetes-list-type: map
+                type: object
+              clusterRef:
+                description: SubTenantClusterReference binds a canonical cluster UUID
+                  and object incarnation.
+                properties:
+                  id:
+                    pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                    type: string
+                  name:
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                    type: string
+                  uid:
+                    maxLength: 128
+                    minLength: 1
+                    type: string
+                required:
+                - id
+                - name
+                - uid
+                type: object
+              displayName:
+                maxLength: 128
+                type: string
+              namespaceKeys:
+                description: namespaceKeys are append-only. Remote names are assigned
+                  by the platform.
+                items:
+                  description: |-
+                    SubTenantNamespaceKey is a logical key, not a caller-selected remote namespace.
+                    Generated namespaces use the UUID-derived tenant prefix followed by this key.
+                  maxLength: 27
+                  minLength: 1
+                  pattern: ^[a-z0-9]([-a-z0-9]{0,25}[a-z0-9])?$
+                  type: string
+                maxItems: 64
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+              policyProfile:
+                enum:
+                - restricted-ambient-v1
+                type: string
+              quota:
+                description: |-
+                  SubTenantQuota is a SubTenant-wide budget. The API must parse each hard value as
+                  a nonnegative Kubernetes Quantity and require integer values for object counts.
+                properties:
+                  hard:
+                    additionalProperties:
+                      type: string
+                    description: hard permits only the approved quota dimensions;
+                      values are Quantity strings.
+                    maxProperties: 12
+                    minProperties: 1
+                    type: object
+                    x-kubernetes-validations:
+                    - message: unsupported quota resource
+                      rule: self.all(k, k in ['requests.cpu', 'requests.memory', 'limits.cpu',
+                        'limits.memory', 'requests.ephemeral-storage', 'limits.ephemeral-storage',
+                        'requests.storage', 'persistentvolumeclaims', 'pods', 'services',
+                        'secrets', 'configmaps'])
+                    - message: quota quantities must contain 1 to 64 characters
+                      rule: self.all(k, size(self[k]) > 0 && size(self[k]) <= 64)
+                    - message: quota values must be valid nonnegative Kubernetes quantities
+                      rule: self.all(k, isQuantity(self[k]) && quantity(self[k]).compareTo(quantity('0'))
+                        >= 0)
+                    - message: object-count quotas must be integral quantities
+                      rule: self.all(k, !(k in ['persistentvolumeclaims', 'pods',
+                        'services', 'secrets', 'configmaps']) || (isQuantity(self[k])
+                        && quantity(self[k]).isInteger()))
+                  namespaceCount:
+                    description: namespaceCount bounds namespace allocation, including
+                      future append requests.
+                    format: int32
+                    maximum: 64
+                    minimum: 1
+                    type: integer
+                required:
+                - hard
+                - namespaceCount
+                type: object
+              tenantRef:
+                description: SubTenantTenantReference binds an existing management
+                  Tenant registration.
+                properties:
+                  name:
+                    maxLength: 56
+                    minLength: 1
+                    pattern: ^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$
+                    type: string
+                  uid:
+                    description: uid prevents adopting a replacement registration
+                      with the same name.
+                    maxLength: 128
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                - uid
+                type: object
+            required:
+            - clusterRef
+            - namespaceKeys
+            - policyProfile
+            - quota
+            - tenantRef
+            type: object
+            x-kubernetes-validations:
+            - message: tenantRef is immutable
+              rule: self.tenantRef == oldSelf.tenantRef
+            - message: clusterRef is immutable
+              rule: self.clusterRef == oldSelf.clusterRef
+            - message: namespaceKeys are append-only; namespace removal requires a
+                separate safe lifecycle
+              rule: oldSelf.namespaceKeys.all(k, k in self.namespaceKeys)
+            - message: namespaceCount must cover every requested namespace key
+              rule: self.quota.namespaceCount >= size(self.namespaceKeys)
+          status:
+            description: |-
+              SubTenantStatus is written by the observer/controller only. The per-subtenant
+              remote writer creates only the Capsule Tenant; shared GTRs own its children.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              deletionBlockers:
+                items:
+                  type: string
+                maxItems: 64
+                type: array
+              message:
+                type: string
+              namespaces:
+                items:
+                  description: |-
+                    SubTenantNamespaceStatus is an observation, never permission to create directly.
+                    Readiness requires current baseline qualification; GTR Ready alone is insufficient.
+                  properties:
+                    conditions:
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                    key:
+                      description: |-
+                        SubTenantNamespaceKey is a logical key, not a caller-selected remote namespace.
+                        Generated namespaces use the UUID-derived tenant prefix followed by this key.
+                      maxLength: 27
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]{0,25}[a-z0-9])?$
+                      type: string
+                    name:
+                      type: string
+                    templateRevision:
+                      type: string
+                    uid:
+                      type: string
+                  required:
+                  - key
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - key
+                x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                type: integer
+              remoteCapsuleTenant:
+                type: string
+              remoteCapsuleTenantUID:
+                type: string
+              state:
+                description: SubTenantState is an asynchronously observed lifecycle
+                  state.
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Degraded
+                - Failed
+                - Deleting
+                type: string
+              templateRevision:
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

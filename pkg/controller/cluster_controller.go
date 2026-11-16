@@ -56,6 +56,9 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if result, stop, err := r.guardSubTenantSafety(ctx, obj, frozen); stop || err != nil {
+		return result, err
+	}
 	if frozen.Holds() {
 		if id != "" {
 			if err := r.rec.Reconcile(ctx, tenant, id); err != nil {

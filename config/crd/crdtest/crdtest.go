@@ -16,6 +16,7 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	kubejson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"sigs.k8s.io/yaml"
@@ -70,7 +71,7 @@ func New(kind string) (*Validator, error) {
 // unknown fields, schema violations and failed CEL rules.
 func (v *Validator) Validate(ctx context.Context, doc []byte) (field.ErrorList, error) {
 	obj := map[string]any{}
-	if err := yaml.Unmarshal(doc, &obj); err != nil {
+	if err := decode(doc, &obj); err != nil {
 		return nil, err
 	}
 	var errs field.ErrorList
@@ -86,12 +87,22 @@ func (v *Validator) Validate(ctx context.Context, doc []byte) (field.ErrorList, 
 // (transition rules such as immutable fields).
 func (v *Validator) ValidateUpdate(ctx context.Context, doc, old []byte) (field.ErrorList, error) {
 	obj, prev := map[string]any{}, map[string]any{}
-	if err := yaml.Unmarshal(doc, &obj); err != nil {
+	if err := decode(doc, &obj); err != nil {
 		return nil, err
 	}
-	if err := yaml.Unmarshal(old, &prev); err != nil {
+	if err := decode(old, &prev); err != nil {
 		return nil, err
 	}
 	errs, _ := v.cel.Validate(ctx, nil, v.s, obj, prev, celconfig.RuntimeCELCostBudget)
 	return errs, nil
+}
+
+// Kubernetes unstructured decoding preserves integer values as int64. Generic
+// YAML-to-map decoding produces float64, which incorrectly fails CEL int rules.
+func decode(doc []byte, obj *map[string]any) error {
+	raw, err := yaml.YAMLToJSON(doc)
+	if err != nil {
+		return err
+	}
+	return kubejson.Unmarshal(raw, obj)
 }

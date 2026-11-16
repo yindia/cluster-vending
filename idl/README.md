@@ -42,6 +42,8 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `admin_service.proto` | `AdminService` (operators only) |
 | `component_service.proto` | `ComponentService` and its request and response messages |
 | `component.proto` | `Component`, `ComponentStatus`, `ComponentPhase`; `ComponentDefinition` (what tenants see of a catalog entry) |
+| `subtenant_service.proto` | Tenant-scoped `SubTenantService` CRUD, pagination, etags and field masks |
+| `subtenant.proto` | `SubTenant`, namespace keys, shared quota budget, approved access references and asynchronous observations |
 
 ## Services and RPCs
 
@@ -96,6 +98,41 @@ not allow is `PERMISSION_DENIED`; one without an accepted token is
 | `ListClusterRecommendations` | Returns the CPU and memory requests (and memory limits) the platform recommends for the cluster's containers, computed from the usage the controller recorded over a week (it samples every five minutes, read-only), with the current values and the difference. `GetCluster` carries only the summary (`status.recommendations`). |
 | `UpdateCluster` | Changes the fields named in `update_mask`. With `validate_only` it changes nothing and returns a `Plan`; with `plan_id` it applies only if that plan still holds. |
 | `DeleteCluster` | Marks the cluster `DELETING` and deletes its resources. `force` also releases Helm releases without uninstalling them. |
+
+### SubTenantService
+
+SubTenants allocate team namespaces within one existing cluster. Kubernetes
+`cloud.cluster-vending.io/v1alpha1 SubTenant` records in `tenant-<tenant_id>`
+are authoritative; no database is used. Creating or changing a record acknowledges
+desired state, not workload provisioning or verified isolation.
+
+| RPC | What it does |
+|---|---|
+| `CreateSubTenant` | Requires an existing tenant, its owned namespace, a tenant-owned cluster with `spec.naas: true`, a valid spec and UUID `request_id`. A retry with the same key and payload returns the same allocation. |
+| `GetSubTenant` | Reads one allocation using tenant, cluster and SubTenant UUIDs. |
+| `ListSubTenants` | Lists one tenant's allocations, optionally filtered by cluster UUID, with bounded pagination. |
+| `UpdateSubTenant` | Requires the current etag and explicit spec field mask. Parent bindings are immutable; namespace keys can be added but cannot be removed or renamed. |
+| `DeleteSubTenant` | Requires the current etag. Unprovisioned intent can be removed immediately. Controller-protected allocations enter asynchronous require-empty deletion; acceptance does not mean workload resources or data have been removed. No force-delete option exists. |
+
+Supported update paths are `spec.display_name`, `spec.namespace_keys`,
+`spec.quota`, `spec.policy_profile`, and `spec.access`. Quota values are strings
+parsed as Kubernetes quantities, with nonnegative whole counts for counted
+resources. The namespace budget must cover all requested namespace keys.
+`restricted-ambient-v1` is the supported policy profile. Access bindings contain
+approved identity references and the `workload-editor` role profile, never raw
+groups or arbitrary Kubernetes roles. Without a trusted identity resolver,
+nonempty access bindings fail with `FAILED_PRECONDITION`; omission grants no access.
+
+The future workload controller must add `SubTenantFinalizer` before its first
+remote write. CRUD never removes that finalizer. Atomic resource-version
+preconditions protect deletion against concurrent controller adoption, and
+recorded remote state without that protection causes deletion to fail closed.
+
+Cluster deletion and disabling `spec.naas` are refused while dependent SubTenant
+records remain, including terminating records. The [isolation design](../docs/design/namespace-as-a-service.md)
+separates management intent, the single per-allocation workload Capsule Tenant,
+and shared GlobalTenantResource templates. Its workload provisioning and isolation
+qualification requirements must be implemented and verified separately from CRUD.
 
 ### ComponentService
 

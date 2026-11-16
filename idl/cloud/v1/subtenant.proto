@@ -1,0 +1,138 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/conditions.proto";
+import "google/protobuf/timestamp.proto";
+
+// SubTenant is a Kubernetes-persisted allocation on one tenant-owned NaaS cluster.
+// Output identity and ownership fields are assigned by the server. The remote
+// writer manages only a Capsule Tenant; shared platform GTRs create its children.
+message SubTenant {
+  string tenant_id = 1;
+  string id = 2;
+  string cluster_id = 3;
+  SubTenantSpec spec = 4;
+  SubTenantStatus status = 5;
+  string etag = 6;
+  int64 generation = 7;
+  google.protobuf.Timestamp create_time = 8;
+  google.protobuf.Timestamp update_time = 9;
+}
+
+message SubTenantSpec {
+  option (buf.validate.message).cel = {
+    id: "subtenant.namespace_budget"
+    message: "namespace_count must cover every requested namespace key"
+    expression: "!has(this.quota) || this.quota.namespace_count >= size(this.namespace_keys)"
+  };
+  string display_name = 1 [(buf.validate.field).string.max_len = 128];
+  // Append-only on update. Names are derived from the allocation UUID and key;
+  // callers cannot supply physical Namespace names or owner references.
+  repeated string namespace_keys = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 27
+        pattern: "^[a-z0-9]([-a-z0-9]{0,25}[a-z0-9])?$"
+      }
+    }
+  }];
+  SubTenantQuota quota = 3 [(buf.validate.field).required = true];
+  string policy_profile = 4 [(buf.validate.field).string.in = "restricted-ambient-v1"];
+  // Omission grants no developer access. Trusted resolution is mandatory.
+  SubTenantAccess access = 5;
+}
+
+// SubTenantQuota is a SubTenant-wide budget, not a per-Namespace duplicate budget.
+message SubTenantQuota {
+  int32 namespace_count = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 64
+  }];
+  // Server validates nonnegative Kubernetes Quantity syntax and integral counts.
+  map<string, string> hard = 2 [(buf.validate.field).map = {
+    min_pairs: 1
+    max_pairs: 12
+    keys: {
+      string: {
+        in: [
+          "requests.cpu",
+          "requests.memory",
+          "limits.cpu",
+          "limits.memory",
+          "requests.ephemeral-storage",
+          "limits.ephemeral-storage",
+          "requests.storage",
+          "persistentvolumeclaims",
+          "pods",
+          "services",
+          "secrets",
+          "configmaps"
+        ]
+      }
+    }
+    values: {
+      string: {
+        min_len: 1
+        max_len: 64
+      }
+    }
+  }];
+}
+
+message SubTenantAccess {
+  option (buf.validate.message).cel = {
+    id: "subtenant.identity_refs_unique"
+    message: "identity_ref entries must be unique"
+    expression: "this.bindings.all(b, this.bindings.filter(x, x.identity_ref == b.identity_ref).size() == 1)"
+  };
+  repeated SubTenantAccessBinding bindings = 1 [(buf.validate.field).repeated.max_items = 32];
+}
+
+message SubTenantAccessBinding {
+  // Opaque approved reference scoped to the platform tenant. Never a raw group,
+  // subject or role. Unknown references or a missing trusted resolver fail closed.
+  string identity_ref = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 63
+    pattern: "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+  }];
+  string role_profile = 2 [(buf.validate.field).string.in = "workload-editor"];
+}
+
+enum SubTenantState {
+  SUB_TENANT_STATE_UNSPECIFIED = 0;
+  SUB_TENANT_STATE_PENDING = 1;
+  SUB_TENANT_STATE_PROVISIONING = 2;
+  SUB_TENANT_STATE_READY = 3;
+  SUB_TENANT_STATE_DEGRADED = 4;
+  SUB_TENANT_STATE_FAILED = 5;
+  SUB_TENANT_STATE_DELETING = 6;
+}
+
+// Ready requires current baseline and isolation qualification for this allocation;
+// Capsule Tenant existence or global GTR Ready alone is never sufficient.
+message SubTenantStatus {
+  int64 observed_generation = 1;
+  SubTenantState state = 2;
+  string message = 3;
+  repeated Condition conditions = 4;
+  string remote_capsule_tenant = 5;
+  string remote_capsule_tenant_uid = 6;
+  string template_revision = 7;
+  repeated SubTenantNamespaceStatus namespaces = 8;
+  repeated string deletion_blockers = 9;
+}
+
+message SubTenantNamespaceStatus {
+  string key = 1;
+  string name = 2;
+  string uid = 3;
+  string template_revision = 4;
+  repeated Condition conditions = 5;
+}

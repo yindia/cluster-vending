@@ -1,10 +1,10 @@
 # Namespace as a Service
 
-Research and proposed design, 2026-11-16. Evidence comes from the official Capsule operating documentation, the released Capsule 0.15.2 chart schemas, the platform's existing contracts, and Istio's primary documentation. All service, CRD, and lifecycle additions below are proposals. No examples were applied and no implementation was changed by this research.
+Research and proposed design, 2026-11-16. Companion examples: [management intent](namespace-as-a-service.management.yaml), [once-installed workload bootstrap](namespace-as-a-service.bootstrap.yaml), and [per-SubTenant Capsule Tenant](namespace-as-a-service.workload.yaml). Evidence comes from the official Capsule operating documentation, the released Capsule 0.15.2 chart schemas, the platform's existing contracts, and Istio's primary documentation. The management CRD and CRUD contract are now implemented; the workload provisioning, qualification and lifecycle sections remain a design. No examples have been applied.
 
 ## Scope and current implementation
 
-The shipped integration is an optional platform component selected by `Cluster.spec.naas`, default false. It installs Capsule 0.15.2 into the workload cluster, using that cluster's existing cert-manager. It does not create Capsule Tenants, provision namespaces, map identities, or install capsule-proxy. Istio ambient is assumed to be installed already. This design proposes the next layer, a `SubTenantService`, without changing the ongoing operator-installation implementation. See [the component baseline](../components/capsule.md), [the catalog definition](../../pkg/catalog/definitions/capsule.yaml), and [the cluster API](../../idl/cloud/v1/cluster.proto).
+The shipped integration is an optional platform component selected by `Cluster.spec.naas`, default false. It installs Capsule 0.15.2 into the workload cluster, using that cluster's existing cert-manager. It does not create Capsule Tenants, provision namespaces, map identities, or install capsule-proxy. Istio ambient is assumed to be installed already. The [SubTenant CRD](../../api/v1alpha1/subtenant_types.go) and [CRUD RPCs](../../idl/cloud/v1/subtenant_service.proto) store management intent, with a cluster-detail UI when NaaS is enabled. New intent remains Pending until a workload controller reconciles and qualifies it; nonempty access references are refused until a trusted resolver exists. The [bootstrap library](../../pkg/naas/bootstrap.go) loads and revisions the shared templates offline, but is not installed or rolled out by this step. See [the API behavior](../../idl/README.md#subtenantservice), [the component baseline](../components/capsule.md), [the catalog definition](../../pkg/catalog/definitions/capsule.yaml), and [the cluster API](../../idl/cloud/v1/cluster.proto).
 
 The intended service is controlled namespace tenancy for applications within an existing workload cluster. It is not a claim that namespaces, Capsule, or an encrypted mesh provide a hard boundary against cluster administrators or a compromised shared kernel. Workloads requiring that boundary need a separately evaluated sandbox, dedicated nodes, or a dedicated cluster. [Kubernetes multi-tenancy](https://kubernetes.io/docs/concepts/security/multi-tenancy/), [Capsule architecture](https://projectcapsule.dev/docs/operating/concepts/architecture/).
 
@@ -17,7 +17,9 @@ flowchart LR
   N --> C[Cluster with NaaS enabled]
   C --> ST[Proposed SubTenant]
   ST --> CT[Capsule Tenant in workload cluster]
-  CT --> NS[One or more governed namespaces]
+  GTR[Platform-owned GTR templates installed once] --> CAP[Capsule replication controller]
+  CT --> CAP
+  CAP --> NS[Generated governed namespaces and baseline resources]
 ```
 
 | Name | Location and meaning | Relationship |
@@ -26,7 +28,7 @@ flowchart LR
 | Cloud account | Existing platform CloudAccount and provider connection | Supplies provider access for Networks; never becomes a workload tenant identity |
 | Network | Existing platform Network | Supplies cluster connectivity and inherited rollout tier |
 | Workload cluster | Existing platform Cluster, reconciled from the management cluster | Belongs to one platform Tenant and Network; `spec.naas` selects Capsule installation |
-| SubTenant | **Proposed** namespaced management CR and RPC resource | Belongs to one platform Tenant and one immutable workload cluster; owns one or more workload namespaces |
+| SubTenant | Namespaced management CR and CRUD RPC resource; workload reconciliation remains proposed | Belongs to one platform Tenant and one immutable workload cluster; records its desired namespace allocation |
 | Capsule Tenant | Workload-cluster `capsule.clastix.io/v1beta2 Tenant`, cluster-scoped | One per SubTenant in that cluster; groups its namespaces and policies |
 | Workload namespace | Native workload-cluster Namespace | Belongs to exactly one Capsule Tenant; contains application workloads, PVCs, Secrets, and service accounts |
 
@@ -35,13 +37,13 @@ The business hierarchy is `platform Tenant → cloud account → Network → Clu
 ## Decisions carried into the detailed plan
 
 1. Kubernetes CRs remain authoritative; introduce no database and no second source of truth for membership or desired policy.
-2. Add a separate future SubTenant service. Require `tenant_id` on every request and resolve the target cluster inside that tenant. Platform authorization does not automatically grant Kubernetes workload-cluster access.
+2. The per-SubTenant management controller creates/updates only the workload Capsule Tenant CR and observes the resulting inventory. Platform-owned GlobalTenantResource templates installed once make Capsule the writer of Namespaces, isolation policies, service accounts and RoleBindings. A bare Capsule Tenant does not create a namespace. Add a separate future SubTenant service. Require `tenant_id` on every request and resolve the target cluster inside that tenant. Platform authorization does not automatically grant Kubernetes workload-cluster access.
 3. Default to one namespace, with an explicit bounded namespace set as the service grows. Namespace names, object UIDs, cluster placement, and ownership are immutable; moving requires a reviewed migration.
 4. Install and verify policy before granting developer access. Use restricted Pod Security admission, narrow workload RBAC, protected enrollment metadata, CNI-enforced ingress/egress restrictions, and explicit Istio authorization.
 5. Ambient enrollment is not default deny. Ztunnel handles L4 policy; waypoints are required for L7. Native NetworkPolicies are additive, so tenants must not be able to widen mandatory boundaries by creating another allow policy.
 6. Keep quotas and namespace governance independent from cloud credentials, cluster release channels, and the Network's rollout tier.
 7. Deletion defaults to refusal while workloads or retained data remain. Never silently remove the Capsule Tenant: its Namespace owner references can trigger namespace garbage collection.
-8. **Future disable precondition:** refuse `naas: true → false` while active, deleting, retained, or unmanaged Capsule tenants/namespaces still depend on enforcement. Check again during reconciliation. The current operator-only implementation does not yet provide this SubTenant gate.
+8. **Implemented registration guard:** refuse `naas: true → false` and cluster deletion while SubTenant records remain, including terminating records. RPCs and reconciliation check fresh management state. Detecting unmanaged workload Capsule tenants/namespaces remains part of the future remote-inventory design.
 9. Retaining a CRD or namespace after operator removal preserves some objects, not their isolation. Loss of admission, reconciliation, conversion service, quota enforcement, or replication protection must be an explicit failure state.
 
 These are proposed platform decisions, informed by [Capsule networking guidance](https://projectcapsule.dev/docs/operating/best-practices/networking/), [restricted workload guidance](https://projectcapsule.dev/docs/operating/best-practices/workloads/), [Istio L4 policy](https://istio.io/latest/docs/ambient/usage/l4-policy/), and the [existing freeze contract](../../idl/cloud/v1/freeze.proto).
@@ -56,24 +58,24 @@ All operator examples will use `capsule.clastix.io/v1beta2`; only Tenant also se
 
 The official [LLM index](https://projectcapsule.dev/llms.txt) and [sitemap](https://projectcapsule.dev/sitemap.xml) were crawled. The sitemap contains **23 operating pages**, including the section landing pages, both authentication routes, all setup variants, all best practices, all concepts, monitoring, and backup/restore. The obsolete `/docs/operating/backup-restore/index.md` route returns 404; the live backup page is `/docs/operating/operations/backup-restore/`. The coverage appendix identifies each available page and the unavailable historical route.
 
-## Proposed management contract
+## Management contract and remaining extensions
 
 ### SubTenant CR
 
-Introduce `cloud.cluster-vending.io/v1alpha1 SubTenant`, namespaced in the parent platform Tenant's management namespace. Its desired state belongs in `spec`; only controllers write `status`. Give it a finalizer such as `cloud.cluster-vending.io/subtenant`. Use an opaque time-ordered UUID as the API ID, consistent with existing cluster IDs; use a stable DNS-safe encoded ID in generated workload names. Display names are mutable and are never authorization keys.
+The implemented `cloud.cluster-vending.io/v1alpha1 SubTenant` is namespaced in the parent platform Tenant's management namespace. Desired state belongs in `spec`; only controllers write `status`. The API uses an opaque request-derived UUID as ID and management object name, so identical create retries return one allocation. Display names are mutable and are never authorization keys. Unprovisioned intent is deletable immediately; the future workload controller must atomically add `cloud.cluster-vending.io/subtenant` before its first remote write. CRUD never removes that finalizer.
 
 | Field | Proposed contract |
 | --- | --- |
 | `spec.tenantRef` | Parent platform Tenant name and UID; immutable and server-resolved |
 | `spec.clusterRef` | Cluster API ID, management CR name and UID; immutable; must resolve inside this platform Tenant |
 | `spec.displayName` | Human-readable name, bounded to 128 characters |
-| `spec.namespaces[]` | Stable logical namespace key and generated physical name; at least one; removal requires a destructive plan |
+| `spec.namespaceKeys[]` | 1–64 unique logical keys of at most 27 characters; append-only; physical names are observed in status rather than supplied by clients |
 | `spec.access.bindings[]` | Approved identity references and bounded role profiles; never arbitrary ClusterRoles or raw impersonation headers |
 | `spec.policyProfile` | Approved, versioned baseline reference; no tenant-supplied CEL or Helm values |
 | `spec.quota` | Typed resource quantities and namespace count, bounded by platform entitlement |
-| `spec.connectivity` | Explicit approved ingress, egress and same-SubTenant flows; default no external exposure |
-| `spec.retention` | Data/namespace disposition; default protect; any destructive override is explicit and reviewed |
-| `status` | Phase, conditions, observedGeneration, applied profile/release revisions, remote inventory, ownership UIDs, quota observations, effective freeze, last observation time, and bounded recent events |
+| Future connectivity extension | Not an accepted spec field; approved ingress/egress flows need a separate design |
+| Future retention extension | Not an accepted spec field; controller-protected deletion is require-empty, with no force option |
+| `status` | State, message, conditions, observedGeneration, remote Capsule Tenant name/UID, template revision, namespace observations and deletion blockers; additional observation fields below remain proposed |
 
 Proposed phases: `Pending`, `Provisioning`, `Ready`, `Degraded`, `Deleting`, `Retained`, `Failed`. Conditions separately report `ClusterAvailable`, `NaaSReady`, `IdentityReady`, `PolicyReady`, `QuotaReady`, `NamespacesReady`, `Ready`, and `DeletionBlocked`. `Synced` means resources were accepted, not that network enforcement was proven. An unreachable workload API yields `Unknown` with observation age, not a stale green readiness signal.
 
@@ -89,30 +91,30 @@ Workload namespaces have Capsule Tenant owner references established through Cap
 
 ### SubTenantService RPC shape
 
-Propose `idl/cloud/v1/subtenant.proto`, `subtenant_service.proto`, generated Go/TypeScript clients, and `pkg/server/subtenant`; these paths are future work, not existing files. Every request carries `tenant_id`. The service reads/writes management CRs; a controller performs remote convergence. Provider adapters supply authenticated workload-cluster access and capabilities; shared contracts contain no AWS credentials, IAM role syntax or CNI-specific manifests.
+The implemented contract is in `idl/cloud/v1/subtenant.proto` and `subtenant_service.proto`, with generated Go/TypeScript clients and Kubernetes-backed handlers in `pkg/server/subtenant`. Every request carries `tenant_id`; single-resource calls also carry `cluster_id`. CRUD stores intent without remote convergence. The future controller uses provider adapters for authenticated workload access; shared contracts contain no AWS credentials, IAM role syntax or CNI-specific manifests. Per-SubTenant remote writes cover only Capsule Tenant lifecycle; generated Namespaces/policies/service accounts/RBAC are read-only to this controller. Cluster bootstrap installs shared GTRs and execution identities once, outside SubTenant reconciliation.
 
 | RPC | Input and result | Semantics |
 | --- | --- | --- |
-| `CreateSubTenant` | `tenant_id`, `cluster_id`, typed desired spec, `request_id`, optional `validate_only`/`plan_id`; returns resource and plan when requested | Async acceptance; retry of identical request ID returns the same resource; a different payload with the same ID is rejected |
-| `GetSubTenant` | `tenant_id`, `id`; returns desired spec, etag, generation and observed status | `NO_SIDE_EFFECTS`; reads recorded observation, without implying a fresh workload scan |
-| `ListSubTenants` | `tenant_id`, optional `cluster_id`, bounded `page_size`, opaque `page_token`, supported typed filters | `NO_SIDE_EFFECTS`; stable ID order and authorization on every page; token bound to tenant/filter scope |
-| `PlanSubTenant` | `tenant_id`, create/update/delete intent, ID and etag where applicable, desired change/update mask | `NO_SIDE_EFFECTS`; renders proposed changes and performs authorized read/dry-run checks; cannot reserve quota or create objects |
-| `UpdateSubTenant` | `tenant_id`, `id`, `etag`, explicit `update_mask`, desired fields, `plan_id` for reviewed changes | Async; only listed mutable paths change; empty/unknown masks rejected; never replaces identity or placement |
-| `DeleteSubTenant` | `tenant_id`, `id`, `etag`, reviewed `plan_id`, disposition, explicit resource-name acknowledgement for destructive deletion | Idempotent async request; default refuses nonempty/data-bearing tenants; returns deletion status until confirmed gone or retained |
+| `CreateSubTenant` | `tenant_id`, `cluster_id`, `subtenant.spec`, required UUID `request_id` | Intent acceptance; identical retry returns the same resource; different payload with the same ID is rejected |
+| `GetSubTenant` | `tenant_id`, `cluster_id`, `subtenant_id` | `NO_SIDE_EFFECTS`; recorded spec, etag, generation and status, without implying a fresh workload scan |
+| `ListSubTenants` | `tenant_id`, optional `cluster_id`, bounded `page_size`, opaque `page_token` | `NO_SIDE_EFFECTS`; stable ID order and authorization on every page; token bound to tenant/cluster scope |
+| `UpdateSubTenant` | `tenant_id`, `cluster_id`, `subtenant.id`, `subtenant.etag`, explicit `update_mask`, desired spec fields | Only masked fields change; empty/unknown masks rejected; immutable placement and append-only keys |
+| `DeleteSubTenant` | `tenant_id`, `cluster_id`, `subtenant_id`, required `etag` | Unprovisioned intent can disappear immediately; controller-protected allocations use require-empty asynchronous cleanup |
+| Future `PlanSubTenant` | Not implemented; proposed authorized workload-change preview | Must remain read-only and bind review to current remote/template revisions |
 
-Use the [existing Plan](../../idl/cloud/v1/plan.proto): creation/apply order, disruptive changes, deletion last, namespace, GVK, field diff, replacement, and `waits_for`. Add **proposed** explicit `retains_data`/`retains_namespace` facts rather than misusing `retains_cloud_resource` for a PVC. Redact Secret content and credentials from plans, logs and inventory. Bind plan IDs to normalized desired change, etag, parent/remote UIDs and resourceVersions, effective policy/release and discovered data; reject stale plans with `FAILED_PRECONDITION`.
+For the future workload preview, use the [existing Plan](../../idl/cloud/v1/plan.proto): Capsule Tenant changes plus predicted Capsule-generated effects, dependency order, disruptive changes, deletion last, namespace, GVK, field diff, replacement, and `waits_for`. The current UI reviews a local validated draft; it does not return an authoritative workload plan. A future preview can expand the pinned GTR templates without applying outputs; the runtime writer remains Capsule. Include shared GTR revisions and Tenant readiness-label/resourceVersion in its snapshot, with explicit retention facts rather than misusing `retains_cloud_resource` for a PVC. Bind plan IDs to normalized desired change, etag, parent/remote UIDs, policy/release and discovered data; redact secrets and reject stale plans.
 
-Example request bodies, illustrating the proposed generated JSON contract:
+Example request bodies using the implemented generated JSON contract:
 
 ```json
-{"tenantId":"acme","clusterId":"00000000-0000-4000-8000-000000000003","requestId":"naas-payments-01","subTenant":{"displayName":"Payments","namespaceKeys":["app"],"policyProfile":"restricted-ambient-v1","quota":{"requests.cpu":"4","requests.memory":"8Gi","requests.storage":"100Gi","pods":"30"}},"validateOnly":true}
+{"tenantId":"acme","clusterId":"00000000-0000-4000-8000-000000000003","requestId":"00000000-0000-4000-8000-000000000099","subtenant":{"spec":{"displayName":"Payments","namespaceKeys":["app"],"policyProfile":"restricted-ambient-v1","quota":{"namespaceCount":3,"hard":{"requests.cpu":"4","requests.memory":"8Gi","requests.storage":"100Gi","pods":"30"}}}}}
 ```
 
 ```json
-{"tenantId":"acme","id":"00000000-0000-4000-8000-000000000021","etag":"opaque-etag","updateMask":"spec.quota","subTenant":{"quota":{"requests.cpu":"6","requests.memory":"12Gi","requests.storage":"100Gi","pods":"40"}},"planId":"reviewed-plan-hash"}
+{"tenantId":"acme","clusterId":"00000000-0000-4000-8000-000000000003","updateMask":"spec.quota","subtenant":{"id":"00000000-0000-4000-8000-000000000021","etag":"opaque-etag","spec":{"quota":{"namespaceCount":3,"hard":{"requests.cpu":"6","requests.memory":"12Gi","requests.storage":"100Gi","pods":"40"}}}}}
 ```
 
-The exact proto field spellings remain an implementation task; the examples define behavior, not an existing API. Specify protobuf FieldMask JSON encoding as a string. Resource references submitted by clients are IDs; handlers resolve canonical names/UIDs and never accept client-written ownership status.
+Protobuf FieldMask JSON encoding is a string. Resource references submitted by clients are IDs; handlers resolve canonical names/UIDs and never accept client-written ownership status. The native CR sample contains server-resolved references and is a different envelope from CLI/UI manifests.
 
 ### Authorization and identity
 
@@ -134,27 +136,35 @@ Pin Capsule, CRD schemas, Kubernetes compatibility, policy profiles and tested I
 
 ### Ordered create and reconcile
 
-1. Authenticate, validate entitlement, resolve platform Tenant and target Cluster by ID+UID, and read effective freeze/release state. Persist one idempotent desired-state record; return acceptance promptly.
-2. Wait for required cluster capabilities and component readiness. Pending is an observable state, not a reason to bypass policy or run cloud calls inside the RPC handler.
-3. Reserve stable names and create the Capsule Tenant with deletion protection, bounded namespace count, policy rules and shared quota. Verify ownership on an existing same-name object; never force-adopt it.
-4. Create namespaces through a Capsule-aware trusted bootstrap identity, with correct membership owner reference/labels, `restricted` PSS, ambient enrollment and a platform-controlled provisioning guard. Do not grant developer access yet.
-5. Apply protected network/authentication policies, LimitRanges, workload service accounts, quota configuration and any approved replication. Wait for Capsule RuleStatus, generated quota/ledger readiness and all declared policy versions to converge.
-6. Verify actual enforcement using the cluster's qualified CNI/ambient test profile. A platform admission guard must reject tenant workloads in an unready namespace; withholding human RoleBindings alone does not stop preexisting CI identities or operators.
-7. Grant the approved namespace RoleBindings, mark the provisioning guard ready, and publish status/inventory with the applied generation and observation time. Make the readiness transition retryable and reversible on drift.
+1. Authenticate, validate entitlement, resolve platform Tenant and Cluster by ID+UID, and persist one idempotent management SubTenant record. Resolve a versioned namespace/policy/access profile; no per-SubTenant arbitrary template or GTR is accepted.
+2. Wait for the cluster prerequisites and the **once-installed** namespace-bootstrap, isolation-baseline and access-baseline GTRs. Verify their scope, selector, execution RBAC and revision; do not install them from the SubTenant reconcile loop.
+3. Create only the workload Capsule Tenant, with deletion protection, approved `spec.data` parameters, identity references, named shared quota/rules, and protected `cloud.cluster-vending.io/access-ready: "false"`. Check the existing object's UID and ownership before any idempotent update. No remote Namespace, policy, ServiceAccount or RoleBinding is written by the management controller.
+4. Capsule's `scope: Tenant` namespace-bootstrap GTR renders native cluster-scoped Namespace objects from the Tenant parameters, including the exact Capsule Tenant owner UID, protected profile/membership labels and initial `naas-ready=false`. A `scope: Namespace` GTR cannot bootstrap the first namespace because its target set is initially empty. A bare Tenant has no automatic namespace-creation behavior.
+5. Capsule's `scope: Namespace` isolation-baseline GTR generates NetworkPolicies, mesh security policy, LimitRange, unprivileged service accounts and other approved resources in the generated namespaces. Capsule also reconciles rules and the shared quota. This phase grants no human developer access.
+6. The management observer reads generated object UIDs/specs/status, quota/ledger readiness, effective rules, CNI/ambient qualification evidence and the exact template revisions. The independent verification runner is a separately installed platform capability; the per-SubTenant observer does not create probe Jobs or mutate generated objects to conduct tests. Record `PolicyReady` only for the observed resource set and current desired/policy revision.
+7. After qualification, patch **only the Capsule Tenant's protected access-ready label** to true, with an optimistic-concurrency precondition and evidence bound to its intent/resource versions. Namespace-bootstrap copies that state into Namespace `naas-ready`; access-baseline selects the true Tenant label and generates the approved RoleBindings. Observe both outputs before reporting access ready. Any spec/profile/identity change clears the Tenant gate in the same accepted update before requalification.
 
-Use separate SSA field managers for platform intent and Capsule-generated resources. Avoid fighting Capsule over Namespace owner references, membership labels, generated RoleBindings or RuleStatus. Retry partial convergence by UID and inventory. Do not regenerate credentials or namespace names on retry. Discover drift and unexpected additional namespaces instead of silently treating them as entitled inventory. Replication dependencies are eventual, not cross-object transactions. [Managed resources and SSA](https://projectcapsule.dev/docs/operating/concepts/managed-resources/), [tenant rules](https://projectcapsule.dev/docs/tenants/rules/).
+Management owns the Capsule Tenant intent and readiness decision; Capsule owns all generated workload resources. Retry by stored UIDs and observe Capsule processed-item status; never force-adopt or repair a generated object by direct management SSA. Correct the Tenant parameters or the once-installed template through their respective owners. Unexpected additional namespaces are drift, not new entitlement. [Tenant-scope replication](https://projectcapsule.dev/docs/replications/global/#scope), [generator context](https://projectcapsule.dev/docs/replications/global/#base-context), [managed resources and SSA](https://projectcapsule.dev/docs/operating/concepts/managed-resources/).
+
+**Readiness is not atomic.** GTRs reconcile independently. `dependsOn` observes a global replication object's readiness, not a transaction for one new Tenant or proof of CNI enforcement. Capsule's ordinary owner/additional RoleBindings can appear before baseline replication; therefore human users must not be included in automatic Tenant owner/binding rules. Access-baseline is a separate GTR selected by the verified Tenant label. Its RoleBinding can appear before namespace-bootstrap propagates `naas-ready=true`; a separately enforced, once-installed admission guard must still deny workload admission until both the qualified baseline and the protected namespace guard hold. A readiness label alone is not an enforcement mechanism. Capsule does not run packet tests or certify isolation; the management observer consumes independently obtained qualification evidence and promotes only the Tenant label. On revocation, GTR label propagation and binding removal are eventual; existing sessions/workloads are not instantly terminated. If those guarantees are insufficient, the profile must remain unavailable until a stronger gate is implemented.
 
 ### Update and freeze
 
-Preview quota decreases, role changes, namespace removal, storage disposition and connectivity changes. Refuse quota reductions below usage/reservations; show that revoking Kubernetes RBAC does not necessarily revoke an already-issued cloud token or terminate established sessions. A policy update affects future admissions and does not repair or evict previously accepted workloads automatically. Stage stricter policies with an inventory audit and an explicit remediation plan.
+Preview quota decreases, role changes, storage disposition and connectivity changes. The initial API rejects removing an existing namespace key, even with a plan: Orphan leaves the namespace and a safe Capsule-owned cleanup/revocation contract is not yet specified. Adding an approved key clears the Tenant access gate and requalifies the complete generated inventory before access is enabled again. Refuse quota reductions below usage/reservations; show that revoking Kubernetes RBAC does not necessarily revoke an already-issued cloud token or terminate established sessions. A policy update affects future admissions and does not repair or evict previously accepted workloads automatically. Stage stricter policies with an inventory audit and an explicit remediation plan.
 
-The platform's canonical freeze remains authoritative. Desired changes can be recorded while frozen; remote create/update/delete work waits, while reads and status observation continue. Do not call Capsule cordoning equivalent to platform freeze: it gates selected workload API mutations by configured caller/hook scope, can affect native controllers differently, and does not stop Kubernetes scheduling, running processes, cloud APIs or packet flow. Any future workload-change freeze needs a separately tested Capsule admission configuration and must preserve recovery controllers. [Freeze contract](../../idl/cloud/v1/freeze.proto), [Capsule cordoning](https://projectcapsule.dev/docs/tenants/administration/).
+The platform's canonical freeze remains authoritative for **management-originated** writes. Desired SubTenant changes can be recorded while frozen; creating/updating/deleting the Capsule Tenant and promoting its access-ready label wait. Reads/status observations continue. This does **not** establish the existing freeze contract's stronger promise that no workload-cluster resources change: already-running Capsule GTR controllers may still reconcile templates, repair drift, finish pending namespace/policy/access generation or run periodic resync without a new management write.
+
+**Unresolved strict-freeze requirement:** Tenant `spec.cordoned` is an admission control on selected workload callers/operations; GTR `spec.cordoned` is a distinct replication reconciliation control. A Tenant label or stopping Tenant writes does not pause shared GTR reconciliation. Cordoning a shared GTR affects every selected Tenant, while deselecting one Tenant can trigger cleanup. A per-resource false apply condition can still reconcile protection metadata and does not suppress cleanup. Do not advertise strict remote freeze for NaaS until a tested controller/admission mechanism coordinates all writers and preserves recovery. Whole-cluster bootstrap may eventually coordinate GTR cordoning; selective SubTenant freeze needs its own design. The current operator toggle/release ordering remains unchanged. [Freeze contract](../../idl/cloud/v1/freeze.proto), [Tenant cordoning](https://projectcapsule.dev/docs/tenants/administration/), [GTR API](https://projectcapsule.dev/docs/reference/), [conditional apply limits](https://projectcapsule.dev/docs/operating/concepts/managed-resources/#apply-conditions).
 
 ### Delete, retain and disable
 
 Default delete is `RequireEmpty`: enumerate Pods, controllers, PVC/PV relationships, snapshots, external resource claims, replication and finalizers; refuse if deleting would lose workload/data ownership. A separate `Retain` disposition keeps the management record in `Retained`, revokes developer access as planned, and continues governance. It must not count as an empty cluster eligible to disable Capsule.
 
-For explicit destructive deletion: record the reviewed data inventory and approvals in the request; prevent new workloads; stop application controllers/jobs; complete the backup/disposition checks; delete workloads; handle PVCs/snapshots and external claims according to their real reclaim policies; then delete namespaces and verify completion. Keep enforcement and managed policies until workloads are gone. Remove the Capsule Tenant only after its namespace inventory is empty, temporarily clearing `preventDeletion` through the trusted controller. Finally remove remote policy/identity artifacts and the management finalizer. Namespace termination can wait on storage/operator finalizers; report blockers, never strip arbitrary finalizers. [Capsule ordered namespace termination](https://projectcapsule.dev/docs/tenants/namespaces/), [Kubernetes volume reclaim policies](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reclaiming).
+The namespace-bootstrap GTR must use `policy.deletion: Orphan`, so removing a namespace key, changing a selector or deleting the replication does not delete a data-bearing Namespace. Keep retained namespaces selected by isolation-baseline so their governance continues. Retained data must keep its management SubTenant and Capsule Tenant records, protected identity links and enforcement; Orphan is a retention behavior, not isolation after deselection. Access-baseline may use `deletion: Remove` for generated RoleBindings to revoke access when its readiness selector no longer matches; revocation is eventual.
+
+**Orphan does not remove the Namespace's Capsule Tenant owner reference.** Deleting the Capsule Tenant can still garbage-collect that Namespace even when replication cleanup uses Orphan. For RequireEmpty, the management controller may delete the Capsule Tenant only after it verifies every owned namespace contains no application workloads, data-bearing claims/snapshots, external-resource dependencies or unresolved finalizers. Empty namespaces may still exist: a reviewed Tenant delete then intentionally lets Kubernetes garbage-collect those namespaces. Retain never takes this path; it retains both the Tenant and its namespaces. In this ownership model it does not directly delete namespaces, policies, service accounts or RoleBindings.
+
+For reviewed destructive offboarding, management first lowers the Tenant access gate and records the requested disposition on the Tenant. Capsule-owned lifecycle templates or a separately approved workload-cluster offboarding mechanism must stop workloads, honor backups/PV/snapshot/external-resource disposition, keep isolation until termination, and explicitly delete namespaces. **A complete safe destructive offboarding mechanism is not yet specified by a namespace-creation GTR with Orphan.** Until it exists, `DeleteSubTenant` supports RequireEmpty/Retain and reports `DeletionBlocked` for nonempty tenants; it must not fall back to direct namespace deletion from management. Once the observer verifies the RequireEmpty inventory and deletion plan, management can clear Tenant deletion protection, delete only that Tenant, observe namespace garbage collection and Capsule cleanup, and remove its management finalizer only after those observations confirm completion. Never strip unrelated finalizers. [Namespace ownership/termination](https://projectcapsule.dev/docs/tenants/namespaces/), [replication cleanup](https://projectcapsule.dev/docs/operating/concepts/managed-resources/), [volume reclaim](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reclaiming).
 
 An unreachable cluster blocks destructive finalization. Orphaning is an operator-reviewed recovery operation that retains a tombstone with the last remote IDs and explicitly reports lost enforcement/observation. Do not delete the only management record and claim remote cleanup succeeded.
 
@@ -224,7 +234,7 @@ For explicit per-namespace allocation, optionally use ResourcePool/ResourcePoolC
 
 Provide realistic per-container defaults through LimitRange or approved resource rules; avoid forcing CPU limits just to claim a stronger QoS class. Limit scratch storage, counts, API churn, PIDs/inodes and noisy-neighbor risks through the appropriate node/admission mechanisms. Reserve platform headroom and maintenance capacity. Optional dedicated node pools must use protected labels, taints, required placement, approved tolerations and scheduler controls; node placement alone is not a complete security boundary. Cluster administrators and shared ztunnel/CSI/CNI agents remain trusted.
 
-Use direct controller SSA for a small explicit inventory, or administrator-owned GlobalTenantResource to distribute approved baseline objects. Do not have both manage the same fields. Prefer per-resource `policy` with explicit `creation`, `protect`, `force`, `deletion`; avoid legacy global `settings` semantics. Namespace/tenant selector removal can delete replicated policies, so preview selector changes as security changes. TenantResource is optional and constrained to the SubTenant; if enabled, use least-privilege execution identities and never grant arbitrary privileged replication or template context reads. [Global replications](https://projectcapsule.dev/docs/replications/global/), [tenant replications](https://projectcapsule.dev/docs/replications/tenant/).
+Use mandatory administrator-owned GlobalTenantResource templates installed once for namespace bootstrap, isolation and gated access. Their execution identity, distinct from the management Tenant writer, has narrowly approved create/patch/delete rights for generated kinds. Capsule performs SSA and owns processed-item tracking/protection. Management observes generated resources and never competes for their fields. Use explicit per-resource policies; namespace bootstrap uses Orphan, and cleanup of security/access resources must be planned separately. Template/selector changes are cluster-level security changes with rollout/qualification, not per-SubTenant GTR installation. The bootstrap rollout must invalidate affected Tenant readiness gates before changing the selected security/access templates, then requalify each Tenant; an old true label is not evidence for a new template revision. TenantResource remains an optional, constrained application feature and cannot replace the mandatory platform GTR baseline. [Global replications](https://projectcapsule.dev/docs/replications/global/), [tenant replications](https://projectcapsule.dev/docs/replications/tenant/).
 
 ## Complete pinned Capsule CR inventory
 
@@ -236,9 +246,9 @@ The following are **all twelve operator CRD kinds** in the verified 0.15.2 archi
 | `Tenant` | Cluster | Required per SubTenant; owns workload namespace membership, rules and namespace cap | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_tenants.yaml) |
 | `TenantOwner` | Cluster | Optional reusable owner identity; not required when Tenant has direct bootstrap owner; selector-based association is not nested tenancy | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_tenantowners.yaml) |
 | `RuleStatus` | Namespaced | Controller-generated effective namespace rule/status; observe, never hand-author | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_rulestatuses.yaml) |
-| `GlobalResourceQuota` | Cluster | Required accounting mechanism for the proposed shared budget; generated by named Tenant rule or explicitly managed, not both | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_globalresourcequotas.yaml) |
+| `GlobalResourceQuota` | Cluster | Required accounting mechanism for the proposed shared budget; generated by a named Tenant rule; management observes the resulting object | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_globalresourcequotas.yaml) |
 | `QuantityLedger` | Namespaced | Internal controller/admission accounting and reservations for quota systems; not tenant-authored | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_quantityledgers.yaml) |
-| `GlobalTenantResource` | Cluster | Optional administrator-owned baseline distribution; useful for LimitRanges, network policies and approved configuration | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_globaltenantresources.yaml) |
+| `GlobalTenantResource` | Cluster | Required once-installed platform templates for namespace bootstrap, isolation-baseline and access-baseline; never created per SubTenant | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_globaltenantresources.yaml) |
 | `TenantResource` | Namespaced | Optional replication within one Capsule Tenant; deny to developers unless explicitly enabled with constrained execution RBAC | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_tenantresources.yaml) |
 | `ResourcePool` | Cluster | Optional allocator of capacity to selected namespaces | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_resourcepools.yaml) |
 | `ResourcePoolClaim` | Namespaced | Optional per-namespace claim against an approved ResourcePool | [schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_resourcepoolclaims.yaml) |
@@ -251,305 +261,98 @@ If kubectl access needs namespace/cluster-resource listing, optionally deploy th
 
 ## Illustrative baseline manifests
 
-These are **documentation examples, not applied resources**. They show the proposed per-SubTenant output and required ordering. They are not a standalone installer or a declaration that every EKS networking combination already enforces them. `st-a1b2c3d4e5f6` is a shortened example identifier; production names must encode the complete stable identity as described above. The sample profile uses PSS `v1.35` only for a cluster qualified for that version; it is not a Capsule compatibility assertion.
+All examples are documentation only and were not applied. The companion [management record](namespace-as-a-service.management.yaml) uses the implemented SubTenant schema; the RPC resolves canonical references rather than accepting their names/UIDs from clients. The [bootstrap file](namespace-as-a-service.bootstrap.yaml) contains the once-installed workload ClusterRole and the three platform GTR templates; the [workload file](namespace-as-a-service.workload.yaml) contains only the single per-SubTenant Capsule Tenant. Workload provisioning and qualification remain future work. Generated objects are inspected as output, never sent as a per-SubTenant apply list by management.
 
-### Cluster-wide prerequisites, installed once
+### Responsibility and deployment split
 
-The existing Capsule, external cert-manager and ambient installations are prerequisites. Before any example namespace is open to developers, the platform must also provide:
+| Stage / owner | Resources written | Frequency |
+| --- | --- | --- |
+| Cluster bootstrap / platform team | Existing Capsule installation configuration, execution identities/RBAC, admission guard, workload-editor role, and the three shared GlobalTenantResources | Installed once per workload cluster; versioned rollout for later template changes |
+| Future management SubTenant controller | One `capsule.clastix.io/v1beta2 Tenant`, including approved parameters and its protected access-ready label; management SubTenant status | Create/update per SubTenant; guarded deletion only when empty |
+| Capsule namespace-bootstrap GTR, `scope: Tenant` | Namespace objects with verified Tenant owner UID, membership/profile/PSS/enrollment labels and propagated `naas-ready` | One render per selected Tenant, even before it has namespaces |
+| Capsule isolation-baseline GTR, `scope: Namespace` | NetworkPolicies, PeerAuthentication, AuthorizationPolicy, LimitRange and approved unprivileged service accounts | Each generated namespace of each selected Tenant |
+| Capsule access-baseline GTR, `scope: Namespace` | Namespace RoleBindings for approved identity/profile parameters, selected only after the Tenant access-ready gate is true | Each qualified namespace; Remove on access-selector deselection |
+| Capsule rule/quota controllers | RuleStatus, generated GlobalResourceQuota, native quota and internal QuantityLedger | Controller-generated; management observes only |
 
-- A trusted `naas-system/provisioner` ServiceAccount, authenticated workload-cluster client, Capsule user/administrator mapping and narrow provisioning permissions. These credentials never appear in the SubTenant API.
-- A workload-editor ClusterRole such as the example below. Capsule strict RBAC must explicitly permit binding any role it distributes; the controller's strict mode is not a guarantee of namespace-only controller authority.
-- Admission that protects namespace readiness/ownership/PSS/enrollment metadata, blocks tenant policy-authoring escape paths, checks workload service-account selection, and prevents workload admission while provisioning is incomplete. Controller-created Pods and external operators must also be covered. No developer RoleBinding is granted until those checks pass.
-- A qualified native CNI enforcement profile, Kubernetes admission plugins, protected platform namespace labels, DNS and health-probe allowances, and a connectivity acceptance runner. A default-deny rollout can break probes, DNS and monitoring without these allowances.
-- Optional approved PriorityClass/RuntimeClass/StorageClass definitions, Gateway API CRDs and waypoint controller where used; storage/backup integrations and approved external identity mappings.
+**Mandatory prerequisites:** existing external cert-manager and ambient installation; exact CNI/HBONE/DNS/probe qualification; protected namespace/Pod/Service metadata; provisioning admission guard; narrow workload-editor role; separate management Tenant-writer and Capsule replication execution identities. The execution identity can create Namespaces and baseline kinds; the management Tenant-writer cannot. Map the replication execution ServiceAccount into the required Capsule administrator/user scope and grant the controller only required impersonation/bind rights. Human developer groups must not appear in Tenant automatic owners or additional bindings. The administrator-configured admission boundary must cover controller-generated Pods and deny privilege/service-account/policy escapes. [Configuration](https://projectcapsule.dev/docs/operating/setup/configuration/), [replication impersonation](https://projectcapsule.dev/docs/replications/global/#impersonation).
 
-The installer, not each SubTenant request, owns CapsuleConfiguration, webhook certificates, admission configurations, CRDs, cluster-wide roles and monitoring configuration. User groups and impersonation defaults are merged into the installation's versioned configuration; do not create a competing CapsuleConfiguration per SubTenant. [Configuration](https://projectcapsule.dev/docs/operating/setup/configuration/), [strict RBAC installation](https://projectcapsule.dev/docs/operating/setup/installation/#strict-rbac).
+A bare Capsule Tenant groups namespaces created through admission; it does not create the first namespace. The pinned GTR API supports cluster-scoped output under Tenant scope, with a `tenant` template context and **no `namespace` context**. Namespace scope instead iterates already selected namespaces. Consequently namespace creation belongs in a Tenant-scope GTR and isolation/access in Namespace-scope GTRs. `namespacedItems` is not the Namespace-bootstrap mechanism; use a generator producing a native cluster-scoped Namespace. [Scope](https://projectcapsule.dev/docs/replications/global/#scope), [context](https://projectcapsule.dev/docs/replications/global/#base-context).
 
-For the initial implementation, the recommended additional admission resources
-are platform-owned `admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy`
-objects and matching `ValidatingAdmissionPolicyBinding` objects. This is a
-proposed design choice, not something supplied by installing Capsule or by the
-currently disabled Kyverno definition. Use fail-closed validation and Deny
-bindings for these independently testable policy families:
+### Once-installed namespace bootstrap template
 
-| Proposed policy family | Required protection |
-| --- | --- |
-| Namespace ownership and readiness | Only the trusted provisioner can set/change SubTenant membership, ownership UIDs, PSS/enrollment labels or the provisioning-ready guard |
-| Workload enrollment and identity | Validate Pods and supported controller templates; prevent mesh/DNS opt-out metadata, unauthorized service-account selection and token/identity escape paths |
-| Placement and service exposure | Reject unapproved nodeName, schedulers, tolerations/affinity, runtime/priority classes and external exposure choices |
-| Incomplete provisioning | Deny workload admission until the namespace baseline is Ready, including Pods created by native controllers or external operators; no blanket system-controller exemption |
-
-Bindings must match protected, platform-owned namespace labels and cannot be
-edited by developers. Test admission errors and unavailable parameter resources
-as fail-closed states. CEL expressions, allowed exceptions, parameter ownership
-and field coverage remain explicit implementation deliverables; these examples
-do not substitute for them. [Native admission policy and binding behavior](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/).
-
-```yaml
-# Workload cluster: cluster-wide prerequisite. No RBAC/policy/Secret privileges.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: naas-workload-editor
-rules:
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["batch"]
-    resources: ["jobs", "cronjobs"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["services", "configmaps", "persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["pods", "events"]
-    verbs: ["get", "list", "watch"]
-```
-
-This role omits direct Pod writes and subresource access, but creating a Deployment still permits running code and choosing its Pod spec. Admission must constrain that spec, including service accounts, and namespace peers must share the same trust boundary. The role does not promise confidentiality from other workload creators in that namespace.
-
-### Per-SubTenant Capsule Tenant and first namespace
-
-Create the Capsule Tenant first and wait for its rules/quota controller. The bootstrap identity is an owner; the developer group is deliberately not a Capsule owner. `forceTenantPrefix` and namespace quota are present in the pinned v1beta2 schema. The rules use current fields instead of legacy embedded `resourceQuotas`, `networkPolicies` or forbidden-metadata examples.
-
-```yaml
-apiVersion: capsule.clastix.io/v1beta2
-kind: Tenant
-metadata:
-  name: st-a1b2c3d4e5f6
-  labels:
-    cloud.cluster-vending.io/tenant: acme
-    cloud.cluster-vending.io/subtenant-id: "00000000-0000-4000-8000-000000000021"
-spec:
-  preventDeletion: true
-  forceTenantPrefix: true
-  permissions:
-    allowOwnerPromotion: false
-  owners:
-    - kind: ServiceAccount
-      name: system:serviceaccount:naas-system:provisioner
-      clusterRoles: [naas-workload-editor]
-  namespaceOptions:
-    quota: 3
-  rules:
-    - quota:
-        - name: budget
-          hard:
-            requests.cpu: "4"
-            requests.memory: 8Gi
-            limits.memory: 8Gi
-            requests.ephemeral-storage: 20Gi
-            limits.ephemeral-storage: 40Gi
-            requests.storage: 100Gi
-            persistentvolumeclaims: "10"
-            pods: "30"
-            services: "20"
-            secrets: "40"
-    - enforce:
-        action: allow
-        services:
-          types: [ClusterIP]
-    - enforce:
-        action: deny
-        services:
-          externalIPs: {}
-    - enforce:
-        action: allow
-        metadata:
-          - apiGroups: [v1]
-            kinds: [Namespace]
-            labels:
-              pod-security.kubernetes.io/enforce:
-                managed: restricted
-                required: true
-                values: [{exact: [restricted]}]
-              pod-security.kubernetes.io/enforce-version:
-                managed: v1.35
-                required: true
-                values: [{exact: [v1.35]}]
-              pod-security.kubernetes.io/audit:
-                managed: restricted
-                required: true
-                values: [{exact: [restricted]}]
-              pod-security.kubernetes.io/audit-version:
-                managed: v1.35
-                required: true
-                values: [{exact: [v1.35]}]
-              pod-security.kubernetes.io/warn:
-                managed: restricted
-                required: true
-                values: [{exact: [restricted]}]
-              pod-security.kubernetes.io/warn-version:
-                managed: v1.35
-                required: true
-                values: [{exact: [v1.35]}]
-              istio.io/dataplane-mode:
-                managed: ambient
-                required: true
-                values: [{exact: [ambient]}]
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: st-a1b2c3d4e5f6-app
-  # Created through the trusted Capsule-aware bootstrap identity.
-  # Capsule supplies/verifies the Tenant owner reference using its actual UID.
-  labels:
-    capsule.clastix.io/tenant: st-a1b2c3d4e5f6
-    cloud.cluster-vending.io/tenant: acme
-    cloud.cluster-vending.io/subtenant-id: "00000000-0000-4000-8000-000000000021"
-    cloud.cluster-vending.io/naas-ready: "false"
-    istio.io/dataplane-mode: ambient
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: v1.35
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/audit-version: v1.35
-    pod-security.kubernetes.io/warn: restricted
-    pod-security.kubernetes.io/warn-version: v1.35
-```
-
-The provisioning guard and protected labels are a required platform admission prerequisite, not capabilities magically supplied by the label itself. Add a second namespace using the same membership and approved logical key; it shares this budget rather than receiving another full budget. The Capsule controller creates the GlobalResourceQuota and internal ledger; do not author synthetic status or precompute their UIDs. [Pinned Tenant schema](https://github.com/projectcapsule/capsule/blob/v0.15.2/charts/capsule/crds/capsule.clastix.io_tenants.yaml), [quota generation](https://projectcapsule.dev/docs/tenants/rules/#quotas).
-
-### Per-namespace policies and identities
-
-The baseline below allows same-SubTenant **encrypted TCP transport** only, plus narrowly selected DNS. It grants neither general external ingress nor internet egress. It is a policy intent to qualify against the actual CNI; do not add an all-namespace mesh-port exception when tests fail. The authenticated namespace list in AuthorizationPolicy must be generated from the full approved namespace inventory and updated safely when a namespace is added or removed.
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: naas-deny-by-default
-  namespace: st-a1b2c3d4e5f6-app
-spec:
-  podSelector: {}
-  policyTypes: [Ingress, Egress]
-  ingress: []
-  egress: []
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: naas-allow-subtenant-hbone
-  namespace: st-a1b2c3d4e5f6-app
-spec:
-  podSelector: {}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              capsule.clastix.io/tenant: st-a1b2c3d4e5f6
-      ports: [{protocol: TCP, port: 15008}]
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              capsule.clastix.io/tenant: st-a1b2c3d4e5f6
-      ports: [{protocol: TCP, port: 15008}]
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: naas-allow-cluster-dns
-  namespace: st-a1b2c3d4e5f6-app
-spec:
-  podSelector: {}
-  policyTypes: [Egress]
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
----
-apiVersion: security.istio.io/v1
-kind: PeerAuthentication
-metadata:
-  name: naas-require-mtls
-  namespace: st-a1b2c3d4e5f6-app
-spec:
-  mtls:
-    mode: STRICT
----
-apiVersion: security.istio.io/v1
-kind: AuthorizationPolicy
-metadata:
-  name: naas-allow-owned-namespaces
-  namespace: st-a1b2c3d4e5f6-app
-spec:
-  action: ALLOW
-  rules:
-    - from:
-        - source:
-            namespaces: [st-a1b2c3d4e5f6-app]
----
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: naas-container-defaults
-  namespace: st-a1b2c3d4e5f6-app
-spec:
-  limits:
-    - type: Container
-      defaultRequest: {cpu: 250m, memory: 256Mi, ephemeral-storage: 1Gi}
-      default: {memory: 256Mi, ephemeral-storage: 2Gi}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: default
-  namespace: st-a1b2c3d4e5f6-app
-automountServiceAccountToken: false
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: app
-  namespace: st-a1b2c3d4e5f6-app
-automountServiceAccountToken: false
-```
-
-Do not grant the final RoleBinding or set `naas-ready=true` until readiness gates pass. The DNS example assumes CoreDNS labels and ordinary Pod-network DNS. Adapt NodeLocal/host-network DNS and ambient probe SNAT exceptions to the qualified cluster, including IPv6. CNI selectors must see the expected endpoints after tunneling/address translation; otherwise this profile is not accepted. For a probe on application port 8080, a separate trusted ingress policy can narrowly permit that port from the documented probe `/32` and `/128` addresses after testing. Do not permit every port from node CIDRs. Identity-authorized monitoring/ingress paths need both explicit network and mesh policies. [Ambient transport/probes](https://istio.io/latest/docs/ambient/usage/networkpolicy/).
-
-This example uses namespace-level same-SubTenant trust. If applications need isolation from each other, replace it with explicit principal+port relationships. To add a waypoint-mandatory application, replace its ztunnel allow with a workload-selected policy accepting only `cluster.local/ns/<namespace>/sa/<waypoint>` and attach original-client L7 rules through `targetRefs`. Do not assume the namespace-level allow above remains compatible with mandatory waypoint traversal.
-
-```yaml
-# Final provisioning step only: the exact group is resolved from trusted identity configuration.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: naas-developers
-  namespace: st-a1b2c3d4e5f6-app
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: naas-workload-editor
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: oidc:acme:subtenant:00000000-0000-4000-8000-000000000021:developers
-```
-
-### Optional Capsule resources are alternatives or extensions
-
-This administrator-owned GlobalTenantResource is an **alternative** to directly applying the LimitRange above; do not let both controllers own the same fields. All other optional kinds in the inventory are omitted unless an explicit product feature needs them. Use a tightly scoped execution ServiceAccount with destination LimitRange get/create/patch/delete rights. The example's platform identity and its impersonation configuration are prerequisites.
+This focused excerpt illustrates the mandatory creation scope and retention behavior. The full installed profile must also generate the pinned PSS, protected profile/identity and ambient labels described above. Namespace keys, trusted developer group and pinned `pssVersion` are supplied through `Tenant.spec.data.naas` and validated by the future service; tenant users cannot edit them. The shortened ID below is illustrative; the companion examples use the complete stable ID.
 
 ```yaml
 apiVersion: capsule.clastix.io/v1beta2
 kind: GlobalTenantResource
 metadata:
-  name: naas-payments-container-defaults
+  name: naas-namespace-bootstrap
 spec:
+  scope: Tenant
   resyncPeriod: 60s
-  # Required/defaulted compatibility field in the pinned schema; policy below is authoritative.
   settings: {}
-  scope: Namespace
   tenantSelector:
     matchLabels:
-      cloud.cluster-vending.io/subtenant-id: "00000000-0000-4000-8000-000000000021"
+      cloud.cluster-vending.io/naas-profile: restricted-ambient-v1
+  serviceAccount:
+    name: baseline-replicator
+    namespace: naas-system
+  resources:
+    - policy:
+        creation: Owner
+        protect: true
+        force: false
+        deletion: Orphan
+      generators:
+        - missingKey: error
+          template: |
+            {{- range $key := $.tenant.spec.data.naas.namespaceKeys }}
+            ---
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: {{ printf "%s-%s" $.tenant.metadata.name $key | quote }}
+              ownerReferences:
+                - apiVersion: capsule.clastix.io/v1beta2
+                  kind: Tenant
+                  name: {{ $.tenant.metadata.name | quote }}
+                  uid: {{ $.tenant.metadata.uid | quote }}
+              labels:
+                capsule.clastix.io/tenant: {{ $.tenant.metadata.name | quote }}
+                cloud.cluster-vending.io/naas-ready: {{ index $.tenant.metadata.labels "cloud.cluster-vending.io/access-ready" | quote }}
+                istio.io/dataplane-mode: ambient
+                pod-security.kubernetes.io/enforce: restricted
+                pod-security.kubernetes.io/enforce-version: {{ $.tenant.spec.data.naas.pssVersion | quote }}
+            {{- end }}
+```
+
+PSS `v1.35` is an example policy version, not a Capsule compatibility assertion; the approved full profile sets enforce/audit/warn and their supported pinned versions. Namespace owner UID is taken from the actual Capsule Tenant, not guessed or supplied by the API caller. `deletion: Orphan` retains the Namespace after template-output/selector removal, **but its Tenant owner reference remains**. Never delete that Tenant as a shortcut for deleting or retaining namespaces.
+
+### Once-installed isolation and access templates
+
+The isolation GTR uses `scope: Namespace` and selects the approved profile, independently of access-ready. Its generated inventory must include:
+
+- Native ingress+egress deny-all plus narrowly qualified same-SubTenant HBONE and actual DNS/probe exceptions; no blanket port 15008 grant from every namespace.
+- Namespace STRICT PeerAuthentication and explicit ztunnel L4 identity authorization; waypoint-only destination identity plus correctly attached L7 policies for optional mandatory-waypoint profiles.
+- LimitRange/resource defaults, the unprivileged default/app ServiceAccounts, and any approved configuration. Tenant rules supply the shared quota and managed namespace metadata.
+
+This inventory is always Capsule-generated from the shared template. Keep isolation active for retained namespaces and prevent selectors/profile changes from accidentally relinquishing governance. Explicit Orphan policies on security resources can preserve their last configuration if selection is lost, but they do not preserve Capsule protection/reconciliation after deselection. Losing selection must report drift, not retained readiness. [Per-resource ownership and cleanup](https://projectcapsule.dev/docs/operating/concepts/managed-resources/).
+
+The access GTR is separate and selects the **Tenant's** protected access-ready label. The following focused example demonstrates the gate, not a standalone provisioning installation:
+
+```yaml
+apiVersion: capsule.clastix.io/v1beta2
+kind: GlobalTenantResource
+metadata:
+  name: naas-access-baseline
+spec:
+  scope: Namespace
+  resyncPeriod: 60s
+  settings: {}
+  tenantSelector:
+    matchLabels:
+      cloud.cluster-vending.io/naas-profile: restricted-ambient-v1
+      cloud.cluster-vending.io/access-ready: "true"
   serviceAccount:
     name: baseline-replicator
     namespace: naas-system
@@ -559,25 +362,85 @@ spec:
         protect: true
         force: false
         deletion: Remove
-      rawItems:
-        - apiVersion: v1
-          kind: LimitRange
-          metadata:
-            name: naas-container-defaults
-          spec:
-            limits:
-              - type: Container
-                defaultRequest: {cpu: 250m, memory: 256Mi, ephemeral-storage: 1Gi}
-                default: {memory: 256Mi, ephemeral-storage: 2Gi}
+      generators:
+        - missingKey: error
+          template: |
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            metadata:
+              name: naas-developers
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: ClusterRole
+              name: naas-workload-editor
+            subjects:
+              - apiGroup: rbac.authorization.k8s.io
+                kind: Group
+                name: {{ $.tenant.spec.data.naas.developerGroup | quote }}
 ```
 
-No example enables `ResourcePermit`, legacy PodSecurityPolicy, invented `Tenant.spec.proxySettings`, or proxy v1beta2. The active Tenant schema contains owners' compatibility proxy settings, but the optional proxy's filtered APIs have their own schema. Existing cert-manager Certificates/Issuers, native RBAC/NetworkPolicy/ResourceQuota, Istio PeerAuthentication/AuthorizationPolicy and optional Gateway resources belong to their own APIs; they are not additional Capsule CRs.
+`naas-workload-editor` is installed once with selected workload/ClusterIP/ConfigMap/PVC permissions and no RBAC, Secret, native/CNI policy, mesh-policy or cluster-admin writes. It must not inherit broader permissions from unrelated aggregated roles. The generator's group is a trusted resolved identity parameter, never arbitrary client input. A workload creator can still choose Pod fields through a Deployment, so admission and namespace-local trust remain mandatory.
+
+There is no atomic transaction between isolation generation, namespace-label propagation, access generation and enforcement verification. Automatic Capsule owner grants bypass this staged model, so only trusted machine identities can be owners. `dependsOn` can express coarse GTR dependencies but does not replace the per-Tenant observer qualification and protected admission gate. If the Namespace is still `naas-ready=false` when the access RoleBinding appears, admission must still reject tenant workloads. Lowering the Tenant label eventually removes the generated access RoleBinding through `deletion: Remove`; it does not instantly revoke existing sessions or delete workloads.
+
+### The only per-SubTenant workload object
+
+The management controller creates this Capsule Tenant and later updates its own spec/labels. Capsule creates every Namespace, isolation resource and RoleBinding through the templates above. The actual service validates/resolves ID, namespace keys, quota entitlement and identity; the example does not implement that API.
+
+```yaml
+apiVersion: capsule.clastix.io/v1beta2
+kind: Tenant
+metadata:
+  name: st-a1b2c3d4e5f6
+  labels:
+    cloud.cluster-vending.io/tenant: acme
+    cloud.cluster-vending.io/subtenant-id: "00000000-0000-4000-8000-000000000021"
+    cloud.cluster-vending.io/naas-profile: restricted-ambient-v1
+    cloud.cluster-vending.io/access-ready: "false"
+spec:
+  preventDeletion: true
+  forceTenantPrefix: true
+  namespaceOptions:
+    quota: 3
+  permissions:
+    allowOwnerPromotion: false
+  owners:
+    - kind: ServiceAccount
+      name: system:serviceaccount:naas-system:baseline-replicator
+      clusterRoles: [naas-workload-editor]
+  data:
+    naas:
+      namespaceKeys: [app]
+      developerGroup: oidc:acme:subtenant:00000000-0000-4000-8000-000000000021:developers
+      pssVersion: v1.35
+  rules:
+    - quota:
+        - name: budget
+          hard:
+            requests.cpu: "4"
+            requests.memory: 8Gi
+            limits.memory: 8Gi
+            requests.storage: 100Gi
+            persistentvolumeclaims: "10"
+            pods: "30"
+            services: "20"
+    - enforce:
+        action: allow
+        services:
+          types: [ClusterIP]
+    - enforce:
+        action: deny
+        services:
+          externalIPs: {}
+```
+
+Once the observer verifies the current generated baseline, it patches only `Tenant.metadata.labels["cloud.cluster-vending.io/access-ready"]` to `"true"`, with an optimistic-concurrency precondition and evidence for the current policy/template/intent revisions. It never patches Namespace readiness, creates service accounts or applies RoleBindings directly. The full approved profile also manages the PSS/enrollment metadata and admission protections; this focused Tenant example is not a replacement for the once-installed security prerequisites. No per-SubTenant GlobalTenantResource, TenantResource, CapsuleConfiguration or bootstrap ServiceAccount is created.
 
 ## Day-2 operation and recovery
 
 Observe controller/webhook availability and latency, certificate expiry and CA injection, failed admissions, quota/ledger initialization, replication processed-item errors, namespace termination, desired-versus-observed generations, and isolation qualification age. Join metrics/logs using protected platform Tenant, cluster and SubTenant IDs, with bounded cardinality. Keep Secret content, bearer tokens and unrestricted workload logs out of shared status. Alert on enrollment drift, unexpected namespaces, missing policies, stale remote observation and Capsule removal while dependencies remain. Capsule supports Prometheus/Grafana and optional admission tracing; tracing credentials belong in Secrets rather than arguments. [Monitoring](https://projectcapsule.dev/docs/operating/operations/monitoring/).
 
-Back up both management SubTenant intent and workload Capsule Tenant/configuration plus namespace resources and volume data. Recovery first restores compatible CRDs, controller/certificates and required classes, then the Capsule Tenant, then correctly owned namespaces with required labels, then application resources/data. Recreate controller-owned baseline resources instead of restoring stale protected replicas or ledger reservations verbatim. A backup of Kubernetes configuration alone does not include PVC data. Validate CSI snapshots/data movement and test restoration into a different qualified cluster. The documented temporary-PV restore exception must be scoped to the actual restoring identity and staging namespace. Provide any tenant-facing backup requests through a constrained platform workflow, not unrestricted access to shared Velero credentials or buckets. [Backup/restore](https://projectcapsule.dev/docs/operating/operations/backup-restore/).
+Back up both management SubTenant intent and workload Capsule Tenant/configuration plus namespace resources and volume data. Recovery first restores compatible CRDs, controller/certificates and required classes, then the Capsule Tenant, then Capsule-driven namespace bootstrap with correct owner UIDs/labels, then generated isolation resources and application resources/data. Keep the Tenant access gate false throughout restore and requalify before promoting it. Recreate controller-owned baseline resources instead of restoring stale protected replicas or ledger reservations verbatim. A backup of Kubernetes configuration alone does not include PVC data. Validate CSI snapshots/data movement and test restoration into a different qualified cluster. The documented temporary-PV restore exception must be scoped to the actual restoring identity and staging namespace. Provide any tenant-facing backup requests through a constrained platform workflow, not unrestricted access to shared Velero credentials or buckets. [Backup/restore](https://projectcapsule.dev/docs/operating/operations/backup-restore/).
 
 Use a documented administrator break-glass path for failed admission/certificate recovery; exclude trusted infrastructure narrowly rather than opening all namespaces or all callers. Maintain multiple Capsule replicas and appropriate disruption budgets, but recognize that webhook failure policy trades admission availability against enforcement. Upgrade CRDs and conversion paths with the pinned chart lifecycle and test stored versions before a rollback. Do not assume controller downgrades undo schema/data migrations. OpenShift/Rancher integrations remain separate qualification profiles; the operating guides contain provider/distribution-specific settings that must not be generalized to EKS.
 
@@ -604,14 +467,14 @@ These are **required future implementation/qualification tests**, not claims of 
 | Egress ServiceEntry bypass, alternate DNS, direct address and external gateway route | Only approved gateway+destination path succeeds; TLS identity validated; discovery visibility is not accepted as enforcement |
 | Concurrent quota consumption across namespaces, reduction below use, ledger unready | Shared limit holds under parallel requests; reduction rejected; readiness/accounting failures block new consumption |
 | Cross-SubTenant PVC/PV/snapshot/Secret access and replica-generated workload access | Denied; restore exception works only for trusted staging identity; namespace-local trust limitation documented |
-| Freeze and in-flight/HALTED COMPONENTS move while toggling NaaS | Desired toggle queues; no remote mutation during freeze; pending component order unchanged; normal retry still required |
+| Freeze and in-flight/HALTED COMPONENTS move while toggling NaaS | Management Tenant/toggle writes queue; pending component order unchanged; normal retry required; explicitly demonstrate that independent Capsule resync continues unless a separate qualified strict-freeze mechanism pauses it |
 | Disable NaaS/create race, active/retained/foreign Capsule Tenant, parent Cluster/Tenant delete | Future precondition blocks enforcement removal; recheck before uninstall; no GC escape from management records |
-| Failure halfway through namespace/policy setup or a delayed replication | No developer workload gap; restart reconciles idempotently; status distinguishes resource delivery from enforcement |
-| Delete with PVCs, snapshots, custom finalizers or unreachable workload API | No silent loss/finalizer stripping; reviewed disposition and clear blockers; inventory retained |
+| Failure halfway through namespace/policy setup or delayed/independently ready GTRs | Management writes only Tenant; access gate stays false; automatic owners cannot grant human access; guarded workload admission closes the non-atomic replication gap |
+| Delete with PVCs, snapshots, custom finalizers or unreachable workload API | RequireEmpty/Retain blocks unsafe deletion; namespace Orphan does not override Tenant-owner GC; management cannot directly delete generated objects; a separately qualified offboarding path is required |
 | Operator/webhook/CNI/ztunnel outage and cert rotation; restore into replacement cluster | Failure behavior matches declared boundary; restore preserves ownership/policy before access; stale status never implies readiness |
 | Shared-node pressure, malicious API churn, PDB/drain interference | Quotas/admission/fairness and operational headroom contain the measured impact; dedicated/sandbox profiles offered when insufficient |
 
-Implementation delivery order: (1) typed contracts/auth/CRDs and capability/readiness observation; (2) idempotent create plus staged access and policy qualification; (3) plans/update/quota/identity lifecycle; (4) guarded delete/retain/disable and parent dependency checks; (5) backup/restore and optional proxy/allocator features. Ship the first provisioning capability only when its mandatory boundary tests pass. This document creates none of those services or resources.
+Implementation delivery order: (1) typed contracts/auth/CRDs and capability/readiness observation; (2) once-installed GTR bootstrap plus Tenant-only idempotent create, observed staged access and policy qualification; (3) plans/update/quota/identity lifecycle; (4) guarded RequireEmpty/Retain/disable and parent dependency checks, followed by a separately qualified Capsule-owned destructive offboarding mechanism; (5) backup/restore and optional proxy/allocator features. Ship the first provisioning capability only when its mandatory boundary tests pass. This document creates none of those services or resources.
 
 ## Source coverage appendix
 

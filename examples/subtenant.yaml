@@ -1,0 +1,52 @@
+# Create a SubTenant from the cluster detail page:
+#   1. Enable spec.naas: true on the cluster (examples/cluster.yaml).
+#   2. Open SubTenants -> Create SubTenant -> Paste YAML.
+#   3. Replace metadata.clusterId with that cluster's ID, then review and create.
+#
+# This is the UI/API manifest envelope, not a native Kubernetes CR.
+# SubTenantService.CreateSubTenant generates the allocation ID and resolves the
+# canonical parent names/UIDs. The UI supplies a stable request UUID for retries.
+# A SubTenant CLI command is not implemented yet.
+#
+# Creation stores desired state. Workload provisioning remains pending until
+# the workload controller is implemented; this file applies no resources itself.
+apiVersion: cluster-vending.io/v1
+kind: SubTenant
+metadata:
+  tenant: acme
+  clusterId: 00000000-0000-0000-0000-000000000003  # replace with CLUSTER_ID
+  # id: <SUBTENANT_ID>  # edit only; allocation identity is assigned on create
+spec:
+  displayName: Payments
+  # Logical keys, not physical namespace names. Use 1-64 unique lowercase DNS
+  # labels, each at most 27 characters. Keys may be added but not removed/renamed.
+  namespaceKeys: [app]
+  # The supported baseline is fixed; arbitrary policies/Helm values are refused.
+  policyProfile: restricted-ambient-v1
+  quota:
+    # Shared budget across this SubTenant, not one copy per namespace.
+    # 1-64; must cover every namespace key above.
+    namespaceCount: 3
+    hard:
+      requests.cpu: "4"
+      requests.memory: 8Gi
+      limits.memory: 8Gi
+      requests.ephemeral-storage: 20Gi
+      limits.ephemeral-storage: 40Gi
+      requests.storage: 100Gi
+      persistentvolumeclaims: "10"
+      pods: "30"
+      services: "20"
+      secrets: "40"
+      # Other supported quota keys: limits.cpu, configmaps.
+      # Values are nonnegative Kubernetes quantities; object counts are integral.
+  # Omitted/empty access grants no developer access. Nonempty bindings require
+  # a trusted identity resolver, which is not implemented yet; leave commented.
+  # Raw OIDC groups, Kubernetes subjects and arbitrary roles are not accepted.
+  # access:
+  #   bindings:
+  #     - identityRef: payments-developers
+  #       roleProfile: workload-editor
+# Parent cluster/tenant references and physical namespace names are assigned by
+# the platform. Do not supply status, generation, etag, credentials, or UID refs.
+# Disabling NaaS or deleting the cluster is blocked while SubTenants remain.

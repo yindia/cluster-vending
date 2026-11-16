@@ -1,0 +1,31 @@
+# Canonical management-cluster record; references are resolved by the service.
+# Illustrative UUIDs only. The referenced Tenant and NaaS Cluster must exist.
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: SubTenant
+metadata:
+  name: 00000000-0000-4000-8000-000000000021
+  namespace: tenant-acme
+  labels:
+    app.kubernetes.io/managed-by: cluster-vending
+    cloud.cluster-vending.io/tenant: acme
+    cloud.cluster-vending.io/id: 00000000-0000-4000-8000-000000000021
+    cloud.cluster-vending.io/cluster-id: 00000000-0000-4000-8000-000000000003
+spec:
+  tenantRef:
+    name: acme
+    uid: 00000000-0000-4000-8000-000000000011
+  clusterRef:
+    id: 00000000-0000-4000-8000-000000000003
+    name: payments
+    uid: 00000000-0000-4000-8000-000000000013
+  displayName: Payments
+  namespaceKeys: [app]
+  policyProfile: restricted-ambient-v1
+  quota:
+    namespaceCount: 3
+    hard:
+      requests.cpu: '4'
+      requests.memory: 8Gi
+      limits.memory: 8Gi
+      pods: '30'
+  # Omission of access grants no developer access. identityRef must be approved.

@@ -19,6 +19,7 @@ import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ConsoleTable as Table } from "./console-table";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { ClusterSubTenants } from "./cluster-subtenants";
 import { TabList, Tab } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -199,13 +200,14 @@ interface FieldsProps {
   onChange: <K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) => void;
   disabled: boolean;
   creating?: boolean;
+  naasLockReason?: string;
   networkPicker?: ReactNode;
   region: string;
   tier?: number;
   step: number;
 }
 
-function ClusterFields({ value, onChange, disabled, creating, networkPicker, region, tier, step }: FieldsProps) {
+function ClusterFields({ value, onChange, disabled, creating, networkPicker, region, tier, step, naasLockReason }: FieldsProps) {
   const text = (field: keyof ClusterForm, title: string, description?: string, required = false) => <TextInput
     label={title} value={String(value[field])} onChange={(next) => onChange(field, next)}
     description={description} isRequired={required} isDisabled={disabled}
@@ -227,7 +229,7 @@ function ClusterFields({ value, onChange, disabled, creating, networkPicker, reg
         <Selector label="Upgrades" value={value.upgradeMode} isDisabled={disabled} onChange={(next) => onChange("upgradeMode", next)} options={[{ value: "1", label: "Manual" }, { value: "2", label: "Automatic" }]} />
       </FormLayout>
       <Text type="supporting">The server resolves Kubernetes versions. Automatic clusters follow their channel; an unset channel uses Stable in automatic mode.</Text>
-      <CheckboxInput label="Namespace as a Service (NaaS)" htmlName="naas" value={value.naas} isDisabled={disabled} onChange={(next) => onChange("naas", next)} description="Enable support for team namespaces with separate access, quotas, and policies." />
+      <CheckboxInput label="Namespace as a Service (NaaS)" htmlName="naas" value={value.naas} isDisabled={disabled || !!naasLockReason} onChange={(next) => onChange("naas", next)} description={naasLockReason || "Enable support for team namespaces with separate access, quotas, and policies."} />
       <Collapsible trigger="Advanced identity and version" defaultIsOpen={false}>
         <VStack gap={4} paddingBlock={3}>
           {text("displayName", "Display name", "Optional friendly name.")}
@@ -506,7 +508,8 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const activityEvents = filteringActivity ? allEvents.data ?? [] : pageEvents;
   const filteredEvents = filterActivityEvents(activityEvents, activityFilters);
   const availableEventKinds = [...pageEvents, ...(allEvents.data ?? [])];
-  const panels = ["overview", "resources", "activity", "components", "deprecations", "recommendations"] as const;
+  const panels = ["overview", "resources", "activity", "components", "deprecations", "recommendations", ...(cluster?.spec?.naas ? ["subtenants"] : [])];
+  const activeTab = tab === "subtenants" && !cluster?.spec?.naas ? "overview" : tab;
   const panelId = (name: string) => `${panelPrefix}-${name}`;
   function openTab(name: string) { setTab(name); if (name === "activity") setRequestedEventKinds(true); }
   return <VStack gap={6} as="section" aria-label="Cluster details">
@@ -535,10 +538,10 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         { label: "Node capacity", value: pool?.scalingConfig ? `${pool.scalingConfig.minSize}–${pool.scalingConfig.maxSize}` : "Pending", note: pool?.instanceTypes.join(", ") || "Default node pool" },
         { label: "Release channel", value: channelSlug ? <Link href={`/channels/${channelSlug}`}>{channel}</Link> : channel, note: cluster.spec?.upgradeMode === UpgradeMode.AUTOMATIC ? "Automatic upgrades" : "Manual upgrades" },
       ]} />
-      <TabList value={tab} onChange={openTab} role="tablist" aria-label="Cluster detail sections" hasDivider>
-        {panels.map((name) => <Tab key={name} value={name} label={name === "deprecations" ? "Deprecated APIs" : name[0].toUpperCase() + name.slice(1)} panelId={panelId(name)} />)}
+      <TabList value={activeTab} onChange={openTab} role="tablist" aria-label="Cluster detail sections" hasDivider>
+        {panels.map((name) => <Tab key={name} value={name} label={name === "subtenants" ? "SubTenants" : name === "deprecations" ? "Deprecated APIs" : name[0].toUpperCase() + name.slice(1)} panelId={panelId(name)} />)}
       </TabList>
-      {tab === "overview" && <VStack id={panelId("overview")} role="tabpanel" aria-label="Overview" tabIndex={0} gap={8}>
+      {activeTab === "overview" && <VStack id={panelId("overview")} role="tabpanel" aria-label="Overview" tabIndex={0} gap={8}>
         {status?.message && <Text color="secondary">{status.message}</Text>}
         <Grid columns={{ minWidth: 300, max: 2 }} gap={8}>
           <VStack gap={4}>
@@ -601,14 +604,14 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           ]} />
         </VStack>
       </VStack>}
-      {tab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Resources" tabIndex={0} gap={6}>
+      {activeTab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Resources" tabIndex={0} gap={6}>
         <ManagedInventory resources={resources} title="Cluster managed resource inventory" />
         {status?.import && <Collapsible trigger={`Import discovery · ${label(ImportPhase, status.import.phase)}`} defaultIsOpen={false}>
           <DetailRows title="Cluster import resource inventory" rows={status.import.resources.map((resource) => ({ name: `${resource.kind} / ${resource.name}`, copyName: resource.name, state: statusValue(Disposition, resource.disposition), detail: <VStack gap={1}>{resource.externalName && <CopyValue value={resource.externalName} label="imported resource cloud ID" />}<Text>{resource.apiVersion} · {resource.detail}{resource.requiresReplacement ? " · Requires replacement" : ""}</Text></VStack> }))} />
         </Collapsible>}
         {!!status?.carriedOver.length && <Collapsible trigger="Carried-over resources" defaultIsOpen={false}><DetailRows title="Carried-over cluster resources" rows={status.carriedOver.map((resource) => ({ name: `${resource.kind} / ${resource.name}`, copyName: resource.name, state: statusValue(Disposition, resource.disposition), detail: <VStack gap={1}>{resource.externalName && <CopyValue value={resource.externalName} label="carried-over resource cloud ID" />}<Text>{resource.detail}</Text></VStack> }))} /></Collapsible>}
       </VStack>}
-      {tab === "activity" && <VStack id={panelId("activity")} role="tabpanel" aria-label="Activity" tabIndex={0} gap={5}>
+      {activeTab === "activity" && <VStack id={panelId("activity")} role="tabpanel" aria-label="Activity" tabIndex={0} gap={5}>
         <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center"><VStack gap={1}><Heading level={3}>Activity</Heading><Text type="supporting">Controller events, newest first.</Text></VStack><RefreshButton label="Refresh activity" onClick={refreshActivity} isLoading={activityQuery.refreshing || allEvents.refreshing} /></HStack>
         <ActivityEventFilters value={activityFilters} onChange={value => { setActivityFilters(value); setEventTokens([""]); }} events={availableEventKinds} onRequestKinds={() => setRequestedEventKinds(true)} />
         {loadCompleteEvents && allEvents.loading && !filteringActivity && <Text role="status">Loading all event kinds and pages…</Text>}
@@ -622,7 +625,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           <Button label="Next events" isDisabled={!events.data?.nextPageToken || eventTokens.includes(events.data.nextPageToken) || events.loading || events.refreshing} onClick={() => { if (events.data?.nextPageToken) setEventTokens([...eventTokens, events.data.nextPageToken]); }} />
         </HStack>}
       </VStack>}
-      {tab === "components" && <VStack id={panelId("components")} role="tabpanel" aria-label="Components" tabIndex={0} gap={6}>
+      {activeTab === "components" && <VStack id={panelId("components")} role="tabpanel" aria-label="Components" tabIndex={0} gap={6}>
         <VStack gap={3}>
           <Heading level={3}>EKS add-ons</Heading>
           <Text type="supporting">Target is the resolved desired version; running is the last observed version. AWS resolves add-ons for the Kubernetes minor unless an explicit version was requested. Release channels do not pin add-on versions.</Text>
@@ -644,8 +647,9 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         </VStack>
         <ClusterTenantComponents clusterId={clusterId} />
       </VStack>}
-      {tab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
-      {tab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
+      {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
+      {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="SubTenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
+      {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
       {editing && canWrite && <EditCluster clusterId={clusterId} currentEtag={cluster.etag} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
       {deleting && canWrite && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
       {retrying && canWrite && <RetryCluster clusterId={clusterId} onClose={() => setRetrying(false)} onRetried={refresh} />}
@@ -736,6 +740,9 @@ function EditCluster({ clusterId, currentEtag, onClose, onApplied }: { clusterId
 
 function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose, onReload }: { baseline: Cluster; asRequested: boolean; currentEtag: string; onApplied: () => void; onClose: () => void; onReload: () => void }) {
   const { api, tenantId, canWrite } = usePlatform();
+  const loadSubTenants = useCallback(async (signal: AbortSignal) => baseline.spec?.naas ? api.subtenant.listSubTenants({ tenantId, clusterId: baseline.id, pageSize: 1 }, { signal }) : undefined, [api, tenantId, baseline.id, baseline.spec?.naas]);
+  const allocations = useAsyncQuery(loadSubTenants);
+  const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing SubTenants before allowing NaaS to be disabled…" : allocations.error ? "SubTenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all SubTenants, including those still deleting, before disabling NaaS." : undefined;
   const [form, setForm] = useState(() => clusterForm(baseline));
   const [step, setStep] = useState(0);
   const formId = useId();
@@ -747,6 +754,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
   const revision = useRef(0);
   const errorRef = useRef<HTMLElement>(null);
   function change<K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) {
+    if (field === "naas" && value === false && naasLockReason) return;
     revision.current++;
     setReview(undefined); setError("");
     setForm((old) => ({ ...old, [field]: value }));
@@ -763,6 +771,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
     const inputRevision = revision.current;
     try {
       if (baseline.etag !== currentEtag) throw new Error("The cluster changed. Reload editable cluster and review a new plan.");
+      if (baseline.spec?.naas && !form.naas && naasLockReason) throw new Error(naasLockReason);
       const request = buildClusterUpdate(tenantId, baseline, form, touched);
       if (apply) {
         if (!review) throw new Error("Review a plan first.");
@@ -791,7 +800,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
     <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>
     <form id={formId} method="post" onSubmit={(event) => { event.preventDefault(); void submit(step === 3); }}>
       <VStack gap={6}>
-        {step < 3 && <ClusterFields step={step} value={form} onChange={change} disabled={busy || !canWrite} region={baseline.spec?.region ?? ""} tier={baseline.status?.tier} />}
+        {step < 3 && <ClusterFields step={step} value={form} onChange={change} naasLockReason={naasLockReason} disabled={busy || !canWrite} region={baseline.spec?.region ?? ""} tier={baseline.status?.tier} />}
     {step === 3 && review && <VStack gap={4}>
       <PlanReview plan={review.plan} />
       {touched.has("naas") && <Banner status={form.naas ? "info" : "warning"} title={form.naas ? "Enable Namespace as a Service" : "Disable Namespace as a Service"} description={form.naas ? "Enable support for team namespaces with separate access, quotas, and policies. Setup continues after you apply this change." : "Turn off namespace tenancy controls for this cluster. Existing namespaces, workloads, and data will remain. Review the impact on teams using these controls before applying."} />}

@@ -32,6 +32,7 @@ async function mockNaaS(page: Page, initiallyEnabled = false) {
       case "GetNetwork": response = { network }; break;
       case "ListClusters": response = { clusters: [cluster()] }; break;
       case "GetCluster": response = { cluster: cluster(), asRequested: true }; break;
+      case "ListSubTenants": response = { subtenants: [] }; break;
       case "ListClusterEvents": response = { events: [] }; break;
       case "CreateCluster": response = { cluster: { ...cluster(), ...body.cluster as object } }; break;
       case "UpdateCluster":

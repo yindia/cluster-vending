@@ -10,7 +10,11 @@ import (
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/yindia/cluster-vending/pkg/kube"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -131,6 +135,11 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 	if warning := crossplaneaws.DedicatedPoolWarning(final.NodePool); warning != "" {
 		plan.Warnings = append(plan.Warnings, warning)
 	}
+	capsuleVersions, err := s.planNaaS(ctx, row, spec, plan)
+	if err != nil {
+		return nil, err
+	}
+	versions = append(versions, capsuleVersions...)
 	versions = append(versions, "cluster="+row.ID+"/"+row.ETag)
 	plan.PlanId, err = planID(req, versions)
 	if err != nil {
@@ -188,4 +197,49 @@ func planID(req *cloudv1.UpdateClusterRequest, versions []string) (string, error
 	r := proto.CloneOf(req)
 	r.ValidateOnly, r.PlanId = false, ""
 	return planning.ID(r, versions)
+}
+
+// Capsule Releases are component-owned, outside the cluster-owned inventory
+// rendered above. Describe the NaaS transition explicitly and bind review to
+// the current Release version without changing the workload cluster.
+func (s *ClusterService) planNaaS(ctx context.Context, row *model.Cluster, desired *cloudv1.ClusterSpec, plan *cloudv1.Plan) ([]string, error) {
+	current, err := reconcilecluster.SpecOf(row)
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	if current.GetNaas() == desired.GetNaas() {
+		return nil, nil
+	}
+	name := crossplaneaws.HelmReleaseObjectName(crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name), "capsule")
+	namespace := kube.TenantNamespace(row.TenantID)
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
+	version := "capsule-release=absent"
+	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, live); err == nil {
+		version = "capsule-release=" + string(live.GetUID()) + "/" + live.GetResourceVersion()
+	} else if !apierrors.IsNotFound(err) {
+		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the managed Capsule installation for plan review")
+	}
+	action := cloudv1.PlannedAction_PLANNED_ACTION_CREATE
+	detail := "Enable NaaS: install the platform-managed Capsule Helm installation in capsule-system. Existing cert-manager must already be ready; this flag does not install cert-manager."
+	if !desired.GetNaas() {
+		action = cloudv1.PlannedAction_PLANNED_ACTION_DELETE
+		detail = "Disable NaaS: remove the platform-managed Capsule Helm installation from capsule-system. Capsule admission enforcement stops. Tenant workloads, Capsule custom resources and CRDs may remain; inspect retained resources before uninstall. The externally provided cert-manager is not removed."
+	}
+	plan.Warnings = append(plan.Warnings, detail)
+	if reconcilecluster.ReleaseMoving(row) {
+		plan.Warnings = append(plan.Warnings, "The requested NaaS flag is stored immediately, but the Capsule installation change waits for the current platform release move to finish. A halted move requires its normal retry or fix before the NaaS change can apply.")
+	}
+	for _, change := range plan.Changes {
+		if change.Kind == crossplaneaws.HelmReleaseGVK.Kind && change.Name == name && change.Namespace == namespace && change.Action == action {
+			change.SpecPath = "spec.naas"
+			change.Detail += "; " + detail
+			return []string{version}, nil
+		}
+	}
+	plan.Changes = append(plan.Changes, &cloudv1.PlannedChange{
+		ApiVersion: crossplaneaws.HelmReleaseGVK.GroupVersion().String(), Kind: crossplaneaws.HelmReleaseGVK.Kind,
+		Name: name, Namespace: namespace, ExternalName: "capsule", SpecPath: "spec.naas", Action: action, Detail: detail,
+	})
+	return []string{version}, nil
 }

@@ -56,6 +56,18 @@ test("unsafe, ambiguous and oversized YAML fail before review", () => {
     assert.throws(() => parseManifest(text, "CloudAccount", "acme", id));
   }
 });
+
+test("cluster YAML accepts generated NaaS booleans and preserves their reviewed value", () => {
+  for (const naas of [false, true]) {
+    const spec = { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } }, aws: {}, naas };
+    const review = parseManifest(stringify(envelope("Cluster", spec)), "Cluster", "acme", id);
+    const request = fromJsonString(CreateClusterRequestSchema, review.requestJson);
+    assert.equal(request.cluster?.spec?.naas, naas);
+    assert.equal(request.requestId, id);
+  }
+  const template = manifestTemplate("Cluster", "acme").replace("REPLACE_WITH_NETWORK_UUID", id);
+  assert.equal(fromJsonString(CreateClusterRequestSchema, parseManifest(template, "Cluster", "acme", id).requestJson).cluster?.spec?.naas ?? false, false);
+});
 test("generated validation catches cross-field node pool constraints", () => {
   const value = envelope("Cluster", { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 5, maxSize: 2 } } });
   assert.throws(() => parseManifest(stringify(value), "Cluster", "acme", id), /min_size|max_size|minSize|maxSize|scaling/i);

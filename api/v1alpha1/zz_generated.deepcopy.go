@@ -852,6 +852,11 @@ func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
 		*out = new(MaintenanceWindow)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.NaaS != nil {
+		in, out := &in.NaaS, &out.NaaS
+		*out = new(bool)
+		**out = **in
+	}
 	if in.AWS != nil {
 		in, out := &in.AWS, &out.AWS
 		*out = new(AWSClusterSpec)

@@ -12,13 +12,14 @@ export interface ClusterForm {
   publicAccess: boolean; privateAccess: boolean; publicCIDRs: string;
   instanceTypes: string; minSize: string; maxSize: string; diskSize: string;
   capacityType: string; adminPrincipals: string; irsa: string;
+  naas: boolean;
 }
 
 export const emptyClusterForm: ClusterForm = {
   name: "", displayName: "", networkId: "", releaseChannel: "0", upgradeMode: "1",
   kubernetesVersion: "", publicAccess: true, privateAccess: true, publicCIDRs: "",
   instanceTypes: "m6i.large", minSize: "1", maxSize: "3", diskSize: "", capacityType: "0",
-  adminPrincipals: "", irsa: "default",
+  adminPrincipals: "", irsa: "default", naas: false,
 };
 
 const split = (text: string) => text.split(/[\s,]+/).filter(Boolean);
@@ -38,6 +39,7 @@ export function clusterForm(cluster: Cluster): ClusterForm {
     diskSize: pool?.diskSizeGb ? String(pool.diskSizeGb) : "", capacityType: String(pool?.capacityType ?? 0),
     adminPrincipals: spec?.access?.adminPrincipals.join(", ") ?? "",
     irsa: aws?.irsa === undefined ? "default" : String(aws.irsa),
+    naas: spec?.naas ?? false,
   };
 }
 
@@ -68,12 +70,13 @@ const mutable = {
   capacityType: "spec.default_node_pool.capacity_type",
   adminPrincipals: "spec.access.admin_principals",
   irsa: "spec.aws.irsa",
+  naas: "spec.naas",
 } as const;
 export type EditableClusterField = keyof typeof mutable;
 
 export const clusterWizardSteps = ["Basics", "Compute", "Access", "Review"] as const;
 const stepFields: readonly (readonly EditableClusterField[])[] = [
-  ["displayName", "releaseChannel", "upgradeMode", "kubernetesVersion"],
+  ["displayName", "releaseChannel", "upgradeMode", "kubernetesVersion", "naas"],
   ["instanceTypes", "minSize", "maxSize", "diskSize", "capacityType"],
   ["publicAccess", "privateAccess", "publicCIDRs", "adminPrincipals", "irsa"],
 ];

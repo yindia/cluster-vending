@@ -8,7 +8,7 @@ The components this build ships, as `ComponentDefinition` files in
 
 | `management` | Components | How they reach a cluster |
 |---|---|---|
-| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `external-secrets`, `karpenter`, `istio` (a bundle of five charts); `kyverno` ships disabled (turn it on with `spec.disabled: false`; `kyverno-policies` is off until then) | Installed with every cluster, as part of creating it, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
+| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `external-secrets`, `karpenter`, `istio` (a bundle of five charts); `capsule` only when cluster `spec.naas: true`; `kyverno` ships disabled (turn it on with `spec.disabled: false`; `kyverno-policies` is off until then) | Installed automatically on applicable clusters, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
 | `Tenant` (default) | `gpu-operator`, `kyverno-policies` | A tenant enables and disables them on a cluster (a `Component`), and may set the values the schema allows. |
 
 **Platform components are part of the cluster.** Once a cluster is
@@ -397,6 +397,7 @@ Each minor in `release.yaml` names the channel whose clusters run it:
 | `aws-load-balancer-controller` | `aws-load-balancer-controller` 3.6.2, `https://aws.github.io/eks-charts` | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `cluster-autoscaler` | `cluster-autoscaler` 9.60.0, `https://kubernetes.github.io/autoscaler`; image tag from the release pin | `kube-system` | none: fixed | none |
 | `external-secrets` | `external-secrets` 2.15.0 (External Secrets Operator v2.15.0), `https://charts.external-secrets.io` | `external-secrets` | none: fixed | none: the chart installs and upgrades its own CRDs (`installCRDs`) |
+| `capsule` | `capsule` 0.15.2, `oci://ghcr.io/projectcapsule/charts` | `capsule-system` | none: fixed | Existing cert-manager required; the chart installs/upgrades its CRDs through its lifecycle hook. [Values and operation](components/capsule.md). |
 | `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; no node class or node pool is shipped | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
 | `kyverno` | `kyverno` 3.10.0 (Kyverno v1.20), `https://kyverno.github.io/kyverno/` | `kyverno` | none: fixed | none needed (subcharts, upgraded by Helm) |
 | `kyverno-policies` | `kyverno-policies` 3.10.0; requires `kyverno` | `kyverno` | yes | none |
@@ -438,6 +439,7 @@ chart's `values.yaml`:
 | `aws-load-balancer-controller`, `cluster-autoscaler`, `karpenter`, `istiod` | `nodeSelector`, `tolerations` |
 | `kyverno` | `global.nodeSelector`, `global.tolerations` (all controllers and hook Jobs) |
 | `external-secrets` | `global.nodeSelector`, `global.tolerations` (the controller, webhook and cert-controller Deployments fall back to them) |
+| `capsule` | Root `nodeSelector` / `tolerations` for the controller, `global.jobs.kubectl.nodeSelector` / `tolerations` for lifecycle hooks |
 | `istio-ingress-gateway` | `nodeSelector`, `tolerations` of Istio's gateway chart |
 | `gpu-operator` | `operator.nodeSelector`, `operator.tolerations` (the operator's Deployment only) |
 

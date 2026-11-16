@@ -227,6 +227,7 @@ function ClusterFields({ value, onChange, disabled, creating, networkPicker, reg
         <Selector label="Upgrades" value={value.upgradeMode} isDisabled={disabled} onChange={(next) => onChange("upgradeMode", next)} options={[{ value: "1", label: "Manual" }, { value: "2", label: "Automatic" }]} />
       </FormLayout>
       <Text type="supporting">The server resolves Kubernetes versions. Automatic clusters follow their channel; an unset channel uses Stable in automatic mode.</Text>
+      <CheckboxInput label="Namespace as a Service (NaaS)" htmlName="naas" value={value.naas} isDisabled={disabled} onChange={(next) => onChange("naas", next)} description="Enables managed Capsule using existing cert-manager. Disabling uninstalls Capsule and stops its admission enforcement; Capsule CRDs and data are retained." />
       <Collapsible trigger="Advanced identity and version" defaultIsOpen={false}>
         <VStack gap={4} paddingBlock={3}>
           {text("displayName", "Display name", "Optional friendly name.")}
@@ -276,6 +277,7 @@ function ClusterReview({ form, region, networkName, accountName, tier }: { form:
       <MetadataListItem label="Upgrade policy">{automatic ? "Automatic · no version pin" : `Manual · ${form.kubernetesVersion || "server default version"}`}</MetadataListItem>
       <MetadataListItem label="Node pool">{form.instanceTypes} · {form.minSize}–{form.maxSize} nodes · {form.capacityType === "2" ? "Spot" : "On demand"}</MetadataListItem>
       <MetadataListItem label="Root disk">{form.diskSize ? `${form.diskSize} GiB` : "Provider default"}</MetadataListItem>
+      <MetadataListItem label="Namespace as a Service (NaaS)">{form.naas ? "Enabled · managed Capsule uses existing cert-manager" : "Disabled · no managed Capsule"}</MetadataListItem>
     </MetadataList>
     <Divider />
     <MetadataList title={<Heading level={4}>Access</Heading>}>
@@ -547,6 +549,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
               <MetadataListItem label="Rollout tier">{tierLabel(status?.tier)}</MetadataListItem>
               <MetadataListItem label="Generation">{String(status?.observedGeneration ?? 0)} observed / {String(cluster.generation)} desired</MetadataListItem>
               <MetadataListItem label="Platform release">{status?.platformRelease ? <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>{status.platformRelease}</Link> : "Not reported"}</MetadataListItem>
+              <MetadataListItem label="Namespace as a Service (NaaS)"><VStack gap={1}><Text>{cluster.spec?.naas ? "Enabled" : "Disabled"}</Text><Text type="supporting">{cluster.spec?.naas ? "Desired setting. Capsule installation and readiness are reported under Components." : "Desired setting. Disabling uninstalls managed Capsule and stops its admission enforcement; existing Capsule CRDs and data are retained."}</Text></VStack></MetadataListItem>
             </MetadataList>
             <ErrorNotice message={network.error} />
           </VStack>
@@ -791,6 +794,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
         {step < 3 && <ClusterFields step={step} value={form} onChange={change} disabled={busy || !canWrite} region={baseline.spec?.region ?? ""} tier={baseline.status?.tier} />}
     {step === 3 && review && <VStack gap={4}>
       <PlanReview plan={review.plan} />
+      {touched.has("naas") && <Banner status={form.naas ? "info" : "warning"} title={form.naas ? "Enable Namespace as a Service" : "Disable Namespace as a Service"} description={form.naas ? "Applying this plan enables managed Capsule using the cluster’s existing cert-manager. Installation converges after the update is accepted." : "Applying this plan disables NaaS, uninstalls managed Capsule and stops Capsule admission enforcement. Capsule CRDs and data are retained, which does not retain that enforcement. cert-manager is managed independently."} />}
       <MetadataList><MetadataListItem label="Edited settings">{[...touched].filter((field) => !(field === "kubernetesVersion" && Number(form.upgradeMode) === UpgradeMode.AUTOMATIC)).map((field) => field.replace(/([A-Z])/g, " $1").toLowerCase()).join(", ")}</MetadataListItem><MetadataListItem label="Concurrency token">{baseline.etag}</MetadataListItem></MetadataList>
       <Collapsible trigger="Advanced · exact reviewed request" defaultIsOpen={false}><VStack as="pre" isScrollable><Text type="code">{toJsonString(UpdateClusterRequestSchema, review.request, { prettySpaces: 2 })}</Text></VStack></Collapsible>
     </VStack>}

@@ -41,6 +41,7 @@ var Cluster = []string{
 	"spec.default_node_pool.scaling_config.min_size",
 	"spec.default_node_pool.taints",
 	"spec.maintenance_window",
+	"spec.naas",
 	"spec.release_channel",
 	"spec.upgrade_mode",
 }

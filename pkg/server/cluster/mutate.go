@@ -61,6 +61,13 @@ func releaseOnly(paths []string) bool {
 // field of the request's spec onto the stored one. Every one of them but
 // releasePaths is rolled out by applying the cluster's resources again.
 var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
+	"spec.naas": func(dst, src *cloudv1.ClusterSpec) {
+		if src == nil {
+			dst.Naas = nil
+		} else {
+			dst.Naas = src.Naas
+		}
+	},
 	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
 	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
 	pathMaintenanceWindow: func(dst, src *cloudv1.ClusterSpec) {

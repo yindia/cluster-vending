@@ -803,6 +803,11 @@ type ClusterSpec struct {
 	// window; an upgrade that started runs to its end. Mutable, like
 	// upgrade_mode; changing it changes no cloud resource.
 	MaintenanceWindow *MaintenanceWindow `protobuf:"bytes,14,opt,name=maintenance_window,json=maintenanceWindow,proto3" json:"maintenance_window,omitempty"`
+	// Enable namespace-as-a-service through the platform-managed Capsule installation.
+	// Unset defaults to false. Mutable: true installs Capsule; false removes its
+	// managed Helm installation. Existing tenant workloads and CRDs may remain.
+	// cert-manager is an external prerequisite and is not installed by this flag.
+	Naas *bool `protobuf:"varint,15,opt,name=naas,proto3,oneof" json:"naas,omitempty"`
 	// The cloud the cluster runs on. Exactly one must be set, even if empty
 	// (e.g. `aws: {}`).
 	//
@@ -906,6 +911,13 @@ func (x *ClusterSpec) GetMaintenanceWindow() *MaintenanceWindow {
 		return x.MaintenanceWindow
 	}
 	return nil
+}
+
+func (x *ClusterSpec) GetNaas() bool {
+	if x != nil && x.Naas != nil {
+		return *x.Naas
+	}
+	return false
 }
 
 func (x *ClusterSpec) GetProvider() isClusterSpec_Provider {
@@ -2254,7 +2266,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb1\x19\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd3\x19\n" +
 	"\vClusterSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x12:\n" +
 	"\anetwork\x18\x02 \x01(\v2\x18.cloud.v1.ClusterNetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12?\n" +
@@ -2265,7 +2277,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x04tier\x18\t \x01(\x0e2\x15.cloud.v1.ClusterTierB\n" +
 	"\xbaH\x05\x82\x01\x02\x10\x01\x18\x01R\x04tier\x12B\n" +
 	"\fupgrade_mode\x18\r \x01(\x0e2\x15.cloud.v1.UpgradeModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vupgradeMode\x12J\n" +
-	"\x12maintenance_window\x18\x0e \x01(\v2\x1b.cloud.v1.MaintenanceWindowR\x11maintenanceWindow\x12,\n" +
+	"\x12maintenance_window\x18\x0e \x01(\v2\x1b.cloud.v1.MaintenanceWindowR\x11maintenanceWindow\x12\x17\n" +
+	"\x04naas\x18\x0f \x01(\bH\x01R\x04naas\x88\x01\x01\x12,\n" +
 	"\x03aws\x18\n" +
 	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\x80\x14\xbaH\xfc\x13\x1a\x8f\x01\n" +
 	"\n" +
@@ -2281,7 +2294,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1aT\n" +
 	"\roidc_aws_only\x12\x1aonly AWS takes access.oidc\x1a'has(this.aws) || !has(this.access.oidc)\x1a\x87\x01\n" +
 	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aAhas(this.aws) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
-	"\bprovider\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xb4\x03\n" +
+	"\bprovider\x12\x05\xbaH\x02\b\x01B\a\n" +
+	"\x05_naasJ\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xb4\x03\n" +
 	"\x11MaintenanceWindow\x12:\n" +
 	"\x04days\x18\x01 \x03(\x0e2\x11.cloud.v1.WeekdayB\x13\xbaH\x10\x92\x01\r\x10\a\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x04days\x12<\n" +
 	"\x05start\x18\x02 \x01(\tB&\xbaH#r!2\x1f^([01][0-9]|2[0-3]):[0-5][0-9]$R\x05start\x12\x1a\n" +

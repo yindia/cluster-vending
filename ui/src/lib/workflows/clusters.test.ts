@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { create, toJson } from "@bufbuild/protobuf";
+import { clone, create, toJson } from "@bufbuild/protobuf";
 import { ClusterSchema, ClusterState, UpgradeMode } from "../../gen/cloud/v1/cluster_pb";
 import { NetworkSchema } from "../../gen/cloud/v1/network_pb";
 import { CloudAccountSchema } from "../../gen/cloud/v1/tenant_service_pb";
@@ -112,6 +112,45 @@ test("validate only touched inputs on updates, and validate endpoint and scaling
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "" }, new Set(["publicCIDRs"])), /requires at least one/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicAccess: false, privateAccess: false }, new Set(["publicAccess", "privateAccess"])), /at least one API endpoint/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "999.1.1.1/33" }, new Set(["publicCIDRs"])), /IPv4 CIDRs/);
+});
+
+test("NaaS defaults off, hydrates saved values and is included in guided creation", () => {
+  assert.equal(emptyClusterForm.naas, false);
+  assert.equal(clusterForm(resolved).naas, false);
+  const enabled = clone(ClusterSchema, resolved);
+  enabled.spec!.naas = true;
+  assert.equal(clusterForm(enabled).naas, true);
+  const draft = { ...emptyClusterForm, name: "new-cluster", networkId: network.id, publicCIDRs: "203.0.113.0/24" };
+  for (const naas of [false, true]) {
+    const request = buildCreateCluster("tenant-a", { ...draft, naas }, network, accounts, "stable-uuid");
+    assert.equal(request.cluster?.spec?.naas, naas);
+    assert.equal(request.requestId, "stable-uuid");
+  }
+});
+
+test("NaaS updates use a sparse leaf mask and preserve disabling false through reviewed apply", () => {
+  for (const naas of [false, true]) {
+    const baseline = clone(ClusterSchema, resolved);
+    baseline.spec!.naas = !naas;
+    const form = { ...clusterForm(baseline), naas };
+    const request = buildClusterUpdate("tenant-a", baseline, form, new Set(["naas"]));
+    assert.deepEqual(request.updateMask?.paths, ["spec.naas"]);
+    assert.equal(request.cluster?.spec?.naas, naas);
+    assert.equal(request.cluster?.spec?.network, undefined);
+    assert.equal(request.cluster?.spec?.controlPlane, undefined);
+    assert.equal(request.cluster?.etag, baseline.etag);
+    const review = bindClusterPlan(request, create(PlanSchema, { planId: "naas-plan", applicable: true, changes: [{ action: 2 }] }));
+    const apply = applyReviewedClusterPlan(review, request);
+    assert.equal(apply.cluster?.spec?.naas, naas);
+    assert.deepEqual(apply.updateMask?.paths, ["spec.naas"]);
+    assert.equal(apply.validateOnly, false);
+    assert.equal(apply.planId, "naas-plan");
+    const changed = buildClusterUpdate("tenant-a", baseline, { ...form, naas: !naas }, new Set(["naas"]));
+    assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
+    const unrelated = buildClusterUpdate("tenant-a", baseline, { ...form, displayName: "Renamed" }, new Set(["displayName"]));
+    assert.deepEqual(unrelated.updateMask?.paths, ["display_name"]);
+    assert.equal(unrelated.cluster?.spec, undefined);
+  }
 });
 
 test("applying uses exact reviewed payload, tenant, mask and etag with explicit plan ID", () => {

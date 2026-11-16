@@ -22,6 +22,7 @@ spec:
         endOfSupport: "2028-01-31T00:00:00Z"
         components:
           - {name: aws-load-balancer-controller, version: "3.6.2"}
+          - {name: capsule, version: "0.15.2"}
           - {name: cluster-autoscaler, version: "9.60.0", values: {image: {tag: v1.37.0}}}
           - {name: external-secrets, version: "2.15.0"}
           - {name: gpu-operator, version: "v26.7.2"}
@@ -39,6 +40,7 @@ spec:
         endOfSupport: "2027-09-30T00:00:00Z"
         components:
           - {name: aws-load-balancer-controller, version: "3.6.2"}
+          - {name: capsule, version: "0.15.2"}
           - {name: cluster-autoscaler, version: "9.60.0", values: {image: {tag: v1.36.2}}}
           - {name: external-secrets, version: "2.15.0"}
           - {name: gpu-operator, version: "v26.7.2"}
@@ -56,6 +58,7 @@ spec:
         endOfSupport: "2027-05-31T00:00:00Z"
         components:
           - {name: aws-load-balancer-controller, version: "3.6.2"}
+          - {name: capsule, version: "0.15.2"}
           - {name: cluster-autoscaler, version: "9.60.0", values: {image: {tag: v1.35.3}}}
           - {name: external-secrets, version: "2.15.0"}
           - {name: gpu-operator, version: "v26.7.2"}

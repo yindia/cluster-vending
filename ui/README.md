@@ -81,6 +81,15 @@ can be enabled and configured there through the shared YAML review/apply workflo
 Components disabled by platform policy remain unavailable; platform-managed
 components remain read-only.
 
+Cluster create and edit forms expose **Namespace as a Service (NaaS)**, backed by
+the generated optional `spec.naas` field and defaulting off. Enabling installs
+platform-managed Capsule using the cluster's existing cert-manager. Disabling
+previews removal and warns that Capsule admission enforcement stops; upstream
+CRDs and data may remain. Updates preserve explicit false through `spec.naas`
+in the update mask. Details show desired configuration separately from component
+readiness. An already active platform release move finishes before applying a
+queued feature toggle, and freezes continue to gate reconciliation.
+
 This dashboard is tenant-only. Tenant viewers can inspect releases and freeze
 status; tenant administrators can freeze and unfreeze their own tenant, networks
 and clusters. The API verifies resource ownership before changing policy. Platform

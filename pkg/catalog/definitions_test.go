@@ -38,7 +38,7 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "gpu-operator", "istio", "istio-base",
+	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "gpu-operator", "istio", "istio-base",
 		"istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
@@ -136,7 +136,8 @@ func TestCatalogIsConsistent(t *testing.T) {
 }
 
 // Tenants see and may enable exactly gpu-operator and kyverno-policies;
-// everything else comes with the cluster, and the Component API refuses
+// everything else is platform managed (Capsule additionally needs NaaS),
+// and the Component API refuses
 // it.
 func TestWhoControlsWhat(t *testing.T) {
 	defs := catalogDefinitions(t)
@@ -148,7 +149,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"aws-load-balancer-controller", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
+	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "karpenter", "ztunnel"} // kyverno ships disabled
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
@@ -209,6 +210,7 @@ func TestIstioBundle(t *testing.T) {
 func TestPlacementOnTheDefaultNodePool(t *testing.T) {
 	where := map[string][]any{
 		"aws-load-balancer-controller": {},
+		"capsule":                      {},
 		"cluster-autoscaler":           {},
 		"karpenter":                    {},
 		"istiod":                       {},
@@ -228,6 +230,16 @@ func TestPlacementOnTheDefaultNodePool(t *testing.T) {
 		if !placed && slices.Contains(component.Placeholders(d.PlatformValues), "system.nodeSelector") {
 			t.Errorf("%s selects the default node pool; it is not expected to", d.Name)
 		}
+	}
+	// CRD hooks run before the Capsule controller can start. Keeping only the
+	// Deployment on the system pool leaves installs stuck on a tainted pool.
+	capsule, err := component.DefinitionOf(byName(t)["capsule"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := lookup(capsule.PlatformValues, "global", "jobs", "kubectl")
+	if lookup(jobs, "nodeSelector") != "${system.nodeSelector}" || lookup(jobs, "tolerations") != "${system.tolerations}" {
+		t.Error("Capsule lifecycle hooks must select and tolerate the default node pool")
 	}
 	karpenter, err := component.DefinitionOf(byName(t)["karpenter"])
 	if err != nil {

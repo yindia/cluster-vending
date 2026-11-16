@@ -1,0 +1,101 @@
+# Checked against Capsule chart/app 0.15.2, including packaged values,
+# schema, CRD lifecycle hooks and templates (docs/components/capsule.md).
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: capsule
+spec:
+  provider: aws
+  description: Capsule multi-tenancy controller for NaaS-enabled clusters, with platform-managed values and certificates issued by the cluster's existing cert-manager.
+  management: Platform
+  # ClusterSpec.naas must be true: the reconciler filters this entry out for
+  # other clusters, including from release-move ordering.
+  namespace: capsule-system
+  install:
+    helm:
+      repository: oci://ghcr.io/projectcapsule/charts
+      chart: capsule
+  # cert-manager is already supplied by the cluster. Do not install a second
+  # copy or use requires without a catalog definition for the dependency.
+  platformValues:
+    crds:
+      install: true
+      # Preserve server-side-apply CRD lifecycle hooks during upgrades.
+      inline: false
+    certManager:
+      generateCertificates: true
+    tls:
+      enableController: false
+      create: false
+    proxy:
+      enabled: false
+    replicaCount: 2
+    nodeSelector: ${system.nodeSelector}
+    tolerations: ${system.tolerations}
+    priorityClassName: system-cluster-critical
+    podLabels:
+      cluster-vending.io/platform-component: capsule
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                cluster-vending.io/platform-component: capsule
+    # No native PDB value: use the chart's extraManifests extension.
+    extraManifests:
+    - apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: capsule-platform
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            cluster-vending.io/platform-component: capsule
+    global:
+      jobs:
+        kubectl:
+          # CRD install/upgrade and cleanup hooks must tolerate the system pool.
+          nodeSelector: ${system.nodeSelector}
+          tolerations: ${system.tolerations}
+          priorityClassName: system-cluster-critical
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+    manager:
+      rbac:
+        strict: true
+      resources:
+        requests: {cpu: 100m, memory: 128Mi}
+        limits: {memory: 512Mi}
+      options:
+        leaderElection:
+          enabled: true
+        # Keep the upstream opt-in group. Identity mapping and Capsule Tenant
+        # provisioning are separate from installing this operator.
+        users:
+        - kind: Group
+          name: projectcapsule.dev
+    webhooks:
+      # Keep tenant enforcement fail-closed without blocking infrastructure
+      # recovery when the controller is unavailable.
+      matchConditions:
+      - name: exclude-control-plane
+        expression: >-
+          !(request.userInfo.username in ["system:apiserver", "system:kube-controller-manager", "system:kube-scheduler"]) &&
+          !("system:nodes" in request.userInfo.groups)
+      - name: exclude-trusted-system-serviceaccounts
+        expression: >-
+          !["kube-system", "cert-manager", "capsule-system", "kyverno"].exists(ns,
+            request.userInfo.username.startsWith("system:serviceaccount:" + ns + ":"))
+      hooks:
+        nodes:
+          enabled: false
+    # Prometheus/Grafana CRDs are optional external dependencies.
+    monitoring:
+      serviceMonitor: {enabled: false}
+      prometheusRules: {enabled: false}
+      dashboards: {enabled: false}

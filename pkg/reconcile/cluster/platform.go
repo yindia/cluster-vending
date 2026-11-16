@@ -333,6 +333,7 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 	// never uninstalls.
 	var elsewhere []string
 	in.Entries, elsewhere = component.ForProvider(in.Entries, string(row.Provider), startedPlatform(row))
+	in.Entries = component.ForNaaS(in.Entries, naasForPass(spec.GetNaas(), row, in.Entries))
 	if len(elsewhere) > 0 {
 		s.logger().WarnContext(ctx, "platform components kept although their definitions are for another cloud",
 			"cluster_id", row.ID, "provider", row.Provider, "components", elsewhere)

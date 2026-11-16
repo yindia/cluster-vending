@@ -227,6 +227,12 @@ message ClusterSpec {
   // upgrade_mode; changing it changes no cloud resource.
   MaintenanceWindow maintenance_window = 14;
 
+  // Enable namespace-as-a-service through the platform-managed Capsule installation.
+  // Unset defaults to false. Mutable: true installs Capsule; false removes its
+  // managed Helm installation. Existing tenant workloads and CRDs may remain.
+  // cert-manager is an external prerequisite and is not installed by this flag.
+  optional bool naas = 15;
+
   // The cloud the cluster runs on. Exactly one must be set, even if empty
   // (e.g. `aws: {}`).
   oneof provider {

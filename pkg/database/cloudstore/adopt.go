@@ -34,11 +34,15 @@ func AdoptNetwork(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Ne
 	if err != nil {
 		return err
 	}
+	if err := activeNetworkAccount(account); err != nil {
+		return err
+	}
 	if err := prepare(&n.Resource); err != nil {
 		return err
 	}
 	label(obj, map[string]string{LabelID: n.ID, LabelTenant: n.TenantID, LabelAccountID: n.CloudAccountID})
 	annotate(obj, map[string]string{AnnotationInput: string(n.Input)})
+	markAccountFence(obj, account)
 	m := resourceMeta(&n.Resource)
 	m.Provider = string(n.Provider)
 	if err := setMeta(obj, m); err != nil {
@@ -51,7 +55,10 @@ func AdoptNetwork(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Ne
 		return translate(err)
 	}
 	r.setStatus(obj, n.Status, n.State)
-	return translate(r.c.Status().Update(ctx, obj))
+	if err := r.c.Status().Update(ctx, obj); err != nil {
+		return translate(err)
+	}
+	return r.finishAccountFence(ctx, obj)
 }
 
 // AdoptCluster makes obj, a Cluster someone created without the API, the
@@ -78,6 +85,9 @@ func AdoptCluster(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Cl
 	}
 	c.CloudAccountID = network.Labels[LabelAccountID]
 	if err := prepare(&c.Resource); err != nil {
+		return err
+	}
+	if err := r.reserveEKSName(ctx, c, network, obj); err != nil {
 		return err
 	}
 	if err := r.fill(c, network.Name, obj); err != nil {

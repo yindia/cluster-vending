@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -54,6 +55,15 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	}
 	if row.Frozen.Holds() {
 		return s.observePaused(ctx, row)
+	}
+	if err := cloudstore.EnsureEKSNameReservation(ctx, s.deps.Store, row); err != nil {
+		// Ownership refusal must not proceed to either infrastructure or
+		// platform writes, but its root cause still belongs in stored status.
+		view, viewErr := s.viewWith(ctx, row, FailureCondition(storeError(err)), nil)
+		if viewErr != nil {
+			return errors.Join(err, viewErr)
+		}
+		return errors.Join(err, s.remember(ctx, row, view.GetStatus()))
 	}
 	// A person asked to try again what failed (cluster retry): the failed
 	// upgrade now, the components where this pass installs them.

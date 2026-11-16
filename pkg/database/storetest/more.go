@@ -129,7 +129,7 @@ func testClusterLookups(t *testing.T, b Backend) {
 		t.Fatal(err)
 	}
 	MustCluster(t, s, "acme", "staging", n)
-	MustCluster(t, s, "globex", "prod", MustNetwork(t, s, "globex", "n")) // another tenant, another account
+	MustCluster(t, s, "globex", "prod", networkInOtherAccount(t, s, "globex", "n"))
 
 	got, err := s.Clusters().GetByCreateRequest(ctx, "acme", key)
 	if err != nil || got.ID != c.ID || got.Labels["team"] != "a" || len(got.Input) == 0 || len(got.Adoption) == 0 || !got.DeleteForce || got.ResolvedGeneration != 1 ||

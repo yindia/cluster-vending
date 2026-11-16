@@ -55,6 +55,7 @@ import { ClusterTakeoverButton } from "./cluster-takeover";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
+import { ClusterExtraFields, ClusterExtraReview, useClusterFieldRows } from "./cluster-form-fields";
 import { ClusterConfiguration } from "./cluster-configuration";
 import { RefreshButton } from "./refresh-button";
 import { ProviderIcon, KubernetesIcon } from "./provider-icons";
@@ -203,13 +204,15 @@ interface FieldsProps {
   disabled: boolean;
   creating?: boolean;
   naasLockReason?: string;
+  rows: ReturnType<typeof useClusterFieldRows>;
+  baseline?: Cluster;
   networkPicker?: ReactNode;
   region: string;
   tier?: number;
   step: number;
 }
 
-function ClusterFields({ value, onChange, disabled, creating, networkPicker, region, tier, step, naasLockReason }: FieldsProps) {
+function ClusterFields({ value, onChange, disabled, creating, networkPicker, region, tier, step, naasLockReason, rows, baseline }: FieldsProps) {
   const text = (field: keyof ClusterForm, title: string, description?: string, required = false) => <TextInput
     label={title} value={String(value[field])} onChange={(next) => onChange(field, next)}
     description={description} isRequired={required} isDisabled={disabled}
@@ -262,6 +265,7 @@ function ClusterFields({ value, onChange, disabled, creating, networkPicker, reg
         </VStack>
       </Collapsible>
     </>}
+    <ClusterExtraFields value={value} onChange={onChange} disabled={disabled} creating={!!creating} step={step} rows={rows} baseline={baseline} />
   </VStack>;
 }
 
@@ -290,6 +294,7 @@ function ClusterReview({ form, region, networkName, accountName, tier }: { form:
       <MetadataListItem label="Administrators">{form.adminPrincipals || "No additional principals"}</MetadataListItem>
       <MetadataListItem label="Service account roles">{form.irsa === "false" ? "Disabled" : "Enabled"}</MetadataListItem>
     </MetadataList>
+    <ClusterExtraReview form={form} creating />
   </VStack>;
 }
 
@@ -327,6 +332,7 @@ function NetworkPicker({ choices, value, disabled, onChange }: { choices: Return
 function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const { api, tenantId, canWrite } = usePlatform();
   const [form, setForm] = useState<ClusterForm>({ ...emptyClusterForm });
+  const rows = useClusterFieldRows(form);
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<"guided" | "yaml">("guided");
   const [manifestVisited, setManifestVisited] = useState(false);
@@ -348,6 +354,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
     if (!canWrite || locked.current) return;
     try {
       if (step < 3) {
+        rows.validate(step);
         validateClusterFormStep(form, step);
         if (step === 0) {
           if (!network || !choices.data) throw new Error("Choose an existing network.");
@@ -379,7 +386,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
     <form id={formId} method="post" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VStack gap={5}>
         {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
-        {step < 3 ? <ClusterFields step={step} value={form} onChange={change} disabled={busy || !canWrite} creating region={network?.spec?.region ?? "Select a network"} tier={network?.spec?.tier}
+        {step < 3 ? <ClusterFields step={step} value={form} onChange={change} rows={rows} disabled={busy || !canWrite} creating region={network?.spec?.region ?? "Select a network"} tier={network?.spec?.tier}
           networkPicker={<NetworkPicker choices={choices} value={form.networkId} disabled={busy || !canWrite} onChange={(next) => change("networkId", next)} />} /> : <>
           <ClusterReview form={form} region={network?.spec?.region ?? ""} networkName={network?.displayName || network?.name || form.networkId} accountName={choices.data?.accounts.find((account) => account.id === network?.spec?.bootstrapId)?.accountName || network?.spec?.bootstrapId} tier={network?.spec?.tier} />
           <Banner status="info" title="Creates managed cloud resources" description="The controller provisions the control plane and node pool asynchronously. Readiness appears on the detail page; cloud charges may apply." />
@@ -744,6 +751,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
   const allocations = useAsyncQuery(loadSubTenants);
   const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing Sub Tenants before allowing NaaS to be disabled…" : allocations.error ? "Sub Tenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all Sub Tenants, including those still deleting, before disabling NaaS." : undefined;
   const [form, setForm] = useState(() => clusterForm(baseline));
+  const rows = useClusterFieldRows(form);
   const [step, setStep] = useState(0);
   const formId = useId();
   const [touched, setTouched] = useState<Set<string>>(new Set());
@@ -754,6 +762,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
   const revision = useRef(0);
   const errorRef = useRef<HTMLElement>(null);
   function change<K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) {
+    if (["desiredSize", "zoneIds", "serviceCidr", "awsAdditionalSecurityGroups", "awsAuthenticationMode"].includes(field)) return;
     if (field === "naas" && value === false && naasLockReason) return;
     revision.current++;
     setReview(undefined); setError("");
@@ -763,7 +772,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
   async function submit(apply: boolean) {
     if (!canWrite || locked.current) return;
     if (!apply && step < 2) {
-      try { validateClusterFormStep(form, step, touched); setStep(step + 1); setError(""); }
+      try { rows.validate(step); validateClusterFormStep(form, step, touched); setStep(step + 1); setError(""); }
       catch (cause) { setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
       return;
     }
@@ -772,6 +781,7 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
     try {
       if (baseline.etag !== currentEtag) throw new Error("The cluster changed. Reload editable cluster and review a new plan.");
       if (baseline.spec?.naas && !form.naas && naasLockReason) throw new Error(naasLockReason);
+      rows.validate(step);
       const request = buildClusterUpdate(tenantId, baseline, form, touched);
       if (apply) {
         if (!review) throw new Error("Review a plan first.");
@@ -800,9 +810,10 @@ function ClusterEditor({ baseline, asRequested, currentEtag, onApplied, onClose,
     <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>
     <form id={formId} method="post" onSubmit={(event) => { event.preventDefault(); void submit(step === 3); }}>
       <VStack gap={6}>
-        {step < 3 && <ClusterFields step={step} value={form} onChange={change} naasLockReason={naasLockReason} disabled={busy || !canWrite} region={baseline.spec?.region ?? ""} tier={baseline.status?.tier} />}
+        {step < 3 && <ClusterFields step={step} value={form} onChange={change} rows={rows} baseline={baseline} naasLockReason={naasLockReason} disabled={busy || !canWrite} region={baseline.spec?.region ?? ""} tier={baseline.status?.tier} />}
     {step === 3 && review && <VStack gap={4}>
       <PlanReview plan={review.plan} />
+      <ClusterExtraReview form={form} touched={touched} />
       {touched.has("naas") && <Banner status={form.naas ? "info" : "warning"} title={form.naas ? "Enable Namespace as a Service" : "Disable Namespace as a Service"} description={form.naas ? "Enable support for team namespaces with separate access, quotas, and policies. Setup continues after you apply this change." : "Turn off namespace tenancy controls for this cluster. Existing namespaces, workloads, and data will remain. Review the impact on teams using these controls before applying."} />}
       <MetadataList><MetadataListItem label="Edited settings">{[...touched].filter((field) => !(field === "kubernetesVersion" && Number(form.upgradeMode) === UpgradeMode.AUTOMATIC)).map((field) => field.replace(/([A-Z])/g, " $1").toLowerCase()).join(", ")}</MetadataListItem><MetadataListItem label="Concurrency token">{baseline.etag}</MetadataListItem></MetadataList>
       <Collapsible trigger="Advanced · exact reviewed request" defaultIsOpen={false}><VStack as="pre" isScrollable><Text type="code">{toJsonString(UpdateClusterRequestSchema, review.request, { prettySpaces: 2 })}</Text></VStack></Collapsible>

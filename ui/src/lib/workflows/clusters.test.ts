@@ -236,3 +236,183 @@ test("import maps only supported AWS network and node group inputs into a read-o
   assert.throws(() => buildImportCluster("tenant-a", { ...form, networkId: "different" }, network, accounts, "id"), /existing network/);
   assert.throws(() => buildImportCluster("tenant-a", { ...form, defaultNodeGroupName: "bad/name" }, network, accounts, "id"), /node group name/);
 });
+
+test("guided create covers tags, node metadata, initial size, maintenance, access and AWS settings", () => {
+  const form = {
+    ...emptyClusterForm, name: "complete", networkId: network.id, publicCIDRs: "203.0.113.0/24",
+    labels: '{"cost-center":"42"}', nodeLabels: '{"team.example.com/pool":"payments"}',
+    nodeTaints: '[{"key":"team.example.com/dedicated","value":"payments","effect":1}]', desiredSize: "2",
+    maintenanceDays: "Monday, Saturday", maintenanceStart: "23:30", maintenanceDuration: "90m",
+    zoneIds: "apne1-az1, apne1-az2", serviceCidr: "172.20.0.0/16", encryptionEnabled: "true",
+    encryptionKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/key-123",
+    awsAmiType: "1", awsAdditionalSecurityGroups: "sg-12345678", awsAuthenticationMode: "2", awsSupportType: "1",
+    awsLogGroupEnabled: "true", awsLogRetentionDays: "90", awsLogTypes: "api, audit",
+    oidcYaml: 'name: corp\nissuerUrl: https://id.example.com\nclientId: platform\ngroupsClaim: groups\ngroupsPrefix: "oidc:"',
+    accessEntriesYaml: '- principalArn: arn:aws:iam::123456789012:role/reader\n  policies:\n    - policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy\n      scope: 2\n      namespaces: [payments]',
+    addonsYaml: '- name: coredns\n  version: "v1.11.4-eksbuild.2"\n  configurationValues: \'{"replicaCount":3}\'',
+  };
+  const created = buildCreateCluster("tenant-a", form, network, accounts, "same-request").cluster!;
+  assert.deepEqual(created.labels, { "cost-center": "42" });
+  assert.deepEqual(created.spec?.defaultNodePool?.labels, { "team.example.com/pool": "payments" });
+  assert.equal(created.spec?.defaultNodePool?.taints[0].effect, 1);
+  assert.equal(created.spec?.defaultNodePool?.scalingConfig?.desiredSize, 2);
+  assert.deepEqual(created.spec?.network?.zoneIds, ["apne1-az1", "apne1-az2"]);
+  assert.equal(created.spec?.network?.serviceCidr, "172.20.0.0/16");
+  assert.deepEqual(created.spec?.maintenanceWindow?.days, [1, 6]);
+  assert.equal(created.spec?.maintenanceWindow?.duration, "90m");
+  assert.equal(created.spec?.controlPlane?.secretsEncryption?.kmsKeyArn, form.encryptionKeyArn);
+  assert.equal(created.spec?.access?.oidc?.groupsPrefix, "oidc:");
+  assert.deepEqual(created.spec?.access?.accessEntries[0].policies[0].namespaces, ["payments"]);
+  assert.equal(created.spec?.provider.case, "aws");
+  if (created.spec?.provider.case === "aws") {
+    const aws = created.spec.provider.value;
+    assert.equal(aws.defaultNodePool?.amiType, 1);
+    assert.deepEqual(aws.additionalSecurityGroupIds, ["sg-12345678"]);
+    assert.equal(aws.accessConfig?.authenticationMode, 2);
+    assert.equal(aws.upgradePolicy?.supportType, 1);
+    assert.equal(aws.controlPlaneLogGroup?.enabled, true);
+    assert.deepEqual(aws.enabledClusterLogTypes, [1, 2]);
+    assert.equal(aws.addons[0].configurationValues, '{"replicaCount":3}');
+  }
+  const hydrated = clusterForm(created);
+  assert.equal(JSON.parse(hydrated.nodeTaints)[0].effect, 1);
+  const roundtrip = buildCreateCluster("tenant-a", hydrated, network, accounts, "same-request").cluster!;
+  assert.deepEqual(toJson(ClusterSchema, roundtrip), toJson(ClusterSchema, created));
+});
+
+test("node metadata updates are separate sparse maps/lists and preserve all unshown settings", () => {
+  const form = { ...clusterForm(resolved), labels: '{"team":"platform"}', nodeLabels: '{"pool":"jobs"}', nodeTaints: '[{"key":"dedicated","effect":"TAINT_EFFECT_NO_EXECUTE"}]', oidcYaml: "malformed: [" };
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["labels", "nodeLabels", "nodeTaints"]));
+  assert.deepEqual(request.updateMask?.paths, ["labels", "spec.default_node_pool.labels", "spec.default_node_pool.taints"]);
+  assert.deepEqual(request.cluster?.labels, { team: "platform" });
+  assert.deepEqual(request.cluster?.spec?.defaultNodePool?.labels, { pool: "jobs" });
+  assert.equal(request.cluster?.spec?.defaultNodePool?.taints[0].effect, 3);
+  assert.equal(request.cluster?.spec?.provider.case, undefined);
+  assert.equal(request.cluster?.spec?.access, undefined);
+  assert.deepEqual(resolved.labels, { environment: "production" });
+});
+
+test("Kubernetes keys/values, duplicate taints and map keys are validated", () => {
+  const form = clusterForm(resolved);
+  for (const nodeLabels of ['{"UPPER.example/pool":"ok"}', '{"example.com/":"bad"}', '{"pool":"bad value"}', '{"a":"one","a":"two"}', '{"a":3}']) {
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, nodeLabels }, new Set(["nodeLabels"])));
+  }
+  for (const nodeTaints of ['[{"key":"bad/key/extra","effect":1}]', '[{"key":"x","effect":0}]', '[{"key":"x","effect":1},{"key":"x","effect":1}]']) {
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, nodeTaints }, new Set(["nodeTaints"])));
+  }
+  assert.doesNotThrow(() => buildClusterUpdate("tenant-a", resolved, { ...form, nodeLabels: '{"example.com/pool":""}', nodeTaints: '[{"key":"x","effect":1},{"key":"x","effect":3}]' }, new Set(["nodeLabels", "nodeTaints"])));
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, labels: '{"aws:reserved":"x"}' }, new Set(["labels"])), /AWS tag/);
+});
+
+test("immutable create-only fields cannot leak into updates", () => {
+  const form = clusterForm(resolved);
+  for (const field of ["desiredSize", "zoneIds", "serviceCidr", "awsAdditionalSecurityGroups", "awsAuthenticationMode"]) {
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set([field])), /immutable or unsupported/);
+  }
+  assert.throws(() => buildCreateCluster("tenant-a", { ...emptyClusterForm, name: "new", networkId: network.id, publicCIDRs: "203.0.113.0/24", desiredSize: "5" }, network, accounts, "retry"), /between minimum/);
+});
+
+test("atomic grouped masks preserve untouched siblings and clear only on explicit edits", () => {
+  const baseline = clone(ClusterSchema, resolved);
+  baseline.spec!.maintenanceWindow = { $typeName: "cloud.v1.MaintenanceWindow", days: [1, 3], start: "02:00", duration: "4h" };
+  if (baseline.spec!.provider.case === "aws") baseline.spec!.provider.value.controlPlaneLogGroup = { $typeName: "cloud.v1.AwsControlPlaneLogGroup", enabled: true, retentionDays: 90 };
+  const form = { ...clusterForm(baseline), maintenanceStart: "03:00", maintenanceDuration: "bad unedited value", awsLogRetentionDays: "30", awsLogGroupEnabled: "false" };
+  const update = buildClusterUpdate("tenant-a", baseline, form, new Set(["maintenanceStart", "awsLogRetentionDays"]));
+  assert.deepEqual(update.updateMask?.paths, ["spec.aws.control_plane_log_group", "spec.maintenance_window"]);
+  assert.deepEqual(update.cluster?.spec?.maintenanceWindow?.days, [1, 3]);
+  assert.equal(update.cluster?.spec?.maintenanceWindow?.duration, "4h");
+  if (update.cluster?.spec?.provider.case === "aws") {
+    assert.equal(update.cluster.spec.provider.value.controlPlaneLogGroup?.enabled, true);
+    assert.equal(update.cluster.spec.provider.value.controlPlaneLogGroup?.retentionDays, 30);
+  }
+  const clear = buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceDays: "", maintenanceStart: "", maintenanceDuration: "" }, new Set(["maintenanceDays", "maintenanceStart", "maintenanceDuration"]));
+  assert.deepEqual(clear.updateMask?.paths, ["spec.maintenance_window"]);
+  assert.equal(clear.cluster?.spec?.maintenanceWindow, undefined);
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceDuration: "30m" }, new Set(["maintenanceDuration"])));
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceStart: "25:00" }, new Set(["maintenanceStart"])));
+});
+
+test("encryption transitions keep the key and cannot disable existing encryption", () => {
+  const baseline = clone(ClusterSchema, resolved);
+  baseline.spec!.controlPlane!.secretsEncryption = { $typeName: "cloud.v1.SecretsEncryption", enabled: true, kmsKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/original" };
+  const form = clusterForm(baseline);
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, encryptionEnabled: "false", encryptionKeyArn: "" }, new Set(["encryptionEnabled", "encryptionKeyArn"])), /cannot be disabled/);
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, encryptionKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/other" }, new Set(["encryptionKeyArn"])), /another key/);
+  const update = buildClusterUpdate("tenant-a", baseline, form, new Set(["encryptionEnabled"]));
+  assert.deepEqual(update.updateMask?.paths, ["spec.control_plane.secrets_encryption"]);
+  assert.equal(update.cluster?.spec?.controlPlane?.secretsEncryption?.kmsKeyArn, baseline.spec?.controlPlane?.secretsEncryption?.kmsKeyArn);
+});
+
+test("typed bounded nested YAML handles launch templates, add-ons and exact plan binding", () => {
+  const form = { ...clusterForm(resolved), launchTemplateYaml: 'id: lt-12345678\nversion: "2"', diskSize: "", addonsYaml: "- name: coredns" };
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set(["launchTemplateYaml"])), /excludes disk size/);
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["launchTemplateYaml", "diskSize", "addonsYaml"]));
+  assert.deepEqual(request.updateMask?.paths, ["spec.aws.addons", "spec.aws.default_node_pool.launch_template", "spec.default_node_pool.disk_size_gb"]);
+  if (request.cluster?.spec?.provider.case === "aws") {
+    assert.equal(request.cluster.spec.provider.value.defaultNodePool?.launchTemplate?.version, "2");
+    assert.equal(request.cluster.spec.provider.value.addons[0].version, ""); // no fabricated channel pin
+  }
+  const review = bindClusterPlan(request, create(PlanSchema, { planId: "advanced", applicable: true }));
+  assert.equal(applyReviewedClusterPlan(review, request).planId, "advanced");
+  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, launchTemplateYaml: 'id: lt-12345678\nversion: "3"' }, new Set(["launchTemplateYaml", "diskSize", "addonsYaml"]));
+  assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
+  for (const oidcYaml of ["unexpected: true", "name: corp\nname: other", "a: &a\n  b: *a", `name: ${"a".repeat(65537)}`]) {
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, oidcYaml }, new Set(["oidcYaml"])));
+  }
+});
+
+test("nested message clears and access changes retain sparse masks and sibling defaults", () => {
+  const form = { ...clusterForm(resolved), oidcYaml: "", accessEntriesYaml: "", addonsYaml: "", launchTemplateYaml: "" };
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["oidcYaml", "accessEntriesYaml", "addonsYaml", "launchTemplateYaml"]));
+  assert.deepEqual(request.updateMask?.paths, ["spec.access.access_entries", "spec.access.oidc", "spec.aws.addons", "spec.aws.default_node_pool.launch_template"]);
+  assert.equal(request.cluster?.spec?.access?.oidc, undefined);
+  assert.deepEqual(request.cluster?.spec?.access?.accessEntries, []);
+  if (request.cluster?.spec?.provider.case === "aws") {
+    assert.deepEqual(request.cluster.spec.provider.value.addons, []);
+    assert.equal(request.cluster.spec.provider.value.defaultNodePool?.launchTemplate, undefined);
+    assert.equal(request.cluster.spec.provider.value.irsa, undefined);
+  }
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, adminPrincipals: "not-an-arn" }, new Set(["adminPrincipals"])), /IAM role/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, irsa: "typo" }, new Set(["irsa"])), /true, false/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, awsLogRetentionDays: "4" }, new Set(["awsLogRetentionDays"])));
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, addonsYaml: "- name: coredns\n- name: coredns" }, new Set(["addonsYaml"])));
+  const baseline = clone(ClusterSchema, resolved);
+  baseline.spec!.access = { $typeName: "cloud.v1.AccessSpec", adminPrincipals: ["arn:aws:iam::123456789012:role/admin"], accessEntries: [] };
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...clusterForm(baseline), accessEntriesYaml: "- principalArn: arn:aws:iam::123456789012:role/admin" }, new Set(["accessEntriesYaml"])), /cannot be both/);
+});
+
+test("advanced network and addon validation belongs to the rendered Access step", () => {
+  const base = { ...emptyClusterForm, name: "wizard", networkId: network.id, publicCIDRs: "203.0.113.0/24" };
+  for (const invalid of [{ zoneIds: "invalid-zone" }, { serviceCidr: "172.20.0.0/25" }, { addonsYaml: "- unexpected: true" }]) {
+    const form = { ...base, ...invalid };
+    assert.doesNotThrow(() => validateClusterFormStep(form, 0));
+    assert.doesNotThrow(() => validateClusterFormStep(form, 1));
+    assert.throws(() => validateClusterFormStep(form, 2));
+    const touched = new Set(Object.keys(invalid));
+    assert.doesNotThrow(() => validateClusterFormStep(form, 0, touched));
+    assert.doesNotThrow(() => validateClusterFormStep(form, 1, touched));
+    assert.throws(() => validateClusterFormStep(form, 2, touched));
+  }
+  const invalidCompute = { ...base, nodeTaints: '[{"key":"dedicated","effect":0}]' };
+  assert.doesNotThrow(() => validateClusterFormStep(invalidCompute, 0));
+  assert.throws(() => validateClusterFormStep(invalidCompute, 1));
+  assert.doesNotThrow(() => validateClusterFormStep(invalidCompute, 2));
+});
+
+test("advanced AWS leaf edits never replace unrelated provider settings", () => {
+  for (const [field, value, path] of [
+    ["awsAmiType", "2", "spec.aws.default_node_pool.ami_type"],
+    ["awsSupportType", "2", "spec.aws.upgrade_policy.support_type"],
+    ["awsLogTypes", "1,5", "spec.aws.enabled_cluster_log_types"],
+  ] as const) {
+    const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), [field]: value }, new Set([field]));
+    assert.deepEqual(request.updateMask?.paths, [path]);
+    assert.equal(request.cluster?.spec?.provider.case, "aws");
+    if (request.cluster?.spec?.provider.case === "aws") {
+      const aws = request.cluster.spec.provider.value;
+      assert.equal(aws.irsa, undefined);
+      assert.deepEqual(aws.addons, []);
+      assert.equal(aws.controlPlaneLogGroup, undefined);
+    }
+  }
+});

@@ -1,10 +1,15 @@
-import { clone, create, fromJson, toJsonString, type JsonObject } from "@bufbuild/protobuf";
-import { ClusterSchema, ClusterState, UpgradeMode, type Cluster } from "../../gen/cloud/v1/cluster_pb";
+import { clone, create, fromJson, toJson, toJsonString, type JsonObject, type JsonValue } from "@bufbuild/protobuf";
+import { ClusterSchema, ClusterState, MaintenanceWindowSchema, UpgradeMode, type Cluster } from "../../gen/cloud/v1/cluster_pb";
+import { AccessSpecSchema, OidcIdentityProviderSchema } from "../../gen/cloud/v1/access_pb";
+import { TaintSchema } from "../../gen/cloud/v1/node_pool_pb";
+import { SecretsEncryptionSchema } from "../../gen/cloud/v1/control_plane_pb";
 import { CreateClusterRequestSchema, ImportClusterRequestSchema, UpdateClusterRequestSchema, type UpdateClusterRequest } from "../../gen/cloud/v1/cluster_service_pb";
 import { PlanSchema, type Plan } from "../../gen/cloud/v1/plan_pb";
 import type { Network } from "../../gen/cloud/v1/network_pb";
 import type { CloudAccount } from "../../gen/cloud/v1/tenant_service_pb";
 import { supportsCapability } from "../providers/registry";
+import { awsClusterForm, awsClusterFormValue, awsCreateOnlyClusterFields, awsMutableClusterFields, emptyAwsClusterFields, validateAwsNodeForm, type AwsClusterFormField } from "../providers/aws-cluster-form";
+import { checkedJson, clusterList, formJson, labelValue, nestedFormYaml, optionalBoolean, qualifiedKey, stringMap, typedFormJson } from "./cluster-form-values";
 
 export interface ClusterForm {
   name: string; displayName: string; networkId: string;
@@ -13,6 +18,12 @@ export interface ClusterForm {
   instanceTypes: string; minSize: string; maxSize: string; diskSize: string;
   capacityType: string; adminPrincipals: string; irsa: string;
   naas: boolean;
+  labels: string; nodeLabels: string; nodeTaints: string; desiredSize: string;
+  maintenanceDays: string; maintenanceStart: string; maintenanceDuration: string;
+  zoneIds: string; serviceCidr: string; encryptionEnabled: string; encryptionKeyArn: string;
+  awsAmiType: string; awsAdditionalSecurityGroups: string; awsAuthenticationMode: string;
+  awsSupportType: string; awsLogGroupEnabled: string; awsLogRetentionDays: string; awsLogTypes: string;
+  oidcYaml: string; accessEntriesYaml: string; launchTemplateYaml: string; addonsYaml: string;
 }
 
 export const emptyClusterForm: ClusterForm = {
@@ -20,6 +31,10 @@ export const emptyClusterForm: ClusterForm = {
   kubernetesVersion: "", publicAccess: true, privateAccess: true, publicCIDRs: "",
   instanceTypes: "m6i.large", minSize: "1", maxSize: "3", diskSize: "", capacityType: "0",
   adminPrincipals: "", irsa: "default", naas: false,
+  labels: "{}", nodeLabels: "{}", nodeTaints: "[]", desiredSize: "",
+  maintenanceDays: "", maintenanceStart: "", maintenanceDuration: "", zoneIds: "", serviceCidr: "",
+  encryptionEnabled: "", encryptionKeyArn: "", oidcYaml: "", accessEntriesYaml: "",
+  ...emptyAwsClusterFields,
 };
 
 const split = (text: string) => text.split(/[\s,]+/).filter(Boolean);
@@ -29,6 +44,8 @@ export function clusterForm(cluster: Cluster): ClusterForm {
   const endpoint = spec?.controlPlane?.endpointAccess;
   const pool = spec?.defaultNodePool;
   const aws = spec?.provider.case === "aws" ? spec.provider.value : undefined;
+  const window = spec?.maintenanceWindow;
+  const encryption = spec?.controlPlane?.secretsEncryption;
   return {
     name: cluster.name, displayName: cluster.displayName, networkId: spec?.network?.networkId ?? "",
     releaseChannel: String(spec?.releaseChannel ?? 0), upgradeMode: String(spec?.upgradeMode || UpgradeMode.MANUAL),
@@ -40,6 +57,15 @@ export function clusterForm(cluster: Cluster): ClusterForm {
     adminPrincipals: spec?.access?.adminPrincipals.join(", ") ?? "",
     irsa: aws?.irsa === undefined ? "default" : String(aws.irsa),
     naas: spec?.naas ?? false,
+    labels: JSON.stringify(cluster.labels), nodeLabels: JSON.stringify(pool?.labels ?? {}),
+    nodeTaints: JSON.stringify(pool?.taints.map(({ key, value, effect }) => ({ key, value, effect })) ?? []),
+    desiredSize: pool?.scalingConfig?.desiredSize === undefined ? "" : String(pool.scalingConfig.desiredSize),
+    maintenanceDays: window?.days.join(", ") ?? "", maintenanceStart: window?.start ?? "", maintenanceDuration: window?.duration ?? "",
+    zoneIds: spec?.network?.zoneIds.join(", ") ?? "", serviceCidr: spec?.network?.serviceCidr ?? "",
+    encryptionEnabled: encryption ? String(encryption.enabled || !!encryption.kmsKeyArn) : "", encryptionKeyArn: encryption?.kmsKeyArn ?? "",
+    oidcYaml: spec?.access?.oidc ? JSON.stringify(toJson(OidcIdentityProviderSchema, spec.access.oidc), null, 2) : "",
+    accessEntriesYaml: spec?.access?.accessEntries.length ? JSON.stringify((toJson(AccessSpecSchema, spec.access) as JsonObject).accessEntries, null, 2) : "",
+    ...awsClusterForm(cluster),
   };
 }
 
@@ -52,7 +78,8 @@ export function clusterProvider(network: Network, accounts: readonly CloudAccoun
 }
 
 function awsCreateSettings(form: ClusterForm): JsonObject {
-  return form.irsa === "default" ? {} : { irsa: form.irsa === "true" };
+  const irsa = optionalBoolean(form.irsa, "IRSA");
+  return irsa === undefined ? {} : { irsa };
 }
 
 const mutable = {
@@ -71,14 +98,22 @@ const mutable = {
   adminPrincipals: "spec.access.admin_principals",
   irsa: "spec.aws.irsa",
   naas: "spec.naas",
+  labels: "labels", nodeLabels: "spec.default_node_pool.labels", nodeTaints: "spec.default_node_pool.taints",
+  maintenanceDays: "spec.maintenance_window", maintenanceStart: "spec.maintenance_window", maintenanceDuration: "spec.maintenance_window",
+  encryptionEnabled: "spec.control_plane.secrets_encryption", encryptionKeyArn: "spec.control_plane.secrets_encryption",
+  oidcYaml: "spec.access.oidc", accessEntriesYaml: "spec.access.access_entries",
+  ...awsMutableClusterFields,
 } as const;
 export type EditableClusterField = keyof typeof mutable;
+const createOnly = { desiredSize: "spec.default_node_pool.scaling_config.desired_size", zoneIds: "spec.network.zone_ids", serviceCidr: "spec.network.service_cidr", ...awsCreateOnlyClusterFields } as const;
+type ClusterInputField = EditableClusterField | keyof typeof createOnly;
+const allPaths = { ...mutable, ...createOnly };
 
 export const clusterWizardSteps = ["Basics", "Compute", "Access", "Review"] as const;
-const stepFields: readonly (readonly EditableClusterField[])[] = [
-  ["displayName", "releaseChannel", "upgradeMode", "kubernetesVersion", "naas"],
-  ["instanceTypes", "minSize", "maxSize", "diskSize", "capacityType"],
-  ["publicAccess", "privateAccess", "publicCIDRs", "adminPrincipals", "irsa"],
+const stepFields: readonly (readonly ClusterInputField[])[] = [
+  ["displayName", "labels", "releaseChannel", "upgradeMode", "kubernetesVersion", "naas", "maintenanceDays", "maintenanceStart", "maintenanceDuration"],
+  ["instanceTypes", "minSize", "maxSize", "diskSize", "capacityType", "desiredSize", "nodeLabels", "nodeTaints", "awsAmiType", "launchTemplateYaml"],
+  ["publicAccess", "privateAccess", "publicCIDRs", "adminPrincipals", "irsa", "zoneIds", "serviceCidr", "addonsYaml", "encryptionEnabled", "encryptionKeyArn", "oidcYaml", "accessEntriesYaml", "awsAdditionalSecurityGroups", "awsAuthenticationMode", "awsSupportType", "awsLogGroupEnabled", "awsLogRetentionDays", "awsLogTypes"],
 ];
 
 /** Called only on Next/submit; editing validates just explicitly touched inputs. */
@@ -108,7 +143,7 @@ function integer(value: string, min: number, max: number, label: string): number
   return Number(value);
 }
 
-function valueOf(field: EditableClusterField, form: ClusterForm) {
+function valueOf(field: ClusterInputField, form: ClusterForm): JsonValue | undefined {
   switch (field) {
     case "releaseChannel": return integer(form[field], 0, 3, "Release channel");
     case "upgradeMode": return integer(form[field], 1, 2, "Upgrade mode");
@@ -130,7 +165,11 @@ function valueOf(field: EditableClusterField, form: ClusterForm) {
       })) throw new Error("Enter up to 40 unique IPv4 CIDRs, such as 203.0.113.0/24.");
       return cidrs;
     }
-    case "adminPrincipals": return split(form[field]);
+    case "adminPrincipals": {
+      const principals = split(form.adminPrincipals);
+      if (principals.length > 20 || new Set(principals).size !== principals.length || principals.some(value => !/^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)\/[A-Za-z0-9+=,.@_/-]+$/.test(value) || value.includes(":role/aws-service-role/"))) throw new Error("Enter up to 20 unique IAM role or user ARNs; service-linked roles are not accepted.");
+      return principals;
+    }
     case "kubernetesVersion": {
       if (Number(form.upgradeMode) === UpgradeMode.AUTOMATIC) throw new Error("Automatic upgrades cannot pin a Kubernetes version.");
       if (form[field] && !/^1\.\d{2}$/.test(form[field])) throw new Error("Kubernetes version must be a minor version such as 1.33, or empty for the server default.");
@@ -140,7 +179,61 @@ function valueOf(field: EditableClusterField, form: ClusterForm) {
       if (form[field].length > 128) throw new Error("Display name must be at most 128 characters.");
       return form[field];
     }
-    case "irsa": return form.irsa === "default" ? undefined : form.irsa === "true";
+    case "irsa": return optionalBoolean(form.irsa, "IRSA");
+    case "desiredSize": return form.desiredSize ? integer(form.desiredSize, 0, 1000, "Desired nodes") : undefined;
+    case "labels": {
+      const labels = stringMap(form.labels, 40, "Cloud tags");
+      for (const [key, value] of Object.entries(labels)) if (!/^[A-Za-z0-9 _.:/=+@-]{1,128}$/.test(key) || key.toLowerCase().startsWith("aws:") || !/^[A-Za-z0-9 _.:/=+@-]{0,256}$/.test(value)) throw new Error("Cloud tags must follow AWS tag rules and cannot use the aws: prefix.");
+      return labels;
+    }
+    case "nodeLabels": {
+      const labels = stringMap(form.nodeLabels, 64, "Node labels");
+      if (Object.entries(labels).some(([key, value]) => !qualifiedKey(key) || !labelValue(value))) throw new Error("Node labels need Kubernetes qualified keys and label values.");
+      return labels;
+    }
+    case "nodeTaints": {
+      const values = formJson(form.nodeTaints || "[]", "Node taints");
+      if (!Array.isArray(values) || values.length > 50) throw new Error("Node taints must be a JSON array of at most 50 entries.");
+      const seen = new Set<string>();
+      return values.map(value => {
+        const taint = checkedJson(TaintSchema, value);
+        if (!qualifiedKey(taint.key) || !labelValue(taint.value)) throw new Error("Taints need Kubernetes qualified keys and label values.");
+        const key = `${taint.key}/${taint.effect}`;
+        if (seen.has(key)) throw new Error("Duplicate taint key/effect pair.");
+        seen.add(key);
+        return toJson(TaintSchema, taint);
+      });
+    }
+    case "zoneIds": {
+      const zones = clusterList(form.zoneIds);
+      if (zones.length && (zones.length < 2 || new Set(zones).size !== zones.length || zones.some(zone => !/^[a-z]+[0-9]-az[0-9]+$/.test(zone)))) throw new Error("Choose at least two unique AWS zone IDs.");
+      return zones;
+    }
+    case "serviceCidr": {
+      const cidr = form.serviceCidr;
+      const match = /^(\d{1,3}(?:\.\d{1,3}){3})\/(1[2-9]|2[0-4])$/.exec(cidr);
+      if (cidr && (!match || match[1].split(".").some(n => Number(n) > 255))) throw new Error("Service CIDR must be an IPv4 /12 to /24 range.");
+      return cidr;
+    }
+    case "maintenanceDays": case "maintenanceStart": case "maintenanceDuration": {
+      if (!form.maintenanceDays.trim() && !form.maintenanceStart && !form.maintenanceDuration) return undefined;
+      const weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+      const days = clusterList(form.maintenanceDays).map(day => { const index = weekdays.indexOf(day.toLowerCase()); return index >= 0 ? index + 1 : integer(day, 1, 7, "UTC weekday"); });
+      return typedFormJson(MaintenanceWindowSchema, { days, start: form.maintenanceStart, duration: form.maintenanceDuration });
+    }
+    case "encryptionEnabled": case "encryptionKeyArn": {
+      if (!form.encryptionEnabled && !form.encryptionKeyArn) return undefined;
+      const enabled = optionalBoolean(form.encryptionEnabled, "Encryption enabled");
+      if (enabled === false && form.encryptionKeyArn) throw new Error("An encryption key implies enabled encryption.");
+      return typedFormJson(SecretsEncryptionSchema, { enabled: enabled ?? !!form.encryptionKeyArn, kmsKeyArn: form.encryptionKeyArn });
+    }
+    case "oidcYaml": { const value = nestedFormYaml(form.oidcYaml); return value === null ? undefined : typedFormJson(OidcIdentityProviderSchema, value); }
+    case "accessEntriesYaml": {
+      const json = typedFormJson(AccessSpecSchema, { accessEntries: nestedFormYaml(form.accessEntriesYaml) ?? [] }) as JsonObject;
+      return json.accessEntries ?? [];
+    }
+    case "awsAmiType": case "awsAdditionalSecurityGroups": case "awsAuthenticationMode": case "awsSupportType": case "awsLogGroupEnabled": case "awsLogRetentionDays": case "awsLogTypes": case "launchTemplateYaml": case "addonsYaml":
+      return awsClusterFormValue(field as AwsClusterFormField, form);
     default: return form[field];
   }
 }
@@ -151,10 +244,18 @@ function validateRelated(form: ClusterForm, fields: ReadonlySet<string>) {
     if (!form.publicAccess && !form.privateAccess) throw new Error("Enable at least one API endpoint.");
     if (form.publicAccess && !split(form.publicCIDRs).length) throw new Error("Public API access requires at least one allowed CIDR.");
   }
+  if (fields.has("desiredSize") && form.desiredSize && (Number(form.desiredSize) < Number(form.minSize) || Number(form.desiredSize) > Number(form.maxSize))) throw new Error("Desired nodes must be between minimum and maximum nodes.");
+  if (["launchTemplateYaml", "diskSize", "awsAmiType"].some(field => fields.has(field))) validateAwsNodeForm(form);
+  if (["adminPrincipals", "accessEntriesYaml", "awsAuthenticationMode"].some(field => fields.has(field))) {
+    const admins = split(form.adminPrincipals);
+    const entries = (valueOf("accessEntriesYaml", form) ?? []) as JsonObject[];
+    if (entries.some(entry => admins.includes(String(entry.principalArn)))) throw new Error("A principal cannot be both an administrator and an access entry.");
+    if (form.awsAuthenticationMode === "3" && (admins.length || entries.length)) throw new Error("IAM access entries require API or API_AND_CONFIG_MAP authentication mode.");
+  }
 }
 
 // JSON uses lowerCamelCase; protobuf FieldMask paths use snake_case.
-function setPath(target: JsonObject, path: string, value: ReturnType<typeof valueOf>) {
+function setPath(target: JsonObject, path: string, value: JsonValue | undefined) {
   const parts = path.split(".").map((part) => part.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase()));
   let current = target;
   for (const part of parts.slice(0, -1)) {
@@ -168,13 +269,15 @@ export function buildCreateCluster(tenantId: string, form: ClusterForm, network:
   clusterProvider(network, accounts);
   if (network.id !== form.networkId || !network.spec?.region) throw new Error("Choose an existing network with a region.");
   if (!/^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$/.test(form.name)) throw new Error("Name must be a lowercase DNS label starting with a letter, at most 40 characters.");
-  validateRelated(form, new Set(Object.keys(mutable)));
+  validateRelated(form, new Set(Object.keys(allPaths)));
   const input: JsonObject = { name: form.name, spec: { region: network.spec.region, network: { networkId: network.id }, aws: awsCreateSettings(form) } };
-  for (const field of Object.keys(mutable) as EditableClusterField[]) {
+  for (const field of Object.keys(allPaths) as ClusterInputField[]) {
     if (field === "irsa" || (field === "kubernetesVersion" && Number(form.upgradeMode) === UpgradeMode.AUTOMATIC)) continue;
-    setPath(input, mutable[field], valueOf(field, form));
+    if (!(field in emptyClusterForm)) continue;
+    if (typeof form[field] === "string" && form[field] === "" && !["displayName", "kubernetesVersion", "adminPrincipals", "publicCIDRs"].includes(field)) continue;
+    setPath(input, allPaths[field], valueOf(field, form));
   }
-  return create(CreateClusterRequestSchema, { tenantId, requestId, cluster: fromJson(ClusterSchema, input) });
+  return create(CreateClusterRequestSchema, { tenantId, requestId, cluster: checkedJson(ClusterSchema, input) });
 }
 
 /** Deliberately sparse even when GetCluster(asRequested) falls back to resolved defaults. */
@@ -183,13 +286,20 @@ export function buildClusterUpdate(tenantId: string, baseline: Cluster, form: Cl
   if (form.name !== baseline.name || form.networkId !== baseline.spec?.network?.networkId) throw new Error("Name and network are immutable.");
   for (const field of touched) if (!Object.hasOwn(mutable, field)) throw new Error(`Field is immutable or unsupported: ${field}`);
   const fields = [...touched] as EditableClusterField[];
+  const effective = { ...clusterForm(baseline) };
+  for (const field of fields) Object.assign(effective, { [field]: form[field] });
   // Changing mode must never send a resolved version back as a user pin.
-  const selected = fields.filter((field) => !(field === "kubernetesVersion" && Number(form.upgradeMode) === UpgradeMode.AUTOMATIC));
+  const selected = fields.filter((field) => !(field === "kubernetesVersion" && Number(effective.upgradeMode) === UpgradeMode.AUTOMATIC));
   if (!selected.length) throw new Error("Edit at least one mutable field before requesting a plan.");
-  validateRelated(form, new Set(selected));
+  validateRelated(effective, new Set(selected));
+  const beforeEncryption = baseline.spec?.controlPlane?.secretsEncryption;
+  if (selected.some(field => field === "encryptionEnabled" || field === "encryptionKeyArn") && (beforeEncryption?.enabled || beforeEncryption?.kmsKeyArn)) {
+    const encryption = valueOf("encryptionEnabled", effective) as JsonObject | undefined;
+    if (!encryption?.enabled || (encryption.kmsKeyArn ?? "") !== (beforeEncryption.kmsKeyArn ?? "")) throw new Error("Encryption cannot be disabled or moved to another key once enabled.");
+  }
   const patch: JsonObject = { id: baseline.id, etag: baseline.etag };
-  for (const field of selected) setPath(patch, mutable[field], valueOf(field, form));
-  return create(UpdateClusterRequestSchema, { tenantId, cluster: fromJson(ClusterSchema, patch), updateMask: { paths: selected.map((field) => mutable[field]).sort() }, validateOnly: true });
+  for (const field of selected) setPath(patch, mutable[field], valueOf(field, effective));
+  return create(UpdateClusterRequestSchema, { tenantId, cluster: fromJson(ClusterSchema, patch), updateMask: { paths: [...new Set(selected.map((field) => mutable[field]))].sort() }, validateOnly: true });
 }
 
 export interface ReviewedClusterPlan { request: UpdateClusterRequest; plan: Plan; fingerprint: string }

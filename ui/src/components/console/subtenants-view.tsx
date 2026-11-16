@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
-import { proportional } from "@astryxdesign/core/Table";
+import { pixel, proportional } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { ConsoleTable } from "./console-table";
 import { CopyValue } from "./copy-value";
 import { StatusValue } from "./detail-layout";
@@ -47,10 +49,21 @@ export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onR
   const [kind, setKind] = useState("all");
   const [state, setState] = useState("all");
   const [page, setPage] = useState(1);
+  const container = useRef<HTMLElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const element = container.current;
+    if (!element) return;
+    const measure = () => setWidth(Math.floor(element.getBoundingClientRect().width));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = rows.filter((row) => (kind === "all" || kind === "SubTenant") && (state === "all" || row.state === state) && terms.every((term) => [row.name, row.allocationName, row.id, row.protected ? "Protected" : "Protection off", "SubTenant", row.state, row.message].join(" ").toLowerCase().includes(term)));
   const currentPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / 25)));
-  return <VStack gap={4} as="section" aria-label="Cluster Sub Tenants">
+  return <VStack ref={container} gap={4} as="section" aria-label="Cluster Sub Tenants" width="100%">
     <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap" width="100%">
       <VStack gap={1}><Heading level={3}>Sub Tenants</Heading><Text type="supporting">Manage team namespaces, quotas and access within this cluster.</Text></VStack>
       <HStack gap={2} wrap="wrap" vAlign="center">{canWrite && <Button label="Create Sub Tenant" variant="primary" onClick={onCreate} />}<RefreshButton label="Refresh Sub Tenants" onClick={onRefresh} isLoading={refreshing} /></HStack>
@@ -66,15 +79,13 @@ export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onR
     </HStack>
     {!loading && <Text type="supporting" role="status">{filtered.length} of {rows.length} Sub Tenants</Text>}
     {!!filtered.length && <ConsoleTable aria-label="Cluster Sub Tenants" data={filtered.slice((currentPage - 1) * 25, currentPage * 25)} idKey="id" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} columns={[
-      { key: "name", header: "Sub Tenant", width: proportional(2, { minWidth: 140 }), renderCell: (row) => <Button label={row.name} variant="ghost" onClick={() => onView(row.id)} /> },
-      { key: "id", header: "ID", width: proportional(2, { minWidth: 140 }), renderCell: (row) => <CopyValue value={row.id} label="Sub Tenant ID" /> },
-      { key: "allocationName", header: "Name", width: proportional(1.5, { minWidth: 120 }), renderCell: (row) => row.allocationName ? <CopyValue value={row.allocationName} label="Sub Tenant name" /> : <Text>Legacy allocation</Text> },
-      { key: "protection", header: "Deletion protection", width: proportional(1, { minWidth: 140 }), renderCell: (row) => <Text>{row.protected ? "Protected" : "Off"}</Text> },
-      { key: "kind", header: "Kind", width: proportional(1, { minWidth: 100 }), renderCell: () => <Text>Sub Tenant</Text> },
-      { key: "namespaces", header: "Namespace keys", width: proportional(1, { minWidth: 120 }), renderCell: (row) => <Text>{row.namespaceCount}</Text> },
-      { key: "state", header: "Status", width: proportional(1.5, { minWidth: 130 }), renderCell: (row) => <StatusValue label={row.state} tone={row.tone} /> },
-      { key: "message", header: "Message", width: proportional(2, { minWidth: 140 }), renderCell: (row) => <Text maxLines={1} hasTruncateTooltip hasCapsize={false}>{row.message || "No message reported"}</Text> },
-      { key: "actions", header: "Actions", width: proportional(1, { minWidth: 110 }), renderCell: (row) => <DropdownMenu presentation="adaptive" alignment="end" button={{ label: "Actions", "aria-label": `Actions for Sub Tenant ${row.name} (${row.id})`, size: "sm", variant: "ghost" }} items={[
+      { key: "name", header: "Sub Tenant", width: proportional(2, { minWidth: 100 }), renderCell: (row) => <Button label={row.name} tooltip={row.name} width="100%" variant="ghost" onClick={() => onView(row.id)} /> },
+      ...(width >= 700 ? [{ key: "id", header: "ID", width: proportional(2, { minWidth: 130 }), renderCell: (row: SubTenantRow) => <CopyValue value={row.id} label="Sub Tenant ID" /> }] : []),
+      ...(width >= 520 ? [{ key: "namespaces", header: "Namespaces", width: proportional(1, { minWidth: 82 }), renderCell: (row: SubTenantRow) => <Text>{row.namespaceCount}</Text> }] : []),
+      ...(width >= 900 ? [{ key: "protection", header: "Protection", width: proportional(1, { minWidth: 86 }), renderCell: (row: SubTenantRow) => <Text>{row.protected ? "Protected" : "Off"}</Text> }] : []),
+      { key: "state", header: "Status", width: proportional(1.5, { minWidth: 100 }), renderCell: (row) => <Tooltip content={row.message || row.state}><StatusValue label={row.state} tone={row.tone} /></Tooltip> },
+      ...(width >= 1050 ? [{ key: "message", header: "Message", width: proportional(2, { minWidth: 150 }), renderCell: (row: SubTenantRow) => <Text maxLines={1} hasTruncateTooltip hasCapsize={false}>{row.message || "No message reported"}</Text> }] : []),
+      { key: "actions", header: "Actions", width: pixel(76), resizable: false, renderCell: (row) => <DropdownMenu presentation="adaptive" alignment="end" aria-label="Actions" renderTrigger={(props) => <Button {...props} label={`Actions for Sub Tenant ${row.name} (${row.id})`} icon={<Icon icon="moreHorizontal" />} isIconOnly size="sm" variant="ghost" />} items={[
         { id: "view", label: "View", onClick: () => onView(row.id) },
         ...(canWrite ? [
           { id: "edit", label: "Edit", isDisabled: !row.mutable || loading || refreshing || !!error, onClick: () => onEdit(row.id) },

@@ -40,8 +40,12 @@ command -v docker >/dev/null || die 'docker is not installed'
 command -v curl >/dev/null || die 'curl is not installed'
 docker info >/dev/null 2>&1 || die 'docker is not running'
 
+offline_migration=0
 if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
-  cmp -s "$STATE/import/cluster-vending-realm.json" "$STATE/applied-realm.json" || die 'realm settings changed since import; startup does not overwrite existing realms; follow the documented reset procedure'
+  if ! cmp -s "$STATE/import/cluster-vending-realm.json" "$STATE/applied-realm.json"; then
+    "$STATE/configure" --state "$STATE" --check-offline-migration || die 'realm settings changed since import; startup does not overwrite existing realms; follow the documented reset procedure'
+    offline_migration=1
+  fi
   [[ "$(docker inspect --format '{{index .Config.Labels "io.cluster-vending.local-keycloak"}}' "$CONTAINER")" == true ]] || die 'container name is owned by another setup'
   [[ "$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")" == "$IMAGE" ]] || die 'existing container uses another version; follow the documented reset procedure'
   [[ "$(docker inspect --format '{{(index (index .HostConfig.PortBindings "8080/tcp") 0).HostIp}}:{{(index (index .HostConfig.PortBindings "8080/tcp") 0).HostPort}}' "$CONTAINER")" == 127.0.0.1:18080 ]] || die 'existing container has unexpected port bindings'
@@ -79,6 +83,11 @@ for ((attempt=0; attempt<120; attempt++)); do
   sleep 2
 done
 [[ "$ready" == 1 ]] || die 'realm did not become ready within four minutes'
+if [[ "$offline_migration" == 1 ]]; then
+  "$STATE/configure" --state "$STATE" --grant-offline-access
+  cp "$STATE/import/cluster-vending-realm.json" "$STATE/applied-realm.json"
+  log 'enabled local CLI offline access without resetting the realm'
+fi
 log "ready: $ISSUER (audience cv-api)"
 [[ "$ACTION" == serve || "$ACTION" == run ]] || exit 0
 

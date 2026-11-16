@@ -9,6 +9,7 @@ import (
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/rollout"
 )
 
 func TestStaleAdmissionsAfterNetworkTierChange(t *testing.T) {
@@ -60,6 +61,7 @@ func TestEmptyNetworkRespectsOwnTier(t *testing.T) {
 		t.Fatalf("Tier0 admitted during Tier2 rollout: %v %v", allowed, err)
 	}
 	channel.Status.CodeChanges.Tier = cloud.ClusterTier0
+	channel.Status.CodeChanges.Admitted = []string{rollout.NetworkCodeKey(network)}
 	if err := c.Update(t.Context(), channel); err != nil {
 		t.Fatal(err)
 	}

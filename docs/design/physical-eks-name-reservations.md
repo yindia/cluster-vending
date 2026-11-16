@@ -1,0 +1,88 @@
+# Physical EKS name reservations and account creation fences
+
+The Kubernetes store reserves each `(AWS partition, canonical AWS account ID,
+region, exact EKS name)` in a ConfigMap in **`kube-system`**. This namespace is a
+fixed coordination domain, independent of tenant namespaces, account registration
+UUIDs, and controller leader-election settings. Every API/controller replica must
+use this same management cluster and reservation namespace. Names and existing
+cluster UUIDs are not changed.
+
+ConfigMaps have label `cloud.cluster-vending.io/eks-name-reservation: "true"` and
+names `cv-eks-name-<SHA-256 prefix>`. Their data retains the complete scope key,
+tenant, allocation UUID, request UUID and normalized request hash, so a truncated
+hash collision fails closed. Errors returned to tenant callers disclose no other
+tenant or allocation identity. There are deliberately no cross-namespace owner
+references and no age-based reclamation.
+
+## Existing and imported resources
+
+Before taking a reservation, the store checks existing Cluster CRs across tenant
+namespaces and resolves their network/account references. An existing registration
+blocks a competing allocation even when it predates reservations. Native adoption
+and reconciliation also take/check the reservation before cloud writes. Imports
+reserve the same physical identity as new creates; they cannot establish a second
+owner. Existing conflicting registrations stop for operator review, without
+renaming or adopting either physical resource.
+
+The normal finalization path releases a reservation only after both cluster and
+platform inventory have been cleared and the management Cluster CR is confirmed
+gone. A foreign finalizer retains the reservation. Removing a CR directly or
+losing the management cluster is not evidence that the AWS cluster is absent.
+
+## Crash recovery
+
+After a crash between reservation and Cluster persistence, retrying the exact
+create request UUID and payload recovers the reserved allocation UUID. A different
+request cannot take the name. Reservations also remain on ambiguous storage or
+cleanup failures; they are not leases.
+
+For an orphaned reservation, an operator must inspect its complete scope and owner,
+the management Cluster/inventory, and the actual EKS identity before any cleanup.
+Confirm AWS absence and all managed-resource cleanup, or restore the original
+registration and let normal finalization complete. Only then remove the specific
+reservation using its UID/resourceVersion preconditions. Never reclaim by age,
+delete all claims, or adopt an EKS cluster merely because its name matches. A
+foreign-finalizer completion after the store's finalization attempt may require
+this explicit verified cleanup.
+
+There is also a deliberate fail-closed gap between deleting the management Cluster
+CR and deleting its reservation. If claim deletion fails or the process crashes
+in that interval, later reconciliation sees no Cluster and does **not** release
+the claim automatically. A repeated delete may return NotFound while the name is
+still reserved. This case requires the verified operator procedure above; there
+is no durable cleanup tombstone or automatic availability guarantee for it.
+
+## Account deletion versus network creation
+
+Network insertion/adoption first rejects a deleting account, persists pending
+intent, then updates the same account incarnation using a resource-version CAS.
+The pending Network cannot be read as provisionable store state. Once the CAS
+succeeds, the pending marker is cleared. Account deletion prepared before insertion
+then has an obsolete resourceVersion; deletion that won first makes creation
+refuse and take back its pending intent. Exact create retries and mutating network
+reconciliation resume interrupted fences. Get/List remain read-only.
+
+The fence and a network's visibility are separate Kubernetes writes, not a
+transaction. Pending-state checks are required before cloud application. If a
+concurrent finalizer prevents rollback, pending intent stays blocked for recovery.
+
+## Credentials, RBAC and remaining boundaries
+
+`management.ConnectStore` constructs the store with a direct, uncached Kubernetes
+client. Reservation and ownership decisions must never use informer-cache reads.
+The server's existing ClusterRole/ClusterRoleBinding permits ConfigMap get/create/
+delete in `kube-system`; the controller's platform role additionally permits the
+list/update/patch operations used by store recovery and finalization. Tenant
+namespace-only RoleBindings are insufficient. Deployment checks exercise these
+permissions. Restrict direct editing of reservation ConfigMaps to trusted platform
+operators; Kubernetes RBAC cannot grant create permission by label prefix.
+
+These guarantees cover cooperating API/controller writers in one management
+cluster. Kubernetes has no transaction spanning a reservation, Cluster, account
+and Network object. The fences prevent unsafe application while incomplete, but
+partial intent and operator recovery remain possible. Independent management
+clusters and actors creating EKS clusters directly in AWS do not participate in
+this reservation protocol. The existing AWS existence check remains necessary,
+and an external actor can still race that check: no atomic AWS/Kubernetes ownership
+transaction is claimed. Proving ownership before adopting an externally created
+same-name EKS cluster requires a separate provider-side ownership handshake.

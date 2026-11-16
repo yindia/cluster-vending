@@ -15,6 +15,7 @@ import (
 	"fmt"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -48,6 +49,9 @@ func PendingStates() []string {
 // It is also where the cloud is looked at: the VPC of an import is
 // discovered here (discoverImport), not by the call that stored it.
 func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
+	if err := cloudstore.ResumeNetworkAccountFence(ctx, s.deps.Store, tenantID, id); err != nil {
+		return err
+	}
 	row, err := s.deps.Store.Networks().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil

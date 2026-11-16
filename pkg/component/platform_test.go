@@ -122,6 +122,8 @@ func TestPlanPlatformLeavesOut(t *testing.T) {
 			want: map[string]string{"needs-irsa": "spec.aws.irsa"}},
 		{name: "unknown placeholder", entries: []component.PlatformEntry{bad},
 			want: map[string]string{"bad-values": "no.such"}},
+		{name: "render failure preserves dependents", entries: []component.PlatformEntry{bad, entry("dependent", "bad-values")},
+			want: map[string]string{"bad-values": "no.such", "dependent": "requires bad-values"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -138,6 +140,10 @@ func TestPlanPlatformLeavesOut(t *testing.T) {
 			for _, s := range skipped {
 				if want, ok := tt.want[s.Name]; !ok || !strings.Contains(s.Reason, want) {
 					t.Errorf("%s left out because %q, want %q", s.Name, s.Reason, want)
+				}
+				intentionalRemoval := tt.name == "not pinned" || tt.name == "what requires a left-out component goes with it"
+				if s.Preserve == intentionalRemoval {
+					t.Errorf("%s: Preserve=%v, intentional removal=%v", s.Name, s.Preserve, intentionalRemoval)
 				}
 			}
 			var planned []string

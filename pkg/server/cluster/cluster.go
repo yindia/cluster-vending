@@ -17,6 +17,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
@@ -98,6 +99,9 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 // race) or a reused request_id; a conflict is the network being deleted at
 // the same moment.
 func createError(err error, row *model.Cluster) error {
+	if errors.Is(err, cloudstore.ErrEKSNameReserved) {
+		return connect.NewError(connect.CodeAlreadyExists, cloudstore.ErrEKSNameReserved.Error())
+	}
 	if errors.Is(err, repository.ErrConflict) {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
 			"network %s is being deleted; a cluster cannot be created in it", row.NetworkID))

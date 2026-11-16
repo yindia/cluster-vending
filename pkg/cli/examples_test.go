@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"buf.build/go/protovalidate"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -41,7 +42,8 @@ func valid(t *testing.T, name string, req proto.Message, err error) {
 // The examples are one chain, followed in the README's walkthrough: an
 // account, a network in it, a cluster in the network; and an imported
 // network with an imported cluster. Each is a valid request, and each
-// refers to the previous step by the same placeholder id.
+// refers to earlier steps using a valid ID. A user may have already replaced
+// the documented placeholders with the IDs returned by their own walkthrough.
 func TestExamplesAreOneChain(t *testing.T) {
 	m := example(t, "cloudaccount.yaml", KindCloudAccount)
 	account, err := m.CloudAccount()
@@ -69,21 +71,15 @@ func TestExamplesAreOneChain(t *testing.T) {
 	}
 	valid(t, "cluster-import.yaml", clusterImport, err)
 
-	const bootstrapID, networkID, importedNetworkID = "00000000-0000-0000-0000-000000000001",
-		"00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000003"
 	for name, got := range map[string]string{
 		"network.yaml spec.bootstrapId":        network.GetSpec().GetBootstrapId(),
 		"network-import.yaml spec.bootstrapId": networkImport.GetBootstrapId(),
+		"cluster.yaml spec.network.networkId":  cluster.GetSpec().GetNetwork().GetNetworkId(),
+		"cluster-import.yaml spec.networkId":   clusterImport.GetNetworkId(),
 	} {
-		if got != bootstrapID {
-			t.Errorf("%s = %s, want the BOOTSTRAP_ID placeholder %s", name, got, bootstrapID)
+		if id, err := uuid.Parse(got); err != nil || id.String() != got || id == uuid.Nil {
+			t.Errorf("%s = %q, want a canonical, nonzero UUID reference", name, got)
 		}
-	}
-	if got := cluster.GetSpec().GetNetwork().GetNetworkId(); got != networkID {
-		t.Errorf("cluster.yaml spec.network.networkId = %s, want the NETWORK_ID placeholder %s", got, networkID)
-	}
-	if got := clusterImport.GetNetworkId(); got != importedNetworkID {
-		t.Errorf("cluster-import.yaml spec.networkId = %s, want the IMPORTED_NETWORK_ID placeholder %s", got, importedNetworkID)
 	}
 	if cluster.GetSpec().GetRegion() != network.GetSpec().GetRegion() {
 		t.Errorf("the cluster is in %s, its network in %s", cluster.GetSpec().GetRegion(), network.GetSpec().GetRegion())

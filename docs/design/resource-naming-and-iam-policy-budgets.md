@@ -1,6 +1,8 @@
 # Platform resource naming, cluster-name limits and cloud uniqueness
 
-Status: proposed implementation plan. This document does not change runtime naming, rename existing resources, or apply infrastructure changes.
+Status: partially implemented. Runtime policy expansion now enforces the managed-policy size budget, and invalid component plans preserve existing inventory. Physical EKS names are reserved across tenants per AWS partition/account/region/name; see [the implemented reservation protocol](physical-eks-name-reservations.md).
+
+The general resource-name allocator, proposed 32-character cluster limit, stronger account-wide cross-region name restriction, and named policy groups below remain proposals. Existing resources are not renamed, and this document applies no infrastructure changes.
 
 ## Problem and evidence
 

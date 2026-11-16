@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-vending-server
+  namespace: cluster-vending-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        args:
+        - --config=/etc/cluster-vending/server.yaml
+        volumeMounts:
+        - name: auth-config
+          mountPath: /etc/cluster-vending
+          readOnly: true
+      volumes:
+      - name: auth-config
+        configMap:
+          name: cluster-vending-server-auth

@@ -366,6 +366,51 @@ and the [native loopback redirect model](https://www.rfc-editor.org/rfc/rfc8252#
 
 ## Rolling it out
 
+### Optional Kubernetes deployment integration
+
+Authentication remains **opt-in**. `config/server/base` starts with auth mode
+`none`: anonymous callers can access every tenant and platform RPC. Restrict
+access to that Service, including access from other cluster workloads. Enabling
+UI sign-in alone does not protect direct calls to an unauthenticated API.
+
+`config/server/auth` is a deployable opt-in example that requires JWTs using the
+existing Go verifier and rules. Edit `config/server/auth/server.yaml` to use your
+HTTPS issuer, API audience and exact group-to-tenant grants. The example grants
+only tenant admin/viewer access to `acme`, with no catch-all or platform admin
+grant. It contains public verification settings only; the API needs no OIDC
+client secret or password.
+
+```sh
+# Render for review; this does not contact or modify a cluster.
+kubectl kustomize config/server/auth
+# After customization and review, explicitly deploy the opted-in configuration:
+kubectl apply -k config/server/auth
+```
+
+The overlay mounts a generated ConfigMap read-only and passes
+`--config=/etc/cluster-vending/server.yaml` to `serve`. Kustomize includes a
+content hash in the ConfigMap name and updates the Deployment reference, so
+changing the settings rolls the API pods. The mounted file holds only auth
+settings; the base's logging/listen environment settings continue to apply.
+A missing mounted file or invalid auth configuration refuses startup;
+unavailable discovery does not enable anonymous access, although keys are
+fetched only on token verification. Keep the `auth` section and its required
+mode: deleting that section restores the server's default anonymous behavior.
+The example HTTPS issuer is a placeholder and must be replaced for real login.
+
+Terminate API TLS at your ingress/gateway and restrict the cleartext backend
+network. Register UI/CLI clients separately and keep their confidential secrets
+outside these manifests. Authentication does not restrict management-cluster
+Kubernetes access; retain Kubernetes RBAC for that boundary. Verify the deployed
+API rejects anonymous and invalid-token RPCs with `UNAUTHENTICATED`, and verify
+both own-tenant access and foreign-tenant denial with real tokens.
+
+The overlay's `mode: required` is independent of the migration mode named
+`optional` below: selecting `optional` still allows anonymous callers. Neither
+the base nor the server's default auth mode is changed by this opt-in example.
+
+### Migration modes
+
 1. **`none`**: add the `auth` section with the issuers and rules, keep
    `mode: none`. The configuration is validated at startup; nothing
    changes for callers.

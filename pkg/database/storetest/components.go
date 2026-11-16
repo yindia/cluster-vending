@@ -103,7 +103,7 @@ func testComponentNeedsItsLiveCluster(t *testing.T, b Backend) {
 	MustTenant(t, s, "globex")
 	n := MustNetwork(t, s, "acme", "n")
 	cluster := MustCluster(t, s, "acme", "prod", n)
-	theirs := MustCluster(t, s, "globex", "prod", MustNetwork(t, s, "globex", "n"))
+	theirs := MustCluster(t, s, "globex", "prod", networkInOtherAccount(t, s, "globex", "n"))
 
 	missing := &model.Component{TenantID: "acme", ClusterID: "01a1d0a6-69d5-7e15-965e-fc6a53fa3d33", Component: "karpenter"}
 	RequireErr(t, s.Components().Create(ctx, missing), repository.ErrNotFound)

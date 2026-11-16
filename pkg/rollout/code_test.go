@@ -10,6 +10,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/upgrade"
 )
 
@@ -55,13 +56,14 @@ func TestComputeCodeTierByTier(t *testing.T) {
 
 func channelAt(tier cloudv1alpha1.ClusterTier, done bool) *cloudv1alpha1.ReleaseChannel {
 	return &cloudv1alpha1.ReleaseChannel{ObjectMeta: metav1.ObjectMeta{Name: "stable"},
-		Status: cloudv1alpha1.ReleaseChannelStatus{CodeChanges: &cloudv1alpha1.ChannelReleaseMoves{Tier: tier, Done: done}}}
+		Status: cloudv1alpha1.ReleaseChannelStatus{CodeChanges: &cloudv1alpha1.ChannelReleaseMoves{Tier: tier, Done: done, Admitted: []string{"network:tenant-acme/net"}}}}
 }
 
 // A network's code change uses its explicit tier before its clusters.
 // A cluster exception does not resume the shared network.
 func TestNetworkCodeAdmitted(t *testing.T) {
-	const network = "net-1"
+	const networkID = "net-1"
+	network := &cloudv1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "net", Namespace: "tenant-acme", Labels: map[string]string{cloudstore.LabelID: networkID}}, Spec: cloudv1alpha1.NetworkSpec{Tier: cloudv1alpha1.ClusterTier1}}
 	clusters := []cloudv1alpha1.Cluster{cluster("dev", cloudv1alpha1.ClusterTier2, "1.36"), cluster("prod", cloudv1alpha1.ClusterTier1, "1.36")}
 	platform := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy"}}
 	tests := []struct {
@@ -72,13 +74,13 @@ func TestNetworkCodeAdmitted(t *testing.T) {
 		why     string
 	}{
 		{"its tier", channelAt(cloudv1alpha1.ClusterTier1, false), nil, true, ""},
-		{"a later tier", channelAt(cloudv1alpha1.ClusterTier0, false), nil, true, ""},
-		{"done", channelAt("", true), nil, true, ""},
+		{"a later tier", channelAt(cloudv1alpha1.ClusterTier0, false), nil, false, "reach tier 1"},
+		{"done is not fresh admission", channelAt("", true), nil, false, "reach tier 1"},
 		{"an earlier tier", channelAt(cloudv1alpha1.ClusterTier2, false), nil, false, "reach tier 1"},
 		{"not planned", &cloudv1alpha1.ReleaseChannel{}, nil, false, "to be planned"},
 		{"frozen", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{platform}, false, "the platform is frozen: deploy"},
 		{"let through", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{
-			Platform: true, Reason: "deploy", Except: []string{network}}}}, true, ""},
+			Platform: true, Reason: "deploy", Except: []string{networkID}}}}, true, ""},
 		{"a cluster let through", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{
 			Platform: true, Reason: "deploy", Except: []string{"id-prod"}}}}, false, "the platform is frozen"},
 	}
@@ -86,7 +88,7 @@ func TestNetworkCodeAdmitted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			channels := map[string]*cloudv1alpha1.ReleaseChannel{"stable": tt.channel}
 
-			got, why := NetworkCodeAdmitted(network, "acme", upgrade.Tier1, clusters, channels, tt.holds, now)
+			got, why := NetworkCodeAdmitted(network, clusters, channels, tt.holds, now)
 
 			if got != tt.want || !strings.Contains(why, tt.why) {
 				t.Errorf("admitted %v (%q), want %v (%q)", got, why, tt.want, tt.why)

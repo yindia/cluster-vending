@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -37,13 +39,24 @@ func run() error {
 	redirect := flag.String("cli-redirect", "http://localhost:18081/callback", "exact CLI loopback callback")
 	probe := flag.Bool("probe", false, "verify existing API requires authentication")
 	checkPort := flag.Bool("check-keycloak-port", false, "refuse a conflicting listener before creating Keycloak")
+	checkOfflineMigration := flag.Bool("check-offline-migration", false, "verify an existing realm differs only by local offline-access grants")
+	grantOffline := flag.Bool("grant-offline-access", false, "enable offline access for the two local fixture users without resetting the realm")
 	flag.Parse()
+	if *checkOfflineMigration {
+		return checkOfflineRoleMigration(*state)
+	}
+	if *grantOffline {
+		return grantLocalOfflineAccess(*state)
+	}
 	if *checkPort {
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:18080", time.Second)
-		if err != nil {
+		conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", "127.0.0.1:18080")
+		if errors.Is(err, syscall.ECONNREFUSED) {
 			return nil
 		}
-		conn.Close()
+		if err != nil {
+			return errors.New("cannot verify whether port 18080 is available")
+		}
+		_ = conn.Close()
 		return errors.New("port 18080 is occupied; coordinate stopping that process before starting Keycloak")
 	}
 	if *probe {
@@ -73,7 +86,7 @@ func prepare(base, state, redirect string) error {
 	if err := os.MkdirAll(state, 0700); err != nil {
 		return err
 	}
-	if err := os.Chmod(state, 0700); err != nil {
+	if err := os.Chmod(state, 0700); err != nil { //nolint:gosec // Private directory requires owner traversal; files below use 0600.
 		return err
 	}
 	secretPath := filepath.Join(state, "secrets.env")
@@ -148,7 +161,7 @@ func localRealm(secrets map[string]string, redirect string) map[string]any {
 		return c
 	}
 	user := func(name, password, group string) map[string]any {
-		return map[string]any{"username": name, "enabled": true, "emailVerified": true, "email": name + "@localhost.test", "firstName": "Local", "lastName": name, "credentials": []any{map[string]any{"type": "password", "value": password, "temporary": false}}, "groups": []string{group}}
+		return map[string]any{"username": name, "enabled": true, "emailVerified": true, "email": name + "@localhost.test", "firstName": "Local", "lastName": name, "credentials": []any{map[string]any{"type": "password", "value": password, "temporary": false}}, "groups": []string{group}, "realmRoles": []string{"offline_access"}}
 	}
 	return map[string]any{
 		"realm": "cluster-vending", "enabled": true, "sslRequired": "none", "registrationAllowed": false, "resetPasswordAllowed": false, "accessTokenLifespan": 300,
@@ -207,9 +220,9 @@ func writePrivate(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -220,18 +233,17 @@ func writePrivate(path string, data []byte) error {
 
 func probeAPI() error {
 	// 10 means there is no listener. Other failures must never start a duplicate.
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:8080", time.Second)
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", "127.0.0.1:8080")
 	if err != nil {
-		var op *net.OpError
-		if errors.As(err, &op) && op.Op == "dial" {
+		if errors.Is(err, syscall.ECONNREFUSED) {
 			os.Exit(10)
 		}
 		return err
 	}
-	conn.Close()
+	_ = conn.Close()
 	client := &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for _, token := range []string{"", "Bearer invalid-local-token"} {
-		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:8080/cloud.v1.TenantService/WhoAmI", strings.NewReader("{}"))
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://127.0.0.1:8080/cloud.v1.TenantService/WhoAmI", strings.NewReader("{}"))
 		if err != nil {
 			return err
 		}
@@ -247,7 +259,7 @@ func probeAPI() error {
 			Code string `json:"code"`
 		}
 		err = json.NewDecoder(res.Body).Decode(&body)
-		res.Body.Close()
+		_ = res.Body.Close()
 		if err != nil || res.StatusCode != http.StatusUnauthorized || body.Code != "unauthenticated" {
 			return errors.New("existing listener on 8080 does not enforce required authentication; stop it explicitly and rerun")
 		}

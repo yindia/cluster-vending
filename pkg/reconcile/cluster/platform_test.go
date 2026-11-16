@@ -9,6 +9,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -147,6 +148,69 @@ func (w world) install(t *testing.T) *platform {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func TestPlatformPlanningFailurePreservesInstalledResources(t *testing.T) {
+	for _, mode := range []string{"private chart", "invalid definition", "invalid release pin"} {
+		t.Run(mode, func(t *testing.T) {
+			w, src := platformWorld(t)
+			w.helmConfig(t)
+			w.install(t)
+			w.deployed(t, "base")
+			w.install(t)
+			w.deployed(t, "mesh")
+			before, err := w.store.ManagedResources().ListByOwner(t.Context(), model.OwnerClusterComponents, w.row.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "private chart":
+				src.defs[0].Spec.Install.Helm.Credentials = &cloudv1alpha1.HelmCredentials{}
+			case "invalid definition":
+				src.defs[0].Spec.PlatformValues = &runtime.RawExtension{Raw: []byte(`{"unknown":"${no.such}"}`)}
+			case "invalid release pin":
+				src.release.Spec.Content.Kubernetes[0].Components[1].Values = &runtime.RawExtension{Raw: []byte(`[]`)}
+			}
+			p, err := w.svc.installPlatform(t.Context(), w.cluster(t))
+			if mode == "invalid definition" && err == nil {
+				t.Fatal("invalid platform definition did not stop planning")
+			}
+			if mode != "invalid definition" && (err != nil || !strings.Contains(phases(p), "FAILED")) {
+				t.Fatalf("failed plan was not reported: %v, %v", p, err)
+			}
+			after, err := w.store.ManagedResources().ListByOwner(t.Context(), model.OwnerClusterComponents, w.row.ID)
+			if err != nil || len(before) != len(after) {
+				t.Fatalf("failed plan changed inventory: before=%d after=%d err=%v", len(before), len(after), err)
+			}
+			for _, name := range []string{"base", "mesh"} {
+				if release := w.release(t, name); release == nil || !release.GetDeletionTimestamp().IsZero() {
+					t.Fatalf("planning failure uninstalled %s", name)
+				}
+			}
+		})
+	}
+}
+
+func TestPlatformExplicitReleaseRemovalStillUninstalls(t *testing.T) {
+	for _, mode := range []string{"removed pin", "disabled definition"} {
+		t.Run(mode, func(t *testing.T) {
+			w, src := platformWorld(t)
+			w.helmConfig(t)
+			w.install(t)
+			w.deployed(t, "base")
+			w.install(t)
+			w.deployed(t, "mesh")
+			if mode == "removed pin" {
+				src.release.Spec.Content.Kubernetes[0].Components = src.release.Spec.Content.Kubernetes[0].Components[:1]
+			} else {
+				src.defs[0].Spec.Disabled = true
+			}
+			w.install(t)
+			if release := w.release(t, "mesh"); release != nil && release.GetDeletionTimestamp().IsZero() {
+				t.Fatal("explicit removal was preserved as a planning failure")
+			}
+		})
+	}
 }
 
 // Platform components install in requires order, each once the one

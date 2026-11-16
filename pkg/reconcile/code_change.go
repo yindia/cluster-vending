@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -17,9 +18,22 @@ import (
 // again; the next failure halts it.
 const CodeRecoveries = 3
 
+// CodeEpoch identifies this controller session. Networks must report the render
+// they observed in this session before any new network code rollout can start.
+// A restart deliberately requires observation again; this is not an admission
+// carried over from the previous binary/process.
+var codeEpoch = uuid.NewString()
+
+func CodeEpoch() string { return codeEpoch }
+
 // CodeFacts are what deciding a resource's code change reads: what a new
 // controller build renders for it against what was applied.
 type CodeFacts struct {
+	// Epoch optionally binds a code target to the controller that observed it.
+	Epoch string
+	// WaitForConvergence keeps a network's apply in flight until current
+	// provider observations confirm its newly rendered objects.
+	WaitForConvergence bool
 	// Applied are the fingerprints recorded when it was last applied (nil:
 	// by a build that did not record them); Now those of this build.
 	Applied, Now map[string]string
@@ -51,7 +65,15 @@ type CodeDecision struct {
 
 // Pending reports whether the render differs from what was applied.
 func (f CodeFacts) Pending() bool {
-	return f.Behind || (f.Applied != nil && sequence.Diff(f.Applied, f.Now).Total() > 0)
+	return f.Behind || f.WaitForConvergence || (f.Applied != nil && sequence.Diff(f.Applied, f.Now).Total() > 0)
+}
+
+func (f CodeFacts) Target() string {
+	target := sequence.Digest(f.Now)
+	if f.Epoch != "" {
+		return f.Epoch + "/" + target
+	}
+	return target
 }
 
 // summary says what changes, for people.
@@ -72,9 +94,12 @@ func (f CodeFacts) summary() (string, int32) {
 // one starts (Applying).
 func DecideCode(f CodeFacts) CodeDecision {
 	if f.Applied == nil && !f.Behind {
-		return CodeDecision{Status: f.Prev, Adopt: true}
+		return CodeDecision{Status: f.observedEpoch(), Adopt: true}
 	}
 	if !f.Pending() {
+		if f.Epoch != "" {
+			return CodeDecision{Status: f.observedEpoch()}
+		}
 		// Applied meanwhile (by an update's apply, say): done.
 		if p := f.Prev.GetPhase(); p == cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_PENDING || p == cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_APPLYING {
 			st := proto.CloneOf(f.Prev)
@@ -84,7 +109,7 @@ func DecideCode(f CodeFacts) CodeDecision {
 		return CodeDecision{Status: f.Prev}
 	}
 	summary, objects := f.summary()
-	target := sequence.Digest(f.Now)
+	target := f.Target()
 	st := &cloudv1.CodeChange{Phase: cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_PENDING, Summary: summary, Objects: objects, Target: target}
 	prev := f.Prev.GetPhase()
 	switch {
@@ -105,6 +130,20 @@ func DecideCode(f CodeFacts) CodeDecision {
 	}
 	st.Phase, st.StartTime = cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_APPLYING, timestamppb.New(f.At)
 	return CodeDecision{Status: st, Apply: true, Started: true}
+}
+
+// Observation of unchanged code is not a new apply or soak. Preserve the last
+// real finish time and emit no Started/Finished transition for a process restart.
+func (f CodeFacts) observedEpoch() *cloudv1.CodeChange {
+	if f.Epoch == "" {
+		return f.Prev
+	}
+	st := proto.CloneOf(f.Prev)
+	if st == nil {
+		st = &cloudv1.CodeChange{}
+	}
+	st.Phase, st.Target = cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_DONE, f.Target()
+	return st
 }
 
 // CodeApplied is the code change once its apply ended: done when what is

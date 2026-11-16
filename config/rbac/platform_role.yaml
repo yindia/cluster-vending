@@ -16,6 +16,19 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: platform-role
 rules:
+# Kubernetes-backed uniqueness claims, including physical EKS-name reservations
+# in kube-system. Both API writes and controller recovery use direct reads.
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - patch
+  - delete
 # Installing the providers at startup (--install-providers,
 # pkg/crossplane/aws InstallProviders): the AWS providers, provider-helm and
 # their runtime configs are created when missing, never changed.

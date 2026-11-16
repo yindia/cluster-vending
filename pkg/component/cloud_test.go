@@ -95,6 +95,26 @@ func TestExpandPolicy(t *testing.T) {
 	}
 }
 
+func TestExpandPolicyEnforcesFinalDocumentBudget(t *testing.T) {
+	vars := Vars{VarClusterName: strings.Repeat("a", 40)}
+	growth := 40 - len("${cluster.name}")
+	for _, size := range []int{MaxPolicySize - growth, MaxPolicySize - growth + 1} {
+		policy := bigPolicy(size, 0)
+		policy = strings.Replace(policy, strings.Repeat("a", len("${cluster.name}")), "${cluster.name}", 1)
+		if err := ValidateCloudResources(role(func(r *IAMRole) { r.Policy = policy })); err != nil {
+			t.Fatalf("valid template was rejected: %v", err)
+		}
+		expanded, err := ExpandPolicy(policy, vars)
+		if size+growth > MaxPolicySize {
+			if err == nil || !strings.Contains(err.Error(), "expanded IAM policy") || expanded != "" {
+				t.Fatalf("oversized expanded policy was accepted: size=%d err=%v", len(expanded), err)
+			}
+		} else if err != nil || policySize(expanded) != MaxPolicySize {
+			t.Fatalf("within-budget expansion rejected: %v", err)
+		}
+	}
+}
+
 func TestCheckCluster(t *testing.T) {
 	tests := []struct {
 		name    string

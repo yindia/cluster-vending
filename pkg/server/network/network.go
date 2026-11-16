@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -67,6 +68,9 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 		return nil, service.ToConnect(err)
 	}
 	if id := req.GetRequestId(); id != "" {
+		if err := cloudstore.ResumeNetworkCreate(ctx, s.deps.Store, req.GetTenantId(), id); err != nil {
+			return nil, service.ToConnect(err)
+		}
 		row, err := s.deps.Store.Networks().GetByCreateRequest(ctx, req.GetTenantId(), id)
 		if err == nil {
 			n, err := s.stored(ctx, row)

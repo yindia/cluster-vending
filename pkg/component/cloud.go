@@ -146,6 +146,9 @@ func ExpandPolicy(policy string, vars Vars) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode the policy: %w", err)
 	}
+	if n := policySize(string(b)); n > MaxPolicySize {
+		return "", fault.Newf(fault.Invalid, "expanded IAM policy has %d characters without whitespace; AWS allows %d", n, MaxPolicySize)
+	}
 	return string(b), nil
 }
 

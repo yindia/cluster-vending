@@ -39,8 +39,15 @@ type Input struct {
 	// it offers none or the release is gone.
 	Release  *cloudv1alpha1.Release
 	Clusters []cloudv1alpha1.Cluster
-	Holds    []cloudv1alpha1.ReleaseHold
-	Now      time.Time
+	// Networks are the shared networks participating in this channel's code
+	// rollout, including empty networks (which participate in every channel).
+	Networks []cloudv1alpha1.Network
+	// NetworkClusters includes other channels when evaluating shared-network holds.
+	NetworkClusters []cloudv1alpha1.Cluster
+	// CodeEpoch is the controller observation session for shared network code.
+	CodeEpoch string
+	Holds     []cloudv1alpha1.ReleaseHold
+	Now       time.Time
 	// Automatic is the controller's automatic-upgrades setting; off, the
 	// plan is reported only.
 	Automatic bool

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/yindia/cluster-vending/pkg/auth"
+	"github.com/yindia/cluster-vending/pkg/cli/login"
 )
 
 // Opt-in integration test: exercises real browser-code PKCE and signed access
@@ -56,6 +58,11 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 				}}
 				ctx := context.WithValue(context.Background(), oauth2.HTTPClient, client)
 				conf := oauth2.Config{ClientID: clientID, RedirectURL: "http://localhost:18081/callback", Scopes: []string{"openid", "profile", "email"}, Endpoint: oauth2.Endpoint{AuthURL: issuer + "/protocol/openid-connect/auth", TokenURL: issuer + "/protocol/openid-connect/token", AuthStyle: oauth2.AuthStyleInParams}}
+				if clientID != "cv-ui" {
+					// Exercise exactly the CLI defaults, including the scope that
+					// requires the user's built-in offline_access realm role.
+					conf.Scopes = []string{"openid", "offline_access"}
+				}
 				switch clientID {
 				case "cv-cli-confidential":
 					conf.ClientSecret = secrets["KEYCLOAK_CLI_CLIENT_SECRET"]
@@ -69,7 +76,7 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 					t.Fatal("authorization endpoint unavailable")
 				}
 				loginURL := loginForm(res.Body)
-				res.Body.Close()
+				_ = res.Body.Close()
 				if loginURL == "" {
 					t.Fatal("login form not returned")
 				}
@@ -77,7 +84,7 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 				if err != nil {
 					t.Fatal("login request failed")
 				}
-				res.Body.Close()
+				_ = res.Body.Close()
 				back, err := url.Parse(res.Header.Get("Location"))
 				if err != nil || back.Query().Get("code") == "" || back.Query().Get("state") != "local-smoke" {
 					t.Fatal("login did not return an authorization code")
@@ -85,6 +92,12 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 				token, err := conf.Exchange(ctx, back.Query().Get("code"), oauth2.VerifierOption(proof))
 				if err != nil {
 					t.Fatal("PKCE exchange failed")
+				}
+				if clientID != "cv-ui" {
+					scope, _ := token.Extra("scope").(string)
+					if token.RefreshToken == "" || !strings.Contains(" "+scope+" ", " offline_access ") {
+						t.Fatal("CLI defaults did not receive offline refresh access")
+					}
 				}
 				id, err := verifier.Verify(ctx, token.AccessToken)
 				if err != nil {
@@ -104,6 +117,64 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 	}
 }
 
+// Use the real CLI implementation and its default scopes, not a parallel
+// hand-written token exchange, so callback-page and offline-access bugs regress.
+func TestLiveKeycloakCLIBrowser(t *testing.T) {
+	if os.Getenv("CV_KEYCLOAK_LIVE") != "1" {
+		t.Skip("set CV_KEYCLOAK_LIVE=1 with the local callback port 18081 available")
+	}
+	secrets, err := readSecrets(filepath.Join("..", ".keycloak", "secrets.env"))
+	if err != nil || secrets == nil {
+		t.Fatal("private fixture credentials unavailable")
+	}
+	for _, clientID := range []string{"cv-cli", "cv-cli-confidential"} {
+		t.Run(clientID, func(t *testing.T) {
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			browser := &http.Client{Jar: jar, Timeout: 15 * time.Second}
+			open := func(target string) error {
+				response, err := browser.Get(target)
+				if err != nil {
+					return io.ErrUnexpectedEOF
+				}
+				action := loginForm(response.Body)
+				_ = response.Body.Close()
+				if action == "" {
+					return io.ErrUnexpectedEOF
+				}
+				response, err = browser.PostForm(action, url.Values{"username": {"acme-admin"}, "password": {secrets["KEYCLOAK_ACME_ADMIN_PASSWORD"]}, "credentialId": {""}})
+				if err != nil {
+					return io.ErrUnexpectedEOF
+				}
+				defer func() { _ = response.Body.Close() }()
+				body, err := io.ReadAll(io.LimitReader(response.Body, 4096))
+				if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "Authentication completed") {
+					t.Error("browser did not report verified authentication")
+				}
+				return nil
+			}
+			options := login.Options{Issuer: issuer, ClientID: clientID, Browser: true, RedirectHost: "localhost", CallbackPort: 18081, OpenBrowser: open, Out: io.Discard}
+			if clientID == "cv-cli-confidential" {
+				options.ClientSecret = secrets["KEYCLOAK_CLI_CLIENT_SECRET"]
+			}
+			credentials, err := login.Login(t.Context(), options)
+			if err != nil || credentials == nil || credentials.RefreshToken == "" {
+				t.Fatal("real CLI browser login with default scopes failed")
+			}
+			cfg, err := localAuth().Resolved()
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := auth.NewVerifier(cfg).Verify(t.Context(), credentials.Bearer())
+			if err != nil || identity.Username != "acme-admin" || identity.IsPlatformAdmin() {
+				t.Fatal("CLI token did not verify with expected tenant identity")
+			}
+		})
+	}
+}
+
 func loginForm(body io.Reader) string {
 	z := html.NewTokenizer(body)
 	for {
@@ -119,6 +190,8 @@ func loginForm(body io.Reader) string {
 					}
 				}
 			}
+		default:
+			// Only form start tags carry the login action.
 		}
 	}
 }

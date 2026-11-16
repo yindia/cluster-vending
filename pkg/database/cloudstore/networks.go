@@ -118,6 +118,9 @@ func remainderJSON(has bool, remainder proto.Message) (string, error) {
 
 // row is the row an object holds.
 func (r networks) row(obj *cloudv1alpha1.Network) (*model.Network, error) {
+	if obj.Annotations[accountFencePending] != "" {
+		return nil, fmt.Errorf("%w: network creation is awaiting its account fence; retry the original create request", repository.ErrConflict)
+	}
 	remainder := &cloudv1.NetworkSpec{}
 	if err := decode([]byte(obj.Annotations[AnnotationRemainder]), remainder); err != nil {
 		return nil, fmt.Errorf("network %s: stored spec remainder: %w", obj.Name, err)
@@ -244,6 +247,9 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 	if err != nil {
 		return err
 	}
+	if err := activeNetworkAccount(account); err != nil {
+		return err
+	}
 	if err := onlyAWS(n.Provider); err != nil {
 		return err
 	}
@@ -254,6 +260,7 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 	if err := r.fill(n, account.Name, obj); err != nil {
 		return err
 	}
+	markAccountFence(obj, account)
 	if err := owner.Set(account, obj, r.c.Scheme()); err != nil {
 		return invalid(err)
 	}
@@ -264,6 +271,13 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 	if err := r.insert(ctx, obj, func() { r.setStatus(obj, n.Status, n.State) }); err != nil {
 		r.release(ctx, obj.Namespace, keys...)
 		return err
+	}
+	if err := r.finishAccountFence(ctx, obj); err != nil {
+		cleanupErr := r.takeBackPending(ctx, obj)
+		if cleanupErr == nil {
+			r.release(ctx, obj.Namespace, keys...)
+		}
+		return errors.Join(err, cleanupErr)
 	}
 	r.created(func(ctx context.Context) error {
 		err := r.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan))

@@ -110,6 +110,22 @@ func MustNetwork(t *testing.T, s repository.Store, tenant, name string) *model.N
 	return n
 }
 
+// A same-named cluster in another tenant must have a distinct physical AWS
+// account (or region), rather than accidentally sharing the same EKS identity.
+func networkInOtherAccount(t *testing.T, s repository.Store, tenant, name string) *model.Network {
+	t.Helper()
+	a := &model.CloudAccount{TenantID: tenant, Provider: model.ProviderAWS, AccountID: "999988887777"}
+	if err := s.Tenants().PutCloudAccount(t.Context(), a); err != nil {
+		t.Fatal(err)
+	}
+	n := &model.Network{TenantID: tenant, Name: name, Provider: model.ProviderAWS, Region: "us-east-1", CloudAccountID: a.ID,
+		Resource: model.Resource{State: "NETWORK_STATE_READY", Spec: Spec("network")}}
+	if err := s.Networks().Create(t.Context(), n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // MustCluster creates a RUNNING aws cluster of the name in the network,
 // in us-east-1.
 func MustCluster(t *testing.T, s repository.Store, tenant, name string, network *model.Network) *model.Cluster {

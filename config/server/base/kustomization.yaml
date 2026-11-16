@@ -5,6 +5,9 @@
 # the server waits for, installs the providers and reconciles.
 #
 #   make deploy-manifests          # render, nothing is applied
+#
+# Authentication is opt-in: this base accepts anonymous callers for every
+# tenant. Use ../auth for an example with required JWT authentication.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

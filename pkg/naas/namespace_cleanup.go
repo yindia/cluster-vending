@@ -19,7 +19,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/resource"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -71,6 +71,13 @@ func PreflightNamespaceCleanup(ctx context.Context, c client.Client, remote *uns
 		if !matches {
 			continue
 		}
+		foreign, err := NamespaceBelongsToForeignAllocation(ctx, c, sub, &ns)
+		if err != nil {
+			return namespaces, blockers, err
+		}
+		if foreign {
+			continue
+		}
 		namespaces = append(namespaces, ns)
 		if err := namespaceOwnership(remote, sub, &ns); err != nil {
 			blockers = append(blockers, fmt.Sprintf("Namespace %s: %s", ns.Name, err))
@@ -91,6 +98,61 @@ func PreflightNamespaceCleanup(ctx context.Context, c client.Client, remote *uns
 		blockers = append(blockers[:63], fmt.Sprintf("and %d more content blockers", len(blockers)-63))
 	}
 	return namespaces, blockers, nil
+}
+
+// NamespaceBelongsToForeignAllocation excludes a prefix neighbor only after
+// verifying its live Capsule Tenant UID and complete platform identity labels.
+// Conflicting current-allocation evidence or stripped labels remain blockers.
+func NamespaceBelongsToForeignAllocation(ctx context.Context, c client.Client, sub *cloud.SubTenant, ns *corev1.Namespace) (bool, error) {
+	name, err := RemoteTenantName(sub)
+	if err != nil {
+		return false, err
+	}
+	if ns.Labels[LabelSubTenantID] == sub.Name || ns.Labels["capsule.clastix.io/tenant"] == name {
+		return false, nil
+	}
+	for _, key := range sub.Spec.NamespaceKeys {
+		if ns.Name == name+"-"+string(key) {
+			return false, nil
+		}
+	}
+	for _, recorded := range sub.Status.Namespaces {
+		if recorded.Name == ns.Name {
+			return false, nil
+		}
+	}
+	for _, owner := range ns.OwnerReferences {
+		if owner.APIVersion == TenantGVK.GroupVersion().String() && owner.Kind == "Tenant" && owner.Name == name {
+			return false, nil
+		}
+	}
+	if len(ns.OwnerReferences) != 1 {
+		return false, nil
+	}
+	owner := ns.OwnerReferences[0]
+	if owner.APIVersion != TenantGVK.GroupVersion().String() || owner.Kind != "Tenant" || owner.UID == "" || owner.Name == "" || owner.Name == name || ns.Labels["capsule.clastix.io/tenant"] != owner.Name || !strings.HasPrefix(ns.Name, owner.Name+"-") {
+		return false, nil
+	}
+	foreign := &unstructured.Unstructured{}
+	foreign.SetGroupVersionKind(TenantGVK)
+	if err := c.Get(ctx, client.ObjectKey{Name: owner.Name}, foreign); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("cannot verify foreign allocation ownership for namespace %s: %w", ns.Name, err)
+	}
+	if foreign.GetUID() != owner.UID || foreign.GetNamespace() != "" {
+		return false, nil
+	}
+	for _, label := range []string{LabelSubTenantID, LabelSubTenantUID, LabelTenant, LabelTenantUID, LabelClusterUID, "cloud.cluster-vending.io/cluster-id"} {
+		if foreign.GetLabels()[label] == "" {
+			return false, nil
+		}
+	}
+	if ns.Labels[LabelSubTenantID] != foreign.GetLabels()[LabelSubTenantID] || ns.Labels[LabelTenant] != foreign.GetLabels()[LabelTenant] {
+		return false, nil
+	}
+	return true, nil
 }
 
 // DeleteEmptyNamespace is the sole offboarding exception to the Tenant-only
@@ -241,13 +303,53 @@ func namespaceBudgetQuota(ctx context.Context, c client.Client, obj, remote *uns
 	if c.Get(ctx, client.ObjectKey{Name: globalName}, global) != nil || global.GetUID() != owner.UID || len(global.GetOwnerReferences()) != 1 || !tenantOwner(global.GetOwnerReferences()[0], remote) {
 		return false
 	}
-	want := corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{}}
-	for key, value := range sub.Spec.Quota.Hard {
-		q, err := resource.ParseQuantity(value)
+	if !OwnTenant(remote, sub) {
+		return false
+	}
+	applied, err := DeletionAppliedTenant(remote)
+	if err != nil {
+		return false
+	}
+	rules, _, err := unstructured.NestedSlice(applied.Object, "spec", "rules")
+	if err != nil {
+		return false
+	}
+	var want corev1.ResourceQuotaSpec
+	found := false
+	for _, raw := range rules {
+		rule, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		quotas, _, err := unstructured.NestedSlice(rule, "quota")
 		if err != nil {
 			return false
 		}
-		want.Hard[corev1.ResourceName(key)] = q
+		for _, rawQuota := range quotas {
+			budget, ok := rawQuota.(map[string]any)
+			if !ok {
+				return false
+			}
+			if budget["name"] != "budget" {
+				continue
+			}
+			if found {
+				return false
+			}
+			found = true
+			config := map[string]any{}
+			for _, field := range []string{"hard", "scopes", "scopeSelector"} {
+				if value, ok := budget[field]; ok {
+					config[field] = value
+				}
+			}
+			if runtime.DefaultUnstructuredConverter.FromUnstructured(config, &want) != nil || len(want.Hard) == 0 {
+				return false
+			}
+		}
+	}
+	if !found {
+		return false
 	}
 	if !equality.Semantic.DeepEqual(quota.Spec, want) {
 		return false
@@ -265,16 +367,24 @@ func namespaceBudgetQuota(ctx context.Context, c client.Client, obj, remote *uns
 }
 
 func namespaceCleanupBaseline(remote *unstructured.Unstructured, sub *cloud.SubTenant, ns *corev1.Namespace) (map[string]*unstructured.Unstructured, error) {
-	pss, _, err := unstructured.NestedString(remote.Object, "spec", "data", "naas", "pssVersion")
+	tenant, err := DeletionAppliedTenant(remote)
 	if err != nil {
 		return nil, err
 	}
-	// Reconstruct the registered keys after withdrawal cleared the remote keys.
-	tenant, err := RenderTenant(sub, pss, "cleanup")
-	if err != nil {
-		return nil, err
+	if remote.GetAnnotations()[DeletionAppliedSpecAnnotation] == "" {
+		// Compatibility for deletions begun before applied snapshots existed.
+		// Quota/rules still come from the owned remote object, never desired spec.
+		keys, _, _ := unstructured.NestedSlice(tenant.Object, "spec", "data", "naas", "namespaceKeys")
+		if len(keys) == 0 {
+			for _, key := range sub.Spec.NamespaceKeys {
+				keys = append(keys, string(key))
+			}
+			if err := unstructured.SetNestedSlice(tenant.Object, keys, "spec", "data", "naas", "namespaceKeys"); err != nil {
+				return nil, err
+			}
+		}
 	}
-	tenant.SetUID(remote.GetUID())
+
 	rawNS, err := runtime.DefaultUnstructuredConverter.ToUnstructured(ns)
 	if err != nil {
 		return nil, err

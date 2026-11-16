@@ -123,6 +123,18 @@ The optional confidential client uses
 `KEYCLOAK_CLI_CLIENT_SECRET`, supplied through the CLI's client-secret
 environment setting; never put the secret on a command line or in kubeconfig.
 
+The CLI defaults to `openid offline_access`. Both local fixture users have
+Keycloak's built-in `offline_access` realm role, which authorizes offline refresh
+tokens. This role does not add a tenant or platform grant. See
+[Keycloak offline access](https://www.keycloak.org/docs/latest/server_admin/#_offline-access).
+Without it, browser authentication can return a code but the token exchange is
+rejected with `not_allowed`.
+
+Startup recognizes the older fixture's missing offline-role assignments and
+adds that role only to `acme-admin` and `acme-viewer`. The migration preserves
+credentials, clients, groups, tenant permissions and realm data. Other changes
+to the imported fixture still require the explicit development reset procedure.
+
 ## Reruns and stopping
 
 `bash hack/keycloak.sh start` starts/reuses Keycloak without touching the API.

@@ -213,9 +213,36 @@ export async function logout(request: Request): Promise<Response> {
   if (!config) return new Response(null, { status: 303, headers: { Location: "/" } });
   if (!sameOrigin(request, config)) return new Response(null, { status: 403, headers });
   const session = await readSession(request, config);
-  if (!session || Number(request.headers.get("Content-Length") ?? 0) > 4096) return new Response(null, { status: 403, headers });
+  if (!session) return new Response(null, { status: 403, headers });
+  const maxBodyBytes = 4096;
+  if (Number(request.headers.get("Content-Length") ?? 0) > maxBodyBytes) return new Response(null, { status: 413, headers });
   let csrf: string;
-  try { csrf = String((await request.formData()).get("csrfToken") ?? ""); }
+  try {
+    // Content-Length can be absent on streamed requests. Bound actual bytes
+    // before formData() buffers/parses them, including before the CSRF check.
+    const reader = request.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (reader) {
+      try {
+        for (;;) {
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.byteLength;
+          if (size > maxBodyBytes) {
+            await reader.cancel();
+            return new Response(null, { status: 413, headers });
+          }
+          chunks.push(part.value);
+        }
+      } finally { reader.releaseLock(); }
+    }
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.length; }
+    const form = await new Response(body, { headers: { "Content-Type": request.headers.get("Content-Type") ?? "" } }).formData();
+    csrf = String(form.get("csrfToken") ?? "");
+  }
   catch { return new Response(null, { status: 400, headers }); }
   if (!sameSecret(csrf, session.csrf)) return new Response(null, { status: 403, headers });
   clearAuthCookies(headers, config);

@@ -62,15 +62,24 @@ type PlatformEntry struct {
 }
 
 // PlatformEntries are the catalog's Platform definitions in install order
-// (PlatformComponents), each with its install. A definition that is not
-// usable (CheckDefinition) is not in the catalog. An error when the
-// Platform definitions are inconsistent.
+// (PlatformComponents), each with its install. An invalid Platform definition
+// fails planning instead of silently removing an installed component. Invalid
+// tenant definitions are excluded. Inconsistent Platform definitions also fail.
 func PlatformEntries(defs []cloudv1alpha1.ComponentDefinition) ([]PlatformEntry, error) {
 	installs := map[string]Install{}
 	var usable []Definition
 	for i := range defs {
 		d, err := DefinitionOf(&defs[i])
-		if err != nil || len(CheckDefinition(d)) > 0 {
+		if err != nil {
+			if defs[i].Spec.Management == cloudv1alpha1.ComponentManagementPlatform {
+				return nil, fmt.Errorf("platform component %s is invalid: %w", defs[i].Name, err)
+			}
+			continue
+		}
+		if problems := CheckDefinition(d); len(problems) > 0 {
+			if d.IsPlatform() {
+				return nil, fmt.Errorf("platform component %s is invalid: %s", d.Name, strings.Join(problems, "; "))
+			}
 			continue
 		}
 		usable = append(usable, d)
@@ -123,6 +132,9 @@ type PlatformInput struct {
 // NotInstalled is a Platform component the plan leaves out, and why.
 type NotInstalled struct {
 	Name, Reason string
+	// Preserve prevents render/validation failures from becoming uninstall intent.
+	// An absent release pin (and dependents of that explicit removal) is intentional.
+	Preserve bool
 }
 
 // PlanPlatform resolves the Platform components of a cluster to what is
@@ -146,14 +158,20 @@ func PlanPlatform(in PlatformInput) (crossplaneaws.PlatformPlan, []NotInstalled)
 	plan.Components = nil
 	var skipped []NotInstalled
 	out := map[string]bool{}
-	skip := func(name, reason string) {
-		out[name] = true
-		skipped = append(skipped, NotInstalled{Name: name, Reason: reason})
-	}
+	preserve := map[string]bool{}
 	for _, e := range in.Entries {
 		c, reason := planComponent(in, e, out)
 		if reason != "" {
-			skip(e.Name, reason)
+			_, pinned := in.Pins[e.Name]
+			keep := pinned
+			for _, dependency := range e.Requires {
+				if out[dependency] {
+					keep = pinned && preserve[dependency]
+					break
+				}
+			}
+			out[e.Name], preserve[e.Name] = true, keep
+			skipped = append(skipped, NotInstalled{Name: e.Name, Reason: reason, Preserve: keep})
 			continue
 		}
 		plan.Components = append(plan.Components, c)

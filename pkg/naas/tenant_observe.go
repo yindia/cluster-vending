@@ -156,6 +156,13 @@ func ObserveTenantNamespaces(ctx context.Context, c client.Client, remote *unstr
 		if !matches {
 			continue
 		}
+		foreign, err := NamespaceBelongsToForeignAllocation(ctx, c, sub, &ns)
+		if err != nil {
+			return nil, nil, err
+		}
+		if foreign {
+			continue
+		}
 		key := strings.TrimPrefix(ns.Name, name+"-")
 		if strings.HasPrefix(ns.Name, name+"-") && len(key) <= 27 {
 			found[key] = true
@@ -256,7 +263,7 @@ func verifyNamespace(ctx context.Context, c client.Client, remote *unstructured.
 					if err := c.Get(ctx, client.ObjectKeyFromObject(expected), current); err != nil {
 						return fmt.Errorf("baseline %s %s is unavailable", expected.GetKind(), expected.GetName())
 					}
-					if !payloadMatches(current, expected) {
+					if !ProvisioningPayloadMatches(current, expected) {
 						return fmt.Errorf("baseline %s %s differs from the current protected template", expected.GetKind(), expected.GetName())
 					}
 				}

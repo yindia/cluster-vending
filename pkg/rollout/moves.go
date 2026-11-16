@@ -59,11 +59,15 @@ func planChanges(out cloudv1alpha1.ChannelReleaseMoves, ch *cloudv1alpha1.Releas
 			out.Blocked = append(out.Blocked, cloudv1alpha1.BlockedCluster{Cluster: m.ID, Gate: string(gate.Code), Message: gate.Message})
 		}
 	}
+	return planChangeMembers(out, ch, policy, in.Now, members)
+}
+
+func planChangeMembers(out cloudv1alpha1.ChannelReleaseMoves, ch *cloudv1alpha1.ReleaseChannel, policy upgrade.Policy, now time.Time, members []upgrade.Member) cloudv1alpha1.ChannelReleaseMoves {
 	if len(members) == 0 {
 		out.Done = true
 		return out
 	}
-	d := upgrade.Plan(policy, in.Now, members)
+	d := upgrade.Plan(policy, now, members)
 	if ch.Spec.Paused && !d.Halted && len(d.Start) > 0 {
 		d.Start, d.Waiting = nil, "the channel is paused (spec.paused): no cluster starts"
 	}

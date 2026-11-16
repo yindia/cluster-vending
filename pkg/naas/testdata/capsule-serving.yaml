@@ -1,0 +1,86 @@
+# An old ReplicaSet remains available while the new Deployment revision rolls.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capsule-controller-manager
+  namespace: capsule-system
+  uid: deployment-uid
+  generation: 8
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: capsule}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: capsule}
+    spec:
+      serviceAccountName: capsule
+      containers: [{name: manager, image: capsule:test}]
+status:
+  observedGeneration: 7
+  availableReplicas: 1
+  updatedReplicas: 0
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: capsule-old
+  namespace: capsule-system
+  uid: old-replicaset-uid
+  ownerReferences:
+    - {apiVersion: apps/v1, kind: Deployment, name: capsule-controller-manager, uid: deployment-uid, controller: true}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: capsule-old-serving
+  namespace: capsule-system
+  uid: pod-uid
+  labels: {app.kubernetes.io/name: capsule}
+  ownerReferences:
+    - {apiVersion: apps/v1, kind: ReplicaSet, name: capsule-old, uid: old-replicaset-uid, controller: true}
+spec:
+  serviceAccountName: capsule
+  containers: [{name: manager, image: capsule:old}]
+status:
+  phase: Running
+  conditions:
+    - {type: Ready, status: 'True'}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: capsule-webhook-service
+  namespace: capsule-system
+  uid: service-uid
+spec:
+  selector: {app.kubernetes.io/name: capsule}
+  ports: [{name: admission, port: 9443, targetPort: 9443}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: capsule-webhook-serving
+  namespace: capsule-system
+  labels: {kubernetes.io/service-name: capsule-webhook-service}
+  ownerReferences:
+    - {apiVersion: v1, kind: Service, name: capsule-webhook-service, uid: service-uid, controller: true}
+addressType: IPv4
+ports: [{name: admission, protocol: TCP, port: 9443}]
+endpoints:
+  - addresses: [10.0.0.5]
+    conditions: {ready: true, terminating: false}
+    targetRef: {apiVersion: v1, kind: Pod, namespace: capsule-system, name: capsule-old-serving, uid: pod-uid}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: capsule-validating-webhook-configuration
+webhooks:
+  - name: tenants.validating.projectcapsule.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      caBundle: dGVzdC1jYQ==
+      service: {namespace: capsule-system, name: capsule-webhook-service, path: /tenants/validating, port: 9443}

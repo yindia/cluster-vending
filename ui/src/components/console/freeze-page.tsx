@@ -19,7 +19,7 @@ import { VStack } from "@astryxdesign/core/VStack";
 import { usePlatform } from "@/components/platform-provider";
 import { RefreshButton } from "./refresh-button";
 import { errorMessage, useAsyncQuery } from "@/lib/api/use-query";
-import { FreezePhase, FreezeTargetSchema, type FreezeTarget } from "@/gen/cloud/v1/admin_freeze_pb";
+import { FreezePhase, FreezeTargetSchema, type FreezeTarget, type FreezeStatus } from "@/gen/cloud/v1/admin_freeze_pb";
 import { CopyButton, CopyValue } from "./copy-value";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 
@@ -104,6 +104,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
   const [actionError, setActionError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState<Pending>();
+  const [confirmedOperation, setConfirmedOperation] = useState<Pending>();
   const [expired, setExpired] = useState<Pending>();
   const controller = useRef<AbortController | null>(null);
   const reasonRef = useRef<HTMLInputElement>(null);
@@ -118,23 +119,25 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
     const timer = setTimeout(() => setExpired(pending), waitLimit);
     return () => clearTimeout(timer);
   }, [pending]);
-  const load = useCallback(async (signal: AbortSignal) => {
-    const response = await api.tenant.getFreeze({ tenantId, target }, { signal });
-    return { response, operation: pending, observedAt: Date.now() };
-  }, [api, tenantId, target, pending]);
-  const operationComplete = useCallback((result: Awaited<ReturnType<typeof load>>) => {
+  const operationComplete = useCallback((result: { response: { status?: FreezeStatus } }) => {
     const current = result.response.status;
     return !!pending && current?.revision === pending.revision
       && current?.target?.scope.case === target.scope.case && current?.target?.scope.value === target.scope.value
       && current.phase === (pending.action === "freeze" ? FreezePhase.FROZEN : FreezePhase.UNFROZEN);
   }, [pending, target]);
-  const query = useAsyncQuery(load, { pollMs: 5000, observeOperation: !!pending, isComplete: operationComplete });
+  const load = useCallback(async (signal: AbortSignal) => {
+    const response = await api.tenant.getFreeze({ tenantId, target }, { signal });
+    // Keep historical confirmation when later live observations report expiry or another policy revision.
+    if (!signal.aborted && pending && operationComplete({ response })) setConfirmedOperation(pending);
+    return { response, operation: pending, observedAt: Date.now() };
+  }, [api, tenantId, target, pending, operationComplete]);
+  const query = useAsyncQuery(load, { pollMs: 5000, observeOperation: !!pending && confirmedOperation !== pending, isComplete: operationComplete });
   // A prior query may still be visible while the loader changes. It cannot confirm a new operation.
   const observation = query.data?.operation === pending ? query.data : undefined;
   const status = observation?.response.status;
   const targetMatches = status?.target?.scope.case === target.scope.case && status?.target?.scope.value === target.scope.value;
   const revisionMatches = !!pending && status?.revision === pending.revision;
-  const complete = !!pending && !!observation && targetMatches && revisionMatches && status?.phase === (pending.action === "freeze" ? FreezePhase.FROZEN : FreezePhase.UNFROZEN);
+  const complete = !!pending && (confirmedOperation === pending || !!observation && operationComplete(observation));
   const timedOut = !!pending && !complete && (expired === pending || !!observation && observation.observedAt - pending.startedAt >= waitLimit);
   const observingPending = !!pending && !complete && !timedOut;
   // Resume must stay available while a freeze is converging: waiting for the
@@ -218,7 +221,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
     ]} />}
     {status && <HStack gap={3} wrap="wrap" vAlign="center"><Text type="supporting">Policy revision</Text><CopyValue value={status.revision} label="policy revision" isSecondary /></HStack>}
     {pending && <Banner status={complete ? "success" : "warning"} title={complete ? "Convergence confirmed" : timedOut ? "Observation timed out" : "Request accepted; awaiting convergence"} description={complete
-      ? `GetFreeze reports ${pending.action === "freeze" ? "frozen" : "unfrozen"} for the selected scope and returned revision.`
+      ? `The requested ${pending.action} was confirmed for this scope at revision ${pending.revision}. Current policy is shown above.`
       : timedOut ? "Convergence was not confirmed within 15 minutes. Refresh status and inspect the scope before another action."
       : `Waiting for the canonical phase at revision ${pending.revision || "(empty)"}.${status && !revisionMatches ? " The observed revision differs; this does not confirm this request." : ""}`} />}
     {pending && !complete && <Button label="Stop operation observation" onClick={() => { setPending(undefined); invalidateReview(); }} />}
@@ -265,7 +268,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
       {status?.freeze?.since && <Text>Policy set (UTC): {new Date(Number(status.freeze.since.seconds) * 1000).toISOString()}</Text>}
       {status?.freeze?.by && <CopyValue value={status.freeze.by} label="policy actor" />}
       {pending && <VStack gap={2}><Text>Latest request: {pending.action}. {complete ? "Convergence confirmed." : timedOut ? "Observation timed out." : "Waiting for convergence."}</Text><CopyValue value={pending.revision} label="returned request revision" /></VStack>}
-      <Text>Idle status updates when refreshed. Submitted operations are observed every 5 seconds for up to 15 minutes. This is the latest observation, not an audit history.</Text>
+      <Text>Idle status follows Live updates; otherwise refresh manually. Submitted operations are observed every 5 seconds until completion, for up to 15 minutes. This is the latest observation, not an audit history.</Text>
     </>}
     </VStack> : null)}
     {review && <Dialog isOpen onOpenChange={closeConfirmation} purpose={submitting ? "required" : "form"} width="min(44rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={6}>

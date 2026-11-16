@@ -16,6 +16,9 @@ import (
 // hold. Parent lookup failures are isolated to that channel.
 func Read(ctx context.Context, c client.Reader, ch *cloudv1alpha1.ReleaseChannel) (Input, error) {
 	in := Input{Channel: ch}
+	if ch.Status.CodeChanges != nil {
+		in.CodeEpoch = ch.Status.CodeChanges.Release
+	}
 	if ch.Status.Release != "" {
 		rel := &cloudv1alpha1.Release{}
 		switch err := c.Get(ctx, client.ObjectKey{Name: ch.Status.Release}, rel); {
@@ -38,9 +41,25 @@ func Read(ctx context.Context, c client.Reader, ch *cloudv1alpha1.ReleaseChannel
 		return in, fmt.Errorf("list network tiers: %w", err)
 	}
 	byName := map[client.ObjectKey]*cloudv1alpha1.Network{}
+	in.NetworkClusters = slices.Clone(clusters.Items)
+	boundChannels := map[client.ObjectKey]map[string]bool{}
+	for _, cluster := range clusters.Items {
+		if !cluster.DeletionTimestamp.IsZero() || cluster.Spec.ReleaseChannel == "" {
+			continue
+		}
+		key := client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Spec.Network.NetworkRef.Name}
+		if boundChannels[key] == nil {
+			boundChannels[key] = map[string]bool{}
+		}
+		boundChannels[key][strings.ToLower(string(cluster.Spec.ReleaseChannel))] = true
+	}
 	for index := range networks.Items {
 		network := &networks.Items[index]
-		byName[client.ObjectKeyFromObject(network)] = network
+		key := client.ObjectKeyFromObject(network)
+		byName[key] = network
+		if len(boundChannels[key]) == 0 || boundChannels[key][ch.Name] {
+			in.Networks = append(in.Networks, *network)
+		}
 	}
 	clusters.Items = slices.DeleteFunc(clusters.Items, func(cluster cloudv1alpha1.Cluster) bool {
 		return !strings.EqualFold(string(cluster.Spec.ReleaseChannel), ch.Name)

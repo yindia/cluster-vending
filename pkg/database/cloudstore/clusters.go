@@ -301,6 +301,9 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	if err := prepare(&c.Resource); err != nil {
 		return err
 	}
+	if err := r.reserveEKSName(ctx, c, network, nil); err != nil {
+		return err
+	}
 	obj := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: network.Namespace, Name: c.Name}}
 	if err := r.fill(c, network.Name, obj); err != nil {
 		return err
@@ -524,6 +527,15 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
+	for _, kind := range []model.OwnerKind{model.OwnerCluster, model.OwnerClusterComponents} {
+		records, err := r.ManagedResources().ListByOwner(ctx, kind, id)
+		if err != nil {
+			return err
+		}
+		if len(records) != 0 {
+			return fmt.Errorf("%w: cluster inventory must be finalized before releasing its physical name", repository.ErrInUse)
+		}
+	}
 	enabled, err := items[*cloudv1alpha1.Component](ctx, r.store, &cloudv1alpha1.ComponentList{}, obj.Namespace,
 		map[string]string{LabelClusterID: id})
 	if err != nil {
@@ -542,6 +554,15 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 		return err
 	}
 	if err := r.remove(ctx, obj); err != nil {
+		return err
+	}
+	remaining := &cloudv1alpha1.Cluster{}
+	if err := r.c.Get(ctx, client.ObjectKeyFromObject(obj), remaining); err == nil {
+		return fmt.Errorf("%w: cluster still has finalizers; physical name reservation retained", repository.ErrConflict)
+	} else if !apierrors.IsNotFound(err) {
+		return translate(err)
+	}
+	if err := r.releaseEKSName(ctx, row); err != nil {
 		return err
 	}
 	r.release(ctx, obj.Namespace, clusterKeys(row)...)

@@ -7,7 +7,12 @@ import (
 	"maps"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -59,13 +64,23 @@ func (s *Reconciler) codeChange(ctx context.Context, row *model.Network) (bool, 
 	}
 	f := reconcile.CodeFacts{Applied: row.RenderHashes, Now: rendered, Behind: s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID),
 		Prev: storedStatus(row).GetCodeChange(), Admitted: true, At: time.Now()}
+	if _, ok := s.deps.Platform.(reconcile.CodeAdmitter); ok {
+		f.Epoch = reconcile.CodeEpoch()
+		f.WaitForConvergence = f.Prev.GetPhase() == cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_APPLYING
+	}
 	if f.Pending() {
 		if a, ok := s.deps.Platform.(reconcile.CodeAdmitter); ok {
-			admitted, why, err := a.NetworkCodeAdmitted(ctx, row.TenantID, row.ID)
-			if err != nil {
-				why = fmt.Sprintf("cannot read the code rollout of its clusters' channels: %v", err)
+			// Publish a new target as Pending before asking a channel for its
+			// target-bound admission. An old plan must not authorize new code.
+			if f.Prev.GetPhase() != cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_APPLYING && f.Prev.GetTarget() != f.Target() {
+				f.Admitted, f.NotAdmitted = false, "waiting for the network's current render target to be planned"
+			} else {
+				admitted, why, err := a.NetworkCodeAdmitted(ctx, row.TenantID, row.ID)
+				if err != nil {
+					why = fmt.Sprintf("cannot read the code rollout of its clusters' channels: %v", err)
+				}
+				f.Admitted, f.NotAdmitted = admitted && err == nil, why
 			}
-			f.Admitted, f.NotAdmitted = admitted && err == nil, why
 		}
 	}
 	d := reconcile.DecideCode(f)
@@ -105,9 +120,72 @@ func (s *Reconciler) codeApplied(ctx context.Context, row *model.Network, render
 	}
 	complete := failure == nil && row.AppliedGeneration >= row.Generation && maps.Equal(row.RenderHashes, rendered) &&
 		!s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID)
+	if complete {
+		var err error
+		complete, err = s.codeResourcesConverged(ctx, row, rendered)
+		if err != nil {
+			// Observation failures are not failed SSA attempts. Keep the apply
+			// in flight and explain unsupported/lagging provider observations.
+			st.Message = err.Error()
+			reconcile.SetCode(ctx, st)
+			return
+		}
+	}
 	out, note := reconcile.CodeApplied(st, complete, failure, time.Now())
 	reconcile.SetCode(ctx, out)
 	if note != nil {
 		reconcile.AddNote(ctx, *note)
 	}
+}
+
+// A successful SSA is not cloud convergence. Read current provider generations
+// directly; cached Ready=True from before the render must not finish a canary.
+func (s *Reconciler) codeResourcesConverged(ctx context.Context, row *model.Network, rendered map[string]string) (bool, error) {
+	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
+	if err != nil {
+		return false, err
+	}
+	seen := 0
+	for _, record := range records {
+		key := record.APIVersion + "/" + record.Kind + "/" + record.Namespace + "/" + record.Name
+		if _, expected := rendered[key]; !expected {
+			continue
+		}
+		seen++
+		object := &unstructured.Unstructured{}
+		object.SetGroupVersionKind(schema.FromAPIVersionAndKind(record.APIVersion, record.Kind))
+		if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: record.Namespace, Name: record.Name}, object); err != nil {
+			return false, err
+		}
+		view := managed.View(managed.Ref{APIVersion: record.APIVersion, Kind: record.Kind, Namespace: record.Namespace, Name: record.Name}, object)
+		_, managedResource, _ := unstructured.NestedFieldNoCopy(object.Object, "spec", "forProvider")
+		if view.State == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
+			return false, fmt.Errorf("network code resource %s failed: %s", record.Name, view.Message)
+		}
+		if managedResource && view.Generation > 0 && view.ObservedGeneration == 0 {
+			return false, fmt.Errorf("network code resource %s has no Synced.observedGeneration; waiting for the supported provider's generation-aware observation", record.Name)
+		}
+		conditions, _, _ := unstructured.NestedSlice(object.Object, "status", "conditions")
+		for _, raw := range conditions {
+			condition, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			// Upjet's async Observe may report ResourceUpToDate while an
+			// operation is still running. Current Synced alone is insufficient.
+			if (condition["type"] == "AsyncOperation" || condition["type"] == "LastAsyncOperation") && condition["status"] != "True" {
+				return false, nil
+			}
+			if condition["type"] == "Ready" {
+				observed, _ := condition["observedGeneration"].(int64)
+				if observed > 0 && observed < view.Generation {
+					return false, nil
+				}
+			}
+		}
+		if view.State != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || view.Paused || managedResource && (view.Generation > view.ObservedGeneration || view.Synced != cloudv1.ConditionStatus_CONDITION_STATUS_TRUE) {
+			return false, nil
+		}
+	}
+	return seen == len(rendered), nil
 }

@@ -1,0 +1,16 @@
+# Public verification settings only: no client secrets, passwords or tokens.
+# Replace the HTTPS issuer, API audience and exact tenant/group grants before
+# deployment. Unassigned users receive no tenant or platform grant.
+auth:
+  mode: required
+  issuers:
+  - name: keycloak
+    issuer: https://login.example.com/realms/platform
+    audiences: [cv-api]
+    usernameClaim: preferred_username
+    rolesClaim: groups
+  rules:
+  - match: {issuer: keycloak, role: tenant-acme-admin}
+    grant: {role: TenantAdmin, tenants: [acme]}
+  - match: {issuer: keycloak, role: tenant-acme-viewer}
+    grant: {role: TenantViewer, tenants: [acme]}

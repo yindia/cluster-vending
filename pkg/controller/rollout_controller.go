@@ -92,7 +92,7 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&cloudv1alpha1.Cluster{}, toChannel, builder.WithPredicates(rolloutInputChanged())).
 		Watches(&cloudv1alpha1.Release{}, allChannels, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&cloudv1alpha1.ReleaseHold{}, allChannels).
-		Watches(&cloudv1alpha1.Network{}, allChannels, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&cloudv1alpha1.Network{}, allChannels, builder.WithPredicates(networkCodeInputChanged())).
 		Complete(r)
 }
 
@@ -119,6 +119,20 @@ func rolloutInputChanged() predicate.Predicate {
 			return true
 		}
 		return !equality.Semantic.DeepEqual(rolloutInput(was), rolloutInput(is))
+	}}
+}
+
+func networkCodeInputChanged() predicate.Predicate {
+	return predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		before, beforeOK := e.ObjectOld.(*cloudv1alpha1.Network)
+		after, afterOK := e.ObjectNew.(*cloudv1alpha1.Network)
+		if !beforeOK || !afterOK {
+			return true
+		}
+		return before.Generation != after.Generation || before.Annotations["crossplane.io/paused"] != after.Annotations["crossplane.io/paused"] || !equality.Semantic.DeepEqual(before.DeletionTimestamp, after.DeletionTimestamp) ||
+			!equality.Semantic.DeepEqual(before.Status.CodeChange, after.Status.CodeChange) ||
+			rollout.NetworkCodeTarget(before) != rollout.NetworkCodeTarget(after) ||
+			before.Status.Phase != after.Status.Phase || !equality.Semantic.DeepEqual(before.Status.Conditions, after.Status.Conditions)
 	}}
 }
 
@@ -180,7 +194,9 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	status.ReleaseMoves = &moves
 	// And its code changes (a new controller build rendering the
 	// clusters' objects differently), for every cluster of the channel.
-	code := rollout.ComputeCode(in)
+	codeInput := in
+	codeInput.CodeEpoch = platform.CodeEpoch()
+	code := rollout.ComputeCode(codeInput)
 	status.CodeChanges = &code
 	meta.SetStatusCondition(&status.Conditions, plan.condition(ch.Generation))
 	if !equality.Semantic.DeepEqual(status, ch.Status) {

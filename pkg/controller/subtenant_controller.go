@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -43,7 +44,7 @@ func NewSubTenantReconciler(d Deps) *SubTenantReconciler { return &SubTenantReco
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=tenants;clusters;releaseholds,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
-func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, reconcileErr error) {
 	leave := r.deps.FreezeBarrier.Enter()
 	defer leave()
 	obj := &cloud.SubTenant{}
@@ -51,6 +52,8 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	st := obj.DeepCopy().Status
+	subTenantAccessCondition(&st, obj.Generation, "ProvisioningReady", false, "Reconciling", "Current Tenant and namespace baselines have not yet been verified")
+	subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, "Reconciling", "Current access prerequisites have not yet been verified")
 	if !obj.DeletionTimestamp.IsZero() && naas.DeletionProtectionEnabled(obj.Spec.DeletionProtection) {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "DeletionProtected", "Deletion protection is enabled; disable it explicitly before offboarding. No workload changes were attempted", false)
 	}
@@ -75,11 +78,6 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return untilFreezeEnds(frozen, result, time.Now()), err
 	}
 	meta.RemoveStatusCondition(&st.Conditions, platform.ConditionFrozen)
-	if obj.DeletionTimestamp.IsZero() {
-		if reason, message, failed := subTenantPrerequisite(parent); reason != "" {
-			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, reason, message, failed)
-		}
-	}
 	if r.deps.SubTenantWorkloads == nil || parent.Status.KubeconfigSecret == "" {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "WorkloadClientPending", "Waiting for the parent kubeconfig and configured workload client; no workload writes have been attempted", false)
 	}
@@ -109,15 +107,18 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if remote != nil && !controllerutil.ContainsFinalizer(obj, cloud.SubTenantFinalizer) {
 		return r.protectSubTenant(ctx, obj, st)
 	}
-	if remote != nil && remote.GetLabels()[naas.LabelAccessReady] != "false" {
-		next := remote.DeepCopy()
-		labels := maps.Clone(remote.GetLabels())
-		labels[naas.LabelAccessReady] = "false"
-		next.SetLabels(labels)
-		if err := workload.Update(ctx, next); err != nil {
-			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "AccessRevocationPending", "Could not close the owned Tenant access gate; no new configuration was applied", true)
+	accessGuard := &subTenantAccessGuard{workload: workload, remote: remote}
+	defer func() {
+		if err := accessGuard.revoke(ctx); err != nil {
+			subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, "AccessRevocationPending", "The owned access gate could not be closed; revocation will retry")
+			result, reconcileErr = r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDegraded, "AccessRevocationPending", "The owned access gate could not be closed; revocation will retry", true)
+			reconcileErr = errors.Join(reconcileErr, err)
 		}
-		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateProvisioning, "AccessClosed", "Developer access gate was closed; current templates and isolation qualification must be observed before access can be considered", false)
+	}()
+	if reason, message, failed := subTenantPrerequisite(parent); reason != "" {
+		if err := naas.ObserveCapsuleAvailability(ctx, workload); err != nil {
+			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, reason, message+"; runtime availability: "+err.Error(), failed)
+		}
 	}
 	bootstrap, err := naas.VerifyTenantBootstrap(ctx, workload)
 	if err != nil {
@@ -135,9 +136,18 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "BootstrapPending", message, warning)
 	}
 	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "PrerequisitesReady", Status: metav1.ConditionTrue, Reason: "PrerequisitesObserved", Message: "Capsule and shared bootstrap prerequisites are ready; workload API access is available", ObservedGeneration: obj.Generation})
-	desired, err := naas.RenderTenant(obj, parent.Status.CurrentKubernetesVersion, bootstrap.Revision())
+	desired, access, clusterSpec, accessErr, err := renderSubTenantAccess(obj, parent, bootstrap.Revision())
 	if err != nil {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "AllocationValidationFailed", err.Error(), true)
+	}
+	subTenantAccessCondition(&st, obj.Generation, "AccessGroupsResolved", accessErr == nil, "GroupsResolved", "Group intent is translated only through the current cluster OIDC mapping")
+	if accessErr != nil {
+		subTenantAccessCondition(&st, obj.Generation, "AccessGroupsResolved", false, "OIDCPending", accessErr.Error())
+	}
+	if remote != nil && remote.GetLabels()[naas.LabelAccessReady] == "true" && naas.EqualTenantSpec(remote, desired) && remote.GetAnnotations()[naas.RevisionAnnotation] == bootstrap.Revision() {
+		labels := desired.GetLabels()
+		labels[naas.LabelAccessReady] = "true"
+		desired.SetLabels(labels)
 	}
 	if !controllerutil.ContainsFinalizer(obj, cloud.SubTenantFinalizer) {
 		return r.protectSubTenant(ctx, obj, st)
@@ -159,6 +169,7 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			remote = next
 		}
 	}
+	accessGuard.remote = remote
 	st.RemoteCapsuleTenant = name
 	st.RemoteCapsuleTenantUID = string(remote.GetUID())
 	st.TemplateRevision = bootstrap.Revision()
@@ -174,11 +185,12 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			ready++
 		}
 	}
-	reason, message := "BaselinePending", fmt.Sprintf("Capsule Tenant observed; %d/%d namespace baselines match current templates. Access remains closed and runtime isolation qualification is required", ready, len(obj.Spec.NamespaceKeys))
-	if ready == len(obj.Spec.NamespaceKeys) {
-		reason = "QualificationRequired"
+	if subTenantProvisioned(obj, remote, inventory) {
+		subTenantAccessCondition(&st, obj.Generation, "ProvisioningReady", true, "Provisioned", "Current Capsule Tenant Ready and all allocated namespace baselines were observed")
+		reason, message := r.reconcileSubTenantAccess(ctx, obj, parent, &st, accessGuard, bootstrap, access, clusterSpec, accessErr)
+		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateReady, reason, message, false)
 	}
-	return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateProvisioning, reason, message, false)
+	return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateProvisioning, "BaselinePending", fmt.Sprintf("Waiting for current Capsule Tenant Ready and namespace baselines (%d/%d observed)", ready, len(obj.Spec.NamespaceKeys)), false)
 }
 
 func (r *SubTenantReconciler) subTenantParent(ctx context.Context, obj *cloud.SubTenant) (*cloud.Cluster, error) {
@@ -255,15 +267,28 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 		state = cloud.SubTenantStateDeleting
 	}
 	st.State, st.Message = state, message
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse, Reason: reason, Message: message, ObservedGeneration: obj.Generation})
+	provisioned := state == cloud.SubTenantStateReady && meta.IsStatusConditionTrue(st.Conditions, "ProvisioningReady")
+	subTenantAccessCondition(&st, obj.Generation, "Ready", provisioned, reason, message)
 	if subTenantPrerequisiteReason(reason) {
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "PrerequisitesReady", Status: metav1.ConditionFalse, Reason: reason, Message: message, ObservedGeneration: obj.Generation})
 	}
-	accessReason, accessMessage := "QualificationRequired", "No identity resolver or runtime isolation qualification is configured; developer access remains closed"
-	if !meta.IsStatusConditionTrue(st.Conditions, "PrerequisitesReady") {
-		accessReason, accessMessage = "PrerequisitesPending", message
+	if !provisioned {
+		accessReason := reason
+		if !meta.IsStatusConditionTrue(st.Conditions, "PrerequisitesReady") {
+			accessReason = "PrerequisitesPending"
+		}
+		subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, accessReason, message)
+		subTenantAccessCondition(&st, obj.Generation, "AccessQualified", false, "PrerequisitesPending", "Provisioning prerequisites are not current")
+		subTenantAccessCondition(&st, obj.Generation, "OIDCReady", false, "PrerequisitesPending", "Provisioning prerequisites are not current")
 	}
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "AccessReady", Status: metav1.ConditionFalse, Reason: accessReason, Message: accessMessage, ObservedGeneration: obj.Generation})
+	conditions := append([]metav1.Condition(nil), st.Conditions...)
+	st.Conditions = nil
+	for _, condition := range conditions {
+		if previous := meta.FindStatusCondition(obj.Status.Conditions, condition.Type); previous != nil {
+			st.Conditions = append(st.Conditions, *previous)
+		}
+		meta.SetStatusCondition(&st.Conditions, condition)
+	}
 	for i := range st.Namespaces {
 		ns := &st.Namespaces[i]
 		previous := slices.IndexFunc(obj.Status.Namespaces, func(old cloud.SubTenantNamespaceStatus) bool { return old.Key == ns.Key && old.UID == ns.UID })
@@ -345,6 +370,15 @@ func (r *SubTenantReconciler) deleteSubTenant(ctx context.Context, obj *cloud.Su
 			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "AccessObservationPending", "Cannot observe namespace access-gate closure", true)
 		}
 		for _, ns := range list.Items {
+			if ns.Labels[naas.LabelSubTenantID] != obj.Name && strings.HasPrefix(ns.Name, remote.GetName()+"-") {
+				foreign, err := naas.NamespaceBelongsToForeignAllocation(ctx, workload, obj, &ns)
+				if err != nil {
+					return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "AccessObservationPending", err.Error(), true)
+				}
+				if foreign {
+					continue
+				}
+			}
 			if (ns.Labels[naas.LabelSubTenantID] == obj.Name || strings.HasPrefix(ns.Name, remote.GetName()+"-")) && ns.Labels["cloud.cluster-vending.io/naas-ready"] != "false" {
 				return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "AccessObservationPending", "Waiting for shared Capsule templates to close namespace readiness before withdrawal", false)
 			}
@@ -358,8 +392,8 @@ func (r *SubTenantReconciler) deleteSubTenant(ctx context.Context, obj *cloud.Su
 		}
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "NamespaceGenerationStopping", "Namespace generation was withdrawn on the owned Tenant; waiting for current Capsule/GTR observations before deletion", false)
 	}
-	if remote.GetAnnotations()[naas.DeletionFenceAnnotation] == "" {
-		fence, err := naas.CaptureTenantDeletionFence(ctx, workload)
+	if !naas.TenantDeletionFenceCurrent(remote) {
+		fence, err := naas.CaptureTenantDeletionFence(ctx, workload, remote)
 		if err != nil {
 			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "GenerationWithdrawalUnconfirmed", err.Error(), false)
 		}
@@ -370,7 +404,7 @@ func (r *SubTenantReconciler) deleteSubTenant(ctx context.Context, obj *cloud.Su
 		if err := workload.Update(ctx, next); err != nil {
 			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "GenerationWithdrawalUnconfirmed", "Cannot record a post-withdrawal observation fence", true)
 		}
-		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "GenerationWithdrawalUnconfirmed", "Waiting for fresh shared GTR observations after namespace-generation withdrawal", false)
+		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "GenerationWithdrawalUnconfirmed", "Withdrawal identity recorded; waiting for Capsule to observe it and release this Tenant's tracked resources", false)
 	}
 	if err := naas.TenantDeletionAcknowledged(ctx, workload, remote); err != nil {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateDeleting, "GenerationWithdrawalUnconfirmed", err.Error(), false)

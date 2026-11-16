@@ -238,6 +238,58 @@ test("valid POST logout clears local secrets even when provider discovery is una
   assert.equal(network.mock.callCount(), 1);
 });
 
+test("logout bounds actual streamed bytes with absent or understated Content-Length before parsing or discovery", async t => {
+  const network = noNetwork(t);
+  const { cookie } = await encryptedCookie();
+  for (const declared of [undefined, "1"]) {
+    let canceled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("padding=" + "x".repeat(2500)));
+        controller.enqueue(new TextEncoder().encode("x".repeat(1700) + "&csrfToken=fixture-csrf-value"));
+      },
+      cancel() { canceled = true; },
+    });
+    const headers: Record<string, string> = { Origin: origin, Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" };
+    if (declared !== undefined) headers["Content-Length"] = declared;
+    const init: RequestInit & { duplex: "half" } = { method: "POST", body, headers, duplex: "half" };
+    const response = await logout(new Request(`${origin}/api/auth/logout`, init));
+    assert.equal(response.status, 413);
+    assert.equal(canceled, true);
+    assert.equal(response.headers.getSetCookie().length, 0);
+  }
+  assert.equal(network.mock.callCount(), 0);
+});
+
+test("logout accepts exactly 4096 bytes and bounded multipart forms", async t => {
+  noNetwork(t);
+  const { cookie } = await encryptedCookie();
+  const suffix = "&csrfToken=fixture-csrf-value";
+  const exact = "padding=" + "x".repeat(4096 - "padding=".length - suffix.length) + suffix;
+  assert.equal(new TextEncoder().encode(exact).byteLength, 4096);
+  const multipart = new FormData();
+  multipart.set("csrfToken", "fixture-csrf-value");
+  for (const body of [exact, multipart]) {
+    const headers: Record<string, string> = { Origin: origin, Cookie: cookie };
+    if (typeof body === "string") headers["Content-Type"] = "application/x-www-form-urlencoded";
+    const response = await logout(new Request(`${origin}/api/auth/logout`, { method: "POST", body, headers }));
+    assert.equal(response.status, 303);
+    assert.ok(response.headers.getSetCookie().length > 0);
+  }
+});
+
+test("declared oversized logout body is refused before reading it", async t => {
+  const network = noNetwork(t);
+  const { cookie } = await encryptedCookie();
+  const body = new ReadableStream<Uint8Array>({ start() {}, pull() { throw new Error("body must not be read"); } }, { highWaterMark: 0 });
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST", body, duplex: "half", headers: { Origin: origin, Cookie: cookie, "Content-Length": "4097", "Content-Type": "application/x-www-form-urlencoded" },
+  };
+  const response = await logout(new Request(`${origin}/api/auth/logout`, init));
+  assert.equal(response.status, 413);
+  assert.equal(network.mock.callCount(), 0);
+});
+
 test("parallel refresh and a late old-cookie request share one rotation within the process grace window", async t => {
   let rotations = 0;
   t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {

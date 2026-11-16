@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -187,7 +188,13 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	}
 	plan, skipped := component.PlanPlatform(in)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
-	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.PlatformSet(plan), s.deps.Inventory(owner))
+	inventory := s.deps.Inventory(owner)
+	if slices.ContainsFunc(skipped, func(c component.NotInstalled) bool { return c.Preserve }) {
+		// A partial plan cannot prove deletion intent. Apply valid components but
+		// retain all previous inventory until the entire plan is renderable.
+		inventory = sequence.Keeping(inventory, func(sequence.Entry) bool { return true })
+	}
+	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.PlatformSet(plan), inventory)
 	if err != nil {
 		s.logger().ErrorContext(ctx, "apply platform components", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Internal, "could not apply the cluster's platform components")
@@ -433,7 +440,7 @@ func pinsOf(rel *cloudv1alpha1.Release, minor string) (pins map[string]component
 		for _, c := range k.Components {
 			values, err := component.PinValues(c.Values)
 			if err != nil {
-				continue // a pin with unusable values is no pin: its component reports it
+				return nil, fmt.Sprintf("release %s has invalid values for %s: %v", rel.Name, c.Name, err)
 			}
 			pins[c.Name] = component.Pin{Version: c.Version, Values: values}
 		}

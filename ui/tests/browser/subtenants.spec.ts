@@ -11,9 +11,9 @@ test.beforeEach(async ({ page }) => {
 const clusterId = "00000000-0000-4000-8000-000000000003";
 const id = "00000000-0000-4000-8000-000000000004";
 const spec = { name: "payments", displayName: "Payments", namespaceKeys: ["payments"], quota: { namespaceCount: 1, hard: { pods: "10" } }, policyProfile: "restricted-ambient-v1" };
-async function mock(page: Page, options: { existing?: boolean; fail?: boolean; naas?: boolean; viewer?: boolean; foreign?: boolean; deleting?: boolean; protection?: boolean; legacy?: boolean; failProtection?: boolean; duplicate?: boolean } = {}) {
+async function mock(page: Page, options: { existing?: boolean; fail?: boolean; naas?: boolean; viewer?: boolean; foreign?: boolean; deleting?: boolean; protection?: boolean; legacy?: boolean; failProtection?: boolean; duplicate?: boolean; longValues?: boolean } = {}) {
   const calls: { method: string; body: Record<string, unknown> }[] = [], unexpected: string[] = [];
-  let current: Record<string, unknown> | undefined = options.existing ? { tenantId: "acme", clusterId, id, spec: { ...spec, ...(options.legacy ? { name: "" } : {}), ...(options.protection !== undefined ? { deletionProtection: options.protection } : {}) }, etag: "fresh-etag", generation: "1", status: { state: options.deleting ? "SUB_TENANT_STATE_DELETING" : "SUB_TENANT_STATE_READY", observedGeneration: "1", remoteCapsuleTenant: "remote-team", namespaces: [{ key: "payments", name: "physical-payments", uid: "namespace-uid", templateRevision: "policy-1" }] } } : undefined;
+  let current: Record<string, unknown> | undefined = options.existing ? { tenantId: "acme", clusterId, id, spec: { ...spec, ...(options.longValues ? { displayName: "Payments platform with a very long team allocation name for production workloads" } : {}), ...(options.legacy ? { name: "" } : {}), ...(options.protection !== undefined ? { deletionProtection: options.protection } : {}) }, etag: "fresh-etag", generation: "1", status: { state: options.deleting ? "SUB_TENANT_STATE_DELETING" : "SUB_TENANT_STATE_READY", observedGeneration: "1", ...(options.longValues ? { message: "Waiting for Capsule to reconcile namespace policy and resource quota across all workload namespaces. ".repeat(8) } : {}), remoteCapsuleTenant: "remote-team", namespaces: [{ key: "payments", name: "physical-payments", uid: "namespace-uid", templateRevision: "policy-1" }] } } : undefined;
   await page.route("**/api/rpc/**", async (route) => {
     const method = new URL(route.request().url()).pathname.split("/").at(-1)!;
     const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -238,5 +238,40 @@ test("YAML group arrays display in detail and guided edits clear groups through 
   await expect(edit.getByRole("textbox", { name: "Admin groups", exact: true })).toHaveValue("payments-admins"); await edit.getByRole("textbox", { name: "Admin groups", exact: true }).fill(""); await edit.getByRole("textbox", { name: "Viewer groups", exact: true }).fill("");
   await edit.getByRole("button", { name: "Review Sub Tenant", exact: true }).click(); await expect(edit).toContainText("Group access will be removed or changed"); await edit.getByRole("button", { name: "Apply Sub Tenant update", exact: true }).click(); await expect(edit).toHaveCount(0);
   const update = api.calls.find((call) => call.method === "UpdateSubTenant")!.body; expect(update.updateMask).toBe("spec.access"); expect(update.subtenant).toMatchObject({ etag: "created-etag", spec: { access: {} } });
+  expect(api.unexpected).toEqual([]);
+});
+
+
+test("Sub Tenant table fits its container at desktop, tablet and phone widths", async ({ page }) => {
+  test.setTimeout(60000);
+  const api = await mock(page, { existing: true, longValues: true });
+  await open(page);
+  const section = page.getByRole("region", { name: "Cluster Sub Tenants", exact: true });
+  const table = section.getByRole("table", { name: "Cluster Sub Tenants", exact: true });
+  for (const width of [1440, 1280, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(table).toBeVisible();
+    await expect.poll(async () => table.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      let parent: HTMLElement | null = element as HTMLElement;
+      const overflowing: string[] = [];
+      while (parent && parent.tagName !== "MAIN") {
+        if (parent.scrollWidth > parent.clientWidth + 2) overflowing.push(`${parent.tagName}:${parent.scrollWidth}/${parent.clientWidth}`);
+        parent = parent.parentElement;
+      }
+      return { overflowing, right: Math.round(box.right) };
+    })).toEqual({ overflowing: [], right: expect.any(Number) });
+    const action = table.getByRole("button", { name: /^Actions for Sub Tenant/ });
+    await action.scrollIntoViewIfNeeded();
+    await expect(action).toBeInViewport();
+    await expect(table.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
+    const actionBox = await action.boundingBox();
+    expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(width);
+  }
+  await table.getByRole("button", { name: /^Actions for Sub Tenant/ }).click();
+  await page.getByRole("menuitem", { name: "View", exact: true }).click();
+  const detail = page.getByRole("dialog", { name: "Sub Tenant details", exact: true });
+  await expect(detail).toContainText(id);
+  await expect(detail).toContainText("remote-team");
   expect(api.unexpected).toEqual([]);
 });

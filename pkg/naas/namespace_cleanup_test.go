@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"reflect"
 	"testing"
 	"time"
 
@@ -240,6 +241,17 @@ func TestNamespaceCleanupOnlyAllowsBoundCapsuleBudget(t *testing.T) {
 	if !namespaceBudgetQuota(t.Context(), c, quota, remote, cleanupAllocation()) {
 		t.Fatal("exact owned budget quota rejected")
 	}
+	pending := cleanupAllocation()
+	pending.Spec.Quota.Hard["requests.cpu"] = "4"
+	pending.Spec.Quota.Hard["pods"] = "50"
+	if !namespaceBudgetQuota(t.Context(), c, quota, remote, pending) {
+		t.Fatal("unapplied management quota update blocked the last applied owned budget")
+	}
+	withdrawn := WithdrawTenantGeneration(remote)
+	if !namespaceBudgetQuota(t.Context(), c, quota, withdrawn, pending) {
+		t.Fatal("withdrawal lost the last applied owned budget")
+	}
+
 	wrong := quota.DeepCopy()
 	_ = unstructured.SetNestedField(wrong.Object, "999", "spec", "hard", "pods")
 	if namespaceBudgetQuota(t.Context(), c, wrong, remote, cleanupAllocation()) {
@@ -286,5 +298,74 @@ func TestNamespaceCleanupCertificateAndPlatformBindingAreNarrow(t *testing.T) {
 	_ = unstructured.SetNestedField(binding.Object, "cluster-admin", "roleRef", "name")
 	if platformOwnerBinding(binding, remote) {
 		t.Fatal("arbitrary RBAC allowed")
+	}
+}
+
+func TestNamespaceCleanupExcludesOnlyVerifiedPrefixNeighbor(t *testing.T) {
+	for _, test := range []string{"verified", "stripped-label", "foreign-uid-mismatch", "missing-foreign-tenant", "current-label-conflict", "current-recorded-namespace", "historical-recorded-unrequested-key"} {
+		t.Run(test, func(t *testing.T) {
+			c, remote, ns := cleanupFixture(t)
+			sub := cleanupAllocation()
+			sibling := allocationFixture()
+			sibling.Name = "00000000-0000-4000-8000-000000000022"
+			sibling.UID = "sibling-subtenant-uid"
+			sibling.Spec.Name = "payments-team"
+			foreign, err := RenderTenant(sibling, "1.35", "revision")
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign.SetUID("foreign-remote-uid")
+			if test != "missing-foreign-tenant" {
+				if err := c.Create(t.Context(), foreign); err != nil {
+					t.Fatal(err)
+				}
+			}
+			neighbor := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments-team-app", UID: "neighbor-ns-uid", Labels: map[string]string{LabelTenant: sibling.Spec.TenantRef.Name, LabelSubTenantID: sibling.Name, "capsule.clastix.io/tenant": foreign.GetName(), "cloud.cluster-vending.io/naas-ready": "true"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: TenantGVK.GroupVersion().String(), Kind: "Tenant", Name: foreign.GetName(), UID: foreign.GetUID()}}}}
+			switch test {
+			case "stripped-label":
+				delete(neighbor.Labels, LabelSubTenantID)
+			case "foreign-uid-mismatch":
+				neighbor.OwnerReferences[0].UID = "different-uid"
+			case "current-label-conflict":
+				neighbor.Labels[LabelSubTenantID] = sub.Name
+			case "current-recorded-namespace":
+				sub.Status.Namespaces = []cloud.SubTenantNamespaceStatus{{Key: "app", Name: neighbor.Name, UID: string(neighbor.UID)}}
+			case "historical-recorded-unrequested-key":
+				sub.Status.Namespaces = []cloud.SubTenantNamespaceStatus{{Key: "removed-key", Name: neighbor.Name, UID: "historical-uid"}}
+			}
+			if err := c.Create(t.Context(), neighbor); err != nil {
+				t.Fatal(err)
+			}
+			namespaces, blockers, err := PreflightNamespaceCleanup(t.Context(), c, remote, sub)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test == "verified" {
+				if len(namespaces) != 1 || namespaces[0].Name != ns.Name || len(blockers) != 0 {
+					t.Fatal("valid prefix neighbor blocked cleanup", namespaces, blockers)
+				}
+			} else if len(namespaces) != 2 || len(blockers) == 0 {
+				t.Fatal("suspicious ownership was silently excluded", namespaces, blockers)
+			}
+		})
+	}
+}
+
+func TestNamespaceCleanupUsesAppliedBaselineDespitePendingKeys(t *testing.T) {
+	_, remote, ns := cleanupFixture(t)
+	before, err := namespaceCleanupBaseline(remote, cleanupAllocation(), ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withdrawn := WithdrawTenantGeneration(remote)
+	pending := cleanupAllocation()
+	pending.Spec.NamespaceKeys = append(pending.Spec.NamespaceKeys, "worker")
+	pending.Spec.Quota.Hard["requests.cpu"] = "4"
+	after, err := namespaceCleanupBaseline(withdrawn, pending, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("unapplied desired config changed the deletion baseline")
 	}
 }

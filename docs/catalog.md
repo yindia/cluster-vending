@@ -632,6 +632,19 @@ component on that Kubernetes minor. They are merged over the definition's
 use placeholders. A pin whose values are not an object, or name an unknown
 placeholder, makes the release not Valid.
 
+Invalid platform definitions and release values stop installation planning;
+they do not request an uninstall. If a component cannot be rendered for a
+cluster, its failure is reported and previous inventory is retained. Other
+renderable components may still converge, but pruning resumes only after the
+plan is usable. Removing a pin or explicitly disabling/deleting a definition
+continues to request removal.
+
+IAM policy documents are checked again after placeholders are expanded. An
+expanded document above 6,144 non-whitespace characters is rejected before
+managed resources are created or updated, and an existing installation is
+retained. Reducing the policy or splitting it into reviewed named policies is
+required; the platform does not automatically drop permissions or split policies.
+
 The cluster autoscaler needs it: its minor version must equal the cluster's
 Kubernetes minor, the chart hardcodes one image per chart release, and no
 chart ships an image for 1.36. The shipped release pins chart 9.60.0 on

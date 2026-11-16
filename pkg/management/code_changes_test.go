@@ -11,6 +11,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
+	"github.com/yindia/cluster-vending/pkg/rollout"
 )
 
 // The management cluster's platform source gates code changes.
@@ -67,6 +68,7 @@ func TestNetworkCodeAdmittedReadsTheManagementCluster(t *testing.T) {
 	}
 
 	stable.Status.CodeChanges.Tier = cloudv1alpha1.ClusterTier0
+	stable.Status.CodeChanges.Admitted = []string{rollout.NetworkCodeKey(network)}
 	if err := c.Status().Update(t.Context(), stable); err != nil {
 		t.Fatal(err)
 	}

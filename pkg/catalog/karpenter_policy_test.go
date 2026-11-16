@@ -93,10 +93,24 @@ func TestExpandedKarpenterPolicyFitsIAMManagedPolicyBudget(t *testing.T) {
 			} else {
 				t.Logf("expanded policy: %d characters; %d below IAM's limit", size, component.MaxPolicySize-size)
 			}
-			baseline, err := component.ExpandPolicy(karpenterPolicyBaseline(t), vars)
+			if _, err := component.ExpandPolicy(karpenterPolicyBaseline(t), vars); err == nil || !strings.Contains(err.Error(), "expanded IAM policy") {
+				t.Fatalf("oversized upstream baseline was not rejected before rendering: %v", err)
+			}
+			// Expand the trusted test fixture without the production budget guard
+			// solely to compare permissions with the smaller deployed policy.
+			var baselineDocument any
+			if err := json.Unmarshal([]byte(karpenterPolicyBaseline(t)), &baselineDocument); err != nil {
+				t.Fatal(err)
+			}
+			expanded, err := component.Expand(baselineDocument, vars)
 			if err != nil {
 				t.Fatal(err)
 			}
+			baselineBytes, err := json.Marshal(expanded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline := string(baselineBytes)
 			if !reflect.DeepEqual(withoutStatementSIDs(t, policy), withoutStatementSIDs(t, baseline)) {
 				t.Fatal("placeholder expansion changed permission semantics")
 			}

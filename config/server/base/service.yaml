@@ -1,6 +1,6 @@
-# The API inside the cluster. It has no authentication of its own: expose
-# it outside only behind something that does (an ingress or gateway with
-# auth); h2c is needed for gRPC.
+# The base API accepts anonymous callers; ../auth opts into required JWT auth.
+# Restrict access to the base Service, including from other cluster workloads.
+# External exposure also needs TLS; h2c is needed upstream for gRPC.
 apiVersion: v1
 kind: Service
 metadata:

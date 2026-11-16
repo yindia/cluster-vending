@@ -16,6 +16,7 @@ export function useAsyncQuery<T>(load: (signal: AbortSignal) => Promise<T>, opti
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
   const { liveUpdates } = usePlatform();
   const pollMs = liveUpdates || options.observeOperation ? options.pollMs : undefined;
+  const livePolling = liveUpdates && pollMs !== undefined;
   const isComplete = options.isComplete;
   useEffect(() => {
     const controller = new AbortController();
@@ -32,13 +33,14 @@ export function useAsyncQuery<T>(load: (signal: AbortSignal) => Promise<T>, opti
         if (!controller.signal.aborted) setState((previous) => ({ ...previous, loader: load, error: errorMessage(error), loading: false, refreshing: false }));
       }
       // Polling is bounded; leaving the page or changing scope cancels it immediately.
-      if (!completed && pollMs && pollMs >= 1000 && !controller.signal.aborted && Date.now() - started < 15 * 60_000) {
+      // Completion ends submitted-operation tracking, but not an explicit Live updates subscription.
+      if ((livePolling || !completed) && pollMs && pollMs >= 1000 && !controller.signal.aborted && Date.now() - started < 15 * 60_000) {
         timer = setTimeout(run, pollMs);
       }
     };
     void run();
     return () => { controller.abort(); if (timer) clearTimeout(timer); };
-  }, [load, revision, pollMs, isComplete]);
+  }, [load, revision, pollMs, isComplete, livePolling]);
   const current = state.loader === load;
   return { data: current ? state.data : undefined, error: current ? state.error : "", loading: !current || state.loading, refreshing: current && state.refreshing, refresh };
 }

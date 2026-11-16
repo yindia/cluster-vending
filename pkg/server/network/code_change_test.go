@@ -48,6 +48,12 @@ func TestNetworkCodeChange(t *testing.T) {
 	}
 	gate := &networkGate{why: "the platform is frozen: deploy"}
 	f.svc = NewNetworkService(reconcile.Deps{Store: f.store, Kube: f.kube, Platform: gate})
+	// First publish the current controller epoch/render target. A stale channel
+	// plan must never authorize a target that this network has not reported.
+	f.reconcile(t, n)
+	if cc := f.get(t, n).GetStatus().GetCodeChange(); cc.GetPhase() != cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_PENDING || !strings.Contains(cc.GetMessage(), "current render target") {
+		t.Fatalf("new target not published before admission: %v", cc)
+	}
 
 	for _, why := range []string{"the platform is frozen: deploy", "waiting for channel stable's code rollout to reach tier 0"} {
 		gate.why = why

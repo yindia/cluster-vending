@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -149,19 +150,32 @@ func Login(ctx context.Context, opts Options) (*Credentials, error) {
 		}
 	}
 	conf.Endpoint.AuthStyle = clientAuthStyle(o.ClientSecret)
-	flow := o.device
 	if o.Browser {
 		o.nonce, err = randomState()
 		if err != nil {
 			return nil, err
 		}
-		flow = o.browser
 	}
-	token, err := flow(ctx, conf)
-	if err != nil {
-		return nil, err
+	validate := func(token *oauth2.Token) (*oidc.IDToken, error) {
+		id, err := verifyLoginIDToken(ctx, provider, o.ClientID, token, o.nonce, slices.Contains(o.Scopes, oidc.ScopeOpenID) || o.UseIDToken, true)
+		if err != nil {
+			return nil, err
+		}
+		if !o.UseIDToken && token.AccessToken == "" {
+			return nil, errors.New("issuer returned no access token")
+		}
+		return id, nil
 	}
-	id, err := verifyLoginIDToken(ctx, provider, o.ClientID, token, o.nonce, slices.Contains(o.Scopes, oidc.ScopeOpenID) || o.UseIDToken, true)
+	var token *oauth2.Token
+	var id *oidc.IDToken
+	if o.Browser {
+		token, id, err = o.browser(ctx, conf, validate)
+	} else {
+		token, err = o.device(ctx, conf)
+		if err == nil {
+			id, err = validate(token)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -204,37 +218,54 @@ func (o Options) device(ctx context.Context, conf *oauth2.Config) (*oauth2.Token
 	return token, nil
 }
 
-// callback is what the issuer sent the browser back with.
+// callback is the completed exchange/verification result, never a raw code.
 type callback struct {
-	code string
-	err  error
+	token *oauth2.Token
+	id    *oidc.IDToken
+	err   error
 }
 
 // browser is the authorization code grant with PKCE (RFC 7636) and a
 // redirect to a loopback port (RFC 8252): the user logs in in the browser
 // of this machine.
-func (o Options) browser(ctx context.Context, conf *oauth2.Config) (*oauth2.Token, error) {
+func (o Options) browser(ctx context.Context, conf *oauth2.Config, validate func(*oauth2.Token) (*oidc.IDToken, error)) (*oauth2.Token, *oidc.IDToken, error) {
 	listenHost := "127.0.0.1"
 	if o.RedirectHost == "::1" {
 		listenHost = "::1"
 	}
 	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", net.JoinHostPort(listenHost, fmt.Sprint(o.CallbackPort)))
 	if err != nil {
-		return nil, fmt.Errorf("listen for the browser's return: %w", err)
+		return nil, nil, fmt.Errorf("listen for the browser's return: %w", err)
 	}
 	state, err := randomState()
 	if err != nil {
 		_ = listener.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	results := make(chan callback, 1)
-	server := &http.Server{Handler: callbackHandler(state, results), ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = server.Serve(listener) }() // closes the listener when it stops
-	defer func() { _ = server.Close() }()
-
 	port := listener.Addr().(*net.TCPAddr).Port
 	conf.RedirectURL = fmt.Sprintf("http://%s%s", net.JoinHostPort(o.RedirectHost, fmt.Sprint(port)), callbackPath)
 	verifier := oauth2.GenerateVerifier()
+	results := make(chan callback, 1)
+	finish := func(code string) callback {
+		token, err := conf.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+		if err != nil {
+			return callback{err: safeOAuthError(err)}
+		}
+		id, err := validate(token)
+		return callback{token: token, id: id, err: err}
+	}
+	// Finish on the HTTP handler goroutine, independently of OpenBrowser: a
+	// synchronous browser/test client may wait for this response before returning.
+	server := &http.Server{Handler: callbackHandler(state, finish, results), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = server.Serve(listener) }() // closes the listener when it stops
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if server.Shutdown(shutdown) != nil {
+			_ = server.Close()
+		}
+	}()
+
 	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oidc.Nonce(o.nonce))
 	_, _ = fmt.Fprintf(o.Out, "To log in, open this URL in your browser:\n%s\n", authURL)
 	if o.OpenBrowser != nil {
@@ -244,43 +275,52 @@ func (o Options) browser(ctx context.Context, conf *oauth2.Config) (*oauth2.Toke
 	}
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("login not completed: %w", ctx.Err())
+		return nil, nil, fmt.Errorf("login not completed: %w", ctx.Err())
 	case result := <-results:
 		if result.err != nil {
-			return nil, fmt.Errorf("login not completed: %w", result.err)
+			return nil, nil, fmt.Errorf("login not completed: %w", result.err)
 		}
-		token, err := conf.Exchange(ctx, result.code, oauth2.VerifierOption(verifier))
-		if err != nil {
-			return nil, fmt.Errorf("login not completed: %w", safeOAuthError(err))
-		}
-		return token, nil
+		return result.token, result.id, nil
 	}
 }
 
-// callbackHandler serves the redirect URI once: it checks the state and
-// passes the code, or the issuer's error, on.
-func callbackHandler(state string, results chan<- callback) http.Handler {
+// callbackHandler accepts one state-matched response, and reports authentication
+// success only after exchange and verification. Unrelated loopback noise cannot
+// claim the callback or terminate the legitimate login.
+func callbackHandler(state string, finish func(string) callback, results chan<- callback) http.Handler {
 	mux := http.NewServeMux()
+	var claimed atomic.Bool
 	mux.HandleFunc("GET "+callbackPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		q := r.URL.Query()
-		result := callback{code: q.Get("code")}
+		if len(q["state"]) != 1 || subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1 {
+			http.Error(w, "This callback does not match the active login. Return to the original login page.", http.StatusBadRequest)
+			return
+		}
+		if !claimed.CompareAndSwap(false, true) {
+			http.Error(w, "This login callback has already been received. Check the terminal for its result.", http.StatusConflict)
+			return
+		}
+		var result callback
 		switch {
-		case len(q["state"]) != 1 || subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1:
-			result.err = errors.New("the browser came back with another login's state")
 		case q.Get("error") != "":
-			result.err = fmt.Errorf("the issuer refused: %s", safeOAuthCode(q.Get("error")))
+			result.err = fmt.Errorf("the issuer refused: %s", safeOAuthMessage(q.Get("error")))
 		case len(q["code"]) > 1:
 			result.err = errors.New("the browser came back with duplicate codes")
-		case result.code == "":
+		case q.Get("code") == "":
 			result.err = errors.New("the browser came back without a code")
+		default:
+			result = finish(q.Get("code"))
 		}
 		if result.err != nil {
-			http.Error(w, "Login failed: "+result.err.Error()+". You can close this window.", http.StatusBadRequest)
+			http.Error(w, "Authentication failed: "+result.err.Error()+". Return to the terminal for the login result.", http.StatusBadRequest)
 		} else {
-			_, _ = fmt.Fprintln(w, "Logged in. You can close this window and return to the terminal.")
+			_, _ = fmt.Fprintln(w, "Authentication completed. Return to the terminal to confirm your credentials were saved. You can close this window.")
 		}
+		// Ensure the page reaches the browser before publishing the result:
+		// browser() closes the listener when it receives this buffered message.
+		_ = http.NewResponseController(w).Flush()
 		select {
 		case results <- result:
 		default: // a second request: the first one decided
@@ -306,18 +346,26 @@ func clientAuthStyle(secret string) oauth2.AuthStyle {
 
 func safeOAuthCode(code string) string {
 	switch code {
-	case "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "server_error", "temporarily_unavailable", "expired_token":
+	case "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "server_error", "temporarily_unavailable", "expired_token", "not_allowed":
 		return code
 	default:
 		return "request_failed"
 	}
 }
 
+func safeOAuthMessage(code string) string {
+	code = safeOAuthCode(code)
+	if code == "not_allowed" {
+		return code + ": issuer policy denied the request; if offline_access was requested, check the client's and user's offline-access permissions"
+	}
+	return code
+}
+
 // OAuth response bodies/descriptions can echo a credential. Never surface them.
 func safeOAuthError(err error) error {
 	var response *oauth2.RetrieveError
 	if errors.As(err, &response) {
-		return errors.New(safeOAuthCode(response.ErrorCode))
+		return errors.New(safeOAuthMessage(response.ErrorCode))
 	}
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled

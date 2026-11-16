@@ -69,7 +69,7 @@ func (p platformSource) NetworkCodeAdmitted(ctx context.Context, tenantID, netwo
 	if err != nil {
 		return false, "", err
 	}
-	admitted, why := rollout.NetworkCodeAdmitted(networkID, tenantID, rollout.Tier(network.Spec.Tier), clusters, byName, holds, time.Now())
+	admitted, why := rollout.NetworkCodeAdmitted(network, clusters, byName, holds, time.Now())
 	return admitted, why, nil
 }
 

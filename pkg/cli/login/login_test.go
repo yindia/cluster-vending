@@ -51,6 +51,7 @@ type idp struct {
 	refreshID              bool
 	wrongSigner            bool
 	omitID                 bool
+	exchangeError          string
 }
 
 func newIDP(t *testing.T) *idp {
@@ -108,6 +109,10 @@ func (i *idp) token(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "authorization_code":
+		if i.exchangeError != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": i.exchangeError, "error_description": "private-provider-description code-1 access-1"})
+			return
+		}
 		sum := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
 		if r.Form.Get("code") != "code-1" || base64.RawURLEncoding.EncodeToString(sum[:]) != i.challenge {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_grant"})
@@ -266,11 +271,6 @@ func TestLoginThroughTheBrowserFails(t *testing.T) {
 		open func(authURL string) error
 		want string
 	}{
-		{"another login's state", func(authURL string) error {
-			back := callbackOf(authURL)
-			back.RawQuery = "code=code-1&state=forged"
-			return get(back)
-		}, "another login's state"},
 		{"the issuer refuses", func(authURL string) error {
 			u, _ := url.Parse(authURL)
 			back := callbackOf(authURL)

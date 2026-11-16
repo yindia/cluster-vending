@@ -416,7 +416,7 @@ func (w *stWorld) acknowledge(t *testing.T) {
 }
 
 func TestSubTenantControllerDeletionPreservesContentThenCleansEmptyNamespace(t *testing.T) {
-	w := newSubTenantWorld(t)
+	w := newDeletionWorld(t)
 	w.provision(t)
 	remote := w.tenant(t)
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: remote.GetName() + "-app", UID: "namespace-uid", Labels: map[string]string{"capsule.clastix.io/tenant": remote.GetName(), naas.LabelSubTenantID: stID, naas.LabelTenant: "acme", "cloud.cluster-vending.io/naas-ready": "false", "projectcapsule.dev/cordoned": "true"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: naas.TenantGVK.GroupVersion().String(), Kind: "Tenant", Name: remote.GetName(), UID: remote.GetUID()}}}}

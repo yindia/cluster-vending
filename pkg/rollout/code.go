@@ -1,15 +1,20 @@
 package rollout
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/maintenance"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/upgrade"
@@ -32,7 +37,172 @@ func ComputeCode(in Input) cloudv1alpha1.ChannelReleaseMoves {
 		return cloudv1alpha1.ChannelReleaseMoves{Waiting: problem}
 	}
 	m := memberInputs{channel: ch.Name, holds: in.Holds, now: in.Now}
-	return planChanges(cloudv1alpha1.ChannelReleaseMoves{}, ch, policy, in, m.codeMember)
+	out := cloudv1alpha1.ChannelReleaseMoves{Release: in.CodeEpoch}
+	discovering := false
+	members := make([]upgrade.Member, 0, len(in.Networks)+len(in.Clusters))
+	parents := map[string]*cloudv1alpha1.Network{}
+	add := func(member upgrade.Member, gate *upgrade.Gate) {
+		members = append(members, member)
+		if gate != nil && len(out.Blocked) < cloudv1alpha1.MaxRolloutClusters {
+			out.Blocked = append(out.Blocked, cloudv1alpha1.BlockedCluster{Cluster: member.ID, Gate: string(gate.Code), Message: gate.Message})
+		}
+	}
+	for i := range in.Networks {
+		network := &in.Networks[i]
+		parents[network.Namespace+"/"+network.Name] = network
+		clusters := in.NetworkClusters
+		if clusters == nil {
+			clusters = in.Clusters
+		}
+		if member, gate, ok := m.networkCodeMember(network, clusters); ok {
+			add(member, gate)
+			children := networkChildren(network, clusters)
+			frozen := FrozenNetwork(network.Labels[cloudstore.LabelID], strings.TrimPrefix(network.Namespace, "tenant-"), children, in.Holds, in.Now) != nil
+			if in.CodeEpoch != "" && member.State != upgrade.Blocked && !frozen && network.GetAnnotations()["crossplane.io/paused"] != "true" && !strings.HasPrefix(NetworkCodeTarget(network), in.CodeEpoch+"/") {
+				discovering = true
+			}
+		}
+	}
+	for i := range in.Clusters {
+		cluster := &in.Clusters[i]
+		member, gate, ok := m.codeMember(cluster)
+		if !ok {
+			continue
+		}
+		// A dependent cluster must not consume a batch slot before its network
+		// can start. The network remains a real pending/in-progress/failed member.
+		if member.State == upgrade.Pending {
+			parent := parents[cluster.Namespace+"/"+cluster.Spec.Network.NetworkRef.Name]
+			if parent != nil && networkCodeOutstanding(parent) {
+				member.State = upgrade.Blocked
+				gate = &upgrade.Gate{Code: "NETWORK_CODE_PENDING", Blocking: true, Message: "waiting for parent network " + parent.Name + " code change first"}
+			}
+		}
+		add(member, gate)
+	}
+	out = planChangeMembers(out, ch, policy, in.Now, members)
+	if discovering {
+		out.Admitted, out.Done = nil, false
+		out.Waiting = "waiting for every participating network to observe this controller's render before code admission"
+	}
+	return out
+}
+
+// The API's typed CodeChange projection omits target; the persisted contract
+// retains it. Missing/malformed observations never satisfy an epoch barrier.
+func NetworkCodeTarget(network *cloudv1alpha1.Network) string {
+	if network.Status.ContractStatus == nil {
+		return ""
+	}
+	var status struct {
+		CodeChange struct {
+			Target string `json:"target"`
+		} `json:"codeChange"`
+	}
+	if json.Unmarshal(network.Status.ContractStatus.Raw, &status) != nil {
+		return ""
+	}
+	return status.CodeChange.Target
+}
+
+// NetworkCodeKey separates network members from namespace/name cluster keys.
+// Binding admission to the pending render target rejects plans from older code.
+func NetworkCodeKey(network *cloudv1alpha1.Network) string {
+	key := "network:" + network.Namespace + "/" + network.Name
+	if target := NetworkCodeTarget(network); target != "" {
+		key += "@" + target
+	}
+	return key
+}
+
+func networkCodeOutstanding(network *cloudv1alpha1.Network) bool {
+	change := network.Status.CodeChange
+	return change != nil && change.Phase != "" && (change.Phase != convert.CodeChangeDone || !networkCodeReady(network))
+}
+
+func networkCodeReady(network *cloudv1alpha1.Network) bool {
+	if network.Status.Phase != cloudv1alpha1.NetworkPhaseReady || meta.IsStatusConditionFalse(network.Status.Conditions, "Ready") || network.Status.ObservedGeneration < network.Generation {
+		return false
+	}
+	if ready := meta.FindStatusCondition(network.Status.Conditions, "Ready"); ready != nil && ready.ObservedGeneration > 0 && ready.ObservedGeneration < network.Generation {
+		return false
+	}
+	if network.Status.ContractStatus != nil {
+		status := &cloudv1.NetworkStatus{}
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(network.Status.ContractStatus.Raw, status); err != nil {
+			return false
+		}
+		for _, resource := range status.ManagedResources {
+			if resource.Kind != "Usage" && resource.Generation > resource.ObservedGeneration || resource.State != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || resource.Paused {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (in memberInputs) networkCodeMember(network *cloudv1alpha1.Network, clusters []cloudv1alpha1.Cluster) (upgrade.Member, *upgrade.Gate, bool) {
+	m := upgrade.Member{ID: NetworkCodeKey(network), Tier: Tier(network.Spec.Tier)}
+	if !network.DeletionTimestamp.IsZero() || network.Status.Phase == cloudv1alpha1.NetworkPhaseImported || network.Status.Phase == cloudv1alpha1.NetworkPhaseProvisioning || (network.Status.Phase == "" && network.Status.CodeChange == nil) {
+		return m, nil, false
+	}
+	children := networkChildren(network, clusters)
+	if network.GetAnnotations()["crossplane.io/paused"] == "true" && (network.Status.CodeChange == nil || network.Status.CodeChange.Phase != convert.CodeChangeApplying) {
+		m.State = upgrade.Blocked
+		return m, &upgrade.Gate{Code: upgrade.GatePaused, Blocking: true, Message: "the network is paused"}, true
+	}
+	if (network.Status.Phase == cloudv1alpha1.NetworkPhaseFailed || meta.IsStatusConditionFalse(network.Status.Conditions, "Synced")) && (network.Status.CodeChange == nil || network.Status.CodeChange.Phase == convert.CodeChangeDone) {
+		m.State = upgrade.Blocked
+		return m, &upgrade.Gate{Code: upgrade.GateNotReady, Blocking: true, Message: "the network is not provisionable"}, true
+	}
+	if hold := FrozenNetwork(network.Labels[cloudstore.LabelID], strings.TrimPrefix(network.Namespace, "tenant-"), children, in.holds, in.now); hold != nil && (network.Status.CodeChange == nil || network.Status.CodeChange.Phase != convert.CodeChangeApplying) {
+		m.State = upgrade.Blocked
+		return m, &upgrade.Gate{Code: upgrade.GateFrozen, Blocking: true, Message: FreezeMessage(hold)}, true
+	}
+	change := network.Status.CodeChange
+	if change == nil || change.Phase == "" {
+		m.State = upgrade.Succeeded
+		return m, nil, true
+	}
+	switch change.Phase {
+	case convert.CodeChangeHalted:
+		m.State = upgrade.Failed
+	case convert.CodeChangeApplying:
+		m.State = upgrade.InProgress
+		if network.Status.Phase == cloudv1alpha1.NetworkPhaseFailed {
+			m.State = upgrade.Failed
+		}
+	case convert.CodeChangeDone:
+		m.State = upgrade.InProgress // desired objects applied; wait for cloud convergence
+		if network.Status.Phase == cloudv1alpha1.NetworkPhaseFailed {
+			m.State = upgrade.Failed
+		} else if networkCodeReady(network) {
+			m.State = upgrade.Succeeded
+		}
+	default:
+		if hold := FrozenNetwork(network.Labels[cloudstore.LabelID], strings.TrimPrefix(network.Namespace, "tenant-"), children, in.holds, in.now); hold != nil {
+			m.State = upgrade.Blocked
+			return m, &upgrade.Gate{Code: upgrade.GateFrozen, Blocking: true, Message: FreezeMessage(hold)}, true
+		}
+		if network.GetAnnotations()["crossplane.io/paused"] == "true" {
+			m.State = upgrade.Blocked
+			return m, &upgrade.Gate{Code: upgrade.GatePaused, Blocking: true, Message: "the network is paused"}, true
+		}
+		m.State = upgrade.Pending
+	}
+	if change.FinishTime != nil {
+		m.FinishedAt = change.FinishTime.Time
+	}
+	if ready := meta.FindStatusCondition(network.Status.Conditions, "Ready"); ready != nil && ready.Status == metav1.ConditionTrue && ready.LastTransitionTime.After(m.FinishedAt) {
+		m.FinishedAt = ready.LastTransitionTime.Time
+	}
+	return m, nil, true
+}
+
+func networkChildren(network *cloudv1alpha1.Network, clusters []cloudv1alpha1.Cluster) []cloudv1alpha1.Cluster {
+	return slices.DeleteFunc(slices.Clone(clusters), func(cluster cloudv1alpha1.Cluster) bool {
+		return cluster.Namespace != network.Namespace || cluster.Spec.Network.NetworkRef.Name != network.Name
+	})
 }
 
 // codeMember is the cluster's place in the channel's code rollout; false
@@ -84,17 +254,14 @@ func codeFinished(c *cloudv1alpha1.Cluster) time.Time {
 	return FinishedAt(c)
 }
 
-// rolloutOrder is how far a tier is in a rollout: Tier2 first.
-func rolloutOrder(t upgrade.Tier) int { return int(upgrade.Tier2 - t) }
-
 // NetworkCodeAdmitted reports whether a network's code change may be
 // applied now, and why not: no freeze holds it (FrozenNetwork), and the
 // code rollout of every channel of its clusters has reached the network's
 // own tier, so it goes before its clusters of that tier.
 // channels are the release channels by name.
-func NetworkCodeAdmitted(id, tenant string, tier upgrade.Tier, clusters []cloudv1alpha1.Cluster, channels map[string]*cloudv1alpha1.ReleaseChannel,
+func NetworkCodeAdmitted(network *cloudv1alpha1.Network, clusters []cloudv1alpha1.Cluster, channels map[string]*cloudv1alpha1.ReleaseChannel,
 	holds []cloudv1alpha1.ReleaseHold, now time.Time) (bool, string) {
-	if h := FrozenNetwork(id, tenant, clusters, holds, now); h != nil {
+	if h := FrozenNetwork(network.Labels[cloudstore.LabelID], strings.TrimPrefix(network.Namespace, "tenant-"), clusters, holds, now); h != nil {
 		return false, FreezeMessage(h)
 	}
 	seen := map[string]bool{}
@@ -104,7 +271,7 @@ func NetworkCodeAdmitted(id, tenant string, tier upgrade.Tier, clusters []cloudv
 			continue
 		}
 		seen[name] = true
-		if why := channelReached(name, channels[name], tier); why != "" {
+		if why := networkAdmission(name, channels[name], network); why != "" {
 			return false, why
 		}
 	}
@@ -120,7 +287,7 @@ func NetworkCodeAdmitted(id, tenant string, tier upgrade.Tier, clusters []cloudv
 		}
 		slices.Sort(names)
 		for _, name := range names {
-			if why := channelReached(name, channels[name], tier); why != "" {
+			if why := networkAdmission(name, channels[name], network); why != "" {
 				return false, why
 			}
 		}
@@ -130,23 +297,31 @@ func NetworkCodeAdmitted(id, tenant string, tier upgrade.Tier, clusters []cloudv
 
 // channelReached says why the channel's code rollout has not reached
 // tier yet; empty when it has (or is done).
-func channelReached(name string, ch *cloudv1alpha1.ReleaseChannel, tier upgrade.Tier) string {
+func networkAdmission(name string, ch *cloudv1alpha1.ReleaseChannel, network *cloudv1alpha1.Network) string {
 	if ch == nil {
 		return fmt.Sprintf("release channel %s does not exist", name)
 	}
+	if ch.Spec.Paused {
+		return "release channel " + name + " is paused"
+	}
+	tier := Tier(network.Spec.Tier)
 	cc := ch.Status.CodeChanges
+	if cc != nil && cc.Release != "" && !strings.HasPrefix(NetworkCodeTarget(network), cc.Release+"/") {
+		return "waiting for this network to observe channel " + name + "'s current controller render"
+	}
 	switch {
 	case cc == nil:
 		return fmt.Sprintf("waiting for channel %s's code rollout to be planned", name)
-	case cc.Done:
-		return ""
 	case cc.Halted:
 		return fmt.Sprintf("channel %s's code rollout is halted: %s", name, cc.Waiting)
-	case cc.Tier == "" || rolloutOrder(Tier(cc.Tier)) < rolloutOrder(tier):
+	case cc.Done || cc.Tier == "" || Tier(cc.Tier) != tier:
 		return fmt.Sprintf("waiting for channel %s's code rollout to reach tier %d (the network goes before its clusters of that tier)",
 			name, tier)
 	}
-	return ""
+	if slices.Contains(cc.Admitted, NetworkCodeKey(network)) {
+		return ""
+	}
+	return "waiting for channel " + name + " to admit this network's current render target"
 }
 
 // FrozenNetwork is the freeze that holds a network; nil when none does.

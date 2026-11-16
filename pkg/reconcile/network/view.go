@@ -79,7 +79,9 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Network, records []m
 	for _, c := range clusters {
 		ids = append(ids, c.ID)
 	}
-	return ToProto(row, spec, status(row, views, o.resources, ids)), nil
+	st := status(row, views, o.resources, ids)
+	st.Architecture = architecture(o.objects, row.TenantID, row.ID)
+	return ToProto(row, spec, st), nil
 }
 
 func (s *Reconciler) logger() *slog.Logger {

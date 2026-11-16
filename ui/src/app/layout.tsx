@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "@astryxdesign/core/reset.css";
 import "@astryxdesign/core/astryx.css";
+import "@xyflow/react/style.css";
 import "./dialogs.css";
 import "./console-controls.css";
 import { Providers } from "./providers";

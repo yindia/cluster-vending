@@ -126,6 +126,12 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		reconcile.SettleMissing(records, views)
 	}
 	st := status(row, views, !createdAfterActive(records))
+	st.Architecture, err = s.observeArchitecture(ctx, row, records)
+	if err != nil {
+		s.logger().ErrorContext(ctx, "observe cluster architecture", "cluster_id", row.ID, "error", err)
+		return nil, fault.New(fault.Unavailable, "cannot read the cluster architecture from the management cluster")
+	}
+
 	if err := s.observeEKS(ctx, records, st); err != nil {
 		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")

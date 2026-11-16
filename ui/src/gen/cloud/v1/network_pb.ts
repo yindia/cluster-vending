@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/network.proto.
  */
 export const file_cloud_v1_network: GenFile = /*@__PURE__*/
-  fileDesc("ChZjbG91ZC92MS9uZXR3b3JrLnByb3RvEghjbG91ZC52MSKIBAoHTmV0d29yaxIRCgl0ZW5hbnRfaWQYASABKAkSCgoCaWQYAiABKAkSOgoEbmFtZRgLIAEoCUIsukgpcicQARgoMiFeW2Etel0oW2EtejAtOS1dezAsMzh9W2EtejAtOV0pPyQSHgoMZGlzcGxheV9uYW1lGAMgASgJQgi6SAVyAxiAARJ5CgZsYWJlbHMYBCADKAsyHS5jbG91ZC52MS5OZXR3b3JrLkxhYmVsc0VudHJ5Qkq6SEeaAUQQKCIgch4QARiAATIXXltBLVphLXowLTkgXy46Lz0rQC1dKyQqHnIcGIACMhdeW0EtWmEtejAtOSBfLjovPStALV0qJBIrCgRzcGVjGAUgASgLMhUuY2xvdWQudjEuTmV0d29ya1NwZWNCBrpIA8gBARInCgZzdGF0dXMYBiABKAsyFy5jbG91ZC52MS5OZXR3b3JrU3RhdHVzEhIKCmdlbmVyYXRpb24YByABKAMSDAoEZXRhZxgIIAEoCRIvCgtjcmVhdGVfdGltZRgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLdXBkYXRlX3RpbWUYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wGi0KC0xhYmVsc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEi9AEKC05ldHdvcmtTcGVjEiYKBHRpZXIYBiABKA4yDi5jbG91ZC52MS5UaWVyQgi6SAWCAQIQARInCgZyZWdpb24YASABKAlCF7pIFHISEAEYQDIMXlthLXowLTktXSskEi8KBmxheW91dBgCIAEoCzIXLmNsb3VkLnYxLk5ldHdvcmtMYXlvdXRCBrpIA8gBARIeCgxib290c3RyYXBfaWQYBCABKAlCCLpIBXIDsAEBEiwKCWZsb3dfbG9ncxgFIAEoCzIZLmNsb3VkLnYxLk5ldHdvcmtGbG93TG9nc0oECAMQBEoECAoQC1IEdGFnc1IDYXdzIqQBCg5DbHVzdGVyTmV0d29yaxIcCgpuZXR3b3JrX2lkGAEgASgJQgi6SAVyA7ABARIyCgh6b25lX2lkcxgFIAMoCUIgukgdkgEaEAYYASIUchIQARhAMgxeW2EtejAtOS1dKyQSHQoIcG9kX2NpZHIYAyABKAlCC7pICNgBAXID8AEBEiEKDHNlcnZpY2VfY2lkchgEIAEoCUILukgI2AEBcgPwAQEigQIKD05ldHdvcmtGbG93TG9ncxIUCgdlbmFibGVkGAEgASgISACIAQESPAoMdHJhZmZpY190eXBlGAIgASgOMhwuY2xvdWQudjEuRmxvd0xvZ1RyYWZmaWNUeXBlQgi6SAWCAQIQARJZCg5yZXRlbnRpb25fZGF5cxgDIAEoDUJBukg+2AEBKjkwATADMAUwBzAOMB4wPDBaMHgwlgEwtAEw7QIwkAMwoQQw2wUwyAgwow4wkBEw/RMw6hYw2BkwxRwSMwocYWdncmVnYXRpb25faW50ZXJ2YWxfc2Vjb25kcxgEIAEoDUINukgK2AEBKgUwPDDYBEIKCghfZW5hYmxlZCKPBgoNTmV0d29ya0xheW91dBIyCgpjaWRyX2Jsb2NrGAEgASgJQh66SBvYAQFyFjIRLygxWzYtOV18MlswLTRdKSTwAQESKwoHc3VibmV0cxgCIAMoCzIQLmNsb3VkLnYxLlN1Ym5ldEIIukgFkgECECASLQoXYXZhaWxhYmlsaXR5X3pvbmVfY291bnQYAyABKA1CDLpICdgBASoEGAYoAhI8ChBuYXRfZ2F0ZXdheV9tb2RlGAQgASgOMhguY2xvdWQudjEuTmF0R2F0ZXdheU1vZGVCCLpIBYIBAhABOq8EukirBBqFAgoqbmV0d29ya19sYXlvdXQuem9uYWxfc3VibmV0c19vcl96b25lX2NvdW50EnB6b25hbCBzdWJuZXRzIGFscmVhZHkgZGVmaW5lIHRoZSB6b25lczsgYXZhaWxhYmlsaXR5X3pvbmVfY291bnQgb25seSBjb21iaW5lcyB3aXRoIHJlZ2lvbmFsIHN1Ym5ldHMgKG5vIHpvbmVfaWQpGmVzaXplKHRoaXMuc3VibmV0cykgPT0gMCB8fCB0aGlzLmF2YWlsYWJpbGl0eV96b25lX2NvdW50ID09IDB1IHx8IHRoaXMuc3VibmV0cy5hbGwocywgcy56b25lX2lkID09ICcnKRp5CiJuZXR3b3JrX2xheW91dC51bmlxdWVfc3VibmV0X2NpZHJzEidzdWJuZXQgY2lkcl9ibG9jayB2YWx1ZXMgbXVzdCBiZSB1bmlxdWUaKnRoaXMuc3VibmV0cy5tYXAocywgcy5jaWRyX2Jsb2NrKS51bmlxdWUoKRqlAQombmV0d29ya19sYXlvdXQucHJpdmF0ZV9zdWJuZXRfcmVxdWlyZWQSO3N1Ym5ldHMsIHdoZW4gc2V0LCBtdXN0IGluY2x1ZGUgYXQgbGVhc3Qgb25lIFBSSVZBVEUgc3VibmV0Gj5zaXplKHRoaXMuc3VibmV0cykgPT0gMCB8fCB0aGlzLnN1Ym5ldHMuZXhpc3RzKHMsIHMucm9sZSA9PSAyKSKBAQoGU3VibmV0Ei4KBHJvbGUYASABKA4yFC5jbG91ZC52MS5TdWJuZXRSb2xlQgq6SAeCAQQQASAAEhwKCmNpZHJfYmxvY2sYAiABKAlCCLpIBXID8AEBEikKB3pvbmVfaWQYAyABKAlCGLpIFdgBAXIQGEAyDF5bYS16MC05LV0rJCLWAwoNTmV0d29ya1N0YXR1cxIlCgVzdGF0ZRgBIAEoDjIWLmNsb3VkLnYxLk5ldHdvcmtTdGF0ZRIPCgdtZXNzYWdlGAIgASgJEhsKE29ic2VydmVkX2dlbmVyYXRpb24YAyABKAMSJwoKY29uZGl0aW9ucxgEIAMoCzITLmNsb3VkLnYxLkNvbmRpdGlvbhItCglyZXNvdXJjZXMYBSABKAsyGi5jbG91ZC52MS5OZXR3b3JrUmVzb3VyY2VzEhMKC2NsdXN0ZXJfaWRzGAYgAygJEiYKBmltcG9ydBgHIAEoCzIWLmNsb3VkLnYxLkltcG9ydFN0YXR1cxIwCgxjYXJyaWVkX292ZXIYCCADKAsyGi5jbG91ZC52MS5JbXBvcnRlZFJlc291cmNlEjQKEW1hbmFnZWRfcmVzb3VyY2VzGAkgAygLMhkuY2xvdWQudjEuTWFuYWdlZFJlc291cmNlEiYKDXJlY2VudF9ldmVudHMYCiADKAsyDy5jbG91ZC52MS5FdmVudBIgCgZmcmVlemUYLSABKAsyEC5jbG91ZC52MS5GcmVlemUSKQoLY29kZV9jaGFuZ2UYLiABKAsyFC5jbG91ZC52MS5Db2RlQ2hhbmdlIpABChBOZXR3b3JrUmVzb3VyY2VzEhgKEGNsb3VkX25ldHdvcmtfaWQYASABKAkSGQoRcHVibGljX3N1Ym5ldF9pZHMYAiADKAkSGgoScHJpdmF0ZV9zdWJuZXRfaWRzGAMgAygJEhcKD25hdF9nYXRld2F5X2lkcxgEIAMoCRISCgplZ3Jlc3NfaXBzGAUgAygJKsUBChJGbG93TG9nVHJhZmZpY1R5cGUSJQohRkxPV19MT0dfVFJBRkZJQ19UWVBFX1VOU1BFQ0lGSUVEEAASKAoZRkxPV19MT0dfVFJBRkZJQ19UWVBFX0FMTBABGgmKtRgFCgNBTEwSLgocRkxPV19MT0dfVFJBRkZJQ19UWVBFX0FDQ0VQVBACGgyKtRgICgZBQ0NFUFQSLgocRkxPV19MT0dfVFJBRkZJQ19UWVBFX1JFSkVDVBADGgyKtRgICgZSRUpFQ1QqWgoKU3VibmV0Um9sZRIbChdTVUJORVRfUk9MRV9VTlNQRUNJRklFRBAAEhYKElNVQk5FVF9ST0xFX1BVQkxJQxABEhcKE1NVQk5FVF9ST0xFX1BSSVZBVEUQAiq3AQoOTmF0R2F0ZXdheU1vZGUSIAocTkFUX0dBVEVXQVlfTU9ERV9VTlNQRUNJRklFRBAAEigKF05BVF9HQVRFV0FZX01PREVfU0lOR0xFEAEaC4q1GAcKBXpvbmFsEioKGU5BVF9HQVRFV0FZX01PREVfUEVSX1pPTkUQAhoLirUYBwoFem9uYWwSLQoZTkFUX0dBVEVXQVlfTU9ERV9SRUdJT05BTBADGg6KtRgKCghyZWdpb25hbCrUAQoMTmV0d29ya1N0YXRlEh0KGU5FVFdPUktfU1RBVEVfVU5TUEVDSUZJRUQQABIeChpORVRXT1JLX1NUQVRFX1BST1ZJU0lPTklORxABEhoKFk5FVFdPUktfU1RBVEVfSU1QT1JURUQQAhIXChNORVRXT1JLX1NUQVRFX1JFQURZEAMSGgoWTkVUV09SS19TVEFURV9VUERBVElORxAEEhoKFk5FVFdPUktfU1RBVEVfREVMRVRJTkcQBRIYChRORVRXT1JLX1NUQVRFX0ZBSUxFRBAGQpwBCgxjb20uY2xvdWQudjFCDE5ldHdvcmtQcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_cloud_v1_code_change, file_cloud_v1_conditions, file_cloud_v1_events, file_cloud_v1_freeze, file_cloud_v1_import, file_cloud_v1_managed_resource, file_cloud_v1_options, file_cloud_v1_tier, file_google_protobuf_timestamp]);
+  fileDesc("ChZjbG91ZC92MS9uZXR3b3JrLnByb3RvEghjbG91ZC52MSKIBAoHTmV0d29yaxIRCgl0ZW5hbnRfaWQYASABKAkSCgoCaWQYAiABKAkSOgoEbmFtZRgLIAEoCUIsukgpcicQARgoMiFeW2Etel0oW2EtejAtOS1dezAsMzh9W2EtejAtOV0pPyQSHgoMZGlzcGxheV9uYW1lGAMgASgJQgi6SAVyAxiAARJ5CgZsYWJlbHMYBCADKAsyHS5jbG91ZC52MS5OZXR3b3JrLkxhYmVsc0VudHJ5Qkq6SEeaAUQQKCIgch4QARiAATIXXltBLVphLXowLTkgXy46Lz0rQC1dKyQqHnIcGIACMhdeW0EtWmEtejAtOSBfLjovPStALV0qJBIrCgRzcGVjGAUgASgLMhUuY2xvdWQudjEuTmV0d29ya1NwZWNCBrpIA8gBARInCgZzdGF0dXMYBiABKAsyFy5jbG91ZC52MS5OZXR3b3JrU3RhdHVzEhIKCmdlbmVyYXRpb24YByABKAMSDAoEZXRhZxgIIAEoCRIvCgtjcmVhdGVfdGltZRgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLdXBkYXRlX3RpbWUYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wGi0KC0xhYmVsc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEi9AEKC05ldHdvcmtTcGVjEiYKBHRpZXIYBiABKA4yDi5jbG91ZC52MS5UaWVyQgi6SAWCAQIQARInCgZyZWdpb24YASABKAlCF7pIFHISEAEYQDIMXlthLXowLTktXSskEi8KBmxheW91dBgCIAEoCzIXLmNsb3VkLnYxLk5ldHdvcmtMYXlvdXRCBrpIA8gBARIeCgxib290c3RyYXBfaWQYBCABKAlCCLpIBXIDsAEBEiwKCWZsb3dfbG9ncxgFIAEoCzIZLmNsb3VkLnYxLk5ldHdvcmtGbG93TG9nc0oECAMQBEoECAoQC1IEdGFnc1IDYXdzIqQBCg5DbHVzdGVyTmV0d29yaxIcCgpuZXR3b3JrX2lkGAEgASgJQgi6SAVyA7ABARIyCgh6b25lX2lkcxgFIAMoCUIgukgdkgEaEAYYASIUchIQARhAMgxeW2EtejAtOS1dKyQSHQoIcG9kX2NpZHIYAyABKAlCC7pICNgBAXID8AEBEiEKDHNlcnZpY2VfY2lkchgEIAEoCUILukgI2AEBcgPwAQEigQIKD05ldHdvcmtGbG93TG9ncxIUCgdlbmFibGVkGAEgASgISACIAQESPAoMdHJhZmZpY190eXBlGAIgASgOMhwuY2xvdWQudjEuRmxvd0xvZ1RyYWZmaWNUeXBlQgi6SAWCAQIQARJZCg5yZXRlbnRpb25fZGF5cxgDIAEoDUJBukg+2AEBKjkwATADMAUwBzAOMB4wPDBaMHgwlgEwtAEw7QIwkAMwoQQw2wUwyAgwow4wkBEw/RMw6hYw2BkwxRwSMwocYWdncmVnYXRpb25faW50ZXJ2YWxfc2Vjb25kcxgEIAEoDUINukgK2AEBKgUwPDDYBEIKCghfZW5hYmxlZCKPBgoNTmV0d29ya0xheW91dBIyCgpjaWRyX2Jsb2NrGAEgASgJQh66SBvYAQFyFjIRLygxWzYtOV18MlswLTRdKSTwAQESKwoHc3VibmV0cxgCIAMoCzIQLmNsb3VkLnYxLlN1Ym5ldEIIukgFkgECECASLQoXYXZhaWxhYmlsaXR5X3pvbmVfY291bnQYAyABKA1CDLpICdgBASoEGAYoAhI8ChBuYXRfZ2F0ZXdheV9tb2RlGAQgASgOMhguY2xvdWQudjEuTmF0R2F0ZXdheU1vZGVCCLpIBYIBAhABOq8EukirBBqFAgoqbmV0d29ya19sYXlvdXQuem9uYWxfc3VibmV0c19vcl96b25lX2NvdW50EnB6b25hbCBzdWJuZXRzIGFscmVhZHkgZGVmaW5lIHRoZSB6b25lczsgYXZhaWxhYmlsaXR5X3pvbmVfY291bnQgb25seSBjb21iaW5lcyB3aXRoIHJlZ2lvbmFsIHN1Ym5ldHMgKG5vIHpvbmVfaWQpGmVzaXplKHRoaXMuc3VibmV0cykgPT0gMCB8fCB0aGlzLmF2YWlsYWJpbGl0eV96b25lX2NvdW50ID09IDB1IHx8IHRoaXMuc3VibmV0cy5hbGwocywgcy56b25lX2lkID09ICcnKRp5CiJuZXR3b3JrX2xheW91dC51bmlxdWVfc3VibmV0X2NpZHJzEidzdWJuZXQgY2lkcl9ibG9jayB2YWx1ZXMgbXVzdCBiZSB1bmlxdWUaKnRoaXMuc3VibmV0cy5tYXAocywgcy5jaWRyX2Jsb2NrKS51bmlxdWUoKRqlAQombmV0d29ya19sYXlvdXQucHJpdmF0ZV9zdWJuZXRfcmVxdWlyZWQSO3N1Ym5ldHMsIHdoZW4gc2V0LCBtdXN0IGluY2x1ZGUgYXQgbGVhc3Qgb25lIFBSSVZBVEUgc3VibmV0Gj5zaXplKHRoaXMuc3VibmV0cykgPT0gMCB8fCB0aGlzLnN1Ym5ldHMuZXhpc3RzKHMsIHMucm9sZSA9PSAyKSKBAQoGU3VibmV0Ei4KBHJvbGUYASABKA4yFC5jbG91ZC52MS5TdWJuZXRSb2xlQgq6SAeCAQQQASAAEhwKCmNpZHJfYmxvY2sYAiABKAlCCLpIBXID8AEBEikKB3pvbmVfaWQYAyABKAlCGLpIFdgBAXIQGEAyDF5bYS16MC05LV0rJCKLBAoNTmV0d29ya1N0YXR1cxIlCgVzdGF0ZRgBIAEoDjIWLmNsb3VkLnYxLk5ldHdvcmtTdGF0ZRIPCgdtZXNzYWdlGAIgASgJEhsKE29ic2VydmVkX2dlbmVyYXRpb24YAyABKAMSJwoKY29uZGl0aW9ucxgEIAMoCzITLmNsb3VkLnYxLkNvbmRpdGlvbhItCglyZXNvdXJjZXMYBSABKAsyGi5jbG91ZC52MS5OZXR3b3JrUmVzb3VyY2VzEhMKC2NsdXN0ZXJfaWRzGAYgAygJEiYKBmltcG9ydBgHIAEoCzIWLmNsb3VkLnYxLkltcG9ydFN0YXR1cxIwCgxjYXJyaWVkX292ZXIYCCADKAsyGi5jbG91ZC52MS5JbXBvcnRlZFJlc291cmNlEjQKEW1hbmFnZWRfcmVzb3VyY2VzGAkgAygLMhkuY2xvdWQudjEuTWFuYWdlZFJlc291cmNlEiYKDXJlY2VudF9ldmVudHMYCiADKAsyDy5jbG91ZC52MS5FdmVudBIgCgZmcmVlemUYLSABKAsyEC5jbG91ZC52MS5GcmVlemUSKQoLY29kZV9jaGFuZ2UYLiABKAsyFC5jbG91ZC52MS5Db2RlQ2hhbmdlEjMKDGFyY2hpdGVjdHVyZRgLIAEoCzIdLmNsb3VkLnYxLk5ldHdvcmtBcmNoaXRlY3R1cmUikAEKEE5ldHdvcmtSZXNvdXJjZXMSGAoQY2xvdWRfbmV0d29ya19pZBgBIAEoCRIZChFwdWJsaWNfc3VibmV0X2lkcxgCIAMoCRIaChJwcml2YXRlX3N1Ym5ldF9pZHMYAyADKAkSFwoPbmF0X2dhdGV3YXlfaWRzGAQgAygJEhIKCmVncmVzc19pcHMYBSADKAkijQEKE05ldHdvcmtBcmNoaXRlY3R1cmUSOAoJcmVzb3VyY2VzGAEgAygLMiUuY2xvdWQudjEuTmV0d29ya0FyY2hpdGVjdHVyZVJlc291cmNlEjwKC2Nvbm5lY3Rpb25zGAIgAygLMicuY2xvdWQudjEuTmV0d29ya0FyY2hpdGVjdHVyZUNvbm5lY3Rpb24irwIKG05ldHdvcmtBcmNoaXRlY3R1cmVSZXNvdXJjZRIMCgRraW5kGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIY2xvdWRfaWQYAyABKAkSDwoHem9uZV9pZBgEIAEoCRIpCgtzdWJuZXRfcm9sZRgFIAEoDjIULmNsb3VkLnYxLlN1Ym5ldFJvbGUSEgoKY2lkcl9ibG9jaxgGIAEoCRIeChZkZXN0aW5hdGlvbl9jaWRyX2Jsb2NrGAcgASgJEiMKG2Rlc3RpbmF0aW9uX2lwdjZfY2lkcl9ibG9jaxgIIAEoCRIRCglwdWJsaWNfaXAYCSABKAkSFgoOcmVmZXJlbmNlX29ubHkYCiABKAgSIgoaZGVzdGluYXRpb25fcHJlZml4X2xpc3RfaWQYCyABKAkiugIKHU5ldHdvcmtBcmNoaXRlY3R1cmVDb25uZWN0aW9uEhMKC3NvdXJjZV9raW5kGAEgASgJEhMKC3NvdXJjZV9uYW1lGAIgASgJEhMKC3RhcmdldF9raW5kGAMgASgJEhMKC3RhcmdldF9uYW1lGAQgASgJEhAKCHJlbGF0aW9uGAUgASgJEg0KBWxhYmVsGAYgASgJEhAKCGV2aWRlbmNlGAcgASgJEh4KFmRlc3RpbmF0aW9uX2NpZHJfYmxvY2sYCCABKAkSIwobZGVzdGluYXRpb25faXB2Nl9jaWRyX2Jsb2NrGAkgASgJEiIKGmRlc3RpbmF0aW9uX3ByZWZpeF9saXN0X2lkGAogASgJEhMKC3JvdXRlX3N0YXRlGAsgASgJEhQKDHJvdXRlX29yaWdpbhgMIAEoCSrFAQoSRmxvd0xvZ1RyYWZmaWNUeXBlEiUKIUZMT1dfTE9HX1RSQUZGSUNfVFlQRV9VTlNQRUNJRklFRBAAEigKGUZMT1dfTE9HX1RSQUZGSUNfVFlQRV9BTEwQARoJirUYBQoDQUxMEi4KHEZMT1dfTE9HX1RSQUZGSUNfVFlQRV9BQ0NFUFQQAhoMirUYCAoGQUNDRVBUEi4KHEZMT1dfTE9HX1RSQUZGSUNfVFlQRV9SRUpFQ1QQAxoMirUYCAoGUkVKRUNUKloKClN1Ym5ldFJvbGUSGwoXU1VCTkVUX1JPTEVfVU5TUEVDSUZJRUQQABIWChJTVUJORVRfUk9MRV9QVUJMSUMQARIXChNTVUJORVRfUk9MRV9QUklWQVRFEAIqtwEKDk5hdEdhdGV3YXlNb2RlEiAKHE5BVF9HQVRFV0FZX01PREVfVU5TUEVDSUZJRUQQABIoChdOQVRfR0FURVdBWV9NT0RFX1NJTkdMRRABGguKtRgHCgV6b25hbBIqChlOQVRfR0FURVdBWV9NT0RFX1BFUl9aT05FEAIaC4q1GAcKBXpvbmFsEi0KGU5BVF9HQVRFV0FZX01PREVfUkVHSU9OQUwQAxoOirUYCgoIcmVnaW9uYWwq1AEKDE5ldHdvcmtTdGF0ZRIdChlORVRXT1JLX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaTkVUV09SS19TVEFURV9QUk9WSVNJT05JTkcQARIaChZORVRXT1JLX1NUQVRFX0lNUE9SVEVEEAISFwoTTkVUV09SS19TVEFURV9SRUFEWRADEhoKFk5FVFdPUktfU1RBVEVfVVBEQVRJTkcQBBIaChZORVRXT1JLX1NUQVRFX0RFTEVUSU5HEAUSGAoUTkVUV09SS19TVEFURV9GQUlMRUQQBkKcAQoMY29tLmNsb3VkLnYxQgxOZXR3b3JrUHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_cloud_v1_code_change, file_cloud_v1_conditions, file_cloud_v1_events, file_cloud_v1_freeze, file_cloud_v1_import, file_cloud_v1_managed_resource, file_cloud_v1_options, file_cloud_v1_tier, file_google_protobuf_timestamp]);
 
 /**
  * Network is a tenant network (AWS VPC, GCP VPC network, Azure VNet) with its
@@ -493,6 +493,14 @@ export type NetworkStatus = Message<"cloud.v1.NetworkStatus"> & {
    * @generated from field: cloud.v1.CodeChange code_change = 46;
    */
   codeChange?: CodeChange | undefined;
+
+  /**
+   * Read-only topology from this network's owned managed resources. Missing
+   * resources/references are omitted; this is not proof of packet reachability.
+   *
+   * @generated from field: cloud.v1.NetworkArchitecture architecture = 11;
+   */
+  architecture?: NetworkArchitecture | undefined;
 };
 
 /**
@@ -549,6 +557,196 @@ export type NetworkResources = Message<"cloud.v1.NetworkResources"> & {
  */
 export const NetworkResourcesSchema: GenMessage<NetworkResources> = /*@__PURE__*/
   messageDesc(file_cloud_v1_network, 7);
+
+/**
+ * A bounded provider-neutral topology, with no raw provider spec or credentials.
+ *
+ * @generated from message cloud.v1.NetworkArchitecture
+ */
+export type NetworkArchitecture = Message<"cloud.v1.NetworkArchitecture"> & {
+  /**
+   * @generated from field: repeated cloud.v1.NetworkArchitectureResource resources = 1;
+   */
+  resources: NetworkArchitectureResource[];
+
+  /**
+   * @generated from field: repeated cloud.v1.NetworkArchitectureConnection connections = 2;
+   */
+  connections: NetworkArchitectureConnection[];
+};
+
+/**
+ * Describes the message cloud.v1.NetworkArchitecture.
+ * Use `create(NetworkArchitectureSchema)` to create a new message.
+ */
+export const NetworkArchitectureSchema: GenMessage<NetworkArchitecture> = /*@__PURE__*/
+  messageDesc(file_cloud_v1_network, 8);
+
+/**
+ * kind/name is the stable identity within this network, matching managed_resources
+ * except for explicitly marked reference_only route targets.
+ * Scalar facts prefer provider observation, falling back to configured values.
+ * Empty values mean unknown/not applicable; subnet_role may be UNSPECIFIED.
+ *
+ * @generated from message cloud.v1.NetworkArchitectureResource
+ */
+export type NetworkArchitectureResource = Message<"cloud.v1.NetworkArchitectureResource"> & {
+  /**
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string cloud_id = 3;
+   */
+  cloudId: string;
+
+  /**
+   * @generated from field: string zone_id = 4;
+   */
+  zoneId: string;
+
+  /**
+   * @generated from field: cloud.v1.SubnetRole subnet_role = 5;
+   */
+  subnetRole: SubnetRole;
+
+  /**
+   * @generated from field: string cidr_block = 6;
+   */
+  cidrBlock: string;
+
+  /**
+   * @generated from field: string destination_cidr_block = 7;
+   */
+  destinationCidrBlock: string;
+
+  /**
+   * @generated from field: string destination_ipv6_cidr_block = 8;
+   */
+  destinationIpv6CidrBlock: string;
+
+  /**
+   * @generated from field: string public_ip = 9;
+   */
+  publicIp: string;
+
+  /**
+   * True only for an explicit route target cloud ID outside the owned snapshot.
+   * Such entries have no managed-resource identity, readiness or inferred facts;
+   * name equals cloud_id solely to provide a stable connection endpoint.
+   *
+   * @generated from field: bool reference_only = 10;
+   */
+  referenceOnly: boolean;
+
+  /**
+   * @generated from field: string destination_prefix_list_id = 11;
+   */
+  destinationPrefixListId: string;
+};
+
+/**
+ * Describes the message cloud.v1.NetworkArchitectureResource.
+ * Use `create(NetworkArchitectureResourceSchema)` to create a new message.
+ */
+export const NetworkArchitectureResourceSchema: GenMessage<NetworkArchitectureResource> = /*@__PURE__*/
+  messageDesc(file_cloud_v1_network, 9);
+
+/**
+ * Endpoints always identify resources included in the same architecture;
+ * reference_only targets are references, not owned or verified resources.
+ * relation: contained_in, placed_in, uses_address, associated_with, routes_via,
+ * or forwards_to. label supplies a readable caption (a route's destination for
+ * forwards_to). An explicit local gateway forwards_to the owned VPC.
+ * Connections are evidence of configuration, not traffic tests.
+ *
+ * @generated from message cloud.v1.NetworkArchitectureConnection
+ */
+export type NetworkArchitectureConnection = Message<"cloud.v1.NetworkArchitectureConnection"> & {
+  /**
+   * @generated from field: string source_kind = 1;
+   */
+  sourceKind: string;
+
+  /**
+   * @generated from field: string source_name = 2;
+   */
+  sourceName: string;
+
+  /**
+   * @generated from field: string target_kind = 3;
+   */
+  targetKind: string;
+
+  /**
+   * @generated from field: string target_name = 4;
+   */
+  targetName: string;
+
+  /**
+   * @generated from field: string relation = 5;
+   */
+  relation: string;
+
+  /**
+   * @generated from field: string label = 6;
+   */
+  label: string;
+
+  /**
+   * "configured": explicit forProvider reference/ID; "observed": atProvider ID.
+   * Matching configured/observed edges are coalesced to observed; differing
+   * targets remain separate so drift is not presented as a confirmed path.
+   *
+   * @generated from field: string evidence = 7;
+   */
+  evidence: string;
+
+  /**
+   * Route destinations are explicit, never inferred from VPC/subnet CIDRs.
+   * Inline RouteTable observations connect directly from the table, without
+   * inventing Route managed resources. These facts do not prove reachability.
+   *
+   * @generated from field: string destination_cidr_block = 8;
+   */
+  destinationCidrBlock: string;
+
+  /**
+   * @generated from field: string destination_ipv6_cidr_block = 9;
+   */
+  destinationIpv6CidrBlock: string;
+
+  /**
+   * @generated from field: string destination_prefix_list_id = 10;
+   */
+  destinationPrefixListId: string;
+
+  /**
+   * Observed standalone Route state (e.g. active/blackhole) and origin only.
+   * Empty when the provider observation does not expose these fields.
+   *
+   * @generated from field: string route_state = 11;
+   */
+  routeState: string;
+
+  /**
+   * @generated from field: string route_origin = 12;
+   */
+  routeOrigin: string;
+};
+
+/**
+ * Describes the message cloud.v1.NetworkArchitectureConnection.
+ * Use `create(NetworkArchitectureConnectionSchema)` to create a new message.
+ */
+export const NetworkArchitectureConnectionSchema: GenMessage<NetworkArchitectureConnection> = /*@__PURE__*/
+  messageDesc(file_cloud_v1_network, 10);
 
 /**
  * FlowLogTrafficType is the traffic a flow log records.

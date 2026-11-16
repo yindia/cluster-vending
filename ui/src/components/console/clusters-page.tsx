@@ -56,6 +56,7 @@ import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
 import { ClusterExtraFields, ClusterExtraReview, useClusterFieldRows } from "./cluster-form-fields";
+import { ClusterTopology } from "./cluster-topology";
 import { ClusterConfiguration } from "./cluster-configuration";
 import { RefreshButton } from "./refresh-button";
 import { ProviderIcon, KubernetesIcon } from "./provider-icons";
@@ -517,7 +518,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const activityEvents = filteringActivity ? allEvents.data ?? [] : pageEvents;
   const filteredEvents = filterActivityEvents(activityEvents, activityFilters);
   const availableEventKinds = [...pageEvents, ...(allEvents.data ?? [])];
-  const panels = ["overview", "configuration", "resources", "activity", "components", "deprecations", "recommendations", ...(cluster?.spec?.naas ? ["subtenants"] : [])];
+  const panels = ["overview", "configuration", "topology", "resources", "activity", "components", "deprecations", "recommendations", ...(cluster?.spec?.naas ? ["subtenants"] : [])];
   const activeTab = tab === "subtenants" && !cluster?.spec?.naas ? "overview" : tab;
   const panelId = (name: string) => `${panelPrefix}-${name}`;
   function openTab(name: string) { setTab(name); if (name === "activity") setRequestedEventKinds(true); }
@@ -614,6 +615,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         </VStack>
       </VStack>}
       {activeTab === "configuration" && <VStack id={panelId("configuration")} role="tabpanel" aria-label="Configuration" tabIndex={0} gap={6}><ClusterConfiguration cluster={cluster} /></VStack>}
+      {activeTab === "topology" && <VStack id={panelId("topology")} role="tabpanel" aria-label="Topology" tabIndex={0} gap={6}><ClusterTopology cluster={cluster} network={network.data?.network} /></VStack>}
       {activeTab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Resources" tabIndex={0} gap={6}>
         <ManagedInventory resources={resources} title="Cluster managed resource inventory" />
         {status?.import && <Collapsible trigger={`Import discovery · ${label(ImportPhase, status.import.phase)}`} defaultIsOpen={false}>

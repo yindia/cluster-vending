@@ -876,7 +876,10 @@ type NetworkStatus struct {
 	// code_change is a change of what the platform renders for the network
 	// (a new controller build), applied before its clusters. They all share
 	// the network tier; unset when nothing was rendered differently.
-	CodeChange    *CodeChange `protobuf:"bytes,46,opt,name=code_change,json=codeChange,proto3" json:"code_change,omitempty"`
+	CodeChange *CodeChange `protobuf:"bytes,46,opt,name=code_change,json=codeChange,proto3" json:"code_change,omitempty"`
+	// Read-only topology from this network's owned managed resources. Missing
+	// resources/references are omitted; this is not proof of packet reachability.
+	Architecture  *NetworkArchitecture `protobuf:"bytes,11,opt,name=architecture,proto3" json:"architecture,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -995,6 +998,13 @@ func (x *NetworkStatus) GetCodeChange() *CodeChange {
 	return nil
 }
 
+func (x *NetworkStatus) GetArchitecture() *NetworkArchitecture {
+	if x != nil {
+		return x.Architecture
+	}
+	return nil
+}
+
 // NetworkResources lists the cloud resources of a network, all owned by the
 // platform. Also reported per cluster in ClusterStatus.network.
 type NetworkResources struct {
@@ -1080,6 +1090,336 @@ func (x *NetworkResources) GetEgressIps() []string {
 	return nil
 }
 
+// A bounded provider-neutral topology, with no raw provider spec or credentials.
+type NetworkArchitecture struct {
+	state         protoimpl.MessageState           `protogen:"open.v1"`
+	Resources     []*NetworkArchitectureResource   `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
+	Connections   []*NetworkArchitectureConnection `protobuf:"bytes,2,rep,name=connections,proto3" json:"connections,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkArchitecture) Reset() {
+	*x = NetworkArchitecture{}
+	mi := &file_cloud_v1_network_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkArchitecture) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkArchitecture) ProtoMessage() {}
+
+func (x *NetworkArchitecture) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_network_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkArchitecture.ProtoReflect.Descriptor instead.
+func (*NetworkArchitecture) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *NetworkArchitecture) GetResources() []*NetworkArchitectureResource {
+	if x != nil {
+		return x.Resources
+	}
+	return nil
+}
+
+func (x *NetworkArchitecture) GetConnections() []*NetworkArchitectureConnection {
+	if x != nil {
+		return x.Connections
+	}
+	return nil
+}
+
+// kind/name is the stable identity within this network, matching managed_resources
+// except for explicitly marked reference_only route targets.
+// Scalar facts prefer provider observation, falling back to configured values.
+// Empty values mean unknown/not applicable; subnet_role may be UNSPECIFIED.
+type NetworkArchitectureResource struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Kind                     string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Name                     string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	CloudId                  string                 `protobuf:"bytes,3,opt,name=cloud_id,json=cloudId,proto3" json:"cloud_id,omitempty"`
+	ZoneId                   string                 `protobuf:"bytes,4,opt,name=zone_id,json=zoneId,proto3" json:"zone_id,omitempty"`
+	SubnetRole               SubnetRole             `protobuf:"varint,5,opt,name=subnet_role,json=subnetRole,proto3,enum=cloud.v1.SubnetRole" json:"subnet_role,omitempty"`
+	CidrBlock                string                 `protobuf:"bytes,6,opt,name=cidr_block,json=cidrBlock,proto3" json:"cidr_block,omitempty"`
+	DestinationCidrBlock     string                 `protobuf:"bytes,7,opt,name=destination_cidr_block,json=destinationCidrBlock,proto3" json:"destination_cidr_block,omitempty"`
+	DestinationIpv6CidrBlock string                 `protobuf:"bytes,8,opt,name=destination_ipv6_cidr_block,json=destinationIpv6CidrBlock,proto3" json:"destination_ipv6_cidr_block,omitempty"`
+	PublicIp                 string                 `protobuf:"bytes,9,opt,name=public_ip,json=publicIp,proto3" json:"public_ip,omitempty"`
+	// True only for an explicit route target cloud ID outside the owned snapshot.
+	// Such entries have no managed-resource identity, readiness or inferred facts;
+	// name equals cloud_id solely to provide a stable connection endpoint.
+	ReferenceOnly           bool   `protobuf:"varint,10,opt,name=reference_only,json=referenceOnly,proto3" json:"reference_only,omitempty"`
+	DestinationPrefixListId string `protobuf:"bytes,11,opt,name=destination_prefix_list_id,json=destinationPrefixListId,proto3" json:"destination_prefix_list_id,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *NetworkArchitectureResource) Reset() {
+	*x = NetworkArchitectureResource{}
+	mi := &file_cloud_v1_network_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkArchitectureResource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkArchitectureResource) ProtoMessage() {}
+
+func (x *NetworkArchitectureResource) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_network_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkArchitectureResource.ProtoReflect.Descriptor instead.
+func (*NetworkArchitectureResource) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *NetworkArchitectureResource) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetCloudId() string {
+	if x != nil {
+		return x.CloudId
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetZoneId() string {
+	if x != nil {
+		return x.ZoneId
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetSubnetRole() SubnetRole {
+	if x != nil {
+		return x.SubnetRole
+	}
+	return SubnetRole_SUBNET_ROLE_UNSPECIFIED
+}
+
+func (x *NetworkArchitectureResource) GetCidrBlock() string {
+	if x != nil {
+		return x.CidrBlock
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetDestinationCidrBlock() string {
+	if x != nil {
+		return x.DestinationCidrBlock
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetDestinationIpv6CidrBlock() string {
+	if x != nil {
+		return x.DestinationIpv6CidrBlock
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetPublicIp() string {
+	if x != nil {
+		return x.PublicIp
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureResource) GetReferenceOnly() bool {
+	if x != nil {
+		return x.ReferenceOnly
+	}
+	return false
+}
+
+func (x *NetworkArchitectureResource) GetDestinationPrefixListId() string {
+	if x != nil {
+		return x.DestinationPrefixListId
+	}
+	return ""
+}
+
+// Endpoints always identify resources included in the same architecture;
+// reference_only targets are references, not owned or verified resources.
+// relation: contained_in, placed_in, uses_address, associated_with, routes_via,
+// or forwards_to. label supplies a readable caption (a route's destination for
+// forwards_to). An explicit local gateway forwards_to the owned VPC.
+// Connections are evidence of configuration, not traffic tests.
+type NetworkArchitectureConnection struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	SourceKind string                 `protobuf:"bytes,1,opt,name=source_kind,json=sourceKind,proto3" json:"source_kind,omitempty"`
+	SourceName string                 `protobuf:"bytes,2,opt,name=source_name,json=sourceName,proto3" json:"source_name,omitempty"`
+	TargetKind string                 `protobuf:"bytes,3,opt,name=target_kind,json=targetKind,proto3" json:"target_kind,omitempty"`
+	TargetName string                 `protobuf:"bytes,4,opt,name=target_name,json=targetName,proto3" json:"target_name,omitempty"`
+	Relation   string                 `protobuf:"bytes,5,opt,name=relation,proto3" json:"relation,omitempty"`
+	Label      string                 `protobuf:"bytes,6,opt,name=label,proto3" json:"label,omitempty"`
+	// "configured": explicit forProvider reference/ID; "observed": atProvider ID.
+	// Matching configured/observed edges are coalesced to observed; differing
+	// targets remain separate so drift is not presented as a confirmed path.
+	Evidence string `protobuf:"bytes,7,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	// Route destinations are explicit, never inferred from VPC/subnet CIDRs.
+	// Inline RouteTable observations connect directly from the table, without
+	// inventing Route managed resources. These facts do not prove reachability.
+	DestinationCidrBlock     string `protobuf:"bytes,8,opt,name=destination_cidr_block,json=destinationCidrBlock,proto3" json:"destination_cidr_block,omitempty"`
+	DestinationIpv6CidrBlock string `protobuf:"bytes,9,opt,name=destination_ipv6_cidr_block,json=destinationIpv6CidrBlock,proto3" json:"destination_ipv6_cidr_block,omitempty"`
+	DestinationPrefixListId  string `protobuf:"bytes,10,opt,name=destination_prefix_list_id,json=destinationPrefixListId,proto3" json:"destination_prefix_list_id,omitempty"`
+	// Observed standalone Route state (e.g. active/blackhole) and origin only.
+	// Empty when the provider observation does not expose these fields.
+	RouteState    string `protobuf:"bytes,11,opt,name=route_state,json=routeState,proto3" json:"route_state,omitempty"`
+	RouteOrigin   string `protobuf:"bytes,12,opt,name=route_origin,json=routeOrigin,proto3" json:"route_origin,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkArchitectureConnection) Reset() {
+	*x = NetworkArchitectureConnection{}
+	mi := &file_cloud_v1_network_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkArchitectureConnection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkArchitectureConnection) ProtoMessage() {}
+
+func (x *NetworkArchitectureConnection) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_network_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkArchitectureConnection.ProtoReflect.Descriptor instead.
+func (*NetworkArchitectureConnection) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_network_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *NetworkArchitectureConnection) GetSourceKind() string {
+	if x != nil {
+		return x.SourceKind
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetSourceName() string {
+	if x != nil {
+		return x.SourceName
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetTargetKind() string {
+	if x != nil {
+		return x.TargetKind
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetTargetName() string {
+	if x != nil {
+		return x.TargetName
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetRelation() string {
+	if x != nil {
+		return x.Relation
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetEvidence() string {
+	if x != nil {
+		return x.Evidence
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetDestinationCidrBlock() string {
+	if x != nil {
+		return x.DestinationCidrBlock
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetDestinationIpv6CidrBlock() string {
+	if x != nil {
+		return x.DestinationIpv6CidrBlock
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetDestinationPrefixListId() string {
+	if x != nil {
+		return x.DestinationPrefixListId
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetRouteState() string {
+	if x != nil {
+		return x.RouteState
+	}
+	return ""
+}
+
+func (x *NetworkArchitectureConnection) GetRouteOrigin() string {
+	if x != nil {
+		return x.RouteOrigin
+	}
+	return ""
+}
+
 var File_cloud_v1_network_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_network_proto_rawDesc = "" +
@@ -1140,7 +1480,7 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04role\x12'\n" +
 	"\n" +
 	"cidr_block\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xf0\x01\x01R\tcidrBlock\x121\n" +
-	"\azone_id\x18\x03 \x01(\tB\x18\xbaH\x15\xd8\x01\x01r\x10\x18@2\f^[a-z0-9-]+$R\x06zoneId\"\xe6\x04\n" +
+	"\azone_id\x18\x03 \x01(\tB\x18\xbaH\x15\xd8\x01\x01r\x10\x18@2\f^[a-z0-9-]+$R\x06zoneId\"\xa9\x05\n" +
 	"\rNetworkStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.NetworkStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1158,14 +1498,52 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	" \x03(\v2\x0f.cloud.v1.EventR\frecentEvents\x12(\n" +
 	"\x06freeze\x18- \x01(\v2\x10.cloud.v1.FreezeR\x06freeze\x125\n" +
 	"\vcode_change\x18. \x01(\v2\x14.cloud.v1.CodeChangeR\n" +
-	"codeChange\"\xdd\x01\n" +
+	"codeChange\x12A\n" +
+	"\farchitecture\x18\v \x01(\v2\x1d.cloud.v1.NetworkArchitectureR\farchitecture\"\xdd\x01\n" +
 	"\x10NetworkResources\x12(\n" +
 	"\x10cloud_network_id\x18\x01 \x01(\tR\x0ecloudNetworkId\x12*\n" +
 	"\x11public_subnet_ids\x18\x02 \x03(\tR\x0fpublicSubnetIds\x12,\n" +
 	"\x12private_subnet_ids\x18\x03 \x03(\tR\x10privateSubnetIds\x12&\n" +
 	"\x0fnat_gateway_ids\x18\x04 \x03(\tR\rnatGatewayIds\x12\x1d\n" +
 	"\n" +
-	"egress_ips\x18\x05 \x03(\tR\tegressIps*\xc5\x01\n" +
+	"egress_ips\x18\x05 \x03(\tR\tegressIps\"\xa5\x01\n" +
+	"\x13NetworkArchitecture\x12C\n" +
+	"\tresources\x18\x01 \x03(\v2%.cloud.v1.NetworkArchitectureResourceR\tresources\x12I\n" +
+	"\vconnections\x18\x02 \x03(\v2'.cloud.v1.NetworkArchitectureConnectionR\vconnections\"\xc5\x03\n" +
+	"\x1bNetworkArchitectureResource\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x19\n" +
+	"\bcloud_id\x18\x03 \x01(\tR\acloudId\x12\x17\n" +
+	"\azone_id\x18\x04 \x01(\tR\x06zoneId\x125\n" +
+	"\vsubnet_role\x18\x05 \x01(\x0e2\x14.cloud.v1.SubnetRoleR\n" +
+	"subnetRole\x12\x1d\n" +
+	"\n" +
+	"cidr_block\x18\x06 \x01(\tR\tcidrBlock\x124\n" +
+	"\x16destination_cidr_block\x18\a \x01(\tR\x14destinationCidrBlock\x12=\n" +
+	"\x1bdestination_ipv6_cidr_block\x18\b \x01(\tR\x18destinationIpv6CidrBlock\x12\x1b\n" +
+	"\tpublic_ip\x18\t \x01(\tR\bpublicIp\x12%\n" +
+	"\x0ereference_only\x18\n" +
+	" \x01(\bR\rreferenceOnly\x12;\n" +
+	"\x1adestination_prefix_list_id\x18\v \x01(\tR\x17destinationPrefixListId\"\xe7\x03\n" +
+	"\x1dNetworkArchitectureConnection\x12\x1f\n" +
+	"\vsource_kind\x18\x01 \x01(\tR\n" +
+	"sourceKind\x12\x1f\n" +
+	"\vsource_name\x18\x02 \x01(\tR\n" +
+	"sourceName\x12\x1f\n" +
+	"\vtarget_kind\x18\x03 \x01(\tR\n" +
+	"targetKind\x12\x1f\n" +
+	"\vtarget_name\x18\x04 \x01(\tR\n" +
+	"targetName\x12\x1a\n" +
+	"\brelation\x18\x05 \x01(\tR\brelation\x12\x14\n" +
+	"\x05label\x18\x06 \x01(\tR\x05label\x12\x1a\n" +
+	"\bevidence\x18\a \x01(\tR\bevidence\x124\n" +
+	"\x16destination_cidr_block\x18\b \x01(\tR\x14destinationCidrBlock\x12=\n" +
+	"\x1bdestination_ipv6_cidr_block\x18\t \x01(\tR\x18destinationIpv6CidrBlock\x12;\n" +
+	"\x1adestination_prefix_list_id\x18\n" +
+	" \x01(\tR\x17destinationPrefixListId\x12\x1f\n" +
+	"\vroute_state\x18\v \x01(\tR\n" +
+	"routeState\x12!\n" +
+	"\froute_origin\x18\f \x01(\tR\vrouteOrigin*\xc5\x01\n" +
 	"\x12FlowLogTrafficType\x12%\n" +
 	"!FLOW_LOG_TRAFFIC_TYPE_UNSPECIFIED\x10\x00\x12(\n" +
 	"\x19FLOW_LOG_TRAFFIC_TYPE_ALL\x10\x01\x1a\t\x8a\xb5\x18\x05\n" +
@@ -1211,38 +1589,41 @@ func file_cloud_v1_network_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_network_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_cloud_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_cloud_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_cloud_v1_network_proto_goTypes = []any{
-	(FlowLogTrafficType)(0),       // 0: cloud.v1.FlowLogTrafficType
-	(SubnetRole)(0),               // 1: cloud.v1.SubnetRole
-	(NatGatewayMode)(0),           // 2: cloud.v1.NatGatewayMode
-	(NetworkState)(0),             // 3: cloud.v1.NetworkState
-	(*Network)(nil),               // 4: cloud.v1.Network
-	(*NetworkSpec)(nil),           // 5: cloud.v1.NetworkSpec
-	(*ClusterNetwork)(nil),        // 6: cloud.v1.ClusterNetwork
-	(*NetworkFlowLogs)(nil),       // 7: cloud.v1.NetworkFlowLogs
-	(*NetworkLayout)(nil),         // 8: cloud.v1.NetworkLayout
-	(*Subnet)(nil),                // 9: cloud.v1.Subnet
-	(*NetworkStatus)(nil),         // 10: cloud.v1.NetworkStatus
-	(*NetworkResources)(nil),      // 11: cloud.v1.NetworkResources
-	nil,                           // 12: cloud.v1.Network.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
-	(Tier)(0),                     // 14: cloud.v1.Tier
-	(*Condition)(nil),             // 15: cloud.v1.Condition
-	(*ImportStatus)(nil),          // 16: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),      // 17: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),       // 18: cloud.v1.ManagedResource
-	(*Event)(nil),                 // 19: cloud.v1.Event
-	(*Freeze)(nil),                // 20: cloud.v1.Freeze
-	(*CodeChange)(nil),            // 21: cloud.v1.CodeChange
+	(FlowLogTrafficType)(0),               // 0: cloud.v1.FlowLogTrafficType
+	(SubnetRole)(0),                       // 1: cloud.v1.SubnetRole
+	(NatGatewayMode)(0),                   // 2: cloud.v1.NatGatewayMode
+	(NetworkState)(0),                     // 3: cloud.v1.NetworkState
+	(*Network)(nil),                       // 4: cloud.v1.Network
+	(*NetworkSpec)(nil),                   // 5: cloud.v1.NetworkSpec
+	(*ClusterNetwork)(nil),                // 6: cloud.v1.ClusterNetwork
+	(*NetworkFlowLogs)(nil),               // 7: cloud.v1.NetworkFlowLogs
+	(*NetworkLayout)(nil),                 // 8: cloud.v1.NetworkLayout
+	(*Subnet)(nil),                        // 9: cloud.v1.Subnet
+	(*NetworkStatus)(nil),                 // 10: cloud.v1.NetworkStatus
+	(*NetworkResources)(nil),              // 11: cloud.v1.NetworkResources
+	(*NetworkArchitecture)(nil),           // 12: cloud.v1.NetworkArchitecture
+	(*NetworkArchitectureResource)(nil),   // 13: cloud.v1.NetworkArchitectureResource
+	(*NetworkArchitectureConnection)(nil), // 14: cloud.v1.NetworkArchitectureConnection
+	nil,                                   // 15: cloud.v1.Network.LabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 16: google.protobuf.Timestamp
+	(Tier)(0),                             // 17: cloud.v1.Tier
+	(*Condition)(nil),                     // 18: cloud.v1.Condition
+	(*ImportStatus)(nil),                  // 19: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),              // 20: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),               // 21: cloud.v1.ManagedResource
+	(*Event)(nil),                         // 22: cloud.v1.Event
+	(*Freeze)(nil),                        // 23: cloud.v1.Freeze
+	(*CodeChange)(nil),                    // 24: cloud.v1.CodeChange
 }
 var file_cloud_v1_network_proto_depIdxs = []int32{
-	12, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
+	15, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
 	5,  // 1: cloud.v1.Network.spec:type_name -> cloud.v1.NetworkSpec
 	10, // 2: cloud.v1.Network.status:type_name -> cloud.v1.NetworkStatus
-	13, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
-	13, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
-	14, // 5: cloud.v1.NetworkSpec.tier:type_name -> cloud.v1.Tier
+	16, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
+	16, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
+	17, // 5: cloud.v1.NetworkSpec.tier:type_name -> cloud.v1.Tier
 	8,  // 6: cloud.v1.NetworkSpec.layout:type_name -> cloud.v1.NetworkLayout
 	7,  // 7: cloud.v1.NetworkSpec.flow_logs:type_name -> cloud.v1.NetworkFlowLogs
 	0,  // 8: cloud.v1.NetworkFlowLogs.traffic_type:type_name -> cloud.v1.FlowLogTrafficType
@@ -1250,19 +1631,23 @@ var file_cloud_v1_network_proto_depIdxs = []int32{
 	2,  // 10: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
 	1,  // 11: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
 	3,  // 12: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
-	15, // 13: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
+	18, // 13: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
 	11, // 14: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
-	16, // 15: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
-	17, // 16: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	18, // 17: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	19, // 18: cloud.v1.NetworkStatus.recent_events:type_name -> cloud.v1.Event
-	20, // 19: cloud.v1.NetworkStatus.freeze:type_name -> cloud.v1.Freeze
-	21, // 20: cloud.v1.NetworkStatus.code_change:type_name -> cloud.v1.CodeChange
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	19, // 15: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
+	20, // 16: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	21, // 17: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	22, // 18: cloud.v1.NetworkStatus.recent_events:type_name -> cloud.v1.Event
+	23, // 19: cloud.v1.NetworkStatus.freeze:type_name -> cloud.v1.Freeze
+	24, // 20: cloud.v1.NetworkStatus.code_change:type_name -> cloud.v1.CodeChange
+	12, // 21: cloud.v1.NetworkStatus.architecture:type_name -> cloud.v1.NetworkArchitecture
+	13, // 22: cloud.v1.NetworkArchitecture.resources:type_name -> cloud.v1.NetworkArchitectureResource
+	14, // 23: cloud.v1.NetworkArchitecture.connections:type_name -> cloud.v1.NetworkArchitectureConnection
+	1,  // 24: cloud.v1.NetworkArchitectureResource.subnet_role:type_name -> cloud.v1.SubnetRole
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_proto_init() }
@@ -1285,7 +1670,7 @@ func file_cloud_v1_network_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_network_proto_rawDesc), len(file_cloud_v1_network_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

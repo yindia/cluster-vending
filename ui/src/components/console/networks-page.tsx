@@ -1,6 +1,7 @@
 "use client";
 
 import { StackItem } from "@astryxdesign/core/Stack";
+import dynamic from "next/dynamic";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -56,6 +57,8 @@ import {
   collectNetworkClusters, filterNetworkInventory, networkClusterRows,
   type CreateAttempt, type NetworkDraft, type NetworkImportDraft, type NetworkTakeoverConfirmation, type ReviewedNetworkUpdate,
 } from "@/lib/workflows/networks";
+
+const NetworkTopology = dynamic(() => import("./network-topology"), { ssr: false, loading: () => <Text>Loading network topology…</Text> });
 
 /** Abort pending work on scope/selection changes and lock duplicate submissions. */
 function useNetworkMutation() {
@@ -666,7 +669,7 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
   const paused = resources.filter((resource) => resource.paused).length;
   const healthy = network ? networkIsReady(network) : false;
   const state = status?.state === NetworkState.READY && !healthy ? "Reconciling" : enumLabel(NetworkState, status?.state);
-  const tabs = [{ value: "overview", label: "Overview" }, { value: "resources", label: "Resources" }, { value: "activity", label: "Activity" }, { value: "configuration", label: "Configuration" }];
+  const tabs = [{ value: "overview", label: "Overview" }, { value: "topology", label: "Topology" }, { value: "resources", label: "Resources" }, { value: "activity", label: "Activity" }, { value: "configuration", label: "Configuration" }];
   return <VStack gap={6}>
     <DetailHeader title={network?.displayName || network?.name || "Network details"}
       metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={networkProvider(account) || ""} size="sm" /><Text type="supporting">{networkProvider(account) === "aws" ? "Amazon Web Services" : "Cloud network"}</Text></HStack><Text type="supporting">{network?.spec?.region || "Region pending"}</Text>{network && <CopyValue value={network.name} label="Network resource name" isSecondary />}</>}
@@ -711,6 +714,7 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
           <RelatedNetworkClusters network={network} />
           <Card variant="muted" padding={4}><VStack gap={3}><Heading level={3}>Rollout policy</Heading><Text>All clusters on this network inherit {enumLabel(Tier, network.spec?.tier)}. Release channels are configured on each cluster.</Text>{paused > 0 && <Text>{paused} managed resources are paused; reconciliation waits until they are resumed.</Text>}{status?.freeze && <Text>{status.freeze.letThrough ? "Allowed through the current freeze" : "Network reconciliation is frozen"}{status.freeze.reason ? ` · ${status.freeze.reason}` : ""}{status.freeze.until ? ` · Until ${time(status.freeze.until)}` : ""}</Text>}{status?.codeChange && <MetadataList><MetadataListItem label="Platform update">{enumLabel(CodeChangePhase, status.codeChange.phase)} · {status.codeChange.summary}</MetadataListItem><MetadataListItem label="Rollout observation">{status.codeChange.message || "No additional message"}</MetadataListItem></MetadataList>}{status?.import && <Text>Import phase: {enumLabel(ImportPhase, status.import.phase)}.</Text>}</VStack></Card>
         </>}
+        {tab === "topology" && <NetworkTopology network={network} account={account} onRefresh={query.refresh} />}
         {tab === "resources" && <NetworkResourceInventory network={network} />}
         {tab === "activity" && <VStack gap={6}><NetworkEvents networkId={networkId} /><Collapsible trigger="Persisted recent events" defaultIsOpen={false}><ActivityEventTable events={status?.recentEvents ?? []} title="Persisted recent network events" /></Collapsible></VStack>}
         {tab === "configuration" && <NetworkConfiguration network={network} account={account} />}

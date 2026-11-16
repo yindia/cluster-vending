@@ -501,6 +501,10 @@ message ClusterStatus {
   // unset when nothing was rendered differently since the cluster was
   // last applied.
   CodeChange code_change = 51;
+
+  // Read-only topology from scoped live managed-resource inventory. Unset in
+  // older stored snapshots; missing links do not prove absence or reachability.
+  ClusterArchitecture architecture = 20;
 }
 
 // ClusterRollout is one automatic upgrade of a cluster, as the rollout
@@ -818,4 +822,17 @@ enum ClusterReleaseMovePhase {
   // Stopped: a component still failed, or did not settle, after the
   // automatic recoveries; nothing moves until cluster retry.
   CLUSTER_RELEASE_MOVE_PHASE_HALTED = 4;
+}
+
+// Provider-neutral cluster topology using the shared bounded fact/edge shapes.
+// Resource kind/name identifies a live managed resource except reference_only
+// entries, which carry only an explicit referenced cloud ID, not verified state.
+// AWS adapter relations: has_node_group, has_addon, has_component, uses_subnet,
+// uses_security_group, uses_launch_template. A has_component edge is configured
+// evidence from Release -> ProviderConfig -> ClusterAuth -> Cluster bindings;
+// neither component labels nor a desired component list establishes that link.
+// No workload objects, Secret payloads, Helm values or access credentials appear.
+message ClusterArchitecture {
+  repeated NetworkArchitectureResource resources = 1;
+  repeated NetworkArchitectureConnection connections = 2;
 }

@@ -424,6 +424,10 @@ message NetworkStatus {
   // (a new controller build), applied before its clusters. They all share
   // the network tier; unset when nothing was rendered differently.
   CodeChange code_change = 46;
+
+  // Read-only topology from this network's owned managed resources. Missing
+  // resources/references are omitted; this is not proof of packet reachability.
+  NetworkArchitecture architecture = 11;
 }
 
 // NetworkResources lists the cloud resources of a network, all owned by the
@@ -440,4 +444,60 @@ message NetworkResources {
   //   GCP   Address.status.atProvider.address
   //   Azure PublicIP.status.atProvider.ipAddress
   repeated string egress_ips = 5;
+}
+
+// A bounded provider-neutral topology, with no raw provider spec or credentials.
+message NetworkArchitecture {
+  repeated NetworkArchitectureResource resources = 1;
+  repeated NetworkArchitectureConnection connections = 2;
+}
+
+// kind/name is the stable identity within this network, matching managed_resources
+// except for explicitly marked reference_only route targets.
+// Scalar facts prefer provider observation, falling back to configured values.
+// Empty values mean unknown/not applicable; subnet_role may be UNSPECIFIED.
+message NetworkArchitectureResource {
+  string kind = 1;
+  string name = 2;
+  string cloud_id = 3;
+  string zone_id = 4;
+  SubnetRole subnet_role = 5;
+  string cidr_block = 6;
+  string destination_cidr_block = 7;
+  string destination_ipv6_cidr_block = 8;
+  string public_ip = 9;
+  // True only for an explicit route target cloud ID outside the owned snapshot.
+  // Such entries have no managed-resource identity, readiness or inferred facts;
+  // name equals cloud_id solely to provide a stable connection endpoint.
+  bool reference_only = 10;
+  string destination_prefix_list_id = 11;
+}
+
+// Endpoints always identify resources included in the same architecture;
+// reference_only targets are references, not owned or verified resources.
+// relation: contained_in, placed_in, uses_address, associated_with, routes_via,
+// or forwards_to. label supplies a readable caption (a route's destination for
+// forwards_to). An explicit local gateway forwards_to the owned VPC.
+// Connections are evidence of configuration, not traffic tests.
+message NetworkArchitectureConnection {
+  string source_kind = 1;
+  string source_name = 2;
+  string target_kind = 3;
+  string target_name = 4;
+  string relation = 5;
+  string label = 6;
+  // "configured": explicit forProvider reference/ID; "observed": atProvider ID.
+  // Matching configured/observed edges are coalesced to observed; differing
+  // targets remain separate so drift is not presented as a confirmed path.
+  string evidence = 7;
+  // Route destinations are explicit, never inferred from VPC/subnet CIDRs.
+  // Inline RouteTable observations connect directly from the table, without
+  // inventing Route managed resources. These facts do not prove reachability.
+  string destination_cidr_block = 8;
+  string destination_ipv6_cidr_block = 9;
+  string destination_prefix_list_id = 10;
+  // Observed standalone Route state (e.g. active/blackhole) and origin only.
+  // Empty when the provider observation does not expose these fields.
+  string route_state = 11;
+  string route_origin = 12;
 }

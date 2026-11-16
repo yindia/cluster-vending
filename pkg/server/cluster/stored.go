@@ -1,14 +1,45 @@
 package cluster
 
 import (
+	"context"
+	"slices"
+
 	"connectrpc.com/connect/v2"
+
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
+	"github.com/yindia/cluster-vending/pkg/server/service"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
-// stored is the API view of a cluster from the database alone: its spec
+func (s *ClusterService) stored(ctx context.Context, row *model.Cluster) (*cloudv1.Cluster, error) {
+	cluster, err := stored(row)
+	if err != nil {
+		return nil, err
+	}
+	tier, err := s.deps.NetworkTier(ctx, row.TenantID, row.NetworkID)
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	cluster.Status.Tier = tier
+	cluster.Spec.ProtoReflect().Clear(cluster.Spec.ProtoReflect().Descriptor().Fields().ByName("tier"))
+	frozen, err := s.deps.FreezeFor(ctx, platform.FreezeTarget{TenantID: row.TenantID, NetworkID: row.NetworkID, ClusterID: row.ID})
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	cluster.Status.Message = platform.WithoutFreezeMessage(cluster.Status.Message, cluster.Status.Freeze)
+	cluster.Status.Freeze = platform.FreezeProto(frozen)
+	cluster.Status.Conditions = slices.DeleteFunc(cluster.Status.Conditions, func(condition *cloudv1.Condition) bool { return condition.GetType() == platform.ConditionFrozen })
+	if condition, _ := platform.RowFreeze(frozen, nil); condition != nil {
+		cluster.Status.Conditions = append(cluster.Status.Conditions, condition)
+	}
+
+	return cluster, nil
+}
+
+// stored is the API view of a cluster from its stored Kubernetes state: its spec
 // and the status last recorded for it (remember). GetCluster and
 // ListClusters return it; nothing is read from the management cluster.
 func stored(row *model.Cluster) (*cloudv1.Cluster, error) {

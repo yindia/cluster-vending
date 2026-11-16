@@ -441,23 +441,31 @@ type ReleaseChannelList struct {
 	Items           []ReleaseChannel `json:"items"`
 }
 
-// ReleaseHoldSpec is a freeze (AdminService.Freeze): no automatic change
-// starts for what it covers. It covers every cluster and network (platform:
-// the platform freeze), a tenant's clusters, a release channel's (every
-// tier, or one), or one cluster. Exactly one of clusterID, tenantID,
-// channel and platform is set; tier only with channel.
-// +kubebuilder:validation:XValidation:rule="[has(self.clusterID), has(self.tenantID), has(self.channel), has(self.platform) && self.platform].filter(x, x).size() == 1",message="set exactly one of clusterID, tenantID, channel and platform"
-// +kubebuilder:validation:XValidation:rule="!has(self.tier) || has(self.channel)",message="tier needs channel"
+// +kubebuilder:validation:XValidation:rule="[has(self.tenantID), has(self.networkID), has(self.clusterID)].filter(x, x).size() == 1",message="choose one tenant, network or cluster"
+type FreezeRule struct {
+	TenantID  string       `json:"tenantID,omitempty"`
+	NetworkID string       `json:"networkID,omitempty"`
+	ClusterID string       `json:"clusterID,omitempty"`
+	Frozen    bool         `json:"frozen"`
+	By        string       `json:"by,omitempty"`
+	Reason    string       `json:"reason,omitempty"`
+	Since     metav1.Time  `json:"since"`
+	Until     *metav1.Time `json:"until,omitempty"`
+}
+
+// ReleaseHoldSpec records the platform freeze or a cluster release lock.
+// +kubebuilder:validation:XValidation:rule="has(self.clusterID) != (has(self.platform) && self.platform)",message="set clusterID or platform, not both"
 type ReleaseHoldSpec struct {
-	// Platform holds every cluster and network: no automatic change starts
-	// anywhere (Kubernetes upgrades, release moves, add-on upgrades, code
-	// changes) while it exists. AdminService.Freeze writes it.
+	Scoped   bool         `json:"scoped,omitempty"`
+	Rules    []FreezeRule `json:"rules,omitempty"`
+	Revision string       `json:"revision,omitempty"`
+	// Platform identifies the canonical freeze policy (platform-freeze).
+	// Unless Scoped is true, it freezes all resources by default. Rules
+	// override that default in order; the last matching rule wins.
 	// +optional
 	Platform bool `json:"platform,omitempty"`
-	// Except are the IDs of the clusters and networks the freeze lets
-	// through (AdminService.Unfreeze with a cluster or a network): their
-	// pending changes may start; a cluster let through lets its network
-	// through too.
+	// Except preserves legacy resource exceptions. New requests use Rules.
+	// A cluster exception does not change its shared network.
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=200
@@ -467,21 +475,6 @@ type ReleaseHoldSpec struct {
 	// +kubebuilder:validation:Pattern=`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="clusterID is immutable; create another hold"
 	ClusterID string `json:"clusterID,omitempty"`
-	// TenantID holds every cluster of the tenant, those created later too.
-	// +optional
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$`
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantID is immutable; create another hold"
-	TenantID string `json:"tenantID,omitempty"`
-	// Channel holds every cluster on the release channel (alpha, beta,
-	// stable), those that join it later too; with Tier, only that tier's.
-	// +optional
-	// +kubebuilder:validation:Enum=alpha;beta;stable
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="channel is immutable; create another hold"
-	Channel string `json:"channel,omitempty"`
-	// Tier narrows Channel to one tier.
-	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tier is immutable; create another hold"
-	Tier ClusterTier `json:"tier,omitempty"`
 	// Release, when set, keeps the cluster on exactly this release (a
 	// lock); unset, the cluster stays on what it has now (a freeze).
 	// +optional
@@ -503,9 +496,17 @@ type ReleaseHoldSpec struct {
 
 // ReleaseHoldStatus is written by the controller.
 type ReleaseHoldStatus struct {
+	// Confirms the controller drained workers for this exact policy before pausing resources.
+	DrainedRevision      string `json:"drainedRevision,omitempty"`
+	DrainedGeneration    int64  `json:"drainedGeneration,omitempty"`
+	FreezePhase          string `json:"freezePhase,omitempty"`
+	FreezeRevision       string `json:"freezeRevision,omitempty"`
+	ObservedGeneration   int64  `json:"observedGeneration,omitempty"`
+	Resources            int32  `json:"resources,omitempty"`
+	PausedResources      int32  `json:"pausedResources,omitempty"`
+	NewlyPausedResources int32  `json:"newlyPausedResources,omitempty"`
 	// Namespace and Name of the Cluster object the ID resolved to (for
-	// people; the hold follows the ID). Empty for a hold of a tenant or a
-	// channel.
+	// people; the hold follows the ID). Empty for the platform freeze.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 	// +optional
@@ -521,16 +522,15 @@ type ReleaseHoldStatus struct {
 }
 
 // ReleaseHold keeps clusters out of rollouts: one cluster on a named
-// release (a lock) or where it is (a freeze), or a tenant's or a channel's
-// clusters where they are. Only the operator holds a cluster; users see it
-// as a freeze (admin freeze).
+// release (a lock) or where it is, or, as the platform freeze (Platform),
+// every cluster and network. Only the operator holds a cluster; users see
+// the platform freeze on their clusters and networks (admin freeze).
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=cvhold
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.platform) || !self.spec.platform || self.metadata.name == 'platform-freeze'",message="the platform freeze is named platform-freeze"
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Cluster-ID",type=string,JSONPath=`.spec.clusterID`
-// +kubebuilder:printcolumn:name="Tenant",type=string,JSONPath=`.spec.tenantID`
-// +kubebuilder:printcolumn:name="Channel",type=string,JSONPath=`.spec.channel`
-// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
+// +kubebuilder:printcolumn:name="Platform",type=boolean,JSONPath=`.spec.platform`
 // +kubebuilder:printcolumn:name="Clusters",type=integer,JSONPath=`.status.clusters`
 // +kubebuilder:printcolumn:name="Cluster",type=string,JSONPath=`.status.name`
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace`

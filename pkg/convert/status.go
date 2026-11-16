@@ -38,6 +38,7 @@ func NetworkStatusInto(p *cloudv1.NetworkStatus, state string, at metav1.Time, i
 // conditions, endpoint, versions, issuer, network resources, the EKS
 // cluster's state, the import plan and the kubeconfig Secret.
 func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, into *cloudv1alpha1.ClusterStatus) {
+	into.Tier = cloudv1alpha1.ClusterTier(camel(p.GetTier(), prefixTier))
 	into.Phase = cloudv1alpha1.ClusterPhase(phase(p.GetState(), prefixClusterState, state))
 	into.Message = p.GetMessage()
 	into.Conditions = conditions(p.GetConditions(), into.Conditions, at)
@@ -78,7 +79,7 @@ func platformComponents(in []*cloudv1.PlatformComponent) []cloudv1alpha1.Platfor
 	}
 	out := make([]cloudv1alpha1.PlatformComponentStatus, 0, len(in))
 	for _, c := range in {
-		pc := cloudv1alpha1.PlatformComponentStatus{Name: c.GetName(), Version: c.GetVersion(),
+		pc := cloudv1alpha1.PlatformComponentStatus{InstalledVersion: c.GetInstalledVersion(), Name: c.GetName(), Version: c.GetVersion(),
 			Phase: camel(c.GetPhase(), prefixComponentPhase), Message: c.GetMessage(),
 			Chart: c.GetChart(), HelmState: c.GetHelmState(), LastError: c.GetLastError(),
 			Failures: c.GetFailures(), Recoveries: c.GetRecoveries()}

@@ -98,11 +98,22 @@ func ClusterUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		return nil, err
 	}
 	cl.Etag = current.GetEtag()
-	res, err := call(ctx, &cloudv1.UpdateClusterRequest{
-		TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask},
-		ValidateOnly: o.Plan,
-	}, c.Cluster.UpdateCluster)
-	if err != nil || !o.Wait || o.Plan {
+
+	req := &cloudv1.UpdateClusterRequest{TenantId: tenant, Cluster: cl, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}, ValidateOnly: true}
+	preview, err := call(ctx, req, c.Cluster.UpdateCluster)
+	if err != nil {
+		return nil, err
+	}
+	shown := preview.(*cloudv1.UpdateClusterResponse)
+	if o.Plan {
+		return preview, nil
+	}
+	if err := reviewUpdatePlan(o, shown.GetPlan()); err != nil {
+		return nil, err
+	}
+	req.ValidateOnly, req.PlanId = false, shown.GetPlan().GetPlanId()
+	res, err := call(ctx, req, c.Cluster.UpdateCluster)
+	if err != nil || !o.Wait {
 		return res, err
 	}
 	return waitCluster(ctx, c, o, tenant, cl.GetId(), false)

@@ -27,8 +27,9 @@ var resourcesLeftPattern = regexp.MustCompile(`; [0-9]+ resources left`)
 // things as they were gives none.
 func statusEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 	out := reconcile.PassFailure(before.GetConditions(), after.GetConditions(), ConditionReconciled)
-	out = append(out, reconcile.PauseNotes(before.GetConditions(), after.GetConditions())...)
+	out = append(out, reconcile.FreezeNotes(before.GetFreeze(), after.GetFreeze())...)
 	out = append(out, resourceEvents(before, after)...) // the steps first, then the state they led to
+	out = append(out, managedLifecycleEvents(before, after)...)
 	out = append(out, stateEvents(before, after)...)
 	out = append(out, upgradeEvents(before, after)...)
 	out = append(out, platformEvents(before, after)...)
@@ -219,22 +220,27 @@ func platformEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 						name, c.GetRecoveries(), orDefault(c.GetChart(), c.GetName()))))
 			}
 		}
-		if known && prev.GetPhase() == c.GetPhase() {
+		if known && prev.GetPhase() == c.GetPhase() && prev.GetVersion() == c.GetVersion() {
 			continue
 		}
 		switch c.GetPhase() {
 		case cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED:
 			out = append(out, reconcile.Warning(reconcile.ReasonPlatformComponentFailed, name+": "+componentFailure(c)))
 		case cloudv1.ComponentPhase_COMPONENT_PHASE_READY:
-			out = append(out, reconcile.Normal(reconcile.ReasonPlatformComponentReady, name+" is installed"))
+			out = append(out, reconcile.Normal(platformReadyReason(prev, c), name+" is installed"))
 		case cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING:
-			out = append(out, reconcile.Normal(reconcile.ReasonPlatformComponentInstalling, "installing "+name))
+			out = append(out, reconcile.Normal(platformInstallingReason(prev, c), "installing "+name))
+		case cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING:
+			out = append(out, reconcile.Normal(reconcile.ReasonPlatformComponentDeleting, "deleting "+name))
 		default: // waiting is not news: the status says what for
 		}
 	}
 	for _, c := range before.GetPlatformComponents() { // in the recorded order
-		if _, gone := was[c.GetName()]; gone && after.GetState() != cloudv1.ClusterState_CLUSTER_STATE_DELETING {
-			out = append(out, reconcile.Normal(reconcile.ReasonPlatformComponentRemoved, c.GetName()+" is no longer installed"))
+		if _, gone := was[c.GetName()]; gone {
+			if c.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING {
+				out = append(out, reconcile.Normal(reconcile.ReasonPlatformComponentDeleting, "deleting "+c.GetName()))
+			}
+			out = append(out, reconcile.Normal(reconcile.ReasonPlatformComponentRemoved, c.GetName()+" is no longer tracked by the platform"))
 		}
 	}
 	if is, then := conditionOf(after, ConditionPlatformComponents), conditionOf(before, ConditionPlatformComponents); is != nil &&

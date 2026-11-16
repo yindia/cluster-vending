@@ -10,7 +10,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
+	"github.com/google/uuid"
 
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -22,7 +24,9 @@ import (
 func countReads(reads *atomic.Int64) interceptor.Funcs {
 	return interceptor.Funcs{
 		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			reads.Add(1)
+			if _, freeze := obj.(*cloudv1alpha1.ReleaseHold); !freeze {
+				reads.Add(1)
+			}
 			return c.Get(ctx, key, obj, opts...)
 		},
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -55,10 +59,8 @@ func (f fixture) allReady(t *testing.T, id string) {
 	}
 }
 
-// GetNetwork and ListNetworks answer from the database: the spec and the
-// status the loop last recorded. Only GetNetwork with live reads the
-// management cluster.
-func TestGetNetworkReadsOnlyTheDatabase(t *testing.T) {
+// Reads use recorded resource status and a live platform freeze lookup.
+func TestGetNetworkReadsStoredResourcesAndLiveFreeze(t *testing.T) {
 	var reads atomic.Int64
 	f := newFixture(t, countReads(&reads))
 	ctx := t.Context()
@@ -141,12 +143,30 @@ func TestStoredNetworkListsItsClusters(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	n := f.create(t, "prod", nil)
-	if err := f.store.Clusters().Create(ctx, &model.Cluster{TenantID: tenant, Name: "one", NetworkID: n.GetId(), Provider: model.ProviderAWS,
-		Region: "us-east-1", Resource: model.Resource{State: "CLUSTER_STATE_RUNNING", Spec: model.JSON(`{}`)}}); err != nil {
+	c := &model.Cluster{TenantID: tenant, Name: "one", NetworkID: n.GetId(), Provider: model.ProviderAWS,
+		Region: "us-east-1", Resource: model.Resource{State: "CLUSTER_STATE_RUNNING", Spec: model.JSON(`{}`)}}
+	if err := f.store.Clusters().Create(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	res, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
-	if err != nil || len(res.GetNetwork().GetStatus().GetClusterIds()) != 1 || res.GetNetwork().GetStatus().GetClusterIds()[0] != "one" {
-		t.Errorf("cluster_ids = %v (%v), want the cluster created since the status was recorded", res.GetNetwork().GetStatus().GetClusterIds(), err)
+	if _, err := uuid.Parse(c.ID); err != nil {
+		t.Fatalf("created cluster ID %q is not a UUID: %v", c.ID, err)
+	}
+	for _, tc := range []struct {
+		name string
+		live bool
+	}{
+		{"stored", false},
+		{"live", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := f.svc.GetNetwork(ctx, &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: tc.live})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids := res.GetNetwork().GetStatus().GetClusterIds()
+			if len(ids) != 1 || ids[0] != c.ID {
+				t.Errorf("cluster_ids = %v, want exactly the new cluster UUID %q (name %q)", ids, c.ID, c.Name)
+			}
+		})
 	}
 }

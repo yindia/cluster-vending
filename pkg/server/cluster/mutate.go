@@ -38,14 +38,13 @@ const (
 const (
 	pathUpgradeMode    = "spec.upgrade_mode"
 	pathReleaseChannel = "spec.release_channel"
-	pathTier           = "spec.tier"
 	// When an automatic upgrade may start: read by the rollout, never
 	// rendered.
 	pathMaintenanceWindow = "spec.maintenance_window"
 )
 
 // releasePaths are the paths of releaseOnly updates.
-var releasePaths = []string{pathUpgradeMode, pathReleaseChannel, pathTier, pathMaintenanceWindow}
+var releasePaths = []string{pathUpgradeMode, pathReleaseChannel, pathMaintenanceWindow}
 
 // releaseOnly reports whether every path of an update is one of
 // releasePaths: the update changes no cloud resource.
@@ -64,7 +63,6 @@ func releaseOnly(paths []string) bool {
 var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
 	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
-	pathTier:           func(dst, src *cloudv1.ClusterSpec) { dst.Tier = src.GetTier() },
 	pathMaintenanceWindow: func(dst, src *cloudv1.ClusterSpec) {
 		dst.MaintenanceWindow = src.GetMaintenanceWindow()
 	},
@@ -206,6 +204,10 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
+	//nolint:staticcheck // Reject legacy per-cluster tier writes with migration guidance.
+	if req.GetCluster().GetSpec().GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "tier is inherited from the network; set spec.tier on the network")
+	}
 	in := req.GetCluster()
 	row, err := s.get(ctx, req.GetTenantId(), in.GetId())
 	if err != nil {
@@ -223,7 +225,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	paths, dropped := updatemask.WithoutAutomaticVersion(spec, in.GetSpec(), req.GetUpdateMask().GetPaths())
 	if dropped && len(paths) == 0 {
 		// Only the version was asked for: nothing changes.
-		c, err := stored(row)
+		c, err := s.stored(ctx, row)
 		return &cloudv1.UpdateClusterResponse{Cluster: c}, err
 	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
@@ -316,8 +318,8 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	if specChanged {
 		s.logger().InfoContext(ctx, "cluster update stored", "cluster_id", row.ID, "paths", paths)
 	}
-	c, err := stored(row)
-	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan}, err
+	c, err := s.stored(ctx, row)
+	return &cloudv1.UpdateClusterResponse{Cluster: c, Plan: plan, UpdateRecorded: true}, err
 }
 
 // planned is a validate_only response: the plan, and the cluster as it is
@@ -463,6 +465,6 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 		}
 		s.logger().InfoContext(ctx, "cluster deleting", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	}
-	c, err := stored(row)
+	c, err := s.stored(ctx, row)
 	return &cloudv1.DeleteClusterResponse{Cluster: c}, err
 }

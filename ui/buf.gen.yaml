@@ -1,0 +1,19 @@
+# Run from the repository root: buf generate --template ui/buf.gen.yaml
+# Generate only TypeScript, preserving the current generated Go state.
+version: v2
+clean: true
+managed:
+  enabled: true
+  disable:
+    - file_option: go_package
+      module: buf.build/bufbuild/protovalidate
+  override:
+    - file_option: go_package_prefix
+      value: github.com/yindia/cluster-vending/pkg/gen/go
+plugins:
+  - remote: buf.build/bufbuild/es:v2.16.0
+    out: ui/src/gen
+    include_imports: true
+    opt: target=ts
+inputs:
+  - directory: idl

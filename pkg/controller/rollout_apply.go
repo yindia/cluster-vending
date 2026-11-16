@@ -97,7 +97,18 @@ func (r *RolloutReconciler) startHop(ctx context.Context, channel string, row ro
 		log.WarnContext(ctx, "automatic upgrade: read the cluster's spec", "error", err)
 		return false
 	}
-	why := notStartable(stored.State, stored.Paused != nil, spec, channel, row)
+	tier, err := (platform.Deps{Store: r.store}).NetworkTier(ctx, row.Tenant, stored.NetworkID)
+	if err != nil || int(tier)-1 != int(row.Tier) {
+		log.InfoContext(ctx, "automatic upgrade skipped: the network tier changed; plan again")
+		return false
+	}
+	frozen, err := (platform.Deps{Kube: r.c, KubeReader: r.reader}).Freeze(ctx, row.ID)
+	if err != nil {
+		log.WarnContext(ctx, "read the freeze", "error", err)
+		return false
+	}
+	stored.Frozen = frozen
+	why := notStartable(stored.State, stored.Frozen.Holds(), spec, channel, row)
 	if why == "" && reconcilecluster.ReleaseMoving(stored) {
 		// A release move and a Kubernetes upgrade never run at once.
 		why = "its components are moving to a new release"

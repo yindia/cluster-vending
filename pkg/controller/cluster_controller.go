@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
@@ -18,6 +22,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
@@ -40,11 +45,25 @@ func NewClusterReconciler(d Deps) *ClusterReconciler {
 
 // Reconcile moves the cluster one step on (see the package comment).
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	leave := r.deps.FreezeBarrier.Enter()
+	defer leave()
 	obj := &cloudv1alpha1.Cluster{}
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	tenant, id := obj.Labels[cloudstore.LabelTenant], obj.Labels[cloudstore.LabelID]
+	frozen, err := r.deps.SyncFreeze(ctx, platform.PauseScope{TenantID: tenant, ClusterID: id})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if frozen.Holds() {
+		if id != "" {
+			if err := r.rec.Reconcile(ctx, tenant, id); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return untilFreezeEnds(frozen, ctrl.Result{RequeueAfter: pendingDelay}, time.Now()), nil
+	}
 	if id == "" {
 		return r.adopt(ctx, obj)
 	}
@@ -61,7 +80,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
-	err := r.rec.Reconcile(ctx, tenant, id)
+	err = r.rec.Reconcile(ctx, tenant, id)
 	if err != nil {
 		r.deps.logger().ErrorContext(ctx, "reconcile cluster", "namespace", obj.Namespace, "name", obj.Name,
 			"cluster_id", id, "error", err)
@@ -217,7 +236,9 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&cloudv1alpha1.Cluster{}, forObject()).
 		Named("cluster").
-		WithOptions(objectOptions(r.deps))
+		WithOptions(objectOptions(r.deps)).Watches(&cloudv1alpha1.ReleaseHold{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+		return enqueueAll(ctx, r.deps.Direct, &cloudv1alpha1.ClusterList{})
+	}))
 	owner := ownerRequests(r.owners, r.deps.Direct, crossplane.LabelCluster,
 		func() client.ObjectList { return &cloudv1alpha1.ClusterList{} })
 	b, err := providerWatches(b, mgr, owner)
@@ -230,6 +251,9 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// A tenant's Component (enabled, changed, disabled) wakes the cluster
 	// it is on: the cluster reconcile installs and removes it.
 	b = b.Watches(&cloudv1alpha1.Component{}, handler.EnqueueRequestsFromMapFunc(componentCluster(r.owners, r.deps.Direct)))
+	b = b.Watches(&cloudv1alpha1.Network{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+		return enqueueAll(ctx, r.deps.Direct, &cloudv1alpha1.ClusterList{})
+	}), builder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	return b.Complete(r)
 }
 

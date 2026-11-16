@@ -2,74 +2,40 @@ syntax = "proto3";
 
 package cloud.v1;
 
-import "buf/validate/validate.proto";
-import "cloud/v1/admin_pause.proto";
+import "cloud/v1/admin_freeze.proto";
 import "cloud/v1/admin_release.proto";
-import "cloud/v1/cluster.proto";
-import "google/protobuf/timestamp.proto";
 
 // AdminService holds operations of the platform's operators, not of
 // tenants. Where the server authenticates, its RPCs need the platform
 // admin role, whatever tenant the request names; with auth.mode none,
 // expose it to administrators only.
 service AdminService {
-  // Pauses a tenant, one of its networks or one of its clusters, e.g. to
-  // upgrade the Crossplane providers (docs/runbooks/provider-upgrade.md).
-  // Two things happen:
+  // Freezes the selected scope (the whole platform by default). For held resources:
   //
-  //   - the pause is recorded on the tenant's cloud accounts, networks and
-  //     clusters (on the one network or cluster), with who paused, when
-  //     and why. The
-  //     platform's controller does not act on a paused resource: it
-  //     creates, changes and deletes nothing of it in the cloud or in its
-  //     workload cluster, and only observes it. An update or a delete
-  //     asked for meanwhile is stored and done after the resume. What is
-  //     created in a paused tenant is paused from the start.
-  //   - every managed resource of the scope, and the Helm releases of its
-  //     platform components, get the crossplane.io/paused annotation, so
-  //     the providers neither change nor delete their cloud resources.
+  //   - the platform's controllers apply no changes: no
+  //     create, update, delete, repair or component install is applied,
+  //     and no automatic change starts (Kubernetes upgrades, release
+  //     moves, add-on upgrades, code changes from a new controller
+  //     build). What users ask for meanwhile is stored and applied after
+  //     the unfreeze (or once that cluster or network is let through).
+  //   - affected Crossplane managed resources and the Helm
+  //     releases of the platform components, get crossplane.io/paused,
+  //     so the providers act on nothing either, even while the
+  //     controller is down.
   //
-  // A network's pause is the network's alone: its clusters are not paused
-  // and keep running. What of a cluster needs the network to change (new
-  // subnet tags, say) waits until the network is resumed; deleting one of
-  // its clusters is not held.
-  //
-  // A paused account, network or cluster has the condition Paused and
-  // status.pause. Idempotent: a resource paused already keeps who paused
-  // it, and records each scope it was paused at.
-  rpc PauseReconcile(PauseReconcileRequest) returns (PauseReconcileResponse);
-
-  // Removes the pause (PauseReconcile). A tenant's resume removes the
-  // tenant's pause from everything it has, except a network or cluster
-  // also paused on its own, which stays paused with the providers' pause
-  // on its managed resources. A resume of one network or cluster ends its
-  // pause whatever else holds it, so it runs again in a paused tenant
-  // (the rest of the tenant stays paused). The controller then observes
-  // each resource and applies what changed meanwhile, once. Idempotent.
-  rpc ResumeReconcile(ResumeReconcileRequest) returns (ResumeReconcileResponse);
-
-  // Lists every pause and freeze in effect: full pauses (of a tenant, a
-  // network, a cluster, or of a channel's clusters) and freezes (of the
-  // platform, a tenant or a channel), with who asked, when, why, until
-  // when and how many clusters each covers.
-  rpc ListPauses(ListPausesRequest) returns (ListPausesResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
-
-  // Freezes the platform, or a tenant's or a channel's (one tier's)
-  // clusters: no automatic change starts for them (Kubernetes upgrades,
-  // release moves, add-on upgrades, code changes from a new controller
-  // build) until Unfreeze; what is under way finishes, and what users ask
-  // for (create, update, delete) is done as usual. Clusters that join the
-  // tenant or channel later are frozen too. Freezing again changes the
-  // reason and until, and keeps what was let through.
+  // Freezing again changes the reason and until, and keeps what was let
+  // through. The call can be repeated: what is paused already is left.
   rpc Freeze(FreezeRequest) returns (FreezeResponse);
 
-  // Lifts the freeze of the target (as Freeze named it); with a cluster_id
-  // (or a network_id), lets only that cluster and its network (that
-  // network) take their pending changes while the freeze stays. Lifting
-  // the freeze forgets what was let through.
+  // Resumes a cluster, a network with all its clusters, or an entire tenant.
+  // A cluster exception leaves its shared network frozen. Broader scoped
+  // unfreezes clear nested freezes. With no target, clears every freeze.
+  // Resumed resources continue through their normal rollout gates.
   rpc Unfreeze(UnfreezeRequest) returns (UnfreezeResponse);
+
+  rpc GetFreeze(GetFreezeRequest) returns (GetFreezeResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // Lists the releases, newest first: valid or not, shipped or published,
   // and the channels and holds naming them. Read-only.
@@ -98,145 +64,4 @@ service AdminService {
   rpc GetReleaseChannel(GetReleaseChannelRequest) returns (GetReleaseChannelResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-}
-
-message PauseReconcileRequest {
-  option (buf.validate.message).cel = {
-    id: "scope.one"
-    message: "set at most one of cluster_id and network_id"
-    expression: "size(this.cluster_id) == 0 || size(this.network_id) == 0"
-  };
-  option (buf.validate.message).cel = {
-    id: "target.one"
-    message: "set tenant_id (with cluster_id or network_id for one of its), or channel; not both"
-    expression: "(size(this.tenant_id) > 0) != (this.channel != 0)"
-  };
-  option (buf.validate.message).cel = {
-    id: "channel.alone"
-    message: "a channel's pause takes no cluster_id or network_id"
-    expression: "this.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)"
-  };
-  option (buf.validate.message).cel = {
-    id: "tier.channel"
-    message: "tier needs channel"
-    expression: "this.tier == 0 || this.channel != 0"
-  };
-
-  // The tenant whose managed resources are paused. Not with channel.
-  string tenant_id = 1 [
-    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
-    (buf.validate.field).string = {
-      max_len: 56
-      pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
-    }
-  ];
-
-  // Only this cluster's managed resources (Cluster.id); empty: all the
-  // tenant's, networks included.
-  string cluster_id = 2 [
-    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
-    (buf.validate.field).string.uuid = true
-  ];
-
-  // Why, shown with the pause (status.pause.reason). Optional.
-  string reason = 3 [(buf.validate.field).string.max_len = 256];
-
-  // Only this network (Network.id): the network row and its own managed
-  // resources, not its clusters. Not with cluster_id.
-  string network_id = 4 [
-    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
-    (buf.validate.field).string.uuid = true
-  ];
-
-  // Every cluster on this release channel now, of every tenant, each
-  // paused as by cluster_id (a cluster that joins later is not: freeze the
-  // channel to keep automatic changes from what joins it). Not with
-  // tenant_id.
-  ReleaseChannel channel = 5 [(buf.validate.field).enum.defined_only = true];
-
-  // Only the channel's clusters of this tier (a cluster with no tier is
-  // tier 0). Only with channel.
-  ClusterTier tier = 6 [(buf.validate.field).enum.defined_only = true];
-
-  // only_upgrades, removed: AdminService.Freeze stops automatic changes.
-  reserved 7;
-  reserved "only_upgrades";
-
-  // When the pause ends by itself; unset: at a resume only. In the future.
-  google.protobuf.Timestamp until = 8;
-}
-
-message PauseReconcileResponse {
-  // Managed resources that are paused now (already paused ones included).
-  int32 resources = 1;
-  // Clusters the pause covers now.
-  int32 clusters = 2;
-  // What else to know, e.g. that clusters joining a channel later are not
-  // paused by a full pause of it.
-  string note = 3;
-}
-
-message ResumeReconcileRequest {
-  option (buf.validate.message).cel = {
-    id: "scope.one"
-    message: "set at most one of cluster_id and network_id"
-    expression: "size(this.cluster_id) == 0 || size(this.network_id) == 0"
-  };
-  option (buf.validate.message).cel = {
-    id: "target.one"
-    message: "set tenant_id (with cluster_id or network_id for one of its), or channel; not both"
-    expression: "(size(this.tenant_id) > 0) != (this.channel != 0)"
-  };
-  option (buf.validate.message).cel = {
-    id: "channel.alone"
-    message: "a channel's resume takes no cluster_id or network_id"
-    expression: "this.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)"
-  };
-  option (buf.validate.message).cel = {
-    id: "tier.channel"
-    message: "tier needs channel"
-    expression: "this.tier == 0 || this.channel != 0"
-  };
-
-  // The tenant whose managed resources are resumed. Not with channel.
-  string tenant_id = 1 [
-    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
-    (buf.validate.field).string = {
-      max_len: 56
-      pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
-    }
-  ];
-
-  // Only this cluster's managed resources (Cluster.id); empty: all the
-  // tenant's.
-  string cluster_id = 2 [
-    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
-    (buf.validate.field).string.uuid = true
-  ];
-
-  // Only this network (Network.id): the network row and its own managed
-  // resources, not its clusters. Not with cluster_id.
-  string network_id = 3 [
-    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
-    (buf.validate.field).string.uuid = true
-  ];
-
-  // The pause of this channel's clusters (PauseReconcileRequest.channel):
-  // only what was paused at that channel (and tier) is resumed; a cluster
-  // also paused on its own, or by another pause, stays paused.
-  ReleaseChannel channel = 4 [(buf.validate.field).enum.defined_only = true];
-
-  // The tier the channel's pause was asked for (none: the whole channel's).
-  ClusterTier tier = 5 [(buf.validate.field).enum.defined_only = true];
-
-  // only_upgrades, removed: AdminService.Unfreeze.
-  reserved 6;
-  reserved "only_upgrades";
-}
-
-message ResumeReconcileResponse {
-  // Managed resources that are reconciled again now.
-  int32 resources = 1;
-  // Clusters resumed (of a channel's pause).
-  int32 clusters = 2;
 }

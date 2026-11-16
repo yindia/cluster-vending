@@ -12,6 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -53,14 +56,30 @@ func countingWorld(t *testing.T) (world, *atomic.Int64) {
 	return newWorld(t, funcs, nil), writes
 }
 
-func (w world) pause(t *testing.T, p *model.Pause) {
+func (w world) pause(t *testing.T, p *model.Freeze) {
 	t.Helper()
-	if err := w.store.Tenants().SetPause(t.Context(), worldTenant, model.PauseTarget{ClusterID: w.row.ID}, p); err != nil {
+	hold := &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: reconcile.FreezeName}}
+	if p == nil {
+		if err := client.IgnoreNotFound(w.kube.Delete(t.Context(), hold)); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	hold.CreationTimestamp = metav1.NewTime(p.Since)
+	hold.Spec = cloudv1alpha1.ReleaseHoldSpec{Platform: true, By: p.By, Reason: p.Reason}
+	if p.Until != nil {
+		at := metav1.NewTime(*p.Until)
+		hold.Spec.Until = &at
+	}
+	if err := w.kube.Create(t.Context(), hold); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconcile.SetProvidersPaused(t.Context(), w.svc.deps, reconcile.PauseScope{TenantID: worldTenant, ClusterID: w.row.ID}, true); err != nil {
 		t.Fatal(err)
 	}
 }
 
-var alice = &model.Pause{By: "alice", Since: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), Reason: "provider upgrade"}
+var alice = &model.Freeze{By: "alice", Since: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), Reason: "provider upgrade"}
 
 // A paused cluster is only observed: the pass writes nothing to the
 // management cluster, the generation stays unapplied, and the status says
@@ -69,6 +88,7 @@ func TestPausedClusterIsObservedNotApplied(t *testing.T) {
 	w, writes := countingWorld(t)
 	ctx := t.Context()
 	w.pause(t, alice)
+	writes.Store(0)
 
 	for range 2 {
 		if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
@@ -87,14 +107,14 @@ func TestPausedClusterIsObservedNotApplied(t *testing.T) {
 	if err := Lenient.Unmarshal(row.Status, st); err != nil {
 		t.Fatal(err)
 	}
-	if st.GetPause().GetBy() != "alice" || st.GetPause().GetReason() != "provider upgrade" ||
-		!st.GetPause().GetSince().AsTime().Equal(alice.Since) {
-		t.Errorf("status.pause = %v", st.GetPause())
+	if st.GetFreeze().GetBy() != "alice" || st.GetFreeze().GetReason() != "provider upgrade" ||
+		!st.GetFreeze().GetSince().AsTime().Equal(alice.Since) {
+		t.Errorf("status.pause = %v", st.GetFreeze())
 	}
-	if !strings.Contains(st.GetMessage(), "paused by alice since 2026-11-14T09:00:00Z") {
+	if !strings.Contains(st.GetMessage(), "frozen by alice since 2026-11-14T09:00:00Z") {
 		t.Errorf("message %q does not say who paused", st.GetMessage())
 	}
-	if !hasCondition(st, reconcile.ConditionPaused) {
+	if !hasCondition(st, reconcile.ConditionFrozen) {
 		t.Errorf("no Paused condition in %v", st.GetConditions())
 	}
 
@@ -115,8 +135,57 @@ func TestPausedClusterIsObservedNotApplied(t *testing.T) {
 	if err := Lenient.Unmarshal(row.Status, st); err != nil {
 		t.Fatal(err)
 	}
-	if st.GetPause() != nil || hasCondition(st, reconcile.ConditionPaused) {
-		t.Errorf("status still says paused: %v, %v", st.GetPause(), st.GetConditions())
+	if st.GetFreeze() != nil || hasCondition(st, reconcile.ConditionFrozen) {
+		t.Errorf("status still says paused: %v, %v", st.GetFreeze(), st.GetConditions())
+	}
+}
+
+func TestScopedFreezePreventsManagedResourceCreation(t *testing.T) {
+	for _, scope := range []string{"cluster", "network", "tenant"} {
+		t.Run(scope, func(t *testing.T) {
+			w, writes := countingWorld(t)
+			rule := cloudv1alpha1.FreezeRule{Frozen: true, Reason: "maintenance"}
+			switch scope {
+			case "cluster":
+				rule.ClusterID = w.row.ID
+			case "network":
+				rule.NetworkID = w.row.NetworkID
+			case "tenant":
+				rule.TenantID = worldTenant
+			}
+			hold := &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: reconcile.FreezeName},
+				Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Scoped: true, Rules: []cloudv1alpha1.FreezeRule{rule}}}
+			if err := w.kube.Create(t.Context(), hold); err != nil {
+				t.Fatal(err)
+			}
+			// Pausing existing resources is an expected metadata write.
+			if _, err := w.svc.deps.SyncFreeze(t.Context(), reconcile.PauseScope{TenantID: worldTenant, NetworkID: w.row.NetworkID, ClusterID: w.row.ID}); err != nil {
+				t.Fatal(err)
+			}
+			writes.Store(0)
+			for range 2 {
+				if err := w.svc.Reconcile(t.Context(), worldTenant, w.row.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			st := &cloudv1.ClusterStatus{}
+			if err := Lenient.Unmarshal(w.cluster(t).Status, st); err != nil {
+				t.Fatal(err)
+			}
+			if writes.Load() != 0 || st.GetFreeze() == nil || st.GetFreeze().GetLetThrough() {
+				t.Fatalf("frozen cluster: %d managed resource writes, freeze=%+v", writes.Load(), st.GetFreeze())
+			}
+			if err := w.kube.Delete(t.Context(), hold); err != nil {
+				t.Fatal(err)
+			}
+			writes.Store(0)
+			if err := w.svc.Reconcile(t.Context(), worldTenant, w.row.ID); err != nil {
+				t.Fatal(err)
+			}
+			if writes.Load() == 0 {
+				t.Fatal("unfreezing did not resume managed resource creation")
+			}
+		})
 	}
 }
 
@@ -136,6 +205,7 @@ func TestSpecChangeWhilePausedIsAppliedAfterResume(t *testing.T) {
 	w, writes := countingWorld(t)
 	ctx := t.Context()
 	w.pause(t, alice)
+	writes.Store(0)
 	row := w.cluster(t)
 	row.Generation++ // what UpdateCluster does
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
@@ -147,7 +217,7 @@ func TestSpecChangeWhilePausedIsAppliedAfterResume(t *testing.T) {
 	if got := w.cluster(t); got.AppliedGeneration != 1 || got.Generation != 3 || writes.Load() != 0 {
 		t.Fatalf("while paused: applied %d of %d, %d writes", got.AppliedGeneration, got.Generation, writes.Load())
 	}
-	if got := w.cluster(t); got.Paused == nil {
+	if got, err := w.svc.deps.Freeze(ctx, w.row.ID); err != nil || !got.Holds() {
 		t.Fatal("the update removed the pause")
 	}
 
@@ -175,6 +245,7 @@ func TestDeleteWhilePausedIsHeld(t *testing.T) {
 	}
 	before := len(roles.Items)
 	w.pause(t, alice)
+	writes.Store(0)
 	row := w.cluster(t)
 	row.State = StateDeleting // what DeleteCluster does
 	if err := w.store.Clusters().Update(ctx, row); err != nil {
@@ -219,21 +290,21 @@ func TestStatusOfAPausedRow(t *testing.T) {
 		want      cloudv1.ClusterState
 		wantInMsg []string
 	}{
-		{"created while its tenant is paused", model.Cluster{Resource: model.Resource{State: StateProvisioning, Generation: 1, Paused: alice}},
+		{"created while its tenant is paused", model.Cluster{Resource: model.Resource{State: StateProvisioning, Generation: 1, Frozen: alice}},
 			nil, cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING,
-			[]string{"paused by alice since 2026-11-14T09:00:00Z (provider upgrade)", "nothing is created, changed or deleted"}},
+			[]string{"frozen by alice since 2026-11-14T09:00:00Z (provider upgrade)", "nothing is created, changed or deleted"}},
 		{"running and paused", model.Cluster{Resource: model.Resource{State: StateRunning, Generation: 1, AppliedGeneration: 1,
-			ObservedGeneration: 1, Paused: &model.Pause{By: "anonymous", Since: alice.Since}}},
-			[]*cloudv1.ManagedResource{ready}, cloudv1.ClusterState_CLUSTER_STATE_RUNNING, []string{"paused by anonymous since 2026-11-14T09:00:00Z"}},
-		{"deleting and paused", model.Cluster{Resource: model.Resource{State: StateDeleting, Generation: 1, AppliedGeneration: 1, Paused: alice}},
-			[]*cloudv1.ManagedResource{ready}, cloudv1.ClusterState_CLUSTER_STATE_DELETING, []string{"deleting", "paused by alice"}},
+			ObservedGeneration: 1, Frozen: &model.Freeze{By: "anonymous", Since: alice.Since}}},
+			[]*cloudv1.ManagedResource{ready}, cloudv1.ClusterState_CLUSTER_STATE_RUNNING, []string{"frozen by anonymous since 2026-11-14T09:00:00Z"}},
+		{"deleting and paused", model.Cluster{Resource: model.Resource{State: StateDeleting, Generation: 1, AppliedGeneration: 1, Frozen: alice}},
+			[]*cloudv1.ManagedResource{ready}, cloudv1.ClusterState_CLUSTER_STATE_DELETING, []string{"deleting", "frozen by alice"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			st := status(&tt.row, tt.views, false)
 
-			if st.GetState() != tt.want || st.GetPause().GetBy() != tt.row.Paused.By || !hasCondition(st, reconcile.ConditionPaused) {
-				t.Fatalf("state %s, pause %v, conditions %v", st.GetState(), st.GetPause(), st.GetConditions())
+			if st.GetState() != tt.want || st.GetFreeze().GetBy() != tt.row.Frozen.By || !hasCondition(st, reconcile.ConditionFrozen) {
+				t.Fatalf("state %s, pause %v, conditions %v", st.GetState(), st.GetFreeze(), st.GetConditions())
 			}
 			for _, want := range tt.wantInMsg {
 				if !strings.Contains(st.GetMessage(), want) {
@@ -265,10 +336,10 @@ func TestPauseAndResumeOfAClusterAreEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := events.count(reconcile.ReasonPaused); got != 1 || !events.said(reconcile.ReasonPaused, "paused by alice") {
+	if got := events.count(reconcile.ReasonPlatformFrozen); got != 1 || !events.said(reconcile.ReasonPlatformFrozen, "frozen by alice") {
 		t.Errorf("Paused events %d (%v %q), want one naming alice", got, events.reasons, events.messages)
 	}
-	if got := events.count(reconcile.ReasonResumed); got != 1 {
+	if got := events.count(reconcile.ReasonPlatformUnfrozen); got != 1 {
 		t.Errorf("Resumed events %d (%v), want one", got, events.reasons)
 	}
 }

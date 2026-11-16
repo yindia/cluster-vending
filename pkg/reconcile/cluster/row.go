@@ -96,6 +96,10 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	}
 	// A cluster on a channel runs the channel's minor unless it names an
 	// older one; the client's input is stored as it was sent.
+	//nolint:staticcheck // Reject legacy per-cluster tier writes with migration guidance.
+	if in.GetSpec().GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
+		return nil, fault.New(fault.Invalid, "tier is inherited from the network; set spec.tier on the network")
+	}
 	requested := proto.CloneOf(in.GetSpec())
 	if err := s.withChannelVersion(ctx, requested); err != nil {
 		return nil, err

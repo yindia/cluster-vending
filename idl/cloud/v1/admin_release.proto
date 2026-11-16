@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/cluster.proto";
 import "cloud/v1/conditions.proto";
+import "cloud/v1/freeze.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -357,4 +358,5 @@ message GetReleaseChannelResponse {
   // plans it (pkg/rollout), from what the management cluster holds: per
   // tier and batch, with every cluster in it, tier 2 first.
   Rollout rollout = 2;
+  Freeze freeze = 3;
 }

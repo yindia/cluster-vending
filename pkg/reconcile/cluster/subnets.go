@@ -16,6 +16,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // subnetManager is the field manager of a cluster's tags on the network's
@@ -30,6 +31,10 @@ func subnetManager(clusterID string) string { return kube.FieldOwner + "/cluster
 // already has it (the tag holds one value: that cluster's Karpenter
 // selects the subnets by kubernetes.io/cluster/<name> instead).
 func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Target) error {
+	frozen, err := s.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: row.TenantID, NetworkID: row.NetworkID})
+	if err != nil {
+		return err
+	}
 	for _, name := range t.SubnetObjects {
 		subnet := &awsec2.Subnet{}
 		if err := s.deps.Get(ctx, client.ObjectKey{Namespace: t.Account.Namespace, Name: name}, subnet); err != nil {
@@ -37,6 +42,14 @@ func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Targe
 			return fault.New(fault.Unavailable, "cannot read the network's subnet "+name)
 		}
 		tags := clusterSubnetTags(subnet.Spec.ForProvider.Tags, row.Name)
+		if frozen.Holds() {
+			for key, value := range tags {
+				if existing := subnet.Spec.ForProvider.Tags[key]; existing == nil || *existing != value {
+					return fault.New(fault.Unavailable, "network "+row.NetworkID+" is frozen; required subnet tags wait for network unfreeze")
+				}
+			}
+			continue
+		}
 		if v := subnet.Spec.ForProvider.Tags[crossplaneaws.TagKarpenterDiscovery]; v != nil && *v != row.Name {
 			s.logger().WarnContext(ctx, "subnet already has a karpenter discovery tag; select it by kubernetes.io/cluster/<name>",
 				"cluster_id", row.ID, "subnet", name, "karpenter.sh/discovery", *v)
@@ -80,9 +93,13 @@ func clusterSubnetTags(existing map[string]*string, cluster string) map[string]a
 // namespace that has them: applying no fields as the cluster's manager
 // drops what it owned.
 func (s *Reconciler) untagSubnets(ctx context.Context, row *model.Cluster, namespace string) error {
+	frozen, err := s.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: row.TenantID, NetworkID: row.NetworkID})
+	if err != nil {
+		return err
+	}
 	// From the API server: the cache strips the managedFields this reads.
 	subnets := &awsec2.SubnetList{}
-	err := s.deps.Reader().List(ctx, subnets, client.InNamespace(namespace),
+	err = s.deps.Reader().List(ctx, subnets, client.InNamespace(namespace),
 		client.MatchingLabels{crossplane.LabelNetwork: row.NetworkID})
 	if err != nil {
 		return fmt.Errorf("list network subnets: %w", err)
@@ -93,6 +110,9 @@ func (s *Reconciler) untagSubnets(ctx context.Context, row *model.Cluster, names
 		sub := &subnets.Items[i]
 		if !managedBy(sub.GetManagedFields(), manager) || sub.GetDeletionTimestamp() != nil {
 			continue
+		}
+		if frozen.Holds() {
+			return fault.New(fault.Unavailable, "network "+row.NetworkID+" is frozen; subnet tag cleanup waits for network unfreeze")
 		}
 		err := kube.ApplyFields(ctx, s.deps.Kube, subnetPatch(namespace, sub.Name), manager)
 		if err != nil && !apierrors.IsNotFound(err) {

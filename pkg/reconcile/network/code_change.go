@@ -36,7 +36,7 @@ func (s *Reconciler) fingerprints(set sequence.Set) (map[string]string, error) {
 // codeChange decides the pass's code change of a network rendered from
 // its spec whose generation is applied (reconcile.DecideCode): it returns
 // whether the network is applied now, and the fingerprints of this
-// build's render. It is admitted in the tier of its most careful cluster,
+// build's render. It is admitted in the network's tier,
 // before its clusters of that tier, unless a freeze holds it
 // (reconcile.CodeAdmitter); a network applied by a build that recorded no
 // fingerprints takes this render as applied.

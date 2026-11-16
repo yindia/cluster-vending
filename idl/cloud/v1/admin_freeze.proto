@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/freeze.proto";
+import "google/protobuf/timestamp.proto";
+
+// FreezeRequest freezes the selected scope, or the entire platform when no target is set.
+message FreezeRequest {
+  option (buf.validate.message).cel = {
+    id: "freeze.target"
+    message: "choose one scope; legacy IDs must agree with target"
+    expression: "[this.tenant_id != '', this.network_id != '', this.cluster_id != ''].filter(x, x).size() <= 1 && (!has(this.target) || ((this.tenant_id == '' || this.target.tenant_id == this.tenant_id) && (this.network_id == '' || this.target.network_id == this.network_id) && (this.cluster_id == '' || this.target.cluster_id == this.cluster_id)))"
+  };
+  string cluster_id = 7 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+  string network_id = 8 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+  string tenant_id = 9 [(buf.validate.field).string.max_len = 56];
+  // Field numbers from the former channel/tier targeting API remain reserved.
+  reserved 2, 3, 4;
+  reserved "channel", "tier";
+
+  // Why, shown on the affected resources.
+  string reason = 1 [(buf.validate.field).string.max_len = 512];
+  // When the freeze ends by itself; unset: at an unfreeze only. In the
+  // future.
+  google.protobuf.Timestamp until = 5;
+  bool reset_exceptions = 6;
+  FreezeTarget target = 10;
+}
+
+message FreezeResponse {
+  // How many clusters and networks it holds now (those let through left
+  // out).
+  int32 clusters = 1;
+  int32 networks = 2;
+  // Legacy compatibility field; always zero. Read status for asynchronous progress.
+  int32 resources = 3;
+  int32 paused_resources = 4;
+  int32 total_resources = 5;
+  string phase = 6;
+  string message = 7;
+  string revision = 8;
+  // Canonical response. Legacy fields above remain available for existing clients.
+  FreezeStatus status = 9;
+}
+
+message UnfreezeRequest {
+  FreezeTarget target = 7;
+  string tenant_id = 6 [(buf.validate.field).string.max_len = 56];
+  option (buf.validate.message).cel = {
+    id: "unfreeze.one_target"
+    message: "choose one scope; legacy IDs must agree with target"
+    expression: "[this.tenant_id != '', this.network_id != '', this.cluster_id != ''].filter(x, x).size() <= 1"
+  };
+
+  // Field numbers from the former channel/tier targeting API remain reserved.
+  reserved 3, 4, 5;
+  reserved "channel", "tier";
+
+  // Resume this cluster only. Its shared network retains its own freeze.
+  // No target: clear every freeze scope.
+  string cluster_id = 1 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+  // Resume this network and all its clusters, clearing nested freezes.
+  string network_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message UnfreezeResponse {
+  // What was requested, for people. Provider pauses are reconciled asynchronously.
+  string note = 1;
+  // Legacy compatibility field; always zero. Read status for asynchronous progress.
+  int32 resources = 2;
+  // Policy revision to bind confirmation to this request. Empty after platform unfreeze.
+  string revision = 3;
+  FreezeStatus status = 4;
+}
+message GetFreezeRequest {
+  FreezeTarget target = 4;
+  option (buf.validate.message).cel = {
+    id: "freeze_status.target"
+    message: "choose one scope; legacy IDs must agree with target"
+    expression: "[this.tenant_id != '', this.network_id != '', this.cluster_id != ''].filter(x, x).size() <= 1"
+  };
+  string tenant_id = 1 [(buf.validate.field).string.max_len = 56];
+  string network_id = 2 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+  string cluster_id = 3 [
+    (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message GetFreezeResponse {
+  Freeze freeze = 1;
+  string phase = 2;
+  repeated string exceptions = 3;
+  int32 clusters = 4;
+  int32 networks = 5;
+  int32 total_resources = 6;
+  int32 paused_resources = 7;
+  int32 newly_paused_resources = 8;
+  string message = 9;
+  string revision = 10;
+  repeated FreezeScope scopes = 11;
+  bool platform_frozen = 12;
+  FreezeStatus status = 13;
+}
+message FreezeScope {
+  string tenant_id = 1;
+  string network_id = 2;
+  string cluster_id = 3;
+  bool frozen = 4;
+  string reason = 5;
+  google.protobuf.Timestamp until = 6;
+}
+
+// FreezeTarget is shared by every freeze operation. Platform must be explicit
+// when this message is supplied. Omitted target preserves legacy platform scope.
+message FreezeTarget {
+  oneof scope {
+    option (buf.validate.oneof).required = true;
+    bool platform = 1 [(buf.validate.field).bool.const = true];
+    string tenant_id = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_len: 56
+      pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+    }];
+    string network_id = 3 [(buf.validate.field).string.uuid = true];
+    string cluster_id = 4 [(buf.validate.field).string.uuid = true];
+  }
+}
+
+enum FreezePhase {
+  FREEZE_PHASE_UNSPECIFIED = 0;
+  FREEZE_PHASE_FREEZING = 1;
+  FREEZE_PHASE_FROZEN = 2;
+  FREEZE_PHASE_UNFREEZING = 3;
+  FREEZE_PHASE_UNFROZEN = 4;
+}
+
+// FreezeStatus describes the selected scope, independently of other scopes.
+// Freeze, Unfreeze and GetFreeze all return this same status shape.
+message FreezeStatus {
+  FreezeTarget target = 1;
+  FreezePhase phase = 2;
+  string revision = 3;
+  string message = 4;
+  Freeze freeze = 5;
+  int32 clusters = 6;
+  int32 networks = 7;
+  int32 total_resources = 8;
+  int32 paused_resources = 9;
+  int32 newly_paused_resources = 10;
+  bool platform_frozen = 11;
+  repeated FreezeScope scopes = 12;
+  repeated string exceptions = 13;
+}

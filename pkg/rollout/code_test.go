@@ -58,19 +58,11 @@ func channelAt(tier cloudv1alpha1.ClusterTier, done bool) *cloudv1alpha1.Release
 		Status: cloudv1alpha1.ReleaseChannelStatus{CodeChanges: &cloudv1alpha1.ChannelReleaseMoves{Tier: tier, Done: done}}}
 }
 
-// A network's code change goes in the tier of its most careful cluster,
-// before its clusters of that tier: not while the channel's code rollout
-// is at an earlier tier; a freeze holds it unless it, or one of its
-// clusters, is let through.
+// A network's code change uses its explicit tier before its clusters.
+// A cluster exception does not resume the shared network.
 func TestNetworkCodeAdmitted(t *testing.T) {
 	const network = "net-1"
 	clusters := []cloudv1alpha1.Cluster{cluster("dev", cloudv1alpha1.ClusterTier2, "1.36"), cluster("prod", cloudv1alpha1.ClusterTier1, "1.36")}
-	if got := NetworkTier(clusters); got != upgrade.Tier1 {
-		t.Fatalf("NetworkTier = %v, want the most careful (1)", got)
-	}
-	if got := NetworkTier(nil); got != upgrade.Tier2 {
-		t.Fatalf("NetworkTier without clusters = %v, want 2", got)
-	}
 	platform := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy"}}
 	tests := []struct {
 		name    string
@@ -88,17 +80,13 @@ func TestNetworkCodeAdmitted(t *testing.T) {
 		{"let through", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{
 			Platform: true, Reason: "deploy", Except: []string{network}}}}, true, ""},
 		{"a cluster let through", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{
-			Platform: true, Reason: "deploy", Except: []string{"id-prod"}}}}, true, ""},
-		{"its tenant frozen", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{
-			TenantID: "acme", Reason: "audit"}}}, false, "tenant acme is frozen"},
-		{"a cluster's channel frozen", channelAt(cloudv1alpha1.ClusterTier1, false), []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{
-			Channel: "stable", Tier: cloudv1alpha1.ClusterTier1, Reason: "quarter end"}}}, false, "channel stable tier 1 is frozen"},
+			Platform: true, Reason: "deploy", Except: []string{"id-prod"}}}}, false, "the platform is frozen"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			channels := map[string]*cloudv1alpha1.ReleaseChannel{"stable": tt.channel}
 
-			got, why := NetworkCodeAdmitted(network, "acme", clusters, channels, tt.holds, now)
+			got, why := NetworkCodeAdmitted(network, "acme", upgrade.Tier1, clusters, channels, tt.holds, now)
 
 			if got != tt.want || !strings.Contains(why, tt.why) {
 				t.Errorf("admitted %v (%q), want %v (%q)", got, why, tt.want, tt.why)

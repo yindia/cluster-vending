@@ -20,15 +20,9 @@ spec:
     - jsonPath: .spec.clusterID
       name: Cluster-ID
       type: string
-    - jsonPath: .spec.tenantID
-      name: Tenant
-      type: string
-    - jsonPath: .spec.channel
-      name: Channel
-      type: string
-    - jsonPath: .spec.tier
-      name: Tier
-      type: string
+    - jsonPath: .spec.platform
+      name: Platform
+      type: boolean
     - jsonPath: .status.clusters
       name: Clusters
       type: integer
@@ -52,9 +46,9 @@ spec:
       openAPIV3Schema:
         description: |-
           ReleaseHold keeps clusters out of rollouts: one cluster on a named
-          release (a lock) or where it is (a freeze), or a tenant's or a channel's
-          clusters where they are. Only the operator holds a cluster; users see it
-          as a freeze (admin freeze).
+          release (a lock) or where it is, or, as the platform freeze (Platform),
+          every cluster and network. Only the operator holds a cluster; users see
+          the platform freeze on their clusters and networks (admin freeze).
         properties:
           apiVersion:
             description: |-
@@ -74,29 +68,13 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              ReleaseHoldSpec is a freeze (AdminService.Freeze): no automatic change
-              starts for what it covers. It covers every cluster and network (platform:
-              the platform freeze), a tenant's clusters, a release channel's (every
-              tier, or one), or one cluster. Exactly one of clusterID, tenantID,
-              channel and platform is set; tier only with channel.
+            description: ReleaseHoldSpec records the platform freeze or a cluster
+              release lock.
             properties:
               by:
                 description: By is who asked for it (AdminService.Freeze sets it).
                 maxLength: 256
                 type: string
-              channel:
-                description: |-
-                  Channel holds every cluster on the release channel (alpha, beta,
-                  stable), those that join it later too; with Tier, only that tier's.
-                enum:
-                - alpha
-                - beta
-                - stable
-                type: string
-                x-kubernetes-validations:
-                - message: channel is immutable; create another hold
-                  rule: self == oldSelf
               clusterID:
                 description: ClusterID is the held cluster's ID (the API's Cluster.id).
                 pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
@@ -106,10 +84,8 @@ spec:
                   rule: self == oldSelf
               except:
                 description: |-
-                  Except are the IDs of the clusters and networks the freeze lets
-                  through (AdminService.Unfreeze with a cluster or a network): their
-                  pending changes may start; a cluster let through lets its network
-                  through too.
+                  Except preserves legacy resource exceptions. New requests use Rules.
+                  A cluster exception does not change its shared network.
                 items:
                   type: string
                 maxItems: 200
@@ -117,9 +93,9 @@ spec:
                 x-kubernetes-list-type: set
               platform:
                 description: |-
-                  Platform holds every cluster and network: no automatic change starts
-                  anywhere (Kubernetes upgrades, release moves, add-on upgrades, code
-                  changes) while it exists. AdminService.Freeze writes it.
+                  Platform identifies the canonical freeze policy (platform-freeze).
+                  Unless Scoped is true, it freezes all resources by default. Rules
+                  override that default in order; the last matching rule wins.
                 type: boolean
               reason:
                 description: Reason, shown on the cluster's status.
@@ -132,24 +108,40 @@ spec:
                   lock); unset, the cluster stays on what it has now (a freeze).
                 pattern: ^([0-9]{4}-[0-9]{2}-[a-z]|shipped-[0-9a-f]{8})$
                 type: string
-              tenantID:
-                description: TenantID holds every cluster of the tenant, those created
-                  later too.
-                pattern: ^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$
+              revision:
                 type: string
-                x-kubernetes-validations:
-                - message: tenantID is immutable; create another hold
-                  rule: self == oldSelf
-              tier:
-                description: Tier narrows Channel to one tier.
-                enum:
-                - Tier0
-                - Tier1
-                - Tier2
-                type: string
-                x-kubernetes-validations:
-                - message: tier is immutable; create another hold
-                  rule: self == oldSelf
+              rules:
+                items:
+                  properties:
+                    by:
+                      type: string
+                    clusterID:
+                      type: string
+                    frozen:
+                      type: boolean
+                    networkID:
+                      type: string
+                    reason:
+                      type: string
+                    since:
+                      format: date-time
+                      type: string
+                    tenantID:
+                      type: string
+                    until:
+                      format: date-time
+                      type: string
+                  required:
+                  - frozen
+                  - since
+                  type: object
+                  x-kubernetes-validations:
+                  - message: choose one tenant, network or cluster
+                    rule: '[has(self.tenantID), has(self.networkID), has(self.clusterID)].filter(x,
+                      x).size() == 1'
+                type: array
+              scoped:
+                type: boolean
               until:
                 description: Until, when set, ends the hold by itself.
                 format: date-time
@@ -158,11 +150,8 @@ spec:
             - reason
             type: object
             x-kubernetes-validations:
-            - message: set exactly one of clusterID, tenantID, channel and platform
-              rule: '[has(self.clusterID), has(self.tenantID), has(self.channel),
-                has(self.platform) && self.platform].filter(x, x).size() == 1'
-            - message: tier needs channel
-              rule: '!has(self.tier) || has(self.channel)'
+            - message: set clusterID or platform, not both
+              rule: has(self.clusterID) != (has(self.platform) && self.platform)
           status:
             description: ReleaseHoldStatus is written by the controller.
             properties:
@@ -230,18 +219,44 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              drainedGeneration:
+                format: int64
+                type: integer
+              drainedRevision:
+                description: Confirms the controller drained workers for this exact
+                  policy before pausing resources.
+                type: string
+              freezePhase:
+                type: string
+              freezeRevision:
+                type: string
               name:
                 type: string
               namespace:
                 description: |-
                   Namespace and Name of the Cluster object the ID resolved to (for
-                  people; the hold follows the ID). Empty for a hold of a tenant or a
-                  channel.
+                  people; the hold follows the ID). Empty for the platform freeze.
                 type: string
+              newlyPausedResources:
+                format: int32
+                type: integer
+              observedGeneration:
+                format: int64
+                type: integer
+              pausedResources:
+                format: int32
+                type: integer
+              resources:
+                format: int32
+                type: integer
             type: object
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: the platform freeze is named platform-freeze
+          rule: '!has(self.spec.platform) || !self.spec.platform || self.metadata.name
+            == ''platform-freeze'''
     served: true
     storage: true
     subresources:

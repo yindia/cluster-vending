@@ -555,6 +555,7 @@ func (s *Reconciler) deletePlatform(ctx context.Context, row *model.Cluster, clu
 		return false, fmt.Errorf("list platform component resources: %w", err)
 	}
 	if len(records) == 0 {
+		recordPlatformDeletion(ctx, row, true)
 		return true, nil
 	}
 	if !row.DeleteForce {
@@ -582,6 +583,7 @@ func (s *Reconciler) deletePlatform(ctx context.Context, row *model.Cluster, clu
 	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
 		return false, err
 	}
+	recordPlatformDeletion(ctx, row, reconcile.AllGone(views))
 	if !reconcile.AllGone(views) {
 		return false, nil
 	}

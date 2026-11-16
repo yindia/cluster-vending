@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// A registered tenant; no account or authorization metadata is exposed.
+message TenantInfo {
+  string id = 1;
+  google.protobuf.Timestamp create_time = 2;
+}
+
+message ListTenantsRequest {}
+
+message ListTenantsResponse {
+  repeated TenantInfo tenants = 1;
+  // Indicates a creation capability, not permission for every tenant ID.
+  // The caller must hold a TenantAdmin grant for the requested ID.
+  bool can_create_tenants = 2;
+}
+
+message CreateTenantRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+}
+
+message CreateTenantResponse {
+  TenantInfo tenant = 1;
+}

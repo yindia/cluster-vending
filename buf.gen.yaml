@@ -20,5 +20,11 @@ plugins:
   - remote: buf.build/connectrpc/go:v2.0.2
     out: pkg/gen/go
     opt: paths=source_relative
+  # Protobuf-ES v2 includes service descriptors used by Connect-ES v2.
+  # Keep this version aligned with ui's @bufbuild/protobuf runtime.
+  - remote: buf.build/bufbuild/es:v2.16.0
+    out: ui/src/gen
+    include_imports: true
+    opt: target=ts
 inputs:
   - directory: idl

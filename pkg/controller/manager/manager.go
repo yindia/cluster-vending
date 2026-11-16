@@ -24,6 +24,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/config"
@@ -33,6 +34,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/management"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/reconcile/account"
+	"github.com/yindia/cluster-vending/pkg/telemetry"
 )
 
 // leaseName is the leader election Lease of the controller: not the API
@@ -212,6 +214,14 @@ func Run(ctx context.Context, o Options) error {
 		UpgradeTimeout: o.UpgradeTimeout}
 	if err := Setup(mgr, deps); err != nil {
 		return err
+	}
+	fleet := telemetry.NewFleet(mgr.GetClient())
+	if err := ctrlmetrics.Registry.Register(fleet); err != nil {
+		return fmt.Errorf("register fleet metrics: %w", err)
+	}
+	defer ctrlmetrics.Registry.Unregister(fleet)
+	if err := mgr.Add(fleet); err != nil {
+		return fmt.Errorf("start fleet metrics publisher: %w", err)
 	}
 	var ready atomic.Bool
 	done, err := management.Start(ctx, mgr, &ready)

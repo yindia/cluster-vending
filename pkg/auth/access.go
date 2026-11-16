@@ -54,12 +54,10 @@ const TenantField = "tenant_id"
 // classifies every RPC) until it is listed here.
 var scopeOverrides = map[protoreflect.FullName]Scope{
 	// Operator actions on a tenant's resources.
-	"cloud.v1.AdminService.PauseReconcile":  ScopePlatform,
-	"cloud.v1.AdminService.ResumeReconcile": ScopePlatform,
-	"cloud.v1.AdminService.ListPauses":      ScopePlatform,
 	// The platform freeze.
-	"cloud.v1.AdminService.Freeze":   ScopePlatform,
-	"cloud.v1.AdminService.Unfreeze": ScopePlatform,
+	"cloud.v1.AdminService.GetFreeze": ScopePlatform,
+	"cloud.v1.AdminService.Freeze":    ScopePlatform,
+	"cloud.v1.AdminService.Unfreeze":  ScopePlatform,
 	// The platform's release configuration and its rollouts.
 	"cloud.v1.AdminService.ListReleases":        ScopePlatform,
 	"cloud.v1.AdminService.GetRelease":          ScopePlatform,
@@ -69,6 +67,8 @@ var scopeOverrides = map[protoreflect.FullName]Scope{
 	"cloud.v1.ComponentService.GetComponentValues": ScopeAuthenticated,
 	// The caller, as the server sees it.
 	"cloud.v1.TenantService.WhoAmI": ScopeAuthenticated,
+	// The directory is filtered by the handler using the caller's grants.
+	"cloud.v1.TenantService.ListTenants": ScopeAuthenticated,
 }
 
 // Classify is what the RPC method needs: its scope from scopeOverrides or,

@@ -374,6 +374,8 @@ message UpdateClusterRequest {
 }
 
 message UpdateClusterResponse {
+  // Desired state was recorded; cloud reconciliation is still asynchronous.
+  bool update_recorded = 3;
   // The cluster: after the update, or as it is for validate_only.
   Cluster cluster = 1;
   // What the update would do (validate_only) or did (with plan_id).

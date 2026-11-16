@@ -25,7 +25,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
-	"github.com/yindia/cluster-vending/pkg/database/model"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // ConditionDefinitionInUse is a ComponentDefinition's condition: True
@@ -138,7 +138,9 @@ func (r *ComponentDefinitionReconciler) heldBy(ctx context.Context, def *cloudv1
 		cl := &clusters.Items[i]
 		state := component.ClusterState{ID: cl.Labels[cloudstore.LabelID], Where: where(cl.Labels[cloudstore.LabelTenant], cl.Namespace, cl.Name),
 			Deleting: !cl.DeletionTimestamp.IsZero() || cl.Status.Phase == cloudv1alpha1.ClusterPhaseDeleting}
-		if p := model.ParsePause(cl.Annotations[cloudstore.AnnotationPaused]); p != nil {
+		if p, err := (platform.Deps{Kube: r.c}).Freeze(ctx, cl.Labels[cloudstore.LabelID]); err != nil {
+			return nil, err
+		} else if p.Holds() {
 			state.PausedBy, state.PausedSince = p.By, p.Since
 		}
 		states = append(states, state)

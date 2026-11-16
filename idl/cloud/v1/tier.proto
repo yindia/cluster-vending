@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_0 = 1;
+  TIER_1 = 2;
+  TIER_2 = 3;
+}

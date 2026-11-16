@@ -8,3 +8,6 @@
 /cluster.yaml
 /config.yaml
 /.claude/
+
+# Local agent session transcripts are not project source.
+/*-this-session-is-being-continued-from-a-previous-*.txt

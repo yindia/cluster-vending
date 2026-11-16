@@ -21,9 +21,9 @@ type verb struct {
 	// --acknowledge-not-imported, wait --wait and --timeout, plan --plan and
 	// --plan-id, force --force, cluster --cluster.
 	id, input, etag, page, ack, wait, plan, force, cluster bool
-	// reason adds --reason (admin pause and freeze), pauseNetwork --network
-	// (admin pause and resume), regions --region (account verify).
-	reason, pauseNetwork, regions bool
+	// reason adds --reason; regions adds --region for account verification.
+	reason, regions bool
+	resetExceptions bool
 	// removed adds --only-removed, oidc --oidc, warnings --only-warnings,
 	// noPlatform --skip-platform-components.
 	removed, oidc, warnings, noPlatform bool
@@ -33,12 +33,11 @@ type verb struct {
 	retry bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
-	// pauseTargets adds --channel and --tier (admin pause, resume, freeze
-	// and unfreeze), until --until (admin pause and freeze), letThrough
-	// --cluster and --network of admin unfreeze.
-	pauseTargets, until, letThrough bool
+	// until adds --until; letThrough adds --cluster and --network.
+	until, letThrough bool
+	freezeTargets     bool
 	// parent makes the verb a subcommand of the group's verb of that name
-	// (admin pause list).
+	// (admin subcommands).
 	parent string
 	// idHelp replaces the help of --id.
 	idHelp string
@@ -66,7 +65,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	var output string
 	group := &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs}
 	pf := group.PersistentFlags()
-	pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (default $"+cli.EnvTenant+"; a manifest's metadata.tenant wins over $"+cli.EnvTenant+")")
+	if use != "admin" {
+		pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (default $"+cli.EnvTenant+"; a manifest's metadata.tenant wins over $"+cli.EnvTenant+")")
+	}
 	pf.StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
 	for _, s := range config.ClientSettings() {
 		pf.String(s.Flag, s.Default, fmt.Sprintf("%s [$%s]", s.Usage, s.Env))
@@ -93,7 +94,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				opts.RequestTimeout = cfg.RequestTimeout
 				opts.Server = cfg.Server
 				opts.Terminal = onTerminal()
-				if use != "admin" { // admin's --tenant is a pause target: never defaulted
+				if use != "admin" { // Admin commands do not use a tenant.
 					opts.DefaultTenant = os.Getenv(cli.EnvTenant)
 				}
 				if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
@@ -115,16 +116,17 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			}
 			f.StringVar(&o.ID, "id", "", help)
 		}
-		if v.pauseTargets {
-			f.StringVar(&o.Channel, "channel", "", "every cluster on this release channel, of every tenant: alpha, beta or stable; not with --tenant")
-			f.StringVar(&o.Tier, "tier", "", "only the channel's clusters of this tier: 0, 1 or 2 (a cluster with no tier is 0)")
-		}
+
 		if v.until {
 			f.StringVar(&o.Until, "until", "", "end it by itself at this time: RFC 3339 (2026-12-31T18:00:00Z) or a date (2026-12-31, its start in UTC)")
 		}
+		if v.freezeTargets {
+			f.BoolVar(&o.Platform, "platform", false, "target the entire platform; cannot combine with tenant, network or cluster")
+			f.StringVar(&o.Tenant, "tenant", "", "target this tenant and all its networks and clusters")
+		}
 		if v.letThrough {
-			f.StringVar(&o.Cluster, "cluster", "", "let only this cluster (cluster ID) and its network through: their pending changes start, the freeze stays")
-			f.StringVar(&o.PauseNetwork, "network", "", "let only this network (network ID) through: its pending changes start, the freeze stays; not with --cluster")
+			f.StringVar(&o.Cluster, "cluster", "", "target this cluster only; its shared network keeps its own freeze state")
+			f.StringVar(&o.PauseNetwork, "network", "", "target this network and all its clusters; not with --cluster (operator commands also exclude --tenant)")
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
@@ -145,6 +147,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.StringVar(&o.PageToken, "page-token", "", "next_page_token of the previous page")
 		}
 		if v.plan {
+			f.StringVar(&o.PlanID, "plan-id", "", "apply only the previously reviewed plan ID; refuses stale plans")
 			f.BoolVar(&o.Plan, "plan", false, "only show what the update would do (a plan: creates, in-place and disruptive changes, deletes); nothing changes")
 		}
 		if v.force {
@@ -175,19 +178,26 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.cluster {
 			f.StringVar(&o.Cluster, "cluster", "", "only this cluster (cluster ID); default: the tenant and everything it has")
 		}
+		if v.resetExceptions {
+			f.BoolVar(&o.ResetExceptions, "reset-exceptions", false, "freeze previously let-through clusters and networks again")
+		}
 		if v.reason {
 			f.StringVar(&o.Reason, "reason", "", "why, shown with the pause or freeze in the status of what it holds")
 		}
 		if v.regions {
 			f.StringSliceVar(&o.Regions, "region", nil, "also check these regions (repeat or comma-separate), e.g. the region of a network not created yet; kept for later checks")
 		}
-		if v.pauseNetwork {
-			f.StringVar(&o.PauseNetwork, "network", "", "only this network (network ID): the network itself, not its clusters; not with --cluster")
-		}
+
 		if v.wait {
 			help := "wait until the resource is ready (delete: gone; import: its plan is there), printing its progress to stderr; a resource that turns FAILED ends the wait with its message and a non-zero exit"
 			if v.regions {
 				help = "wait for the controller's access check, printing progress to stderr; a denied check exits non-zero"
+			}
+			if (use == "admin" || use == "tenant") && cmd.Name() == "freeze" {
+				help = "wait for the controller to confirm Frozen after active reconciliations drain"
+			}
+			if (use == "admin" || use == "tenant") && cmd.Name() == "unfreeze" {
+				help = "wait for controller confirmation that freeze-owned pauses in the selected scope are removed"
 			}
 			f.BoolVar(&o.Wait, "wait", false, help)
 			f.DurationVar(&o.Timeout, "timeout", cli.DefaultWaitTimeout, "how long --wait waits")
@@ -206,7 +216,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 // --id; the ID as the argument works too (not shown in the help).
 func newAccountCmd() *cobra.Command {
 	return newResourceCmd("account", "Onboard and check a tenant's cloud accounts (TenantService)", []verb{
-		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): its namespace and ProviderConfig, then print how to " +
+		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): its account ProviderConfig (requires an existing Tenant and its namespace; run tenant create first), then print how to " +
 			"create the platform's IAM role in it with CloudFormation (the template this server serves at /cloudformation/) and have its access checked",
 			run: cli.AccountCreate, args: cobra.NoArgs, input: true},
 		{use: "get", short: "Show the account --id, with its access check", run: cli.BootstrapGet, args: cobra.MaximumNArgs(1), id: true},
@@ -219,8 +229,19 @@ func newAccountCmd() *cobra.Command {
 	})
 }
 
+func newTenantCmd() *cobra.Command {
+	return newResourceCmd("tenant", "Create and list tenants, and manage their freezes (TenantService)", []verb{
+		{use: "create <tenant-id>", short: "Register a tenant and create its owned namespace before connecting accounts", run: cli.TenantCreate, idHelp: "tenant ID (DNS label)", args: cobra.ExactArgs(1)},
+		{use: "list", short: "List tenants visible to your identity; no --tenant required", run: cli.TenantList, args: cobra.NoArgs},
+		{use: "freeze", short: "Freeze this tenant, or one of its networks or clusters", run: cli.TenantFreeze, args: cobra.NoArgs, reason: true, until: true, wait: true, letThrough: true},
+		{use: "status", short: "Show this tenant's freeze confirmation", run: cli.TenantFreezeStatus, args: cobra.NoArgs, parent: "freeze", letThrough: true},
+		{use: "unfreeze", short: "Resume this tenant, network or cluster unless held by the platform", run: cli.TenantUnfreeze, args: cobra.NoArgs, wait: true, letThrough: true},
+	})
+}
+
 func newNetworkCmd() *cobra.Command {
 	verbs := crud("network", cli.KindNetwork, cli.NetworkCreate, cli.NetworkGet, cli.NetworkList, cli.NetworkUpdate, cli.NetworkDelete)
+	verbs[3].plan = true
 	verbs = append(verbs,
 		verb{use: "import", short: "Import an existing network read-only from a NetworkImport manifest (-f)",
 			run: cli.NetworkImport, args: cobra.NoArgs, input: true, wait: true},
@@ -233,16 +254,11 @@ func newNetworkCmd() *cobra.Command {
 
 func newAdminCmd() *cobra.Command {
 	admin := newResourceCmd("admin", "Operator actions (AdminService)", []verb{
-		{use: "pause", short: "Pause a tenant, one network or cluster, or a channel's clusters (--channel, --tier): everything (the platform and the Crossplane providers stop acting on it, e.g. during an incident or a provider upgrade; what is asked for meanwhile is done after resume); to stop automatic changes only, use admin freeze",
-			run: cli.AdminPause, args: cobra.NoArgs, cluster: true, reason: true, pauseNetwork: true, pauseTargets: true, until: true},
-		{use: "list", short: "List every pause and freeze in effect: what it covers, what it stops (everything, or automatic changes), who, since and until when, why, how many clusters",
-			run: cli.AdminPauseList, args: cobra.NoArgs, parent: "pause"},
-		{use: "resume", short: "Resume what pause paused, with the same target: a tenant (a network or cluster also paused on its own stays paused), one network or cluster, or a channel's clusters",
-			run: cli.AdminResume, args: cobra.NoArgs, cluster: true, pauseNetwork: true, pauseTargets: true},
-		{use: "freeze", short: "Freeze the platform (or --tenant, or --channel and --tier) before a risky deploy (new controller build, provider upgrade) or for a quiet period: no automatic change starts (Kubernetes upgrades, component and add-on upgrades, code changes) until unfreeze; users' own changes still apply",
-			run: cli.AdminFreeze, args: cobra.NoArgs, reason: true, pauseTargets: true, until: true},
-		{use: "unfreeze", short: "Lift the freeze of the platform (or of --tenant, --channel and --tier, as frozen): automatic changes start again, tier by tier; with --cluster or --network, let only that one take its pending changes while the freeze stays",
-			run: cli.AdminUnfreeze, args: cobra.NoArgs, pauseTargets: true, letThrough: true},
+		{use: "freeze", short: "Freeze the platform, a tenant, a network or a cluster; controllers and Crossplane pause",
+			run: cli.AdminFreeze, args: cobra.NoArgs, reason: true, until: true, wait: true, resetExceptions: true, letThrough: true, freezeTargets: true},
+		{use: "status", short: "Show freeze confirmation, provider pause counts and let-through IDs", run: cli.AdminFreezeStatus, args: cobra.NoArgs, parent: "freeze", letThrough: true, freezeTargets: true},
+		{use: "unfreeze", short: "Resume a cluster, a network and its clusters, a tenant or the entire platform",
+			run: cli.AdminUnfreeze, args: cobra.NoArgs, wait: true, letThrough: true, freezeTargets: true},
 	})
 	admin.AddCommand(newAdminReleaseCmds()...)
 	return admin

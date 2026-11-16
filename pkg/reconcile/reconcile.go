@@ -13,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -22,11 +23,16 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 )
 
-// Deps are what reconciling works with: the database (the source of
-// truth), the management cluster where Crossplane managed resources are
-// created, and how tenant cloud accounts are reached.
+// Deps are what reconciling works with: the repository backed by Kubernetes
+// custom resources, the management cluster where Crossplane managed resources
+// are created, and how tenant cloud accounts are reached.
 type Deps struct {
-	Store repository.Store
+	// ManagedResourceKinds lists the managed kinds supplied by active provider adapters.
+	// Nil preserves the current AWS installation; a future GCP adapter can
+	// supply its kinds without changing inventory, planning or freeze logic.
+	ManagedResourceKinds []schema.GroupVersionKind
+	FreezeBarrier        *FreezeBarrier
+	Store                repository.Store
 	// Kube reads from the informer cache (the server's manager) and writes
 	// to the API server; tests use a plain client.
 	Kube client.Client

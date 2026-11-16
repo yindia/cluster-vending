@@ -26,6 +26,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 	"github.com/yindia/cluster-vending/pkg/server/tenant"
+	"github.com/yindia/cluster-vending/pkg/telemetry"
 	"github.com/yindia/cluster-vending/pkg/version"
 )
 
@@ -33,6 +34,8 @@ import (
 // headers (slowloris). There is no read or write timeout on the whole
 // request because streaming RPCs are long-lived.
 const readHeaderTimeout = 10 * time.Second
+
+var rpcMetrics = telemetry.NewRPC(ctrlmetrics.Registry)
 
 // Option adjusts NewHandler.
 type Option func(*options)
@@ -80,8 +83,8 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 		opt(&o)
 	}
 	o.auth.Logger = d.Logger
-	// Faults outermost: the authentication answers with faults too.
-	server := connect.NewServer(service.Faults, authn.Interceptor(o.auth))
+	// Measure after fault translation, including refusals before the handler runs.
+	server := connect.NewServer(rpcMetrics.Interceptor, service.Faults, authn.Interceptor(o.auth))
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d, tenant.WithOnboarding(o.onboarding)))

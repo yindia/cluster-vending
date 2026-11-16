@@ -1,0 +1,41 @@
+/* Compact inline controls stay reachable by keyboard and visible on touch. */
+.cv-copy-target {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  max-inline-size: 100%;
+}
+
+.cv-copy-control {
+  position: relative;
+  flex: none;
+}
+
+.cv-copy-feedback {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-end: 0;
+  z-index: 1;
+  color: var(--color-text-primary);
+  background: var(--color-background-popover);
+  border-radius: var(--radius-container);
+  white-space: nowrap;
+}
+
+.cv-copy-feedback:not(:empty) {
+  padding: var(--spacing-1) var(--spacing-2);
+}
+
+@media (hover: hover) {
+  .cv-copy-control button {
+    opacity: 0;
+  }
+
+  .cv-copy-target:hover .cv-copy-control button,
+  tr:hover .cv-copy-control button,
+  .cv-copy-target:focus-within .cv-copy-control button,
+  .cv-copy-control:focus-within button,
+  .cv-copy-control[data-feedback="true"] button {
+    opacity: 1;
+  }
+}

@@ -69,9 +69,18 @@ func (s *Reconciler) view(ctx context.Context, row *model.Cluster, failure *clou
 // reports those recorded with the row (a read, or a pass that did not
 // look).
 func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *cloudv1.Condition, installed *platform) (*cloudv1.Cluster, error) {
+	frozen, err := s.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: row.TenantID, NetworkID: row.NetworkID, ClusterID: row.ID})
+	if err != nil {
+		return nil, err
+	}
+	row.Frozen = frozen
+
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return nil, storeError(err)
+	}
+	if deletion, ok := ctx.Value(platformDeletionKey{}).(*platformDeletion); ok && deletion.seen {
+		installed = deletion.state
 	}
 	if installed == nil {
 		installed = storedPlatform(row)
@@ -83,7 +92,13 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 	withFailure(c.GetStatus(), failure)
 	withPlatform(c.GetStatus(), installed)
 	s.withKubernetes(ctx, row.ID, c.GetSpec(), c.GetStatus(), storedStatus(row))
-	s.withUpgradePause(ctx, row, c.GetSpec(), c.GetStatus())
+	tier, err := s.deps.NetworkTier(ctx, row.TenantID, row.NetworkID)
+	if err != nil {
+		return nil, err
+	}
+	c.Status.Tier = tier
+	c.Spec.ProtoReflect().Clear(c.Spec.ProtoReflect().Descriptor().Fields().ByName("tier"))
+	c.Status.Freeze = reconcile.FreezeProto(row.Frozen)
 	withTeardownStatus(ctx, c.GetStatus(), storedStatus(row))
 	c.GetStatus().CodeChange = reconcile.CodeOf(ctx, storedStatus(row).GetCodeChange())
 	// What the controller reported last stays with the status: a read
@@ -269,13 +284,13 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	default:
 		st.State, st.Message = cloudv1.ClusterState_CLUSTER_STATE_PROVISIONING, progress
 	}
-	if paused, note := reconcile.RowPause(row.Paused, views); paused != nil {
+	st.Freeze = reconcile.FreezeProto(row.Frozen)
+	if paused, note := reconcile.RowFreeze(row.Frozen, views); paused != nil {
 		// A pause is the operator's: reported, never a failure. A paused
 		// cluster says who paused it whatever its state; paused resources
 		// of a cluster that is not are only worth a note while it moves.
 		st.Conditions = append(st.Conditions, paused)
-		st.Pause = reconcile.PauseProto(row.Paused)
-		if row.Paused != nil || st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_RUNNING {
+		if row.Frozen.Holds() || st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_RUNNING {
 			st.Message = strings.TrimPrefix(st.Message+note, "; ")
 		}
 	}

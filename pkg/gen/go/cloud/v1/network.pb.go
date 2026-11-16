@@ -409,6 +409,9 @@ func (x *Network) GetUpdateTime() *timestamppb.Timestamp {
 // NetworkSpec is the desired state of a Network resource.
 type NetworkSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Rollout sensitivity shared by this network and every cluster on it.
+	// Unspecified defaults to TIER_0, the last tier to receive a release.
+	Tier Tier `protobuf:"varint,6,opt,name=tier,proto3,enum=cloud.v1.Tier" json:"tier,omitempty"`
 	// Region of the network. Immutable. Same mapping as ClusterSpec.region.
 	Region string `protobuf:"bytes,1,opt,name=region,proto3" json:"region,omitempty"`
 	// Address space, subnets and NAT.
@@ -456,6 +459,13 @@ func (x *NetworkSpec) ProtoReflect() protoreflect.Message {
 // Deprecated: Use NetworkSpec.ProtoReflect.Descriptor instead.
 func (*NetworkSpec) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_network_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *NetworkSpec) GetTier() Tier {
+	if x != nil {
+		return x.Tier
+	}
+	return Tier_TIER_UNSPECIFIED
 }
 
 func (x *NetworkSpec) GetRegion() string {
@@ -857,13 +867,15 @@ type NetworkStatus struct {
 	// events for about an hour; these stay with the network.
 	// ListNetworkEvents returns the events themselves while they exist.
 	RecentEvents []*Event `protobuf:"bytes,10,rep,name=recent_events,json=recentEvents,proto3" json:"recent_events,omitempty"`
-	// pause is set while an operator paused the network (its tenant): who,
-	// since when and why. The platform then only observes the network; the
-	// condition Paused is True and message says so. Unset: not paused.
-	Pause *Pause `protobuf:"bytes,45,opt,name=pause,proto3" json:"pause,omitempty"`
+	// freeze is set while the platform is frozen (AdminService.Freeze):
+	// who, since when, why, until when, and whether this one is let
+	// through. Held (not let through), the platform only observes it and
+	// its managed resources carry crossplane.io/paused; the condition
+	// Frozen is True and message says so. Unset: not frozen.
+	Freeze *Freeze `protobuf:"bytes,45,opt,name=freeze,proto3" json:"freeze,omitempty"`
 	// code_change is a change of what the platform renders for the network
-	// (a new controller build), applied in the tier of its most careful
-	// cluster, before them; unset when nothing was rendered differently.
+	// (a new controller build), applied before its clusters. They all share
+	// the network tier; unset when nothing was rendered differently.
 	CodeChange    *CodeChange `protobuf:"bytes,46,opt,name=code_change,json=codeChange,proto3" json:"code_change,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -969,9 +981,9 @@ func (x *NetworkStatus) GetRecentEvents() []*Event {
 	return nil
 }
 
-func (x *NetworkStatus) GetPause() *Pause {
+func (x *NetworkStatus) GetFreeze() *Freeze {
 	if x != nil {
-		return x.Pause
+		return x.Freeze
 	}
 	return nil
 }
@@ -1072,7 +1084,7 @@ var File_cloud_v1_network_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_network_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/network.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1acloud/v1/code_change.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\x1a\x14cloud/v1/pause.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
+	"\x16cloud/v1/network.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1acloud/v1/code_change.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/freeze.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/options.proto\x1a\x13cloud/v1/tier.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aNetwork\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
@@ -1092,8 +1104,9 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf3\x01\n" +
-	"\vNetworkSpec\x12/\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa1\x02\n" +
+	"\vNetworkSpec\x12,\n" +
+	"\x04tier\x18\x06 \x01(\x0e2\x0e.cloud.v1.TierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x127\n" +
 	"\x06layout\x18\x02 \x01(\v2\x17.cloud.v1.NetworkLayoutB\x06\xbaH\x03\xc8\x01\x01R\x06layout\x12+\n" +
 	"\fbootstrap_id\x18\x04 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\vbootstrapId\x126\n" +
@@ -1127,7 +1140,7 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04role\x12'\n" +
 	"\n" +
 	"cidr_block\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xf0\x01\x01R\tcidrBlock\x121\n" +
-	"\azone_id\x18\x03 \x01(\tB\x18\xbaH\x15\xd8\x01\x01r\x10\x18@2\f^[a-z0-9-]+$R\x06zoneId\"\xe3\x04\n" +
+	"\azone_id\x18\x03 \x01(\tB\x18\xbaH\x15\xd8\x01\x01r\x10\x18@2\f^[a-z0-9-]+$R\x06zoneId\"\xe6\x04\n" +
 	"\rNetworkStatus\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.NetworkStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -1142,8 +1155,8 @@ const file_cloud_v1_network_proto_rawDesc = "" +
 	"\fcarried_over\x18\b \x03(\v2\x1a.cloud.v1.ImportedResourceR\vcarriedOver\x12F\n" +
 	"\x11managed_resources\x18\t \x03(\v2\x19.cloud.v1.ManagedResourceR\x10managedResources\x124\n" +
 	"\rrecent_events\x18\n" +
-	" \x03(\v2\x0f.cloud.v1.EventR\frecentEvents\x12%\n" +
-	"\x05pause\x18- \x01(\v2\x0f.cloud.v1.PauseR\x05pause\x125\n" +
+	" \x03(\v2\x0f.cloud.v1.EventR\frecentEvents\x12(\n" +
+	"\x06freeze\x18- \x01(\v2\x10.cloud.v1.FreezeR\x06freeze\x125\n" +
 	"\vcode_change\x18. \x01(\v2\x14.cloud.v1.CodeChangeR\n" +
 	"codeChange\"\xdd\x01\n" +
 	"\x10NetworkResources\x12(\n" +
@@ -1214,13 +1227,14 @@ var file_cloud_v1_network_proto_goTypes = []any{
 	(*NetworkResources)(nil),      // 11: cloud.v1.NetworkResources
 	nil,                           // 12: cloud.v1.Network.LabelsEntry
 	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
-	(*Condition)(nil),             // 14: cloud.v1.Condition
-	(*ImportStatus)(nil),          // 15: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),      // 16: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),       // 17: cloud.v1.ManagedResource
-	(*Event)(nil),                 // 18: cloud.v1.Event
-	(*Pause)(nil),                 // 19: cloud.v1.Pause
-	(*CodeChange)(nil),            // 20: cloud.v1.CodeChange
+	(Tier)(0),                     // 14: cloud.v1.Tier
+	(*Condition)(nil),             // 15: cloud.v1.Condition
+	(*ImportStatus)(nil),          // 16: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),      // 17: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),       // 18: cloud.v1.ManagedResource
+	(*Event)(nil),                 // 19: cloud.v1.Event
+	(*Freeze)(nil),                // 20: cloud.v1.Freeze
+	(*CodeChange)(nil),            // 21: cloud.v1.CodeChange
 }
 var file_cloud_v1_network_proto_depIdxs = []int32{
 	12, // 0: cloud.v1.Network.labels:type_name -> cloud.v1.Network.LabelsEntry
@@ -1228,26 +1242,27 @@ var file_cloud_v1_network_proto_depIdxs = []int32{
 	10, // 2: cloud.v1.Network.status:type_name -> cloud.v1.NetworkStatus
 	13, // 3: cloud.v1.Network.create_time:type_name -> google.protobuf.Timestamp
 	13, // 4: cloud.v1.Network.update_time:type_name -> google.protobuf.Timestamp
-	8,  // 5: cloud.v1.NetworkSpec.layout:type_name -> cloud.v1.NetworkLayout
-	7,  // 6: cloud.v1.NetworkSpec.flow_logs:type_name -> cloud.v1.NetworkFlowLogs
-	0,  // 7: cloud.v1.NetworkFlowLogs.traffic_type:type_name -> cloud.v1.FlowLogTrafficType
-	9,  // 8: cloud.v1.NetworkLayout.subnets:type_name -> cloud.v1.Subnet
-	2,  // 9: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
-	1,  // 10: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
-	3,  // 11: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
-	14, // 12: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
-	11, // 13: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
-	15, // 14: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
-	16, // 15: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	17, // 16: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	18, // 17: cloud.v1.NetworkStatus.recent_events:type_name -> cloud.v1.Event
-	19, // 18: cloud.v1.NetworkStatus.pause:type_name -> cloud.v1.Pause
-	20, // 19: cloud.v1.NetworkStatus.code_change:type_name -> cloud.v1.CodeChange
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	14, // 5: cloud.v1.NetworkSpec.tier:type_name -> cloud.v1.Tier
+	8,  // 6: cloud.v1.NetworkSpec.layout:type_name -> cloud.v1.NetworkLayout
+	7,  // 7: cloud.v1.NetworkSpec.flow_logs:type_name -> cloud.v1.NetworkFlowLogs
+	0,  // 8: cloud.v1.NetworkFlowLogs.traffic_type:type_name -> cloud.v1.FlowLogTrafficType
+	9,  // 9: cloud.v1.NetworkLayout.subnets:type_name -> cloud.v1.Subnet
+	2,  // 10: cloud.v1.NetworkLayout.nat_gateway_mode:type_name -> cloud.v1.NatGatewayMode
+	1,  // 11: cloud.v1.Subnet.role:type_name -> cloud.v1.SubnetRole
+	3,  // 12: cloud.v1.NetworkStatus.state:type_name -> cloud.v1.NetworkState
+	15, // 13: cloud.v1.NetworkStatus.conditions:type_name -> cloud.v1.Condition
+	11, // 14: cloud.v1.NetworkStatus.resources:type_name -> cloud.v1.NetworkResources
+	16, // 15: cloud.v1.NetworkStatus.import:type_name -> cloud.v1.ImportStatus
+	17, // 16: cloud.v1.NetworkStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	18, // 17: cloud.v1.NetworkStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	19, // 18: cloud.v1.NetworkStatus.recent_events:type_name -> cloud.v1.Event
+	20, // 19: cloud.v1.NetworkStatus.freeze:type_name -> cloud.v1.Freeze
+	21, // 20: cloud.v1.NetworkStatus.code_change:type_name -> cloud.v1.CodeChange
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_proto_init() }
@@ -1258,10 +1273,11 @@ func file_cloud_v1_network_proto_init() {
 	file_cloud_v1_code_change_proto_init()
 	file_cloud_v1_conditions_proto_init()
 	file_cloud_v1_events_proto_init()
+	file_cloud_v1_freeze_proto_init()
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_options_proto_init()
-	file_cloud_v1_pause_proto_init()
+	file_cloud_v1_tier_proto_init()
 	file_cloud_v1_network_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

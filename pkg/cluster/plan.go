@@ -115,14 +115,11 @@ func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 }
 
 // ResolveReleaseFields stores the defaults of the fields that say how
-// platform releases treat the cluster: an unset tier is tier 0 (nobody
-// classified it: the most sensitive, last to receive a release) and an
-// unset upgrade mode is manual (releases never move it). An unset release
+// platform releases treat the cluster. Tier is inherited from its network;
+// an unset upgrade mode is manual (releases never move it). An unset release
 // channel stays unset: it only means STABLE once the cluster is automatic.
 func ResolveReleaseFields(spec *cloudv1.ClusterSpec) {
-	if spec.GetTier() == cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
-		spec.Tier = cloudv1.ClusterTier_CLUSTER_TIER_0
-	}
+	spec.ProtoReflect().Clear(spec.ProtoReflect().Descriptor().Fields().ByName("tier"))
 	if spec.GetUpgradeMode() == cloudv1.UpgradeMode_UPGRADE_MODE_UNSPECIFIED {
 		spec.UpgradeMode = cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL
 	}

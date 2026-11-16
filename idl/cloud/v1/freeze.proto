@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Freeze is the platform freeze as a cluster or a network sees it
+// (AdminService.Freeze). While it holds the resource the platform does not
+// act on it and its managed resources carry crossplane.io/paused: nothing
+// of it is created, changed or deleted in the cloud or in its workload
+// cluster, and what was asked for meanwhile (an update, a delete) is
+// stored and done after the unfreeze. Its status is still kept current.
+message Freeze {
+  // The former scope field number remains reserved.
+  reserved 5;
+  string scope = 7;
+
+  // Who froze the resource; "anonymous" when the API runs without
+  // authentication.
+  string by = 1;
+
+  // Since when.
+  google.protobuf.Timestamp since = 2;
+
+  // Why, as the caller said.
+  string reason = 3;
+
+  // When it ends by itself; unset: at an unfreeze only.
+  google.protobuf.Timestamp until = 4;
+
+  // The resource is allowed through an applicable freeze policy.
+  bool let_through = 6;
+}

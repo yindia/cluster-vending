@@ -40,7 +40,7 @@ func Install(ctx context.Context, c client.Client) error {
 // the server reads. All are installed together
 // (Install) and served once their definitions are.
 func Kinds() []schema.GroupVersionKind {
-	kinds := []string{"CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold",
+	kinds := []string{"Tenant", "CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold",
 		"Component", "ComponentDefinition"}
 	out := make([]schema.GroupVersionKind, 0, len(kinds))
 	for _, kind := range kinds {

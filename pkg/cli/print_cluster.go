@@ -26,8 +26,8 @@ func clusterRow(c *cloudv1.Cluster, wide bool) []string {
 
 func clusterPhase(st *cloudv1.ClusterStatus) string {
 	phase := word(st.GetState().String(), "CLUSTER_STATE_")
-	if st.GetPause() != nil {
-		phase += " (paused)"
+	if frozen := st.GetFreeze(); frozen != nil && !frozen.GetLetThrough() {
+		phase += " (frozen)"
 	}
 	return phase
 }
@@ -75,7 +75,10 @@ func mutatedCluster(w io.Writer, c *cloudv1.Cluster, verb string) error {
 	if err := mutated(w, "cluster", c.GetName(), c.GetId(), verb); err != nil {
 		return err
 	}
-	return table(w, clusterHeader, [][]string{clusterRow(c, false)})
+	if err := table(w, clusterHeader, [][]string{clusterRow(c, false)}); err != nil {
+		return err
+	}
+	return frozenWrite(w, c.GetStatus().GetFreeze())
 }
 
 // versionLine is the cluster's version, with the minor its release
@@ -108,14 +111,15 @@ func kubernetesLines(k *cloudv1.ClusterKubernetes) [][2]string {
 // releaseLines are how the cluster takes new versions: its release
 // channel, its rollout tier and its upgrade mode (unset is stored as
 // Manual: it never upgrades by itself).
-func releaseLines(s *cloudv1.ClusterSpec) [][2]string {
+func releaseLines(c *cloudv1.Cluster) [][2]string {
+	s := c.GetSpec()
 	mode := "Manual (upgrades only when you change the version)"
 	if s.GetUpgradeMode() == cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC {
 		mode = "Automatic (follow the channel's minor)"
 	}
 	return [][2]string{
 		{"Channel", word(s.GetReleaseChannel().String(), "RELEASE_CHANNEL_")},
-		{"Tier", word(s.GetTier().String(), "CLUSTER_TIER_")},
+		{"Tier", word(c.GetStatus().GetTier().String(), "CLUSTER_TIER_") + " (from network)"},
 		{"Upgrades", mode},
 	}
 }
@@ -132,7 +136,7 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	}
 	kv = append(kv, kubernetesLines(st.GetKubernetes())...)
 	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", releaseLine(st)}}...)
-	kv = append(kv, releaseLines(c.GetSpec())...)
+	kv = append(kv, releaseLines(c)...)
 	if line := rolloutLine(st.GetRollout(), st.GetCurrentKubernetesVersion()); line != "" {
 		kv = append(kv, [2]string{"Rollout", line})
 	}
@@ -143,12 +147,10 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	if u := st.GetUpgrade(); u != nil {
 		kv = append(kv, [2]string{"Upgrade", upgradeLine(u)})
 	}
-	if p := st.GetPause(); p != nil {
-		kv = append(kv, [2]string{"Paused", pauseLine(p)})
-	}
-	if p := st.GetUpgradePause(); p != nil {
+	if p := st.GetFreeze(); p != nil {
 		kv = append(kv, [2]string{"Frozen", freezeLine(p)})
 	}
+
 	kv = append(kv, [2]string{"Message", oneLine(st.GetMessage())}, [2]string{"Age", age(c.GetCreateTime())})
 	if err := fields(w, kv); err != nil {
 		return err

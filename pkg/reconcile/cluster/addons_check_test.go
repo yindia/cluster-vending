@@ -77,7 +77,7 @@ func TestAddonsCheckable(t *testing.T) {
 	updating := running()
 	updating.State = StateUpdating
 	paused := running()
-	paused.Paused = &model.Pause{}
+	paused.Frozen = &model.Freeze{}
 	for name, tt := range map[string]struct {
 		row  *model.Cluster
 		want bool

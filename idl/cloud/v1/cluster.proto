@@ -11,11 +11,11 @@ import "cloud/v1/conditions.proto";
 import "cloud/v1/control_plane.proto";
 import "cloud/v1/deprecation.proto";
 import "cloud/v1/events.proto";
+import "cloud/v1/freeze.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
 import "cloud/v1/node_pool.proto";
-import "cloud/v1/pause.proto";
 import "cloud/v1/recommendation.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -206,18 +206,19 @@ message ClusterSpec {
 
   // Which platform releases the cluster receives: how early it gets a new
   // version of what the platform runs on its clusters. It is not the
-  // Kubernetes version (control_plane.kubernetes_version). Stored and
-  // returned; nothing acts on it yet.
+  // Kubernetes version (control_plane.kubernetes_version). Each cluster
+  // can follow its own channel while inheriting its network's tier.
   ReleaseChannel release_channel = 8 [(buf.validate.field).enum.defined_only = true];
 
-  // How sensitive the cluster is, which decides its turn within its
-  // release channel: a release reaches tier 2 first, then tier 1, then
-  // tier 0. Stored and returned; nothing acts on it yet.
-  ClusterTier tier = 9 [(buf.validate.field).enum.defined_only = true];
+  // Legacy field: set NetworkSpec.tier instead. Nonzero values are
+  // rejected on create/update. The inherited tier is in ClusterStatus.tier.
+  ClusterTier tier = 9 [
+    deprecated = true,
+    (buf.validate.field).enum.defined_only = true
+  ];
 
   // Whether platform releases move the cluster (UpgradeMode). Unset is
-  // stored as UPGRADE_MODE_MANUAL. Mutable, like release_channel and tier.
-  // Stored and returned; releases do not act on it yet.
+  // stored as UPGRADE_MODE_MANUAL. Mutable, like release_channel.
   UpgradeMode upgrade_mode = 13 [(buf.validate.field).enum.defined_only = true];
 
   // When the platform may start an automatic upgrade of the cluster.
@@ -349,6 +350,8 @@ enum ClusterState {
 // ClusterStatus is the observed state, aggregated from the Crossplane
 // managed resources' status.
 message ClusterStatus {
+  // Output only. Inherited live from the parent network. Rollouts proceed 2, 1, 0.
+  ClusterTier tier = 60;
   ClusterState state = 1;
 
   // Human-readable summary of the current state, typically the reason for
@@ -446,10 +449,12 @@ message ClusterStatus {
   // events themselves while they exist.
   repeated Event recent_events = 41;
 
-  // pause is set while an operator paused the cluster (or its tenant):
-  // who, since when and why. The platform then only observes the cluster;
-  // the condition Paused is True and message says so. Unset: not paused.
-  Pause pause = 45;
+  // freeze is set while the platform is frozen (AdminService.Freeze):
+  // who, since when, why, until when, and whether this one is let
+  // through. Held (not let through), the platform only observes it and
+  // its managed resources carry crossplane.io/paused; the condition
+  // Frozen is True and message says so. Unset: not frozen.
+  Freeze freeze = 45;
 
   // recommendations is the summary of the usage the controller records to
   // recommend resource requests (the recommendations themselves:
@@ -468,11 +473,9 @@ message ClusterStatus {
   // cluster; a version a person changed writes none.
   ClusterRollout rollout = 47;
 
-  // upgrade_pause is set while a freeze holds the cluster
-  // (AdminService.Freeze: of the platform, its tenant or its channel):
-  // who, why, until when, and its scope. No automatic change of it starts;
-  // it is reconciled and updated as usual.
-  Pause upgrade_pause = 48;
+  // upgrade_pause, removed: the freeze is the platform's (freeze).
+  reserved 48;
+  reserved "upgrade_pause";
 
   // teardown is the first step of the cluster's deletion: what its
   // controllers made in the cloud (load balancers of Services and
@@ -541,7 +544,7 @@ enum ClusterRolloutResult {
   // automatic upgrades are off; message says which.
   CLUSTER_ROLLOUT_RESULT_PENDING = 5;
   // Kept back by one of its own checks (manual upgrades, a maintenance
-  // window, the deprecation scan, health, a pause); message says which.
+  // window, the deprecation scan, health, the freeze); message says which.
   CLUSTER_ROLLOUT_RESULT_BLOCKED = 6;
 }
 
@@ -623,6 +626,8 @@ message PlatformComponent {
   // record so the install could start again). At most 3; then the
   // component stays FAILED.
   int32 recoveries = 10;
+  // Last version observed Ready; retained while the target version is upgrading.
+  string installed_version = 11;
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in

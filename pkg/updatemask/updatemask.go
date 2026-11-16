@@ -42,12 +42,11 @@ var Cluster = []string{
 	"spec.default_node_pool.taints",
 	"spec.maintenance_window",
 	"spec.release_channel",
-	"spec.tier",
 	"spec.upgrade_mode",
 }
 
 // Network are the paths UpdateNetwork accepts.
-var Network = []string{"display_name", "labels", "spec.flow_logs"}
+var Network = []string{"display_name", "labels", "spec.flow_logs", "spec.tier"}
 
 // fixedWhy says why a field that is set at creation cannot change.
 var fixedWhy = map[string]string{

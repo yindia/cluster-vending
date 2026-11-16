@@ -661,8 +661,12 @@ func (x *ListNetworksResponse) GetNextPageToken() string {
 }
 
 type UpdateNetworkRequest struct {
-	state    protoimpl.MessageState `protogen:"open.v1"`
-	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Preview only; desired state is not stored.
+	ValidateOnly bool `protobuf:"varint,4,opt,name=validate_only,json=validateOnly,proto3" json:"validate_only,omitempty"`
+	// Apply only if the request and live resource versions still match this plan.
+	PlanId   string `protobuf:"bytes,5,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// network.id identifies the target; network.etag, when set, must match.
 	// Only the masked paths are applied; the server validates the merged
 	// result.
@@ -671,6 +675,8 @@ type UpdateNetworkRequest struct {
 	//
 	//	display_name
 	//	labels         (also re-tags every cloud resource)
+	//	spec.flow_logs
+	//	spec.tier
 	//
 	// The layout (address space, subnets, NAT) is immutable for now; any
 	// other path fails with INVALID_ARGUMENT. Updates of an IMPORTED network
@@ -710,6 +716,20 @@ func (*UpdateNetworkRequest) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{10}
 }
 
+func (x *UpdateNetworkRequest) GetValidateOnly() bool {
+	if x != nil {
+		return x.ValidateOnly
+	}
+	return false
+}
+
+func (x *UpdateNetworkRequest) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
 func (x *UpdateNetworkRequest) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
@@ -732,10 +752,13 @@ func (x *UpdateNetworkRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 }
 
 type UpdateNetworkResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Network       *Network               `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Desired state was recorded; cloud reconciliation is still asynchronous.
+	UpdateRecorded bool     `protobuf:"varint,3,opt,name=update_recorded,json=updateRecorded,proto3" json:"update_recorded,omitempty"`
+	Network        *Network `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
+	Plan           *Plan    `protobuf:"bytes,2,opt,name=plan,proto3" json:"plan,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *UpdateNetworkResponse) Reset() {
@@ -768,9 +791,23 @@ func (*UpdateNetworkResponse) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_network_service_proto_rawDescGZIP(), []int{11}
 }
 
+func (x *UpdateNetworkResponse) GetUpdateRecorded() bool {
+	if x != nil {
+		return x.UpdateRecorded
+	}
+	return false
+}
+
 func (x *UpdateNetworkResponse) GetNetwork() *Network {
 	if x != nil {
 		return x.Network
+	}
+	return nil
+}
+
+func (x *UpdateNetworkResponse) GetPlan() *Plan {
+	if x != nil {
+		return x.Plan
 	}
 	return nil
 }
@@ -886,7 +923,7 @@ var File_cloud_v1_network_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecloud/v1/network_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x12cloud/v1/aws.proto\x1a\x15cloud/v1/events.proto\x1a\x16cloud/v1/network.proto\x1a google/protobuf/field_mask.proto\"\xc5\x01\n" +
+	"\x1ecloud/v1/network_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x12cloud/v1/aws.proto\x1a\x15cloud/v1/events.proto\x1a\x16cloud/v1/network.proto\x1a\x13cloud/v1/plan.proto\x1a google/protobuf/field_mask.proto\"\xc5\x01\n" +
 	"\x14CreateNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x123\n" +
 	"\anetwork\x18\x02 \x01(\v2\x11.cloud.v1.NetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12*\n" +
@@ -932,15 +969,19 @@ const file_cloud_v1_network_service_proto_rawDesc = "" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\"m\n" +
 	"\x14ListNetworksResponse\x12-\n" +
 	"\bnetworks\x18\x01 \x03(\v2\x11.cloud.v1.NetworkR\bnetworks\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xae\x02\n" +
-	"\x14UpdateNetworkRequest\x12L\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xf6\x02\n" +
+	"\x14UpdateNetworkRequest\x12#\n" +
+	"\rvalidate_only\x18\x04 \x01(\bR\fvalidateOnly\x12!\n" +
+	"\aplan_id\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x06planId\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x123\n" +
 	"\anetwork\x18\x02 \x01(\v2\x11.cloud.v1.NetworkB\x06\xbaH\x03\xd8\x01\x03R\anetwork\x12C\n" +
 	"\vupdate_mask\x18\x03 \x01(\v2\x1a.google.protobuf.FieldMaskB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"updateMask:N\xbaHK\x1aI\n" +
-	"\x1fupdate_network.network_required\x12\x13network is required\x1a\x11has(this.network)\"D\n" +
-	"\x15UpdateNetworkResponse\x12+\n" +
-	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\"\xa1\x01\n" +
+	"\x1fupdate_network.network_required\x12\x13network is required\x1a\x11has(this.network)\"\x91\x01\n" +
+	"\x15UpdateNetworkResponse\x12'\n" +
+	"\x0fupdate_recorded\x18\x03 \x01(\bR\x0eupdateRecorded\x12+\n" +
+	"\anetwork\x18\x01 \x01(\v2\x11.cloud.v1.NetworkR\anetwork\x12\"\n" +
+	"\x04plan\x18\x02 \x01(\v2\x0e.cloud.v1.PlanR\x04plan\"\xa1\x01\n" +
 	"\x14DeleteNetworkRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -991,8 +1032,9 @@ var file_cloud_v1_network_service_proto_goTypes = []any{
 	(*Network)(nil),                   // 14: cloud.v1.Network
 	(*AwsImportNetwork)(nil),          // 15: cloud.v1.AwsImportNetwork
 	(*fieldmaskpb.FieldMask)(nil),     // 16: google.protobuf.FieldMask
-	(*ListNetworkEventsRequest)(nil),  // 17: cloud.v1.ListNetworkEventsRequest
-	(*ListNetworkEventsResponse)(nil), // 18: cloud.v1.ListNetworkEventsResponse
+	(*Plan)(nil),                      // 17: cloud.v1.Plan
+	(*ListNetworkEventsRequest)(nil),  // 18: cloud.v1.ListNetworkEventsRequest
+	(*ListNetworkEventsResponse)(nil), // 19: cloud.v1.ListNetworkEventsResponse
 }
 var file_cloud_v1_network_service_proto_depIdxs = []int32{
 	14, // 0: cloud.v1.CreateNetworkRequest.network:type_name -> cloud.v1.Network
@@ -1005,28 +1047,29 @@ var file_cloud_v1_network_service_proto_depIdxs = []int32{
 	14, // 7: cloud.v1.UpdateNetworkRequest.network:type_name -> cloud.v1.Network
 	16, // 8: cloud.v1.UpdateNetworkRequest.update_mask:type_name -> google.protobuf.FieldMask
 	14, // 9: cloud.v1.UpdateNetworkResponse.network:type_name -> cloud.v1.Network
-	14, // 10: cloud.v1.DeleteNetworkResponse.network:type_name -> cloud.v1.Network
-	0,  // 11: cloud.v1.NetworkService.CreateNetwork:input_type -> cloud.v1.CreateNetworkRequest
-	2,  // 12: cloud.v1.NetworkService.ImportNetwork:input_type -> cloud.v1.ImportNetworkRequest
-	4,  // 13: cloud.v1.NetworkService.TakeOverNetwork:input_type -> cloud.v1.TakeOverNetworkRequest
-	6,  // 14: cloud.v1.NetworkService.GetNetwork:input_type -> cloud.v1.GetNetworkRequest
-	17, // 15: cloud.v1.NetworkService.ListNetworkEvents:input_type -> cloud.v1.ListNetworkEventsRequest
-	8,  // 16: cloud.v1.NetworkService.ListNetworks:input_type -> cloud.v1.ListNetworksRequest
-	10, // 17: cloud.v1.NetworkService.UpdateNetwork:input_type -> cloud.v1.UpdateNetworkRequest
-	12, // 18: cloud.v1.NetworkService.DeleteNetwork:input_type -> cloud.v1.DeleteNetworkRequest
-	1,  // 19: cloud.v1.NetworkService.CreateNetwork:output_type -> cloud.v1.CreateNetworkResponse
-	3,  // 20: cloud.v1.NetworkService.ImportNetwork:output_type -> cloud.v1.ImportNetworkResponse
-	5,  // 21: cloud.v1.NetworkService.TakeOverNetwork:output_type -> cloud.v1.TakeOverNetworkResponse
-	7,  // 22: cloud.v1.NetworkService.GetNetwork:output_type -> cloud.v1.GetNetworkResponse
-	18, // 23: cloud.v1.NetworkService.ListNetworkEvents:output_type -> cloud.v1.ListNetworkEventsResponse
-	9,  // 24: cloud.v1.NetworkService.ListNetworks:output_type -> cloud.v1.ListNetworksResponse
-	11, // 25: cloud.v1.NetworkService.UpdateNetwork:output_type -> cloud.v1.UpdateNetworkResponse
-	13, // 26: cloud.v1.NetworkService.DeleteNetwork:output_type -> cloud.v1.DeleteNetworkResponse
-	19, // [19:27] is the sub-list for method output_type
-	11, // [11:19] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	17, // 10: cloud.v1.UpdateNetworkResponse.plan:type_name -> cloud.v1.Plan
+	14, // 11: cloud.v1.DeleteNetworkResponse.network:type_name -> cloud.v1.Network
+	0,  // 12: cloud.v1.NetworkService.CreateNetwork:input_type -> cloud.v1.CreateNetworkRequest
+	2,  // 13: cloud.v1.NetworkService.ImportNetwork:input_type -> cloud.v1.ImportNetworkRequest
+	4,  // 14: cloud.v1.NetworkService.TakeOverNetwork:input_type -> cloud.v1.TakeOverNetworkRequest
+	6,  // 15: cloud.v1.NetworkService.GetNetwork:input_type -> cloud.v1.GetNetworkRequest
+	18, // 16: cloud.v1.NetworkService.ListNetworkEvents:input_type -> cloud.v1.ListNetworkEventsRequest
+	8,  // 17: cloud.v1.NetworkService.ListNetworks:input_type -> cloud.v1.ListNetworksRequest
+	10, // 18: cloud.v1.NetworkService.UpdateNetwork:input_type -> cloud.v1.UpdateNetworkRequest
+	12, // 19: cloud.v1.NetworkService.DeleteNetwork:input_type -> cloud.v1.DeleteNetworkRequest
+	1,  // 20: cloud.v1.NetworkService.CreateNetwork:output_type -> cloud.v1.CreateNetworkResponse
+	3,  // 21: cloud.v1.NetworkService.ImportNetwork:output_type -> cloud.v1.ImportNetworkResponse
+	5,  // 22: cloud.v1.NetworkService.TakeOverNetwork:output_type -> cloud.v1.TakeOverNetworkResponse
+	7,  // 23: cloud.v1.NetworkService.GetNetwork:output_type -> cloud.v1.GetNetworkResponse
+	19, // 24: cloud.v1.NetworkService.ListNetworkEvents:output_type -> cloud.v1.ListNetworkEventsResponse
+	9,  // 25: cloud.v1.NetworkService.ListNetworks:output_type -> cloud.v1.ListNetworksResponse
+	11, // 26: cloud.v1.NetworkService.UpdateNetwork:output_type -> cloud.v1.UpdateNetworkResponse
+	13, // 27: cloud.v1.NetworkService.DeleteNetwork:output_type -> cloud.v1.DeleteNetworkResponse
+	20, // [20:28] is the sub-list for method output_type
+	12, // [12:20] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_network_service_proto_init() }
@@ -1037,6 +1080,7 @@ func file_cloud_v1_network_service_proto_init() {
 	file_cloud_v1_aws_proto_init()
 	file_cloud_v1_events_proto_init()
 	file_cloud_v1_network_proto_init()
+	file_cloud_v1_plan_proto_init()
 	file_cloud_v1_network_service_proto_msgTypes[2].OneofWrappers = []any{
 		(*ImportNetworkRequest_Aws)(nil),
 	}

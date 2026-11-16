@@ -88,12 +88,18 @@ func nextMinorOf(c *cloudv1alpha1.Cluster) string {
 // Reconcile scans the cluster when a scan is due and comes back when the
 // next one is.
 func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	leave := r.deps.FreezeBarrier.Enter()
+	defer leave()
 	obj := &cloudv1alpha1.Cluster{}
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	tenant, id := obj.Labels[cloudstore.LabelTenant], obj.Labels[cloudstore.LabelID]
-	if id == "" || !scannable(obj) {
+	frozen, err := r.deps.Freeze(ctx, id)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if frozen.Holds() || id == "" || !scannable(obj) {
 		return ctrl.Result{RequeueAfter: notScannableDelay}, nil
 	}
 	current := obj.Status.CurrentKubernetesVersion
@@ -126,11 +132,7 @@ func scannable(obj *cloudv1alpha1.Cluster) bool {
 	if !obj.DeletionTimestamp.IsZero() {
 		return false
 	}
-	if obj.Annotations[cloudstore.AnnotationPaused] != "" {
-		// Paused by an operator: the scan reads the workload cluster, and
-		// a paused cluster's is left alone until the resume.
-		return false
-	}
+
 	if obj.Status.Phase == cloudv1alpha1.ClusterPhaseImported {
 		return obj.Status.KubeconfigSecret != ""
 	}

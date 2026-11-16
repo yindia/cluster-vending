@@ -33,7 +33,7 @@ message CodeChange {
 // CodeChangePhase is where a code change is.
 enum CodeChangePhase {
   CODE_CHANGE_PHASE_UNSPECIFIED = 0;
-  // It waits its turn in the rollout (or a freeze, a pause, a window).
+  // It waits its turn in the rollout (or the freeze, a window).
   CODE_CHANGE_PHASE_PENDING = 1;
   // It is being applied.
   CODE_CHANGE_PHASE_APPLYING = 2;

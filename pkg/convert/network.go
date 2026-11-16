@@ -20,6 +20,7 @@ func NetworkSpecToAPI(p *cloudv1.NetworkSpec, accountName string, imported bool)
 	spec := cloudv1alpha1.NetworkSpec{
 		AccountRef: cloudv1alpha1.LocalReference{Name: accountName},
 		Region:     p.GetRegion(),
+		Tier:       NetworkTierToAPI(p.GetTier()),
 		FlowLogs:   flowLogsToAPI(p.GetFlowLogs()),
 	}
 	if imported {
@@ -38,6 +39,7 @@ func NetworkSpecToAPI(p *cloudv1.NetworkSpec, accountName string, imported bool)
 func NetworkSpecFromAPI(s cloudv1alpha1.NetworkSpec, accountID string, remainder *cloudv1.NetworkSpec) *cloudv1.NetworkSpec {
 	p := &cloudv1.NetworkSpec{
 		Region:      s.Region,
+		Tier:        NetworkTierFromAPI(s.Tier),
 		BootstrapId: accountID,
 		Layout:      layoutFromAPI(s.Layout),
 		FlowLogs:    flowLogsFromAPI(s.FlowLogs),
@@ -110,5 +112,25 @@ func flowLogsFromAPI(f *cloudv1alpha1.NetworkFlowLogs) *cloudv1.NetworkFlowLogs 
 			cloudv1.FlowLogTrafficType(0).Descriptor(), prefixFlowLog, string(f.TrafficType))),
 		RetentionDays:              toUint32(f.RetentionDays),
 		AggregationIntervalSeconds: toUint32(f.AggregationIntervalSeconds),
+	}
+}
+func NetworkTierToAPI(tier cloudv1.Tier) cloudv1alpha1.ClusterTier {
+	switch tier {
+	case cloudv1.Tier_TIER_1:
+		return cloudv1alpha1.ClusterTier1
+	case cloudv1.Tier_TIER_2:
+		return cloudv1alpha1.ClusterTier2
+	default:
+		return cloudv1alpha1.ClusterTier0
+	}
+}
+func NetworkTierFromAPI(tier cloudv1alpha1.ClusterTier) cloudv1.Tier {
+	switch tier {
+	case cloudv1alpha1.ClusterTier1:
+		return cloudv1.Tier_TIER_1
+	case cloudv1alpha1.ClusterTier2:
+		return cloudv1.Tier_TIER_2
+	default:
+		return cloudv1.Tier_TIER_0
 	}
 }

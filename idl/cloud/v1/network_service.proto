@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "cloud/v1/aws.proto";
 import "cloud/v1/events.proto";
 import "cloud/v1/network.proto";
+import "cloud/v1/plan.proto";
 import "google/protobuf/field_mask.proto";
 
 // NetworkService manages tenant networks. The platform is the source of truth
@@ -214,6 +215,10 @@ message ListNetworksResponse {
 }
 
 message UpdateNetworkRequest {
+  // Preview only; desired state is not stored.
+  bool validate_only = 4;
+  // Apply only if the request and live resource versions still match this plan.
+  string plan_id = 5 [(buf.validate.field).string.max_len = 128];
   option (buf.validate.message).cel = {
     id: "update_network.network_required"
     message: "network is required"
@@ -234,6 +239,8 @@ message UpdateNetworkRequest {
   // Mutable paths:
   //   display_name
   //   labels         (also re-tags every cloud resource)
+  //   spec.flow_logs
+  //   spec.tier
   // The layout (address space, subnets, NAT) is immutable for now; any
   // other path fails with INVALID_ARGUMENT. Updates of an IMPORTED network
   // fail with FAILED_PRECONDITION until it is taken over.
@@ -241,7 +248,10 @@ message UpdateNetworkRequest {
 }
 
 message UpdateNetworkResponse {
+  // Desired state was recorded; cloud reconciliation is still asynchronous.
+  bool update_recorded = 3;
   Network network = 1;
+  Plan plan = 2;
 }
 
 message DeleteNetworkRequest {

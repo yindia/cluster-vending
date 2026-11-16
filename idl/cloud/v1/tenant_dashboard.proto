@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/admin_freeze.proto";
+import "cloud/v1/cluster.proto";
+import "google/protobuf/timestamp.proto";
+
+// These requests deliberately have no legacy global targeting or exception
+// reset fields. Only tenant_id's resources may be selected, even by an admin.
+message TenantFreezeRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Omitted: this tenant. Explicit platform, empty or foreign targets fail.
+  FreezeTarget target = 2;
+  string reason = 3 [(buf.validate.field).string.max_len = 512];
+  google.protobuf.Timestamp until = 4;
+}
+
+message TenantUnfreezeRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Omitted: this tenant. An active platform freeze cannot be bypassed.
+  FreezeTarget target = 2;
+}
+
+message TenantGetFreezeRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Omitted: this tenant. Status never includes another tenant's resources.
+  FreezeTarget target = 2;
+}
+
+message TenantListReleasesRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  int32 page_size = 2 [(buf.validate.field).int32.gte = 0];
+  string page_token = 3;
+}
+
+message TenantGetReleaseRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 63
+  }];
+}
+
+message TenantListReleaseChannelsRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+}
+
+message TenantGetReleaseChannelRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  ReleaseChannel channel = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

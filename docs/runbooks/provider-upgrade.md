@@ -14,65 +14,30 @@ Each step says where it comes from:
 
 The whole procedure has not been run against a real management cluster yet.
 
-## What a pause is
+## What the platform freeze does
 
-`AdminService.PauseReconcile` (CLI: `cluster-vending admin pause --tenant <t>
-[--network <id> | --cluster <id>] [--reason "..."] [--until <time>]`, or
-`--channel <c> [--tier <n>]` for a channel's clusters; docs/controller.md,
-"Admin: pause and resume") does two things **[code]**:
+`cluster-vending admin freeze --reason "provider upgrade" --wait` stores the
+cluster-scoped `ReleaseHold/platform-freeze` in the management cluster.
+It stops account, network and cluster actions, including deletion,
+repair, upgrades and workload scans. Managed resources and Helm Releases
+get `crossplane.io/paused: "true"`, so Crossplane also stops reconciling.
+It does not cancel AWS operations already submitted.
 
-1. **It records the pause on the platform's own objects**: the tenant's
-   `CloudAccount`s, `Network`s and `Cluster`s (only the `Cluster` with
-   `--cluster`) and the tenant's namespace get the annotation
-   `cloud.cluster-vending.io/paused`, a JSON value with who paused (the
-   caller's name, `anonymous` without authentication), since when, and the
-   reason. The platform's controller does not act on what carries it, and
-   what is created in a paused tenant carries it from the start.
-2. **It pauses the providers**: every managed resource of the scope, and
-   provider-helm's `Release`s of its platform components, get
-   `crossplane.io/paused: "true"`; the provider of a paused resource stops
-   reconciling it until the annotation is removed **[upstream]**:
-   "Manually applying the `crossplane.io/paused` annotation causes the
-   Provider to stop reconciling the managed resource", and "Kubernetes and
-   Crossplane can't delete resources with a `paused` annotation"
-   (docs.crossplane.io, Managed Resources, "Paused").
+User writes remain accepted and stored as custom resources. They apply
+after unfreeze. `cluster get` and `network get` show `Frozen:`; a
+resource let through says so. The events are `PlatformFrozen`,
+`PlatformUnfrozen` and `LetThrough`.
 
-`ResumeReconcile` removes both, in the same order.
+`ProviderConfig` and `Usage` objects are not Crossplane managed resources.
+The platform does not change or delete account configuration during the
+freeze. Workloads already running remain running.
 
-| | |
-|---|---|
-| Unit | One tenant (its accounts, networks and clusters), one network (`--network <id>`: the network and its own managed resources, not its clusters), or one cluster (`--cluster <id>`). Resuming one network or cluster of a paused tenant leaves the rest paused. There is no single call for every tenant. **[code]** |
-| Network scope | A network's pause is the network's alone: its clusters keep running. What of a cluster needs the network to change (new subnet tags, say) waits until the network is resumed; deleting one of its clusters is not held. **[code]** |
-| Scopes | A row records each scope it was paused at. A tenant's resume removes the tenant's scope only: a network or cluster also paused on its own stays paused, with the providers' pause still on its managed resources. Its own resume ends it, whatever else holds it. A pause written by an older build records no scope, and any resume ends it. **[code]** |
-| Covers | Our objects as above; every managed resource kind the platform renders for the AWS providers, and provider-helm's `Release`. **[code]** |
-| Does not cover | `ProviderConfig`s and `Usage`s: they are not managed resources. Crossplane v2.4.3's Usage controller has no pause handling, and a Usage does nothing to the cloud: it only blocks deletes. **[code]**, **[upstream]** source read |
-| Stored as | The two annotations. Who, when and why are in `status.pause` of a paused account, network or cluster and in its `Paused` condition, and in the message of a network or cluster. A paused account's own `CloudAccount` object has the `Paused` condition too. **[code]** |
-| Needs | The `PlatformAdmin` role where the API authenticates. **[code]** |
-| Repeatable | Yes: a paused object keeps who paused it first, and pausing or resuming twice returns the same count. **[code]** |
+See [platform freeze](../controller.md#admin-scoped-freeze).
+There is no separate pause/resume API. Tenant, network and cluster scopes
+are supported; channel and tier scopes are not. A network-wide unfreeze
+includes its clusters; a cluster-only unfreeze leaves its shared network frozen.
 
-What the platform's controller does with a paused object **[code]**:
-
-| Loop | While paused |
-|---|---|
-| Cloud account | Its `ProviderConfig`, credentials copy and kubeconfig-reader binding are not applied; a delete is held. |
-| Network | Nothing applied, repaired or deleted; import discovery (an AWS lookup) does not run. Status recorded. |
-| Cluster | Nothing applied, repaired or deleted; no subnet tagging, no import discovery, no EKS name or version lookup, no node group retirement. Status recorded. |
-| Platform components | Not applied; no stuck-release recovery (nothing is removed in the workload cluster). |
-| Deprecation scan | Does not run: it reads the workload cluster. |
-| Spec update, delete | Accepted by the API and stored; done by the first pass after the resume, once. |
-| New cluster or network in a paused tenant | Stored, paused from the start; `PROVISIONING` with "paused by …" until the resume. |
-
-The status of a paused network or cluster **[code]**:
-
-- `status.pause` says who, since when and why, and the condition `Paused=True`
-  says it too; the message ends with `paused by <who> since <time> (<reason>)`;
-- a paused resource is never a failure: one that was ready stays `READY`,
-  one that was not is `WAITING` with the reason `ReconcilePaused`, however
-  long the pause lasts. A running cluster stays `RUNNING`;
-- the events `Paused` and `Resumed` are emitted when it starts and ends
-  (`cluster events <id>`).
-
-## What a tenant pause does not stop
+## What the platform freeze does not stop
 
 The controller's own startup work is not a tenant's: on start it creates the
 providers, runtime configs and CRDs that are missing, adds kinds to the
@@ -110,25 +75,22 @@ kubectl get providers.pkg.crossplane.io -o custom-columns=NAME:.metadata.name,PA
 
 ### 2. The controller
 
-It can stay up: paused tenants are only observed **[code]**. To be
+It can stay up: frozen resources are only observed **[code]**. To be
 conservative, stop it instead and start it again in step 7:
 
 ```sh
 kubectl -n cluster-vending-system scale deployment cluster-vending-controller-manager --replicas=0
 ```
 
-### 3. Pause every tenant **[code]**
-
-A tenant's namespace is `tenant-<tenant id>`.
+### 3. Freeze the platform
 
 ```sh
-for t in $(kubectl get namespaces -o name | sed -n 's|^namespace/tenant-||p'); do
-  cluster-vending admin pause --tenant "$t" --reason "provider upgrade to $V"
-done
+cluster-vending admin freeze --reason "provider upgrade"
 ```
 
-Each call prints how many resources are paused now. A tenant created after
-this loop is not paused: run the loop again just before step 5.
+Wait for confirmed `Frozen` before changing the providers. Use
+`cluster-vending admin freeze status` to inspect phase, exceptions and counts. Partial failures
+are reported; repeat the command to finish pausing managed resources.
 
 ### 4. Check that nothing reconciles
 
@@ -219,11 +181,11 @@ uses is served, then goes on **[code]**. Resume one cluster of low
 importance:
 
 ```sh
-cluster-vending admin resume --tenant <tenant> --cluster <cluster id>
+cluster-vending admin unfreeze --cluster <cluster id>
 cluster-vending cluster get <cluster id> --tenant <tenant>
 ```
 
-It is fine when: the `Paused` condition and `status.pause` are gone, the
+It is fine when: the `Frozen` condition shows the cluster is let through, the
 cluster is `RUNNING`,
 and none of its resources reports an error:
 
@@ -237,17 +199,14 @@ upjet has open reports of duplicate or orphaned cloud resources after a
 provider restart (crossplane/upjet issues 561, 632 and 304, found in earlier
 research for this project and not re-checked for this runbook).
 
-### 8. Resume the rest
-
-One tenant, check, then all:
+### 8. Unfreeze the rest
 
 ```sh
-cluster-vending admin resume --tenant <tenant>
-for t in $(kubectl get namespaces -o name | sed -n 's|^namespace/tenant-||p'); do
-  cluster-vending admin resume --tenant "$t"
-done
+cluster-vending admin unfreeze
 kubectl get networks.cloud.cluster-vending.io,clusters.cloud.cluster-vending.io -A
 ```
+
+Pending automatic changes still follow the rollout tiers and health gates.
 
 ## Rollback
 

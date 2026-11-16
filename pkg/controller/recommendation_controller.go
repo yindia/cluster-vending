@@ -53,6 +53,8 @@ func (r *RecommendationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // deleted, paused, or imported without a kubeconfig) is the same as for
 // the deprecation scan (scannable).
 func (r *RecommendationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	leave := r.deps.FreezeBarrier.Enter()
+	defer leave()
 	if !r.enabled {
 		return ctrl.Result{}, nil
 	}
@@ -61,7 +63,11 @@ func (r *RecommendationReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	tenant, id := obj.Labels[cloudstore.LabelTenant], obj.Labels[cloudstore.LabelID]
-	if id == "" || !scannable(obj) {
+	frozen, err := r.deps.Freeze(ctx, id)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if frozen.Holds() || id == "" || !scannable(obj) {
 		return ctrl.Result{RequeueAfter: notScannableDelay}, nil
 	}
 	sampler := r.sampler

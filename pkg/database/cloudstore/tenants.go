@@ -9,16 +9,18 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	tenantlife "github.com/yindia/cluster-vending/pkg/reconcile/tenant"
 )
 
 type tenants struct{ store }
@@ -38,74 +40,95 @@ type accountMeta struct {
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
-// Create makes the tenant: its namespace, created or (when something else
-// made it first) adopted, marked as the tenant's. ErrAlreadyExists when it
-// is marked already.
+// Create stores the canonical cluster-scoped registration, then ensures its
+// namespace synchronously for callers that immediately register an account.
 func (r tenants) Create(ctx context.Context, t *model.Tenant) error {
-	if !labelValue(t.ID) {
+	if !tenantlife.ValidID(t.ID) {
 		return fmt.Errorf("%w: tenant ID %q", repository.ErrInvalid, t.ID)
+	}
+	if _, err := r.Get(ctx, t.ID); err == nil {
+		return fmt.Errorf("%w: tenant %s", repository.ErrAlreadyExists, t.ID)
+	} else if !errors.Is(err, repository.ErrNotFound) {
+		return err
 	}
 	t.Defaults()
 	t.CreatedAt = now()
 	t.UpdatedAt = t.CreatedAt
-	mark := func(ns *corev1.Namespace) {
-		label(ns, map[string]string{LabelTenant: t.ID})
-		annotate(ns, map[string]string{AnnotationDisplayName: t.DisplayName,
-			AnnotationCreatedAt: t.CreatedAt.UTC().Format(time.RFC3339Nano)})
-	}
-	name := kube.TenantNamespace(t.ID)
-	err := retry(func() error {
-		ns := &corev1.Namespace{}
-		err := r.c.Get(ctx, client.ObjectKey{Name: name}, ns)
-		switch {
-		case apierrors.IsNotFound(err):
-			ns = &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
-			mark(ns)
-			return r.c.Create(ctx, ns)
-		case err != nil:
-			return err
-		case ns.Labels[LabelTenant] != "":
-			return fmt.Errorf("%w: tenant %s", repository.ErrAlreadyExists, t.ID)
-		}
-		mark(ns)
-		return r.c.Update(ctx, ns)
-	})
-	if err != nil {
+	obj := &cloudv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: t.ID, Annotations: map[string]string{
+		AnnotationCreatedAt: t.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}}, Spec: cloudv1alpha1.TenantSpec{DisplayName: t.DisplayName}}
+	if err := r.c.Create(ctx, obj); err != nil {
 		return translate(err)
 	}
-	r.created(func(ctx context.Context) error { return r.unmark(ctx, t.ID) })
+	if _, err := tenantlife.EnsureNamespace(ctx, r.c, obj); err != nil {
+		cleanup := r.deleteRegistration(ctx, t.ID, obj.UID)
+		if errors.Is(err, tenantlife.ErrNamespaceCollision) {
+			err = fmt.Errorf("%w: %w", repository.ErrConflict, err)
+		}
+		return errors.Join(translate(err), cleanup)
+	}
+	r.created(func(ctx context.Context) error { return r.Delete(ctx, t.ID) })
 	return nil
 }
 
-// unmark makes the namespace nobody's tenant again. The namespace itself
-// stays: it may hold what the platform put there for the tenant.
-func (r tenants) unmark(ctx context.Context, id string) error {
-	return translate(retry(func() error {
-		ns, err := r.tenantNamespace(ctx, id)
-		if err != nil {
-			return err
-		}
-		delete(ns.Labels, LabelTenant)
-		annotate(ns, map[string]string{AnnotationDisplayName: "", AnnotationCreatedAt: ""})
-		return r.c.Update(ctx, ns)
-	}))
-}
-
+// Get prefers the canonical registration. Legacy namespace reads are strictly
+// read-only and never adopt an unmarked or foreign namespace.
 func (r tenants) Get(ctx context.Context, id string) (*model.Tenant, error) {
+	if !tenantlife.ValidID(id) {
+		return nil, repository.ErrNotFound
+	}
+	obj := &cloudv1alpha1.Tenant{}
+	err := r.c.Get(ctx, client.ObjectKey{Name: id}, obj)
+	if err == nil {
+		if !obj.DeletionTimestamp.IsZero() {
+			return nil, repository.ErrNotFound
+		}
+		created := tenantlife.Timestamp(obj)
+		result := &model.Tenant{ID: id, DisplayName: obj.Spec.DisplayName, CreatedAt: created, UpdatedAt: created}
+		result.Defaults()
+		return result, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, translate(err)
+	}
 	ns, err := r.tenantNamespace(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	if len(ns.OwnerReferences) != 0 || !ns.DeletionTimestamp.IsZero() || ns.Annotations[tenantlife.AnnotationRetainedTenant] != "" || ns.Annotations[tenantlife.AnnotationRegistration] != "" {
+		return nil, repository.ErrNotFound
+	}
 	created, _ := time.Parse(time.RFC3339Nano, ns.Annotations[AnnotationCreatedAt])
-	return &model.Tenant{ID: id, DisplayName: ns.Annotations[AnnotationDisplayName], CreatedAt: created, UpdatedAt: created}, nil
+	if created.IsZero() {
+		created = ns.CreationTimestamp.Time
+	}
+	result := &model.Tenant{ID: id, DisplayName: ns.Annotations[AnnotationDisplayName], CreatedAt: created, UpdatedAt: created}
+	result.Defaults()
+	return result, nil
 }
 
-// Delete removes the tenant and its accounts unless it has networks or
-// clusters (ErrInUse). The namespace stays, unmarked.
+// Delete removes the registration and accounts unless networks or clusters use
+// it. The known-owned namespace and its contents are retained, never cascaded.
 func (r tenants) Delete(ctx context.Context, id string) error {
+	obj := &cloudv1alpha1.Tenant{}
+	err := r.c.Get(ctx, client.ObjectKey{Name: id}, obj)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return translate(err)
+	}
+	canonical := err == nil
 	ns, err := r.tenantNamespace(ctx, id)
-	if err != nil {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
+	}
+	if ns == nil {
+		if !canonical {
+			return repository.ErrNotFound
+		}
+		// A registration whose namespace has not yet been created can still be removed.
+		return r.deleteRegistration(ctx, id)
+	}
+	if len(ns.OwnerReferences) != 0 {
+		return fmt.Errorf("%w: namespace %s has a foreign owner", repository.ErrConflict, ns.Name)
 	}
 	networks, err := items[*cloudv1alpha1.Network](ctx, r.store, &cloudv1alpha1.NetworkList{}, ns.Name, nil)
 	if err != nil {
@@ -127,7 +150,34 @@ func (r tenants) Delete(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	return r.unmark(ctx, id)
+	if err := tenantlife.RetainNamespace(ctx, r.c, id); err != nil {
+		return translate(err)
+	}
+	if canonical {
+		return r.deleteRegistration(ctx, id)
+	}
+	return nil
+}
+
+func (r tenants) deleteRegistration(ctx context.Context, id string, expectedUID ...types.UID) error {
+	return translate(retry(func() error {
+		obj := &cloudv1alpha1.Tenant{}
+		if err := r.c.Get(ctx, client.ObjectKey{Name: id}, obj); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if len(expectedUID) > 0 && obj.UID != expectedUID[0] {
+			return apierrors.NewConflict(cloudv1alpha1.GroupVersion.WithResource("tenants").GroupResource(), id, fmt.Errorf("tenant registration was replaced during namespace creation"))
+		}
+		if controllerutil.RemoveFinalizer(obj, cloudv1alpha1.TenantFinalizer) {
+			if err := r.c.Update(ctx, obj); err != nil {
+				return err
+			}
+			if !obj.DeletionTimestamp.IsZero() {
+				return nil
+			}
+		}
+		return client.IgnoreNotFound(r.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan), client.Preconditions{UID: &obj.UID, ResourceVersion: &obj.ResourceVersion}))
+	}))
 }
 
 // accountName is the object name of an account: one per provider and
@@ -188,7 +238,6 @@ func accountRow(obj *cloudv1alpha1.CloudAccount) *model.CloudAccount {
 	if obj.Spec.AWS != nil {
 		a.AccountID = obj.Spec.AWS.AccountID
 	}
-	a.Paused, a.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	a.Access = AccessModel(obj.Status.Access)
 	a.AccessRequestedAt = accessRequestedOf(obj)
 	a.AccessRequestedRegions = accessRegionsOf(obj)
@@ -248,9 +297,6 @@ func (r tenants) createAccount(ctx context.Context, key client.ObjectKey, a *mod
 	obj := &cloudv1alpha1.CloudAccount{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name,
 		Labels: map[string]string{LabelID: row.ID, LabelTenant: row.TenantID}}}
 	if err := fillAccount(&row, obj); err != nil {
-		return nil, err
-	}
-	if err := r.inheritPause(ctx, obj); err != nil {
 		return nil, err
 	}
 	if err := r.c.Create(ctx, obj); err != nil {

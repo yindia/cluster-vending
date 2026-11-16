@@ -103,7 +103,11 @@ func MergeAccess(prev *model.AccountAccess, report awscloud.AccessReport, now ti
 // until the next is due. Only the store is written to by the caller: it
 // changes nothing itself.
 func (r *Reconciler) VerifyAccess(ctx context.Context, a *model.CloudAccount, now time.Time) (*model.AccountAccess, time.Duration, error) {
-	if a.Paused != nil || r.deps.AWSAccessCheck == nil {
+	frozen, err := r.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: a.TenantID})
+	if err != nil {
+		return nil, 0, err
+	}
+	if frozen.Holds() || r.deps.AWSAccessCheck == nil {
 		return nil, 0, nil
 	}
 	regions, err := r.accountRegions(ctx, a)

@@ -91,7 +91,7 @@ func (in memberInputs) moveMember(c *cloudv1alpha1.Cluster, release string) (m u
 		c.Spec.UpgradeMode != cloudv1alpha1.UpgradeModeAutomatic || c.Status.PlatformRelease == "" {
 		return m, nil, false
 	}
-	m = upgrade.Member{ID: c.Namespace + "/" + c.Name, Tier: Tier(c.Spec.Tier)}
+	m = upgrade.Member{ID: c.Namespace + "/" + c.Name, Tier: Tier(c.Status.Tier)}
 	move := c.Status.ReleaseMove
 	switch {
 	case move != nil && move.Phase == convert.ReleaseMoveHalted:

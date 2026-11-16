@@ -32,12 +32,12 @@ func noWrites() interceptor.Funcs {
 }
 
 // BootstrapTenant stores the account and writes nothing to the management
-// cluster: the CloudAccount controller applies the namespace and the
+// cluster: the CloudAccount controller applies credentials and the
 // ProviderConfig (with the providers' credentials it is configured with),
 // so the server never overwrites them.
 func TestBootstrapTenantOnlyStores(t *testing.T) {
 	f := newFixture(t, noWrites())
-	f.expectNewTenant()
+	f.expectTenant()
 	f.expectPut(account)
 
 	res, err := f.svc.BootstrapTenant(t.Context(), request("acme", account))

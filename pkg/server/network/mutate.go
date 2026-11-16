@@ -24,6 +24,7 @@ const (
 	pathDisplayName = "display_name"
 	pathLabels      = "labels"
 	pathFlowLogs    = "spec.flow_logs"
+	pathTier        = "spec.tier"
 )
 
 // updatable are the update mask paths (updatemask.Network, which the CLI
@@ -70,6 +71,28 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			"spec.flow_logs cannot be set on an imported network: it keeps the flow logs it was imported with")
 	}
+
+	var plan *cloudv1.Plan
+	if req.GetValidateOnly() || req.GetPlanId() != "" {
+		plan, err = s.planUpdate(ctx, req, row, spec)
+		if err != nil {
+			return nil, err
+		}
+		if req.GetValidateOnly() {
+			current, err := s.get(ctx, req.GetTenantId(), in.GetId())
+			if err != nil {
+				return nil, err
+			}
+			network, err := s.stored(ctx, current)
+			return &cloudv1.UpdateNetworkResponse{Network: network, Plan: plan}, err
+		}
+		if plan.GetPlanId() != req.GetPlanId() {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is stale; the request or a resource changed; plan again")
+		}
+		if !plan.GetApplicable() {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is not applicable: it changes an immutable field")
+		}
+	}
 	tagsChanged := changed.labels || changed.flowLogs
 	if row.Spec, err = netreconcile.Encode(spec); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())
@@ -92,7 +115,7 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 		return nil, service.ToConnect(err)
 	}
 	n, err := s.stored(ctx, row)
-	return &cloudv1.UpdateNetworkResponse{Network: n}, service.ToConnect(err)
+	return &cloudv1.UpdateNetworkResponse{Network: n, Plan: plan, UpdateRecorded: true}, service.ToConnect(err)
 }
 
 // checkMutable refuses updates of deleting networks and stale etags.
@@ -124,6 +147,8 @@ func applyMask(row *model.Network, spec *cloudv1.NetworkSpec, in *cloudv1.Networ
 			// Always re-applied, even unchanged: that also adds tags the
 			// platform introduced after the network was created.
 			changed.labels = true
+		case pathTier:
+			spec.Tier = in.GetSpec().GetTier()
 		case pathFlowLogs:
 			next := corenetwork.ResolveFlowLogs(in.GetSpec().GetFlowLogs())
 			if err := corenetwork.FlowLogsChangeable(spec.GetFlowLogs(), next); err != nil {
@@ -160,6 +185,11 @@ func updatedInput(row *model.Network, in *cloudv1.Network, paths []string) (mode
 			input.DisplayName = in.GetDisplayName()
 		case pathLabels:
 			input.Labels = in.GetLabels()
+		case pathTier:
+			if input.Spec == nil {
+				input.Spec = &cloudv1.NetworkSpec{}
+			}
+			input.Spec.Tier = in.GetSpec().GetTier()
 		case pathFlowLogs:
 			if input.Spec == nil {
 				input.Spec = &cloudv1.NetworkSpec{}

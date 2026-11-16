@@ -104,6 +104,13 @@ func (s *Reconciler) describe(ctx context.Context, row *model.Cluster, namespace
 	at := now()
 	for _, c := range p.components {
 		prev := before[c.GetName()]
+		c.InstalledVersion = prev.GetInstalledVersion()
+		if c.InstalledVersion == "" && prev.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_READY {
+			c.InstalledVersion = prev.GetVersion()
+		}
+		if c.GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_READY {
+			c.InstalledVersion = c.GetVersion()
+		}
 		if prev != nil && prev.GetVersion() == c.GetVersion() {
 			c.Recoveries = prev.GetRecoveries()
 		}

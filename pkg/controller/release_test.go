@@ -393,35 +393,16 @@ func TestHoldResolvesTheClusterID(t *testing.T) {
 // A hold of a tenant or a channel covers every cluster that matches, those
 // added later too: it is resolved with how many match now, none included,
 // and names no one cluster.
-func TestHoldOfATenantOrChannelCountsItsClusters(t *testing.T) {
-	ctx := t.Context()
-	cluster := func(name, tenant string, channel cloudv1alpha1.ReleaseChannelName, tier cloudv1alpha1.ClusterTier) *cloudv1alpha1.Cluster {
-		return &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-" + tenant, Name: name,
-			Labels: map[string]string{cloudstore.LabelID: "id-" + name, cloudstore.LabelTenant: tenant}},
-			Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: channel, Tier: tier}}
-	}
-	hold := func(name string, spec cloudv1alpha1.ReleaseHoldSpec) *cloudv1alpha1.ReleaseHold {
-		spec.Reason = "freeze"
-		return &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
-	}
-	c := releaseClient(t,
-		cluster("a", "acme", cloudv1alpha1.ReleaseChannelBeta, cloudv1alpha1.ClusterTier0),
-		cluster("b", "acme", cloudv1alpha1.ReleaseChannelBeta, cloudv1alpha1.ClusterTier2),
-		cluster("c", "globex", cloudv1alpha1.ReleaseChannelStable, ""),
-		hold("tenant", cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme"}),
-		hold("beta", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta"}),
-		hold("beta-tier0", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta", Tier: cloudv1alpha1.ClusterTier0}),
-		hold("alpha", cloudv1alpha1.ReleaseHoldSpec{Channel: "alpha"}))
+func TestPlatformHoldCountsClusters(t *testing.T) {
+	hold := &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: "platform-freeze"}, Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy"}}
+	cluster := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "one", Namespace: "tenant-acme", Labels: map[string]string{cloudstore.LabelID: "id-one"}}}
+	c := releaseClient(t, hold, cluster)
 	r := &ReleaseHoldReconciler{c: c, now: time.Now}
-	for name, want := range map[string]int32{"tenant": 2, "beta": 2, "beta-tier0": 1, "alpha": 0} {
-		reconcileOnce(t, r, name)
-		got := &cloudv1alpha1.ReleaseHold{}
-		if err := c.Get(ctx, client.ObjectKey{Name: name}, got); err != nil {
-			t.Fatal(err)
-		}
-		cond := meta.FindStatusCondition(got.Status.Conditions, cloudv1alpha1.HoldConditionResolved)
-		if got.Status.Clusters != want || got.Status.Name != "" || cond == nil || cond.Status != metav1.ConditionTrue {
-			t.Errorf("%s: %d clusters (want %d), name %q, condition %+v", name, got.Status.Clusters, want, got.Status.Name, cond)
-		}
+	reconcileOnce(t, r, "platform-freeze")
+	if err := c.Get(t.Context(), client.ObjectKey{Name: hold.Name}, hold); err != nil {
+		t.Fatal(err)
+	}
+	if hold.Status.Clusters != 1 {
+		t.Fatal(hold.Status)
 	}
 }

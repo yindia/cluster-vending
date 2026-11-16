@@ -31,6 +31,12 @@ func (s *Reconciler) View(ctx context.Context, row *model.Network) (*cloudv1.Net
 // view is View with the failure to report: the recorded one for a read,
 // this pass's for the reconciler.
 func (s *Reconciler) view(ctx context.Context, row *model.Network, failure *cloudv1.Condition) (*cloudv1.Network, error) {
+	frozen, err := s.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: row.TenantID, NetworkID: row.ID})
+	if err != nil {
+		return nil, err
+	}
+	row.Frozen = frozen
+
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
 	if err != nil {
 		return nil, err
@@ -71,7 +77,7 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Network, records []m
 	}
 	ids := make([]string, 0, len(clusters))
 	for _, c := range clusters {
-		ids = append(ids, c.Name)
+		ids = append(ids, c.ID)
 	}
 	return ToProto(row, spec, status(row, views, o.resources, ids)), nil
 }

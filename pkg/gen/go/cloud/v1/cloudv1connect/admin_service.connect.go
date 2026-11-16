@@ -24,18 +24,12 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// AdminServicePauseReconcileProcedure is the procedure name of the AdminService's PauseReconcile
-	// RPC.
-	AdminServicePauseReconcileProcedure = "/cloud.v1.AdminService/PauseReconcile"
-	// AdminServiceResumeReconcileProcedure is the procedure name of the AdminService's ResumeReconcile
-	// RPC.
-	AdminServiceResumeReconcileProcedure = "/cloud.v1.AdminService/ResumeReconcile"
-	// AdminServiceListPausesProcedure is the procedure name of the AdminService's ListPauses RPC.
-	AdminServiceListPausesProcedure = "/cloud.v1.AdminService/ListPauses"
 	// AdminServiceFreezeProcedure is the procedure name of the AdminService's Freeze RPC.
 	AdminServiceFreezeProcedure = "/cloud.v1.AdminService/Freeze"
 	// AdminServiceUnfreezeProcedure is the procedure name of the AdminService's Unfreeze RPC.
 	AdminServiceUnfreezeProcedure = "/cloud.v1.AdminService/Unfreeze"
+	// AdminServiceGetFreezeProcedure is the procedure name of the AdminService's GetFreeze RPC.
+	AdminServiceGetFreezeProcedure = "/cloud.v1.AdminService/GetFreeze"
 	// AdminServiceListReleasesProcedure is the procedure name of the AdminService's ListReleases RPC.
 	AdminServiceListReleasesProcedure = "/cloud.v1.AdminService/ListReleases"
 	// AdminServiceGetReleaseProcedure is the procedure name of the AdminService's GetRelease RPC.
@@ -49,28 +43,6 @@ const (
 )
 
 var (
-	adminServicePauseReconcileSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType: connect.StreamTypeUnary,
-			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("PauseReconcile"),
-			Procedure:  AdminServicePauseReconcileProcedure,
-		}
-	})
-	adminServiceResumeReconcileSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType: connect.StreamTypeUnary,
-			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ResumeReconcile"),
-			Procedure:  AdminServiceResumeReconcileProcedure,
-		}
-	})
-	adminServiceListPausesSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType:       connect.StreamTypeUnary,
-			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("ListPauses"),
-			Procedure:        AdminServiceListPausesProcedure,
-			IdempotencyLevel: connect.IdempotencyNoSideEffects,
-		}
-	})
 	adminServiceFreezeSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -83,6 +55,14 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("Unfreeze"),
 			Procedure:  AdminServiceUnfreezeProcedure,
+		}
+	})
+	adminServiceGetFreezeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_admin_service_proto.Services().ByName("AdminService").Methods().ByName("GetFreeze"),
+			Procedure:        AdminServiceGetFreezeProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
 	adminServiceListReleasesSpec = sync.OnceValue(func() connect.Spec {
@@ -121,57 +101,28 @@ var (
 
 // AdminServiceClient is a client for the cloud.v1.AdminService service.
 type AdminServiceClient interface {
-	// Pauses a tenant, one of its networks or one of its clusters, e.g. to
-	// upgrade the Crossplane providers (docs/runbooks/provider-upgrade.md).
-	// Two things happen:
+	// Freezes the selected scope (the whole platform by default). For held resources:
 	//
-	//   - the pause is recorded on the tenant's cloud accounts, networks and
-	//     clusters (on the one network or cluster), with who paused, when
-	//     and why. The
-	//     platform's controller does not act on a paused resource: it
-	//     creates, changes and deletes nothing of it in the cloud or in its
-	//     workload cluster, and only observes it. An update or a delete
-	//     asked for meanwhile is stored and done after the resume. What is
-	//     created in a paused tenant is paused from the start.
-	//   - every managed resource of the scope, and the Helm releases of its
-	//     platform components, get the crossplane.io/paused annotation, so
-	//     the providers neither change nor delete their cloud resources.
+	//   - the platform's controllers apply no changes: no
+	//     create, update, delete, repair or component install is applied,
+	//     and no automatic change starts (Kubernetes upgrades, release
+	//     moves, add-on upgrades, code changes from a new controller
+	//     build). What users ask for meanwhile is stored and applied after
+	//     the unfreeze (or once that cluster or network is let through).
+	//   - affected Crossplane managed resources and the Helm
+	//     releases of the platform components, get crossplane.io/paused,
+	//     so the providers act on nothing either, even while the
+	//     controller is down.
 	//
-	// A network's pause is the network's alone: its clusters are not paused
-	// and keep running. What of a cluster needs the network to change (new
-	// subnet tags, say) waits until the network is resumed; deleting one of
-	// its clusters is not held.
-	//
-	// A paused account, network or cluster has the condition Paused and
-	// status.pause. Idempotent: a resource paused already keeps who paused
-	// it, and records each scope it was paused at.
-	PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error)
-	// Removes the pause (PauseReconcile). A tenant's resume removes the
-	// tenant's pause from everything it has, except a network or cluster
-	// also paused on its own, which stays paused with the providers' pause
-	// on its managed resources. A resume of one network or cluster ends its
-	// pause whatever else holds it, so it runs again in a paused tenant
-	// (the rest of the tenant stays paused). The controller then observes
-	// each resource and applies what changed meanwhile, once. Idempotent.
-	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
-	// Lists every pause and freeze in effect: full pauses (of a tenant, a
-	// network, a cluster, or of a channel's clusters) and freezes (of the
-	// platform, a tenant or a channel), with who asked, when, why, until
-	// when and how many clusters each covers.
-	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
-	// Freezes the platform, or a tenant's or a channel's (one tier's)
-	// clusters: no automatic change starts for them (Kubernetes upgrades,
-	// release moves, add-on upgrades, code changes from a new controller
-	// build) until Unfreeze; what is under way finishes, and what users ask
-	// for (create, update, delete) is done as usual. Clusters that join the
-	// tenant or channel later are frozen too. Freezing again changes the
-	// reason and until, and keeps what was let through.
+	// Freezing again changes the reason and until, and keeps what was let
+	// through. The call can be repeated: what is paused already is left.
 	Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error)
-	// Lifts the freeze of the target (as Freeze named it); with a cluster_id
-	// (or a network_id), lets only that cluster and its network (that
-	// network) take their pending changes while the freeze stays. Lifting
-	// the freeze forgets what was let through.
+	// Resumes a cluster, a network with all its clusters, or an entire tenant.
+	// A cluster exception leaves its shared network frozen. Broader scoped
+	// unfreezes clear nested freezes. With no target, clears every freeze.
+	// Resumed resources continue through their normal rollout gates.
 	Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error)
+	GetFreeze(context.Context, *v1.GetFreezeRequest) (*v1.GetFreezeResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
 	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
@@ -198,57 +149,28 @@ func NewAdminServiceClient(client *connect.Client) AdminServiceClient {
 
 // AdminServiceHandler is an implementation of the cloud.v1.AdminService service.
 type AdminServiceHandler interface {
-	// Pauses a tenant, one of its networks or one of its clusters, e.g. to
-	// upgrade the Crossplane providers (docs/runbooks/provider-upgrade.md).
-	// Two things happen:
+	// Freezes the selected scope (the whole platform by default). For held resources:
 	//
-	//   - the pause is recorded on the tenant's cloud accounts, networks and
-	//     clusters (on the one network or cluster), with who paused, when
-	//     and why. The
-	//     platform's controller does not act on a paused resource: it
-	//     creates, changes and deletes nothing of it in the cloud or in its
-	//     workload cluster, and only observes it. An update or a delete
-	//     asked for meanwhile is stored and done after the resume. What is
-	//     created in a paused tenant is paused from the start.
-	//   - every managed resource of the scope, and the Helm releases of its
-	//     platform components, get the crossplane.io/paused annotation, so
-	//     the providers neither change nor delete their cloud resources.
+	//   - the platform's controllers apply no changes: no
+	//     create, update, delete, repair or component install is applied,
+	//     and no automatic change starts (Kubernetes upgrades, release
+	//     moves, add-on upgrades, code changes from a new controller
+	//     build). What users ask for meanwhile is stored and applied after
+	//     the unfreeze (or once that cluster or network is let through).
+	//   - affected Crossplane managed resources and the Helm
+	//     releases of the platform components, get crossplane.io/paused,
+	//     so the providers act on nothing either, even while the
+	//     controller is down.
 	//
-	// A network's pause is the network's alone: its clusters are not paused
-	// and keep running. What of a cluster needs the network to change (new
-	// subnet tags, say) waits until the network is resumed; deleting one of
-	// its clusters is not held.
-	//
-	// A paused account, network or cluster has the condition Paused and
-	// status.pause. Idempotent: a resource paused already keeps who paused
-	// it, and records each scope it was paused at.
-	PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error)
-	// Removes the pause (PauseReconcile). A tenant's resume removes the
-	// tenant's pause from everything it has, except a network or cluster
-	// also paused on its own, which stays paused with the providers' pause
-	// on its managed resources. A resume of one network or cluster ends its
-	// pause whatever else holds it, so it runs again in a paused tenant
-	// (the rest of the tenant stays paused). The controller then observes
-	// each resource and applies what changed meanwhile, once. Idempotent.
-	ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error)
-	// Lists every pause and freeze in effect: full pauses (of a tenant, a
-	// network, a cluster, or of a channel's clusters) and freezes (of the
-	// platform, a tenant or a channel), with who asked, when, why, until
-	// when and how many clusters each covers.
-	ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error)
-	// Freezes the platform, or a tenant's or a channel's (one tier's)
-	// clusters: no automatic change starts for them (Kubernetes upgrades,
-	// release moves, add-on upgrades, code changes from a new controller
-	// build) until Unfreeze; what is under way finishes, and what users ask
-	// for (create, update, delete) is done as usual. Clusters that join the
-	// tenant or channel later are frozen too. Freezing again changes the
-	// reason and until, and keeps what was let through.
+	// Freezing again changes the reason and until, and keeps what was let
+	// through. The call can be repeated: what is paused already is left.
 	Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error)
-	// Lifts the freeze of the target (as Freeze named it); with a cluster_id
-	// (or a network_id), lets only that cluster and its network (that
-	// network) take their pending changes while the freeze stays. Lifting
-	// the freeze forgets what was let through.
+	// Resumes a cluster, a network with all its clusters, or an entire tenant.
+	// A cluster exception leaves its shared network frozen. Broader scoped
+	// unfreezes clear nested freezes. With no target, clears every freeze.
+	// Resumed resources continue through their normal rollout gates.
 	Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error)
+	GetFreeze(context.Context, *v1.GetFreezeRequest) (*v1.GetFreezeResponse, error)
 	// Lists the releases, newest first: valid or not, shipped or published,
 	// and the channels and holds naming them. Read-only.
 	ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error)
@@ -271,11 +193,9 @@ type AdminServiceHandler interface {
 func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler) {
 	adapter := adminServiceHandler{svc: svc}
 	server.Register(
-		connect.Method{Spec: adminServicePauseReconcileSpec(), Handler: adapter.pauseReconcile},
-		connect.Method{Spec: adminServiceResumeReconcileSpec(), Handler: adapter.resumeReconcile},
-		connect.Method{Spec: adminServiceListPausesSpec(), Handler: adapter.listPauses},
 		connect.Method{Spec: adminServiceFreezeSpec(), Handler: adapter.freeze},
 		connect.Method{Spec: adminServiceUnfreezeSpec(), Handler: adapter.unfreeze},
+		connect.Method{Spec: adminServiceGetFreezeSpec(), Handler: adapter.getFreeze},
 		connect.Method{Spec: adminServiceListReleasesSpec(), Handler: adapter.listReleases},
 		connect.Method{Spec: adminServiceGetReleaseSpec(), Handler: adapter.getRelease},
 		connect.Method{Spec: adminServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
@@ -286,24 +206,16 @@ func RegisterAdminServiceHandler(server *connect.Server, svc AdminServiceHandler
 // UnimplementedAdminServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedAdminServiceHandler struct{}
 
-func (UnimplementedAdminServiceHandler) PauseReconcile(context.Context, *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.PauseReconcile is not implemented")
-}
-
-func (UnimplementedAdminServiceHandler) ResumeReconcile(context.Context, *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ResumeReconcile is not implemented")
-}
-
-func (UnimplementedAdminServiceHandler) ListPauses(context.Context, *v1.ListPausesRequest) (*v1.ListPausesResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.ListPauses is not implemented")
-}
-
 func (UnimplementedAdminServiceHandler) Freeze(context.Context, *v1.FreezeRequest) (*v1.FreezeResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.Freeze is not implemented")
 }
 
 func (UnimplementedAdminServiceHandler) Unfreeze(context.Context, *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.Unfreeze is not implemented")
+}
+
+func (UnimplementedAdminServiceHandler) GetFreeze(context.Context, *v1.GetFreezeRequest) (*v1.GetFreezeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.AdminService.GetFreeze is not implemented")
 }
 
 func (UnimplementedAdminServiceHandler) ListReleases(context.Context, *v1.ListReleasesRequest) (*v1.ListReleasesResponse, error) {
@@ -326,30 +238,6 @@ type adminServiceClient struct {
 	client *connect.Client
 }
 
-func (c *adminServiceClient) PauseReconcile(ctx context.Context, req *v1.PauseReconcileRequest) (*v1.PauseReconcileResponse, error) {
-	var res v1.PauseReconcileResponse
-	if err := c.client.CallUnary(ctx, adminServicePauseReconcileSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *adminServiceClient) ResumeReconcile(ctx context.Context, req *v1.ResumeReconcileRequest) (*v1.ResumeReconcileResponse, error) {
-	var res v1.ResumeReconcileResponse
-	if err := c.client.CallUnary(ctx, adminServiceResumeReconcileSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *adminServiceClient) ListPauses(ctx context.Context, req *v1.ListPausesRequest) (*v1.ListPausesResponse, error) {
-	var res v1.ListPausesResponse
-	if err := c.client.CallUnary(ctx, adminServiceListPausesSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
 func (c *adminServiceClient) Freeze(ctx context.Context, req *v1.FreezeRequest) (*v1.FreezeResponse, error) {
 	var res v1.FreezeResponse
 	if err := c.client.CallUnary(ctx, adminServiceFreezeSpec(), req, &res); err != nil {
@@ -361,6 +249,14 @@ func (c *adminServiceClient) Freeze(ctx context.Context, req *v1.FreezeRequest) 
 func (c *adminServiceClient) Unfreeze(ctx context.Context, req *v1.UnfreezeRequest) (*v1.UnfreezeResponse, error) {
 	var res v1.UnfreezeResponse
 	if err := c.client.CallUnary(ctx, adminServiceUnfreezeSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *adminServiceClient) GetFreeze(ctx context.Context, req *v1.GetFreezeRequest) (*v1.GetFreezeResponse, error) {
+	var res v1.GetFreezeResponse
+	if err := c.client.CallUnary(ctx, adminServiceGetFreezeSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -400,42 +296,6 @@ func (c *adminServiceClient) GetReleaseChannel(ctx context.Context, req *v1.GetR
 
 type adminServiceHandler struct{ svc AdminServiceHandler }
 
-func (h adminServiceHandler) pauseReconcile(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.PauseReconcileRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.PauseReconcile(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h adminServiceHandler) resumeReconcile(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.ResumeReconcileRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.ResumeReconcile(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h adminServiceHandler) listPauses(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.ListPausesRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.ListPauses(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
 func (h adminServiceHandler) freeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
 	var req v1.FreezeRequest
 	if err := stream.Receive(&req); err != nil {
@@ -454,6 +314,18 @@ func (h adminServiceHandler) unfreeze(ctx context.Context, _ connect.Spec, strea
 		return err
 	}
 	res, err := h.svc.Unfreeze(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h adminServiceHandler) getFreeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetFreezeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetFreeze(ctx, &req)
 	if err != nil {
 		return err
 	}

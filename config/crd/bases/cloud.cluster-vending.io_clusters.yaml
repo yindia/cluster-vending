@@ -40,7 +40,7 @@ spec:
     - jsonPath: .spec.releaseChannel
       name: Channel
       type: string
-    - jsonPath: .spec.tier
+    - jsonPath: .status.tier
       name: Tier
       type: string
     - jsonPath: .spec.upgradeMode
@@ -874,16 +874,6 @@ spec:
                 - message: tag keys are 1-128 and values 0-256 characters
                   rule: self.all(k, size(k) >= 1 && size(k) <= 128 && size(self[k])
                     <= 256)
-              tier:
-                description: |-
-                  tier is how sensitive the cluster is. Within a release channel a
-                  release reaches Tier2 first, then Tier1, then Tier0. Stored only for
-                  now.
-                enum:
-                - Tier0
-                - Tier1
-                - Tier2
-                type: string
               upgradeMode:
                 default: Manual
                 description: |-
@@ -1517,6 +1507,10 @@ spec:
                         helmState is Helm's state of that chart's release (deployed, failed,
                         pending-install, pending-upgrade, pending-rollback, uninstalling).
                       type: string
+                    installedVersion:
+                      description: Last chart version observed Ready, retained during
+                        upgrades.
+                      type: string
                     lastError:
                       description: lastError is the provider's last error for that
                         chart, in full.
@@ -1739,6 +1733,16 @@ spec:
                 - startTime
                 - toVersion
                 type: object
+              tier:
+                description: |-
+                  ClusterTier is how sensitive a cluster is. Within a release channel a
+                  release reaches Tier2 clusters first, then Tier1, then Tier0. Stored
+                  only for now: nothing acts on it yet.
+                enum:
+                - Tier0
+                - Tier1
+                - Tier2
+                type: string
               upgrade:
                 description: |-
                   upgrade is the Kubernetes upgrade in progress: set from the moment

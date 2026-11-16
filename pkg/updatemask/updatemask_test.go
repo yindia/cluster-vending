@@ -17,9 +17,9 @@ func current() *cloudv1.Cluster {
 	return &cloudv1.Cluster{Id: "c1", Name: "prod-eks", Etag: "e1", DisplayName: "Prod", Labels: map[string]string{"env": "prod"},
 		Spec: &cloudv1.ClusterSpec{Region: "us-west-1",
 			ControlPlane:   &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.36"},
-			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_2,
-			UpgradeMode: cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
-			Provider:    &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: proto.Bool(true)}}},
+			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA,
+			UpgradeMode:    cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
+			Provider:       &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: proto.Bool(true)}}},
 		Status: &cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING}}
 }
 

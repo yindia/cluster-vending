@@ -13,18 +13,21 @@ import (
 
 type freezeRecorder struct {
 	cloudv1connect.UnimplementedAdminServiceHandler
-	froze   []*cloudv1.FreezeRequest
-	unfroze []*cloudv1.UnfreezeRequest
+	froze          []*cloudv1.FreezeRequest
+	unfroze        []*cloudv1.UnfreezeRequest
+	statusReads    int
+	status         *cloudv1.GetFreezeResponse
+	statusRequests []*cloudv1.GetFreezeRequest
 }
 
 func (f *freezeRecorder) Freeze(_ context.Context, req *cloudv1.FreezeRequest) (*cloudv1.FreezeResponse, error) {
 	f.froze = append(f.froze, req)
-	return &cloudv1.FreezeResponse{Clusters: 12}, nil
+	return &cloudv1.FreezeResponse{Clusters: 12, Phase: "Freezing", Message: "waiting for controller confirmation"}, nil
 }
 
 func (f *freezeRecorder) Unfreeze(_ context.Context, req *cloudv1.UnfreezeRequest) (*cloudv1.UnfreezeResponse, error) {
 	f.unfroze = append(f.unfroze, req)
-	return &cloudv1.UnfreezeResponse{Note: "the platform is not frozen any more"}, nil
+	return &cloudv1.UnfreezeResponse{Note: "the platform is not frozen any more", Status: &cloudv1.FreezeStatus{Target: req.Target, Phase: cloudv1.FreezePhase_FREEZE_PHASE_UNFROZEN}}, nil
 }
 
 // admin freeze and unfreeze: the reason, and one cluster or network let
@@ -36,7 +39,7 @@ func TestAdminFreeze(t *testing.T) {
 	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Reason: "provider upgrade"}, &out, OutputTable); err != nil {
 		t.Fatal(err)
 	}
-	if svc.froze[0].GetReason() != "provider upgrade" || !strings.Contains(out.String(), "the platform is frozen: 12 clusters") {
+	if svc.froze[0].GetReason() != "provider upgrade" || (!strings.Contains(out.String(), "Freezing") || !strings.Contains(out.String(), "12")) {
 		t.Errorf("freeze %v, output %q", svc.froze[0], out.String())
 	}
 	for _, o := range []Options{{}, {Cluster: "0190a000-0000-7000-8000-0000000000a0"}, {PauseNetwork: "0190a000-0000-7000-8000-0000000000c0"}} {
@@ -44,7 +47,7 @@ func TestAdminFreeze(t *testing.T) {
 		if err := Run(t.Context(), AdminUnfreeze, Clients{Admin: svc}, o, &out, OutputTable); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out.String(), "not frozen any more") {
+		if !strings.Contains(out.String(), "Unfrozen") {
 			t.Errorf("output %q", out.String())
 		}
 	}
@@ -57,38 +60,13 @@ func TestAdminFreeze(t *testing.T) {
 	}
 }
 
-// admin freeze of a channel's tier (or a tenant), until a date, sends that
-// target; unfreeze names the same target, with one cluster let through.
-func TestAdminFreezeOfATarget(t *testing.T) {
+func TestAdminFreezeUntil(t *testing.T) {
 	svc := &freezeRecorder{}
-	var out bytes.Buffer
-	opts := Options{Channel: "beta", Tier: "0", Until: "2026-12-31", Reason: "quarter end"}
-
-	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, opts, &out, OutputTable); err != nil {
+	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Until: "2026-12-31"}, &bytes.Buffer{}, OutputTable); err != nil {
 		t.Fatal(err)
 	}
-	let := opts
-	let.Cluster = "0190a000-0000-7000-8000-0000000000a0"
-	if err := Run(t.Context(), AdminUnfreeze, Clients{Admin: svc}, let, &bytes.Buffer{}, OutputTable); err != nil {
-		t.Fatal(err)
-	}
-	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Tenant: "acme"}, &bytes.Buffer{}, OutputTable); err != nil {
-		t.Fatal(err)
-	}
-
-	f, u := svc.froze[0], svc.unfroze[0]
-	if f.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || f.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_0 ||
-		!f.GetUntil().AsTime().Equal(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)) || f.GetReason() != "quarter end" {
-		t.Errorf("freeze request %v", f)
-	}
-	if !strings.HasPrefix(out.String(), "channel beta tier 0 is frozen: 12 clusters") {
-		t.Errorf("output %q", out.String())
-	}
-	if u.GetChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || u.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_0 || u.GetClusterId() != let.Cluster {
-		t.Errorf("unfreeze request %v", u)
-	}
-	if svc.froze[1].GetTenantId() != "acme" {
-		t.Errorf("tenant freeze %v", svc.froze[1])
+	if !svc.froze[0].GetUntil().AsTime().Equal(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)) {
+		t.Fatal(svc.froze[0])
 	}
 }
 
@@ -99,10 +77,10 @@ func TestAdminFreezeRefuses(t *testing.T) {
 		opts Options
 		want string
 	}{
-		{"a channel and a tenant", Options{Tenant: "acme", Channel: "beta"}, "not both"},
-		{"a tier without a channel", Options{Tier: "0"}, "--tier needs --channel"},
-		{"an unknown channel", Options{Channel: "gamma"}, "alpha, beta or stable"},
-		{"a cluster", Options{Cluster: "c"}, "--cluster"},
+		{"a channel and a tenant", Options{Tenant: "acme", Channel: "beta"}, "not supported"},
+		{"a tier without a channel", Options{Tier: "0"}, "not supported"},
+		{"an unknown channel", Options{Channel: "gamma"}, "not supported"},
+		{"an invalid cluster ID", Options{Cluster: "c"}, "UUID"},
 		{"an until that is no time", Options{Until: "soon"}, "--until"},
 	}
 	for _, tt := range tests {
@@ -115,5 +93,85 @@ func TestAdminFreezeRefuses(t *testing.T) {
 				t.Fatalf("err = %v (sent %d), want one saying %q", err, len(svc.froze), tt.want)
 			}
 		})
+	}
+}
+func (f *freezeRecorder) GetFreeze(_ context.Context, req *cloudv1.GetFreezeRequest) (*cloudv1.GetFreezeResponse, error) {
+	f.statusReads++
+	f.statusRequests = append(f.statusRequests, req)
+	if f.status != nil {
+		return f.status, nil
+	}
+	return &cloudv1.GetFreezeResponse{Phase: "Frozen", TotalResources: 3, PausedResources: 3, Exceptions: []string{"canary-id"}}, nil
+}
+func TestAdminFreezeStatusWaitAndReset(t *testing.T) {
+	svc := &freezeRecorder{}
+	var out bytes.Buffer
+	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Wait: true, ResetExceptions: true}, &out, OutputTable); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.froze[0].GetResetExceptions() || svc.statusReads != 1 {
+		t.Fatalf("reset/wait: %v, %d", svc.froze, svc.statusReads)
+	}
+	for _, expected := range []string{"Frozen", "3/3", "canary-id"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Fatalf("missing %s: %s", expected, out.String())
+		}
+	}
+}
+
+func TestAdminUnfreezeWaitUsesSelectedScope(t *testing.T) {
+	for _, opts := range []Options{{Cluster: "0190a000-0000-7000-8000-000000000001"}, {PauseNetwork: "0190a000-0000-7000-8000-000000000003"}, {Tenant: "acme"}, {}} {
+		svc := &freezeRecorder{status: &cloudv1.GetFreezeResponse{Phase: "Unfrozen"}}
+		opts.Wait = true
+		var out bytes.Buffer
+		if err := Run(t.Context(), AdminUnfreeze, Clients{Admin: svc}, opts, &out, OutputTable); err != nil {
+			t.Fatal(err)
+		}
+		if svc.statusReads != 1 || svc.statusRequests[0].GetClusterId() != opts.Cluster || svc.statusRequests[0].GetNetworkId() != opts.PauseNetwork || svc.statusRequests[0].GetTenantId() != opts.Tenant {
+			t.Fatalf("wrong confirmation scope: %+v", svc.statusRequests)
+		}
+		if !strings.Contains(out.String(), "Unfrozen") {
+			t.Fatal(out.String())
+		}
+	}
+}
+
+func TestAdminUnfreezeWaitRejectsSupersededRequest(t *testing.T) {
+	svc := &freezeRecorder{status: &cloudv1.GetFreezeResponse{Phase: "Unfrozen", Revision: "newer-request"}}
+	err := Run(t.Context(), AdminUnfreeze, Clients{Admin: svc}, Options{Wait: true}, &bytes.Buffer{}, OutputTable)
+	if err == nil || !strings.Contains(err.Error(), "changed while waiting") {
+		t.Fatalf("superseded unfreeze: %v", err)
+	}
+}
+
+func TestAdminFreezeWaitAndJSONUseScopedTypedContract(t *testing.T) {
+	id := "0190a000-0000-7000-8000-000000000001"
+	target := &cloudv1.FreezeTarget{Scope: &cloudv1.FreezeTarget_ClusterId{ClusterId: id}}
+	svc := &freezeRecorder{status: &cloudv1.GetFreezeResponse{Status: &cloudv1.FreezeStatus{Target: target, Phase: cloudv1.FreezePhase_FREEZE_PHASE_FROZEN, Clusters: 1, TotalResources: 2, PausedResources: 2}}}
+	var out bytes.Buffer
+	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Cluster: id, Wait: true}, &out, OutputJSON); err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.statusRequests) != 1 || svc.statusRequests[0].GetTarget().GetClusterId() != id {
+		t.Fatalf("wait read another scope: %v", svc.statusRequests)
+	}
+	if !strings.Contains(out.String(), "FREEZE_PHASE_FROZEN") || !strings.Contains(out.String(), id) {
+		t.Fatalf("typed JSON status missing: %s", out.String())
+	}
+	if svc.froze[0].GetTarget().GetClusterId() != id || svc.froze[0].GetClusterId() != id {
+		t.Fatal("scoped legacy compatibility IDs were not mirrored")
+	}
+}
+
+func TestAdminExplicitPlatformRejectsAnotherScope(t *testing.T) {
+	svc := &freezeRecorder{}
+	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Platform: true, Tenant: "acme"}, &bytes.Buffer{}, OutputTable); err == nil || len(svc.froze) > 0 {
+		t.Fatalf("ambiguous platform target: %v", err)
+	}
+	if err := Run(t.Context(), AdminFreeze, Clients{Admin: svc}, Options{Platform: true}, &bytes.Buffer{}, OutputTable); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.froze[0].GetTarget().GetPlatform() {
+		t.Fatal("platform was not explicit in request")
 	}
 }

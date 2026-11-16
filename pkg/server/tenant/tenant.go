@@ -11,9 +11,15 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/config"
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -52,12 +58,13 @@ func NewTenantService(d reconcile.Deps, opts ...Option) *TenantService {
 // applies and reads the account's objects in the management cluster.
 func (s *TenantService) rec() *accountreconcile.Reconciler { return accountreconcile.New(s.deps) }
 
-// BootstrapTenant records the tenant and its account, and that is all: the
-// CloudAccount controller applies what the management cluster needs (the
-// tenant namespace and the account's ProviderConfig), and the answer shows
-// the account as stored. Every step is idempotent, so a failed call is
-// fixed by calling again.
+// BootstrapTenant registers an account for an existing Tenant CR and owned
+// namespace. The account controller applies credentials and ProviderConfig;
+// tenant lifecycle exclusively owns namespace creation.
 func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
+	if err := auth.FromContext(ctx).Authorize(auth.Access{Scope: auth.ScopeTenant, Write: true}, req.GetTenantId()); err != nil {
+		return nil, service.ToConnect(err)
+	}
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -177,14 +184,20 @@ func (s *TenantService) ListCloudAccounts(ctx context.Context, req *cloudv1.List
 	return &cloudv1.ListCloudAccountsResponse{Accounts: out}, nil
 }
 
-// record stores the tenant (created on its first bootstrap) and the
-// account, in one transaction. A new account gets a generated
+// record stores an account only after checking its registered Tenant CR
+// and owned namespace. A new account gets a generated
 // ProviderConfig name; an existing one keeps it and updates the rest. The
 // tenant's other accounts are not touched.
 func (s *TenantService) record(ctx context.Context, a *model.CloudAccount) (*model.CloudAccount, error) {
+	if s.deps.Store == nil || s.directoryReader() == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, "tenant registration is unavailable")
+	}
+	if err := s.requireRegisteredTenant(ctx, a.TenantID); err != nil {
+		return nil, err
+	}
 	var stored *model.CloudAccount
 	err := s.deps.Store.WithinTransaction(ctx, func(tx repository.Store) error {
-		if err := ensureTenant(ctx, tx.Tenants(), a.TenantID); err != nil {
+		if _, err := tx.Tenants().Get(ctx, a.TenantID); err != nil {
 			return err
 		}
 		if err := tx.Tenants().PutCloudAccount(ctx, a); err != nil {
@@ -202,16 +215,32 @@ func (s *TenantService) record(ctx context.Context, a *model.CloudAccount) (*mod
 	return stored, nil
 }
 
-func ensureTenant(ctx context.Context, tenants repository.Tenants, tenantID string) error {
-	_, err := tenants.Get(ctx, tenantID)
-	if !errors.Is(err, repository.ErrNotFound) {
-		return err
+// Read the CR explicitly: Store.Get permits legacy namespace migration reads,
+// which must never authorize a new account registration.
+func (s *TenantService) requireRegisteredTenant(ctx context.Context, id string) error {
+	reader := s.deps.Kube
+	if reader == nil {
+		return connect.NewError(connect.CodeUnavailable, "tenant registration is unavailable")
 	}
-	err = tenants.Create(ctx, &model.Tenant{ID: tenantID})
-	if errors.Is(err, repository.ErrAlreadyExists) {
-		return nil // created concurrently
+	tenant := &cloudv1alpha1.Tenant{}
+	if err := reader.Get(ctx, client.ObjectKey{Name: id}, tenant); apierrors.IsNotFound(err) {
+		return connect.NewError(connect.CodeNotFound, "tenant is not registered; create the tenant before registering a cloud account")
+	} else if err != nil {
+		return connect.NewError(connect.CodeUnavailable, "cannot read tenant registration")
 	}
-	return err
+	if tenant.DeletionTimestamp != nil {
+		return connect.NewError(connect.CodeFailedPrecondition, "tenant is being deleted")
+	}
+	namespace := &corev1.Namespace{}
+	if err := reader.Get(ctx, client.ObjectKey{Name: kube.TenantNamespace(id)}, namespace); apierrors.IsNotFound(err) {
+		return connect.NewError(connect.CodeFailedPrecondition, "tenant namespace is not ready; wait for tenant registration before registering a cloud account")
+	} else if err != nil {
+		return connect.NewError(connect.CodeUnavailable, "cannot read tenant namespace")
+	}
+	if namespace.Labels[cloudstore.LabelTenant] != id || len(namespace.OwnerReferences) > 0 || namespace.DeletionTimestamp != nil || namespace.Status.Phase == corev1.NamespaceTerminating {
+		return connect.NewError(connect.CodeFailedPrecondition, "tenant namespace is unavailable or is not owned by this tenant")
+	}
+	return nil
 }
 
 func (s *TenantService) logger() *slog.Logger {

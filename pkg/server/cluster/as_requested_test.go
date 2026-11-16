@@ -38,8 +38,8 @@ func TestGetClusterAsRequested(t *testing.T) {
 	if asked.GetCluster().GetLabels()["team"] != "a" || asked.GetCluster().GetEtag() != resolved.GetCluster().GetEtag() {
 		t.Errorf("labels %v, etag %q (resolved %q)", asked.GetCluster().GetLabels(), asked.GetCluster().GetEtag(), resolved.GetCluster().GetEtag())
 	}
-	if resolved.GetAsRequested() || resolved.GetCluster().GetSpec().GetTier() == cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
-		t.Errorf("without as_requested: as_requested %v, tier %v; want the resolved spec", resolved.GetAsRequested(), resolved.GetCluster().GetSpec().GetTier())
+	if resolved.GetAsRequested() || resolved.GetCluster().GetStatus().GetTier() == cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
+		t.Errorf("without as_requested: as_requested %v, tier %v; want the resolved spec", resolved.GetAsRequested(), resolved.GetCluster().GetStatus().GetTier())
 	}
 }
 

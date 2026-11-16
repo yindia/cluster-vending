@@ -17,7 +17,7 @@ func TestBootstrapGivesAnExternalID(t *testing.T) {
 	var given []string
 	for range 2 {
 		f := newFixture(t)
-		f.expectNewTenant()
+		f.expectTenant()
 		f.tenants.EXPECT().PutCloudAccount(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, a *model.CloudAccount) error {
 			given = append(given, a.ExternalID)
 			return nil

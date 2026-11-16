@@ -23,21 +23,25 @@ func (p platformSource) MoveAdmitted(ctx context.Context, channel, release, tena
 		}
 		return false, "", err
 	}
-	return admittedBy(ch.Status.ReleaseMoves, release, kube.TenantNamespace(tenantID)+"/"+cluster)
+	allowed, why := admittedBy(ch.Status.ReleaseMoves, release, kube.TenantNamespace(tenantID)+"/"+cluster)
+	if !allowed {
+		return false, why, nil
+	}
+	return p.currentAdmissionTier(ctx, ch, ch.Status.ReleaseMoves, tenantID, cluster)
 }
 
 // admittedBy reads a channel's release rollout for the cluster key
 // (namespace/name).
-func admittedBy(m *cloudv1alpha1.ChannelReleaseMoves, release, key string) (bool, string, error) {
+func admittedBy(m *cloudv1alpha1.ChannelReleaseMoves, release, key string) (bool, string) {
 	switch {
 	case m == nil || m.Release != release:
-		return false, fmt.Sprintf("waiting for the channel's rollout of release %s to be planned", release), nil
-	case slices.Contains(m.Admitted, key):
-		return true, "", nil
+		return false, fmt.Sprintf("waiting for the channel's rollout of release %s to be planned", release)
 	case m.Halted:
-		return false, "the channel's rollout of release " + release + " is halted: " + m.Waiting, nil
+		return false, "the channel's rollout of release " + release + " is halted: " + m.Waiting
+	case slices.Contains(m.Admitted, key):
+		return true, ""
 	case m.Waiting != "":
-		return false, "waiting its turn in the channel's rollout: " + m.Waiting, nil
+		return false, "waiting its turn in the channel's rollout: " + m.Waiting
 	}
-	return false, "waiting its turn in the channel's rollout", nil
+	return false, "waiting its turn in the channel's rollout"
 }

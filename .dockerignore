@@ -17,3 +17,5 @@ examples
 hack
 deploy
 **/*_test.go
+# The dashboard has its own Dockerfile and build context.
+ui

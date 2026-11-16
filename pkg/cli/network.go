@@ -93,9 +93,25 @@ func NetworkUpdate(ctx context.Context, c Clients, o Options) (proto.Message, er
 		return nil, err
 	}
 	n.Etag = current.GetEtag()
-	return call(ctx, &cloudv1.UpdateNetworkRequest{
-		TenantId: tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask},
-	}, c.Network.UpdateNetwork)
+
+	req := &cloudv1.UpdateNetworkRequest{TenantId: tenant, Network: n, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}, ValidateOnly: true}
+	preview, err := call(ctx, req, c.Network.UpdateNetwork)
+	if err != nil {
+		return nil, err
+	}
+	shown := preview.(*cloudv1.UpdateNetworkResponse)
+	if o.Plan {
+		return preview, nil
+	}
+	if err := reviewUpdatePlan(o, shown.GetPlan()); err != nil {
+		return nil, err
+	}
+	req.ValidateOnly, req.PlanId = false, shown.GetPlan().GetPlanId()
+	result, err := call(ctx, req, c.Network.UpdateNetwork)
+	if err != nil || !o.Wait {
+		return result, err
+	}
+	return waitNetwork(ctx, c, o, tenant, n.GetId(), false)
 }
 
 // NetworkDelete calls NetworkService.DeleteNetwork, which stores the

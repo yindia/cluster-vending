@@ -26,6 +26,8 @@ type updateCluster struct {
 	// nil: the server has no such view and answers the resolved one.
 	requested *cloudv1.Cluster
 	updated   *cloudv1.UpdateClusterRequest
+	requests  []*cloudv1.UpdateClusterRequest
+	plan      *cloudv1.Plan
 }
 
 func (s *updateCluster) GetCluster(_ context.Context, req *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
@@ -37,7 +39,12 @@ func (s *updateCluster) GetCluster(_ context.Context, req *cloudv1.GetClusterReq
 
 func (s *updateCluster) UpdateCluster(_ context.Context, req *cloudv1.UpdateClusterRequest) (*cloudv1.UpdateClusterResponse, error) {
 	s.updated = req
-	return &cloudv1.UpdateClusterResponse{Cluster: s.current}, nil
+	s.requests = append(s.requests, proto.CloneOf(req))
+	plan := s.plan
+	if plan == nil {
+		plan = &cloudv1.Plan{PlanId: "cluster-plan", Applicable: true}
+	}
+	return &cloudv1.UpdateClusterResponse{Cluster: s.current, Plan: plan, UpdateRecorded: !req.GetValidateOnly()}, nil
 }
 
 // storedCluster is the cluster as GetCluster returns it: the stored spec,
@@ -46,7 +53,7 @@ func storedCluster() *cloudv1.Cluster {
 	return &cloudv1.Cluster{TenantId: "acme", Id: inferCluster, Name: "prod-eks", Etag: "etag-1", Labels: map[string]string{"env": "prod"},
 		Spec: &cloudv1.ClusterSpec{Region: "us-west-1",
 			ControlPlane:   &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.36"},
-			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_2,
+			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA,
 			Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: proto.Bool(true),
 				Addons: mergedAddons("metrics-server")}}}}
 }
@@ -101,9 +108,9 @@ func TestClusterUpdateInfersTheMask(t *testing.T) {
 		{name: "the region cannot change", noUpdate: true, wantErr: "spec.region cannot be changed",
 			manifest: clusterHead + "spec: {region: us-east-1}\n"},
 		// update has no --etag: it always sends the etag of the object it read.
-		{name: "the etag read is sent", wantMask: []string{"spec.tier"}, wantETag: "etag-1",
+		{name: "the etag read is sent", wantMask: []string{"spec.release_channel"}, wantETag: "etag-1",
 			opts:     Options{ETag: "mine"},
-			manifest: clusterHead + "spec: {region: us-west-1, tier: CLUSTER_TIER_1}\n"},
+			manifest: clusterHead + "spec: {region: us-west-1, releaseChannel: RELEASE_CHANNEL_ALPHA}\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -149,8 +156,10 @@ func TestClusterUpdateInfersTheMask(t *testing.T) {
 // updateNetwork answers GetNetwork with current and records UpdateNetwork.
 type updateNetwork struct {
 	cloudv1connect.NetworkServiceClient
-	current *cloudv1.Network
-	updated *cloudv1.UpdateNetworkRequest
+	current  *cloudv1.Network
+	updated  *cloudv1.UpdateNetworkRequest
+	requests []*cloudv1.UpdateNetworkRequest
+	plan     *cloudv1.Plan
 }
 
 func (s *updateNetwork) GetNetwork(context.Context, *cloudv1.GetNetworkRequest) (*cloudv1.GetNetworkResponse, error) {
@@ -159,7 +168,12 @@ func (s *updateNetwork) GetNetwork(context.Context, *cloudv1.GetNetworkRequest) 
 
 func (s *updateNetwork) UpdateNetwork(_ context.Context, req *cloudv1.UpdateNetworkRequest) (*cloudv1.UpdateNetworkResponse, error) {
 	s.updated = req
-	return &cloudv1.UpdateNetworkResponse{Network: s.current}, nil
+	s.requests = append(s.requests, proto.CloneOf(req))
+	plan := s.plan
+	if plan == nil {
+		plan = &cloudv1.Plan{PlanId: "network-plan", Applicable: true}
+	}
+	return &cloudv1.UpdateNetworkResponse{Network: s.current, Plan: plan, UpdateRecorded: !req.GetValidateOnly()}, nil
 }
 
 func TestNetworkUpdateInfersTheMask(t *testing.T) {
@@ -188,12 +202,35 @@ func TestNetworkUpdateInfersTheMask(t *testing.T) {
 // defaults it never states), it changes nothing, immutable fields and all;
 // with only its release channel edited it changes exactly that.
 func TestClusterUpdateReapplyingTheCreateManifest(t *testing.T) {
-	const example = "../../examples/cluster.yaml"
-	raw, err := os.ReadFile(example)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := LoadManifest(example, KindCluster)
+	// Keep this scenario independent of editable walkthrough examples. The
+	// explicit Beta baseline makes changing only the channel to Alpha meaningful.
+	const raw = `apiVersion: cluster-vending.io/v1
+kind: Cluster
+metadata:
+  name: prod-eks
+  tenant: acme
+  displayName: Production EKS
+  labels: {env: prod, team: platform}
+spec:
+  region: us-west-1
+  network:
+    networkId: 00000000-0000-0000-0000-000000000002
+  controlPlane:
+    kubernetesVersion: "1.35"
+    endpointAccess:
+      publicAccessCidrs: ["0.0.0.0/0"]
+    secretsEncryption: {enabled: true}
+  defaultNodePool:
+    instanceTypes: [t3.medium]
+    diskSizeGb: 30
+    scalingConfig: {minSize: 2, maxSize: 3}
+  releaseChannel: RELEASE_CHANNEL_BETA
+  upgradeMode: UPGRADE_MODE_AUTOMATIC
+  aws:
+    irsa: true
+    addons: [{name: metrics-server}]
+`
+	m, err := LoadManifest(writeManifest(t, raw), KindCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,14 +238,15 @@ func TestClusterUpdateReapplyingTheCreateManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	valid(t, "create manifest fixture", &cloudv1.CreateClusterRequest{TenantId: "acme", Cluster: created}, nil)
 	created.Id, created.Etag = inferCluster, "etag-1"
-	edited := strings.Replace(string(raw), "\nspec:\n", "\nspec:\n  releaseChannel: RELEASE_CHANNEL_ALPHA\n", 1)
+	edited := strings.Replace(raw, "releaseChannel: RELEASE_CHANNEL_BETA", "releaseChannel: RELEASE_CHANNEL_ALPHA", 1)
 	tests := []struct {
 		name     string
 		manifest string
 		wantMask []string
 	}{
-		{name: "the same manifest: nothing to change", manifest: string(raw)},
+		{name: "the same manifest: nothing to change", manifest: raw},
 		{name: "only the release channel edited", manifest: edited, wantMask: []string{"spec.release_channel"}},
 	}
 	for _, tt := range tests {
@@ -232,6 +270,9 @@ func TestClusterUpdateReapplyingTheCreateManifest(t *testing.T) {
 			if got := api.updated.GetUpdateMask().GetPaths(); !slices.Equal(got, tt.wantMask) || api.updated.GetCluster().GetEtag() != "etag-1" {
 				t.Errorf("mask %v, etag %q; want %v", got, api.updated.GetCluster().GetEtag(), tt.wantMask)
 			}
+			if api.updated.GetCluster().GetSpec().GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_ALPHA {
+				t.Errorf("release channel = %v, want Alpha", api.updated.GetCluster().GetSpec().GetReleaseChannel())
+			}
 		})
 	}
 }
@@ -246,15 +287,15 @@ func TestClusterUpdateIgnoresTheVersionOfAnAutomaticCluster(t *testing.T) {
 		wantMask []string
 		note     bool
 	}{
-		{"automatic", cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC, []string{"spec.tier"}, true},
-		{"manual", cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL, []string{"spec.control_plane.kubernetes_version", "spec.tier"}, false},
+		{"automatic", cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC, []string{"spec.release_channel"}, true},
+		{"manual", cloudv1.UpgradeMode_UPGRADE_MODE_MANUAL, []string{"spec.control_plane.kubernetes_version", "spec.release_channel"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			current := storedCluster()
 			current.Spec.UpgradeMode = tt.mode
 			api := &updateCluster{current: current}
-			manifest := clusterHead + "spec:\n  controlPlane: {kubernetesVersion: \"1.35\"}\n  tier: CLUSTER_TIER_1\n"
+			manifest := clusterHead + "spec:\n  controlPlane: {kubernetesVersion: \"1.35\"}\n  releaseChannel: RELEASE_CHANNEL_ALPHA\n"
 			var out, progress bytes.Buffer
 
 			err := Run(t.Context(), ClusterUpdate, Clients{Cluster: api},

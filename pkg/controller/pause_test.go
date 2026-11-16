@@ -10,18 +10,27 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
-	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
-var operatorPause = &model.Pause{By: "alice", Since: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), Reason: "provider upgrade"}
+var operatorPause = &model.Freeze{By: "alice", Since: time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), Reason: "provider upgrade"}
 
-func (w world) pauseTenant(t *testing.T, p *model.Pause) {
+func (w world) pauseTenant(t *testing.T, p *model.Freeze) {
 	t.Helper()
-	w.must(t, w.store.Tenants().SetPause(t.Context(), tenant, model.PauseTarget{}, p))
+	hold := &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: platform.FreezeName}}
+	if p == nil {
+		w.must(t, client.IgnoreNotFound(w.k.Delete(t.Context(), hold)))
+		return
+	}
+	hold.CreationTimestamp = metav1.NewTime(p.Since)
+	hold.Spec = cloudv1alpha1.ReleaseHoldSpec{Platform: true, By: p.By, Reason: p.Reason}
+	w.must(t, w.k.Create(t.Context(), hold))
 }
 
 // A network created while its tenant is paused is stored and not acted
@@ -48,11 +57,9 @@ func TestNetworkOfAPausedTenantWaitsForTheResume(t *testing.T) {
 		t.Fatalf("%d VPC objects of a paused network", n)
 	}
 	obj := w.network(t, "prod")
-	if obj.Annotations[cloudstore.AnnotationPaused] == "" {
-		t.Fatal("a network created in a paused tenant carries no pause")
-	}
+
 	if obj.Status.Phase != cloudv1alpha1.NetworkPhaseProvisioning ||
-		!strings.Contains(obj.Status.Message, "paused by alice since 2026-11-14T09:00:00Z (provider upgrade)") {
+		!strings.Contains(obj.Status.Message, "frozen by alice since 2026-11-14T09:00:00Z (provider upgrade)") {
 		t.Fatalf("phase %q, message %q", obj.Status.Phase, obj.Status.Message)
 	}
 

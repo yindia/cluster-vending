@@ -655,13 +655,31 @@ func TestDeleteNetworkInUse(t *testing.T) {
 	if err := f.store.Clusters().Create(t.Context(), c); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := uuid.Parse(c.ID); err != nil {
+		t.Fatalf("created cluster ID %q is not a UUID: %v", c.ID, err)
+	}
+	// Creating a cluster updates its network's etag; capture the guard's baseline afterward.
+	row, err = f.store.Networks().Get(t.Context(), tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = f.svc.DeleteNetwork(t.Context(), &cloudv1.DeleteNetworkRequest{TenantId: tenant, NetworkId: n.GetId()})
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("err = %v, want FAILED_PRECONDITION", err)
 	}
 	got, err := f.svc.GetNetwork(t.Context(), &cloudv1.GetNetworkRequest{TenantId: tenant, NetworkId: n.GetId(), Live: true})
-	if err != nil || got.GetNetwork().GetStatus().GetClusterIds()[0] != "eks" {
-		t.Errorf("cluster_ids = %v, %v", got.GetNetwork().GetStatus().GetClusterIds(), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := got.GetNetwork().GetStatus().GetClusterIds(); len(ids) != 1 || ids[0] != c.ID {
+		t.Errorf("cluster_ids = %v, want exactly the blocking cluster UUID %q (name %q)", ids, c.ID, c.Name)
+	}
+	after, err := f.store.Networks().Get(t.Context(), tenant, n.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != row.State || after.ETag != row.ETag {
+		t.Errorf("refused deletion changed network state/etag: %s/%s, want %s/%s", after.State, after.ETag, row.State, row.ETag)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/rollout"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -187,5 +188,9 @@ func (s *Service) GetReleaseChannel(ctx context.Context, req *cloudv1.GetRelease
 	for _, r := range res.Rows {
 		planned.Members = append(planned.Members, RolloutMemberFromRow(r))
 	}
-	return &cloudv1.GetReleaseChannelResponse{Channel: ChannelFromAPI(ch, true), Rollout: planned}, nil
+	frozen, err := s.deps.Freeze(ctx)
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	return &cloudv1.GetReleaseChannelResponse{Channel: ChannelFromAPI(ch, true), Rollout: planned, Freeze: reconcile.FreezeProto(frozen)}, nil
 }

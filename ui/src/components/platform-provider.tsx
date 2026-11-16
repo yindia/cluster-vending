@@ -1,0 +1,61 @@
+"use client";
+
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createBrowserClients, type BrowserClients } from "@/lib/api/client";
+import type { WhoAmIResponse } from "@/gen/cloud/v1/tenant_service_pb";
+import type { TenantInfo } from "@/gen/cloud/v1/tenant_directory_pb";
+import { sessionAccess } from "@/lib/api/access";
+
+interface Session { tenantId: string; token: string; revision: number; connectionRevision: number }
+interface PlatformContext {
+  api: BrowserClients;
+  tenantId: string;
+  scopeKey: string;
+  identity?: WhoAmIResponse;
+  confirmedTenants: readonly TenantInfo[];
+  rememberCreatedTenant: (tenant: TenantInfo) => void;
+  canWrite: boolean;
+  liveUpdates: boolean;
+  setLiveUpdates: (enabled: boolean) => void;
+  setIdentity: (identity?: WhoAmIResponse) => void;
+  connect: (tenantId: string, token?: string) => void;
+  disconnect: () => void;
+}
+const Platform = createContext<PlatformContext | null>(null);
+
+function sessionClients(session: Session) {
+  return createBrowserClients({ baseUrl: "/api/rpc", bearerToken: session.token || undefined });
+}
+
+export function PlatformProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session>({ tenantId: "acme", token: "", revision: 0, connectionRevision: 0 });
+  const [identity, setIdentity] = useState<WhoAmIResponse>();
+  const [confirmed, setConfirmed] = useState<{ scope: string; tenants: TenantInfo[] }>();
+  const [liveUpdates, setLiveUpdates] = useState(false);
+  const api = useMemo(() => sessionClients(session), [session]);
+  const { canWrite } = sessionAccess(identity, session.tenantId);
+  // Tenant switches remount the console, but do not change the credential connection.
+  // Never expose prior confirmations before WhoAmI verifies the same principal and grants again.
+  const grantScope = identity ? [...new Set(identity.grants.map((grant) => JSON.stringify([grant.role, [...new Set(grant.tenants)].sort()])))].sort() : undefined;
+  const confirmationScope = identity ? JSON.stringify([session.connectionRevision, identity.anonymous, identity.issuer, identity.subject, identity.username, grantScope]) : undefined;
+  const confirmedTenants = confirmationScope && confirmed?.scope === confirmationScope ? confirmed.tenants : [];
+  const rememberCreatedTenant = useCallback((tenant: TenantInfo) => {
+    if (!confirmationScope) return;
+    setConfirmed((previous) => ({
+      scope: confirmationScope,
+      tenants: [...(previous?.scope === confirmationScope ? previous.tenants.filter((item) => item.id !== tenant.id) : []), tenant],
+    }));
+  }, [confirmationScope]);
+  const connect = useCallback((tenantId: string, token?: string) => {
+    setIdentity(undefined);
+    setSession((previous) => ({ tenantId: tenantId.trim(), token: token?.trim() ?? previous.token, revision: previous.revision + 1, connectionRevision: previous.connectionRevision + (token !== undefined && token.trim() !== previous.token ? 1 : 0) }));
+  }, []);
+  const disconnect = useCallback(() => { setIdentity(undefined); setSession((previous) => ({ tenantId: previous.tenantId, token: "", revision: previous.revision + 1, connectionRevision: previous.connectionRevision + 1 })); }, []);
+  return <Platform value={{ api, tenantId: session.tenantId, scopeKey: `${session.tenantId}:${session.revision}`, identity, confirmedTenants, rememberCreatedTenant, canWrite, liveUpdates, setLiveUpdates, connect, disconnect, setIdentity }}>{children}</Platform>;
+}
+
+export function usePlatform() {
+  const context = useContext(Platform);
+  if (!context) throw new Error("Platform client must be used within PlatformProvider");
+  return context;
+}

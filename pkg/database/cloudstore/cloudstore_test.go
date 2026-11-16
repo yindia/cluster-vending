@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,7 +43,7 @@ func document(t *testing.T, m proto.Message) model.JSON {
 // networkSpec is a contract spec with everything a network can say, for
 // the row's account and region.
 func networkSpec(n *model.Network) *cloudv1.NetworkSpec {
-	return &cloudv1.NetworkSpec{Region: n.Region, BootstrapId: n.CloudAccountID,
+	return &cloudv1.NetworkSpec{Tier: cloudv1.Tier_TIER_0, Region: n.Region, BootstrapId: n.CloudAccountID,
 		Layout: &cloudv1.NetworkLayout{CidrBlock: "10.0.0.0/16", NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE,
 			Subnets: []*cloudv1.Subnet{
 				{Role: cloudv1.SubnetRole_SUBNET_ROLE_PUBLIC, CidrBlock: "10.0.224.0/22", ZoneId: "use1-az1"},
@@ -69,7 +70,7 @@ func clusterSpec(c *model.Cluster) *cloudv1.ClusterSpec {
 				Type: cloudv1.AccessEntryType_ACCESS_ENTRY_TYPE_STANDARD, Policies: []*cloudv1.AccessPolicy{{
 					PolicyArn: "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy",
 					Scope:     cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_NAMESPACE, Namespaces: []string{"dev"}}}}}},
-		ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_1,
+		ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA,
 		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{
 			AccessConfig:           &cloudv1.AwsAccessConfig{AuthenticationMode: cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_API},
 			EnabledClusterLogTypes: []cloudv1.AwsClusterLogType{cloudv1.AwsClusterLogType_AWS_CLUSTER_LOG_TYPE_AUDIT},
@@ -159,7 +160,7 @@ func TestRowsAreObjectsOfTheKinds(t *testing.T) {
 	if err := w.k.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "prod"}, cluster); err != nil {
 		t.Fatal(err)
 	}
-	if cs := cluster.Spec; cs.Network.NetworkRef.Name != "shared" || cs.Tier != cloudv1alpha1.ClusterTier1 ||
+	if cs := cluster.Spec; cs.Network.NetworkRef.Name != "shared" ||
 		cs.ReleaseChannel != cloudv1alpha1.ReleaseChannelBeta || cs.DefaultNodePool.Scaling.MaxSize != 3 || cs.AWS == nil {
 		t.Errorf("cluster spec = %+v", cs)
 	}
@@ -179,7 +180,7 @@ func TestAnEditOfTheTypedSpecIsRead(t *testing.T) {
 	if err := w.k.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "prod"}, obj); err != nil {
 		t.Fatal(err)
 	}
-	obj.Spec.Tier, obj.Spec.DefaultNodePool.Scaling.MaxSize, obj.Spec.Tags = cloudv1alpha1.ClusterTier0, 9, cloudv1alpha1.Tags{"cost": "x"}
+	obj.Spec.DefaultNodePool.Scaling.MaxSize, obj.Spec.Tags = 9, cloudv1alpha1.Tags{"cost": "x"}
 	if err := w.k.Update(ctx, obj); err != nil {
 		t.Fatal(err)
 	}
@@ -191,9 +192,9 @@ func TestAnEditOfTheTypedSpecIsRead(t *testing.T) {
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	if spec.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_0 || spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 9 ||
+	if spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 9 ||
 		row.Labels["cost"] != "x" || row.ETag != c.ETag {
-		t.Errorf("row after the edit: tier %s, max size %d, labels %v", spec.GetTier(), spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize(), row.Labels)
+		t.Errorf("row after the edit: max size %d, labels %v", spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize(), row.Labels)
 	}
 }
 
@@ -207,7 +208,7 @@ func TestImportedNetwork(t *testing.T) {
 	request := &cloudv1.ImportNetworkRequest{TenantId: "acme", Name: "legacy", Region: "us-east-1", BootstrapId: w.account,
 		Provider: &cloudv1.ImportNetworkRequest_Aws{Aws: &cloudv1.AwsImportNetwork{VpcId: vpc, SubnetIds: []string{"subnet-0123456789abcdef0"}}}}
 	// A layout the kind's own rules would refuse: no private subnet.
-	discovered := &cloudv1.NetworkSpec{Region: "us-east-1", BootstrapId: w.account, Layout: &cloudv1.NetworkLayout{CidrBlock: "172.31.0.0/16",
+	discovered := &cloudv1.NetworkSpec{Tier: cloudv1.Tier_TIER_0, Region: "us-east-1", BootstrapId: w.account, Layout: &cloudv1.NetworkLayout{CidrBlock: "172.31.0.0/16",
 		NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_SINGLE,
 		Subnets:        []*cloudv1.Subnet{{Role: cloudv1.SubnetRole_SUBNET_ROLE_PUBLIC, CidrBlock: "172.31.0.0/20", ZoneId: "use1-az1"}}}}
 	plan := &cloudv1.NetworkStatus{Import: &cloudv1.ImportStatus{Phase: cloudv1.ImportPhase_IMPORT_PHASE_PLANNED,
@@ -428,24 +429,26 @@ func TestOwnersWithDependentsStay(t *testing.T) {
 	storetest.MustTenant(t, w.s, "acme")
 }
 
-// A namespace that exists (the bootstrap applies it too) becomes the
-// tenant's; a tenant is not created twice.
-func TestTenantAdoptsItsNamespace(t *testing.T) {
+// A namespace without an ownership marker is never adopted by registration.
+func TestTenantRejectsUnmarkedNamespace(t *testing.T) {
 	k := newClient(t)
 	ctx := t.Context()
-	if err := k.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"x": "y"}}}); err != nil {
+	original := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"x": "y"}}}
+	if err := k.Create(ctx, original); err != nil {
 		t.Fatal(err)
 	}
 	s := cloudstore.New(k)
 	if _, err := s.Tenants().Get(ctx, "acme"); !errors.Is(err, repository.ErrNotFound) {
-		t.Fatalf("a namespace nobody marked is a tenant: %v", err)
+		t.Fatalf("unmarked namespace was a tenant: %v", err)
 	}
-	storetest.MustTenant(t, s, "acme")
+	storetest.RequireErr(t, s.Tenants().Create(ctx, &model.Tenant{ID: "acme"}), repository.ErrConflict)
 	ns := &corev1.Namespace{}
-	if err := k.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil || ns.Labels["x"] != "y" || ns.Labels[cloudstore.LabelTenant] != "acme" {
-		t.Errorf("namespace labels = %v (%v)", ns.Labels, err)
+	if err := k.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil || ns.Labels["x"] != "y" || ns.Labels[cloudstore.LabelTenant] != "" || ns.ResourceVersion != original.ResourceVersion {
+		t.Fatalf("collision changed namespace: %#v (%v)", ns, err)
 	}
-	storetest.RequireErr(t, s.Tenants().Create(ctx, &model.Tenant{ID: "acme"}), repository.ErrAlreadyExists)
+	if err := k.Get(ctx, client.ObjectKey{Name: "acme"}, &cloudv1alpha1.Tenant{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("failed create left registration: %v", err)
+	}
 }
 
 // Of creates that race for one value, one is stored: a name, a create

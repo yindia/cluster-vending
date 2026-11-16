@@ -20,10 +20,10 @@ func cluster(name string, tier cloudv1alpha1.ClusterTier, version string) cloudv
 	return cloudv1alpha1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tenant-acme",
 			Labels: map[string]string{cloudstore.LabelID: "id-" + name, cloudstore.LabelTenant: "acme"}},
-		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable, Tier: tier,
+		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable,
 			UpgradeMode:  cloudv1alpha1.UpgradeModeAutomatic,
 			ControlPlane: &cloudv1alpha1.ControlPlaneSpec{KubernetesVersion: version}},
-		Status: cloudv1alpha1.ClusterStatus{Phase: cloudv1alpha1.ClusterPhaseRunning, CurrentKubernetesVersion: version,
+		Status: cloudv1alpha1.ClusterStatus{Tier: tier, Phase: cloudv1alpha1.ClusterPhaseRunning, CurrentKubernetesVersion: version,
 			Conditions: []metav1.Condition{
 				{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: ready},
 				{Type: cloudv1alpha1.ConditionPlatformComponentsReady, Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: ready},
@@ -158,14 +158,6 @@ func TestHoldsMatchClusters(t *testing.T) {
 		{"another ID", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-dev"}, false},
 		{"its ID, until later", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-prod", Until: &future}, true},
 		{"its ID, until passed", cloudv1alpha1.ReleaseHoldSpec{ClusterID: "id-prod", Until: &past}, false},
-		{"its tenant", cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme"}, true},
-		{"another tenant", cloudv1alpha1.ReleaseHoldSpec{TenantID: "globex"}, false},
-		{"its channel", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable"}, true},
-		{"its channel and tier", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Tier: cloudv1alpha1.ClusterTier0}, true},
-		{"its channel, another tier", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Tier: cloudv1alpha1.ClusterTier2}, false},
-		{"another channel", cloudv1alpha1.ReleaseHoldSpec{Channel: "beta"}, false},
-		{"its channel, let through", cloudv1alpha1.ReleaseHoldSpec{Channel: "stable", Except: []string{"id-prod"}}, false},
-		{"its tenant, another let through", cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme", Except: []string{"id-dev"}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

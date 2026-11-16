@@ -31,7 +31,6 @@ func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1
 		DefaultNodePool:   nodePoolToAPI(p.GetDefaultNodePool()),
 		Access:            accessToAPI(p.GetAccess()),
 		ReleaseChannel:    cloudv1alpha1.ReleaseChannelName(camel(p.GetReleaseChannel(), prefixReleaseChannel)),
-		Tier:              cloudv1alpha1.ClusterTier(camel(p.GetTier(), prefixTier)),
 		UpgradeMode:       cloudv1alpha1.UpgradeMode(camel(p.GetUpgradeMode(), prefixUpgradeMode)),
 		MaintenanceWindow: windowToAPI(p.GetMaintenanceWindow()),
 		AWS:               awsToAPI(p.GetAws()),
@@ -77,7 +76,7 @@ func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, _ *cloudv
 		Access:          accessFromAPI(s.Access),
 		ReleaseChannel: cloudv1.ReleaseChannel(uncamel(
 			cloudv1.ReleaseChannel(0).Descriptor(), prefixReleaseChannel, string(s.ReleaseChannel))),
-		Tier: cloudv1.ClusterTier(uncamel(cloudv1.ClusterTier(0).Descriptor(), prefixTier, string(s.Tier))),
+
 		UpgradeMode: cloudv1.UpgradeMode(uncamel(
 			cloudv1.UpgradeMode(0).Descriptor(), prefixUpgradeMode, string(s.UpgradeMode))),
 		MaintenanceWindow: windowFromAPI(s.MaintenanceWindow),

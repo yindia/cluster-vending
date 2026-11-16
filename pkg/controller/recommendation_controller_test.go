@@ -9,7 +9,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/recommend"
 	"github.com/yindia/cluster-vending/pkg/reconcile/recommendations"
 )
@@ -74,9 +73,7 @@ func TestClusterThatIsNotSampled(t *testing.T) {
 		change func(*testing.T, world)
 	}{
 		{"paused by an operator", func(t *testing.T, w world) {
-			obj := w.cluster(t, "prod")
-			obj.Annotations = map[string]string{cloudstore.AnnotationPaused: `{"by":"ops"}`}
-			w.must(t, w.k.Update(t.Context(), obj))
+			w.pauseTenant(t, operatorPause)
 		}},
 		{"not running yet", func(t *testing.T, w world) {
 			obj := w.cluster(t, "prod")

@@ -17,6 +17,9 @@ rules:
 - apiGroups:
   - cloud.cluster-vending.io
   resources:
+  - tenants
+  - tenants/status
+  - tenants/finalizers
   - cloudaccounts
   - cloudaccounts/status
   - networks
@@ -81,8 +84,8 @@ rules:
   - get
   - create
   - delete
-# A tenant is its namespace: created or adopted when the tenant is, never
-# deleted by the server.
+# TenantService.CreateTenant creates the canonical Tenant CR and ensures its
+# known-owned namespace synchronously. The server never deletes namespaces.
 - apiGroups:
   - ""
   resources:
@@ -221,9 +224,9 @@ rules:
   - get
   - list
   - watch
-# An account's ProviderConfig: BootstrapTenant still applies it itself (and
-# the tenant namespace above) when the account is stored; the controller
-# reconciles it from then on (pkg/reconcile/account).
+# Account ProviderConfigs are reconciled by the controller. The server reads
+# them and may dry-run a reviewed plan; account registration creates neither a
+# ProviderConfig nor a tenant namespace.
 - apiGroups:
   - aws.m.upbound.io
   resources:

@@ -9,13 +9,22 @@ that keeps its rows as these objects
 (`pkg/database/cloudstore`). None of it has run against a real API server
 or AWS; it is tested on a fake API server only.
 
+See [Provider adapters, inventory and update plans](providers-and-plans.md) for
+the Kubernetes inventory fields, resource deletion previews and the extension
+points for a future GCP backend.
+
+See [Prometheus metrics](metrics.md) for RPC and controller fleet metrics,
+scrape configuration, scaling queries and example alert rules.
+
 ## API
 
-Group `cloud.cluster-vending.io`, version `v1alpha1`. Every kind is
-namespaced; the tenant is the namespace.
+Group `cloud.cluster-vending.io`, version `v1alpha1`. `Tenant` is cluster
+scoped and registers a tenant. Its controller creates and maintains the
+`tenant-<id>` namespace; accounts, networks and clusters live there.
 
 | Kind | Short name | Owned by | Owns |
 |---|---|---|---|
+| `Tenant` | `cvtenant` | (nothing) | namespace registration, without a garbage-collection owner reference |
 | `CloudAccount` | `cvacct` | (nothing) | its `Network`s |
 | `Network` | `cvnet` | one `CloudAccount` (`spec.accountRef`) | its `Cluster`s |
 | `Cluster` | `cvc` | one `Network` (`spec.network.networkRef`) | (nothing) |
@@ -35,8 +44,26 @@ conventions (camelCase, string enums, `metav1.Condition`). `pkg/convert`
 translates between the two, both ways without loss.
 
 The API server keeps its state in these kinds (`pkg/database/cloudstore`,
-the only store): a tenant is its namespace, and every account, network and
-cluster the API knows is an object here.
+the only store). Cloud-account creation requires an existing `Tenant` and
+its correctly labeled, active namespace; it never creates either implicitly.
+Deleting tenant registration retains the namespace. Existing labeled tenant
+namespaces are migrated by the tenant controller.
+
+`ReleaseHold` remains the freeze policy authority. The tenant controller
+reflects effective platform or tenant freezes in `Tenant.status.freeze` and
+the `crossplane.io/paused` annotation, preserving independently applied pauses.
+
+```sh
+cluster-vending tenant create acme
+cluster-vending tenant list
+cluster-vending tenant freeze --tenant acme --reason maintenance --wait
+cluster-vending tenant freeze status --tenant acme
+cluster-vending tenant unfreeze --tenant acme --wait
+```
+
+Tenant commands use `TenantService` and accept only the caller's permitted
+tenant, network or cluster targets. Platform operations remain in the operator
+`admin` commands through `AdminService`.
 
 ## Layout
 
@@ -583,40 +610,99 @@ runs, the minor it moves to next, its state, since when, why it is blocked,
 its ID and the gate code. All of them are read-only and support
 `-o yaml|json` (the plan is the `plan` field).
 
-### Admin: pause and freeze
+### Network tiers and cluster channels
 
-Two things stop the platform, each with its own pair of commands:
+A Network owns `spec.tier` (`Tier0`, `Tier1`, `Tier2`; default `Tier0`).
+All clusters on that network inherit the same tier, reported in their
+`status.tier`. Clusters retain their own `spec.releaseChannel`: two clusters
+sharing a network may follow Alpha and Stable while sharing Tier0.
+The rollout planner reads the network tier directly, including before
+starting an upgrade, so a stale cluster status cannot choose its tier.
+Network tier edits replan the rollout and refresh cluster status. Kubernetes
+upgrades, release moves and code changes recheck the live parent tier before
+starting. An orphaned cluster blocks its own channel, not unrelated channels.
+Networks without channel-bound clusters use their own tier and wait for all
+configured platform code rollouts to reach it; missing rollout plans hold them.
 
-| | `admin pause` / `admin resume` | `admin freeze` / `admin unfreeze` |
-|---|---|---|
-| Stops | everything: the platform and the Crossplane providers do not act on it | automatic changes only: Kubernetes upgrades, release moves, add-on upgrades, code changes |
-| The clusters | keep running in AWS; nothing is created, changed, repaired or deleted; what is asked for meanwhile is done after the resume | are reconciled, repaired and updated as users ask |
-| Use it for | an incident, a provider upgrade, a fix by hand | a risky deploy (a new controller build), a quiet period ("not this quarter") |
-| Target | a tenant (`--tenant`), one of its networks or clusters (`--network`, `--cluster`), or a channel's clusters (`--channel`, `--tier`) | the platform (no flag), a tenant (`--tenant`), or a channel's clusters (`--channel`, `--tier`) |
-| By tenant or channel | pauses the clusters on it now; one that joins later is not paused | covers the clusters that join later too |
-| One let through | resume it on its own | `admin unfreeze <target> --cluster <id>` or `--network <id>` |
+For API manifests use `spec.tier: TIER_0` on a Network. Cluster `spec.tier`
+is deprecated and rejected on create/update; move it to the network.
+Existing networks without a tier conservatively inherit Tier0. If previous
+cluster tiers differed, choose the network tier explicitly before rollout.
+
+### Admin: scoped freeze
+
+A freeze request first reports `Freezing`. The controller drains active
+reconciliations, pauses held managed resources and records its acknowledgement
+of that request in the Kubernetes ReleaseHold status. Only then does the
+status become `Frozen`. Use `--wait` before a risky deployment; a successful
+request alone is not confirmation. If the controller is stopped, confirmation
+waits until it returns. A freeze changed during confirmation is checked again.
+Confirmation assumes one elected controller manager (or one local manager).
+It does not cancel AWS operations the providers already submitted.
+
+Freeze can target the platform, a tenant, a network or one cluster. A tenant
+scope covers its accounts, networks and clusters; a network scope covers the
+network and every cluster on it. A cluster scope covers only that cluster.
+
+A freeze stops cloud account, network and cluster actions in its scope,
+including upgrades, repairs, import discovery and deletion. The controller
+still records status. Platform-managed AWS resources and Helm Releases get
+`crossplane.io/paused: "true"`, so Crossplane also stops reconciling them.
+Existing workloads keep running; AWS operations already submitted cannot
+be cancelled by freezing.
 
 ```sh
-cluster-vending admin pause --tenant acme --reason "provider-aws upgrade"
-cluster-vending admin freeze --reason "controller 0.9 rollout"
-cluster-vending admin freeze --channel beta --tier 0 --reason "quarter-end" --until 2026-12-31
-cluster-vending admin pause list        # TARGET WHAT BY SINCE UNTIL CLUSTERS REASON; WHAT: everything | automatic changes
-cluster-vending admin unfreeze --cluster <id>              # the platform stays frozen; this cluster and its network go ahead
-cluster-vending admin unfreeze --channel beta --tier 0
+cluster-vending admin freeze --platform --reason "controller rollout" --wait
+cluster-vending admin freeze status
+cluster-vending admin freeze --reset-exceptions --reason "refreeze canaries" --wait
+cluster-vending admin freeze --reason "maintenance" --until 2026-12-31
+cluster-vending admin freeze --network <id> --reason "network maintenance" --wait
+cluster-vending admin freeze --cluster <id> --reason "cluster maintenance" --wait
+cluster-vending admin freeze --tenant acme --reason "tenant maintenance" --wait
+cluster-vending admin unfreeze --cluster <id> --wait # shared network stays frozen
+cluster-vending admin unfreeze --tenant acme # includes its networks and clusters
+cluster-vending admin unfreeze --network <id> # includes its clusters
+cluster-vending admin unfreeze --platform    # the whole platform
 ```
 
-- `--until` (RFC 3339, or a date: its start in UTC) ends a pause or a freeze
-  by itself. Without it, it lasts until `admin resume` or `admin unfreeze`.
-- Pauses add up, and so do freezes: a resume or unfreeze removes the one it
-  names (same target) and nothing else. A cluster paused on its own stays
-  paused when its channel's tier or its tenant is resumed.
-- To keep one cluster on the version it runs, set its `upgradeMode` to
-  Manual rather than freezing it.
-- `cluster get` shows a pause on its `Paused:` line (`everything: …`) and a
-  freeze on its `Frozen:` line (`automatic changes: …`), with why, the
-  scope it was asked at, who, since and until when; a cluster a freeze
-  holds back is listed with the gate `FROZEN` (`<target> is frozen:
-  <reason>`).
+`admin freeze status` lists phase, reason, expiry, exceptions and provider
+pause totals. Repeating freeze preserves exceptions; `--reset-exceptions`
+clears them without unfreezing the platform. Unfreeze is asynchronous too:
+status remains `Unfreezing` while freeze-owned provider pauses remain.
+Use `admin unfreeze --cluster/--network/--tenant <id> --wait` to wait for
+that scope independently of other freezes. `admin freeze status` accepts
+the same scope flags. Confirmation is bound to the requested policy revision;
+a concurrent freeze change aborts the wait rather than confirming another request.
+
+The latest matching scoped action wins. A tenant-wide unfreeze clears
+nested network and cluster freezes in that tenant; network-wide unfreeze
+clears nested cluster freezes. Platform unfreeze clears all scopes. A later
+specific freeze can hold one resource again. There are no channel/tier
+freeze flags and no separate pause/resume commands.
+
+A cluster exception does not unpause its shared network. Required network
+tag changes or tag cleanup wait for network unfreeze. Automatic changes
+still follow their channel, inherited tier, health gates and maintenance
+window after being let through.
+
+Creates, updates and deletes are accepted and stored as Kubernetes custom
+resources during a freeze. Their cloud changes wait until unfreeze.
+`--until` ends the freeze automatically while the controller is running.
+Crossplane annotations stay in force when the controller is stopped, so
+expiry waits for it to return.
+
+`cluster get` and `network get` show `Frozen:`, including exceptions;
+`admin channel get` shows the freeze above the channel. Unfreeze removes
+freeze-owned pause annotations; resources paused manually beforehand stay
+paused. The RPCs share a `FreezeTarget` (one of platform, tenant, network, cluster)
+and a `FreezeStatus` with typed phase, echoed target, revision and progress.
+CLI JSON/YAML output uses this same status shape for freeze, unfreeze and status.
+Legacy flat RPC fields and target-less platform commands remain supported;
+new automation should use explicit targets. Scoped freeze waits and counts
+cover the selected scope independently of unrelated provider pause failures.
+
+State is `ReleaseHold/platform-freeze` in the management cluster,
+with no database.
 
 ### Freeze and code changes
 
@@ -637,8 +723,8 @@ it is not applied at once: it rolls out like a Kubernetes upgrade.
   `maxFailed`, maintenance windows, health, pauses and freezes. Manual
   clusters are members too: the change is the platform's, not a version.
   A cluster on no channel goes when nothing freezes it.
-- **Networks first.** A network takes the most careful tier of its
-  clusters (tier 2 without clusters) and goes when the code rollout of each
+- **Networks first.** A network uses its own tier, shared by all its
+  clusters, and goes when the code rollout of each
   of its clusters' channels reaches that tier; its clusters of that tier
   wait for it. Earlier tiers go before it.
 - **Applied, recovered, halted.** An admitted change is applied

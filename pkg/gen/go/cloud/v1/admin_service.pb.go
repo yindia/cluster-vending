@@ -7,12 +7,9 @@
 package cloudv1
 
 import (
-	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -23,361 +20,15 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type PauseReconcileRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tenant whose managed resources are paused. Not with channel.
-	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// Only this cluster's managed resources (Cluster.id); empty: all the
-	// tenant's, networks included.
-	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	// Why, shown with the pause (status.pause.reason). Optional.
-	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
-	// Only this network (Network.id): the network row and its own managed
-	// resources, not its clusters. Not with cluster_id.
-	NetworkId string `protobuf:"bytes,4,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
-	// Every cluster on this release channel now, of every tenant, each
-	// paused as by cluster_id (a cluster that joins later is not: freeze the
-	// channel to keep automatic changes from what joins it). Not with
-	// tenant_id.
-	Channel ReleaseChannel `protobuf:"varint,5,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
-	// Only the channel's clusters of this tier (a cluster with no tier is
-	// tier 0). Only with channel.
-	Tier ClusterTier `protobuf:"varint,6,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
-	// When the pause ends by itself; unset: at a resume only. In the future.
-	Until         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=until,proto3" json:"until,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PauseReconcileRequest) Reset() {
-	*x = PauseReconcileRequest{}
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PauseReconcileRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PauseReconcileRequest) ProtoMessage() {}
-
-func (x *PauseReconcileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PauseReconcileRequest.ProtoReflect.Descriptor instead.
-func (*PauseReconcileRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_service_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *PauseReconcileRequest) GetTenantId() string {
-	if x != nil {
-		return x.TenantId
-	}
-	return ""
-}
-
-func (x *PauseReconcileRequest) GetClusterId() string {
-	if x != nil {
-		return x.ClusterId
-	}
-	return ""
-}
-
-func (x *PauseReconcileRequest) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-func (x *PauseReconcileRequest) GetNetworkId() string {
-	if x != nil {
-		return x.NetworkId
-	}
-	return ""
-}
-
-func (x *PauseReconcileRequest) GetChannel() ReleaseChannel {
-	if x != nil {
-		return x.Channel
-	}
-	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
-}
-
-func (x *PauseReconcileRequest) GetTier() ClusterTier {
-	if x != nil {
-		return x.Tier
-	}
-	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
-}
-
-func (x *PauseReconcileRequest) GetUntil() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Until
-	}
-	return nil
-}
-
-type PauseReconcileResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Managed resources that are paused now (already paused ones included).
-	Resources int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
-	// Clusters the pause covers now.
-	Clusters int32 `protobuf:"varint,2,opt,name=clusters,proto3" json:"clusters,omitempty"`
-	// What else to know, e.g. that clusters joining a channel later are not
-	// paused by a full pause of it.
-	Note          string `protobuf:"bytes,3,opt,name=note,proto3" json:"note,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PauseReconcileResponse) Reset() {
-	*x = PauseReconcileResponse{}
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PauseReconcileResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PauseReconcileResponse) ProtoMessage() {}
-
-func (x *PauseReconcileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PauseReconcileResponse.ProtoReflect.Descriptor instead.
-func (*PauseReconcileResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_service_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *PauseReconcileResponse) GetResources() int32 {
-	if x != nil {
-		return x.Resources
-	}
-	return 0
-}
-
-func (x *PauseReconcileResponse) GetClusters() int32 {
-	if x != nil {
-		return x.Clusters
-	}
-	return 0
-}
-
-func (x *PauseReconcileResponse) GetNote() string {
-	if x != nil {
-		return x.Note
-	}
-	return ""
-}
-
-type ResumeReconcileRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tenant whose managed resources are resumed. Not with channel.
-	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// Only this cluster's managed resources (Cluster.id); empty: all the
-	// tenant's.
-	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	// Only this network (Network.id): the network row and its own managed
-	// resources, not its clusters. Not with cluster_id.
-	NetworkId string `protobuf:"bytes,3,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
-	// The pause of this channel's clusters (PauseReconcileRequest.channel):
-	// only what was paused at that channel (and tier) is resumed; a cluster
-	// also paused on its own, or by another pause, stays paused.
-	Channel ReleaseChannel `protobuf:"varint,4,opt,name=channel,proto3,enum=cloud.v1.ReleaseChannel" json:"channel,omitempty"`
-	// The tier the channel's pause was asked for (none: the whole channel's).
-	Tier          ClusterTier `protobuf:"varint,5,opt,name=tier,proto3,enum=cloud.v1.ClusterTier" json:"tier,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResumeReconcileRequest) Reset() {
-	*x = ResumeReconcileRequest{}
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResumeReconcileRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResumeReconcileRequest) ProtoMessage() {}
-
-func (x *ResumeReconcileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResumeReconcileRequest.ProtoReflect.Descriptor instead.
-func (*ResumeReconcileRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_service_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *ResumeReconcileRequest) GetTenantId() string {
-	if x != nil {
-		return x.TenantId
-	}
-	return ""
-}
-
-func (x *ResumeReconcileRequest) GetClusterId() string {
-	if x != nil {
-		return x.ClusterId
-	}
-	return ""
-}
-
-func (x *ResumeReconcileRequest) GetNetworkId() string {
-	if x != nil {
-		return x.NetworkId
-	}
-	return ""
-}
-
-func (x *ResumeReconcileRequest) GetChannel() ReleaseChannel {
-	if x != nil {
-		return x.Channel
-	}
-	return ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED
-}
-
-func (x *ResumeReconcileRequest) GetTier() ClusterTier {
-	if x != nil {
-		return x.Tier
-	}
-	return ClusterTier_CLUSTER_TIER_UNSPECIFIED
-}
-
-type ResumeReconcileResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Managed resources that are reconciled again now.
-	Resources int32 `protobuf:"varint,1,opt,name=resources,proto3" json:"resources,omitempty"`
-	// Clusters resumed (of a channel's pause).
-	Clusters      int32 `protobuf:"varint,2,opt,name=clusters,proto3" json:"clusters,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResumeReconcileResponse) Reset() {
-	*x = ResumeReconcileResponse{}
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResumeReconcileResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResumeReconcileResponse) ProtoMessage() {}
-
-func (x *ResumeReconcileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_admin_service_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResumeReconcileResponse.ProtoReflect.Descriptor instead.
-func (*ResumeReconcileResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_admin_service_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *ResumeReconcileResponse) GetResources() int32 {
-	if x != nil {
-		return x.Resources
-	}
-	return 0
-}
-
-func (x *ResumeReconcileResponse) GetClusters() int32 {
-	if x != nil {
-		return x.Clusters
-	}
-	return 0
-}
-
 var File_cloud_v1_admin_service_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1acloud/v1/admin_pause.proto\x1a\x1ccloud/v1/admin_release.proto\x1a\x16cloud/v1/cluster.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8d\a\n" +
-	"\x15PauseReconcileRequest\x12M\n" +
-	"\ttenant_id\x18\x01 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
-	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12 \n" +
-	"\x06reason\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x06reason\x12*\n" +
-	"\n" +
-	"network_id\x18\x04 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId\x12<\n" +
-	"\achannel\x18\x05 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
-	"\x04tier\x18\x06 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier\x120\n" +
-	"\x05until\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x05until:\xf0\x03\xbaH\xec\x03\x1as\n" +
-	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\x1a\x93\x01\n" +
-	"\n" +
-	"target.one\x12Rset tenant_id (with cluster_id or network_id for one of its), or channel; not both\x1a1(size(this.tenant_id) > 0) != (this.channel != 0)\x1a\x95\x01\n" +
-	"\rchannel.alone\x123a channel's pause takes no cluster_id or network_id\x1aOthis.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)\x1aG\n" +
-	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0J\x04\b\a\x10\bR\ronly_upgrades\"f\n" +
-	"\x16PauseReconcileResponse\x12\x1c\n" +
-	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
-	"\bclusters\x18\x02 \x01(\x05R\bclusters\x12\x12\n" +
-	"\x04note\x18\x03 \x01(\tR\x04note\"\xbb\x06\n" +
-	"\x16ResumeReconcileRequest\x12M\n" +
-	"\ttenant_id\x18\x01 \x01(\tB0\xbaH-\xd8\x01\x01r(\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12*\n" +
-	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tclusterId\x12*\n" +
-	"\n" +
-	"network_id\x18\x03 \x01(\tB\v\xbaH\b\xd8\x01\x01r\x03\xb0\x01\x01R\tnetworkId\x12<\n" +
-	"\achannel\x18\x04 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\achannel\x123\n" +
-	"\x04tier\x18\x05 \x01(\x0e2\x15.cloud.v1.ClusterTierB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04tier:\xf1\x03\xbaH\xed\x03\x1as\n" +
-	"\tscope.one\x12,set at most one of cluster_id and network_id\x1a8size(this.cluster_id) == 0 || size(this.network_id) == 0\x1a\x93\x01\n" +
-	"\n" +
-	"target.one\x12Rset tenant_id (with cluster_id or network_id for one of its), or channel; not both\x1a1(size(this.tenant_id) > 0) != (this.channel != 0)\x1a\x96\x01\n" +
-	"\rchannel.alone\x124a channel's resume takes no cluster_id or network_id\x1aOthis.channel == 0 || (size(this.cluster_id) == 0 && size(this.network_id) == 0)\x1aG\n" +
-	"\ftier.channel\x12\x12tier needs channel\x1a#this.tier == 0 || this.channel != 0J\x04\b\x06\x10\aR\ronly_upgrades\"S\n" +
-	"\x17ResumeReconcileResponse\x12\x1c\n" +
-	"\tresources\x18\x01 \x01(\x05R\tresources\x12\x1a\n" +
-	"\bclusters\x18\x02 \x01(\x05R\bclusters2\xf7\x05\n" +
-	"\fAdminService\x12S\n" +
-	"\x0ePauseReconcile\x12\x1f.cloud.v1.PauseReconcileRequest\x1a .cloud.v1.PauseReconcileResponse\x12V\n" +
-	"\x0fResumeReconcile\x12 .cloud.v1.ResumeReconcileRequest\x1a!.cloud.v1.ResumeReconcileResponse\x12L\n" +
-	"\n" +
-	"ListPauses\x12\x1b.cloud.v1.ListPausesRequest\x1a\x1c.cloud.v1.ListPausesResponse\"\x03\x90\x02\x01\x12;\n" +
+	"\x1ccloud/v1/admin_service.proto\x12\bcloud.v1\x1a\x1bcloud/v1/admin_freeze.proto\x1a\x1ccloud/v1/admin_release.proto2\xc7\x04\n" +
+	"\fAdminService\x12;\n" +
 	"\x06Freeze\x12\x17.cloud.v1.FreezeRequest\x1a\x18.cloud.v1.FreezeResponse\x12A\n" +
-	"\bUnfreeze\x12\x19.cloud.v1.UnfreezeRequest\x1a\x1a.cloud.v1.UnfreezeResponse\x12R\n" +
+	"\bUnfreeze\x12\x19.cloud.v1.UnfreezeRequest\x1a\x1a.cloud.v1.UnfreezeResponse\x12I\n" +
+	"\tGetFreeze\x12\x1a.cloud.v1.GetFreezeRequest\x1a\x1b.cloud.v1.GetFreezeResponse\"\x03\x90\x02\x01\x12R\n" +
 	"\fListReleases\x12\x1d.cloud.v1.ListReleasesRequest\x1a\x1e.cloud.v1.ListReleasesResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\n" +
 	"GetRelease\x12\x1b.cloud.v1.GetReleaseRequest\x1a\x1c.cloud.v1.GetReleaseResponse\"\x03\x90\x02\x01\x12g\n" +
@@ -385,71 +36,42 @@ const file_cloud_v1_admin_service_proto_rawDesc = "" +
 	"\x11GetReleaseChannel\x12\".cloud.v1.GetReleaseChannelRequest\x1a#.cloud.v1.GetReleaseChannelResponse\"\x03\x90\x02\x01B\xa1\x01\n" +
 	"\fcom.cloud.v1B\x11AdminServiceProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
-var (
-	file_cloud_v1_admin_service_proto_rawDescOnce sync.Once
-	file_cloud_v1_admin_service_proto_rawDescData []byte
-)
-
-func file_cloud_v1_admin_service_proto_rawDescGZIP() []byte {
-	file_cloud_v1_admin_service_proto_rawDescOnce.Do(func() {
-		file_cloud_v1_admin_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_cloud_v1_admin_service_proto_rawDesc), len(file_cloud_v1_admin_service_proto_rawDesc)))
-	})
-	return file_cloud_v1_admin_service_proto_rawDescData
-}
-
-var file_cloud_v1_admin_service_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cloud_v1_admin_service_proto_goTypes = []any{
-	(*PauseReconcileRequest)(nil),       // 0: cloud.v1.PauseReconcileRequest
-	(*PauseReconcileResponse)(nil),      // 1: cloud.v1.PauseReconcileResponse
-	(*ResumeReconcileRequest)(nil),      // 2: cloud.v1.ResumeReconcileRequest
-	(*ResumeReconcileResponse)(nil),     // 3: cloud.v1.ResumeReconcileResponse
-	(ReleaseChannel)(0),                 // 4: cloud.v1.ReleaseChannel
-	(ClusterTier)(0),                    // 5: cloud.v1.ClusterTier
-	(*timestamppb.Timestamp)(nil),       // 6: google.protobuf.Timestamp
-	(*ListPausesRequest)(nil),           // 7: cloud.v1.ListPausesRequest
-	(*FreezeRequest)(nil),               // 8: cloud.v1.FreezeRequest
-	(*UnfreezeRequest)(nil),             // 9: cloud.v1.UnfreezeRequest
-	(*ListReleasesRequest)(nil),         // 10: cloud.v1.ListReleasesRequest
-	(*GetReleaseRequest)(nil),           // 11: cloud.v1.GetReleaseRequest
-	(*ListReleaseChannelsRequest)(nil),  // 12: cloud.v1.ListReleaseChannelsRequest
-	(*GetReleaseChannelRequest)(nil),    // 13: cloud.v1.GetReleaseChannelRequest
-	(*ListPausesResponse)(nil),          // 14: cloud.v1.ListPausesResponse
-	(*FreezeResponse)(nil),              // 15: cloud.v1.FreezeResponse
-	(*UnfreezeResponse)(nil),            // 16: cloud.v1.UnfreezeResponse
-	(*ListReleasesResponse)(nil),        // 17: cloud.v1.ListReleasesResponse
-	(*GetReleaseResponse)(nil),          // 18: cloud.v1.GetReleaseResponse
-	(*ListReleaseChannelsResponse)(nil), // 19: cloud.v1.ListReleaseChannelsResponse
-	(*GetReleaseChannelResponse)(nil),   // 20: cloud.v1.GetReleaseChannelResponse
+	(*FreezeRequest)(nil),               // 0: cloud.v1.FreezeRequest
+	(*UnfreezeRequest)(nil),             // 1: cloud.v1.UnfreezeRequest
+	(*GetFreezeRequest)(nil),            // 2: cloud.v1.GetFreezeRequest
+	(*ListReleasesRequest)(nil),         // 3: cloud.v1.ListReleasesRequest
+	(*GetReleaseRequest)(nil),           // 4: cloud.v1.GetReleaseRequest
+	(*ListReleaseChannelsRequest)(nil),  // 5: cloud.v1.ListReleaseChannelsRequest
+	(*GetReleaseChannelRequest)(nil),    // 6: cloud.v1.GetReleaseChannelRequest
+	(*FreezeResponse)(nil),              // 7: cloud.v1.FreezeResponse
+	(*UnfreezeResponse)(nil),            // 8: cloud.v1.UnfreezeResponse
+	(*GetFreezeResponse)(nil),           // 9: cloud.v1.GetFreezeResponse
+	(*ListReleasesResponse)(nil),        // 10: cloud.v1.ListReleasesResponse
+	(*GetReleaseResponse)(nil),          // 11: cloud.v1.GetReleaseResponse
+	(*ListReleaseChannelsResponse)(nil), // 12: cloud.v1.ListReleaseChannelsResponse
+	(*GetReleaseChannelResponse)(nil),   // 13: cloud.v1.GetReleaseChannelResponse
 }
 var file_cloud_v1_admin_service_proto_depIdxs = []int32{
-	4,  // 0: cloud.v1.PauseReconcileRequest.channel:type_name -> cloud.v1.ReleaseChannel
-	5,  // 1: cloud.v1.PauseReconcileRequest.tier:type_name -> cloud.v1.ClusterTier
-	6,  // 2: cloud.v1.PauseReconcileRequest.until:type_name -> google.protobuf.Timestamp
-	4,  // 3: cloud.v1.ResumeReconcileRequest.channel:type_name -> cloud.v1.ReleaseChannel
-	5,  // 4: cloud.v1.ResumeReconcileRequest.tier:type_name -> cloud.v1.ClusterTier
-	0,  // 5: cloud.v1.AdminService.PauseReconcile:input_type -> cloud.v1.PauseReconcileRequest
-	2,  // 6: cloud.v1.AdminService.ResumeReconcile:input_type -> cloud.v1.ResumeReconcileRequest
-	7,  // 7: cloud.v1.AdminService.ListPauses:input_type -> cloud.v1.ListPausesRequest
-	8,  // 8: cloud.v1.AdminService.Freeze:input_type -> cloud.v1.FreezeRequest
-	9,  // 9: cloud.v1.AdminService.Unfreeze:input_type -> cloud.v1.UnfreezeRequest
-	10, // 10: cloud.v1.AdminService.ListReleases:input_type -> cloud.v1.ListReleasesRequest
-	11, // 11: cloud.v1.AdminService.GetRelease:input_type -> cloud.v1.GetReleaseRequest
-	12, // 12: cloud.v1.AdminService.ListReleaseChannels:input_type -> cloud.v1.ListReleaseChannelsRequest
-	13, // 13: cloud.v1.AdminService.GetReleaseChannel:input_type -> cloud.v1.GetReleaseChannelRequest
-	1,  // 14: cloud.v1.AdminService.PauseReconcile:output_type -> cloud.v1.PauseReconcileResponse
-	3,  // 15: cloud.v1.AdminService.ResumeReconcile:output_type -> cloud.v1.ResumeReconcileResponse
-	14, // 16: cloud.v1.AdminService.ListPauses:output_type -> cloud.v1.ListPausesResponse
-	15, // 17: cloud.v1.AdminService.Freeze:output_type -> cloud.v1.FreezeResponse
-	16, // 18: cloud.v1.AdminService.Unfreeze:output_type -> cloud.v1.UnfreezeResponse
-	17, // 19: cloud.v1.AdminService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
-	18, // 20: cloud.v1.AdminService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
-	19, // 21: cloud.v1.AdminService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
-	20, // 22: cloud.v1.AdminService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
-	14, // [14:23] is the sub-list for method output_type
-	5,  // [5:14] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	0,  // 0: cloud.v1.AdminService.Freeze:input_type -> cloud.v1.FreezeRequest
+	1,  // 1: cloud.v1.AdminService.Unfreeze:input_type -> cloud.v1.UnfreezeRequest
+	2,  // 2: cloud.v1.AdminService.GetFreeze:input_type -> cloud.v1.GetFreezeRequest
+	3,  // 3: cloud.v1.AdminService.ListReleases:input_type -> cloud.v1.ListReleasesRequest
+	4,  // 4: cloud.v1.AdminService.GetRelease:input_type -> cloud.v1.GetReleaseRequest
+	5,  // 5: cloud.v1.AdminService.ListReleaseChannels:input_type -> cloud.v1.ListReleaseChannelsRequest
+	6,  // 6: cloud.v1.AdminService.GetReleaseChannel:input_type -> cloud.v1.GetReleaseChannelRequest
+	7,  // 7: cloud.v1.AdminService.Freeze:output_type -> cloud.v1.FreezeResponse
+	8,  // 8: cloud.v1.AdminService.Unfreeze:output_type -> cloud.v1.UnfreezeResponse
+	9,  // 9: cloud.v1.AdminService.GetFreeze:output_type -> cloud.v1.GetFreezeResponse
+	10, // 10: cloud.v1.AdminService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
+	11, // 11: cloud.v1.AdminService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
+	12, // 12: cloud.v1.AdminService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
+	13, // 13: cloud.v1.AdminService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
+	7,  // [7:14] is the sub-list for method output_type
+	0,  // [0:7] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_service_proto_init() }
@@ -457,22 +79,20 @@ func file_cloud_v1_admin_service_proto_init() {
 	if File_cloud_v1_admin_service_proto != nil {
 		return
 	}
-	file_cloud_v1_admin_pause_proto_init()
+	file_cloud_v1_admin_freeze_proto_init()
 	file_cloud_v1_admin_release_proto_init()
-	file_cloud_v1_cluster_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_admin_service_proto_rawDesc), len(file_cloud_v1_admin_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   0,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_cloud_v1_admin_service_proto_goTypes,
 		DependencyIndexes: file_cloud_v1_admin_service_proto_depIdxs,
-		MessageInfos:      file_cloud_v1_admin_service_proto_msgTypes,
 	}.Build()
 	File_cloud_v1_admin_service_proto = out.File
 	file_cloud_v1_admin_service_proto_goTypes = nil

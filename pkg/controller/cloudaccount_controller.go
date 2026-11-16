@@ -12,6 +12,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
@@ -49,11 +51,23 @@ func NewCloudAccountReconciler(d Deps) *CloudAccountReconciler {
 // ProviderConfig name and its role: one created without it is marked, not
 // adopted.
 func (r *CloudAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	leave := r.deps.FreezeBarrier.Enter()
+	defer leave()
 	obj := &cloudv1alpha1.CloudAccount{}
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	tenant, id := obj.Labels[cloudstore.LabelTenant], obj.Labels[cloudstore.LabelID]
+	frozen, err := r.deps.FreezeFor(ctx, platform.FreezeTarget{TenantID: tenant})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if frozen.Holds() {
+		if err := r.report(ctx, req, nil, nil); err != nil {
+			return ctrl.Result{}, err
+		}
+		return untilFreezeEnds(frozen, ctrl.Result{RequeueAfter: pendingDelay}, time.Now()), nil
+	}
 	if id == "" {
 		if !obj.DeletionTimestamp.IsZero() {
 			return ctrl.Result{}, nil
@@ -67,7 +81,7 @@ func (r *CloudAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := ensureFinalizer(ctx, r.deps.Direct, obj, cloudv1alpha1.CloudAccountFinalizer); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	err := r.rec.Reconcile(ctx, tenant, id)
+	err = r.rec.Reconcile(ctx, tenant, id)
 	if errors.Is(err, repository.ErrNotFound) {
 		return ctrl.Result{}, nil
 	}
@@ -130,13 +144,14 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 	if account.AccessDenied(current) {
 		obj.Status.Phase = cloudv1alpha1.CloudAccountPhaseFailed
 	}
-	pause := model.ParsePause(obj.Annotations[cloudstore.AnnotationPaused])
-	if pause != nil {
-		paused := account.PausedCondition(pause)
-		meta.SetStatusCondition(&obj.Status.Conditions, metav1.Condition{Type: paused.GetType(), Status: metav1.ConditionTrue,
-			Reason: paused.GetReason(), Message: paused.GetMessage(), ObservedGeneration: obj.Generation})
+	frozen, err := r.deps.FreezeFor(ctx, platform.FreezeTarget{TenantID: obj.Labels[cloudstore.LabelTenant]})
+	if err != nil {
+		return err
+	}
+	if condition, _ := platform.RowFreeze(frozen, nil); condition != nil {
+		meta.SetStatusCondition(&obj.Status.Conditions, convert.Condition(condition, obj.Generation))
 	} else {
-		meta.RemoveStatusCondition(&obj.Status.Conditions, platform.ConditionPaused)
+		meta.RemoveStatusCondition(&obj.Status.Conditions, platform.ConditionFrozen)
 	}
 	if equality.Semantic.DeepEqual(before, &obj.Status) {
 		return nil
@@ -149,28 +164,19 @@ func (r *CloudAccountReconciler) report(ctx context.Context, req ctrl.Request, p
 	if n := accountEvent(meta.FindStatusCondition(before.Conditions, ConditionReady), cond); n != nil {
 		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
 	}
-	if n := accountPauseEvent(meta.FindStatusCondition(before.Conditions, platform.ConditionPaused), pause); n != nil {
-		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
+
+	wasFrozen := meta.FindStatusCondition(before.Conditions, platform.ConditionFrozen) != nil
+	if frozen.Holds() != wasFrozen {
+		reason, message := platform.ReasonPlatformUnfrozen, "the platform is unfrozen"
+		if frozen.Holds() {
+			reason, message = platform.ReasonPlatformFrozen, platform.FrozenBy(frozen)
+		}
+		r.deps.Emit(ctx, accountObject(obj), platform.EventNormal, reason, message)
 	}
 	if n := account.AccessNote(cloudstore.AccessModel(before.Access), current); n != nil {
 		r.deps.Emit(ctx, accountObject(obj), n.Type, n.Reason, n.Message)
 	}
 	return nil
-}
-
-// accountPauseEvent says what a change of the account's pause means: the
-// pause began (Paused) or ended (Resumed). Nil when nothing changed.
-func accountPauseEvent(was *metav1.Condition, pause *model.Pause) *platform.Note {
-	switch {
-	case pause != nil && was == nil:
-		n := platform.Normal(platform.ReasonPaused, account.PausedCondition(pause).GetMessage())
-		return &n
-	case pause == nil && was != nil:
-		n := platform.Normal(platform.ReasonResumed, "the pause ended: the platform and the providers act on it again")
-		return &n
-	default:
-		return nil
-	}
 }
 
 // accountObject is the object events of a CloudAccount are about.
@@ -250,6 +256,8 @@ func (r *CloudAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&cloudv1alpha1.CloudAccount{}, forObject()).
 		Owns(&cloudv1alpha1.Network{}).
 		Named("cloudaccount").
-		WithOptions(objectOptions(r.deps)).
+		WithOptions(objectOptions(r.deps)).Watches(&cloudv1alpha1.ReleaseHold{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+		return enqueueAll(ctx, r.deps.Direct, &cloudv1alpha1.CloudAccountList{})
+	})).
 		Complete(r)
 }

@@ -101,7 +101,7 @@ func Connect(ctx context.Context, o Options) (manager.Manager, error) {
 	opts := kube.ManagerOptions{Cached: cached, Election: o.LeaderElection, LeaseName: o.LeaseName,
 		MetricsAddr: o.MetricsAddr, ProbeAddr: o.ProbeAddr}
 	if o.WatchPlatformKinds {
-		opts.Unfiltered = cloudstore.Kinds()
+		opts.Unfiltered = append(cloudstore.Kinds(), corev1.SchemeGroupVersion.WithKind("Namespace"))
 	}
 	return kube.NewManagerWith(cfg, opts)
 }

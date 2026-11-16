@@ -77,18 +77,20 @@ type Options struct {
 	ETag string
 	// Plan is --plan of update: only show what the update would do
 	// (validate_only).
-	Plan bool
+	Plan   bool
+	PlanID string
 	// Force is --force of cluster delete: tear down even if the cluster's
 	// API is unreachable.
 	Force bool
-	// Cluster is --cluster of admin pause / resume: one cluster only.
+	// Cluster is --cluster of admin unfreeze: one cluster only.
 	Cluster string
-	// Reason is --reason of admin pause: why, shown with the pause.
-	Reason string
-	// Channel is --channel of admin pause, resume, freeze and unfreeze (alpha,
-	// beta, stable); Tier its --tier (0, 1, 2; empty: all).
+	// Reason is --reason of admin freeze: why, shown with the pause.
+	Reason          string
+	ResetExceptions bool
+	Platform        bool
+	// Channel and Tier reject obsolete scoped freeze options.
 	Channel, Tier string
-	// Until is --until of admin pause and freeze.
+	// Until is --until of admin freeze.
 	Until string
 	// Regions is --region of account verify: regions to check besides
 	// those of the account's networks.
@@ -125,7 +127,7 @@ type Options struct {
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
 	// cluster's OIDC identity provider.
 	OIDC bool
-	// PauseNetwork is --network of admin pause and resume: only this
+	// PauseNetwork is --network of admin unfreeze: only this
 	// network (network ID). Not with Cluster.
 	PauseNetwork string
 	// Details is --details of component list: why each component is not

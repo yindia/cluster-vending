@@ -50,9 +50,7 @@ func accessRows(a *cloudv1.AccountAccess) [][]string {
 
 func accountRow(a *cloudv1.CloudAccount) []string {
 	state := word(a.GetStatus().GetState().String(), "CLOUD_ACCOUNT_STATE_")
-	if a.GetStatus().GetPause() != nil {
-		state += " (paused)"
-	}
+
 	return []string{orNone(a.GetAccountName()), orNone(a.GetId()), orNone(a.GetAws().GetAccountId()), state,
 		accessWord(a.GetStatus().GetAccess()), age(a.GetCreateTime())}
 }
@@ -95,9 +93,7 @@ func describeAccount(w io.Writer, a *cloudv1.CloudAccount) error {
 		{"Role", a.GetAws().GetRole()}, {"Namespace", st.GetNamespace()}, {"Provider Config", st.GetProviderConfigName()},
 		{"Identity", st.GetIdentity()}, {"External ID", externalIDWord(a.GetAws())},
 	}
-	if p := st.GetPause(); p != nil {
-		kv = append(kv, [2]string{"Paused", pauseLine(p)})
-	}
+
 	access := st.GetAccess()
 	word := accessWord(access)
 	if t := access.GetCheckedTime(); t != nil {

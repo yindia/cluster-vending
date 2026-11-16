@@ -9,8 +9,8 @@ import (
 )
 
 // Provider is the cloud a row belongs to, the same names as the cloud.v1
-// provider oneof arms. Adding a provider means adding it here and to the
-// CHECK constraints in model.go.
+// provider oneof arms. Identifier recognition is separate from installing
+// and implementing the provider adapter; unsupported backends fail closed.
 type Provider string
 
 // Supported providers.

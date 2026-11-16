@@ -2128,6 +2128,7 @@ type GetReleaseChannelResponse struct {
 	// plans it (pkg/rollout), from what the management cluster holds: per
 	// tier and batch, with every cluster in it, tier 2 first.
 	Rollout       *Rollout `protobuf:"bytes,2,opt,name=rollout,proto3" json:"rollout,omitempty"`
+	Freeze        *Freeze  `protobuf:"bytes,3,opt,name=freeze,proto3" json:"freeze,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2176,11 +2177,18 @@ func (x *GetReleaseChannelResponse) GetRollout() *Rollout {
 	return nil
 }
 
+func (x *GetReleaseChannelResponse) GetFreeze() *Freeze {
+	if x != nil {
+		return x.Freeze
+	}
+	return nil
+}
+
 var File_cloud_v1_admin_release_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\n" +
-	"\x1ccloud/v1/admin_release.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x02\n" +
+	"\x1ccloud/v1/admin_release.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/freeze.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x02\n" +
 	"\aRelease\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\ashipped\x18\x02 \x01(\bR\ashipped\x12\x14\n" +
@@ -2357,10 +2365,11 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\bchannels\x18\x01 \x03(\v2\x1c.cloud.v1.ReleaseChannelInfoR\bchannels\"Z\n" +
 	"\x18GetReleaseChannelRequest\x12>\n" +
 	"\achannel\x18\x01 \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\achannel\"\x80\x01\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\achannel\"\xaa\x01\n" +
 	"\x19GetReleaseChannelResponse\x126\n" +
 	"\achannel\x18\x01 \x01(\v2\x1c.cloud.v1.ReleaseChannelInfoR\achannel\x12+\n" +
-	"\arollout\x18\x02 \x01(\v2\x11.cloud.v1.RolloutR\arollout*\xb9\x01\n" +
+	"\arollout\x18\x02 \x01(\v2\x11.cloud.v1.RolloutR\arollout\x12(\n" +
+	"\x06freeze\x18\x03 \x01(\v2\x10.cloud.v1.FreezeR\x06freeze*\xb9\x01\n" +
 	"\fRolloutState\x12\x1d\n" +
 	"\x19ROLLOUT_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ROLLOUT_STATE_PENDING\x10\x01\x12\x1d\n" +
@@ -2425,6 +2434,7 @@ var file_cloud_v1_admin_release_proto_goTypes = []any{
 	(*structpb.Struct)(nil),             // 30: google.protobuf.Struct
 	(ClusterTier)(0),                    // 31: cloud.v1.ClusterTier
 	(*Condition)(nil),                   // 32: cloud.v1.Condition
+	(*Freeze)(nil),                      // 33: cloud.v1.Freeze
 }
 var file_cloud_v1_admin_release_proto_depIdxs = []int32{
 	28, // 0: cloud.v1.Release.channels:type_name -> cloud.v1.ReleaseChannel
@@ -2479,11 +2489,12 @@ var file_cloud_v1_admin_release_proto_depIdxs = []int32{
 	28, // 49: cloud.v1.GetReleaseChannelRequest.channel:type_name -> cloud.v1.ReleaseChannel
 	5,  // 50: cloud.v1.GetReleaseChannelResponse.channel:type_name -> cloud.v1.ReleaseChannelInfo
 	14, // 51: cloud.v1.GetReleaseChannelResponse.rollout:type_name -> cloud.v1.Rollout
-	52, // [52:52] is the sub-list for method output_type
-	52, // [52:52] is the sub-list for method input_type
-	52, // [52:52] is the sub-list for extension type_name
-	52, // [52:52] is the sub-list for extension extendee
-	0,  // [0:52] is the sub-list for field type_name
+	33, // 52: cloud.v1.GetReleaseChannelResponse.freeze:type_name -> cloud.v1.Freeze
+	53, // [53:53] is the sub-list for method output_type
+	53, // [53:53] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_admin_release_proto_init() }
@@ -2493,6 +2504,7 @@ func file_cloud_v1_admin_release_proto_init() {
 	}
 	file_cloud_v1_cluster_proto_init()
 	file_cloud_v1_conditions_proto_init()
+	file_cloud_v1_freeze_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

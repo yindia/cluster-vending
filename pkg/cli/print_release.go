@@ -193,6 +193,11 @@ func printChannels(w io.Writer, channels []*cloudv1.ReleaseChannelInfo, wide boo
 // plan) and its release moves; then the rollout plan per tier and batch
 // (wide adds every cluster), the releases it offered and its conditions.
 func describeChannel(w io.Writer, res *cloudv1.GetReleaseChannelResponse, wide bool) error {
+	if frozen := res.GetFreeze(); frozen != nil {
+		if err := fields(w, [][2]string{{"Frozen", freezeLine(frozen)}}); err != nil {
+			return err
+		}
+	}
 	c, r := res.GetChannel(), res.GetRollout()
 	summary := c.GetRollout()
 	tier, state := rollingTierWord(c.GetRolloutTier(), summary, nil), rolloutState(summary, c.GetPaused())

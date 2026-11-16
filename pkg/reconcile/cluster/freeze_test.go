@@ -29,7 +29,6 @@ func (h freezeSource) Holds(context.Context) ([]cloudv1alpha1.ReleaseHold, error
 // nothing automatic starts blind.
 func TestReconcilerFrozen(t *testing.T) {
 	platform := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy", Except: []string{"let-through"}}}
-	acme := cloudv1alpha1.ReleaseHold{Spec: cloudv1alpha1.ReleaseHoldSpec{TenantID: "acme", Reason: "audit"}}
 	tests := []struct {
 		name, id, tenant string
 		src              freezeSource
@@ -38,8 +37,6 @@ func TestReconcilerFrozen(t *testing.T) {
 	}{
 		{"frozen", "c1", "acme", freezeSource{holds: []cloudv1alpha1.ReleaseHold{platform}}, true, "the platform is frozen: deploy"},
 		{"let through", "let-through", "acme", freezeSource{holds: []cloudv1alpha1.ReleaseHold{platform}}, false, ""},
-		{"its tenant frozen", "c1", "acme", freezeSource{holds: []cloudv1alpha1.ReleaseHold{acme}}, true, "tenant acme is frozen: audit"},
-		{"another tenant frozen", "c1", "globex", freezeSource{holds: []cloudv1alpha1.ReleaseHold{acme}}, false, ""},
 		{"not frozen", "c1", "acme", freezeSource{}, false, ""},
 		{"holds unreadable", "c1", "acme", freezeSource{err: errors.New("down")}, true, "cannot read whether the cluster is frozen; waiting"},
 	}

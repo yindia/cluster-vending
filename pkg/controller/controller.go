@@ -126,10 +126,14 @@ func (d Deps) logger() *slog.Logger {
 // SetupAll registers the controllers with mgr: the three of the rows
 // (accounts, networks, clusters) and those of the release objects.
 func SetupAll(mgr ctrl.Manager, d Deps) error {
+	if d.FreezeBarrier == nil {
+		d.FreezeBarrier = &platform.FreezeBarrier{}
+	}
 	setups := []struct {
 		name  string
 		setup func(ctrl.Manager) error
 	}{
+		{"tenant", NewTenantReconciler(d).SetupWithManager},
 		{"cloudaccount", NewCloudAccountReconciler(d).SetupWithManager},
 		{"network", NewNetworkReconciler(d).SetupWithManager},
 		{"cluster", NewClusterReconciler(d).SetupWithManager},
@@ -338,17 +342,16 @@ func next(r *model.Resource, pending []string, imported string, err error) ctrl.
 	if r == nil {
 		return res
 	}
-	return untilPauseEnds(r.Paused, res, time.Now())
+	return untilFreezeEnds(r.Frozen, res, time.Now())
 }
 
 // untilPauseEnds looks at a paused row again when a part of its pause
 // ends by itself (its until), if that is sooner than res.
-func untilPauseEnds(p *model.Pause, res ctrl.Result, now time.Time) ctrl.Result {
-	end, ok := p.NextEnd()
-	if !ok {
+func untilFreezeEnds(f *model.Freeze, res ctrl.Result, now time.Time) ctrl.Result {
+	if f == nil || f.Until == nil {
 		return res
 	}
-	wait := max(end.Sub(now), time.Second)
+	wait := max(f.Until.Sub(now), time.Second)
 	if res.RequeueAfter == 0 || wait < res.RequeueAfter {
 		res.RequeueAfter = wait
 	}

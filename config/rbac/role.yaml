@@ -6,6 +6,17 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
   - events.k8s.io
   resources:
   - events
@@ -20,6 +31,7 @@ rules:
   - componentdefinitions
   - components
   - networks
+  - tenants
   verbs:
   - create
   - delete
@@ -37,6 +49,7 @@ rules:
   - components/finalizers
   - networks/finalizers
   - releases/finalizers
+  - tenants/finalizers
   verbs:
   - update
 - apiGroups:
@@ -50,6 +63,7 @@ rules:
   - releasechannels/status
   - releaseholds/status
   - releases/status
+  - tenants/status
   verbs:
   - get
   - patch

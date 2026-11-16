@@ -11,6 +11,8 @@ import (
 )
 
 // release_channel and tier take their defined values, or none.
+//
+//nolint:staticcheck // Legacy wire compatibility remains validated.
 func TestReleaseChannelAndTierValidation(t *testing.T) {
 	type spec = cloudv1.ClusterSpec
 	type req = cloudv1.CreateClusterRequest
@@ -57,9 +59,10 @@ func TestReleaseOrderIsInTheNumbers(t *testing.T) {
 	}
 }
 
-// Both fields survive what a create does to a spec (resolving its
-// defaults) and the JSON the spec is stored as, so Get returns them.
-func TestReleaseChannelAndTierAreStored(t *testing.T) {
+// The channel survives resolving defaults and storage; legacy cluster tier is cleared.
+//
+//nolint:staticcheck // Verify migration from the former per-cluster tier.
+func TestReleaseChannelStoredAndLegacyTierCleared(t *testing.T) {
 	in := validCreate().GetCluster().GetSpec()
 	in.ReleaseChannel, in.Tier = cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, cloudv1.ClusterTier_CLUSTER_TIER_1
 	resolved, err := corecluster.ResolveSpec(in, []string{"use1-az1", "use1-az2"})
@@ -74,7 +77,7 @@ func TestReleaseChannelAndTierAreStored(t *testing.T) {
 	if err := protojson.Unmarshal(raw, stored); err != nil {
 		t.Fatal(err)
 	}
-	if stored.GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || stored.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_1 {
+	if stored.GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA || stored.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
 		t.Errorf("stored spec has channel %s and tier %s", stored.GetReleaseChannel(), stored.GetTier())
 	}
 }

@@ -13,8 +13,6 @@ import (
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
-	"github.com/yindia/cluster-vending/pkg/rollout"
-	planner "github.com/yindia/cluster-vending/pkg/upgrade"
 )
 
 // CodeChanging reports whether the cluster has a code change waiting for
@@ -131,9 +129,8 @@ func (s *Reconciler) codeAdmitted(ctx context.Context, row *model.Cluster, spec 
 }
 
 // networkCodePending says why the cluster waits for its network's code
-// change: the network has one pending and rolls out in the cluster's tier
-// (its most careful cluster's, rollout.NetworkTier), before its clusters
-// of that tier. Empty otherwise: clusters of earlier tiers go first.
+// change: every child inherits the network tier and waits for its shared
+// network changes first. Empty when no network code change is pending.
 func (s *Reconciler) networkCodePending(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec) string {
 	id := spec.GetNetwork().GetNetworkId()
 	n, err := s.deps.Store.Networks().Get(ctx, row.TenantID, id)
@@ -149,23 +146,9 @@ func (s *Reconciler) networkCodePending(ctx context.Context, row *model.Cluster,
 	default:
 		return ""
 	}
-	siblings, err := s.deps.Store.Clusters().ListByNetwork(ctx, id)
+	tier, err := s.deps.NetworkTier(ctx, row.TenantID, id)
 	if err != nil {
-		return "cannot read the clusters of network " + id + "; waiting"
+		return "cannot read the network's tier; waiting"
 	}
-	tier := planner.Tier2
-	for i := range siblings {
-		if other, err := SpecOf(&siblings[i]); err == nil {
-			tier = min(tier, tierOf(&siblings[i], other))
-		}
-	}
-	if tierOf(row, spec) != tier {
-		return ""
-	}
-	return fmt.Sprintf("waiting for network %s's code change first (it goes before its clusters of tier %d)", id, tier)
-}
-
-// tierOf is the cluster's rollout tier (a cluster with no tier is 0).
-func tierOf(row *model.Cluster, spec *cloudv1.ClusterSpec) planner.Tier {
-	return rollout.Tier(holdView(row, spec).Spec.Tier)
+	return fmt.Sprintf("waiting for network %s's code change first (it goes before its clusters of tier %d)", id, int(tier)-1)
 }

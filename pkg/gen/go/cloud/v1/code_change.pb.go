@@ -27,7 +27,7 @@ type CodeChangePhase int32
 
 const (
 	CodeChangePhase_CODE_CHANGE_PHASE_UNSPECIFIED CodeChangePhase = 0
-	// It waits its turn in the rollout (or a freeze, a pause, a window).
+	// It waits its turn in the rollout (or the freeze, a window).
 	CodeChangePhase_CODE_CHANGE_PHASE_PENDING CodeChangePhase = 1
 	// It is being applied.
 	CodeChangePhase_CODE_CHANGE_PHASE_APPLYING CodeChangePhase = 2

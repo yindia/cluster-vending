@@ -3,7 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 // Plan is what an update would do, computed without changing anything
-// (UpdateClusterRequest.validate_only): the rendered resources are
+// (UpdateClusterRequest.validate_only or UpdateNetworkRequest.validate_only): the rendered resources are
 // server-side applied as a dry run and compared with the live ones.
 message Plan {
   // Identifies the plan: a hash of the request and of the live resources'
@@ -79,4 +79,8 @@ message PlannedChange {
   // exists", "node group <name> is ready". The server makes the change by
   // itself once that holds. Empty: made at once.
   string waits_for = 10;
+  // Namespace of the managed resource, empty for cluster-scoped kinds.
+  string namespace = 11;
+  // DELETE removes platform management but retains the cloud resource.
+  bool retains_cloud_resource = 12;
 }

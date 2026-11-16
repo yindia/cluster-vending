@@ -6,10 +6,11 @@ import "buf/validate/validate.proto";
 import "cloud/v1/code_change.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/events.proto";
+import "cloud/v1/freeze.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/options.proto";
-import "cloud/v1/pause.proto";
+import "cloud/v1/tier.proto";
 import "google/protobuf/timestamp.proto";
 
 // Provider-neutral network contract. The platform is the source of truth
@@ -87,6 +88,9 @@ message Network {
 
 // NetworkSpec is the desired state of a Network resource.
 message NetworkSpec {
+  // Rollout sensitivity shared by this network and every cluster on it.
+  // Unspecified defaults to TIER_0, the last tier to receive a release.
+  Tier tier = 6 [(buf.validate.field).enum.defined_only = true];
   // Provider-specific rules on the layout (AWS: zone IDs, PRIVATE subnets
   // in two zones, a PUBLIC subnet, per-zone NAT) are checked by the server:
   // the cloud is the account's (bootstrap_id), not part of the spec.
@@ -409,14 +413,16 @@ message NetworkStatus {
   // ListNetworkEvents returns the events themselves while they exist.
   repeated Event recent_events = 10;
 
-  // pause is set while an operator paused the network (its tenant): who,
-  // since when and why. The platform then only observes the network; the
-  // condition Paused is True and message says so. Unset: not paused.
-  Pause pause = 45;
+  // freeze is set while the platform is frozen (AdminService.Freeze):
+  // who, since when, why, until when, and whether this one is let
+  // through. Held (not let through), the platform only observes it and
+  // its managed resources carry crossplane.io/paused; the condition
+  // Frozen is True and message says so. Unset: not frozen.
+  Freeze freeze = 45;
 
   // code_change is a change of what the platform renders for the network
-  // (a new controller build), applied in the tier of its most careful
-  // cluster, before them; unset when nothing was rendered differently.
+  // (a new controller build), applied before its clusters. They all share
+  // the network tier; unset when nothing was rendered differently.
   CodeChange code_change = 46;
 }
 

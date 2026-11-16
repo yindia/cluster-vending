@@ -2,6 +2,9 @@ package network
 
 import (
 	"context"
+	"slices"
+
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 
 	"connectrpc.com/connect/v2"
 
@@ -11,10 +14,9 @@ import (
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
-// stored is the API view of a network from the database alone: its spec,
+// stored is the API view of a network from its stored Kubernetes state: its spec,
 // the status last recorded for it (remember) and the clusters using it
-// now. GetNetwork and ListNetworks return it; nothing is read from the
-// management cluster.
+// now. Managed resource status stays recorded; the platform freeze is read live.
 func (s *NetworkService) stored(ctx context.Context, row *model.Network) (*cloudv1.Network, error) {
 	spec, err := netreconcile.SpecOf(row)
 	if err != nil {
@@ -35,8 +37,19 @@ func (s *NetworkService) stored(ctx context.Context, row *model.Network) (*cloud
 	}
 	st.ClusterIds = nil
 	for _, c := range clusters {
-		st.ClusterIds = append(st.ClusterIds, c.Name)
+		st.ClusterIds = append(st.ClusterIds, c.ID)
 	}
+	frozen, err := s.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: row.TenantID, NetworkID: row.ID})
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	st.Message = reconcile.WithoutFreezeMessage(st.Message, st.Freeze)
+	st.Freeze = reconcile.FreezeProto(frozen)
+	st.Conditions = slices.DeleteFunc(st.Conditions, func(condition *cloudv1.Condition) bool { return condition.GetType() == reconcile.ConditionFrozen })
+	if condition, _ := reconcile.RowFreeze(frozen, nil); condition != nil {
+		st.Conditions = append(st.Conditions, condition)
+	}
+
 	return netreconcile.ToProto(row, spec, st), nil
 }
 

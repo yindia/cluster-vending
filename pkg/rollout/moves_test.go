@@ -68,8 +68,9 @@ func TestComputeMovesBlocked(t *testing.T) {
 	k8s := onRelease("k8s", cloudv1alpha1.ClusterTier2, "old")
 	k8s.Status.Upgrade = &cloudv1alpha1.ClusterUpgrade{FromVersion: "1.35", ToVersion: "1.36", Phase: "ControlPlane"}
 	paused := onRelease("paused", cloudv1alpha1.ClusterTier2, "old")
-	paused.Annotations = map[string]string{"cloud.cluster-vending.io/paused": `{"by":"ops","since":"2026-11-14T00:00:00Z","reason":"x"}`}
+
 	in := input(k8s, paused, onRelease("t1", cloudv1alpha1.ClusterTier1, "old"))
+	in.Holds = []cloudv1alpha1.ReleaseHold{{Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "deploy", Except: []string{"id-t1", "id-k8s"}}}}
 
 	m := ComputeMoves(in)
 

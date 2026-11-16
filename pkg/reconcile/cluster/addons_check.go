@@ -61,7 +61,7 @@ type addonChange struct {
 // Running, applied, not paused, and no Kubernetes upgrade or release move
 // under way (they set the versions themselves, in their own order).
 func addonsCheckable(row *model.Cluster) bool {
-	return row.State == StateRunning && row.Paused == nil && row.AppliedGeneration >= row.Generation &&
+	return row.State == StateRunning && !row.Frozen.Holds() && row.AppliedGeneration >= row.Generation &&
 		!Upgrading(row) && !ReleaseMoving(row)
 }
 
@@ -149,8 +149,8 @@ func (s *Reconciler) recheckAddons(ctx context.Context, row *model.Cluster) {
 	}
 	s.checks.checkAgain(row.ID, at.Add(addonsCheckEvery))
 	for _, c := range changes {
-		reconcile.AddNote(ctx, reconcile.Normal(reconcile.ReasonAddonUpgraded,
-			fmt.Sprintf("upgrading add-on %s from %s to %s, the version EKS now recommends", c.Name, c.From, c.To)))
+		reconcile.AddNote(ctx, reconcile.Normal(reconcile.ReasonAddonUpgradeScheduled,
+			fmt.Sprintf("scheduled add-on %s upgrade from %s to %s, the version EKS now recommends", c.Name, c.From, c.To)))
 	}
 }
 

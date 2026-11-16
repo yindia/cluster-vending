@@ -87,15 +87,10 @@ type Resource struct {
 	// their provider oneof (aws / gcp / azure).
 	Spec   JSON
 	Status JSON
-	// Paused is the operator's pause of the resource; nil for none. Read
-	// only: it is set and removed by Tenants.SetPause, and a new resource
-	// of a paused tenant is created with the tenant's. A scope whose until
-	// has passed is not part of it.
-	Paused *Pause
-	// PauseLapsed: the stored pause has a scope whose until has passed;
-	// Tenants.DropLapsedPause writes it again without (the reconcile
-	// does, and resumes the providers when nothing is left).
-	PauseLapsed bool
+	// Frozen is the platform freeze as it holds the resource (Freeze);
+	// nil when the platform is not frozen. Not stored: the reconciler sets
+	// it from the freeze at the start of each pass.
+	Frozen *Freeze
 }
 
 // Meta returns the shared resource columns, for code that handles every
@@ -153,10 +148,6 @@ type CloudAccount struct {
 	// AccountName is the human-readable name (AWS account name, GCP project
 	// name, Azure subscription name). Informational only.
 	AccountName string
-	// Paused is the operator's pause of the account (Resource.Paused).
-	Paused *Pause
-	// PauseLapsed is Resource.PauseLapsed of the account.
-	PauseLapsed bool
 	// Access is the controller's last access check of the account (its
 	// status); nil before the first.
 	Access *AccountAccess

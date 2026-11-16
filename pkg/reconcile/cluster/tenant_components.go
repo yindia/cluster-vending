@@ -246,9 +246,14 @@ func (s *Reconciler) setTenantStatus(ctx context.Context, row *model.Cluster, c 
 	if err != nil {
 		return err
 	}
-	if err := s.deps.Store.Components().SetStatus(ctx, c.TenantID, c.ID, c.ETag, raw); err != nil &&
-		!errors.Is(err, repository.ErrConflict) && !errors.Is(err, repository.ErrNotFound) {
+	if err := s.deps.Store.Components().SetStatus(ctx, c.TenantID, c.ID, c.ETag, raw); err != nil {
+		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
+			return nil
+		}
 		return fmt.Errorf("record the status of component %s: %w", c.Component, err)
+	}
+	for _, note := range tenantComponentEvents(c.Component, prev, st) {
+		reconcile.AddNote(ctx, note)
 	}
 	return nil
 }
@@ -284,6 +289,11 @@ func (s *Reconciler) removeTenant(ctx context.Context, row *model.Cluster, c mod
 		return false, err
 	}
 	if len(records) == 0 {
+		if tenantStatus(c).GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING {
+			if err := s.setTenantStatus(ctx, row, c, &cloudv1.PlatformComponent{Name: c.Component, Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING}, tenantStatus(c).GetRelease()); err != nil {
+				return false, err
+			}
+		}
 		return true, s.forgetComponent(ctx, row, c)
 	}
 	if err := s.setTenantStatus(ctx, row, c, &cloudv1.PlatformComponent{Name: c.Component,
@@ -329,6 +339,7 @@ func (s *Reconciler) forgetComponent(ctx context.Context, row *model.Cluster, c 
 	if err := s.deps.Store.Components().Delete(ctx, c.TenantID, c.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("remove component %s: %w", c.Component, err)
 	}
+	reconcile.AddNote(ctx, reconcile.Normal(reconcile.ReasonComponentDeleted, "component "+c.Component+" was removed"))
 	s.logger().InfoContext(ctx, "component removed", "cluster_id", row.ID, "tenant_id", row.TenantID,
 		"component_id", c.ID, "component", c.Component)
 	return nil

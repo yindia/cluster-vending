@@ -136,7 +136,6 @@ func (r networks) row(obj *cloudv1alpha1.Network) (*model.Network, error) {
 	}
 	m.into(&n.Resource)
 	n.Seen = seen(obj)
-	n.Paused, n.PauseLapsed = pauseOf(obj), pauseLapsed(obj)
 	return n, nil
 }
 
@@ -257,9 +256,6 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 	}
 	if err := owner.Set(account, obj, r.c.Scheme()); err != nil {
 		return invalid(err)
-	}
-	if err := r.inheritPause(ctx, obj); err != nil {
-		return err
 	}
 	keys := networkKeys(n)
 	if err := r.claimAll(ctx, obj.Namespace, kindNetwork, n.ID, keys); err != nil {

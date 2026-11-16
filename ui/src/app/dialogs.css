@@ -1,0 +1,9 @@
+/* Native dialog scroll containment; visual styling belongs to Astryx. */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}

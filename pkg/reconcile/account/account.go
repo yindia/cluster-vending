@@ -1,5 +1,5 @@
 // Package account makes the management cluster match a tenant's stored
-// cloud account: the tenant namespace and the account's ProviderConfig,
+// cloud account: the account's ProviderConfig,
 // through which Crossplane reaches the account. The TenantService handlers
 // call it today; a CloudAccount controller calls the same entry points. It
 // knows no RPC library: failures a caller can act on are faults.
@@ -19,18 +19,18 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
+	tenantlife "github.com/yindia/cluster-vending/pkg/reconcile/tenant"
 )
 
 // Condition types of CloudAccountStatus.
 const (
-	// ConditionBootstrapped: the namespace and the account's ProviderConfig
-	// are applied.
+	// ConditionBootstrapped: the account credentials and ProviderConfig
+	// are applied in the existing tenant namespace.
 	ConditionBootstrapped = "Bootstrapped"
 	// ConditionAccessVerified: the controller's access check passed: the
 	// tenant role works in every region the account uses and allows the
@@ -38,8 +38,8 @@ const (
 	ConditionAccessVerified = "AccessVerified"
 )
 
-// namespaceKind is the kind of the tenant namespace among an account's
-// recorded objects.
+// namespaceKind recognizes legacy namespace records for safe deletion.
+// New account reconciliations never record tenant-owned namespaces.
 const namespaceKind = "Namespace"
 
 // Reconciler bootstraps cloud accounts in the management cluster.
@@ -58,24 +58,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, tenantID, cloudAccountID str
 	if err != nil {
 		return err
 	}
-	if a.Paused != nil {
-		// Paused by an operator (AdminService.PauseReconcile): its
-		// ProviderConfig, credentials copy and bindings are left as they
-		// are until the resume.
+	frozen, err := r.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: a.TenantID})
+	if err != nil {
+		return err
+	}
+	if frozen.Holds() {
 		return nil
 	}
 	return r.Apply(ctx, a)
 }
 
 // objects are what an AWS account needs in the management cluster, in the
-// order they are applied: the tenant namespace, then, with a credentials
+// order they are applied: with a credentials
 // Secret (local runs), the account's copy of it, then the account's
 // ProviderConfig (it assumes the tenant role, a.Identity, with the
 // providers' IRSA credentials or the keys in that copy).
 func objects(a *model.CloudAccount, keys *corev1.Secret, direct bool) []client.Object {
-	objs := []client.Object{
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: a.Namespace, Labels: crossplane.Labels(a.TenantID)}},
-	}
+	var objs []client.Object
 	var ref *crossplaneaws.CredentialsSecret
 	if keys != nil {
 		objs = append(objs, keys)
@@ -160,8 +159,8 @@ func owner(a *model.CloudAccount) reconcile.Owner {
 	return reconcile.Owner{TenantID: a.TenantID, CloudAccountID: a.ID, Kind: model.OwnerCloudAccount, ID: a.ID}
 }
 
-// Apply applies the tenant namespace, with a credentials Secret the
-// account's copy of it, and the account's ProviderConfig, from the stored
+// Apply requires an existing owned tenant namespace and applies the
+// account credentials copy and ProviderConfig from the stored
 // account, and records them as the account's (the copy is deleted with the
 // account). The
 // providers and their runtime config are the platform's, installed
@@ -170,6 +169,23 @@ func owner(a *model.CloudAccount) reconcile.Owner {
 // namespace also binds the controller to the kubeconfig reader role
 // (bindKubeconfigReader). Every step is idempotent.
 func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
+	frozen, err := r.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: a.TenantID})
+	if err != nil {
+		return err
+	}
+	if frozen.Holds() {
+		return nil
+	}
+	namespace := &corev1.Namespace{}
+	if r.deps.Kube == nil {
+		return fault.New(fault.FailedPrecondition, "management cluster is unavailable")
+	}
+	if err := r.deps.Kube.Get(ctx, client.ObjectKey{Name: a.Namespace}, namespace); err != nil {
+		return fault.New(fault.FailedPrecondition, "tenant namespace must already exist before account reconciliation")
+	}
+	if namespace.Labels[tenantlife.LabelTenant] != a.TenantID || len(namespace.OwnerReferences) > 0 || a.Namespace != kube.TenantNamespace(a.TenantID) || namespace.DeletionTimestamp != nil || namespace.Status.Phase == corev1.NamespaceTerminating {
+		return fault.New(fault.FailedPrecondition, "tenant namespace is unavailable or belongs to another tenant")
+	}
 	keys, err := r.credentialsCopy(ctx, a)
 	if err != nil {
 		return err
@@ -202,8 +218,12 @@ func (r *Reconciler) Apply(ctx context.Context, a *model.CloudAccount) error {
 // FailedPrecondition fault): their managed resources reach the cloud
 // through the ProviderConfig. It is safe to repeat.
 func (r *Reconciler) Delete(ctx context.Context, a *model.CloudAccount) (bool, error) {
-	if a.Paused != nil {
-		return false, nil // held until the resume
+	frozen, err := r.deps.FreezeFor(ctx, reconcile.FreezeTarget{TenantID: a.TenantID})
+	if err != nil {
+		return false, err
+	}
+	if frozen.Holds() {
+		return false, nil
 	}
 	records, err := r.deps.Store.ManagedResources().ListByAccount(ctx, a.TenantID, a.ID)
 	if err != nil {
@@ -263,21 +283,8 @@ func Proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 		// Bootstrapped, but the platform cannot act in it.
 		out.Status.State = cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_FAILED
 	}
-	if a.Paused != nil {
-		out.Status.Pause = reconcile.PauseProto(a.Paused)
-		out.Status.Conditions = append(out.Status.Conditions, PausedCondition(a.Paused))
-	}
+
 	return out
-}
-
-// PausedNote is what a paused account's status says after who paused it.
-const PausedNote = "nothing is created, changed or deleted until it is resumed (admin resume)"
-
-// PausedCondition is the Paused condition of a paused account: who
-// paused it, since when, why, and what that means.
-func PausedCondition(p *model.Pause) *cloudv1.Condition {
-	return &cloudv1.Condition{Type: reconcile.ConditionPaused, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE,
-		Reason: managed.ReasonPaused, Message: reconcile.PausedBy(p) + ": " + PausedNote}
 }
 
 func proto(a *model.CloudAccount) *cloudv1.CloudAccount {

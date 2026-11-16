@@ -669,7 +669,7 @@ type ClusterSpec struct {
 	// release reaches Tier2 first, then Tier1, then Tier0. Stored only for
 	// now.
 	// +optional
-	Tier ClusterTier `json:"tier,omitempty"`
+
 	// upgradeMode is whether platform releases move the cluster: Manual
 	// (the default; the tenant chooses versions, channels do not apply) or
 	// Automatic (the cluster follows its release channel by tier). Mutable.
@@ -920,6 +920,9 @@ const ConditionPlatformComponentsReady = "PlatformComponentsReady"
 // PlatformComponentStatus is one component the platform installed with a
 // cluster.
 type PlatformComponentStatus struct {
+	// Last chart version observed Ready, retained during upgrades.
+	// +optional
+	InstalledVersion string `json:"installedVersion,omitempty"`
 	// name in the catalog, e.g. karpenter.
 	// +required
 	Name string `json:"name"`
@@ -958,6 +961,7 @@ type PlatformComponentStatus struct {
 // ClusterStatus is the observed state of a Cluster, aggregated from its
 // Crossplane objects.
 type ClusterStatus struct {
+	Tier ClusterTier `json:"tier,omitempty"`
 	// observedGeneration is the generation the status reflects.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -1085,7 +1089,7 @@ type ClusterStatus struct {
 // +kubebuilder:printcolumn:name="Upgrade",type=string,JSONPath=`.status.upgrade.phase`,priority=1
 // +kubebuilder:printcolumn:name="Upgrading-To",type=string,JSONPath=`.status.upgrade.toVersion`,priority=1
 // +kubebuilder:printcolumn:name="Channel",type=string,JSONPath=`.spec.releaseChannel`
-// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
+// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.status.tier`
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.upgradeMode`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

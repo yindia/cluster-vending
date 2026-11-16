@@ -33,7 +33,6 @@ spec:
   # Stored only for now: a release reaches Alpha, then Beta, then Stable,
   # and within a channel Tier2, then Tier1, then Tier0. Unset tier is Tier0.
   releaseChannel: Stable
-  tier: Tier0
   aws:
     upgradePolicy:
       supportType: STANDARD

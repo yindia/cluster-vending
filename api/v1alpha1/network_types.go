@@ -159,6 +159,8 @@ type NetworkImport struct {
 // +kubebuilder:validation:XValidation:rule="has(self.importFrom) == has(oldSelf.importFrom)",message="a network is created or imported for good: importFrom cannot be added or removed"
 // +kubebuilder:validation:XValidation:rule="!has(self.importFrom) || !has(self.flowLogs)",message="flowLogs cannot be set on an imported network: it keeps the flow logs it was imported with"
 type NetworkSpec struct {
+	// +kubebuilder:default=Tier0
+	Tier ClusterTier `json:"tier,omitempty"`
 	// accountRef names the CloudAccount the network lives in, in the same
 	// namespace. The account owns the network. Immutable. Clusters run in
 	// their network's account.
@@ -282,6 +284,7 @@ type NetworkStatus struct {
 // +kubebuilder:resource:shortName=cvnet;cvnetwork,categories=cluster-vending
 // +kubebuilder:printcolumn:name="Account",type=string,JSONPath=`.spec.accountRef.name`
 // +kubebuilder:printcolumn:name="Region",type=string,JSONPath=`.spec.region`
+// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
 // +kubebuilder:printcolumn:name="VPC",type=string,JSONPath=`.status.resources.cloudNetworkID`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

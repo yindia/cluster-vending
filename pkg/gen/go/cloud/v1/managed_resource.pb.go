@@ -135,7 +135,7 @@ type ManagedResource struct {
 	// applied to the cloud yet.
 	ObservedGeneration int64 `protobuf:"varint,14,opt,name=observed_generation,json=observedGeneration,proto3" json:"observed_generation,omitempty"`
 	// Paused: the object carries crossplane.io/paused, so its provider does
-	// not act on it (AdminService.PauseReconcile) until it is resumed. Its
+	// not act on it (AdminService.Freeze) until it is unfrozen. Its
 	// state stays what it was: READY when it was ready, WAITING otherwise;
 	// a deletion waits too.
 	Paused        bool `protobuf:"varint,15,opt,name=paused,proto3" json:"paused,omitempty"`

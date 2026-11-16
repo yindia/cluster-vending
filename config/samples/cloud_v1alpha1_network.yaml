@@ -5,6 +5,7 @@ metadata:
   name: prod
   namespace: tenant-acme
 spec:
+  tier: Tier0
   # The CloudAccount that owns this network (cloud_v1alpha1_cloudaccount.yaml).
   accountRef:
     name: aws-111122223333

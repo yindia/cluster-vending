@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,7 +14,6 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
-	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/deprecation"
 	"github.com/yindia/cluster-vending/pkg/reconcile/deprecations"
 )
@@ -135,8 +133,7 @@ func TestClusterThatCannotBeScanned(t *testing.T) {
 		{"paused by an operator", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {
 			// The scan reads the workload cluster: a paused cluster's is
 			// left alone.
-			w.must(t, w.store.Tenants().SetPause(t.Context(), tenant, model.PauseTarget{ClusterID: obj.Labels[cloudstore.LabelID]},
-				&model.Pause{By: "alice", Since: time.Now()}))
+			w.pauseTenant(t, operatorPause)
 		}, true, ""},
 		{"no kubeconfig Secret named", func(t *testing.T, w world, obj *cloudv1alpha1.Cluster) {
 			obj.Status.KubeconfigSecret = ""

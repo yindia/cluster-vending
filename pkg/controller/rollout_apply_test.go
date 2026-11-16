@@ -56,13 +56,21 @@ func newUpgradeWorld(t *testing.T, policy cloudv1alpha1.RolloutPolicy, names ...
 	w := upgradeWorld{k: k, store: cloudstore.New(k), ids: map[string]string{}}
 	storetest.MustTenant(t, w.store, upgradeTenant)
 	network := storetest.MustNetwork(t, w.store, upgradeTenant, "net")
+	networkObject := &cloudv1alpha1.Network{}
+	if err := k.Get(t.Context(), client.ObjectKey{Namespace: "tenant-" + upgradeTenant, Name: "net"}, networkObject); err != nil {
+		t.Fatal(err)
+	}
+	networkObject.Spec.Tier = cloudv1alpha1.ClusterTier2
+	if err := k.Update(t.Context(), networkObject); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range names {
 		spec, err := protojson.Marshal(&cloudv1.ClusterSpec{Region: "us-east-1",
 			Network:        &cloudv1.ClusterNetwork{NetworkId: network.ID},
 			ControlPlane:   &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.35"},
-			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE, Tier: cloudv1.ClusterTier_CLUSTER_TIER_2,
-			UpgradeMode: cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
-			Provider:    &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}}})
+			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_STABLE,
+			UpgradeMode:    cloudv1.UpgradeMode_UPGRADE_MODE_AUTOMATIC,
+			Provider:       &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,6 +157,39 @@ func (w upgradeWorld) pass(t *testing.T, automatic bool, plan client.Client, now
 }
 
 var twoAtOnce = cloudv1alpha1.RolloutPolicy{MaxInProgress: 2, MaxFailed: 1, Soak: metav1.Duration{Duration: time.Hour}}
+
+func TestAutomaticUpgradeRechecksNetworkTier(t *testing.T) {
+	w := newUpgradeWorld(t, twoAtOnce, "a")
+	network := &cloudv1alpha1.Network{}
+	key := client.ObjectKey{Namespace: kube.TenantNamespace(upgradeTenant), Name: "net"}
+	if err := w.k.Get(t.Context(), key, network); err != nil {
+		t.Fatal(err)
+	}
+	network.Spec.Tier = cloudv1alpha1.ClusterTier0
+	if err := w.k.Update(t.Context(), network); err != nil {
+		t.Fatal(err)
+	}
+	stale := interceptor.NewClient(w.k, interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+		if err := c.List(ctx, list, opts...); err != nil {
+			return err
+		}
+		if networks, ok := list.(*cloudv1alpha1.NetworkList); ok {
+			for i := range networks.Items {
+				networks.Items[i].Spec.Tier = cloudv1alpha1.ClusterTier2
+			}
+		}
+		return nil
+	}})
+	events := w.pass(t, true, stale, rolloutNow)
+	if w.version(t, "a") != "1.35" || events.count(platform.ReasonAutomaticUpgradeStarted) != 0 {
+		t.Fatal("a stale network tier admitted an automatic upgrade")
+	}
+	// A fresh plan can use the new tier and proceed.
+	events = w.pass(t, true, w.k, rolloutNow)
+	if w.version(t, "a") != "1.36" || events.count(platform.ReasonAutomaticUpgradeStarted) == 0 {
+		t.Fatal("a fresh plan did not use the new network tier")
+	}
+}
 
 // With automatic upgrades on, the plan's clusters get their next minor
 // once, through the store, with a record and an event; the plan's limit

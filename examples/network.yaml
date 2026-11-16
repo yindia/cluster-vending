@@ -1,6 +1,8 @@
 # Step 2 of the walkthrough (README.md): a network in tenant acme's account.
 #
 #   cluster-vending network create -f examples/network.yaml [--wait]
+#   cluster-vending network update --id <NETWORK_ID> -f examples/network.yaml --plan
+#   cluster-vending network update --id <NETWORK_ID> -f examples/network.yaml [--wait]
 #
 # Replace spec.bootstrapId with the BOOTSTRAP_ID that `bootstrap create -f
 # examples/cloudaccount.yaml` returned. The answer has the network's id:
@@ -8,19 +10,61 @@
 apiVersion: cluster-vending.io/v1
 kind: Network
 metadata:
-  name: prod                 # prefix of the network's resource names
-  tenant: acme
-  displayName: Prod network
-  labels: {env: prod, team: platform}   # filtering, and AWS tags on every resource
+  name: prod                 # immutable; lowercase DNS label, 1-40 characters
+  tenant: acme               # tenant scope; or use --tenant
+  # id: <NETWORK_ID>          # update only: optional alternative to --id; omit on create
+  displayName: Prod network  # mutable; optional, at most 128 characters
+  # Mutable: filtering and AWS tags on every resource; at most 40 pairs.
+  # Keys: 1-128 characters; values: 0-256. Allowed: letters, digits,
+  # spaces and _ . : / = + @ - . Platform/AWS-reserved keys are refused.
+  labels: {env: prod, team: platform}
 spec:
-  region: us-west-1
+  # Mutable; inherited by every cluster in this network.
+  # Choices: TIER_2 (first), TIER_1 (next), TIER_0 (last, default).
+  # TIER_UNSPECIFIED also resolves to TIER_0.
+  tier: TIER_2
+  region: us-west-1           # immutable; must match the account's verified region
   bootstrapId: 00000000-0000-0000-0000-000000000001   # BOOTSTRAP_ID
-  # layout is optional: default 10.0.0.0/16, 3 zones, one NAT gateway.
+  # bootstrapId is immutable: the CloudAccount UUID, not the AWS account number.
+  # Provider comes from that account; no spec.aws or spec.provider setting.
+  # Immutable after creation. Omit layout for 10.0.0.0/16, 3 zones, one NAT.
   layout:
+    # IPv4 /16 through /24; default 10.0.0.0/16.
+    # Automatic subnet allocation needs /22 or larger; /23-/24 need explicit subnets.
     cidrBlock: 10.1.0.0/16
+    # Implemented choices: NAT_GATEWAY_MODE_SINGLE (default),
+    # NAT_GATEWAY_MODE_PER_ZONE (a NAT in each private-subnet zone).
+    # NAT_GATEWAY_MODE_UNSPECIFIED resolves to SINGLE.
+    # NAT_GATEWAY_MODE_REGIONAL exists in the API but is not implemented yet.
     natGatewayMode: NAT_GATEWAY_MODE_PER_ZONE
+    # Alternative to explicit subnets: omit subnets and set a zone count.
+    # availabilityZoneCount: 3   # 2-6, default 3; cannot exceed the region's zones
+    # Do not set availabilityZoneCount alongside explicit AWS zonal subnets.
+    # At most 32 subnets: distinct, non-overlapping IPv4 CIDRs inside cidrBlock,
+    # /16 through /28 (and no larger than the network).
+    # role: SUBNET_ROLE_PUBLIC or SUBNET_ROLE_PRIVATE.
+    # zoneId: AWS zone ID in this region, not an account-specific name like us-west-1a.
+    # AWS requires private subnets in at least two zones and a public subnet;
+    # PER_ZONE requires a public subnet in every private-subnet zone.
     subnets:
       - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.1.0.0/24,  zoneId: usw1-az1}
       - {role: SUBNET_ROLE_PUBLIC,  cidrBlock: 10.1.1.0/24,  zoneId: usw1-az3}
       - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.1.16.0/20, zoneId: usw1-az1}
       - {role: SUBNET_ROLE_PRIVATE, cidrBlock: 10.1.32.0/20, zoneId: usw1-az3}
+  # Optional, for platform-created networks only; omitted/disabled means no logs.
+  # Delivery is to a dedicated CloudWatch Logs group. Imported networks keep
+  # their discovered flow logs and cannot set this block.
+  flowLogs:
+    enabled: true           # mutable: true creates logs; false removes their resources
+    # ALL (default), ACCEPT, REJECT; UNSPECIFIED resolves to ALL.
+    # Use the full FLOW_LOG_TRAFFIC_TYPE_ prefix, as below.
+    trafficType: FLOW_LOG_TRAFFIC_TYPE_ALL
+    # Mutable retention. Choices (days): 1, 3, 5, 7, 14, 30, 60, 90, 120,
+    # 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653.
+    # Omitted/0 resolves to 30 when enabled.
+    retentionDays: 30
+    aggregationIntervalSeconds: 600  # 60 or 600; omitted/0 resolves to 600
+    # trafficType and aggregationIntervalSeconds cannot change while enabled:
+    # first apply enabled:false, wait for removal, then enable with new settings.
+# Release channel belongs to each cluster; freeze is managed through admin commands.
+# status, etag, generation and timestamps are server-owned, not input settings.

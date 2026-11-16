@@ -116,9 +116,12 @@ tenant. The exceptions are listed in `pkg/auth/access.go`:
 |---|---|
 | Every RPC with `tenant_id`, marked `NO_SIDE_EFFECTS` | Any role for the tenant |
 | Every other RPC with `tenant_id` (create, update, delete, import, takeover, bootstrap, enable, disable) | `TenantAdmin` for the tenant |
-| `AdminService.PauseReconcile`, `AdminService.ResumeReconcile` | `PlatformAdmin`, whatever tenant they name |
+| `AdminService.Freeze`, `AdminService.Unfreeze` | `PlatformAdmin`, whatever tenant they name |
 | `AdminService.ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel` | `PlatformAdmin` (read-only) |
 | `ComponentService.GetComponentValues`, `TenantService.WhoAmI` | Any accepted caller |
+| `TenantService.ListTenants` | Any accepted caller; results filtered to readable tenants |
+| `TenantService.CreateTenant` | `TenantAdmin` for the requested ID; creates no new grants |
+| `TenantService.Freeze`, `Unfreeze` | `TenantAdmin` for the selected tenant and its owned resources |
 
 An RPC that is neither listed nor carries a `tenant_id` is refused, and a
 test (`TestEveryRPCIsClassified`) fails when one is added.

@@ -131,11 +131,9 @@ A cluster cannot be deleted while it has components.
 
 | RPC | What it does |
 |---|---|
-| `PauseReconcile` | Pauses a tenant, one of its networks or clusters, or a release channel's clusters (`channel`, with `tier` for one tier): everything: the rows get the pause, their managed resources `crossplane.io/paused` (to stop automatic changes only, `Freeze`). `until` ends it by itself. |
-| `ResumeReconcile` | Ends the pause of the same target and kind; other pauses of a cluster stay. |
-| `ListPauses` | Every pause and freeze in effect: target, everything or automatic changes, who, since, until, why, how many clusters. |
-| `Freeze` | Freezes the platform, or a tenant's or a channel's (`tier`) clusters: no automatic change starts (Kubernetes upgrades, release moves, add-on upgrades, code changes); users' own changes still apply. `until` ends it by itself. |
-| `Unfreeze` | Lifts the freeze of a target, or with `cluster_id` / `network_id` lets one through while it stays. |
+| `GetFreeze` | Current phase (`Freezing`, `Frozen`, `Unfreezing`, `Unfrozen`), metadata, exceptions and live provider pause totals. |
+| `Freeze` | Requests a freeze of the platform, or `tenant_id`, `network_id` (including its clusters), or `cluster_id`: controllers stop cloud changes and Crossplane managed resources are paused. User writes are stored for later. `until` ends it automatically while the controller runs. Confirmation is asynchronous; `reset_exceptions` refreezes canaries. |
+| `Unfreeze` | Resumes the platform; `cluster_id` lets one cluster through while its shared network stays frozen; `network_id` resumes a network and its clusters; `tenant_id` resumes a tenant; no target clears all scopes. |
 | `ListReleases`, `GetRelease` | The releases, newest first; one release per Kubernetes minor: channel, default, upgrade target, end of support, ending, components with versions and locked values. Read-only. |
 | `ListReleaseChannels`, `GetReleaseChannel` | alpha, beta, stable: promotion, the release and minor each offers, rollout policy (with `release_soak`) and the tier its rollout is at, and `pending`: the release an Automatic channel takes once its release soak ends; one channel adds the releases it offered, its conditions, its `release_moves`, and its rollout planned now with the controller's rules (`pkg/rollout`): per tier and batch, with every cluster. |
 

@@ -25,10 +25,11 @@ func rolloutCluster(name string, tier cloudv1alpha1.ClusterTier, version string)
 	return &cloudv1alpha1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tenant-acme",
 			Labels: map[string]string{cloudstore.LabelID: "id-" + name}},
-		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable, Tier: tier,
+		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable,
+			Network:      cloudv1alpha1.ClusterNetwork{NetworkRef: cloudv1alpha1.LocalReference{Name: "net-" + string(tier)}},
 			UpgradeMode:  cloudv1alpha1.UpgradeModeAutomatic,
 			ControlPlane: &cloudv1alpha1.ControlPlaneSpec{KubernetesVersion: version}},
-		Status: cloudv1alpha1.ClusterStatus{Phase: cloudv1alpha1.ClusterPhaseRunning, CurrentKubernetesVersion: version,
+		Status: cloudv1alpha1.ClusterStatus{Tier: tier, Phase: cloudv1alpha1.ClusterPhaseRunning, CurrentKubernetesVersion: version,
 			Conditions: []metav1.Condition{
 				{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: metav1.NewTime(rolloutNow.Add(-48 * time.Hour))},
 				{Type: cloudv1alpha1.ConditionPlatformComponentsReady, Status: metav1.ConditionTrue, Reason: "Ready",
@@ -49,6 +50,16 @@ func rolloutWorld(t *testing.T, policy cloudv1alpha1.RolloutPolicy, objects ...c
 	stable := &cloudv1alpha1.ReleaseChannel{ObjectMeta: metav1.ObjectMeta{Name: "stable"},
 		Spec:   cloudv1alpha1.ReleaseChannelSpec{Promotion: cloudv1alpha1.PromotionAutomatic, Policy: policy},
 		Status: cloudv1alpha1.ReleaseChannelStatus{Release: rel.Name, KubernetesMinor: "1.36"}}
+	networks := map[string]bool{}
+	for _, object := range objects {
+		if cluster, ok := object.(*cloudv1alpha1.Cluster); ok {
+			name := cluster.Spec.Network.NetworkRef.Name
+			if name != "" && !networks[name] {
+				networks[name] = true
+				objects = append(objects, &cloudv1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cluster.Namespace}, Spec: cloudv1alpha1.NetworkSpec{Tier: cluster.Status.Tier}})
+			}
+		}
+	}
 	return releaseClient(t, append([]client.Object{rel, stable}, objects...)...)
 }
 

@@ -22,7 +22,6 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
-	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/maintenance"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/release"
@@ -239,7 +238,7 @@ func (in memberInputs) row(c *cloudv1alpha1.Cluster) (r Row, wake time.Time, ok 
 		return r, wake, false
 	}
 	r = Row{ID: c.Labels[cloudstore.LabelID], Tenant: tenantOf(c), Namespace: c.Namespace, Name: c.Name,
-		Tier: Tier(c.Spec.Tier), Current: current, Target: in.target}
+		Tier: Tier(c.Status.Tier), Current: current, Target: in.target}
 	if u := c.Status.Upgrade; u != nil {
 		r.Phase = string(u.Phase)
 	}
@@ -317,7 +316,6 @@ func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Fa
 	f := upgrade.Facts{Mode: upgrade.Mode(c.Spec.UpgradeMode), Target: target,
 		Ready:         meta.IsStatusConditionTrue(c.Status.Conditions, "Ready") || c.Status.Phase == cloudv1alpha1.ClusterPhaseRunning,
 		PlatformReady: platformReady(c),
-		Paused:        model.ParsePause(c.Annotations[cloudstore.AnnotationPaused]) != nil,
 	}
 	if h := HoldOf(in.holds, c, in.now); h != nil {
 		f.Frozen, f.FrozenMessage = true, FreezeMessage(h)
@@ -363,6 +361,24 @@ func FinishedAt(c *cloudv1alpha1.Cluster) time.Time {
 // no automatic change of it starts. Nil when none does.
 func HoldOf(holds []cloudv1alpha1.ReleaseHold, c *cloudv1alpha1.Cluster, now time.Time) *cloudv1alpha1.ReleaseHold {
 	for i := range holds {
+		if holds[i].Spec.Platform {
+			target := reconcile.FreezeTarget{TenantID: c.Labels[cloudstore.LabelTenant], ClusterID: c.Labels[cloudstore.LabelID], NetworkID: c.Labels["cluster-vending.io/network"]}
+			if frozen := reconcile.FreezeForTarget(&holds[i], now, target); frozen.Holds() {
+				current := holds[i].DeepCopy()
+				current.Spec.Reason = frozen.Reason
+				current.Spec.Until = nil
+				if frozen.Until != nil {
+					until := metav1.NewTime(*frozen.Until)
+					current.Spec.Until = &until
+				}
+				if current.Annotations == nil {
+					current.Annotations = map[string]string{}
+				}
+				current.Annotations["cloud.cluster-vending.io/effective-freeze-scope"] = frozen.Scope
+				return current
+			}
+			continue
+		}
 		if Active(holds[i], now) && Matches(holds[i].Spec, c) {
 			return &holds[i]
 		}
@@ -370,48 +386,36 @@ func HoldOf(holds []cloudv1alpha1.ReleaseHold, c *cloudv1alpha1.Cluster, now tim
 	return nil
 }
 
-// Matches reports whether a freeze's target covers c: the platform, or c
-// is the cluster it names, or of the tenant it names, or on the channel it
-// names (and of its tier, when it names one; a cluster with no tier is
-// tier 0). A cluster the freeze lets through (Except) is not covered.
+// Matches reports whether a hold covers c: the platform freeze, or c is
+// the cluster it names. A cluster the freeze lets through (Except) is not
+// covered.
 func Matches(h cloudv1alpha1.ReleaseHoldSpec, c *cloudv1alpha1.Cluster) bool {
 	if slices.Contains(h.Except, c.Labels[cloudstore.LabelID]) {
 		return false
 	}
 	switch {
 	case h.Platform:
-		return true
+		return reconcile.FreezeForTarget(&cloudv1alpha1.ReleaseHold{Spec: h}, time.Now(), reconcile.FreezeTarget{TenantID: c.Labels[cloudstore.LabelTenant], ClusterID: c.Labels[cloudstore.LabelID], NetworkID: c.Labels["cluster-vending.io/network"]}).Holds()
 	case h.ClusterID != "":
 		return c.Labels[cloudstore.LabelID] == h.ClusterID
-	case h.TenantID != "":
-		return tenantOf(c) == h.TenantID
-	case h.Channel != "":
-		if !strings.EqualFold(string(c.Spec.ReleaseChannel), h.Channel) {
-			return false
-		}
-		return h.Tier == "" || Tier(c.Spec.Tier) == Tier(h.Tier)
 	}
 	return false
 }
 
-// HoldTarget names what a hold covers, for people: "cluster <id>",
-// "tenant acme", "channel beta", "channel beta tier 0".
+// HoldTarget names what a hold covers, for people: "the platform",
+// "cluster <id>".
 func HoldTarget(h cloudv1alpha1.ReleaseHoldSpec) string {
-	switch {
-	case h.Platform:
+	if h.Platform || h.ClusterID == "" {
 		return "the platform"
-	case h.ClusterID != "":
-		return "cluster " + h.ClusterID
-	case h.TenantID != "":
-		return "tenant " + h.TenantID
-	case h.Tier != "":
-		return fmt.Sprintf("channel %s tier %d", h.Channel, Tier(h.Tier))
 	}
-	return "channel " + h.Channel
+	return "cluster " + h.ClusterID
 }
 
 // Active reports whether the hold holds its cluster at now.
 func Active(h cloudv1alpha1.ReleaseHold, now time.Time) bool {
+	if h.Spec.Platform {
+		return reconcile.AnyFreezeActive(&h, now)
+	}
 	return h.Spec.Until == nil || h.Spec.Until.After(now)
 }
 
@@ -528,31 +532,17 @@ func Earliest(a, b time.Time) time.Time {
 	return b
 }
 
-// FreezeName is the name of the release hold that is the platform freeze:
-// one for the platform.
-const FreezeName = "platform-freeze"
-
-// FreezeNameOf is the name of the release hold that freezes a target: one
-// per target, so freezing again changes it.
-func FreezeNameOf(spec cloudv1alpha1.ReleaseHoldSpec) string {
-	switch {
-	case spec.Platform:
-		return FreezeName
-	case spec.ClusterID != "":
-		return "freeze-cluster-" + spec.ClusterID
-	case spec.TenantID != "":
-		return "freeze-tenant-" + spec.TenantID
-	case spec.Tier != "":
-		return "freeze-channel-" + strings.ToLower(spec.Channel) + "-" + strings.ToLower(string(spec.Tier))
-	}
-	return "freeze-channel-" + strings.ToLower(spec.Channel)
-}
+// FreezeName is the name of the release hold that is the platform freeze.
+const FreezeName = reconcile.FreezeName
 
 // FreezeMessage is what a cluster a freeze holds says: "the platform is
-// frozen: provider upgrade", "channel beta tier 0 is frozen: quarter end
-// (until 2026-12-31T00:00:00Z)".
+// frozen: provider upgrade (until 2026-12-31T00:00:00Z)".
 func FreezeMessage(h *cloudv1alpha1.ReleaseHold) string {
-	out := HoldTarget(h.Spec) + " is frozen"
+	target := HoldTarget(h.Spec)
+	if scope := h.Annotations["cloud.cluster-vending.io/effective-freeze-scope"]; scope != "" && scope != "platform" {
+		target = scope
+	}
+	out := target + " is frozen"
 	if h.Spec.Reason != "" {
 		out += ": " + h.Spec.Reason
 	}

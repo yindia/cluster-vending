@@ -51,7 +51,7 @@ func TestNetworkCodeAdmittedReadsTheManagementCluster(t *testing.T) {
 	network := &cloudv1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "main",
 		Labels: map[string]string{cloudstore.LabelID: "net-1"}}}
 	prod := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "prod", Labels: map[string]string{cloudstore.LabelID: "c-1"}},
-		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable, Tier: cloudv1alpha1.ClusterTier0}}
+		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable}}
 	prod.Spec.Network.NetworkRef.Name = "main"
 	other := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "other"},
 		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelBeta}}

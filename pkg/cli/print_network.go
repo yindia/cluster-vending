@@ -28,8 +28,8 @@ func networkRow(n *cloudv1.Network, wide bool) []string {
 
 func networkPhase(st *cloudv1.NetworkStatus) string {
 	phase := word(st.GetState().String(), "NETWORK_STATE_")
-	if st.GetPause() != nil {
-		phase += " (paused)"
+	if frozen := st.GetFreeze(); frozen != nil && !frozen.GetLetThrough() {
+		phase += " (frozen)"
 	}
 	return phase
 }
@@ -65,7 +65,10 @@ func mutatedNetwork(w io.Writer, n *cloudv1.Network, verb string) error {
 	if err := mutated(w, "network", n.GetName(), n.GetId(), verb); err != nil {
 		return err
 	}
-	return table(w, networkHeader, [][]string{networkRow(n, false)})
+	if err := table(w, networkHeader, [][]string{networkRow(n, false)}); err != nil {
+		return err
+	}
+	return frozenWrite(w, n.GetStatus().GetFreeze())
 }
 
 // describeNetwork is one network: its fields, then every resource with
@@ -75,11 +78,11 @@ func describeNetwork(w io.Writer, n *cloudv1.Network) error {
 	layout := n.GetSpec().GetLayout()
 	kv := [][2]string{
 		{"Name", n.GetName()}, {"ID", n.GetId()}, {"Tenant", n.GetTenantId()}, {"Phase", networkPhase(st)},
-		{"Region", n.GetSpec().GetRegion()}, {"VPC", st.GetResources().GetCloudNetworkId()}, {"CIDR", layout.GetCidrBlock()},
+		{"Region", n.GetSpec().GetRegion()}, {"Tier", word(n.GetSpec().GetTier().String(), "TIER_")}, {"VPC", st.GetResources().GetCloudNetworkId()}, {"CIDR", layout.GetCidrBlock()},
 		{"Zones", strings.Join(zones(layout), ",")}, {"Clusters", strings.Join(st.GetClusterIds(), ",")},
 	}
-	if p := st.GetPause(); p != nil {
-		kv = append(kv, [2]string{"Paused", pauseLine(p)})
+	if p := st.GetFreeze(); p != nil {
+		kv = append(kv, [2]string{"Frozen", freezeLine(p)})
 	}
 	// A network's only rollout is its code changes.
 	if line := codeChangeLine(st.GetCodeChange()); line != "" {

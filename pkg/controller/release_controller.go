@@ -18,6 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
@@ -66,7 +68,7 @@ func setupReleases(mgr ctrl.Manager, d Deps) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("releasehold").For(&cloudv1alpha1.ReleaseHold{}).
 		Watches(&cloudv1alpha1.Release{}, all(&cloudv1alpha1.ReleaseHoldList{})).
 		Watches(&cloudv1alpha1.Cluster{}, all(&cloudv1alpha1.ReleaseHoldList{})).
-		Complete(&ReleaseHoldReconciler{c: c})
+		Complete(&ReleaseHoldReconciler{c: d.Direct, barrier: d.FreezeBarrier})
 }
 
 // enqueueAll is a request for every object of a cluster-scoped list: the
@@ -566,8 +568,9 @@ func conditionMessage(conds []metav1.Condition, typ string) string {
 // ReleaseHoldReconciler resolves a hold's cluster ID to its Cluster object
 // and checks the release it names.
 type ReleaseHoldReconciler struct {
-	c   client.Client
-	now func() time.Time
+	barrier *platform.FreezeBarrier
+	c       client.Client
+	now     func() time.Time
 }
 
 // Reconcile writes the namespace and name the hold's cluster ID resolves
@@ -575,9 +578,27 @@ type ReleaseHoldReconciler struct {
 // is missing or withdrawn, and a hold whose until has passed are reported.
 // It changes no cluster.
 func (r *ReleaseHoldReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if req.Name == platform.FreezeName {
+		wait, err := platform.ConfirmFreeze(ctx, platform.Deps{Kube: r.c, KubeReader: r.c, FreezeBarrier: r.barrier}, r.clock())
+		return ctrl.Result{RequeueAfter: wait}, err
+	}
 	hold := &cloudv1alpha1.ReleaseHold{}
 	if err := r.c.Get(ctx, req.NamespacedName, hold); err != nil {
+		if apierrors.IsNotFound(err) && req.Name == platform.FreezeName {
+			_, err := platform.SetProvidersPaused(ctx, platform.Deps{Kube: r.c}, platform.PauseScope{}, false)
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if hold.Spec.Platform {
+		scope := platform.PauseScope{}
+		active := rollout.Active(*hold, r.clock())
+		if active {
+			scope.Except = hold.Spec.Except
+		}
+		if _, err := platform.SetProvidersPaused(ctx, platform.Deps{Kube: r.c}, scope, active); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	clusters := &cloudv1alpha1.ClusterList{}
 	var opts []client.ListOption

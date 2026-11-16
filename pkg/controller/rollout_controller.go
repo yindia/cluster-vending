@@ -20,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/rollout"
@@ -42,8 +41,10 @@ const ConditionRolloutPlanned = "RolloutPlanned"
 // (status.rollout). With automatic upgrades on it also starts the plan's
 // hops (rollout_apply.go); off, it never changes a cluster's version.
 type RolloutReconciler struct {
-	c   client.Client
-	now func() time.Time
+	barrier *platform.FreezeBarrier
+	c       client.Client
+	reader  client.Reader
+	now     func() time.Time
 	// automatic is the controller's automatic-upgrades setting; timeout
 	// its upgrade-timeout (0: the default).
 	automatic bool
@@ -58,7 +59,7 @@ type RolloutReconciler struct {
 // NewRolloutReconciler returns the rollout controller on d's manager
 // client (SetupWithManager sets it).
 func NewRolloutReconciler(d Deps) *RolloutReconciler {
-	return &RolloutReconciler{automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, events: d.Events,
+	return &RolloutReconciler{barrier: d.FreezeBarrier, automatic: d.AutomaticUpgrades, timeout: d.UpgradeTimeout, events: d.Events,
 		store: d.Store, log: d.Logger}
 }
 
@@ -75,6 +76,7 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.c == nil {
 		r.c = mgr.GetClient()
 	}
+	r.reader = mgr.GetAPIReader()
 	toChannel := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 		cl, ok := obj.(*cloudv1alpha1.Cluster)
 		if !ok || cl.Spec.ReleaseChannel == "" {
@@ -90,6 +92,7 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&cloudv1alpha1.Cluster{}, toChannel, builder.WithPredicates(rolloutInputChanged())).
 		Watches(&cloudv1alpha1.Release{}, allChannels, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&cloudv1alpha1.ReleaseHold{}, allChannels).
+		Watches(&cloudv1alpha1.Network{}, allChannels, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
@@ -121,8 +124,8 @@ func rolloutInputChanged() predicate.Predicate {
 
 // rolloutInput is what the rollout reads of a cluster.
 func rolloutInput(c *cloudv1alpha1.Cluster) []any {
-	return []any{c.Spec.ReleaseChannel, c.Spec.Tier, c.Spec.UpgradeMode, c.Spec.MaintenanceWindow,
-		rollout.SpecVersion(c), c.Annotations[cloudstore.AnnotationPaused], c.DeletionTimestamp,
+	return []any{c.Spec.ReleaseChannel, c.Status.Tier, c.Spec.UpgradeMode, c.Spec.MaintenanceWindow,
+		rollout.SpecVersion(c), c.DeletionTimestamp,
 		c.Status.Phase, c.Status.Conditions, c.Status.CurrentKubernetesVersion, c.Status.Upgrade,
 		c.Status.Deprecations, c.Status.PlatformComponents, recordResult(c), c.Status.PlatformRelease, movePhase(c), codePhase(c)}
 }
@@ -157,6 +160,8 @@ func recordResult(c *cloudv1alpha1.Cluster) cloudv1alpha1.ClusterRolloutResult {
 
 // Reconcile plans the channel's rollout now and writes it to its status.
 func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	leave := r.barrier.Enter()
+	defer leave()
 	ch := &cloudv1alpha1.ReleaseChannel{}
 	if err := r.c.Get(ctx, req.NamespacedName, ch); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)

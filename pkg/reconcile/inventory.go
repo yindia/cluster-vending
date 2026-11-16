@@ -14,8 +14,8 @@ import (
 // management cluster.
 func (d Deps) Sequence() sequence.Engine { return sequence.Engine{Objects: d.Objects()} }
 
-// Inventory is owner's objects as the database records them
-// (managed_resources), for sequence.Engine.
+// Inventory reads an owner\'s Kubernetes status inventory for sequence.Engine.
+// Each entry records the full API version, kind, namespace and name.
 func (d Deps) Inventory(owner Owner) sequence.Inventory { return inventory{deps: d, owner: owner} }
 
 type inventory struct {

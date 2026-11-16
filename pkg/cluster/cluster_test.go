@@ -240,8 +240,9 @@ func TestResolveSpecDefaultsTheUpgradeMode(t *testing.T) {
 	}
 }
 
-func TestResolveSpecDefaultsTheTier(t *testing.T) {
-	for in, want := range map[cloudv1.ClusterTier]cloudv1.ClusterTier{
+//nolint:staticcheck // Verify legacy cluster tier fields are discarded.
+func TestResolveSpecDiscardsLegacyTier(t *testing.T) {
+	for in := range map[cloudv1.ClusterTier]cloudv1.ClusterTier{
 		cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED: cloudv1.ClusterTier_CLUSTER_TIER_0,
 		cloudv1.ClusterTier_CLUSTER_TIER_0:           cloudv1.ClusterTier_CLUSTER_TIER_0,
 		cloudv1.ClusterTier_CLUSTER_TIER_2:           cloudv1.ClusterTier_CLUSTER_TIER_2,
@@ -249,8 +250,8 @@ func TestResolveSpecDefaultsTheTier(t *testing.T) {
 		spec := minimalSpec()
 		spec.Tier = in
 		got, err := ResolveSpec(spec, []string{"use1-az1", "use1-az2"})
-		if err != nil || got.GetTier() != want {
-			t.Errorf("tier %s resolved to %s (%v), want %s", in, got.GetTier(), err, want)
+		if err != nil || got.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED {
+			t.Errorf("tier %s resolved to %s (%v), want %s", in, got.GetTier(), err, cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED)
 		}
 	}
 }

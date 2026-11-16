@@ -9,6 +9,7 @@ import (
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -59,7 +60,7 @@ func newWorld(t *testing.T, funcs ...interceptor.Funcs) world {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := fake.NewClientBuilder().WithScheme(scheme)
+	b := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"cloud.cluster-vending.io/tenant": tenant, crossplane.LabelTenantID: tenant}}})
 	for _, f := range funcs {
 		b = b.WithInterceptorFuncs(f)
 	}
@@ -106,11 +107,10 @@ func TestReconcileBootstrapsTheAccount(t *testing.T) {
 	if pc == nil || len(pc.Spec.AssumeRoleChain) != 1 || *pc.Spec.AssumeRoleChain[0].RoleARN != identity {
 		t.Fatalf("ProviderConfig = %+v, want it to assume %s", pc, identity)
 	}
-	if len(records) != 2 || records[0].Kind != "Namespace" || records[0].Namespace != "" ||
-		records[1].Kind != "ProviderConfig" || records[1].Name != w.account.ProviderConfigName ||
-		records[1].CloudAccountID != w.account.ID || records[1].TenantID != tenant {
-		t.Errorf("records = %+v, want the namespace then the ProviderConfig", records)
+	if len(records) != 1 || records[0].Kind != "ProviderConfig" || records[0].Name != w.account.ProviderConfigName || records[0].CloudAccountID != w.account.ID || records[0].TenantID != tenant {
+		t.Errorf("records = %+v, want only ProviderConfig", records)
 	}
+
 }
 
 // Reconciling an account again changes nothing: not its objects, not its
@@ -201,9 +201,9 @@ func TestView(t *testing.T) {
 		t.Errorf("view = %v", got)
 	}
 	views := st.GetManagedResources()
-	if len(views) != 2 || views[1].GetKind() != "ProviderConfig" ||
-		views[1].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
-		t.Errorf("objects = %v, want the namespace and the ProviderConfig, ready", views)
+	if len(views) != 1 || views[0].GetKind() != "ProviderConfig" ||
+		views[0].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
+		t.Errorf("objects = %v, want only the ProviderConfig, ready", views)
 	}
 }
 
@@ -258,5 +258,58 @@ func TestRoleNameFromIdentity(t *testing.T) {
 		if got := RoleName(identity); got != want {
 			t.Errorf("RoleName(%q) = %q, want %q", identity, got, want)
 		}
+	}
+}
+
+func TestApplyNeverCreatesMissingTenantNamespace(t *testing.T) {
+	w := newWorld(t)
+	if err := w.kube.Delete(t.Context(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}); err != nil {
+		t.Fatal(err)
+	}
+	err := w.rec.Apply(t.Context(), w.account)
+	if !fault.Is(err, fault.FailedPrecondition) {
+		t.Fatalf("apply: %v", err)
+	}
+	ns, pc, records := w.have(t)
+	if ns != nil || pc != nil || len(records) != 0 {
+		t.Fatalf("missing namespace caused writes: %v %v %v", ns, pc, records)
+	}
+}
+
+func TestApplyRejectsUnavailableNamespaceOwnership(t *testing.T) {
+	for _, state := range []string{"owner reference", "deleting", "terminating"} {
+		t.Run(state, func(t *testing.T) {
+			w := newWorld(t, interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if err := c.Get(ctx, key, obj, opts...); err != nil {
+						return err
+					}
+					if ns, ok := obj.(*corev1.Namespace); ok {
+						switch state {
+						case "owner reference":
+							ns.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "foreign-owner", UID: "foreign-owner"}}
+						case "deleting":
+							now := metav1.Now()
+							ns.DeletionTimestamp = &now
+						case "terminating":
+							ns.Status.Phase = corev1.NamespaceTerminating
+						}
+					}
+					return nil
+				},
+				Apply: func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+					t.Fatal("account applied resources despite invalid namespace")
+					return nil
+				},
+			})
+			err := w.rec.Apply(t.Context(), w.account)
+			if !fault.Is(err, fault.FailedPrecondition) {
+				t.Fatalf("apply: %v", err)
+			}
+			_, pc, records := w.have(t)
+			if pc != nil || len(records) != 0 {
+				t.Fatalf("invalid namespace caused writes: %v %v", pc, records)
+			}
+		})
 	}
 }

@@ -1,0 +1,21 @@
+# The server already exposes /metrics on its HTTP port.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: server-metrics-monitor
+  namespace: system
+  labels:
+    app.kubernetes.io/name: cluster-vending-server
+spec:
+  endpoints:
+  - path: /metrics
+    port: http
+    scheme: http
+    interval: 30s
+    scrapeTimeout: 10s
+    relabelings:
+    - targetLabel: cluster_vending_role
+      replacement: server
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-vending-server

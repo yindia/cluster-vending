@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
@@ -14,6 +17,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 )
 
@@ -36,11 +40,25 @@ func NewNetworkReconciler(d Deps) *NetworkReconciler {
 
 // Reconcile moves the network one step on (see the package comment).
 func (r *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	leave := r.deps.FreezeBarrier.Enter()
+	defer leave()
 	obj := &cloudv1alpha1.Network{}
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	tenant, id := obj.Labels[cloudstore.LabelTenant], obj.Labels[cloudstore.LabelID]
+	frozen, err := r.deps.SyncFreeze(ctx, platform.PauseScope{TenantID: tenant, NetworkID: id})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if frozen.Holds() {
+		if id != "" {
+			if err := r.rec.Reconcile(ctx, tenant, id); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return untilFreezeEnds(frozen, ctrl.Result{RequeueAfter: pendingDelay}, time.Now()), nil
+	}
 	if id == "" {
 		return r.adopt(ctx, obj)
 	}
@@ -57,7 +75,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
-	err := r.rec.Reconcile(ctx, tenant, id)
+	err = r.rec.Reconcile(ctx, tenant, id)
 	if err != nil {
 		r.deps.logger().ErrorContext(ctx, "reconcile network", "namespace", obj.Namespace, "name", obj.Name,
 			"network_id", id, "error", err)
@@ -199,7 +217,9 @@ func (r *NetworkReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&cloudv1alpha1.Network{}, forObject()).
 		Owns(&cloudv1alpha1.Cluster{}).
 		Named("network").
-		WithOptions(objectOptions(r.deps))
+		WithOptions(objectOptions(r.deps)).Watches(&cloudv1alpha1.ReleaseHold{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+		return enqueueAll(ctx, r.deps.Direct, &cloudv1alpha1.NetworkList{})
+	}))
 	b, err := providerWatches(b, mgr, ownerRequests(r.owners, r.deps.Direct, crossplane.LabelNetwork,
 		func() client.ObjectList { return &cloudv1alpha1.NetworkList{} }))
 	if err != nil {

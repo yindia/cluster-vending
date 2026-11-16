@@ -65,7 +65,7 @@ message ManagedResource {
   int64 observed_generation = 14;
 
   // Paused: the object carries crossplane.io/paused, so its provider does
-  // not act on it (AdminService.PauseReconcile) until it is resumed. Its
+  // not act on it (AdminService.Freeze) until it is unfrozen. Its
   // state stays what it was: READY when it was ready, WAITING otherwise;
   // a deletion waits too.
   bool paused = 15;

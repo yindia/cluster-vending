@@ -51,8 +51,9 @@ its kind; the message has the details.
 | Network, Cluster | `Updating` | Normal | a new generation, or a renderer change, is being applied |
 | Network, Cluster | `Failed` | Warning | a resource failed or vanished, or the pass could not apply the change; the message names it. Said again only when it is about another resource |
 | Network, Cluster | `Repaired` | Normal | an object deleted from the management cluster was created again |
-| Network, Cluster | `Paused` | Normal | an operator paused its resources (`admin pause`): nothing changes in the cloud |
-| Network, Cluster | `Resumed` | Normal | the pause ended |
+| Network, Cluster | `PlatformFrozen` | Normal | the platform freeze holds this resource |
+| Network, Cluster | `PlatformUnfrozen` | Normal | the platform freeze ended |
+| Network, Cluster | `LetThrough` | Normal | this resource is let through while the platform remains frozen |
 | Network, Cluster | `Deleting` | Normal | deletion started, waits for something else than before, or got stuck |
 | Network, Cluster | `Deleted` | Normal | everything is gone and the object is removed |
 | Cluster | `TeardownStarted` | Normal | the deletion's first step began: the load balancers and Karpenter's nodes the cluster's controllers made are being deleted |
@@ -66,7 +67,7 @@ its kind; the message has the details.
 | Cluster | `UpgradeNodes` | Normal | the control plane runs the new version; the node groups, then the add-ons, follow |
 | Cluster | `UpgradeStep` | Normal | the upgrade reached its next step: the add-ons, the platform components, the tenant components |
 | Cluster | `AddonRecovering` | Warning | add-ons failed (AWS's reason) or did not settle within 30 minutes; they are applied again (at most 3 times) |
-| Cluster | `AddonUpgraded` | Normal | the daily check found a newer version EKS recommends for an unpinned add-on; the cluster moves to it |
+| Cluster | `AddonUpgradeScheduled` | Normal | the daily check recorded a newer EKS-recommended version; application follows in reconciliation |
 | Network, Cluster | `CodeChangeStarted` | Normal | its turn came in the rollout of a code change (a new controller build renders its objects differently: "3 objects change"); it is applied |
 | Network, Cluster | `CodeChangeFinished` | Normal | the code change was applied in full |
 | Network, Cluster | `CodeChangeHalted` | Warning | the code change failed to apply 3 times; nothing more is tried until a newer build renders it otherwise or an update applies it |
@@ -153,3 +154,24 @@ authentication on, any role for the tenant may call them
   recorded by that call.
 - The last event of a deleted object (`Deleted`) refers to it by name
   only: the object is gone by then.
+
+## Resource lifecycle events
+
+The cluster event stream includes individual managed-resource transitions:
+
+| Resource | Start | Completion | Failure |
+|---|---|---|---|
+| EKS add-on | AddonInstalling, AddonUpgrading, AddonDeleting | AddonInstalled, AddonUpgraded, AddonDeleted | AddonFailed |
+| Node group | NodeGroupCreating, NodeGroupUpgrading, NodeGroupDeleting | NodeGroupCreated, NodeGroupUpgraded, NodeGroupDeleted | NodeGroupFailed |
+| Platform component | PlatformComponentInstalling, PlatformComponentUpgrading, PlatformComponentDeleting | PlatformComponentReady, PlatformComponentUpgraded, PlatformComponentRemoved | PlatformComponentFailed |
+| Tenant component | ComponentInstalling, ComponentUpgrading, ComponentDeleting | ComponentReady, ComponentUpgraded, ComponentDeleted | ComponentFailed |
+
+Names identify the affected add-on, node group or component. Upgrade events
+include component versions where available. Transitions compare persisted
+observations, so unchanged reconciliations do not replay events after restart.
+A removed inventory entry reports removal from platform tracking; it does not
+assert that an intentionally retained cloud resource was destroyed.
+
+Use `cluster-vending cluster events --id <cluster-id> --tenant <tenant>`
+for the Kubernetes event stream; cluster status also retains the most recent
+events. No database is required.

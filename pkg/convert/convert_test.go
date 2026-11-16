@@ -111,6 +111,7 @@ func TestClusterSpecRoundTrips(t *testing.T) {
 	for k := range variants {
 		want := &cloudv1.ClusterSpec{}
 		fill(want.ProtoReflect(), k)
+		want.ProtoReflect().Clear(want.ProtoReflect().Descriptor().Fields().ByName("tier"))
 		if want.GetNetwork() == nil {
 			want.Network = &cloudv1.ClusterNetwork{NetworkId: "n"} // a cluster always has its network
 		}
@@ -148,7 +149,7 @@ func TestUnsetStaysUnset(t *testing.T) {
 		spec, remainder := convert.ClusterSpecToAPI(want, "shared")
 		diff(t, name, convert.ClusterSpecFromAPI(spec, "n", remainder), want)
 	}
-	flowLogs := &cloudv1.NetworkSpec{Region: "us-east-1", FlowLogs: &cloudv1.NetworkFlowLogs{Enabled: ptr.To(false)}}
+	flowLogs := &cloudv1.NetworkSpec{Tier: cloudv1.Tier_TIER_0, Region: "us-east-1", FlowLogs: &cloudv1.NetworkFlowLogs{Enabled: ptr.To(false)}}
 	spec, remainder := convert.NetworkSpecToAPI(flowLogs, "a", false)
 	diff(t, "flow logs turned off", convert.NetworkSpecFromAPI(spec, "", remainder), flowLogs)
 }
@@ -156,7 +157,7 @@ func TestUnsetStaysUnset(t *testing.T) {
 // The kinds spell the contract's values as documented on their types.
 func TestEnumSpellings(t *testing.T) {
 	spec, _ := convert.ClusterSpecToAPI(&cloudv1.ClusterSpec{
-		ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA, Tier: cloudv1.ClusterTier_CLUSTER_TIER_0,
+		ReleaseChannel:    cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA,
 		MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY}},
 		DefaultNodePool: &cloudv1.NodePoolSpec{CapacityType: cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND,
 			Taints: []*cloudv1.Taint{{Key: "k", Effect: cloudv1.TaintEffect_TAINT_EFFECT_PREFER_NO_SCHEDULE}}},
@@ -172,7 +173,6 @@ func TestEnumSpellings(t *testing.T) {
 		Subnets: []*cloudv1.Subnet{{Role: cloudv1.SubnetRole_SUBNET_ROLE_PRIVATE}}})
 	for got, want := range map[string]string{
 		string(spec.ReleaseChannel):                                          "Beta",
-		string(spec.Tier):                                                    "Tier0",
 		string(spec.MaintenanceWindow.Days[0]):                               "Saturday",
 		string(spec.DefaultNodePool.CapacityType):                            "OnDemand",
 		string(spec.DefaultNodePool.Taints[0].Effect):                        "PreferNoSchedule",
@@ -191,9 +191,9 @@ func TestEnumSpellings(t *testing.T) {
 	}
 	// A spelling the contract does not have (an edit by hand) is unset,
 	// not an error and not another value.
-	back := convert.ClusterSpecFromAPI(cloudv1alpha1.ClusterSpec{Tier: "Tier9", ReleaseChannel: "Nightly"}, "n", nil)
-	if back.GetTier() != cloudv1.ClusterTier_CLUSTER_TIER_UNSPECIFIED || back.GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED {
-		t.Errorf("unknown spellings became %s, %s", back.GetTier(), back.GetReleaseChannel())
+	back := convert.ClusterSpecFromAPI(cloudv1alpha1.ClusterSpec{ReleaseChannel: "Nightly"}, "n", nil)
+	if back.GetReleaseChannel() != cloudv1.ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED {
+		t.Errorf("unknown spelling became %s", back.GetReleaseChannel())
 	}
 }
 

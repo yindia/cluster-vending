@@ -83,7 +83,7 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 	case *cloudv1.CreateClusterResponse:
 		return true, mutatedCluster(w, m.GetCluster(), "created")
 	case *cloudv1.UpdateClusterResponse:
-		if m.GetPlan() != nil {
+		if m.GetPlan() != nil && !m.GetUpdateRecorded() {
 			return true, printPlan(w, m.GetPlan())
 		}
 		return true, mutatedCluster(w, m.GetCluster(), "updated")
@@ -102,6 +102,9 @@ func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
 	case *cloudv1.CreateNetworkResponse:
 		return true, mutatedNetwork(w, m.GetNetwork(), "created")
 	case *cloudv1.UpdateNetworkResponse:
+		if m.GetPlan() != nil && !m.GetUpdateRecorded() {
+			return true, printPlan(w, m.GetPlan())
+		}
 		return true, mutatedNetwork(w, m.GetNetwork(), "updated")
 	case *cloudv1.DeleteNetworkResponse:
 		return true, mutatedNetwork(w, m.GetNetwork(), "deletion requested")
@@ -293,37 +296,36 @@ func eventRows(events []*cloudv1.Event) [][]string {
 
 var eventHeader = []string{"LAST SEEN", "TYPE", "REASON", "MESSAGE"}
 
-// pauseLine says who paused something, since when and why.
-func pauseLine(p *cloudv1.Pause) string { return pauseWith(p, whatEverything) }
+func frozenWrite(w io.Writer, frozen *cloudv1.Freeze) error {
+	if frozen == nil || frozen.GetLetThrough() {
+		return nil
+	}
+	_, err := fmt.Fprintln(w, "The platform is frozen; this request is stored and applies after admin unfreeze.")
+	return err
+}
 
-// freezeLine is a freeze: automatic changes stop.
-func freezeLine(p *cloudv1.Pause) string { return pauseWith(p, whatAutomaticChanges) }
-
-// pauseWith is a pause as describe prints it: what it stops, why, then
-// what it was asked for at (when wider than the object), who, since and
-// until when: "everything: provider upgrade (tenant, by alice since
-// 2026-11-14T11:00:00Z)".
-func pauseWith(p *cloudv1.Pause, what string) string {
+func freezeLine(p *cloudv1.Freeze) string {
 	if p == nil {
 		return ""
 	}
-	line := what
+	state := "everything"
+	if p.GetLetThrough() {
+		state = "let through; the platform stays frozen"
+	}
 	if p.GetReason() != "" {
-		line += ": " + p.GetReason()
+		state += ": " + p.GetReason()
 	}
-	var detail []string
-	if s := p.GetScope(); s != "" && s != "cluster" && s != "network" {
-		detail = append(detail, s)
+	detail := "by " + orNone(p.GetBy())
+	if p.GetScope() != "" && p.GetScope() != "platform" {
+		detail = p.GetScope() + ", " + detail
 	}
-	by := "by " + orNone(p.GetBy())
 	if p.GetSince() != nil {
-		by += " since " + p.GetSince().AsTime().UTC().Format(time.RFC3339)
+		detail += " since " + p.GetSince().AsTime().UTC().Format(time.RFC3339)
 	}
-	detail = append(detail, by)
 	if p.GetUntil() != nil {
-		detail = append(detail, "until "+p.GetUntil().AsTime().UTC().Format(time.RFC3339))
+		detail += ", until " + p.GetUntil().AsTime().UTC().Format(time.RFC3339)
 	}
-	return line + " (" + strings.Join(detail, ", ") + ")"
+	return state + " (" + detail + ")"
 }
 
 // mutated writes kubectl's "kind/name (id) verb" line.

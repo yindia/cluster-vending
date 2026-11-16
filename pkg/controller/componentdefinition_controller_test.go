@@ -196,9 +196,8 @@ func TestComponentDefinitionHoldsOnRecordedObjects(t *testing.T) {
 			holderCluster(func(c *cloudv1alpha1.Cluster) { c.Status.Phase = cloudv1alpha1.ClusterPhaseDeleting }),
 			componentRelease("prod-lb", "lb")}},
 		{name: "objects of a paused cluster", objects: []client.Object{
-			holderCluster(func(c *cloudv1alpha1.Cluster) {
-				c.Annotations = map[string]string{cloudstore.AnnotationPaused: `{"by":"alice","since":"` + since.Format(time.RFC3339) + `"}`}
-			}),
+			holderCluster(nil),
+			&cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: "platform-freeze", CreationTimestamp: metav1.NewTime(since)}, Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, By: "alice", Reason: "test"}},
 			componentRelease("prod-lb", "lb")},
 			held: true, message: "paused by alice since 2026-11-14T09:00:00Z"},
 	}

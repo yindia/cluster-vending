@@ -30,9 +30,9 @@ func TestAdmittedBy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, why, err := admittedBy(tt.moves, "r2", tt.key)
-			if err != nil || got != tt.want || !strings.Contains(why, tt.why) {
-				t.Fatalf("admitted %v (%q, %v), want %v saying %q", got, why, err, tt.want, tt.why)
+			got, why := admittedBy(tt.moves, "r2", tt.key)
+			if got != tt.want || !strings.Contains(why, tt.why) {
+				t.Fatalf("admitted %v (%q), want %v saying %q", got, why, tt.want, tt.why)
 			}
 		})
 	}

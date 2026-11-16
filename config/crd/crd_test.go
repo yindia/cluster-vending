@@ -23,7 +23,7 @@ func TestEmbeddedDefinitions(t *testing.T) {
 		kind, _, _ := unstructured.NestedString(d.Object, "spec", "names", "kind")
 		kinds[kind] = d
 	}
-	want := []string{"CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold", "Component", "ComponentDefinition"}
+	want := []string{"Tenant", "CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold", "Component", "ComponentDefinition"}
 	for _, kind := range want {
 		if kinds[kind] == nil {
 			t.Errorf("no definition of %s", kind)
@@ -34,7 +34,7 @@ func TestEmbeddedDefinitions(t *testing.T) {
 	}
 	// The operator's release objects are cluster-scoped, with a status
 	// the controller writes.
-	for _, kind := range []string{"Release", "ReleaseChannel", "ReleaseHold", "ComponentDefinition"} {
+	for _, kind := range []string{"Tenant", "Release", "ReleaseChannel", "ReleaseHold", "ComponentDefinition"} {
 		if scope, _, _ := unstructured.NestedString(kinds[kind].Object, "spec", "scope"); scope != "Cluster" {
 			t.Errorf("%s scope = %s, want Cluster", kind, scope)
 		}

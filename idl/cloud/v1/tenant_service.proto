@@ -3,9 +3,12 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/admin_freeze.proto";
+import "cloud/v1/admin_release.proto";
 import "cloud/v1/conditions.proto";
 import "cloud/v1/managed_resource.proto";
-import "cloud/v1/pause.proto";
+import "cloud/v1/tenant_dashboard.proto";
+import "cloud/v1/tenant_directory.proto";
 import "google/protobuf/timestamp.proto";
 
 // TenantService onboards tenants' cloud accounts. A tenant can have any
@@ -13,10 +16,41 @@ import "google/protobuf/timestamp.proto";
 // before a network is created or imported in it (NetworkSpec.bootstrap_id
 // is the account's CloudAccount.id).
 service TenantService {
-  // Registers one of the tenant's cloud accounts, stores it, and creates in
-  //   the management cluster:
-  //   - the tenant namespace tenant-<tenant_id>, if it does not exist
-  //   - the account's provider credential in that namespace (AWS: a
+  // Lists registered tenants visible to the caller's existing grants.
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Registers a cluster-scoped Tenant and its owned namespace. Does not create accounts, cloud
+  // resources or authorization grants, and never adopts an unmarked namespace.
+  rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Tenant-scoped dashboard operations. An omitted target means this tenant,
+  // never the platform; a network or cluster must belong to tenant_id.
+  rpc Freeze(TenantFreezeRequest) returns (FreezeResponse);
+  rpc Unfreeze(TenantUnfreezeRequest) returns (UnfreezeResponse);
+  rpc GetFreeze(TenantGetFreezeRequest) returns (GetFreezeResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Published release configuration, with tenant-only rollout observations.
+  rpc ListReleases(TenantListReleasesRequest) returns (ListReleasesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc GetRelease(TenantGetReleaseRequest) returns (GetReleaseResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListReleaseChannels(TenantListReleaseChannelsRequest) returns (ListReleaseChannelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc GetReleaseChannel(TenantGetReleaseChannelRequest) returns (GetReleaseChannelResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Registers an account for an existing cluster-scoped Tenant CR and its
+  // owned namespace tenant-<tenant_id>. Call CreateTenant first; a legacy
+  // namespace alone is insufficient. Missing registration returns NOT_FOUND;
+  // a missing, deleting or unowned namespace returns FAILED_PRECONDITION.
+  // This call never creates a tenant or namespace. The account controller
+  // creates the account's provider credential in that namespace (AWS: a
   //     ProviderConfig with credentials.source IRSA and an assumeRoleChain
   //     into the tenant role, see "Account access" in idl/README.md). Its
   //     name is generated on the first bootstrap of the account and kept
@@ -31,7 +65,7 @@ service TenantService {
   //
   // Idempotent: calling it again for the same account updates its name and
   // converges the resources again. Another account ID adds an account. The
-  // account is READY once the namespace and ProviderConfig are applied.
+  // account is READY once its credentials and ProviderConfig are applied.
   // Whether the tenant role can be used is not checked by the call: the
   // controller checks it afterwards (status.access, condition
   // AccessVerified; VerifyCloudAccount asks for a check now), and an
@@ -357,7 +391,7 @@ enum CloudAccountState {
   CLOUD_ACCOUNT_STATE_UNSPECIFIED = 0;
   // Not reported yet: bootstrap is applied by the call itself.
   CLOUD_ACCOUNT_STATE_BOOTSTRAPPING = 1;
-  // The namespace and the credential (AWS: ProviderConfig) are applied,
+  // The account credential (AWS: ProviderConfig) is applied in its existing namespace,
   // and the last access check did not deny anything (condition
   // AccessVerified: True, or Unknown before the first verdict).
   CLOUD_ACCOUNT_STATE_READY = 2;
@@ -381,14 +415,12 @@ message CloudAccountStatus {
   // tenant role ARN (GCP: service account, Azure: client ID).
   string identity = 5;
   // Everything the platform created for the account, in creation order:
-  // the bootstrap's own objects (namespace, ProviderConfig) and those of
+  // the bootstrap's own objects (credentials, ProviderConfig) and those of
   // its networks, clusters and node pools.
   repeated ManagedResource managed_resources = 6;
-  // An operator's pause (AdminService.PauseReconcile): the platform does
-  // not change the account's ProviderConfig, its credentials copy or its
-  // bindings until it is resumed. The condition Paused is True and says
-  // who, since when and why. Unset: not paused.
-  Pause pause = 7;
+  // pause, removed: account freezes are reported through conditions.
+  reserved 7;
+  reserved "pause";
   // The controller's last check that it can reach and act in the account
   // (the tenant role in every region the account's networks use, and the
   // calls the platform needs). The condition AccessVerified says the same.

@@ -48,7 +48,7 @@ check: lint vet test ## What CI runs: lint, vet and unit tests
 ##@ Protobuf
 
 .PHONY: generate
-generate: ## Generate Go code from idl/ (buf, remote plugins)
+generate: ## Generate Go and UI TypeScript from idl/ (buf, remote plugins)
 	buf dep update
 	buf generate
 
@@ -212,39 +212,3 @@ deploy-manifests: ## Render the controller's and the server's manifests into bin
 	  $(KUSTOMIZE) $$dir | sed 's|ghcr.io/yindia/cluster-vending:latest|$(IMAGE):$(TAG)|' > $$out; \
 	  echo "$$dir -> $$out"; \
 	done
-
-##@ Demo
-
-# The demo is five phase tapes (hack/demo/0*.tape), each recorded on its
-# own into bin/demo/<run>-<phase>.gif/.mp4 and resumable: a phase done
-# already is skipped, one run again continues the same run (DEMO_RUN, or
-# the newest unfinished one). REAL AWS. hack/demo/README.md.
-DEMO_TAPES := $(wildcard hack/demo/0*.tape) hack/demo/setup.tape
-
-.PHONY: demo demo-validate demo-account demo-network demo-cluster demo-upgrade demo-cleanup demo-status demo-video
-demo-validate: ## Parse every demo tape (vhs); nothing runs
-	@for t in $(DEMO_TAPES); do vhs validate $$t || exit 1; done
-
-demo: build demo-validate ## Record the whole demo, phase by phase (~90 min): stops at the first phase that fails and says which make demo-<phase> to run again
-	@hack/demo/run.sh all
-
-demo-account: build ## Demo phase 1: account create with its CloudFormation role, until verified (needs DEMO_ACCOUNT_ID and AWS credentials of that account)
-	@hack/demo/run.sh account
-
-demo-network: build ## Demo phase 2: network create, until READY
-	@hack/demo/run.sh network
-
-demo-cluster: build ## Demo phase 3: cluster create on 1.36, alpha channel, automatic, tier 2, until RUNNING
-	@hack/demo/run.sh cluster
-
-demo-upgrade: build ## Demo phase 4: the automatic upgrade to 1.37 (the controller needs automatic-upgrades: true)
-	@hack/demo/run.sh upgrade
-
-demo-cleanup: build ## Demo phase 5: delete the cluster, the network, the account and its role's stack (needs DEMO_ACCOUNT_ID and AWS credentials)
-	@hack/demo/run.sh cleanup
-
-demo-status: build ## The current demo run's state (bin/demo/<run>.env), which phases are done, and each piece now
-	@hack/demo/run.sh status
-
-demo-video: ## Join the current run's phase videos into bin/demo/<run>.mp4 (ffmpeg; skipped without it)
-	@hack/demo/run.sh video

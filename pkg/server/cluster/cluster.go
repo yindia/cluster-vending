@@ -71,7 +71,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	}
 	if rid := req.GetRequestId(); rid != "" {
 		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
-			c, err := stored(row)
+			c, err := s.stored(ctx, row)
 			return &cloudv1.CreateClusterResponse{Cluster: c}, err
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
@@ -89,7 +89,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	}
 	s.logger().InfoContext(ctx, "cluster stored", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
 		"network_id", row.NetworkID)
-	c, err := stored(row)
+	c, err := s.stored(ctx, row)
 	return &cloudv1.CreateClusterResponse{Cluster: c}, err
 }
 
@@ -110,7 +110,7 @@ func createError(err error, row *model.Cluster) error {
 	return service.ToConnect(err)
 }
 
-// GetCluster returns one cluster from the database: its spec and the
+// GetCluster returns one cluster from its stored Kubernetes state: its spec and the
 // status last recorded for it (stored); with live, the status read now
 // from the management cluster. Like every read it changes nothing.
 func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetClusterRequest) (_ *cloudv1.GetClusterResponse, err error) {
@@ -122,7 +122,7 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
-	read := stored
+	read := func(row *model.Cluster) (*cloudv1.Cluster, error) { return s.stored(ctx, row) }
 	if req.GetLive() {
 		read = func(row *model.Cluster) (*cloudv1.Cluster, error) { return s.View(ctx, row) }
 	}
@@ -171,7 +171,7 @@ func (s *ClusterService) ListClusters(ctx context.Context, req *cloudv1.ListClus
 		res.NextPageToken = rows[size-1].ID
 	}
 	for i := range rows {
-		c, err := stored(&rows[i])
+		c, err := s.stored(ctx, &rows[i])
 		if err != nil {
 			return nil, err
 		}

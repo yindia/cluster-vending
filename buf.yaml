@@ -7,6 +7,15 @@ deps:
 lint:
   use:
     - STANDARD
+  ignore_only:
+    # Admin and tenant services intentionally share read/status responses.
+    # Tenant requests retain their distinct names and tenant-bound validation;
+    # keep these source names stable for the generated service clients.
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - idl/cloud/v1/admin_service.proto
+      - idl/cloud/v1/tenant_service.proto
+    RPC_REQUEST_STANDARD_NAME:
+      - idl/cloud/v1/tenant_service.proto
 breaking:
   # WIRE_JSON protects binary and JSON clients (field numbers, types, JSON
   # names) but allows deleting a field once its number and name are

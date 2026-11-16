@@ -7,7 +7,7 @@ network or EKS cluster that something else built, read-only at first, and
 then take it over.
 
 The repository holds one binary with three roles: an API server (`serve`), a
-CLI that calls it (`account`, `network`, `cluster`, `admin`, and `login`,
+CLI that calls it (`tenant`, `account`, `network`, `cluster`, `admin`, and `login`,
 `logout`, `whoami` where the server authenticates), and a controller manager
 (`controller`) that reconciles the same resources when they are kept as
 custom resources.
@@ -15,6 +15,9 @@ custom resources.
 Nothing here has run against a real AWS account. See
 [docs/architecture.md](docs/architecture.md) for what is built, what is
 decided but not built, and what is not verified.
+
+The tenant web dashboard lives in [`ui/`](ui/README.md), with its own Next.js
+build and Dockerfile. It uses the same generated Connect RPC contracts as the CLI.
 
 ## Prerequisites
 
@@ -30,7 +33,7 @@ decided but not built, and what is not verified.
 | `make build` | Builds `bin/cluster-vending`. |
 | `make check` | Lint (protos and Go), `go vet` and the unit tests. This is the gate before every commit. |
 | `make test` | Unit tests with the race detector. They use a fake API server; no cluster is needed. |
-| `make generate` | Regenerates `pkg/gen` from `idl/`. |
+| `make generate` | Regenerates Go in `pkg/gen` and TypeScript in `ui/src/gen` from `idl/`. |
 | `make controller-apis` | Regenerate deepcopy code, CRDs and RBAC for the kinds in `api/`. |
 | `make mocks` | Regenerates the repository mocks. |
 | `make help` | Lists every target. |
@@ -91,6 +94,9 @@ later manifest needs is a placeholder in it, named in the file's header:
 `111122223333`, the role and the VPC and subnet IDs with your own.
 
 ```sh
+# Register the tenant and create its namespace before adding accounts.
+bin/cluster-vending tenant create acme
+
 # 1. Onboard acme's AWS account (docs/onboarding.md). It onboards the
 #    account and prints how to create the platform's IAM role there: the
 #    template this server serves (/cloudformation/provisioner.yaml), its

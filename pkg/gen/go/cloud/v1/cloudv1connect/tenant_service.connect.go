@@ -24,6 +24,26 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// TenantServiceListTenantsProcedure is the procedure name of the TenantService's ListTenants RPC.
+	TenantServiceListTenantsProcedure = "/cloud.v1.TenantService/ListTenants"
+	// TenantServiceCreateTenantProcedure is the procedure name of the TenantService's CreateTenant RPC.
+	TenantServiceCreateTenantProcedure = "/cloud.v1.TenantService/CreateTenant"
+	// TenantServiceFreezeProcedure is the procedure name of the TenantService's Freeze RPC.
+	TenantServiceFreezeProcedure = "/cloud.v1.TenantService/Freeze"
+	// TenantServiceUnfreezeProcedure is the procedure name of the TenantService's Unfreeze RPC.
+	TenantServiceUnfreezeProcedure = "/cloud.v1.TenantService/Unfreeze"
+	// TenantServiceGetFreezeProcedure is the procedure name of the TenantService's GetFreeze RPC.
+	TenantServiceGetFreezeProcedure = "/cloud.v1.TenantService/GetFreeze"
+	// TenantServiceListReleasesProcedure is the procedure name of the TenantService's ListReleases RPC.
+	TenantServiceListReleasesProcedure = "/cloud.v1.TenantService/ListReleases"
+	// TenantServiceGetReleaseProcedure is the procedure name of the TenantService's GetRelease RPC.
+	TenantServiceGetReleaseProcedure = "/cloud.v1.TenantService/GetRelease"
+	// TenantServiceListReleaseChannelsProcedure is the procedure name of the TenantService's
+	// ListReleaseChannels RPC.
+	TenantServiceListReleaseChannelsProcedure = "/cloud.v1.TenantService/ListReleaseChannels"
+	// TenantServiceGetReleaseChannelProcedure is the procedure name of the TenantService's
+	// GetReleaseChannel RPC.
+	TenantServiceGetReleaseChannelProcedure = "/cloud.v1.TenantService/GetReleaseChannel"
 	// TenantServiceBootstrapTenantProcedure is the procedure name of the TenantService's
 	// BootstrapTenant RPC.
 	TenantServiceBootstrapTenantProcedure = "/cloud.v1.TenantService/BootstrapTenant"
@@ -47,6 +67,76 @@ const (
 )
 
 var (
+	tenantServiceListTenantsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("ListTenants"),
+			Procedure:        TenantServiceListTenantsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceCreateTenantSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("CreateTenant"),
+			Procedure:        TenantServiceCreateTenantProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+	tenantServiceFreezeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("Freeze"),
+			Procedure:  TenantServiceFreezeProcedure,
+		}
+	})
+	tenantServiceUnfreezeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("Unfreeze"),
+			Procedure:  TenantServiceUnfreezeProcedure,
+		}
+	})
+	tenantServiceGetFreezeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("GetFreeze"),
+			Procedure:        TenantServiceGetFreezeProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceListReleasesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("ListReleases"),
+			Procedure:        TenantServiceListReleasesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceGetReleaseSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("GetRelease"),
+			Procedure:        TenantServiceGetReleaseProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceListReleaseChannelsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("ListReleaseChannels"),
+			Procedure:        TenantServiceListReleaseChannelsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	tenantServiceGetReleaseChannelSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("GetReleaseChannel"),
+			Procedure:        TenantServiceGetReleaseChannelProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 	tenantServiceBootstrapTenantSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -107,10 +197,27 @@ var (
 
 // TenantServiceClient is a client for the cloud.v1.TenantService service.
 type TenantServiceClient interface {
-	// Registers one of the tenant's cloud accounts, stores it, and creates in
-	//   the management cluster:
-	//   - the tenant namespace tenant-<tenant_id>, if it does not exist
-	//   - the account's provider credential in that namespace (AWS: a
+	// Lists registered tenants visible to the caller's existing grants.
+	ListTenants(context.Context, *v1.ListTenantsRequest) (*v1.ListTenantsResponse, error)
+	// Registers a cluster-scoped Tenant and its owned namespace. Does not create accounts, cloud
+	// resources or authorization grants, and never adopts an unmarked namespace.
+	CreateTenant(context.Context, *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error)
+	// Tenant-scoped dashboard operations. An omitted target means this tenant,
+	// never the platform; a network or cluster must belong to tenant_id.
+	Freeze(context.Context, *v1.TenantFreezeRequest) (*v1.FreezeResponse, error)
+	Unfreeze(context.Context, *v1.TenantUnfreezeRequest) (*v1.UnfreezeResponse, error)
+	GetFreeze(context.Context, *v1.TenantGetFreezeRequest) (*v1.GetFreezeResponse, error)
+	// Published release configuration, with tenant-only rollout observations.
+	ListReleases(context.Context, *v1.TenantListReleasesRequest) (*v1.ListReleasesResponse, error)
+	GetRelease(context.Context, *v1.TenantGetReleaseRequest) (*v1.GetReleaseResponse, error)
+	ListReleaseChannels(context.Context, *v1.TenantListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
+	GetReleaseChannel(context.Context, *v1.TenantGetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
+	// Registers an account for an existing cluster-scoped Tenant CR and its
+	// owned namespace tenant-<tenant_id>. Call CreateTenant first; a legacy
+	// namespace alone is insufficient. Missing registration returns NOT_FOUND;
+	// a missing, deleting or unowned namespace returns FAILED_PRECONDITION.
+	// This call never creates a tenant or namespace. The account controller
+	// creates the account's provider credential in that namespace (AWS: a
 	//     ProviderConfig with credentials.source IRSA and an assumeRoleChain
 	//     into the tenant role, see "Account access" in idl/README.md). Its
 	//     name is generated on the first bootstrap of the account and kept
@@ -125,7 +232,7 @@ type TenantServiceClient interface {
 	//
 	// Idempotent: calling it again for the same account updates its name and
 	// converges the resources again. Another account ID adds an account. The
-	// account is READY once the namespace and ProviderConfig are applied.
+	// account is READY once its credentials and ProviderConfig are applied.
 	// Whether the tenant role can be used is not checked by the call: the
 	// controller checks it afterwards (status.access, condition
 	// AccessVerified; VerifyCloudAccount asks for a check now), and an
@@ -176,10 +283,27 @@ func NewTenantServiceClient(client *connect.Client) TenantServiceClient {
 
 // TenantServiceHandler is an implementation of the cloud.v1.TenantService service.
 type TenantServiceHandler interface {
-	// Registers one of the tenant's cloud accounts, stores it, and creates in
-	//   the management cluster:
-	//   - the tenant namespace tenant-<tenant_id>, if it does not exist
-	//   - the account's provider credential in that namespace (AWS: a
+	// Lists registered tenants visible to the caller's existing grants.
+	ListTenants(context.Context, *v1.ListTenantsRequest) (*v1.ListTenantsResponse, error)
+	// Registers a cluster-scoped Tenant and its owned namespace. Does not create accounts, cloud
+	// resources or authorization grants, and never adopts an unmarked namespace.
+	CreateTenant(context.Context, *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error)
+	// Tenant-scoped dashboard operations. An omitted target means this tenant,
+	// never the platform; a network or cluster must belong to tenant_id.
+	Freeze(context.Context, *v1.TenantFreezeRequest) (*v1.FreezeResponse, error)
+	Unfreeze(context.Context, *v1.TenantUnfreezeRequest) (*v1.UnfreezeResponse, error)
+	GetFreeze(context.Context, *v1.TenantGetFreezeRequest) (*v1.GetFreezeResponse, error)
+	// Published release configuration, with tenant-only rollout observations.
+	ListReleases(context.Context, *v1.TenantListReleasesRequest) (*v1.ListReleasesResponse, error)
+	GetRelease(context.Context, *v1.TenantGetReleaseRequest) (*v1.GetReleaseResponse, error)
+	ListReleaseChannels(context.Context, *v1.TenantListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error)
+	GetReleaseChannel(context.Context, *v1.TenantGetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error)
+	// Registers an account for an existing cluster-scoped Tenant CR and its
+	// owned namespace tenant-<tenant_id>. Call CreateTenant first; a legacy
+	// namespace alone is insufficient. Missing registration returns NOT_FOUND;
+	// a missing, deleting or unowned namespace returns FAILED_PRECONDITION.
+	// This call never creates a tenant or namespace. The account controller
+	// creates the account's provider credential in that namespace (AWS: a
 	//     ProviderConfig with credentials.source IRSA and an assumeRoleChain
 	//     into the tenant role, see "Account access" in idl/README.md). Its
 	//     name is generated on the first bootstrap of the account and kept
@@ -194,7 +318,7 @@ type TenantServiceHandler interface {
 	//
 	// Idempotent: calling it again for the same account updates its name and
 	// converges the resources again. Another account ID adds an account. The
-	// account is READY once the namespace and ProviderConfig are applied.
+	// account is READY once its credentials and ProviderConfig are applied.
 	// Whether the tenant role can be used is not checked by the call: the
 	// controller checks it afterwards (status.access, condition
 	// AccessVerified; VerifyCloudAccount asks for a check now), and an
@@ -242,6 +366,15 @@ type TenantServiceHandler interface {
 func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandler) {
 	adapter := tenantServiceHandler{svc: svc}
 	server.Register(
+		connect.Method{Spec: tenantServiceListTenantsSpec(), Handler: adapter.listTenants},
+		connect.Method{Spec: tenantServiceCreateTenantSpec(), Handler: adapter.createTenant},
+		connect.Method{Spec: tenantServiceFreezeSpec(), Handler: adapter.freeze},
+		connect.Method{Spec: tenantServiceUnfreezeSpec(), Handler: adapter.unfreeze},
+		connect.Method{Spec: tenantServiceGetFreezeSpec(), Handler: adapter.getFreeze},
+		connect.Method{Spec: tenantServiceListReleasesSpec(), Handler: adapter.listReleases},
+		connect.Method{Spec: tenantServiceGetReleaseSpec(), Handler: adapter.getRelease},
+		connect.Method{Spec: tenantServiceListReleaseChannelsSpec(), Handler: adapter.listReleaseChannels},
+		connect.Method{Spec: tenantServiceGetReleaseChannelSpec(), Handler: adapter.getReleaseChannel},
 		connect.Method{Spec: tenantServiceBootstrapTenantSpec(), Handler: adapter.bootstrapTenant},
 		connect.Method{Spec: tenantServiceGetCloudAccountSpec(), Handler: adapter.getCloudAccount},
 		connect.Method{Spec: tenantServiceListCloudAccountsSpec(), Handler: adapter.listCloudAccounts},
@@ -254,6 +387,42 @@ func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandl
 
 // UnimplementedTenantServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedTenantServiceHandler struct{}
+
+func (UnimplementedTenantServiceHandler) ListTenants(context.Context, *v1.ListTenantsRequest) (*v1.ListTenantsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.ListTenants is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) CreateTenant(context.Context, *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.CreateTenant is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) Freeze(context.Context, *v1.TenantFreezeRequest) (*v1.FreezeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.Freeze is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) Unfreeze(context.Context, *v1.TenantUnfreezeRequest) (*v1.UnfreezeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.Unfreeze is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) GetFreeze(context.Context, *v1.TenantGetFreezeRequest) (*v1.GetFreezeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.GetFreeze is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) ListReleases(context.Context, *v1.TenantListReleasesRequest) (*v1.ListReleasesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.ListReleases is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) GetRelease(context.Context, *v1.TenantGetReleaseRequest) (*v1.GetReleaseResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.GetRelease is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) ListReleaseChannels(context.Context, *v1.TenantListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.ListReleaseChannels is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) GetReleaseChannel(context.Context, *v1.TenantGetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.GetReleaseChannel is not implemented")
+}
 
 func (UnimplementedTenantServiceHandler) BootstrapTenant(context.Context, *v1.BootstrapTenantRequest) (*v1.BootstrapTenantResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.BootstrapTenant is not implemented")
@@ -285,6 +454,78 @@ func (UnimplementedTenantServiceHandler) WhoAmI(context.Context, *v1.WhoAmIReque
 
 type tenantServiceClient struct {
 	client *connect.Client
+}
+
+func (c *tenantServiceClient) ListTenants(ctx context.Context, req *v1.ListTenantsRequest) (*v1.ListTenantsResponse, error) {
+	var res v1.ListTenantsResponse
+	if err := c.client.CallUnary(ctx, tenantServiceListTenantsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) CreateTenant(ctx context.Context, req *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error) {
+	var res v1.CreateTenantResponse
+	if err := c.client.CallUnary(ctx, tenantServiceCreateTenantSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) Freeze(ctx context.Context, req *v1.TenantFreezeRequest) (*v1.FreezeResponse, error) {
+	var res v1.FreezeResponse
+	if err := c.client.CallUnary(ctx, tenantServiceFreezeSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) Unfreeze(ctx context.Context, req *v1.TenantUnfreezeRequest) (*v1.UnfreezeResponse, error) {
+	var res v1.UnfreezeResponse
+	if err := c.client.CallUnary(ctx, tenantServiceUnfreezeSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) GetFreeze(ctx context.Context, req *v1.TenantGetFreezeRequest) (*v1.GetFreezeResponse, error) {
+	var res v1.GetFreezeResponse
+	if err := c.client.CallUnary(ctx, tenantServiceGetFreezeSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) ListReleases(ctx context.Context, req *v1.TenantListReleasesRequest) (*v1.ListReleasesResponse, error) {
+	var res v1.ListReleasesResponse
+	if err := c.client.CallUnary(ctx, tenantServiceListReleasesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) GetRelease(ctx context.Context, req *v1.TenantGetReleaseRequest) (*v1.GetReleaseResponse, error) {
+	var res v1.GetReleaseResponse
+	if err := c.client.CallUnary(ctx, tenantServiceGetReleaseSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) ListReleaseChannels(ctx context.Context, req *v1.TenantListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error) {
+	var res v1.ListReleaseChannelsResponse
+	if err := c.client.CallUnary(ctx, tenantServiceListReleaseChannelsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) GetReleaseChannel(ctx context.Context, req *v1.TenantGetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
+	var res v1.GetReleaseChannelResponse
+	if err := c.client.CallUnary(ctx, tenantServiceGetReleaseChannelSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (c *tenantServiceClient) BootstrapTenant(ctx context.Context, req *v1.BootstrapTenantRequest) (*v1.BootstrapTenantResponse, error) {
@@ -344,6 +585,114 @@ func (c *tenantServiceClient) WhoAmI(ctx context.Context, req *v1.WhoAmIRequest)
 }
 
 type tenantServiceHandler struct{ svc TenantServiceHandler }
+
+func (h tenantServiceHandler) listTenants(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ListTenantsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListTenants(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) createTenant(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.CreateTenantRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.CreateTenant(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) freeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantFreezeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.Freeze(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) unfreeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantUnfreezeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.Unfreeze(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) getFreeze(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantGetFreezeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetFreeze(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) listReleases(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantListReleasesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListReleases(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) getRelease(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantGetReleaseRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetRelease(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) listReleaseChannels(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantListReleaseChannelsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListReleaseChannels(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) getReleaseChannel(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.TenantGetReleaseChannelRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetReleaseChannel(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
 
 func (h tenantServiceHandler) bootstrapTenant(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
 	var req v1.BootstrapTenantRequest

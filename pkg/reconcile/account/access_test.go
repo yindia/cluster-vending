@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/storetest"
@@ -246,7 +249,9 @@ func TestVerifyAccessSkips(t *testing.T) {
 				d.AWSAccessCheck = c
 			}
 			if tt.paused {
-				w.account.Paused = &model.Pause{By: "ops"}
+				if err := w.kube.Create(t.Context(), &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: reconcile.FreezeName}, Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, By: "ops", Reason: "test"}}); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			got, _, err := New(d).VerifyAccess(t.Context(), w.account, now)

@@ -81,14 +81,17 @@ spec:
 ```
 
 ```sh
+cluster-vending tenant create acme
 cluster-vending account create -f cloudaccount.yaml
 ```
 
 1. **What the server can say is checked first** (`GetAccountOnboarding`):
    no management role configured, or a role name that is not of its
    template, stops the command with nothing created.
-2. **The account** is onboarded: its namespace and ProviderConfig, and its
-   external ID (`BootstrapTenant`).
+2. **The account** is onboarded into its existing tenant namespace: its
+   ProviderConfig and external ID (`BootstrapTenant`). Create the cluster-scoped
+   Tenant CR first; account creation rejects a missing Tenant CR or namespace
+   and does not create either.
 3. **The steps to create the role** are printed, from the account's
    onboarding (`GetAccountOnboarding` with its `id`): the template's URL on
    the API server, its parameters (`RoleName`, `ManagementRoleArn`, the

@@ -90,7 +90,7 @@ func (PlannedAction) EnumDescriptor() ([]byte, []int) {
 }
 
 // Plan is what an update would do, computed without changing anything
-// (UpdateClusterRequest.validate_only): the rendered resources are
+// (UpdateClusterRequest.validate_only or UpdateNetworkRequest.validate_only): the rendered resources are
 // server-side applied as a dry run and compared with the live ones.
 type Plan struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -199,9 +199,13 @@ type PlannedChange struct {
 	// 1.35" (node groups and add-ons during an upgrade), "the encryption key
 	// exists", "node group <name> is ready". The server makes the change by
 	// itself once that holds. Empty: made at once.
-	WaitsFor      string `protobuf:"bytes,10,opt,name=waits_for,json=waitsFor,proto3" json:"waits_for,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WaitsFor string `protobuf:"bytes,10,opt,name=waits_for,json=waitsFor,proto3" json:"waits_for,omitempty"`
+	// Namespace of the managed resource, empty for cluster-scoped kinds.
+	Namespace string `protobuf:"bytes,11,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	// DELETE removes platform management but retains the cloud resource.
+	RetainsCloudResource bool `protobuf:"varint,12,opt,name=retains_cloud_resource,json=retainsCloudResource,proto3" json:"retains_cloud_resource,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *PlannedChange) Reset() {
@@ -304,6 +308,20 @@ func (x *PlannedChange) GetWaitsFor() string {
 	return ""
 }
 
+func (x *PlannedChange) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *PlannedChange) GetRetainsCloudResource() bool {
+	if x != nil {
+		return x.RetainsCloudResource
+	}
+	return false
+}
+
 var File_cloud_v1_plan_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_plan_proto_rawDesc = "" +
@@ -315,7 +333,7 @@ const file_cloud_v1_plan_proto_rawDesc = "" +
 	"applicable\x18\x02 \x01(\bR\n" +
 	"applicable\x121\n" +
 	"\achanges\x18\x03 \x03(\v2\x17.cloud.v1.PlannedChangeR\achanges\x12\x1a\n" +
-	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xd6\x02\n" +
+	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xaa\x03\n" +
 	"\rPlannedChange\x12\x1f\n" +
 	"\vapi_version\x18\x01 \x01(\tR\n" +
 	"apiVersion\x12\x12\n" +
@@ -328,7 +346,9 @@ const file_cloud_v1_plan_proto_rawDesc = "" +
 	"\x14requires_replacement\x18\b \x01(\bR\x13requiresReplacement\x12!\n" +
 	"\funified_diff\x18\t \x01(\tR\vunifiedDiff\x12\x1b\n" +
 	"\twaits_for\x18\n" +
-	" \x01(\tR\bwaitsFor*\xcf\x01\n" +
+	" \x01(\tR\bwaitsFor\x12\x1c\n" +
+	"\tnamespace\x18\v \x01(\tR\tnamespace\x124\n" +
+	"\x16retains_cloud_resource\x18\f \x01(\bR\x14retainsCloudResource*\xcf\x01\n" +
 	"\rPlannedAction\x12\x1e\n" +
 	"\x1aPLANNED_ACTION_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PLANNED_ACTION_CREATE\x10\x01\x12\"\n" +

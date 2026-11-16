@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
-	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/maintenance"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/upgrade"
 )
 
@@ -39,7 +41,7 @@ func (in memberInputs) codeMember(c *cloudv1alpha1.Cluster) (m upgrade.Member, g
 	if !strings.EqualFold(string(c.Spec.ReleaseChannel), in.channel) || !c.DeletionTimestamp.IsZero() {
 		return m, nil, false
 	}
-	m = upgrade.Member{ID: c.Namespace + "/" + c.Name, Tier: Tier(c.Spec.Tier)}
+	m = upgrade.Member{ID: c.Namespace + "/" + c.Name, Tier: Tier(c.Status.Tier)}
 	change := c.Status.CodeChange
 	switch {
 	case change == nil || change.Phase == convert.CodeChangeDone || change.Phase == "":
@@ -82,31 +84,19 @@ func codeFinished(c *cloudv1alpha1.Cluster) time.Time {
 	return FinishedAt(c)
 }
 
-// NetworkTier is the tier a network's code change rolls out in: the most
-// careful of its clusters' (tier 0 before 1 before 2); Tier2 without
-// clusters.
-func NetworkTier(clusters []cloudv1alpha1.Cluster) upgrade.Tier {
-	tier := upgrade.Tier2
-	for i := range clusters {
-		tier = min(tier, Tier(clusters[i].Spec.Tier))
-	}
-	return tier
-}
-
 // rolloutOrder is how far a tier is in a rollout: Tier2 first.
 func rolloutOrder(t upgrade.Tier) int { return int(upgrade.Tier2 - t) }
 
 // NetworkCodeAdmitted reports whether a network's code change may be
 // applied now, and why not: no freeze holds it (FrozenNetwork), and the
 // code rollout of every channel of its clusters has reached the network's
-// tier (NetworkTier), so it goes before its clusters of that tier.
+// own tier, so it goes before its clusters of that tier.
 // channels are the release channels by name.
-func NetworkCodeAdmitted(id, tenant string, clusters []cloudv1alpha1.Cluster, channels map[string]*cloudv1alpha1.ReleaseChannel,
+func NetworkCodeAdmitted(id, tenant string, tier upgrade.Tier, clusters []cloudv1alpha1.Cluster, channels map[string]*cloudv1alpha1.ReleaseChannel,
 	holds []cloudv1alpha1.ReleaseHold, now time.Time) (bool, string) {
 	if h := FrozenNetwork(id, tenant, clusters, holds, now); h != nil {
 		return false, FreezeMessage(h)
 	}
-	tier := NetworkTier(clusters)
 	seen := map[string]bool{}
 	for i := range clusters {
 		name := strings.ToLower(string(clusters[i].Spec.ReleaseChannel))
@@ -116,6 +106,23 @@ func NetworkCodeAdmitted(id, tenant string, clusters []cloudv1alpha1.Cluster, ch
 		seen[name] = true
 		if why := channelReached(name, channels[name], tier); why != "" {
 			return false, why
+		}
+	}
+
+	// Without channel-bound children, use every configured platform code rollout.
+	if len(seen) == 0 {
+		if len(channels) == 0 {
+			return false, "waiting for a platform code rollout to be planned"
+		}
+		names := make([]string, 0, len(channels))
+		for name := range channels {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			if why := channelReached(name, channels[name], tier); why != "" {
+				return false, why
+			}
 		}
 	}
 	return true, ""
@@ -143,9 +150,8 @@ func channelReached(name string, ch *cloudv1alpha1.ReleaseChannel, tier upgrade.
 }
 
 // FrozenNetwork is the freeze that holds a network; nil when none does.
-// The platform's and its tenant's freezes hold it unless they let it, or
-// one of its clusters, through; a channel's freeze holds it when it holds
-// one of its clusters and does not let the network through.
+// A scoped cluster exception never resumes the network. Cluster release
+// locks can also hold a shared network code change.
 func FrozenNetwork(id, tenant string, clusters []cloudv1alpha1.Cluster, holds []cloudv1alpha1.ReleaseHold, now time.Time) *cloudv1alpha1.ReleaseHold {
 	for i := range holds {
 		h := &holds[i]
@@ -153,23 +159,26 @@ func FrozenNetwork(id, tenant string, clusters []cloudv1alpha1.Cluster, holds []
 			continue
 		}
 		switch {
-		case h.Spec.Platform || (h.Spec.TenantID != "" && h.Spec.TenantID == tenant):
-			if !letsAClusterThrough(h.Spec, clusters) {
-				return h
+		case h.Spec.Platform:
+			if frozen := reconcile.FreezeForTarget(h, now, reconcile.FreezeTarget{TenantID: tenant, NetworkID: id}); frozen.Holds() {
+				current := h.DeepCopy()
+				current.Spec.Reason = frozen.Reason
+				current.Spec.Until = nil
+				if frozen.Until != nil {
+					until := metav1.NewTime(*frozen.Until)
+					current.Spec.Until = &until
+				}
+				if current.Annotations == nil {
+					current.Annotations = map[string]string{}
+				}
+				current.Annotations["cloud.cluster-vending.io/effective-freeze-scope"] = frozen.Scope
+				return current
 			}
-		case h.Spec.Channel != "" || h.Spec.ClusterID != "":
+		case h.Spec.ClusterID != "":
 			if slices.ContainsFunc(clusters, func(c cloudv1alpha1.Cluster) bool { return Matches(h.Spec, &c) }) {
 				return h
 			}
 		}
 	}
 	return nil
-}
-
-// letsAClusterThrough reports whether the freeze lets one of the clusters
-// through: their network goes through with it.
-func letsAClusterThrough(h cloudv1alpha1.ReleaseHoldSpec, clusters []cloudv1alpha1.Cluster) bool {
-	return slices.ContainsFunc(clusters, func(c cloudv1alpha1.Cluster) bool {
-		return slices.Contains(h.Except, c.Labels[cloudstore.LabelID])
-	})
 }

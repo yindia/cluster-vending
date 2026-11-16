@@ -38,7 +38,7 @@ func TestSetupRegistersTheControllers(t *testing.T) {
 	if err := manager.Setup(mgr, manager.Deps{}); err == nil {
 		t.Error("the controllers were registered twice")
 	}
-	for _, kind := range []string{"CloudAccount", "Network", "Cluster"} {
+	for _, kind := range []string{"Tenant", "CloudAccount", "Network", "Cluster"} {
 		if !mgr.GetScheme().Recognizes(cloudv1alpha1.GroupVersion.WithKind(kind)) {
 			t.Errorf("the manager's scheme does not know %s", kind)
 		}
@@ -162,7 +162,7 @@ func TestSamplesFormTheChain(t *testing.T) {
 		t.Errorf("the cluster names network %q in %q, the network is %q in %q",
 			cluster.Spec.Network.NetworkRef.Name, cluster.Namespace, network.Name, network.Namespace)
 	}
-	if cluster.Spec.ReleaseChannel != cloudv1alpha1.ReleaseChannelStable || cluster.Spec.Tier != cloudv1alpha1.ClusterTier0 {
-		t.Errorf("release channel %q, tier %q", cluster.Spec.ReleaseChannel, cluster.Spec.Tier)
+	if cluster.Spec.ReleaseChannel != cloudv1alpha1.ReleaseChannelStable || network.Spec.Tier != cloudv1alpha1.ClusterTier0 {
+		t.Errorf("release channel %q, tier %q", cluster.Spec.ReleaseChannel, network.Spec.Tier)
 	}
 }

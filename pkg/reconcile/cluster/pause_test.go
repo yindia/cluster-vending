@@ -56,7 +56,7 @@ func TestStatusOfAPausedCluster(t *testing.T) {
 			}
 			var cond *cloudv1.Condition
 			for _, c := range st.GetConditions() {
-				if c.GetType() == reconcile.ConditionPaused {
+				if c.GetType() == reconcile.ConditionFrozen {
 					cond = c
 				}
 			}

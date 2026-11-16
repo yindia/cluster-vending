@@ -44,21 +44,12 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	ctx = reconcile.WithCodeHolder(withTeardownHolder(reconcile.WithNotes(ctx)))
-	// A pause asked with an until ends by itself: its scope is dropped,
-	// and when none is left the providers act on the resources again.
-	if row.PauseLapsed {
-		target := model.PauseTarget{ClusterID: row.ID}
-		if err := reconcile.LiftLapsedPause(ctx, s.deps, tenantID, target, row.Paused != nil); err != nil {
-			return err
-		}
+	ctx = withPlatformDeletion(reconcile.WithCodeHolder(withTeardownHolder(reconcile.WithNotes(ctx))))
+	row.Frozen, err = s.deps.SyncFreeze(ctx, reconcile.PauseScope{TenantID: tenantID, ClusterID: row.ID, NetworkID: row.NetworkID})
+	if err != nil {
+		return err
 	}
-	// A paused cluster (AdminService.PauseReconcile) is only observed:
-	// nothing of it is applied, repaired or deleted, AWS and its workload
-	// cluster are not touched, and what was asked for meanwhile (a new
-	// generation, a delete) stays stored until the resume. Its status is
-	// still recorded below, and says who paused it.
-	if row.Paused != nil {
+	if row.Frozen.Holds() {
 		return s.observePaused(ctx, row)
 	}
 	// A person asked to try again what failed (cluster retry): the failed
@@ -79,6 +70,11 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	current, err := s.deps.Store.Clusters().Get(ctx, tenantID, id)
 	if errors.Is(err, repository.ErrNotFound) {
 		if row.State == StateDeleting {
+			notes := reconcile.Notes(ctx)
+			final := &cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_DELETING}
+			notes = append(notes, managedLifecycleEvents(storedStatus(row), final)...)
+			notes = append(notes, platformEvents(storedStatus(row), final)...)
+			s.emit(ctx, row, notes)
 			s.deps.Emit(ctx, object(row), reconcile.EventNormal, reconcile.ReasonDeleted,
 				"the cluster's resources are gone and the cluster is removed")
 		}
@@ -87,6 +83,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return errors.Join(failed, err)
 	}
+	current.Frozen = row.Frozen
 	// The components the platform installs with the cluster: after the
 	// cluster's own pass, and never in its way. What fails here is logged
 	// and tried again; the recorded components stay as they were.

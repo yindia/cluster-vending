@@ -13,10 +13,15 @@ import (
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/auth"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -75,7 +80,7 @@ func newFixture(t *testing.T, funcs ...interceptor.Funcs) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := fake.NewClientBuilder().WithScheme(scheme)
+	b := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&cloudv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-acme", Labels: map[string]string{cloudstore.LabelTenant: "acme", crossplane.LabelTenantID: "acme"}}})
 	for _, f := range funcs {
 		b = b.WithInterceptorFuncs(f)
 	}
@@ -117,12 +122,6 @@ func roleARN(accountID string) string {
 	return "arn:aws:iam::" + accountID + ":role/cluster-vending-provisioner"
 }
 
-// expectNewTenant: the tenant does not exist yet.
-func (f fixture) expectNewTenant() {
-	f.tenants.EXPECT().Get(gomock.Any(), "acme").Return(nil, repository.ErrNotFound)
-	f.tenants.EXPECT().Create(gomock.Any(), &model.Tenant{ID: "acme"}).Return(nil)
-}
-
 // expectTenant: the tenant exists.
 func (f fixture) expectTenant() {
 	f.tenants.EXPECT().Get(gomock.Any(), "acme").Return(&model.Tenant{ID: "acme"}, nil)
@@ -159,7 +158,7 @@ func (f fixture) providerConfig(t *testing.T, name string) *awsv1beta1.ProviderC
 
 func TestBootstrapTenantCreatesResources(t *testing.T) {
 	f := newFixture(t)
-	f.expectNewTenant()
+	f.expectTenant()
 	f.expectPut(account)
 	ctx := t.Context()
 
@@ -256,7 +255,7 @@ func TestBootstrapTenantWithoutAWSProvider(t *testing.T) {
 			return c.Apply(ctx, obj, opts...)
 		},
 	})
-	f.expectNewTenant()
+	f.expectTenant()
 	f.expectPut(account)
 
 	// The call stores the account; applying it is what fails.
@@ -351,7 +350,7 @@ func TestBootstrapTenantUsesRequestedRole(t *testing.T) {
 
 func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 	f := newFixture(t)
-	f.expectNewTenant()
+	f.expectTenant()
 	f.expectPut(account)
 
 	if _, err := f.svc.BootstrapTenant(t.Context(), request("acme", account)); err != nil {
@@ -363,22 +362,141 @@ func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 	if err := f.apply(t, stored(account)); err != nil {
 		t.Fatal(err)
 	}
-	if len(*f.recorded) != 2 {
-		t.Fatalf("recorded = %+v, want the namespace and the ProviderConfig", *f.recorded)
+	if len(*f.recorded) != 1 {
+		t.Fatalf("recorded = %+v, want only the ProviderConfig", *f.recorded)
 	}
-	ns, pc := (*f.recorded)[0], (*f.recorded)[1]
-	if ns.Kind != "Namespace" || ns.Name != "tenant-acme" || ns.Namespace != "" ||
-		pc.Kind != "ProviderConfig" || pc.APIVersion != "aws.m.upbound.io/v1beta1" || pc.Name != "aws-0a1b2c3d" ||
+	pc := (*f.recorded)[0]
+	if pc.Kind != "ProviderConfig" || pc.APIVersion != "aws.m.upbound.io/v1beta1" || pc.Name != "aws-0a1b2c3d" ||
 		pc.OwnerKind != model.OwnerCloudAccount || pc.OwnerID != "row-"+account || pc.CloudAccountID != "row-"+account {
-		t.Errorf("recorded = %+v / %+v", ns, pc)
+		t.Errorf("recorded = %+v", pc)
 	}
 	view, err := accountreconcile.New(f.svc.deps).View(t.Context(), stored(account))
 	if err != nil {
 		t.Fatal(err)
 	}
 	views := view.GetStatus().GetManagedResources()
-	if len(views) != 2 || views[1].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
-		views[1].GetKind() != "ProviderConfig" {
+	if len(views) != 1 || views[0].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
+		views[0].GetKind() != "ProviderConfig" {
 		t.Errorf("account resources = %v", views)
+	}
+}
+
+func TestBootstrapRequiresTenantCRAndNamespace(t *testing.T) {
+	for _, test := range []struct {
+		name                      string
+		removeCR, removeNamespace bool
+		want                      connect.Code
+	}{
+		{"legacy namespace alone", true, false, connect.CodeNotFound},
+		{"registered tenant without namespace", false, true, connect.CodeFailedPrecondition},
+		{"registered tenant and namespace", false, false, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t)
+			if test.removeCR {
+				if err := f.kube.Delete(t.Context(), &cloudv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: "acme"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.removeNamespace {
+				if err := f.kube.Delete(t.Context(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-acme"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.want == 0 {
+				f.expectTenant()
+				f.expectPut(account)
+			}
+			// No repository writes are expected on either missing prerequisite.
+			_, err := f.svc.BootstrapTenant(t.Context(), request("acme", account))
+			if test.want == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || connect.CodeOf(err) != test.want {
+				t.Fatalf("bootstrap: %v, want %v", err, test.want)
+			}
+			ns := &corev1.Namespace{}
+			err = f.kube.Get(t.Context(), client.ObjectKey{Name: "tenant-acme"}, ns)
+			if test.removeNamespace && err == nil {
+				t.Fatal("bootstrap created a namespace")
+			}
+			if !test.removeNamespace && err != nil {
+				t.Fatal(err)
+			}
+			if len(*f.recorded) != 0 {
+				t.Fatal("bootstrap mutated managed resources")
+			}
+		})
+	}
+}
+func TestBootstrapRejectsUnownedNamespace(t *testing.T) {
+	for _, owner := range []string{"", "foreign"} {
+		t.Run(owner, func(t *testing.T) {
+			f := newFixture(t)
+			ns := &corev1.Namespace{}
+			if err := f.kube.Get(t.Context(), client.ObjectKey{Name: "tenant-acme"}, ns); err != nil {
+				t.Fatal(err)
+			}
+			ns.Labels[cloudstore.LabelTenant] = owner
+			if err := f.kube.Update(t.Context(), ns); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.svc.BootstrapTenant(t.Context(), request("acme", account))
+			if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestBootstrapRequiresTenantAdmin(t *testing.T) {
+	for _, grant := range []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}, {Role: auth.RoleTenantAdmin, Tenants: []string{"foreign"}}} {
+		f := newFixture(t, noWrites())
+		ctx := auth.WithIdentity(t.Context(), &auth.Identity{Subject: "caller", Grants: []auth.Grant{grant}})
+		_, err := f.svc.BootstrapTenant(ctx, request("acme", account))
+		if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Fatalf("unauthorized bootstrap: %v", err)
+		}
+	}
+}
+
+func TestBootstrapRejectsUnavailableTenantOwnership(t *testing.T) {
+	for _, state := range []string{"namespace owner reference", "namespace deleting", "namespace terminating", "tenant deleting"} {
+		t.Run(state, func(t *testing.T) {
+			funcs := noWrites()
+			funcs.Get = func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if err := c.Get(ctx, key, obj, opts...); err != nil {
+					return err
+				}
+				switch value := obj.(type) {
+				case *corev1.Namespace:
+					switch state {
+					case "namespace owner reference":
+						value.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "foreign-owner", UID: "foreign-owner"}}
+					case "namespace deleting":
+						now := metav1.Now()
+						value.DeletionTimestamp = &now
+					case "namespace terminating":
+						value.Status.Phase = corev1.NamespaceTerminating
+					}
+				case *cloudv1alpha1.Tenant:
+					if state == "tenant deleting" {
+						now := metav1.Now()
+						value.DeletionTimestamp = &now
+					}
+				}
+				return nil
+			}
+			f := newFixture(t, funcs)
+			// No Create/Put expectations: a failed prerequisite cannot write an account.
+			_, err := f.svc.BootstrapTenant(t.Context(), request("acme", account))
+			if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+				t.Fatalf("bootstrap: %v", err)
+			}
+			if len(*f.recorded) != 0 {
+				t.Fatal("failed prerequisite recorded resources")
+			}
+		})
 	}
 }

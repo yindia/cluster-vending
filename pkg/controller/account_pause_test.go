@@ -31,7 +31,7 @@ func TestPausedAccountStatusAndEvents(t *testing.T) {
 		}
 		obj := &cloudv1alpha1.CloudAccount{}
 		w.must(t, w.k.Get(ctx, req.NamespacedName, obj))
-		return meta.FindStatusCondition(obj.Status.Conditions, platform.ConditionPaused)
+		return meta.FindStatusCondition(obj.Status.Conditions, platform.ConditionFrozen)
 	}
 
 	if c := reconcile(1); c != nil {
@@ -39,7 +39,7 @@ func TestPausedAccountStatusAndEvents(t *testing.T) {
 	}
 	w.pauseTenant(t, operatorPause)
 	c := reconcile(3)
-	if c == nil || c.Status != metav1.ConditionTrue || !strings.HasPrefix(c.Message, "paused by alice since 2026-11-14T09:00:00Z (provider upgrade)") {
+	if c == nil || c.Status != metav1.ConditionTrue || !strings.HasPrefix(c.Message, "frozen by alice since 2026-11-14T09:00:00Z (provider upgrade)") {
 		t.Fatalf("Paused condition of a paused account = %+v", c)
 	}
 	w.pauseTenant(t, nil)
@@ -49,11 +49,11 @@ func TestPausedAccountStatusAndEvents(t *testing.T) {
 
 	var got []string
 	for _, e := range rec.All() {
-		if e.Reason == platform.ReasonPaused || e.Reason == platform.ReasonResumed {
+		if e.Reason == platform.ReasonPlatformFrozen || e.Reason == platform.ReasonPlatformUnfrozen {
 			got = append(got, e.Reason)
 		}
 	}
-	if strings.Join(got, ",") != platform.ReasonPaused+","+platform.ReasonResumed {
+	if strings.Join(got, ",") != platform.ReasonPlatformFrozen+","+platform.ReasonPlatformUnfrozen {
 		t.Fatalf("pause events = %v, want one Paused then one Resumed", got)
 	}
 }

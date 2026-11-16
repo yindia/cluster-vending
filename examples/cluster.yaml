@@ -1,6 +1,12 @@
 # Step 3 of the walkthrough (README.md): an EKS cluster in network prod.
 #
 #   cluster-vending cluster create -f examples/cluster.yaml [--wait]
+#   cluster-vending cluster update --id <CLUSTER_ID> -f examples/cluster.yaml --plan
+#   cluster-vending cluster update --id <CLUSTER_ID> -f examples/cluster.yaml [--wait]
+#
+# Optional settings below are commented out; uncomment only what you need.
+# On update, omitted fields stay unchanged. Use --plan to review replacements
+# and removals before applying. Tier is inherited from the network, not set here.
 #
 # Replace spec.network.networkId with the NETWORK_ID that `network create -f
 # examples/network.yaml` returned (`network list --tenant acme` shows it).
@@ -9,25 +15,83 @@ kind: Cluster
 metadata:
   name: prod-eks             # the EKS cluster name (unique per account and region)
   tenant: acme
+  # id: <CLUSTER_ID>          # update only: alternative to --id; omit on create
   displayName: Prod EKS
+  # displayName: up to 128 characters. labels: up to 40 cloud tag pairs;
+  # keys 1-128 characters, values up to 256; reserved AWS/platform keys refused.
   labels: {env: prod, team: platform}   # filtering, and AWS tags on every resource
 spec:
   region: us-west-1          # the network's region
   network:
     networkId: 00000000-0000-0000-0000-000000000002   # NETWORK_ID
+    # Immutable: choose private subnets in these network zones; empty uses all.
+    # AWS requires at least two zones, using zone IDs rather than zone names.
+    # zoneIds: [usw1-az1, usw1-az3]
+    # Immutable Kubernetes Service IPv4 range, /12 through /24; omit for EKS default.
+    # serviceCidr: 172.20.0.0/16
+    # podCidr exists in the common API but must remain unset for AWS VPC CNI.
   controlPlane:
-    # kubernetesVersion: "1.34"   # omitted: the EKS default
+    kubernetesVersion: "1.35"   # unchanged: the channel moves it (upgradeMode: Automatic)
     endpointAccess:
       publicAccessCidrs: ["0.0.0.0/0"]
+      # Mutable, both default true; at least one endpoint must be enabled.
+      # With public access enabled, publicAccessCidrs requires 1-40 unique IPv4 CIDRs.
+      # endpointPrivateAccess: true
+      # endpointPublicAccess: true
+      # A private-only API must be reachable from the management cluster too.
     secretsEncryption: {enabled: true}   # a KMS key the platform creates; or kmsKeyArn: <existing key>. Cannot be turned off later.
+    # To use an existing key instead, replace the secretsEncryption block with:
+    # secretsEncryption:
+    #   enabled: true
+    #   kmsKeyArn: arn:aws:kms:us-west-1:111122223333:key/00000000-0000-0000-0000-000000000000
+    # An existing key is not created/deleted by the platform. Once enabled,
+    # encryption cannot be disabled or switched to a different key.
   defaultNodePool:           # platform workloads; user workloads run on Karpenter
     instanceTypes: [t3.medium]
     diskSizeGb: 30
     scalingConfig: {minSize: 2, maxSize: 3}
-  # releaseChannel: RELEASE_CHANNEL_STABLE   # ALPHA | BETA | STABLE: stored, not acted on yet
-  # tier: CLUSTER_TIER_0                      # 0 (most sensitive) | 1 | 2; unset is tier 0
+    # capacityType: CAPACITY_TYPE_ON_DEMAND  # default; or CAPACITY_TYPE_SPOT
+    # instanceTypes: 1-20 unique AWS types. diskSizeGb: 20-16384 GiB.
+    # Changing instanceTypes, capacityType or diskSizeGb replaces the node group.
+    # Optional Kubernetes node labels (up to 64); separate from metadata cloud tags.
+    # labels: {workload: platform}
+    # Optional node taints (up to 50). Effects: TAINT_EFFECT_NO_SCHEDULE,
+    # TAINT_EFFECT_PREFER_NO_SCHEDULE, TAINT_EFFECT_NO_EXECUTE.
+    # taints:
+    #   - {key: workload, value: platform, effect: TAINT_EFFECT_NO_SCHEDULE}
+    # To set initial size, expand the existing scalingConfig mapping, for example:
+    # scalingConfig: {minSize: 2, maxSize: 3, desiredSize: 2}
+    # minSize: 0-1000; maxSize: 1-1000; minSize <= desiredSize <= maxSize.
+    # desiredSize is create-only, defaults to max(minSize, 1); ignored on update.
+  releaseChannel: RELEASE_CHANNEL_ALPHA     # alpha: Kubernetes 1.37 | beta: 1.36 | stable: 1.35
+  upgradeMode: UPGRADE_MODE_AUTOMATIC       # follow the channel's minor; MANUAL (default) never upgrades
+  # Channels: RELEASE_CHANNEL_ALPHA, RELEASE_CHANNEL_BETA, RELEASE_CHANNEL_STABLE.
+  # RELEASE_CHANNEL_UNSPECIFIED: automatic follows Stable; manual follows none.
+  # Modes: UPGRADE_MODE_MANUAL, UPGRADE_MODE_AUTOMATIC; UNSPECIFIED means MANUAL.
+  # Automatic version movement follows platform rollout gates and controller settings.
+  # maintenanceWindow:                      # when an automatic upgrade may start (UTC); unset: any time
+  #   days: [WEEKDAY_SATURDAY, WEEKDAY_SUNDAY]   # empty: every day
+  #   start: "02:00"                        # HH:MM, UTC
+  #   duration: 4h                          # 1h to 24h; a running upgrade finishes after the window ends
+  # days accepts WEEKDAY_MONDAY through WEEKDAY_SUNDAY, with no duplicates.
+  # duration also accepts minutes/combinations, e.g. 90m or 1h30m.
   access:
     adminPrincipals: []      # IAM role/user ARNs, e.g. arn:aws:iam::111122223333:role/platform-admin; the creator is admin already
+    # Up to 20 admins; removing a principal revokes its managed admin access.
+    # Other IAM principals and scoped EKS policies (up to 50 entries):
+    # accessEntries:
+    #   - principalArn: arn:aws:iam::111122223333:role/developers
+    #     type: ACCESS_ENTRY_TYPE_STANDARD  # default; only STANDARD takes policies
+    #     policies:                        # up to 20 policies per principal
+    #       - policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy
+    #         scope: ACCESS_POLICY_SCOPE_NAMESPACE
+    #         namespaces: [team-a]         # required for NAMESPACE; up to 50
+    # For whole-cluster access: scope ACCESS_POLICY_SCOPE_CLUSTER, omit namespaces.
+    # Entry types: ACCESS_ENTRY_TYPE_STANDARD, ACCESS_ENTRY_TYPE_EC2_LINUX,
+    # ACCESS_ENTRY_TYPE_EC2_WINDOWS, ACCESS_ENTRY_TYPE_FARGATE_LINUX,
+    # ACCESS_ENTRY_TYPE_EC2, ACCESS_ENTRY_TYPE_HYBRID_LINUX,
+    # ACCESS_ENTRY_TYPE_HYPERPOD_LINUX. UNSPECIFIED defaults to STANDARD.
+    # A principal cannot appear in both adminPrincipals and accessEntries.
     # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (docs/oidc.md)
     #   entra: {tenantId: 00000000-0000-0000-0000-000000000000, clientId: 00000000-0000-0000-0000-000000000000}   # Microsoft Entra ID: nothing else to set
     # or any other provider:
@@ -36,17 +100,73 @@ spec:
     #   issuerUrl: https://example.okta.com/oauth2/default   # HTTPS, reachable from the internet
     #   clientId: kubernetes
     #   usernameClaim: email
+    #   usernamePrefix: "oidc:"  # "-" disables prefix; must not contain system:
     #   groupsClaim: groups
     #   groupsPrefix: "oidc:"  # bind RBAC to oidc:<group>; its users have no permissions until you do
+    #   requiredClaims: {tenant: acme}  # up to 50 required claim/value pairs
+    # For entra, name is optional (defaults to entra), and requiredClaims is allowed;
+    # omit generic issuer/client/claim/prefix settings. OIDC changes replace the
+    # association, temporarily interrupting authentication through that provider.
   aws:
+    # Create-time setting; updates are currently not implemented. Default: API.
+    # accessConfig:
+    #   authenticationMode: AWS_AUTHENTICATION_MODE_API
+    # Choices: AWS_AUTHENTICATION_MODE_API, AWS_AUTHENTICATION_MODE_API_AND_CONFIG_MAP,
+    # AWS_AUTHENTICATION_MODE_CONFIG_MAP (legacy; cannot use the access entries above).
+    # Immutable extra control-plane security groups (up to 4); not created/deleted here.
+    # additionalSecurityGroupIds: [sg-0123456789abcdef0]
+    # AWS settings for the defaultNodePool, separate from the common node-pool block:
+    # defaultNodePool:
+    #   amiType: AWS_AMI_TYPE_AL2023_X86_64_STANDARD  # default
+    #   # Option A: existing launch template (id OR name, plus numeric version).
+    #   launchTemplate:
+    #     id: lt-0123456789abcdef0
+    #     # name: existing-node-template   # alternative to id, never both
+    #     version: "3"                    # not $Latest or $Default
+    #   # Option B: replace launchTemplate above with a platform-owned template:
+    #   # launchTemplate:
+    #   #   securityGroupIds: [sg-0123456789abcdef0]  # up to 4 extra node security groups
+    #   #   imageId: ami-0123456789abcdef0           # optional custom AMI
+    #   #   userData: <base64-bootstrap-script>      # required with imageId
+    # With any launchTemplate, omit common defaultNodePool.diskSizeGb; put disk
+    # settings in the existing template. CUSTOM needs a template carrying an AMI.
+    # Setting/removing/switching templates or amiType replaces the node group;
+    # a new numeric version of the same template rolls the nodes in place.
+    # amiType choices (all prefixed AWS_AMI_TYPE_):
+    # AL2023_X86_64_STANDARD, AL2023_ARM_64_STANDARD, AL2023_X86_64_NVIDIA,
+    # AL2023_X86_64_NEURON, AL2023_ARM_64_NVIDIA,
+    # BOTTLEROCKET_X86_64, BOTTLEROCKET_ARM_64, BOTTLEROCKET_X86_64_NVIDIA,
+    # BOTTLEROCKET_ARM_64_NVIDIA, BOTTLEROCKET_X86_64_FIPS, BOTTLEROCKET_ARM_64_FIPS,
+    # BOTTLEROCKET_X86_64_NVIDIA_FIPS, BOTTLEROCKET_ARM_64_NVIDIA_FIPS,
+    # WINDOWS_CORE_2019_X86_64, WINDOWS_FULL_2019_X86_64,
+    # WINDOWS_CORE_2022_X86_64, WINDOWS_FULL_2022_X86_64,
+    # WINDOWS_CORE_2025_X86_64, WINDOWS_FULL_2025_X86_64, CUSTOM.
+    # AMI must be compatible with the instance architecture and workload needs.
+    irsa: true               # the cluster's IAM OIDC provider: platform components' IAM roles need it
     controlPlaneLogGroup: {enabled: true, retentionDays: 30}   # /aws/eks/<name>/cluster, created before the EKS cluster
+    # Log-group enabled: true/false. Default retention when enabled: 90 days.
+    # retentionDays choices: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365,
+    # 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653.
     enabledClusterLogTypes: [AWS_CLUSTER_LOG_TYPE_API, AWS_CLUSTER_LOG_TYPE_AUDIT, AWS_CLUSTER_LOG_TYPE_AUTHENTICATOR]
+    # Also available: AWS_CLUSTER_LOG_TYPE_CONTROLLER_MANAGER, AWS_CLUSTER_LOG_TYPE_SCHEDULER.
+    # An empty list disables control-plane logging.
     upgradePolicy:
       supportType: AWS_SUPPORT_TYPE_STANDARD
+      # Alternative: AWS_SUPPORT_TYPE_EXTENDED (paid extended support).
     addons:                  # merged into vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver
       - name: metrics-server
+        # Optional on any add-on; omit version for EKS-recommended compatible version.
+        # version: v0.0.0-eksbuild.1   # illustrative only: choose a compatible version
+        # configurationValues: '{}'  # JSON string matching that add-on's config schema
       - name: kube-state-metrics
       - name: cert-manager
-      - name: aws-efs-csi-driver
-      - name: snapshot-controller
-      - name: aws-fsx-csi-driver
+      # - name: aws-efs-csi-driver
+      # - name: snapshot-controller
+      # - name: aws-fsx-csi-driver
+      # - name: aws-mountpoint-s3-csi-driver
+      #   s3BucketNames: [example-workload-bucket]  # required only for this add-on
+    # Defaults can also be listed to override their version/configurationValues.
+    # The platform does not create EFS/FSx file systems or S3 buckets for CSI add-ons.
+# Platform components are managed by the platform catalog, not fields in this file.
+# Freeze/unfreeze uses admin commands. Do not set spec.tier (use the network tier),
+# status, generation, etag or timestamps. GCP/Azure settings are not implemented yet.

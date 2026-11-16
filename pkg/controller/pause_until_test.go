@@ -14,12 +14,12 @@ import (
 func TestUntilPauseEnds(t *testing.T) {
 	now := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
 	soon, later := now.Add(3*time.Minute), now.Add(time.Hour)
-	at := func(until *time.Time) *model.Pause {
-		return (*model.Pause)(nil).With(model.PauseCluster, &model.Pause{By: "alice", Since: now, Until: until})
+	at := func(until *time.Time) *model.Freeze {
+		return &model.Freeze{By: "alice", Since: now, Until: until}
 	}
 	tests := []struct {
 		name  string
-		pause *model.Pause
+		pause *model.Freeze
 		res   time.Duration
 		want  time.Duration
 	}{
@@ -31,7 +31,7 @@ func TestUntilPauseEnds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := untilPauseEnds(tt.pause, ctrl.Result{RequeueAfter: tt.res}, now)
+			got := untilFreezeEnds(tt.pause, ctrl.Result{RequeueAfter: tt.res}, now)
 
 			if got.RequeueAfter != tt.want {
 				t.Fatalf("RequeueAfter = %v, want %v", got.RequeueAfter, tt.want)

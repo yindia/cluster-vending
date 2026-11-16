@@ -2,6 +2,7 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
+- bases/cloud.cluster-vending.io_tenants.yaml
 - bases/cloud.cluster-vending.io_cloudaccounts.yaml
 - bases/cloud.cluster-vending.io_networks.yaml
 - bases/cloud.cluster-vending.io_clusters.yaml

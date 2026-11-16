@@ -447,44 +447,6 @@ func (c *MockTenantsDeleteCloudAccountCall) DoAndReturn(f func(context.Context, 
 	return c
 }
 
-// DropLapsedPause mocks base method.
-func (m *MockTenants) DropLapsedPause(ctx context.Context, tenantID string, target model.PauseTarget) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DropLapsedPause", ctx, tenantID, target)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DropLapsedPause indicates an expected call of DropLapsedPause.
-func (mr *MockTenantsMockRecorder) DropLapsedPause(ctx, tenantID, target any) *MockTenantsDropLapsedPauseCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropLapsedPause", reflect.TypeOf((*MockTenants)(nil).DropLapsedPause), ctx, tenantID, target)
-	return &MockTenantsDropLapsedPauseCall{Call: call}
-}
-
-// MockTenantsDropLapsedPauseCall wrap *gomock.Call
-type MockTenantsDropLapsedPauseCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockTenantsDropLapsedPauseCall) Return(arg0 error) *MockTenantsDropLapsedPauseCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockTenantsDropLapsedPauseCall) Do(f func(context.Context, string, model.PauseTarget) error) *MockTenantsDropLapsedPauseCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockTenantsDropLapsedPauseCall) DoAndReturn(f func(context.Context, string, model.PauseTarget) error) *MockTenantsDropLapsedPauseCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // Get mocks base method.
 func (m *MockTenants) Get(ctx context.Context, id string) (*model.Tenant, error) {
 	m.ctrl.T.Helper()
@@ -713,44 +675,6 @@ func (c *MockTenantsRequestAccessCheckCall) Do(f func(context.Context, string, s
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockTenantsRequestAccessCheckCall) DoAndReturn(f func(context.Context, string, string, time.Time, []string) error) *MockTenantsRequestAccessCheckCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// SetPause mocks base method.
-func (m *MockTenants) SetPause(ctx context.Context, tenantID string, target model.PauseTarget, pause *model.Pause) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SetPause", ctx, tenantID, target, pause)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// SetPause indicates an expected call of SetPause.
-func (mr *MockTenantsMockRecorder) SetPause(ctx, tenantID, target, pause any) *MockTenantsSetPauseCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPause", reflect.TypeOf((*MockTenants)(nil).SetPause), ctx, tenantID, target, pause)
-	return &MockTenantsSetPauseCall{Call: call}
-}
-
-// MockTenantsSetPauseCall wrap *gomock.Call
-type MockTenantsSetPauseCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockTenantsSetPauseCall) Return(arg0 error) *MockTenantsSetPauseCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockTenantsSetPauseCall) Do(f func(context.Context, string, model.PauseTarget, *model.Pause) error) *MockTenantsSetPauseCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockTenantsSetPauseCall) DoAndReturn(f func(context.Context, string, model.PauseTarget, *model.Pause) error) *MockTenantsSetPauseCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

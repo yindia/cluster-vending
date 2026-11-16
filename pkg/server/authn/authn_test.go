@@ -29,8 +29,6 @@ const audience = "api://cluster-vending"
 // never get that far.
 type handlers struct {
 	cloudv1connect.UnimplementedClusterServiceHandler
-	cloudv1connect.UnimplementedAdminServiceHandler
-	cloudv1connect.UnimplementedTenantServiceHandler
 	reached atomic.Int32
 	// caller is the identity the last handler saw.
 	caller atomic.Pointer[auth.Identity]
@@ -51,14 +49,35 @@ func (h *handlers) DeleteCluster(ctx context.Context, _ *cloudv1.DeleteClusterRe
 	return &cloudv1.DeleteClusterResponse{}, nil
 }
 
-func (h *handlers) PauseReconcile(ctx context.Context, _ *cloudv1.PauseReconcileRequest) (*cloudv1.PauseReconcileResponse, error) {
+func (h *handlers) Freeze(ctx context.Context, _ *cloudv1.FreezeRequest) (*cloudv1.FreezeResponse, error) {
 	h.seen(ctx)
-	return &cloudv1.PauseReconcileResponse{}, nil
+	return &cloudv1.FreezeResponse{}, nil
 }
 
 func (h *handlers) WhoAmI(ctx context.Context, _ *cloudv1.WhoAmIRequest) (*cloudv1.WhoAmIResponse, error) {
 	h.seen(ctx)
 	return &cloudv1.WhoAmIResponse{Subject: auth.FromContext(ctx).Subject}, nil
+}
+
+// Tenant and operator services now share method names with different request
+// types. Keep separate adapters while retaining the same request counters and
+// identity observations used by every existing assertion.
+type adminHandlers struct {
+	cloudv1connect.UnimplementedAdminServiceHandler
+	observed *handlers
+}
+
+func (h adminHandlers) Freeze(ctx context.Context, req *cloudv1.FreezeRequest) (*cloudv1.FreezeResponse, error) {
+	return h.observed.Freeze(ctx, req)
+}
+
+type tenantHandlers struct {
+	cloudv1connect.UnimplementedTenantServiceHandler
+	observed *handlers
+}
+
+func (h tenantHandlers) WhoAmI(ctx context.Context, req *cloudv1.WhoAmIRequest) (*cloudv1.WhoAmIResponse, error) {
+	return h.observed.WhoAmI(ctx, req)
 }
 
 // api is the API behind the interceptor in mode, its handlers, its log and
@@ -94,8 +113,8 @@ func newAPI(t *testing.T, mode auth.Mode) *api {
 	server := connect.NewServer(service.Faults, authn.Interceptor(authn.Options{
 		Mode: mode, Verifier: auth.NewVerifier(cfg), Logger: slog.New(slog.NewTextHandler(a.logs, nil))}))
 	cloudv1connect.RegisterClusterServiceHandler(server, a.handlers)
-	cloudv1connect.RegisterAdminServiceHandler(server, a.handlers)
-	cloudv1connect.RegisterTenantServiceHandler(server, a.handlers)
+	cloudv1connect.RegisterAdminServiceHandler(server, adminHandlers{observed: a.handlers})
+	cloudv1connect.RegisterTenantServiceHandler(server, tenantHandlers{observed: a.handlers})
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
 	srv := httptest.NewServer(mux)
@@ -139,7 +158,7 @@ func (a *api) calls() map[string]func(ctx context.Context, tenant string) error 
 			return err
 		},
 		"platform": func(ctx context.Context, tenant string) error {
-			_, err := a.clients.admin.PauseReconcile(ctx, &cloudv1.PauseReconcileRequest{TenantId: tenant})
+			_, err := a.clients.admin.Freeze(ctx, &cloudv1.FreezeRequest{})
 			return err
 		},
 		"whoami": func(ctx context.Context, _ string) error {

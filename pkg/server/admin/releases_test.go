@@ -69,6 +69,13 @@ func releaseWorld(t *testing.T, objects ...client.Object) *Service {
 		}
 		objs = append(objs, ch)
 	}
+	seenNetworks := map[string]bool{}
+	for _, object := range objects {
+		if cluster, ok := object.(*cloudv1alpha1.Cluster); ok && cluster.Spec.Network.NetworkRef.Name != "" && !seenNetworks[cluster.Spec.Network.NetworkRef.Name] {
+			seenNetworks[cluster.Spec.Network.NetworkRef.Name] = true
+			objs = append(objs, &cloudv1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: cluster.Spec.Network.NetworkRef.Name, Namespace: cluster.Namespace}, Spec: cloudv1alpha1.NetworkSpec{Tier: cluster.Status.Tier}})
+		}
+	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objs, objects...)...).Build()
 	s := NewService(reconcile.Deps{Kube: c})
 	s.now = func() time.Time { return releaseNow }
@@ -81,10 +88,11 @@ func stableCluster(name string, tier cloudv1alpha1.ClusterTier, version string) 
 	return &cloudv1alpha1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "tenant-acme",
 			Labels: map[string]string{cloudstore.LabelID: "id-" + name, cloudstore.LabelTenant: "acme"}},
-		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable, Tier: tier,
+		Spec: cloudv1alpha1.ClusterSpec{ReleaseChannel: cloudv1alpha1.ReleaseChannelStable,
+			Network:      cloudv1alpha1.ClusterNetwork{NetworkRef: cloudv1alpha1.LocalReference{Name: "net-" + string(tier)}},
 			UpgradeMode:  cloudv1alpha1.UpgradeModeAutomatic,
 			ControlPlane: &cloudv1alpha1.ControlPlaneSpec{KubernetesVersion: version}},
-		Status: cloudv1alpha1.ClusterStatus{Phase: cloudv1alpha1.ClusterPhaseRunning, CurrentKubernetesVersion: version,
+		Status: cloudv1alpha1.ClusterStatus{Tier: tier, Phase: cloudv1alpha1.ClusterPhaseRunning, CurrentKubernetesVersion: version,
 			Conditions: []metav1.Condition{
 				{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: ready},
 				{Type: cloudv1alpha1.ConditionPlatformComponentsReady, Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: ready},

@@ -139,36 +139,6 @@ func TestPassFailure(t *testing.T) {
 	}
 }
 
-func TestPauseNotes(t *testing.T) {
-	paused := []*cloudv1.Condition{{Type: reconcile.ConditionPaused, Status: cloudv1.ConditionStatus_CONDITION_STATUS_TRUE,
-		Message: "3 of 40 resources are paused"}}
-	tests := []struct {
-		name          string
-		before, after []*cloudv1.Condition
-		want          string
-	}{
-		{name: "never paused"},
-		{name: "a pause starts", after: paused, want: reconcile.ReasonPaused},
-		{name: "the pause goes on", before: paused, after: paused},
-		{name: "the pause ends", before: paused, want: reconcile.ReasonResumed},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := reconcile.PauseNotes(tt.before, tt.after)
-
-			if tt.want == "" {
-				if len(got) != 0 {
-					t.Fatalf("notes = %+v, want none", got)
-				}
-				return
-			}
-			if len(got) != 1 || got[0].Reason != tt.want || got[0].Type != reconcile.EventNormal || got[0].Message == "" {
-				t.Fatalf("notes = %+v, want one %s", got, tt.want)
-			}
-		})
-	}
-}
-
 // The packages that decide what happens know events only through
 // reconcile.Events: none of them imports an event recorder.
 func TestReconcilePackagesImportNoRecorder(t *testing.T) {

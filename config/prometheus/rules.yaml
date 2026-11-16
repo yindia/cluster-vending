@@ -1,0 +1,83 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-alerts
+  namespace: system
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+spec:
+  groups:
+  - name: cluster-vending
+    rules:
+    - alert: ClusterVendingMetricsTargetDown
+      expr: up{cluster_vending_role=~"server|controller"} == 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: Cluster vending metrics target is unavailable
+        description: Inspect the pod, metrics listener and scrape network access.
+    - alert: ClusterVendingRPCServerErrors
+      expr: >-
+        (sum(rate(cluster_vending_rpc_requests_total{code=~"internal|unknown|unavailable|deadline_exceeded"}[5m]))
+        / clamp_min(sum(rate(cluster_vending_rpc_requests_total[5m])), 0.001) > 0.05)
+        and (sum(rate(cluster_vending_rpc_requests_total[5m])) > 0.1)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: More than 5% of cluster vending RPCs fail with server errors
+        description: Inspect RPC result codes, controller health and Kubernetes API errors. Authentication and validation errors are excluded.
+    - alert: ClusterVendingFleetMetricsStale
+      expr: >-
+        (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance)
+        ((time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds > 120)
+        or (cluster_vending_fleet_metrics_refresh_success == 0))
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: Cluster vending fleet snapshot is stale
+        description: Fleet data is retained after failed reads; inspect cache sync, permissions and controller logs before trusting fleet counts.
+    - alert: ClusterVendingNoFleetPublisher
+      expr: sum(cluster_vending_fleet_metrics_active) < 1 or absent(cluster_vending_fleet_metrics_active)
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: No controller is publishing fleet metrics
+        description: Inspect controller leader election and controller pod health.
+    - alert: ClusterVendingProvisioningSlow
+      expr: >-
+        (cluster_vending_fleet_oldest_provisioning_seconds{kind=~"cluster|network"} > 3600)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: A network or cluster has been provisioning for over an hour
+        description: Inspect owner conditions, provider queues, cloud quotas and freeze state. The age includes time intentionally frozen.
+    - alert: ClusterVendingUpgradePhaseSlow
+      expr: >-
+        (cluster_vending_fleet_upgrade_oldest_phase_seconds > 1800)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: A Kubernetes upgrade phase has lasted over 30 minutes
+        description: Inspect upgrade progress, node drains, add-on health and freeze state. Tune this threshold to workload size.
+    - alert: ClusterVendingFreezeNotConfirmed
+      expr: >-
+        (cluster_vending_freeze_phase{phase=~"pending|freezing"} == 1)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: The platform freeze has not been confirmed
+        description: Inspect freeze status and provider pause failures; policy presence alone does not confirm reconciliation is paused.

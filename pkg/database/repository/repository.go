@@ -68,22 +68,6 @@ type Tenants interface {
 	// ListCloudAccounts returns the tenant's accounts, ordered by provider
 	// then account ID.
 	ListCloudAccounts(ctx context.Context, tenantID string) ([]model.CloudAccount, error)
-	// SetPause records an operator's pause (model.Pause), or with nil
-	// removes it, at target: one cluster, one network (the network row
-	// alone: its clusters are not paused), or the tenant (its accounts,
-	// networks and clusters, and every one created while the tenant is
-	// paused). A row paused already keeps who paused it and since when,
-	// and records each scope it was paused at. A resume of the tenant
-	// removes only the tenant's scope: a network or cluster paused on its
-	// own stays paused. A resume of one network or cluster ends its pause
-	// whatever else holds it, so it can run again in a paused tenant.
-	// ErrNotFound: no such tenant, network or cluster.
-	SetPause(ctx context.Context, tenantID string, target model.PauseTarget, pause *model.Pause) error
-	// DropLapsedPause writes the pause of target (one cluster, one
-	// network, or the tenant's namespace) again without the scopes whose
-	// until has passed, and without the annotation when none is left.
-	// ErrNotFound: no such tenant, network or cluster.
-	DropLapsedPause(ctx context.Context, tenantID string, target model.PauseTarget) error
 	// RequestAccessCheck records that an access check of the account (by
 	// row ID) was asked for at at (CloudAccount.AccessRequestedAt), of
 	// regions too when any are given (AccessRequestedRegions; none keeps

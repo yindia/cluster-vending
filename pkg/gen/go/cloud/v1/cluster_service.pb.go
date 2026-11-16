@@ -856,6 +856,8 @@ func (x *UpdateClusterRequest) GetPlanId() string {
 
 type UpdateClusterResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Desired state was recorded; cloud reconciliation is still asynchronous.
+	UpdateRecorded bool `protobuf:"varint,3,opt,name=update_recorded,json=updateRecorded,proto3" json:"update_recorded,omitempty"`
 	// The cluster: after the update, or as it is for validate_only.
 	Cluster *Cluster `protobuf:"bytes,1,opt,name=cluster,proto3" json:"cluster,omitempty"`
 	// What the update would do (validate_only) or did (with plan_id).
@@ -892,6 +894,13 @@ func (x *UpdateClusterResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UpdateClusterResponse.ProtoReflect.Descriptor instead.
 func (*UpdateClusterResponse) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_cluster_service_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *UpdateClusterResponse) GetUpdateRecorded() bool {
+	if x != nil {
+		return x.UpdateRecorded
+	}
+	return false
 }
 
 func (x *UpdateClusterResponse) GetCluster() *Cluster {
@@ -1091,8 +1100,9 @@ const file_cloud_v1_cluster_service_proto_rawDesc = "" +
 	"updateMask\x12#\n" +
 	"\rvalidate_only\x18\x04 \x01(\bR\fvalidateOnly\x12!\n" +
 	"\aplan_id\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x06planId:N\xbaHK\x1aI\n" +
-	"\x1fupdate_cluster.cluster_required\x12\x13cluster is required\x1a\x11has(this.cluster)\"h\n" +
-	"\x15UpdateClusterResponse\x12+\n" +
+	"\x1fupdate_cluster.cluster_required\x12\x13cluster is required\x1a\x11has(this.cluster)\"\x91\x01\n" +
+	"\x15UpdateClusterResponse\x12'\n" +
+	"\x0fupdate_recorded\x18\x03 \x01(\bR\x0eupdateRecorded\x12+\n" +
 	"\acluster\x18\x01 \x01(\v2\x11.cloud.v1.ClusterR\acluster\x12\"\n" +
 	"\x04plan\x18\x02 \x01(\v2\x0e.cloud.v1.PlanR\x04plan\"\xb7\x01\n" +
 	"\x14DeleteClusterRequest\x12L\n" +

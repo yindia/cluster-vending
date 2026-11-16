@@ -116,8 +116,8 @@ func TestClusterCreatedByHandIsAdoptedAppliedAndDeleted(t *testing.T) {
 		len(obj.Finalizers) != 1 || obj.Finalizers[0] != cloudv1alpha1.ClusterFinalizer {
 		t.Errorf("labels %v, owners %v, finalizers %v", obj.Labels, obj.OwnerReferences, obj.Finalizers)
 	}
-	if len(obj.Spec.Network.ZoneIDs) != 2 || obj.Spec.Tier != cloudv1alpha1.ClusterTier0 {
-		t.Errorf("the spec was not resolved as a create resolves it: zones %v, tier %q", obj.Spec.Network.ZoneIDs, obj.Spec.Tier)
+	if len(obj.Spec.Network.ZoneIDs) != 2 || obj.Status.Tier != cloudv1alpha1.ClusterTier0 {
+		t.Errorf("the spec was not resolved as a create resolves it: zones %v, tier %q", obj.Spec.Network.ZoneIDs, obj.Status.Tier)
 	}
 	row, err := w.store.Clusters().Get(ctx, tenant, id)
 	if err != nil || row.State != reconcilecluster.StateProvisioning || row.NetworkID != net.ID {

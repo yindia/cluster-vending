@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.region
       name: Region
       type: string
+    - jsonPath: .spec.tier
+      name: Tier
+      type: string
     - jsonPath: .status.resources.cloudNetworkID
       name: VPC
       type: string
@@ -298,6 +301,17 @@ spec:
                 - message: tag keys are 1-128 and values 0-256 characters
                   rule: self.all(k, size(k) >= 1 && size(k) <= 128 && size(self[k])
                     <= 256)
+              tier:
+                default: Tier0
+                description: |-
+                  ClusterTier is how sensitive a cluster is. Within a release channel a
+                  release reaches Tier2 clusters first, then Tier1, then Tier0. Stored
+                  only for now: nothing acts on it yet.
+                enum:
+                - Tier0
+                - Tier1
+                - Tier2
+                type: string
             required:
             - accountRef
             - region

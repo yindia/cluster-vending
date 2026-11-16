@@ -56,11 +56,11 @@ func TestStatusEvents(t *testing.T) {
 		{name: "the EKS cluster becomes ACTIVE",
 			before: st(provisioning, "", mr("Cluster", "c", creating)),
 			after:  st(provisioning, "", mr("Cluster", "c", ready), mr("NodeGroup", "ng", creating)),
-			want:   []string{"Normal ControlPlaneActive"}, message: "ACTIVE"},
+			want:   []string{"Normal ControlPlaneActive", "Normal NodeGroupCreating"}, message: "installed"},
 		{name: "node group and add-ons ready, then running",
 			before: st(provisioning, "", mr("Cluster", "c", ready), mr("NodeGroup", "ng", creating), mr("Addon", "a", creating)),
 			after:  st(running, "", mr("Cluster", "c", ready), mr("NodeGroup", "ng", ready), mr("Addon", "a", ready)),
-			want:   []string{"Normal NodeGroupReady", "Normal AddonsReady", "Normal Running"}, message: "all 3 resources are ready"},
+			want:   []string{"Normal NodeGroupReady", "Normal AddonsReady", "Normal NodeGroupCreated", "Normal AddonInstalled", "Normal Running"}, message: "all 3 resources are ready"},
 		{name: "running stays running", before: st(running, ""), after: st(running, "")},
 		{name: "a change is applied", before: st(running, ""), after: st(updating, "applying generation 3 (4 of 5 resources ready)"),
 			want: []string{"Normal Updating"}, message: "generation 3"},
@@ -131,10 +131,10 @@ func TestStatusEvents(t *testing.T) {
 		{name: "a component is removed",
 			before: withComponents(st(running, ""), pc("mesh", cloudv1.ComponentPhase_COMPONENT_PHASE_READY, 0), pc("old", cloudv1.ComponentPhase_COMPONENT_PHASE_READY, 0)),
 			after:  withComponents(st(running, ""), pc("mesh", cloudv1.ComponentPhase_COMPONENT_PHASE_READY, 0)),
-			want:   []string{"Normal PlatformComponentRemoved"}, message: "old"},
-		{name: "components go with a deleted cluster, silently",
+			want:   []string{"Normal PlatformComponentDeleting", "Normal PlatformComponentRemoved"}, message: "old"},
+		{name: "components report removal with a deleted cluster",
 			before: withComponents(st(running, ""), pc("mesh", cloudv1.ComponentPhase_COMPONENT_PHASE_READY, 0)),
-			after:  st(deleting, "deleting; 3 resources left"), want: []string{"Normal Deleting"}},
+			after:  st(deleting, "deleting; 3 resources left"), want: []string{"Normal Deleting", "Normal PlatformComponentDeleting", "Normal PlatformComponentRemoved"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

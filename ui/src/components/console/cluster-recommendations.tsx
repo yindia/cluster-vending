@@ -1,5 +1,9 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
+import { RefreshButton } from "./refresh-button";
+
 import { useCallback, useState } from "react";
 import { equals } from "@bufbuild/protobuf";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
@@ -148,9 +152,9 @@ function RecommendationsInventory({ clusterId }: { clusterId: string }) {
     { key: "source", header: "Source", width: proportional(2, { minWidth: 120 }), renderCell: ({ recommendation: row }) => <SourceStatus source={row.source} /> },
   ];
   return <VStack gap={6} as="section" aria-label="Cluster resource recommendations">
-    <HStack gap={4} wrap="wrap" hAlign="between" vAlign="center">
-      <VStack gap={1}><Heading level={3}>Resource recommendations</Heading><Text type="supporting">Stored suggestions for container requests. Select a container to inspect limits, usage and differences.</Text></VStack>
-      <Button label="Refresh recommendations" variant="secondary" isLoading={query.refreshing} onClick={() => { setSelected(undefined); query.refresh(); }} />
+    <HStack gap={4} wrap="wrap" hAlign="end" vAlign="center" width="100%">
+      <StackItem size="fill"><VStack gap={1}><Heading level={3}>Resource recommendations</Heading><Text type="supporting">Stored suggestions for container requests. Select a container to inspect limits, usage and differences.</Text></VStack></StackItem>
+      <RefreshButton label="Refresh recommendations" isLoading={query.refreshing} onClick={() => { setSelected(undefined); query.refresh(); }} />
     </HStack>
     <Text type="supporting">Refresh reads stored API results. It does not trigger sampling or change workloads. CPU is shown in millicores; memory uses binary units.</Text>
     {query.error && <Banner status="error" title="Could not read recommendations" description={`${query.error}${query.data ? " Previously loaded results are shown." : ""}`} />}

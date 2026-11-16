@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { HStack, VStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { Heading } from "@astryxdesign/core/Heading";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Stepper, Step } from "@astryxdesign/core/Stepper";
 import { Text } from "@astryxdesign/core/Text";
 import { usePlatform } from "@/components/platform-provider";
 import type { CloudAccount } from "@/gen/cloud/v1/tenant_service_pb";
@@ -15,12 +19,63 @@ import type { ManifestKind, ManifestReview } from "@/lib/workflows/manifests";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { CopyValue } from "./copy-value";
 import { ValuesEditor, type ValuesEditorHandle } from "./values-editor";
-import { WizardDialog } from "./wizard-dialog";
+import { WizardDialog, type WizardDialogProps } from "./wizard-dialog";
+
+/** The two cluster drafts share a header and keep their existing reviewed workflows. */
+export function ClusterCreateDialog({ mode, onModeChange, yamlContent, modeDisabled = false, busy = false, ...props }: WizardDialogProps & {
+  mode: "guided" | "yaml";
+  onModeChange: (mode: "guided" | "yaml") => void;
+  yamlContent?: ReactNode;
+  modeDisabled?: boolean;
+}) {
+  const changeOpen = (open: boolean) => { if (!busy) props.onOpenChange(open); };
+  return <Dialog isOpen={props.isOpen} onOpenChange={changeOpen} purpose={busy ? "required" : "form"} width="min(48rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={0}>
+    <Layout padding={6}
+      header={<VStack gap={4}>
+        <DialogHeader title="Create cluster" subtitle="Choose how to configure your cluster, then review before creating it." onOpenChange={busy ? undefined : changeOpen} />
+        <HStack paddingInline={6}>
+          <SegmentedControl label="Creation method" value={mode} onChange={(value) => { if (value === "guided" || value === "yaml") onModeChange(value); }} isDisabled={busy || modeDisabled} layout="hug" size="md">
+            <SegmentedControlItem value="guided" label="Guided form" />
+            <SegmentedControlItem value="yaml" label="Paste YAML" />
+          </SegmentedControl>
+        </HStack>
+      </VStack>}
+      content={<><ClusterCreationBody {...props} isOpen={props.isOpen && mode === "guided"} />{yamlContent}</>}
+    />
+  </Dialog>;
+}
+
+function ClusterCreationBody({ isOpen, steps, step, children, footer }: WizardDialogProps) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const previousStep = useRef(step);
+  useEffect(() => {
+    if (isOpen && previousStep.current !== step) heading.current?.focus();
+    previousStep.current = step;
+  }, [isOpen, step]);
+  if (!isOpen) return null;
+  return <Layout
+      content={<LayoutContent padding={6}><VStack gap={5} minHeight="min(24rem, 50dvh)">
+        <Stepper activeStep={step} label="Create cluster progress" density="compact">{steps.map((label, index) => <Step key={label} step={index} label={label} />)}</Stepper>
+        <Heading level={3} ref={heading} tabIndex={-1}>{steps[step]}</Heading>
+        {children}
+      </VStack></LayoutContent>}
+      footer={footer ? <LayoutFooter padding={5} hasDivider><HStack hAlign="end">{footer}</HStack></LayoutFooter> : undefined}
+    />;
+}
+
+function ManifestDialogFrame({ embedded, ...props }: WizardDialogProps & { embedded: boolean }) {
+  return embedded
+    ? <ClusterCreationBody {...props} />
+    : <WizardDialog {...props} />;
+}
 
 export type ManifestCreateDialogProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onUseForm?: () => void;
+  /** Cluster creation owns one modal and embeds this draft's reviewed workflow. */
+  embedded?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 } & (
   | { kind: "CloudAccount"; onCreated: (resource: CloudAccount) => void }
   | { kind: "Network"; onCreated: (resource: Network) => void }
@@ -37,7 +92,7 @@ function ErrorNotice({ error }: { error: string }) {
 }
 
 export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
-  const { isOpen, kind, onOpenChange, onUseForm } = props;
+  const { isOpen, kind, onOpenChange, onUseForm, embedded = false, onBusyChange } = props;
   const { api, tenantId, scopeKey, canWrite } = usePlatform();
   const formId = useId();
   const editor = useRef<ValuesEditorHandle>(null);
@@ -52,6 +107,7 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   const latest = useRef({ props, api, tenantId, scopeKey, canWrite });
   useLayoutEffect(() => { latest.current = { props, api, tenantId, scopeKey, canWrite }; }, [props, api, tenantId, scopeKey, canWrite]);
   const previousScope = useRef({ scopeKey, tenantId, kind });
+  useEffect(() => { onBusyChange?.(!!busy); }, [busy, onBusyChange]);
 
   function cancel() {
     operation.current?.controller.abort();
@@ -206,7 +262,8 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   const importing = kind === "NetworkImport" || kind === "ClusterImport";
   const resourceLabel = account ? "cloud account" : kind.replace("Import", "").toLowerCase();
   const locked = !!busy || !canWrite || !tenantId;
-  return <WizardDialog
+  return <ManifestDialogFrame
+    embedded={embedded}
     isOpen={isOpen} onOpenChange={changeOpen}
     title={account ? "Connect cloud account from YAML" : `${importing ? "Import" : "Create"} ${resourceLabel} from YAML`}
     description={`Active tenant: ${tenantId || "None selected"}`}
@@ -243,5 +300,5 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
         <ErrorNotice error={error} />
       </VStack>
     </form>
-  </WizardDialog>;
+  </ManifestDialogFrame>;
 }

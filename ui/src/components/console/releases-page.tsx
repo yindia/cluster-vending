@@ -84,7 +84,7 @@ function ReleaseBrowser() {
   const channels = useAsyncQuery(loadChannels);
   return <VStack gap={6}>
     <DetailHeader title="Releases" description="Published releases and channel offerings. Open a release or channel to inspect its versions and rollout details." />
-    <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap"><Heading level={2}>Release channels</Heading><RefreshButton label="Refresh channels" isLoading={channels.refreshing} onClick={channels.refresh} /></HStack>
+    <HStack width="100%" gap={3} hAlign="between" vAlign="center" wrap="wrap"><Heading level={2}>Release channels</Heading><RefreshButton label="Refresh channels" isLoading={channels.refreshing} onClick={channels.refresh} /></HStack>
     {channels.error && <Banner status="error" title="Channels could not be loaded" description={channels.error} />}
     {channels.loading && <Text role="status">Loading channels…</Text>}
     {channels.data && <Table searchable searchText={({ item }) => [channelLabel(item.channel), item.release, item.kubernetesMinor, item.promotion, item.paused ? "Paused" : "Not paused"].join(" ")} aria-label="Release channels" idKey="id" textOverflow="wrap" data={channels.data.channels.map(item => ({ id: item.channel, item }))} columns={[
@@ -125,7 +125,7 @@ function ReleaseInventory({ channels, channelsError }: { channels?: readonly Rel
   const visible = filtered.slice((currentPage - 1) * 25, currentPage * 25);
   const hasFilters = !!search || channel !== "all" || state !== "all" || origin !== "all";
   return <VStack gap={4}>
-    <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap"><Heading level={2}>Release inventory</Heading><RefreshButton label="Refresh releases" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
+    <HStack width="100%" gap={3} hAlign="between" vAlign="center" wrap="wrap"><Heading level={2}>Release inventory</Heading><RefreshButton label="Refresh releases" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
     {query.error && <Banner status="error" title="Releases could not be loaded" description={query.error} />}
     {query.loading && <Text role="status">Loading the complete release inventory…</Text>}
     <HStack gap={3} wrap="wrap" vAlign="end">
@@ -167,12 +167,12 @@ function ComponentPins({ minors, showAddonInfo = true }: { minors: readonly Rele
   const selectedRow = rows.find(row => row.id === selected);
   return <VStack gap={5}>
     <VStack gap={2}><Heading level={2}>Platform component pins</Heading><Text>Each version belongs to one Kubernetes minor. Release Helm values are locked: tenants cannot override their paths.</Text></VStack>
-    {rows.length ? <Table searchable searchText={(row) => [row.minor, row.item.name, row.item.version, row.item.values && Object.keys(row.item.values).length ? "Inspect locked values" : "No values set"].join(" ")} aria-label="Release component pins by Kubernetes minor" idKey="id" textOverflow="wrap" data={rows} columns={[
+    <Table searchable searchText={(row) => [row.minor, row.item.name, row.item.version, row.item.values && Object.keys(row.item.values).length ? "Inspect locked values" : "No values set"].join(" ")} aria-label="Release component pins by Kubernetes minor" idKey="id" textOverflow="wrap" data={rows} emptyState="No platform component pins returned for these Kubernetes minors." columns={[
       { key: "minor", header: "Kubernetes", renderCell: row => <Text>{row.minor}</Text> },
       { key: "name", header: "Component", renderCell: ({ item }) => <CopyValue value={item.name} label="component name" /> },
       { key: "version", header: "Pinned version", renderCell: ({ item }) => item.version ? <CopyValue value={item.version} label="pinned version" /> : <Text>Not reported</Text> },
       { key: "values", header: "Locked Helm values", renderCell: row => <Button label={row.item.values && Object.keys(row.item.values).length ? "Inspect locked values" : "Inspect values (none set)"} onClick={() => setSelected(row.id)} /> },
-    ]} /> : <Text>No platform component pins returned for these Kubernetes minors.</Text>}
+    ]} />
     {selectedRow && <VStack gap={3}><Heading level={3}>{selectedRow.item.name} · Kubernetes {selectedRow.minor}</Heading><ValuesEditor label={`Locked Helm values for ${selectedRow.item.name} on Kubernetes ${selectedRow.minor}`} description="Read-only release values, merged over the definition’s platform values. Placeholders may be resolved by the platform." language="yaml" readOnly value={stringify(selectedRow.item.values ?? {})} height="18rem" /></VStack>}
     {showAddonInfo && <AddonVersionSource />}
   </VStack>;
@@ -180,12 +180,18 @@ function ComponentPins({ minors, showAddonInfo = true }: { minors: readonly Rele
 
 function ReleaseDetail({ name }: { name: string }) {
   const { api, tenantId } = usePlatform();
+  const [minorFilter, setMinorFilter] = useState("all");
   const load = useCallback((signal: AbortSignal) => api.tenant.getRelease({ tenantId, name }, { signal }), [api, tenantId, name]);
   const query = useAsyncQuery(load);
   const release = query.data?.release;
   const loadChannels = useCallback((signal: AbortSignal) => api.tenant.listReleaseChannels({ tenantId }, { signal }), [api, tenantId]);
   const channels = useAsyncQuery(loadChannels);
   const references = currentChannels(release?.name ?? name, channels.data?.channels);
+  const minors = release?.kubernetes ?? [];
+  const minorOptions = [...new Set(minors.map(minor => minor.minor))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  // A refreshed release can remove the selected minor. Return to the complete inventory.
+  if (release && minorFilter !== "all" && !minorOptions.includes(minorFilter)) setMinorFilter("all");
+  const filteredMinors = minorFilter === "all" ? minors : minors.filter(minor => minor.minor === minorFilter);
   return <VStack gap={6}>
     <DetailHeader title={release?.name || name} description="Kubernetes support and platform component versions." metadata={<CopyValue value={release?.name || name} label="release name" isSecondary />} status={release ? <OfferingStatus state={offeringState(release, channels.data?.channels)} /> : <Text>Loading release</Text>} actions={<RefreshButton label="Refresh release details" isLoading={query.refreshing || channels.refreshing} onClick={() => { query.refresh(); channels.refresh(); }} />} />
     {query.error && <Banner status="error" title="Release details unavailable" description={query.error} />}
@@ -201,9 +207,13 @@ function ReleaseDetail({ name }: { name: string }) {
         { label: "Published", value: time(release.createTime), note: release.shipped ? "Shipped with the controller" : "Operator published" },
       ]} />
       {!release.valid && <Banner status="error" title="Release validation failed" description={release.invalidReason || "The server reported this release as invalid."} />}
+      <HStack as="search" aria-label="Release version filters" gap={3} wrap="wrap" vAlign="center">
+        <Selector label="Kubernetes version" value={minorFilter} onChange={setMinorFilter} options={[{ value: "all", label: "All versions" }, ...minorOptions.map(minor => ({ value: minor, label: minor }))]} />
+        <Text role="status" color="secondary">{filteredMinors.length} of {minors.length} Kubernetes versions</Text>
+      </HStack>
       <DetailTabs label="Release detail sections" sections={[
-        { id: "overview", label: "Overview", content: <><VStack gap={2}><Heading level={2}>Release notes</Heading><Text>{release.notes || "No release notes provided."}</Text></VStack><MinorTable minors={release.kubernetes} /><VStack gap={3}><Heading level={2}>Current references</Heading><HStack gap={3} wrap="wrap">{references.map(channel => <ChannelLink key={channel} channel={channel} />)}</HStack>{!channels.data && <Text>Current channel references have not loaded.</Text>}{release.holds.map((hold, index) => <CopyValue key={index} value={hold} label="release hold" />)}{channels.data && !references.length && !release.holds.length && <Text>No channel or hold references returned.</Text>}</VStack><AddonVersionSource /></> },
-        { id: "components", label: "Components", content: <ComponentPins minors={release.kubernetes} /> },
+        { id: "overview", label: "Overview", content: <><VStack gap={2}><Heading level={2}>Release notes</Heading><Text>{release.notes || "No release notes provided."}</Text></VStack><MinorTable minors={filteredMinors} /><VStack gap={3}><Heading level={2}>Current references</Heading><HStack gap={3} wrap="wrap">{references.map(channel => <ChannelLink key={channel} channel={channel} />)}</HStack>{!channels.data && <Text>Current channel references have not loaded.</Text>}{release.holds.map((hold, index) => <CopyValue key={index} value={hold} label="release hold" />)}{channels.data && !references.length && !release.holds.length && <Text>No channel or hold references returned.</Text>}</VStack><AddonVersionSource /></> },
+        { id: "components", label: "Components", content: <ComponentPins minors={filteredMinors} /> },
       ]} />
     </>}
   </VStack>;
@@ -218,7 +228,7 @@ function OfferedComponents({ info }: { info: ReleaseChannelInfo }) {
   const matching = release?.name === info.release && matches.length === 1;
   return <VStack gap={5}>
     <Text>Current offering: {info.release} · Kubernetes {info.kubernetesMinor}. Pending releases are not used for this table.</Text>
-    <HStack><RefreshButton label="Refresh offered component pins" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
+    <HStack width="100%" hAlign="end" vAlign="center"><RefreshButton label="Refresh offered component pins" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
     {query.loading && <Text role="status">Loading the offered release…</Text>}
     {query.error && <Banner status="error" title="Offered release unavailable" description={query.error} />}
     {query.data && !matching && <Banner status="warning" title="Offering does not match the release" description="The exact offered release and Kubernetes minor were not returned. Versions cannot be inferred from a default or another minor." />}

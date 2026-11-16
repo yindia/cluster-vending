@@ -58,6 +58,12 @@ All console tables support pointer and keyboard column resizing, with a reset
 action to restore default widths. There is no separate width configuration menu.
 Wide tables scroll horizontally. Complete detail tables offer local search;
 paginated inventories filter complete loaded datasets before slicing pages.
+Cluster and network lists show effective pause policy in a separate **Pause**
+column, with local filters for paused resources, active resources and explicit
+let-through exceptions. Health status remains visible independently.
+The overview inventory groups accounts, their networks and each network's
+clusters in an expandable table with child counts. Relationships use platform
+IDs; filtering retains the ancestors needed to understand a matching resource.
 Activity, event lists and release history use their existing tables and pagination
 without date inputs. Time entry is reserved for an optional freeze expiry.
 Account, network and cluster detail headers offer **View YAML**: a read-only,
@@ -99,10 +105,15 @@ creates a cluster-scoped Tenant CR and its Kubernetes namespace, then selects th
 does not create a cloud account or change access grants. Switching tenants leaves
 resource detail context and cancels the old scope’s reads and drafts.
 
+Refresh controls use a consistent icon at the right of their section or toolbar.
+Icons remain centered alongside their labels without clipping text descenders.
+
 Create dialogs offer a guided form or **Paste YAML**, using the CLI's
 `cluster-vending.io/v1` manifests (`CloudAccount`, `Network`, `Cluster`). YAML is
 bounded to 64 KiB and checked against generated protobuf validation rules. Review
 performs read-only reference checks; server admission occurs on final submission.
+Cluster creation presents both modes in a shared dialog header and preserves
+each draft when switching between them.
 Cloud-account creation requires an existing Tenant CR and its namespace; it never
 creates either implicitly. Tenant registration owns namespace setup and the tenant
 controller maintains it. Effective freeze policy is reflected on the Tenant CR.
@@ -119,9 +130,15 @@ changed etags or plans require fresh consent. NOT_IMPORTED resources require
 acknowledgement, and cluster takeover offers the persistent skip-platform-components
 choice.
 
-Cluster details offer **Get kubeconfig** to copy local CLI install/print commands,
-with OIDC commands only when configured. Commands use positional cluster IDs and
-run with the user’s own credentials; the browser does not execute them.
+Cluster details offer **Get kubeconfig** to load current cluster details and copy
+an `aws eks update-kubeconfig` command using the recorded EKS name and region.
+The command runs locally with the user's AWS credentials; the browser does not
+execute it or download cloud credentials. Other providers need their own command
+adapter instead of an AWS fallback.
+
+Release details filter Kubernetes support and component pins by the versions
+declared in that release. YAML and values editors keep text selections readable
+in light, dark and forced-color modes.
 
 ## Generated API contracts
 

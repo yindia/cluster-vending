@@ -1,5 +1,7 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -32,6 +34,7 @@ import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
 import { RefreshButton } from "./refresh-button";
+import { PauseValue, pauseState } from "./pause-value";
 import { ProviderIcon } from "./provider-icons";
 import { ActivityEventTable, ActivityEventFilters, filterActivityEvents, type ActivityFilters } from "./activity-event-table";
 import { errorMessage, useAsyncQuery } from "@/lib/api/use-query";
@@ -307,7 +310,7 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
     <Button label="Back" type="button" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={step === 0 || mutation.busy} />
     <Button label={step < 2 ? "Next" : "Import for discovery"} form="network-import-form" type="submit" variant="primary" isDisabled={!canWrite} isLoading={mutation.busy} />
   </HStack>}><VStack gap={4}>
-    {step === 0 && <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center"><Text type="label">Use guided form</Text><Button type="button" label="Paste YAML" variant="secondary" isDisabled={locked} onClick={() => { setManifestVisited(true); setMode("yaml"); }} /></HStack>}
+    {step === 0 && <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center" width="100%"><Text type="label">Use guided form</Text><Button type="button" label="Paste YAML" variant="secondary" isDisabled={locked} onClick={() => { setManifestVisited(true); setMode("yaml"); }} /></HStack>}
     {step === 0 && <Text type="supporting">Import starts read-only discovery. The platform will not take ownership until you review the discovered resources and confirm takeover.</Text>}
     <form id="network-import-form" method="post" aria-label="Import network fields" onSubmit={submit} noValidate>
       <VStack gap={4}>
@@ -419,7 +422,7 @@ function NetworkEditor({ networkId, currentEtag, accounts, onAccepted, onCancel 
   return <VStack gap={4}>
     {query.loading && <Text role="status">Loading stored input for editing…</Text>}
     <ErrorNotice error={query.error} />
-    {query.error && <Button label="Retry loading editor" onClick={query.refresh} />}
+    {query.error && <HStack hAlign="end" vAlign="center" width="100%"><RefreshButton label="Retry loading editor" onClick={query.refresh} isLoading={query.refreshing} /></HStack>}
     {query.data?.network && <NetworkForm baseline={query.data.network} asRequested={query.data.asRequested} currentEtag={currentEtag} accounts={accounts} onAccepted={onAccepted} onCancel={onCancel} />}
     {!query.loading && !query.error && !query.data?.network && <Text>The server returned no network to edit.</Text>}
     {!query.data?.network && <Button label="Cancel edit" onClick={onCancel} />}
@@ -479,7 +482,7 @@ function NetworkEvents({ networkId }: { networkId: string }) {
   const repeated = !!next && tokens.includes(next);
   const busy = query.loading || query.refreshing;
   return <VStack gap={5}>
-    <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center">
+    <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center" width="100%">
       <VStack gap={1}><Heading level={3}>Activity</Heading><Text type="supporting">Controller events, newest first.</Text></VStack>
       <RefreshButton label="Refresh activity" onClick={refreshActivity} isLoading={activityQuery.refreshing || allEvents.refreshing} />
     </HStack>
@@ -540,7 +543,10 @@ function RelatedNetworkClusters({ network }: { network: Network }) {
   const rows = networkClusterRows(networkId, network.status?.clusterIds ?? [], query.data,
     query.data !== undefined && !query.loading && !query.error);
   return <VStack gap={3}>
-    <Heading level={3}>Related clusters</Heading>
+    <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap" width="100%">
+      <Heading level={3}>Related clusters</Heading>
+      <RefreshButton label="Refresh related clusters" onClick={query.refresh} isLoading={query.refreshing} />
+    </HStack>
     <ErrorNotice error={query.error} />
     {query.error && <Text>The cluster list could not be refreshed. Known clusters and unresolved status references are shown below; references may be names rather than platform IDs.</Text>}
     {query.loading && <Text role="status">Loading related cluster names and state…</Text>}
@@ -551,7 +557,6 @@ function RelatedNetworkClusters({ network }: { network: Network }) {
       { key: "version", header: "Kubernetes", renderCell: ({ cluster }) => <Text>{cluster ? cluster.status?.currentKubernetesVersion || "Not reported" : "Not resolved"}</Text> },
       { key: "channel", header: "Release channel", renderCell: ({ cluster }) => <Text>{cluster ? enumLabel(ReleaseChannel, cluster.spec?.releaseChannel) : "Not resolved"}</Text> },
     ]} /> : !query.loading && <Text>{query.error ? "No fallback cluster references reported." : "No related clusters reported."}</Text>}
-    <HStack gap={2}><RefreshButton label="Refresh related clusters" onClick={query.refresh} isLoading={query.refreshing} /></HStack>
   </VStack>;
 }
 
@@ -664,15 +669,15 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
   const tabs = [{ value: "overview", label: "Overview" }, { value: "resources", label: "Resources" }, { value: "activity", label: "Activity" }, { value: "configuration", label: "Configuration" }];
   return <VStack gap={6}>
     <DetailHeader title={network?.displayName || network?.name || "Network details"}
-      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={networkProvider(account) || ""} size="sm" /><Text type="supporting" hasCapsize>{networkProvider(account) === "aws" ? "Amazon Web Services" : "Cloud network"}</Text></HStack><Text type="supporting">{network?.spec?.region || "Region pending"}</Text>{network && <CopyValue value={network.name} label="Network resource name" isSecondary />}</>}
+      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={networkProvider(account) || ""} size="sm" /><Text type="supporting">{networkProvider(account) === "aws" ? "Amazon Web Services" : "Cloud network"}</Text></HStack><Text type="supporting">{network?.spec?.region || "Region pending"}</Text>{network && <CopyValue value={network.name} label="Network resource name" isSecondary />}</>}
       status={network && <StatusValue tone={healthy ? "success" : status?.state === NetworkState.FAILED ? "error" : "warning"} label={state} />}
       actions={<>
             {network && canWrite && <Button label="Edit network" onClick={() => setEditing(true)} isDisabled={editing || !network.etag || !networkProvider(account) || status?.state === NetworkState.IMPORTED || status?.state === NetworkState.DELETING} />}
-            <RefreshButton label="Refresh details" onClick={query.refresh} isLoading={query.refreshing} />
             {network && <ResourceYamlButton kind="Network" resourceId={network.id} />}
             {network && canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze network" : "Freeze network"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "secondary"} href={`/freeze?scope=network&id=${encodeURIComponent(network.id)}`} />}
             {network && canWrite && <DeleteNetwork network={network} onAccepted={accepted} />}
             {network && canWrite && status?.import && (status.state === NetworkState.IMPORTED || status.state === NetworkState.FAILED) && <TakeOverNetworkForm network={network} accounts={accounts} onAccepted={accepted} onReload={query.refresh} />}
+            <RefreshButton label="Refresh details" onClick={query.refresh} isLoading={query.refreshing} />
       </>} />
     {notice && <Banner status="info" title="Request accepted" description={notice} />}
     <ErrorNotice error={query.error} />
@@ -729,7 +734,7 @@ function NetworkDetailPage({ resourceId }: { resourceId: string }) {
   const accounts = useAsyncQuery(loadAccounts);
   return <VStack gap={6}>
     <ErrorNotice error={accounts.error} />
-    {accounts.error && <RefreshButton label="Refresh accounts" onClick={accounts.refresh} isLoading={accounts.refreshing} />}
+    {accounts.error && <HStack hAlign="end" vAlign="center" width="100%"><RefreshButton label="Refresh accounts" onClick={accounts.refresh} isLoading={accounts.refreshing} /></HStack>}
     <NetworkDetails networkId={resourceId} accounts={accounts.data?.accounts ?? []} />
   </VStack>;
 }
@@ -741,6 +746,7 @@ function NetworksList() {
   const [accountFilter, setAccountFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
+  const [pauseFilter, setPauseFilter] = useState("all");
   const [acceptedId, setAcceptedId] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -764,14 +770,17 @@ function NetworksList() {
     return terms.every((term) => text.includes(term)) &&
       (accountFilter === "all" || network.spec?.bootstrapId === accountFilter) &&
       (tierFilter === "all" || String(network.spec?.tier ?? Tier.TIER_UNSPECIFIED) === tierFilter) &&
-      (stateFilter === "all" || String(network.status?.state ?? NetworkState.UNSPECIFIED) === stateFilter);
+      (stateFilter === "all" || String(network.status?.state ?? NetworkState.UNSPECIFIED) === stateFilter) &&
+      (pauseFilter === "all" || pauseState(network.status?.freeze) === pauseFilter);
   });
   const pageCount = Math.max(1, Math.ceil(filtered.length / 25));
   const currentPage = Math.min(page, pageCount - 1);
   const rows: NetworkRow[] = filtered.slice(currentPage * 25, (currentPage + 1) * 25).map((network) => ({ id: network.id, network }));
-  const hasFilters = !!search.trim() || accountFilter !== "all" || tierFilter !== "all" || stateFilter !== "all";
+  const hasFilters = !!search.trim() || accountFilter !== "all" || tierFilter !== "all" || stateFilter !== "all" || pauseFilter !== "all";
   const columns: TableColumn<NetworkRow>[] = [
-    { key: "name", header: "Name", width: proportional(3, { minWidth: 80 }), renderCell: ({ network }) => <HStack gap={1} vAlign="center"><Link href={`/networks/${encodeURIComponent(network.id)}`} maxLines={1} tooltip={network.displayName ? `${network.displayName} (${network.name})` : network.name}>{network.displayName || network.name || network.id}</Link><CopyButton value={network.displayName || network.name || network.id} label="Network name" /></HStack> },
+    { key: "name", header: "Name", width: proportional(2, { minWidth: 160 }), renderCell: ({ network }) => <HStack gap={1} vAlign="center"><Link href={`/networks/${encodeURIComponent(network.id)}`} maxLines={1} tooltip={network.displayName ? `${network.displayName} (${network.name})` : network.name}>{network.displayName || network.name || network.id}</Link><CopyButton value={network.displayName || network.name || network.id} label="Network name" /></HStack> },
+    { key: "state", header: "Status", width: proportional(1, { minWidth: 100 }), renderCell: ({ network }) => <StatusValue label={enumLabel(NetworkState, network.status?.state)} tone={network.status?.state === NetworkState.READY ? "success" : network.status?.state === NetworkState.FAILED ? "error" : "neutral"} /> },
+    { key: "pause", header: "Pause", width: proportional(1, { minWidth: 120 }), renderCell: ({ network }) => <PauseValue freeze={network.status?.freeze} /> },
     { key: "id", header: "ID", width: proportional(3, { minWidth: 80 }), renderCell: ({ network }) => <CopyValue value={network.id} label="Network ID" /> },
     { key: "account", header: "Account", width: proportional(2, { minWidth: 80 }), renderCell: ({ network }) => {
       const id = network.spec?.bootstrapId;
@@ -780,17 +789,18 @@ function NetworksList() {
     } },
     { key: "region", header: "Region", width: proportional(1, { minWidth: 80 }), renderCell: ({ network }) => <Text maxLines={1} hasTruncateTooltip>{network.spec?.region || "Not reported"}</Text> },
     { key: "tier", header: "Tier", width: proportional(1, { minWidth: 80 }), renderCell: ({ network }) => <Text maxLines={1}>{enumLabel(Tier, network.spec?.tier)}</Text> },
-    { key: "state", header: "Status", width: proportional(1, { minWidth: 80 }), renderCell: ({ network }) => <StatusValue label={enumLabel(NetworkState, network.status?.state)} tone={network.status?.state === NetworkState.READY ? "success" : network.status?.state === NetworkState.FAILED ? "error" : "neutral"} /> },
   ];
   const accepted = (network: Network | undefined, message: string) => {
     setNotice(message); setCreating(false); setImporting(false); setAcceptedId(network?.id); list.refresh();
   };
   return <Section variant="transparent" padding={4}><VStack gap={4}>
-    <HStack gap={2} wrap="wrap">
-      <Heading level={2}>Networks</Heading>
-      <RefreshButton label="Refresh networks" onClick={() => { list.refresh(); accounts.refresh(); }} isLoading={list.refreshing || accounts.refreshing} />
-      {canWrite && <Button label="Create network" variant="primary" onClick={() => { setCreating(true); setImporting(false); }} isDisabled={creating} />}
-      {canWrite && <Button label="Import network" onClick={() => { setImporting(true); setCreating(false); }} isDisabled={importing} />}
+    <HStack hAlign="end" vAlign="center" gap={3} wrap="wrap" width="100%">
+      <StackItem size="fill"><Heading level={2}>Networks</Heading></StackItem>
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        {canWrite && <Button label="Create network" variant="primary" onClick={() => { setCreating(true); setImporting(false); }} isDisabled={creating} />}
+        {canWrite && <Button label="Import network" onClick={() => { setImporting(true); setCreating(false); }} isDisabled={importing} />}
+        <RefreshButton label="Refresh networks" onClick={() => { list.refresh(); accounts.refresh(); }} isLoading={list.refreshing || accounts.refreshing} />
+      </HStack>
     </HStack>
     {!canWrite && <Text type="supporting">Your tenant access is read only.</Text>}
     {notice && <Banner status="info" title="Request accepted" description={notice} />}
@@ -803,7 +813,8 @@ function NetworksList() {
       <Selector label="Filter by account" value={accountFilter} onChange={(value) => { setAccountFilter(value); setPage(0); }} width="min(100%, 14rem)" options={[{ value: "all", label: "All accounts" }, ...accountIds.map((id) => ({ value: id, label: accountMap.get(id)?.accountName || id }))]} />
       <Selector label="Filter by tier" value={tierFilter} onChange={(value) => { setTierFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All tiers" }, ...tiers.map((tier) => ({ value: String(tier), label: enumLabel(Tier, tier) }))]} />
       <Selector label="Filter by status" value={stateFilter} onChange={(value) => { setStateFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All statuses" }, ...states.map((state) => ({ value: String(state), label: enumLabel(NetworkState, state) }))]} />
-      {hasFilters && <Button label="Clear network filters" variant="ghost" onClick={() => { setSearch(""); setAccountFilter("all"); setTierFilter("all"); setStateFilter("all"); setPage(0); }} />}
+      <Selector label="Filter by pause" value={pauseFilter} onChange={(value) => { setPauseFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All pause states" }, { value: "paused", label: "Paused" }, { value: "not-paused", label: "Not paused" }, { value: "let-through", label: "Let through" }]} />
+      {hasFilters && <Button label="Clear network filters" variant="ghost" onClick={() => { setSearch(""); setAccountFilter("all"); setTierFilter("all"); setStateFilter("all"); setPauseFilter("all"); setPage(0); }} />}
     </HStack>
     {list.loading && <Text role="status">Loading all network pages…</Text>}
     {list.data && <Text type="supporting" role="status">{filtered.length} of {allNetworks.length} tenant networks · 25 per page</Text>}

@@ -46,7 +46,7 @@ function SessionGate({ children, onConfigure }: { children: ReactNode; onConfigu
   const query = useAsyncQuery(load);
   useEffect(() => { if (query.data) setIdentity(query.data); }, [query.data, setIdentity]);
   if (query.loading) return <Text role="status">Connecting to the platform API…</Text>;
-  if (query.error) return <VStack gap={4}><Banner status="error" role="alert" title="Platform connection unavailable" description={query.error} /><Button label="Configure connection" onClick={onConfigure} /><RefreshButton label="Retry connection" onClick={query.refresh} isLoading={query.refreshing} /></VStack>;
+  if (query.error) return <VStack gap={4}><Banner status="error" role="alert" title="Platform connection unavailable" description={query.error} /><HStack gap={2} hAlign="end" vAlign="center" width="100%" wrap="wrap"><Button label="Configure connection" onClick={onConfigure} /><RefreshButton label="Retry connection" onClick={query.refresh} isLoading={query.refreshing} /></HStack></VStack>;
   if (!identity) return null;
   return children;
 }

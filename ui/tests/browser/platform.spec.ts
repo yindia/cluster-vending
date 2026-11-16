@@ -14,6 +14,43 @@ const definition = { name: "external-dns", description: "Synchronize DNS records
 const stableRelease = { name: "release-stable", valid: true, shipped: true, channels: ["RELEASE_CHANNEL_STABLE"], notes: "Stable platform components.", kubernetes: [{ minor: "1.35", channel: "RELEASE_CHANNEL_STABLE", default: true, components: [{ name: "external-dns", version: "0.16.0", values: { policy: "sync" } }] }, { minor: "1.36", channel: "RELEASE_CHANNEL_ALPHA", components: [{ name: "external-dns", version: "0.17.0", values: { policy: "sync" } }] }] };
 const stableChannel = { channel: "RELEASE_CHANNEL_STABLE", release: "release-stable", kubernetesMinor: "1.35", promotion: "AUTOMATIC", pending: { release: "release-next" }, rollout: { done: true } };
 
+for (const kind of ["Cluster", "Network"] as const) {
+  test(`${kind} list shows effective pause separately from health and filters locally`, async ({ page }) => {
+    const calls = await mockAPI(page);
+    const base = kind === "Cluster" ? cluster : network;
+    const resources = [
+      { ...base, id: "00000000-0000-4000-8000-000000000021", name: "policy-paused", displayName: "policy-paused", status: { ...base.status, managedResources: [], freeze: { scope: "tenant", reason: "Maintenance window" } } },
+      { ...base, id: "00000000-0000-4000-8000-000000000022", name: "policy-exception", displayName: "policy-exception", status: { ...base.status, managedResources: [], freeze: { scope: "tenant", reason: "Maintenance window", letThrough: true } } },
+      { ...base, id: "00000000-0000-4000-8000-000000000023", name: "policy-active", displayName: "policy-active", status: { ...base.status, managedResources: [] } },
+    ];
+    const method = kind === "Cluster" ? "ListClusters" : "ListNetworks";
+    const listCalls: string[] = [];
+    await page.route(`**/api/rpc/cloud.v1.${kind}Service/${method}`, route => {
+      listCalls.push(method);
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ [kind === "Cluster" ? "clusters" : "networks"]: resources }) });
+    });
+    await page.goto(kind === "Cluster" ? "/clusters" : "/networks");
+    const table = page.getByRole("table", { name: kind === "Cluster" ? "Clusters" : "Tenant networks", exact: true });
+    await expect(table.getByRole("columnheader", { name: /^Pause(?:\s|$)/ })).toBeVisible();
+    for (const [name, state] of [["policy-paused", "Paused"], ["policy-exception", "Let through"], ["policy-active", "Not paused"]]) {
+      const row = table.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
+      await expect(row.getByText(state, { exact: true })).toBeVisible();
+      await expect(row.getByText(state, { exact: true })).toBeInViewport();
+      await expect(row.getByText(kind === "Cluster" ? "Running" : "Ready", { exact: true })).toBeVisible();
+    }
+    await page.screenshot({ path: `/tmp/cv-ui-${kind.toLowerCase()}-pause-list.png`, animations: "disabled" });
+    const loaded = listCalls.length;
+    for (const [state, name] of [["Paused", "policy-paused"], ["Let through", "policy-exception"], ["Not paused", "policy-active"]]) {
+      await page.getByRole("combobox", { name: "Filter by pause", exact: true }).click();
+      await page.getByRole("option", { name: state, exact: true }).click();
+      await expect(table.getByRole("row")).toHaveCount(2);
+      await expect(table.getByRole("link", { name, exact: true })).toBeVisible();
+    }
+    expect(listCalls).toHaveLength(loaded);
+    expect(calls.some(call => /^(GetCluster|GetNetwork|Freeze|Unfreeze)$/.test(call.method))).toBe(false);
+  });
+}
+
 type Call = { service: string; method: string; body: Record<string, unknown> };
 
 async function advanceToReview(dialog: Locator) {
@@ -138,7 +175,7 @@ test("YAML creates preserve advanced configuration and require explicit reviewed
   ] as const) {
     await page.goto(url);
     await page.getByRole("button", { name: action, exact: true }).click();
-    await page.getByRole("button", { name: "Paste YAML", exact: true }).click();
+    await page.getByRole(kind === "Cluster" ? "radio" : "button", { name: "Paste YAML", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const draft = stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: "yaml-production", tenant: "acme" }, spec });
     const editor = dialog.getByRole("textbox", { name: `${kind} manifest`, exact: true });
@@ -265,16 +302,18 @@ test("tenant creation errors preserve the current scope and viewer access remain
   expect(viewerCalls.filter(call => call.method === "CreateTenant")).toHaveLength(0);
 });
 
-test("cluster kubeconfig commands are copyable for viewers and use the real CLI syntax", async ({ page }) => {
-  const calls = await mockAPI(page, { viewer: true });
+test("cluster kubeconfig commands fetch current cloud identity and are copyable for viewers", async ({ page }) => {
+  const calls = await mockAPI(page, { viewer: true, diagnostics: true });
   await mockClipboard(page);
   await page.goto(`/clusters/${clusterId}`);
   await page.getByRole("button", { name: "Get kubeconfig", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Get kubeconfig", exact: true });
-  await expect(dialog).toContainText(`cluster kubeconfig '${clusterId}' --tenant 'acme'`);
-  await expect(dialog).not.toContainText("--id");
-  await dialog.getByRole("button", { name: "Copy install kubeconfig command", exact: true }).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { copiedValues: string[] }).copiedValues.at(-1))).toBe(`cluster-vending cluster kubeconfig '${clusterId}' --tenant 'acme'`);
+  const command = "aws eks update-kubeconfig --region 'us-west-1' --name 'payments'";
+  await expect(dialog).toContainText(command);
+  await expect(dialog).not.toContainText("cluster-vending cluster kubeconfig");
+  await dialog.getByRole("button", { name: "Copy AWS kubeconfig command", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { copiedValues: string[] }).copiedValues.at(-1))).toBe(command);
+  expect(calls.some(call => call.method === "GetCluster" && call.body.live === true && call.body.clusterId === clusterId && call.body.tenantId === "acme")).toBe(true);
   await page.screenshot({ path: "/tmp/cv-ui-kubeconfig-commands.png", animations: "disabled" });
   expect(calls.filter(call => /^(Create|Update|TakeOver)/.test(call.method))).toHaveLength(0);
 });
@@ -493,7 +532,7 @@ test("shared tables support pointer and keyboard resizing without configuration 
   await mockAPI(page);
   await page.goto("/");
   const table = page.getByRole("table", { name: "Tenant resource inventory", exact: true });
-  const name = table.getByRole("columnheader", { name: "Resource", exact: false });
+  const name = table.getByRole("columnheader", { name: "Resource", exact: true });
   const initial = (await name.boundingBox())!.width;
   const handle = name.getByRole("separator");
   await handle.focus();
@@ -520,7 +559,9 @@ test("Kind filters compose with search across overview and all resource inventor
   const overview = page.getByRole("table", { name: "Tenant resource inventory", exact: true });
   await page.getByRole("combobox", { name: "Resource kind", exact: true }).click();
   await page.getByRole("option", { name: "Cluster", exact: true }).click();
-  await expect(overview.getByRole("row")).toHaveCount(2);
+  await expect(overview.getByRole("row")).toHaveCount(4);
+  await expect(overview).toContainText("Production network");
+  await expect(overview).toContainText("Context");
   await expect(overview).toContainText("payments");
   await page.getByRole("button", { name: "Clear resource filters", exact: true }).click();
   await expect(overview.getByRole("row")).toHaveCount(4);
@@ -904,6 +945,31 @@ test("overview resource names link directly to full detail pages", async ({ page
   await expect(inventory.getByRole("link", { name: "payments", exact: true })).toHaveAttribute("href", `/clusters/${clusterId}`);
 });
 
+test("overview inventory expands account and network children and reveals matching paths", async ({ page }) => {
+  await mockAPI(page);
+  await page.goto("/");
+  const inventory = page.getByRole("table", { name: "Tenant resource inventory", exact: true });
+  await expect(inventory.getByRole("row")).toHaveCount(4);
+  await expect(inventory.getByRole("row").filter({ has: page.getByRole("link", { name: "Production", exact: true }) })).toContainText("1 network · 1 cluster");
+  await page.getByRole("button", { name: "Collapse Production", exact: true }).click();
+  await expect(inventory.getByRole("row")).toHaveCount(2);
+  const expand = page.getByRole("button", { name: "Expand Production", exact: true });
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expand.focus();
+  await expand.press("Enter");
+  await expect(inventory.getByRole("row")).toHaveCount(4);
+  await page.getByRole("button", { name: "Collapse all", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search resources", exact: true }).fill("payments");
+  await expect(inventory.getByRole("row")).toHaveCount(4);
+  await expect(page.getByRole("status").filter({ hasText: "1 of 3 resources" })).toBeVisible();
+  await expect(inventory.getByText("Context", { exact: true })).toHaveCount(2);
+  await page.getByRole("button", { name: "Clear resource filters", exact: true }).click();
+  await expect(inventory.getByRole("row")).toHaveCount(2);
+  await page.getByRole("button", { name: "Expand all", exact: true }).click();
+  await expect(inventory.getByRole("row")).toHaveCount(4);
+  await page.screenshot({ path: "/tmp/cv-ui-overview-inventory-tree.png", animations: "disabled" });
+});
+
 test("account details expose its managed inventory and related resources", async ({ page }) => {
   await mockAPI(page);
   await page.goto(`/accounts/${accountId}`);
@@ -930,6 +996,21 @@ test("network details expose inventory and linked clusters without the create fo
   await page.getByRole("tab", { name: /^Overview\b/ }).click();
   await expect(page.getByRole("link", { name: "payments", exact: true })).toHaveAttribute("href", `/clusters/${clusterId}`);
   await expect(page.getByRole("button", { name: "Create network", exact: true })).toHaveCount(0);
+});
+
+test("empty related clusters keeps refresh aligned with the right edge of its heading row", async ({ page }) => {
+  await mockAPI(page);
+  await page.route("**/api/rpc/cloud.v1.ClusterService/ListClusters", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ clusters: [] }) }));
+  await page.goto(`/networks/${networkId}`);
+  await expect(page.getByText("No related clusters reported.", { exact: true })).toBeVisible();
+  const heading = page.getByRole("heading", { name: "Related clusters", exact: true });
+  const refresh = page.getByRole("button", { name: "Refresh related clusters", exact: true });
+  const headingBox = (await heading.boundingBox())!;
+  const refreshBox = (await refresh.boundingBox())!;
+  const rowBox = (await heading.locator("..").boundingBox())!;
+  expect(refreshBox.x).toBeGreaterThan(headingBox.x + headingBox.width);
+  expect(Math.abs(refreshBox.x + refreshBox.width - rowBox.x - rowBox.width)).toBeLessThan(2);
+  await page.screenshot({ path: "/tmp/cv-network-empty-related-clusters.png", fullPage: true });
 });
 
 test("cluster details include all managed resource identifiers and pause state", async ({ page }) => {

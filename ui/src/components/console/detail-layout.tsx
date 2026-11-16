@@ -1,5 +1,7 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
 import type { ReactNode } from "react";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
@@ -20,9 +22,9 @@ export function DetailHeader({ title, description, metadata, status, actions }: 
   title: string; description?: string; metadata?: ReactNode; status?: ReactNode; actions?: ReactNode;
 }) {
   return <VStack gap={4}>
-    <HStack hAlign="between" vAlign="center" gap={4} wrap="wrap">
-      <HStack gap={3} wrap="wrap" vAlign="center"><Heading level={1}>{title}</Heading>{status}</HStack>
-      {actions && <HStack gap={2} wrap="wrap" vAlign="center">{actions}</HStack>}
+    <HStack hAlign="end" vAlign="center" gap={4} wrap="wrap" width="100%">
+      <StackItem size="fill"><HStack gap={3} wrap="wrap" vAlign="center"><Heading level={1}>{title}</Heading>{status}</HStack></StackItem>
+      {actions && <HStack gap={2} wrap="wrap" vAlign="center" hAlign="end" maxWidth="100%">{actions}</HStack>}
     </HStack>
     {description && <Text color="secondary">{description}</Text>}
     {metadata && <HStack gap={3} wrap="wrap" vAlign="center">{metadata}</HStack>}

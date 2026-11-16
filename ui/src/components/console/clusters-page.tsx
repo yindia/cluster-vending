@@ -12,6 +12,7 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
+import { StackItem } from "@astryxdesign/core/Stack";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Pagination } from "@astryxdesign/core/Pagination";
@@ -21,6 +22,7 @@ import { proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { TabList, Tab } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { VStack } from "@astryxdesign/core/VStack";
 import { usePlatform } from "@/components/platform-provider";
 import { PlanReview } from "@/components/resources/plan-review";
@@ -44,7 +46,7 @@ import { Disposition, ImportPhase } from "@/gen/cloud/v1/import_pb";
 import { RetryAction } from "@/gen/cloud/v1/cluster_retry_pb";
 import type { Network } from "@/gen/cloud/v1/network_pb";
 import { WizardDialog } from "./wizard-dialog";
-import { ManifestCreateDialog } from "./manifest-create-dialog";
+import { ClusterCreateDialog, ManifestCreateDialog } from "./manifest-create-dialog";
 import { ImportManifestDialog } from "./import-manifest-dialog";
 import { ClusterAccessButton } from "./cluster-access";
 import { ClusterTakeoverButton } from "./cluster-takeover";
@@ -83,11 +85,22 @@ export function ClustersPage({ resourceId }: { resourceId?: string } = {}) {
   return resourceId ? <ClusterDetails key={resourceId} clusterId={resourceId} /> : <ClusterList />;
 }
 
+function clusterPause(cluster: Cluster): { key: string; label: string; detail: string; tone: "warning" | "neutral" } {
+  const freeze = cluster.status?.freeze;
+  const resources = cluster.status?.managedResources.filter((resource) => resource.paused).length ?? 0;
+  const policy = freeze ? `Scope: ${freeze.scope || "Not reported"}. Reason: ${freeze.reason || "Not reported"}.` : "No effective cluster freeze is reported.";
+  if (freeze && !freeze.letThrough) return { key: "paused", label: "Paused", detail: `Paused. ${policy}`, tone: "warning" };
+  if (freeze?.letThrough) return { key: "let-through", label: "Let through", detail: `Cluster is allowed through the policy. ${policy}${resources ? ` ${resources} managed resources still report paused.` : ""}`, tone: "neutral" };
+  if (resources) return { key: "resources-paused", label: "Resources paused", detail: `${resources} managed resources report paused; this does not indicate a whole-cluster freeze.`, tone: "warning" };
+  return { key: "not-paused", label: "Not paused", detail: policy, tone: "neutral" };
+}
+
 function ClusterList() {
   const { api, tenantId, canWrite } = usePlatform();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
+  const [pauseFilter, setPauseFilter] = useState("all");
   const [networkFilter, setNetworkFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
@@ -113,8 +126,10 @@ function ClusterList() {
   const filtered = inventory.filter((cluster) => {
     const networkId = cluster.spec?.network?.networkId ?? "";
     const network = networkById.get(networkId);
-    return (!query || [cluster.name, cluster.displayName, cluster.id, networkId, network?.name, network?.displayName, cluster.spec?.region].some((value) => value?.toLocaleLowerCase().includes(query))) &&
+    const pause = clusterPause(cluster);
+    return (!query || [cluster.name, cluster.displayName, cluster.id, networkId, network?.name, network?.displayName, cluster.spec?.region, pause.label, cluster.status?.freeze?.reason, cluster.status?.freeze?.scope].some((value) => value?.toLocaleLowerCase().includes(query))) &&
       (stateFilter === "all" || String(cluster.status?.state ?? 0) === stateFilter) &&
+      (pauseFilter === "all" || pause.key === pauseFilter) &&
       (networkFilter === "all" || networkId === networkFilter) &&
       (channelFilter === "all" || String(cluster.spec?.releaseChannel ?? 0) === channelFilter) &&
       (tierFilter === "all" || String(inheritedTier(cluster)) === tierFilter);
@@ -128,6 +143,10 @@ function ClusterList() {
     { key: "name", header: "Name", width: proportional(2, { minWidth: 80 }), renderCell: ({ cluster }) => <HStack gap={1} vAlign="center"><Link maxLines={1} href={`/clusters/${encodeURIComponent(cluster.id)}`}>{cluster.name || cluster.displayName}</Link><CopyButton value={cluster.name || cluster.displayName} label="cluster name" /></HStack> },
     { key: "id", header: "ID", width: proportional(2, { minWidth: 80 }), renderCell: ({ cluster }) => <CopyValue value={cluster.id} label="cluster ID" /> },
     { key: "state", header: "Status", width: proportional(1, { minWidth: 80 }), renderCell: ({ cluster }) => statusValue(ClusterState, cluster.status?.state) },
+    { key: "pause", header: "Pause", width: proportional(1.5, { minWidth: 140 }), renderCell: ({ cluster }) => {
+      const pause = clusterPause(cluster);
+      return <Tooltip content={pause.detail}><StatusValue label={pause.label} tone={pause.tone} /></Tooltip>;
+    } },
     { key: "version", header: "Kubernetes", width: proportional(1, { minWidth: 80 }), renderCell: ({ cluster }) => <Text maxLines={1}>{cluster.status?.currentKubernetesVersion || "Not observed"}</Text> },
     { key: "network", header: "Network", width: proportional(2, { minWidth: 80 }), renderCell: ({ cluster }) => {
       const id = cluster.spec?.network?.networkId;
@@ -139,11 +158,11 @@ function ClusterList() {
     { key: "tier", header: "Tier", width: proportional(1, { minWidth: 80 }), renderCell: ({ cluster }) => <Text maxLines={1}>{inheritedTier(cluster) ? `Tier ${inheritedTier(cluster) - 1}` : "Default"}</Text> },
   ];
   return <VStack gap={6}>
-    <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center">
-      <Heading level={2}>All clusters</Heading>
-      <HStack gap={3} wrap="wrap">
-        <RefreshButton label="Refresh clusters" isLoading={list.refreshing || networks.refreshing} onClick={() => { list.refresh(); networks.refresh(); }} />
+    <HStack gap={3} wrap="wrap" hAlign="end" vAlign="center" width="100%">
+      <StackItem size="fill"><Heading level={2}>All clusters</Heading></StackItem>
+      <HStack gap={3} wrap="wrap" vAlign="center">
         {canWrite && <><Button label="Create cluster" onClick={() => setCreating(true)} /><Button label="Import cluster" variant="secondary" onClick={() => setImporting(true)} /></>}
+        <RefreshButton label="Refresh clusters" isLoading={list.refreshing || networks.refreshing} onClick={() => { list.refresh(); networks.refresh(); }} />
       </HStack>
     </HStack>
     {!canWrite && <Text type="supporting">Read-only access. Tenant administrators can create and change clusters.</Text>}
@@ -152,10 +171,11 @@ function ClusterList() {
     <HStack gap={3} wrap="wrap" vAlign="end">
       <TextInput label="Search clusters" value={search} onChange={changeFilter(setSearch)} type="search" placeholder="Name, ID, network or region" hasClear autoComplete="off" />
       <Selector label="Status" value={stateFilter} onChange={changeFilter(setStateFilter)} options={[{ value: "all", label: "All states" }, ...[...new Set(inventory.map((cluster) => cluster.status?.state ?? 0))].sort((a, b) => a - b).map((state) => ({ value: String(state), label: label(ClusterState, state) }))]} />
+      <Selector label="Filter by pause" value={pauseFilter} onChange={changeFilter(setPauseFilter)} options={[{ value: "all", label: "All pause states" }, { value: "paused", label: "Paused" }, { value: "let-through", label: "Let through" }, { value: "resources-paused", label: "Resources paused" }, { value: "not-paused", label: "Not paused" }]} />
       <Selector label="Network" hasSearch value={networkFilter} onChange={changeFilter(setNetworkFilter)} options={[{ value: "all", label: "All networks" }, ...networkIds.map((id) => ({ value: id, label: networkById.get(id)?.displayName || networkById.get(id)?.name || id }))]} />
       <Selector label="Channel" value={channelFilter} onChange={changeFilter(setChannelFilter)} options={[{ value: "all", label: "All channels" }, ...[0, 1, 2, 3].map((channel) => ({ value: String(channel), label: channelName(channel) }))]} />
       <Selector label="Tier" value={tierFilter} onChange={changeFilter(setTierFilter)} options={[{ value: "all", label: "All tiers" }, { value: "0", label: "Default" }, ...[1, 2, 3].map((tier) => ({ value: String(tier), label: `Tier ${tier - 1}` }))]} />
-      <Button label="Clear filters" variant="ghost" onClick={() => { setSearch(""); setStateFilter("all"); setNetworkFilter("all"); setChannelFilter("all"); setTierFilter("all"); setPage(1); }} />
+      <Button label="Clear filters" variant="ghost" onClick={() => { setSearch(""); setStateFilter("all"); setPauseFilter("all"); setNetworkFilter("all"); setChannelFilter("all"); setTierFilter("all"); setPage(1); }} />
     </HStack>
     <ErrorNotice message={list.error} />
     <ErrorNotice message={networks.error} />
@@ -290,7 +310,7 @@ function NetworkPicker({ choices, value, disabled, onChange }: { choices: Return
   return <VStack gap={3}>
     <ErrorNotice message={choices.error} />
     {choices.error && <Button label="Reload networks and accounts" onClick={choices.refresh} isDisabled={disabled} />}
-    <HStack gap={2} vAlign="end" wrap="wrap"><Selector label="Existing network" hasSearch value={value} isLoading={choices.loading} isDisabled={disabled || choices.loading} placeholder="Choose a network" onChange={onChange} options={(choices.data?.networks ?? []).map((item) => {
+    <HStack gap={2} vAlign="end" wrap="wrap" hAlign="between" width="100%"><Selector label="Existing network" hasSearch value={value} isLoading={choices.loading} isDisabled={disabled || choices.loading} placeholder="Choose a network" onChange={onChange} options={(choices.data?.networks ?? []).map((item) => {
       let supported = true;
       try { clusterProvider(item, choices.data?.accounts ?? []); } catch { supported = false; }
       return { value: item.id, label: `${item.displayName || item.name} · ${item.spec?.region ?? "Unknown region"}`, disabled: !supported, description: supported ? "AWS · tier inherited from network" : "Unsupported or missing cloud account" };
@@ -304,6 +324,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<"guided" | "yaml">("guided");
   const [manifestVisited, setManifestVisited] = useState(false);
+  const [manifestBusy, setManifestBusy] = useState(false);
   const [review, setReview] = useState<CreateClusterRequest>();
   const [busy, setBusy] = useState(false);
   const locked = useRef(false);
@@ -341,7 +362,8 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
     finally { locked.current = false; setBusy(false); }
   }
   return <>
-  <WizardDialog isOpen={mode === "guided"} onOpenChange={(open) => { if (!open && !locked.current) onClose(); }} title="Create cluster" steps={clusterWizardSteps} step={step} busy={busy}
+  <ClusterCreateDialog mode={mode} onModeChange={(next) => { if (next === "yaml") setManifestVisited(true); setMode(next); }} isOpen onOpenChange={(open) => { if (!open && !locked.current) onClose(); }} title="Create cluster" steps={clusterWizardSteps} step={step} busy={busy || manifestBusy}
+    yamlContent={manifestVisited ? <ManifestCreateDialog kind="Cluster" embedded isOpen={mode === "yaml"} onBusyChange={setManifestBusy} onOpenChange={(open: boolean) => { if (!open) onClose(); }} onCreated={(resource: Cluster) => onCreated(resource.id)} /> : undefined}
     description="Choose a network and configuration, then review your cluster before creating it."
     footer={<HStack gap={3} wrap="wrap">
       <Button label="Cancel creation" variant="secondary" onClick={onClose} isDisabled={busy} />
@@ -350,11 +372,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
     </HStack>}>
     <form id={formId} method="post" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VStack gap={5}>
-        {step === 0 && <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center">
-          <Text type="label">Use guided form</Text>
-          <Button label="Paste YAML" variant="secondary" isDisabled={busy} onClick={() => { setManifestVisited(true); setMode("yaml"); }} />
-        </HStack>}
-        <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>
+        {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
         {step < 3 ? <ClusterFields step={step} value={form} onChange={change} disabled={busy || !canWrite} creating region={network?.spec?.region ?? "Select a network"} tier={network?.spec?.tier}
           networkPicker={<NetworkPicker choices={choices} value={form.networkId} disabled={busy || !canWrite} onChange={(next) => change("networkId", next)} />} /> : <>
           <ClusterReview form={form} region={network?.spec?.region ?? ""} networkName={network?.displayName || network?.name || form.networkId} accountName={choices.data?.accounts.find((account) => account.id === network?.spec?.bootstrapId)?.accountName || network?.spec?.bootstrapId} tier={network?.spec?.tier} />
@@ -363,8 +381,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
         </>}
       </VStack>
     </form>
-  </WizardDialog>
-  {manifestVisited && <ManifestCreateDialog kind="Cluster" isOpen={mode === "yaml"} onOpenChange={(open: boolean) => { if (!open) onClose(); }} onCreated={(resource: Cluster) => onCreated(resource.id)} onUseForm={() => setMode("guided")} />}
+  </ClusterCreateDialog>
   </>;
 }
 
@@ -500,13 +517,13 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         description={`${cluster.spec?.provider.case?.toUpperCase() || "Provider pending"} · ${cluster.spec?.region || "Region pending"}`}
         metadata={<HStack gap={4} wrap="wrap" vAlign="center"><ProviderIcon provider={cluster.spec?.provider.case ?? ""} size="sm" /><CopyValue value={cluster.name} label="cluster name" isSecondary /><CopyValue value={cluster.id} label="cluster ID" isSecondary /></HStack>}
         status={statusValue(ClusterState, status?.state)}
-        actions={<HStack gap={2} wrap="wrap">
-          <RefreshButton label="Refresh" onClick={refresh} isLoading={detail.refreshing} />
+        actions={<HStack gap={2} wrap="wrap" vAlign="center">
           <ResourceYamlButton kind="Cluster" resourceId={cluster.id} />
           <ClusterAccessButton cluster={cluster} />
           {canWrite && status?.import && <ClusterTakeoverButton cluster={cluster} onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously; readiness is not yet confirmed."); refresh(); }} />}
           {canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze cluster" : "Freeze cluster"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "secondary"} href={`/freeze?scope=cluster&id=${encodeURIComponent(cluster.id)}`} />}
           {canWrite && <><Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} /><Button label="Delete" variant="destructive" onClick={() => setDeleting(true)} /></>}
+          <RefreshButton label="Refresh" onClick={refresh} isLoading={detail.refreshing} />
         </HStack>}
       />
       {message && <VStack role="status"><Banner status="info" title="Request recorded" description={message} /></VStack>}

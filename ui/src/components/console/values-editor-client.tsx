@@ -18,7 +18,20 @@ const editorTheme = EditorView.theme({
   ".cm-gutters": { backgroundColor: "var(--color-background-surface)", color: "var(--color-text-secondary)", borderRight: "thin solid var(--color-border)" },
   ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--color-background-gray)" },
   "&.cm-focused": { outline: "0.125rem solid var(--color-accent)", outlineOffset: "-0.125rem" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "var(--color-accent-muted)" },
+  // Match the default drawSelection selector's specificity. Its light-theme
+  // fallback otherwise wins even when the surrounding Astryx theme is dark.
+  "& > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { backgroundColor: "var(--color-accent-muted)" },
+  // drawSelection hides native backgrounds with !important. Restore a matching
+  // pair for browser selections too; selected syntax spans use readable text.
+  ".cm-content::selection, .cm-content .cm-line::selection, .cm-content .cm-line ::selection": {
+    backgroundColor: "var(--color-accent-muted) !important", color: "var(--color-text-primary)",
+  },
+  "@media (forced-colors: active)": {
+    "& > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": { backgroundColor: "transparent" },
+    ".cm-content::selection, .cm-content .cm-line::selection, .cm-content .cm-line ::selection": {
+      backgroundColor: "Highlight !important", color: "HighlightText",
+    },
+  },
   ".cm-panels, .cm-tooltip": { backgroundColor: "var(--color-background-popover)", color: "var(--color-text-primary)" },
   ".cm-cursor": { borderLeftColor: "var(--color-text-primary)" },
 });

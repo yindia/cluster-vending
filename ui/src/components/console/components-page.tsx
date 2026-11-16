@@ -1,5 +1,7 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -109,8 +111,8 @@ function Catalog({ clusterId }: { clusterId: string }) {
   const visible = filtered.slice((currentPage - 1) * 25, currentPage * 25);
   const hasFilters = !!search || management !== "all" || provider !== "all" || availability !== "all";
   return <VStack gap={4}>
-    <HStack gap={3} wrap="wrap" hAlign="between">
-      {clusterId && <HStack gap={2} wrap="wrap"><Link href={`/clusters/${encodeURIComponent(clusterId)}`}>View selected cluster: {clusterId}</Link><CopyButton value={clusterId} label="Cluster ID" /></HStack>}
+    <HStack gap={3} wrap="wrap" hAlign="end" vAlign="center" width="100%">
+      <StackItem size="fill"><VStack gap={2}><Heading level={2}>Component catalog</Heading>{clusterId && <HStack gap={2} wrap="wrap" vAlign="center"><Link href={`/clusters/${encodeURIComponent(clusterId)}`}>View selected cluster: {clusterId}</Link><CopyButton value={clusterId} label="Cluster ID" /></HStack>}</VStack></StackItem>
       <RefreshButton label="Refresh catalog" isLoading={query.refreshing} onClick={query.refresh} />
     </HStack>
     {query.error && <Banner status="error" title="Catalog could not be loaded" description={query.error} />}
@@ -167,11 +169,11 @@ function ComponentDetailContent({ name, clusterId, selectCluster }: { name: stri
       {current?.id && <CopyValue value={current.id} label="Component ID" display={`ID: ${current.id}`} isSecondary />}
       {clusterId && <HStack gap={1} vAlign="center"><Link href={`/clusters/${encodeURIComponent(clusterId)}`}>{status?.clusterName || "View cluster"}</Link><CopyValue value={clusterId} label="Cluster ID" isSecondary /></HStack>}
     </>} status={<StatusValue label={health} tone={healthTone} />} actions={<>
-      <RefreshButton label="Refresh component" isLoading={definitionQuery.refreshing || inventory.refreshing} onClick={refresh} />
       {definition && context && inventoryAvailable && !inventory.refreshing && !definitionQuery.error && !definitionQuery.refreshing && canWrite && definition.management === ComponentManagement.TENANT && <ComponentMutationForm key={`${current?.id ?? "new"}:${current?.etag ?? ""}:${definition.disabled}:${definition.configurable}`} context={context} onAccepted={(action, component) => {
         setAccepted(previous => ({ action, component, revision: (previous?.revision ?? 0) + 1 }));
         refresh();
       }} />}
+      <RefreshButton label="Refresh component" isLoading={definitionQuery.refreshing || inventory.refreshing} onClick={refresh} />
     </>} />
     {definitionQuery.loading && <Text role="status">Loading component…</Text>}
     {definitionQuery.error && <Banner status="error" title="Component catalog unavailable" description={definitionQuery.error} />}
@@ -229,8 +231,7 @@ function ValuesTemplate({ name }: { name: string }) {
   const load = useCallback((signal: AbortSignal) => api.component.getComponentValues({ name }, { signal }), [api, name]);
   const query = useAsyncQuery(load);
   return <VStack gap={4}>
-    <Heading level={3}>Values template</Heading>
-    <RefreshButton label="Refresh values template" isLoading={query.refreshing} onClick={query.refresh} />
+    <HStack hAlign="between" vAlign="center" gap={3} width="100%"><Heading level={3}>Values template</Heading><RefreshButton label="Refresh values template" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
     {query.loading && <Text role="status">Loading values template…</Text>}
     {query.error && <Banner status="error" title="Values template unavailable" description={query.error} />}
     {query.data && <ValuesEditor label="Helm values template" language="yaml" value={query.data.userValues} description={query.data.userValues ? "Catalog template, including its original comments." : "No user values template returned."} readOnly />}
@@ -260,9 +261,8 @@ function InstalledComponents({ clusterId }: { clusterId: string }) {
   const visible = filtered.slice((currentPage - 1) * 25, currentPage * 25);
   const hasFilters = !!search || management !== "all" || phase !== "all";
   return <VStack gap={4}>
-    <Heading level={2}>Installed components</Heading>
+    <HStack hAlign="between" vAlign="center" gap={3} width="100%"><Heading level={2}>Installed components</Heading><RefreshButton label="Refresh installed components" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
     <Text>Inventory includes platform components and tenant entries that are not enabled. Refresh to retrieve the latest status.</Text>
-    <RefreshButton label="Refresh installed components" isLoading={query.refreshing} onClick={query.refresh} />
     {query.loading && <Text role="status">Loading the complete component inventory…</Text>}
     {query.error && <Banner status="error" title="Installed components unavailable" description={query.error} />}
     <HStack gap={3} wrap="wrap" vAlign="end">
@@ -463,6 +463,6 @@ export function ComponentObservation({ tenantId, action, accepted, onSettled }: 
     <Text>Accepted generation: {String(accepted.generation)}{observed?.status ? ` · Observed phase: ${enumLabel(ComponentPhase[observed.status.phase], observed.status.phase)} · Observed generation: ${String(observed.status.observedGeneration)}` : ""}</Text>
     {(observed?.status?.lastError || observed?.status?.message) && <Text>{observed.status.lastError || observed.status.message}</Text>}
     {query.error && <Banner status="error" title="Component observation failed" description={query.error} />}
-    <RefreshButton label="Refresh accepted component status" isLoading={query.refreshing} onClick={() => { terminal.current = undefined; setPending(true); query.refresh(); }} />
+    <HStack hAlign="end" vAlign="center" width="100%"><RefreshButton label="Refresh accepted component status" isLoading={query.refreshing} onClick={() => { terminal.current = undefined; setPending(true); query.refresh(); }} /></HStack>
   </VStack>;
 }

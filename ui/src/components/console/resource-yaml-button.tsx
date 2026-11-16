@@ -10,6 +10,7 @@ import { usePlatform } from "@/components/platform-provider";
 import { useAsyncQuery } from "@/lib/api/use-query";
 import { resourceYaml, type YamlResource } from "@/lib/workflows/resource-yaml";
 import { ValuesEditor } from "./values-editor";
+import { RefreshButton } from "./refresh-button";
 
 type Props = { kind: YamlResource["kind"]; resourceId: string };
 export function ResourceYamlButton(props: Props) {
@@ -57,7 +58,7 @@ function YamlDialog({ kind, resourceId, onClose }: Props & { onClose: () => void
           <ValuesEditor label={`${kind} YAML configuration`} language="yaml" readOnly value={query.data.yaml} height="min(28rem, 50dvh)" description="Configuration snapshot for this existing resource. IDs identify the resource; observed status and API etags are omitted." />
         </>}
       </VStack></LayoutContent>}
-      footer={<LayoutFooter padding={5} hasDivider><HStack hAlign="end" gap={2}><Button label="Refresh YAML" isLoading={query.refreshing} onClick={query.refresh} /><Button label="Close YAML" onClick={onClose} /></HStack></LayoutFooter>}
+      footer={<LayoutFooter padding={5} hasDivider><HStack hAlign="end" vAlign="center" gap={2} width="100%"><Button label="Close YAML" onClick={onClose} /><RefreshButton label="Refresh YAML" isLoading={query.refreshing} onClick={query.refresh} /></HStack></LayoutFooter>}
     />
   </Dialog>;
 }

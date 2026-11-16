@@ -1,5 +1,7 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
@@ -338,13 +340,13 @@ function AccountDetails({ id }: { id: string }) {
   const healthIssues = conditions.filter((condition) => condition.status === ConditionStatus.FALSE || condition.status === ConditionStatus.UNKNOWN);
   return <VStack gap={6}>
     <DetailHeader title={account ? accountName(account) : "Account details"}
-      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={account?.provider.case ?? ""} size="sm" /><Text color="secondary" hasCapsize>{account?.provider.case === "aws" ? "Amazon Web Services" : "Cloud account"}</Text></HStack>{awsId && <CopyValue value={awsId} label="AWS account ID" isSecondary />}<Text color="secondary">{regions.length ? regions.join(", ") : "No regions reported"}</Text>{account && <CopyButton value={accountName(account)} label="Account name" />}</>}
+      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={account?.provider.case ?? ""} size="sm" /><Text color="secondary">{account?.provider.case === "aws" ? "Amazon Web Services" : "Cloud account"}</Text></HStack>{awsId && <CopyValue value={awsId} label="AWS account ID" isSecondary />}<Text color="secondary">{regions.length ? regions.join(", ") : "No regions reported"}</Text>{account && <CopyButton value={accountName(account)} label="Account name" />}</>}
       status={account && <AccessStatus account={account} />}
       actions={<>
         {account && <ResourceYamlButton kind="CloudAccount" resourceId={account.id} />}
         {account && <ConnectAccount account={account} onAccepted={(saved) => accepted(saved, "Account update accepted. Access will be checked asynchronously.")} />}
-        <RefreshButton label="Refresh" isLoading={detail.refreshing || related.refreshing} isDisabled={!tenantId || deletionRequested} onClick={refresh} />
         {account && <DeleteAccount account={account} onAccepted={() => { setDeletionRequested(true); setNotice("Deletion requested. The controller must remove the ProviderConfig and account record. Return to accounts to observe completion."); }} />}
+        <RefreshButton label="Refresh" isLoading={detail.refreshing || related.refreshing} isDisabled={!tenantId || deletionRequested} onClick={refresh} />
       </>} />
     {!tenantId && <Banner status="warning" title="Select a tenant to view this account" />}
     {tenantId && !canWrite && <Text color="secondary">Read-only access · Account mutations require tenant permissions.</Text>}
@@ -393,12 +395,12 @@ function AccountDetails({ id }: { id: string }) {
           ]} /> : <Text color="secondary">No controller conditions reported.</Text>}
         </>}
         {tab === "access" && <>
-          <HStack justify="between" wrap="wrap" gap={3}><VStack gap={2}><Heading level={2}>Role access</Heading><Text color="secondary">Configure trust, then check the permissions the platform needs.</Text></VStack><VerifyAccount account={account} onAccepted={(saved) => accepted(saved, "Verification requested. A new controller attempt will update the result.")} /></HStack>
+          <HStack hAlign="between" vAlign="center" width="100%" wrap="wrap" gap={3}><VStack gap={2}><Heading level={2}>Role access</Heading><Text color="secondary">Configure trust, then check the permissions the platform needs.</Text></VStack><VerifyAccount account={account} onAccepted={(saved) => accepted(saved, "Verification requested. A new controller attempt will update the result.")} /></HStack>
           <HStack gap={6} wrap="wrap"><Value label="Last verdict"><AccessStatus account={account} /></Value><Value label="Checked">{timestampText(access?.checkedTime)}</Value><Value label="Last attempt">{timestampText(access?.attemptedTime)}</Value></HStack>
           {access?.message && <Banner status={access.stale ? "warning" : access.verified ? "info" : "error"} title={access.reason || "Access check"} description={access.message} />}
           {access && (access.regions.length > 0 || access.checks.length > 0) && <Table searchable aria-label="Account access checks" density="compact" data={[...access.regions, ...access.checks]} columns={accessColumns} idKey={(result) => `${result.region}:${result.action}`} />}
           <Divider />
-          <VStack gap={3}><Heading level={3}>Set up the IAM role</Heading><Text color="secondary">Use your own AWS session to create or update the role stack. No cloud credentials are collected and this UI makes no AWS calls.</Text><ErrorNotice error={onboarding.error} />{onboarding.error && <Button label="Retry instructions" isLoading={onboarding.refreshing} onClick={onboarding.refresh} />}{onboarding.loading && <Text role="status">Loading instructions…</Text>}{onboarding.data && <>
+          <VStack gap={3}><HStack hAlign="between" vAlign="center" width="100%" gap={3}><Heading level={3}>Set up the IAM role</Heading>{onboarding.error && <RefreshButton label="Retry instructions" isLoading={onboarding.refreshing} onClick={onboarding.refresh} />}</HStack><Text color="secondary">Use your own AWS session to create or update the role stack. No cloud credentials are collected and this UI makes no AWS calls.</Text><ErrorNotice error={onboarding.error} />{onboarding.loading && <Text role="status">Loading instructions…</Text>}{onboarding.data && <>
             <Value label="CloudFormation template path on your API server">{onboarding.data.templatePath}</Value>
             <HStack gap={6} wrap="wrap"><Value label="Stack name / RoleName"><CopyValue value={onboarding.data.roleName} label="Stack role name" /></Value><Value label="AWS account ID"><CopyValue value={onboarding.data.accountId} label="AWS account ID" /></Value></HStack>
             <Collapsible trigger="Template parameters and trusted identity" defaultIsOpen={false}><VStack gap={4} padding={3}><Value label="ManagementRoleArn"><CopyValue value={onboarding.data.managementRoleArn} label="Management role ARN" /></Value><HStack gap={2} align="end"><TextInput id={`${uiId}-external`} label="ExternalId parameter" description="Use only in this account’s role stack. Keep this value private." type="password" value={onboarding.data.externalId} isReadOnly autoComplete="off" /><CopyButton value={onboarding.data.externalId} label="External ID parameter" /></HStack><Value label="Assumed principal"><CopyValue value={access?.principalArn ?? ""} label="Assumed principal ARN" /></Value><Text>Pass RoleName, ManagementRoleArn and, when present, ExternalId to CloudFormation. Acknowledge named IAM resources. Wait for the stack to finish before requesting verification.</Text></VStack></Collapsible>
@@ -454,7 +456,7 @@ function AccountsList() {
     } },
   ];
   return <VStack gap={5}>
-    <HStack justify="between" gap={3} wrap="wrap"><VStack gap={1}><Heading level={2}>Cloud connections</Heading><Text color="secondary">Manage the accounts where your infrastructure runs.</Text></VStack><HStack gap={2}><RefreshButton label="Refresh accounts" isDisabled={!tenantId} isLoading={list.refreshing} onClick={refresh} /><ConnectAccount onAccepted={(account) => { setSaved(account); refresh(); }} /></HStack></HStack>
+    <HStack hAlign="end" vAlign="center" gap={3} wrap="wrap" width="100%"><StackItem size="fill"><VStack gap={1}><Heading level={2}>Cloud connections</Heading><Text color="secondary">Manage the accounts where your infrastructure runs.</Text></VStack></StackItem><HStack gap={2} vAlign="center" wrap="wrap"><ConnectAccount onAccepted={(account) => { setSaved(account); refresh(); }} /><RefreshButton label="Refresh accounts" isDisabled={!tenantId} isLoading={list.refreshing} onClick={refresh} /></HStack></HStack>
     {!tenantId && <Banner status="warning" title="Select a tenant to manage accounts" />}
     {tenantId && !canWrite && <Text color="secondary">Read-only access · Account mutations require tenant permissions.</Text>}
     <ErrorNotice error={list.error} />

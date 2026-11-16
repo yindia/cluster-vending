@@ -1,5 +1,9 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
+import { RefreshButton } from "./refresh-button";
+
 import { useCallback, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -145,9 +149,9 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
   ];
 
   return <VStack as="section" aria-label="Tenant components" gap={4}>
-    <HStack hAlign="between" vAlign="start" gap={4} wrap="wrap">
-      <VStack gap={1}><Heading level={2}>Tenant components</Heading><Text color="secondary">Enable optional components or manage their tenant settings. Versions are selected by the cluster’s release.</Text></VStack>
-      <Button label="Refresh tenant components" isDisabled={!tenantId || !clusterId} isLoading={catalog.refreshing || inventory.refreshing} onClick={refresh} />
+    <HStack hAlign="end" vAlign="center" gap={4} wrap="wrap" width="100%">
+      <StackItem size="fill"><VStack gap={1}><Heading level={2}>Tenant components</Heading><Text color="secondary">Enable optional components or manage their tenant settings. Versions are selected by the cluster’s release.</Text></VStack></StackItem>
+      <RefreshButton label="Refresh tenant components" isDisabled={!tenantId || !clusterId} isLoading={catalog.refreshing || inventory.refreshing} onClick={refresh} />
     </HStack>
     {(!tenantId || !clusterId) && <Banner status="info" title="Select a tenant and cluster to manage components" />}
     {!canWrite && <Text color="secondary">Your session has read-only access. Tenant write permission is required to enable, update or disable components.</Text>}

@@ -95,7 +95,7 @@ function ClusterTakeover({ cluster, onAccepted }: { cluster: Cluster; onAccepted
       <form id={formId} method="post" noValidate aria-label="Review cluster ownership" onSubmit={event => { event.preventDefault(); void submit(); }}><VStack gap={4}>
         {busy === "read" && <Text role="status">Loading the current cluster import plan and parent network…</Text>}
         {error && <Banner status="error" role="alert" title="Takeover could not be completed" description={error} />}
-        {!review && !busy && <RefreshButton label="Reload takeover review" onClick={() => { void loadReview(); }} />}
+        {!review && !busy && <HStack hAlign="end" vAlign="center" width="100%"><RefreshButton label="Reload takeover review" onClick={() => { void loadReview(); }} /></HStack>}
         {review && <>
           <DetailSummary items={[{ label: "Cluster", value: review.cluster.name }, { label: "Network", value: review.network.displayName || review.network.name }, { label: "Tenant", value: tenantId }]} />
           {step === 0 ? <>

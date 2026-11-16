@@ -1,5 +1,7 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
@@ -196,11 +198,11 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
   const tabs = ["policies", ...(status ? ["resources"] : []), ...(pending || status?.message || status?.freeze?.since ? ["activity"] : [])];
   const activeTab = tabs.includes(tab) ? tab : "policies";
   return <VStack gap={6}>
-    <HStack gap={4} hAlign="between" vAlign="center" wrap="wrap">
-      <HStack gap={2} vAlign="center" wrap="wrap"><Heading level={2}>{scopeLabel}</Heading><CopyButton value={scopeId} label="scope ID" /></HStack>
+    <HStack gap={4} hAlign="end" vAlign="center" wrap="wrap" width="100%">
+      <StackItem size="fill"><HStack gap={2} vAlign="center" wrap="wrap"><Heading level={2}>{scopeLabel}</Heading><CopyButton value={scopeId} label="scope ID" /></HStack></StackItem>
       <HStack gap={2} wrap="wrap" vAlign="center">
-        <RefreshButton label="Refresh freeze status" isLoading={query.refreshing} onClick={query.refresh} />
         {canWrite && <Button label="Unfreeze scope" variant="primary" aria-haspopup="dialog" isDisabled={actionBusy("unfreeze") || !status || !targetMatches || !!query.error || !!status.platformFrozen} tooltip={status?.platformFrozen ? "An additional platform pause applies and cannot be overridden by tenant controls." : undefined} onClick={() => prepareAction("unfreeze")} />}
+        <RefreshButton label="Refresh freeze status" isLoading={query.refreshing} onClick={query.refresh} />
       </HStack>
     </HStack>
     {!canWrite && <Text color="secondary">Read-only access. Tenant administrator permission is required to freeze or unfreeze resources.</Text>}

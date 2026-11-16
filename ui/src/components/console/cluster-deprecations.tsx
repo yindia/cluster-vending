@@ -1,5 +1,9 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
+import { RefreshButton } from "./refresh-button";
+
 import { useCallback, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -116,9 +120,9 @@ export function ClusterDeprecationsPanel({ clusterId }: { clusterId: string }) {
   const clear = () => { setSearch(""); setNamespace("scope:all"); setKind("scope:all"); setSeverity("all"); setSource("all"); setPage(0); };
 
   return <VStack gap={5}>
-    <HStack hAlign="between" vAlign="center" gap={3} wrap="wrap">
-      <VStack gap={1}><Heading level={3}>Deprecated APIs</Heading><Text type="supporting">Findings from the controller’s last recorded scan.</Text></VStack>
-      <Button label="Refresh findings" variant="secondary" onClick={query.refresh} isLoading={query.refreshing} />
+    <HStack hAlign="end" vAlign="center" gap={3} wrap="wrap" width="100%">
+      <StackItem size="fill"><VStack gap={1}><Heading level={3}>Deprecated APIs</Heading><Text type="supporting">Findings from the controller’s last recorded scan.</Text></VStack></StackItem>
+      <RefreshButton label="Refresh findings" onClick={query.refresh} isLoading={query.refreshing} />
     </HStack>
     <Text type="supporting">Refresh reloads saved findings, never starts a scan. Coverage is limited to retained manifests and Helm releases.</Text>
     {query.error && <Banner status="error" title="Could not load findings" description={query.error} />}

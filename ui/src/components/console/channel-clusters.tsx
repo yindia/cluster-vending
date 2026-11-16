@@ -1,5 +1,9 @@
 "use client";
 
+import { StackItem } from "@astryxdesign/core/Stack";
+
+import { RefreshButton } from "./refresh-button";
+
 import { useCallback, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -102,9 +106,9 @@ function ChannelSubscriberList({ channel }: { channel: ReleaseChannel }) {
   ];
 
   return <VStack as="section" aria-label="Channel cluster subscriptions" gap={4}>
-    <HStack hAlign="between" vAlign="start" gap={4} wrap="wrap">
-      <VStack gap={1}><Heading level={2}>Subscribed clusters</Heading><Text color="secondary">{channelName} channel · Active tenant: {tenantId || "not selected"}. This list covers this tenant only.</Text><Text type="supporting" color="secondary">Explicit channel subscriptions include manual clusters; upgrade policy is separate. Automatic clusters with no channel selected follow Stable by default.</Text></VStack>
-      <Button label="Refresh subscribed clusters" isDisabled={!tenantId} isLoading={query.refreshing} onClick={query.refresh} />
+    <HStack hAlign="end" vAlign="center" gap={4} wrap="wrap" width="100%">
+      <StackItem size="fill"><VStack gap={1}><Heading level={2}>Subscribed clusters</Heading><Text color="secondary">{channelName} channel · Active tenant: {tenantId || "not selected"}. This list covers this tenant only.</Text><Text type="supporting" color="secondary">Explicit channel subscriptions include manual clusters; upgrade policy is separate. Automatic clusters with no channel selected follow Stable by default.</Text></VStack></StackItem>
+      <RefreshButton label="Refresh subscribed clusters" isDisabled={!tenantId} isLoading={query.refreshing} onClick={query.refresh} />
     </HStack>
     {!tenantId && <Banner status="info" title="Select a tenant to view its channel subscriptions" />}
     {tenantId && query.loading && <Text role="status">Loading all subscribed clusters and network metadata…</Text>}

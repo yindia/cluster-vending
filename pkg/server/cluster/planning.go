@@ -218,17 +218,17 @@ func (s *ClusterService) planNaaS(ctx context.Context, row *model.Cluster, desir
 	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, live); err == nil {
 		version = "capsule-release=" + string(live.GetUID()) + "/" + live.GetResourceVersion()
 	} else if !apierrors.IsNotFound(err) {
-		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the managed Capsule installation for plan review")
+		return nil, connect.NewError(connect.CodeUnavailable, "cannot verify namespace tenancy controls for plan review")
 	}
 	action := cloudv1.PlannedAction_PLANNED_ACTION_CREATE
-	detail := "Enable NaaS: install the platform-managed Capsule Helm installation in capsule-system. Existing cert-manager must already be ready; this flag does not install cert-manager."
+	detail := "Enable Namespace as a Service: add support for team namespaces with separate access, quotas, and policies. Setup continues after this update is accepted."
 	if !desired.GetNaas() {
 		action = cloudv1.PlannedAction_PLANNED_ACTION_DELETE
-		detail = "Disable NaaS: remove the platform-managed Capsule Helm installation from capsule-system. Capsule admission enforcement stops. Tenant workloads, Capsule custom resources and CRDs may remain; inspect retained resources before uninstall. The externally provided cert-manager is not removed."
+		detail = "Disable Namespace as a Service: turn off namespace tenancy controls for this cluster. Existing namespaces, workloads, and data are not deleted by this change. Review the impact on teams using these controls before applying."
 	}
 	plan.Warnings = append(plan.Warnings, detail)
 	if reconcilecluster.ReleaseMoving(row) {
-		plan.Warnings = append(plan.Warnings, "The requested NaaS flag is stored immediately, but the Capsule installation change waits for the current platform release move to finish. A halted move requires its normal retry or fix before the NaaS change can apply.")
+		plan.Warnings = append(plan.Warnings, "This change will take effect after the current platform upgrade finishes. A halted upgrade must be resolved first.")
 	}
 	for _, change := range plan.Changes {
 		if change.Kind == crossplaneaws.HelmReleaseGVK.Kind && change.Name == name && change.Namespace == namespace && change.Action == action {

@@ -35,7 +35,7 @@ async function mockNaaS(page: Page, initiallyEnabled = false) {
       case "ListClusterEvents": response = { events: [] }; break;
       case "CreateCluster": response = { cluster: { ...cluster(), ...body.cluster as object } }; break;
       case "UpdateCluster":
-        if (body.validateOnly) response = { plan: { planId: "naas-reviewed-plan", applicable: true, changes: [{ action: "PLANNED_ACTION_DELETE", kind: "Release", name: "capsule", detail: "Uninstall managed Capsule and stop admission enforcement; retain Capsule CRDs and data", retainsCloudResource: false }] } };
+        if (body.validateOnly) response = { plan: { planId: "naas-reviewed-plan", applicable: true, changes: [{ action: "PLANNED_ACTION_DELETE", kind: "Release", name: "capsule", detail: "Turn off namespace tenancy controls. Existing namespaces, workloads, and data are not deleted.", retainsCloudResource: false }] } };
         else { enabled = false; response = { updateRecorded: true, cluster: cluster() }; }
         break;
       default:
@@ -55,7 +55,8 @@ test("guided NaaS starts off, survives mode switching and is enabled only after 
   const dialog = page.getByRole("dialog", { name: "Create cluster", exact: true });
   const checkbox = dialog.getByRole("checkbox", { name: controlName, exact: true });
   await expect(checkbox).not.toBeChecked();
-  await expect(dialog).toContainText("existing cert-manager");
+  await expect(dialog).toContainText("team namespaces with separate access, quotas, and policies");
+  await expect(dialog).not.toContainText("cert-manager");
   await checkbox.check();
   await dialog.getByRole("textbox", { name: /^Cluster name\b/ }).fill("naas-enabled");
   await dialog.getByRole("button", { name: /^Existing network\b/ }).click();
@@ -67,7 +68,7 @@ test("guided NaaS starts off, survives mode switching and is enabled only after 
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("checkbox", { name: "Public endpoint", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(dialog).toContainText("Enabled · managed Capsule uses existing cert-manager");
+  await expect(dialog.locator("dt").filter({ hasText: controlName }).locator("xpath=following-sibling::dd[1]")).toHaveText("Enabled");
   expect(mock.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
   await dialog.getByRole("button", { name: "Create cluster", exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -80,7 +81,7 @@ test("guided NaaS starts off, survives mode switching and is enabled only after 
 test("disabling NaaS previews Capsule removal with retained data and applies only the reviewed false leaf", async ({ page }) => {
   const mock = await mockNaaS(page, true);
   await page.goto(`/clusters/${clusterId}`);
-  await expect(page.getByText("Desired setting. Capsule installation and readiness are reported under Components.")).toBeVisible();
+  await expect(page.getByText("Check Components for setup progress.")).toBeVisible();
   await page.getByRole("button", { name: "Edit cluster", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Edit cluster", exact: true });
   const checkbox = dialog.getByRole("checkbox", { name: controlName, exact: true });
@@ -90,10 +91,9 @@ test("disabling NaaS previews Capsule removal with retained data and applies onl
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("button", { name: "Preview update plan", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
-  await expect(dialog).toContainText("Capsule CRDs and data are retained");
-  await expect(dialog).toContainText("stops Capsule admission enforcement");
-  await expect(dialog).toContainText("does not retain that enforcement");
-  await expect(dialog).toContainText("cert-manager is managed independently");
+  await expect(dialog).toContainText("Turn off namespace tenancy controls");
+  await expect(dialog).toContainText("Existing namespaces, workloads, and data will remain");
+  await expect(dialog).not.toContainText("cert-manager");
   const preview = mock.calls.find((call) => call.method === "UpdateCluster")!.body;
   expect(preview.validateOnly).toBe(true);
   expect(preview.updateMask).toBe("spec.naas");
@@ -110,7 +110,7 @@ test("disabling NaaS previews Capsule removal with retained data and applies onl
   expect(apply.validateOnly ?? false).toBe(false);
   expect(apply.cluster).toEqual(preview.cluster);
   expect(apply.updateMask).toBe("spec.naas");
-  await expect(page.getByText("Desired setting. Disabling uninstalls managed Capsule and stops its admission enforcement; existing Capsule CRDs and data are retained.")).toBeVisible();
+  await expect(page.getByText("Existing namespaces and workloads are kept when disabling.")).toBeVisible();
   expect(mock.unexpected).toEqual([]);
 });
 

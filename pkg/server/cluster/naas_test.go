@@ -110,7 +110,7 @@ func TestNaaSReviewedPlansDescribeInstallRemoveAndBindExactRequest(t *testing.T)
 				if change.Action != action || change.Kind != "Release" || change.ExternalName != "capsule" || change.RetainsCloudResource {
 					t.Fatalf("wrong Capsule change: %v", change)
 				}
-				if !enabled && (!strings.Contains(change.Detail, "admission enforcement stops") || !strings.Contains(change.Detail, "CRDs may remain")) {
+				if !enabled && (!strings.Contains(change.Detail, "turn off namespace tenancy controls") || !strings.Contains(change.Detail, "data are not deleted")) {
 					t.Fatalf("missing uninstall impact: %v", change)
 				}
 			}
@@ -199,7 +199,7 @@ func TestNaaSPlanWarnsWhenPlatformReleaseMoveMustFinish(t *testing.T) {
 				t.Fatal(err)
 			}
 			warnings := strings.Join(plan.Warnings, " ")
-			if !strings.Contains(warnings, "waits for the current platform release move") || !strings.Contains(warnings, "halted move requires its normal retry or fix") {
+			if !strings.Contains(warnings, "after the current platform upgrade finishes") || !strings.Contains(warnings, "halted upgrade must be resolved first") {
 				t.Fatalf("missing release move warning: %v", plan.Warnings)
 			}
 		})

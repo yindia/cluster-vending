@@ -1,11 +1,35 @@
 # Local Keycloak login
 
-`hack/start.sh` creates/reuses kind, starts Keycloak, waits for its realm's
-discovery document and signing keys, installs Crossplane, then starts the API
-with required authentication. On a fresh cluster, first run
-`START_API=0 bash hack/start.sh`, then `make run-controller` in another terminal
-to install the platform CRDs/providers, then `bash hack/keycloak.sh serve`.
-The bootstrap does not start a second controller.
+Local development runs without OIDC by default:
+
+```sh
+make kind-up          # kind and Crossplane only
+make run-controller  # separate terminal
+make run             # API, foreground
+make run-ui          # UI, separate terminal (or cd ui && npm run dev)
+```
+
+The `auth` block in `hack/config.local.yaml` is commented out. The API treats
+an absent block as authentication disabled; the UI development launcher reads
+the same block and disables login even if an older `.env.local` enabled it.
+Neither application command starts Keycloak or Docker.
+
+To opt in:
+
+1. Run `make keycloak` separately to configure/start the local identity provider.
+2. Uncomment the complete `auth` block in `hack/config.local.yaml`.
+3. Restart the API and UI with the same commands above.
+
+To disable login, comment out that block again and restart both applications.
+The Keycloak container may remain running independently. Configuration changes
+do not restart existing processes or reuse a stale API listener.
+
+`LOCAL_CONFIG=/path/to/config.yaml make run` and
+`LOCAL_CONFIG=/path/to/config.yaml make run-ui` select another shared config.
+For direct `npm run dev`, `CV_CONFIG` is resolved relative to the repository
+root. Missing/invalid config and incomplete enabled OIDC fail startup.
+Production does not read this local file: it still requires explicit
+`AUTH_ENABLED` and server-side credentials.
 
 Keycloak is a sibling Docker container, `cluster-vending-keycloak`, using
 `quay.io/keycloak/keycloak:26.8.2`. It binds only `127.0.0.1:18080`. Its named
@@ -43,21 +67,12 @@ are ignored by Git under `hack/.keycloak/`, directory mode `0700`, files `0600`:
 | `ui.env` | `AUTH_ENABLED=true`, `KEYCLOAK_ISSUER`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`, `AUTH_SECRET`, `AUTH_URL` |
 | `server.yaml` | Copy of the personal server configuration with required auth and `127.0.0.1:8080` binding |
 | `container.env`, `import/cluster-vending-realm.json`, `applied-realm.json` | Private container bootstrap material |
-| `server.log`, `server.pid` | API process started by the bootstrap |
 
-The UI's server process can receive `ui.env` through its environment loader.
-Keep it server-side; never prefix these secrets with `NEXT_PUBLIC_`, copy them
-into browser code, print them, or overwrite an existing UI `.env.local`.
-Environment loaders must preserve any intentional existing settings. For a
-dedicated local terminal with no existing auth settings, one launch option is:
-
-```sh
-set -a
-. hack/.keycloak/ui.env
-set +a
-cd ui
-npm run dev
-```
+The UI development launcher reads `ui.env` only when the shared server config
+enables authentication. Explicit server-side environment or `.env.local` client
+settings take precedence over generated values; `AUTH_ENABLED` is controlled by
+the shared YAML during development. Keep credentials server-side and never use
+`NEXT_PUBLIC_` prefixes. Keycloak setup never rewrites `.env.local`.
 
 Local users are `acme-admin` and `acme-viewer`; their passwords are in
 `KEYCLOAK_ACME_ADMIN_PASSWORD` and `KEYCLOAK_ACME_VIEWER_PASSWORD` in the private
@@ -65,18 +80,10 @@ file. Keycloak administration uses username `admin` and
 `KEYCLOAK_ADMIN_PASSWORD`. View credentials privately in your editor when
 logging in. No passwords or client secrets are committed or printed by bootstrap.
 
-`KEYCLOAK_BASE_CONFIG` selects an alternative personal server configuration to
-copy. Neither `hack/config.local.yaml` nor `hack/controller.local.yaml` is
-modified. The generated copy preserves the personal settings except `auth` and
-the HTTP listen address. `CV_*` environment overrides still apply to other
-settings. `make run` builds the API, starts/reuses Keycloak, refreshes the
-generated authenticated configuration, and runs the API in the foreground.
-Use Ctrl-C to stop that foreground API. If an authenticated API is already
-listening, the command reuses it instead of opening a second listener; stop
-the existing process first when you need to run a newly built binary.
-`bash hack/keycloak.sh serve` starts the authenticated API in the background.
-An occupied port belonging to another service or an unauthenticated API is
-reported instead of silently replacing it.
+`KEYCLOAK_BASE_CONFIG` selects the personal server configuration used to generate
+the optional `server.yaml` reference copy. Setup preserves the personal config,
+credentials and existing realm. It does not enable authentication in either app.
+Use the commented auth block in the personal config as the normal opt-in switch.
 
 ## Authorization
 
@@ -137,18 +144,15 @@ to the imported fixture still require the explicit development reset procedure.
 
 ## Reruns and stopping
 
-`bash hack/keycloak.sh start` starts/reuses Keycloak without touching the API.
-`bash hack/keycloak.sh serve` additionally starts the API and waits for readiness.
-An existing API listener must reject anonymous and invalid-token `WhoAmI` calls;
-otherwise the script fails and asks you to stop it explicitly. It never kills
-an existing listener. A reused listener still needs the matching issuer/rules;
-the anonymous probe alone does not prove its configured issuer. When changing
-server settings, coordinate a restart and start with the generated file.
+`make keycloak` (or `bash hack/keycloak.sh start`) starts/reuses Keycloak only.
+`bash hack/keycloak.sh prepare` generates private settings without starting it.
+The former `serve` and `run` script actions are removed; use `make run` and
+`make run-ui` independently. Stop each foreground application with Ctrl-C.
+If an older setup left a background API running, stop that known process before
+starting the API; the commands never kill or silently reuse an occupied listener.
 
-Stop a bootstrap-managed API with `kill "$(cat hack/.keycloak/server.pid)"`
-after checking that the PID still identifies the expected API process. Stop
-Keycloak with `docker stop cluster-vending-keycloak`. `hack/stop.sh` deletes
-kind only; it leaves the separate Keycloak container and volume intact.
+Stop Keycloak with `docker stop cluster-vending-keycloak`. `hack/stop.sh`
+deletes kind only and leaves the separate Keycloak container and volume intact.
 
 For an intentional development reset, stop Keycloak and remove its container
 and volume, then run the bootstrap again:

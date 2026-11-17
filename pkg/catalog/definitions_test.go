@@ -150,7 +150,7 @@ func TestWhoControlsWhat(t *testing.T) {
 	}
 	got := definitionNames(platform)
 	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
-		"istio-cni", "istio-ingress-gateway", "karpenter", "ztunnel"} // kyverno ships disabled
+		"istio-cni", "istio-ingress-gateway", "karpenter", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
 	}
@@ -163,21 +163,19 @@ func TestWhoControlsWhat(t *testing.T) {
 	}
 }
 
-// Kyverno ships switched off (the platform team turns it on with
-// spec.disabled: false), and kyverno-policies, which requires it, is off
-// with it.
-func TestKyvernoShipsDisabled(t *testing.T) {
+// The policy engine is installed by the platform; policies remain tenant opt-in.
+func TestKyvernoShipsEnabled(t *testing.T) {
 	defs := catalogDefinitions(t)
-
 	off := component.Off(defs)
-
-	for _, d := range defs {
-		if d.Name == "kyverno" && !d.Disabled {
-			t.Error("kyverno is not shipped disabled")
+	for _, name := range []string{"kyverno", "kyverno-policies"} {
+		if reason := off[name]; reason != "" {
+			t.Errorf("%s unexpectedly unavailable: %s", name, reason)
 		}
 	}
-	if off["kyverno-policies"] == "" {
-		t.Errorf("kyverno-policies is not off with kyverno: %v", off)
+	for _, d := range defs {
+		if d.Name == "kyverno" && d.Disabled {
+			t.Error("kyverno must ship enabled")
+		}
 	}
 }
 

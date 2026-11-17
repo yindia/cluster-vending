@@ -27,6 +27,14 @@ npm ci
 npm run dev
 ```
 
+Development reads the API's `auth` section in `../hack/config.local.yaml`.
+With that section commented out, login is disabled. To enable local login, run
+`make keycloak` from the repository root, uncomment the complete auth block,
+then restart the API and UI. The launcher reads generated private client settings
+from `hack/.keycloak/ui.env` only when authentication is enabled. Production
+still uses explicit `AUTH_ENABLED` and server-only secrets.
+See [local Keycloak setup](../docs/local-keycloak.md).
+
 Use an already running UI server when one exists; do not start a second listener.
 From the repository root, this application is in `ui/`.
 

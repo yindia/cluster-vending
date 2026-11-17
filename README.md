@@ -75,6 +75,11 @@ Both the controller's lookups and the providers assume each account's
 tenant role, whatever their own credentials are, so the tenant role's trust
 policy must allow the IAM user or role the keys belong to.
 
+Local API and UI login is disabled by default. Run `make run-ui` for the UI.
+For optional login, run `make keycloak` separately, uncomment the `auth` block
+in `hack/config.local.yaml`, then restart the API and UI. Comment it out again
+to disable login. See [local Keycloak setup](docs/local-keycloak.md).
+
 `hack/config.local.yaml` points the server at the kind cluster and needs
 no AWS setting; its state is custom resources there (there is no database).
 `hack/controller.local.yaml` turns leader election off and names the

@@ -12,6 +12,7 @@ CONTAINER="cluster-vending-keycloak"
 VOLUME="cluster-vending-keycloak-data"
 ISSUER="http://localhost:18080/realms/cluster-vending"
 ACTION="${1:-start}"
+[[ "$ACTION" == prepare || "$ACTION" == start ]] || { printf 'usage: hack/keycloak.sh [prepare|start]; use make run and make run-ui for the applications\n' >&2; exit 1; }
 
 die() { printf 'keycloak: %s\n' "$*" >&2; exit 1; }
 log() { printf 'keycloak: %s\n' "$*"; }
@@ -35,7 +36,6 @@ if [[ "$ACTION" == prepare ]]; then
   log 'private settings prepared in hack/.keycloak/{secrets.env,ui.env,server.yaml}'
   exit 0
 fi
-[[ "$ACTION" == start || "$ACTION" == serve || "$ACTION" == run ]] || die 'usage: hack/keycloak.sh [prepare|start|serve|run]'
 command -v docker >/dev/null || die 'docker is not installed'
 command -v curl >/dev/null || die 'curl is not installed'
 docker info >/dev/null 2>&1 || die 'docker is not running'
@@ -89,41 +89,3 @@ if [[ "$offline_migration" == 1 ]]; then
   log 'enabled local CLI offline access without resetting the realm'
 fi
 log "ready: $ISSUER (audience cv-api)"
-[[ "$ACTION" == serve || "$ACTION" == run ]] || exit 0
-
-status=0
-"$STATE/configure" --probe || status=$?
-if [[ "$status" == 0 ]]; then
-  log 'existing API listener requires authentication; reusing it'
-  exit 0
-fi
-[[ "$status" == 10 ]] || die 'refusing to replace an existing API listener'
-if [[ -f "$STATE/server.pid" ]] && kill -0 "$(cat "$STATE/server.pid")" 2>/dev/null; then
-  die 'managed server is still starting; see hack/.keycloak/server.log'
-fi
-if [[ "$ACTION" == run ]]; then
-  api_binary="${KEYCLOAK_API_BINARY:-$ROOT/bin/cluster-vending}"
-  [[ -x "$api_binary" ]] || die 'API binary is missing; run make build first'
-  # Foreground ownership belongs to the caller, not the bootstrap lock/PID file.
-  rmdir "$STATE/lock"
-  trap - EXIT
-  exec "$api_binary" serve --config "$STATE/server.yaml" --http-addr 127.0.0.1:8080
-fi
-log 'building the API server'
-GOTOOLCHAIN=auto go build -o "$STATE/cluster-vending" .
-# Explicit listen address wins over CV_HTTP_ADDR; the generated config requires
-# auth regardless of the personal file's original auth mode.
-nohup "$STATE/cluster-vending" serve --config "$STATE/server.yaml" \
-  --http-addr 127.0.0.1:8080 > "$STATE/server.log" 2>&1 < /dev/null &
-server_pid=$!
-printf '%s\n' "$server_pid" > "$STATE/server.pid"
-for ((attempt=0; attempt<120; attempt++)); do
-  kill -0 "$server_pid" 2>/dev/null || die 'API exited; inspect hack/.keycloak/server.log (start the controller first to install its CRDs/providers)'
-  if curl --fail --silent --max-time 2 http://127.0.0.1:8080/readyz >/dev/null 2>&1; then
-    "$STATE/configure" --probe
-    log 'API ready on http://127.0.0.1:8080 with auth required'
-    exit 0
-  fi
-  sleep 2
-done
-die 'API is still starting; see hack/.keycloak/server.log; rerunning will not launch a duplicate'

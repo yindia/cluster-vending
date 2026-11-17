@@ -1,29 +1,30 @@
-auth:
-    mode: required
-    issuers:
-        - name: keycloak
-          issuer: http://localhost:18080/realms/cluster-vending
-          audiences:
-            - cv-api
-          entra: null
-          usernameClaim: preferred_username
-          tenantClaim: ""
-          rolesClaim: groups
-    rules:
-        - match:
-            issuer: keycloak
-            role: tenant-acme-admin
-          grant:
-            role: TenantAdmin
-            tenants:
-                - acme
-        - match:
-            issuer: keycloak
-            role: tenant-acme-viewer
-          grant:
-            role: TenantViewer
-            tenants:
-                - acme
+# Optional OIDC: uncomment this entire auth block to enable API and UI login.
+# auth:
+#     mode: required
+#     issuers:
+#         - name: keycloak
+#           issuer: http://localhost:18080/realms/cluster-vending
+#           audiences:
+#             - cv-api
+#           entra: null
+#           usernameClaim: preferred_username
+#           tenantClaim: ""
+#           rolesClaim: groups
+#     rules:
+#         - match:
+#             issuer: keycloak
+#             role: tenant-acme-admin
+#           grant:
+#             role: TenantAdmin
+#             tenants:
+#                 - acme
+#         - match:
+#             issuer: keycloak
+#             role: tenant-acme-viewer
+#           grant:
+#             role: TenantViewer
+#             tenants:
+#                 - acme
 aws-management-role-arn: arn:aws:iam::642299167759:role/cluster-vending-provisioner
 context: kind-cluster-vending
 http-addr: 127.0.0.1:8080

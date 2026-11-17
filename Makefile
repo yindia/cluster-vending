@@ -175,8 +175,16 @@ build: ## Build bin/cluster-vending
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY) .
 
 .PHONY: run
-run: build ## Run the API with local Keycloak authentication; start run-controller first
-	KEYCLOAK_API_BINARY="$(abspath $(BINARY))" bash hack/keycloak.sh run
+LOCAL_CONFIG ?= hack/config.local.yaml
+run: build ## Run the API using local config (OIDC off unless auth is configured)
+	$(BINARY) serve --config "$(LOCAL_CONFIG)"
+
+.PHONY: run-ui keycloak
+run-ui: ## Run the UI with the same local auth mode as the API
+	cd ui && CV_CONFIG="$(abspath $(LOCAL_CONFIG))" npm run dev
+
+keycloak: ## Start/configure local Keycloak only; does not start API or UI
+	bash hack/keycloak.sh start
 
 .PHONY: run-controller
 run-controller: build ## Run the controller against the kind cluster (hack/controller.local.yaml); AWS keys from the environment

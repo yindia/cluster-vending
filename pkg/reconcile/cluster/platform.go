@@ -187,7 +187,6 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		s.describe(ctx, row, in.Plan.Namespace, p, nil)
 		return p, nil
 	}
-	in.HoldForPlatformNodeGroup = holdForPlatformNodeGroup(row, slices.ContainsFunc(in.Entries, func(e component.PlatformEntry) bool { return e.Name == karpenterComponent }))
 	plan, skipped := component.PlanPlatform(in)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
 	inventory := s.deps.Inventory(owner)
@@ -570,7 +569,7 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		network.Status.Resources = &cloudv1alpha1.NetworkResources{CloudNetworkID: vpc}
 	}
 	nodeRole := crossplaneaws.NodeRoleName(clusterPlan)
-	live, liveErr := s.livePlacement(ctx, row, cluster, clusterPlan.Namespace, nodeGroup, installed)
+	live, liveErr := s.livePlacement(ctx, cluster, clusterPlan.Namespace, nodeGroup, installed)
 	return func(name string) component.Vars {
 		p := iam
 		p.Component = name
@@ -585,7 +584,7 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		}
 		vars := component.VarsFor(cluster, network, account, out)
 		if live != nil {
-			vars = component.WithPlacement(vars, live.system, live.platform)
+			vars = component.WithPlacement(vars, *live)
 		}
 		if liveErr != nil {
 			// The node group cannot be read: the placement is not known,

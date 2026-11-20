@@ -23,15 +23,15 @@ async function mock(page: Page, options: Options = {}) {
   let tokenFailed = false;
   const cluster = {
     id: clusterId, tenantId: "acme", name: "production", etag: "etag-1", generation: "1",
-    spec: { region: "us-west-2", network: { networkId }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 2, maxSize: 2 } }, aws: {},
+    spec: { region: "us-west-2", network: { networkId }, defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 2, maxSize: 2 } }, aws: {},
       nodeGroups: [{ name: "batch", instanceFamilies: ["m7i"], architectures: ["ARCHITECTURE_AMD64"], capacityTypes: ["CAPACITY_TYPE_SPOT"], labels: { team: "data" } }] },
     status: { state: "CLUSTER_STATE_RUNNING", observedGeneration: "1", nodeGroups: [
-      { name: "platform", platformManaged: true, phase: "NODE_GROUP_PHASE_READY", nodes: 2 },
-      { name: "batch", phase: "NODE_GROUP_PHASE_READY", nodes: TOTAL },
       { name: "system", platformManaged: true, phase: "NODE_GROUP_PHASE_READY", nodes: 2 },
+      { name: "batch", phase: "NODE_GROUP_PHASE_READY", nodes: TOTAL },
     ] },
   };
-  const manifests = ["platform", "batch"].map(name => ({ name, platformManaged: name === "platform", ec2NodeClassYaml: `kind: EC2NodeClass\nmetadata:\n  name: ${name}\n`, nodePoolYaml: `kind: NodePool\nmetadata:\n  name: ${name}\n` }));
+  // The system group is an EKS managed node group: its entry has no YAML.
+  const manifests = [{ name: "system", platformManaged: true }, { name: "batch", platformManaged: false, ec2NodeClassYaml: "kind: EC2NodeClass\nmetadata:\n  name: batch\n", nodePoolYaml: "kind: NodePool\nmetadata:\n  name: batch\n" }];
   await page.route("**/api/rpc/**", async route => {
     const method = new URL(route.request().url()).pathname.split("/").at(-1)!;
     const body = route.request().postDataJSON();
@@ -183,20 +183,19 @@ test("an unreadable results bucket is a notice, and an incomplete collection say
   await expect(bodyRows(page)).toHaveCount(100);
 });
 
-test("the platform and system groups open too, marked as managed by the platform", async ({ page }) => {
+test("the system group opens, marked as managed by the platform, with its nodes; there is no platform group", async ({ page }) => {
   const api = await mock(page);
-  await page.goto(`/clusters/${clusterId}/node-groups/platform`);
-  await expect(page.getByRole("heading", { level: 1, name: "platform" })).toBeVisible();
-  await expect(page.getByText("Managed by platform", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "View YAML for node group platform" })).toBeVisible();
-  await expect(bodyRows(page)).toHaveCount(2);
-
   await page.goto(`/clusters/${clusterId}/node-groups/system`);
   await expect(page.getByRole("heading", { level: 1, name: "system" })).toBeVisible();
   await expect(page.getByText("Managed by platform", { exact: true })).toBeVisible();
-  await expect(page.getByText("m6i.large")).toBeVisible();
+  await expect(page.getByText("t3.large")).toBeVisible();
+  await expect(page.getByText("2 nodes (fixed)")).toBeVisible();
   await expect(page.getByRole("button", { name: /View YAML/ })).toHaveCount(0);
+  await expect(bodyRows(page)).toHaveCount(2);
   expect(api.unexpected).toEqual([]);
+
+  await page.goto(`/clusters/${clusterId}/node-groups/platform`);
+  await expect(page.getByText("Node group not found")).toBeVisible();
 });
 
 test("a name the cluster does not have is not found", async ({ page }) => {
@@ -217,7 +216,7 @@ test("the Node groups tab links every group to its page", async ({ page }) => {
   await page.goto(`/clusters/${clusterId}`);
   await page.getByRole("tab", { name: "Node groups", exact: true }).click();
   const panel = page.getByRole("tabpanel", { name: "Node groups", exact: true });
-  for (const name of ["platform", "batch", "system"]) await expect(panel.getByRole("link", { name: `Open node group ${name}` })).toHaveAttribute("href", `/clusters/${clusterId}/node-groups/${name}`);
+  for (const name of ["system", "batch"]) await expect(panel.getByRole("link", { name: `Open node group ${name}` })).toHaveAttribute("href", `/clusters/${clusterId}/node-groups/${name}`);
   await panel.getByRole("link", { name: "Open node group batch" }).click();
   await expect(page).toHaveURL(new RegExp(`/clusters/${clusterId}/node-groups/batch$`));
   await expect(page.getByRole("heading", { level: 1, name: "batch" })).toBeVisible();

@@ -257,7 +257,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	}
 	if slices.Contains(paths, pathNodeGroups) {
 		if err := checkNodeGroupAllowlist(spec.GetNodeGroups(), nodeGroupsBefore,
-			s.deps.NodeGroupInstanceFamilies, s.deps.NodeGroupInstanceTypes); err != nil {
+			s.deps.NodeGroups.Karpenter.InstanceFamilies, s.deps.NodeGroups.Karpenter.InstanceTypes); err != nil {
 			return nil, err
 		}
 	}

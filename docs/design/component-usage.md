@@ -571,7 +571,7 @@ name and its path in the message).
 | `${iam.policyArn}` | the component's own policy | the policy exists |
 | `${system.nodeSelector}` | the label of the default managed node group, `{node.cluster-vending.io/pool: system}`, as a map (an imported cluster: its default node pool's labels) | always |
 | `${system.tolerations}` | the toleration of the default managed node group's taint: `{key, operator: Equal, value, effect}` (an imported cluster: one per taint of its default node pool) | always |
-| `${platform.nodeSelector}`, `${platform.tolerations}` | the same for the platform's Karpenter node pool (`node.cluster-vending.io/pool=platform`, NoSchedule); an imported cluster has none, so they are its default node pool's | always |
+| `${platform.nodeSelector}`, `${platform.tolerations}` | an alias of the two above: the platform runs on the default managed node group; an imported cluster's are its default node pool's | always |
 | `${karpenter.nodeRoleName}`, `${karpenter.nodeRoleArn}` | the role Karpenter's nodes run as, `<prefix>-karpenter-node`, and its ARN | the cluster's prefix is known |
 | `${karpenter.interruptionQueue}` | the name of Karpenter's interruption queue, `<prefix>-karpenter` | the cluster's prefix is known |
 

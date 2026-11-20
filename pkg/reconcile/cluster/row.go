@@ -107,7 +107,9 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err := s.withIRSA(ctx, requested); err != nil {
 		return nil, err
 	}
-	spec, err := corecluster.ResolveSpec(requested, t.Zones)
+	sys := s.deps.NodeGroups.System
+	spec, err := corecluster.ResolveSpecWith(requested, t.Zones, corecluster.SystemPool{Size: sys.Size, InstanceType: sys.InstanceType,
+		CapacityType: sys.CapacityType, DiskSizeGiB: sys.DiskSizeGiB})
 	if err != nil {
 		return nil, fault.New(fault.Invalid, err.Error())
 	}

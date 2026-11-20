@@ -196,7 +196,7 @@ spec:
 | `class` | `Catalog`: installable from this entry alone. `Builtin`: also needs cloud resources rendered by platform code, so the entry is only usable with a platform build that knows the component. |
 | `source`, `eksAddon` | Where it comes from, per install mechanism. |
 | `requires` | Dependencies. Enable is refused until they are Ready; disable is refused while a dependant exists. |
-| `sequence` | Platform components only (int32, default 100, minimum 0): install order. A component starts once every Platform component of a lower sequence is Ready; Karpenter is 0 and the rest wait for the platform node group (docs/design/karpenter-node-groups.md). |
+| `sequence` | Platform components only (int32, default 100, minimum 0): install order. A component starts once every Platform component of a lower sequence is Ready; Karpenter is 0, so it installs first; nothing waits for a node group (docs/design/karpenter-node-groups.md). |
 | `defaults` | Values the platform sets for everyone. A release can override them per Kubernetes minor. |
 | `valuesSchema` | What a tenant may pass. Values outside it are refused at the API. |
 | `protectedKeys` | Values the platform owns (cluster name, role ARNs, anything tied to cloud resources it created). |

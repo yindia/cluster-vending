@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
@@ -24,8 +25,6 @@ import (
 type placementCase struct {
 	// mngNew: the live node group has the system label and taint.
 	mngNew bool
-	// platformReady: status.node_groups has the platform group READY.
-	platformReady bool
 }
 
 func placementDefs(src *fakePlatform) {
@@ -83,21 +82,15 @@ func existingPlacementWorld(t *testing.T, c placementCase) (world, string) {
 	placementDefs(src)
 	w.helmConfig(t)
 	ng := placedNodeGroup(t, w, c.mngNew)
-	setNodeGroupsStatus(t, w, c.platformReady)
+	recordStarted(t, w)
 	return w, ng
 }
 
-// setNodeGroupsStatus records the platform group's phase and that the
-// platform components were started.
-func setNodeGroupsStatus(t *testing.T, w world, platformReady bool) {
+// recordStarted records that the platform components were started.
+func recordStarted(t *testing.T, w world) {
 	t.Helper()
-	phase := cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING
-	if platformReady {
-		phase = cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY
-	}
 	row := w.cluster(t)
 	row.Status = mustStatus(t, &cloudv1.ClusterStatus{
-		NodeGroups: []*cloudv1.NodeGroupStatus{{Name: "platform", PlatformManaged: true, Phase: phase}},
 		PlatformComponents: []*cloudv1.PlatformComponent{
 			{Name: "karpenter", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY},
 			{Name: "workload", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_READY}}})
@@ -120,12 +113,10 @@ func placementOfRelease(t *testing.T, u *unstructured.Unstructured) (map[string]
 }
 
 var (
-	noSelector       = map[string]any{}
-	noTolerations    = []any{}
-	systemSelector   = map[string]any{"node.cluster-vending.io/pool": "system"}
-	systemTaints     = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}}
-	platformSelector = map[string]any{"node.cluster-vending.io/pool": "platform"}
-	platformTaints   = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "platform", "effect": "NoSchedule"}}
+	noSelector     = map[string]any{}
+	noTolerations  = []any{}
+	systemSelector = map[string]any{"node.cluster-vending.io/pool": "system"}
+	systemTaints   = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}}
 )
 
 // installBoth passes until karpenter, then workload, are written.
@@ -138,34 +129,31 @@ func installBoth(t *testing.T, w world) {
 	w.install(t)
 }
 
+// Every component, Karpenter's and the platform's alike (${platform.*} is
+// an alias of ${system.*}), follows the live node group: its old placement
+// until it really carries the system label and taint, then the system one.
 func TestPlacementFollowsTheLiveNodeGroup(t *testing.T) {
 	for _, tt := range []struct {
-		name            string
-		c               placementCase
-		karpSel, capSel map[string]any
-		karpTol, capTol []any
+		name string
+		c    placementCase
+		sel  map[string]any
+		tol  []any
 	}{
-		{"existing cluster, node group without the new label, platform pool not ready: old placement everywhere",
-			placementCase{}, noSelector, noSelector, noTolerations, noTolerations},
-		{"node group carries the new label, platform pool not ready: system placement everywhere",
-			placementCase{mngNew: true}, systemSelector, systemSelector, systemTaints, systemTaints},
-		{"node group carries the new label, platform pool ready: system for Karpenter, platform for the rest",
-			placementCase{mngNew: true, platformReady: true}, systemSelector, platformSelector, systemTaints, platformTaints},
-		{"platform pool ready before the node group has the label: Karpenter stays on the old placement",
-			placementCase{platformReady: true}, noSelector, platformSelector, noTolerations, platformTaints},
+		{"existing cluster, node group without the new label: old placement everywhere",
+			placementCase{}, noSelector, noTolerations},
+		{"node group carries the new label: system placement everywhere",
+			placementCase{mngNew: true}, systemSelector, systemTaints},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w, _ := existingPlacementWorld(t, tt.c)
 
 			installBoth(t, w)
 
-			sel, tol := placementOfRelease(t, w.release(t, "karpenter"))
-			if !reflect.DeepEqual(sel, tt.karpSel) || !reflect.DeepEqual(tol, tt.karpTol) {
-				t.Errorf("karpenter placement = %v %v, want %v %v", sel, tol, tt.karpSel, tt.karpTol)
-			}
-			sel, tol = placementOfRelease(t, w.release(t, "workload"))
-			if !reflect.DeepEqual(sel, tt.capSel) || !reflect.DeepEqual(tol, tt.capTol) {
-				t.Errorf("workload placement = %v %v, want %v %v", sel, tol, tt.capSel, tt.capTol)
+			for _, name := range []string{"karpenter", "workload"} {
+				sel, tol := placementOfRelease(t, w.release(t, name))
+				if !reflect.DeepEqual(sel, tt.sel) || !reflect.DeepEqual(tol, tt.tol) {
+					t.Errorf("%s placement = %v %v, want %v %v", name, sel, tol, tt.sel, tt.tol)
+				}
 			}
 		})
 	}
@@ -206,16 +194,28 @@ func TestInstalledComponentsMoveWhenTheNodeGroupGetsTheLabel(t *testing.T) {
 	}
 }
 
-// A cluster with no node group to read (first install) and nothing started
-// still waits, as before.
-func TestNewClusterStillHoldsComponentsForThePlatformNodeGroup(t *testing.T) {
+// A new cluster's components are not held for a node group: Karpenter is
+// first (sequence 0), the others follow it by sequence alone, on the fixed
+// system placement.
+func TestNewClusterComponentsFollowSequenceNotANodeGroup(t *testing.T) {
 	w, src := platformWorld(t)
 	placementDefs(src)
 	w.helmConfig(t)
 
 	p := w.install(t)
 
-	if componentOf(p, "workload").GetPhase() == cloudv1.ComponentPhase_COMPONENT_PHASE_READY || w.release(t, "workload") != nil {
-		t.Errorf("workload = %v", componentOf(p, "workload"))
+	if w.release(t, "karpenter") == nil || w.release(t, "workload") != nil {
+		t.Fatalf("first pass: karpenter %v workload %v", w.release(t, "karpenter") != nil, w.release(t, "workload") != nil)
+	}
+	if msg := componentOf(p, "workload").GetMessage(); strings.Contains(msg, "node group") {
+		t.Errorf("workload message %q: it waits for karpenter by sequence, not for a node group", msg)
+	}
+	w.deployed(t, "karpenter")
+
+	w.install(t)
+
+	sel, tol := placementOfRelease(t, w.release(t, "workload"))
+	if !reflect.DeepEqual(sel, systemSelector) || !reflect.DeepEqual(tol, systemTaints) {
+		t.Errorf("workload placement = %v %v", sel, tol)
 	}
 }

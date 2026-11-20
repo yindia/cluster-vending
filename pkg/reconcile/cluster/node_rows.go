@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -199,26 +198,4 @@ func withNodesNotice(groups, stored []*cloudv1.NodeGroupStatus, attempted bool, 
 			}
 		}
 	}
-}
-
-// systemGroupStatus is the status of the default managed node group, from the
-// rows read: Ready when every node is, else the count that is not.
-func systemGroupStatus(rows []*cloudv1.NodeGroupNode) *cloudv1.NodeGroupStatus {
-	notReady := 0
-	for _, r := range rows {
-		if !r.GetReady() {
-			notReady++
-		}
-	}
-	if notReady == 0 {
-		return groupStatus(systemNodeGroup, true, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, "", int32(len(rows))) //nolint:gosec // bounded
-	}
-	return groupStatus(systemNodeGroup, true, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, plural(notReady)+" not ready", int32(len(rows))) //nolint:gosec // bounded
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return "1 node"
-	}
-	return strconv.Itoa(n) + " nodes"
 }

@@ -117,7 +117,7 @@ func TestLoadServeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServe: %v", err)
 	}
-	want := config.Serve{HTTPAddr: ":8080", ShutdownTimeout: 30 * time.Second}
+	want := config.Serve{HTTPAddr: ":8080", ShutdownTimeout: 30 * time.Second, NodeGroups: config.DefaultNodeGroups()}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v, want %+v", cfg, want)
 	}
@@ -127,7 +127,9 @@ func TestLoadServeDefaults(t *testing.T) {
 	}
 	if want := []string{config.FlagConfig, config.FlagHTTPAddr, config.FlagShutdownTimeout,
 		config.FlagAWSManagementRoleARN, config.FlagAWSServerRoleARN, config.FlagAWSRegion, config.FlagAWSSourceRoleARN,
-		config.FlagAWSExternalID, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes}; !slices.Equal(flags, want) {
+		config.FlagAWSExternalID, config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupCapacityType,
+		config.FlagSystemNodeGroupDiskSizeGiB, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
+		config.FlagNodeGroupDefaultArchitectures, config.FlagNodeGroupDefaultCapacityTypes}; !slices.Equal(flags, want) {
 		t.Errorf("serve settings = %v, want only %v", flags, want)
 	}
 }

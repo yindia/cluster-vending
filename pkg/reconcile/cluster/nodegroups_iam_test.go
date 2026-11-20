@@ -113,15 +113,15 @@ func TestNodeGroupsWaitForKarpenterIAM(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fw := newFakeWorkload(interceptor.Funcs{})
-			w, row, _ := nodeGroupWorldSrc(t, fw)
+			w, row, _ := nodeGroupWorldSrc(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 			f := good(row)
 			tt.mutate(&f, row)
 			f.seed(t, w, row, "us-east-1")
 
 			res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-			applied := fw.get(t, "EC2NodeClass", "", "platform") != nil || fw.get(t, "NodePool", "", "platform") != nil
-			p := statusOf(res, "platform")
+			applied := fw.get(t, "EC2NodeClass", "", "gpu") != nil || fw.get(t, "NodePool", "", "gpu") != nil
+			p := statusOf(res, "gpu")
 			if tt.waitsOn == "" {
 				if !applied {
 					t.Fatalf("the node groups were not applied although the IAM chain is ready: %v", p)
@@ -133,7 +133,7 @@ func TestNodeGroupsWaitForKarpenterIAM(t *testing.T) {
 			}
 			if p.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING ||
 				!strings.Contains(p.GetMessage(), "waiting for Karpenter's IAM") || !strings.Contains(p.GetMessage(), tt.waitsOn) {
-				t.Errorf("platform status = %v %q, want PENDING waiting for Karpenter's IAM (%s)", p.GetPhase(), p.GetMessage(), tt.waitsOn)
+				t.Errorf("gpu status = %v %q, want PENDING waiting for Karpenter's IAM (%s)", p.GetPhase(), p.GetMessage(), tt.waitsOn)
 			}
 		})
 	}

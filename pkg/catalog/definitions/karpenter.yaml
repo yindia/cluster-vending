@@ -6,11 +6,11 @@ spec:
   # The cloud it is installed on; the same component for another cloud is
   # another definition, <name>-<provider> (docs/catalog.md).
   provider: aws
-  description: Karpenter node autoscaler. It launches EC2 nodes for the platform's NodePool and the cluster's own node groups; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them (docs/catalog.md).
+  description: Karpenter node autoscaler. It launches EC2 nodes for the cluster's own (user) node groups only; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them. The platform's own pods run on the system managed node group (docs/catalog.md).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
-  # The first platform component: everything else waits for it and for the
-  # platform node group the controller creates once it is Ready.
+  # The first platform component: every other one installs after it, by
+  # sequence.
   sequence: 0
   namespace: kube-system
   install:
@@ -311,19 +311,24 @@ spec:
       # The platform's SQS queue (EventBridge: Spot interruption, rebalance,
       # instance state change, AWS Health), rendered with the cluster.
       interruptionQueue: ${karpenter.interruptionQueue}
-    # Sizing from the official install command (1 CPU / 1Gi, requests = limits).
+    # The one component that keeps two replicas (anti-affinity below) on the
+    # small system group; the controller is leader elected.
+    replicas: 2
+    # Requests are trimmed so the platform fits 2 x t3.medium
+    # (docs/catalog.md, "Sizing the system group"); the limits stay at the
+    # official install command's 1 CPU / 1Gi.
     controller:
       resources:
         requests:
-          cpu: "1"
-          memory: 1Gi
+          cpu: 250m
+          memory: 512Mi
         limits:
           cpu: "1"
           memory: 1Gi
     # The controller runs on the default managed node group (with the
     # affinity below, which keeps it off the nodes Karpenter launches): its
     # label, and a toleration of its taint. Every other component runs on
-    # the platform pool (${platform.*}).
+    # the same group (${platform.*} is an alias of ${system.*}).
     nodeSelector: ${system.nodeSelector}
     tolerations: ${system.tolerations}
     # Chart default already keeps Karpenter off Karpenter-launched nodes (karpenter.sh/nodepool DoesNotExist).

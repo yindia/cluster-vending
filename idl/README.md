@@ -341,9 +341,16 @@ user's (`name`, `platform_managed`, `phase` PENDING/READY/FAILED/DELETING,
 | `taints` | no | none | up to 50, like `NodePoolSpec.taints` |
 | `limits.cpu`, `limits.memory_gib` | no | no ceiling | greater than 0 when set |
 
-The default node group is the platform's (it runs Karpenter and CoreDNS).
-Omit `spec.default_node_pool` and the platform fills it; an update that
-changes its taints, labels or scaling is refused with `FAILED_PRECONDITION`.
+The default node group is the platform's only one, `system`: it runs Karpenter,
+CoreDNS, every platform and tenant component and the EKS add-on controllers
+(there is no platform node pool). Omit `spec.default_node_pool` and the
+platform fills it (instance type, capacity type and disk from the admin's
+`nodeGroups.system` settings, for a new cluster); its size is the admin's, and
+an update that changes its taints, labels or scaling is refused with
+`FAILED_PRECONDITION`. `status.node_groups` lists `system` first
+(`platform_managed`), then the user's groups. The names `platform`, `default`
+and `system` are reserved. The allowlist and defaults for user groups are the
+admin's `nodeGroups.karpenter` settings (`GetNodeGroupOptions`).
 `update --plan` lists each node group change as a `NodePool` entry
 (`CREATE`, `UPDATE_IN_PLACE`, `DELETE`, `spec_path` `spec.node_groups`).
 

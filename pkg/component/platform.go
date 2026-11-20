@@ -128,9 +128,6 @@ type PlatformInput struct {
 	// Vars are a component's placeholder values (VarsFor with its IAM
 	// outputs).
 	Vars func(component string) Vars
-	// HoldForPlatformNodeGroup holds every component above sequence 0 back
-	// (PENDING) until the platform node group is Ready.
-	HoldForPlatformNodeGroup bool
 	// Plan is the cluster's identity (namespace, IDs, prefix, node group);
 	// its Components are filled in.
 	Plan crossplaneaws.PlatformPlan
@@ -138,10 +135,6 @@ type PlatformInput struct {
 	// ProviderConfig, IDs, names, region, tags).
 	IAM crossplaneaws.ComponentIAMPlan
 }
-
-// PlatformNodeGroupWait is what a component above sequence 0 waits for
-// until the platform node group is Ready.
-const PlatformNodeGroupWait = "the platform node group to be Ready"
 
 // NotInstalled is a Platform component the plan leaves out, and why.
 type NotInstalled struct {
@@ -221,9 +214,6 @@ func planComponent(in PlatformInput, e PlatformEntry, out map[string]bool) (cros
 	vars := in.Vars(e.Name)
 	c := crossplaneaws.PlatformComponentPlan{Name: e.Name, Namespace: e.Install.Namespace, Requires: slices.Clone(e.Requires), Sequence: e.Sequence}
 	var waits []string
-	if in.HoldForPlatformNodeGroup && e.Sequence > 0 && e.Name != KarpenterComponent {
-		waits = append(waits, PlatformNodeGroupWait)
-	}
 	wait := func(err error) bool {
 		var notReady *NotReadyError
 		if errors.As(err, &notReady) {

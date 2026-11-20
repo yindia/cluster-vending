@@ -34,7 +34,8 @@ func TestLoadController(t *testing.T) {
 		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true, Recommendations: true,
 		ReconcileWorkers: config.DefaultReconcileWorkers, UpgradeTimeout: config.DefaultUpgradeTimeout,
 		TeardownTimeout: config.DefaultTeardownTimeout, HelmBackoffMax: config.DefaultHelmBackoffMax, HelmMaxFailures: config.DefaultHelmMaxFailures,
-		AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
+		NodeGroups: config.DefaultNodeGroups(),
+		AWS:        config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("defaults = %+v, want %+v", cfg, want)
 	}
@@ -140,8 +141,11 @@ func TestControllerSettingsAreFew(t *testing.T) {
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagHelmBackoffMax, config.FlagHelmMaxFailures, config.FlagRecommendations,
 		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
-		config.FlagProviderCredentialsSecret, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
-		config.FlagSkipTenantRole, config.FlagAWSRegion, config.FlagAWSSourceRoleARN, config.FlagAWSExternalID}
+		config.FlagProviderCredentialsSecret,
+		config.FlagSkipTenantRole, config.FlagAWSRegion, config.FlagAWSSourceRoleARN, config.FlagAWSExternalID,
+		config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupCapacityType,
+		config.FlagSystemNodeGroupDiskSizeGiB, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
+		config.FlagNodeGroupDefaultArchitectures, config.FlagNodeGroupDefaultCapacityTypes}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)
 	}

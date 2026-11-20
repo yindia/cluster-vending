@@ -152,6 +152,67 @@ and `--log-level`, and only these:
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
 | `--aws-region`, `--aws-source-role-arn`, `--aws-external-id` | how the controller reaches a tenant's account, the same three settings as the API server's: the AWS SDK's default region, an optional role to assume with the controller's own credentials before the tenant role (own credentials, source role, tenant role), and an optional external ID for a tenant role whose account has none of its own. The controller's own credentials are never a setting (IRSA in production; `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment locally). The same access writes each cluster's scan results to its S3 results bucket (deprecations, recommendations, policy violations and events) and empties that bucket when the cluster is deleted ([design/cluster-results-s3.md](design/cluster-results-s3.md)) |
 
+| `nodeGroups` section, or `--system-node-group-*`, `--node-group-*` | the node group layout, below |
+
+### Node group layout (`nodeGroups`)
+
+The platform admin sets the node layout in the `nodeGroups` section of the
+config file, the same shape and the same struct for the controller and the
+API server (give both the same file or the same values: the controller
+renders, the server validates):
+
+```yaml
+nodeGroups:
+  system:                      # the default EKS managed node group
+    instanceType: t3.medium    # new clusters only; existing ones keep theirs (no replacement)
+    size: 2                    # desired = min = max, no autoscaler; at least 2
+    capacityType: ON_DEMAND    # new clusters only
+    diskSizeGiB: 0             # new clusters only; 0: EKS's default
+  karpenter:                   # what users may create as their own node groups
+    instanceFamilies: [t3]     # empty list or `none`: no restriction
+    instanceTypes: []          # extra allowed types
+    defaults:                  # applied to a user group that leaves them unset
+      architectures: [AMD64]
+      capacityTypes: [ON_DEMAND]
+```
+
+`hack/config.local.yaml` and `hack/controller.local.yaml` show it with
+comments. Lists are real YAML lists here (elsewhere the config file takes
+scalars only). Each value is also a flag and a variable, which win over the
+file; lists are comma-separated there:
+
+| Key | Flag | Variable | Default |
+|---|---|---|---|
+| `system.instanceType` | `--system-node-group-instance-type` | `CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE` | `t3.medium` |
+| `system.size` | `--system-node-group-size` | `CV_SYSTEM_NODE_GROUP_SIZE` | `2` (minimum 2: Karpenter runs two replicas with anti-affinity) |
+| `system.capacityType` | `--system-node-group-capacity-type` | `CV_SYSTEM_NODE_GROUP_CAPACITY_TYPE` | `ON_DEMAND` |
+| `system.diskSizeGiB` | `--system-node-group-disk-size-gib` | `CV_SYSTEM_NODE_GROUP_DISK_SIZE_GIB` | `0` |
+| `karpenter.instanceFamilies` | `--node-group-instance-families` | `CV_NODE_GROUP_INSTANCE_FAMILIES` | `t3` |
+| `karpenter.instanceTypes` | `--node-group-instance-types` | `CV_NODE_GROUP_INSTANCE_TYPES` | none |
+| `karpenter.defaults.architectures` | `--node-group-default-architectures` | `CV_NODE_GROUP_DEFAULT_ARCHITECTURES` | `AMD64` |
+| `karpenter.defaults.capacityTypes` | `--node-group-default-capacity-types` | `CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES` | `ON_DEMAND` |
+
+The two allowlist flags are the names that shipped before the section and
+still work (as flags, variables and flat keys in the file). Startup fails with
+every problem listed: a size below 2, an instance type that is not like
+`t3.large`, a family that is not like `t3`, a capacity type other than
+`ON_DEMAND`/`SPOT`, an architecture other than `AMD64`/`ARM64`.
+
+- `system` is the one node group of the platform: Karpenter, CoreDNS, every
+  platform and tenant component and the EKS add-on controllers run on it.
+  **`size` applies to every cluster, in place**: a change resizes the existing
+  clusters' node group (EKS scales it; nothing is replaced). `instanceType`,
+  `capacityType` and `diskSizeGiB` apply to new clusters only, because EKS
+  cannot change them on a node group: an existing cluster keeps what its
+  stored spec says, and a changed default never replaces its node group.
+  Users cannot change the group's labels, taints or scaling through the API.
+  Choose the machines for what a release installs: see "Sizing the system
+  group" in [catalog.md](catalog.md#where-the-pods-run).
+- `karpenter` is for users' groups (`spec.node_groups`): the server refuses a
+  new or changed group outside the allowlist; the controller gives a group
+  that sets no architecture or capacity type the `defaults`. The system group
+  is not subject to the allowlist.
+
 It installs the CRDs of the three kinds and the Crossplane AWS providers
 (unless `--install-providers=false`) and waits for their kinds. The API
 server installs nothing; it waits for the kinds the controller installs, so
@@ -829,17 +890,22 @@ it is not applied at once: it rolls out like a Kubernetes upgrade.
   kinds' own validation rules check it, not the API's update checks.
 - **Karpenter node groups.** After the platform components, and only while
   the Karpenter component is READY, the cluster pass server-side applies
-  (field manager `cluster-vending`, forced) the EC2NodeClass and NodePool
-  `platform` and one pair per `spec.node_groups` into the workload cluster
+  (field manager `cluster-vending`, forced) one EC2NodeClass and NodePool
+  pair per `spec.node_groups` into the workload cluster
   (`Deps.NodeGroupClients`, the kubeconfig the teardown uses), labelled
-  `cloud.cluster-vending.io/managed-by=platform`. Every pass puts them back;
-  a group removed from the spec is deleted (only labelled objects, pool
-  before class). The NodePools' `Ready` condition and node counts go into
-  `status.node_groups` (platform first). Reads and applies are bounded (10s
+  `cloud.cluster-vending.io/managed-by=platform`; a cluster with none gets
+  nothing applied. Every pass puts them back; a group removed from the spec
+  is deleted (only labelled objects, pool before class). An old `platform`
+  pool and class of a cluster built before the system group took over are
+  removed too, but only once the system group is at its size and Ready and
+  every component has moved off them (the system group's message says "moving
+  components off the old platform pool: N left"). The NodePools' `Ready`
+  condition and node counts go into `status.node_groups`, after the `system`
+  entry (the EKS node group's readiness, and the count of its nodes). Reads and applies are bounded (10s
   per call, 45s per pass, lists of at most 500) and never fail the pass: an
   error is the group's message, the last good phase stays, missing Karpenter
-  CRDs are PENDING. The other platform components wait for the platform node
-  group to be READY (`sequence`, docs/catalog.md).
+  CRDs are PENDING. No component waits for a node group (`sequence`,
+  docs/catalog.md).
 - **Requeue.** 5s while a generation is not applied in full, 20s while the
   cloud works on it, 1m for an import that is only observed, 30s after a
   failed pass (and while a cluster's recorded object is missing), and a 10m
@@ -903,8 +969,8 @@ it is not applied at once: it rolls out like a Kubernetes upgrade.
      within a sequence a component after those that require it; each is
      fully uninstalled (its Helm Releases gone, then its IAM objects gone)
      before the next lower sequence starts.
-  4. **Node groups**: Karpenter's user NodePools, then the platform NodePool,
-     then the NodeClaims left (Karpenter terminates the nodes), then the
+  4. **Node groups**: Karpenter's NodePools (the users', and an old platform
+     one), then the NodeClaims left (Karpenter terminates the nodes), then the
      EC2NodeClasses (Karpenter removes their instance profiles). Reads are
      one page of 500 per kind and bounded by a deadline per pass.
   5. **Karpenter** (sequence 0): its chart and IAM role, then its

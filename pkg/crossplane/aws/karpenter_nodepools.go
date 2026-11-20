@@ -28,16 +28,13 @@ const (
 	eksClusterNameTag      = "aws:eks:cluster-name"
 
 	// LabelManagedBy marks the NodePools and EC2NodeClasses the platform
-	// applies (platform and user groups alike): only objects with it are
+	// applies (the user groups', and the platform group's of a cluster
+	// built before the system group took over): only objects with it are
 	// reverted or deleted by the controller.
 	LabelManagedBy = "cloud.cluster-vending.io/managed-by"
 	// ManagedByPlatform is its value.
 	ManagedByPlatform = "platform"
 
-	// platformCPULimit and platformMemoryLimit are the platform pool's
-	// (generous) limits.
-	platformCPULimit    = "1000"
-	platformMemoryLimit = "4000Gi"
 	// defaultAMIPin is what an EC2NodeClass pins when the release has none.
 	defaultAMIPin = "latest"
 )
@@ -55,30 +52,35 @@ type KarpenterNodeGroupsInput struct {
 	// false: with kubernetes.io/cluster/<cluster> (another cluster of the
 	// network holds the discovery tag).
 	Discovery bool
-	// NodeGroups are the spec's user node groups (spec.node_groups); the
-	// platform group is always rendered.
+	// NodeGroups are the spec's user node groups (spec.node_groups): the
+	// only Karpenter groups there are. None: nothing is rendered.
 	NodeGroups []*cloudv1.NodeGroupSpec
+	// DefaultArchitectures ("AMD64", "ARM64") and DefaultCapacityTypes
+	// ("ON_DEMAND", "SPOT") are the platform admin's defaults for a user
+	// group that sets none (nodeGroups.karpenter.defaults); empty: AMD64
+	// and ON_DEMAND.
+	DefaultArchitectures, DefaultCapacityTypes []string
 }
 
 // KarpenterNodeGroupObjects are the objects of the cluster's Karpenter
-// node groups, exactly as they are applied to the workload cluster:
-// first the platform group's EC2NodeClass and NodePool, then each user
-// group's, a class before its pool, in the spec's order. The same input
+// node groups, exactly as they are applied to the workload cluster: each
+// user group's EC2NodeClass and NodePool, a class before its pool, in the
+// spec's order. The platform runs on the default managed node group
+// ("system"), so there is no platform group. The same input
 // always gives the same objects. A name that is empty, repeated, reserved
 // ("platform", "default", "system") or not a DNS label is an error.
 func KarpenterNodeGroupObjects(in KarpenterNodeGroupsInput) ([]*unstructured.Unstructured, error) {
 	if in.ClusterName == "" || in.ClusterPrefix == "" {
 		return nil, fmt.Errorf("cluster name and prefix are required")
 	}
-	groups := make([]karpenterGroup, 1, 1+len(in.NodeGroups))
-	groups[0] = karpenterGroup{Name: PoolPlatform, PlatformPool: true}
+	groups := make([]karpenterGroup, 0, len(in.NodeGroups))
 	seen := map[string]bool{}
 	for _, g := range in.NodeGroups {
 		name := g.GetName()
 		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
 			return nil, fmt.Errorf("node group name %q: %s", name, strings.Join(errs, "; "))
 		}
-		if name == PoolPlatform || name == "default" || name == PoolSystem || seen[name] {
+		if name == "platform" || name == "default" || name == PoolSystem || seen[name] {
 			return nil, fmt.Errorf("node group name %q is reserved or repeated", name)
 		}
 		seen[name] = true
@@ -86,16 +88,15 @@ func KarpenterNodeGroupObjects(in KarpenterNodeGroupsInput) ([]*unstructured.Uns
 	}
 	out := make([]*unstructured.Unstructured, 0, 2*len(groups))
 	for _, g := range groups {
-		out = append(out, renderNodeClass(in, g.Name), renderNodePool(g))
+		out = append(out, renderNodeClass(in, g.Name), renderNodePool(g, in))
 	}
 	return out, nil
 }
 
-// karpenterGroup is a node group as rendered: the platform's or a user's.
+// karpenterGroup is a user node group as rendered.
 type karpenterGroup struct {
-	Name         string
-	PlatformPool bool
-	Spec         *cloudv1.NodeGroupSpec // nil for the platform's
+	Name string
+	Spec *cloudv1.NodeGroupSpec
 }
 
 // renderNodeClass is the group's EC2NodeClass: the cluster's Karpenter
@@ -150,12 +151,29 @@ func categoryRequirements() []any {
 	}
 }
 
-// uniqueNames maps enum values to their names, sorted, skipping unknown
-// values and duplicates; def when none is left.
-func uniqueNames[T comparable](values []T, names map[T]string, def string) []string {
+// archsOf are the group's architectures, else the admin's defaults, else
+// amd64; capacitiesOf the same for capacity types (on-demand).
+func archsOf(values []cloudv1.Architecture, defaults []string) []string {
+	if names := uniqueNames(values, archNames, ""); len(names) > 0 {
+		return names
+	}
+	return fromDefaults(defaults, map[string]string{"AMD64": "amd64", "ARM64": "arm64"}, "amd64")
+}
+
+func capacitiesOf(values []cloudv1.CapacityType, defaults []string) []string {
+	if names := uniqueNames(values, capacityNames, ""); len(names) > 0 {
+		return names
+	}
+	return fromDefaults(defaults, map[string]string{"ON_DEMAND": "on-demand", "SPOT": "spot"}, "on-demand")
+}
+
+// fromDefaults maps the admin's default names ("AMD64", "ON_DEMAND") to
+// Karpenter's, sorted, skipping unknown ones and repeats; def when none is
+// left.
+func fromDefaults(defaults []string, names map[string]string, def string) []string {
 	var out []string
-	for _, v := range values {
-		if n, ok := names[v]; ok && !slices.Contains(out, n) {
+	for _, d := range defaults {
+		if n, ok := names[d]; ok && !slices.Contains(out, n) {
 			out = append(out, n)
 		}
 	}
@@ -166,57 +184,58 @@ func uniqueNames[T comparable](values []T, names map[T]string, def string) []str
 	return out
 }
 
+// uniqueNames maps enum values to their names, sorted, skipping unknown
+// values and duplicates; def when none is left ("": none).
+func uniqueNames[T comparable](values []T, names map[T]string, def string) []string {
+	var out []string
+	for _, v := range values {
+		if n, ok := names[v]; ok && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 && def != "" {
+		return []string{def}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // renderNodePool is the group's NodePool, pointing at the EC2NodeClass of
-// its name. The platform's is on-demand, amd64 and tainted for the
-// platform's own pods; a user's follows its spec, with the pool label and
-// the user's labels and taints.
-func renderNodePool(g karpenterGroup) *unstructured.Unstructured {
+// its name: it follows the user's spec, with the pool label and the user's
+// labels and taints.
+func renderNodePool(g karpenterGroup, in KarpenterNodeGroupsInput) *unstructured.Unstructured {
 	labels := map[string]any{PoolLabelKey: g.Name}
-	var taints []any
+	taints := make([]any, 0, len(g.Spec.GetTaints()))
 	var reqs []any
 	limits := map[string]any{}
-	if g.PlatformPool {
-		taint := PoolTaint(PoolPlatform)
-		taints = append(taints, map[string]any{"key": taint.Key, "value": taint.Value, "effect": "NoSchedule"})
-		// The platform's own choice (PlatformInstanceFamilies/Sizes); the
-		// admin allowlist applies to user groups only.
-		reqs = append(reqs,
-			requirement("karpenter.k8s.aws/instance-family", "In", PlatformInstanceFamilies...),
-			requirement("karpenter.k8s.aws/instance-size", "In", PlatformInstanceSizes...),
-			requirement("kubernetes.io/arch", "In", "amd64"),
-			requirement("kubernetes.io/os", "In", "linux"),
-			requirement("karpenter.sh/capacity-type", "In", "on-demand"))
-		limits["cpu"], limits["memory"] = platformCPULimit, platformMemoryLimit
-	} else {
-		s := g.Spec
-		for k, v := range s.GetLabels() {
-			if k != PoolLabelKey {
-				labels[k] = v
-			}
+	s := g.Spec
+	for k, v := range s.GetLabels() {
+		if k != PoolLabelKey {
+			labels[k] = v
 		}
-		for _, t := range s.GetTaints() {
-			taints = append(taints, map[string]any{"key": t.GetKey(), "value": t.GetValue(),
-				"effect": orEffect(t.GetEffect())})
-		}
-		if len(s.GetInstanceTypes()) > 0 {
-			reqs = append(reqs, requirement("node.kubernetes.io/instance-type", "In", sortedUnique(s.GetInstanceTypes())...))
-		}
-		if len(s.GetInstanceFamilies()) > 0 {
-			reqs = append(reqs, requirement("karpenter.k8s.aws/instance-family", "In", sortedUnique(s.GetInstanceFamilies())...))
-		}
-		if len(s.GetInstanceTypes()) == 0 && len(s.GetInstanceFamilies()) == 0 {
-			reqs = append(reqs, categoryRequirements()...)
-		}
-		reqs = append(reqs,
-			requirement("kubernetes.io/arch", "In", uniqueNames(s.GetArchitectures(), archNames, "amd64")...),
-			requirement("kubernetes.io/os", "In", "linux"),
-			requirement("karpenter.sh/capacity-type", "In", uniqueNames(s.GetCapacityTypes(), capacityNames, "on-demand")...))
-		if cpu := s.GetLimits().GetCpu(); s.GetLimits() != nil && s.GetLimits().Cpu != nil {
-			limits["cpu"] = fmt.Sprintf("%d", cpu)
-		}
-		if s.GetLimits() != nil && s.GetLimits().MemoryGib != nil {
-			limits["memory"] = fmt.Sprintf("%dGi", s.GetLimits().GetMemoryGib())
-		}
+	}
+	for _, t := range s.GetTaints() {
+		taints = append(taints, map[string]any{"key": t.GetKey(), "value": t.GetValue(),
+			"effect": orEffect(t.GetEffect())})
+	}
+	if len(s.GetInstanceTypes()) > 0 {
+		reqs = append(reqs, requirement("node.kubernetes.io/instance-type", "In", sortedUnique(s.GetInstanceTypes())...))
+	}
+	if len(s.GetInstanceFamilies()) > 0 {
+		reqs = append(reqs, requirement("karpenter.k8s.aws/instance-family", "In", sortedUnique(s.GetInstanceFamilies())...))
+	}
+	if len(s.GetInstanceTypes()) == 0 && len(s.GetInstanceFamilies()) == 0 {
+		reqs = append(reqs, categoryRequirements()...)
+	}
+	reqs = append(reqs,
+		requirement("kubernetes.io/arch", "In", archsOf(s.GetArchitectures(), in.DefaultArchitectures)...),
+		requirement("kubernetes.io/os", "In", "linux"),
+		requirement("karpenter.sh/capacity-type", "In", capacitiesOf(s.GetCapacityTypes(), in.DefaultCapacityTypes)...))
+	if s.GetLimits() != nil && s.GetLimits().Cpu != nil {
+		limits["cpu"] = fmt.Sprintf("%d", s.GetLimits().GetCpu())
+	}
+	if s.GetLimits() != nil && s.GetLimits().MemoryGib != nil {
+		limits["memory"] = fmt.Sprintf("%dGi", s.GetLimits().GetMemoryGib())
 	}
 	templateSpec := map[string]any{
 		"nodeClassRef": map[string]any{"group": karpenterAPIGroup, "kind": KarpenterNodeClassGVK.Kind, "name": g.Name},

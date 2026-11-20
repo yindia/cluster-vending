@@ -50,15 +50,16 @@ spec:
         service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /healthz/ready
     autoscaling:
       enabled: true
-      minReplicas: 2
+      # One replica at least (system group sizing, docs/catalog.md); the HPA
+      # adds more under load. No PodDisruptionBudget: the chart allows one
+      # only with two replicas, and one that demands it would stop a drain.
+      minReplicas: 1
       maxReplicas: 5
       targetCPUUtilizationPercentage: 80
-    podDisruptionBudget:
-      minAvailable: 1
     resources:
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 50m
+        memory: 64Mi
       limits:
         cpu: "2"
         memory: 1Gi

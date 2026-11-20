@@ -34,3 +34,9 @@ spec:
     excludeNamespaces:
       - kube-system
     revision: ""
+    # The DaemonSet's requests (the chart's default, explicit so the sizing
+    # test counts them: pkg/catalog/system_group_sizing_test.go).
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi

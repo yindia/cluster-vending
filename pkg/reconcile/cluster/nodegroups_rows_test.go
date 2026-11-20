@@ -110,11 +110,12 @@ func karpenterNode(name, pool string, ready bool) *corev1.Node {
 	return n
 }
 
-func managedNode(name string) *corev1.Node {
+// managedNode is a node of the default managed node group, named group.
+func managedNode(name, group string) *corev1.Node {
 	n := karpenterNode(name, "", true)
 	delete(n.Labels, crossplaneaws.KarpenterNodePoolLabel)
 	delete(n.Labels, "karpenter.sh/capacity-type")
-	n.Labels["eks.amazonaws.com/nodegroup"] = "prod-default"
+	n.Labels["eks.amazonaws.com/nodegroup"] = group
 	n.Labels["eks.amazonaws.com/capacityType"] = "ON_DEMAND"
 	return n
 }
@@ -138,9 +139,15 @@ func TestNodeRowsAreCollectedPerGroupAndWritten(t *testing.T) {
 	gpu2.Status.Conditions = append(gpu2.Status.Conditions, corev1.NodeCondition{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionTrue},
 		corev1.NodeCondition{Type: corev1.NodeDiskPressure, Status: corev1.ConditionFalse}, corev1.NodeCondition{Type: corev1.NodeNetworkUnavailable, Status: corev1.ConditionTrue})
 	gpu3.Labels["kubernetes.io/arch"] = "arm64"
-	fw := newFakeWorkload(interceptor.Funcs{}, gpu1, gpu2, gpu3, karpenterNode("ip-10-0-2-1", "platform", true), managedNode("ip-10-0-3-1"), managedNode("ip-10-0-3-2"),
+	fw := newFakeWorkload(interceptor.Funcs{}, gpu1, gpu2, gpu3, karpenterNode("ip-10-0-2-1", "platform", true),
 		nodeClaim("gpu-abc", "ip-10-0-1-1", "Launched", "Registered", "Initialized", "Ready"), nodeClaim("gpu-def", "ip-10-0-1-2", "Launched", "Registered"))
 	rw := newRowsWorld(t, fw, true, &cloudv1.NodeGroupSpec{Name: "gpu", InstanceFamilies: []string{"g5"}})
+	// The system group's nodes are the ones labelled with the default node
+	// group's name; another managed group's nodes are not.
+	systemGroup := crossplaneaws.DefaultNodeGroupName(crossplaneaws.ClusterPrefix(rw.row.TenantID, rw.row.ID, rw.row.Name))
+	for _, n := range []*corev1.Node{managedNode("ip-10-0-3-1", systemGroup), managedNode("ip-10-0-3-2", systemGroup), managedNode("ip-10-0-3-3", "someone-elses")} {
+		require.NoError(t, fw.c.Create(t.Context(), n))
+	}
 
 	res := rw.pass(t)
 
@@ -194,8 +201,10 @@ func TestNodeRowsAreCollectedPerGroupAndWritten(t *testing.T) {
 	require.Equal(t, results.Nodes.IndexKey(), ref.Key)
 	require.EqualValues(t, 6, ref.Total)
 	require.True(t, ref.CollectedAt.Equal(rowsAt))
-	// The platform and the managed group's nodes count without being rows of the CR.
-	require.Equal(t, int32(2), statusOf(res, "system").GetNodes())
+	// The managed group's nodes count without being rows of the CR; the
+	// system status takes the count from the pass.
+	require.Equal(t, int32(2), res.system.nodes)
+	require.True(t, res.system.counted)
 }
 
 func TestNodeRowsAreWrittenAtMostOncePerMinuteAndOnlyWhenChanged(t *testing.T) {
@@ -254,10 +263,10 @@ func TestUnchangedNodeRowsRefreshTheSummaryTimeSlowly(t *testing.T) {
 }
 
 func TestNodeRowsNeedingNoS3AreSilent(t *testing.T) {
-	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "platform", true))
-	w, _ := nodeGroupWorld(t, fw) // no ResultsS3: a test, or a controller with no AWS
+	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "gpu", true))
+	w, _ := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"}) // no ResultsS3: a test, or a controller with no AWS
 	res := passOf(w, w.cluster(t), karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
-	require.Equal(t, int32(1), statusOf(res, "platform").GetNodes())
+	require.Equal(t, int32(1), statusOf(res, "gpu").GetNodes())
 	for _, g := range res.groups {
 		require.Empty(t, g.GetNodesNotice())
 	}
@@ -298,16 +307,17 @@ func TestNodeRowsWhenS3IsUnavailable(t *testing.T) {
 
 // A throttled pass keeps the notice of the last attempt.
 func TestThrottledPassKeepsTheNodesNotice(t *testing.T) {
-	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "platform", true))
-	rw := newRowsWorld(t, fw, false)
+	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "gpu", true))
+	rw := newRowsWorld(t, fw, false, &cloudv1.NodeGroupSpec{Name: "gpu"})
 	first := rw.pass(t)
-	require.NotEmpty(t, statusOf(first, "platform").GetNodesNotice())
+	require.NotEmpty(t, statusOf(first, "gpu").GetNodesNotice())
+	require.True(t, first.system.noticeSet && first.system.notice != "", "the system group's status carries it too")
 	// The recorded status is what the next pass starts from.
 	st := &cloudv1.ClusterStatus{NodeGroups: first.groups}
 	rw.rememberStatus(t, st)
 	rw.at(10 * time.Second)
 	second := rw.pass(t)
-	require.Equal(t, statusOf(first, "platform").GetNodesNotice(), statusOf(second, "platform").GetNodesNotice())
+	require.Equal(t, statusOf(first, "gpu").GetNodesNotice(), statusOf(second, "gpu").GetNodesNotice())
 }
 
 // Reading is paginated, so 1,200 nodes of one group are 1,200 rows of one
@@ -336,7 +346,7 @@ func TestNodeRowsOfAnUnfinishedReadAreIncomplete(t *testing.T) {
 	}))
 	rw := newRowsWorld(t, fw, true)
 	// The pass's own deadline ends the read; S3 writes use a fresh context.
-	nodes, _ := rw.svc.readNodes(ctx, fw.c)
+	nodes, _ := rw.svc.readNodes(ctx, fw.c, "")
 	require.False(t, nodes.complete)
 	require.NotEmpty(t, nodes.rows["platform"])
 	require.Less(t, len(nodes.rows["platform"]), 1200)

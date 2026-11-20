@@ -85,10 +85,8 @@ type Options struct {
 	// region of its SDK, the optional source role and external ID
 	// (aws-region, aws-source-role-arn, aws-external-id).
 	AWSAccess config.AWSAccess
-	// NodeGroupInstanceFamilies and NodeGroupInstanceTypes are the platform
-	// admin's allowlist of node group machines, for user node groups (the
-	// platform node group is the platform's own choice).
-	NodeGroupInstanceFamilies, NodeGroupInstanceTypes []string
+	// NodeGroups is the platform admin's node group layout.
+	NodeGroups config.NodeGroups
 	// ReconcileWorkers is how many accounts, networks and clusters of each
 	// kind are reconciled at once (0: one).
 	ReconcileWorkers int
@@ -224,7 +222,7 @@ func Run(ctx context.Context, o Options) error {
 		NoRecommendations: !o.Recommendations,
 		Logger:            logger,
 
-		NodeGroupInstanceFamilies: o.NodeGroupInstanceFamilies, NodeGroupInstanceTypes: o.NodeGroupInstanceTypes,
+		NodeGroups: o.NodeGroups,
 	}, lookups)
 	checkCredentialsSecret(ctx, reconciling, logger)
 	// What happens to accounts, networks, clusters and releases is also a

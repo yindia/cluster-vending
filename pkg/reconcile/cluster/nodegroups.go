@@ -11,10 +11,12 @@ import (
 	"unicode/utf8"
 
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -36,21 +38,22 @@ const (
 	// karpenterComponent is the platform component whose Ready phase
 	// releases the node groups.
 	karpenterComponent = component.KarpenterComponent
-	// PlatformNodeGroupName is the status name of the platform node group.
-	platformNodeGroup = crossplaneaws.PoolPlatform
+	// legacyPlatformPool is the name of the Karpenter NodePool and
+	// EC2NodeClass an earlier build applied for the platform's components.
+	// The system node group runs them now; what is left of it in a
+	// workload cluster is removed once nothing needs it (legacyPoolGate).
+	legacyPlatformPool = "platform"
 )
 
-// nodeGroup is a node group as the status names it.
+// nodeGroup is a user node group as the status names it.
 type nodeGroup struct {
-	Name         string
-	PlatformPool bool
+	Name string
 }
 
-// nodeGroupsOf are the platform node group and the spec's groups, in
-// order.
+// nodeGroupsOf are the spec's user node groups, in order. The system node
+// group, the platform's only one, is not among them (withNodeGroups).
 func nodeGroupsOf(spec *cloudv1.ClusterSpec) []nodeGroup {
-	out := make([]nodeGroup, 1, 1+len(spec.GetNodeGroups()))
-	out[0] = nodeGroup{Name: platformNodeGroup, PlatformPool: true}
+	out := make([]nodeGroup, 0, len(spec.GetNodeGroups()))
 	for _, g := range spec.GetNodeGroups() {
 		out = append(out, nodeGroup{Name: g.GetName()})
 	}
@@ -74,8 +77,29 @@ type kubeletView struct {
 
 // nodeGroupsResult is what a pass learned of the cluster's node groups.
 type nodeGroupsResult struct {
+	// groups are the user groups' statuses.
 	groups   []*cloudv1.NodeGroupStatus
 	kubelets kubeletView
+	// system is what the pass saw of the default managed node group's nodes
+	// and of the move off the old platform pool; zero: nothing, the
+	// recorded values stay.
+	system systemObserved
+}
+
+// systemObserved is what a pass observed of the system node group beyond its
+// managed resource.
+type systemObserved struct {
+	// nodes is the count of its nodes (the nodes with the node group's
+	// label); counted: the node list was read completely.
+	nodes   int32
+	counted bool
+	// notice is why the node list could not be stored; noticeSet: this
+	// pass tried (else the recorded notice stays).
+	notice    string
+	noticeSet bool
+	// move is the message of the move off the old platform pool, empty
+	// when there is none.
+	move string
 }
 
 type nodeGroupsKey struct{}
@@ -93,41 +117,84 @@ func nodeGroupsOfPass(ctx context.Context) *nodeGroupsResult {
 	return nil
 }
 
-// withNodeGroups puts the node groups into a status being built: the ones
-// this pass found, else the ones recorded.
+// withNodeGroups puts the node groups into a status being built: the
+// system group first (its phase from the node group's managed resource in
+// st, its node count from the pass or, failing that, the recorded status),
+// then the user groups this pass found, else the ones recorded.
 func withNodeGroups(ctx context.Context, st, stored *cloudv1.ClusterStatus) {
+	var observed systemObserved
+	var user []*cloudv1.NodeGroupStatus
 	if r := nodeGroupsOfPass(ctx); r != nil {
-		st.NodeGroups = r.groups
-		return
+		observed, user = r.system, r.groups
+	} else {
+		for _, g := range stored.GetNodeGroups() {
+			// The system group is rebuilt below; a platform group recorded
+			// by an earlier build is gone with its pool.
+			if !g.GetPlatformManaged() {
+				user = append(user, g)
+			}
+		}
 	}
-	st.NodeGroups = stored.GetNodeGroups()
+	st.NodeGroups = append([]*cloudv1.NodeGroupStatus{systemStatus(st, stored, observed)}, user...)
 }
 
-// platformNodeGroupReady: the recorded status says the platform node group
-// is READY.
-func platformNodeGroupReady(row *model.Cluster) bool {
+// systemStatus is the status of the default managed node group: PENDING,
+// READY, FAILED or DELETING as its managed resource (the newest one while a
+// replaced group is retired) is, with its message; the node count as the
+// pass counted it, else as recorded.
+func systemStatus(st, stored *cloudv1.ClusterStatus, observed systemObserved) *cloudv1.NodeGroupStatus {
+	var current *cloudv1.ManagedResource
+	for _, v := range st.GetManagedResources() {
+		if v.GetKind() == KindNodeGroup {
+			current = v
+		}
+	}
+	phase, message := cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, "waiting for the node group to be created"
+	if current != nil {
+		message = current.GetMessage()
+		switch current.GetState() {
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
+			phase, message = cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, ""
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED, cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING:
+			phase = cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING:
+			phase = cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING
+		default:
+			if message == "" {
+				message = "waiting for the node group to be Ready"
+			}
+		}
+	}
+	var nodes int32
+	var notice string
+	for _, g := range stored.GetNodeGroups() {
+		if g.GetName() == systemNodeGroup {
+			nodes, notice = g.GetNodes(), g.GetNodesNotice()
+		}
+	}
+	if observed.counted {
+		nodes = observed.nodes
+	}
+	if observed.move != "" {
+		message = strings.TrimSpace(message + " " + observed.move)
+	}
+	if observed.noticeSet {
+		notice = observed.notice
+	}
+	out := groupStatus(systemNodeGroup, true, phase, message, nodes)
+	out.NodesNotice = notice
+	return out
+}
+
+// hasKarpenterNodes: the recorded status has a user node group that was
+// READY, so Karpenter's nodes follow an upgrade's target too.
+func hasKarpenterNodes(row *model.Cluster) bool {
 	for _, g := range storedStatus(row).GetNodeGroups() {
-		if g.GetName() == platformNodeGroup {
-			return g.GetPhase() == cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY
+		if !g.GetPlatformManaged() && g.GetPhase() == cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY {
+			return true
 		}
 	}
 	return false
-}
-
-// holdForPlatformNodeGroup: the platform components above sequence 0 wait
-// for the platform node group. Only a cluster whose catalog has Karpenter
-// waits, and only before anything else was started: a node group status
-// that wavers later never holds back what is installed.
-func holdForPlatformNodeGroup(row *model.Cluster, karpenter bool) bool {
-	if !karpenter || platformNodeGroupReady(row) {
-		return false
-	}
-	for name, started := range startedPlatform(row) {
-		if started && name != karpenterComponent {
-			return false
-		}
-	}
-	return true
 }
 
 func shortMessage(s string) string {
@@ -142,10 +209,12 @@ func groupStatus(name string, platform bool, phase cloudv1.NodeGroupPhase, messa
 	return &cloudv1.NodeGroupStatus{Name: name, PlatformManaged: platform, Phase: phase, Message: shortMessage(message), Nodes: nodes}
 }
 
-// reconcileNodeGroups applies the cluster's Karpenter node groups into its
-// workload cluster and reads their status into the pass (nodeGroupsOfPass).
-// It runs after the platform components, and only once the Karpenter
-// component is READY: nothing is applied before. It never fails the pass:
+// reconcileNodeGroups applies the cluster's user Karpenter node groups into
+// its workload cluster (a cluster with none gets nothing applied), reads
+// their status and the system group's nodes into the pass (nodeGroupsOfPass),
+// and removes what an earlier build applied for the platform pool once
+// nothing needs it. It runs after the platform components, and only once the
+// Karpenter component is READY: nothing is applied before. It never fails the pass:
 // what cannot be applied or read is the node group's status message, and a
 // status that cannot be read keeps its last good phase.
 func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster, installed *platform) {
@@ -197,7 +266,7 @@ func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster
 func allGroups(groups []nodeGroup, phase cloudv1.NodeGroupPhase, message string) []*cloudv1.NodeGroupStatus {
 	out := make([]*cloudv1.NodeGroupStatus, 0, len(groups))
 	for _, g := range groups {
-		out = append(out, groupStatus(g.Name, g.PlatformPool, phase, message, 0))
+		out = append(out, groupStatus(g.Name, false, phase, message, 0))
 	}
 	return out
 }
@@ -213,7 +282,7 @@ func degraded(groups []nodeGroup, stored []*cloudv1.NodeGroupStatus, why string)
 				phase, nodes = o.GetPhase(), o.GetNodes()
 			}
 		}
-		out = append(out, groupStatus(g.Name, g.PlatformPool, phase, "status unavailable: "+why, nodes))
+		out = append(out, groupStatus(g.Name, false, phase, "status unavailable: "+why, nodes))
 	}
 	return &nodeGroupsResult{groups: out}
 }
@@ -231,7 +300,7 @@ func waitingForIAM(groups []nodeGroup, stored []*cloudv1.NodeGroupStatus, what s
 				phase, nodes = o.GetPhase(), o.GetNodes()
 			}
 		}
-		out = append(out, groupStatus(g.Name, g.PlatformPool, phase, "waiting for Karpenter's IAM ("+what+")", nodes))
+		out = append(out, groupStatus(g.Name, false, phase, "waiting for Karpenter's IAM ("+what+")", nodes))
 	}
 	return &nodeGroupsResult{groups: out}
 }
@@ -254,15 +323,18 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 		s.logger().WarnContext(ctx, "node groups: prepare", "cluster_id", row.ID, "error", err)
 		return degraded(groups, stored, err.Error())
 	}
-	// The node classes name Karpenter's node role: nothing is applied
-	// before its IAM chain is Ready and the controller policy passes it.
-	wait, err := s.karpenterIAMWait(ctx, extra.namespace, in.ClusterPrefix, extra.accountID, spec.GetRegion())
-	if err != nil {
-		s.logger().WarnContext(ctx, "node groups: read Karpenter's IAM", "cluster_id", row.ID, "error", err)
-		return degraded(groups, stored, err.Error())
-	}
-	if wait != "" {
-		return waitingForIAM(groups, stored, wait)
+	// The node classes name Karpenter's node role: no user group is applied
+	// before its IAM chain is Ready and the controller policy passes it. A
+	// cluster without user groups needs none of it.
+	if len(groups) > 0 {
+		wait, err := s.karpenterIAMWait(ctx, extra.namespace, in.ClusterPrefix, extra.accountID, spec.GetRegion())
+		if err != nil {
+			s.logger().WarnContext(ctx, "node groups: read Karpenter's IAM", "cluster_id", row.ID, "error", err)
+			return degraded(groups, stored, err.Error())
+		}
+		if wait != "" {
+			return waitingForIAM(groups, stored, wait)
+		}
 	}
 	var c client.Client
 	err = call(ctx, func(ctx context.Context) (err error) {
@@ -289,9 +361,11 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 			}
 		}
 	}
-	removing := s.removeNodeGroups(ctx, c, row, groups)
-	nodes, kubelets := s.readNodes(ctx, c)
-	out := &nodeGroupsResult{kubelets: kubelets}
+	nodes, kubelets := s.readNodes(ctx, c, extra.systemGroup)
+	legacy := &legacyPoolGate{s: s, c: c, row: row, installed: installed, extra: extra, nodes: nodes}
+	removing := s.removeNodeGroups(ctx, c, row, groups, legacy, nodes)
+	out := &nodeGroupsResult{kubelets: kubelets, system: systemObserved{nodes: nodes.count[systemNodeGroup], counted: nodes.complete,
+		move: legacy.message}}
 	for _, g := range groups {
 		out.groups = append(out.groups, s.readGroup(ctx, c, g, stored, failed[g.Name], nodes))
 	}
@@ -299,27 +373,194 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 		out.groups = append(out.groups, groupStatus(name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING,
 			"removed from the cluster; Karpenter drains its nodes", nodes.count[name]))
 	}
-	if rows := nodes.rows[systemNodeGroup]; len(rows) > 0 {
-		out.groups = append(out.groups, systemGroupStatus(rows))
-	}
 	// The per-node rows go to the results bucket; the status keeps counts and,
 	// when they cannot be stored, a notice.
 	attempted, notice := s.writeNodeRows(ctx, row, nodes)
 	withNodesNotice(out.groups, stored, attempted, notice)
+	out.system.notice, out.system.noticeSet = notice, attempted
 	withAMINotice(out.groups, extra.amiNotice)
 	return out
 }
 
-// withAMINotice adds the AMI pin notice to the platform group's message.
+// withAMINotice adds the AMI pin notice to the user groups' messages.
 func withAMINotice(groups []*cloudv1.NodeGroupStatus, notice string) {
 	if notice == "" {
 		return
 	}
 	for _, g := range groups {
-		if g.GetName() == platformNodeGroup {
+		if g.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING {
 			g.Message = shortMessage(strings.TrimSpace(g.GetMessage() + " " + notice))
 		}
 	}
+}
+
+// legacyPoolGate decides whether the old platform pool of a cluster built
+// before the system group took over may be removed
+// (docs/design/karpenter-node-groups.md, "Migration of existing clusters").
+// The objects stay exactly as they are (not applied, not changed) until:
+//
+//  1. the system node group has its new placement and size and is Ready,
+//     with that many Ready nodes;
+//  2. every platform component is READY on a Release that is already what
+//     the system placement renders (its Helm release settled: nothing is
+//     changed in this pass) and every tenant component is READY;
+//  3. no pod but a DaemonSet's (or a static one) is left on the old pool's
+//     nodes, whatever component it belongs to: nothing still selects only
+//     the old pool.
+//
+// message is what the system group's status says meanwhile; it is only
+// asked when the cluster has such objects.
+type legacyPoolGate struct {
+	s         *Reconciler
+	c         client.Client
+	row       *model.Cluster
+	installed *platform
+	extra     nodeGroupsExtra
+	nodes     nodeCounts
+
+	decided, ok bool
+	message     string
+}
+
+// allowed reports whether the old pool may be deleted now, deciding once per
+// pass.
+func (g *legacyPoolGate) allowed(ctx context.Context) bool {
+	if g.decided {
+		return g.ok
+	}
+	g.decided = true
+	if why := g.systemNotReady(ctx); why != "" {
+		g.message = "moving components off the old platform pool: waiting for the system node group (" + why + ")"
+		return false
+	}
+	left := g.componentsLeft(ctx)
+	if len(left) > 0 {
+		g.message = fmt.Sprintf("moving components off the old platform pool: %d left (%s)", len(left), listNames(left))
+		return false
+	}
+	g.ok = true
+	g.message = "removing the old platform pool"
+	return true
+}
+
+// systemNotReady is why the system node group is not ready to take over; ""
+// when it is.
+func (g *legacyPoolGate) systemNotReady(ctx context.Context) string {
+	if g.extra.systemGroup == "" {
+		return "its name is not known"
+	}
+	ng := &awseks.NodeGroup{}
+	if err := g.s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: g.extra.namespace, Name: g.extra.systemGroup}, ng); err != nil {
+		return "cannot be read: " + err.Error()
+	}
+	at := ng.Status.AtProvider
+	switch {
+	case ptr.Deref(at.ID, "") == "" || ptr.Deref(at.Status, "") != "ACTIVE":
+		return "not active yet"
+	case at.Labels[crossplaneaws.PoolLabelKey] == nil || ptr.Deref(at.Labels[crossplaneaws.PoolLabelKey], "") != crossplaneaws.PoolSystem:
+		return "its system label is not applied yet"
+	case at.ScalingConfig == nil || int(ptr.Deref(at.ScalingConfig.DesiredSize, 0)) != g.extra.systemSize:
+		return fmt.Sprintf("not at its size of %d yet", g.extra.systemSize)
+	}
+	if !g.nodes.complete {
+		return "its nodes could not be read"
+	}
+	ready := 0
+	for _, n := range g.nodes.rows[systemNodeGroup] {
+		if n.GetReady() {
+			ready++
+		}
+	}
+	if ready < g.extra.systemSize {
+		return fmt.Sprintf("%d of %d nodes are Ready", ready, g.extra.systemSize)
+	}
+	return ""
+}
+
+// componentsLeft are the platform and tenant components that are not
+// settled on the system placement: platform components not READY or still
+// being changed, tenant components not READY, and the pods still on the old
+// pool's nodes.
+func (g *legacyPoolGate) componentsLeft(ctx context.Context) []string {
+	var left []string
+	if g.installed == nil {
+		return []string{"platform components"}
+	}
+	for _, c := range g.installed.components {
+		if c.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_READY || !c.GetUnchanged() {
+			left = append(left, c.GetName())
+		}
+	}
+	rows, err := g.s.deps.Store.Components().ListByCluster(ctx, g.row.TenantID, g.row.ID)
+	if err != nil {
+		return append(left, "tenant components")
+	}
+	for _, c := range rows {
+		if c.State == componentDeleting {
+			continue
+		}
+		if tenantStatus(c).GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_READY {
+			left = append(left, c.Component)
+		}
+	}
+	pods, err := g.podsOnOldPool(ctx)
+	switch {
+	case err != nil:
+		left = append(left, "its pods could not be read")
+	case pods > 0:
+		left = append(left, fmt.Sprintf("%d pods on its nodes", pods))
+	}
+	return left
+}
+
+// podsOnOldPool counts the pods that run on the old pool's nodes and would
+// not be everywhere anyway: not a DaemonSet's, not a static pod, not
+// finished. The pod list is paginated and bounded by the pass deadline.
+func (g *legacyPoolGate) podsOnOldPool(ctx context.Context) (int, error) {
+	oldNodes := map[string]bool{}
+	for _, n := range g.nodes.rows[legacyPlatformPool] {
+		oldNodes[n.GetName()] = true
+	}
+	if len(oldNodes) == 0 {
+		return 0, nil
+	}
+	count := 0
+	err := eachPage(ctx, g.c, schema.GroupVersionKind{Version: "v1", Kind: "PodList"}, func(items []unstructured.Unstructured) {
+		for i := range items {
+			if oldNodes[nodeOfPod(&items[i])] && countsAsLeft(&items[i]) {
+				count++
+			}
+		}
+	})
+	return count, err
+}
+
+func nodeOfPod(p *unstructured.Unstructured) string {
+	name, _, _ := unstructured.NestedString(p.Object, "spec", "nodeName")
+	return name
+}
+
+func countsAsLeft(p *unstructured.Unstructured) bool {
+	if phase, _, _ := unstructured.NestedString(p.Object, "status", "phase"); phase == "Succeeded" || phase == "Failed" {
+		return false
+	}
+	if _, mirror := p.GetAnnotations()["kubernetes.io/config.mirror"]; mirror {
+		return false
+	}
+	for _, o := range p.GetOwnerReferences() {
+		if o.Kind == "DaemonSet" {
+			return false
+		}
+	}
+	return true
+}
+
+func listNames(names []string) string {
+	const shown = 5
+	if len(names) <= shown {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(names[:shown], ", "), len(names)-shown)
 }
 
 func describeApplyError(obj *unstructured.Unstructured, err error) string {
@@ -359,7 +600,8 @@ func (s *Reconciler) NodeGroupObjects(ctx context.Context, row *model.Cluster) (
 // default pin).
 func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, release string) (crossplaneaws.KarpenterNodeGroupsInput, nodeGroupsExtra, error) {
 	in := crossplaneaws.KarpenterNodeGroupsInput{ClusterName: row.Name, ClusterPrefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
-		Discovery: true, NodeGroups: spec.GetNodeGroups()}
+		Discovery: true, NodeGroups: spec.GetNodeGroups(),
+		DefaultArchitectures: s.deps.NodeGroups.Karpenter.Defaults.Architectures, DefaultCapacityTypes: s.deps.NodeGroups.Karpenter.Defaults.CapacityTypes}
 	var rel *cloudv1alpha1.Release
 	if src := s.releases(); src != nil && release != "" {
 		var err error
@@ -374,6 +616,11 @@ func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, sp
 		return in, extra, fmt.Errorf("read the network: %w", err)
 	}
 	extra.namespace, extra.accountID = t.Account.Namespace, t.Account.AccountID
+	plan := s.RenderPlan(spec, row, t)
+	extra.systemSize = plan.NodePool.Desired
+	if name, _, err := s.NodeGroupName(ctx, row, plan); err == nil {
+		extra.systemGroup = name
+	}
 	for _, name := range t.SubnetObjects {
 		subnet := &awsec2.Subnet{}
 		if err := s.deps.Get(ctx, client.ObjectKey{Namespace: t.Account.Namespace, Name: name}, subnet); err != nil {
@@ -390,6 +637,10 @@ func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, sp
 // AMI pin notice for the status, and where Karpenter's IAM objects are.
 type nodeGroupsExtra struct {
 	amiNotice, namespace, accountID string
+	// systemGroup is the default managed node group's object name and
+	// systemSize the size the render gives it ("" and 0: not known).
+	systemGroup string
+	systemSize  int
 }
 
 // shippedAMIPins are the AMI pins this build's release.yaml ships, by
@@ -457,8 +708,12 @@ func nodeAMIMinor(specVersion string, stored *cloudv1.ClusterStatus) string {
 
 // removeNodeGroups deletes the platform's NodePools and EC2NodeClasses
 // that no group wants any more (only objects with the managed-by label),
-// and returns the names still there. A pool goes before its class.
-func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row *model.Cluster, groups []nodeGroup) []string {
+// and returns the names still there. A pool goes before its class. The
+// objects of the old platform pool are left alone until legacy allows
+// (nothing changes them, nothing is reported as a group); then its pool is
+// deleted, and its class once its pool and its nodes are gone.
+func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row *model.Cluster, groups []nodeGroup,
+	legacy *legacyPoolGate, nodes nodeCounts) []string {
 	want := map[string]bool{}
 	for _, g := range groups {
 		want[g.Name] = true
@@ -487,12 +742,20 @@ func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row 
 		for i := range list.Items {
 			obj := &list.Items[i]
 			name := obj.GetName()
-			if want[name] || name == platformNodeGroup {
+			if want[name] {
 				continue
 			}
-			if !gvk.pool && pools[name] {
-				still = appendOnce(still, name)
-				continue // the class goes once its pool is gone
+			old := name == legacyPlatformPool
+			if old && !legacy.allowed(ctx) {
+				continue
+			}
+			if !gvk.pool && (pools[name] || (old && nodes.count[name] > 0)) {
+				if old {
+					legacy.message = fmt.Sprintf("removing the old platform pool: waiting for Karpenter to terminate its nodes (%d left)", max(nodes.count[name], 1))
+				} else {
+					still = appendOnce(still, name)
+				}
+				continue // the class goes once its pool and nodes are gone
 			}
 			if gvk.pool {
 				pools[name] = true
@@ -500,7 +763,11 @@ func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row 
 			if err := call(ctx, func(ctx context.Context) error { return client.IgnoreNotFound(c.Delete(ctx, obj)) }); err != nil {
 				s.logger().WarnContext(ctx, "node groups: delete", "cluster_id", row.ID, "object", objectRef(obj), "error", err)
 			}
-			still = appendOnce(still, name)
+			if old {
+				legacy.message = "removing the old platform pool: waiting for Karpenter to terminate its nodes"
+			} else {
+				still = appendOnce(still, name)
+			}
 		}
 	}
 	return still
@@ -557,7 +824,7 @@ func eachPage(ctx context.Context, c client.Client, gvk schema.GroupVersionKind,
 // Karpenter nodes by pool, the default managed group's nodes as "system", each
 // joined with its NodeClaim. A failed or unfinished read is "not known", and
 // its rows are incomplete.
-func (s *Reconciler) readNodes(ctx context.Context, c client.Client) (nodeCounts, kubeletView) {
+func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup string) (nodeCounts, kubeletView) {
 	counts := nodeCounts{count: map[string]int32{}, rows: map[string][]*cloudv1.NodeGroupNode{}}
 	view := kubeletView{}
 	minors := map[string]bool{}
@@ -581,13 +848,19 @@ func (s *Reconciler) readNodes(ctx context.Context, c client.Client) (nodeCounts
 		return nodeCounts{count: map[string]int32{}, rows: counts.rows}, kubeletView{}
 	}
 	counts.complete = true
-	// The default managed node group's nodes are the "system" group.
+	// The default managed node group's nodes are the "system" group: the
+	// nodes labelled with its name (any managed group's, where it is not
+	// known).
+	var managed client.ListOption = client.HasLabels{managedNodeGroupLabel}
+	if systemGroup != "" {
+		managed = client.MatchingLabels{managedNodeGroupLabel: systemGroup}
+	}
 	err = eachPage(ctx, c, nodeList, func(items []unstructured.Unstructured) {
 		for i := range items {
 			counts.count[systemNodeGroup]++
 			counts.rows[systemNodeGroup] = append(counts.rows[systemNodeGroup], nodeRowOf(&items[i]))
 		}
-	}, client.HasLabels{managedNodeGroupLabel})
+	}, managed)
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: list managed nodes", "error", err)
 		counts.complete = false
@@ -622,7 +895,7 @@ func (s *Reconciler) readNodes(ctx context.Context, c client.Client) (nodeCounts
 // conditions are fine), or why that is not known.
 func (s *Reconciler) readGroup(ctx context.Context, c client.Client, g nodeGroup, stored []*cloudv1.NodeGroupStatus, applyFailure string, nodes nodeCounts) *cloudv1.NodeGroupStatus {
 	if applyFailure != "" {
-		return groupStatus(g.Name, g.PlatformPool, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED, applyFailure, nodes.count[g.Name])
+		return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED, applyFailure, nodes.count[g.Name])
 	}
 	pool := &unstructured.Unstructured{}
 	pool.SetGroupVersionKind(crossplaneaws.KarpenterNodePoolGVK)
@@ -630,7 +903,7 @@ func (s *Reconciler) readGroup(ctx context.Context, c client.Client, g nodeGroup
 	switch {
 	case err == nil:
 	case meta.IsNoMatchError(err) || apierrors.IsNotFound(err):
-		return groupStatus(g.Name, g.PlatformPool, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, "waiting for Karpenter to report the node group", 0)
+		return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, "waiting for Karpenter to report the node group", 0)
 	default:
 		return degraded([]nodeGroup{g}, stored, err.Error()).groups[0]
 	}
@@ -642,12 +915,12 @@ func (s *Reconciler) readGroup(ctx context.Context, c client.Client, g nodeGroup
 	}
 	ready, message := readyCondition(pool)
 	if ready {
-		return groupStatus(g.Name, g.PlatformPool, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, "", n)
+		return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, "", n)
 	}
 	if message == "" {
 		message = "waiting for Karpenter to report the node group"
 	}
-	return groupStatus(g.Name, g.PlatformPool, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, message, n)
+	return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, message, n)
 }
 
 // readyCondition is whether the object's Ready condition is True and,

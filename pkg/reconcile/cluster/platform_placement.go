@@ -14,31 +14,22 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	"github.com/yindia/cluster-vending/pkg/database/model"
 )
 
-// placements are where the platform's pods are placed now.
-type placements struct{ system, platform component.Placement }
-
-// livePlacement resolves ${system.*} and ${platform.*} from live state,
-// never from what the platform intends to roll out
+// livePlacement resolves ${system.*} (and its alias ${platform.*}) from live
+// state, never from what the platform intends to roll out
 // (docs/design/karpenter-node-groups.md, "Migration of existing clusters"):
+// it is what the default managed node group carries now: its labels and
+// taints as the provider reports them (status.atProvider), so an existing
+// cluster keeps its old placement until the node group really has the
+// system label and taint. Where the node group is not reported yet: a
+// cluster whose components were started keeps what its stored default node
+// pool says (the placement before this build); a new one gets the
+// platform's fixed system placement.
 //
-//   - system is what the default managed node group carries now: its labels
-//     and taints as the provider reports them (status.atProvider), so an
-//     existing cluster keeps its old placement until the node group really
-//     has the system label and taint. Where the node group is not reported
-//     yet: a cluster whose components were started keeps what its stored
-//     default node pool says (the placement before this build); a new one
-//     gets the platform's fixed system placement (its components wait for
-//     the node group anyway).
-//   - platform is the platform pool only once status.node_groups shows the
-//     platform group READY; until then it is the system placement.
-//
-// nil for a cluster whose placement is its own (an imported one: it has no
-// platform pool). An error when the node group cannot be read: the
-// placements are then not known.
-func (s *Reconciler) livePlacement(ctx context.Context, row *model.Cluster, cluster *cloudv1alpha1.Cluster, namespace, nodeGroup string, installed bool) (*placements, error) {
+// nil for a cluster whose placement is its own (an imported one). An error
+// when the node group cannot be read: the placement is then not known.
+func (s *Reconciler) livePlacement(ctx context.Context, cluster *cloudv1alpha1.Cluster, namespace, nodeGroup string, installed bool) (*component.Placement, error) {
 	if cluster.Spec.ImportFrom != nil {
 		return nil, nil
 	}
@@ -46,12 +37,7 @@ func (s *Reconciler) livePlacement(ctx context.Context, row *model.Cluster, clus
 	if err != nil {
 		return nil, err
 	}
-	out := &placements{system: system, platform: system}
-	if platformNodeGroupReady(row) {
-		out.platform = component.Placement{Labels: crossplaneaws.PoolLabels(crossplaneaws.PoolPlatform),
-			Taints: []crossplaneaws.TaintPlan{crossplaneaws.PoolTaint(crossplaneaws.PoolPlatform)}}
-	}
-	return out, nil
+	return &system, nil
 }
 
 func (s *Reconciler) systemPlacement(ctx context.Context, cluster *cloudv1alpha1.Cluster, namespace, nodeGroup string, installed bool) (component.Placement, error) {

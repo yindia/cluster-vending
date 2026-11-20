@@ -12,7 +12,7 @@ import (
 func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 	old := clusterPlan().NodePool // a tenant-chosen pool: other taints, scaling 1..3
 
-	got := crossplaneaws.FixedSystemNodePool(old)
+	got := crossplaneaws.FixedSystemNodePool(old, 5)
 
 	if !reflect.DeepEqual(got.Labels, map[string]string{"node.cluster-vending.io/pool": "system"}) {
 		t.Errorf("labels = %v", got.Labels)
@@ -20,8 +20,16 @@ func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 	if want := []crossplaneaws.TaintPlan{{Key: "node.cluster-vending.io/pool", Value: "system", Effect: "NO_SCHEDULE"}}; !reflect.DeepEqual(got.Taints, want) {
 		t.Errorf("taints = %v, want %v", got.Taints, want)
 	}
-	if got.MinSize != 2 || got.MaxSize != 2 || got.Desired != 2 {
-		t.Errorf("size = %d/%d/%d, want 2/2/2", got.MinSize, got.MaxSize, got.Desired)
+	if got.MinSize != 5 || got.MaxSize != 5 || got.Desired != 5 {
+		t.Errorf("size = %d/%d/%d, want 5/5/5", got.MinSize, got.MaxSize, got.Desired)
+	}
+	for _, size := range []int{0, 1, -3} {
+		if p := crossplaneaws.FixedSystemNodePool(old, size); p.MinSize != 2 || p.MaxSize != 2 || p.Desired != 2 {
+			t.Errorf("size %d gave %d/%d/%d, want the default 2", size, p.MinSize, p.MaxSize, p.Desired)
+		}
+	}
+	if p := crossplaneaws.FixedSystemNodePool(old, 2); p.Desired != 2 {
+		t.Errorf("the minimum, 2, was refused: %d", p.Desired)
 	}
 	if len(old.Taints) != 1 || old.Taints[0].Key != "gpu" || old.MaxSize != 3 {
 		t.Error("the input plan was changed")
@@ -34,7 +42,7 @@ func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 func TestFixingTheSystemPoolDoesNotReplaceTheNodeGroup(t *testing.T) {
 	before := clusterPlan()
 	after := before
-	after.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool)
+	after.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 2)
 
 	if a, b := crossplaneaws.ReplacementNodeGroupName(before.Prefix, before.NodePool), crossplaneaws.ReplacementNodeGroupName(after.Prefix, after.NodePool); a != b {
 		t.Errorf("replacement name changed: %s -> %s", a, b)
@@ -61,11 +69,11 @@ func TestFixingTheSystemPoolDoesNotReplaceTheNodeGroup(t *testing.T) {
 }
 
 func TestPoolPlacement(t *testing.T) {
-	if got := crossplaneaws.PoolLabels("platform"); !reflect.DeepEqual(got, map[string]string{"node.cluster-vending.io/pool": "platform"}) {
+	if got := crossplaneaws.PoolLabels("system"); !reflect.DeepEqual(got, map[string]string{"node.cluster-vending.io/pool": "system"}) {
 		t.Errorf("labels = %v", got)
 	}
-	want := []map[string]any{{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "platform", "effect": "NoSchedule"}}
-	if got := crossplaneaws.PoolTolerations("platform"); !reflect.DeepEqual(got, want) {
+	want := []map[string]any{{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}}
+	if got := crossplaneaws.PoolTolerations("system"); !reflect.DeepEqual(got, want) {
 		t.Errorf("tolerations = %v, want %v", got, want)
 	}
 }

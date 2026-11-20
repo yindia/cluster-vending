@@ -79,11 +79,24 @@ spec:
         # install rules in ../rbac/platform_role.yaml can go).
         - name: CV_INSTALL_PROVIDERS
           value: "true"
-        # Machines node groups may use: the platform node group takes these
-        # families; the API server (config/server) refuses user groups
-        # outside them. Keep both the same. Empty: no restriction.
+        # The node group layout (nodeGroups in a config file, --config /
+        # CV_CONFIG, is the same thing; docs/controller.md). The API server
+        # (config/server) must have the same values. The system node group
+        # runs Karpenter, CoreDNS and every platform component at a fixed
+        # size; instance type and capacity type apply to new clusters only.
+        - name: CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE
+          value: "t3.medium"
+        - name: CV_SYSTEM_NODE_GROUP_SIZE
+          value: "2"
+        # What users may create as their own (Karpenter) node groups: the
+        # families the API server allows ("none": no restriction), and what a
+        # group that sets none gets.
         - name: CV_NODE_GROUP_INSTANCE_FAMILIES
-          value: "m7i,m7a,m7g,c7i,c7a,c7g,r7i,r7a,r7g"
+          value: "t3"
+        - name: CV_NODE_GROUP_DEFAULT_ARCHITECTURES
+          value: "AMD64"
+        - name: CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES
+          value: "ON_DEMAND"
         # No AWS keys here, ever: the controller's own AWS credentials are
         # its service account's IAM role (IRSA, see ../default), and every
         # lookup assumes the tenant role of the account it reads.

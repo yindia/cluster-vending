@@ -153,6 +153,9 @@ func (s *Reconciler) Base(row *model.Cluster, a *model.CloudAccount) crossplanea
 		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: row.TenantID, AccountID: a.AccountID,
 		ClusterID: row.ID, ClusterName: row.Name, Prefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
 		Tags: row.Labels, Adoption: Adoption(row),
+		// The admin's size of the default (system) node group: it applies
+		// to every cluster, in place.
+		SystemPoolSize: s.deps.NodeGroups.System.Size,
 	}
 }
 

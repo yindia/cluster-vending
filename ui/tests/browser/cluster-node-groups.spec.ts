@@ -12,7 +12,7 @@ const initialGroups = (): Group[] => [
   { name: "fresh", instanceFamilies: ["c7g"], architectures: ["ARCHITECTURE_ARM64"], capacityTypes: ["CAPACITY_TYPE_ON_DEMAND"] },
 ];
 const nodeGroupStatus = [
-  { name: "platform", platformManaged: true, phase: "NODE_GROUP_PHASE_READY", message: "", nodes: 2 },
+  { name: "system", platformManaged: true, phase: "NODE_GROUP_PHASE_READY", message: "", nodes: 2 },
   { name: "batch", phase: "NODE_GROUP_PHASE_READY", message: "", nodes: 4 },
   { name: "gpu", phase: "NODE_GROUP_PHASE_FAILED", message: "No GPU capacity in the selected zones", nodes: 0 },
 ];
@@ -28,14 +28,14 @@ async function mock(page: Page, options: Options = {}) {
   const network = { id: networkId, tenantId: "acme", name: "production", spec: { region: "us-west-2", tier: "TIER_1" } };
   const cluster = () => ({
     id: clusterId, tenantId: "acme", name: "production", etag: `etag-${revision}`, generation: String(revision),
-    spec: { region: "us-west-2", network: { networkId }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 2, maxSize: 2 } }, nodeGroups: groups, aws: {} },
+    spec: { region: "us-west-2", network: { networkId }, defaultNodePool: { instanceTypes: ["t3.large"], capacityType: "CAPACITY_TYPE_ON_DEMAND", scalingConfig: { minSize: 2, maxSize: 2 } }, nodeGroups: groups, aws: {} },
     status: { state: "CLUSTER_STATE_RUNNING", observedGeneration: String(revision), nodeGroups: options.emptyStatus ? [] : [...nodeGroupStatus.filter(item => item.platformManaged || groups.some(group => group.name === item.name)), ...deleting.map(name => ({ name, phase: "NODE_GROUP_PHASE_DELETING", message: "Karpenter is draining the nodes", nodes: 1 }))] },
   });
-  // What the server renders: the platform group first, then each user group; YAML text is opaque to the UI.
-  const manifests = () => options.imported ? [] : [{ name: "platform", platformManaged: true }, ...groups.map(group => ({ name: group.name, platformManaged: false }))].map(item => ({
+  // What the server renders: the system group first (platform managed, an EKS node group: no YAML), then each user group; YAML text is opaque to the UI.
+  const manifests = () => options.imported ? [] : [{ name: "system", platformManaged: true }, ...groups.map(group => ({ name: group.name, platformManaged: false }))].map(item => item.platformManaged ? item : ({
     ...item,
     ec2NodeClassYaml: `apiVersion: karpenter.k8s.aws/v1\nkind: EC2NodeClass\nmetadata:\n  name: ${item.name}\nspec:\n  role: production-karpenter-node\n`,
-    nodePoolYaml: `apiVersion: karpenter.sh/v1\nkind: NodePool\nmetadata:\n  name: ${item.name}\nspec:\n  limits:\n    cpu: "${item.platformManaged ? 1000 : 64}"\n`,
+    nodePoolYaml: `apiVersion: karpenter.sh/v1\nkind: NodePool\nmetadata:\n  name: ${item.name}\nspec:\n  limits:\n    cpu: "64"\n`,
   }));
   await page.route("**/api/rpc/**", async route => {
     const method = new URL(route.request().url()).pathname.split("/").at(-1)!;
@@ -90,13 +90,22 @@ async function addToken(dialog: Locator, label: string, value: string) {
 const alert = (dialog: Locator) => dialog.locator('[role="alert"][tabindex="-1"]');
 const text = (dialog: Locator, name: string) => dialog.getByRole("textbox", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( Required)?$`) });
 
-test("the platform group is read-only and user groups show their spec and observed status", async ({ page }) => {
+test("the system group is first and read-only, there is no platform row, and user groups show their spec and observed status", async ({ page }) => {
   const api = await mock(page), panel = await open(page);
   const table = panel.getByRole("table", { name: "Cluster node groups", exact: true });
-  await expect(table).toContainText("platform");
-  await expect(row(panel, "platform")).toContainText("Managed by platform");
-  await expect(row(panel, "platform")).toContainText("Ready");
-  await expect(panel.getByRole("button", { name: "Actions for node group platform", exact: true })).toHaveCount(0);
+  await expect(table).toContainText("system");
+  await expect(row(panel, "system")).toContainText("Managed by platform");
+  await expect(row(panel, "system")).toContainText("Ready");
+  await expect(row(panel, "system")).toContainText("Locked");
+  await expect(row(panel, "system")).toContainText("t3.large");
+  await expect(row(panel, "system")).toContainText("2 nodes (fixed)");
+  await expect(row(panel, "system")).toContainText("On-demand");
+  await expect(row(panel, "system").getByRole("link", { name: "Open node group system", exact: true })).toHaveAttribute("href", `/clusters/${clusterId}/node-groups/system`);
+  await expect(panel.getByRole("button", { name: "Actions for node group system", exact: true })).toHaveCount(0);
+  // The system group is an EKS node group, not Karpenter objects: no YAML to show for it.
+  await expect(panel.getByRole("button", { name: "View YAML for node group system", exact: true })).toHaveCount(0);
+  await expect(row(panel, "platform")).toHaveCount(0);
+  await expect(table.getByRole("row")).toHaveCount(5); // header, system, batch, gpu, fresh
   await expect(row(panel, "batch")).toContainText("On-demand");
   await expect(row(panel, "batch")).toContainText("m7i family");
   await expect(row(panel, "batch")).toContainText("dedicated=batch:NoSchedule");
@@ -255,11 +264,11 @@ test("client validation mirrors the server and blocks the plan request", async (
 });
 
 test("a server rejection of the plan is shown and nothing is applied", async ({ page }) => {
-  const api = await mock(page, { failPreview: "the platform node group is not Ready" }), panel = await open(page);
+  const api = await mock(page, { failPreview: "Karpenter is not Ready yet" }), panel = await open(page);
   await openAction(page, panel, "fresh", "Remove");
   const dialog = page.getByRole("dialog", { name: "Remove node group fresh", exact: true });
   await dialog.getByRole("button", { name: "Preview plan", exact: true }).click();
-  await expect(alert(dialog)).toContainText("the platform node group is not Ready");
+  await expect(alert(dialog)).toContainText("Karpenter is not Ready yet");
   await expect(dialog.getByRole("heading", { name: "Remove", exact: true })).toBeVisible();
   expect(api.updates().every(call => call.body.validateOnly === true)).toBe(true);
 });
@@ -275,7 +284,7 @@ test("the default node pool edit shows platform-managed fields read-only and sen
   await expect(text(dialog, "Maximum nodes")).toHaveAttribute("readonly", "");
   await expect(dialog).toContainText("Managed by the platform");
   await dialog.getByRole("button", { name: "Node labels and taints", exact: true }).click();
-  await expect(dialog).toContainText("runs Karpenter only");
+  await expect(dialog).toContainText("runs Karpenter and the platform");
   await expect(dialog.getByRole("button", { name: "Add node label", exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Add node taint", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
@@ -301,33 +310,34 @@ test("a narrow viewport keeps the node groups table and dialog free of horizonta
   await page.screenshot({ path: "test-results/node-groups-narrow-dialog.png" });
 });
 
-test("the platform row is always shown, Pending until Karpenter reports it, even with an empty node group status", async ({ page }) => {
+test("the system row is always shown, Pending until the controller reports it, even with an empty node group status", async ({ page }) => {
   const api = await mock(page, { emptyStatus: true }), panel = await open(page);
-  await expect(row(panel, "platform")).toContainText("Managed by platform");
-  await expect(row(panel, "platform")).toContainText("Pending — waiting for Karpenter");
-  await expect(panel.getByRole("button", { name: "Actions for node group platform", exact: true })).toHaveCount(0);
+  await expect(row(panel, "system")).toContainText("Managed by platform");
+  await expect(row(panel, "system")).toContainText("Pending — waiting for the controller");
+  await expect(panel.getByRole("button", { name: "Actions for node group system", exact: true })).toHaveCount(0);
+  await expect(row(panel, "platform")).toHaveCount(0);
   await expect(row(panel, "batch")).toContainText("Pending");
   expect(api.calls.some(call => call.method === "ListClusterNodeGroupManifests" && (call.body as unknown as { clusterId: string }).clusterId === clusterId)).toBe(true);
   expect(api.unexpected).toEqual([]);
 });
 
-test("an imported cluster has no platform node group row", async ({ page }) => {
+test("an imported cluster has no system node group row", async ({ page }) => {
   await mock(page, { emptyStatus: true, imported: true });
   const panel = await open(page);
   await expect(row(panel, "batch")).toBeVisible();
-  await expect(row(panel, "platform")).toHaveCount(0);
-  await expect(panel.getByRole("button", { name: "View YAML for node group platform", exact: true })).toHaveCount(0);
+  await expect(row(panel, "system")).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "View YAML for node group system", exact: true })).toHaveCount(0);
 });
 
-test("View YAML shows the EC2NodeClass and the NodePool of the platform and of a user group, with copy", async ({ page }) => {
+test("View YAML shows the EC2NodeClass and the NodePool of a user group, with copy", async ({ page }) => {
   const api = await mock(page), panel = await open(page);
-  await panel.getByRole("button", { name: "View YAML for node group platform", exact: true }).click();
-  let dialog = page.getByRole("dialog", { name: "Node group platform YAML", exact: true });
+  await panel.getByRole("button", { name: "View YAML for node group batch", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Node group batch YAML", exact: true });
   await expect(dialog.getByRole("textbox", { name: "EC2NodeClass YAML", exact: true })).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: "NodePool YAML", exact: true })).toBeVisible();
   await expect(dialog).toContainText("kind: EC2NodeClass");
   await expect(dialog).toContainText("kind: NodePool");
-  await expect(dialog).toContainText("name: platform");
+  await expect(dialog).toContainText("name: batch");
   await expect(dialog.getByRole("button", { name: "Copy EC2NodeClass YAML", exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Copy NodePool YAML", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Close YAML", exact: true }).click();
@@ -339,33 +349,33 @@ test("View YAML shows the EC2NodeClass and the NodePool of the platform and of a
 });
 
 test("the platform allow-list suggests families and types and is checked before the plan; the server stays the authority", async ({ page }) => {
-  const api = await mock(page, { allow: { instanceFamilies: ["m7i", "c7i"], instanceTypes: ["r7i.large"] } }), panel = await open(page);
+  const api = await mock(page, { allow: { instanceFamilies: ["t3", "t3a"], instanceTypes: ["t4g.large"] } }), panel = await open(page);
   await panel.getByRole("button", { name: "Add node group", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Add node group", exact: true });
-  await expect(dialog).toContainText("Allowed: m7i, c7i");
+  await expect(dialog).toContainText("Allowed: t3, t3a");
   await text(dialog, "Name").fill("web");
   // Suggestions come from the allow-list.
   await dialog.getByRole("combobox", { name: "Instance families", exact: true }).click();
-  await expect(page.getByRole("option", { name: "c7i", exact: true })).toBeVisible();
-  await expect(page.getByRole("option", { name: "m7i", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "t3a", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "t3", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await dialog.getByRole("combobox", { name: "Instance types", exact: true }).click();
-  await expect(page.getByRole("option", { name: "r7i.large", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "t4g.large", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   // A family outside it is refused with the allowed list, and nothing is sent.
   await addToken(dialog, "Instance families", "p5");
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(alert(dialog)).toContainText('Instance family "p5" is not allowed');
-  await expect(alert(dialog)).toContainText("m7i, c7i");
+  await expect(alert(dialog)).toContainText("t3, t3a");
   expect(api.updates()).toHaveLength(0);
   // A type outside both lists is refused too.
   await dialog.getByRole("button", { name: /^Remove p5/ }).click();
-  await addToken(dialog, "Instance families", "m7i");
+  await addToken(dialog, "Instance families", "t3");
   await addToken(dialog, "Instance types", "x2idn.16xlarge");
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(alert(dialog)).toContainText('Instance type "x2idn.16xlarge" is not allowed');
   await dialog.getByRole("button", { name: /^Remove x2idn/ }).click();
-  await addToken(dialog, "Instance types", "r7i.large");
+  await addToken(dialog, "Instance types", "t4g.large");
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Scheduling", exact: true })).toBeVisible();
   expect(api.unexpected).toEqual([]);

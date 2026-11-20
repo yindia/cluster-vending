@@ -94,44 +94,46 @@ spec:
 
     admissionController:
       # Serves every admission webhook call; all replicas serve requests.
-      # Kyverno's HA minimum for the admission controller is 3. Allowed: 3 to 7.
-      replicas: 3
+      # One replica: the system group is 2 x t3.medium (docs/catalog.md,
+      # "Sizing the system group"), where only Karpenter is kept highly
+      # available. Raise to 3 (Kyverno's HA minimum) on a larger group.
+      replicas: 1
       container:
         resources:
           limits:
             memory: "384Mi"
           requests:
-            cpu: "100m"
+            cpu: "75m"
             memory: "128Mi"
 
     backgroundController:
       # Generate and mutate-existing rules. Leader elected: extra replicas are standby only.
-      # Allowed: 2 or 3.
-      replicas: 2
+      # One replica (system group sizing); 2 or 3 for HA.
+      replicas: 1
       resources:
         limits:
           memory: "128Mi"
         requests:
-          cpu: "100m"
+          cpu: "50m"
           memory: "64Mi"
 
     cleanupController:
-      # DeletingPolicies and TTL cleanup. Allowed: 2 or 3.
-      replicas: 2
+      # DeletingPolicies and TTL cleanup. One replica (system group sizing); 2 or 3 for HA.
+      replicas: 1
       resources:
         limits:
           memory: "128Mi"
         requests:
-          cpu: "100m"
+          cpu: "50m"
           memory: "64Mi"
 
     reportsController:
-      # Policy reports. Leader elected: extra replicas are standby only. Allowed: 2 or 3.
+      # Policy reports. Leader elected: extra replicas are standby only. One replica (system group sizing); 2 or 3 for HA.
       # Raise memory on clusters with many resources or policies.
-      replicas: 2
+      replicas: 1
       resources:
         limits:
           memory: "128Mi"
         requests:
-          cpu: "100m"
+          cpu: "50m"
           memory: "64Mi"

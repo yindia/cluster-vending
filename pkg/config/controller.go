@@ -64,7 +64,7 @@ const (
 // an operator who needs other values sets --install-providers=false and
 // manages the provider objects. The controller always brings resources to
 // this build's renderer.
-var controllerSettings = []Setting{
+var controllerSettings = withNodeGroupSettings([]Setting{
 	{Flag: FlagConfig, Env: EnvConfig,
 		Usage: "YAML file with any of these settings, keyed by flag name; flags and environment variables win over it"},
 	{Flag: FlagMetricsAddr, Env: EnvMetricsAddr, Default: DefaultMetricsAddr,
@@ -100,12 +100,10 @@ var controllerSettings = []Setting{
 	{Flag: FlagTeardownTimeout, Env: EnvTeardownTimeout, Default: DefaultTeardownTimeout.String(),
 		Usage: "how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted, before it goes on (what is left is reported), e.g. 30m"},
 	providerCredentialsSetting,
-	nodeGroupFamiliesSetting,
-	nodeGroupTypesSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
 	awsAccessSettings[0], awsAccessSettings[1], awsAccessSettings[2],
-}
+})
 
 // ControllerSettings returns the settings of the controller command.
 func ControllerSettings() []Setting { return slices.Clone(controllerSettings) }
@@ -145,9 +143,10 @@ type Controller struct {
 	UpgradeTimeout time.Duration
 	// TeardownTimeout bounds a cluster deletion's teardown.
 	TeardownTimeout time.Duration
-	// NodeGroups is the instance allowlist of node groups: user groups are
-	// checked by the server; the platform node group uses its families.
-	NodeGroups NodeGroupAllowlist
+	// NodeGroups is the node group layout (the server's too): the system
+	// group's size and, for new clusters, instance type; the user groups'
+	// defaults.
+	NodeGroups NodeGroups
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
@@ -169,7 +168,7 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	access, accessErrs := awsAccessFrom(v)
 	cfg.AWSAccess = access
 	errs = append(errs, accessErrs...)
-	allow, allowErrs := nodeGroupAllowlistFrom(v)
+	allow, allowErrs := nodeGroupsFrom(v)
 	cfg.NodeGroups = allow
 	errs = append(errs, allowErrs...)
 	cfg.AWS.StaticKeys = staticKeysFrom(env)

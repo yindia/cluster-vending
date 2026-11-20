@@ -204,7 +204,7 @@ function tierLabel(tier?: number) {
   return tier ? `Tier ${tier - 1} (from network)` : "Network default";
 }
 
-const platformManagedNote = "Managed by the platform: runs Karpenter only.";
+const platformManagedNote = "Managed by the platform: the system node group, which runs Karpenter and the platform's components.";
 
 interface FieldsProps {
   value: ClusterForm;
@@ -259,7 +259,7 @@ function ClusterFields({ value, onChange, disabled, creating, networkPicker, net
           {creating ? text("desiredSize", "Initial desired nodes") : <TextInput label="Initial desired nodes" value={value.desiredSize} isReadOnly autoComplete="off" />}
           {text("maxSize", "Maximum nodes", undefined, true, !creating)}
         </FormLayout>
-        {!creating && <Text type="supporting">Managed by the platform: the default node group runs Karpenter only. Add capacity for workloads with node groups.</Text>}
+        {!creating && <Text type="supporting">Managed by the platform: the default node group runs Karpenter and the platform&apos;s components. Add capacity for workloads with node groups.</Text>}
         {creating && <Text type="supporting">Leave the initial count empty to start at the minimum, or at 1 if the minimum is 0.</Text>}
       </VStack>
       <Selector label="Capacity" value={value.capacityType} isDisabled={disabled} onChange={(next) => onChange("capacityType", next)} options={[{ value: "0", label: "On demand · server default" }, { value: "1", label: "On demand" }, { value: "2", label: "Spot" }]} />

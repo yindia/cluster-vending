@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -24,16 +25,21 @@ func (s *ClusterService) GetNodeGroupOptions(_ context.Context, req *cloudv1.Get
 		return nil, err
 	}
 	return &cloudv1.GetNodeGroupOptionsResponse{
-		InstanceFamilies: slices.Clone(s.deps.NodeGroupInstanceFamilies),
-		InstanceTypes:    slices.Clone(s.deps.NodeGroupInstanceTypes),
+		InstanceFamilies: slices.Clone(s.deps.NodeGroups.Karpenter.InstanceFamilies),
+		InstanceTypes:    slices.Clone(s.deps.NodeGroups.Karpenter.InstanceTypes),
 		Architectures:    []cloudv1.Architecture{cloudv1.Architecture_ARCHITECTURE_AMD64, cloudv1.Architecture_ARCHITECTURE_ARM64},
 		CapacityTypes:    []cloudv1.CapacityType{cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND, cloudv1.CapacityType_CAPACITY_TYPE_SPOT},
 	}, nil
 }
 
 // ListClusterNodeGroupManifests renders the Karpenter objects of the
-// cluster's node groups with the function the controller applies them from
-// (reconcilecluster.NodeGroupObjects), as deterministic YAML.
+// cluster's user node groups with the function the controller applies them
+// from (reconcilecluster.NodeGroupObjects), as deterministic YAML. The first
+// entry is the system group (platform_managed; none for a cluster the platform
+// does not manage): the default EKS
+// managed node group is a managed resource of the management cluster, not
+// Karpenter objects, and the contract has no field for its YAML yet, so the
+// entry carries no YAML.
 func (s *ClusterService) ListClusterNodeGroupManifests(ctx context.Context, req *cloudv1.ListClusterNodeGroupManifestsRequest) (_ *cloudv1.ListClusterNodeGroupManifestsResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -49,6 +55,9 @@ func (s *ClusterService) ListClusterNodeGroupManifests(ctx context.Context, req 
 		return nil, connect.NewError(connect.CodeFailedPrecondition, "cannot render the node groups: "+err.Error())
 	}
 	out := &cloudv1.ListClusterNodeGroupManifestsResponse{}
+	if reconcilecluster.PlatformManaged(row) {
+		out.NodeGroups = append(out.NodeGroups, &cloudv1.NodeGroupManifest{Name: systemNodeGroup, PlatformManaged: true})
+	}
 	byName := map[string]*cloudv1.NodeGroupManifest{}
 	for _, o := range objs {
 		raw, err := yaml.Marshal(o.Object)
@@ -57,7 +66,7 @@ func (s *ClusterService) ListClusterNodeGroupManifests(ctx context.Context, req 
 		}
 		m := byName[o.GetName()]
 		if m == nil {
-			m = &cloudv1.NodeGroupManifest{Name: o.GetName(), PlatformManaged: o.GetName() == platformGroupName}
+			m = &cloudv1.NodeGroupManifest{Name: o.GetName()}
 			byName[o.GetName()] = m
 			out.NodeGroups = append(out.NodeGroups, m)
 		}
@@ -69,9 +78,6 @@ func (s *ClusterService) ListClusterNodeGroupManifests(ctx context.Context, req 
 	}
 	return out, nil
 }
-
-// platformGroupName is the name of the platform's own node group.
-const platformGroupName = "platform"
 
 // checkNodeGroupAllowlist refuses the groups of want that ask for machines
 // outside the platform admin's allowlist. Groups equal to one in have (the

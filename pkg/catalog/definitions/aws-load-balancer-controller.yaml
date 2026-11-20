@@ -303,14 +303,15 @@ spec:
       allowAllSecrets: false
     # Fixed by the platform at the researched defaults.
     # Controller pods. Only one is the active leader; the others are hot standbys
-    # that also serve the admission webhooks. Keep at least 2.
-    replicaCount: 2
+    # that also serve the admission webhooks. One here (system group sizing,
+    # docs/catalog.md); 2 for HA on a larger group.
+    replicaCount: 1
 
     # Pod resources.
     resources:
       requests:
-        cpu: "100m"
-        memory: "128Mi"
+        cpu: "50m"
+        memory: "64Mi"
       limits:
         memory: "256Mi"
 

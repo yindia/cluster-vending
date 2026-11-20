@@ -16,7 +16,8 @@ import (
 //  1. load balancers in the workload cluster
 //  2. tenant components, a component after those that require it
 //  3. platform components above sequence 0, highest sequence first
-//  4. the Karpenter node groups: user pools, platform pool, node classes
+//  4. the Karpenter node groups: node pools (the users', and an old platform
+//     pool of a cluster built before the system group), node claims, node classes
 //  5. Karpenter: its chart, its IAM, its queue, rules and node role
 //  6. the EKS add-ons with their pod identity associations and roles
 //  7. the rest, ordered by their Usages: the default node group, the EKS

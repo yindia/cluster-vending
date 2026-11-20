@@ -87,8 +87,8 @@ func newServeCmd(g *globals) *cobra.Command {
 				// minor its release channel offers.
 				Releases: catalog,
 				Logger:   g.logger,
-				// The allowlist of user node groups' machines.
-				NodeGroupInstanceFamilies: cfg.NodeGroups.InstanceFamilies, NodeGroupInstanceTypes: cfg.NodeGroups.InstanceTypes,
+				// The node group layout: the allowlist of user groups, the system group.
+				NodeGroups: cfg.NodeGroups,
 			}
 			var ready atomic.Bool
 			done, err := management.Start(ctx, mgr, &ready)

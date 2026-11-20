@@ -29,3 +29,32 @@ provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
 # forbids assuming roles). Needs provider-credentials-secret.
 automatic-upgrades: true
 skip-tenant-role: true
+
+# The node group layout: the same section in the server's and the
+# controller's file, so they cannot drift (docs/controller.md). Flags and
+# CV_* variables win over single values.
+nodeGroups:
+  # The default EKS managed node group: runs Karpenter, CoreDNS, every
+  # platform component, the tenant's components and the EKS add-on
+  # controllers, tainted node.cluster-vending.io/pool=system:NoSchedule.
+  system:
+    # New clusters only; an existing cluster keeps its instance type (EKS
+    # cannot change it in place, the node group would be replaced).
+    instanceType: t3.medium
+    # Desired = min = max, no autoscaler; at least 2 (Karpenter runs two
+    # replicas with anti-affinity). Resizes existing clusters in place.
+    size: 2
+    # New clusters only: ON_DEMAND or SPOT.
+    capacityType: ON_DEMAND
+    # New clusters only, in GiB; 0: EKS's default.
+    diskSizeGiB: 0
+  # What users may create as their own node groups (Karpenter NodePools).
+  karpenter:
+    # Families (and, below, types) user groups may use; an empty list
+    # restricts nothing. t3 is x86 and burstable.
+    instanceFamilies: [t3]
+    instanceTypes: []
+    # Applied to a user group that leaves them unset.
+    defaults:
+      architectures: [AMD64]
+      capacityTypes: [ON_DEMAND]

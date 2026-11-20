@@ -15,18 +15,13 @@ import (
 type addonPlacement struct {
 	path               []string
 	defaultTolerations []map[string]any
-	// platform: the add-on's controller runs on the platform pool of a
-	// cluster with Karpenter node groups (ClusterPlan.Karpenter), not on
-	// the default group (docs/design/karpenter-node-groups.md).
-	platform bool
 }
 
 // addonPlacements are the add-ons whose controller pods are placed by the
-// platform: on the default node pool (its labels become their
-// nodeSelector, and they tolerate each of its taints), or, on a cluster
-// with Karpenter node groups, the EBS CSI controller on the platform pool
-// (its label and taint). With tainted pools the platform's pods then run
-// there and tenant workloads do not.
+// platform: on the default node pool, the system group (its labels become
+// their nodeSelector, and they tolerate each of its taints). With the
+// tainted system group the platform's pods run there and tenant workloads
+// do not.
 //
 // Only add-ons whose configuration schema (aws eks
 // describe-addon-configuration) is confirmed are listed; EKS refuses a
@@ -57,7 +52,7 @@ var addonPlacements = map[string]addonPlacement{
 		{"key": "CriticalAddonsOnly", "operator": "Exists"},
 		{"key": "node-role.kubernetes.io/control-plane", "effect": "NoSchedule"},
 	}},
-	AddonEBSCSI: {path: []string{"controller"}, platform: true, defaultTolerations: []map[string]any{
+	AddonEBSCSI: {path: []string{"controller"}, defaultTolerations: []map[string]any{
 		{"key": "CriticalAddonsOnly", "operator": "Exists"},
 		{"effect": "NoExecute", "operator": "Exists", "tolerationSeconds": 300},
 	}},
@@ -100,9 +95,6 @@ func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
 		return a.ConfigurationValues
 	}
 	labels, taints := pool.Labels, pool.Taints
-	if placement.platform && b.p.Karpenter {
-		labels, taints = PoolLabels(PoolPlatform), []TaintPlan{PoolTaint(PoolPlatform)}
-	}
 	if len(labels) == 0 && len(taints) == 0 {
 		return a.ConfigurationValues
 	}

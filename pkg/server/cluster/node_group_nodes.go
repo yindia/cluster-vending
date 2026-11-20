@@ -20,12 +20,9 @@ const (
 	maxNodesPageSize     = 500
 )
 
-// The default managed node group and the platform's own group exist on every
-// cluster; their status names are not in the spec.
-const (
-	systemNodeGroup   = "system"
-	platformNodeGroup = "platform"
-)
+// The default managed node group, the platform's only one, exists on every
+// cluster; its status name is not in the spec.
+const systemNodeGroup = "system"
 
 const (
 	noticeNodesNotCollected = "the node list has not been collected yet; the controller collects it while it reconciles the cluster's node groups"
@@ -100,7 +97,7 @@ func nodeGroupKnown(row *model.Cluster, name string) (bool, string) {
 			notice = g.GetNodesNotice()
 		}
 	}
-	known := name == systemNodeGroup || name == platformNodeGroup ||
+	known := name == systemNodeGroup ||
 		slices.ContainsFunc(cl.GetSpec().GetNodeGroups(), func(g *cloudv1.NodeGroupSpec) bool { return g.GetName() == name }) ||
 		slices.ContainsFunc(cl.GetStatus().GetNodeGroups(), func(g *cloudv1.NodeGroupStatus) bool { return g.GetName() == name })
 	return known, notice

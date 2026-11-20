@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
@@ -22,10 +21,6 @@ type teardownStage struct {
 
 func ofKinds(kinds ...string) func(reconcile.WorkloadObject) bool {
 	return func(o reconcile.WorkloadObject) bool { return slices.Contains(kinds, o.Kind) }
-}
-
-func isPlatformPool(o reconcile.WorkloadObject) bool {
-	return o.Kind == reconcile.KindNodePool && o.Name == crossplaneaws.PoolPlatform
 }
 
 // loadBalancerStages are the first thing a deletion removes in the workload
@@ -44,21 +39,17 @@ var loadBalancerStages = []teardownStage{{
 }}
 
 // nodeGroupStages are the Karpenter node groups, removed after the platform
-// components above Karpenter are gone: the user node pools, then the
-// platform node pool, then whatever NodeClaims Karpenter has left to
-// terminate, then the node classes (their instance profiles and launch
-// templates), which Karpenter keeps while nodes use them. A pool is removed
-// by Karpenter once its nodes are terminated, so a pool that is gone has no
-// nodes.
+// components above Karpenter are gone: the node pools (the users', and the
+// old platform pool's of a cluster built before the system group took over),
+// then whatever NodeClaims Karpenter has left to terminate, then the node
+// classes (their instance profiles and launch templates), which Karpenter
+// keeps while nodes use them. A pool is removed by Karpenter once its nodes
+// are terminated, so a pool that is gone has no nodes. The system node group
+// is not Karpenter's: the cluster's own deletion removes it.
 var nodeGroupStages = []teardownStage{
-	{match: func(o reconcile.WorkloadObject) bool { return o.Kind == reconcile.KindNodePool && !isPlatformPool(o) },
-		order: []string{reconcile.KindNodePool},
+	{match: ofKinds(reconcile.KindNodePool), order: []string{reconcile.KindNodePool},
 		message: func(objs []reconcile.WorkloadObject) string {
-			return "deleting the user node pools and waiting for Karpenter to terminate their nodes (" + listOf(objs) + ")"
-		}},
-	{match: isPlatformPool, order: []string{reconcile.KindNodePool},
-		message: func(objs []reconcile.WorkloadObject) string {
-			return "deleting the platform node pool and waiting for Karpenter to terminate its nodes (" + listOf(objs) + ")"
+			return "deleting the node pools and waiting for Karpenter to terminate their nodes (" + listOf(objs) + ")"
 		}},
 	{match: ofKinds(reconcile.KindNodeClaim), order: []string{reconcile.KindNodeClaim},
 		message: func(objs []reconcile.WorkloadObject) string {

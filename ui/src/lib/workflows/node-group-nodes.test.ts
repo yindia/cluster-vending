@@ -110,11 +110,10 @@ test("collection state: never collected, collected, incomplete, with notices", (
   assert.equal(unreadable.incomplete, false);
 });
 
-test("a group's detail: user groups show their spec, platform groups say who manages them", () => {
+test("a group's detail: user groups show their spec, the system group says who manages it", () => {
   const cluster = create(ClusterSchema, {
-    id: "c1", spec: { nodeGroups: [create(NodeGroupSpecSchema, { name: "gpu", instanceFamilies: ["g5"], capacityTypes: [CapacityType.SPOT] })], defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 2, maxSize: 2 } } },
+    id: "c1", spec: { nodeGroups: [create(NodeGroupSpecSchema, { name: "gpu", instanceFamilies: ["g5"], capacityTypes: [CapacityType.SPOT] })], defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 2, maxSize: 2 } } },
     status: { nodeGroups: [
-      create(NodeGroupStatusSchema, { name: "platform", platformManaged: true, phase: NodeGroupPhase.READY, nodes: 2 }),
       create(NodeGroupStatusSchema, { name: "gpu", phase: NodeGroupPhase.FAILED, message: "No GPU capacity", nodes: 0 }),
       create(NodeGroupStatusSchema, { name: "system", platformManaged: true, phase: NodeGroupPhase.READY, nodes: 2 }),
     ] },
@@ -126,22 +125,21 @@ test("a group's detail: user groups show their spec, platform groups say who man
   assert.equal(gpu.summary[0].value, "Spot");
   assert.equal(gpu.summary[1].value, "g5 family");
 
-  const platform = groupDetail(cluster, "platform");
-  assert.deepEqual([platform?.kind, platform?.platformManaged, platform?.phaseLabel, platform?.nodes], ["platform", true, "Ready", 2]);
-  assert.match(String(platform?.summary[0].value), /Karpenter/);
-
   const system = groupDetail(cluster, "system");
-  assert.deepEqual([system?.kind, system?.platformManaged], ["system", true]);
-  assert.equal(system?.summary.find(item => item.label === "Instance types")?.value, "m6i.large");
+  assert.deepEqual([system?.kind, system?.platformManaged, system?.phaseLabel, system?.nodes], ["system", true, "Ready", 2]);
+  assert.match(String(system?.summary[0].value), /Karpenter, CoreDNS/);
+  assert.match(String(system?.summary[0].value), /every platform component/);
+  assert.equal(system?.summary.find(item => item.label === "Instance types")?.value, "t3.large");
   assert.equal(system?.summary.find(item => item.label === "Size")?.value, "2 nodes (fixed)");
 
+  // "platform" is no node group any more: it is reserved, and unknown unless a status still says so.
+  assert.equal(groupDetail(cluster, "platform"), undefined);
   assert.equal(groupDetail(cluster, "ghost"), undefined);
 });
 
-test("system and platform exist before the controller reports them", () => {
-  const cluster = create(ClusterSchema, { id: "c1", spec: { defaultNodePool: { instanceTypes: ["t3.medium"], scalingConfig: { minSize: 1, maxSize: 3 } } } });
+test("system exists before the controller reports it", () => {
+  const cluster = create(ClusterSchema, { id: "c1", spec: { defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 1, maxSize: 3 } } } });
   const system = groupDetail(cluster, "system");
   assert.deepEqual([system?.phaseLabel, system?.tone, system?.nodes], ["Not reported", "neutral", undefined]);
   assert.equal(system?.summary.find(item => item.label === "Size")?.value, "1–3 nodes");
-  assert.equal(groupDetail(cluster, "platform")?.phaseLabel, "Pending");
 });

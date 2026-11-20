@@ -160,9 +160,9 @@ func (s *Reconciler) releaseNodeRoleUsages(ctx context.Context, c *clusterRemova
 // teardown timeout. A restart forgets it: the timeout then counts again.
 var nodeStageErrors sync.Map
 
-// deleteNodeGroups is stage 4: in the workload cluster, Karpenter's user
-// node pools are deleted, then the platform node pool, then what is left of
-// its NodeClaims is waited for, then its EC2NodeClasses are deleted (Karpenter
+// deleteNodeGroups is stage 4: in the workload cluster, Karpenter's
+// node pools (the users', and an old platform pool) are deleted, then what is
+// left of its NodeClaims is waited for, then its EC2NodeClasses are deleted (Karpenter
 // removes their instance profiles). Each waits until the one before is gone.
 // Nothing is deleted before the platform components above Karpenter are
 // gone, so nothing is scheduled onto the nodes being removed. Reads are

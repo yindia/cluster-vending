@@ -259,28 +259,22 @@ func TestPinValuesForPlatform(t *testing.T) {
 	}
 }
 
-// Every platform component above sequence 0 is held until the platform
-// node group is Ready; sequence 0 (Karpenter) is not.
-func TestPlanPlatformHoldsForThePlatformNodeGroup(t *testing.T) {
+// No component is held for a node group: components follow sequence and
+// requires only (PlatformComponentPlan.WaitsFor is for placeholders).
+func TestPlanPlatformDoesNotHoldForANodeGroup(t *testing.T) {
 	first, second := entry("karpenter"), entry("lb")
 	first.Sequence, second.Sequence = 0, 100
 	in := platformInput(first, second)
-	in.HoldForPlatformNodeGroup = true
 
 	plan, _ := component.PlanPlatform(in)
 
-	k, _ := named(plan, "karpenter")
-	lb, _ := named(plan, "lb")
-	if k.WaitsFor != "" {
-		t.Errorf("karpenter waits for %q", k.WaitsFor)
+	for _, name := range []string{"karpenter", "lb"} {
+		if c, _ := named(plan, name); c.WaitsFor != "" {
+			t.Errorf("%s waits for %q", name, c.WaitsFor)
+		}
 	}
-	if lb.WaitsFor != "the platform node group to be Ready" || lb.Sequence != 100 {
-		t.Errorf("lb waits for %q, sequence %d", lb.WaitsFor, lb.Sequence)
-	}
-	in.HoldForPlatformNodeGroup = false
-	plan, _ = component.PlanPlatform(in)
-	if lb, _ = named(plan, "lb"); lb.WaitsFor != "" {
-		t.Errorf("released lb waits for %q", lb.WaitsFor)
+	if lb, _ := named(plan, "lb"); lb.Sequence != 100 {
+		t.Errorf("lb sequence %d", lb.Sequence)
 	}
 }
 
@@ -323,26 +317,5 @@ func TestInstallOfReadsTheTimeout(t *testing.T) {
 	def.Spec.Install.Timeout = nil
 	if got, _ := component.InstallOf(def); got.Timeout != 0 {
 		t.Errorf("unset: %s", got.Timeout)
-	}
-}
-
-// Karpenter makes the platform node group, so it is never held for it,
-// whatever its definition's sequence says: a definition left at the
-// default (a catalog that was not synced, or edited) must not deadlock
-// the cluster (Karpenter waiting for the node group, the node group for
-// Karpenter).
-func TestPlanPlatformNeverHoldsKarpenter(t *testing.T) {
-	k, lb := entry(component.KarpenterComponent), entry("lb")
-	k.Sequence, lb.Sequence = 100, 100
-	in := platformInput(k, lb)
-	in.HoldForPlatformNodeGroup = true
-
-	plan, _ := component.PlanPlatform(in)
-
-	if got, _ := named(plan, component.KarpenterComponent); got.WaitsFor != "" {
-		t.Errorf("karpenter at sequence 100 waits for %q: the cluster would deadlock", got.WaitsFor)
-	}
-	if got, _ := named(plan, "lb"); got.WaitsFor != "the platform node group to be Ready" {
-		t.Errorf("lb waits for %q, want the platform node group", got.WaitsFor)
 	}
 }

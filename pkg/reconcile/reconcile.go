@@ -18,6 +18,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
+	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/results"
 
@@ -123,13 +124,13 @@ type Deps struct {
 	Teardowns Teardowns
 	// TeardownTimeout bounds that teardown; 0 is DefaultTeardownTimeout.
 	TeardownTimeout time.Duration
-	// NodeGroupInstanceFamilies and NodeGroupInstanceTypes are the platform
-	// admin's allowlist of node group machines (--node-group-instance-
-	// families, --node-group-instance-types); empty: no restriction. The
-	// API server refuses user groups outside it. The platform node group
-	// is the platform's own choice (crossplaneaws.PlatformInstanceFamilies)
-	// and ignores it. Set both to the same values.
-	NodeGroupInstanceFamilies, NodeGroupInstanceTypes []string
+	// NodeGroups is the platform admin's node group layout (the nodeGroups
+	// section of the config file, the same for the server and the
+	// controller): the system group's size and, for new clusters, its
+	// instance type, capacity type and disk; the allowlist (which the API
+	// server enforces on user groups) and the defaults of user groups. The
+	// zero value: the system defaults and no restriction.
+	NodeGroups config.NodeGroups
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool

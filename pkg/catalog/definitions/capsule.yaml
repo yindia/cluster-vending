@@ -72,7 +72,7 @@ spec:
       rbac:
         strict: true
       resources:
-        requests: {cpu: 100m, memory: 128Mi}
+        requests: {cpu: 50m, memory: 96Mi}
         limits: {memory: 512Mi}
       options:
         leaderElection:

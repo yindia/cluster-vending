@@ -13,15 +13,20 @@ var zonesAB = []string{"use1-az1", "use1-az2"}
 func assertSystemPool(t *testing.T, pool *cloudv1.NodePoolSpec) {
 	t.Helper()
 	sc := pool.GetScalingConfig()
-	if sc.GetMinSize() != 2 || sc.GetMaxSize() != 2 || sc.DesiredSize == nil || sc.GetDesiredSize() != 2 {
-		t.Errorf("scaling = %v, want 2/2/2", sc)
-	}
+	assertSystemSize(t, sc, 2)
 	if !reflect.DeepEqual(pool.GetLabels(), map[string]string{"node.cluster-vending.io/pool": "system"}) {
 		t.Errorf("labels = %v", pool.GetLabels())
 	}
 	if len(pool.GetTaints()) != 1 || pool.GetTaints()[0].GetKey() != "node.cluster-vending.io/pool" ||
 		pool.GetTaints()[0].GetValue() != "system" || pool.GetTaints()[0].GetEffect() != cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE {
 		t.Errorf("taints = %v", pool.GetTaints())
+	}
+}
+
+func assertSystemSize(t *testing.T, sc *cloudv1.ScalingConfig, size uint32) {
+	t.Helper()
+	if sc.GetMinSize() != size || sc.GetMaxSize() != size || sc.DesiredSize == nil || sc.GetDesiredSize() != size {
+		t.Errorf("scaling = %v, want %d/%d/%d", sc, size, size, size)
 	}
 }
 
@@ -79,7 +84,7 @@ func TestRenderPlanFixesTheDefaultNodeGroupOfAnExistingCluster(t *testing.T) {
 	plan := RenderPlan(spec, []string{"subnet-a"}, base)
 
 	want := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{InstanceTypes: []string{"m6i.large"}, CapacityType: "ON_DEMAND",
-		AMIType: "AL2023_x86_64_STANDARD"})
+		AMIType: "AL2023_x86_64_STANDARD"}, 2)
 	if !reflect.DeepEqual(plan.NodePool, want) {
 		t.Errorf("node pool = %+v\nwant %+v", plan.NodePool, want)
 	}
@@ -158,5 +163,93 @@ func TestExistingClustersKeepTheirStoredInstanceType(t *testing.T) {
 	old := crossplaneaws.NodePoolPlan{InstanceTypes: []string{"m6i.large"}, CapacityType: "ON_DEMAND", AMIType: "AL2023_x86_64_STANDARD"}
 	if crossplaneaws.ReplacementNodeGroupName("p", old) != crossplaneaws.ReplacementNodeGroupName("p", plan.NodePool) {
 		t.Error("the node group would be replaced")
+	}
+}
+
+// The admin's settings apply to a new cluster: its instance type (unless
+// the request names one) and its size, which is stored too.
+func TestResolveSpecWithTheAdminsSystemNodeGroupSettings(t *testing.T) {
+	in := minimalSpec()
+	in.DefaultNodePool = nil
+
+	spec, err := ResolveSpecWith(in, zonesAB, SystemPool{Size: 5, InstanceType: "m7i.large"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"m7i.large"}) {
+		t.Errorf("instance types = %v, want the admin's", got)
+	}
+	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 5)
+
+	named := minimalSpec()
+	named.DefaultNodePool.InstanceTypes = []string{"c7i.xlarge"}
+	spec, err = ResolveSpecWith(named, zonesAB, SystemPool{Size: 4, InstanceType: "m7i.large"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"c7i.xlarge"}) {
+		t.Errorf("the request's instance type was replaced: %v", got)
+	}
+
+	// Unset (or below the minimum): the defaults.
+	spec, err = ResolveSpecWith(in, zonesAB, SystemPool{Size: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 2)
+	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"t3.medium"}) {
+		t.Errorf("instance types = %v", got)
+	}
+}
+
+// A cluster created with the former layout stores t3.medium and a fixed 2:
+// the admin's size moves it in place (the render takes the plan's size), its
+// instance type, capacity and AMI stay, so the node group keeps its name and
+// is not replaced, and a changed instance type default never reaches it.
+func TestSystemNodeGroupSizeChangesInPlaceOnAnExistingCluster(t *testing.T) {
+	stored := minimalSpec()
+	stored.DefaultNodePool.InstanceTypes = []string{"t3.medium"}
+	stored.DefaultNodePool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 2, DesiredSize: ptrUint32(2)}
+	spec := mustResolveWithout(t, stored)
+	base := crossplaneawsBase()
+	before := RenderPlan(spec, []string{"subnet-a"}, base)
+	base.SystemPoolSize = 4
+
+	after := RenderPlan(spec, []string{"subnet-a"}, base)
+
+	if before.NodePool.MinSize != 2 || after.NodePool.MinSize != 4 || after.NodePool.MaxSize != 4 || after.NodePool.Desired != 4 {
+		t.Errorf("sizes before %+v after %+v, want the plan's size (default 2, then 4)", before.NodePool, after.NodePool)
+	}
+	if !reflect.DeepEqual(after.NodePool.InstanceTypes, []string{"t3.medium"}) || after.NodePool.CapacityType != "ON_DEMAND" || after.NodePool.AMIType != "AL2023_x86_64_STANDARD" {
+		t.Errorf("the stored node group settings changed: %+v", after.NodePool)
+	}
+	old := crossplaneaws.NodePoolPlan{InstanceTypes: []string{"t3.medium"}, CapacityType: "ON_DEMAND", AMIType: "AL2023_x86_64_STANDARD"}
+	if crossplaneaws.ReplacementNodeGroupName("p", old) != crossplaneaws.ReplacementNodeGroupName("p", after.NodePool) {
+		t.Error("a size change would replace the node group")
+	}
+}
+
+// The admin's capacity type and disk size are defaults of a new cluster's
+// system group too; the request wins.
+func TestResolveSpecWithSystemCapacityTypeAndDisk(t *testing.T) {
+	in := minimalSpec()
+	in.DefaultNodePool = nil
+	spec, err := ResolveSpecWith(in, zonesAB, SystemPool{CapacityType: "SPOT", DiskSizeGiB: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := spec.GetDefaultNodePool(); p.GetCapacityType() != cloudv1.CapacityType_CAPACITY_TYPE_SPOT || p.GetDiskSizeGb() != 50 {
+		t.Errorf("capacity %v disk %d", p.GetCapacityType(), p.GetDiskSizeGb())
+	}
+	named := minimalSpec()
+	named.DefaultNodePool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND
+	named.DefaultNodePool.DiskSizeGb = 80
+	spec, err = ResolveSpecWith(named, zonesAB, SystemPool{CapacityType: "SPOT", DiskSizeGiB: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := spec.GetDefaultNodePool(); p.GetCapacityType() != cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND || p.GetDiskSizeGb() != 80 {
+		t.Errorf("the request was replaced: %v %d", p.GetCapacityType(), p.GetDiskSizeGb())
 	}
 }

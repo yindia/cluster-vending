@@ -46,9 +46,10 @@ func reqValues(t *testing.T, pool *unstructured.Unstructured, key string) []stri
 	return nil
 }
 
-// The objects are the platform's class and pool, then each group's, a class
-// before its pool, every one labelled managed; the same input always gives
-// the same bytes.
+// The objects are each user group's class and pool, in the spec's order, a
+// class before its pool, every one labelled managed; the same input always
+// gives the same bytes. There is no platform group: the system node group
+// runs the platform.
 func TestKarpenterNodeGroupObjectsOrderAndDeterminism(t *testing.T) {
 	in := nodeGroupsInput(&cloudv1.NodeGroupSpec{Name: "gpu", InstanceFamilies: []string{"g5"}}, &cloudv1.NodeGroupSpec{Name: "batch"})
 
@@ -64,7 +65,7 @@ func TestKarpenterNodeGroupObjectsOrderAndDeterminism(t *testing.T) {
 			t.Errorf("%s is not labelled managed", o.GetName())
 		}
 	}
-	want := []string{"EC2NodeClass/platform", "NodePool/platform", "EC2NodeClass/gpu", "NodePool/gpu", "EC2NodeClass/batch", "NodePool/batch"}
+	want := []string{"EC2NodeClass/gpu", "NodePool/gpu", "EC2NodeClass/batch", "NodePool/batch"}
 	if !slices.Equal(order, want) {
 		t.Errorf("order %v, want %v", order, want)
 	}
@@ -91,26 +92,12 @@ func TestKarpenterNodeGroupObjectsRefuseBadNames(t *testing.T) {
 	}
 }
 
-// The platform pool is on-demand, amd64, tainted and labelled for the
-// platform's pods, with generous limits.
-func TestRenderPlatformNodePool(t *testing.T) {
-	objs, _ := crossplaneaws.KarpenterNodeGroupObjects(nodeGroupsInput())
-	pool := objectNamed(t, objs, "NodePool", "platform")
-
-	labels, _, _ := unstructured.NestedMap(pool.Object, "spec", "template", "metadata", "labels")
-	taints, _, _ := unstructured.NestedSlice(pool.Object, "spec", "template", "spec", "taints")
-	if labels["node.cluster-vending.io/pool"] != "platform" || len(taints) != 1 ||
-		taints[0].(map[string]any)["key"] != "node.cluster-vending.io/pool" || taints[0].(map[string]any)["effect"] != "NoSchedule" {
-		t.Errorf("labels %v taints %v", labels, taints)
-	}
-	if got := reqValues(t, pool, "karpenter.sh/capacity-type"); !slices.Equal(got, []string{"on-demand"}) {
-		t.Errorf("capacity types %v", got)
-	}
-	if cpu, _, _ := unstructured.NestedString(pool.Object, "spec", "limits", "cpu"); cpu == "" {
-		t.Error("no limits")
-	}
-	if ref, _, _ := unstructured.NestedString(pool.Object, "spec", "template", "spec", "nodeClassRef", "name"); ref != "platform" {
-		t.Errorf("nodeClassRef %q", ref)
+// A cluster with no user node group applies nothing: no platform pool or
+// class is rendered.
+func TestNoUserNodeGroupsRenderNothing(t *testing.T) {
+	objs, err := crossplaneaws.KarpenterNodeGroupObjects(nodeGroupsInput())
+	if err != nil || len(objs) != 0 {
+		t.Errorf("objects %v, err %v", objs, err)
 	}
 }
 
@@ -160,12 +147,12 @@ func TestRenderUserNodePool(t *testing.T) {
 	}
 }
 
-// The node class follows the platform's values: role, AMI pin, selectors
+// A node class follows the platform's values: role, AMI pin, selectors
 // by discovery tag or, where another cluster holds it, the cluster tag.
 func TestRenderNodeClass(t *testing.T) {
-	in := nodeGroupsInput()
+	in := nodeGroupsInput(&cloudv1.NodeGroupSpec{Name: "batch"})
 	objs, _ := crossplaneaws.KarpenterNodeGroupObjects(in)
-	class := objectNamed(t, objs, "EC2NodeClass", "platform")
+	class := objectNamed(t, objs, "EC2NodeClass", "batch")
 
 	role, _, _ := unstructured.NestedString(class.Object, "spec", "role")
 	subnets, _, _ := unstructured.NestedSlice(class.Object, "spec", "subnetSelectorTerms")
@@ -174,11 +161,42 @@ func TestRenderNodeClass(t *testing.T) {
 	}
 	in.Discovery, in.AMIPin = false, ""
 	objs, _ = crossplaneaws.KarpenterNodeGroupObjects(in)
-	class = objectNamed(t, objs, "EC2NodeClass", "platform")
+	class = objectNamed(t, objs, "EC2NodeClass", "batch")
 	subnets, _, _ = unstructured.NestedSlice(class.Object, "spec", "subnetSelectorTerms")
 	terms, _, _ := unstructured.NestedSlice(class.Object, "spec", "amiSelectorTerms")
 	if !reflect.DeepEqual(subnets[0], map[string]any{"tags": map[string]any{"kubernetes.io/cluster/prod": "*"}}) ||
 		terms[0].(map[string]any)["alias"] != "al2023@latest" {
 		t.Errorf("fallback subnets %v ami %v", subnets, terms)
+	}
+}
+
+// A group that sets no architecture or capacity type gets the admin's
+// defaults (amd64 / on-demand when there are none); what it sets wins.
+func TestUserNodePoolAppliesTheAdminsDefaults(t *testing.T) {
+	in := nodeGroupsInput(&cloudv1.NodeGroupSpec{Name: "plain"},
+		&cloudv1.NodeGroupSpec{Name: "own", Architectures: []cloudv1.Architecture{cloudv1.Architecture_ARCHITECTURE_AMD64},
+			CapacityTypes: []cloudv1.CapacityType{cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND}})
+	in.DefaultArchitectures = []string{"ARM64", "AMD64"}
+	in.DefaultCapacityTypes = []string{"SPOT", "ON_DEMAND"}
+
+	objs, _ := crossplaneaws.KarpenterNodeGroupObjects(in)
+
+	plain, own := objectNamed(t, objs, "NodePool", "plain"), objectNamed(t, objs, "NodePool", "own")
+	if got := reqValues(t, plain, "kubernetes.io/arch"); !slices.Equal(got, []string{"amd64", "arm64"}) {
+		t.Errorf("default arch %v", got)
+	}
+	if got := reqValues(t, plain, "karpenter.sh/capacity-type"); !slices.Equal(got, []string{"on-demand", "spot"}) {
+		t.Errorf("default capacity %v", got)
+	}
+	if got := reqValues(t, own, "kubernetes.io/arch"); !slices.Equal(got, []string{"amd64"}) {
+		t.Errorf("own arch %v", got)
+	}
+	if got := reqValues(t, own, "karpenter.sh/capacity-type"); !slices.Equal(got, []string{"on-demand"}) {
+		t.Errorf("own capacity %v", got)
+	}
+	in.DefaultArchitectures, in.DefaultCapacityTypes = []string{"bogus"}, nil
+	objs, _ = crossplaneaws.KarpenterNodeGroupObjects(in)
+	if got := reqValues(t, objectNamed(t, objs, "NodePool", "plain"), "kubernetes.io/arch"); !slices.Equal(got, []string{"amd64"}) {
+		t.Errorf("invalid default arch %v", got)
 	}
 }

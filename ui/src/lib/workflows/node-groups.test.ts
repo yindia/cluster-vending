@@ -4,7 +4,7 @@ import { create, toJson, type MessageInitShape } from "@bufbuild/protobuf";
 import { ClusterSchema } from "../../gen/cloud/v1/cluster_pb";
 import { Architecture, NodeGroupPhase, NodeGroupSpecSchema, NodeGroupStatusSchema } from "../../gen/cloud/v1/node_group_pb";
 import { GetNodeGroupOptionsResponseSchema, NodeGroupManifestSchema } from "../../gen/cloud/v1/node_group_manifest_pb";
-import { CapacityType, TaintEffect } from "../../gen/cloud/v1/node_pool_pb";
+import { CapacityType, NodePoolSpecSchema, TaintEffect } from "../../gen/cloud/v1/node_pool_pb";
 import { clusterPlanApplicable } from "./clusters";
 import {
   MAX_NODE_GROUPS, applyNodeGroupChange, buildNodeGroupSpec, buildNodeGroupsUpdate, emptyNodeGroupForm, nodeGroupForm,
@@ -151,9 +151,9 @@ test("plans with NodePool changes are applicable through the shared cluster plan
 
 const status = (name: string, phase: NodeGroupPhase, extra = {}) => create(NodeGroupStatusSchema, { name, phase, ...extra });
 
-test("rows list the platform group first, then user groups, with spec-only groups pending", () => {
-  const rows = nodeGroupRows([spec("a"), spec("fresh")], [status("a", NodeGroupPhase.READY, { nodes: 3 }), status("platform", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })]);
-  assert.deepEqual(rows.map(row => row.name), ["platform", "a", "fresh"]);
+test("rows list the system group first, then user groups, with spec-only groups pending", () => {
+  const rows = nodeGroupRows([spec("a"), spec("fresh")], [status("a", NodeGroupPhase.READY, { nodes: 3 }), status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })]);
+  assert.deepEqual(rows.map(row => row.name), ["system", "a", "fresh"]);
   assert.equal(rows[0].platformManaged, true);
   assert.equal(rows[0].spec, undefined);
   assert.equal(rows[1].phaseLabel, "Ready"); assert.equal(rows[1].nodes, 3); assert.equal(rows[1].tone, "success");
@@ -162,37 +162,53 @@ test("rows list the platform group first, then user groups, with spec-only group
 });
 
 test("status-only user groups remain visible while deleting, and failed groups are flagged", () => {
-  const rows = nodeGroupRows([spec("bad")], [status("platform", NodeGroupPhase.READY, { platformManaged: true }), status("gone", NodeGroupPhase.DELETING, { message: "draining" }), status("bad", NodeGroupPhase.FAILED, { message: "no capacity" })]);
-  assert.deepEqual(rows.map(row => row.name), ["platform", "bad", "gone"]);
+  const rows = nodeGroupRows([spec("bad")], [status("system", NodeGroupPhase.READY, { platformManaged: true }), status("gone", NodeGroupPhase.DELETING, { message: "draining" }), status("bad", NodeGroupPhase.FAILED, { message: "no capacity" })]);
+  assert.deepEqual(rows.map(row => row.name), ["system", "bad", "gone"]);
   assert.equal(rows[1].tone, "error"); assert.equal(rows[1].message, "no capacity");
   assert.equal(rows[2].phaseLabel, "Deleting"); assert.equal(rows[2].spec, undefined); assert.equal(rows[2].editable, false);
   assert.equal(rows[1].editable, true); assert.equal(rows[0].editable, false);
 });
 
-test("the platform row is always there until the manifests say the platform manages no node groups", () => {
-  // Nothing reported and nothing known yet: the platform group is Pending, waiting for Karpenter.
+test("the system row is always there until the manifests say the platform manages no node groups", () => {
+  // Nothing reported and nothing known yet: the system group is Pending, waiting for the controller.
   const rows = nodeGroupRows([], []);
-  assert.deepEqual(rows.map(row => [row.name, row.platformManaged, row.phaseLabel, row.editable]), [["platform", true, "Pending", false]]);
-  assert.match(rows[0].message, /Pending — waiting for Karpenter/);
+  assert.deepEqual(rows.map(row => [row.name, row.platformManaged, row.phaseLabel, row.editable]), [["system", true, "Pending", false]]);
+  assert.match(rows[0].message, /Pending — waiting for the controller/);
   assert.equal(rows[0].observed, false);
   // Its phase comes from the status once there is one.
-  const ready = nodeGroupRows([], [status("platform", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })]);
+  const ready = nodeGroupRows([], [status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })]);
   assert.deepEqual([ready[0].phaseLabel, ready[0].nodes, ready[0].observed], ["Ready", 2, true]);
   // An imported cluster: the manifests are known and empty.
   assert.deepEqual(nodeGroupRows([], [], []), []);
   assert.deepEqual(nodeGroupRows([spec("a")], [], []).map(row => row.name), ["a"]);
 });
 
+test("a platform group an earlier controller recorded is not a row: the system group runs the platform", () => {
+  const rows = nodeGroupRows([spec("a")], [status("platform", NodeGroupPhase.READY, { platformManaged: true, nodes: 1 }), status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })]);
+  assert.deepEqual(rows.map(row => row.name), ["system", "a"]);
+});
+
+test("the system row carries the default node group's instance type, capacity and fixed size", () => {
+  const pool = create(NodePoolSpecSchema, { instanceTypes: ["t3.large"], capacityType: CapacityType.ON_DEMAND, scalingConfig: { minSize: 2, maxSize: 2 } });
+  const [system, user] = nodeGroupRows([spec("a")], [status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })], undefined, pool);
+  assert.deepEqual(system.system, { instanceTypes: "t3.large", capacity: "On-demand", size: "2 nodes (fixed)" });
+  assert.equal(user.system, undefined);
+  assert.equal(nodeGroupRows([], [], undefined, undefined)[0].system, undefined, "no default pool: no summary");
+  const spot = create(NodePoolSpecSchema, { instanceTypes: ["t3.large", "t3.xlarge"], capacityType: CapacityType.SPOT, scalingConfig: { minSize: 3, maxSize: 3 } });
+  assert.deepEqual(nodeGroupRows([], [], undefined, spot)[0].system, { instanceTypes: "t3.large, t3.xlarge", capacity: "Spot", size: "3 nodes (fixed)" });
+});
+
 const manifest = (name: string, platformManaged = false) => create(NodeGroupManifestSchema, { name, platformManaged, ec2NodeClassYaml: `kind: EC2NodeClass\nname: ${name}\n`, nodePoolYaml: `kind: NodePool\nname: ${name}\n` });
 
-test("manifests are merged into the rows by name, the platform group's included", () => {
-  const rows = nodeGroupRows([spec("a"), spec("b")], [status("a", NodeGroupPhase.READY)], [manifest("platform", true), manifest("a")]);
-  assert.deepEqual(rows.map(row => [row.name, row.manifest?.name]), [["platform", "platform"], ["a", "a"], ["b", undefined]]);
-  assert.match(rows[0].manifest!.nodePoolYaml, /kind: NodePool/);
-  // The platform row exists from the manifests alone, with the waiting message.
-  assert.equal(rows[0].phaseLabel, "Pending"); assert.match(rows[0].message, /waiting for Karpenter/);
+test("manifests are merged into the rows by name; the system group has none to show", () => {
+  const systemEntry = create(NodeGroupManifestSchema, { name: "system", platformManaged: true });
+  const rows = nodeGroupRows([spec("a"), spec("b")], [status("a", NodeGroupPhase.READY)], [systemEntry, manifest("a")]);
+  assert.deepEqual(rows.map(row => [row.name, row.manifest?.name]), [["system", undefined], ["a", "a"], ["b", undefined]]);
+  assert.match(rows[1].manifest!.nodePoolYaml, /kind: NodePool/);
+  // The system row exists from the manifests alone, with the waiting message.
+  assert.equal(rows[0].phaseLabel, "Pending"); assert.match(rows[0].message, /waiting for the controller/);
   // A deleting group has no manifest any more.
-  const deleting = nodeGroupRows([], [status("platform", NodeGroupPhase.READY, { platformManaged: true }), status("gone", NodeGroupPhase.DELETING)], [manifest("platform", true)]);
+  const deleting = nodeGroupRows([], [status("system", NodeGroupPhase.READY, { platformManaged: true }), status("gone", NodeGroupPhase.DELETING)], [systemEntry]);
   assert.equal(deleting.find(row => row.name === "gone")?.manifest, undefined);
 });
 
@@ -234,7 +250,7 @@ test("summaries describe capacity, instances, architectures, labels, taints and 
   assert.equal(summarizeNodeGroup(spec("c", { limits: { $typeName: "cloud.v1.NodeGroupLimits", memoryGib: 8 } })).limits, "8 GiB");
 });
 
-test("status reporting tolerates unknown phases, repeated names, an unreported platform group and a missing node count", () => {
+test("status reporting tolerates unknown phases, repeated names, an unreported system group and a missing node count", () => {
   const userRows = (rows: ReturnType<typeof nodeGroupRows>) => rows.filter(row => !row.platformManaged);
   const unknown = userRows(nodeGroupRows([spec("a")], [status("a", 99 as NodeGroupPhase, { message: "from a newer controller" })]));
   assert.equal(unknown[0].phaseLabel, "Unknown (99)"); assert.equal(unknown[0].tone, "neutral"); assert.equal(unknown[0].message, "from a newer controller");
@@ -243,9 +259,9 @@ test("status reporting tolerates unknown phases, repeated names, an unreported p
   assert.equal(unspecified[0].phaseLabel, "Not reported"); assert.equal(unspecified[0].observed, true);
   const repeated = userRows(nodeGroupRows([spec("a")], [status("a", NodeGroupPhase.READY, { nodes: 1 }), status("a", NodeGroupPhase.FAILED)]));
   assert.deepEqual(repeated.map(row => row.name), ["a"]);
-  const noPlatform = nodeGroupRows([spec("a")], []);
-  assert.deepEqual(noPlatform.map(row => [row.name, row.platformManaged, row.phaseLabel]), [["platform", true, "Pending"], ["a", false, "Pending"]]);
-  const specAlias = nodeGroupRows([spec("platform")], [status("platform", NodeGroupPhase.READY, { platformManaged: true })]);
+  const noSystem = nodeGroupRows([spec("a")], []);
+  assert.deepEqual(noSystem.map(row => [row.name, row.platformManaged, row.phaseLabel]), [["system", true, "Pending"], ["a", false, "Pending"]]);
+  const specAlias = nodeGroupRows([spec("system")], [status("system", NodeGroupPhase.READY, { platformManaged: true })]);
   assert.equal(specAlias.filter(row => row.platformManaged).length, 1);
   assert.equal(specAlias.find(row => row.platformManaged)?.editable, false);
 });

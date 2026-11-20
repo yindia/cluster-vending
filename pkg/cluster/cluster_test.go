@@ -95,7 +95,7 @@ func TestResolveSpecFillsDefaultsWithoutTouchingInput(t *testing.T) {
 		t.Errorf("plan defaults = %q %q %q", plan.AuthenticationMode, plan.NodePool.CapacityType, plan.NodePool.AMIType)
 	}
 	if plan.NodePool.Desired != 2 {
-		t.Errorf("desired = %d, want min_size 2", plan.NodePool.Desired)
+		t.Errorf("desired = %d, want the system node group's 2", plan.NodePool.Desired)
 	}
 }
 

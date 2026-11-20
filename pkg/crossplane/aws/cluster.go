@@ -122,10 +122,13 @@ type ClusterPlan struct {
 	// Karpenter renders what a cluster with Karpenter node groups needs
 	// beyond the managed node group: the node role with its EC2_LINUX
 	// access entry, and the interruption queue with its EventBridge rules
-	// (karpenter.go). It is also what places the EBS CSI controller on the
-	// platform pool (addon_placement.go). The platform's own clusters have
-	// it; an imported one does not unless the caller says so.
+	// (karpenter.go). The platform's own clusters have it; an imported one
+	// does not unless the caller says so.
 	Karpenter bool
+	// SystemPoolSize is the platform admin's size of the default node
+	// group (min = max = desired); 0 or below MinSystemPoolSize:
+	// DefaultSystemPoolSize. Not used for an imported cluster's own group.
+	SystemPoolSize int
 	// AccountID is the AWS account of the cluster: with it the interruption
 	// queue's ARN is known up front. Without it (and without
 	// KarpenterQueueARN) the queue policy and the rules' targets wait for

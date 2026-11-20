@@ -103,7 +103,7 @@ const mutable = {
   ...awsMutableClusterFields,
 } as const;
 export type EditableClusterField = keyof typeof mutable;
-/** The default node group runs Karpenter only: the server refuses (FailedPrecondition) any change to its
+/** The default (system) node group is the platform's: the server refuses (FailedPrecondition) any change to its
  * taints, labels or scaling, so these are set when creating a cluster and never sent in an update mask. */
 const platformManagedPool = {
   minSize: "spec.default_node_pool.scaling_config.min_size", maxSize: "spec.default_node_pool.scaling_config.max_size",
@@ -290,7 +290,7 @@ export function buildClusterUpdate(tenantId: string, baseline: Cluster, form: Cl
   if (!baseline.etag) throw new Error("Reload the cluster: an etag is required for a reviewed update.");
   if (form.name !== baseline.name || form.networkId !== baseline.spec?.network?.networkId) throw new Error("Name and network are immutable.");
   for (const field of touched) {
-    if (platformManagedClusterFields.includes(field)) throw new Error(`The default node group is managed by the platform (it runs Karpenter only): ${field} cannot be changed.`);
+    if (platformManagedClusterFields.includes(field)) throw new Error(`The default node group is managed by the platform (the system group runs the platform): ${field} cannot be changed.`);
     if (!Object.hasOwn(mutable, field)) throw new Error(`Field is immutable or unsupported: ${field}`);
   }
   const fields = [...touched] as EditableClusterField[];

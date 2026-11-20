@@ -1098,8 +1098,8 @@ spec:
               limits:
                 memory: 512Mi
               requests:
-                cpu: 100m
-                memory: 128Mi
+                cpu: 50m
+                memory: 96Mi
           monitoring:
             dashboards:
               enabled: false
@@ -2242,8 +2242,8 @@ spec:
               limits:
                 memory: 512Mi
               requests:
-                cpu: 100m
-                memory: 128Mi
+                cpu: 50m
+                memory: 96Mi
           monitoring:
             dashboards:
               enabled: false
@@ -3386,8 +3386,8 @@ spec:
               limits:
                 memory: 512Mi
               requests:
-                cpu: 100m
-                memory: 128Mi
+                cpu: 50m
+                memory: 96Mi
           monitoring:
             dashboards:
               enabled: false
@@ -3446,4 +3446,4 @@ spec:
       minor: "1.35"
       nodeAmiPin: v20261107
       upgradeTo: "1.36"
-    renderVersion: 7
+    renderVersion: 8

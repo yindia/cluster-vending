@@ -178,24 +178,22 @@ func TestDedicatedPoolWarning(t *testing.T) {
 	}
 }
 
-// On a cluster with Karpenter node groups, CoreDNS stays on the default
-// (system) group and the EBS CSI controller moves to the platform pool.
-func TestAddonsOnTheSystemAndPlatformPools(t *testing.T) {
+// On a cluster with Karpenter node groups, CoreDNS and the EBS CSI
+// controller both run on the default (system) group.
+func TestAddonsOnTheSystemPool(t *testing.T) {
 	system := map[string]any{"node.cluster-vending.io/pool": "system"}
-	platform := map[string]any{"node.cluster-vending.io/pool": "platform"}
 	systemToleration := map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}
-	platformToleration := map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "platform", "effect": "NoSchedule"}
 	tests := []struct {
 		name           string
 		configurations map[string]string
 		imported       bool
 		want           map[string]map[string]any
 	}{
-		{name: "coredns on the system group, the EBS controller on the platform pool",
+		{name: "coredns and the EBS controller on the system group",
 			want: map[string]map[string]any{
 				"coredns": {"nodeSelector": system, "tolerations": append([]any{systemToleration}, corednsDefaults...)},
-				"aws-ebs-csi-driver": {"controller": map[string]any{"nodeSelector": platform,
-					"tolerations": append([]any{platformToleration}, ebsDefaults...)}},
+				"aws-ebs-csi-driver": {"controller": map[string]any{"nodeSelector": system,
+					"tolerations": append([]any{systemToleration}, ebsDefaults...)}},
 			}},
 		{name: "the tenant's own placement wins",
 			configurations: map[string]string{
@@ -212,7 +210,7 @@ func TestAddonsOnTheSystemAndPlatformPools(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := planWithAddons(tt.configurations)
 			p.Karpenter = true
-			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool)
+			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2)
 			if tt.imported {
 				p.ExternalNames = map[string]string{"prod-1a2b3c4d-default": "ng-1"}
 			}

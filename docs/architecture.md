@@ -230,7 +230,7 @@ import it again; it is never rendered from something else.
   2. tenant components, a component after those that require it;
   3. platform components above sequence 0, highest sequence first (within a
      sequence, reverse `requires`), each with its Helm Releases and IAM gone;
-  4. Karpenter's node groups: user NodePools, the platform NodePool, the
+  4. Karpenter's node groups: the NodePools (the users', and an old platform one), the
      remaining NodeClaims, then the EC2NodeClasses;
   5. Karpenter: its chart and IAM, the interruption queue, rules and targets,
      the node role and its access entry;

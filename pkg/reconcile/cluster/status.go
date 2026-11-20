@@ -143,13 +143,27 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		s.logger().ErrorContext(ctx, "observe upgrade", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
-	u.karpenterNodes = platformNodeGroupReady(row)
+	u.karpenterNodes = hasKarpenterNodes(row)
 	if r := nodeGroupsOfPass(ctx); r != nil {
 		u.kubelets = &r.kubelets
 	}
 	st.Upgrade = u.status(row, views, storedUpgrade(row), comps)
 	upgrading(st)
+	s.withLiveSystemSize(row, spec)
 	return ClusterProto(row, spec, st), nil
+}
+
+// withLiveSystemSize shows the default node group's size as it is rendered
+// now, the platform admin's (nodeGroups.system.size), not the one stored at
+// creation: the platform fixes it for every cluster it created, in place.
+// An imported cluster keeps its own. spec is a copy of the stored one.
+func (s *Reconciler) withLiveSystemSize(row *model.Cluster, spec *cloudv1.ClusterSpec) {
+	pool := spec.GetDefaultNodePool()
+	if row.Imported || pool == nil {
+		return
+	}
+	size := uint32(crossplaneaws.SystemPoolSize(s.deps.NodeGroups.System.Size)) //nolint:gosec // validated, small
+	pool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: size, MaxSize: size, DesiredSize: &size}
 }
 
 // observeEKS copies what the EKS Cluster and NodeGroup report into st.

@@ -85,7 +85,7 @@ export function collectionState(response: ListNodeGroupNodesResponse): Collectio
   return { collected, collectedLabel: response.collectedAt ? utc(response.collectedAt) : "Not collected yet", incomplete: collected && !response.complete, notices: [...response.notices] };
 }
 
-export type NodeGroupKind = "platform" | "system" | "user";
+export type NodeGroupKind = "system" | "user";
 export interface GroupDetail {
   name: string; kind: NodeGroupKind; platformManaged: boolean;
   phase: NodeGroupPhase; phaseLabel: string; tone: NodeGroupTone; message: string; nodes?: number;
@@ -107,25 +107,25 @@ function userSummary(group: NodeGroupSpec) {
 
 /**
  * What the detail page shows of a group: its status as the controller reports it (or Pending/Not reported before it
- * does) and the group's own settings. "system" and "platform" exist on every cluster the platform manages, so they
- * resolve before the controller reports them; any other name must be in the spec or the status.
+ * does) and the group's own settings. "system", the default managed node group that runs the platform, exists on
+ * every cluster the platform manages, so it resolves before the controller reports it; any other name must be in the
+ * spec or the status.
  */
 export function groupDetail(cluster: Cluster, name: string): GroupDetail | undefined {
   const observed: NodeGroupStatus | undefined = cluster.status?.nodeGroups.find(group => group.name === name);
   const spec = cluster.spec?.nodeGroups.find(group => group.name === name);
-  const kind: NodeGroupKind = name === "platform" ? "platform" : name === "system" ? "system" : "user";
+  const kind: NodeGroupKind = name === "system" ? "system" : "user";
   if (kind === "user" && !spec && !observed) return undefined;
   const phase = observed?.phase ?? (kind === "system" ? NodeGroupPhase.UNSPECIFIED : NodeGroupPhase.PENDING);
   const [phaseLabel, tone] = phaseDisplay(phase);
   let summary: GroupDetail["summary"];
-  if (kind === "platform") summary = [{ label: "Managed by", value: "The platform: a Karpenter node group that runs platform components, tenant components and add-on controllers. It cannot be changed." }];
-  else if (kind === "system") {
+  if (kind === "system") {
     const pool = cluster.spec?.defaultNodePool;
-    summary = [{ label: "Managed by", value: "The platform: the default managed node group, tainted for Karpenter and CoreDNS." }];
+    summary = [{ label: "Managed by", value: "The platform: the default managed node group, at a fixed size. It runs Karpenter, CoreDNS, every platform component, tenant components and add-on controllers, and cannot be changed." }];
     if (pool?.instanceTypes.length) summary.push({ label: "Instance types", value: pool.instanceTypes.join(", ") });
     if (pool?.scalingConfig) summary.push({ label: "Size", value: sizeLabel(pool.scalingConfig.minSize, pool.scalingConfig.maxSize) });
   } else summary = spec ? userSummary(spec) : [];
   return {
-    name, kind, platformManaged: kind !== "user", phase, phaseLabel, tone, message: observed?.message ?? "", nodes: observed?.nodes, nodesNotice: observed?.nodesNotice ?? "", summary,
+    name, kind, platformManaged: kind === "system" || !!observed?.platformManaged, phase, phaseLabel, tone, message: observed?.message ?? "", nodes: observed?.nodes, nodesNotice: observed?.nodesNotice ?? "", summary,
   };
 }

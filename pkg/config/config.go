@@ -121,7 +121,7 @@ var globalSettings = []Setting{
 // serveSettings are the API server's. It validates requests and stores
 // the desired state; it reconciles nothing, installs nothing and makes no
 // AWS call: the controller does.
-var serveSettings = []Setting{
+var serveSettings = withNodeGroupSettings([]Setting{
 	{Flag: FlagConfig, Env: EnvConfig,
 		Usage: "YAML file with any of these settings, keyed by flag name; flags and environment variables win over it"},
 	{Flag: FlagHTTPAddr, Env: EnvHTTPAddr, Default: DefaultHTTPAddr,
@@ -133,9 +133,7 @@ var serveSettings = []Setting{
 	{Flag: FlagAWSServerRoleARN, Env: EnvAWSServerRoleARN,
 		Usage: "the IAM role the API server's own credentials are (its IRSA role): the principal the account role templates trust, next to the management role, to read the results buckets; account create prints it as the role stack's ServerPrincipalArn. Not needed when aws-source-role-arn is set (that role is it). Empty with no source role: the server cannot read results, and account create prints no server principal"},
 	awsAccessSettings[0], awsAccessSettings[1], awsAccessSettings[2],
-	nodeGroupFamiliesSetting,
-	nodeGroupTypesSetting,
-}
+})
 
 // GlobalSettings returns the settings every command accepts.
 func GlobalSettings() []Setting { return slices.Clone(globalSettings) }
@@ -163,8 +161,9 @@ type Serve struct {
 	// ManagementRoleARN is what account onboarding puts in the role's stack
 	// (optional).
 	ManagementRoleARN string
-	// NodeGroups is the instance allowlist of user node groups.
-	NodeGroups NodeGroupAllowlist
+	// NodeGroups is the node group layout: the allowlist and defaults of
+	// user node groups, and the system group.
+	NodeGroups NodeGroups
 	// ServerRoleARN is the role the server's own credentials are (optional;
 	// see ServerPrincipalARN).
 	ServerRoleARN string
@@ -217,7 +216,7 @@ func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 		errs = append(errs, err)
 	}
 	cfg.ShutdownTimeout = timeout
-	allow, allowErrs := nodeGroupAllowlistFrom(v)
+	allow, allowErrs := nodeGroupsFrom(v)
 	cfg.NodeGroups = allow
 	errs = append(errs, allowErrs...)
 	errs = append(errs, cfg.validateOnboarding()...)

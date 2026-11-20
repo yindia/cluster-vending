@@ -31,14 +31,14 @@ func shippedPinOn(t *testing.T, minor string) string {
 // not follow the newest AMI: its node classes pin what this build ships.
 func TestAMIPinFallsBackToTheShippedPinNotLatest(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
-	w, row, src := nodeGroupWorldSrc(t, fw)
+	w, row, src := nodeGroupWorldSrc(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 	iamFake{role: true, access: true, policy: true, attachments: 4, passRoleOn: nodeRoleARN(row)}.seed(t, w, row, "us-east-1")
 	src.release.Spec.Content.Kubernetes[0].NodeAMIPin = "" // the recorded release has none
 	want := shippedPinOn(t, "1.37")
 
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-	class := fw.get(t, "EC2NodeClass", "", "platform")
+	class := fw.get(t, "EC2NodeClass", "", "gpu")
 	terms, _, _ := unstructured.NestedSlice(class.Object, "spec", "amiSelectorTerms")
 	if got := terms[0].(map[string]any)["alias"]; got != "al2023@"+want || strings.HasSuffix(got.(string), "@latest") {
 		t.Errorf("AMI alias %v, want al2023@%s", got, want)
@@ -67,10 +67,10 @@ func TestAMIPinLatestOnlyWhenNothingPinsAndSaysSo(t *testing.T) {
 	}
 }
 
-// The notice reaches the platform group's status.
-func TestAMIPinNoticeIsOnThePlatformGroup(t *testing.T) {
+// The notice reaches the user groups' status.
+func TestAMIPinNoticeIsOnTheUserGroups(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
-	w, row, src := nodeGroupWorldSrc(t, fw)
+	w, row, src := nodeGroupWorldSrc(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 	iamFake{role: true, access: true, policy: true, attachments: 4, passRoleOn: nodeRoleARN(row)}.seed(t, w, row, "us-east-1")
 	src.release.Spec.Content.Kubernetes[0].NodeAMIPin = ""
 	src.release.Spec.Content.Kubernetes[0].Minor = "1.99"
@@ -80,7 +80,7 @@ func TestAMIPinNoticeIsOnThePlatformGroup(t *testing.T) {
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-	if p := statusOf(res, "platform"); p == nil || !strings.Contains(p.GetMessage(), "latest") {
-		t.Errorf("platform status = %v", p)
+	if g := statusOf(res, "gpu"); g == nil || !strings.Contains(g.GetMessage(), "latest") {
+		t.Errorf("gpu status = %v", g)
 	}
 }

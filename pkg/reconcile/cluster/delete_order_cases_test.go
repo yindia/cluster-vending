@@ -124,10 +124,10 @@ func TestDeletionNodeGroupWaitEnds(t *testing.T) {
 		d.td.stuck = d.td.stuck || o.Kind == reconcile.KindNodePool // Karpenter never finishes a pool
 	}
 	var last string
-	for i := 0; i < 40 && !strings.Contains(last, "stage 4 of 7, node groups: deleting the user node pools"); i++ {
+	for i := 0; i < 40 && !strings.Contains(last, "stage 4 of 7, node groups: deleting the node pools"); i++ {
 		last = d.pass()
 	}
-	require.Contains(t, last, "stage 4 of 7, node groups: deleting the user node pools")
+	require.Contains(t, last, "stage 4 of 7, node groups: deleting the node pools")
 	require.Nil(t, d.releaseOf("karpenter").GetDeletionTimestamp(), "Karpenter stays while it has nodes to terminate")
 	for range 3 {
 		require.Contains(t, d.pass(), "stage 4 of 7, node groups", "it waits within the timeout")

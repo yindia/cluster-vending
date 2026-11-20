@@ -176,6 +176,7 @@ cluster-vending account delete --id <account id> --tenant acme [--wait]
 |---|---|
 | `aws-server-role-arn` | The role the API server's own credentials are (its IRSA role): the second principal the templates trust, `account create` prints it as `ServerPrincipalArn`. Not needed with `aws-source-role-arn` (that role is the principal). Neither: the parameter is left empty and the server cannot read results. |
 | `aws-region`, `aws-source-role-arn`, `aws-external-id` | How the server reaches an account to read the results buckets, as the controller does: the SDK's default region, an optional role to assume first, an optional external ID for a tenant role whose account has none. Credentials are the AWS SDK's default chain (IRSA; for local use `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment), never a setting. |
+| `nodeGroups` section, `node-group-*`, `system-node-group-*` | The node group layout: what users may create as node groups (families, types, defaults) and the system group. The controller needs the same values; see [controller.md](controller.md#node-group-layout-nodegroups). |
 | `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account create` cannot say what the role trusts: `GetAccountOnboarding` fails with `FAILED_PRECONDITION`, saying so, and nothing is created. The server makes no AWS call with it. |
 
 ## Changing the templates

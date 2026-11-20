@@ -33,6 +33,8 @@ spec:
     profile: ambient
     global:
       istioNamespace: istio-system
+      defaultPodDisruptionBudget:
+        enabled: false
       multiCluster:
         # Must be the same name as ztunnel's multiCluster.clusterName.
         clusterName: ${cluster.name}
@@ -50,12 +52,15 @@ spec:
       # No cluster-wide sidecar injection. Workloads join with the ambient label.
       enableNamespacesByDefault: false
     autoscaleEnabled: true
-    autoscaleMin: 2
+    # One replica at least (system group sizing, docs/catalog.md); the HPA adds
+    # more under load. A single replica has no PodDisruptionBudget: one that
+    # demands it stay up would stop a node drain.
+    autoscaleMin: 1
     autoscaleMax: 5
     resources:
       requests:
-        cpu: 500m
-        memory: 2048Mi
+        cpu: 100m
+        memory: 256Mi
     gateways:
       # Gateways and waypoints that istiod deploys (also into tenant namespaces)
       # get the RuntimeDefault seccomp profile, so they pass Pod Security "restricted".

@@ -49,10 +49,13 @@ const ProviderVersion = "v2.9.0"
 //	   access entry and the interruption queue with its EventBridge rules
 //	   are rendered, and the EBS CSI controller follows the platform pool
 //	   (docs/design/karpenter-node-groups.md)
+//	8  one platform node group, "system": the default node group is sized by
+//	   the admin (nodeGroups.system.size) and the EBS CSI controller runs on
+//	   it like every other platform pod; there is no platform pool
 //	7  the bucket of the cluster's scan results with its public access
 //	   block, ownership controls, encryption, TLS-only policy and lifecycle
 //	   (results_bucket.go), for clusters the platform created
-const RenderVersion = 7
+const RenderVersion = 8
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.

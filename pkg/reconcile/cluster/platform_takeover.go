@@ -60,6 +60,12 @@ func noPlatform(row *model.Cluster) bool {
 	return row.State == StateImported || row.State == StateBlocked || PlatformKeptOff(row)
 }
 
+// PlatformManaged reports whether the platform manages the cluster's node
+// groups: the system group, and the user groups' Karpenter objects. False
+// for an imported cluster that is only observed (or whose takeover kept the
+// platform components off).
+func PlatformManaged(row *model.Cluster) bool { return !noPlatform(row) }
+
 // HasIRSA reports whether a cluster with this spec and these recorded
 // objects has IRSA: spec.aws.irsa, or an IAM OIDC provider among its
 // objects (hasOIDCProvider).

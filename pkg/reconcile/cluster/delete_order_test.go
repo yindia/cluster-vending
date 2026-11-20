@@ -38,8 +38,7 @@ const (
 	rankMesh         // platform, sequence 100, requires base
 	rankBase         // platform, sequence 100
 	rankEarly        // platform, sequence 10
-	rankUserPool
-	rankPlatformPool
+	rankPool         // user pools, and the old platform pool of a cluster built before the system group
 	rankNodeClaim
 	rankNodeClass
 	rankKarpenterChart // platform, sequence 0
@@ -219,11 +218,8 @@ func (d *delOrder) workload() {
 	ranks := map[string]int{reconcile.KindService: rankLoadBalancer, reconcile.KindNodeClaim: rankNodeClaim, reconcile.KindEC2NodeClass: rankNodeClass}
 	for _, o := range d.td.objs {
 		rank := ranks[o.Kind]
-		switch {
-		case o.Kind == reconcile.KindNodePool && o.Name == "platform":
-			rank = rankPlatformPool
-		case o.Kind == reconcile.KindNodePool:
-			rank = rankUserPool
+		if o.Kind == reconcile.KindNodePool {
+			rank = rankPool
 		}
 		d.objects = append(d.objects, delObject{rank: rank, workload: o.Ref()})
 	}
@@ -378,7 +374,7 @@ func TestDeletionRunsInTheReverseOfCreation(t *testing.T) {
 	require.Contains(t, joined, "platform components: uninstalling sequence 100")
 	require.Contains(t, joined, "platform components: uninstalling sequence 10")
 	require.Contains(t, joined, "waiting for Release "+crossplaneaws.HelmReleaseObjectName(d.prefix, "mesh")+" to be uninstalled")
-	require.Contains(t, joined, "user node pools")
+	require.Contains(t, joined, "node pools")
 	require.Contains(t, joined, "instance profiles")
 	require.Contains(t, joined, "base waits for the components that require it", "mesh requires base: base goes after it")
 	left, err := d.store.ManagedResources().ListByOwner(t.Context(), model.OwnerClusterComponents, d.row.ID)

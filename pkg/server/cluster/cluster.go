@@ -89,7 +89,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 		}
 	}
 	if err := checkNodeGroupAllowlist(req.GetCluster().GetSpec().GetNodeGroups(), nil,
-		s.deps.NodeGroupInstanceFamilies, s.deps.NodeGroupInstanceTypes); err != nil {
+		s.deps.NodeGroups.Karpenter.InstanceFamilies, s.deps.NodeGroups.Karpenter.InstanceTypes); err != nil {
 		return nil, err
 	}
 	row, err := s.NewRow(ctx, req)

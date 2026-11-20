@@ -55,8 +55,9 @@ func TestPlanLoadBalancers(t *testing.T) {
 	}
 }
 
-// The node groups: user pools, then the platform pool, then the NodeClaims
-// left, then the node classes; each only once the one before is gone.
+// The node groups: every pool (the users', and the old platform pool of a
+// cluster built before the system group), then the NodeClaims left, then the
+// node classes; each only once the one before is gone.
 func TestPlanNodeGroups(t *testing.T) {
 	user := obj(reconcile.KindNodePool, "", "gpu", false)
 	platformPool := obj(reconcile.KindNodePool, "", "platform", false)
@@ -74,15 +75,12 @@ func TestPlanNodeGroups(t *testing.T) {
 	}{
 		{name: "nothing: done"},
 		{name: "a load balancer is not its business", objs: []reconcile.WorkloadObject{obj(reconcile.KindService, "ns", "lb", false)}},
-		{name: "the user pools first; the platform pool, claims and classes wait",
+		{name: "the pools first, an old platform pool with them; claims and classes wait",
 			objs:       []reconcile.WorkloadObject{class, claim, platformPool, user},
-			wantDelete: []reconcile.WorkloadObject{user}, wantMessage: "deleting the user node pools and waiting for Karpenter to terminate their nodes (NodePool gpu)"},
+			wantDelete: []reconcile.WorkloadObject{user, platformPool}, wantMessage: "deleting the node pools and waiting for Karpenter to terminate their nodes (NodePool gpu, NodePool platform)"},
 		{name: "a pool being deleted is waited for since its request",
-			objs: []reconcile.WorkloadObject{platformPool, deleting}, wantSince: at,
-			wantMessage: "deleting the user node pools and waiting for Karpenter to terminate their nodes (NodePool gpu)"},
-		{name: "then the platform pool",
-			objs:       []reconcile.WorkloadObject{class, claim, platformPool},
-			wantDelete: []reconcile.WorkloadObject{platformPool}, wantMessage: "deleting the platform node pool and waiting for Karpenter to terminate its nodes (NodePool platform)"},
+			objs: []reconcile.WorkloadObject{deleting}, wantSince: at,
+			wantMessage: "deleting the node pools and waiting for Karpenter to terminate their nodes (NodePool gpu)"},
 		{name: "then what nodes are left",
 			objs:        []reconcile.WorkloadObject{class, claim},
 			wantMessage: "waiting for Karpenter to terminate its remaining nodes (NodeClaim gpu-x2k)", wantDelete: []reconcile.WorkloadObject{claim}},

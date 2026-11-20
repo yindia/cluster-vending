@@ -15,7 +15,9 @@ import (
 )
 
 func allowlist(families, types []string) func(*recon.Deps) {
-	return func(d *recon.Deps) { d.NodeGroupInstanceFamilies, d.NodeGroupInstanceTypes = families, types }
+	return func(d *recon.Deps) {
+		d.NodeGroups.Karpenter.InstanceFamilies, d.NodeGroups.Karpenter.InstanceTypes = families, types
+	}
 }
 
 func TestAllowedInstance(t *testing.T) {
@@ -78,7 +80,7 @@ func TestUpdateClusterChecksOnlyNewOrChangedNodeGroups(t *testing.T) {
 	require.NoError(t, err)
 
 	// The allowlist is set later: the existing group stays, as is.
-	w.svc.deps.NodeGroupInstanceFamilies = []string{"m7i"}
+	w.svc.deps.NodeGroups.Karpenter.InstanceFamilies = []string{"m7i"}
 	keep := &cloudv1.NodeGroupSpec{Name: "old", InstanceFamilies: []string{"x1e"}}
 	_, err = w.svc.UpdateCluster(t.Context(), updateRequest(w, &cloudv1.ClusterSpec{NodeGroups: []*cloudv1.NodeGroupSpec{keep, {Name: "web", InstanceFamilies: []string{"m7i"}}}}, "spec.node_groups"))
 	require.NoError(t, err)
@@ -111,23 +113,25 @@ func TestListClusterNodeGroupManifests(t *testing.T) {
 
 	out, err := w.svc.ListClusterNodeGroupManifests(t.Context(), &cloudv1.ListClusterNodeGroupManifestsRequest{TenantId: worldTenant, ClusterId: w.row.ID})
 	require.NoError(t, err)
-	require.Len(t, out.GetNodeGroups(), 2)
-	platform, batch := out.GetNodeGroups()[0], out.GetNodeGroups()[1]
-	require.Equal(t, "platform", platform.GetName())
-	require.True(t, platform.GetPlatformManaged())
+	require.Len(t, out.GetNodeGroups(), 2, "the system group, then the user's; no platform group")
+	system, batch := out.GetNodeGroups()[0], out.GetNodeGroups()[1]
+	require.Equal(t, "system", system.GetName())
+	require.True(t, system.GetPlatformManaged())
+	require.Empty(t, system.GetEc2NodeClassYaml(), "the system group is an EKS managed node group, not Karpenter objects")
+	require.Empty(t, system.GetNodePoolYaml())
 	require.Equal(t, "batch", batch.GetName())
 	require.False(t, batch.GetPlatformManaged())
-	require.Contains(t, platform.GetEc2NodeClassYaml(), "kind: EC2NodeClass")
-	require.Contains(t, platform.GetNodePoolYaml(), "kind: NodePool")
-	require.Contains(t, platform.GetNodePoolYaml(), "karpenter.k8s.aws/instance-family")
+	require.Contains(t, batch.GetEc2NodeClassYaml(), "kind: EC2NodeClass")
+	require.Contains(t, batch.GetNodePoolYaml(), "kind: NodePool")
+	require.Contains(t, batch.GetNodePoolYaml(), "karpenter.k8s.aws/instance-family")
 	require.Contains(t, batch.GetNodePoolYaml(), "name: batch")
 
 	// Byte for byte what the controller applies: the reconciler's objects
 	// as deterministic YAML.
 	objs, err := w.svc.NodeGroupObjects(t.Context(), w.cluster(t))
 	require.NoError(t, err)
-	require.Len(t, objs, 4)
-	for i, want := range []string{platform.GetEc2NodeClassYaml(), platform.GetNodePoolYaml(), batch.GetEc2NodeClassYaml(), batch.GetNodePoolYaml()} {
+	require.Len(t, objs, 2)
+	for i, want := range []string{batch.GetEc2NodeClassYaml(), batch.GetNodePoolYaml()} {
 		raw, err := yaml.Marshal(objs[i].Object)
 		require.NoError(t, err)
 		require.Equal(t, string(raw), want)
@@ -136,8 +140,8 @@ func TestListClusterNodeGroupManifests(t *testing.T) {
 	// Rendering twice gives the same text.
 	again, err := w.svc.ListClusterNodeGroupManifests(t.Context(), &cloudv1.ListClusterNodeGroupManifestsRequest{TenantId: worldTenant, ClusterId: w.row.ID})
 	require.NoError(t, err)
-	require.Equal(t, out.GetNodeGroups()[1].GetNodePoolYaml(), again.GetNodeGroups()[1].GetNodePoolYaml())
-	require.False(t, strings.HasPrefix(platform.GetNodePoolYaml(), "---"))
+	require.Equal(t, batch.GetNodePoolYaml(), again.GetNodeGroups()[1].GetNodePoolYaml())
+	require.False(t, strings.HasPrefix(batch.GetNodePoolYaml(), "---"))
 }
 
 func TestListClusterNodeGroupManifestsIsTenantScoped(t *testing.T) {

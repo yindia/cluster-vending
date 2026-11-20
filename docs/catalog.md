@@ -183,10 +183,12 @@ in reverse; the bundle is Ready when every member is. A release pins every
 member of a bundle or none. Tenants never see internal definitions, and
 cannot enable one by itself.
 
-**Karpenter is the only node autoscaler.** The platform runs no cluster
-autoscaler: the cluster's default managed node group has a fixed size (two
-nodes) and runs Karpenter and CoreDNS only, and every other pod runs on nodes
-Karpenter launches (see [Where the pods run](#where-the-pods-run)).
+**Karpenter is the only node autoscaler, and only for users' node groups.**
+The platform runs no cluster autoscaler: the cluster's default managed node
+group (`system`) has a fixed size (the admin's `nodeGroups.system.size`,
+default 2) and runs Karpenter, CoreDNS and every platform and tenant
+component; Karpenter launches the nodes of the users' own node groups (see
+[Where the pods run](#where-the-pods-run)).
 `cluster-autoscaler` was removed from the platform set: the build no longer
 ships its definition, so an existing cluster uninstalls it on its next pass
 (the same path as "Disabling and removing a component").
@@ -461,43 +463,66 @@ supported by the versions above. The GPU operator's pin carries the leading
 
 ## Where the pods run
 
-A cluster has three kinds of nodes, told apart by a label and, for the two
-the platform owns, a taint
-([design](design/karpenter-node-groups.md)):
+A cluster has two kinds of nodes, told apart by a label and, for the one the
+platform owns, a taint ([design](design/karpenter-node-groups.md)):
 
 | Pool | Label | Taint | What runs |
 |---|---|---|---|
-| default managed node group (`system`) | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, CoreDNS |
-| Karpenter NodePool `platform` | `node.cluster-vending.io/pool=platform` | `node.cluster-vending.io/pool=platform:NoSchedule` | the platform components, the tenant's components, the EKS add-on controllers (the EBS CSI driver's) |
+| default managed node group (`system`) | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, CoreDNS, the platform components, the tenant's components, the EKS add-on controllers (the EBS CSI driver's) |
 | the cluster's own node groups (`spec.node_groups`) | `node.cluster-vending.io/pool=<name>` and the user's labels | the user's | the user's workloads |
 
 DaemonSets (vpc-cni, kube-proxy, the pod identity agent, istio-cni, ztunnel)
 tolerate every taint and run everywhere. The platform fixes the default
-managed node group's taint, label and size (min = max = desired = 2, Karpenter
-runs two replicas) and the `platform` pool: users cannot change them. An
-imported cluster keeps its own node group and its components follow it as
-before (`${system.*}` and `${platform.*}` both resolve to its default node
-pool's labels and taints).
+managed node group's taint, label and size (min = max = desired =
+`nodeGroups.system.size`, at least 2: Karpenter runs two replicas): users
+cannot change them. An imported cluster keeps its own node group and its
+components follow it as before (`${system.*}` and `${platform.*}` both resolve
+to its default node pool's labels and taints). There is no separate platform
+pool: an earlier build's Karpenter `platform` NodePool is removed from an
+existing cluster once its components have moved
+([migration](design/karpenter-node-groups.md#migration-of-existing-clusters)).
 
-Each definition sets `${platform.nodeSelector}` (the pool's label) and
+Each definition sets `${platform.nodeSelector}` (the node group's label) and
 `${platform.tolerations}` (a toleration of its taint) at its chart's own
-keys, checked in each chart's `values.yaml`. Only Karpenter uses
-`${system.nodeSelector}` / `${system.tolerations}`: it must run where it needs
-no node of its own.
+keys, checked in each chart's `values.yaml`. `${platform.*}` is an alias of
+`${system.*}` (the same live value; Karpenter's definition uses the latter).
 
 | Component | Keys |
 |---|---|
 | `aws-load-balancer-controller`, `istiod` | `nodeSelector`, `tolerations` |
-| `karpenter` | `nodeSelector`, `tolerations` (the system pool) |
+| `karpenter` | `nodeSelector`, `tolerations` |
 | `kyverno` | `global.nodeSelector`, `global.tolerations` (all controllers and hook Jobs) |
 | `external-secrets` | `global.nodeSelector`, `global.tolerations` (the controller, webhook and cert-controller Deployments fall back to them) |
 | `capsule` | Root `nodeSelector` / `tolerations` for the controller, `global.jobs.kubectl.nodeSelector` / `tolerations` for lifecycle hooks |
 | `istio-ingress-gateway` | `nodeSelector`, `tolerations` of Istio's gateway chart |
 | `gpu-operator` | `operator.nodeSelector`, `operator.tolerations` (the operator's Deployment only) |
 
-EKS add-ons: CoreDNS gets the system pool's label and toleration, the EBS CSI
-driver's controller the platform pool's (an add-on's `configurationValues`
-keys win over them).
+EKS add-ons: CoreDNS and the EBS CSI driver's controller get the system
+group's label and toleration (an add-on's `configurationValues` keys win over
+them).
+
+**Sizing the system group.** Everything above runs on `system`: 2 x `t3.medium`
+by default (2 vCPU, 4 GiB, at most 17 pods each). Allocatable per node, by the
+EKS AL2023 reservations, is 1.93 CPU, about 3.2 GiB and 17 pods (3.86 CPU,
+6.3 GiB, 34 pods for the group). The catalog's requests plus the add-ons and
+DaemonSets (Karpenter 2 x 250m / 512Mi, ztunnel 200m / 512Mi and istio-cni
+100m / 100Mi per node, CoreDNS 2 x 100m / 70Mi, the EBS CSI controller and the
+per-node add-on DaemonSets, every other component 50m-100m) come to 2.4 CPU
+(63%), 4.3 GiB (66%) and 30 pods (88%). The pod count is the tight limit:
+about 4 pods are left for tenant components, so a larger `size` or
+`instanceType` is the way to grow.
+
+To fit, only Karpenter (2 replicas, required anti-affinity) is highly
+available; Kyverno (admission and the three controllers), istiod, the Istio
+ingress gateway (both start at 1 and scale by HPA), external-secrets
+(controller, webhook, cert-controller) and the AWS Load Balancer Controller run
+one replica, with no PodDisruptionBudget (one that demands the only replica
+stay up would stop a node drain); Capsule keeps 2. Raise the replicas in a
+definition on a larger group. Requests are trimmed, limits are not.
+`pkg/catalog/system_group_sizing_test.go` sums the shipped values (explicit
+requests and replicas are required there) and fails above 85% of the default
+group's CPU and memory allocatable or above its pod capacity. Pods that do
+not fit stay Pending and their component's Helm release does not become Ready.
 
 Not placed, on purpose or for lack of a verified key:
 - `istio-cni` and `ztunnel` are DaemonSets that must run on every node;
@@ -543,10 +568,12 @@ server-side applies them into the workload cluster, through the kubeconfig it
 already uses, on every pass. A platform object that was edited or deleted is
 put back.
 
-- **The `platform` pool**: one `NodePool` and one `EC2NodeClass`, both named
-  `platform`, owned by the platform; users cannot create, change or delete
-  them. Platform components, tenant components and the EKS add-on
-  controllers run there (see [Where the pods run](#where-the-pods-run)).
+- **No platform pool.** The platform's own pods run on the system managed
+  node group (see [Where the pods run](#where-the-pods-run)); a cluster with
+  no node groups of its own gets nothing applied. A `platform` `NodePool` and
+  `EC2NodeClass` an earlier build applied (with the platform's `managed-by`
+  label) are deleted by the same removal path as a user group's, once the
+  components no longer need them.
 - **The user's node groups** (`spec.node_groups`, up to 20): each a
   `NodePool` plus an `EC2NodeClass` of the same name, with the instance
   types or families, architectures, capacity types (on-demand, Spot), labels,
@@ -592,8 +619,9 @@ kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/downloa
 
 ## Using External Secrets
 
-The operator (two replicas of the controller and of the cert-controller with
-leader election, two of the webhook, a PodDisruptionBudget each) runs
+The operator (one replica each of the controller, the webhook and the
+cert-controller, with leader election on for a scale-out; no PodDisruptionBudget,
+see "Sizing the system group") runs
 **without any AWS credentials**: the platform gives it no IAM role. A store
 names the service account whose IAM role it reads with, so each team's
 access is its own role, not the operator's (external-secrets.io, "AWS
@@ -679,9 +707,9 @@ spec:
   every Platform component of a lower sequence is deployed and Ready (the
   same wait as `requires`, which still applies; a component may not require
   one of a higher sequence). Karpenter is `0`, the only sequence that runs
-  before the platform node group: every Platform component above 0 is also
-  held (PENDING, "waiting for the platform node group to be Ready") until
-  that node group is Ready. Removal runs in reverse. Ignored for tenant
+  before the platform node group: it installs first. Nothing is held for a
+  node group: the platform runs on the system managed node group. Removal
+  runs in reverse. Ignored for tenant
   components. Definition fields otherwise: `provider`, `management`,
   `namespace`, `install`, `requires`, `sequence`, `cloudResources`,
   `platformValues`, `userValues`, `valuesSchema`.
@@ -752,12 +780,14 @@ makes the release not Valid (override every `istio-*` member together).
   it a Spot launch fails and the NodeClaim reports it.
 - Nodes use the platform's own role (`<prefix>-karpenter-node`) with its
   `EC2_LINUX` access entry, not the managed node group's.
-- Two controller replicas need the two managed node group nodes; their size
-  is fixed. A new cluster's default group is `t3.medium` (1 CPU / 1Gi per
-  replica plus CoreDNS fit); existing clusters keep their instance type.
-- The `platform` NodePool is `t3` (`medium`, `large`, `xlarge`), amd64,
-  on-demand, whatever the admin's node group allowlist says; t3 is
-  burstable, so sustained load above its baseline is throttled.
+- Two controller replicas need two managed node group nodes; the group's size
+  is fixed and the admin's (`nodeGroups.system.size`, at least 2). A new
+  cluster's default group is `t3.medium` (`nodeGroups.system.instanceType`);
+  existing clusters keep their instance type. t3 is burstable: sustained load
+  above its baseline is throttled. See
+  [Sizing the system group](#where-the-pods-run).
+- Karpenter serves the users' node groups only; it has nothing to launch for
+  a cluster without them.
 - Karpenter manages the instance profile through the IAM API, so private
   subnets need outbound internet (NAT).
 

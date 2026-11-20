@@ -378,8 +378,7 @@ type ComponentDefinitionSpec struct {
 	// sequence orders Platform components: they install in ascending
 	// sequence, and one starts only once every Platform component of a lower
 	// sequence is deployed and Ready (requires still applies). Karpenter is 0,
-	// the only sequence that runs before the platform node group exists:
-	// every Platform component above 0 also waits for it to be Ready.
+	// so it installs first; nothing waits for a node group.
 	// Removal runs in reverse. Ignored for tenant components.
 	// +optional
 	// +kubebuilder:default=100

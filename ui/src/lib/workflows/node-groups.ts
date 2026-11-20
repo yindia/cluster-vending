@@ -3,7 +3,7 @@ import { ClusterSchema, type Cluster } from "../../gen/cloud/v1/cluster_pb";
 import { UpdateClusterRequestSchema, type UpdateClusterRequest } from "../../gen/cloud/v1/cluster_service_pb";
 import type { GetNodeGroupOptionsResponse, NodeGroupManifest } from "../../gen/cloud/v1/node_group_manifest_pb";
 import { Architecture, NodeGroupPhase, NodeGroupSpecSchema, type NodeGroupSpec, type NodeGroupStatus } from "../../gen/cloud/v1/node_group_pb";
-import { CapacityType, TaintEffect } from "../../gen/cloud/v1/node_pool_pb";
+import { CapacityType, TaintEffect, type NodePoolSpec } from "../../gen/cloud/v1/node_pool_pb";
 import { checkedJson, labelValue, qualifiedKey } from "./cluster-form-values";
 
 /** Mirrors the buf.validate rules on cloud.v1.NodeGroupSpec and ClusterSpec.node_groups. */
@@ -13,8 +13,10 @@ const MAX_LIST = 20;
 const MAX_LABELS = 64;
 const MAX_TAINTS = 50;
 const MAX_LIMIT = 2_147_483_647;
-const platformGroupName = "platform";
-const reservedNames = [platformGroupName, "default", "system"];
+/** The platform's one node group: the default EKS managed node group. */
+const systemGroupName = "system";
+/** "platform" was a Karpenter node group of an earlier layout; it stays reserved. */
+const reservedNames = ["platform", "default", systemGroupName];
 export const nodeGroupSteps = ["Node group", "Scheduling", "Review"] as const;
 export const nodeGroupRemoveSteps = ["Remove", "Review"] as const;
 
@@ -215,9 +217,12 @@ export interface NodeGroupRow extends Record<string, unknown> {
   observed: boolean;
   phase: NodeGroupPhase; phaseLabel: string; tone: NodeGroupTone; message: string;
   nodes?: number; spec?: NodeGroupSpec;
-  /** The group's Karpenter objects as the controller applies them; absent while unknown. */
+  /** The group's Karpenter objects as the controller applies them; absent while unknown, and for the system group (an EKS node group, not Karpenter objects). */
   manifest?: NodeGroupManifest;
+  /** What the system group is made of, from the cluster's default node pool; set on that row only. */
+  system?: SystemGroupSummary;
 }
+export interface SystemGroupSummary { instanceTypes: string; capacity: string; size: string }
 
 const phaseLabels: Record<number, [string, NodeGroupTone]> = {
   [NodeGroupPhase.UNSPECIFIED]: ["Not reported", "neutral"], [NodeGroupPhase.PENDING]: ["Pending", "warning"],
@@ -228,14 +233,32 @@ export function phaseDisplay(phase: NodeGroupPhase): [string, NodeGroupTone] {
   return phaseLabels[phase] ?? [`Unknown (${phase})`, "neutral"];
 }
 const waiting = "Waiting for the controller to report this node group.";
-const platformWaiting = "Pending — waiting for Karpenter";
+const systemWaiting = "Pending — waiting for the controller";
+
+/** "2 nodes (fixed)" or "1–3 nodes": the default managed node group's size. */
+function systemSize(min: number, max: number): string {
+  return min === max ? `${min} ${min === 1 ? "node" : "nodes"} (fixed)` : `${min}–${max} nodes`;
+}
+
+function systemSummary(pool: NodePoolSpec): SystemGroupSummary {
+  return {
+    instanceTypes: pool.instanceTypes.join(", ") || "—", capacity: pool.capacityType === CapacityType.SPOT ? "Spot" : "On-demand",
+    size: pool.scalingConfig ? systemSize(pool.scalingConfig.minSize, pool.scalingConfig.maxSize) : "—",
+  };
+}
+
+/** Manifests with something to show: the system group's entry has no YAML. */
+export function hasManifestYaml(manifest: NodeGroupManifest | undefined): manifest is NodeGroupManifest {
+  return !!manifest && !!(manifest.ec2NodeClassYaml || manifest.nodePoolYaml);
+}
 
 /**
- * Platform group first, then spec order; spec-only groups are Pending and status-only groups (deleting) stay visible.
- * The platform row is always shown (Pending until Karpenter reports it) unless `manifests` is known and has none: the
- * platform manages no node groups of an imported cluster. Each row carries its manifest by name.
+ * The system group first, then spec order; spec-only groups are Pending and status-only groups (deleting) stay visible.
+ * The system row is always shown (Pending until the controller reports it) unless `manifests` is known and has none: the
+ * platform manages no node groups of an imported cluster. Each row carries its manifest by name; `defaultPool` is the
+ * cluster's default node pool, which the system row summarizes. A platform group an earlier controller recorded is not shown.
  */
-export function nodeGroupRows(spec: readonly NodeGroupSpec[], status: readonly NodeGroupStatus[], manifests?: readonly NodeGroupManifest[]): NodeGroupRow[] {
+export function nodeGroupRows(spec: readonly NodeGroupSpec[], status: readonly NodeGroupStatus[], manifests?: readonly NodeGroupManifest[], defaultPool?: NodePoolSpec): NodeGroupRow[] {
   // First report wins: a repeated name must never produce two rows (the table keys rows by name).
   const byName = new Map<string, NodeGroupStatus>();
   for (const item of status) if (!byName.has(item.name)) byName.set(item.name, item);
@@ -245,14 +268,17 @@ export function nodeGroupRows(spec: readonly NodeGroupSpec[], status: readonly N
     const phase = observed?.phase ?? NodeGroupPhase.PENDING;
     const [phaseLabel, tone] = phaseLabels[phase] ?? [`Unknown (${phase})`, "neutral" as const];
     const platformManaged = observed?.platformManaged ?? platform;
+    const manifest = manifestOf.get(name);
     return {
       name, platformManaged, editable: !platformManaged && !!group && phase !== NodeGroupPhase.DELETING, observed: !!observed,
-      phase, phaseLabel, tone, message: observed ? observed.message : platform ? platformWaiting : waiting, nodes: observed?.nodes, spec: group,
-      manifest: manifestOf.get(name),
+      phase, phaseLabel, tone, message: observed ? observed.message : platform ? systemWaiting : waiting, nodes: observed?.nodes, spec: group,
+      manifest: hasManifestYaml(manifest) ? manifest : undefined,
+      system: platformManaged && name === systemGroupName && defaultPool ? systemSummary(defaultPool) : undefined,
     };
   };
-  const platform = [...byName.values()].filter(item => item.platformManaged).map(item => row(item.name, item));
-  if (!platform.length && (!manifests || manifests.some(item => item.platformManaged))) platform.push(row(platformGroupName, undefined, undefined, true));
+  // The platform group of an earlier layout (a Karpenter pool) is gone with its pool: never a row.
+  const platform = [...byName.values()].filter(item => item.platformManaged && item.name !== "platform").map(item => row(item.name, item));
+  if (!platform.length && (!manifests || manifests.some(item => item.platformManaged))) platform.push(row(systemGroupName, undefined, undefined, true));
   const shown = new Set(platform.map(item => item.name));
   const users: NodeGroupRow[] = [];
   for (const group of spec) {
@@ -261,7 +287,7 @@ export function nodeGroupRows(spec: readonly NodeGroupSpec[], status: readonly N
     users.push(row(group.name, byName.get(group.name), group));
   }
   for (const item of byName.values()) {
-    if (shown.has(item.name)) continue;
+    if (shown.has(item.name) || (item.platformManaged && item.name === "platform")) continue;
     shown.add(item.name);
     users.push(row(item.name, item));
   }

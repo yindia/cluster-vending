@@ -1,62 +1,63 @@
-# Karpenter-only node groups
+# Node layout: one system node group, Karpenter for users
 
 Status: controller side built (see "Status: built" at the end); decided design. This replaces the "platform ships no NodePool"
 rule in `docs/catalog.md` and the unbuilt preset in
-`docs/design/component-usage.md` §6.4–6.5.
+`docs/design/component-usage.md` §6.4–6.5. An earlier revision of this
+design had a second, Karpenter-managed `platform` node group; there is one
+platform node group now, `system` (see "Migration of existing clusters").
 
 ## Decisions
 
 | Question | Decision |
 |---|---|
-| Workload nodes | Karpenter only. No EKS managed node group except the default one. |
-| Default managed node group | One per cluster, platform-managed (`t3.medium` for a new cluster): fixed size (2 nodes, Karpenter runs two replicas), tainted and labelled so only Karpenter and CoreDNS run there. Users cannot change its taints, labels or scaling. |
-| Platform node group | One Karpenter `NodePool` + `EC2NodeClass` named `platform`, owned by the platform. Platform components, tenant components and EKS add-on controllers run there. Users cannot create, change or delete it. |
-| User node groups | `ClusterSpec.node_groups`: further Karpenter NodePools, each with its own EC2NodeClass. Users add, change and remove them. |
-| Delivery | The controller server-side applies the EC2NodeClasses and NodePools into the workload cluster through the kubeconfig it already uses (teardown, scans), on every pass. A platform object that was edited or deleted is put back. No chart. |
+| Platform node group | **One**, `system`: the default EKS managed node group. It runs Karpenter, CoreDNS, every platform component, the tenant's components and the EKS add-on controllers. There is no Karpenter pool for the platform and no autoscaler for the group. |
+| Its size | Fixed: min = max = desired = `nodeGroups.system.size` (default 2, at least 2: Karpenter runs two replicas with anti-affinity). Set by the platform admin only; a change resizes existing clusters in place. |
+| Its machines | `nodeGroups.system.instanceType` (default `t3.medium`), `capacityType`, `diskSizeGiB`: new clusters only. A cluster created before keeps the instance type, capacity type, AMI and disk of its stored spec: EKS cannot change them in place, the node group would be replaced. |
+| Its placement | Label `node.cluster-vending.io/pool=system`, taint `node.cluster-vending.io/pool=system:NoSchedule`. Users cannot change its taints, labels or scaling (`failed_precondition`). |
+| User node groups | `ClusterSpec.node_groups`: Karpenter NodePools, each with its own EC2NodeClass. Users add, change and remove them. Karpenter serves them only. |
+| Delivery | The controller server-side applies the user groups' EC2NodeClasses and NodePools into the workload cluster through the kubeconfig it already uses (teardown, scans), on every pass. A platform object that was edited or deleted is put back. No chart. A cluster with no user node groups gets nothing applied. |
 | cluster-autoscaler | Removed from the platform set. Existing clusters have it uninstalled through the normal component removal. |
-| Existing clusters | Move to the new layout: the default group's taints, labels and size change in place (no replacement: instance types and AMI stay), platform components get the new placement and reschedule onto the platform pool. Imported clusters are untouched until taken over; a takeover with `skip_platform_components` keeps its adopted group as it is. |
+| Existing clusters | Move in place: the default group's taints, labels and size change (no replacement: instance types and AMI stay), platform components get the system placement, and the old `platform` NodePool and EC2NodeClass are removed once nothing needs them (see "Migration"). Imported clusters are untouched until taken over; a takeover with `skip_platform_components` keeps its adopted group as it is. |
 | User fields | Instance types and families, architectures, capacity types (on-demand, Spot), labels, taints, CPU and memory limits. |
 
 ## Placement
 
 | Where | Label (nodeSelector) | Taint | What runs |
 |---|---|---|---|
-| default managed node group | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, CoreDNS |
-| `platform` NodePool | `node.cluster-vending.io/pool=platform` | `node.cluster-vending.io/pool=platform:NoSchedule` | platform components, tenant components, EKS add-on controllers (ebs-csi controller, and any placed add-on) |
+| default managed node group (`system`) | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, CoreDNS, the platform components, the tenant's components, the EKS add-on controllers (the EBS CSI controller, and any placed add-on) |
 | user NodePool `<name>` | `node.cluster-vending.io/pool=<name>` plus the user's labels | the user's taints | the user's workloads |
 
 DaemonSets (vpc-cni, kube-proxy, pod identity agent, istio-cni, ztunnel)
-tolerate every taint and run everywhere.
+tolerate every taint and run everywhere. The platform's pods requesting more
+than a `system` node holds (all of them, with their DaemonSets, are on 2
+nodes) are a sizing question, not a placement one: see "Sizing" below.
 
 Placeholders (`pkg/component/placeholders.go`): `${system.nodeSelector}` /
-`${system.tolerations}` keep meaning "the default managed node group" and are
-used by Karpenter only. New `${platform.nodeSelector}` /
-`${platform.tolerations}` are the platform pool; every other platform and
-tenant component's catalog values switch to them.
+`${system.tolerations}` are the default managed node group's. `${platform.nodeSelector}`
+/ `${platform.tolerations}` are aliases of them, kept so the catalog's values do
+not churn; either name gives the same value, from live state.
 
 ## Install order
 
 1. EKS add-ons, with every other cluster resource: the cluster is RUNNING
    (and the default managed node group Ready).
-2. Karpenter's chart: the first platform component.
-3. Once Karpenter is Ready (its platform component phase READY: chart
-   deployed, so its CRDs exist), the controller creates the platform node
-   group (`EC2NodeClass` + `NodePool` `platform`), then the user node groups.
-   Nothing of the node groups is applied before that.
-4. Once the platform node group is Ready (`NodePool` `Ready` condition), the
-   other platform components install, in their definitions' sequence.
-5. Then the tenant components (they already wait for every platform
-   component to be Ready).
+2. The platform components, in their definitions' `sequence` (and `requires`)
+   order, through the Helm gate (one operation at a time,
+   [helm-reliability.md](helm-reliability.md)): Karpenter first (sequence 0).
+   Nothing is held for a node group: they run on the system group, which
+   exists before the cluster is RUNNING.
+3. The tenant components (they already wait for every platform component to
+   be Ready).
+4. Once Karpenter is Ready (its platform component phase READY: chart
+   deployed, so its CRDs exist) and its IAM is, the controller applies the
+   user node groups, if there are any.
 
 **Sequence in the definition.** `ComponentDefinition.spec.sequence`
 (int32, default 100): platform components install in ascending sequence;
 one starts only once every platform component of a lower sequence is
 deployed and Ready (the same mechanism as `requires`, which still applies
-within and across sequences). Karpenter is `0`, the only sequence that
-runs before the platform node group: every platform component with a
-sequence above `0` is also held back, with a status saying so ("waiting for
-the platform node group to be Ready"), until the platform node group is
-Ready. Removal runs in reverse sequence.
+within and across sequences). Karpenter is `0`. Removal runs in reverse
+sequence.
 
 ## Contract (`cloud.v1`, additive)
 
@@ -65,7 +66,7 @@ Ready. Removal runs in reverse sequence.
 repeated NodeGroupSpec node_groups = 16;   // user Karpenter node groups, max 20
 
 message NodeGroupSpec {
-  string name = 1;                         // DNS label, unique; not "platform", "default", "system"
+  string name = 1;                         // DNS label, unique; not "platform", "default", "system" (reserved)
   repeated string instance_types = 2;      // e.g. m7i.large; empty: any of instance_families
   repeated string instance_families = 3;   // e.g. m7i, c7g
   repeated Architecture architectures = 4; // AMD64, ARM64; empty: AMD64
@@ -77,7 +78,7 @@ message NodeGroupSpec {
 message NodeGroupLimits { optional int32 cpu = 1; optional int32 memory_gib = 2; }
 
 // ClusterStatus
-repeated NodeGroupStatus node_groups = 52; // the platform group first, then the user's
+repeated NodeGroupStatus node_groups = 52; // `system` first (platform_managed), then the user's
 message NodeGroupStatus {
   string name = 1; bool platform_managed = 2;
   NodeGroupPhase phase = 3;                // PENDING, READY, FAILED, DELETING
@@ -90,7 +91,9 @@ message NodeGroupStatus {
   platform fills it; a request that changes its taints, labels or scaling is
   refused (`failed_precondition: the default node group is managed by the
   platform`). Instance types, capacity type and AMI stay as they are for
-  existing clusters.
+  existing clusters. The size is the platform admin's setting
+  (`nodeGroups.system.size`), not the spec's: the render takes the current
+  setting, whatever the stored spec says.
 - CRD `ClusterSpec.NodeGroups` / `ClusterStatus.NodeGroups` mirror it;
   `pkg/convert` converts both ways.
 
@@ -108,7 +111,7 @@ message NodeGroupStatus {
 - **Spot service-linked role** `AWSServiceRoleForEC2Spot`: account-level,
   added to the account's provisioner CloudFormation template (created if
   missing).
-- **EC2NodeClass**: `role: <prefix>-karpenter-node`; subnets and security
+- **EC2NodeClass** (user groups only): `role: <prefix>-karpenter-node`; subnets and security
   groups by `karpenter.sh/discovery=<cluster>` or, where another cluster of
   the network holds that tag, `kubernetes.io/cluster/<cluster>`; AMI
   `alias: al2023@<pin>` from the release's pin for the cluster's Kubernetes
@@ -116,24 +119,30 @@ message NodeGroupStatus {
 
 ## Upgrades
 
-The Kubernetes upgrade's "node groups" step also moves the EC2NodeClasses'
-AMI pin to the target minor's; Karpenter drift replaces the nodes. The step
-is settled when every NodeClaim runs the target version (read through the
-workload kubeconfig).
+The Kubernetes upgrade's "node groups" step also moves the user groups'
+EC2NodeClasses' AMI pin to the target minor's; Karpenter drift replaces
+their nodes. The step is settled when every NodeClaim runs the target
+version (read through the workload kubeconfig; only a cluster that has user
+node groups is read). The system group upgrades through the existing managed
+node group path (the node group's `version`, with the rest of the step).
 
 ## Status and deletion
 
-Each pass reads the NodePools' `Ready` condition and node counts into
-`status.node_groups`. A user node group removed from the spec is deleted from
+Each pass reads the user NodePools' `Ready` condition and node counts into
+`status.node_groups`. The first entry is `system` (`platform_managed`): its
+phase is the readiness of the EKS `NodeGroup` managed resource (the newest,
+while a replaced one is retired), its node count that of the nodes labelled
+`eks.amazonaws.com/nodegroup=<the default group's name>`, read by the same
+paginated node reads. A user node group removed from the spec is deleted from
 the workload cluster (Karpenter drains its nodes). Cluster deletion runs
 in the reverse of the install order above, each stage gone before the next:
 load balancers, tenant components, platform components by descending
-sequence (above 0), then the node groups (user NodePools, the platform
-NodePool, the NodeClaims Karpenter has left, the EC2NodeClasses, read with
+sequence (above 0), then the node groups (the NodePools, the NodeClaims
+Karpenter has left, the EC2NodeClasses, read with
 bounded pages and a deadline per pass; a wait ends after the teardown
 timeout), then Karpenter itself (its chart, its IAM, the interruption queue,
 rules and targets, the node role and its access entry), then the EKS
-add-ons, then the rest ([../architecture.md](../architecture.md),
+add-ons, then the rest (the system group among it) ([../architecture.md](../architecture.md),
 "Deletion"; [../controller.md](../controller.md)). Karpenter stays until
 its nodes are gone, so it can terminate them and remove the instance
 profiles.
@@ -146,14 +155,12 @@ Controller side, as designed:
   orders by sequence; a component's first Release waits for the last Release
   of every lower-sequence component (Ready and deployed) and keeps it with a
   Usage. Requiring a higher sequence is a catalog error.
-- Components above sequence 0 are PENDING ("waiting for the platform node
-  group to be Ready") until `status.node_groups` has the platform group
-  READY. Only when the catalog has Karpenter, and only before another
-  component was started: a wavering node group status never holds back what
-  is installed.
+- No component is held for a node group: they follow `sequence` and
+  `requires` and the Helm gate alone.
 - `pkg/reconcile/cluster/nodegroups*.go` applies and reads the node groups
   (`Deps.NodeGroupClients`, `management.WorkloadClients`), after
-  `installPlatform` and only once Karpenter is READY. Status reads are
+  `installPlatform` and only once Karpenter is READY; the IAM readiness wait
+  gates only the user groups. Status reads are
   bounded and never fail a pass; the last good phase is kept on errors.
 - The AMI pin is `nodeAmiPin` per minor in `pkg/catalog/release.yaml` and
   `Release.spec.content.kubernetes[]` (unset: `al2023@latest`). The upgrade
@@ -171,22 +178,37 @@ Deviations and deferred:
 - Not covered without a real cluster: the SSA of Karpenter's kinds against
   a real API server (tests use a fake client), Karpenter's drift replacing
   nodes on an AMI pin change, and the `Ready` condition's real wording.
-- The platform NodePool is small burstable x86: family `t3`, sizes `medium`,
-  `large`, `xlarge`, amd64, on-demand (`crossplaneaws.PlatformInstanceFamilies`
-  and `PlatformInstanceSizes`, one place to change). It is the platform's own
-  choice and ignores the admin allowlist, so an allowlist with only Graviton
-  families no longer leaves it with nothing to launch. A node of the pool
-  has 2 vCPU and 4 GiB (t3.medium) at the least: components with larger
-  requests are placed on the larger sizes. t3 is burstable: sustained CPU
-  above the baseline is throttled (or charged, in unlimited mode).
 - The default managed node group's instance type for a new cluster is
-  `t3.medium` (`DefaultSystemInstanceType`; Karpenter's 1 CPU / 1Gi request
-  per replica and CoreDNS fit). A cluster created before keeps the
-  instance type of its stored spec (no node group replacement).
+  `t3.medium` (`nodeGroups.system.instanceType`; machines are t3, x86 and
+  burstable: sustained CPU above the baseline is throttled, or charged in
+  unlimited mode). A cluster created before keeps the instance type of its
+  stored spec (no node group replacement). See "Sizing" for what 2 nodes
+  hold.
+- The system group's YAML is not in `ListClusterNodeGroupManifests`: the
+  contract's `NodeGroupManifest` has the two Karpenter fields only. The
+  response has a `system` entry (`platform_managed`) without YAML. An
+  additive `string node_group_yaml` carrying the rendered EKS `NodeGroup`
+  (`spec.forProvider`) is the way to show it; it needs `make generate`.
 - A release published before `nodeAmiPin` falls back to the pin this build
   ships for the minor (`pkg/catalog/release.yaml`), never to `latest`; only
   when that is missing too the class pins `latest` and the platform group's
   status says so.
+
+### Sizing
+
+The system group holds Karpenter (2 replicas, 250m CPU / 512 MiB requested
+each, limits 1 CPU / 1 GiB), CoreDNS, every platform component and the add-on
+controllers, with the DaemonSets on each node. On 2 x `t3.medium` (2 vCPU,
+4 GiB, 17 pods per node; allocatable 1.93 CPU / 3.2 GiB per node by the EKS
+AL2023 reservations, so 3.86 CPU / 6.3 GiB / 34 pods) the requests sum to 2.4
+CPU (63%), 4.3 GiB (66%) and 30 pods (88%). The pod count is the tight
+limit. Only Karpenter keeps two replicas among the platform components
+(Capsule keeps 2 too); the rest run one, without a PodDisruptionBudget so a
+drain can proceed. Requests are explicit in the definitions and summed by
+`pkg/catalog/system_group_sizing_test.go`, which fails above 85% of the
+default group's CPU or memory allocatable or above its pod capacity: size
+`nodeGroups.system` up (`t3.large`, or more nodes) before adding replicas or
+components.
 
 ### Migration of existing clusters
 
@@ -201,13 +223,29 @@ platform intends to roll out:
   taint; then the new one. Where the node group is not reported yet, a
   cluster whose components started keeps its stored default node pool, a new
   one gets the fixed system placement.
-- `${platform.*}` is the platform pool only once `status.node_groups` shows
-  the platform group READY; until then it is the same as `${system.*}`.
+- `${platform.*}` is an alias of `${system.*}`: the same live value.
 - A component already installed keeps running on its current placement and
   moves with one Helm upgrade (the Helm gate orders them) when the target
-  becomes live. Components that have not started on a new cluster still
-  wait for the platform node group (the hold above).
-- The EC2NodeClasses and NodePools are applied only when the Karpenter node
+  becomes live. Components that have not started on a new cluster follow
+  `sequence` and `requires` only.
+- **The old `platform` NodePool and EC2NodeClass** of a cluster built before
+  the system group took over (labelled `managed-by=platform`) are removed by
+  the applier's normal removal path, but only in this order, and until it
+  holds they are kept exactly as they are (not applied again, not changed):
+  1. the system node group has the system label and taint, is ACTIVE at
+     the admin's size and that many of its nodes are Ready;
+  2. every platform component is READY with its Helm release settled
+     (nothing written in this pass, the gate's `unchanged`), every tenant
+     component is READY, and no pod but a DaemonSet's or a static one is
+     left on the old pool's nodes (a paginated pod read), so nothing still
+     selects only the old pool;
+  3. then the NodePool `platform` is deleted (Karpenter drains and
+     terminates its nodes), the EC2NodeClass `platform` once the NodePool and
+     its nodes are gone.
+  The system group's status message says where it is: "moving components off
+  the old platform pool: N left (...)", "removing the old platform pool: ...".
+  There is no `platform` row in `status.node_groups`.
+- The user groups' EC2NodeClasses and NodePools are applied only when the Karpenter node
   role, its four policy attachments and its `EC2_LINUX` access entry are
   Ready and the Karpenter controller policy as applied (the live `Policy`,
   Ready) allows `iam:PassRole` on that role; until then the groups report
@@ -219,19 +257,46 @@ platform intends to roll out:
 
 ## Instance allowlist and manifests
 
-- `node-group-instance-families` and `node-group-instance-types` (flag,
-  `CV_NODE_GROUP_INSTANCE_*`, config file as comma-separated values) are set
-  the same on `serve` and `controller`. Empty restricts nothing. The server
-  refuses (InvalidArgument) a new or changed user group whose families are
-  outside the family list, whose types are in neither list nor of an
-  allowed family, or, when a family list is set, that names neither (the
+- The layout is the `nodeGroups` section of the config file, the same shape
+  for `serve` and `controller` (`config.NodeGroups`, one struct, validated
+  at startup with clear errors), so the server's checks and the controller's
+  render cannot drift:
+
+  ```yaml
+  nodeGroups:
+    system:                      # the default EKS managed node group
+      instanceType: t3.medium    # new clusters only
+      size: 2                    # desired = min = max; at least 2
+      capacityType: ON_DEMAND    # new clusters only
+      diskSizeGiB: 0             # new clusters only; 0: EKS's default
+    karpenter:                   # what users may create
+      instanceFamilies: [t3]
+      instanceTypes: []
+      defaults:                  # for a user group that leaves them unset
+        architectures: [AMD64]
+        capacityTypes: [ON_DEMAND]
+  ```
+
+  Each value is also a flag and `CV_*` variable (`system-node-group-size`,
+  `system-node-group-instance-type`, `system-node-group-capacity-type`,
+  `system-node-group-disk-size-gib`, `node-group-instance-families`,
+  `node-group-instance-types`, `node-group-default-architectures`,
+  `node-group-default-capacity-types`; lists comma-separated); they win over
+  the file. The two allowlist names are the ones that shipped before the
+  section and still work as flat file keys. An empty list or `none` restricts
+  nothing. Validation: size at least 2, an instance type like `t3.medium`,
+  families like `t3`, `ON_DEMAND`/`SPOT`, `AMD64`/`ARM64`.
+- The server refuses (InvalidArgument) a new or changed user group whose
+  families are outside the family list, whose types are in neither list nor
+  of an allowed family, or, when a family list is set, that names neither (the
   default categories would sidestep it). Unchanged groups are not rechecked,
-  so narrowing the list never blocks an unrelated update. The platform
-  NodePool is not subject to it (see above); user groups with neither
-  families nor types get the default categories.
+  so narrowing the list never blocks an unrelated update. The system group
+  is not subject to it. The controller gives a user group that sets no
+  architecture or capacity type the `defaults`.
 - `GetNodeGroupOptions` returns the allowlist, architectures and capacity
   types (read-only); the UI suggests and pre-checks with it.
-- `ListClusterNodeGroupManifests` renders the objects with
+- `ListClusterNodeGroupManifests`: `system` first (`platform_managed`, no
+  YAML, see above), then each user group, rendered with
   `reconcilecluster.Reconciler.NodeGroupObjects`, the function the applier's
   input comes from, as `sigs.k8s.io/yaml`; none for an imported cluster that
   was not taken over. The release pin is read from the recorded
@@ -240,8 +305,8 @@ platform intends to roll out:
 ## Node group detail page and node list
 
 - Each node group has a page, `/clusters/<id>/node-groups/<name>` (the Node
-  groups tab links the platform group, the user groups and the default managed
-  group, `system`). It shows the group's phase, the platform-managed mark, the
+  groups tab links `system`, the default managed group, then the user
+  groups). It shows the group's phase, the platform-managed mark, the
   group's settings, View YAML, and a table of its nodes (name, status, instance
   type, zone, capacity, kubelet version, age, NodeClaim) with a status filter and
   a name search, paged by the server at 100 nodes.

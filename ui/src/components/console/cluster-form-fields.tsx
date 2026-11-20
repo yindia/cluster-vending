@@ -103,7 +103,7 @@ export function ClusterExtraFields({ value, onChange, disabled, creating, step, 
         <KeyValueRows field="nodeLabels" label="Node labels" rowLabel="node label" state={rows} onChange={onChange} disabled={disabled} />
         <KeyValueRows field="nodeTaints" label="Node taints" rowLabel="node taint" state={rows} onChange={onChange} disabled={disabled} />
       </VStack> : <VStack gap={3} paddingBlock={3} data-platform-managed="">
-        <Text type="supporting">Managed by the platform: runs Karpenter only. Set labels and taints on a node group instead.</Text>
+        <Text type="supporting">Managed by the platform: the system node group runs Karpenter and the platform&apos;s components. Set labels and taints on a node group instead.</Text>
         <MetadataList>
           <MetadataListItem label="Node labels">{lockedEntries(value.nodeLabels, false)}</MetadataListItem>
           <MetadataListItem label="Node taints">{lockedEntries(value.nodeTaints, true)}</MetadataListItem>

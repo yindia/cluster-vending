@@ -12,6 +12,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { usePlatform } from "@/components/platform-provider";
 import { useAsyncQuery } from "@/lib/api/use-query";
+import { hasManifestYaml } from "@/lib/workflows/node-groups";
 import {
   NODE_PAGE_SIZE, collectionState, groupDetail, isTokenMismatch, nodeFilterOptions, nodeRow, nodeStatusFilter, pageRange, pagerBack, pagerForward, pagerStart,
   type NodeRow, type NodeStatusChoice,
@@ -84,7 +85,8 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
   const [container, width] = useElementWidth();
 
   const detail = cluster.data ? groupDetail(cluster.data, group) : undefined;
-  const manifest = manifests.data?.find(item => item.name === group);
+  const found = manifests.data?.find(item => item.name === group);
+  const manifest = hasManifestYaml(found) ? found : undefined;
   const back = <Link href={`/clusters/${encodeURIComponent(clusterId)}?tab=node-groups`}>Cluster node groups</Link>;
   const refresh = () => { cluster.refresh(); manifests.refresh(); nodes.refresh(); };
   const refreshing = cluster.refreshing || manifests.refreshing || nodes.refreshing;

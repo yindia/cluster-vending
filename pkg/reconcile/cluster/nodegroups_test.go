@@ -16,7 +16,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -125,54 +124,86 @@ func setReady(t *testing.T, fw *fakeWorkload, kind, name string, ready bool) {
 // Nothing of the node groups is applied before Karpenter is READY.
 func TestNodeGroupsWaitForKarpenter(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
-	w, row := nodeGroupWorld(t, fw)
+	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING))
 
-	if fw.opened != 0 || fw.get(t, "NodePool", "", "platform") != nil {
+	if fw.opened != 0 || fw.get(t, "NodePool", "", "gpu") != nil {
 		t.Errorf("the cluster was touched before Karpenter was Ready (opened %d)", fw.opened)
 	}
-	if p := statusOf(res, "platform"); p == nil || p.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING || !p.GetPlatformManaged() {
-		t.Errorf("platform status = %v", p)
+	if g := statusOf(res, "gpu"); g == nil || g.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING || g.GetPlatformManaged() {
+		t.Errorf("gpu status = %v", g)
 	}
 }
 
-// Once Karpenter is READY the platform group and the spec's groups are
-// applied, labelled, platform first; readiness follows the NodePool's
-// Ready condition.
-func TestNodeGroupsAreAppliedOnceKarpenterIsReady(t *testing.T) {
+// Once Karpenter is READY the user groups are applied, labelled; readiness
+// follows the NodePool's Ready condition. There is no platform group.
+func TestUserNodeGroupsAreAppliedOnceKarpenterIsReady(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
 	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu", InstanceFamilies: []string{"g5"}})
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-	for _, name := range []string{"platform", "gpu"} {
-		pool, class := fw.get(t, "NodePool", "", name), fw.get(t, "EC2NodeClass", "", name)
-		if pool == nil || class == nil {
-			t.Fatalf("%s: pool %v class %v", name, pool != nil, class != nil)
-		}
-		if pool.GetLabels()[crossplaneaws.LabelManagedBy] != crossplaneaws.ManagedByPlatform || class.GetLabels()[crossplaneaws.LabelManagedBy] != crossplaneaws.ManagedByPlatform {
-			t.Errorf("%s is not labelled managed", name)
-		}
+	pool, class := fw.get(t, "NodePool", "", "gpu"), fw.get(t, "EC2NodeClass", "", "gpu")
+	if pool == nil || class == nil {
+		t.Fatalf("gpu: pool %v class %v", pool != nil, class != nil)
 	}
-	class := fw.get(t, "EC2NodeClass", "", "platform")
-	alias, _, _ := unstructured.NestedString(class.Object, "spec", "amiSelectorTerms", "0", "alias")
+	if pool.GetLabels()[crossplaneaws.LabelManagedBy] != crossplaneaws.ManagedByPlatform || class.GetLabels()[crossplaneaws.LabelManagedBy] != crossplaneaws.ManagedByPlatform {
+		t.Error("gpu is not labelled managed")
+	}
+	if fw.get(t, "NodePool", "", "platform") != nil || fw.get(t, "EC2NodeClass", "", "platform") != nil {
+		t.Error("a platform NodePool or EC2NodeClass was applied: the system node group runs the platform")
+	}
 	terms, _, _ := unstructured.NestedSlice(class.Object, "spec", "amiSelectorTerms")
-	if got := terms[0].(map[string]any)["alias"]; got != "al2023@v20261107" || alias != "" {
+	if got := terms[0].(map[string]any)["alias"]; got != "al2023@v20261107" {
 		t.Errorf("AMI alias %v", got)
 	}
-	if got, want := res.groups[0].GetName(), "platform"; got != want || len(res.groups) != 2 {
+	if len(res.groups) != 1 || res.groups[0].GetName() != "gpu" || res.groups[0].GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING {
 		t.Fatalf("groups %v", res.groups)
 	}
-	if res.groups[0].GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING {
-		t.Errorf("a pool without a Ready condition is %v", res.groups[0].GetPhase())
-	}
 
-	setReady(t, fw, "NodePool", "platform", true)
+	setReady(t, fw, "NodePool", "gpu", true)
 	res = passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-	if p := statusOf(res, "platform"); p.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY || p.GetNodes() != 3 {
-		t.Errorf("platform status = %v", p)
+	if g := statusOf(res, "gpu"); g.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY || g.GetNodes() != 3 {
+		t.Errorf("gpu status = %v", g)
+	}
+}
+
+// A cluster with no user node groups applies nothing to the workload
+// cluster, and needs none of Karpenter's IAM for it.
+func TestNoUserNodeGroupsApplyNothing(t *testing.T) {
+	var applied []string
+	fw := newFakeWorkload(interceptor.Funcs{Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+		if u, ok := obj.(interface{ GetName() string }); ok {
+			applied = append(applied, u.GetName())
+		}
+		return c.Apply(ctx, obj, opts...)
+	}})
+	w, row, _ := nodeGroupWorldSrc(t, fw) // no IAM seeded: only user groups wait for it
+
+	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
+
+	if len(applied) != 0 {
+		t.Errorf("applied %v", applied)
+	}
+	if res == nil || len(res.groups) != 0 || !res.system.counted {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+// The IAM wait gates user groups only.
+func TestKarpenterIAMGatesUserGroupsOnly(t *testing.T) {
+	fw := newFakeWorkload(interceptor.Funcs{})
+	w, row, _ := nodeGroupWorldSrc(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"}) // no IAM seeded
+
+	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
+
+	if g := statusOf(res, "gpu"); g == nil || !strings.Contains(g.GetMessage(), "waiting for Karpenter's IAM") {
+		t.Errorf("gpu status = %v", g)
+	}
+	if fw.get(t, "NodePool", "", "gpu") != nil {
+		t.Error("a group was applied before Karpenter's IAM was ready")
 	}
 }
 
@@ -183,17 +214,17 @@ func TestNodeGroupsAreRevertedAndOthersLeftAlone(t *testing.T) {
 	foreign.SetGroupVersionKind(crossplaneaws.KarpenterNodePoolGVK)
 	foreign.SetName("hand-made")
 	fw := newFakeWorkload(interceptor.Funcs{}, foreign)
-	w, row := nodeGroupWorld(t, fw)
+	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 	karpenter := karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY)
 	passOf(w, row, karpenter)
-	if err := fw.c.Delete(t.Context(), fw.get(t, "NodePool", "", "platform")); err != nil {
+	if err := fw.c.Delete(t.Context(), fw.get(t, "NodePool", "", "gpu")); err != nil {
 		t.Fatal(err)
 	}
 
 	passOf(w, row, karpenter)
 
-	if fw.get(t, "NodePool", "", "platform") == nil {
-		t.Error("the deleted platform NodePool was not put back")
+	if fw.get(t, "NodePool", "", "gpu") == nil {
+		t.Error("the deleted NodePool was not put back")
 	}
 	if fw.get(t, "NodePool", "", "hand-made") == nil {
 		t.Error("an object the platform does not own was deleted")
@@ -201,14 +232,14 @@ func TestNodeGroupsAreRevertedAndOthersLeftAlone(t *testing.T) {
 }
 
 // A group removed from the spec is deleted (NodePool before its class),
-// and reported DELETING while it is there.
+// and reported DELETING while it is there; the others stay.
 func TestRemovedNodeGroupIsDeleted(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
-	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
+	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"}, &cloudv1.NodeGroupSpec{Name: "web"})
 	karpenter := karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY)
 	passOf(w, row, karpenter)
 	spec, _ := SpecOf(row)
-	spec.NodeGroups = nil
+	spec.NodeGroups = spec.NodeGroups[1:]
 	raw, _ := Encode(spec)
 	row.Spec = raw
 
@@ -224,8 +255,8 @@ func TestRemovedNodeGroupIsDeleted(t *testing.T) {
 	if fw.get(t, "EC2NodeClass", "", "gpu") != nil {
 		t.Error("the removed group's EC2NodeClass is still there")
 	}
-	if platform := fw.get(t, "NodePool", "", "platform"); platform == nil {
-		t.Error("the platform group went with it")
+	if fw.get(t, "NodePool", "", "web") == nil {
+		t.Error("the other group went with it")
 	}
 }
 
@@ -233,24 +264,31 @@ func TestRemovedNodeGroupIsDeleted(t *testing.T) {
 // the last good phase stays, nothing returns an error.
 func TestNodeGroupsKeepTheLastGoodStatusOnErrors(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
-	w, row := nodeGroupWorld(t, fw)
+	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 	karpenter := karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY)
 	passOf(w, row, karpenter)
-	setReady(t, fw, "NodePool", "platform", true)
+	setReady(t, fw, "NodePool", "gpu", true)
 	good := passOf(w, row, karpenter)
 	row.Status = mustStatus(t, &cloudv1.ClusterStatus{NodeGroups: good.groups})
 
 	fw.err = errors.New("connection refused")
 	res := passOf(w, row, karpenter)
 
-	p := statusOf(res, "platform")
-	if p.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY || !strings.Contains(p.GetMessage(), "status unavailable") ||
-		p.GetNodes() != 3 {
-		t.Errorf("platform status after an error = %v", p)
+	g := statusOf(res, "gpu")
+	if g.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY || !strings.Contains(g.GetMessage(), "status unavailable") ||
+		g.GetNodes() != 3 {
+		t.Errorf("gpu status after an error = %v", g)
 	}
-	if !platformNodeGroupReady(row) {
-		t.Error("the recorded platform group is READY")
+	if !hasKarpenterNodes(withNodeGroupsRow(row, good.groups)) {
+		t.Error("a recorded READY user group means Karpenter has nodes")
 	}
+}
+
+func withNodeGroupsRow(row *model.Cluster, groups []*cloudv1.NodeGroupStatus) *model.Cluster {
+	out := *row
+	raw, _ := Encode(&cloudv1.ClusterStatus{NodeGroups: groups})
+	out.Status = raw
+	return &out
 }
 
 // A failed apply is that group's FAILED status; others go on, and the
@@ -262,7 +300,7 @@ func TestNodeGroupApplyFailureIsStatus(t *testing.T) {
 		}
 		return c.Apply(ctx, obj, opts...)
 	}})
-	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
+	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"}, &cloudv1.NodeGroupSpec{Name: "web"})
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
@@ -270,8 +308,8 @@ func TestNodeGroupApplyFailureIsStatus(t *testing.T) {
 	if g.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED || len([]rune(g.GetMessage())) > nodeGroupMessageMax {
 		t.Errorf("gpu status = %v", g)
 	}
-	if fw.get(t, "NodePool", "", "platform") == nil {
-		t.Error("the platform group was not applied")
+	if fw.get(t, "NodePool", "", "web") == nil {
+		t.Error("the other group was not applied")
 	}
 }
 
@@ -285,12 +323,12 @@ func TestNodeGroupsToleratesMissingCRDs(t *testing.T) {
 			return &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "karpenter.sh", Kind: "NodePool"}}
 		},
 	})
-	w, row := nodeGroupWorld(t, fw)
+	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-	if p := statusOf(res, "platform"); p == nil || !strings.Contains(p.GetMessage(), "CRDs") {
-		t.Errorf("platform status = %v", p)
+	if g := statusOf(res, "gpu"); g == nil || !strings.Contains(g.GetMessage(), "CRDs") {
+		t.Errorf("gpu status = %v", g)
 	}
 }
 
@@ -357,47 +395,6 @@ func TestKarpenterNodesSettleTheNodeGroupsStep(t *testing.T) {
 	}
 }
 
-// Every platform component above sequence 0 waits for the platform node
-// group, which Karpenter's cluster does not; once something else started,
-// a wavering node group status never holds it back.
-func TestPlatformComponentsWaitForThePlatformNodeGroup(t *testing.T) {
-	karp := platformDef("karpenter")
-	zero := int32(0)
-	karp.Spec.Sequence = &zero
-	w, src := platformWorld(t)
-	src.defs = append(src.defs, karp)
-	src.release.Spec.Content.Kubernetes[0].Components = append(src.release.Spec.Content.Kubernetes[0].Components,
-		cloudv1alpha1.ComponentPin{Name: "karpenter", Version: "1.0.0"})
-	w.helmConfig(t)
-
-	p := w.install(t)
-
-	if got := phases(p); !strings.Contains(got, "karpenter=INSTALLING") || !strings.Contains(got, "base=PENDING") || !strings.Contains(got, "mesh=PENDING") {
-		t.Fatalf("components = %s", got)
-	}
-	for _, c := range p.components {
-		if c.GetName() == "base" && !strings.Contains(c.GetMessage(), "waiting for the platform node group to be Ready") {
-			t.Errorf("base message %q", c.GetMessage())
-		}
-	}
-	if w.release(t, "base") != nil {
-		t.Error("base was installed before the platform node group was Ready")
-	}
-	w.deployed(t, "karpenter")
-	row := w.cluster(t)
-	row.Status = mustStatus(t, &cloudv1.ClusterStatus{NodeGroups: []*cloudv1.NodeGroupStatus{
-		{Name: "platform", Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY}}})
-	if err := w.store.Clusters().Update(t.Context(), row); err != nil {
-		t.Fatal(err)
-	}
-
-	w.install(t)
-
-	if w.release(t, "base") == nil {
-		t.Error("base is not installed once the platform node group is Ready")
-	}
-}
-
 // A taken-over cluster gets Karpenter's setup (its queue and node role):
 // the chart's values point at them. One only observed does not.
 func TestRenderPlanKarpenterForTakeover(t *testing.T) {
@@ -433,16 +430,16 @@ func mustStatus(t *testing.T, st *cloudv1.ClusterStatus) model.JSON {
 	return raw
 }
 
-// The platform group is on the status from the start: PENDING before the
-// platform components are looked at, with the user groups, and the
-// recorded state of a group is kept while Karpenter is not Ready.
+// The user groups are on the status from the start: PENDING before the
+// platform components are looked at, and the recorded state of a group is
+// kept while Karpenter is not Ready.
 func TestNodeGroupsVisibleFromTheStart(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
 	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
 
 	res := passOf(w, row, nil)
 
-	if res == nil || len(res.groups) != 2 || res.groups[0].GetName() != "platform" || !res.groups[0].GetPlatformManaged() ||
+	if res == nil || len(res.groups) != 1 || res.groups[0].GetName() != "gpu" || res.groups[0].GetPlatformManaged() ||
 		res.groups[0].GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING ||
 		res.groups[0].GetMessage() != "waiting for Karpenter to be Ready" {
 		t.Fatalf("groups = %v", res)
@@ -451,11 +448,11 @@ func TestNodeGroupsVisibleFromTheStart(t *testing.T) {
 		t.Error("the cluster was opened before Karpenter was Ready")
 	}
 	row.Status = mustStatus(t, &cloudv1.ClusterStatus{NodeGroups: []*cloudv1.NodeGroupStatus{
-		{Name: "platform", PlatformManaged: true, Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, Nodes: 2}}})
+		{Name: "gpu", Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, Nodes: 2}}})
 
 	res = passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING))
 
-	if res.groups[0].GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY || res.groups[1].GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING {
+	if res.groups[0].GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY {
 		t.Errorf("groups = %v", res.groups)
 	}
 }

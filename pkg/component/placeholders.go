@@ -38,16 +38,15 @@ const (
 	// placeholders: a string that is exactly ${system.nodeSelector} becomes
 	// the labels of the default managed node group (a map),
 	// ${system.tolerations} a list tolerating its taint ({key, operator:
-	// Equal, value, effect}). Only Karpenter uses them: it runs there,
-	// where tenant workloads and the other components do not. Only in
-	// platform values.
+	// Equal, value, effect}). The platform has one node group, so these
+	// and the platform.* placeholders below are the same: 	// where tenant workloads do not. Only in platform values.
 	VarSystemNodeSelector = "system.nodeSelector"
 	VarSystemTolerations  = "system.tolerations"
-	// VarPlatformNodeSelector and VarPlatformTolerations are the same for
-	// the platform's Karpenter node pool: where every other platform
-	// component, the tenant's components and the add-on controllers run.
-	// An imported cluster has no platform pool: its components follow its
-	// default node pool (its labels and taints), as before.
+	// VarPlatformNodeSelector and VarPlatformTolerations are aliases of the
+	// two above, kept so catalog values need not change: every platform
+	// component, the tenant's components and the add-on controllers run on
+	// the default managed node group. An imported cluster's components
+	// follow its default node pool (its labels and taints), as before.
 	VarPlatformNodeSelector = "platform.nodeSelector"
 	VarPlatformTolerations  = "platform.tolerations"
 
@@ -154,10 +153,9 @@ func VarsFor(cluster *cloudv1alpha1.Cluster, network *cloudv1alpha1.Network, acc
 	return v
 }
 
-// placement sets the whole-value placeholders of the node pools. A cluster
-// the platform created has the platform's pools (crossplaneaws.Pool*),
-// whatever its stored spec says. An imported one has its own default node
-// pool, for both: it has no platform pool.
+// placement sets the whole-value placeholders of the node pools: a platform
+// cluster has one node group, the system one (platform.* is its alias); an
+// imported one has its own default pool.
 func placement(v Vars, cluster *cloudv1alpha1.Cluster) {
 	if cluster.Spec.ImportFrom != nil {
 		v[VarSystemNodeSelector] = systemNodeSelector(cluster.Spec.DefaultNodePool)
@@ -167,8 +165,7 @@ func placement(v Vars, cluster *cloudv1alpha1.Cluster) {
 	}
 	v[VarSystemNodeSelector] = mustJSON(crossplaneaws.PoolLabels(crossplaneaws.PoolSystem))
 	v[VarSystemTolerations] = mustJSON(crossplaneaws.PoolTolerations(crossplaneaws.PoolSystem))
-	v[VarPlatformNodeSelector] = mustJSON(crossplaneaws.PoolLabels(crossplaneaws.PoolPlatform))
-	v[VarPlatformTolerations] = mustJSON(crossplaneaws.PoolTolerations(crossplaneaws.PoolPlatform))
+	v[VarPlatformNodeSelector], v[VarPlatformTolerations] = v[VarSystemNodeSelector], v[VarSystemTolerations]
 }
 
 // Placement is where the pods of a node pool run: the labels they select and
@@ -179,16 +176,15 @@ type Placement struct {
 }
 
 // WithPlacement is v with the whole-value placeholders of the default
-// managed node group (system.*) and of the platform pool (platform.*) set
-// from the given placements: what the live node group carries now, and the
-// platform pool once it is Ready. It never changes v.
-func WithPlacement(v Vars, system, platform Placement) Vars {
+// managed node group (system.*, and platform.* as its alias) set from the
+// placement the live node group carries now. It never changes v.
+func WithPlacement(v Vars, system Placement) Vars {
 	out := make(Vars, len(v)+4)
 	for k, val := range v {
 		out[k] = val
 	}
 	out[VarSystemNodeSelector], out[VarSystemTolerations] = system.selectorJSON(), system.tolerationsJSON()
-	out[VarPlatformNodeSelector], out[VarPlatformTolerations] = platform.selectorJSON(), platform.tolerationsJSON()
+	out[VarPlatformNodeSelector], out[VarPlatformTolerations] = out[VarSystemNodeSelector], out[VarSystemTolerations]
 	return out
 }
 

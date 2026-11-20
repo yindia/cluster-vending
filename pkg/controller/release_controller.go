@@ -29,7 +29,7 @@ import (
 )
 
 // The release controllers keep the status of the operator's release
-// objects (docs/design/release-admin.md). They change no cluster: rollouts
+// objects (docs/architecture.md#releases-channels-and-rollouts). They change no cluster: rollouts
 // come later.
 
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=releases;releasechannels,verbs=get;list;watch;create;update;patch
@@ -340,7 +340,7 @@ func upstream(channel string) string {
 
 // Reconcile resolves the release the channel offers. Pinned and Manual
 // offer spec.release; Automatic offers the release its upstream offers.
-// Until rollouts exist (docs/design/release-admin.md, step 6), a release
+// Until rollouts exist (docs/architecture.md#releases-channels-and-rollouts, step 6), a release
 // counts as completed upstream as soon as the upstream offers it. A
 // release that is missing, invalid or withdrawn is not offered: the
 // channel keeps offering what it did, with the Offering condition saying

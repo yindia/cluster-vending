@@ -6,7 +6,7 @@ metadata:
   name: kyverno
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: Kyverno policy engine (admission, background, cleanup and reports controllers) installed highly available and fail closed, with system and platform namespaces excluded from its webhooks.
   # Installed with every cluster by the platform; not a tenant's to enable.
@@ -16,7 +16,7 @@ spec:
   # kyverno and kyverno-policies are released together.
   versionGroup: kyverno
   install:
-    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    # Helm waits this long for each chart to roll out (docs/architecture.md#helm-operations).
     timeout: 15m
     helm:
       repository: https://kyverno.github.io/kyverno/
@@ -94,7 +94,7 @@ spec:
 
     admissionController:
       # Serves every admission webhook call; all replicas serve requests.
-      # One replica: the system group is 2 x t3.medium (docs/catalog.md,
+      # One replica: the system group is 2 x t3.medium (docs/architecture.md#node-layout,
       # "Sizing the system group"), where only Karpenter is kept highly
       # available. Raise to 3 (Kyverno's HA minimum) on a larger group.
       replicas: 1

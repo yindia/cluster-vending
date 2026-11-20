@@ -199,7 +199,7 @@ func (ComponentPhase) EnumDescriptor() ([]byte, []int) {
 }
 
 // Component is one catalog component enabled on one cluster of a tenant
-// (docs/design/component-usage.md). A cluster has a component at most once.
+// (docs/architecture.md#components-and-the-catalog). A cluster has a component at most once.
 type Component struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Tenant that owns the component. Output only: set by the server from the

@@ -18,7 +18,7 @@ const (
 
 // The reasons of the events the controller emits: what happened, as one
 // word. An event is emitted when something changes, never on a pass that
-// found things as they were. docs/events.md has the same table.
+// found things as they were. docs/architecture.md#events-and-conditions has the same table.
 //
 //	Object        Reason                      Type     When
 //	Cluster       Provisioning                Normal   its resources are being created

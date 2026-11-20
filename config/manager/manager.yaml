@@ -80,7 +80,7 @@ spec:
         - name: CV_INSTALL_PROVIDERS
           value: "true"
         # The node group layout (nodeGroups in a config file, --config /
-        # CV_CONFIG, is the same thing; docs/controller.md). The API server
+        # CV_CONFIG, is the same thing; docs/architecture.md#5-configuration). The API server
         # (config/server) must have the same values. The system node group
         # runs Karpenter, cluster-autoscaler, CoreDNS and every platform
         # component, autoscaled between the minimum and maximum size (both

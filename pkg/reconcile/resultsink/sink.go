@@ -1,5 +1,5 @@
 // Package resultsink writes a scan's full result to the cluster's results
-// bucket (docs/design/cluster-results-s3.md) and records its summary on the
+// bucket (docs/architecture.md#results-in-s3) and records its summary on the
 // Cluster. It is how the controller's scanners (deprecations,
 // recommendations, policy) use S3, and it never fails a scan: when the
 // bucket is not there, not Ready or cannot be written, the caller keeps

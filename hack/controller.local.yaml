@@ -22,7 +22,7 @@ aws-management-role-arn: arn:aws:iam::642299167759:role/cluster-vending-provisio
 # Kind has no IRSA: the providers authenticate with the AWS keys in this
 # Secret (an AWS shared credentials file under the key, default
 # "credentials"), then assume each account's tenant role. Create it once
-# (docs/controller.md, "Local run"), then uncomment:
+# (docs/architecture.md#run-locally, "Local run"), then uncomment:
 provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
 # Local testing only: act with the Secret's keys directly, without assuming
 # the account's tenant role (for an account whose organization policy
@@ -31,7 +31,7 @@ automatic-upgrades: true
 skip-tenant-role: true
 
 # The node group layout: the same section in the server's and the
-# controller's file, so they cannot drift (docs/controller.md). Flags and
+# controller's file, so they cannot drift (docs/architecture.md#5-configuration). Flags and
 # CV_* variables win over single values.
 nodeGroups:
   # The default EKS managed node group: runs Karpenter, CoreDNS, every

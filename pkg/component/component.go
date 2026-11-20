@@ -1,6 +1,6 @@
 // Package component decides, without any client or store, whether a tenant
 // may enable, change or disable a component on a cluster, and what values
-// the component is installed with (docs/design/component-usage.md,
+// the component is installed with (docs/architecture.md#components-and-the-catalog,
 // sections 4.4, 5 and 8):
 //
 //   - Merge builds the effective values: chart defaults, then the

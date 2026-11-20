@@ -1,4 +1,4 @@
-# The component catalog (docs/design/component-usage.md), written by the
+# The component catalog (docs/architecture.md#components-and-the-catalog), written by the
 # release-admin role. Chart versions are not here: each release pins them
 # per Kubernetes minor.
 #

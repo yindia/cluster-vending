@@ -16,7 +16,7 @@ import (
 // node. This file fails when what the shipped catalog REQUESTS there no
 // longer fits the DEFAULT group at its MINIMUM size (config.DefaultNodeGroups,
 // MinSize nodes) with headroom: a chart bump or a definition edit cannot
-// silently outgrow it (docs/catalog.md, "Sizing the system group"). The
+// silently outgrow it (docs/architecture.md#node-layout, "Sizing the system group"). The
 // group is autoscaled: when pending pods need room, cluster-autoscaler adds
 // nodes up to MaxSize, so what does not fit at the minimum is a cost
 // (more nodes), not an outage, but the default stays one that needs none.

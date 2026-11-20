@@ -1,6 +1,6 @@
 package aws
 
-// The node pools of a cluster (docs/design/karpenter-node-groups.md): the
+// The node pools of a cluster (docs/architecture.md#node-layout): the
 // default managed node group ("system") runs Karpenter, CoreDNS, every
 // platform component, the tenant's components and the EKS add-on
 // controllers, between a minimum and a maximum size that cluster-autoscaler

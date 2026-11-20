@@ -36,7 +36,7 @@ func TestShippedRulesParse(t *testing.T) {
 // The newest Kubernetes minor the data knows a removal in. A target after
 // it finds what was removed up to here and nothing newer: either that
 // minor removes nothing, or Pluto has not recorded it yet. When this
-// fails after `make deprecation-rules`, update it and docs/deprecations.md.
+// fails after `make deprecation-rules`, update it and docs/architecture.md#scanners.
 func TestNewestRemovalTheRulesKnow(t *testing.T) {
 	if got := rules(t).NewestRemoval(); got != "1.36" {
 		t.Fatalf("newest removal = %s, want 1.36", got)

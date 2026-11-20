@@ -15,7 +15,7 @@ import (
 
 // definitionsDir holds the shipped definitions: one ComponentDefinition per
 // YAML file, named after it. Each definition's chart version and caveats
-// are in docs/catalog.md.
+// are in docs/architecture.md#components-and-the-catalog.
 const definitionsDir = "definitions"
 
 //go:embed definitions/*.yaml

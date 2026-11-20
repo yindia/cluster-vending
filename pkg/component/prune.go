@@ -1,5 +1,5 @@
 // Package component holds the pure rules of catalog components
-// (docs/design/component-usage.md): no I/O, plain inputs.
+// (docs/architecture.md#components-and-the-catalog): no I/O, plain inputs.
 package component
 
 import "reflect"

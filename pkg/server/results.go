@@ -11,7 +11,7 @@ import (
 
 // NewResultsStore is what the API server reads the clusters' scan results
 // with (WithResults): S3 clients of the clusters' accounts, called through
-// the tenant role of each (docs/design/cluster-results-s3.md).
+// the tenant role of each (docs/architecture.md#results-in-s3).
 //
 // Its credentials are the AWS SDK's default chain (IRSA in production, keys
 // in the environment for local testing, never a setting), then the source

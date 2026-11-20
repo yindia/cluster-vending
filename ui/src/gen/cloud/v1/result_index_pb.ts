@@ -18,7 +18,7 @@ export const file_cloud_v1_result_index: GenFile = /*@__PURE__*/
  * ResultIndex is the small object (latest/<kind>/index.json) that names the
  * shards of a result kind that grows with the cluster (nodes: one shard per
  * node group). A reader reads the index, then only the shard it needs
- * (docs/design/cluster-results-s3.md).
+ * (docs/architecture.md#results-in-s3).
  *
  * @generated from message cloud.v1.ResultIndex
  */

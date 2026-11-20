@@ -18,7 +18,7 @@ import (
 
 // livePlacement resolves ${system.*} (and its alias ${platform.*}) from live
 // state, never from what the platform intends to roll out
-// (docs/design/karpenter-node-groups.md, "Migration of existing clusters"):
+// (docs/architecture.md#node-layout, "Migration of existing clusters"):
 // it is what the default managed node group carries now: its labels and
 // taints as the provider reports them (status.atProvider), so an existing
 // cluster keeps its old placement until the node group really has the

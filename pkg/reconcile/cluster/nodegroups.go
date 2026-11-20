@@ -396,7 +396,7 @@ func withAMINotice(groups []*cloudv1.NodeGroupStatus, notice string) {
 
 // legacyPoolGate decides whether the old platform pool of a cluster built
 // before the system group took over may be removed
-// (docs/design/karpenter-node-groups.md, "Migration of existing clusters").
+// (docs/architecture.md#node-layout, "Migration of existing clusters").
 // The objects stay exactly as they are (not applied, not changed) until:
 //
 //  1. the system node group has its new placement and size and is Ready,

@@ -4,12 +4,12 @@ metadata:
   name: gpu-operator
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: NVIDIA GPU Operator, which runs the device plugin, GPU Feature Discovery, DCGM exporter, MIG manager and Node Feature Discovery on GPU nodes that use the EKS-optimized AL2023 NVIDIA AMI (the AMI already provides the driver and container toolkit).
   namespace: gpu-operator
   install:
-    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    # Helm waits this long for each chart to roll out (docs/architecture.md#helm-operations).
     timeout: 15m
     helm:
       repository: https://helm.ngc.nvidia.com/nvidia

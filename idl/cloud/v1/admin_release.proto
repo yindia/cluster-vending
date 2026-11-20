@@ -13,7 +13,7 @@ import "google/protobuf/timestamp.proto";
 // (AdminService): the releases, the channels that offer them, the
 // rollout of each channel's Kubernetes minor and the holds that keep
 // clusters out of it. Read-only: the objects are written with kubectl or
-// from Git (docs/design/release-admin.md).
+// from Git (docs/architecture.md#releases-channels-and-rollouts).
 
 // Release is a published release: what clusters run, per Kubernetes minor.
 message Release {

@@ -242,7 +242,7 @@ message ClusterSpec {
   optional bool naas = 15;
 
   // User node groups: further Karpenter NodePools, each with its own
-  // EC2NodeClass (docs/design/karpenter-node-groups.md). At most 20. One
+  // EC2NodeClass (docs/architecture.md#node-layout). At most 20. One
   // update-mask path: the list is compared whole.
   repeated NodeGroupSpec node_groups = 16 [(buf.validate.field).repeated.max_items = 20];
 
@@ -344,7 +344,7 @@ enum UpgradeMode {
   // The cluster follows its release channel (an unset release_channel is
   // STABLE) and, within the channel, its tier: a release moves it, without
   // an UpdateCluster. Not acted on yet: releases come in later steps
-  // (docs/design/release-admin.md).
+  // (docs/architecture.md#releases-channels-and-rollouts).
   UPGRADE_MODE_AUTOMATIC = 2;
 }
 

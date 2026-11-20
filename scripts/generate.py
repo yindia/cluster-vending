@@ -391,7 +391,7 @@ PROVISION_CLUSTERS = [
 ]
 
 # The managed policies of each role: (name suffix, statements).
-# The bucket of a cluster's scan results (docs/design/cluster-results-s3.md):
+# The bucket of a cluster's scan results (docs/architecture.md#results-in-s3):
 # the platform creates, configures and deletes buckets named cv-*, and reads,
 # writes and deletes the objects in them. Nothing else of S3. The reads are
 # what the Crossplane provider refreshes a bucket with.

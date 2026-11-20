@@ -4,7 +4,7 @@
 // The handlers validate and store; they install nothing. A Platform
 // component is installed with its cluster by the cluster reconcile, and
 // so is a tenant's Component, after the platform's: it is stored PENDING,
-// and the reconcile writes its phase (docs/design/component-usage.md).
+// and the reconcile writes its phase (docs/architecture.md#components-and-the-catalog).
 package component
 
 import (

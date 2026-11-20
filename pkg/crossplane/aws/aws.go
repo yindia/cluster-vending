@@ -48,7 +48,7 @@ const ProviderVersion = "v2.9.0"
 //	   and taint, two nodes), the karpenter node role with its EC2_LINUX
 //	   access entry and the interruption queue with its EventBridge rules
 //	   are rendered, and the EBS CSI controller follows the platform pool
-//	   (docs/design/karpenter-node-groups.md)
+//	   (docs/architecture.md#node-layout)
 //	8  one platform node group, "system": the default node group is sized by
 //	   the admin (nodeGroups.system.size) and the EBS CSI controller runs on
 //	   it like every other platform pod; there is no platform pool
@@ -62,7 +62,7 @@ const RenderVersion = 8
 // provider-aws-sqs and provider-aws-cloudwatchevents are for Karpenter's
 // interruption queue and the EventBridge rules feeding it (karpenter.go).
 // provider-aws-s3 is for the bucket of a cluster's scan results
-// (results_bucket.go, docs/design/cluster-results-s3.md).
+// (results_bucket.go, docs/architecture.md#results-in-s3).
 var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam", "provider-aws-cloudwatchlogs",
 	"provider-aws-kms", "provider-aws-sqs", "provider-aws-cloudwatchevents", "provider-aws-s3"}
 

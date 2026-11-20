@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The platform admin's node group layout (docs/design/karpenter-node-groups.md).
+// The platform admin's node group layout (docs/architecture.md#node-layout).
 // It is the `nodeGroups` section of the config file, the same for the
 // server and the controller:
 //

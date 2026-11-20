@@ -1,5 +1,5 @@
 # Checked against Capsule chart/app 0.15.2, including packaged values,
-# schema, CRD lifecycle hooks and templates (docs/components/capsule.md).
+# schema, CRD lifecycle hooks and templates (docs/architecture.md#subtenants-and-naas).
 apiVersion: cloud.cluster-vending.io/v1alpha1
 kind: ComponentDefinition
 metadata:

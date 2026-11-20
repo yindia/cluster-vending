@@ -18,7 +18,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/results"
 )
 
-// Where scan results are read from (docs/design/cluster-results-s3.md).
+// Where scan results are read from (docs/architecture.md#results-in-s3).
 //
 // A cluster whose Cluster object has a summary of a kind (model.ResultRef)
 // has the full result of that kind in its results bucket: the server reads

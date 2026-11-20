@@ -257,7 +257,7 @@ export type ClusterSpec = Message<"cloud.v1.ClusterSpec"> & {
 
   /**
    * User node groups: further Karpenter NodePools, each with its own
-   * EC2NodeClass (docs/design/karpenter-node-groups.md). At most 20. One
+   * EC2NodeClass (docs/architecture.md#node-layout). At most 20. One
    * update-mask path: the list is compared whole.
    *
    * @generated from field: repeated cloud.v1.NodeGroupSpec node_groups = 16;
@@ -1461,7 +1461,7 @@ export enum UpgradeMode {
    * The cluster follows its release channel (an unset release_channel is
    * STABLE) and, within the channel, its tier: a release moves it, without
    * an UpdateCluster. Not acted on yet: releases come in later steps
-   * (docs/design/release-admin.md).
+   * (docs/architecture.md#releases-channels-and-rollouts).
    *
    * @generated from enum value: UPGRADE_MODE_AUTOMATIC = 2;
    */

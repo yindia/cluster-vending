@@ -11,7 +11,7 @@ import (
 
 // A cluster's deletion runs in the reverse of its creation, in stages; a
 // stage starts only when the one before it is fully gone
-// (docs/architecture.md, "Deletion"):
+// (docs/architecture.md#deletion):
 //
 //  1. load balancers in the workload cluster
 //  2. tenant components, a component after those that require it

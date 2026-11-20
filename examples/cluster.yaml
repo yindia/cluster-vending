@@ -103,7 +103,7 @@ spec:
     # ACCESS_ENTRY_TYPE_EC2, ACCESS_ENTRY_TYPE_HYBRID_LINUX,
     # ACCESS_ENTRY_TYPE_HYPERPOD_LINUX. UNSPECIFIED defaults to STANDARD.
     # A principal cannot appear in both adminPrincipals and accessEntries.
-    # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (docs/oidc.md)
+    # oidc:                  # an OIDC identity provider for the Kubernetes API, next to IAM (docs/architecture.md#cluster-oidc)
     #   entra: {tenantId: 00000000-0000-0000-0000-000000000000, clientId: 00000000-0000-0000-0000-000000000000}   # Microsoft Entra ID: nothing else to set
     # or any other provider:
     # oidc:

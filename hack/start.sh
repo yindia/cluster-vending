@@ -9,7 +9,7 @@
 # cloudwatchlogs, kms), provider-helm and their runtime config, when
 # missing (--install-providers); tenant namespaces, ProviderConfigs and
 # managed resources as it reconciles. Kind has no IRSA: the providers need
-# a credentials Secret (docs/controller.md, "Local run").
+# a credentials Secret (docs/architecture.md#run-locally, "Local run").
 #
 # Safe to re-run: every step is idempotent. Delete the cluster with
 # hack/stop.sh.
@@ -57,12 +57,12 @@ cat <<MSG
 
 Ready. kubectl context: $CONTEXT
 
-  1. create the providers' credentials Secret (docs/controller.md, "Local run")
+  1. create the providers' credentials Secret (docs/architecture.md#run-locally, "Local run")
   2. make run-controller   the controller (AWS keys exported in its shell)
   3. make run             API (OIDC off by default)
   4. make run-ui          UI (same auth mode as the API)
 
 Optional login: run make keycloak separately, then uncomment the auth section
-in hack/config.local.yaml and restart the API and UI. See docs/local-keycloak.md.
+in hack/config.local.yaml and restart the API and UI. See docs/architecture.md#local-login.
 
 MSG

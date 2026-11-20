@@ -1,6 +1,6 @@
 package controller
 
-// The controller's access to the component kinds (docs/design/component-usage.md).
+// The controller's access to the component kinds (docs/architecture.md#components-and-the-catalog).
 // The component reconciler is not written yet; these markers give the
 // controller's role what it will need: the catalog read, and created where a
 // shipped definition is missing (pkg/catalog; release-admin

@@ -30,7 +30,7 @@ resources:
 - cloudaccount_admin_role.yaml
 - cloudaccount_editor_role.yaml
 - cloudaccount_viewer_role.yaml
-# For people managing releases (docs/design/release-admin.md): the
+# For people managing releases (docs/architecture.md#releases-channels-and-rollouts): the
 # operator writes, others read.
 - release_admin_role.yaml
 - release_viewer_role.yaml

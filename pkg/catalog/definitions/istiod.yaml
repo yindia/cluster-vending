@@ -4,7 +4,7 @@ metadata:
   name: istiod
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: Istio control plane (istiod) with the ambient profile; deploys waypoints and Gateway API gateways once the Gateway API CRDs are installed.
   # A member of the istio bundle (istio.yaml): installed with it, by the
@@ -14,12 +14,12 @@ spec:
   namespace: istio-system
   # The Gateway API CRDs are not installed by the platform (no upstream chart
   # ships them): istiod runs without them, and uses them once they exist
-  # (waypoints, Gateway API ingress; docs/catalog.md).
+  # (waypoints, Gateway API ingress; docs/architecture.md#components-and-the-catalog).
   requires: [istio-base]
   versionGroup: istio
   upgradeOneMinorAtATime: true
   install:
-    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    # Helm waits this long for each chart to roll out (docs/architecture.md#helm-operations).
     timeout: 15m
     helm:
       repository: https://blob.istio.io/istio-release/charts
@@ -52,7 +52,7 @@ spec:
       # No cluster-wide sidecar injection. Workloads join with the ambient label.
       enableNamespacesByDefault: false
     autoscaleEnabled: true
-    # One replica at least (system group sizing, docs/catalog.md); the HPA adds
+    # One replica at least (system group sizing, docs/architecture.md#node-layout); the HPA adds
     # more under load. A single replica has no PodDisruptionBudget: one that
     # demands it stay up would stop a node drain.
     autoscaleMin: 1

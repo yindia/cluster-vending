@@ -87,7 +87,7 @@ type CloudAccountStatus struct {
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
 	// access is the controller's last check that it can reach and act in
 	// the account: the tenant role in every region the account's networks
-	// use, and the calls the platform needs (docs/controller.md).
+	// use, and the calls the platform needs (docs/architecture.md#aws-access-and-accounts).
 	// +optional
 	Access *AccountAccess `json:"access,omitempty"`
 }

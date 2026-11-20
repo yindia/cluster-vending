@@ -1,7 +1,7 @@
 # Istio in ambient mode (no sidecars): one component made of five charts,
 # all Istio's own, each a definition of its own (internal: true) with its
 # chart, namespace, version pin and requires. Checked against Istio 1.32.0;
-# docs/catalog.md has the caveats.
+# docs/architecture.md#components-and-the-catalog has the caveats.
 #
 # The members are installed in requires order, each once the one before is
 # Ready: istio-base, then istiod, istio-cni, ztunnel, and the ingress
@@ -12,7 +12,7 @@ metadata:
   name: istio
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: Istio service mesh in ambient mode, with an internal ingress gateway. Namespaces join the mesh with the label istio.io/dataplane-mode=ambient.
   # Installed with every cluster by the platform; not a tenant's to enable.

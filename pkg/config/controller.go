@@ -49,7 +49,7 @@ const (
 	// two, draining and terminating Karpenter's nodes a few minutes more.
 	// DefaultHelmBackoffMax caps the pause between two attempts at a failed
 	// Helm release; DefaultHelmMaxFailures is how many failures in a row that
-	// count make a component FAILED (docs/design/helm-reliability.md).
+	// count make a component FAILED (docs/architecture.md#helm-operations).
 	DefaultHelmBackoffMax  = 30 * time.Minute
 	DefaultHelmMaxFailures = 5
 	// minHelmBackoffMax is the shortest cap: the first step is a minute.

@@ -223,7 +223,7 @@ const (
 	// The cluster follows its release channel (an unset release_channel is
 	// STABLE) and, within the channel, its tier: a release moves it, without
 	// an UpdateCluster. Not acted on yet: releases come in later steps
-	// (docs/design/release-admin.md).
+	// (docs/architecture.md#releases-channels-and-rollouts).
 	UpgradeMode_UPGRADE_MODE_AUTOMATIC UpgradeMode = 2
 )
 
@@ -811,7 +811,7 @@ type ClusterSpec struct {
 	// cert-manager is an external prerequisite and is not installed by this flag.
 	Naas *bool `protobuf:"varint,15,opt,name=naas,proto3,oneof" json:"naas,omitempty"`
 	// User node groups: further Karpenter NodePools, each with its own
-	// EC2NodeClass (docs/design/karpenter-node-groups.md). At most 20. One
+	// EC2NodeClass (docs/architecture.md#node-layout). At most 20. One
 	// update-mask path: the list is compared whole.
 	NodeGroups []*NodeGroupSpec `protobuf:"bytes,16,rep,name=node_groups,json=nodeGroups,proto3" json:"node_groups,omitempty"`
 	// The cloud the cluster runs on. Exactly one must be set, even if empty

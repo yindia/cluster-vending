@@ -4,7 +4,7 @@ metadata:
   name: istio-base
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: Istio cluster-wide resources (Istio CRDs and the default-revision validation webhook); required by the Istio control plane.
   # A member of the istio bundle (istio.yaml): installed with it, by the

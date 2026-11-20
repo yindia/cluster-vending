@@ -5,7 +5,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// The operator's release objects (docs/design/release-admin.md): a
+// The operator's release objects (docs/architecture.md#releases-channels-and-rollouts): a
 // Release locks what clusters run, a ReleaseChannel says which release a
 // channel offers and how it rolls out, a ReleaseHold keeps one cluster out
 // of rollouts. All cluster-scoped, written by the operator (release-admin

@@ -35,7 +35,7 @@ type liveComponent struct {
 }
 
 // liveComponents is the set of the cluster that deadlocked: Karpenter
-// (sequence 0), the cluster autoscaler (10), and the rest at 100.
+// (sequence 0), the cluster autoscaler (10, as it was then), and the rest at 100.
 var liveComponents = []liveComponent{
 	{"karpenter", 0, nil},
 	{"cluster-autoscaler", 10, nil},

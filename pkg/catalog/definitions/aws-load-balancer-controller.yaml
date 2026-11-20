@@ -4,7 +4,7 @@ metadata:
   name: aws-load-balancer-controller
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: AWS Load Balancer Controller, which provisions ALBs for Ingress/Gateway and NLBs for Services of type LoadBalancer.
   # Installed with every cluster by the platform; not a tenant's to enable.
@@ -17,7 +17,7 @@ spec:
       # No CRD chart: the upstream chart installs its own CRDs (its crds/
       # folder) with the first install. Helm never upgrades them, so a
       # version bump that changes them needs upstream's crds.yaml applied
-      # (docs/catalog.md).
+      # (docs/architecture.md#components-and-the-catalog).
   cloudResources:
     iamRole:
       access: IRSA
@@ -304,7 +304,7 @@ spec:
     # Fixed by the platform at the researched defaults.
     # Controller pods. Only one is the active leader; the others are hot standbys
     # that also serve the admission webhooks. One here (system group sizing,
-    # docs/catalog.md); 2 for HA on a larger group.
+    # docs/architecture.md#components-and-the-catalog); 2 for HA on a larger group.
     replicaCount: 1
 
     # Pod resources.

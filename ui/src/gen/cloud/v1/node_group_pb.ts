@@ -19,7 +19,7 @@ export const file_cloud_v1_node_group: GenFile = /*@__PURE__*/
 
 /**
  * NodeGroupSpec is one user node group: a Karpenter NodePool with its own
- * EC2NodeClass in the workload cluster (docs/design/karpenter-node-groups.md).
+ * EC2NodeClass in the workload cluster (docs/architecture.md#node-layout).
  * Nodes carry the label node.cluster-vending.io/pool=<name> in addition to
  * labels. The platform's own groups (the default managed node group and the
  * `platform` NodePool) are not part of the spec.
@@ -181,7 +181,7 @@ export const NodeGroupStatusSchema: GenMessage<NodeGroupStatus> = /*@__PURE__*/
 
 /**
  * NodeGroupNodes is the nodes of one node group: one shard of the `nodes`
- * result in the cluster's results bucket (docs/design/cluster-results-s3.md).
+ * result in the cluster's results bucket (docs/architecture.md#results-in-s3).
  * The controller collects it while it reads the workload cluster's nodes and
  * NodeClaims; ListNodeGroupNodes pages through it.
  *

@@ -36,7 +36,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			"Who may call the API is the \"auth\" section of the settings file\n" +
 			"(--config): OIDC issuers whose bearer tokens are accepted and the rules\n" +
 			"that give their callers roles. Without it nothing is authenticated\n" +
-			"(docs/authentication.md).",
+			"(docs/architecture.md#authentication).",
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{annotationSettingsFile: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -106,8 +106,8 @@ func newServeCmd(g *globals) *cobra.Command {
 			}()
 			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
 			// The scan results are read from the clusters' buckets, through
-			// each account's tenant role, read-only (docs/design/
-			// cluster-results-s3.md); nothing else of AWS is called.
+			// each account's tenant role, read-only (docs/architecture.md#results-in-s3);
+			// nothing else of AWS is called.
 			results, err := server.NewResultsStore(ctx, cfg.AWSAccess)
 			if err != nil {
 				return err

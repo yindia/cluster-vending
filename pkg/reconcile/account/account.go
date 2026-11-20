@@ -142,7 +142,7 @@ func readCredentialsSecret(ctx context.Context, d reconcile.Deps) (*corev1.Secre
 	switch {
 	case apierrors.IsNotFound(err):
 		return nil, fault.Newf(fault.FailedPrecondition,
-			"the provider credentials Secret %s/%s does not exist; create it (see docs/controller.md) or unset --provider-credentials-secret",
+			"the provider credentials Secret %s/%s does not exist; create it (see docs/architecture.md#aws-credentials) or unset --provider-credentials-secret",
 			ref.Namespace, ref.Name)
 	case err != nil:
 		return nil, fault.Newf(fault.Unavailable, "cannot read the provider credentials Secret %s/%s: %v", ref.Namespace, ref.Name, err)

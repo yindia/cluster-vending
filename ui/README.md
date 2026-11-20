@@ -1,22 +1,19 @@
 # Cluster Vending UI
 
-Next.js App Router application using React, TypeScript and Astryx Neutral.
+Next.js App Router console, in React and TypeScript with the Astryx Neutral design
+system. It reads the platform through the Go Connect API and keeps no state of its
+own: no database, no AWS access. The tenant console is at
+[localhost:3000](http://localhost:3000/) when run locally.
 
-The console at [localhost:3000](http://localhost:3000/) reads live inventory through
-the existing Go Connect API. Accounts, networks and clusters have dedicated detail
-URLs, resource inventories and reviewed create/edit workflows. Create and edit
-forms use modal steps with a final review; destructive actions require explicit
-confirmation. Releases, channels, component catalog and scoped freeze controls
-use the generated contracts. Components, releases and channels also have dedicated details. Helm values use
-YAML/JSON code editors with syntax highlighting, line numbers and copy controls.
-The static design preview remains at `/preview`.
+The console shows tenants, accounts, networks, clusters, components, releases and
+channels, and tenant freezes. Create and import use guided forms or CLI-compatible
+YAML (`cluster-vending.io/v1` manifests), with a review step before submission.
+Destructive actions need explicit confirmation. The console reads only what the
+caller's grants allow. The API checks every change again.
 
-Select a tenant from the searchable **Tenant** control in the top bar. Open
-**Settings** to supply your own access token if required.
-The token stays in tab memory. Background refresh is **off by default**; use the
-page Refresh actions or enable Live updates in Settings. Submitted operations
-are observed until completion with bounded polling. Set server-only `CV_API_BASE_URL` to the Go API URL
-(default `http://127.0.0.1:8080`). No database is added.
+What the console does with the platform is described in
+[docs/architecture.md](../docs/architecture.md); the topology views read the
+API's `architecture` projection.
 
 ## Development
 
@@ -27,16 +24,12 @@ npm ci
 npm run dev
 ```
 
-Development reads the API's `auth` section in `../hack/config.local.yaml`.
-With that section commented out, login is disabled. To enable local login, run
-`make keycloak` from the repository root, uncomment the complete auth block,
-then restart the API and UI. The launcher reads generated private client settings
-from `hack/.keycloak/ui.env` only when authentication is enabled. Production
-still uses explicit `AUTH_ENABLED` and server-only secrets.
-See [local Keycloak setup](../docs/local-keycloak.md).
+Development reads the API's `auth` section in `../hack/config.local.yaml`. With that
+section commented out, login is off. To enable local login, see
+[local login](../docs/architecture.md#local-login). Set the server-only
+`CV_API_BASE_URL` to the Go API's URL (default `http://127.0.0.1:8080`).
 
-Use an already running UI server when one exists; do not start a second listener.
-From the repository root, this application is in `ui/`.
+Use an already-running UI server when one exists; do not start a second listener.
 
 ## Checks
 
@@ -49,113 +42,10 @@ npm run doctor
 npm run test:browser
 ```
 
-Unit tests mock the API. Browser tests use the already-running server at port 3000
-and intercept every RPC with fixtures; they do not mutate a cloud account or backend.
-Override the browser target with `CV_UI_TEST_BASE_URL` when needed.
-The production dependency audit is `npm audit --omit=dev`.
-Generated source in `src/gen` is excluded from lint because it is compiler-owned.
-
-Account, network and cluster lists use single-line table rows with separate ID
-columns, search and filters. Network and cluster lists exhaust API pagination
-before filtering locally; list search includes resources beyond the visible page.
-Detail resource inventories support search and Kind/status/pause filters. Overview,
-Activity, deprecation findings and workload recommendations also expose Kind filters.
-Event search and filters inspect all available event pages. Event messages reveal
-full text on hover, focus or touch; no separate full-message action is required.
-All console tables support pointer and keyboard column resizing, with a reset
-action to restore default widths. There is no separate width configuration menu.
-Wide tables scroll horizontally. Complete detail tables offer local search;
-paginated inventories filter complete loaded datasets before slicing pages.
-Cluster and network lists show effective pause policy in a separate **Pause**
-column, with local filters for paused resources, active resources and explicit
-let-through exceptions. Health status remains visible independently.
-The overview inventory groups accounts, their networks and each network's
-clusters in an expandable table with child counts. Relationships use platform
-IDs; filtering retains the ancestors needed to understand a matching resource.
-Activity, event lists and release history use their existing tables and pagination
-without date inputs. Time entry is reserved for an optional freeze expiry.
-Account, network and cluster detail headers offer **View YAML**: a read-only,
-copyable configuration snapshot. Networks and clusters request the original input;
-if unavailable, the dialog identifies the returned configuration as resolved.
-Observed status and API etags are omitted.
-Cluster details also expose **Deprecated APIs** and **Recommendations** as
-read-only, tenant-scoped views of the controller's recorded results. Refresh reads
-stored findings; it does not trigger a scan. Collection timestamps, errors,
-coverage and missing-data states distinguish an old or absent result from a
-successful check.
-
-The cluster's Components tab includes the tenant catalog, so available components
-can be enabled and configured there through the shared YAML review/apply workflow.
-Components disabled by platform policy remain unavailable; platform-managed
-components remain read-only.
-
-Cluster create and edit forms expose **Namespace as a Service (NaaS)**, backed by
-the generated optional `spec.naas` field and defaulting off. Enabling installs
-platform-managed Capsule using the cluster's existing cert-manager. Disabling
-previews removal and warns that Capsule admission enforcement stops; upstream
-CRDs and data may remain. Updates preserve explicit false through `spec.naas`
-in the update mask. Details show desired configuration separately from component
-readiness. An already active platform release move finishes before applying a
-queued feature toggle, and freezes continue to gate reconciliation.
-
-This dashboard is tenant-only. Tenant viewers can inspect releases and freeze
-status; tenant administrators can freeze and unfreeze their own tenant, networks
-and clusters. The API verifies resource ownership before changing policy. Platform
-administration RPCs are unavailable through the dashboard proxy. An active platform
-maintenance freeze is a read-only restriction that tenant users cannot lift.
-
-Freeze controls expose an explicit **Unfreeze scope** action for tenant
-administrators. It remains available while a freeze is converging, with canonical
-status and typed scope confirmation still required. Cluster and network detail
-actions open their own preselected freeze scope; opening that page only reads
-status and never changes policy automatically.
-
-Release-channel details include a **Clusters** tab for the selected tenant. It
-loads all cluster pages before filtering by channel, includes explicit channel
-selections and the automatic Stable default, and shows upgrade mode separately.
-Manual clusters with no channel are not subscribers. The table is independent of
-current rollout membership and supports search, filters and cluster detail links.
-
-The top bar lists only registered tenants the caller may read. **Create tenant**
-is available when the API and the caller’s grants permit the requested ID. It
-creates a cluster-scoped Tenant CR and its Kubernetes namespace, then selects the canonical returned tenant; it
-does not create a cloud account or change access grants. Switching tenants leaves
-resource detail context and cancels the old scope’s reads and drafts.
-
-Refresh controls use a consistent icon at the right of their section or toolbar.
-Icons remain centered alongside their labels without clipping text descenders.
-
-Create dialogs offer a guided form or **Paste YAML**, using the CLI's
-`cluster-vending.io/v1` manifests (`CloudAccount`, `Network`, `Cluster`). YAML is
-bounded to 64 KiB and checked against generated protobuf validation rules. Review
-performs read-only reference checks; server admission occurs on final submission.
-Cluster creation presents both modes in a shared dialog header and preserves
-each draft when switching between them.
-Cloud-account creation requires an existing Tenant CR and its namespace; it never
-creates either implicitly. Tenant registration owns namespace setup and the tenant
-controller maintains it. Effective freeze policy is reflected on the Tenant CR.
-
-The reviewed request preserves advanced spec fields and optional values. Tenant
-mismatches and create-time IDs are rejected. Cluster tier comes from its network.
-
-Import dialogs likewise accept guided input or CLI-compatible **Paste YAML**
-(`NetworkImport`, `ClusterImport`). Validation and reference checks only read;
-final confirmation records observe-only discovery. Explicit **Take over** actions
-in imported network and cluster headers review the plan before requesting
-ownership. Cluster takeover re-reads the cluster and parent network before submit;
-changed etags or plans require fresh consent. NOT_IMPORTED resources require
-acknowledgement, and cluster takeover offers the persistent skip-platform-components
-choice.
-
-Cluster details offer **Get kubeconfig** to load current cluster details and copy
-an `aws eks update-kubeconfig` command using the recorded EKS name and region.
-The command runs locally with the user's AWS credentials; the browser does not
-execute it or download cloud credentials. Other providers need their own command
-adapter instead of an AWS fallback.
-
-Release details filter Kubernetes support and component pins by the versions
-declared in that release. YAML and values editors keep text selections readable
-in light, dark and forced-color modes.
+Unit tests mock the API. Browser tests use the running server on port 3000 and
+intercept every RPC with fixtures, so they change no account or backend. Set
+`CV_UI_TEST_BASE_URL` to test another target. The production dependency audit is
+`npm audit --omit=dev`. Generated code in `src/gen` is excluded from lint.
 
 ## Generated API contracts
 
@@ -163,41 +53,23 @@ in light, dark and forced-color modes.
 npm run codegen
 ```
 
-This calls `buf generate --template ui/buf.gen.yaml` from the repository root.
-The root `buf.gen.yaml` generates both Go and TypeScript. The UI-only template
-avoids rewriting the existing generated Go tree. Protobuf-ES generates message
-schemas and service descriptors; Connect clients consume those descriptors.
-
-The generated files in `src/gen` are required by the runtime clients and manifest
-validation; keep them committed. Regenerate them after changing the contracts.
-
-Local reference material in `docs/`, dependency directories, build output, test
-reports, environment files and generated tool pointers are excluded by `.gitignore`.
+This runs `buf generate --template ui/buf.gen.yaml` from the repository root. The
+generated files in `src/gen` are required by the runtime clients and are committed.
+Regenerate them after changing the contracts in `idl/`.
 
 ## Design system
 
 Astryx agent conventions are in [AGENTS.md](AGENTS.md). The CLI owns
-`src/astryx-themes.ts`; `src/app/providers.tsx` imports `themes` and
-`defaultThemeSlug` once and passes `themes[defaultThemeSlug]` to `Theme`.
-Use the installed components and prebuilt stylesheets. No StyleX compiler is
-needed until custom StyleX source is introduced.
-
-For customization, extend the imported theme with
-`defineTheme({ extends: importedTheme, ... })` and build static theme assets.
-Do not eject a theme unless an independent source fork is explicitly requested.
-Neutral's font stylesheet currently uses Google Fonts for Figtree, with the
-theme's fallback font stack if it cannot load.
+`src/astryx-themes.ts`. Extend the imported theme with `defineTheme({ extends: ... })`;
+do not eject it.
 
 ## Production
 
-`npm run build` prepares Next's standalone server with its static/public assets.
-Run `npm start` only when a server is not already running. Set `PORT` and
-`HOSTNAME` in the deployment environment as needed. A nonroot, multistage
-[Dockerfile](Dockerfile) is supplied; build its context from `ui/`.
+`npm run build` prepares Next's standalone server. Run `npm start` only when a server
+is not already running. Set `PORT` and `HOSTNAME` as the deployment needs. A nonroot,
+multistage [Dockerfile](Dockerfile) is supplied; build its context from `ui/`.
 
-The current connection flow accepts an operator-supplied access token; web OIDC
-login and refresh are not implemented. Backend authorization remains authoritative.
-Deploy behind the appropriate access boundary and require authentication in the Go
-API. Never embed a shared administrative token in a browser bundle. Kubernetes remains the source
-of truth; the UI adds no database. GCP and Azure are planned/disabled, not usable
-backend providers.
+The console takes an operator-supplied access token; web OIDC login and token refresh
+are not implemented. Deploy it behind an access boundary, and require authentication
+in the Go API. Never embed a shared administrative token in a browser bundle. GCP and
+Azure are not usable backends.

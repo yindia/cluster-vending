@@ -31,7 +31,7 @@ const (
 
 // ListNodeGroupNodes returns a page of the nodes of one node group, read from
 // the group's shard in the cluster's results bucket: the index first, then
-// only that shard (docs/design/cluster-results-s3.md, Scale). Problems with
+// only that shard (docs/architecture.md#results-in-s3, Scale). Problems with
 // the bucket are notices in the answer, never errors.
 func (s *ClusterService) ListNodeGroupNodes(ctx context.Context, req *cloudv1.ListNodeGroupNodesRequest) (_ *cloudv1.ListNodeGroupNodesResponse, err error) {
 	defer func() { err = rpcError(err) }()

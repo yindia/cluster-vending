@@ -11,7 +11,7 @@ import (
 )
 
 // What a cluster with Karpenter node groups needs in AWS beyond what its
-// managed node group has (docs/design/karpenter-node-groups.md):
+// managed node group has (docs/architecture.md#node-layout):
 //
 //   - the role Karpenter's nodes run as, "<prefix>-karpenter-node", with the
 //     four AWS managed policies a node needs, and an explicit EC2_LINUX

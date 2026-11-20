@@ -1099,7 +1099,7 @@ type ClusterStatus struct {
 	Deprecations *ClusterDeprecations `json:"deprecations,omitempty"`
 
 	// results are the summaries of the scan results kept in the cluster's
-	// results bucket, one per kind (docs/design/cluster-results-s3.md). A
+	// results bucket, one per kind (docs/architecture.md#results-in-s3). A
 	// kind with a summary here is read from the bucket; one without is read
 	// from the fields above.
 	// +listType=map

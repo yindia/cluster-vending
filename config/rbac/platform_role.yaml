@@ -178,7 +178,7 @@ rules:
   - delete
   - deletecollection
 # The bucket of a cluster's scan results and its settings
-# (docs/design/cluster-results-s3.md).
+# (docs/architecture.md#results-in-s3).
 - apiGroups:
   - s3.aws.m.upbound.io
   resources:

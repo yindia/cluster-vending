@@ -18,7 +18,7 @@ import (
 )
 
 // The per-node rows of the node groups (the `nodes` kind of the cluster's
-// results bucket, docs/design/cluster-results-s3.md): collected during the
+// results bucket, docs/architecture.md#results-in-s3): collected during the
 // reads readNodes already makes, one shard per node group, written at most
 // once a minute per cluster and only when their content changed. The Cluster
 // keeps only counts.

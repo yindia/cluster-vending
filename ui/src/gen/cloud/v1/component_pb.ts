@@ -21,7 +21,7 @@ export const file_cloud_v1_component: GenFile = /*@__PURE__*/
 
 /**
  * Component is one catalog component enabled on one cluster of a tenant
- * (docs/design/component-usage.md). A cluster has a component at most once.
+ * (docs/architecture.md#components-and-the-catalog). A cluster has a component at most once.
  *
  * @generated from message cloud.v1.Component
  */

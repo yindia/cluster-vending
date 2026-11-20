@@ -1,7 +1,7 @@
 // Package results stores the scan results of a cluster (deprecated APIs,
 // resource recommendations, policy violations and their events) in the S3
-// bucket the platform renders with the cluster (docs/design/
-// cluster-results-s3.md; the bucket is pkg/crossplane/aws results_bucket.go),
+// bucket the platform renders with the cluster (docs/architecture.md#results-in-s3;
+// the bucket is pkg/crossplane/aws results_bucket.go),
 // so a large cluster is not limited by the size of a Kubernetes object.
 //
 // The controller's scanners write and the API server reads, each with an

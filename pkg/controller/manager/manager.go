@@ -71,7 +71,7 @@ type Options struct {
 	InstallCatalog bool
 	// RecoverStuckReleases lets the cluster reconcile remove the Helm
 	// record of a platform component's stuck revision in the workload
-	// cluster (docs/catalog.md).
+	// cluster (docs/architecture.md#components-and-the-catalog).
 	RecoverStuckReleases bool
 	// HelmBackoffMax and HelmMaxFailures are how a failed Helm release is
 	// retried (--helm-backoff-max, --helm-max-failures); zero: the
@@ -190,7 +190,7 @@ func Run(ctx context.Context, o Options) error {
 		logger.Warn("AWS keys found in the environment: they are the controller's own credentials (local testing); every lookup still assumes the tenant role of the account it reads")
 	}
 	// Always this build's renderer, for every resource: releases replace
-	// a configurable target later (docs/design/rollouts.md).
+	// a configurable target later (docs/architecture.md#releases-channels-and-rollouts).
 	renderTarget := int64(crossplaneaws.RenderVersion)
 	lookups, err := management.NewAWSClient(ctx, o.AWSAccess, "")
 	if err != nil {
@@ -226,7 +226,7 @@ func Run(ctx context.Context, o Options) error {
 	}, lookups)
 	checkCredentialsSecret(ctx, reconciling, logger)
 	// What happens to accounts, networks, clusters and releases is also a
-	// Kubernetes event of the object (docs/events.md).
+	// Kubernetes event of the object (docs/architecture.md#events-and-conditions).
 	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
 	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades,
 		UpgradeTimeout: o.UpgradeTimeout}

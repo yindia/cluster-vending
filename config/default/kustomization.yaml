@@ -42,7 +42,7 @@ resources:
 # policy must name it. With the management role itself here, the tenant
 # roles need to trust one role only. For local testing there is no
 # annotation: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and run
-# `cluster-vending controller` (docs/controller.md).
+# `cluster-vending controller` (docs/architecture.md#controller-settings).
 patches:
 - target:
     kind: ServiceAccount

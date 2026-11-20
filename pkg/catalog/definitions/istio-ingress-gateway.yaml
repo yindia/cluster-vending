@@ -4,7 +4,7 @@ metadata:
   name: istio-ingress-gateway
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: Cluster ingress, Istio's gateway (an Envoy Deployment) behind an internal AWS Network Load Balancer.
   # A member of the istio bundle (istio.yaml): installed with it, by the
@@ -22,7 +22,7 @@ spec:
   versionGroup: istio
   upgradeOneMinorAtATime: true
   install:
-    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    # Helm waits this long for each chart to roll out (docs/architecture.md#helm-operations).
     timeout: 15m
     helm:
       # Istio's own gateway chart, at the version of the other Istio charts.
@@ -50,7 +50,7 @@ spec:
         service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /healthz/ready
     autoscaling:
       enabled: true
-      # One replica at least (system group sizing, docs/catalog.md); the HPA
+      # One replica at least (system group sizing, docs/architecture.md#node-layout); the HPA
       # adds more under load. No PodDisruptionBudget: the chart allows one
       # only with two replicas, and one that demands it would stop a drain.
       minReplicas: 1

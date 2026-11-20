@@ -18,7 +18,7 @@ import (
 )
 
 // helmGate is the cluster's Helm operations as one pass sees them
-// (docs/design/helm-reliability.md, mechanisms 2 and 3):
+// (docs/architecture.md#helm-operations, mechanisms 2 and 3):
 //
 //   - a Release whose spec digest equals the live one is not written;
 //   - at most one Release of the cluster is installing or upgrading: a

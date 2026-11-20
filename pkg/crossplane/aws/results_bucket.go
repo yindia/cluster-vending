@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// The bucket of a cluster's scan results (docs/design/cluster-results-s3.md):
+// The bucket of a cluster's scan results (docs/architecture.md#results-in-s3):
 // deprecations, recommendations and policy results are written here by the
 // controller's scanners and read by the API server, both through the tenant
 // role. It lives in the cluster's own AWS account and is rendered with the

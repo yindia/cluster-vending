@@ -47,7 +47,7 @@ func newLoginCmd() *cobra.Command {
 			"client) and --entra-scope (the API's scope, api://<app-id>/.default)\n" +
 			"stand for --issuer, --client-id and --scopes.\n\n" +
 			"Automation sets $" + login.EnvToken + " to a token it got itself; it wins over the\n" +
-			"stored login. See docs/authentication.md.",
+			"stored login. See docs/architecture.md#authentication.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var prompt func() (string, error)

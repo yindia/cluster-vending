@@ -32,7 +32,7 @@ log-format: text
 log-level: debug
 provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
 # The node group layout: the same section in the server's and the
-# controller's file, so they cannot drift (docs/controller.md). Flags and
+# controller's file, so they cannot drift (docs/architecture.md#5-configuration). Flags and
 # CV_* variables win over single values.
 nodeGroups:
   # The default EKS managed node group: runs Karpenter, CoreDNS, every

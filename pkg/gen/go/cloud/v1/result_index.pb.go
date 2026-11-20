@@ -25,7 +25,7 @@ const (
 // ResultIndex is the small object (latest/<kind>/index.json) that names the
 // shards of a result kind that grows with the cluster (nodes: one shard per
 // node group). A reader reads the index, then only the shard it needs
-// (docs/design/cluster-results-s3.md).
+// (docs/architecture.md#results-in-s3).
 type ResultIndex struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Shards []*ResultIndexShard    `protobuf:"bytes,1,rep,name=shards,proto3" json:"shards,omitempty"`

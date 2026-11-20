@@ -159,7 +159,10 @@ func TestPlatformSizingRules(t *testing.T) {
 	}
 	// A big request fits when a big size is allowed.
 	big := withRequests(defs, "external-secrets", "30", "1Gi")
-	allowed := pool(func(p *config.PlatformNodePool) { p.InstanceSizes = []string{"8xlarge"}; p.Limits.CPU = 512 })
+	allowed := pool(func(p *config.PlatformNodePool) {
+		p.InstanceFamilies, p.InstanceSizes = []string{"m7i"}, []string{"8xlarge"}
+		p.Limits.CPU = 512
+	})
 	if problems, _ := catalog.CheckPlatformSizing(big, allowed); len(problems) != 0 {
 		t.Errorf("30 CPU on an 8xlarge: %v", problems)
 	}

@@ -31,10 +31,10 @@ func ParseUserValues(file string) (Values, error) {
 }
 
 // The bounds of a definition's install.timeout: Helm waits at least a
-// minute, and a chart that needs more than two hours is not rolling out.
+// minute, and at most an hour (the CRD's CEL rule).
 const (
 	MinInstallTimeout = time.Minute
-	MaxInstallTimeout = 2 * time.Hour
+	MaxInstallTimeout = time.Hour
 )
 
 // CheckDefinition reports what makes a definition's values unusable, for
@@ -45,7 +45,7 @@ const (
 //   - the cloud resources are unusable (ValidateCloudResources: the IAM
 //     policy is no policy document, or uses an unknown placeholder);
 //   - a Platform component has userValues or a valuesSchema;
-//   - install.timeout is not between 1m and 2h;
+//   - install.timeout is not between 1m and 60m;
 //   - a bundle (includes) has an install, values, a schema or cloud
 //     resources of its own, or is internal;
 //   - userValues does not parse as a YAML object;
@@ -74,7 +74,7 @@ func CheckDefinition(d Definition) []string {
 		out = append(out, "a Platform component takes no tenant values: remove userValues and valuesSchema")
 	}
 	if d.InstallTimeout != 0 && (d.InstallTimeout < MinInstallTimeout || d.InstallTimeout > MaxInstallTimeout) {
-		out = append(out, fmt.Sprintf("install.timeout %s must be between 1m and 2h", d.InstallTimeout))
+		out = append(out, fmt.Sprintf("install.timeout %s must be between 1m and 60m", d.InstallTimeout))
 	}
 	out = append(out, bundleProblems(d)...)
 	user, err := ParseUserValues(d.UserValues)

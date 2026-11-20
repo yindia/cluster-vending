@@ -17,7 +17,7 @@ import (
 //
 //	nodeGroups:
 //	  platform:
-//	    instanceFamilies: [m7i, m6i]
+//	    instanceFamilies: [t3]          # testing; production m7i, m6i
 //	    instanceSizes: [large, xlarge, 2xlarge]
 //	    architectures: [AMD64]          # one per pool
 //	    capacityTypes: [ON_DEMAND]      # SPOT is refused in this version
@@ -63,7 +63,7 @@ const (
 	ConsolidateWhenEmpty                = "WhenEmpty"
 	ConsolidateWhenEmptyOrUnderutilized = "WhenEmptyOrUnderutilized"
 
-	defaultPlatformFamilies = "m7i,m6i"
+	defaultPlatformFamilies = "t3"
 	defaultPlatformSizes    = "large,xlarge,2xlarge"
 	// MaxPlatformMaxPods is the most pods a node may hold with prefix
 	// delegation (the VPC CNI's limit for the shapes the pool uses).

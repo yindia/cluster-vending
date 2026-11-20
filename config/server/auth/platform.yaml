@@ -39,7 +39,7 @@ nodeGroups:
   # The platform pool, the Karpenter NodePool and EC2NodeClass "platform-pool"
   # (built and empty until PROP-03 phase 3 places components on it).
   platform:
-    instanceFamilies: [m7i, m6i]
+    instanceFamilies: [t3]             # testing default; production: m7i, m6i (PROP-03 4.6)
     instanceSizes: [large, xlarge, 2xlarge]
     architectures: [AMD64]          # one per pool
     capacityTypes: [ON_DEMAND]      # SPOT is refused in this version

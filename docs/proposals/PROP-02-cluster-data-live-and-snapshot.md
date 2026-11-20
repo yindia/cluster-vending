@@ -27,7 +27,7 @@ This revision splits the kinds by what they need:
   these two kinds only.
 - **Cluster status summary:** the controller writes a small, bounded summary on each pass (node counts,
   per-group totals, violation counts by severity, last-hour event counts, and the existing deprecation and
-  recommendation summaries). Fleet dashboards, rollout gates and the unreachable case read it.
+  recommendation summaries). Fleet dashboards, the upgrade readiness gates and the unreachable case read it.
 
 The API adds `sort_by`, `sort_order` and `live_at` on the live list RPCs, and a `GetNodeResources` RPC
 for group totals. It adds no `source` field: the live kinds are always live, and the stored kinds are
@@ -108,10 +108,10 @@ starts from.
 
 | Kind | Stored in S3 | Read by | Summary on Cluster status | Sort (live or in memory) |
 |---|---|---|---|---|
-| Node rows, counts, resources | No | Live reader | Counts and totals per group | `NAME`, `AGE`, `READINESS`, CPU and memory requested percent, `POD_COUNT` |
+| Node rows, counts, resources | No | Live reader | Counts and totals per group (requests only, no usage) | `NAME`, `AGE`, `READINESS`, CPU and memory requested percent, CPU and memory used percent, `POD_COUNT` |
 | Node totals per group and cluster | No | Live reader (`GetNodeResources`) | Yes (same totals) | Not paged |
-| Policy violations | No | Live reader | Counts by severity | `NAMESPACE`, `ENGINE`, `SEVERITY` |
-| Policy and admission events, last hour | No | Live reader | Count by reason | `TIME`, `COUNT` |
+| Policy violations | No | Live reader | Counts by severity (15-minute counts pass) | `NAMESPACE`, `ENGINE`, `SEVERITY` |
+| Policy and admission events, last hour | No | Live reader | Count by reason (15-minute counts pass) | `TIME`, `COUNT` |
 | Deprecation findings | Yes: `latest/deprecations.json`, history 30 days | API, read-only role | Summary (existing) | `REMOVED_FIRST`, `NAMESPACE`, `KIND` |
 | Recommendations | Yes: `latest/recommendations.json`, history hourly 30 days; usage ConfigMap in the management cluster | API, read-only role | Summary (existing) | `NAMESPACE`, `CPU_CHANGE`, `MEMORY_CHANGE` |
 | Platform events of the Cluster | No (management cluster) | API | `recentEvents` (existing) | Newest first |
@@ -142,7 +142,18 @@ Rules:
   counts (it does not zero them); the `…CollectedAt` times show their age.
 - Bounded by the field list above. A test marshals a 1,000-node summary with 16 groups and checks it stays
   under 8 KiB (typical size about 2 KiB, estimate).
-- Rollout gates read this summary, not the live reader, so a rollout does not depend on the live reader.
+- **The policy counts cost reads, not writes.** To count violations by severity the policy pass still lists
+  every PolicyReport (and the other report kinds) of the cluster. Removing the S3 copy removes the writes, not
+  these reads, and the live reader reads the same reports again when someone views them. The counts pass
+  therefore moves from every 5 minutes to every **15 minutes**: the counts feed dashboards and a summary, not a
+  table. The console marks the policy counts "old" after 30 minutes (two missed counts passes); the gates below read only the node part of the summary. On a large cluster that cuts the policy pass's
+  reads to a third. The event counts are read on the same pass.
+- **The upgrade readiness gates read the summary**, never the live reader, so an upgrade does not depend on the
+  live reader. The automatic Kubernetes upgrade's hold (`UpgradeHold`, `pkg/reconcile/cluster/upgrade_ready.go`)
+  and the `NOT_READY` gate of `pkg/upgrade/gates.go` (`Check`) gain one rule: `Reachable` False, or a
+  `nodesCollectedAt` older than **15 minutes**, makes the gate wait with the message "the platform cannot read
+  the cluster" or "the cluster's summary is N minutes old". The gate waits; it does not pass on old data and it
+  does not fail the upgrade. The console marks the same summary "old" after 15 minutes.
 
 ### 5.3 Node resources (live)
 
@@ -154,6 +165,14 @@ Rules:
 | `requested_cpu_millis`, `requested_memory_bytes` | Sum over the node's pods, scheduler definition below | millicores, bytes |
 | `pod_count` | Pods bound to the node that are not Succeeded or Failed | count |
 | `pods_without_requests` | Of those pods, the ones with a container that sets no CPU or memory request | count |
+| `used_cpu_millis`, `used_memory_bytes` (optional, live only) | `NodeMetrics` of `metrics.k8s.io` for the node | millicores, bytes |
+
+**Available and used.** "Available" is allocatable minus requested: what the scheduler can still place. Usage
+is shown next to it, as a separate number, so a group that is fully requested but idle (or the reverse) is
+visible. Usage comes from one list of `nodes.metrics.k8s.io` per build (one object per node, a few hundred
+bytes each). When metrics-server is not installed, or the list fails, the usage fields are absent and the
+response carries the notice "node usage unavailable: metrics.k8s.io is not served". Usage is never on the
+status summary: the controller does not read metrics for it, and the summary stays requests only.
 
 **Requested, per pod.** The scheduler's definition: effective request = max(sum of container
 requests, max of init container requests) + `spec.overhead`, per resource. Only pods with
@@ -162,14 +181,16 @@ requests, max of init container requests) + `spec.overhead`, per resource. Only 
 **One definition.** The projection and aggregation live in one package, called by the controller's pass
 (summary) and the live build (rows), so the two cannot disagree.
 
-**Collection.** The live build lists nodes, then pods (`limit` 500, `continue`), then NodeClaims. Pods
+**Collection.** The live build lists nodes, then pods (`limit` 500, `continue`), then NodeClaims, then
+node metrics (optional, above). Pods
 are projected to the fields above as each page arrives and never kept whole. For a 10,000-pod cluster
 that is 20 pages per build. Where the client supports it, the list uses the protobuf content type
 (estimate: about a third of the JSON size; to be measured).
 
 **Totals.** The build computes totals per group and for the cluster: nodes, ready nodes, sums of
-allocatable and requested CPU, memory and pods, and `pods_without_requests`. `GetNodeResources` returns
-them. The summary carries the same totals from the controller's pass.
+allocatable and requested CPU, memory and pods, `pods_without_requests`, and used CPU and memory when the
+metrics were read. `GetNodeResources` returns them. The summary carries the same totals from the controller's
+pass, without usage.
 
 ### 5.4 Violation events: one hour, from the source
 
@@ -194,13 +215,26 @@ The controller's policy pass counts last-hour events by reason for the summary, 
 | **A. API server reads live** | Workload kubeconfig for every cluster, plus Secret read in tenant namespaces | Each request waits on a workload cluster | All clusters' read access, from an internet-facing process | Lowest: no new process | Rejected. The API becomes a holder of workload credentials. |
 | **B. Controller serves live** | Same as today's controller: AWS and management write access | Requests share the reconcile workers | A request bug runs in the process that writes AWS and Crossplane | Low | Rejected. Mixes user traffic with write-capable reconcilers. |
 | **C. Per-cluster agent** | Local, in-cluster | Lowest (local watch) | Limited to that cluster | High: 100 installs, versions, RBAC | Deferred. Revisit only if section 6 shows the live reader cannot meet its targets. |
-| **D. Live reader (separate Deployment, same binary)** | Its own read-only identity per cluster (section 7). Kubeconfig Secret read in tenant namespaces, through the existing reader binding. | Each live request waits on the reader, not on the API | Read-only, no write to any system, reachable only from the API | One more Deployment, one more identity per cluster | **Recommended.** |
+| **D. Live reader (separate Deployment, same binary)** | Its own read-only identity per cluster (7.1): a kubeconfig written by a second ClusterAuth for the account's reader role, mapped by an EKS access entry to a read-only group. It reads that Secret in tenant namespaces; it holds no AWS credentials. | Each live request waits on the reader, not on the API | Read-only, no write to any system, reachable only from the API | One more Deployment; per cluster one more ClusterAuth, access entry and ClusterRoleBinding | **Recommended.** |
 
 **Why D.** The API stays what it is: it holds no workload credentials. The live reader holds them, has no
 write path to AWS, Crossplane or the workload cluster, and has its own failure domain, so console bursts do
 not slow reconciliation. It is a subcommand of the same binary (`cluster-vending live`) with its own
 ServiceAccount, Deployment and internal Service. It takes only tenant and cluster IDs, and resolves the rest
 from the Cluster object. The controller keeps reading each pass, so a workload cluster sees two readers.
+
+**Replicas.** Version 1 runs **one** live reader replica (Deployment strategy `Recreate`, so two never run at
+once). Views, singleflight, cooldowns and the per-cluster, per-tenant and fleet limits of 5.9 are that
+process's memory. A restart loses the views: a caller holding a token gets `INVALID_ARGUMENT` "restart the
+list" and the console restarts at page one. The views are a cache of a few seconds, so this is the whole cost
+of a restart. Two replicas behind a plain Service would split a list across replicas (page 2 on a replica
+without the view) and double every limit, so they are not run.
+
+**Scale-out (later, only if the phase 3 load test shows one replica cannot meet its targets).** The API routes
+each live request by a hash of (tenant ID, cluster ID) to one replica (a headless Service and rendezvous
+hashing over its endpoints). A cluster's views, singleflight and cooldown then live on one replica. The tenant
+and fleet limits are divided by the replica count. A replica change moves some clusters to another replica,
+whose callers restart their lists once.
 
 ### 5.6 What the Kubernetes API allows
 
@@ -282,7 +316,7 @@ kept in the cache (bounded in bytes, 5.9) and sorted in memory. Their snapshot t
 
 | Kind | `sort_by` values (default first) | Served from |
 |---|---|---|
-| Nodes | `NAME`, `AGE`, `READINESS` (not Ready first), `CPU_REQUESTED_PERCENT`, `MEMORY_REQUESTED_PERCENT`, `POD_COUNT` | Live |
+| Nodes | `NAME`, `AGE`, `READINESS` (not Ready first), `CPU_REQUESTED_PERCENT`, `MEMORY_REQUESTED_PERCENT`, `CPU_USED_PERCENT`, `MEMORY_USED_PERCENT` (rows without usage last), `POD_COUNT` | Live |
 | Node totals (`GetNodeResources`) | Not paged; one row per group, plus the cluster total | Live |
 | Violations | `NAMESPACE` (default), `ENGINE`, `SEVERITY` | Live |
 | Violation events | `TIME` (default, newest first), `COUNT` | Live |
@@ -297,19 +331,22 @@ A fleet view reads it for many clusters without calling the live reader.
 | Control | Value |
 |---|---|
 | Rows per response | 500 maximum |
-| Rows per view | Nodes 5,000; events 50,000; violations 20,000. Pods are not kept: only per-node aggregates. |
+| Rows per view | Nodes 5,000; events 50,000; violations 50,000 (today's collector bound, about 20 MB at 400 bytes a row). Pods are not kept: only per-node aggregates. |
 | Build deadline | Nodes and pods 30 seconds; events and violations 15 seconds |
 | Requests per build | 200 pages |
 | Per cluster | One build at a time; at most 4 builds a minute; at most 10 requests a second (client-side limiter, burst 20) |
 | Per tenant | At most 10 builds a minute across the tenant's clusters (section 7.2) |
 | Fleet | At most 8 builds in flight. A build waits 2 seconds for a slot, then is refused as `BUSY`. |
 | Failure cooldown | 30 seconds after a failure: the same error is returned without contacting the cluster. 2 minutes after 3 consecutive failures. |
+| Replicas | One in version 1 (5.5). Every limit in this table is that process's. |
 | Memory | Live views: 256 MiB in total in the live reader, least recently used evicted first. Stored results cache: 64 MiB by bytes (replaces the 16-object count bound). |
 | Page size | 100 nodes by default; 50 for the others. Same as today. |
 
 **Unreachable.** A build is "unreachable" when one of these happens before the first page:
 
-- the Cluster object or its kubeconfig Secret is missing (`CLUSTER_UNREACHABLE`, reason "no kubeconfig");
+- the Cluster object is missing (`CLUSTER_UNREACHABLE`, reason "no cluster");
+- the live kubeconfig Secret is missing or its ClusterAuth is not Ready (`NO_LIVE_IDENTITY`, 7.1; no
+  cooldown, since no request reached the cluster);
 - connect, DNS or TLS fails, or the deadline passes with no page (`CLUSTER_UNREACHABLE`);
 - the apiserver answers 401 or 403 (`CREDENTIALS_REJECTED`, shown to the platform team with the rotation
   hint; the tenant sees "the platform cannot read this cluster").
@@ -393,6 +430,7 @@ Estimates from the code's own limits, labelled as such. Each must be measured in
 | Stored latest bytes, deprecations and recommendations | about 23 MB (60 × 31 KB + 30 × 260 KB + 10 × 1.3 MB) |
 | Stored history bytes, 30 days, recommendations (upper bound) | about 13 GB (72,000 objects × about 175 KB average, estimate) |
 | Extra controller LIST requests an hour for pods | about 2,300 (1,200 large + 720 medium + 360 small). Accepted (open question 2). |
+| Controller policy counts pass | Every 15 minutes instead of 5: a third of today's report reads. Each live view of violations adds one full read of the reports. |
 | Live read requests, if every large cluster is viewed at once | Capped by 8 builds in flight: at most about 16 requests a second across the fleet |
 
 ### 6.4 S3 writes and history
@@ -438,13 +476,39 @@ Request cost is small at these rates. The gain is the object count and the stora
 | API server ServiceAccount (management cluster) | Reads and writes its CRs (as today). Reads the results bucket for the two stored kinds through the narrowed role (5.11). Calls the live reader. | Any workload kubeconfig, any Secret read in tenant namespaces, any workload credential, any read of the removed S3 prefixes |
 | Controller ServiceAccount (management cluster) | As today. Writes the status summary and the two stored kinds. | Write access to the removed S3 prefixes is unused after phase 6 and is removed with them |
 | Live reader ServiceAccount (management cluster) | Get on Cluster CRs; get on kubeconfig Secrets in tenant namespaces through the `cluster-vending-kubeconfig-reader` binding (a second binding for this ServiceAccount) | Write to any CR, AWS, Crossplane |
-| Live reader identity in each workload cluster (new) | `cluster-vending-live-reader` ClusterRole: get and list on nodes, pods, events, NodeClaims (`karpenter.sh`), PolicyReports and ClusterPolicyReports (`wgpolicyk8s.io`), OpenReports and ClusterReports (`openreports.io`), Gatekeeper constraints (get and list) | Secrets, ConfigMaps, VPAs, pod metrics, `pods/exec`, `pods/log`, any write verb, watch in v1 |
+| Live reader identity in each workload cluster (new) | The account's reader IAM role, mapped by an EKS access entry to the Kubernetes group `cluster-vending:live-reader`, bound to the `cluster-vending-live-reader` ClusterRole: get and list on nodes, pods, events, NodeClaims (`karpenter.sh`), PolicyReports and ClusterPolicyReports (`wgpolicyk8s.io`), OpenReports and ClusterReports (`openreports.io`), Gatekeeper constraints, and `nodes` of `metrics.k8s.io` | Secrets, ConfigMaps, VPAs, pod metrics, `pods/exec`, `pods/log`, any write verb, watch in v1, any EKS access policy |
 | Controller identity in the workload cluster (today) | Its kubeconfig. Keeps the reads it has (including the deprecation scan's Helm release Secrets and the recommendation reads). | Unchanged by this proposal (open question 6) |
 
-The live reader's workload identity is a new ServiceAccount and token, written by ClusterAuth into a new
-Secret (`<cluster>-live-kubeconfig`) in the tenant namespace. Rotation follows ClusterAuth's.
+**How the live identity is made.** ClusterAuth (`eks.aws.m.upbound.io`) does not create Kubernetes
+identities: it writes a kubeconfig whose token is a short-lived EKS token for the AWS identity of its
+ProviderConfig, and refreshes it every `refreshPeriod`. Today's ClusterAuth (`clusterAuth`,
+`pkg/crossplane/aws/cluster.go`) uses the account's tenant role, which the cluster's access entry gives the
+cluster admin policy. The live identity is therefore a second AWS identity with its own access entry, not a
+ServiceAccount:
 
-Narrowing the live ClusterRole to what the projection needs (no VPAs, no metrics, no Secrets) is the
+| Object | Where | Content |
+|---|---|---|
+| IAM role | The tenant account: the existing **reader role** (`cluster-vending-reader-role.template.yaml`) | Unchanged. Its trust already allows the management role (and the server principal); its policy has `eks:Describe*`, which covers the `eks:DescribeCluster` the token needs. No template change and no `TemplateVersion` bump, so tenants re-apply nothing. |
+| CloudAccount field | Management cluster | `spec.aws.readerRole` (new, optional). Default `arn:aws:iam::<account>:role/cluster-vending-reader`, the stack's default `RoleName`. The platform does not record the reader role today. |
+| ProviderConfig `<account>-live` | Management cluster | Assumes the reader role from the management role, with the account's external ID. |
+| ClusterAuth `<prefix>-live-auth` | Management cluster, tenant namespace | The `<account>-live` ProviderConfig; writes the Secret `<prefix>-live-kubeconfig`; the same `refreshPeriod` as the existing ClusterAuth. |
+| AccessEntry `<prefix>-live` | The EKS cluster | `principalArn` the reader role, type `STANDARD`, `kubernetesGroups: [cluster-vending:live-reader]`, **no** AccessPolicyAssociation. |
+| ClusterRole `cluster-vending-live-reader` and ClusterRoleBinding to the group `cluster-vending:live-reader` | The workload cluster | Applied by the controller with its own kubeconfig, after the cluster is `ACTIVE`, like the other workload objects it applies. |
+
+The live reader reads only the Secret `<prefix>-live-kubeconfig`. It holds no AWS credentials: the token is
+minted by the Crossplane provider. Rotation is ClusterAuth's refresh. An account without the reader stack, or
+whose reader role cannot be assumed, has a ClusterAuth that is not Ready; its clusters get no live identity.
+
+**Imported clusters.** The same four objects are added when a cluster is imported: an access entry is
+additive and changes no existing access. A cluster whose authentication mode is `CONFIG_MAP` (no access
+entries) gets no live identity; the platform does not change its authentication mode.
+
+**No live identity.** When the live Secret is missing or its ClusterAuth is not Ready, the live RPCs return
+UNAVAILABLE with reason `NO_LIVE_IDENTITY` ("the platform has no read-only identity for this cluster"), and the
+console shows the summary, as for an unreachable cluster. The controller's kubeconfig is never used as a
+fallback.
+
+Narrowing the live ClusterRole to what the projection needs (no VPAs, no pod metrics, no Secrets) is the
 reason recommendations stay with the controller. The live identity needs nothing for them.
 
 ### 7.2 Tenant scoping
@@ -473,12 +537,15 @@ reason recommendations stay with the controller. The live identity needs nothing
 - Network: the live reader's Service accepts only the API server's pods (NetworkPolicy); egress is limited to
   the management cluster's API and the workload endpoints.
 
-### 7.5 Known gap
+### 7.5 Unauthenticated mode
 
 `auth.mode: none` in the API lets the caller set any tenant ID
-([architecture.md, Known limits](../architecture.md#7-known-limits)). The live reader inherits that gap:
-with auth off, any caller can read any cluster's live data. Live reads ship only with `auth.mode` on, or
-the operator accepts that they are not a tenant boundary in that mode.
+([architecture.md, Known limits](../architecture.md#7-known-limits)). With auth off, any caller could read
+any cluster's live data. So `serve` refuses live reads in that mode: the live RPCs return
+`FAILED_PRECONDITION` "live reads need authentication", and the console shows the summary with that notice.
+The config file can allow them with `live.allowWithoutAuth: true`. Only `hack/config.local.yaml` sets it, for
+local development; the deploy bases (`config/server/base`) never do, and `serve` logs a warning at start when
+it is set.
 
 ## 8. Alternatives considered
 
@@ -498,14 +565,18 @@ Each phase ships alone and leaves the system consistent. Stored kinds are unchan
 S3 writers for the live kinds run alongside the live path through phase 5, so the two can be compared and
 rolled back.
 
-### Phase 0: Stop violation event history (interim)
+**Status (2026-11-21).** Phases 0, 1 and 2 are implemented on `main` (commit `2ce6048`). Phase 2b is not: the
+summary is on the Cluster object but not yet in the API. The 15-minute counts pass and the gate rule of 5.2
+are not implemented yet; they ship with phase 2b.
+
+### Phase 0: Stop violation event history (interim) — implemented
 
 - Write `violation-events` with `results.WithoutHistory()`. Write `violations` history at most hourly, with
   the existing gate. Delete the existing `history/violation-events/` objects once, at rollout.
 - **Accepted when:** no `history/violation-events/` object is written after the release.
 - **Tests:** the write options; an S3 fake that counts PUTs per pass.
 
-### Phase 1: API shape
+### Phase 1: API shape — implemented
 
 - Proto additions of 5.8 (`sort_by`, `sort_order`, `live_at`, `complete`, `GetNodeResources`, page token
   length). The live RPCs return `UNIMPLEMENTED` until phase 3. The stored RPCs are unchanged.
@@ -513,7 +584,7 @@ rolled back.
   golden test), and a live RPC returns `UNIMPLEMENTED`, not a crash.
 - **Tests:** wire compatibility (old client, new server; new client, old server); token scope tests.
 
-### Phase 2: Cluster status summary
+### Phase 2: Cluster status summary — implemented
 
 - The controller writes `conditions[Reachable]`, `nodes`, the extended `nodeGroups[]` (with resource totals and
   the pod list in the node pass), `violations` and `violationEvents` (5.2). The pass counts events and violations
@@ -526,19 +597,49 @@ rolled back.
   requests); a fake API with paginated pods; the summary bound; the status write rule (time-only refresh at most
   every 10 minutes).
 
+### Phase 2b: Summary in the API
+
+- `idl/cloud/v1`: on `Cluster`, the `nodes` counts (total, ready, not ready, `nodes_collected_at`), the
+  `violations` counts (total, by severity, `policy_collected_at`), the `violation_events` counts (total, by
+  reason), and the `Reachable` condition (status, reason, `last_successful_at`). On `NodeGroupStatus`: allocatable
+  and requested CPU and memory, allocatable pods, pod count, pods without requests. Additive fields only.
+- `pkg/convert`: the Cluster status summary to these fields; absent when the summary is absent (a cluster no
+  pass has read yet), never zero.
+- CLI: `cluster get` prints the counts, the per-group requested and allocatable totals, and Reachable with its
+  reason. UI: the cluster overview shows the same, with `…CollectedAt` ages and the "old" marking of 5.2.
+- The policy counts pass moves to 15 minutes, and the upgrade readiness gates get the rule of 5.2 (Reachable
+  False or a summary older than 15 minutes waits).
+- **Accepted when:** `cluster get` and the overview show the counts of a fixture cluster; a cluster without a
+  summary shows "not read yet", not zeros; an unreachable fixture shows Reachable False with its reason and the
+  last counts; an upgrade on a cluster whose summary is 16 minutes old waits with the gate message.
+- **Tests:** convert tests (summary present, absent, unreachable); a CLI print golden; a UI component test for the
+  overview's three states; gate tests at 14 and 16 minutes and with Reachable False; the policy pass cadence.
+
 ### Phase 3: Live reader, nodes and node totals
 
-- The `cluster-vending live` subcommand, the internal Connect endpoint, the Deployment, the Service, the
-  NetworkPolicy, the two identities, the workload RBAC, the caps, the cooldown, the views.
+- The `cluster-vending live` subcommand, the internal Connect endpoint, the Deployment (one replica, `Recreate`,
+  5.5), the Service, the NetworkPolicy, the caps, the cooldown, the views.
+- The live identity of 7.1, per account and cluster: `spec.aws.readerRole` on the CloudAccount, the
+  `<account>-live` ProviderConfig, the `<prefix>-live-auth` ClusterAuth writing `<prefix>-live-kubeconfig`, the
+  `<prefix>-live` AccessEntry with the `cluster-vending:live-reader` group and no access policy, and the
+  `cluster-vending-live-reader` ClusterRole and ClusterRoleBinding in the workload cluster. The same objects at
+  import; none for a `CONFIG_MAP` cluster. Deletion removes them with the cluster's other access objects.
+- Node usage from `nodes.metrics.k8s.io` (5.3), optional.
+- `serve` refuses live reads with `auth.mode: none` unless `live.allowWithoutAuth` is set (7.5).
 - The console's node pages switch to the live API, with the unreachable notice and the summary counts. S3 node
   writers keep running for comparison and rollback.
 - **Accepted when:** a 1,000-node, 10,000-pod test cluster returns a sorted, paginated node list in under 3
   seconds at p95 cold, and under 100 milliseconds warm. A cap breach returns its reason. Three failures start
   the cooldown, and no request reaches the cluster during it. The API process holds no kubeconfig. A 403 shows
-  `CREDENTIALS_REJECTED`, not `CLUSTER_UNREACHABLE`.
+  `CREDENTIALS_REJECTED`, not `CLUSTER_UNREACHABLE`. A cluster without the live Secret returns `NO_LIVE_IDENTITY`
+  and the controller's kubeconfig is not used. A live reader restart makes an open token answer "restart the
+  list". With `auth.mode: none` and no `live.allowWithoutAuth`, the live RPCs return `FAILED_PRECONDITION`.
 - **Tests:** build tests against a fake API that paginates, returns 410 on a stale token, and times out, one row
-  per cap; singleflight; token tests (expiry, scope, sort change); an RBAC test that the live identity cannot read
-  Secrets, ConfigMaps or VPAs and cannot write; a load test at 100 synthetic clusters (the target number for
+  per cap; singleflight; token tests (expiry, scope, sort change, a token from before a restart); render golden
+  tests of the live ProviderConfig, ClusterAuth and AccessEntry (group set, no access policy), for a created and an
+  imported cluster, and none for a `CONFIG_MAP` cluster; the usage fields present and absent (no metrics API); an
+  RBAC test that the live identity cannot read Secrets, ConfigMaps, VPAs or pod metrics and cannot write;
+  the auth-mode refusal; a load test at 100 synthetic clusters (the target number for
   [Known limits](../architecture.md#7-known-limits)).
 
 ### Phase 4: Live violations and events
@@ -586,10 +687,11 @@ rolled back.
 6. **Scan identity.** The deprecation scan and the recommendation reads use the controller's kubeconfig, including
    Helm release Secrets. Decide whether that identity should lose Secret read, with Helm storage read through another
    identity. This is a separate change and is not needed for this proposal.
-7. **Limits.** The caps of 5.9 (5,000 nodes, 50,000 events, 20,000 violations, 15 to 30 seconds per build) are reasoned
+7. **Limits.** The caps of 5.9 (5,000 nodes, 50,000 events, 50,000 violations, 15 to 30 seconds per build) are reasoned
    from the code, not measured. Confirm them after the phase 3 load test.
-8. **Summary staleness.** The console marks the summary "old" after 15 minutes without a pass. Confirm the threshold, and
-   whether rollout gates should refuse a summary older than that.
+8. **Summary staleness.** Decided: the node part of the summary is "old" after 15 minutes, and the upgrade readiness
+   gates wait (not pass, not fail) on a summary that old or on `Reachable` False (5.2). The policy counts are "old"
+   after 30 minutes.
 9. **Violation history.** Violations and events lose their 30-day history in phase 6. Nothing audit-style remains for
    violations. Confirm that live-only is acceptable, or keep an hourly stored history for violations (a new, small
    kind).

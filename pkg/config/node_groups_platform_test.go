@@ -14,7 +14,7 @@ import (
 
 func TestNodeGroupsDefaultsOfThePlatformPool(t *testing.T) {
 	want := config.PlatformNodePool{
-		InstanceFamilies: []string{"m7i", "m6i"}, InstanceSizes: []string{"large", "xlarge", "2xlarge"},
+		InstanceFamilies: []string{"t3"}, InstanceSizes: []string{"large", "xlarge", "2xlarge"},
 		Architectures: []string{"AMD64"}, CapacityTypes: []string{"ON_DEMAND"},
 		Limits:              config.PlatformLimits{CPU: 128, Memory: "512Gi"},
 		ConsolidationPolicy: "WhenEmpty", ConsolidateAfter: 5 * time.Minute,

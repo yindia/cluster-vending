@@ -18,8 +18,8 @@ layout into three pools:
 
 | Pool | What runs | Capacity |
 |---|---|---|
-| **Bootstrap** (`system`, the EKS managed default node group) | Karpenter (2 replicas), CoreDNS (2), the aws-ebs-csi-driver controller (2) | Fixed size, configured: `nodeGroups.system` |
-| **Platform** (Karpenter NodePool `platform-pool`, EC2NodeClass `platform-pool`) | Every platform component except Karpenter, and every tenant component | Grows and shrinks with demand, configured: `nodeGroups.platform` |
+| **Bootstrap** (`system`, the EKS managed default node group) | Karpenter (2 replicas), CoreDNS (2), the aws-ebs-csi-driver controller (2), and Capsule (2) when the cluster has `naas` | Fixed size, configured: `nodeGroups.system` |
+| **Platform** (Karpenter NodePool `platform-pool`, EC2NodeClass `platform-pool`) | Every other platform component, and every tenant component | Grows and shrinks with demand, configured: `nodeGroups.platform` |
 | **Tenant** (`nodeGroups.karpenter`, unchanged) | The tenant's own workloads | As today |
 
 DaemonSets (vpc-cni, kube-proxy, the pod identity agent, the EBS node plugin, istio-cni,
@@ -29,14 +29,16 @@ Decisions, each argued in section 4:
 
 | Question | Decision |
 |---|---|
-| Bootstrap set | Karpenter, CoreDNS, aws-ebs-csi-driver controller. Nothing else. |
+| Bootstrap set | Karpenter, CoreDNS, aws-ebs-csi-driver controller, and Capsule when `naas` is on (its fail-closed namespace webhooks, 4.11). Nothing else. |
 | Bootstrap substrate | The EKS managed node group that the cluster has as its default node group. Default: 2 x `t3.medium` (for testing), fixed size, `instanceTypes` a list. Production sizes are a recommendation in 4.6. No Fargate. |
 | cluster-autoscaler | Removed from the default set. The bootstrap group does not need to grow, and Karpenter scales the platform and tenant pools. |
-| Platform pool | One NodePool `platform-pool` and one EC2NodeClass `platform-pool`, on-demand, families `m7i` and `m6i` by default, tainted `node.cluster-vending.io/pool=platform-pool:NoSchedule`, `WhenEmpty` consolidation in every class, explicit limits and disruption budgets. |
+| Platform pool | One NodePool `platform-pool` and one EC2NodeClass `platform-pool`, on-demand, family `t3` by default (testing size, like the bootstrap group; `m7i` and `m6i` are the production recommendation in 4.6), tainted `node.cluster-vending.io/pool=platform-pool:NoSchedule`, `WhenEmpty` consolidation in every class, explicit limits and disruption budgets. |
 | Tenant components | Platform pool. Not the tenant's own groups. No per-cluster switch. |
 | Helm capacity | A release that waits on pool capacity is classified `capacity`: not counted, retried for up to 2 x its install timeout (4.11). |
 | Deadlock | Karpenter is never held for any pool. A platform pool is "Ready" when its objects are Ready, not when it has nodes. Pods create the nodes. |
-| Migration | Create the platform pool first. Move one component at a time, through the gated rollout of PROP-01 4.7, and only when the pool has a Ready node. Shrink the bootstrap group last. |
+| Migration | Record each component's placement first (phase 3), so the new build changes nothing on an existing cluster. Create the platform pool. Move one component at a time by changing its recorded placement, admitted by the per-definition gated rollout of PROP-01 phase 5 (a dependency: phase 4 here waits for it), and only when the pool has a Ready node. Shrink the bootstrap group last. |
+| Priority | Platform components run with PriorityClass `cluster-vending-platform` (100000), tenant components with `cluster-vending-tenant-component` (10000), so a platform pod preempts tenant component pods when the pool is at its limits (4.7). |
+| Quota | Cluster creation and `account verify` check the region's On-Demand Standard vCPU quota against the bootstrap group and the platform pool's floor (4.5). |
 | Prefix delegation | New clusters only. Existing clusters opt in by a manual node replacement. No automatic migration (4.9). |
 | Configuration | The PROP-01 file: `nodeGroups.system`, `nodeGroups.platform`, `nodeGroups.karpenter`. |
 
@@ -123,7 +125,8 @@ toward `Failed` today. That is wrong for a capacity problem and needs its own cl
 The principle: **bootstrap is the set that must run before a platform NodePool can launch
 its first node, plus the EKS add-on controllers, which EKS creates before any platform node
 exists, plus CoreDNS, whose outage would stop name resolution across the cluster whatever
-the platform pool does.** Everything else is platform or tenant.
+the platform pool does, plus Capsule, whose fail-closed namespace webhooks would otherwise make a
+pool outage block every namespace change in the cluster.** Everything else is platform or tenant.
 
 | Workload | Class | Where | Replicas | Reason |
 |---|---|---|---|---|
@@ -138,16 +141,18 @@ the platform pool does.** Everything else is platform or tenant.
 | `istiod` | Platform | Platform pool | 2, HPA above | Ambient control plane. Needed for new mesh configuration, not for running pods. |
 | `istio-ingress-gateway` | Platform | Platform pool | 2, HPA above | Traffic entry. Its pods are on the pool that scales with the traffic. |
 | `istio-cni`, `ztunnel` | DaemonSet | Every node | one per node | Ambient mesh needs them on every node. |
-| `capsule` (when `naas`) | Platform | Platform pool | 2 | Tenancy controller. Not needed by bootstrap. |
+| `capsule` (when `naas`) | Bootstrap | Bootstrap group | 2 | Tenancy controller. Its `namespaces` and `replications` webhooks are `Fail` with no namespace selector (phase 0 results, section 7). On the pool, a pool outage would block every namespace create, update and delete. On the bootstrap group they depend only on the group whose loss is already the one total outage (4.11). No `failurePolicy` is weakened. Its values use `${system.*}`. |
 | `kyverno-policies` (tenant) | Tenant, no workload | none | none | Policy objects only. |
 | `gpu-operator` (tenant) | Tenant | Platform pool for the operator and its controllers | per chart | The operands (device plugin, DaemonSets) run on the tenant's GPU groups with the chart's own tolerations. |
 | Tenant components in general | Tenant | Platform pool | per chart | Their placement is the platform's, not the tenant's (4.7). |
 | `vpc-cni`, `kube-proxy`, `eks-pod-identity-agent`, `aws-ebs-csi-driver` node | DaemonSet | Every node | one per node | Node networking, proxy, identity and volume agents. |
 
-Pod count of the bootstrap set: 6 controller replicas (Karpenter 2, CoreDNS 2, EBS
-controller 2) plus the DaemonSets on each node (vpc-cni, kube-proxy, pod identity agent,
-EBS node, istio-cni, ztunnel: six per node). Two `t3.medium` nodes give 34 pod slots and
-need 18. The 17-pod limit of each node is the binding one, so the sizing check counts pods,
+Pod count of the bootstrap set: 8 controller replicas (Karpenter 2, CoreDNS 2, EBS
+controller 2, Capsule 2 when `naas` is on) plus the DaemonSets on each node (vpc-cni,
+kube-proxy, pod identity agent, EBS node, istio-cni, ztunnel: six per node). Two `t3.medium`
+nodes give 34 pod slots and need 20 (18 without `naas`). Capsule's hook job (CRD install and
+cleanup, 100m and 128 MiB) runs on the bootstrap group too, for the length of an install or
+upgrade. The 17-pod limit of each node is the binding one, so the sizing check counts pods,
 not only CPU and memory (4.5).
 
 ### 4.2 The bootstrap substrate
@@ -170,8 +175,10 @@ Shape:
   Every type in the list has the same architecture and vCPU and memory class (4.4).
 - Subnets in every availability zone of the network, so the capacity of one zone does not
   take the group out.
-- Fixed size: desired = minimum = maximum = `minSize`. The group changes size only through
-  M3 (4.9).
+- Fixed size: desired = minimum = maximum = `minSize`. A new cluster (from phase 3) is created
+  this way and gets no cluster-autoscaler. An existing cluster keeps cluster-autoscaler, with
+  `system.maxSize` as its ceiling, until M3 removes it (4.9); after that `maxSize` is ignored
+  with a warning. The group changes size only through M3.
 - Node-level limits apply: 17 pods on `t3.medium` without prefix delegation (4.5).
 - Upgrade: the managed node group's rolling update, one node at a time, under PDBs (4.10).
 - Failure domain: the capacity of one instance type in one zone can run out. The list of
@@ -185,6 +192,12 @@ Shape:
 the release's `nodeAmiPin` (the existing mechanism, PROP-01 2.2 and architecture.md
 "Upgrade"), and the cluster's tags. The class adds no `kubelet` settings unless
 `platform.maxPods` is set (4.6).
+
+**A release without `nodeAmiPin`.** PROP-01 decided that such a release falls back to
+`al2023@latest`. For the platform pool, `latest` is resolved once, at the pool's first render
+for that release, and the resolved AMI is recorded on the cluster status. It moves only with a
+release move or a Kubernetes upgrade, never because AWS published a newer AMI. Without this, a
+drift replacement of the whole pool would follow every AMI publication.
 
 **NodePool `platform-pool`**, rendered for each cluster:
 
@@ -209,7 +222,7 @@ spec:
       requirements:
         - {key: kubernetes.io/arch, operator: In, values: [amd64]}
         - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
-        - {key: karpenter.k8s.aws/instance-family, operator: In, values: [m7i, m6i]}
+        - {key: karpenter.k8s.aws/instance-family, operator: In, values: [t3]}       # config default (testing)
         - {key: karpenter.k8s.aws/instance-size, operator: In, values: [large, xlarge, 2xlarge]}
       expireAfter: 336h
       terminationGracePeriod: 1h
@@ -242,18 +255,33 @@ names; they name the role, not the pool object.
 - **Limits** cap the pool so a runaway pending set cannot launch unbounded capacity. They
   are configured (4.4) and checked against the platform's own requests (4.5).
 
-**Placement.** The placeholders change meaning, which is the only change to the catalog:
+**Placement.** The placeholders change meaning, and two priority placeholders are added. With
+Capsule's switch to `${system.*}`, those are the only changes to the catalog:
 
 | Placeholder | Today | After |
 |---|---|---|
-| `${platform.nodeSelector}`, `${platform.tolerations}` | the managed node group | the platform pool (`platform-pool`) |
+| `${platform.nodeSelector}`, `${platform.tolerations}` | the managed node group | the platform pool (`platform-pool`) on a new cluster; on an existing one, the component's recorded placement (4.8) |
 | `${system.nodeSelector}`, `${system.tolerations}` | the managed node group | the bootstrap group, unchanged |
+| `${platform.priorityClassName}` | none | `cluster-vending-platform` |
+| `${tenant.priorityClassName}` | none | `cluster-vending-tenant-component` |
 
 The change to `${platform.*}` rewrites the values of every platform definition that uses it
-(external-secrets, capsule, aws-load-balancer-controller, istiod, istio-ingress-gateway,
-kyverno, gpu-operator). That is a catalog change, so it reaches existing clusters only
-through the gated rollout of PROP-01 4.7 (4.9). `${system.*}` keeps its meaning and no new
-placeholder is added.
+(external-secrets, aws-load-balancer-controller, istiod, istio-ingress-gateway, kyverno,
+gpu-operator). Capsule moves from `${platform.*}` to `${system.*}` (4.1). For an existing
+cluster `${platform.*}` renders from the component's recorded placement (4.8), so the new
+meaning reaches it only when that record changes, through the gated rollout of PROP-01 4.7
+(4.9). `${system.*}` keeps its meaning.
+
+**Priority.** The platform creates two PriorityClasses on every cluster it places components
+on, with the pool: `cluster-vending-platform` (value 100000) and
+`cluster-vending-tenant-component` (value 10000), neither global default. Platform
+definitions set `priorityClassName: ${platform.priorityClassName}`, and the platform sets
+`${tenant.priorityClassName}` on tenant components where the chart has the key. When the pool
+is at its `limits`, a pending platform pod preempts tenant component pods, so a heavy tenant
+component cannot keep istiod or Kyverno from scaling. The bootstrap components keep the
+`system-cluster-critical` or `system-node-critical` class their charts and add-ons set
+(Capsule already sets `system-cluster-critical`). Tenant workloads on tenant pools are not
+affected: preemption acts within the nodes a pod can schedule on.
 
 **Who places what, in code.** The bootstrap add-ons (CoreDNS, EBS controller) keep
 `addonPlacements` but select the bootstrap group's labels explicitly, not `b.p.NodePool`,
@@ -270,8 +298,9 @@ EKS add-on: the add-on would wait for a pool with no nodes (2.4).
    EC2NodeClass and NodePool `platform-pool`, and the tenant pools. Waits: Karpenter Ready.
    Ready of the pool means its EC2NodeClass and NodePool report `Ready`. It does not mean a
    node exists.
-4. Platform components by sequence (`requires` order within a sequence). Each waits for the
-   platform pool to be Ready. Its pods make Karpenter launch nodes. The Helm install waits
+4. The two PriorityClasses, then platform components by sequence (`requires` order within a
+   sequence). Each component placed on the pool waits for the platform pool to be Ready;
+   Capsule, on the bootstrap group, does not. Its pods make Karpenter launch nodes. The Helm install waits
    for the pods to become Ready, as today, and a capacity wait is classified as in 4.11.
 5. Tenant components, as today: after the platform components.
 
@@ -299,9 +328,9 @@ nodeGroups:
     minSize: 2                     # fixed size: desired = min = max; at least 2 (Karpenter's two replicas)
     capacityType: ON_DEMAND        # new clusters only
     diskSizeGiB: 0                 # new clusters only; 0 is EKS's default
-                                   # maxSize is removed with cluster-autoscaler; a value still set is ignored with a warning
+    # maxSize: 6                   # deprecated: only cluster-autoscaler's ceiling on existing clusters until M3; then ignored with a warning
   platform:                        # the Karpenter NodePool "platform-pool": platform and tenant components
-    instanceFamilies: [m7i, m6i]
+    instanceFamilies: [t3]         # default for testing; production: [m7i, m6i] (4.6)
     instanceSizes: [large, xlarge, 2xlarge]
     architectures: [AMD64]         # AMD64 or ARM64; one per pool
     capacityTypes: [ON_DEMAND]     # SPOT is refused in this version
@@ -326,7 +355,7 @@ nodeGroups:
 |---|---|---|---|
 | `system.instanceTypes` | `--system-instance-types` | `CV_SYSTEM_INSTANCE_TYPES` | `t3.medium` |
 | `system.minSize` | `--system-node-group-min-size` (existing) | `CV_SYSTEM_NODE_GROUP_MIN_SIZE` (existing) | `2` |
-| `platform.instanceFamilies` | `--platform-instance-families` | `CV_PLATFORM_INSTANCE_FAMILIES` | `m7i,m6i` |
+| `platform.instanceFamilies` | `--platform-instance-families` | `CV_PLATFORM_INSTANCE_FAMILIES` | `t3` |
 | `platform.instanceSizes` | `--platform-instance-sizes` | `CV_PLATFORM_INSTANCE_SIZES` | `large,xlarge,2xlarge` |
 | `platform.limits.cpu` / `.memory` | `--platform-limit-cpu` / `--platform-limit-memory` | `CV_PLATFORM_LIMIT_CPU` / `CV_PLATFORM_LIMIT_MEMORY` | `128` / `512Gi` |
 | `platform.consolidationPolicy` | `--platform-consolidation-policy` | `CV_PLATFORM_CONSOLIDATION_POLICY` | `WhenEmpty` |
@@ -337,7 +366,8 @@ or mixes architectures or vCPU and memory classes (the sizing uses the smallest)
 size does not match the shape of the name; `capacityTypes` contains `SPOT`; `limits` are not
 positive; `maxPods` is above 110 while the cluster's VPC CNI prefix delegation is off (4.6).
 A `system.maxSize` or a `CV_SYSTEM_NODE_GROUP_MAX_SIZE` still set logs a warning, as the
-PROP-01 variables do.
+PROP-01 variables do. Until M3 has removed cluster-autoscaler from an existing cluster, the
+value is still that cluster's autoscaler ceiling; new clusters and migrated ones ignore it.
 
 ### 4.5 Validation and sizing
 
@@ -346,7 +376,7 @@ Three layers, as in PROP-01 4.5.
 **Offline (`controller --check`), with the rendered catalog and the config file:**
 
 - **Bootstrap sizing.** `SizingTable` restricted to the bootstrap set (karpenter, coredns,
-  the EBS controller, and the DaemonSets) against 85 % of `minSize` nodes of the smallest
+  the EBS controller, capsule when `naas` can be on, and the DaemonSets) against 85 % of `minSize` nodes of the smallest
   instance type in `instanceTypes`. It counts CPU, memory and pods. The pod count is
   `minSize x maxPodsPerNode`, where `maxPodsPerNode` is 17 for `t3.medium` (and the sizing
   test's table), 29 for `m6i.large`, and 110 when prefix delegation is on. A bootstrap set
@@ -356,8 +386,9 @@ Three layers, as in PROP-01 4.5.
   shape the pool allows (`instanceSizes`). A request larger than every shape can never
   schedule and is refused.
 - **Catalog placement.** Every platform definition has `${platform.*}` or `${system.*}`
-  values, never a literal `nodeSelector` (checked by the placeholder rules). `karpenter` and
-  CoreDNS use `${system.*}`. Nothing else uses `${system.*}`.
+  values, never a literal `nodeSelector` (checked by the placeholder rules). `karpenter`,
+  CoreDNS and `capsule` use `${system.*}`. Nothing else uses `${system.*}`. Every platform
+  definition on the pool sets `priorityClassName: ${platform.priorityClassName}`.
 - **Requires.** A bootstrap component requires only bootstrap components, so the pool is
   never a dependency of the bootstrap set.
 
@@ -365,14 +396,26 @@ Three layers, as in PROP-01 4.5.
 bootstrap group has `minSize` nodes Ready (the existing `readNodes`); the pool's offering
 set is read into its status, and an empty set is reported.
 
+**Account preflight (cluster creation and `account verify`).** The platform's nodes run in the
+tenant's account, so the region's EC2 quota "Running On-Demand Standard (A, C, D, H, I, M, R,
+T, Z) instances" (`L-1216C47A`, in vCPUs, read through Service Quotas) must hold the cluster's
+floor: `minSize` x the vCPUs of the smallest type in `system.instanceTypes`, plus two nodes of
+the platform pool's smallest shape (the smallest `instanceSizes` entry of the smallest family).
+The check subtracts nothing for running instances; it is a floor, not a forecast. Below the
+floor, creation is refused with the numbers (quota, floor, and how it was computed), and
+`account verify` reports the same as a failed check. With the defaults that floor is
+2 x 2 (`t3.medium`) + 2 x 2 (`t3.large`) = 8 vCPUs. Quota that cannot be read (no
+`servicequotas:GetServiceQuota`) is reported as a warning, not a refusal.
+
 ### 4.6 Scale classes
 
 The platform pool grows with the cluster. The bootstrap set does not: it is the same
 size at 10 nodes and at 1,000 nodes, apart from CoreDNS and Karpenter replicas.
 
-**The config default is 2 x `t3.medium` for every class.** That is the testing size. The
-recommended production sizes are in the table below as guidance: an operator sets them in the
-file for the class that applies. The class values are starting values, not measured yet; the
+**The config default is the testing size for every class:** 2 x `t3.medium` for the bootstrap
+group, and family `t3` (`large` to `2xlarge`) for the platform pool. The recommended production
+sizes are in the table below as guidance: an operator sets them in the file for the class that
+applies. The class values are starting values, not measured yet; the
 phase 5 load test replaces them.
 
 | | Small (up to 50 nodes, 1,000 pods) | Medium (up to 250 nodes, 3,000 pods) | Large (up to 1,000 nodes, 10,000 pods) |
@@ -381,7 +424,8 @@ phase 5 load test replaces them.
 | Bootstrap, recommended for production | 2 x `t3.medium` | 2 x `m6i.large` | 3 x `m6i.large` |
 | Pod slots, bootstrap, recommended size, default CNI | 34 | 58 | 87 |
 | Platform limits | cpu 32, memory 128Gi | cpu 128, memory 512Gi | cpu 256, memory 1Ti |
-| Platform families and sizes | `m7i`, `m6i`; `large` to `2xlarge` | same; `xlarge` to `4xlarge` | same; `xlarge` to `8xlarge` |
+| Platform families and sizes, config default (testing) | `t3`; `large` to `2xlarge` | same | same |
+| Platform families and sizes, recommended for production | `m7i`, `m6i`; `large` to `2xlarge` | same; `xlarge` to `4xlarge` | same; `xlarge` to `8xlarge` |
 | Platform consolidation | `WhenEmpty` | `WhenEmpty` | `WhenEmpty` |
 | Karpenter | 2 | 2 | 2 |
 | CoreDNS | 2 | 3 | 4 (its requests and cache size to be measured) |
@@ -397,9 +441,11 @@ Notes on the classes:
 - **Cost.** Moving platform components off the shared group adds platform capacity: the
   steady state is the nodes the platform's pods need, with a floor of about two nodes
   because the components spread across them. At 100 clusters that is on the order of 200
-  additional nodes next to today's shared group. `WhenEmpty` (4.3) adds idle capacity on top.
-  The phase 0 measurement records both per class. The cost is the price of isolation and of a
-  fleet that grows; a smaller class can keep a cheaper shape.
+  additional nodes next to today's shared group, paid in the tenants' accounts. `WhenEmpty`
+  (4.3) adds idle capacity on top. The phase 0 measurement records both per class. The cost is
+  the price of isolation and of a fleet that grows. The testing default (`t3`) keeps the floor
+  of a small cluster near two `t3.large`; the production families are an operator's choice per
+  class. The account preflight (4.5) refuses a cluster whose region quota cannot hold the floor.
 - **Pod density.** Without prefix delegation a `t3.medium` holds 17 pods, and the large class
   cannot hold its platform pods on the bootstrap group. Prefix delegation is the VPC CNI add-on
   setting (`ENABLE_PREFIX_DELEGATION`). It is set at cluster creation, and the large class
@@ -425,39 +471,67 @@ The platform adds no switch. A `nodeSelector` and `tolerations` that a tenant se
 component values are passed through as today; the platform does not read them as a placement
 choice.
 
+**Sharing the pool.** Tenant components and platform components share the pool's `limits`. A
+tenant component runs at `cluster-vending-tenant-component` (10000), below the platform's
+`cluster-vending-platform` (100000) (4.3, Priority). When the pool is at its limits, a pending
+platform pod preempts tenant component pods; the reverse never happens. The platform sizing
+check (4.5) counts platform components only against `limits`, so the platform always has its
+own minimum within them.
+
 ### 4.8 Live state and the rule for existing clusters
 
 The rule of `livePlacement` (`pkg/reconcile/cluster/platform_placement.go`) stays. A
-component's placement is what its pods run on now, not what the catalog intends. The new
-pool follows the same rule:
+component's placement is what its pods run on now, not what the catalog intends. Today
+`livePlacement` resolves `${system.*}` and `${platform.*}` alike, from the managed group's live
+labels and taints. That is safe only while both aliases name the same group. Before
+`${platform.*}` changes meaning, each component needs its own record, so the record ships first,
+in phase 3, before any placement changes:
 
-- The placement recorded for each platform component is `system` or `platform-pool`, stored
-  on the cluster status (`status.platformPlacement`, a map from component to pool). It is read
-  from the live Deployment or DaemonSet's `nodeSelector` on the workload cluster, and not
-  from the catalog. A new cluster records `platform-pool` for every component it places there.
-- A move changes a component's recorded placement only when its Helm upgrade has settled
-  (its pods are Ready on the target pool). A failed move leaves the recorded value where it
-  was.
-- For an existing cluster, `${platform.*}` renders to the value the component's recorded
-  placement names. The catalog's new value is not applied until that component's move is
-  admitted (4.9).
+- **The record.** `status.platformPlacement`, a map from component name to pool (`system` or
+  `platform-pool`).
+- **First pass of the new build.** A cluster that has any platform component installed records
+  each installed component as `system`: read from its live Deployment's or DaemonSet's
+  `nodeSelector` on the workload cluster, and `system` when that cannot be read or matches
+  neither pool. A component not installed yet on such a cluster is recorded `system` too, so
+  that cluster keeps one layout until it migrates (4.9). Only a cluster with no platform
+  component installed yet, a new cluster, records `platform-pool` for every component placed
+  there.
+- **Rendering.** `${platform.*}` renders per component from that record: `system` gives the
+  values `livePlacement` gives today, `platform-pool` gives the pool's. `${system.*}` is
+  unchanged. So deploying phase 3 changes no rendered value on an existing cluster, and no
+  Helm release is upgraded by the deploy.
+- **A record with no entry.** A component without a record (written before the record existed,
+  or added later by a catalog change) renders as `system` on a cluster that has any `system`
+  entry, and as `platform-pool` otherwise.
+- **Changing it.** Only a move (4.9, M2) changes a component's record, and only when its Helm
+  upgrade has settled (its pods are Ready on the target pool). A failed move leaves the record
+  where it was.
 
 ### 4.9 Migration of existing clusters
 
-Today every cluster has the managed `system` group and no platform pool. The steps:
+Today every cluster has the managed `system` group and no platform pool. After phase 3, each
+existing cluster has every component recorded `system` (4.8), so nothing has moved yet.
+
+**Dependency.** M2 and M3 need the gated catalog changes of PROP-01 phase 5, in the
+per-definition form: a fingerprint per definition, so one definition's change is admitted on
+its own, one definition at a time, in a given order. A single fingerprint per cluster cannot
+express "move external-secrets now and istiod later". Phase 4 here does not start before
+PROP-01 phase 5 ships. The steps:
 
 - **M1. Create the pool.** Once `karpenter` is Ready on an existing cluster, the controller
   applies the EC2NodeClass and NodePool `platform-pool`, as it does for tenant pools. No pod
   is placed on it yet, so nothing moves. Pool Ready is reported on the cluster.
-- **M2. Move components, one at a time.** Each component is moved by a gated catalog change
-  (PROP-01 4.7): its values change from `system` to `platform-pool`, applied with the existing
-  code-change rollout (tiers Tier2, Tier1, Tier0, `maxInProgress`, soak, windows, freeze, and
-  halt past `maxFailed`). A component moves only when the platform pool has at least one
+- **M2. Move components, one at a time.** A move is a change of the component's recorded
+  placement (4.8) from `system` to `platform-pool`, which changes its rendered values. It is
+  admitted per component by the per-definition gated rollout of PROP-01 phase 5 (PROP-01 4.7):
+  tiers Tier2, Tier1, Tier0, `maxInProgress`, soak, windows, freeze, and halt past `maxFailed`.
+  The rollout admits the components in the order below, the next only after the previous one
+  has settled on the cluster. A component moves only when the platform pool has at least one
   Ready node, which the controller reads with the node list it already has. The move waits
   while the pool has no Ready node, so the component is never moved onto a pool that cannot
   run it.
-  Order, lowest risk first: `external-secrets`, `aws-load-balancer-controller`, `capsule`,
-  the gpu-operator controllers (tenant), `kyverno` (one controller at a time, the admission
+  Order, lowest risk first: `external-secrets`, `aws-load-balancer-controller`, the
+  gpu-operator controllers (tenant), `kyverno` (one controller at a time, the admission
   controller last), `istio-ingress-gateway`, `istiod`. Istiod moves last because its pods
   serve the mesh configuration. The move of each is one Helm upgrade with `wait: true`.
 - **M3. Remove cluster-autoscaler, then resize the bootstrap group.** After M2, a gated
@@ -476,8 +550,12 @@ Today every cluster has the managed `system` group and no platform pool. The ste
   the group can remove a node the platform has not drained, the shrink stays blocked until the
   removal can be pointed at an empty node; the platform never reduces the group while a
   non-empty node is one of the candidates.
-- **M4. Keep Karpenter and CoreDNS on the bootstrap group.** They never move. Their
-  placement is the bootstrap group in every class.
+  After M3 the group is fixed size and `system.maxSize` is ignored for that cluster, with a
+  warning if it is still set.
+- **M4. Keep Karpenter, CoreDNS, the EBS controller and Capsule on the bootstrap group.** They
+  never move. Their placement is the bootstrap group in every class. Capsule's values change
+  from `${platform.*}` to `${system.*}`, which on an existing cluster renders the same values,
+  so it has nothing to move.
 
 **Rollback.** There is no automatic rollback, as in PROP-01 and the rollouts. Moving a
 component back is the same gated change with the old value, and it works only while the
@@ -504,7 +582,8 @@ The Kubernetes upgrade's steps (architecture.md, "How a Kubernetes upgrade runs"
    pin (the release's `nodeAmiPin`), one node at a time under the disruption budget. The
    step settles when every node of the bootstrap group and of the platform pool runs the
    target kubelet minor. The tenant groups are unchanged. The step now includes the
-   platform pool, which the code does not do today.
+   platform pool, which the code does not do today. This change ships in phase 3, with the
+   first clusters that have nodes on the pool.
 3. **Addons.** As today. CoreDNS runs on the bootstrap group already at the new minor.
 4. **PlatformComponents.** The pins move, as today. A pod restart is a rolling update
    inside the pool.
@@ -524,16 +603,19 @@ Points that change the timing:
 | The platform pool cannot launch a node: no capacity for every type in its families, IAM, quota, subnet IP exhaustion, an AMI pin that does not resolve, or a node that does not register | Every running platform pod. Karpenter does not drain a node until its replacement exists. | New platform pods and new tenant component pods stay Pending. Tenant workloads on their own groups are unaffected. Deletion stage 1 waits for the load balancer controller (4.12). | `PlatformComponentsReady` reason `PlatformPoolNoCapacity` after 10 minutes. Karpenter events. The pool's offering count in its status. | Widen `instanceFamilies` or `instanceSizes`; check quota and subnet IPs. A release that waits on this is a capacity class (below): not counted. |
 | Karpenter is down (crash loop, IAM, the controller role) | Bootstrap group, CoreDNS, the EBS controller, every running node. | No node is launched for any pool. Pending pods stay Pending. | Karpenter deployment unavailable; `KarpenterUnavailable` reason on the platform and tenant pools. | The two replicas sit on different bootstrap nodes. Restart or fix the role. Nothing else needs a change. |
 | A bootstrap node is lost | The other node. CoreDNS and Karpenter run one replica each, with anti-affinity. | Capacity of bootstrap is halved until the managed group replaces the node. | Node count below `minSize`. | The managed group replaces it. The PDBs stop a drain from taking both replicas. |
-| Both bootstrap nodes are lost, or their instance type has no capacity in any zone | Platform and tenant pods on running nodes. | Karpenter and DNS are down. No scaling. | DNS and Karpenter alerts. | This is the one total outage of the design. Mitigate with multi-type `instanceTypes` and subnets in every AZ. |
-| A Kyverno, istiod, load balancer controller, External Secrets or Capsule webhook is unavailable | Running pods. | Pods whose admission goes through a webhook with `failurePolicy: Fail` cannot be created in the namespaces its `namespaceSelector` matches. | Admission errors in events. | The failure policies and selectors are verified in phase 0 (rule below). A `Fail` webhook whose pods run on the platform pool must exclude the bootstrap namespaces. This risk exists today; the move of a component to the pool does not change it. |
+| Both bootstrap nodes are lost, or their instance type has no capacity in any zone | Platform and tenant pods on running nodes. | Karpenter and DNS are down. No scaling. With `naas`, Capsule is down too, and its `Fail` webhooks block namespace changes. | DNS and Karpenter alerts. | This is the one total outage of the design. Mitigate with multi-type `instanceTypes` and subnets in every AZ. |
+| A Kyverno, istiod, load balancer controller or External Secrets webhook is unavailable (Capsule's run on the bootstrap group: row above) | Running pods. | Pods whose admission goes through a webhook with `failurePolicy: Fail` cannot be created in the namespaces its `namespaceSelector` matches. | Admission errors in events. | The failure policies and selectors are verified in phase 0 (rule below). A `Fail` webhook whose pods run on the platform pool must exclude the bootstrap namespaces. This risk exists today; the move of a component to the pool does not change it. |
 | The load balancer controller is down | Existing load balancers. | New Services of type LoadBalancer and new Ingresses are not reconciled. | Pending LB objects. | Its webhook `failurePolicy` and selector are checked in phase 0. |
 
 **Webhook rule.** Every webhook of a platform component is recorded in phase 0 with its
 `failurePolicy` and `namespaceSelector`. Any webhook with `failurePolicy: Fail` whose pods run
-on the platform pool has a `namespaceSelector` that excludes `kube-system` and `karpenter-system`
-(the Karpenter namespace in the catalog), so a pool outage cannot block the bootstrap namespaces.
-The platform sets a selector of this kind on the chart values where the chart allows it, and
-phase 0 records the chart keys that do.
+on the platform pool has a `namespaceSelector` that excludes `kube-system` (where Karpenter,
+CoreDNS and the EBS controller run in this catalog; phase 0 found no `karpenter-system`
+namespace), so a pool outage cannot block the bootstrap namespaces. The platform sets a
+selector of this kind on the chart values where the chart allows it; phase 0 recorded the chart
+keys that do (section 7). A component whose `Fail` webhooks cannot be scoped this way and whose
+outage would block the cluster as a whole does not run on the pool: Capsule's `namespaces` and
+`replications` webhooks are the case, so Capsule is bootstrap (4.1).
 
 **Helm capacity class (decided).** A release is classified `capacity`, not counted, when all
 of the following hold at the end of its install or upgrade wait:
@@ -618,16 +700,43 @@ acceptance test for phases 2 to 4.
 
 ### Phase 3: New clusters place components on the pool
 
+In this order within the phase; the first item ships before, or in the same build as, the rest:
+
+- **The placement record first** (4.8): `status.platformPlacement`, filled on the first pass of
+  the new build (`system` for every component of a cluster that has any installed,
+  `platform-pool` only for a new cluster), and `${platform.*}` rendered from it per component.
 - Placeholders split (4.3). New clusters place every platform and tenant component on
-  `platform-pool`, except Karpenter and the three bootstrap components. Add-on placement names
-  the bootstrap group explicitly (2.4). The Helm capacity class (4.11). The platform pool's
-  `PlatformPoolNoCapacity` reason.
-- **Accepted when**: on a new cluster, only the bootstrap set and the DaemonSets run on
-  bootstrap nodes; every other platform and tenant pod is on a node labelled
-  `pool=platform-pool`; a pool that cannot launch leaves the components Pending with the
-  reason, not Failed.
-- **Tests**: placement tests per definition (every `${platform.*}` resolves to the pool, every
-  `${system.*}` to the bootstrap group); a Helm classifier test for the capacity class with
+  `platform-pool`, except the bootstrap set (Karpenter, CoreDNS, the EBS controller, and
+  Capsule, which switches to `${system.*}`). Add-on placement names the bootstrap group
+  explicitly (2.4).
+- New clusters get no cluster-autoscaler, and their system group is created fixed size
+  (desired = min = max = `minSize`, 4.2). Existing clusters keep the autoscaler and
+  `system.maxSize` as its ceiling until M3.
+- The two PriorityClasses and the priority placeholders (4.3, Priority).
+- The NodeGroups step of the Kubernetes upgrade includes the platform pool (4.10).
+- The account preflight of the vCPU quota at creation and in `account verify` (4.5).
+- The Helm capacity class (4.11). The platform pool's `PlatformPoolNoCapacity` reason.
+- Code follow-up for the sizing: `CheckBootstrapSizing` counts Capsule (2 replicas, 50m and
+  96 MiB each from `capsule.yaml`, plus its 100m and 128 MiB hook job) when `naas` can be on.
+- **Accepted when**:
+  - deploying phase 3 over an existing cluster renders identical Helm values for every
+    component, and upgrades no Helm release;
+  - on a new cluster, only the bootstrap set and the DaemonSets run on bootstrap nodes; every
+    other platform and tenant pod is on a node labelled `pool=platform-pool`; no
+    cluster-autoscaler is installed and the system group's min, max and desired are equal;
+  - a pool that cannot launch leaves the components Pending with the reason, not Failed;
+  - with the pool at its limits, a pending platform pod preempts a tenant component pod;
+  - a Kubernetes upgrade's NodeGroups step settles only when every bootstrap and
+    platform-pool node runs the target kubelet minor;
+  - creation in a region whose quota is below the floor is refused with the numbers.
+- **Tests**: a deploy-over test: an existing cluster's components render the same values
+  before and after the build, with the record filled as `system`; the record rules of 4.8 (an
+  installed cluster, a new cluster, a component without an entry, an unreadable
+  `nodeSelector`); placement tests per definition (every `${platform.*}` resolves to the pool on
+  a new cluster, every `${system.*}` to the bootstrap group); the PriorityClass render and the
+  priority placeholder per definition; the NodeGroups step with a platform-pool node on the old
+  minor (not settled) and on the new one (settled); the quota preflight below, at and above the
+  floor, and with the quota unreadable; a Helm classifier test for the capacity class with
   these cases: a timeout with Unschedulable pods and a launching NodeClaim is `capacity`; the
   same after 2 x the install timeout is counted; a timeout with no NodeClaim and no
   insufficient-capacity report is counted; the Karpenter-not-held test with the pool; a sandbox
@@ -635,9 +744,11 @@ acceptance test for phases 2 to 4.
 
 ### Phase 4: Existing clusters move
 
-- M1 to M4 of 4.9 as gated catalog changes (PROP-01 4.7), per component, in the order given.
-  The live placement record (4.8). The cluster-autoscaler removal and the bootstrap group's
-  drain-checked resize (M3).
+- **Depends on PROP-01 phase 5** (gated catalog changes with a fingerprint per definition,
+  admitted one definition at a time in a given order). Not started before it ships.
+- M1 to M4 of 4.9: each move a change of the component's recorded placement (4.8), admitted
+  by that rollout per component, in the order given. The cluster-autoscaler removal and the
+  bootstrap group's drain-checked resize (M3).
 - **Accepted when**: on a sandbox cluster built in the old layout, every component moves,
   with no pod left Pending past the Helm timeout, the move halting and recovering as the
   rollout rules say on an injected failure, and the autoscaler gone with the bootstrap group
@@ -671,8 +782,10 @@ acceptance test for phases 2 to 4.
 3. **cluster-autoscaler.** Removed from the default set. The bootstrap group is fixed size and
    Karpenter scales everything else.
 4. **Webhook failure policies.** A Phase 0 verification task (4.11, webhook rule). The design
-   consequence: a `Fail` webhook whose pods run on the platform pool excludes `kube-system`
-   and `karpenter-system` in its `namespaceSelector`.
+   consequence: a `Fail` webhook whose pods run on the platform pool excludes `kube-system` in
+   its `namespaceSelector` (Karpenter runs in `kube-system` in this catalog; there is no
+   `karpenter-system`). A component whose `Fail` webhooks cannot be scoped that way stays on the
+   bootstrap group (decision 11).
 5. **Consolidation.** `WhenEmpty` for every scale class, for stability over cost. It is
    configurable in `nodeGroups.platform.consolidationPolicy`. The idle-capacity cost is
    measured in Phase 0 per class (4.3, 4.6).
@@ -688,6 +801,29 @@ acceptance test for phases 2 to 4.
 10. **Prefix delegation.** Set at creation, on by default for the large class. Existing clusters
     may enable it only through a documented manual node replacement. There is no automatic
     migration (4.6, 4.9). Spot is out of scope as decided in 4.3.
+11. **Capsule on the bootstrap group.** With `naas`, Capsule is part of the bootstrap set. Its
+    `namespaces` and `replications` webhooks stay `Fail` with no namespace selector, and depend
+    only on the bootstrap group (4.1, 4.11). No `failurePolicy` is weakened. It adds 2 pods to
+    the bootstrap group (20 of 34 slots on 2 x `t3.medium`).
+12. **Placement record before the split.** `status.platformPlacement` ships first in phase 3,
+    filled as `system` on every existing cluster, so the build that changes `${platform.*}`
+    renders nothing new on an existing cluster (4.8).
+13. **Migration on per-definition gating.** Phase 4 depends on PROP-01 phase 5 with a fingerprint
+    per definition, admitted one at a time in the M2 order (4.9).
+14. **Priority classes.** `cluster-vending-platform` (100000) for platform components,
+    `cluster-vending-tenant-component` (10000) for tenant components; platform pods preempt
+    tenant component pods when the pool is at its limits (4.3, 4.7).
+15. **Testing defaults for the pool.** The config default of the platform pool is `t3`, `large`
+    to `2xlarge`, like the bootstrap group's testing size. `m7i` and `m6i` are the production
+    recommendation (4.6).
+16. **Quota preflight.** Cluster creation and `account verify` check the region's On-Demand
+    Standard vCPU quota (`L-1216C47A`) against the cluster's floor and refuse below it (4.5).
+17. **`system.maxSize`.** Kept as cluster-autoscaler's ceiling on existing clusters until M3; new
+    clusters are fixed size and ignore it, with a warning when it is set (4.2, 4.4).
+18. **AMI of the pool without a release pin.** `latest` is resolved once per release and
+    recorded; it moves only with a release move or a Kubernetes upgrade (4.3).
+19. **New clusters in phase 3.** No cluster-autoscaler, a fixed-size system group, and the
+    platform pool in the NodeGroups upgrade step (4.2, 4.10).
 
 **Phase 0 results (offline part, 2026-11-20).** The five pinned charts were pulled and rendered with
 `helm template` (Helm 4.1.0, the charts' own repositories, the platformValues of each
@@ -723,13 +859,14 @@ What this means for 4.11:
   the two pod webhooks of Kyverno (runtime), which the shipped `namespaceSelector` excludes from
   `kube-system`. The webhook rule holds for ALB, External Secrets, istio and Capsule's pod webhooks.
 - An outage of the pool does stop: Ingress and TargetGroupBinding writes (ALB), SecretStore and
-  ExternalSecret writes (External Secrets), every namespace create, update and delete, and Capsule's CRDs
-  (Capsule `namespaces` and `replications`), and pod creation in opted-in namespaces (istio, ALB readiness
-  gate, Capsule tenants). Karpenter's own pods and CoreDNS are not in that set.
+  ExternalSecret writes (External Secrets), and pod creation in opted-in namespaces (istio, ALB readiness
+  gate). Karpenter's own pods and CoreDNS are not in that set. Had Capsule moved to the pool, it would
+  also stop every namespace create, update and delete and Capsule's CRDs (`namespaces` and
+  `replications`), and pod creation in Capsule tenants; with Capsule on the bootstrap group it does not.
 - Capsule's `namespaces` and `replications` webhooks are `Fail` with no namespace selector. Moving
   Capsule to the pool makes a pool outage block namespace changes cluster-wide (the platform's own
-  namespaces included), where today it is the same outage of the system group. Phase 4 moves Capsule only
-  after the first runtime check below, and may set `webhooks.hooks.<name>.failurePolicy: Ignore` for those two.
+  namespaces included), where today it is the same outage of the system group. **Decided:** Capsule
+  is not moved. It joins the bootstrap set (4.1, decision 11), and its webhooks keep `Fail`.
 - Still to check on a cluster (needs a cluster; kind is enough): Kyverno's runtime webhook
   configurations (names, `failurePolicy` per webhook with the shipped policies, `namespaceSelector` as the
   controller writes it); Capsule's generated `capsule-dynamic-webhook`, which should equal the rendered
@@ -740,8 +877,8 @@ What this means for 4.11:
 | Webhook `failurePolicy` and `namespaceSelector` of the five charts | Above, from the rendered charts. Kyverno's runtime webhooks: needs a cluster. |
 | Managed node group scale-in against PodDisruptionBudgets, and which node it removes | **Needs a sandbox account.** Not answerable offline. The design does not rely on it (4.9, M3). |
 | Idle capacity that `WhenEmpty` leaves, per class | **Needs a sandbox account** (a running pool). |
-| Platform pool steady node count per class | **Needs a sandbox account.** Offline: the platform set requests 675m CPU and 1,088 MiB at minimum replicas (`pkg/catalog` `CheckPlatformSizing` on the shipped catalog), which fits one `m7i.large`; the floor of two nodes in 4.6 is for spread, not for these requests. |
-| Requests of the bootstrap set on a `t3.medium` | Offline, from `CheckBootstrapSizing`: 2 x `t3.medium` allocate 3,860m CPU, 6,492 MiB, 34 pods; the bootstrap set requests 1,750m (45%), 3,172 MiB (49%) and 18 pods (53%). It fits, and the 17-pod limit is the one counted. An `m6i.large` (29 pods) was not measured on a node. |
+| Platform pool steady node count per class | **Needs a sandbox account.** Offline: the platform set requests 675m CPU and 1,088 MiB at minimum replicas (`pkg/catalog` `CheckPlatformSizing` on the shipped catalog, measured before Capsule moved to the bootstrap set; to be re-run without it), which fits one `t3.large` or `m7i.large`; the floor of two nodes in 4.6 is for spread, not for these requests. |
+| Requests of the bootstrap set on a `t3.medium` | Offline, from `CheckBootstrapSizing`: 2 x `t3.medium` allocate 3,860m CPU, 6,492 MiB, 34 pods; the bootstrap set requests 1,750m (45%), 3,172 MiB (49%) and 18 pods (53%). It fits, and the 17-pod limit is the one counted. These numbers are without Capsule. With Capsule on the bootstrap group (2 x 50m and 96 MiB, from `capsule.yaml`), the set is 1,850m (48%), 3,364 MiB (52%) and 20 pods (59%), before its 100m and 128 MiB hook job; `CheckBootstrapSizing` must add Capsule (phase 3). An `m6i.large` (29 pods) was not measured on a node. |
 
 The class values of 4.6 are neither confirmed nor changed: they need the sandbox measurements.
 

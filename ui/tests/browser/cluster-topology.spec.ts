@@ -104,8 +104,7 @@ async function mockClusterTopology(page: Page, options: MockOptions = {}) {
 }
 
 async function openTopology(page: Page) {
-  await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Topology", exact: true }).click();
+  await page.goto(`/clusters/${clusterId}?tab=topology`);
   await expect(page.getByRole("heading", { name: "Cluster architecture", exact: true })).toBeVisible();
   return page.getByLabel("Cluster topology canvas", { exact: true });
 }

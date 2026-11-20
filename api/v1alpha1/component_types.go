@@ -276,8 +276,9 @@ type ComponentInstall struct {
 	// roll out (provider-helm forProvider.waitTimeout, with wait on), and
 	// what the platform counts a stuck operation from (timeout plus two
 	// minutes). Heavy charts (operators with hook Jobs, mesh control
-	// planes) need more than the default. Unset: 10m.
+	// planes) need more than the default. From 1m to 60m. Unset: 10m.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1m') && duration(self) <= duration('60m')",message="install.timeout is between 1m and 60m"
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
@@ -383,6 +384,7 @@ type ComponentDefinitionSpec struct {
 	// +optional
 	// +kubebuilder:default=100
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10000
 	Sequence *int32 `json:"sequence,omitempty"`
 	// versionGroup names components that are versions of one product (the
 	// Istio charts, Kyverno and its policies): a release must pin every
@@ -461,6 +463,7 @@ type ComponentDefinitionStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')",message="a component definition is named as a DNS label"
 // +kubebuilder:validation:XValidation:rule="!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)",message="a component cannot require itself"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name != 'karpenter' || (has(self.spec.sequence) && self.spec.sequence == 0 && !(has(self.spec.disabled) && self.spec.disabled))",message="karpenter has sequence 0 and is not disabled: every other platform component waits for its nodes"
 // +kubebuilder:printcolumn:name="Requires",type=string,JSONPath=`.spec.requires`
 // +kubebuilder:printcolumn:name="IAM",type=string,JSONPath=`.spec.cloudResources.iamRole.access`
 // +kubebuilder:printcolumn:name="Disabled",type=boolean,JSONPath=`.spec.disabled`

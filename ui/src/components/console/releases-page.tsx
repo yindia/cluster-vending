@@ -1,7 +1,7 @@
 "use client";
 
 import { FilterRow } from "./filter-row";
-import { useCallback, useId, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -9,7 +9,7 @@ import { HStack } from "@astryxdesign/core/HStack";
 import { Link } from "@astryxdesign/core/Link";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { DetailNavigation, useDetailSection } from "./detail-navigation";
 import { proportional } from "@astryxdesign/core/Table";
 import { ConsoleTable as Table } from "./console-table";
 import { Text } from "@astryxdesign/core/Text";
@@ -65,17 +65,20 @@ export function ReleasesPage({ resourceId, channelId }: { resourceId?: string; c
   return <ReleaseBrowser key={scopeKey} />;
 }
 
-function DetailTabs({ label: name, sections }: { label: string; sections: readonly { id: string; label: string; content: ReactNode }[] }) {
-  const [selected, setSelected] = useState(sections[0].id);
-  const id = useId();
-  const active = sections.some(section => section.id === selected) ? selected : sections[0].id;
+function DetailTabs({ resource, sections, summary, filters, refresh }: {
+  resource: string; sections: { id: string; label: string; content: ReactNode; localRefresh?: boolean }[];
+  summary: ReactNode; filters?: ReactNode; refresh: ReactNode;
+}) {
+  const pages = sections.map(section => ({ value: section.id, label: section.label }));
+  const navigation = useDetailSection(pages);
+  const section = sections.find(item => item.id === navigation.active)!;
   return <VStack gap={6}>
-    <TabList role="tablist" aria-label={name} value={active} onChange={setSelected} hasDivider>
-      {sections.map(section => <Tab key={section.id} id={`${id}-${section.id}-tab`} value={section.id} label={section.label} panelId={`${id}-${section.id}-panel`} />)}
-    </TabList>
-    {sections.map(section => section.id === active
-      ? <VStack key={section.id} id={`${id}-${section.id}-panel`} role="tabpanel" aria-labelledby={`${id}-${section.id}-tab`} tabIndex={0} gap={5}>{section.content}</VStack>
-      : null)}
+    <DetailNavigation resource={resource} pages={pages} selection={navigation} actions={!section.localRefresh && refresh} />
+    <VStack key={section.id} id={navigation.panelId(section.id)} role="tabpanel" aria-label={section.label} tabIndex={0} gap={5}>
+      {section.id === "overview" && summary}
+      {filters}
+      {section.content}
+    </VStack>
   </VStack>;
 }
 
@@ -194,25 +197,28 @@ function ReleaseDetail({ name }: { name: string }) {
   if (release && minorFilter !== "all" && !minorOptions.includes(minorFilter)) setMinorFilter("all");
   const filteredMinors = minorFilter === "all" ? minors : minors.filter(minor => minor.minor === minorFilter);
   return <VStack gap={6}>
-    <DetailHeader title={release?.name || name} description="Kubernetes support and platform component versions." metadata={<CopyValue value={release?.name || name} label="release name" isSecondary />} status={release ? <OfferingStatus state={offeringState(release, channels.data?.channels)} /> : <Text>Loading release</Text>} actions={<RefreshButton label="Refresh release details" isLoading={query.refreshing || channels.refreshing} onClick={() => { query.refresh(); channels.refresh(); }} />} />
+    <DetailHeader title={release?.name || name} description="Kubernetes support and platform component versions." metadata={<CopyValue value={release?.name || name} label="release name" isSecondary />} status={release ? <OfferingStatus state={offeringState(release, channels.data?.channels)} /> : <Text>Loading release</Text>} actions={!release && query.error && <RefreshButton label="Refresh release details" isLoading={query.refreshing || channels.refreshing} onClick={() => { query.refresh(); channels.refresh(); }} />} />
     {query.error && <Banner status="error" title="Release details unavailable" description={query.error} />}
     {query.loading && <Text role="status">Loading release details…</Text>}
     {channels.error && <Banner status="warning" title="Current channel references unavailable" description={`${channels.error}${channels.data ? " References reflect the last successful load." : " Current offering status cannot be confirmed."}`} />}
     {query.data && !release && <Text>No release details returned.</Text>}
     {release && <>
-      <DetailSummary items={[
+
+      {!release.valid && <Banner status="error" title="Release validation failed" description={release.invalidReason || "The server reported this release as invalid."} />}
+
+      <DetailTabs resource="Release" refresh={<RefreshButton label="Refresh release details" isLoading={query.refreshing || channels.refreshing} onClick={() => { query.refresh(); channels.refresh(); }} />}
+        summary={<DetailSummary items={[
         { label: "Kubernetes minors", value: release.kubernetes.length, note: "Supported by this release" },
         { label: "Offering channels", value: channels.data ? references.length : "Not reported", note: channels.data ? references.map(channelLabel).join(", ") || "None" : "Current channel offerings have not loaded" },
         { label: "Configuration validation", value: release.valid ? "Valid" : "Invalid", note: release.valid ? "Configuration passed validation; offering state is separate" : release.invalidReason || "No reason reported" },
         { label: "Release holds", value: release.holds.length, note: "References that retain this release" },
         { label: "Published", value: time(release.createTime), note: release.shipped ? "Shipped with the controller" : "Operator published" },
-      ]} />
-      {!release.valid && <Banner status="error" title="Release validation failed" description={release.invalidReason || "The server reported this release as invalid."} />}
-      <FilterRow label="Release version filters">
+      ]} />}
+        filters={<FilterRow label="Release version filters">
         <Selector label="Kubernetes version" value={minorFilter} onChange={setMinorFilter} options={[{ value: "all", label: "All versions" }, ...minorOptions.map(minor => ({ value: minor, label: minor }))]} />
         <Text role="status" color="secondary">{filteredMinors.length} of {minors.length} Kubernetes versions</Text>
-      </FilterRow>
-      <DetailTabs label="Release detail sections" sections={[
+      </FilterRow>}
+        sections={[
         { id: "overview", label: "Overview", content: <><VStack gap={2}><Heading level={2}>Release notes</Heading><Text>{release.notes || "No release notes provided."}</Text></VStack><MinorTable minors={filteredMinors} /><VStack gap={3}><Heading level={2}>Current references</Heading><HStack gap={3} wrap="wrap">{references.map(channel => <ChannelLink key={channel} channel={channel} />)}</HStack>{!channels.data && <Text>Current channel references have not loaded.</Text>}{release.holds.map((hold, index) => <CopyValue key={index} value={hold} label="release hold" />)}{channels.data && !references.length && !release.holds.length && <Text>No channel or hold references returned.</Text>}</VStack><AddonVersionSource /></> },
         { id: "components", label: "Components", content: <ComponentPins minors={filteredMinors} /> },
       ]} />
@@ -220,7 +226,7 @@ function ReleaseDetail({ name }: { name: string }) {
   </VStack>;
 }
 
-function OfferedComponents({ info }: { info: ReleaseChannelInfo }) {
+function OfferedComponents({ info, onRefreshChannel }: { info: ReleaseChannelInfo; onRefreshChannel: () => void }) {
   const { api, tenantId } = usePlatform();
   const load = useCallback((signal: AbortSignal) => api.tenant.getRelease({ tenantId, name: info.release }, { signal }), [api, tenantId, info.release]);
   const query = useAsyncQuery(load);
@@ -229,7 +235,7 @@ function OfferedComponents({ info }: { info: ReleaseChannelInfo }) {
   const matching = release?.name === info.release && matches.length === 1;
   return <VStack gap={5}>
     <Text>Current offering: {info.release} · Kubernetes {info.kubernetesMinor}. Pending releases are not used for this table.</Text>
-    <HStack width="100%" hAlign="end" vAlign="center"><RefreshButton label="Refresh offered component pins" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
+    <HStack width="100%" hAlign="end" vAlign="center"><RefreshButton label="Refresh offered component pins" isLoading={query.refreshing} onClick={() => { onRefreshChannel(); query.refresh(); }} /></HStack>
     {query.loading && <Text role="status">Loading the offered release…</Text>}
     {query.error && <Banner status="error" title="Offered release unavailable" description={query.error} />}
     {query.data && !matching && <Banner status="warning" title="Offering does not match the release" description="The exact offered release and Kubernetes minor were not returned. Versions cannot be inferred from a default or another minor." />}
@@ -269,21 +275,23 @@ function ChannelDetail({ channel }: { channel: ReleaseChannel }) {
   const info = query.data?.channel;
   const matches = info?.channel === channel;
   return <VStack gap={6}>
-    <DetailHeader title={channelLabel(channel)} description="Current release offering, component pins and rollout history." metadata={<CopyValue value={channelSlug(channel) || String(channel)} label="channel name" isSecondary />} status={<StatusValue label={info ? info.paused ? "Rollout paused" : "Rollout not paused" : "Loading channel"} tone={info?.paused ? "warning" : "neutral"} />} actions={<RefreshButton label="Refresh channel details" isLoading={query.refreshing} onClick={query.refresh} />} />
+    <DetailHeader title={channelLabel(channel)} description="Current release offering, component pins and rollout history." metadata={<CopyValue value={channelSlug(channel) || String(channel)} label="channel name" isSecondary />} status={<StatusValue label={info ? info.paused ? "Rollout paused" : "Rollout not paused" : "Loading channel"} tone={info?.paused ? "warning" : "neutral"} />} actions={!matches && query.error && <RefreshButton label="Refresh channel details" isLoading={query.refreshing} onClick={query.refresh} />} />
     {query.error && <Banner status="error" title="Channel details unavailable" description={query.error} />}
     {query.loading && <Text role="status">Loading channel details…</Text>}
     {query.data && !matches && <Banner status="warning" title="Channel not returned" description="No matching channel details were returned by the server." />}
     {info && matches && <>
-      <DetailSummary items={[
+
+      <DetailTabs resource="Channel" refresh={<RefreshButton label="Refresh channel details" isLoading={query.refreshing} onClick={query.refresh} />}
+        summary={<DetailSummary items={[
         { label: "Current release", value: <ReleaseLink name={info.release} />, note: "Offered now" },
         { label: "Kubernetes", value: info.kubernetesMinor || "Not reported", note: "Current offering minor" },
         { label: "Promotion", value: info.promotion || "Not reported", note: info.pinnedRelease ? `Pinned to ${info.pinnedRelease}` : "No release pin reported" },
         { label: "Rollout tier", value: label(ClusterTier[info.rolloutTier], info.rolloutTier), note: info.paused ? "Paused" : "Not paused" },
-      ]} />
-      <DetailTabs label="Channel detail sections" sections={[
+      ]} />}
+        sections={[
         { id: "overview", label: "Overview", content: <><Heading level={2}>Channel offering</Heading><Text>Published release configuration for this channel. Cluster subscriptions and rollout observations are limited to tenant {tenantId}.</Text>{info.pending && <VStack gap={2}><Heading level={3}>Pending offering</Heading><ReleaseLink name={info.pending.release} /><Text>This is not the current offering. Since: {time(info.pending.since)} · Soak ends: {time(info.pending.until)}</Text></VStack>}{info.conditions.map((condition, index) => <Text key={index}>{condition.type}: {condition.message || condition.reason || "No message reported"}</Text>)}</> },
-        { id: "components", label: "Components", content: info.release && info.kubernetesMinor ? <OfferedComponents key={`${info.release}:${info.kubernetesMinor}`} info={info} /> : <Text>The channel has no complete current offering. Versions cannot be inferred.</Text> },
-        { id: "clusters", label: "Clusters", content: <ChannelClusters channel={channel} /> },
+        { id: "components", label: "Components", localRefresh: !!info.release && !!info.kubernetesMinor, content: info.release && info.kubernetesMinor ? <OfferedComponents key={`${info.release}:${info.kubernetesMinor}`} info={info} onRefreshChannel={query.refresh} /> : <Text>The channel has no complete current offering. Versions cannot be inferred.</Text> },
+        { id: "clusters", label: "Clusters", localRefresh: true, content: <ChannelClusters channel={channel} /> },
         { id: "rollout", label: "Rollout", content: <ChannelRollout data={query.data!} /> },
         { id: "history", label: "History", content: <><Heading level={2}>Release offering history</Heading>
           {info.history.length ? <Table searchable searchText={({ item }) => [item.release, time(item.from), item.to ? time(item.to) : "No end reported", item.reason].join(" ")} aria-label="Channel release history" idKey="id" textOverflow="wrap" data={info.history.map((item, id) => ({ id, item }))} columns={[

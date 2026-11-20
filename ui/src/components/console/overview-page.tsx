@@ -16,6 +16,7 @@ import { StackItem } from "@astryxdesign/core/Stack";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { usePlatform } from "@/components/platform-provider";
+import { DetailHeader } from "./detail-layout";
 import { RefreshButton } from "./refresh-button";
 import { useAsyncQuery } from "@/lib/api/use-query";
 import { collectPages } from "@/lib/api/pagination";
@@ -65,7 +66,7 @@ export function OverviewPage() {
   ];
   function clearFilters() { setSearch(""); setKindFilter("all"); setStateFilter("all"); setProviderFilter("all"); }
   return <VStack gap={6}>
-    <HStack hAlign="end" vAlign="center" gap={3} wrap="wrap" width="100%"><StackItem size="fill"><Heading level={2}>Fleet health</Heading></StackItem><RefreshButton label="Refresh overview" onClick={query.refresh} isLoading={query.refreshing} /></HStack>
+    <DetailHeader title="Overview" description="Tenant fleet health and resource inventory." actions={<RefreshButton label="Refresh overview" onClick={query.refresh} isLoading={query.refreshing} />} />
     {query.error && <Banner status="error" role="alert" title="Could not refresh the fleet" description={query.error} />}
     {query.loading && <Text role="status">Loading your tenant’s resources…</Text>}
     {query.data && <>

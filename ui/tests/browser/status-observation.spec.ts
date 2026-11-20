@@ -73,7 +73,7 @@ for (const enabled of [false, true]) {
 for (const [terminal, label] of [["READY", "Ready"], ["FAILED", "Failed"], ["DEGRADED", "Degraded"]]) {
   test(`stale ${label} is pending in inventory, detail and update banner until the new generation is observed`, async ({ page }) => {
     const mock = await mockStatus(page, `SUB_TENANT_STATE_${terminal}`);
-    await page.goto(`/clusters/${clusterId}`); await page.getByRole("tab", { name: "Sub Tenants", exact: true }).click();
+    await page.goto(`/clusters/${clusterId}?tab=subtenants`);
     const table = page.getByRole("table", { name: "Cluster Sub Tenants", exact: true });
     await expect(table.getByRole("cell", { name: label, exact: true })).toBeVisible();
     await table.getByRole("button", { name: `Actions for Sub Tenant Payments (${subtenantId})`, exact: true }).click(); await page.getByRole("menuitem", { name: "Edit", exact: true }).click();

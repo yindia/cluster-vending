@@ -261,8 +261,8 @@ func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *
 }
 
 // releaseNotNewer reports whether target is known not to be newer than
-// current: releases are ordered by their creation time (when they were
-// published). Either one gone, unreadable or without a time is not
+// current: releases are ordered by their serial (spec.serial; a release
+// that predates it by its creation time). Either one gone, unreadable or without a time is not
 // known, and does not hold a move back.
 func (s *Reconciler) releaseNotNewer(ctx context.Context, current, target string) bool {
 	if current == "" {
@@ -279,11 +279,10 @@ func (s *Reconciler) releaseNotNewer(ctx context.Context, current, target string
 	return notNewer(cur, tgt)
 }
 
-// notNewer: both releases have a creation time and target's is not after
-// current's.
+// notNewer: target is not after current by their serials; a release
+// without one falls back to its creation time (api ReleaseNotNewer).
 func notNewer(current, target *cloudv1alpha1.Release) bool {
-	c, t := current.CreationTimestamp, target.CreationTimestamp
-	return !c.IsZero() && !t.IsZero() && !t.After(c.Time)
+	return cloudv1alpha1.ReleaseNotNewer(current, target)
 }
 
 // retryWith is the pass's retry with component added: what a person's

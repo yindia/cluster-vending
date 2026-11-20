@@ -31,7 +31,7 @@ func TestPrintReleases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shipped := &cloudv1.Release{Name: "shipped-1aed928c", Shipped: true, Valid: true, Channels: []cloudv1.ReleaseChannel{alpha, beta, stable},
+	shipped := &cloudv1.Release{Name: "shipped-1aed928c", Serial: 7, Shipped: true, Valid: true, Channels: []cloudv1.ReleaseChannel{alpha, beta, stable},
 		CreateTime: ago(48 * time.Hour), Kubernetes: []*cloudv1.ReleaseMinor{
 			{Minor: "1.37", Channel: alpha, Default: true, EndOfSupport: eos,
 				Components: []*cloudv1.ReleaseComponent{{Name: "cluster-autoscaler", Version: "9.60.0", Values: tag}}},
@@ -40,9 +40,9 @@ func TestPrintReleases(t *testing.T) {
 	old := &cloudv1.Release{Name: "shipped-f874cd2c", InvalidReason: "the minors are fewer than 3", CreateTime: ago(96 * time.Hour)}
 
 	if got, want := printed(t, &cloudv1.ListReleasesResponse{Releases: []*cloudv1.Release{shipped, old}}, OutputTable),
-		"NAME               SHIPPED   VALID   CHANNELS            PINNED   AGE\n"+
-			"shipped-1aed928c   yes       True    alpha,beta,stable   0        2d\n"+
-			"shipped-f874cd2c   no        False   <none>              0        4d\n"; got != want {
+		"NAME               SERIAL   SHIPPED   VALID   CHANNELS            PINNED   AGE\n"+
+			"shipped-1aed928c   7        yes       True    alpha,beta,stable   0        2d\n"+
+			"shipped-f874cd2c   <none>   no        False   <none>              0        4d\n"; got != want {
 		t.Errorf("releases: got\n%s\nwant\n%s", got, want)
 	}
 	if got := printed(t, &cloudv1.ListReleasesResponse{Releases: []*cloudv1.Release{old}}, OutputWide); !strings.Contains(got,

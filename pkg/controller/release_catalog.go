@@ -10,23 +10,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/component"
+	"github.com/yindia/cluster-vending/pkg/catalog"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/release"
 )
 
 // pinValueProblems reports the component pins of a release whose values
-// are unusable: not an object, or naming an unknown placeholder.
+// are unusable (catalog.PinValueProblems).
 func pinValueProblems(content cloudv1alpha1.ReleaseContent) []string {
-	var problems []string
-	for _, k := range content.Kubernetes {
-		for _, c := range k.Components {
-			if _, err := component.PinValues(c.Values); err != nil {
-				problems = append(problems, fmt.Sprintf("on %s, the values of %s: %v", k.Minor, c.Name, err))
-			}
-		}
-	}
-	return problems
+	return catalog.PinValueProblems(content)
 }
 
 // releasePins is a release's component pins as pkg/release takes them.

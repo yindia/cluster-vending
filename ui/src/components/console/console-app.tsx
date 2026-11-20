@@ -34,13 +34,13 @@ import { ComponentsPage } from "./components-page";
 import { FreezePage, type FreezeSelection } from "./freeze-page";
 
 const navigation = [
-  { section: "overview", label: "Overview", description: "Your tenant’s cloud resources and rollout progress." },
-  { section: "accounts", label: "Accounts", description: "Connect, verify and manage cloud accounts." },
-  { section: "networks", label: "Networks", description: "Shared networking and the rollout tiers inherited by clusters." },
-  { section: "clusters", label: "Clusters", description: "Create clusters, review changes and follow upgrades." },
-  { section: "components", label: "Component catalog", description: "Available components and their configuration templates." },
-  { section: "releases", label: "Releases", description: "Platform releases and Alpha, Beta and Stable channels." },
-  { section: "freeze", label: "Freeze controls", description: "Pause and resume reconciliation at the right scope." },
+  { section: "overview", label: "Overview" },
+  { section: "accounts", label: "Accounts" },
+  { section: "networks", label: "Networks" },
+  { section: "clusters", label: "Clusters" },
+  { section: "components", label: "Component catalog" },
+  { section: "releases", label: "Releases" },
+  { section: "freeze", label: "Freeze controls" },
 ] as const;
 
 function SessionGate({ children, onConfigure }: { children: ReactNode; onConfigure: () => void }) {
@@ -93,7 +93,18 @@ export default function ConsoleApp({ section = "overview", resourceId, subtenant
       <SideNavSection title="Workspace">{navigation.map((item) => <SideNavItem key={item.section} label={item.label} href={item.section === "overview" ? "/" : `/${item.section}`} isSelected={item.section === section} />)}</SideNavSection>
     </SideNav>}
   ><Layout height="fill" content={<LayoutContent padding={6}><VStack gap={6}>
-    {resourceId || channelId || ["releases", "freeze", "components"].includes(section) ? <HStack as="nav" aria-label="Breadcrumb" gap={2} vAlign="center" wrap="wrap"><Link href="/">Workspace</Link><Text color="secondary" aria-hidden="true">/</Text><Link href={section === "components" && componentClusterId ? `/components?cluster=${encodeURIComponent(componentClusterId)}` : `/${section}`}>{current.label}</Link>{(subtenantId || nodeGroup) && resourceId && <><Text color="secondary" aria-hidden="true">/</Text><Link href={`/clusters/${encodeURIComponent(resourceId)}`}>Cluster details</Link></>}{(resourceId || channelId) && <><Text color="secondary" aria-hidden="true">/</Text><Text color="secondary" aria-current="page">{nodeGroup ? "Node group" : subtenantId ? "Sub Tenant" : channelId ? "Channel" : "Details"}</Text></>}</HStack> : <VStack gap={2}><Text type="supporting">WORKSPACE / {current.label.toUpperCase()}</Text><Heading level={1}>{current.label}</Heading><Text color="secondary">{current.description}</Text></VStack>}
+    <HStack as="nav" aria-label="Breadcrumb" gap={2} vAlign="center" wrap="wrap">
+      <Link href="/">Workspace</Link><Text color="secondary" aria-hidden="true">/</Text>
+      {resourceId || channelId ? <>
+        <Link href={`/${section}`}>{current.label}</Link>
+        {(subtenantId || nodeGroup) && resourceId && <>
+          <Text color="secondary" aria-hidden="true">/</Text>
+          <Link href={`/clusters/${encodeURIComponent(resourceId)}?tab=${nodeGroup ? "node-groups" : "subtenants"}`}>{nodeGroup ? "Node groups" : "Sub Tenants"}</Link>
+        </>}
+        <Text color="secondary" aria-hidden="true">/</Text>
+        <Text color="secondary" aria-current="page">{nodeGroup ? "Node group" : subtenantId ? "Sub Tenant" : channelId ? "Channel" : "Details"}</Text>
+      </> : <Text color="secondary" aria-current="page">{current.label}</Text>}
+    </HStack>
     <Dialog isOpen={connectionOpen} onOpenChange={setConnectionOpen} purpose="form" width="min(40rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={0}>
       <Layout padding={6}
         header={<DialogHeader title="Settings" subtitle="Manage your workspace connection and display preferences." onOpenChange={setConnectionOpen} />}

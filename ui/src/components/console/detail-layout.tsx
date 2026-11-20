@@ -32,8 +32,8 @@ export function DetailHeader({ title, description, metadata, status, actions }: 
   </VStack>;
 }
 
-export function DetailSummary({ items }: { items: readonly { label: string; value: ReactNode; note?: ReactNode }[] }) {
-  return <Grid columns={{ minWidth: 180, max: 4 }} gap={3} align="stretch">
+export function DetailSummary({ items, minColumnWidth = 144 }: { minColumnWidth?: number; items: readonly { label: string; value: ReactNode; note?: ReactNode }[] }) {
+  return <Grid columns={{ minWidth: minColumnWidth, max: 4 }} gap={3} align="stretch">
     {items.map((item) => <Card key={item.label} padding={4} height="100%"><VStack gap={2}>
       <Text type="supporting">{item.label}</Text>
       {typeof item.value === "string" || typeof item.value === "number" ? <Text type="large" weight="semibold">{item.value}</Text> : item.value}

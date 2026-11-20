@@ -27,6 +27,10 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      volumes:
+      - name: platform-config
+        configMap:
+          name: platform-config
       serviceAccountName: server
       # Longer than --shutdown-timeout (30s): in-flight requests drain.
       terminationGracePeriodSeconds: 45
@@ -37,9 +41,17 @@ spec:
         command:
         - /cluster-vending
         - serve
+        args:
+        # The node group layout: the file the controller reads too
+        # (../../node-groups).
+        - --config=/etc/cluster-vending/platform.yaml
         envFrom:
         - configMapRef:
             name: server-config
+        volumeMounts:
+        - name: platform-config
+          mountPath: /etc/cluster-vending
+          readOnly: true
         ports:
         # The Connect API (Connect, gRPC, gRPC-Web; cleartext HTTP/1.1 and
         # HTTP/2), the probes and /metrics share this port.

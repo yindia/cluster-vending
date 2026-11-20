@@ -1,0 +1,16 @@
+# The platform config file both processes read (`--config`): the
+# nodeGroups section, one copy for the API server and the controller.
+# The generated ConfigMap's name carries a hash of platform.yaml, so a change
+# of the file rolls both Deployments. Both Deployments mount it by the name
+# "platform-config" (the volume of each), which kustomize rewrites.
+#
+# To change the layout, edit platform.yaml or patch the generator in an
+# overlay. Do not set CV_SYSTEM_NODE_GROUP_* or CV_NODE_GROUP_* variables:
+# they win over the file and the processes warn about them at start.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+configMapGenerator:
+- name: platform-config
+  files:
+  - platform.yaml

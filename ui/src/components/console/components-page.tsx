@@ -1,7 +1,6 @@
 "use client";
 
 import { FilterRow } from "./filter-row";
-import { StackItem } from "@astryxdesign/core/Stack";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -14,7 +13,7 @@ import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { proportional } from "@astryxdesign/core/Table";
 import { ConsoleTable as Table } from "./console-table";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { DetailNavigation, useDetailSection } from "./detail-navigation";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { VStack } from "@astryxdesign/core/VStack";
@@ -45,15 +44,7 @@ function componentHref(name: string) {
 export function ComponentsPage({ resourceId }: { resourceId?: string; clusterId?: string }) {
   const { scopeKey } = usePlatform();
   const key = `${scopeKey}:${resourceId ?? "catalog"}`;
-  return resourceId ? <ComponentDetail key={key} name={resourceId} /> : <ComponentBrowser key={key} />;
-}
-
-function ComponentBrowser() {
-  const { tenantId } = usePlatform();
-  return <VStack gap={4}>
-    <DetailHeader title="Components" description="Browse component definitions, release versions, dependencies and Helm values templates." metadata={<CopyValue value={tenantId} label="Tenant" display={`Tenant: ${tenantId}`} isSecondary />} />
-    <Catalog />
-  </VStack>;
+  return resourceId ? <ComponentDetail key={key} name={resourceId} /> : <Catalog key={key} />;
 }
 
 function Catalog() {
@@ -79,10 +70,8 @@ function Catalog() {
   const visible = filtered.slice((currentPage - 1) * 25, currentPage * 25);
   const hasFilters = !!search || management !== "all" || provider !== "all" || availability !== "all";
   return <VStack gap={4}>
-    <HStack gap={3} wrap="wrap" hAlign="end" vAlign="center" width="100%">
-      <StackItem size="fill"><Heading level={2}>Component catalog</Heading></StackItem>
-      <RefreshButton label="Refresh catalog" isLoading={query.refreshing} onClick={query.refresh} />
-    </HStack>
+    <DetailHeader title="Component catalog" description="Browse release versions, dependencies, and configuration templates."
+      actions={<RefreshButton label="Refresh catalog" isLoading={query.refreshing} onClick={query.refresh} />} />
     {query.error && <Banner status="error" title="Catalog could not be loaded" description={query.error} />}
     {query.loading && <Text role="status">Loading catalog…</Text>}
     <FilterRow label="Component catalog filters">
@@ -108,30 +97,30 @@ function Catalog() {
 
 function ComponentDetail({ name }: { name: string }) {
   const { api, tenantId } = usePlatform();
-  const [tab, setTab] = useState("overview");
-  const panelId = useId();
+  const tabs = [{ value: "overview", label: "Overview" }, { value: "values", label: "Values" }, { value: "schema", label: "Schema" }];
+  const navigation = useDetailSection(tabs);
+  const tab = navigation.active;
   const loadDefinition = useCallback((signal: AbortSignal) => api.component.listComponentDefinitions({ tenantId }, { signal }), [api, tenantId]);
   const definitionQuery = useAsyncQuery(loadDefinition);
   const definition = definitionQuery.data?.definitions.find(item => item.name === name);
-  const tabs = [{ value: "overview", label: "Overview" }, { value: "values", label: "Values" }, { value: "schema", label: "Schema" }];
+
   return <VStack gap={6}>
-    <DetailHeader title={name} description={definition?.description || undefined} metadata={<CopyValue value={name} label="Component name" display={`Component: ${name}`} isSecondary />} actions={<RefreshButton label="Refresh component" isLoading={definitionQuery.refreshing} onClick={definitionQuery.refresh} />} />
+    <DetailHeader title={name} description={definition?.description || undefined} metadata={<CopyValue value={name} label="Component name" display={`Component: ${name}`} isSecondary />} actions={!definition && definitionQuery.error && <RefreshButton label="Retry component" onClick={definitionQuery.refresh} />} />
     {definitionQuery.loading && <Text role="status">Loading component…</Text>}
     {definitionQuery.error && <Banner status="error" title="Component catalog unavailable" description={definitionQuery.error} />}
     {definitionQuery.data && !definition && <Banner status="warning" title="Component not found" description="This component is not in the current catalog. Return to components or refresh the catalog." />}
     {definition && <>
+
+      {definition.disabled && <Banner status="warning" title="Catalog availability" description={definition.disabledReason || "This component is unavailable."} />}
+      <DetailNavigation resource="Component" pages={tabs} selection={navigation} actions={tab !== "values" && <RefreshButton label="Refresh component" isLoading={definitionQuery.refreshing} onClick={definitionQuery.refresh} />} />
+      {tabs.map(item => item.value === tab ? <VStack key={item.value} id={navigation.panelId(tab)} role="tabpanel" aria-label={navigation.label} tabIndex={0} gap={6}>
+        {tab === "overview" && <>
       <DetailSummary items={[
         { label: "Management", value: enumLabel(ComponentManagement[definition.management], definition.management) },
         { label: "Provider", value: enumLabel(CloudProvider[definition.provider], definition.provider) },
         { label: "Availability", value: definition.disabled ? "Unavailable" : "Available" },
         { label: "Tenant values", value: definition.configurable ? "Configurable" : "Not configurable" },
       ]} />
-      {definition.disabled && <Banner status="warning" title="Catalog availability" description={definition.disabledReason || "This component is unavailable."} />}
-      <TabList value={tab} onChange={setTab} role="tablist" aria-label="Component detail sections" hasDivider>
-        {tabs.map(item => <Tab key={item.value} id={`${panelId}-${item.value}-tab`} value={item.value} label={item.label} panelId={`${panelId}-${item.value}-panel`} />)}
-      </TabList>
-      {tabs.map(item => item.value === tab ? <VStack key={item.value} id={`${panelId}-${item.value}-panel`} role="tabpanel" aria-labelledby={`${panelId}-${item.value}-tab`} tabIndex={0} gap={6}>
-        {tab === "overview" && <>
           <VStack gap={3}>
             <Heading level={2}>Release versions</Heading>
             {Object.keys(definition.versions).length ? <Table aria-label="Component release versions" idKey="minor" data={Object.entries(definition.versions).map(([minor, version]) => ({ minor, version }))} columns={[
@@ -147,7 +136,7 @@ function ComponentDetail({ name }: { name: string }) {
         </>}
         {tab === "values" && <>
           <ValuesEditor label="Platform locked values" language="yaml" value={stringify(definition.platformValues ?? {})} description="Platform managed settings are read-only and override tenant settings." readOnly />
-          <ValuesTemplate name={definition.name} />
+          <ValuesTemplate name={definition.name} onRefreshDefinition={definitionQuery.refresh} />
         </>}
         {tab === "schema" && <ValuesEditor label="Values schema" language="json" value={JSON.stringify(definition.valuesSchema ?? {}, null, 2)} readOnly />}
       </VStack> : null)}
@@ -155,12 +144,12 @@ function ComponentDetail({ name }: { name: string }) {
   </VStack>;
 }
 
-function ValuesTemplate({ name }: { name: string }) {
+function ValuesTemplate({ name, onRefreshDefinition }: { name: string; onRefreshDefinition: () => void }) {
   const { api } = usePlatform();
   const load = useCallback((signal: AbortSignal) => api.component.getComponentValues({ name }, { signal }), [api, name]);
   const query = useAsyncQuery(load);
   return <VStack gap={4}>
-    <HStack hAlign="between" vAlign="center" gap={3} width="100%"><Heading level={3}>Values template</Heading><RefreshButton label="Refresh values template" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
+    <HStack hAlign="between" vAlign="center" gap={3} width="100%"><Heading level={3}>Values template</Heading><RefreshButton label="Refresh values template" isLoading={query.refreshing} onClick={() => { onRefreshDefinition(); query.refresh(); }} /></HStack>
     {query.loading && <Text role="status">Loading values template…</Text>}
     {query.error && <Banner status="error" title="Values template unavailable" description={query.error} />}
     {query.data && <ValuesEditor label="Helm values template" language="yaml" value={query.data.userValues} description={query.data.userValues ? "Catalog template, including its original comments." : "No user values template returned."} readOnly />}

@@ -88,6 +88,9 @@ func ReleaseFromAPI(r *cloudv1alpha1.Release, detail bool) *cloudv1.Release {
 	out := &cloudv1.Release{Name: r.Name, Shipped: r.Labels[cloudv1alpha1.LabelShipped] == "true",
 		Valid: true, Withdrawn: r.Spec.Withdrawn, Holds: slices.Clone(r.Status.Holds),
 		CreateTime: timeOf(&r.CreationTimestamp)}
+	if r.Spec.Serial != nil {
+		out.Serial = *r.Spec.Serial
+	}
 	if c := meta.FindStatusCondition(r.Status.Conditions, cloudv1alpha1.ReleaseConditionValid); c != nil && c.Status != metav1.ConditionTrue {
 		out.Valid, out.InvalidReason = false, c.Message
 	}

@@ -177,6 +177,17 @@ spec:
                 description: Notes for operators and tenants.
                 maxLength: 4096
                 type: string
+              serial:
+                description: |-
+                  Serial orders the releases: a higher serial is a newer release,
+                  whatever the creation times (a release re-created by a GitOps tool
+                  keeps its place). Unique across releases and above every other
+                  serial when a release is added. Immutable once set. Unset on a
+                  release that predates the field: such a release is older than any
+                  with a serial and is ordered by its creation time among its kind.
+                format: int64
+                minimum: 1
+                type: integer
               withdrawn:
                 description: 'Withdrawn: no channel may offer it any more. Cannot
                   be undone.'
@@ -188,6 +199,8 @@ spec:
             - message: a withdrawn release stays withdrawn
               rule: '!(has(oldSelf.withdrawn) && oldSelf.withdrawn) || (has(self.withdrawn)
                 && self.withdrawn)'
+            - message: serial cannot change or be removed once set
+              rule: '!has(oldSelf.serial) || (has(self.serial) && self.serial == oldSelf.serial)'
           status:
             description: ReleaseStatus is written by the controller.
             properties:

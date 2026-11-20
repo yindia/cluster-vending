@@ -430,8 +430,12 @@ spec:
                       roll out (provider-helm forProvider.waitTimeout, with wait on), and
                       what the platform counts a stuck operation from (timeout plus two
                       minutes). Heavy charts (operators with hook Jobs, mesh control
-                      planes) need more than the default. Unset: 10m.
+                      planes) need more than the default. From 1m to 60m. Unset: 10m.
                     type: string
+                    x-kubernetes-validations:
+                    - message: install.timeout is between 1m and 60m
+                      rule: duration(self) >= duration('1m') && duration(self) <=
+                        duration('60m')
                 type: object
                 x-kubernetes-validations:
                 - message: helm is the only install mechanism so far
@@ -506,6 +510,7 @@ spec:
                   so it installs first; nothing waits for a node group.
                   Removal runs in reverse. Ignored for tenant components.
                 format: int32
+                maximum: 10000
                 minimum: 0
                 type: integer
               upgradeOneMinorAtATime:
@@ -631,6 +636,10 @@ spec:
           rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
         - message: a component cannot require itself
           rule: '!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)'
+        - message: 'karpenter has sequence 0 and is not disabled: every other platform
+            component waits for its nodes'
+          rule: self.metadata.name != 'karpenter' || (has(self.spec.sequence) && self.spec.sequence
+            == 0 && !(has(self.spec.disabled) && self.spec.disabled))
     served: true
     storage: true
     subresources:

@@ -125,7 +125,17 @@ type ReleaseContent struct {
 
 // ReleaseSpec is a published release.
 // +kubebuilder:validation:XValidation:rule="!(has(oldSelf.withdrawn) && oldSelf.withdrawn) || (has(self.withdrawn) && self.withdrawn)",message="a withdrawn release stays withdrawn"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.serial) || (has(self.serial) && self.serial == oldSelf.serial)",message="serial cannot change or be removed once set"
 type ReleaseSpec struct {
+	// Serial orders the releases: a higher serial is a newer release,
+	// whatever the creation times (a release re-created by a GitOps tool
+	// keeps its place). Unique across releases and above every other
+	// serial when a release is added. Immutable once set. Unset on a
+	// release that predates the field: such a release is older than any
+	// with a serial and is ordered by its creation time among its kind.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Serial *int64 `json:"serial,omitempty"`
 	// Content is what the release locks: immutable, publish a new release
 	// to change a version.
 	// +required
@@ -246,6 +256,7 @@ type PendingRelease struct {
 // ReleaseChannelSpec is the operator's settings for one channel.
 // +kubebuilder:validation:XValidation:rule="!has(self.release) || self.promotion != 'Automatic'",message="spec.release is the release of a Pinned or Manual channel; an Automatic channel takes its upstream's"
 // +kubebuilder:validation:XValidation:rule="self.promotion == 'Automatic' || has(self.release)",message="a Pinned or Manual channel names its spec.release"
+// +kubebuilder:validation:XValidation:rule="!has(self.policy) || !has(self.policy.releaseSoak) || !has(self.promotion) || self.promotion == 'Automatic'",message="policy.releaseSoak is for an Automatic channel: it is how long the upstream must have offered a release"
 type ReleaseChannelSpec struct {
 	// Promotion: Automatic takes each release the upstream channel
 	// completed; Manual and Pinned offer spec.release.

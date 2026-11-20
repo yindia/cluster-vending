@@ -28,7 +28,7 @@ if command -v docker >/dev/null && \
 fi
 
 # A dedicated helper uses the repo's YAML parser, preserving personal settings
-# in a generated copy. No edits to config.local.yaml or controller.local.yaml.
+# in a generated copy. No edits to config.local.yaml.
 GOTOOLCHAIN=auto go build -o "$STATE/configure" ./hack/keycloak
 "$STATE/configure" --base "${KEYCLOAK_BASE_CONFIG:-hack/config.local.yaml}" \
   --state "$STATE" --cli-redirect "${KEYCLOAK_CLI_REDIRECT:-http://localhost:18081/callback}"

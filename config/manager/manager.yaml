@@ -52,6 +52,10 @@ spec:
         # Metrics are off unless the ../metrics component turns them on.
         - --metrics-addr=0
         - --log-format=json
+        # The node group layout: the file the API server reads too
+        # (../node-groups). Do not set CV_SYSTEM_NODE_GROUP_* or
+        # CV_NODE_GROUP_* here: a variable wins over the file.
+        - --config=/etc/cluster-vending/platform.yaml
         env:
         # The leader election Lease lives in the controller's own namespace
         # (--lease-namespace), whatever namespace the kustomization sets.
@@ -79,31 +83,13 @@ spec:
         # install rules in ../rbac/platform_role.yaml can go).
         - name: CV_INSTALL_PROVIDERS
           value: "true"
-        # The node group layout (nodeGroups in a config file, --config /
-        # CV_CONFIG, is the same thing; docs/architecture.md#5-configuration). The API server
-        # (config/server) must have the same values. The system node group
-        # runs Karpenter, cluster-autoscaler, CoreDNS and every platform
-        # component, autoscaled between the minimum and maximum size (both
-        # change existing clusters in place); instance type and capacity
-        # type apply to new clusters only.
-        - name: CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE
-          value: "t3.medium"
-        - name: CV_SYSTEM_NODE_GROUP_MIN_SIZE
-          value: "2"
-        - name: CV_SYSTEM_NODE_GROUP_MAX_SIZE
-          value: "6"
-        # What users may create as their own (Karpenter) node groups: the
-        # families the API server allows ("none": no restriction), and what a
-        # group that sets none gets.
-        - name: CV_NODE_GROUP_INSTANCE_FAMILIES
-          value: "t3"
-        - name: CV_NODE_GROUP_DEFAULT_ARCHITECTURES
-          value: "AMD64"
-        - name: CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES
-          value: "ON_DEMAND"
         # No AWS keys here, ever: the controller's own AWS credentials are
         # its service account's IAM role (IRSA, see ../default), and every
         # lookup assumes the tenant role of the account it reads.
+        volumeMounts:
+        - name: platform-config
+          mountPath: /etc/cluster-vending
+          readOnly: true
         ports:
         - containerPort: 8081
           name: health
@@ -135,5 +121,9 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
+      volumes:
+      - name: platform-config
+        configMap:
+          name: platform-config
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

@@ -1,2 +1,7 @@
 resources:
 - manager.yaml
+
+# The node group layout: the file the API server reads too, mounted at
+# /etc/cluster-vending (see manager.yaml).
+components:
+- ../node-groups

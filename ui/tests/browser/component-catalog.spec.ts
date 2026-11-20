@@ -71,7 +71,7 @@ test("component details remain read-only catalog with release versions, template
 
 test("cluster detail retains management and treats id-less READY tenant entries as Disabled", async ({ page }) => {
   const mock = await mockCatalog(page, true);
-  await page.goto(`/clusters/${clusterId}`); await page.getByRole("tab", { name: "Components", exact: true }).click();
+  await page.goto(`/clusters/${clusterId}?tab=components`);
   const table = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true });
   const policies = table.getByRole("row").filter({ has: page.getByRole("link", { name: "policies", exact: true }) });
   await expect(policies).toContainText("Disabled"); await expect(policies).not.toContainText("Ready");

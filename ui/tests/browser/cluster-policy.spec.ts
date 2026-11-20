@@ -36,9 +36,8 @@ async function mockPolicy(page: Page, fixture: Fixture = {}) {
   return { calls, unexpected };
 }
 async function openPolicy(page: Page, section: "Current violations" | "Violation events") {
-  await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Violations", exact: true }).click();
-  return page.getByRole("tabpanel", { name: "Violations", exact: true }).getByRole("group", { name: section, exact: true });
+  await page.goto(`/clusters/${clusterId}?tab=violations`);
+  return page.getByRole("tabpanel", { name: "Policy violations", exact: true }).getByRole("group", { name: section, exact: true });
 }
 function readOnly(api: Awaited<ReturnType<typeof mockPolicy>>) {
   expect(api.unexpected).toEqual([]);
@@ -88,8 +87,11 @@ test("violations expose real report findings with search, filters and explicit r
   await expect(table).toContainText("invoice-worker");
   await expect(table).not.toContainText("payment-worker");
   const readsBeforeRefresh = api.calls.filter(call => call.method === "ListClusterViolations").length;
-  await panel.getByRole("button", { name: "Refresh violations", exact: true }).click();
+  const eventReads = api.calls.filter(call => call.method === "ListClusterViolationEvents").length;
+  await page.getByRole("button", { name: "Refresh policy violations and events", exact: true }).click();
   await expect.poll(() => api.calls.filter(call => call.method === "ListClusterViolations").length).toBe(readsBeforeRefresh + 1);
+  await expect.poll(() => api.calls.filter(call => call.method === "ListClusterViolationEvents").length).toBe(eventReads + 1);
+  await expect(table).not.toContainText("payment-worker");
   await expect(panel.locator('input[type="date"]')).toHaveCount(0);
   readOnly(api);
 });
@@ -116,7 +118,7 @@ test("one Violations tab shows both current findings and retained events", async
   await expect(panel.getByRole("table", { name: "Cluster violation events", exact: true })).toContainText("Admission denied");
   await expect(panel).toContainText("not an audit log");
   await expect(page.getByRole("tab", { name: "Violation events", exact: true })).toHaveCount(0);
-  const combined = page.getByRole("tabpanel", { name: "Violations", exact: true });
+  const combined = page.getByRole("tabpanel", { name: "Policy violations", exact: true });
   await expect(combined.getByRole("table", { name: "Cluster violations", exact: true })).toContainText("invoice-worker");
   await combined.getByRole("searchbox", { name: "Search violations", exact: true }).fill("no-match");
   await expect(combined.getByText("No retained rows match your search and filters.")).toBeVisible();
@@ -236,8 +238,9 @@ test("switching cluster drops the previous cluster's rows and filters", async ({
   await panel.getByRole("searchbox", { name: "Search violations", exact: true }).fill("payment");
   await page.getByRole("link", { name: "Clusters", exact: true }).first().click();
   await page.getByRole("link", { name: "billing", exact: true }).click();
-  await page.getByRole("tab", { name: "Violations", exact: true }).click();
-  const next = page.getByRole("tabpanel", { name: "Violations", exact: true }).getByRole("group", { name: "Current violations", exact: true });
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
+  await page.getByRole("tab", { name: "Policy violations", exact: true }).click();
+  const next = page.getByRole("tabpanel", { name: "Policy violations", exact: true }).getByRole("group", { name: "Current violations", exact: true });
   await expect(next.getByRole("table", { name: "Cluster violations", exact: true })).toContainText("ledger-worker");
   await expect(next).not.toContainText("payment-worker");
   await expect(next.getByRole("searchbox", { name: "Search violations", exact: true })).toHaveValue("");
@@ -255,4 +258,32 @@ test("long messages stay readable without hover", async ({ page }) => {
   await expect(detail).toContainText("resource-limits");
   await expect(detail.getByRole("button", { name: "Copy Resource" })).toBeVisible();
   readOnly(api);
+});
+
+test("cluster sections keep their URLs across reload, history and mobile navigation", async ({ page }) => {
+  const api = await mockPolicy(page, { violations: { summary }, events: { summary } });
+  await page.goto(`/clusters/${clusterId}?source=inventory`);
+  const nav = page.getByRole("navigation", { name: "Cluster navigation" });
+  await expect(nav.getByRole("tablist", { name: "Cluster sections" }).getByRole("tab")).toHaveCount(5);
+  await expect(page.getByRole("table", { name: "Cluster health conditions" })).toBeVisible();
+  expect(api.calls.filter(call => call.method === "ListClusterEvents")).toHaveLength(0);
+  await nav.getByRole("tab", { name: "Operations", exact: true }).click();
+  await nav.getByRole("tab", { name: "Policy violations", exact: true }).click();
+  await expect(page).toHaveURL(/source=inventory&tab=violations$/);
+  await page.reload();
+  await expect(page.getByRole("tabpanel", { name: "Policy violations" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("tabpanel", { name: "Activity" })).toBeVisible();
+  await page.goForward();
+  await expect(nav.getByRole("tab", { name: "Policy violations" })).toHaveAttribute("aria-selected", "true");
+  await page.setViewportSize({ width: 390, height: 844 });
+  const section = nav.getByRole("combobox", { name: "Cluster section" });
+  await expect(section).toBeInViewport();
+  await section.click();
+  await expect(page.getByRole("option", { name: "Sub Tenants", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Cluster summary" })).toBeInViewport();
+  await expect(page).toHaveURL(/\?source=inventory$/);
+  await expect(page.getByRole("button", { name: "Actions", exact: true })).toHaveCount(0);
+  expect(api.unexpected).toEqual([]);
 });

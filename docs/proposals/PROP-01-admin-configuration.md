@@ -525,6 +525,17 @@ Each phase ships on its own and leaves the system consistent.
 
 ## 8. Open questions
 
+**Decided (2026-11-20):**
+
+- **AMI pins of old releases:** fall back to `al2023@latest` with the existing notice; no
+  constant table.
+- **Dependents of a disabled component:** keep today's cascade; a disable switches its
+  dependents off with it. The "refuse the disable" rule of 4.5 is dropped.
+- **Manual clusters:** take catalog changes in tier order, like Automatic ones.
+- **Helm chart:** out of scope for now; kustomize only. Phase 6 is deferred.
+
+The questions below are kept for the record; the four above are closed.
+
 1. **AMI pins of old releases.** `shippedAMIPins` (`pkg/reconcile/cluster/nodegroups.go`) fills
    in the pins of releases published before `nodeAmiPin` existed, from `release.yaml`. That file
    goes. Choose: a constant table of those pins in code, or accept `latest` with the existing notice.

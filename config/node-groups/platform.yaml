@@ -1,0 +1,23 @@
+# Read by `cluster-vending serve` and `cluster-vending controller`
+# (--config /etc/cluster-vending/platform.yaml): the same file, so they cannot
+# disagree (docs/architecture.md#node-groups-configuration).
+nodeGroups:
+  # The default EKS managed node group: runs Karpenter, cluster-autoscaler,
+  # CoreDNS and every platform and tenant component.
+  system:
+    # New clusters only: instanceType, capacityType, diskSizeGiB.
+    instanceType: t3.medium
+    # In place, on every cluster. minSize is also the size at creation (at
+    # least 2: Karpenter runs two replicas); maxSize is at least minSize.
+    minSize: 2
+    maxSize: 6
+    capacityType: ON_DEMAND
+    diskSizeGiB: 0
+  # What tenants may create as their own node groups.
+  karpenter:
+    # An empty list restricts nothing.
+    instanceFamilies: [t3]
+    instanceTypes: []
+    defaults:
+      architectures: [AMD64]
+      capacityTypes: [ON_DEMAND]

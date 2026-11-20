@@ -1,7 +1,6 @@
 "use client";
 
 import { FilterRow } from "./filter-row";
-import { StackItem } from "@astryxdesign/core/Stack";
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -18,7 +17,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
-import { TabList, Tab } from "@astryxdesign/core/TabList";
+import { ResourceActions } from "./resource-actions";
+import { DetailNavigation, useDetailSection } from "./detail-navigation";
 import type { TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -229,7 +229,7 @@ function DeleteAccount({ account, onAccepted }: { account: CloudAccount; onAccep
   const mutation = useAccountMutation();
   const disabled = !tenantId || !canWrite || mutation.busy;
   return <>
-    <Button label="Delete account" variant="destructive" isDisabled={disabled} onClick={() => { setConfirmation(""); mutation.clearError(); setOpen(true); }} />
+    <ResourceActions resource="Account" items={[{ id: "delete", label: "Delete account", variant: "destructive", isDisabled: disabled, onClick: () => { setConfirmation(""); mutation.clearError(); setOpen(true); } }]} />
     <Dialog isOpen={open} onOpenChange={(next) => { if (!mutation.busy) setOpen(next); }} purpose={mutation.busy ? "required" : "form"} aria-describedby={`${id}-impact`} padding={0}>
       <DialogHeader title={`Delete ${accountName(account)}?`} onOpenChange={mutation.busy ? undefined : setOpen} />
       <VStack padding={5} gap={4}>
@@ -287,7 +287,9 @@ const clusterColumns = (networks: readonly Network[]): TableColumn<Cluster>[] =>
 function AccountDetails({ id }: { id: string }) {
   const { api, tenantId, canWrite } = usePlatform();
   const uiId = useId();
-  const [tab, setTab] = useState("overview");
+  const tabs = ["overview", "resources", "activity", "access", "configuration"].map(value => ({ value, label: titleCase(value) }));
+  const navigation = useDetailSection(tabs);
+  const tab = navigation.active;
   const [search, setSearch] = useState("");
   const [resourceKind, setResourceKind] = useState("all");
   const [resourceState, setResourceState] = useState("all");
@@ -305,9 +307,9 @@ function AccountDetails({ id }: { id: string }) {
   const detail = useAsyncQuery(load);
   const account = detail.data;
   const loadRelated = useCallback(async (signal: AbortSignal) => {
-    if (!tenantId || deletionRequested) return undefined;
+    if (!tenantId || deletionRequested || tab !== "overview") return undefined;
     return loadAccountRelations(api, tenantId, id, signal);
-  }, [api, tenantId, id, deletionRequested]);
+  }, [api, tenantId, id, deletionRequested, tab]);
   const related = useAsyncQuery(loadRelated);
   const awsId = account?.provider.case === "aws" ? account.provider.value.accountId : "";
   const awsRole = account?.provider.case === "aws" ? account.provider.value.role : "";
@@ -341,39 +343,40 @@ function AccountDetails({ id }: { id: string }) {
   const healthIssues = conditions.filter((condition) => condition.status === ConditionStatus.FALSE || condition.status === ConditionStatus.UNKNOWN);
   return <VStack gap={6}>
     <DetailHeader title={account ? accountName(account) : "Account details"}
-      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={account?.provider.case ?? ""} size="sm" /><Text color="secondary">{account?.provider.case === "aws" ? "Amazon Web Services" : "Cloud account"}</Text></HStack>{awsId && <CopyValue value={awsId} label="AWS account ID" isSecondary />}<Text color="secondary">{regions.length ? regions.join(", ") : "No regions reported"}</Text>{account && <CopyButton value={accountName(account)} label="Account name" />}</>}
+      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={account?.provider.case ?? ""} size="sm" /><Text color="secondary">{account?.provider.case === "aws" ? "Amazon Web Services" : "Cloud account"}</Text></HStack>{awsId && <CopyValue value={awsId} label="AWS account ID" isSecondary />}{account && <CopyValue value={account.id} label="Platform account ID" isSecondary />}</>}
       status={account && <AccessStatus account={account} />}
       actions={<>
-        {account && <ResourceYamlButton kind="CloudAccount" resourceId={account.id} />}
-        {account && <ConnectAccount account={account} onAccepted={(saved) => accepted(saved, "Account update accepted. Access will be checked asynchronously.")} />}
-        {account && <DeleteAccount account={account} onAccepted={() => { setDeletionRequested(true); setNotice("Deletion requested. The controller must remove the ProviderConfig and account record. Return to accounts to observe completion."); }} />}
-        <RefreshButton label="Refresh" isLoading={detail.refreshing || related.refreshing} isDisabled={!tenantId || deletionRequested} onClick={refresh} />
+        {account && canWrite && <ConnectAccount account={account} onAccepted={(saved) => accepted(saved, "Account update accepted. Access will be checked asynchronously.")} />}
+        {account && canWrite && <DeleteAccount account={account} onAccepted={() => { setDeletionRequested(true); setNotice("Deletion requested. The controller must remove the ProviderConfig and account record. Return to accounts to observe completion."); }} />}
+        {!account && detail.error && <RefreshButton label="Retry account details" onClick={refresh} />}
       </>} />
     {!tenantId && <Banner status="warning" title="Select a tenant to view this account" />}
     {tenantId && !canWrite && <Text color="secondary">Read-only access · Account mutations require tenant permissions.</Text>}
     {detail.loading && !deletionRequested && <Text role="status">Loading account…</Text>}
     <ErrorNotice error={detail.error} />
-    <VStack aria-live="polite" role="status" gap={2}>{notice && <Banner status="info" title={notice} />}{awaitingAttempt && !deletionRequested && <Text>Waiting for a new access-check attempt. Acceptance does not mean verified.</Text>}</VStack>
+    {(notice || awaitingAttempt && !deletionRequested) && <VStack aria-live="polite" role="status" gap={2}>{notice && <Banner status="info" title={notice} />}{awaitingAttempt && !deletionRequested && <Text>Waiting for a new access-check attempt. Acceptance does not mean verified.</Text>}</VStack>}
     {account && <>
+
+      <DetailNavigation resource="Account" pages={tabs} selection={navigation} actions={<RefreshButton label="Refresh account section" isLoading={detail.refreshing || (tab === "overview" && related.refreshing) || (tab === "access" && onboarding.refreshing)} onClick={refresh} />} />
+      <VStack role="tabpanel" id={navigation.panelId(tab)} aria-label={navigation.label} tabIndex={0} gap={6}>
+        {tab === "overview" && <>
       <DetailSummary items={[
         { label: "Account access", value: <AccessStatus account={account} />, note: titleCase(accountStateLabel(account)) },
         { label: "Managed resources", value: resources.length, note: `${resources.filter((resource) => resource.state === ManagedResourceState.READY).length} ready` },
         { label: "Networks", value: related.data ? related.data.networks.length : related.error ? "Unavailable" : "Loading…", note: "Connected to this account" },
         { label: "Clusters", value: related.data ? related.data.clusters.length : related.error ? "Unavailable" : "Loading…", note: "On connected networks" },
       ]} />
-      <TabList role="tablist" aria-label="Account sections" value={tab} onChange={setTab} hasDivider>
-        {["overview", "resources", "activity", "access"].map((name) => <Tab key={name} id={`${uiId}-tab-${name}`} value={name} label={titleCase(name)} panelId={`${uiId}-panel-${name}`} />)}
-      </TabList>
-      <VStack role="tabpanel" id={`${uiId}-panel-${tab}`} aria-labelledby={`${uiId}-tab-${tab}`} tabIndex={0} gap={6}>
-        {tab === "overview" && <>
-          <HStack gap={6} wrap="wrap"><Value label="IAM role"><CopyValue value={awsRole} label="IAM role name" /></Value><Value label="Last access check">{timestampText(access?.checkedTime)}</Value><Value label="Created">{timestampText(account.createTime)}</Value></HStack>
+          <HStack gap={6} wrap="wrap"><Value label="Regions">{regions.join(", ") || "Not reported"}</Value><Value label="IAM role"><CopyValue value={awsRole} label="IAM role name" /></Value><Value label="Last access check">{timestampText(access?.checkedTime)}</Value><Value label="Created">{timestampText(account.createTime)}</Value></HStack>
           {healthIssues.length > 0 ? <Banner status={healthIssues.some((condition) => condition.status === ConditionStatus.FALSE) ? "warning" : "info"} title="Account needs attention" description={healthIssues.map((condition) => condition.message || condition.reason || condition.type).join(" · ")} /> : <Text color="secondary">{access?.verified && !access.stale ? "The last access check passed. Resource health is reported separately in Resources." : "Access has not been confirmed. Open Access to configure the role and request a verification."}</Text>}
           <Divider />
           <VStack gap={3}><Heading level={2}>Connected infrastructure</Heading><Text color="secondary">Networks in this account and the clusters running on them.</Text><ErrorNotice error={related.error} />{related.loading && <Text role="status">Loading related infrastructure…</Text>}{related.data && <>
             <Heading level={3}>Networks</Heading>{related.data.networks.length ? <Table searchable aria-label="Account related networks" data={related.data.networks} columns={networkColumns} idKey="id" density="compact" /> : <Text color="secondary">No networks belong to this account.</Text>}
             <Heading level={3}>Clusters</Heading>{related.data.clusters.length ? <Table searchable aria-label="Account related clusters" data={related.data.clusters} columns={clusterColumns(related.data.networks)} idKey="id" density="compact" /> : <Text color="secondary">No clusters belong to this account’s networks.</Text>}
           </>}</VStack>
-          <Collapsible trigger="Platform connection details" defaultIsOpen={false}><VStack gap={4} padding={3}><Value label="Platform account ID"><CopyValue value={account.id} label="Platform account ID" /></Value><Value label="Tenant"><CopyValue value={account.tenantId} label="Tenant ID" /></Value><Value label="ProviderConfig"><CopyValue value={account.status?.providerConfigName ?? ""} label="ProviderConfig name" /></Value><Value label="Namespace"><CopyValue value={account.status?.namespace ?? ""} label="Namespace" /></Value><Value label="Assumed identity"><CopyValue value={account.status?.identity ?? ""} label="Assumed identity" /></Value><Value label="Updated">{timestampText(account.updateTime)}</Value></VStack></Collapsible>
+        </>}
+        {tab === "configuration" && <>
+          <HStack hAlign="between" vAlign="center" wrap="wrap" gap={2}><Heading level={2}>Platform connection details</Heading><ResourceYamlButton kind="CloudAccount" resourceId={id} /></HStack>
+          <VStack gap={4}><Value label="Platform account ID"><CopyValue value={account.id} label="Platform account ID" /></Value><Value label="Tenant"><CopyValue value={account.tenantId} label="Tenant ID" /></Value><Value label="ProviderConfig"><CopyValue value={account.status?.providerConfigName ?? ""} label="ProviderConfig name" /></Value><Value label="Namespace"><CopyValue value={account.status?.namespace ?? ""} label="Namespace" /></Value><Value label="Assumed identity"><CopyValue value={account.status?.identity ?? ""} label="Assumed identity" /></Value><Value label="Updated">{timestampText(account.updateTime)}</Value></VStack>
         </>}
         {tab === "resources" && <>
           <HStack gap={3} justify="between" wrap="wrap"><VStack gap={1}><Heading level={2}>Managed resources</Heading><Text role="status" color="secondary">{filtered.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack></HStack>
@@ -408,7 +411,6 @@ function AccountDetails({ id }: { id: string }) {
           </>}</VStack>
         </>}
       </VStack>
-      <Text type="supporting" color="secondary">Use Refresh for the latest observations, or enable Live updates to refresh progressing accounts every five seconds for up to two minutes. Requested access checks are observed automatically during that window. A ready ProviderConfig alone does not mean account access is verified.</Text>
     </>}
   </VStack>;
 }
@@ -457,7 +459,10 @@ function AccountsList() {
     } },
   ];
   return <VStack gap={5}>
-    <HStack hAlign="end" vAlign="center" gap={3} wrap="wrap" width="100%"><StackItem size="fill"><VStack gap={1}><Heading level={2}>Cloud connections</Heading><Text color="secondary">Manage the accounts where your infrastructure runs.</Text></VStack></StackItem><HStack gap={2} vAlign="center" wrap="wrap"><ConnectAccount onAccepted={(account) => { setSaved(account); refresh(); }} /><RefreshButton label="Refresh accounts" isDisabled={!tenantId} isLoading={list.refreshing} onClick={refresh} /></HStack></HStack>
+    <DetailHeader title="Accounts" description="Connect cloud accounts and verify platform access." actions={<>
+      <ConnectAccount onAccepted={(account) => { setSaved(account); refresh(); }} />
+      <RefreshButton label="Refresh accounts" isDisabled={!tenantId} isLoading={list.refreshing} onClick={refresh} />
+    </>} />
     {!tenantId && <Banner status="warning" title="Select a tenant to manage accounts" />}
     {tenantId && !canWrite && <Text color="secondary">Read-only access · Account mutations require tenant permissions.</Text>}
     <ErrorNotice error={list.error} />

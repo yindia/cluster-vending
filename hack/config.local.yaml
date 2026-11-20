@@ -31,8 +31,20 @@ http-addr: 127.0.0.1:8080
 log-format: text
 log-level: debug
 provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
-# The node group layout: the same section in the server's and the
-# controller's file, so they cannot drift (docs/architecture.md#5-configuration). Flags and
+# The controller's own settings (`make run-controller` reads this same file;
+# `serve` ignores them). Its AWS credentials are never here: export
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN) in the
+# shell that runs it.
+# One local controller: no leader election Lease, which a killed controller
+# would leave behind for the next start to wait out.
+leader-elect: false
+health-probe-addr: 127.0.0.1:8081
+automatic-upgrades: true
+# Local testing only: act with the Secret's keys directly, without assuming
+# the account's tenant role. Needs provider-credentials-secret.
+skip-tenant-role: true
+# The node group layout: one section for both processes, because they read
+# this one file (docs/architecture.md#node-groups-configuration). Flags and
 # CV_* variables win over single values.
 nodeGroups:
   # The default EKS managed node group: runs Karpenter, CoreDNS, every

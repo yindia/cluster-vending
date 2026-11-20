@@ -1260,11 +1260,11 @@ while a component uses it.
 | `spec.disabled` | bool | Switches it off without deleting it. |
 | `spec.internal` | bool | Only installed as a member of a bundle (`includes`). |
 | `spec.install.helm` | object | `crds` (a chart holding only the CRDs, as templates), `companions` (charts installed after the main one is ready), and the chart source (`repository`, `chart`, `credentials`, `insecureSkipTLSVerify`, `plainHTTP`). |
-| `spec.install.timeout` | duration | How long Helm waits for each chart's rollout. |
+| `spec.install.timeout` | duration, 1 m to 60 m | How long Helm waits for each chart's rollout. |
 | `spec.namespace` | string | Namespace in the workload cluster. Required with `install`. |
 | `spec.includes` | list | Makes the definition a bundle of other definitions. |
 | `spec.requires` | list, up to 16 | Components that must be ready first. |
-| `spec.sequence` | int32, default 100 | Platform components install in ascending sequence. Karpenter is 0; every other shipped definition uses the default. |
+| `spec.sequence` | int32, 0 to 10000, default 100 | Platform components install in ascending sequence. Karpenter is 0 (CEL: the definition named `karpenter` has sequence 0 and is not disabled); every other shipped definition uses the default. |
 | `spec.versionGroup` | string | Components that are versions of one product, upgraded together (`istio`, `kyverno`). |
 | `spec.upgradeOneMinorAtATime` | bool | Supports in-place upgrades of one minor at a time (Istio). |
 | `spec.conflictsWithAddons` | list | EKS add-ons the cluster must not have while this is enabled. |
@@ -1302,6 +1302,7 @@ finalizer `cloud.cluster-vending.io/release-in-use` holds it while a channel or 
 |---|---|---|
 | `spec.content.renderVersion` | int | The renderer version clusters are brought to. |
 | `spec.content.kubernetes[]` | list, 3 to 6 consecutive | Per Kubernetes minor: `minor` (`1.NN`), `default`, `channel` (`alpha`, `beta` or `stable`), `upgradeTo`, `endOfSupport`, `nodeAmiPin`, `components[]` (`name`, `version`, `values`: the pins and locked values of that minor). |
+| `spec.serial` | int64, at least 1 | The release order: a higher serial is a newer release, whatever the creation times, so a re-created release keeps its place. Immutable once set (CEL). Unset on a release that predates it: such a release is older than any with a serial, and is ordered by creation time among its kind. `admin release list` shows it; the list is newest first by serial, and a release move compares serials. `controller --export` numbers the releases that have none, in creation order (ties by name). |
 | `spec.notes` | string, max 4096 | Notes for operators and tenants. |
 | `spec.withdrawn` | bool | No channel may offer it again. Cannot be undone. |
 | `status.conditions` | list | `Valid` (the release passes its checks), `InUse`. |
@@ -1515,6 +1516,15 @@ Accepted by every command.
 | Skip the tenant role | `--skip-tenant-role` | `CV_SKIP_TENANT_ROLE` | `false` | Local testing only, with the Secret: act with its keys, without assuming tenant roles |
 | Provider runtime | not settings | | | Poll intervals, reconcile rate and resources are fixed in `crossplaneaws.DefaultProviderRuntime`. Use `--install-providers=false` to manage the providers yourself. |
 
+**Catalog modes of `controller`.** Two read-only modes run no controller
+([PROP-01](proposals/PROP-01-admin-configuration.md), phase 0):
+
+| Flag | Meaning |
+|---|---|
+| `--export` | Reads the management cluster (`--kubeconfig`) and writes its `ComponentDefinition`s, `Release`s and `ReleaseChannel`s as clean manifests (no status, uid, resourceVersion, managed fields, finalizers or shipped label and hash; the `cloud.cluster-vending.io/catalog-schema: "1"` annotation added; releases without a serial numbered in creation order). One multi-document stream on stdout, or with `--export-dir <dir>` the layout `definitions/`, `releases/`, `channels/` with one file per object and a `kustomization.yaml`. On stderr it lists how the live definitions differ from this build's embedded catalog. |
+| `--check -f <path\|->` | Reads rendered manifests (`kustomize build ... \| cluster-vending controller --config platform.yaml --check -f -`), makes no cluster call, prints every problem and exits 1 if there is any: the three channels once each, requirements that exist and do not cycle, a requirement's sequence not above its dependent's, sequence 0 for karpenter alone, unique serials, consecutive minors and one minor per channel, a pin for every enabled chart (and companion) on every minor, channels naming releases of the set, each definition's `Valid` checks, the schema annotation, and the system node group sizing against `nodeGroups.system` of `--config` (the default group without it). Disabling a component switches its dependents off with it: that is not a problem. |
+
+
 The controller's `--aws-region`, `--aws-source-role-arn` and `--aws-external-id` are
 the same as the server's.
 
@@ -1532,6 +1542,17 @@ The platform admin sets the layout in the `nodeGroups` section of the config fil
 with the same shape and struct for the controller and the server. The controller
 renders, and the server validates, so the two must get the same file or values.
 Lists are real YAML lists in the file, and comma-separated in flags and variables.
+
+There is one file for both processes. `config/node-groups` is a kustomize component:
+its `configMapGenerator` makes the ConfigMap `platform-config` from `platform.yaml`, with the
+content hash in its name, so a change of the file rolls both Deployments. The server and the
+controller mount it at `/etc/cluster-vending` and pass `--config=/etc/cluster-vending/platform.yaml`.
+They load it with the same code, so an invalid file stops both with the same problems.
+The manifests set no `CV_SYSTEM_NODE_GROUP_*` or `CV_NODE_GROUP_*` variable. A variable still
+wins over the file (flag, then variable, then file), so one that is set anywhere logs a
+warning at start of either command. Locally, `make run` and `make run-controller` both pass
+`hack/config.local.yaml`. `config/server/auth` carries the same `nodeGroups` plus the `auth`
+section for the server's one `--config` (a config test keeps the two equal).
 
 ```yaml
 nodeGroups:
@@ -1601,9 +1622,9 @@ kubectl --context kind-cluster-vending -n crossplane-system create secret generi
 aws_access_key_id = $AWS_ACCESS_KEY_ID
 aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
 EOF
-# then, in hack/controller.local.yaml: uncomment provider-credentials-secret and set aws-management-role-arn
+# then, in hack/config.local.yaml: uncomment provider-credentials-secret and set aws-management-role-arn
 
-make run-controller              # terminal 1: the controller (hack/controller.local.yaml)
+make run-controller              # terminal 1: the controller (hack/config.local.yaml, the same file)
 make run                         # terminal 2: the API server (hack/config.local.yaml), after the CRDs and providers exist
 make run-ui                      # terminal 3: the console at localhost:3000
 ```

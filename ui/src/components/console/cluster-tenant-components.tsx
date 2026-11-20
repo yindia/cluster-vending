@@ -1,11 +1,10 @@
 "use client";
 
 import { FilterRow } from "./filter-row";
-import { StackItem } from "@astryxdesign/core/Stack";
 
 import { RefreshButton } from "./refresh-button";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -37,13 +36,14 @@ type TenantComponentRow = {
 };
 const PAGE_SIZE = 25;
 
-/** Keep table drafts and operation observation isolated when the selected scope changes. */
-export function ClusterTenantComponents({ clusterId }: { clusterId: string }) {
+type ComponentsProps = { children: ReactNode; clusterRefreshing: boolean; clusterId: string; onRefreshCluster: () => void; onRetry: () => void };
+
+export function ClusterComponentsPanel({ clusterId, ...actions }: ComponentsProps) {
   const { scopeKey } = usePlatform();
-  return <TenantComponentsContent key={`${scopeKey}:${clusterId}`} clusterId={clusterId} />;
+  return <TenantComponentsContent key={`${scopeKey}:${clusterId}`} clusterId={clusterId} {...actions} />;
 }
 
-function TenantComponentsContent({ clusterId }: { clusterId: string }) {
+function TenantComponentsContent({ clusterId, onRefreshCluster, onRetry, children, clusterRefreshing }: ComponentsProps) {
   const { api, tenantId, canWrite } = usePlatform();
   const [search, setSearch] = useState("");
   const [availability, setAvailability] = useState("all");
@@ -145,28 +145,34 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
     } },
   ];
 
-  return <VStack as="section" aria-label="Tenant components" gap={4}>
-    <HStack hAlign="end" vAlign="center" gap={4} wrap="wrap" width="100%">
-      <StackItem size="fill"><VStack gap={1}><Heading level={2}>Tenant components</Heading><Text color="secondary">Enable optional components or manage their tenant settings. Versions are selected by the cluster’s release.</Text></VStack></StackItem>
-      <RefreshButton label="Refresh tenant components" isDisabled={!tenantId || !clusterId} isLoading={catalog.refreshing || inventory.refreshing} onClick={refresh} />
+  return <>
+    <HStack hAlign="between" vAlign="center" gap={2}>
+      <Heading level={2}>Components &amp; add-ons</Heading>
+      <RefreshButton label="Refresh components" isDisabled={!tenantId || !clusterId} isLoading={clusterRefreshing || catalog.refreshing || inventory.refreshing} onClick={() => { onRefreshCluster(); refresh(); }} />
     </HStack>
-    {(!tenantId || !clusterId) && <Banner status="info" title="Select a tenant and cluster to manage components" />}
-    {!canWrite && <Text color="secondary">Your session has read-only access. Tenant write permission is required to enable, update or disable components.</Text>}
-    {catalog.error && <Banner status="error" title="Tenant component catalog unavailable" description={catalog.error} />}
-    {inventory.error && <Banner status="error" title="Complete component inventory unavailable" description={inventory.error} />}
-    {(catalog.loading || inventory.loading) && <Text role="status">Loading the tenant catalog and complete cluster inventory…</Text>}
-    {accepted && <ComponentObservation key={accepted.revision} tenantId={tenantId} action={accepted.action} accepted={accepted.component} onSettled={refresh} />}
-    <FilterRow label="Tenant component filters">
-      <TextInput label="Search tenant components" type="search" placeholder="Name, description, ID or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />
-      <Selector label="Component availability" value={availability} onChange={(value) => { setAvailability(value); setPage(1); }} options={[
-        { value: "all", label: "All tenant entries" }, { value: "available", label: "Available in catalog" },
-        { value: "enabled", label: "In cluster inventory" }, { value: "not-enabled", label: "Disabled" },
-        { value: "unavailable", label: "Platform disabled" }, { value: "read-only", label: "Unknown / read-only" },
-      ]} />
-      {(search || availability !== "all") && <Button label="Clear tenant component filters" onClick={() => { setSearch(""); setAvailability("all"); setPage(1); }} />}
-    </FilterRow>
-    <Text role="status" color="secondary">{filtered.length} of {rows.length} tenant component entries</Text>
-    {visible.length ? <ConsoleTable aria-label="Cluster tenant component catalog" data={visible} columns={columns} idKey="key" rowIndexStart={(currentPage - 1) * PAGE_SIZE + 1} rowCount={filtered.length} /> : !catalog.loading && !inventory.loading && <Text>{rows.length ? "No tenant components match the current filters." : catalog.error || inventory.error ? "Tenant entries could not be fully loaded. Refresh before making changes." : "No tenant component definitions or unmanaged inventory entries were returned."}</Text>}
-    {filtered.length > PAGE_SIZE && <Pagination label="Tenant component pagination" page={currentPage} onChange={setPage} totalItems={filtered.length} pageSize={PAGE_SIZE} variant="count" />}
-  </VStack>;
+    {children}
+    <VStack as="section" aria-label="Tenant components" gap={4}>
+      <VStack gap={1}><Heading level={3}>Tenant components</Heading><Text color="secondary">Enable optional components or manage their tenant settings. Versions are selected by the cluster’s release.</Text></VStack>
+      {canWrite && inventory.data?.some(item => item.management === ComponentManagement.TENANT && componentInstallationStatus(item).tone === "error") &&
+        <HStack><Button label="Retry failed work" onClick={onRetry} /></HStack>}
+      {(!tenantId || !clusterId) && <Banner status="info" title="Select a tenant and cluster to manage components" />}
+      {!canWrite && <Text color="secondary">Your session has read-only access. Tenant write permission is required to enable, update or disable components.</Text>}
+      {catalog.error && <Banner status="error" title="Tenant component catalog unavailable" description={catalog.error} />}
+      {inventory.error && <Banner status="error" title="Complete component inventory unavailable" description={inventory.error} />}
+      {(catalog.loading || inventory.loading) && <Text role="status">Loading the tenant catalog and complete cluster inventory…</Text>}
+      {accepted && <ComponentObservation key={accepted.revision} tenantId={tenantId} action={accepted.action} accepted={accepted.component} onSettled={refresh} />}
+      <FilterRow label="Tenant component filters">
+        <TextInput label="Search tenant components" type="search" placeholder="Name, description, ID or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />
+        <Selector label="Component availability" value={availability} onChange={(value) => { setAvailability(value); setPage(1); }} options={[
+          { value: "all", label: "All tenant entries" }, { value: "available", label: "Available in catalog" },
+          { value: "enabled", label: "In cluster inventory" }, { value: "not-enabled", label: "Disabled" },
+          { value: "unavailable", label: "Platform disabled" }, { value: "read-only", label: "Unknown / read-only" },
+        ]} />
+        {(search || availability !== "all") && <Button label="Clear tenant component filters" onClick={() => { setSearch(""); setAvailability("all"); setPage(1); }} />}
+      </FilterRow>
+      <Text role="status" color="secondary">{filtered.length} of {rows.length} tenant component entries</Text>
+      {visible.length ? <ConsoleTable aria-label="Cluster tenant component catalog" data={visible} columns={columns} idKey="key" rowIndexStart={(currentPage - 1) * PAGE_SIZE + 1} rowCount={filtered.length} /> : !catalog.loading && !inventory.loading && <Text>{rows.length ? "No tenant components match the current filters." : catalog.error || inventory.error ? "Tenant entries could not be fully loaded. Refresh before making changes." : "No tenant component definitions or unmanaged inventory entries were returned."}</Text>}
+      {filtered.length > PAGE_SIZE && <Pagination label="Tenant component pagination" page={currentPage} onChange={setPage} totalItems={filtered.length} pageSize={PAGE_SIZE} variant="count" />}
+    </VStack>
+  </>;
 }

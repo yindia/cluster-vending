@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/catalog"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
@@ -229,58 +229,10 @@ func (r *ReleaseReconciler) namedBy(ctx context.Context, release string) (namedR
 }
 
 // ValidateRelease makes the checks of a release's content the API
-// server's CEL rules cannot: the minors are consecutive, an upgradeTo is
-// the next minor and one of them, the channels are each on one minor
-// from the newest (alpha) to the oldest (stable) or none is
-// (release.ChannelProblems), and the renderer version is not newer than
-// this build's (render). It returns the problems found; none means valid.
+// server's CEL rules cannot (catalog.ValidateRelease, shared with the
+// offline check): it returns the problems found; none means valid.
 func ValidateRelease(content cloudv1alpha1.ReleaseContent, render int64) []string {
-	var problems []string
-	if content.RenderVersion > render {
-		problems = append(problems, fmt.Sprintf("renderVersion %d is newer than this controller's renderer (%d)", content.RenderVersion, render))
-	}
-	minors := map[string]bool{}
-	var numbers []int
-	for _, k := range content.Kubernetes {
-		n, ok := minorNumber(k.Minor)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("minor %q is not 1.<n>", k.Minor))
-			continue
-		}
-		minors[k.Minor] = true
-		numbers = append(numbers, n)
-	}
-	slices.Sort(numbers)
-	for i := 1; i < len(numbers); i++ {
-		if numbers[i] != numbers[i-1]+1 {
-			problems = append(problems, fmt.Sprintf("the minors are not consecutive: 1.%d is followed by 1.%d", numbers[i-1], numbers[i]))
-		}
-	}
-	for _, k := range content.Kubernetes {
-		if k.UpgradeTo == "" {
-			continue
-		}
-		from, okFrom := minorNumber(k.Minor)
-		to, okTo := minorNumber(k.UpgradeTo)
-		switch {
-		case !okFrom || !okTo || to != from+1:
-			problems = append(problems, fmt.Sprintf("%s upgrades to %s: an upgrade goes to the next minor", k.Minor, k.UpgradeTo))
-		case !minors[k.UpgradeTo]:
-			problems = append(problems, fmt.Sprintf("%s upgrades to %s, which the release does not have", k.Minor, k.UpgradeTo))
-		}
-	}
-	problems = append(problems, release.ChannelProblems(releasePins("", content))...)
-	return append(problems, pinValueProblems(content)...)
-}
-
-// minorNumber is n of "1.<n>".
-func minorNumber(minor string) (int, bool) {
-	rest, ok := strings.CutPrefix(minor, "1.")
-	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest)
-	return n, err == nil
+	return catalog.ValidateRelease(content, render)
 }
 
 // setValid sets the Valid condition from the problems found.

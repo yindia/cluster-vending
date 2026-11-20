@@ -352,7 +352,8 @@ test("cluster kubeconfig commands fetch current cloud identity and are copyable 
 test("imported clusters require explicit ownership consent before takeover", async ({ page }) => {
   const calls = await mockAPI(page, { importedCluster: true, tenantAdmin: true });
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("button", { name: "Take over imported cluster", exact: true }).click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Take over imported cluster", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Take over imported cluster", exact: true });
   await expect(dialog.getByRole("table", { name: "Resources reviewed for cluster takeover", exact: true })).toContainText("sg-external");
   expect(calls.filter(call => call.method === "TakeOverCluster")).toHaveLength(0);
@@ -446,8 +447,8 @@ test("detail resource search and pause filters compose and reset", async ({ page
     [`/networks/${networkId}`, "vpc-0123456789abcdef0", "Pause status", "Paused"],
     [`/clusters/${clusterId}`, "payments-workers-external", "Paused", "Active"],
   ]) {
-    await page.goto(url);
-    await page.getByRole("tab", { name: "Resources", exact: true }).click();
+    await page.goto(url.startsWith("/clusters/") ? `${url}?tab=resources` : url);
+    if (!url.startsWith("/clusters/")) await page.getByRole("tab", { name: "Resources", exact: true }).click();
     const search = page.getByRole("searchbox", { name: "Search resources", exact: true });
     await search.fill(cloudId);
     await expect(page.getByRole("table")).toContainText(cloudId);
@@ -518,8 +519,8 @@ test("Settings uses aligned full-width fields and fits desktop and mobile", asyn
 test("detail activity and channel history have no date filters", async ({ page }) => {
   await mockAPI(page, { eventHistory: true });
   for (const [url, name] of [[`/networks/${networkId}`, "Network events"], [`/clusters/${clusterId}`, "Cluster events"]]) {
-    await page.goto(url);
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.goto(url.startsWith("/clusters/") ? `${url}?tab=activity` : url);
+    if (!url.startsWith("/clusters/")) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     const table = page.getByRole("table", { name, exact: true });
     await expect(table.getByRole("columnheader")).toHaveText(["Time (UTC)", "Type", "Reason", "Message", "Kind", "Resource", "Count"]);
     await expect(page.locator('input[type="date"], input[type="datetime-local"]')).toHaveCount(0);
@@ -540,7 +541,7 @@ test("tenant viewers can inspect and copy YAML for accounts, networks and cluste
   const calls = await mockAPI(page, { viewer: true });
   await mockClipboard(page);
   for (const [url, kind, id] of [[`/accounts/${accountId}`, "CloudAccount", accountId], [`/networks/${networkId}`, "Network", networkId], [`/clusters/${clusterId}`, "Cluster", clusterId]]) {
-    await page.goto(url);
+    await page.goto(kind === "Cluster" ? `${url}?tab=configuration` : url);
     await page.getByRole("button", { name: "View YAML", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `${kind} YAML`, exact: true });
     await expect(dialog).toBeVisible();
@@ -601,8 +602,8 @@ test("Kind filters compose with search across overview and all resource inventor
     [`/networks/${networkId}`, "Subnet", "private-subnet", "Network managed resource inventory"],
     [`/clusters/${clusterId}`, "Release", "dns-release", "Cluster cloud resources"],
   ]) {
-    await page.goto(url);
-    await page.getByRole("tab", { name: "Resources", exact: true }).click();
+    await page.goto(url.startsWith("/clusters/") ? `${url}?tab=resources` : url);
+    if (!url.startsWith("/clusters/")) await page.getByRole("tab", { name: "Resources", exact: true }).click();
     await (url.startsWith("/clusters/") ? page.getByRole("button", { name: /^Resource kind / }) : page.getByRole("combobox", { name: "Resource kind", exact: true })).click();
     await page.getByRole("option", { name: kind, exact: true }).click();
     const inventory = tableName === "Cluster cloud resources" ? page.getByRole("table").first() : page.getByRole("table", { name: tableName, exact: true });
@@ -618,8 +619,8 @@ test("Kind filters compose with search across overview and all resource inventor
 test("event Kind and message search include later pages and full messages appear on hover", async ({ page }) => {
   const calls = await mockAPI(page, { eventHistory: true, viewer: true });
   for (const [url, tableName] of [[`/networks/${networkId}`, "Network events"], [`/clusters/${clusterId}`, "Cluster events"]]) {
-    await page.goto(url);
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.goto(url.startsWith("/clusters/") ? `${url}?tab=activity` : url);
+    if (!url.startsWith("/clusters/")) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     await page.getByRole("combobox", { name: "Event kind", exact: true }).click();
     await page.getByRole("option", { name: "Release", exact: true }).click();
     const table = page.getByRole("table", { name: tableName, exact: true });
@@ -704,6 +705,7 @@ test("release inventory distinguishes current channel offerings from other valid
 test("Kind filters narrow deprecation findings and workload recommendations", async ({ page }) => {
   await mockAPI(page, { richTables: true });
   await page.goto(`/clusters/${clusterId}`);
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
   await page.getByRole("tab", { name: "Deprecated APIs", exact: true }).click();
   await page.getByRole("combobox", { name: "Kind", exact: true }).click();
   await page.getByRole("option", { name: "Ingress", exact: true }).click();
@@ -745,6 +747,7 @@ test("cluster insights load tenant-scoped saved findings and recommendations on 
   await page.goto(`/clusters/${clusterId}`);
   await expect(page.getByRole("button", { name: "View deprecated APIs", exact: true })).toBeVisible();
   expect(calls.filter(call => call.method === "ListClusterDeprecations" || call.method === "ListClusterRecommendations")).toHaveLength(0);
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
   await page.getByRole("tab", { name: "Deprecated APIs", exact: true }).click();
   const findings = page.getByRole("table", { name: "Cluster deprecated API findings", exact: true });
   await expect(findings).toContainText("payments-budget");
@@ -776,6 +779,7 @@ test("cluster insights load tenant-scoped saved findings and recommendations on 
 test("a cluster that has never been scanned is not shown as compatible", async ({ page }) => {
   await mockAPI(page, { neverScanned: true, viewer: true });
   await page.goto(`/clusters/${clusterId}`);
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
   await page.getByRole("tab", { name: "Deprecated APIs", exact: true }).click();
   await expect(page.getByText("Never scanned", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("No deprecated API findings", { exact: true })).toHaveCount(0);
@@ -784,7 +788,7 @@ test("a cluster that has never been scanned is not shown as compatible", async (
 test("cluster tenant catalog enables configured components only after exact reviewed confirmation", async ({ page }) => {
   const calls = await mockAPI(page, { componentCatalog: true });
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Components", exact: true }).click();
+  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
   const table = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true });
   const blocked = table.getByRole("row").filter({ has: page.getByRole("link", { name: "blocked-component", exact: true }) });
   await expect(blocked).toContainText("Disabled by platform policy");
@@ -813,7 +817,7 @@ test("cluster tenant catalog enables configured components only after exact revi
 test("cluster component catalog is read-only for tenant viewers", async ({ page }) => {
   await mockAPI(page, { componentCatalog: true, viewer: true });
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Components", exact: true }).click();
+  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
   const table = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true });
   await expect(table).toContainText("policies");
   await expect(table.getByRole("button", { name: "Enable component", exact: true })).toHaveCount(0);
@@ -851,7 +855,7 @@ test("table statuses preserve the full ink height of deleting and missing labels
   await page.route("**/api/rpc/cloud.v1.NetworkService/GetNetwork", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ network: { ...network, status: { ...network.status, managedResources: [{ ...network.status.managedResources[0], state: "MANAGED_RESOURCE_STATE_MISSING", ready: "CONDITION_STATUS_FALSE", synced: "CONDITION_STATUS_FALSE" }] } }, asRequested: true }) }));
   for (const [url, label, tableName] of [["/clusters", "Deleting", "Clusters"], [`/networks/${networkId}`, "Missing", "Network managed resource inventory"]]) {
     await page.goto(url);
-    if (label === "Missing") await page.getByRole("tab", { name: "Resources", exact: true }).click();
+    if (label === "Missing") { await page.getByRole("tab", { name: "Infrastructure", exact: true }).click(); await page.getByRole("tab", { name: "Infrastructure inventory", exact: true }).click(); }
     const text = page.getByRole("table", { name: tableName, exact: true }).getByText(label, { exact: true });
     await expect(text).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
@@ -932,7 +936,7 @@ test("channel Clusters tab lists subscriptions across all tenant pages, includin
 test("cluster component values validate before applying exact reviewed settings", async ({ page }) => {
   const calls = await mockAPI(page);
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Components", exact: true }).click();
+  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
   const row = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true }).getByRole("row").filter({ has: page.getByRole("link", { name: "external-dns", exact: true }) });
   await row.getByRole("button", { name: "Manage component", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Manage external-dns", exact: true });
@@ -1042,7 +1046,8 @@ test("cluster details include all managed resource identifiers and pause state",
   await page.goto(`/clusters/${clusterId}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("payments");
   await page.screenshot({ path: "/tmp/cv-ui-cluster-overview.png", fullPage: true });
-  await page.getByRole("tab", { name: /^Resources\b/ }).click();
+  await page.getByRole("tab", { name: "Infrastructure", exact: true }).click();
+  await page.getByRole("tab", { name: "Infrastructure inventory", exact: true }).click();
   const resources = page.getByRole("table").filter({ hasText: "payments-workers-external" });
   await expect(resources).toContainText("NodeGroup");
   await expect(resources).toContainText(/paused/i);
@@ -1195,7 +1200,12 @@ test("resource details link to their own freeze scope without changing policy", 
   const calls = await mockAPI(page);
   for (const [url, scope, id] of [[`/clusters/${clusterId}`, "cluster", clusterId], [`/networks/${networkId}`, "network", networkId]]) {
     await page.goto(url);
-    await page.getByRole("link", { name: `Freeze ${scope}`, exact: true }).click();
+    if (scope === "cluster") {
+      await page.getByRole("button", { name: "Actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Freeze cluster", exact: true }).click();
+    } else {
+      await page.getByRole("link", { name: "Freeze network", exact: true }).click();
+    }
     await expect(page).toHaveURL(new RegExp(`/freeze\\?scope=${scope}&id=${id}`));
     await expect(page.getByRole("button", { name: "Unfreeze scope", exact: true })).toBeEnabled();
     expect(calls.filter(call => call.method === "Freeze" || call.method === "Unfreeze")).toHaveLength(0);
@@ -1302,7 +1312,7 @@ test("disabled add-ons and catalog components never appear Ready", async ({ page
     await route.fallback();
   });
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Components", exact: true }).click();
+  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
   const addons = page.getByRole("table", { name: "Cluster EKS add-on target and running versions", exact: true });
   const addon = (name: string) => addons.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
   await expect(addon("snapshot-controller")).toContainText("Disabled");

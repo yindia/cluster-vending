@@ -286,3 +286,31 @@ func TestReleaseNotNewerReadsTheReleases(t *testing.T) {
 		t.Error("an unknown release does not hold a move back")
 	}
 }
+
+// The order is the serial: a release re-created later (a newer creation
+// time, the same serial) neither moves clusters back nor forward.
+func TestNotNewerUsesTheSerial(t *testing.T) {
+	rel := func(serial int64, h int) *cloudv1alpha1.Release {
+		r := &cloudv1alpha1.Release{ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(moveNow.Add(time.Duration(h) * time.Hour))}}
+		if serial > 0 {
+			r.Spec.Serial = &serial
+		}
+		return r
+	}
+	tests := []struct {
+		name            string
+		current, target *cloudv1alpha1.Release
+		want            bool
+	}{
+		{"higher serial, older creation time (re-created)", rel(1, 9), rel(2, 1), false},
+		{"lower serial, newer creation time (re-created)", rel(2, 1), rel(1, 9), true},
+		{"same serial", rel(3, 1), rel(3, 9), true},
+		{"serial beats a legacy release", rel(0, 9), rel(1, 1), false},
+		{"legacy target of a serialed current", rel(1, 1), rel(0, 9), true},
+	}
+	for _, tt := range tests {
+		if got := notNewer(tt.current, tt.target); got != tt.want {
+			t.Errorf("%s: notNewer = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}

@@ -82,7 +82,7 @@ test("guided NaaS starts off, survives mode switching and is enabled only after 
 test("disabling NaaS previews Capsule removal with retained data and applies only the reviewed false leaf", async ({ page }) => {
   const mock = await mockNaaS(page, true);
   await page.goto(`/clusters/${clusterId}`);
-  await expect(page.getByText("Check Components for setup progress.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "View Sub Tenants" })).toHaveAttribute("href", `/clusters/${clusterId}?tab=subtenants`);
   await page.getByRole("button", { name: "Edit cluster", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Edit cluster", exact: true });
   const checkbox = dialog.getByRole("checkbox", { name: controlName, exact: true });
@@ -111,7 +111,8 @@ test("disabling NaaS previews Capsule removal with retained data and applies onl
   expect(apply.validateOnly ?? false).toBe(false);
   expect(apply.cluster).toEqual(preview.cluster);
   expect(apply.updateMask).toBe("spec.naas");
-  await expect(page.getByText("Existing namespaces and workloads are kept when disabling.")).toBeVisible();
+  await expect(page.locator("dt").filter({ hasText: "Namespace as a Service" }).locator("+ dd")).toHaveText("Disabled");
+  await expect(page.getByRole("link", { name: "View Sub Tenants" })).toHaveCount(0);
   expect(mock.unexpected).toEqual([]);
 });
 

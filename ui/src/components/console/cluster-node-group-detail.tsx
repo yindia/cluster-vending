@@ -20,6 +20,7 @@ import {
 import { ConsoleTable } from "./console-table";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { NodeGroupYamlButton } from "./node-group-yaml-button";
+import { Heading } from "@astryxdesign/core/Heading";
 import { RefreshButton } from "./refresh-button";
 
 const SEARCH_DELAY_MS = 300;
@@ -124,7 +125,7 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
   return <VStack as="section" aria-label="Node group details" gap={6}>
     <DetailHeader title={detail.name} description={`Node group in ${cluster.data.displayName || cluster.data.name || clusterId}`}
       status={<HStack gap={3} vAlign="center" wrap="wrap"><StatusValue label={detail.phaseLabel} tone={detail.tone} />{detail.platformManaged && <Badge label="Managed by platform" variant="blue" />}</HStack>}
-      actions={<>{manifest && <NodeGroupYamlButton manifest={manifest} />}<RefreshButton label="Refresh node group" onClick={refresh} isLoading={refreshing} /></>}
+      actions={manifest && <NodeGroupYamlButton manifest={manifest} />}
       metadata={back} />
     {detail.message && <Banner status={detail.tone === "error" ? "error" : "warning"} title="Node group status" description={detail.message} />}
     <DetailSummary items={[
@@ -134,13 +135,14 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
     ]} />
     <VStack as="section" aria-label="Nodes" gap={3} width="100%">
       <HStack gap={3} hAlign="between" vAlign="end" wrap="wrap" width="100%">
-        <VStack gap={1}><Text type="large" weight="semibold">Nodes</Text>
+        <VStack gap={1}><Heading level={2}>Nodes</Heading>
           <Text type="supporting" role="status">{state?.collected ? `Collected ${state.collectedLabel}` : state ? "Not collected yet" : "Loading…"}</Text></VStack>
         <HStack gap={3} vAlign="end" wrap="wrap">
           <SegmentedControl label="Node status" value={choice} size="md" onChange={value => { setChoice(value as NodeStatusChoice); setPager(pagerStart()); }}>
             {nodeFilterOptions.map(option => <SegmentedControlItem key={option.value} value={option.value} label={option.label} />)}
           </SegmentedControl>
           <TextInput label="Search nodes" type="search" value={draft} onChange={setDraft} placeholder="Node name" hasClear autoComplete="off" width="min(100%, 18rem)" />
+          <RefreshButton label="Refresh node group" onClick={refresh} isLoading={refreshing} />
         </HStack>
       </HStack>
       {restarted && <Banner status="info" title="The node list changed" description="The controller collected the nodes again, so the list starts from the first page." onDismiss={() => setRestarted(false)} />}

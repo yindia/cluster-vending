@@ -35,6 +35,9 @@ message Release {
   repeated ReleaseMinor kubernetes = 9;
   // Notes for operators and tenants. GetRelease only.
   string notes = 10;
+  // The release order: a higher serial is a newer release. 0: the release
+  // predates serials (older than any that has one).
+  int64 serial = 11;
 }
 
 // ReleaseMinor is what clusters on one Kubernetes minor run.

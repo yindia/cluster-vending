@@ -2,7 +2,7 @@
 
 import { StackItem } from "@astryxdesign/core/Stack";
 
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -12,7 +12,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ConsoleTable as Table } from "./console-table";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { DetailNavigation, useDetailSection } from "./detail-navigation";
+import { useRouter } from "next/navigation";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { VStack } from "@astryxdesign/core/VStack";
@@ -57,6 +58,7 @@ export function FreezePage({ initialSelection }: { initialSelection?: FreezeSele
 }
 
 function FreezeScopes({ initialSelection }: { initialSelection?: FreezeSelection }) {
+  const router = useRouter();
   const { tenantId } = usePlatform();
   const [scope, setScope] = useState<Scope>(initialSelection?.scope ?? "tenant");
   const selectionMatches = !initialSelection || initialSelection.scope !== "tenant" || initialSelection.id === tenantId;
@@ -73,6 +75,10 @@ function FreezeScopes({ initialSelection }: { initialSelection?: FreezeSelection
       return;
     }
     setError("");
+    if (initialSelection?.scope !== scope || initialSelection.id !== value) {
+      router.push(`/freeze?scope=${scope}&id=${encodeURIComponent(value)}`, { scroll: false });
+      return;
+    }
     setActive({ target: targetFor(scope, value), label: selectionLabel(scope, value), key: (active?.key ?? 0) + 1 });
   }
   return <VStack gap={6}>
@@ -94,8 +100,6 @@ function FreezeScopes({ initialSelection }: { initialSelection?: FreezeSelection
 
 function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel: string }) {
   const { api, tenantId, canWrite } = usePlatform();
-  const [tab, setTab] = useState("policies");
-  const panelId = useId();
   const [action, setAction] = useState<Action>("freeze");
   const [reason, setReason] = useState("");
   const [until, setUntil] = useState("");
@@ -199,7 +203,8 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
   }
   const scopeId = String(target.scope.value ?? "");
   const tabs = ["policies", ...(status ? ["resources"] : []), ...(pending || status?.message || status?.freeze?.since ? ["activity"] : [])];
-  const activeTab = tabs.includes(tab) ? tab : "policies";
+  const pages = tabs.map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
+  const navigation = useDetailSection(pages);
   return <VStack gap={6}>
     <HStack gap={4} hAlign="end" vAlign="center" wrap="wrap" width="100%">
       <StackItem size="fill"><HStack gap={2} vAlign="center" wrap="wrap"><Heading level={2}>{scopeLabel}</Heading><CopyButton value={scopeId} label="scope ID" /></HStack></StackItem>
@@ -213,23 +218,22 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
     {query.loading && <Text role="status">Loading freeze status…</Text>}
     {query.error && <Banner status="error" title="Freeze status unavailable" description={query.error} />}
     {observation && !status && <Banner status="warning" title="Canonical status missing" description="The server did not return canonical freeze status. Convergence cannot be confirmed." />}
-    {status && <DetailSummary items={[
-      { label: "Phase", value: <StatusValue label={FreezePhase[status.phase]?.toLowerCase().replace(/^./, c => c.toUpperCase()) ?? `Unknown (${status.phase})`} tone={status.phase === FreezePhase.FROZEN || status.phase === FreezePhase.FREEZING ? "warning" : "neutral"} />, note: "Current server observation" },
-      { label: "Paused resources", value: `${status.pausedResources} / ${status.totalResources}`, note: `${status.newlyPausedResources} newly paused` },
-      { label: "Clusters", value: status.clusters, note: "Within this scope" },
-      { label: "Networks", value: status.networks, note: "Within this scope" },
-    ]} />}
     {status && <HStack gap={3} wrap="wrap" vAlign="center"><Text type="supporting">Policy revision</Text><CopyValue value={status.revision} label="policy revision" isSecondary /></HStack>}
     {pending && <Banner status={complete ? "success" : "warning"} title={complete ? "Convergence confirmed" : timedOut ? "Observation timed out" : "Request accepted; awaiting convergence"} description={complete
       ? `The requested ${pending.action} was confirmed for this scope at revision ${pending.revision}. Current policy is shown above.`
       : timedOut ? "Convergence was not confirmed within 15 minutes. Refresh status and inspect the scope before another action."
       : `Waiting for the canonical phase at revision ${pending.revision || "(empty)"}.${status && !revisionMatches ? " The observed revision differs; this does not confirm this request." : ""}`} />}
     {pending && !complete && <Button label="Stop operation observation" onClick={() => { setPending(undefined); invalidateReview(); }} />}
-    <TabList role="tablist" aria-label="Freeze detail sections" value={activeTab} onChange={setTab} hasDivider>
-      {tabs.map(item => <Tab key={item} value={item} label={item.replace(/^./, c => c.toUpperCase())} id={`${panelId}-${item}-tab`} panelId={`${panelId}-${item}-panel`} />)}
-    </TabList>
-    {tabs.map(item => item === activeTab ? <VStack key={item} id={`${panelId}-${item}-panel`} role="tabpanel" aria-labelledby={`${panelId}-${item}-tab`} tabIndex={0} gap={5}>
-    {item === "policies" && <>
+    <DetailNavigation resource="Freeze" pages={pages} selection={navigation} />
+    <VStack id={navigation.panelId(navigation.active)} role="tabpanel" aria-label={navigation.label} tabIndex={0} gap={5}>
+    {navigation.active === "policies" && <>
+    {status && <DetailSummary items={[
+      { label: "Phase", value: <StatusValue label={FreezePhase[status.phase]?.toLowerCase().replace(/^./, c => c.toUpperCase()) ?? `Unknown (${status.phase})`} tone={status.phase === FreezePhase.FROZEN || status.phase === FreezePhase.FREEZING ? "warning" : "neutral"} />, note: "Current server observation" },
+      { label: "Paused resources", value: `${status.pausedResources} / ${status.totalResources}`, note: `${status.newlyPausedResources} newly paused` },
+      { label: "Clusters", value: status.clusters, note: "Within this scope" },
+      { label: "Networks", value: status.networks, note: "Within this scope" },
+    ]} />}
+
     {status && <VStack gap={3}>
       <Heading level={3}>Current policy</Heading>
       <Text>{status.freeze?.reason || "No freeze reason reported."}</Text>
@@ -257,12 +261,12 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
     </form>
     </>}
     </>}
-    {item === "resources" && status && <>
+    {navigation.active === "resources" && status && <>
       <Heading level={3}>Resource pause progress</Heading>
       <Text>{status.pausedResources} of {status.totalResources} resources paused; {status.newlyPausedResources} newly paused in this observation.</Text>
       <Text>The scope contains {status.clusters} clusters and {status.networks} networks. Individual resource identities are not included in this status.</Text>
     </>}
-    {item === "activity" && <>
+    {navigation.active === "activity" && <>
       <Heading level={3}>Latest observation</Heading>
       <Text>{status?.message || "No server message reported."}</Text>
       {status?.freeze?.since && <Text>Policy set (UTC): {new Date(Number(status.freeze.since.seconds) * 1000).toISOString()}</Text>}
@@ -270,7 +274,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
       {pending && <VStack gap={2}><Text>Latest request: {pending.action}. {complete ? "Convergence confirmed." : timedOut ? "Observation timed out." : "Waiting for convergence."}</Text><CopyValue value={pending.revision} label="returned request revision" /></VStack>}
       <Text>Idle status follows Live updates; otherwise refresh manually. Submitted operations are observed every 5 seconds until completion, for up to 15 minutes. This is the latest observation, not an audit history.</Text>
     </>}
-    </VStack> : null)}
+    </VStack>
     {review && <Dialog isOpen onOpenChange={closeConfirmation} purpose={submitting ? "required" : "form"} width="min(44rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={6}>
       <VStack gap={5}>
         <DialogHeader title={`Confirm ${review.action}`} subtitle="Review the scope and type its full name before applying." onOpenChange={submitting ? undefined : closeConfirmation} />

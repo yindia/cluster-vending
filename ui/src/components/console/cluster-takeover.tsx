@@ -1,5 +1,6 @@
 "use client";
 
+import { ResourceActions } from "./resource-actions";
 import { FilterRow } from "./filter-row";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -19,12 +20,14 @@ import { DetailSummary } from "./detail-layout";
 import { WizardDialog } from "./wizard-dialog";
 import { RefreshButton } from "./refresh-button";
 
-export function ClusterTakeoverButton({ cluster, onAccepted }: { cluster: Cluster; onAccepted: (cluster: Cluster) => void }) {
+type TakeoverProps = { cluster: Cluster; onAccepted: (cluster: Cluster) => void; onDelete: () => void };
+
+export function ClusterActions({ cluster, ...props }: TakeoverProps) {
   const { scopeKey } = usePlatform();
-  return <ClusterTakeover key={`${scopeKey}:${cluster.id}`} cluster={cluster} onAccepted={onAccepted} />;
+  return <ClusterTakeover key={`${scopeKey}:${cluster.id}`} cluster={cluster} {...props} />;
 }
 
-function ClusterTakeover({ cluster, onAccepted }: { cluster: Cluster; onAccepted: (cluster: Cluster) => void }) {
+function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
   const { api, tenantId, canWrite } = usePlatform();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -87,7 +90,14 @@ function ClusterTakeover({ cluster, onAccepted }: { cluster: Cluster; onAccepted
   const rows = resources.map((resource, id) => ({ id, resource })).filter(({ resource }) => (kind === "all" || resource.kind === kind) && terms.every(term => [resource.kind, resource.name, resource.externalName, resource.detail, Disposition[resource.disposition]].join(" ").toLowerCase().includes(term)));
   const notImported = resources.filter(resource => resource.disposition === Disposition.NOT_IMPORTED);
   return <>
-    <Button label="Take over imported cluster" isDisabled={!canWrite || cluster.status?.state !== ClusterState.IMPORTED} onClick={() => { void loadReview(); }} aria-haspopup="dialog" />
+    <ResourceActions resource="Cluster"
+      items={[
+        { id: "freeze", label: cluster.status?.freeze && !cluster.status.freeze.letThrough ? "Unfreeze cluster" : "Freeze cluster",
+          href: `/freeze?scope=cluster&id=${encodeURIComponent(cluster.id)}` },
+        ...(cluster.status?.import ? [{ id: "takeover", label: "Take over imported cluster",
+          isDisabled: !canWrite || cluster.status.state !== ClusterState.IMPORTED, onClick: () => { void loadReview(); } }] : []),
+        { id: "delete", label: "Delete cluster", variant: "destructive", onClick: onDelete },
+      ]} />
     <WizardDialog isOpen={open} onOpenChange={close} title="Take over imported cluster" steps={["Review import plan", "Confirm ownership"]} step={step} busy={busy === "write"} footer={<HStack gap={2} wrap="wrap">
       <Button ref={cancelButton} label="Cancel takeover" isDisabled={busy === "write"} onClick={() => close(false)} />
       {step === 1 && <Button label="Back" isDisabled={!!busy} onClick={() => { setStep(0); setError(""); }} />}

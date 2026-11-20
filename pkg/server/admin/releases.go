@@ -87,7 +87,8 @@ func page(n int, size int32, token string) (start, end int, next string, err err
 	return start, end, next, nil
 }
 
-// ListReleases lists the releases, newest first.
+// ListReleases lists the releases, newest first: by serial (a release
+// without one is below those with one, and is ordered by its creation time).
 func (s *Service) ListReleases(ctx context.Context, req *cloudv1.ListReleasesRequest) (*cloudv1.ListReleasesResponse, error) {
 	if err := service.Validate(req); err != nil {
 		return nil, err
@@ -96,12 +97,7 @@ func (s *Service) ListReleases(ctx context.Context, req *cloudv1.ListReleasesReq
 	if err := s.reader().List(ctx, list); err != nil {
 		return nil, s.readError(ctx, "releases", err)
 	}
-	slices.SortFunc(list.Items, func(a, b cloudv1alpha1.Release) int {
-		if c := b.CreationTimestamp.Compare(a.CreationTimestamp.Time); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Name, b.Name)
-	})
+	cloudv1alpha1.SortReleasesNewestFirst(list.Items)
 	start, end, next, err := page(len(list.Items), req.GetPageSize(), req.GetPageToken())
 	if err != nil {
 		return nil, err

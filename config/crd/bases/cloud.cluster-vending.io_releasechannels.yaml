@@ -125,6 +125,10 @@ spec:
               rule: '!has(self.release) || self.promotion != ''Automatic'''
             - message: a Pinned or Manual channel names its spec.release
               rule: self.promotion == 'Automatic' || has(self.release)
+            - message: 'policy.releaseSoak is for an Automatic channel: it is how
+                long the upstream must have offered a release'
+              rule: '!has(self.policy) || !has(self.policy.releaseSoak) || !has(self.promotion)
+                || self.promotion == ''Automatic'''
           status:
             description: ReleaseChannelStatus is written by the controller.
             properties:

@@ -36,7 +36,7 @@ talks to AWS; the API server validates and stores.
 make kind-up                # kind with Crossplane (hack/start.sh)
 export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...   # in the shell only
 
-make run-controller         # terminal 1: hack/controller.local.yaml
+make run-controller         # terminal 1: hack/config.local.yaml
 make run                    # terminal 2: API server, after the controller installed the CRDs
 ```
 

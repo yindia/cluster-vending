@@ -1,7 +1,8 @@
 "use client";
 
 import { toJson, type DescField, type DescMessage, type JsonObject, type JsonValue } from "@bufbuild/protobuf";
-import { VStack } from "@astryxdesign/core/Layout";
+import type { ReactNode } from "react";
+import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Divider } from "@astryxdesign/core/Divider";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Heading, Text } from "@astryxdesign/core/Text";
@@ -118,10 +119,10 @@ export function clusterConfigurationGroups(cluster: Cluster): ConfigurationGroup
   return [...groups.filter(group => scheduling.has(group.key)), ...groups.filter(group => !scheduling.has(group.key))];
 }
 
-export function ClusterConfiguration({ cluster }: { cluster: Cluster }) {
+export function ClusterConfiguration({ cluster, actions }: { cluster: Cluster; actions: ReactNode }) {
   const groups = clusterConfigurationGroups(cluster);
   return <VStack gap={6}>
-    <VStack gap={2}><Heading level={2}>Configuration</Heading><Text color="secondary">Desired cluster settings.</Text></VStack>
+    <HStack hAlign="between" vAlign="center" wrap="wrap" gap={2}><Heading level={2}>Configuration</Heading>{actions}</HStack>
     {!cluster.spec && <Text>No desired configuration was returned.</Text>}
     {groups.map((group) => <VStack key={group.key} gap={4} as="section" aria-label={group.title}>
       <Divider />

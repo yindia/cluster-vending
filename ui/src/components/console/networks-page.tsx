@@ -1,7 +1,6 @@
 "use client";
 
 import { FilterRow } from "./filter-row";
-import { StackItem } from "@astryxdesign/core/Stack";
 import dynamic from "next/dynamic";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
@@ -18,7 +17,8 @@ import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { ResourceActions } from "./resource-actions";
+import { DetailNavigation, useDetailSection } from "./detail-navigation";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
@@ -399,13 +399,12 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
   </VStack></ResourceWorkflowDialog>;
 }
 
-function TakeOverNetworkForm({ network, accounts, onAccepted, onReload }: {
+function TakeOverNetworkForm({ network, accounts, onAccepted, onReload, onClose }: {
   network: Network; accounts: CloudAccount[];
   onAccepted: (network: Network | undefined, message: string) => void;
-  onReload: () => void;
+  onReload: () => void; onClose: () => void;
 }) {
   const { api, tenantId, canWrite } = usePlatform();
-  const [open, setOpen] = useState(false);
   const reviewKey = networkTakeoverKey(network);
   const [confirmation, setConfirmation] = useState<NetworkTakeoverConfirmation>({ reviewKey, ownershipConfirmation: "", acknowledgeNotImported: false });
   const [validation, setValidation] = useState("");
@@ -437,18 +436,15 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload }: {
         }
         const request = buildTakeOverNetwork(tenantId, current, account, confirmation, canWrite);
         const response = await api.network.takeOverNetwork(request, { signal });
-        if (!signal.aborted) { setOpen(false); onAccepted(response.network, "Takeover request accepted. The controller will acquire management and converge the reviewed import plan asynchronously. Cloud readiness has not yet been confirmed."); }
+        if (!signal.aborted) { onAccepted(response.network, "Takeover request accepted. The controller will acquire management and converge the reviewed import plan asynchronously. Cloud readiness has not yet been confirmed."); }
       });
     } catch (error) {
       setValidation(errorMessage(error));
       requestAnimationFrame(() => errorFocus.current?.focus());
     }
   };
-  return <>
-    <Button label="Take over imported network" onClick={() => { setConfirmation({ reviewKey, ownershipConfirmation: "", acknowledgeNotImported: false }); setOpen(true); }} isDisabled={!canWrite || !!blocked} />
-    {blocked && <Text type="supporting">{blocked}</Text>}
-    <WizardDialog isOpen={open} onOpenChange={setOpen} title="Take over imported network" steps={["Confirm ownership"]} step={0} busy={mutation.busy} footer={<HStack gap={2} wrap="wrap">
-      <Button label="Cancel takeover" onClick={() => setOpen(false)} isDisabled={mutation.busy} />
+  return <WizardDialog isOpen onOpenChange={open => { if (!open) onClose(); }} title="Take over imported network" steps={["Confirm ownership"]} step={0} busy={mutation.busy} footer={<HStack gap={2} wrap="wrap">
+      <Button label="Cancel takeover" onClick={onClose} isDisabled={mutation.busy} />
       <Button label="Confirm network takeover" form="network-takeover-form" type="submit" variant="primary" isDisabled={locked || !current || consent.ownershipConfirmation !== `take over ${network.name}` || (!!notImported.length && !consent.acknowledgeNotImported)} isLoading={mutation.busy} />
     </HStack>}><VStack gap={4}>
     <Text>Review every resource, change and replacement in the import preview below. Takeover lets the platform manage these cloud resources and converge the plan. CARRIED_OVER resources become platform-owned; NOT_IMPORTED resources stay outside platform management.</Text>
@@ -464,7 +460,7 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload }: {
         <ErrorNotice error={mutation.error} />
       </VStack>
     </form>
-  </VStack></WizardDialog></>;
+  </VStack></WizardDialog>;
 }
 
 function NetworkEditor({ networkId, currentEtag, accounts, onAccepted, onCancel }: {
@@ -505,7 +501,7 @@ function ImportedNetworkInventory({ resources, label }: { resources: ImportedRes
   ]} /> : <Text>No imported resources reported.</Text>;
 }
 
-function NetworkEvents({ networkId }: { networkId: string }) {
+function NetworkEvents({ networkId, onRefreshNetwork }: { networkId: string; onRefreshNetwork: () => void }) {
   const { api, tenantId } = usePlatform();
   const [tokens, setTokens] = useState([""]);
   const [activityFilters, setActivityFilters] = useState<ActivityFilters>({ search: "", kind: "all", onlyWarnings: false });
@@ -537,7 +533,7 @@ function NetworkEvents({ networkId }: { networkId: string }) {
   return <VStack gap={5}>
     <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center" width="100%">
       <VStack gap={1}><Heading level={3}>Activity</Heading><Text type="supporting">Controller events, newest first.</Text></VStack>
-      <RefreshButton label="Refresh activity" onClick={refreshActivity} isLoading={activityQuery.refreshing || allEvents.refreshing} />
+      <RefreshButton label="Refresh activity" onClick={() => { onRefreshNetwork(); refreshActivity(); }} isLoading={activityQuery.refreshing || allEvents.refreshing} />
     </HStack>
     <ActivityEventFilters value={activityFilters} onChange={value => { setActivityFilters(value); setTokens([""]); }} events={availableEventKinds} onRequestKinds={() => setRequestedEventKinds(true)} />
     {loadCompleteEvents && allEvents.loading && !filteringActivity && <Text role="status">Loading all event kinds and pages…</Text>}
@@ -554,9 +550,8 @@ function NetworkEvents({ networkId }: { networkId: string }) {
   </VStack>;
 }
 
-function DeleteNetwork({ network, onAccepted }: { network: Network; onAccepted: (network: Network | undefined, message: string) => void }) {
+function DeleteNetwork({ network, onAccepted, onClose }: { onClose: () => void; network: Network; onAccepted: (network: Network | undefined, message: string) => void }) {
   const { api, tenantId, canWrite } = usePlatform();
-  const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState({ etag: network.etag, text: "" });
   const mutation = useNetworkMutation();
   const dependencies = network.status?.clusterIds ?? [];
@@ -567,13 +562,11 @@ function DeleteNetwork({ network, onAccepted }: { network: Network; onAccepted: 
     if (disabled || !confirmed || mutation.busy) return;
     void mutation.run(async (signal) => {
       const response = await api.network.deleteNetwork({ tenantId, networkId: network.id, etag: network.etag }, { signal });
-      if (!signal.aborted) { setOpen(false); onAccepted(response.network, "Deletion request accepted. Removal is asynchronous; refresh inventory to confirm completion."); }
+      if (!signal.aborted) { onAccepted(response.network, "Deletion request accepted. Removal is asynchronous; refresh inventory to confirm completion."); }
     });
   };
-  return <>
-    <Button label="Delete network" variant="destructive" tooltip={dependencies.length ? "Remove dependent clusters before deleting this network." : "Delete this network and its owned resources"} onClick={() => { setConfirmation({ etag: network.etag, text: "" }); setOpen(true); }} isDisabled={disabled} />
-    <WizardDialog isOpen={open} onOpenChange={setOpen} title="Delete network" steps={["Confirm deletion"]} step={0} busy={mutation.busy} footer={<HStack gap={2} wrap="wrap">
-      <Button label="Cancel deletion" onClick={() => setOpen(false)} isDisabled={mutation.busy} />
+  return <WizardDialog isOpen onOpenChange={open => { if (!open) onClose(); }} title="Delete network" steps={["Confirm deletion"]} step={0} busy={mutation.busy} footer={<HStack gap={2} wrap="wrap">
+      <Button label="Cancel deletion" onClick={onClose} isDisabled={mutation.busy} />
       <Button label="Delete network and owned resources" form="network-delete-form" variant="destructive" type="submit" isDisabled={disabled || !confirmed} isLoading={mutation.busy} />
     </HStack>}><VStack gap={4}>
     <Text>{network.status?.state === NetworkState.IMPORTED ? "An import that was never taken over is only forgotten; its cloud resources remain." : "Deleting removes this network and its owned cloud resources. Carried-over resources may be retained according to ownership policy."}</Text>
@@ -584,7 +577,7 @@ function DeleteNetwork({ network, onAccepted }: { network: Network; onAccepted: 
         <ErrorNotice error={mutation.error} />
       </VStack>
     </form>
-  </VStack></WizardDialog></>;
+  </VStack></WizardDialog>;
 }
 
 function RelatedNetworkClusters({ network }: { network: Network }) {
@@ -674,7 +667,7 @@ function NetworkResourceInventory({ network }: { network: Network }) {
 function NetworkConfiguration({ network, account }: { network: Network; account?: CloudAccount }) {
   const spec = network.spec;
   return <VStack gap={6}>
-    <VStack gap={3}><Heading level={2}>Network configuration</Heading><Text type="supporting">Account, region and address layout are fixed after creation.</Text>
+    <VStack gap={3}><HStack hAlign="between" vAlign="center" gap={2} wrap="wrap"><Heading level={2}>Network configuration</Heading><ResourceYamlButton kind="Network" resourceId={network.id} /></HStack><Text type="supporting">Account, region and address layout are fixed after creation.</Text>
       <MetadataList columns="multi">
         <MetadataListItem label="Provider">{networkProvider(account) === "aws" ? "Amazon Web Services" : "Unknown or unsupported"}</MetadataListItem>
         <MetadataListItem label="Cloud account">{spec?.bootstrapId ? <AccountReference id={spec.bootstrapId} account={account} /> : "Not reported"}</MetadataListItem>
@@ -704,49 +697,55 @@ function NetworkConfiguration({ network, account }: { network: Network; account?
 
 function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: CloudAccount[] }) {
   const { api, tenantId, canWrite } = usePlatform();
+  const [action, setAction] = useState<"delete" | "takeover">();
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState("");
-  const [tab, setTab] = useState("overview");
-  const panelId = useId();
+  const tabs = [{ value: "overview", label: "Overview" }, { value: "topology", label: "Topology" }, { value: "resources", label: "Resources" }, { value: "activity", label: "Activity" }, { value: "configuration", label: "Configuration" }];
+  const navigation = useDetailSection(tabs);
+  const tab = navigation.active;
   const load = useCallback((signal: AbortSignal) => api.network.getNetwork({ tenantId, networkId }, { signal }), [api, tenantId, networkId]);
   const query = useAsyncQuery(load, { pollMs: 5000 });
   const network = query.data?.network;
-  const accepted = (_network: Network | undefined, message: string) => { setNotice(message); setEditing(false); query.refresh(); };
+  const accepted = (_network: Network | undefined, message: string) => { setNotice(message); setEditing(false); setAction(undefined); query.refresh(); };
   const status = network?.status;
   const account = accounts.find(({ id }) => id === network?.spec?.bootstrapId);
   const resources = status?.managedResources ?? [];
   const ready = resources.filter((resource) => resource.state === ManagedResourceState.READY && resource.ready === ConditionStatus.TRUE && resource.observedGeneration >= resource.generation).length;
   const paused = resources.filter((resource) => resource.paused).length;
+  const takeoverBlock = network && status?.import ? networkTakeoverBlockReason(tenantId, network, account) : undefined;
   const healthy = network ? networkIsReady(network) : false;
   const state = status?.state === NetworkState.READY && !healthy ? "Reconciling" : enumLabel(NetworkState, status?.state);
-  const tabs = [{ value: "overview", label: "Overview" }, { value: "topology", label: "Topology" }, { value: "resources", label: "Resources" }, { value: "activity", label: "Activity" }, { value: "configuration", label: "Configuration" }];
+
   return <VStack gap={6}>
     <DetailHeader title={network?.displayName || network?.name || "Network details"}
-      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={networkProvider(account) || ""} size="sm" /><Text type="supporting">{networkProvider(account) === "aws" ? "Amazon Web Services" : "Cloud network"}</Text></HStack><Text type="supporting">{network?.spec?.region || "Region pending"}</Text>{network && <CopyValue value={network.name} label="Network resource name" isSecondary />}</>}
-      status={network && <StatusValue tone={healthy ? "success" : status?.state === NetworkState.FAILED ? "error" : "warning"} label={state} />}
+      metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={networkProvider(account) || ""} size="sm" /><Text type="supporting">{networkProvider(account) === "aws" ? "Amazon Web Services" : "Cloud network"}</Text></HStack><Text type="supporting">{network?.spec?.region || "Region pending"}</Text>{network && <CopyValue value={network.name} label="Network resource name" isSecondary />}{network && <CopyValue value={network.id} label="Network ID" isSecondary />}</>}
+      status={network && <><StatusValue tone={healthy ? "success" : status?.state === NetworkState.FAILED ? "error" : "warning"} label={state} />{status?.freeze && <PauseValue freeze={status.freeze} />}</>}
       actions={<>
             {network && canWrite && <Button label="Edit network" onClick={() => setEditing(true)} isDisabled={editing || !network.etag || !networkProvider(account) || status?.state === NetworkState.IMPORTED || status?.state === NetworkState.DELETING} />}
-            {network && <ResourceYamlButton kind="Network" resourceId={network.id} />}
-            {network && canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze network" : "Freeze network"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "secondary"} href={`/freeze?scope=network&id=${encodeURIComponent(network.id)}`} />}
-            {network && canWrite && <DeleteNetwork network={network} onAccepted={accepted} />}
-            {network && canWrite && status?.import && (status.state === NetworkState.IMPORTED || status.state === NetworkState.FAILED) && <TakeOverNetworkForm network={network} accounts={accounts} onAccepted={accepted} onReload={query.refresh} />}
-            <RefreshButton label="Refresh details" onClick={query.refresh} isLoading={query.refreshing} />
+            {network && canWrite && <ResourceActions resource="Network" items={[
+              { id: "freeze", label: status?.freeze && !status.freeze.letThrough ? "Unfreeze network" : "Freeze network", href: `/freeze?scope=network&id=${encodeURIComponent(network.id)}` },
+              ...(status?.import && (status.state === NetworkState.IMPORTED || status.state === NetworkState.FAILED) ? [{
+                id: "takeover", label: "Take over imported network", description: takeoverBlock || undefined, isDisabled: !!takeoverBlock, onClick: () => setAction("takeover"),
+              }] : []),
+              { id: "delete", label: "Delete network", variant: "destructive", isDisabled: !network.etag || !!status?.clusterIds.length || status?.state === NetworkState.DELETING,
+                description: status?.clusterIds.length ? "Remove dependent clusters first." : undefined, onClick: () => setAction("delete") },
+            ]} />}
+            {!network && query.error && <RefreshButton label="Retry network details" onClick={query.refresh} />}
       </>} />
     {notice && <Banner status="info" title="Request accepted" description={notice} />}
     <ErrorNotice error={query.error} />
     {query.loading && <Text role="status">Loading network health and resources…</Text>}
     {network && <>
+
+      <DetailNavigation resource="Network" pages={tabs} selection={navigation} actions={["overview", "resources", "configuration"].includes(tab) && <RefreshButton label="Refresh details" onClick={query.refresh} isLoading={query.refreshing} />} />
+      {tabs.map((item) => item.value === tab ? <VStack key={item.value} id={navigation.panelId(tab)} role="tabpanel" aria-label={navigation.label} tabIndex={0} gap={6}>
+        {tab === "overview" && <>
       <DetailSummary items={[
         { label: "Managed resources", value: resources.length, note: `${paused} paused` },
         { label: "Resources ready", value: `${ready} / ${resources.length}`, note: "Observed cloud readiness" },
         { label: "Connected clusters", value: status?.clusterIds.length ?? 0, note: "Share this network" },
         { label: "Rollout tier", value: enumLabel(Tier, network.spec?.tier), note: "Inherited by every cluster" },
       ]} />
-      <TabList value={tab} onChange={setTab} role="tablist" aria-label="Network detail sections" hasDivider>
-        {tabs.map((item) => <Tab key={item.value} id={`${panelId}-${item.value}-tab`} value={item.value} label={item.label} panelId={`${panelId}-${item.value}-panel`} />)}
-      </TabList>
-      {tabs.map((item) => item.value === tab ? <VStack key={item.value} id={`${panelId}-${item.value}-panel`} role="tabpanel" aria-labelledby={`${panelId}-${item.value}-tab`} tabIndex={0} gap={6}>
-        {tab === "overview" && <>
           <VStack gap={4}>
             <HStack hAlign="between" vAlign="start" gap={4} wrap="wrap"><VStack gap={1}><Heading level={2}>Network health</Heading><Text type="supporting">{healthy ? "The cloud matches the current desired generation." : "Waiting for cloud reconciliation to confirm the desired generation."}</Text></VStack><Text type="supporting">Generation {String(status?.observedGeneration ?? 0)} / {String(network.generation)}</Text></HStack>
             <Text>{status?.message || (healthy ? "All reported checks are current." : "No controller message yet.")}</Text>
@@ -766,10 +765,11 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
         </>}
         {tab === "topology" && <NetworkTopology network={network} account={account} onRefresh={query.refresh} />}
         {tab === "resources" && <NetworkResourceInventory network={network} />}
-        {tab === "activity" && <VStack gap={6}><NetworkEvents networkId={networkId} /><Collapsible trigger="Persisted recent events" defaultIsOpen={false}><ActivityEventTable events={status?.recentEvents ?? []} title="Persisted recent network events" /></Collapsible></VStack>}
+        {tab === "activity" && <VStack gap={6}><NetworkEvents networkId={networkId} onRefreshNetwork={query.refresh} /><Collapsible trigger="Persisted recent events" defaultIsOpen={false}><ActivityEventTable events={status?.recentEvents ?? []} title="Persisted recent network events" /></Collapsible></VStack>}
         {tab === "configuration" && <NetworkConfiguration network={network} account={account} />}
       </VStack> : null)}
-      <Text type="supporting">Use Refresh for the latest observations. Enable Live updates to refresh every five seconds for up to 15 minutes; Refresh restarts observation.</Text>
+      {network && canWrite && action === "delete" && <DeleteNetwork network={network} onClose={() => setAction(undefined)} onAccepted={accepted} />}
+      {network && canWrite && action === "takeover" && <TakeOverNetworkForm network={network} accounts={accounts} onClose={() => setAction(undefined)} onAccepted={accepted} onReload={query.refresh} />}
       {canWrite && editing && <NetworkEditor networkId={networkId} currentEtag={network.etag} accounts={accounts} onAccepted={accepted} onCancel={() => setEditing(false)} />}
     </>}
   </VStack>;
@@ -847,15 +847,12 @@ function NetworksList() {
   const accepted = (network: Network | undefined, message: string) => {
     setNotice(message); setCreating(false); setImporting(false); setAcceptedId(network?.id); list.refresh();
   };
-  return <Section variant="transparent" padding={4}><VStack gap={4}>
-    <HStack hAlign="end" vAlign="center" gap={3} wrap="wrap" width="100%">
-      <StackItem size="fill"><Heading level={2}>Networks</Heading></StackItem>
-      <HStack gap={2} vAlign="center" wrap="wrap">
+  return <VStack gap={5}>
+    <DetailHeader title="Networks" description="Manage network placement and the rollout tier inherited by clusters." actions={<>
         {canWrite && <Button label="Create network" variant="primary" onClick={() => { setCreating(true); setImporting(false); }} isDisabled={creating} />}
         {canWrite && <Button label="Import network" onClick={() => { setImporting(true); setCreating(false); }} isDisabled={importing} />}
         <RefreshButton label="Refresh networks" onClick={() => { list.refresh(); accounts.refresh(); }} isLoading={list.refreshing || accounts.refreshing} />
-      </HStack>
-    </HStack>
+    </>} />
     {!canWrite && <Text type="supporting">Your tenant access is read only.</Text>}
     {notice && <Banner status="info" title="Request accepted" description={notice} />}
     {acceptedId && <Link href={`/networks/${encodeURIComponent(acceptedId)}`}>View network details and progress</Link>}
@@ -881,5 +878,5 @@ function NetworksList() {
     </HStack>
     {creating && canWrite && <NetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setCreating(false)} />}
     {importing && canWrite && <ImportNetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setImporting(false)} />}
-  </VStack></Section>;
+  </VStack>;
 }

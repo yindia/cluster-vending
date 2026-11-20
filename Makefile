@@ -144,7 +144,9 @@ cf-format-check: cf-requirements ## Check scripts/generate.py is black-formatted
 
 .PHONY: test
 test: ## Unit tests with the race detector (a fake API server, no cluster needed)
-	go test -race -count=1 ./...
+	# pkg/reconcile/cluster takes over 10 minutes under -race; the default per-package
+	# timeout is 10m.
+	go test -race -count=1 -timeout 30m ./...
 
 .PHONY: cover
 cover: ## Unit tests with a coverage report in bin/coverage.html
@@ -198,8 +200,8 @@ keycloak: ## Start/configure local Keycloak only; does not start API or UI
 	bash hack/keycloak.sh start
 
 .PHONY: run-controller
-run-controller: build ## Run the controller against the kind cluster (hack/controller.local.yaml); AWS keys from the environment
-	$(BINARY) controller --config hack/controller.local.yaml
+run-controller: build ## Run the controller against the kind cluster (the same file as run, LOCAL_CONFIG); AWS keys from the environment
+	$(BINARY) controller --config "$(LOCAL_CONFIG)"
 
 .PHONY: clean
 clean: ## Remove build output

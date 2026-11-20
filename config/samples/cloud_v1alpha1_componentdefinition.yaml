@@ -73,6 +73,9 @@ spec:
   provider: aws
   description: Node autoscaling. Launches EC2 instances for pending pods.
   namespace: kube-system
+  # Karpenter is the first platform component: the CRD refuses any other
+  # sequence for it.
+  sequence: 0
   # An IRSA role (the default access): the cluster needs spec.aws.irsa. The
   # ${...} placeholders are filled in per cluster. No interruption queue
   # yet: only an IAM role and policy can be declared so far.

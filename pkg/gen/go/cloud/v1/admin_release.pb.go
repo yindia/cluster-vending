@@ -172,7 +172,10 @@ type Release struct {
 	// The supported Kubernetes minors, newest first. GetRelease only.
 	Kubernetes []*ReleaseMinor `protobuf:"bytes,9,rep,name=kubernetes,proto3" json:"kubernetes,omitempty"`
 	// Notes for operators and tenants. GetRelease only.
-	Notes         string `protobuf:"bytes,10,opt,name=notes,proto3" json:"notes,omitempty"`
+	Notes string `protobuf:"bytes,10,opt,name=notes,proto3" json:"notes,omitempty"`
+	// The release order: a higher serial is a newer release. 0: the release
+	// predates serials (older than any that has one).
+	Serial        int64 `protobuf:"varint,11,opt,name=serial,proto3" json:"serial,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,6 +278,13 @@ func (x *Release) GetNotes() string {
 		return x.Notes
 	}
 	return ""
+}
+
+func (x *Release) GetSerial() int64 {
+	if x != nil {
+		return x.Serial
+	}
+	return 0
 }
 
 // ReleaseMinor is what clusters on one Kubernetes minor run.
@@ -2188,7 +2198,7 @@ var File_cloud_v1_admin_release_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"\n" +
-	"\x1ccloud/v1/admin_release.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/freeze.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe9\x02\n" +
+	"\x1ccloud/v1/admin_release.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x16cloud/v1/cluster.proto\x1a\x19cloud/v1/conditions.proto\x1a\x15cloud/v1/freeze.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x81\x03\n" +
 	"\aRelease\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\ashipped\x18\x02 \x01(\bR\ashipped\x12\x14\n" +
@@ -2203,7 +2213,8 @@ const file_cloud_v1_admin_release_proto_rawDesc = "" +
 	"kubernetes\x18\t \x03(\v2\x16.cloud.v1.ReleaseMinorR\n" +
 	"kubernetes\x12\x14\n" +
 	"\x05notes\x18\n" +
-	" \x01(\tR\x05notes\"\xa7\x02\n" +
+	" \x01(\tR\x05notes\x12\x16\n" +
+	"\x06serial\x18\v \x01(\x03R\x06serial\"\xa7\x02\n" +
 	"\fReleaseMinor\x12\x14\n" +
 	"\x05minor\x18\x01 \x01(\tR\x05minor\x122\n" +
 	"\achannel\x18\x02 \x01(\x0e2\x18.cloud.v1.ReleaseChannelR\achannel\x12\x18\n" +

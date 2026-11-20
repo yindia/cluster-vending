@@ -23,6 +23,11 @@ resources:
 - deployment.yaml
 - service.yaml
 
+# The node group layout is the file of ../../node-groups, the same one the
+# controller reads: a ConfigMap mounted at /etc/cluster-vending.
+components:
+- ../../node-groups
+
 # The server's settings, as the CV_* environment variables of its flags
 # (pkg/config). Edit here or patch in an overlay.
 configMapGenerator:
@@ -31,16 +36,6 @@ configMapGenerator:
   - CV_HTTP_ADDR=:8080
   - CV_LOG_FORMAT=json
   - CV_LOG_LEVEL=info
-  # The node group layout (the controller needs the same values:
-  # ../../manager). Families user node groups may use ("none": no
-  # restriction) and what a group that sets none gets; the system node
-  # group's size and, for new clusters, instance type.
-  - CV_NODE_GROUP_INSTANCE_FAMILIES=t3
-  - CV_NODE_GROUP_DEFAULT_ARCHITECTURES=AMD64
-  - CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES=ON_DEMAND
-  - CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE=t3.medium
-  - CV_SYSTEM_NODE_GROUP_MIN_SIZE=2
-  - CV_SYSTEM_NODE_GROUP_MAX_SIZE=6
   # Nothing of AWS: the server validates requests and stores the desired
   # state. The controller (../../default) installs the providers, looks the
   # cloud up and reconciles; it is the one with AWS settings and an IAM role.

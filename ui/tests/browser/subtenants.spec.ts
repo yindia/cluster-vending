@@ -41,7 +41,7 @@ async function mock(page: Page, options: { existing?: boolean; fail?: boolean; n
   });
   return { calls, unexpected };
 }
-async function open(page: Page) { await page.goto(`/clusters/${clusterId}`); await page.getByRole("tab", { name: "Sub Tenants", exact: true }).click(); await expect(page.getByRole("searchbox", { name: "Search Sub Tenants", exact: true })).toBeVisible(); }
+async function open(page: Page) { await page.goto(`/clusters/${clusterId}?tab=subtenants`); await expect(page.getByRole("searchbox", { name: "Search Sub Tenants", exact: true })).toBeVisible(); }
 
 test("guided drafts and explicit review, unavailable team access, identical request retry", async ({ page }) => {
   const api = await mock(page, { fail: true }); await open(page);
@@ -331,7 +331,8 @@ test("Sub Tenant detail saves three services locally and keeps its resources out
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => table.evaluate(node => node.getBoundingClientRect().right)).toBeLessThanOrEqual(390);
   await page.getByRole("link", { name: "Cluster Sub Tenants", exact: true }).click();
-  await page.getByRole("tab", { name: "Cloud Resource", exact: true }).click();
+  await page.getByRole("combobox", { name: "Cluster section" }).click();
+  await page.getByRole("option", { name: "Platform cloud resources", exact: true }).click();
   await expect(page.getByRole("region", { name: "Platform-owned cloud resources" })).toContainText("No managed resource previews yet");
   expect(api.calls.filter(({ method }) => /^(Create|Update|Delete|Apply)/.test(method))).toEqual([]);
   expect(api.unexpected).toEqual([]);
@@ -395,7 +396,7 @@ test("the cluster creates each service for the platform, independently of a Sub 
   const api = await mock(page, { existing: true });
   await page.goto(`/clusters/${clusterId}?tab=cloud-resources`);
   const platform = page.getByRole("region", { name: "Platform-owned cloud resources" });
-  const panel = page.getByRole("tabpanel", { name: "Cloud Resource" });
+  const panel = page.getByRole("tabpanel", { name: "Platform cloud resources" });
   await expect(platform).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Reported infrastructure" })).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Open Cluster snapshot" })).toHaveCount(0);

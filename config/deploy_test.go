@@ -180,7 +180,7 @@ func TestControllerDeploymentUsesTheCommandsSettings(t *testing.T) {
 func TestServerSettingsLoad(t *testing.T) {
 	_, envNames := known(config.ServeSettings(), config.GlobalSettings())
 	c := deployment(t, filepath.Join(serverBase, "deployment.yaml")).Spec.Template.Spec.Containers[0]
-	if !slices.Equal(c.Command, []string{"/cluster-vending", "serve"}) || len(c.Args) != 0 || len(c.Env) != 0 {
+	if !slices.Equal(c.Command, []string{"/cluster-vending", "serve"}) || !slices.Equal(c.Args, []string{"--config=" + platformConfigPath}) || len(c.Env) != 0 {
 		t.Errorf("command %v args %v env %v", c.Command, c.Args, c.Env)
 	}
 	env := literals(t, serverBase)
@@ -192,7 +192,11 @@ func TestServerSettingsLoad(t *testing.T) {
 			t.Errorf("the server is given %s: it reconciles nothing and makes no AWS call", name)
 		}
 	}
-	cfg, err := config.LoadServe(lookup(nil), lookup(env), nil)
+	file, err := config.LoadFile(filepath.Join("node-groups", "platform.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadServe(lookup(nil), lookup(env), file)
 	if err != nil {
 		t.Fatalf("the settings do not load: %v", err)
 	}

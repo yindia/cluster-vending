@@ -99,3 +99,14 @@
     align-items: end;
   }
 }
+
+.cv-detail-navigation {
+  container: detail-navigation / inline-size;
+  inline-size: 100%;
+}
+.cv-detail-navigation .cv-detail-mobile-nav { display: none; }
+@container detail-navigation (max-width: 40rem) {
+  .cv-detail-navigation .cv-detail-desktop-nav { display: none; }
+  .cv-detail-navigation .cv-detail-mobile-nav { display: flex; }
+  .cv-detail-mobile-nav > :first-child { flex: 1; min-inline-size: 0; }
+}

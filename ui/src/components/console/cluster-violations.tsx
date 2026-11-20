@@ -10,7 +10,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
-import { StackItem } from "@astryxdesign/core/Stack";
+import { Divider } from "@astryxdesign/core/Divider";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -111,19 +111,13 @@ function PolicyTable({ items, events, offset, total }: { items: PolicyRow[]; eve
   </VStack>;
 }
 
-export function ClusterViolationsPanel({ clusterId, events = false }: { clusterId: string; events?: boolean }) {
+export function ClusterViolationsPanel({ clusterId }: { clusterId: string }) {
   const { scopeKey } = usePlatform();
-  return <ViolationsInventory key={`${scopeKey}:${clusterId}`} clusterId={clusterId} events={events} />;
+  return <PolicySnapshots key={`${scopeKey}:${clusterId}`} clusterId={clusterId} />;
 }
 
-function ViolationsInventory({ clusterId, events }: { clusterId: string; events: boolean }) {
+function usePolicySnapshot(clusterId: string, events: boolean) {
   const { api, tenantId } = usePlatform();
-  const [filters, setFilters] = useState({ ...emptyPolicyFilters });
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const filterId = useId();
-  const [page, setPage] = useState(1);
-  const title = events ? "Violation events" : "Current violations";
-  const noun = events ? "violation events" : "violations";
   const load = useCallback(async (signal: AbortSignal) => {
     if (!tenantId || !clusterId) throw new Error("Select a tenant and cluster to read policy results.");
     return collectPolicySnapshot<PolicyRow>(async pageToken => {
@@ -136,7 +130,30 @@ function ViolationsInventory({ clusterId, events }: { clusterId: string; events:
       return { ...response, items: response.violations };
     }, signal);
   }, [api, tenantId, clusterId, events]);
-  const query = useAsyncQuery(load);
+  return useAsyncQuery(load);
+}
+
+function PolicySnapshots({ clusterId }: { clusterId: string }) {
+  const findings = usePolicySnapshot(clusterId, false);
+  const events = usePolicySnapshot(clusterId, true);
+  return <VStack gap={5}>
+    <HStack hAlign="between" vAlign="center" gap={2}><Heading level={2}>Policy violations</Heading>
+      <RefreshButton label="Refresh policy violations and events" isLoading={findings.refreshing || events.refreshing}
+        onClick={() => { findings.refresh(); events.refresh(); }} />
+    </HStack>
+    <ViolationsInventory query={findings} events={false} />
+    <Divider />
+    <ViolationsInventory query={events} events />
+  </VStack>;
+}
+
+function ViolationsInventory({ query, events }: { query: ReturnType<typeof usePolicySnapshot>; events: boolean }) {
+  const [filters, setFilters] = useState({ ...emptyPolicyFilters });
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterId = useId();
+  const [page, setPage] = useState(1);
+  const title = events ? "Violation events" : "Current violations";
+  const noun = events ? "violation events" : "violations";
   const rows = query.data?.rows ?? [];
   const summary = query.data?.summary;
   const filtered = filterPolicyRows(rows, filters);
@@ -150,10 +167,7 @@ function ViolationsInventory({ clusterId, events }: { clusterId: string; events:
   const available = !!summary?.collectedAt;
   const staleLabel = staleSnapshotLabel(summary, utcTime);
   return <VStack className="cv-policy-panel" role="group" aria-label={title} gap={3} aria-busy={query.refreshing || query.loading}>
-    <HStack gap={3} wrap="wrap" hAlign="end" vAlign="center" width="100%">
-      <StackItem size="fill"><Heading level={2}>{title}</Heading></StackItem>
-      <RefreshButton label={`Refresh ${noun}`} isLoading={query.refreshing} onClick={query.refresh} />
-    </HStack>
+    <Heading level={3}>{title}</Heading>
     <Text type="supporting" color="secondary">{events ? query.data?.retentionNotice || "Kubernetes retains events for a limited time and can combine repeated occurrences." : "Policy reports show findings at collection time. Admission events are listed below."}</Text>
     {query.error && <Banner status="error" title={`Could not load ${noun}`} description={query.error} />}
     {query.error && query.data && <Text>Showing the last fully loaded snapshot. The failed refresh did not add partial pages.</Text>}

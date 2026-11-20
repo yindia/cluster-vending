@@ -189,7 +189,7 @@ test("the system group opens, marked as managed by the platform, with its nodes;
   await expect(page.getByRole("heading", { level: 1, name: "system" })).toBeVisible();
   await expect(page.getByText("Managed by platform", { exact: true })).toBeVisible();
   await expect(page.getByText("t3.large")).toBeVisible();
-  await expect(page.getByText("2 nodes (fixed)")).toBeVisible();
+  await expect(page.getByText("2–2 (autoscaled)")).toBeVisible();
   await expect(page.getByRole("button", { name: /View YAML/ })).toHaveCount(0);
   await expect(bodyRows(page)).toHaveCount(2);
   expect(api.unexpected).toEqual([]);
@@ -214,7 +214,7 @@ test("View YAML opens the group's manifests", async ({ page }) => {
 test("the Node groups tab links every group to its page", async ({ page }) => {
   await mock(page);
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Node groups", exact: true }).click();
+  await page.getByRole("tab", { name: "Infrastructure", exact: true }).click();
   const panel = page.getByRole("tabpanel", { name: "Node groups", exact: true });
   for (const name of ["system", "batch"]) await expect(panel.getByRole("link", { name: `Open node group ${name}` })).toHaveAttribute("href", `/clusters/${clusterId}/node-groups/${name}`);
   await panel.getByRole("link", { name: "Open node group batch" }).click();

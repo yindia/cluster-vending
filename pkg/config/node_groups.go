@@ -285,3 +285,18 @@ func parseList(s Setting, raw string, pattern *regexp.Regexp, what string) ([]st
 	}
 	return out, nil
 }
+
+// LeftoverNodeGroupVariables names the environment variables that still
+// set a node group key, in the settings' order. They keep working (a
+// variable wins over the file) but the file is where the layout lives
+// (docs/architecture.md#node-groups-configuration), so the commands warn at
+// start to make a forgotten one visible.
+func LeftoverNodeGroupVariables(env LookupFunc) []string {
+	var set []string
+	for _, s := range nodeGroupSettings {
+		if _, ok := get(env, s.Env); ok {
+			set = append(set, s.Env)
+		}
+	}
+	return set
+}

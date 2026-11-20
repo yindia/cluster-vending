@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -282,5 +283,40 @@ func TestGetReleaseChannelCarriesThePlan(t *testing.T) {
 	if t0.GetState() != cloudv1.RolloutTierState_ROLLOUT_TIER_STATE_NOT_STARTED || len(t0.GetWaits()) != 1 ||
 		t0.GetWaits()[0].GetClusterName() != "manual" || t0.GetWaits()[0].GetReason() == "" {
 		t.Errorf("tier 0 = %v", t0)
+	}
+}
+
+// The list is ordered by serial, not by creation time: a release
+// re-created later keeps its place. A release without a serial is below
+// every release with one, and the serial is shown.
+func TestListReleasesOrderedBySerial(t *testing.T) {
+	mk := func(name string, serial int64, age time.Duration) *cloudv1alpha1.Release {
+		r := &cloudv1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: name, CreationTimestamp: metav1.NewTime(releaseNow.Add(-age))}}
+		if serial > 0 {
+			r.Spec.Serial = &serial
+		}
+		return r
+	}
+	s := releaseWorld(t,
+		mk("2026-11-a", 1, time.Hour), // re-created: the newest creation time
+		mk("2026-11-b", 2, 24*time.Hour),
+		mk("2026-11-c", 3, 72*time.Hour))
+
+	res, err := s.ListReleases(t.Context(), &cloudv1.ListReleasesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	serials := map[string]int64{}
+	for _, r := range res.GetReleases() {
+		got = append(got, r.GetName())
+		serials[r.GetName()] = r.GetSerial()
+	}
+	want := []string{"2026-11-c", "2026-11-b", "2026-11-a", shipped, "shipped-f874cd2c"}
+	if !slices.Equal(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+	if serials["2026-11-c"] != 3 || serials["2026-11-a"] != 1 || serials[shipped] != 0 {
+		t.Errorf("serials = %v", serials)
 	}
 }

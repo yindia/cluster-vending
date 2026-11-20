@@ -71,8 +71,7 @@ async function mock(page: Page, options: Options = {}) {
 }
 
 async function open(page: Page) {
-  await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Node groups", exact: true }).click();
+  await page.goto(`/clusters/${clusterId}?tab=node-groups`);
   return page.getByRole("tabpanel", { name: "Node groups", exact: true });
 }
 const row = (panel: Locator, name: string) => panel.getByRole("row").filter({ has: panel.page().getByText(name, { exact: true }) });
@@ -98,7 +97,7 @@ test("the system group is first and read-only, there is no platform row, and use
   await expect(row(panel, "system")).toContainText("Ready");
   await expect(row(panel, "system")).toContainText("Locked");
   await expect(row(panel, "system")).toContainText("t3.large");
-  await expect(row(panel, "system")).toContainText("2 nodes (fixed)");
+  await expect(row(panel, "system")).toContainText("2–2 (autoscaled)");
   await expect(row(panel, "system")).toContainText("On-demand");
   await expect(row(panel, "system").getByRole("link", { name: "Open node group system", exact: true })).toHaveAttribute("href", `/clusters/${clusterId}/node-groups/system`);
   await expect(panel.getByRole("button", { name: "Actions for node group system", exact: true })).toHaveCount(0);

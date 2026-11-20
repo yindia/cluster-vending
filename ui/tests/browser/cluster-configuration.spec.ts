@@ -72,7 +72,7 @@ test("viewer can inspect full advanced desired configuration, without observed s
   await expect(panel).not.toContainText("aws-mountpoint-s3-csi-driver");
   await expect(panel).not.toContainText("config-bucket");
   await expect(panel).not.toContainText("logLevel");
-  await expect(panel.getByRole("button", { name: "View YAML", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "View YAML", exact: true })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "View YAML", exact: true })).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("configuration-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -107,7 +107,7 @@ test("configuration keeps false and zero while omitting empty optional settings"
 test("configuration reuses tenant-scoped read-only YAML viewer and copy", async ({ page }) => {
   const api = await mockConfiguration(page, advancedSpec);
   const panel = await openConfiguration(page);
-  await expect(panel.getByRole("button", { name: "View YAML", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "View YAML", exact: true })).toHaveCount(1);
   await page.getByRole("button", { name: "View YAML", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Cluster YAML", exact: true });
   await expect(dialog.getByRole("textbox", { name: "Cluster YAML configuration", exact: true })).toBeVisible();

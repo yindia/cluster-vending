@@ -20,10 +20,12 @@ import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ConsoleTable as Table } from "./console-table";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
-import { useSearchParams } from "next/navigation";
 import { ManagedResourcePreviews } from "./managed-resource-previews";
 import { ClusterSubTenants } from "./cluster-subtenants";
-import { TabList, Tab } from "@astryxdesign/core/TabList";
+import { clusterSections } from "./cluster-sections";
+import { DetailNavigation, useDetailSection } from "./detail-navigation";
+import { ComponentPhase } from "@/gen/cloud/v1/component_pb";
+import { NodeGroupPhase } from "@/gen/cloud/v1/node_group_pb";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
@@ -40,7 +42,7 @@ import {
   type ClusterForm, type ReviewedClusterPlan,
 } from "@/lib/workflows/clusters";
 import {
-  ClusterState, ClusterUpgradePhase, UpgradeMode, type Cluster, type PlatformComponent,
+  ClusterState, ClusterRolloutResult, ClusterUpgradePhase, UpgradeMode, type Cluster, type PlatformComponent,
 } from "@/gen/cloud/v1/cluster_pb";
 import { CreateClusterRequestSchema, ImportClusterRequestSchema, UpdateClusterRequestSchema, type CreateClusterRequest, type ImportClusterRequest } from "@/gen/cloud/v1/cluster_service_pb";
 import { platformInstallationStatus } from "@/lib/workflows/installation-status";
@@ -54,7 +56,7 @@ import { ResourceWorkflowDialog, ManifestCreateDialog } from "./manifest-create-
 import { accountDescription } from "@/lib/workflows/cluster-placement";
 import { supportsCapability } from "@/lib/providers/registry";
 import { ClusterAccessButton } from "./cluster-access";
-import { ClusterTakeoverButton } from "./cluster-takeover";
+import { ClusterActions } from "./cluster-takeover";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
@@ -68,7 +70,7 @@ import { ActivityEventTable, ActivityEventFilters, filterActivityEvents, type Ac
 import { ClusterDeprecationsPanel } from "./cluster-deprecations";
 import { ClusterRecommendationsPanel } from "./cluster-recommendations";
 import { ClusterViolationsPanel } from "./cluster-violations";
-import { ClusterTenantComponents } from "./cluster-tenant-components";
+import { ClusterComponentsPanel } from "./cluster-tenant-components";
 
 function label(values: Record<number, string>, value?: number) {
   if (value === undefined) return "Not reported";
@@ -168,13 +170,10 @@ function ClusterList() {
     { key: "tier", header: "Tier", width: proportional(1, { minWidth: 80 }), renderCell: ({ cluster }) => <Text maxLines={1}>{inheritedTier(cluster) ? `Tier ${inheritedTier(cluster) - 1}` : "Default"}</Text> },
   ];
   return <VStack gap={6}>
-    <HStack gap={3} wrap="wrap" hAlign="end" vAlign="center" width="100%">
-      <StackItem size="fill"><Heading level={2}>All clusters</Heading></StackItem>
-      <HStack gap={3} wrap="wrap" vAlign="center">
-        {canWrite && <><Button label="Create cluster" onClick={() => setCreating(true)} /><Button label="Import cluster" variant="secondary" onClick={() => setImporting(true)} /></>}
+    <DetailHeader title="Clusters" description="Manage Kubernetes clusters, node groups, and upgrades." actions={<>
+        {canWrite && <><Button label="Create cluster" variant="primary" onClick={() => setCreating(true)} /><Button label="Import cluster" variant="secondary" onClick={() => setImporting(true)} /></>}
         <RefreshButton label="Refresh clusters" isLoading={list.refreshing || networks.refreshing} onClick={() => { list.refresh(); networks.refresh(); }} />
-      </HStack>
-    </HStack>
+    </>} />
     {!canWrite && <Text type="supporting">Read-only access. Tenant administrators can create and change clusters.</Text>}
     {acknowledgement && <VStack role="status"><Text>{acknowledgement}</Text></VStack>}
     {acceptedId && <Link href={`/clusters/${encodeURIComponent(acceptedId)}`}>View cluster details and readiness</Link>}
@@ -528,10 +527,6 @@ function ImportCluster({ onClose, onImported }: { onClose: () => void; onImporte
 
 function ClusterDetails({ clusterId }: { clusterId: string }) {
   const { api, tenantId, canWrite } = usePlatform();
-  const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab");
-  const [tab, setTab] = useState<string>(initialTab === "cloud-resources" || initialTab === "subtenants" || initialTab === "node-groups" ? initialTab : "overview");
-  const panelPrefix = useId();
   const [polling, setPolling] = useState(true);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -541,16 +536,23 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const [activityFilters, setActivityFilters] = useState<ActivityFilters>({ search: "", kind: "all", onlyWarnings: false });
   const filteringActivity = !!activityFilters.search.trim() || activityFilters.kind !== "all" || activityFilters.onlyWarnings;
   const [requestedEventKinds, setRequestedEventKinds] = useState(false);
-  const loadCompleteEvents = filteringActivity || requestedEventKinds;
+
   const load = useCallback(async (signal: AbortSignal) => {
     const result = await api.cluster.getCluster({ tenantId, clusterId }, { signal });
     if (!signal.aborted) setPolling(!!result.cluster && clusterIsConverging(result.cluster));
     return result;
   }, [api, tenantId, clusterId]);
   const detail = useAsyncQuery(load, { pollMs: polling ? 5000 : undefined });
+  const cluster = detail.data?.cluster;
+  const sections = clusterSections(!!cluster?.spec?.naas);
+  const pages = sections.flatMap(section => section.pages);
+  const navigation = useDetailSection(pages);
+  const { active: activeTab, href: tabHref, open: openTab, panelId } = navigation;
+  const activityOpen = activeTab === "activity" && !!cluster;
+  const loadCompleteEvents = activityOpen && (filteringActivity || requestedEventKinds);
   const eventToken = eventTokens[eventTokens.length - 1];
-  const loadEvents = useCallback((signal: AbortSignal) => api.cluster.listClusterEvents({ tenantId, clusterId, pageSize: 25, pageToken: eventToken }, { signal }), [api, tenantId, clusterId, eventToken]);
-  const events = useAsyncQuery(loadEvents, { pollMs: !filteringActivity && polling ? 5000 : undefined });
+  const loadEvents = useCallback((signal: AbortSignal) => activityOpen && !filteringActivity ? api.cluster.listClusterEvents({ tenantId, clusterId, pageSize: 25, pageToken: eventToken }, { signal }) : Promise.resolve(undefined), [api, tenantId, clusterId, eventToken, activityOpen, filteringActivity]);
+  const events = useAsyncQuery(loadEvents, { pollMs: activityOpen && !filteringActivity && polling ? 5000 : undefined });
   const loadAllEvents = useCallback(async (signal: AbortSignal) => {
     if (!loadCompleteEvents) return undefined;
     return collectPages(async pageToken => {
@@ -564,8 +566,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
     if (!filteringActivity) events.refresh();
     if (loadCompleteEvents) allEvents.refresh();
   };
-  const refresh = () => { detail.refresh(); refreshActivity(); };
-  const cluster = detail.data?.cluster;
+  const refresh = detail.refresh;
   const status = cluster?.status;
   const aws = status?.provider.case === "aws" ? status.provider.value : undefined;
   const resources = status?.managedResources ?? [];
@@ -583,18 +584,11 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const activityEvents = filteringActivity ? allEvents.data ?? [] : pageEvents;
   const filteredEvents = filterActivityEvents(activityEvents, activityFilters);
   const availableEventKinds = [...pageEvents, ...(allEvents.data ?? [])];
-  const panels = ["overview", "configuration", "node-groups", "topology", "resources", "cloud-resources", "activity", "components", "deprecations", "recommendations", "violations", ...(cluster?.spec?.naas ? ["subtenants"] : [])];
-  const activeTab = tab === "subtenants" && !cluster?.spec?.naas ? "overview" : tab;
-  const panelId = (name: string) => `${panelPrefix}-${name}`;
-  function openTab(name: string) {
-    setTab(name);
-    if (name === "activity") setRequestedEventKinds(true);
-    const url = new URL(window.location.href);
-    if (name === "cloud-resources" || name === "subtenants" || name === "node-groups") url.searchParams.set("tab", name);
-    else if (url.searchParams.has("tab")) url.searchParams.delete("tab");
-    else return;
-    window.history.replaceState(null, "", url);
-  }
+  const pause = cluster && clusterPause(cluster);
+  const systemPool = status?.nodeGroups.find(group => group.platformManaged && group.name === "system");
+  const failedComponents = status?.platformComponents.filter(component => component.phase === ComponentPhase.FAILED) ?? [];
+  const rollout = status?.rollout;
+  const failedUpgrade = rollout?.result === ClusterRolloutResult.FAILED || rollout?.result === ClusterRolloutResult.TIMED_OUT;
   return <VStack gap={6} as="section" aria-label="Cluster details">
     {!cluster && <DetailHeader title={detail.loading ? "Loading cluster" : "Cluster details"} />}
     <ErrorNotice message={detail.error} />
@@ -604,27 +598,25 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         title={cluster.displayName || cluster.name}
         description={`${cluster.spec?.provider.case?.toUpperCase() || "Provider pending"} · ${cluster.spec?.region || "Region pending"}`}
         metadata={<HStack gap={4} wrap="wrap" vAlign="center"><ProviderIcon provider={cluster.spec?.provider.case ?? ""} size="sm" /><CopyValue value={cluster.name} label="cluster name" isSecondary /><CopyValue value={cluster.id} label="cluster ID" isSecondary /></HStack>}
-        status={statusValue(ClusterState, status?.state)}
+        status={<>{statusValue(ClusterState, status?.state)}{pause && pause.key !== "not-paused" && <StatusValue label={[pause.label, status?.freeze?.scope].filter(Boolean).join(" · ")} tone={pause.tone} />}</>}
         actions={<HStack gap={2} wrap="wrap" vAlign="center">
-          <ResourceYamlButton kind="Cluster" resourceId={cluster.id} />
           <ClusterAccessButton cluster={cluster} />
-          {canWrite && status?.import && <ClusterTakeoverButton cluster={cluster} onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously; readiness is not yet confirmed."); refresh(); }} />}
-          {canWrite && <Button label={status?.freeze && !status.freeze.letThrough ? "Unfreeze cluster" : "Freeze cluster"} variant={status?.freeze && !status.freeze.letThrough ? "primary" : "secondary"} href={`/freeze?scope=cluster&id=${encodeURIComponent(cluster.id)}`} />}
-          {canWrite && <><Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} /><Button label="Delete" variant="destructive" onClick={() => setDeleting(true)} /></>}
-          <RefreshButton label="Refresh" onClick={refresh} isLoading={detail.refreshing} />
+          {canWrite && <Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
+          {canWrite && <ClusterActions cluster={cluster} onDelete={() => setDeleting(true)}
+            onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously."); refresh(); }} />}
         </HStack>}
       />
       {message && <VStack role="status"><Banner status="info" title="Request recorded" description={message} /></VStack>}
-      <DetailSummary items={[
-        { label: "Kubernetes", value: <HStack gap={2} vAlign="center"><KubernetesIcon /><Text type="large" weight="semibold" hasCapsize>{status?.currentKubernetesVersion || "Resolving"}</Text></HStack>, note: status?.kubernetes?.available ? `${status.kubernetes.available} available` : "Observed control plane" },
-        { label: "Resources ready", value: `${ready} / ${resources.length}`, note: resources.some((resource) => resource.paused) ? `${resources.filter((resource) => resource.paused).length} paused` : "Managed cloud inventory" },
-        { label: "Node capacity", value: pool?.scalingConfig ? `${pool.scalingConfig.minSize}–${pool.scalingConfig.maxSize}` : "Pending", note: pool?.instanceTypes.join(", ") || "Default node pool" },
-        { label: "Release channel", value: channelSlug ? <Link href={`/channels/${channelSlug}`}>{channel}</Link> : channel, note: cluster.spec?.upgradeMode === UpgradeMode.AUTOMATIC ? "Automatic upgrades" : "Manual upgrades" },
-      ]} />
-      <TabList value={activeTab} onChange={openTab} role="tablist" aria-label="Cluster detail sections" hasDivider>
-        {panels.map((name) => <Tab key={name} value={name} label={name === "cloud-resources" ? "Cloud Resource" : name === "subtenants" ? "Sub Tenants" : name === "node-groups" ? "Node groups" : name === "deprecations" ? "Deprecated APIs" : name[0].toUpperCase() + name.slice(1)} panelId={panelId(name)} />)}
-      </TabList>
-      {activeTab === "overview" && <VStack id={panelId("overview")} role="tabpanel" aria-label="Overview" tabIndex={0} gap={8}>
+      <DetailNavigation resource="Cluster" pages={pages} groups={sections} selection={navigation} />
+      {activeTab === "overview" && <VStack id={panelId("overview")} role="tabpanel" aria-label="Overview" tabIndex={0} gap={6}>
+        <HStack hAlign="between" vAlign="center"><Heading level={2}>Cluster summary</Heading><RefreshButton label="Refresh overview" onClick={() => { refresh(); network.refresh(); }} isLoading={detail.refreshing || network.refreshing} /></HStack>
+        {pause && pause.key !== "not-paused" && <Banner status={pause.tone === "warning" ? "warning" : "info"} title={pause.label} description={pause.detail} />}
+        <DetailSummary items={[
+          { label: "Kubernetes", value: <HStack gap={2} vAlign="center"><KubernetesIcon /><Text type="large" weight="semibold" hasCapsize>{status?.currentKubernetesVersion || "Resolving"}</Text></HStack>, note: status?.kubernetes?.available ? `${status.kubernetes.available} available` : "Observed control plane" },
+          { label: "Resources ready", value: resources.length ? `${ready} / ${resources.length}` : "Not reported", note: resources.some((resource) => resource.paused) ? `${resources.filter((resource) => resource.paused).length} paused` : "Managed cloud inventory" },
+          { label: "Default pool limits", value: pool?.scalingConfig ? `${pool.scalingConfig.minSize}–${pool.scalingConfig.maxSize}` : "Pending", note: [systemPool && `${systemPool.nodes} observed`, pool?.instanceTypes.join(", ")].filter(Boolean).join(" · ") || "Configured minimum–maximum" },
+          { label: "Release channel", value: channelSlug ? <Link href={`/channels/${channelSlug}`}>{channel}</Link> : channel, note: cluster.spec?.upgradeMode === UpgradeMode.AUTOMATIC ? "Automatic upgrades" : "Manual upgrades" },
+        ]} />
         {status?.message && <Text color="secondary">{status.message}</Text>}
         <Grid columns={{ minWidth: 300, max: 2 }} gap={8}>
           <VStack gap={4}>
@@ -635,7 +627,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
               <MetadataListItem label="Rollout tier">{tierLabel(status?.tier)}</MetadataListItem>
               <MetadataListItem label="Generation">{String(status?.observedGeneration ?? 0)} observed / {String(cluster.generation)} desired</MetadataListItem>
               <MetadataListItem label="Platform release">{status?.platformRelease ? <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>{status.platformRelease}</Link> : "Not reported"}</MetadataListItem>
-              <MetadataListItem label="Namespace as a Service (NaaS)"><VStack gap={1}><Text>{cluster.spec?.naas ? "Enabled" : "Disabled"}</Text><Text type="supporting">{cluster.spec?.naas ? "Check Components for setup progress." : "Existing namespaces and workloads are kept when disabling."}</Text></VStack></MetadataListItem>
+              <MetadataListItem label="Namespace as a Service (NaaS)"><VStack gap={1}><Text>{cluster.spec?.naas ? "Enabled" : "Disabled"}</Text>{cluster.spec?.naas && <Link href={tabHref("subtenants")}>View Sub Tenants</Link>}</VStack></MetadataListItem>
             </MetadataList>
             <ErrorNotice message={network.error} />
           </VStack>
@@ -649,17 +641,13 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
             </MetadataList>
             {status?.upgrade?.message && <Text type="supporting">{status.upgrade.message}</Text>}
             <HStack gap={2} wrap="wrap"><Button label="View deprecated APIs" onClick={() => openTab("deprecations")} /><Button label="View recommendations" onClick={() => openTab("recommendations")} /></HStack>
-            {canWrite && <HStack><Button label="Retry failed work" variant="secondary" onClick={() => setRetrying(true)} /></HStack>}
+            {(failedComponents.length > 0 || failedUpgrade) && <VStack gap={2}>
+              <Banner status="error" title="Failed work" description={[failedUpgrade && (rollout?.message || "Automatic upgrade failed"), ...failedComponents.map(component => component.name)].filter(Boolean).join(" · ")} />
+              {canWrite && <HStack><Button label="Retry failed work" variant="secondary" onClick={() => setRetrying(true)} /></HStack>}
+            </VStack>}
           </VStack>
         </Grid>
         <Divider />
-        <VStack gap={4}>
-          <HStack hAlign="between" gap={3} wrap="wrap"><Heading level={3}>Related resources</Heading><Link href={`#${panelId("resources")}`} onClick={() => openTab("resources")}>View all {resources.length} resources</Link></HStack>
-          <DetailRows title="Related cluster resources" rows={[
-            ...nodeGroups.map((resource) => ({ name: resource.name, copyName: resource.name, state: statusValue(ManagedResourceState, resource.state), detail: <VStack gap={1}>{resource.externalName && <CopyValue value={resource.externalName} label="node group cloud ID" />}<Text type="supporting">{resource.message || "Node group"}</Text></VStack>, href: `#${panelId("resources")}`, activate: () => openTab("resources") })),
-            ...(aws?.addons ?? []).map((addon) => { const display = addons.find((item) => item.name === addon.name)?.status; return { name: addon.name, state: display ? <StatusValue label={display.label} tone={display.tone} /> : statusValue(ManagedResourceState, addon.state), detail: `Add-on · ${addon.version}`, href: `#${panelId("components")}`, activate: () => openTab("components") }; }),
-          ]} />
-        </VStack>
         <VStack gap={4}>
           <Heading level={3}>All health conditions</Heading>
           <Table searchable aria-label="Cluster health conditions" data={(status?.conditions ?? []).map((condition, rowId) => ({ ...condition, rowId }))} idKey="rowId" columns={[
@@ -686,12 +674,28 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
             { key: "value", header: "Value", width: proportional(3, { minWidth: 200 }), renderCell: item => item.value ? <CopyValue value={item.value} label={item.name} /> : <Text color="secondary">Pending</Text> },
           ]} />
         </VStack>
+        <VStack gap={4}>
+          <HStack hAlign="between" gap={3} wrap="wrap"><Heading level={3}>Related resources</Heading><Link href={tabHref("resources")}>View infrastructure inventory</Link></HStack>
+          <DetailRows title="Related cluster resources" rows={[
+            ...(status?.nodeGroups ?? []).filter(group => !(group.platformManaged && group.name === "platform")).map(group => ({
+              name: group.name, copyName: group.name, state: statusValue(NodeGroupPhase, group.phase),
+              detail: group.message || `${group.nodes} observed nodes`,
+              href: `/clusters/${encodeURIComponent(clusterId)}/node-groups/${encodeURIComponent(group.name)}`,
+            })),
+            ...(!status?.nodeGroups.length ? nodeGroups.map(resource => ({
+              name: resource.name, copyName: resource.name, state: statusValue(ManagedResourceState, resource.state),
+              detail: resource.externalName ? <CopyValue value={resource.externalName} label="node group cloud ID" /> : resource.message || "Node group",
+              href: tabHref("node-groups"),
+            })) : []),
+            ...(aws?.addons ?? []).map((addon) => { const display = addons.find((item) => item.name === addon.name)?.status; return { name: addon.name, state: display ? <StatusValue label={display.label} tone={display.tone} /> : statusValue(ManagedResourceState, addon.state), detail: `Add-on · ${addon.version}`, href: tabHref("components") }; }),
+          ]} />
+        </VStack>
       </VStack>}
-      {activeTab === "configuration" && <VStack id={panelId("configuration")} role="tabpanel" aria-label="Configuration" tabIndex={0} gap={6}><ClusterConfiguration cluster={cluster} /></VStack>}
+      {activeTab === "configuration" && <VStack id={panelId("configuration")} role="tabpanel" aria-label="Configuration" tabIndex={0} gap={6}><ClusterConfiguration cluster={cluster} actions={<HStack gap={2} vAlign="center"><ResourceYamlButton kind="Cluster" resourceId={clusterId} /><RefreshButton label="Refresh configuration" onClick={refresh} isLoading={detail.refreshing} /></HStack>} /></VStack>}
       {activeTab === "node-groups" && <VStack id={panelId("node-groups")} role="tabpanel" aria-label="Node groups" tabIndex={0} gap={6}><ClusterNodeGroups cluster={cluster} refreshing={detail.refreshing} onRefresh={detail.refresh} onApplied={(note) => { setMessage(note); refresh(); }} /></VStack>}
       {activeTab === "topology" && <VStack id={panelId("topology")} role="tabpanel" aria-label="Topology" tabIndex={0} gap={6}><ClusterTopology cluster={cluster} network={network.data?.network} /></VStack>}
-      {activeTab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Resources" tabIndex={0} gap={6}>
-        <ManagedInventory resources={resources} title="Cluster managed resource inventory" />
+      {activeTab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Infrastructure inventory" tabIndex={0} gap={6}>
+        <ManagedInventory resources={resources} title="Cluster managed resource inventory" onRefresh={refresh} refreshing={detail.refreshing} />
         {status?.import && <Collapsible trigger={`Import discovery · ${label(ImportPhase, status.import.phase)}`} defaultIsOpen={false}>
           <DetailRows title="Cluster import resource inventory" rows={status.import.resources.map((resource) => ({ name: `${resource.kind} / ${resource.name}`, copyName: resource.name, state: statusValue(Disposition, resource.disposition), detail: <VStack gap={1}>{resource.externalName && <CopyValue value={resource.externalName} label="imported resource cloud ID" />}<Text>{resource.apiVersion} · {resource.detail}{resource.requiresReplacement ? " · Requires replacement" : ""}</Text></VStack> }))} />
         </Collapsible>}
@@ -711,32 +715,31 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           <Button label="Next events" isDisabled={!events.data?.nextPageToken || eventTokens.includes(events.data.nextPageToken) || events.loading || events.refreshing} onClick={() => { if (events.data?.nextPageToken) setEventTokens([...eventTokens, events.data.nextPageToken]); }} />
         </HStack>}
       </VStack>}
-      {activeTab === "components" && <VStack id={panelId("components")} role="tabpanel" aria-label="Components" tabIndex={0} gap={6}>
-        <VStack gap={3}>
-          <Heading level={3}>EKS add-ons</Heading>
-          <Text type="supporting">Target is the resolved desired version; running is the last observed version. AWS resolves add-ons for the Kubernetes minor unless an explicit version was requested. Release channels do not pin add-on versions.</Text>
-          {addons.length ? <Table aria-label="Cluster EKS add-on target and running versions" density="compact" hasHover textOverflow="wrap" idKey="name" data={addons} columns={[
-            { key: "name", header: "Add-on", width: proportional(2, { minWidth: 80 }) },
-            { key: "target", header: "Target (resolved)", width: proportional(1, { minWidth: 80 }) },
-            { key: "version", header: "Running", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <Text>{row.running?.version || (row.status.key === "disabled" ? "—" : "Not observed")}</Text> },
-            { key: "state", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <StatusValue label={row.status.label} tone={row.status.tone} /> },
-            { key: "message", header: "Message", width: proportional(2, { minWidth: 80 }), renderCell: (row) => <Text type="supporting">{row.message}</Text> },
-          ]} /> : <Text type="supporting">No EKS add-on targets or running versions reported.</Text>}
-        </VStack>
-        <VStack gap={3}>
-          <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center"><Heading level={3}>Platform components</Heading>{status?.platformRelease && <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>Release {status.platformRelease}</Link>}</HStack>
-          <Text type="supporting">The platform release pins chart versions. Installed versions show the last observed ready version and can lag during rollout.</Text>
-          <PlatformComponentInventory components={status?.platformComponents ?? []} naasEnabled={cluster.spec?.naas ?? false} />
-        </VStack>
-        <ClusterTenantComponents clusterId={clusterId} />
+      {activeTab === "components" && <VStack id={panelId("components")} role="tabpanel" aria-label="Components &amp; add-ons" tabIndex={0} gap={6}>
+        <ClusterComponentsPanel clusterId={clusterId} clusterRefreshing={detail.refreshing} onRefreshCluster={refresh} onRetry={() => setRetrying(true)}>
+          <VStack gap={3}>
+            <Heading level={3}>EKS add-ons</Heading>
+            <Text type="supporting">Target is the resolved desired version; running is the last observed version. AWS resolves add-ons for the Kubernetes minor unless an explicit version was requested. Release channels do not pin add-on versions.</Text>
+            {addons.length ? <Table aria-label="Cluster EKS add-on target and running versions" density="compact" hasHover textOverflow="wrap" idKey="name" data={addons} columns={[
+              { key: "name", header: "Add-on", width: proportional(2, { minWidth: 80 }) },
+              { key: "target", header: "Target (resolved)", width: proportional(1, { minWidth: 80 }) },
+              { key: "version", header: "Running", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <Text>{row.running?.version || (row.status.key === "disabled" ? "—" : "Not observed")}</Text> },
+              { key: "state", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (row) => <StatusValue label={row.status.label} tone={row.status.tone} /> },
+              { key: "message", header: "Message", width: proportional(2, { minWidth: 80 }), renderCell: (row) => <Text type="supporting">{row.message}</Text> },
+            ]} /> : <Text type="supporting">No EKS add-on targets or running versions reported.</Text>}
+          </VStack>
+          <VStack gap={3}>
+            <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center"><Heading level={3}>Platform components</Heading>{status?.platformRelease && <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>Release {status.platformRelease}</Link>}</HStack>
+            <Text type="supporting">The platform release pins chart versions. Installed versions show the last observed ready version and can lag during rollout.</Text>
+            <PlatformComponentInventory components={status?.platformComponents ?? []} naasEnabled={cluster.spec?.naas ?? false} />
+          </VStack>
+        </ClusterComponentsPanel>
       </VStack>}
-      {activeTab === "violations" && <VStack id={panelId("violations")} role="tabpanel" aria-label="Violations" tabIndex={0} gap={8}>
+      {activeTab === "violations" && <VStack id={panelId("violations")} role="tabpanel" aria-label="Policy violations" tabIndex={0} gap={8}>
         <ClusterViolationsPanel clusterId={clusterId} />
-        <Divider />
-        <ClusterViolationsPanel clusterId={clusterId} events />
       </VStack>}
       {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
-      {activeTab === "cloud-resources" && <VStack id={panelId("cloud-resources")} role="tabpanel" aria-label="Cloud Resource" tabIndex={0} gap={4}>
+      {activeTab === "cloud-resources" && <VStack id={panelId("cloud-resources")} role="tabpanel" aria-label="Platform cloud resources" tabIndex={0} gap={4}>
         <ManagedResourcePreviews key={cluster.id} ownership="platform" clusterId={cluster.id}
           owner={cluster.displayName || cluster.name || cluster.id} region={cluster.spec?.region ?? ""}
           provider={cluster.spec?.provider.case || cluster.status?.provider.case} deleting={cluster.status?.state === ClusterState.DELETING} />
@@ -765,7 +768,7 @@ function PlatformComponentInventory({ components, naasEnabled }: { components: P
   return components.length ? <Table aria-label="Cluster platform component pinned and installed versions" data={components} columns={columns} idKey="name" density="compact" hasHover textOverflow="wrap" /> : <Text type="supporting">No platform components reported.</Text>;
 }
 
-function ManagedInventory({ resources, title }: { resources: ManagedResource[]; title: string }) {
+function ManagedInventory({ resources, title, onRefresh, refreshing }: { resources: ManagedResource[]; title: string; onRefresh: () => void; refreshing: boolean }) {
   const [search, setSearch] = useState("");
   const [health, setHealth] = useState("all");
   const [kind, setKind] = useState("all");
@@ -795,7 +798,7 @@ function ManagedInventory({ resources, title }: { resources: ManagedResource[]; 
   ];
   return <VStack gap={4}>
     <HStack gap={4} wrap="wrap" hAlign="between" vAlign="center">
-      <VStack gap={1}><Heading level={3}>Cloud resources</Heading><Text type="supporting" role="status">{matching.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack>
+      <HStack hAlign="between" vAlign="center"><VStack gap={1}><Heading level={3}>Infrastructure inventory</Heading><Text type="supporting" role="status">{matching.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack><RefreshButton label="Refresh infrastructure inventory" onClick={onRefresh} isLoading={refreshing} /></HStack>
     </HStack>
     <FilterRow label="Resource filters">
       <TextInput label="Search resources" placeholder="Name, kind or cloud ID" type="search" value={search} onChange={setSearch} hasClear autoComplete="off" />
@@ -809,10 +812,11 @@ function ManagedInventory({ resources, title }: { resources: ManagedResource[]; 
   </VStack>;
 }
 
-function DetailRows({ title, rows }: { title: string; rows: { name: string; state: ReactNode; detail: ReactNode; href?: string; anchor?: string; copyName?: string; activate?: () => void }[] }) {
-  type Row = { id: number; name: string; state: ReactNode; detail: ReactNode; href?: string; anchor?: string; copyName?: string; activate?: () => void };
-  const columns: TableColumn<Row>[] = [
-    { key: "name", header: "Name", width: proportional(2, { minWidth: 80 }), renderCell: (row) => <HStack id={row.anchor} gap={2} wrap="wrap" vAlign="center">{row.href ? <Link href={row.href} onClick={row.activate}>{row.name}</Link> : <Text>{row.name}</Text>}{row.copyName && <CopyButton value={row.copyName} label="resource name" />}</HStack> },
+type RelatedResourceRow = { name: string; state: ReactNode; detail: ReactNode; href?: string; copyName?: string };
+
+function DetailRows({ title, rows }: { title: string; rows: RelatedResourceRow[] }) {
+  const columns: TableColumn<RelatedResourceRow & { id: number }>[] = [
+    { key: "name", header: "Name", width: proportional(2, { minWidth: 80 }), renderCell: (row) => <HStack gap={2} wrap="wrap" vAlign="center">{row.href ? <Link href={row.href}>{row.name}</Link> : <Text>{row.name}</Text>}{row.copyName && <CopyButton value={row.copyName} label="resource name" />}</HStack> },
     { key: "state", header: "Status", width: proportional(1, { minWidth: 80 }), renderCell: (row) => typeof row.state === "string" ? <Text>{row.state}</Text> : row.state },
     { key: "detail", header: "Details", width: proportional(3, { minWidth: 80 }), renderCell: (row) => typeof row.detail === "string" ? <Text>{row.detail}</Text> : row.detail },
   ];

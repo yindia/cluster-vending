@@ -70,6 +70,9 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 			g.cfg, g.logger = cfg, logger
+			if cmd.Annotations[annotationSettingsFile] == "true" {
+				warnLeftoverNodeGroupVariables(logger, os.LookupEnv)
+			}
 			return nil
 		},
 	}
@@ -116,5 +119,15 @@ func changedFlags(fs *pflag.FlagSet) config.LookupFunc {
 			return "", false
 		}
 		return f.Value.String(), true
+	}
+}
+
+// warnLeftoverNodeGroupVariables names the variables that still set a node
+// group key: they win over the config file's nodeGroups section, so a
+// forgotten one would hide a change of the file.
+func warnLeftoverNodeGroupVariables(logger *slog.Logger, env config.LookupFunc) {
+	if left := config.LeftoverNodeGroupVariables(env); len(left) > 0 {
+		logger.Warn("environment variables set node group keys and override the nodeGroups section of the config file; remove them",
+			"variables", left)
 	}
 }

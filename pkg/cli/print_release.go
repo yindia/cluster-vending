@@ -64,7 +64,7 @@ func date(t *timestamppb.Timestamp) string {
 	return t.AsTime().UTC().Format("2006-01-02")
 }
 
-var releaseHeader = []string{"NAME", "SHIPPED", "VALID", "CHANNELS", "PINNED", "AGE"}
+var releaseHeader = []string{"NAME", "SERIAL", "SHIPPED", "VALID", "CHANNELS", "PINNED", "AGE"}
 
 func printReleases(w io.Writer, releases []*cloudv1.Release, wide bool) error {
 	if len(releases) == 0 {
@@ -77,7 +77,7 @@ func printReleases(w io.Writer, releases []*cloudv1.Release, wide bool) error {
 	}
 	rows := make([][]string, 0, len(releases))
 	for _, r := range releases {
-		rw := []string{r.GetName(), yesNo(r.GetShipped()), validWord(r), channelList(r.GetChannels()),
+		rw := []string{r.GetName(), serialWord(r.GetSerial()), yesNo(r.GetShipped()), validWord(r), channelList(r.GetChannels()),
 			strconv.Itoa(len(r.GetHolds())), age(r.GetCreateTime())}
 		if wide {
 			rw = append(rw, orNone(oneLine(r.GetInvalidReason())))
@@ -85,6 +85,14 @@ func printReleases(w io.Writer, releases []*cloudv1.Release, wide bool) error {
 		rows = append(rows, rw)
 	}
 	return table(w, header, rows)
+}
+
+// serialWord is a release's serial; <none> for one that predates serials.
+func serialWord(n int64) string {
+	if n <= 0 {
+		return none
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 func validWord(r *cloudv1.Release) string {
@@ -109,7 +117,7 @@ func channelList(chs []cloudv1.ReleaseChannel) string {
 // describeRelease is one release: its fields, its minors, and the
 // components on each minor (wide adds their locked values).
 func describeRelease(w io.Writer, r *cloudv1.Release, wide bool) error {
-	kv := [][2]string{{"Name", r.GetName()}, {"Shipped", yesNo(r.GetShipped())}, {"Valid", validWord(r)},
+	kv := [][2]string{{"Name", r.GetName()}, {"Serial", serialWord(r.GetSerial())}, {"Shipped", yesNo(r.GetShipped())}, {"Valid", validWord(r)},
 		{"Reason", r.GetInvalidReason()}, {"Channels", channelList(r.GetChannels())},
 		{"Pinned", strings.Join(r.GetHolds(), ", ")}, {"Age", age(r.GetCreateTime())}, {"Notes", oneLine(r.GetNotes())}}
 	if err := fields(w, kv); err != nil {

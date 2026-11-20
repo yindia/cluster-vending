@@ -10,13 +10,14 @@ import (
 )
 
 // Usable says whether a network or cluster may be created, imported or
-// taken over in account a and region (empty: the account only): the
+// taken over (capability) in account a and region (empty: the account only): the
 // controller's last access check of it (VerifyAccess) gave a verdict, the
-// verdict is verified, and the region was among those checked. A refusal
+// verdict is verified (for Import and TakeOver: the role's reads and, for
+// TakeOver, its write passed, whatever creating gave), and the region was among those checked. A refusal
 // is FailedPrecondition, saying what to do. A verified verdict whose later
 // checks failed for a transient reason is still usable; the warning then
 // says so.
-func Usable(a *model.CloudAccount, region string) (warning string, err error) {
+func Usable(a *model.CloudAccount, region string, capability Capability) (warning string, err error) {
 	name, verify := accountLabel(a), "cluster-vending account verify --id "+a.ID
 	last := a.Access
 	if last == nil || last.CheckedAt.IsZero() {
@@ -33,8 +34,20 @@ func Usable(a *model.CloudAccount, region string) (warning string, err error) {
 			region, name, r.Reason, r.Message, verify)
 	}
 	if !last.Verified {
-		return "", fault.Newf(fault.FailedPrecondition, "account %s cannot be used: %s: %s; fix the account and run: %s",
-			name, last.Reason, last.Message, verify)
+		scope := region
+		if i < 0 {
+			scope = "" // judged by the checks of every region until its own is made
+		}
+		switch {
+		case capability != Create && Allows(last, capability, scope):
+			// A reader or updater role, for what it can do.
+		case capability == Create && partial(last):
+			return "", fault.Newf(fault.FailedPrecondition, "account %s cannot create networks or clusters: %s; "+
+				"use a provisioner role to create, or run: %s", name, partialMessage(last), verify)
+		default:
+			return "", fault.Newf(fault.FailedPrecondition, "account %s cannot be used: %s: %s; fix the account and run: %s",
+				name, last.Reason, last.Message, verify)
+		}
 	}
 	if region != "" && i < 0 {
 		// The caller starts that check (RegionToCheck): say so.
@@ -63,7 +76,7 @@ func accountLabel(a *model.CloudAccount) string {
 // regions it is asked for). ok is false for any other refusal.
 func RegionToCheck(a *model.CloudAccount, region string) (regions []string, ok bool) {
 	last := a.Access
-	if region == "" || last == nil || last.CheckedAt.IsZero() || !last.Verified {
+	if region == "" || last == nil || last.CheckedAt.IsZero() || (!last.Verified && !partial(last)) {
 		return nil, false
 	}
 	for _, r := range last.Regions {

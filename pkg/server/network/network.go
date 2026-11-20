@@ -84,7 +84,7 @@ func (s *NetworkService) CreateNetwork(ctx context.Context, req *cloudv1.CreateN
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := s.usableByID(ctx, row.TenantID, row.CloudAccountID, row.Region); err != nil {
+	if err := s.usableByID(ctx, row.TenantID, row.CloudAccountID, row.Region, accountreconcile.Create); err != nil {
 		return nil, err
 	}
 	if err := s.deps.Store.Networks().Create(ctx, row); err != nil {
@@ -110,8 +110,8 @@ func bootstrapped(a *model.CloudAccount) error {
 // usable refuses an account whose access the controller has not verified
 // in region (accountreconcile.Usable), as FAILED_PRECONDITION. A verdict
 // that is stale is logged and allowed.
-func (s *NetworkService) usable(ctx context.Context, a *model.CloudAccount, region string) error {
-	warning, err := accountreconcile.Usable(a, region)
+func (s *NetworkService) usable(ctx context.Context, a *model.CloudAccount, region string, capability accountreconcile.Capability) error {
+	warning, err := accountreconcile.Usable(a, region, capability)
 	if err != nil {
 		s.startRegionCheck(ctx, a, region)
 		return service.ToConnect(err)
@@ -123,12 +123,12 @@ func (s *NetworkService) usable(ctx context.Context, a *model.CloudAccount, regi
 }
 
 // usableByID is usable for the account of a network row.
-func (s *NetworkService) usableByID(ctx context.Context, tenantID, accountID, region string) error {
+func (s *NetworkService) usableByID(ctx context.Context, tenantID, accountID, region string, capability accountreconcile.Capability) error {
 	a, err := s.rec().Account(ctx, tenantID, accountID)
 	if err != nil {
 		return service.ToConnect(err)
 	}
-	return s.usable(ctx, a, region)
+	return s.usable(ctx, a, region, capability)
 }
 
 // GetNetwork returns one network from the database: its spec and the

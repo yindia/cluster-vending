@@ -32,20 +32,36 @@ func createdAfterActive(records []model.ManagedResource) bool {
 	return false
 }
 
-// eksActive reports whether the cluster's EKS cluster is ACTIVE.
-func (s *Reconciler) eksActive(ctx context.Context, records []model.ManagedResource) (bool, error) {
+// eksUpdatingStatus is the EKS cluster status during an upgrade or an
+// update: its API keeps answering.
+const eksUpdatingStatus = "UPDATING"
+
+// eksStatus is the status of the cluster's EKS cluster; empty when none is
+// recorded or the management cluster has none (yet).
+func (s *Reconciler) eksStatus(ctx context.Context, records []model.ManagedResource) (string, error) {
 	for _, r := range records {
 		if r.Kind != "Cluster" {
 			continue
 		}
 		c := &awseks.Cluster{}
 		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, c); err != nil {
-			return false, fmt.Errorf("read EKS cluster %s: %w", r.Name, err)
+			return "", fmt.Errorf("read EKS cluster %s: %w", r.Name, err)
 		}
-		return ptr.Deref(c.Status.AtProvider.Status, "") == eksActiveStatus, nil
+		return ptr.Deref(c.Status.AtProvider.Status, ""), nil
 	}
-	return false, nil
+	return "", nil
 }
+
+// eksActive reports whether the cluster's EKS cluster is ACTIVE.
+func (s *Reconciler) eksActive(ctx context.Context, records []model.ManagedResource) (bool, error) {
+	status, err := s.eksStatus(ctx, records)
+	return status == eksActiveStatus, err
+}
+
+// eksServes reports whether an EKS cluster with this status answers its API
+// (ACTIVE, and UPDATING during an upgrade): a deletion still reaches the
+// workload cluster then.
+func eksServes(status string) bool { return status == eksActiveStatus || status == eksUpdatingStatus }
 
 // FillLive sets the plan's values that only exist once other resources do
 // (crossplaneaws.ClusterPlan.FillLive), from the cluster's objects as the

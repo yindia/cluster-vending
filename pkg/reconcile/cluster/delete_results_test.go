@@ -7,11 +7,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	awss3 "github.com/upbound/provider-aws/v2/apis/namespaced/s3/v1beta1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/results"
@@ -124,4 +128,58 @@ func TestDeletionOfAClusterWhoseBucketIsAlreadyGone(t *testing.T) {
 
 	_, err := d.store.Clusters().Get(t.Context(), worldTenant, d.row.ID)
 	require.ErrorIs(t, err, repository.ErrNotFound)
+}
+
+// One failing S3 call holds back the bucket only: the EKS cluster, the node
+// group and the IAM are deleted in the same pass, the Bucket and its settings
+// stay until the bucket is emptied, and the status says why.
+func TestDeletionKeepsOnlyTheBucketWhenItCannotBeEmptied(t *testing.T) {
+	d := newDeletingWorld(t, "latest/deprecations.json")
+	prefix := crossplaneaws.ClusterPrefix(worldTenant, d.row.ID, "prod")
+	records, err := d.store.ManagedResources().ListByOwner(t.Context(), model.OwnerCluster, d.row.ID)
+	require.NoError(t, err)
+	exists := func(r model.ManagedResource) bool {
+		u := &unstructured.Unstructured{}
+		gv, _ := schema.ParseGroupVersion(r.APIVersion)
+		u.SetGroupVersionKind(gv.WithKind(r.Kind))
+		return d.kube.Get(t.Context(), client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u) == nil
+	}
+	var others, bucket []model.ManagedResource
+	for _, r := range records {
+		switch {
+		case r.Kind == managed.UsageKind:
+		case crossplaneaws.IsResultsBucketObject(prefix, r.Kind, r.Name):
+			bucket = append(bucket, r)
+		case exists(r):
+			others = append(others, r)
+		}
+	}
+	require.NotEmpty(t, others, "the cluster has objects besides its bucket")
+	require.NotEmpty(t, bucket)
+	d.s3.Fail = func(op, _, _ string) error {
+		if op == "ListObjectsV2" {
+			return errors.New("throttled")
+		}
+		return nil
+	}
+
+	err = d.svc.Reconcile(t.Context(), worldTenant, d.row.ID)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "results bucket")
+	for _, r := range others {
+		require.False(t, exists(r), "%s %s is deleted although only the bucket cannot be emptied", r.Kind, r.Name)
+	}
+	for _, r := range bucket {
+		require.True(t, exists(r), "%s %s stays until the bucket is emptied", r.Kind, r.Name)
+	}
+	require.Nil(t, *d.keysAtBucketDelete, "the Bucket was never deleted")
+	require.Contains(t, string(d.cluster(t).Status), "empty the results bucket", "the problem is in the status")
+
+	d.s3.Fail = nil
+	for range 8 {
+		require.NoError(t, d.svc.Reconcile(t.Context(), worldTenant, d.row.ID))
+	}
+	_, gone := d.store.Clusters().Get(t.Context(), worldTenant, d.row.ID)
+	require.ErrorIs(t, gone, repository.ErrNotFound)
 }

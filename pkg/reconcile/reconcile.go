@@ -32,6 +32,10 @@ import (
 // an account, in a region.
 type ResultsS3 func(a awscloud.Access, region string) (results.S3API, error)
 
+// InstanceProfiles makes the IAM client that reaches an account's instance
+// profiles, as its tenant role, in a region.
+type InstanceProfiles func(a awscloud.Access, region string) (awscloud.InstanceProfileAPI, error)
+
 type Deps struct {
 	// ManagedResourceKinds lists the managed kinds supplied by active provider adapters.
 	// Nil preserves the current AWS installation; a future GCP adapter can
@@ -73,6 +77,10 @@ type Deps struct {
 	// results bucket with it and a cluster's deletion empties it. Nil: no
 	// results are written to S3 and a bucket is not emptied (tests).
 	ResultsS3 ResultsS3
+	// InstanceProfiles makes the IAM client with which a cluster's deletion
+	// takes Karpenter's node role out of the instance profiles Karpenter
+	// made, before it deletes the role. Nil: none is removed (tests).
+	InstanceProfiles InstanceProfiles
 	// ProviderCredentials, when set, is the Secret every account's
 	// ProviderConfig authenticates the Crossplane AWS providers with,
 	// instead of IRSA (a management cluster without IRSA, such as a local

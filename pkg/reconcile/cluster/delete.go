@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	awss3 "github.com/upbound/provider-aws/v2/apis/namespaced/s3/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
@@ -56,18 +58,14 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	if done, err := s.teardown(ctx, row, records); err != nil || !done {
 		return false, err
 	}
-	active, err := s.eksActive(ctx, records)
+	down, err := s.releaseIfDown(ctx, row, records)
 	if err != nil {
 		return false, err
-	}
-	if row.DeleteForce || !active {
-		if err := s.forceRelease(ctx, row); err != nil {
-			return false, err
-		}
 	}
 	// 2. The tenant's components, a tenant component may require a
 	// platform one.
 	if gone, err := s.deleteTenant(ctx, row); err != nil || !gone {
+		appendDeleteStage(ctx, down)
 		return false, err
 	}
 	// 3. The platform's components above Karpenter.
@@ -77,6 +75,7 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	}
 	recordPlatformDeletion(ctx, row, len(plat.components) == 0)
 	if gone, err := s.removeAbove(ctx, row, plat); err != nil || !gone {
+		appendDeleteStage(ctx, down)
 		return false, err
 	}
 	// 4. Karpenter's node groups, while Karpenter still runs to terminate
@@ -85,14 +84,20 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	if err != nil {
 		return false, err
 	}
-	reachable := !row.DeleteForce && active && storedStatus(row).GetKubeconfigSecret() != ""
-	if !s.deleteNodeGroups(ctx, row, cl, reachable) {
+	// Whether the node stage runs is decided without a call: a failing API
+	// is retried (and ended by the teardown timeout) inside the stage.
+	skip, err := s.skipCause(ctx, row, records)
+	if err != nil {
+		return false, err
+	}
+	if !s.deleteNodeGroups(ctx, row, cl, skip == "") {
 		return false, nil
 	}
 	// 5. Karpenter: its chart and IAM, then its queue, rules and node role.
 	if gone, err := s.removeKarpenterChart(ctx, row, plat); err != nil || !gone {
 		return false, err
 	}
+	s.releaseNodeProfiles(ctx, row, cl)
 	if gone, err := s.removeStage(ctx, cl, crossplaneaws.DeleteStageKarpenter, stageKarpenter,
 		"removing its interruption queue, rules and targets, node role and access entry"); err != nil || !gone {
 		return false, err
@@ -106,12 +111,16 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	// The results bucket is emptied before its Bucket resource is deleted
 	// (AWS refuses a bucket with objects and the platform never
 	// force-destroys one): every pass until the Bucket is gone, so a scan that
-	// wrote late is emptied too.
-	if err := s.emptyResultsBucket(ctx, row); err != nil {
-		return false, err
-	}
+	// wrote late is emptied too. A bucket that cannot be emptied holds back
+	// only itself and its settings: the EKS cluster, the node group and the
+	// IAM go on, and the problem is the cluster's status.
+	bucketErr := s.emptyResultsBucket(ctx, row)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerCluster, ID: row.ID}
-	if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.ClusterDeleteOrder); err != nil {
+	if bucketErr == nil {
+		if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.ClusterDeleteOrder); err != nil {
+			return false, deleteError(err)
+		}
+	} else if err := s.deps.DeleteRecorded(ctx, s.withoutResultsBucket(row, records)); err != nil {
 		return false, deleteError(err)
 	}
 	// As they are after the step: what it deleted may be gone already.
@@ -126,6 +135,9 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	// very step is released now, not a pass later.
 	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
 		return false, err
+	}
+	if bucketErr != nil {
+		return false, bucketErr
 	}
 	if !reconcile.AllGone(views) {
 		return false, nil
@@ -149,8 +161,24 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	if err := s.deps.Store.Clusters().Delete(ctx, row.TenantID, row.ID); err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return false, fmt.Errorf("remove the cluster row: %w", err)
 	}
+	forgetDeleteClocks(row.ID)
 	s.logger().InfoContext(ctx, "cluster deleted", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	return true, nil
+}
+
+// withoutResultsBucket are the records of the cluster's objects but the
+// results Bucket and its settings: what the rest of stage 7 deletes while
+// the bucket cannot be emptied. The Usages stay, so the Bucket is protected
+// until it is deleted.
+func (s *Reconciler) withoutResultsBucket(row *model.Cluster, records []model.ManagedResource) []model.ManagedResource {
+	prefix := crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name)
+	out := make([]model.ManagedResource, 0, len(records))
+	for _, r := range records {
+		if !crossplaneaws.IsResultsBucketObject(prefix, r.Kind, r.Name) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // deleteError maps an object the deletion could not read to UNAVAILABLE;
@@ -214,6 +242,9 @@ func (s *Reconciler) sweep(ctx context.Context, row *model.Cluster, namespace st
 
 // kindOf is the item kind of a typed list, e.g. NodeGroupList -> NodeGroup.
 func kindOf(list client.ObjectList) string {
+	if u, ok := list.(*unstructured.UnstructuredList); ok {
+		return strings.TrimSuffix(u.GroupVersionKind().Kind, "List")
+	}
 	name := fmt.Sprintf("%T", list) // *v1beta1.NodeGroupList
 	for i := len(name) - 1; i >= 0; i-- {
 		if name[i] == '.' {

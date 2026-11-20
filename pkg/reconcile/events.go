@@ -86,6 +86,7 @@ const (
 	ReasonTeardownFinished            = "TeardownFinished"
 	ReasonTeardownTimedOut            = "TeardownTimedOut"
 	ReasonTeardownSkipped             = "TeardownSkipped"
+	ReasonReleasesLetGo               = "HelmReleasesLetGo"
 	ReasonImportDiscovered            = "ImportDiscovered"
 	ReasonImportBlocked               = "ImportBlocked"
 	ReasonTakenOver                   = "TakenOver"

@@ -57,6 +57,14 @@ func setDeleteStage(ctx context.Context, stage int, waits string) {
 	}
 }
 
+// appendDeleteStage adds text to the stage message the pass has set; nothing
+// when it set none or the text is empty.
+func appendDeleteStage(ctx context.Context, text string) {
+	if h, ok := ctx.Value(deleteStageKey{}).(*deleteStageHolder); ok && h.message != "" && text != "" {
+		h.message += "; " + text
+	}
+}
+
 // withDeleteStageStatus makes the stage the deleting cluster's message.
 func withDeleteStageStatus(ctx context.Context, st *cloudv1.ClusterStatus) {
 	if h, ok := ctx.Value(deleteStageKey{}).(*deleteStageHolder); ok && h.message != "" &&
@@ -95,14 +103,14 @@ func (s *Reconciler) definitionOrder(ctx context.Context) definitionOrder {
 	return out
 }
 
-// sequenceOf is a component's sequence: the catalog's, else 0 for Karpenter,
-// else the default.
+// sequenceOf is a component's sequence: 0 for Karpenter (by name, whatever
+// the catalog says: its stage is fixed), else the catalog's, else the default.
 func (o definitionOrder) sequenceOf(name string) int32 {
+	if name == karpenterComponent {
+		return 0 // by name first: a catalog that moved it would put it among the rest
+	}
 	if seq, ok := o.sequence[name]; ok {
 		return seq
-	}
-	if name == karpenterComponent {
-		return 0
 	}
 	return component.DefaultSequence
 }

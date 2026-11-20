@@ -243,6 +243,26 @@ func (r clusters) UsageHistory(ctx context.Context, tenantID, id string) ([]byte
 	return cm.BinaryData[usageHistoryKey], nil
 }
 
+// deleteUsageHistory deletes the cluster's recorded usage ConfigMap (none is
+// no error). Another cluster's of the same name, left behind, is not touched.
+func (r clusters) deleteUsageHistory(ctx context.Context, obj *cloudv1alpha1.Cluster) error {
+	cm := &corev1.ConfigMap{}
+	err := r.c.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: usageHistoryName(obj.Name)}, cm)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return translate(err)
+	}
+	if cm.Labels[LabelID] != obj.Labels[LabelID] {
+		return nil
+	}
+	if err := r.c.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete the recorded usage: %w", translate(err))
+	}
+	return nil
+}
+
 // SetUsageHistory writes the cluster's recorded usage into its ConfigMap,
 // owned by the Cluster object so that it goes with it.
 func (r clusters) SetUsageHistory(ctx context.Context, tenantID, id string, history []byte) error {
@@ -768,6 +788,11 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	// reservation releasing before the CR goes, so a crash or a failed
 	// release after it does not keep the name reserved forever.
 	if err := r.markEKSNameReleasing(ctx, row, time.Now()); err != nil {
+		return err
+	}
+	// The recorded usage is a ConfigMap owned by the Cluster; the Cluster is
+	// removed with orphan propagation, so the collector would never delete it.
+	if err := r.deleteUsageHistory(ctx, obj); err != nil {
 		return err
 	}
 	// Dropping the last finalizer on a deleting CR removes it immediately;

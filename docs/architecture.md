@@ -290,8 +290,8 @@ at `/cloudformation/`. Three roles, each a superset of the one before:
 
 | Role | Allows | Use |
 |---|---|---|
-| `reader` | Describe and list of EC2, EKS, IAM, KMS, CloudWatch Logs, SQS and EventBridge | Imports and observation. The access check reports `ec2:CreateVpc` as not allowed, so no network or cluster is created. |
-| `updater` | `reader`, plus changes to what exists (tags, rules, EKS updates, IAM trust and policy versions, KMS aliases) | Accounts that take over and update existing resources. |
+| `reader` | Describe and list of EC2, EKS, IAM, KMS, CloudWatch Logs, SQS and EventBridge | Imports and observation. The access check reports `ec2:CreateVpc` and `ec2:CreateTags` as not allowed; the account is usable for import only. |
+| `updater` | `reader`, plus changes to what exists (tags, rules, EKS updates, IAM trust and policy versions, KMS aliases) | Accounts that take over and update existing resources. The `ec2:CreateTags` DryRun passes; `ec2:CreateVpc` does not, so it imports and takes over but creates nothing. |
 | `provisioner` | `updater`, plus creating and deleting VPCs, subnets, gateways, EKS clusters and node groups, add-ons, IAM roles and policies | Accounts meant for the platform to create resources in. |
 
 The stack name and role name follow `cluster-vending-<role>` (or
@@ -310,6 +310,15 @@ account's networks use, plus `us-east-1` and any region added with `--region`:
 | `ec2:CreateVpc` | dry run: `DryRunOperation` when allowed, `UnauthorizedOperation` when not | Creating networks |
 | `eks:ListClusters` (one page) | read | EKS name checks, import, observation |
 | `iam:GetRole` of the tenant role | read, once | IAM roles the platform creates and reads |
+
+Usability is per capability, from the per-check results (`pkg/reconcile/account/capability.go`):
+`Create` needs every check (`status.access.verified`); `Import` needs the reads
+(`DescribeAvailabilityZones`, `DescribeVpcs`, `ListClusters`) in the region; `TakeOver`
+needs those and the `ec2:CreateTags` DryRun. CreateCluster and CreateNetwork ask for
+`Create`, ImportCluster and ImportNetwork for `Import`, the take-overs for `TakeOver`.
+A reader or updater account is not denied: `AccessVerified` is `True` with reason
+`VerifiedForImport` and says what it allows and what failed, and a request for more is
+refused as `FAILED_PRECONDITION` with that message. A region that failed still refuses all.
 
 Its result is `status.access` (time, principal, each region and call with its
 reason) and the condition `AccessVerified`. Reasons: `AssumeRoleDenied`,
@@ -408,11 +417,19 @@ stage and what it waits for.
    EC2NodeClasses.
 5. **Karpenter** (sequence 0): its chart and IAM role, then its interruption
    queue, its EventBridge rules and targets, and the node role and access entry.
+   Before the node role is deleted, it is taken out of the instance profiles
+   Karpenter made for this cluster (tagged `karpenter.k8s.aws/ec2nodeclass` or
+   `karpenter.sh/managed-by`, and for this cluster), and those profiles are
+   deleted, through the tenant role. A forced or timed-out node group stage
+   leaves them, and IAM refuses to delete a role a profile still holds. No
+   other profile is touched.
 6. **EKS add-ons** with their pod identity associations, roles and policies.
 7. **The rest**, ordered by Usages: the default managed node group, the EKS
    cluster, the cluster's IAM, the results bucket (emptied first, every pass
-   until the bucket is gone), unrecorded leftovers, the subnet tags, and the
-   records.
+   until the bucket is gone), unrecorded leftovers (including Helm Releases and
+   the Helm ProviderConfig), the subnet tags, and the records. A bucket that
+   cannot be emptied holds back only the Bucket and its settings: everything
+   else is deleted, and the cluster's status names the bucket problem.
 
 Rules that apply throughout:
 
@@ -422,9 +439,20 @@ Rules that apply throughout:
 - The load balancer stage ends after `--teardown-timeout` (default 15 m), and
   the node group stage after the same time from the request. Each ends with a
   `TeardownTimedOut` warning naming what is left, and the deletion goes on.
-- A forced deletion (`cluster delete --force`), or a cluster whose API cannot
-  be reached, skips the workload stages (`TeardownSkipped`). Its Helm releases
-  are let go without an uninstall.
+- Whether the workload cluster is used is decided by trying, not by the EKS
+  status alone: with a kubeconfig Secret and an EKS cluster that is `ACTIVE` or
+  `UPDATING` (an upgrade), the API is called, and stages 1 and 4 retry a failing
+  API until `--teardown-timeout`. A forced deletion (`cluster delete --force`),
+  a cluster with no kubeconfig Secret or whose EKS cluster does not answer
+  (`CREATING`, `DELETING`, `FAILED`) skips the workload stages
+  (`TeardownSkipped`, with the cause in the message), and its Helm Releases are
+  let go without an uninstall.
+- An `ACTIVE` or `UPDATING` cluster whose API is down in stages 2 and 3 waits
+  `--teardown-timeout` from when it was first seen down (at once when the
+  teardown stage already gave up), then its Helm Releases are let go without an
+  uninstall (`HelmReleasesLetGo` warning). The stage message names the cause and
+  `cluster delete --force`, which skips the wait. The wait restarts with the
+  controller. Releases let go stay without Delete.
 - The Usage webhook may refuse a deletion while a user exists. That is "waiting
   for its users", not a failure.
 - The reconciler asks the API server directly before it forgets: the records and

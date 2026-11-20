@@ -173,6 +173,7 @@ var nodeStageErrors sync.Map
 // The stage never fails the deletion: what goes wrong is its status message.
 func (s *Reconciler) deleteNodeGroups(ctx context.Context, row *model.Cluster, c *clusterRemoval, reachable bool) bool {
 	if s.deps.Teardowns == nil || !reachable || c.past() {
+		nodeStageErrors.Delete(row.ID)
 		return true
 	}
 	at := now()

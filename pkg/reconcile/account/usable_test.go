@@ -106,7 +106,7 @@ func TestUsable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			warning, err := Usable(tt.account, tt.region)
+			warning, err := Usable(tt.account, tt.region, Create)
 			if warning != tt.wantWarning {
 				t.Errorf("warning = %q, want %q", warning, tt.wantWarning)
 			}

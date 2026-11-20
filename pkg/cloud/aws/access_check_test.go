@@ -60,6 +60,16 @@ func (f probeFake) CreateVpc(_ context.Context, in *ec2.CreateVpcInput, _ ...fun
 	return nil, &smithy.GenericAPIError{Code: "DryRunOperation", Message: "Request would have succeeded, but DryRun flag is set."}
 }
 
+func (f probeFake) CreateTags(_ context.Context, in *ec2.CreateTagsInput, _ ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
+	if !awssdk.ToBool(in.DryRun) {
+		panic("CreateTags without DryRun: the check must never change anything")
+	}
+	if err := f.fail(ActionCreateTagsDryRun); err != nil {
+		return nil, err
+	}
+	return nil, &smithy.GenericAPIError{Code: "InvalidVpcID.NotFound", Message: "The vpc ID does not exist"}
+}
+
 func (f probeFake) ListClusters(context.Context, *eks.ListClustersInput, ...func(*eks.Options)) (*eks.ListClustersOutput, error) {
 	return &eks.ListClustersOutput{}, f.fail(ActionListClusters)
 }
@@ -136,6 +146,9 @@ func TestCheckAccessReasons(t *testing.T) {
 			errs: map[string]map[string]error{"ap-east-1": {ActionGetCallerIdentity: apiErr("InvalidClientTokenId",
 				"The security token included in the request is invalid")}},
 			region: "ap-east-1", reason: ReasonRegionNotEnabled},
+		{name: "a dry-run tag denied", regions: []string{"us-west-1"},
+			errs:   map[string]map[string]error{"us-west-1": {ActionCreateTagsDryRun: apiErr("UnauthorizedOperation", "You are not authorized")}},
+			region: "us-west-1", action: ActionCreateTagsDryRun, reason: ReasonNotAllowed},
 		{name: "a dry-run create denied by an SCP", regions: []string{"us-west-1"},
 			errs:   map[string]map[string]error{"us-west-1": {ActionCreateVpcDryRun: scp}},
 			region: "us-west-1", action: ActionCreateVpcDryRun, reason: ReasonDeniedBySCP},

@@ -75,3 +75,49 @@ func TestSetRecommendations(t *testing.T) {
 		t.Errorf("garbage stored: %v", err)
 	}
 }
+
+// The recorded usage goes with the cluster's deletion: the Cluster is
+// removed with orphan propagation, so the garbage collector never deletes
+// its ConfigMap.
+func TestDeleteRemovesTheUsageHistory(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	c := w.cluster(t, "prod")
+	if err := w.s.Clusters().SetUsageHistory(ctx, "acme", c.ID, []byte("history")); err != nil {
+		t.Fatal(err)
+	}
+	key := client.ObjectKey{Namespace: namespace, Name: "prod-usage-history"}
+	if err := w.k.Get(ctx, key, &corev1.ConfigMap{}); err != nil {
+		t.Fatalf("the usage history is not stored: %v", err)
+	}
+
+	if err := w.s.Clusters().Delete(ctx, "acme", c.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.k.Get(ctx, key, &corev1.ConfigMap{}); err == nil {
+		t.Error("the usage history is left behind")
+	}
+}
+
+// Another cluster's history of the same name, left behind, is not deleted
+// with this one.
+func TestDeleteLeavesAnotherClustersUsageHistory(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	c := w.cluster(t, "prod")
+	other := &corev1.ConfigMap{}
+	other.Namespace, other.Name = namespace, "prod-usage-history"
+	other.Labels = map[string]string{cloudstore.LabelID: "someone-else"}
+	if err := w.k.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.s.Clusters().Delete(ctx, "acme", c.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.k.Get(ctx, client.ObjectKeyFromObject(other), &corev1.ConfigMap{}); err != nil {
+		t.Errorf("another cluster's usage history was deleted: %v", err)
+	}
+}

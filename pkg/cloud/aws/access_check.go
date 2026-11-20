@@ -10,6 +10,7 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -24,6 +25,7 @@ const (
 	ActionDescribeAvailabilityZones = "ec2:DescribeAvailabilityZones"
 	ActionDescribeVpcs              = "ec2:DescribeVpcs"
 	ActionCreateVpcDryRun           = "ec2:CreateVpc"
+	ActionCreateTagsDryRun          = "ec2:CreateTags"
 	ActionListClusters              = "eks:ListClusters"
 	ActionGetRole                   = "iam:GetRole"
 )
@@ -69,12 +71,14 @@ var AccessChecks = []AccessCheck{
 	{ActionDescribeAvailabilityZones, "read", "network layouts and their zones", false},
 	{ActionDescribeVpcs, "read (one page)", "network import and the providers' observation", false},
 	{ActionCreateVpcDryRun, "DryRun=true: DryRunOperation when allowed, UnauthorizedOperation when not", "creating networks", false},
+	{ActionCreateTagsDryRun, "DryRun=true on a resource that does not exist: DryRunOperation or a not-found answer when allowed (the permission is checked first), UnauthorizedOperation when not",
+		"taking over existing networks and clusters (the updater role's write)", false},
 	{ActionListClusters, "read (one page)", "EKS name checks, import and the providers' clusters", false},
 	{ActionGetRole, "read of the tenant role itself, once (IAM is global)", "the IAM roles the platform creates and reads", true},
 }
 
 // regionalChecks are the checks after the identity call, in every region.
-var regionalChecks = []string{ActionDescribeAvailabilityZones, ActionDescribeVpcs, ActionCreateVpcDryRun, ActionListClusters}
+var regionalChecks = []string{ActionDescribeAvailabilityZones, ActionDescribeVpcs, ActionCreateVpcDryRun, ActionCreateTagsDryRun, ActionListClusters}
 
 // CheckResult is one call's outcome.
 type CheckResult struct {
@@ -149,6 +153,7 @@ type (
 		DescribeAvailabilityZones(context.Context, *ec2.DescribeAvailabilityZonesInput, ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error)
 		DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
 		CreateVpc(context.Context, *ec2.CreateVpcInput, ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error)
+		CreateTags(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
 	}
 	accessEKS interface {
 		ListClusters(context.Context, *eks.ListClustersInput, ...func(*eks.Options)) (*eks.ListClustersOutput, error)
@@ -257,6 +262,14 @@ func call(ctx context.Context, api accessAPIs, action string) error {
 		var apiErr smithy.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "DryRunOperation" {
 			err = nil // allowed: the DryRun answer when the call would succeed
+		}
+	case ActionCreateTagsDryRun:
+		_, err = api.ec2.CreateTags(ctx, &ec2.CreateTagsInput{Resources: []string{"vpc-00000000000000000"},
+			Tags: []ec2types.Tag{{Key: awssdk.String("cluster-vending.io/access-check"), Value: awssdk.String("dry-run")}}, DryRun: awssdk.Bool(true)})
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && (apiErr.ErrorCode() == "DryRunOperation" || strings.HasSuffix(apiErr.ErrorCode(), ".NotFound") ||
+			strings.HasSuffix(apiErr.ErrorCode(), ".Malformed")) {
+			err = nil // allowed: the permission is checked before the resource
 		}
 	case ActionListClusters:
 		_, err = api.eks.ListClusters(ctx, &eks.ListClustersInput{MaxResults: awssdk.Int32(1)})

@@ -28,8 +28,10 @@ const loadBalancerLeftBehind = "load balancers and their security groups (of Ser
 // cluster, the load balancers its controllers made in the cloud are deleted
 // while the AWS Load Balancer Controller still runs (planTeardown), before
 // any platform component is uninstalled. (Karpenter's nodes are the fourth
-// stage, deleteNodeGroups.) It reports whether the deletion may go on. It is skipped (with a warning) when the deletion is
-// forced or the cluster's API cannot be reached, and ends after the
+// stage, deleteNodeGroups.) It reports whether the deletion may go on. It is
+// skipped (with a warning naming why) when the deletion is forced, the
+// cluster has no kubeconfig or its EKS cluster does not answer (it is not
+// ACTIVE or UPDATING), and ends after the
 // teardown timeout with a warning listing what is left: a deletion never
 // waits on it for ever. Its state is the status's teardown (kept across
 // passes: the timeout counts from its start).
@@ -41,33 +43,27 @@ func (s *Reconciler) teardown(ctx context.Context, row *model.Cluster, records [
 	if s.deps.Teardowns == nil {
 		return true, nil
 	}
-	reachable := !row.DeleteForce && storedStatus(row).GetKubeconfigSecret() != ""
-	if reachable {
-		active, err := s.eksActive(ctx, records)
-		if err != nil {
-			return false, err
-		}
-		reachable = active
+	skip, err := s.skipCause(ctx, row, records)
+	if err != nil {
+		return false, err
 	}
-	return s.runTeardown(ctx, row, prev, reachable), nil
+	return s.runTeardown(ctx, row, prev, skip), nil
 }
 
-// runTeardown is teardown once it knows whether the cluster's API can be
-// reached; it records the step's state (withTeardown) and its events.
-func (s *Reconciler) runTeardown(ctx context.Context, row *model.Cluster, prev *cloudv1.ClusterTeardown, reachable bool) bool {
+// runTeardown is teardown once it knows whether the cluster's API is to be
+// used: skip says why it is not (skipCause), empty to run the stage. An API
+// that is to be used and does not answer is retried until the timeout. It
+// records the step's state (withTeardown) and its events.
+func (s *Reconciler) runTeardown(ctx context.Context, row *model.Cluster, prev *cloudv1.ClusterTeardown, skip string) bool {
 	at := now()
 	t := &cloudv1.ClusterTeardown{StartTime: prev.GetStartTime()}
 	if t.StartTime == nil {
 		t.StartTime = timestamppb.New(at)
 	}
 	defer setTeardown(ctx, t)
-	if !reachable {
-		why := "the cluster's API cannot be reached (its EKS cluster is not ACTIVE)"
-		if row.DeleteForce {
-			why = "the deletion is forced"
-		}
+	if skip != "" {
 		t.FinishTime, t.Result = timestamppb.New(at), cloudv1.ClusterTeardownResult_CLUSTER_TEARDOWN_RESULT_SKIPPED
-		t.Message = "skipped: " + why + "; " + leftBehind
+		t.Message = "skipped: the cluster's API is not used (" + skip + "); " + leftBehind
 		reconcile.AddNote(ctx, reconcile.Warning(reconcile.ReasonTeardownSkipped, t.Message))
 		return true
 	}

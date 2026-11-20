@@ -18,6 +18,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	corenetwork "github.com/yindia/cluster-vending/pkg/network"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 	netreconcile "github.com/yindia/cluster-vending/pkg/reconcile/network"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -55,7 +56,7 @@ func (s *NetworkService) ImportNetwork(ctx context.Context, req *cloudv1.ImportN
 	if err := bootstrapped(account); err != nil {
 		return nil, err
 	}
-	if err := s.usable(ctx, account, req.GetRegion()); err != nil {
+	if err := s.usable(ctx, account, req.GetRegion(), accountreconcile.Import); err != nil {
 		return nil, err
 	}
 	if err := s.refuseOwnedVPC(ctx, account, req.GetAws().GetVpcId()); err != nil {
@@ -111,7 +112,7 @@ func (s *NetworkService) TakeOverNetwork(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, service.ToConnect(err)
 	}
-	if err := s.usableByID(ctx, row.TenantID, row.CloudAccountID, row.Region); err != nil {
+	if err := s.usableByID(ctx, row.TenantID, row.CloudAccountID, row.Region, accountreconcile.TakeOver); err != nil {
 		return nil, err
 	}
 	// The plan that was reviewed is the one applied: what was changed on

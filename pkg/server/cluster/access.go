@@ -13,8 +13,8 @@ import (
 // has not verified its access in the network's region
 // (accountreconcile.Usable), as FAILED_PRECONDITION. A verdict that is
 // stale is logged and allowed.
-func (s *ClusterService) usable(ctx context.Context, a *model.CloudAccount, region string) error {
-	warning, err := accountreconcile.Usable(a, region)
+func (s *ClusterService) usable(ctx context.Context, a *model.CloudAccount, region string, capability accountreconcile.Capability) error {
+	warning, err := accountreconcile.Usable(a, region, capability)
 	if err != nil {
 		if regions, ok := accountreconcile.RegionToCheck(a, region); ok {
 			// The refusal starts the region's check, so it fixes itself.
@@ -32,7 +32,7 @@ func (s *ClusterService) usable(ctx context.Context, a *model.CloudAccount, regi
 }
 
 // usableNetwork is usable for the account of the network (by ID).
-func (s *ClusterService) usableNetwork(ctx context.Context, tenantID, networkID string) error {
+func (s *ClusterService) usableNetwork(ctx context.Context, tenantID, networkID string, capability accountreconcile.Capability) error {
 	n, err := s.deps.Store.Networks().Get(ctx, tenantID, networkID)
 	if err != nil {
 		return service.ToConnect(err)
@@ -41,5 +41,5 @@ func (s *ClusterService) usableNetwork(ctx context.Context, tenantID, networkID 
 	if err != nil {
 		return service.ToConnect(err)
 	}
-	return s.usable(ctx, a, n.Region)
+	return s.usable(ctx, a, n.Region, capability)
 }

@@ -119,6 +119,22 @@ var (
 	}
 )
 
+// IsResultsBucketObject reports whether the object of that kind and name is
+// the cluster's results Bucket or one of its settings (the kinds
+// resultsLists has): what a deletion keeps until the bucket is emptied.
+func IsResultsBucketObject(prefix, kind, name string) bool {
+	base := ResultsBucketObjectName(prefix)
+	if name == base {
+		return kind == resultsBucketKind.Kind
+	}
+	for _, suffix := range resultsSettings {
+		if name == base+suffix {
+			return kind == resultsSettingKinds[suffix].Kind
+		}
+	}
+	return false
+}
+
 // resultsObjects are the objects above, in creation order; none unless the
 // plan has a results bucket.
 func (b clusterBuilder) resultsObjects() []client.Object {

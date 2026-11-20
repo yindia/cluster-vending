@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,11 +47,26 @@ func protects(policies []string) bool {
 	return slices.Contains(policies, "Create") && !slices.Contains(policies, "Delete") && !slices.Contains(policies, "*")
 }
 
+// protectedKind reports whether the platform ever protects objects of r's
+// kind: the stateful cloud objects of the AWS provider. The Helm Releases
+// and ProviderConfigs of the provider-helm and provider-kubernetes families
+// (group *.m.crossplane.io) are not: a Release a deletion let go (without
+// Delete, so removing it does not uninstall a chart in a cluster that cannot
+// be reached) must not be switched back to full management by a later
+// delete of it.
+func protectedKind(r Ref) bool {
+	group, _, _ := strings.Cut(r.APIVersion, "/")
+	return !strings.HasSuffix(group, ".m.crossplane.io")
+}
+
 // allowDelete switches the object of r to full management when the
 // platform protects it from deletion (protects) and it is not shared
 // (RetainAnnotation), so deleting it deletes its cloud resource. An
 // object that is gone, or of a kind not installed, needs nothing.
 func (c Client) allowDelete(ctx context.Context, r Ref) error {
+	if !protectedKind(r) {
+		return nil
+	}
 	u := r.empty()
 	err := c.Kube.Get(ctx, r.key(), u)
 	switch {

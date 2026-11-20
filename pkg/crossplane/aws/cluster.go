@@ -15,6 +15,7 @@ import (
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -581,9 +582,17 @@ func strPtrs(in map[string]string) map[string]*string {
 }
 
 // ClusterLists are empty lists of every kind ClusterResources creates, to
-// find a cluster's objects by label.
+// find a cluster's objects by label; with the provider-helm Releases and
+// ProviderConfigs (unstructured, the provider-helm Go module is not a
+// dependency) that reach the cluster, which a deletion that lets them go
+// may leave behind.
 func ClusterLists() []client.ObjectList {
-	return append([]client.ObjectList{
+	helm := func(gvk schema.GroupVersionKind) client.ObjectList {
+		l := &unstructured.UnstructuredList{}
+		l.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+		return l
+	}
+	return append([]client.ObjectList{helm(HelmReleaseGVK), helm(HelmProviderConfigGVK),
 		&awseks.AccessPolicyAssociationList{}, &awseks.AccessEntryList{}, &awseks.PodIdentityAssociationList{},
 		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awsec2.LaunchTemplateList{},
 		&awsiam.OpenIDConnectProviderList{}, &awseks.IdentityProviderConfigList{}, &awseks.ClusterList{},

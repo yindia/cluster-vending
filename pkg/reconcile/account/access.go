@@ -34,6 +34,9 @@ const (
 const (
 	ReasonAccessNotChecked = "NotChecked"
 	ReasonAccessVerified   = "Verified"
+	// ReasonAccessVerifiedPartly: the role reads (and maybe updates) but
+	// cannot create: right for imports and take-overs, not a denial.
+	ReasonAccessVerifiedPartly = "VerifiedForImport"
 	// ReasonNoTenantRole: the account has no usable tenant role stored.
 	ReasonNoTenantRole = "NoTenantRole"
 )
@@ -164,7 +167,8 @@ func (r *Reconciler) accountRegions(ctx context.Context, a *model.CloudAccount) 
 }
 
 // AccessCondition is the AccessVerified condition of an account's access:
-// True when verified, False when a check was denied, Unknown before the
+// True when verified (or verified for import and take over only, as a
+// reader or updater role is), False when a check was denied, Unknown before the
 // first verdict.
 func AccessCondition(a *model.AccountAccess) *cloudv1.Condition {
 	c := &cloudv1.Condition{Type: ConditionAccessVerified, Status: cloudv1.ConditionStatus_CONDITION_STATUS_UNKNOWN}
@@ -173,6 +177,8 @@ func AccessCondition(a *model.AccountAccess) *cloudv1.Condition {
 		c.Reason, c.Message = ReasonAccessNotChecked, "the controller has not checked the account's access yet"
 	case a.CheckedAt.IsZero():
 		c.Reason, c.Message = a.Reason, "the access check could not finish: "+a.Message
+	case partial(a):
+		c.Status, c.Reason, c.Message = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, ReasonAccessVerifiedPartly, partialMessage(a)
 	case a.Verified:
 		c.Status, c.Reason = cloudv1.ConditionStatus_CONDITION_STATUS_TRUE, ReasonAccessVerified
 		c.Message = fmt.Sprintf("the tenant role works in %s and allows the platform's calls (checked %s)",
@@ -188,7 +194,7 @@ func AccessCondition(a *model.AccountAccess) *cloudv1.Condition {
 
 // AccessDenied: the last verdict of the account's access is a denial.
 func AccessDenied(a *model.AccountAccess) bool {
-	return a != nil && !a.Verified && !a.CheckedAt.IsZero()
+	return a != nil && !a.Verified && !a.CheckedAt.IsZero() && !partial(a)
 }
 
 func accessRegions(a *model.AccountAccess) []string {
@@ -207,7 +213,7 @@ func AccessNote(was, is *model.AccountAccess) *reconcile.Note {
 	switch {
 	case is == nil || is.CheckedAt.IsZero():
 		return nil
-	case is.Verified && (was == nil || !was.Verified):
+	case (is.Verified || partial(is)) && (was == nil || (!was.Verified && !partial(was))):
 		n := reconcile.Normal(reconcile.ReasonAccessVerified, AccessCondition(is).GetMessage())
 		return &n
 	case AccessDenied(is) && (!AccessDenied(was) || was.Reason != is.Reason || was.Message != is.Message):

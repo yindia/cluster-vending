@@ -24,6 +24,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	recon "github.com/yindia/cluster-vending/pkg/reconcile"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -96,7 +97,7 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	if err != nil {
 		return nil, err
 	}
-	if err := s.usableNetwork(ctx, row.TenantID, row.NetworkID); err != nil {
+	if err := s.usableNetwork(ctx, row.TenantID, row.NetworkID, accountreconcile.Create); err != nil {
 		return nil, err
 	}
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {

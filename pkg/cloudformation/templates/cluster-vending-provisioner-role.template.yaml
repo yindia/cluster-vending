@@ -99,6 +99,22 @@ Resources:
               - '*'
             Sid: ProvisionIAM
           - Action:
+              - iam:ListInstanceProfileTags
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadInstanceProfileTags
+          - Action:
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:DeleteInstanceProfile
+            Condition:
+              'Null':
+                aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass: 'false'
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: CleanKarpenterInstanceProfiles
+          - Action:
               - iam:PassRole
             Condition:
               StringEquals:

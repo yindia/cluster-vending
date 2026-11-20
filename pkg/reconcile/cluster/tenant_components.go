@@ -312,7 +312,7 @@ func (s *Reconciler) logTenant(ctx context.Context, row *model.Cluster, c model.
 // whether it is gone: its charts are uninstalled (a chart before the one
 // it was installed after, by the Usages of PlatformSet), then its role,
 // then the Component itself. When the workload cluster cannot be reached
-// (its EKS cluster is not ACTIVE, or the cluster's deletion is forced)
+// (its EKS cluster neither ACTIVE nor UPDATING, or the cluster's deletion is forced)
 // the Releases are let go without an uninstall (forceRelease).
 func (s *Reconciler) removeTenant(ctx context.Context, row *model.Cluster, c model.Component) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerComponent, c.ID)
@@ -335,11 +335,11 @@ func (s *Reconciler) removeTenant(ctx context.Context, row *model.Cluster, c mod
 	if err != nil {
 		return false, err
 	}
-	active, err := s.eksActive(ctx, clusterRecords)
+	status, err := s.eksStatus(ctx, clusterRecords)
 	if err != nil {
 		return false, err
 	}
-	if !active || row.DeleteForce {
+	if !eksServes(status) || row.DeleteForce {
 		if err := s.forceRelease(ctx, row); err != nil {
 			return false, err
 		}

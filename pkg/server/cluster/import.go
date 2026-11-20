@@ -12,6 +12,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -49,7 +50,7 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	if err != nil {
 		return nil, err
 	}
-	if err := s.usable(ctx, account, network.Region); err != nil {
+	if err := s.usable(ctx, account, network.Region, accountreconcile.Import); err != nil {
 		return nil, err
 	}
 	if err := s.NameTaken(ctx, req.GetTenantId(), req.GetName()); err != nil {
@@ -106,7 +107,7 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	if err != nil {
 		return nil, err
 	}
-	if err := s.usable(ctx, target.Account, target.Network.Region); err != nil {
+	if err := s.usable(ctx, target.Account, target.Network.Region, accountreconcile.TakeOver); err != nil {
 		return nil, err
 	}
 	// The row only: once anything is owned the cluster is no longer an

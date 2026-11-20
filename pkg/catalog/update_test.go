@@ -164,3 +164,45 @@ func TestSpecHash(t *testing.T) {
 		t.Error("disabled changes the hash")
 	}
 }
+
+// The API server fills a CRD default into every stored definition: a field
+// added later with a default (sequence, 100) appears on definitions an
+// earlier build shipped and hashed without it. That is not an edit: the
+// definition is still updated to this build's spec, and one no longer in
+// the build is still deleted. A real edit is still left alone.
+func TestSyncTreatsCRDDefaultsAsUnedited(t *testing.T) {
+	old := spec("version one") // hashed before sequence existed
+	stored := func(name string) *cloudv1alpha1.ComponentDefinition {
+		d := shipped(name, old)
+		d.Spec.Sequence = ptrTo(int32(100)) // what the API server returns now
+		return d
+	}
+	first := spec("version two")
+	first.Sequence = ptrTo(int32(0)) // this build moves karpenter first
+	c := newClient(t, stored("karpenter"), stored("cluster-autoscaler"))
+
+	res, err := catalog.Sync(t.Context(), c, []*cloudv1alpha1.ComponentDefinition{definition("karpenter", first)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := get(t, c, "karpenter"); got == nil || got.Spec.Description != "version two" || got.Spec.Sequence == nil || *got.Spec.Sequence != 0 {
+		t.Errorf("karpenter = %+v, want this build's spec with sequence 0", got)
+	}
+	if got := get(t, c, "cluster-autoscaler"); got != nil && got.DeletionTimestamp.IsZero() {
+		t.Errorf("cluster-autoscaler, no longer in the build, is kept: %+v (result %+v)", got.Spec, res)
+	}
+	if slices.Contains(res.Edited, "karpenter") || slices.Contains(res.Edited, "cluster-autoscaler") {
+		t.Errorf("a CRD default counted as an edit: %+v", res)
+	}
+	if catalog.SpecHash(old) != catalog.SpecHash(stored("x").Spec) {
+		t.Error("a spec and the same spec with sequence at its default hash differently")
+	}
+	realEdit := old
+	realEdit.Sequence = ptrTo(int32(5))
+	if catalog.SpecHash(old) == catalog.SpecHash(realEdit) {
+		t.Error("a sequence other than the default no longer counts as an edit")
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }

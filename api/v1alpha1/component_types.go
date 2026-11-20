@@ -8,6 +8,10 @@ import (
 // ComponentFinalizer holds a Component until what it installed is removed.
 const ComponentFinalizer = "cloud.cluster-vending.io/component"
 
+// DefaultComponentSequence is ComponentDefinitionSpec.Sequence when a
+// definition sets none (the CRD default).
+const DefaultComponentSequence int32 = 100
+
 // MaxComponentValuesBytes bounds a component's values, serialized as JSON.
 // The CRD cannot measure schemaless JSON, so the store and the API check it.
 const MaxComponentValuesBytes = 64 << 10

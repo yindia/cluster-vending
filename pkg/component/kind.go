@@ -114,7 +114,7 @@ func chartOf(def *cloudv1alpha1.ComponentDefinition) string {
 }
 
 // DefaultSequence is the sequence of a definition that sets none.
-const DefaultSequence int32 = 100
+const DefaultSequence = cloudv1alpha1.DefaultComponentSequence
 
 // sequenceOf is the definition's spec.sequence, DefaultSequence when unset.
 func sequenceOf(def *cloudv1alpha1.ComponentDefinition) int32 {

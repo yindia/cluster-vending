@@ -63,6 +63,14 @@ func Install(ctx context.Context, c client.Client) (Result, error) {
 // updating the rest of it.
 func SpecHash(spec cloudv1alpha1.ComponentDefinitionSpec) string {
 	spec.Disabled = false
+	// A field the CRD defaults, added after definitions were hashed, comes
+	// back from the API server set to its default on every stored
+	// definition: at its default it hashes as unset, or each shipped
+	// definition would look edited and never be updated or removed again.
+	// Add every such field here when the CRD gains one.
+	if spec.Sequence != nil && *spec.Sequence == cloudv1alpha1.DefaultComponentSequence {
+		spec.Sequence = nil
+	}
 	raw, _ := json.Marshal(spec) // these types always marshal
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])

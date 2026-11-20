@@ -15,6 +15,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/maintenance"
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/rollout"
@@ -39,7 +40,10 @@ func (r *RolloutReconciler) finishUpgrades(ctx context.Context, channel string, 
 			continue
 		}
 		started := c.Status.Rollout.Result == cloudv1alpha1.ClusterRolloutInProgress
-		next := rollout.Finish(c, now, r.upgradeTimeout())
+		if c.Status.Phase == cloudv1alpha1.ClusterPhaseDeleting {
+			continue // a deleting cluster's record is left: it neither times out nor counts
+		}
+		next := rollout.FinishHeld(c, now, r.upgradeTimeout(), rollout.HoldOf(in.Holds, c, now) != nil)
 		if next == nil || !r.writeRecord(ctx, c, next) {
 			continue
 		}
@@ -82,7 +86,8 @@ func (r *RolloutReconciler) startHops(ctx context.Context, plan rollout.Result, 
 
 // startHop sets the cluster's next minor, read again right before: it is
 // still automatic, on this channel, asks for the minor the plan saw, is
-// not paused or being deleted, and the hop goes up. A write that loses to
+// not paused or being deleted, no code change or release move is in
+// flight, its maintenance window is open, and the hop goes up. A write that loses to
 // another change is skipped; the next pass plans again. Irreversible: EKS
 // cannot downgrade.
 func (r *RolloutReconciler) startHop(ctx context.Context, channel string, row rollout.Row, now time.Time) bool {
@@ -112,6 +117,12 @@ func (r *RolloutReconciler) startHop(ctx context.Context, channel string, row ro
 	if why == "" && reconcilecluster.ReleaseMoving(stored) {
 		// A release move and a Kubernetes upgrade never run at once.
 		why = "its components are moving to a new release"
+	}
+	if why == "" && reconcilecluster.CodeChanging(stored) {
+		why = "a code change is in flight"
+	}
+	if why == "" && !maintenance.Open(spec.GetMaintenanceWindow(), now) {
+		why = "outside its maintenance window"
 	}
 	if why == "" {
 		// EKS add-ons, then platform components, then tenant components:

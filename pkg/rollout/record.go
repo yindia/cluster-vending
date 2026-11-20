@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -67,17 +68,42 @@ func upgrading(c *cloudv1alpha1.Cluster) bool {
 //     and reports no upgrade (every step of it done), Failed when the
 //     cluster failed while upgrading, TimedOut when it made no progress
 //     for timeout: its current step started longer ago than that (or,
-//     never seen upgrading, the hop did);
+//     never seen upgrading, the hop did), unless the cluster is held (FinishHeld);
 //   - a record the rollout never started (Pending, Blocked): Succeeded,
 //     "reached by an update", once the cluster runs its target with no
 //     upgrade in progress, however it got there.
 //
 // nil when the record stays as it is.
 func Finish(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration) *cloudv1alpha1.ClusterRolloutRecord {
+	return FinishHeld(c, now, timeout, false)
+}
+
+// conditionUpgradePaused is the cluster condition that says its
+// reconciliation is held on purpose (a freeze or a pause).
+const conditionUpgradePaused = "UpgradePaused"
+
+// pauseRefresh is how often the step clock of a held upgrade is moved up
+// to now (one status write at most per pass of this age).
+const pauseRefresh = time.Minute
+
+// Held reports whether the cluster is held on purpose now: a freeze
+// (held, from HoldOf) or its UpgradePaused condition. Nothing it does
+// then counts as a stall.
+func Held(c *cloudv1alpha1.Cluster, frozen bool) bool {
+	return frozen || meta.IsStatusConditionTrue(c.Status.Conditions, conditionUpgradePaused)
+}
+
+// FinishHeld is Finish for a cluster that may be held by a freeze
+// (frozen). A held cluster does not advance toward TimedOut: its step
+// clock is moved up to now (the record's startTime, at most once per
+// pauseRefresh), so the upgrade gets the time it had left when the hold
+// ends. A cluster being deleted keeps its record as it is.
+func FinishHeld(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration, frozen bool) *cloudv1alpha1.ClusterRolloutRecord {
 	rec := c.Status.Rollout
-	if rec == nil {
+	if rec == nil || c.Status.Phase == cloudv1alpha1.ClusterPhaseDeleting {
 		return nil
 	}
+	held := Held(c, frozen)
 	out := rec.DeepCopy()
 	finished := metav1.NewTime(now)
 	out.FinishTime = &finished
@@ -103,6 +129,11 @@ func Finish(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration) *clo
 	case c.Status.Upgrade != nil && c.Status.Upgrade.Halted:
 		// The add-ons did not settle after the automatic recoveries.
 		out.Result, out.Message = cloudv1alpha1.ClusterRolloutFailed, c.Status.Upgrade.Message
+	case held:
+		if now.Sub(since) < pauseRefresh {
+			return nil
+		}
+		out.FinishTime, out.StartTime = rec.FinishTime, metav1.NewTime(now)
 	case now.Sub(since) > timeout:
 		out.Result = cloudv1alpha1.ClusterRolloutTimedOut
 		out.Message = fmt.Sprintf("no progress for %s", timeout)
@@ -122,9 +153,10 @@ func Finish(c *cloudv1alpha1.Cluster, now time.Time, timeout time.Duration) *clo
 // cluster's current step started, or, while the cluster reports no
 // upgrade yet, when the rollout started the hop.
 func stepStart(c *cloudv1alpha1.Cluster, rec *cloudv1alpha1.ClusterRolloutRecord) time.Time {
-	if u := c.Status.Upgrade; u != nil && u.PhaseStartTime != nil {
+	if u := c.Status.Upgrade; u != nil && u.PhaseStartTime != nil && u.PhaseStartTime.After(rec.StartTime.Time) {
 		return u.PhaseStartTime.Time
 	}
+	// The record's start is also moved up while the cluster is held.
 	return rec.StartTime.Time
 }
 

@@ -550,7 +550,7 @@ func TestImportClusterBlocked(t *testing.T) {
 		"subnet outside the network": {func(c *awscloud.Cluster) { c.SubnetIDs = []string{"subnet-a", "subnet-zzz"} },
 			"not a private subnet of network"},
 		"node group in other subnets": {func(c *awscloud.Cluster) { c.NodeGroups[0].SubnetIDs = []string{"subnet-a"} }, "EKS cannot change subnetIds"},
-		"not active":                  {func(c *awscloud.Cluster) { c.Status = "UPDATING" }, "must be ACTIVE"},
+		"not active":                  {func(c *awscloud.Cluster) { c.Status = "FAILED" }, "must be ACTIVE"},
 		"old AMI type":                {func(c *awscloud.Cluster) { c.NodeGroups[0].AMIType = "AL2_x86_64" }, "AMI type AL2_x86_64"},
 		"role not readable":           {func(c *awscloud.Cluster) { c.Role.Unreadable = "access denied" }, "role cannot be read"},
 	} {

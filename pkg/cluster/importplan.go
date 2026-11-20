@@ -156,6 +156,18 @@ func (p *importPlanner) block(kind, externalName, detail string) {
 	p.line(EKSAPIVersion, kind, "", externalName, "", cloudv1.Disposition_DISPOSITION_BLOCKING, detail)
 }
 
+// TransientStatus reports whether an EKS cluster status is one the cluster
+// leaves by itself (CREATING, UPDATING, ...): an import looked at it again
+// later rather than blocking. ACTIVE needs no wait, and FAILED and
+// DELETING are final: the plan blocks those.
+func TransientStatus(status string) bool {
+	switch status {
+	case "", crossplaneaws.EKSActive, "FAILED", "DELETING":
+		return false
+	}
+	return true
+}
+
 // preconditions checks what must hold before anything is derived and
 // returns the default node group.
 func (p *importPlanner) preconditions() awscloud.NodeGroup {

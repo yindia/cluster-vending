@@ -275,6 +275,13 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 			"secrets encryption cannot be turned off or moved to another key once it is on: EKS cannot change it")
 	}
 	if slices.Contains(paths, pathKubernetesVersion) {
+		// A change while an upgrade runs (or is halted) would rebuild its
+		// status and skip the intermediate minor's pins; the same version
+		// again changes nothing.
+		if spec.GetControlPlane().GetKubernetesVersion() != versionBefore && reconcilecluster.Upgrading(row) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
+				"cluster %s is upgrading Kubernetes (or its upgrade is halted): wait for it to finish, or run `cluster retry` to continue a halted one, before changing kubernetes_version", row.ID))
+		}
 		if err := s.CheckVersionStep(ctx, row, versionBefore, spec.GetControlPlane().GetKubernetesVersion()); err != nil {
 			return nil, err
 		}

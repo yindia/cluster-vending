@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,10 @@ import (
 )
 
 type clusters struct{ store }
+
+// AnnotationRowGeneration is the object generation (metadata.generation) the
+// store's last write of the object produced.
+const AnnotationRowGeneration = group + "row-generation"
 
 // Stored states of a cluster the store itself looks at.
 const (
@@ -664,10 +669,16 @@ func (r clusters) Record(ctx context.Context, c *model.Cluster) error {
 // an edit is still waiting to be taken up (generation ahead of the observed
 // one) and this write does not take it up (a new row generation): that edit
 // stays unobserved, for the controller to bump and apply.
+//
+// The generation the write produces is recorded on the object in the same
+// update (AnnotationRowGeneration), so the controller, which may wake between
+// this update and the status one, can tell an edit made by this store from
+// one made on the object (StoreWrote).
 func (r clusters) write(ctx context.Context, c *model.Cluster, rotate bool) error {
 	old, updated := c.ETag, c.UpdatedAt
 	var obj *cloudv1alpha1.Cluster
 	var observed *int64
+	var predicted int64
 	err := retry(func() error {
 		var err error
 		observed = nil
@@ -678,15 +689,21 @@ func (r clusters) write(ctx context.Context, c *model.Cluster, rotate bool) erro
 		if m.ETag != old || changedSince(obj, c.Seen) || c.SeenGeneration != 0 && obj.Generation != c.SeenGeneration {
 			return repository.ErrConflict
 		}
-		pending := obj.Status.ObservedGeneration != 0 && obj.Generation > obj.Status.ObservedGeneration
+		pending := obj.Status.ObservedGeneration != 0 && obj.Generation > obj.Status.ObservedGeneration && !StoreWrote(obj)
 		takesUp := c.Generation > m.Generation
 		c.CreatedAt = m.CreatedAt
 		if rotate {
 			c.ETag, c.UpdatedAt = newETag(), now()
 		}
+		specBefore := obj.Spec.DeepCopy()
 		if err := r.fill(c, obj.Spec.Network.NetworkRef.Name, obj); err != nil {
 			return err
 		}
+		predicted = obj.Generation
+		if !equality.Semantic.DeepEqual(*specBefore, obj.Spec) {
+			predicted++ // the API server counts a change of the spec
+		}
+		annotate(obj, map[string]string{AnnotationRowGeneration: strconv.FormatInt(predicted, 10)})
 		if err := r.c.Update(ctx, obj); err != nil {
 			return err
 		}
@@ -700,8 +717,42 @@ func (r clusters) write(ctx context.Context, c *model.Cluster, rotate bool) erro
 		c.ETag, c.UpdatedAt = old, updated
 		return translate(err)
 	}
+	if obj.Generation != predicted {
+		// The prediction was off (the server did not count a change it
+		// looked like): the record must not claim a generation an edit made
+		// later would get.
+		if err := r.recordGeneration(ctx, c.TenantID, c.ID, obj.Generation); err != nil {
+			return translate(err)
+		}
+	}
 	c.Seen, c.SeenGeneration = seen(obj), obj.Generation
 	return r.writeStatus(ctx, c.TenantID, c.ID, c.ETag, c.Status, obj, observed)
+}
+
+// recordGeneration sets AnnotationRowGeneration of the cluster's object to
+// the generation it has.
+func (r clusters) recordGeneration(ctx context.Context, tenantID, id string, generation int64) error {
+	return retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		if obj.Generation != generation {
+			return nil // changed since: that is not this write's to record
+		}
+		annotate(obj, map[string]string{AnnotationRowGeneration: strconv.FormatInt(generation, 10)})
+		return r.c.Update(ctx, obj)
+	})
+}
+
+// StoreWrote reports whether the object's current generation is the one a
+// write of the store produced (Update, Record), not one made on the object
+// (kubectl edit). Between that write's update of the object and its status
+// update the generation is ahead of the observed one, and the controller
+// must not take it for an edit.
+func StoreWrote(obj *cloudv1alpha1.Cluster) bool {
+	g, err := strconv.ParseInt(obj.Annotations[AnnotationRowGeneration], 10, 64)
+	return err == nil && g == obj.Generation
 }
 
 // writeStatus is networks.writeStatus for a cluster. observed is what the

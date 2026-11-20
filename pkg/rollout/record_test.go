@@ -286,3 +286,65 @@ func TestTenantComponentsNotReadyHoldTheUpgrade(t *testing.T) {
 		})
 	}
 }
+
+// A cluster held on purpose (a freeze, UpgradePaused) does not advance
+// toward TimedOut however long the hold lasts, and gets the time it had
+// left once it is released.
+func TestFinishHeldClusterDoesNotTimeOut(t *testing.T) {
+	const timeout = 90 * time.Minute
+	stalled := func() cloudv1alpha1.Cluster {
+		c := cluster("c", cloudv1alpha1.ClusterTier2, "1.35")
+		c.Status.Rollout = record(cloudv1alpha1.ClusterRolloutInProgress, "1.35", "1.36", now.Add(-3*timeout))
+		return c
+	}
+	paused := stalled()
+	paused.Status.Conditions = []metav1.Condition{{Type: "UpgradePaused", Status: metav1.ConditionTrue}}
+	for name, c := range map[string]struct {
+		c      cloudv1alpha1.Cluster
+		frozen bool
+	}{"freeze": {stalled(), true}, "UpgradePaused": {paused, false}} {
+		t.Run(name, func(t *testing.T) {
+			got := FinishHeld(&c.c, now, timeout, c.frozen)
+			if got != nil && (got.Result != cloudv1alpha1.ClusterRolloutInProgress || got.FinishTime != nil) {
+				t.Fatalf("held cluster finished as %+v, want InProgress", got)
+			}
+			if got == nil || !got.StartTime.Time.Equal(now) {
+				t.Fatalf("the step clock is not moved up to now: %+v", got)
+			}
+			// Released a little later: the refreshed clock gives it the time left.
+			c.c.Status.Rollout = got
+			c.c.Status.Conditions = nil
+			if r := FinishHeld(&c.c, now.Add(timeout-time.Minute), timeout, false); r != nil {
+				t.Errorf("after the hold it timed out early: %+v", r)
+			}
+			r := FinishHeld(&c.c, now.Add(timeout+time.Minute), timeout, false)
+			if r == nil || r.Result != cloudv1alpha1.ClusterRolloutTimedOut {
+				t.Errorf("after the remaining time it should time out, got %+v", r)
+			}
+		})
+	}
+	// A hold alone does not hide a success.
+	done := stalled()
+	done.Status.CurrentKubernetesVersion = "1.36"
+	if got := FinishHeld(&done, now, timeout, true); got == nil || got.Result != cloudv1alpha1.ClusterRolloutSucceeded {
+		t.Errorf("held but done = %+v, want Succeeded", got)
+	}
+}
+
+// A cluster being deleted keeps no slot in the rollout and its upgrade
+// record neither times out nor counts as failed.
+func TestDeletingClusterLeavesTheRollout(t *testing.T) {
+	const timeout = 90 * time.Minute
+	del := cluster("gone", cloudv1alpha1.ClusterTier2, "1.35")
+	del.Status.Phase = cloudv1alpha1.ClusterPhaseDeleting
+	del.Status.Rollout = record(cloudv1alpha1.ClusterRolloutInProgress, "1.35", "1.36", now.Add(-3*timeout))
+	if got := Finish(&del, now, timeout); got != nil {
+		t.Errorf("a deleting cluster's record was finished: %+v", got)
+	}
+	res := Compute(input(del))
+	for _, r := range res.Rows {
+		if r.Name == "gone" {
+			t.Errorf("a deleting cluster is a member: %+v", r)
+		}
+	}
+}

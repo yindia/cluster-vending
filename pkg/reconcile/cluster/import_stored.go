@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -24,6 +25,15 @@ const (
 	importObjectsKey       = "importObjects"
 	importPodIdentitiesKey = "importPodIdentities"
 )
+
+// maxImportObjectsBytes bounds the serialized objects of an import kept
+// with the row (the cluster object's annotation has a limit of its own,
+// and a row that cannot be stored would fail every pass).
+const maxImportObjectsBytes = 200 << 10
+
+// ErrImportTooLarge is WithImportObjects' error for a plan whose objects
+// exceed maxImportObjectsBytes once serialized.
+var ErrImportTooLarge = errors.New("the import is too large to keep with the cluster")
 
 // WithImportObjects is adoption (crossplaneaws.Adoption as stored JSON)
 // with the objects of the import plan kept next to it. ImportCluster
@@ -48,6 +58,9 @@ func WithImportObjects(adoption model.JSON, plan corecluster.ImportPlan, scheme 
 	identities, err2 := json.Marshal(plan.PodIdentities)
 	if err1 != nil || err2 != nil {
 		return nil, fmt.Errorf("encode the import's objects: %w", firstError(err1, err2))
+	}
+	if size := len(objects) + len(identities); size > maxImportObjectsBytes {
+		return nil, fmt.Errorf("%w: its %d objects take %d KiB, the limit is %d KiB", ErrImportTooLarge, len(bodies), size>>10, maxImportObjectsBytes>>10)
 	}
 	fields[importObjectsKey], fields[importPodIdentitiesKey] = objects, identities
 	out, err := json.Marshal(fields)

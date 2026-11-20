@@ -239,7 +239,8 @@ type memberInputs struct {
 // ahead of the channel). wake is when its window opens, when that is what
 // blocks it.
 func (in memberInputs) row(c *cloudv1alpha1.Cluster) (r Row, wake time.Time, ok bool) {
-	if !strings.EqualFold(string(c.Spec.ReleaseChannel), in.channel) || !c.DeletionTimestamp.IsZero() {
+	if !strings.EqualFold(string(c.Spec.ReleaseChannel), in.channel) || !c.DeletionTimestamp.IsZero() ||
+		c.Status.Phase == cloudv1alpha1.ClusterPhaseDeleting {
 		return r, wake, false
 	}
 	current := c.Status.CurrentKubernetesVersion

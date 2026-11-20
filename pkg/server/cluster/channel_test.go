@@ -84,7 +84,8 @@ func TestCreateOnAChannel(t *testing.T) {
 		t.Errorf("alpha asking for 1.35 (older, offered) = %v, want accepted", err)
 	}
 
-	// No channel: the version stays the client's (EKS chooses when unset).
+	// No channel: the release's default minor when unset (see
+	// TestCreateOnNoChannelChecksTheRelease).
 	res, err = w.svc.CreateCluster(ctx, onChannel(w, "no-channel", cloudv1.ReleaseChannel_RELEASE_CHANNEL_UNSPECIFIED, ""))
 	if err != nil {
 		t.Fatal(err)
@@ -93,8 +94,8 @@ func TestCreateOnAChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec, _ := reconcilecluster.SpecOf(row); spec.GetControlPlane().GetKubernetesVersion() != "" {
-		t.Errorf("no channel: kubernetes_version = %q, want unset", spec.GetControlPlane().GetKubernetesVersion())
+	if spec, _ := reconcilecluster.SpecOf(row); spec.GetControlPlane().GetKubernetesVersion() != "1.37" {
+		t.Errorf("no channel: kubernetes_version = %q, want the default 1.37", spec.GetControlPlane().GetKubernetesVersion())
 	}
 }
 

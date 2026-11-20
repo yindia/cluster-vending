@@ -207,3 +207,97 @@ func TestAPIUpdatesStayObservedAndKeepTheirSpec(t *testing.T) {
 		t.Fatalf("a platform spec write left an edit pending: observed %d, generation %d", obj.Status.ObservedGeneration, obj.Generation)
 	}
 }
+
+// The generation a store write produces is recorded on the object, so the
+// controller can tell it from a kubectl edit while the status is behind.
+func TestStoreWriteRecordsTheGenerationItProduced(t *testing.T) {
+	w := newEditWorld(t)
+	c := w.create(t, "prod")
+	row, err := w.s.Clusters().Get(t.Context(), "acme", c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &cloudv1.ClusterSpec{}
+	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	row.Spec, _ = protojson.Marshal(spec)
+	row.Generation++
+	if err := w.s.Clusters().Update(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	obj := w.object(t, "prod")
+	if obj.Generation != 2 || !cloudstore.StoreWrote(obj) {
+		t.Fatalf("API update: generation %d, recorded %q", obj.Generation, obj.Annotations[cloudstore.AnnotationRowGeneration])
+	}
+	w.kubectlEdit(t, "prod", 9)
+	if obj := w.object(t, "prod"); obj.Generation != 3 || cloudstore.StoreWrote(obj) {
+		t.Fatalf("kubectl edit taken for the store's: generation %d, recorded %q", obj.Generation, obj.Annotations[cloudstore.AnnotationRowGeneration])
+	}
+}
+
+// A write that does not change the spec records the generation as it is,
+// even when the write looks like a change (the server counted none): a later
+// kubectl edit must not be taken for the store's.
+func TestStoreWriteNeverRecordsAGenerationAheadOfTheObject(t *testing.T) {
+	w := newWorld(t) // the fake API server counts no generations
+	c := &model.Cluster{TenantID: "acme", Name: "prod", NetworkID: w.network.ID, Provider: "aws", Region: "us-east-1",
+		Resource: model.Resource{State: "CLUSTER_STATE_PROVISIONING"}}
+	c.Spec = document(t, clusterSpec(c))
+	if err := w.s.Clusters().Create(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	row, err := w.s.Clusters().Get(t.Context(), "acme", c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &cloudv1.ClusterSpec{}
+	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	row.Spec, _ = protojson.Marshal(spec)
+	row.Generation++
+	if err := w.s.Clusters().Update(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	obj := &cloud.Cluster{}
+	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: "prod"}, obj); err != nil {
+		t.Fatal(err)
+	}
+	if !cloudstore.StoreWrote(obj) {
+		t.Fatalf("generation %d, recorded %q: the record is ahead of the object", obj.Generation, obj.Annotations[cloudstore.AnnotationRowGeneration])
+	}
+}
+
+// A store write on a generation the store produced itself acknowledges it,
+// although the status is behind (the controller's catch-up of the window
+// between an API update and its status write).
+func TestRecordObservesAGenerationTheStoreProduced(t *testing.T) {
+	w := newEditWorld(t)
+	c := w.create(t, "prod")
+	row, _ := w.s.Clusters().Get(t.Context(), "acme", c.ID)
+	spec := &cloudv1.ClusterSpec{}
+	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	row.Spec, _ = protojson.Marshal(spec)
+	row.Generation++
+	if err := w.s.Clusters().Update(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	obj := w.object(t, "prod")
+	obj.Status.ObservedGeneration = obj.Generation - 1 // the status write has not happened yet
+	if err := w.k.Status().Update(t.Context(), obj); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = w.s.Clusters().Get(t.Context(), "acme", c.ID)
+	if err := w.s.Clusters().Record(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	if obj := w.object(t, "prod"); obj.Status.ObservedGeneration != obj.Generation {
+		t.Fatalf("observed %d, generation %d", obj.Status.ObservedGeneration, obj.Generation)
+	}
+}

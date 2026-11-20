@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect/v2"
 	"github.com/google/uuid"
@@ -109,6 +110,28 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 	}
 	if err := s.usable(ctx, target.Account, target.Network.Region, accountreconcile.TakeOver); err != nil {
 		return nil, err
+	}
+	// The stored plan is what full management writes. Taking over from a
+	// plan that no longer matches the cluster would push its old values, so
+	// a cluster that changed in AWS since the import is refused: the safer
+	// of re-running discovery (a plan the user has not reviewed) and
+	// importing again (a reviewed one).
+	drift, err := s.ImportDrift(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	if len(drift) > 0 {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
+			"the cluster changed since it was imported, and taking over would push the old values back: %s; delete the import and import it again to review the current plan",
+			strings.Join(drift, "; ")))
+	}
+	// Every platform component comes from the release of the cluster's
+	// channel (stable when it names none): it must offer the minor the
+	// cluster runs.
+	if !req.GetSkipPlatformComponents() {
+		if err := s.CheckReleaseMinor(ctx, spec); err != nil {
+			return nil, err
+		}
 	}
 	// The row only: once anything is owned the cluster is no longer an
 	// imported, read-only one (deleting that leaves the cloud alone), so

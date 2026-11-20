@@ -385,3 +385,62 @@ func TestAutomaticUpgradeWaitsForTenantComponents(t *testing.T) {
 		})
 	}
 }
+
+// Right before the version is written the cluster's window and code
+// change are read again: a window that closed, or a code change that
+// started, since the plan read its cache keeps the hop back.
+func TestAutomaticUpgradeRechecksWindowAndCodeChange(t *testing.T) {
+	tests := map[string]func(*model.Cluster, *cloudv1.ClusterSpec){
+		"window closed": func(_ *model.Cluster, spec *cloudv1.ClusterSpec) {
+			start := rolloutNow.UTC().Add(6 * time.Hour).Format("15:04")
+			spec.MaintenanceWindow = &cloudv1.MaintenanceWindow{Start: start, Duration: "1h"}
+		},
+		"code change in flight": func(row *model.Cluster, _ *cloudv1.ClusterSpec) {
+			raw, err := protojson.Marshal(&cloudv1.ClusterStatus{CodeChange: &cloudv1.CodeChange{
+				Phase: cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_APPLYING}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row.Status = raw
+		},
+	}
+	for name, change := range tests {
+		t.Run(name, func(t *testing.T) {
+			w := newUpgradeWorld(t, twoAtOnce, "a")
+			row, err := w.store.Clusters().Get(t.Context(), upgradeTenant, w.ids["a"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, err := reconcilecluster.SpecOf(row)
+			if err != nil {
+				t.Fatal(err)
+			}
+			change(row, spec)
+			if row.Spec, err = reconcilecluster.Encode(spec); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.store.Clusters().Update(t.Context(), row); err != nil {
+				t.Fatal(err)
+			}
+
+			// The cache the plan reads has not seen the change yet.
+			stale := interceptor.NewClient(w.k, interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if err := c.List(ctx, list, opts...); err != nil {
+					return err
+				}
+				if clusters, ok := list.(*cloudv1alpha1.ClusterList); ok {
+					for i := range clusters.Items {
+						clusters.Items[i].Spec.MaintenanceWindow = nil
+					}
+				}
+				return nil
+			}})
+
+			events := w.pass(t, true, stale, rolloutNow)
+
+			if v := w.version(t, "a"); v != "1.35" || events.count(platform.ReasonAutomaticUpgradeStarted) != 0 {
+				t.Errorf("the hop started: asks for %s, %d started", v, events.count(platform.ReasonAutomaticUpgradeStarted))
+			}
+		})
+	}
+}

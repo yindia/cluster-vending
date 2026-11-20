@@ -17,6 +17,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/storetest"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
@@ -37,6 +38,7 @@ func (w world) readyNetwork(t *testing.T) *model.Network {
 	net := &model.Network{TenantID: tenant, Name: "net", CloudAccountID: w.account.ID, Provider: model.ProviderAWS, Region: "us-east-1",
 		Resource: model.Resource{State: "NETWORK_STATE_READY", Spec: spec}}
 	w.must(t, w.store.Networks().Create(ctx, net))
+	storetest.SetAccess(t, w.k, tenant, w.account.ID, storetest.Verified("us-east-1"))
 	var records []model.ManagedResource
 	for i, zone := range []string{"use1-az1", "use1-az2"} {
 		subnet := &awsec2.Subnet{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "net-private-" + zone,

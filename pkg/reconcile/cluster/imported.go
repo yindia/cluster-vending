@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"google.golang.org/protobuf/encoding/protojson"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
@@ -187,4 +190,144 @@ func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster
 		}
 	}
 	return nil
+}
+
+// ImportDrift lists what the imported cluster's objects report now that
+// differs from the plan the import stored, in the fields full management
+// would write: the Kubernetes version, the endpoint access and public
+// CIDRs, the node groups' scaling and instance types, the add-ons'
+// versions and the access entries' groups. The takeover applies the stored
+// plan, so a difference means it would push old values (a version EKS
+// refuses, reverted CIDRs, an add-on rolled back). A field the object does
+// not report yet is not a difference. Empty when the row has no stored
+// objects (a cluster the platform created, or an older import).
+func (s *Reconciler) ImportDrift(ctx context.Context, row *model.Cluster) ([]string, error) {
+	planned, _, ok, err := storedImportObjects(row, s.deps.Kube.Scheme())
+	if err != nil || !ok {
+		return nil, err
+	}
+	var diffs []string
+	for _, obj := range planned {
+		live, found, err := s.liveOf(ctx, obj)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+		diffs = append(diffs, driftOf(obj, live)...)
+	}
+	return diffs, nil
+}
+
+// liveOf reads the object as the management cluster has it now, for the
+// kinds ImportDrift compares; false for the others and for a missing one.
+func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (client.Object, bool, error) {
+	var live client.Object
+	switch planned.(type) {
+	case *awseks.Cluster:
+		live = &awseks.Cluster{}
+	case *awseks.NodeGroup:
+		live = &awseks.NodeGroup{}
+	case *awseks.Addon:
+		live = &awseks.Addon{}
+	case *awseks.AccessEntry:
+		live = &awseks.AccessEntry{}
+	default:
+		return nil, false, nil
+	}
+	key := client.ObjectKeyFromObject(planned)
+	if err := s.deps.Get(ctx, key, live); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return nil, false, nil
+		}
+		return nil, false, fault.New(fault.Unavailable, fmt.Sprintf("cannot read %s %s: %v", planned.GetObjectKind().GroupVersionKind().Kind, key.Name, err))
+	}
+	return live, true, nil
+}
+
+// driftOf compares a planned object with the same object as observed.
+func driftOf(planned, live client.Object) []string {
+	var d driftList
+	switch p := planned.(type) {
+	case *awseks.Cluster:
+		l := live.(*awseks.Cluster)
+		at := l.Status.AtProvider
+		d.name = "Cluster " + p.Name
+		d.strings("version", p.Spec.ForProvider.Version, at.Version)
+		if v, o := p.Spec.ForProvider.VPCConfig, at.VPCConfig; v != nil && o != nil {
+			d.bools("private endpoint access", v.EndpointPrivateAccess, o.EndpointPrivateAccess)
+			d.bools("public endpoint access", v.EndpointPublicAccess, o.EndpointPublicAccess)
+			d.sets("public access CIDRs", v.PublicAccessCidrs, o.PublicAccessCidrs)
+		}
+	case *awseks.NodeGroup:
+		l := live.(*awseks.NodeGroup)
+		at := l.Status.AtProvider
+		d.name = "NodeGroup " + p.Name
+		if v, o := p.Spec.ForProvider.ScalingConfig, at.ScalingConfig; v != nil && o != nil {
+			d.floats("min size", v.MinSize, o.MinSize)
+			d.floats("max size", v.MaxSize, o.MaxSize)
+			// The desired size is written at creation only (DesiredSizeAtCreateOnly).
+		}
+		d.sets("instance types", p.Spec.ForProvider.InstanceTypes, at.InstanceTypes)
+	case *awseks.Addon:
+		l := live.(*awseks.Addon)
+		d.name = "Addon " + p.Name
+		d.strings("version", p.Spec.ForProvider.AddonVersion, l.Status.AtProvider.AddonVersion)
+	case *awseks.AccessEntry:
+		l := live.(*awseks.AccessEntry)
+		d.name = "AccessEntry " + p.Name
+		d.sets("kubernetes groups", p.Spec.ForProvider.KubernetesGroups, l.Status.AtProvider.KubernetesGroups)
+	}
+	return d.out
+}
+
+// driftList collects the differences of one object. A value that is unset
+// on either side is not compared.
+type driftList struct {
+	name string
+	out  []string
+}
+
+func (d *driftList) add(field, planned, observed string) {
+	d.out = append(d.out, fmt.Sprintf("%s: %s is %s in the import plan, %s now", d.name, field, planned, observed))
+}
+
+func (d *driftList) strings(field string, planned, observed *string) {
+	if planned != nil && observed != nil && *planned != *observed {
+		d.add(field, *planned, *observed)
+	}
+}
+
+func (d *driftList) bools(field string, planned, observed *bool) {
+	if planned != nil && observed != nil && *planned != *observed {
+		d.add(field, fmt.Sprint(*planned), fmt.Sprint(*observed))
+	}
+}
+
+func (d *driftList) floats(field string, planned, observed *float64) {
+	if planned != nil && observed != nil && *planned != *observed {
+		d.add(field, fmt.Sprint(*planned), fmt.Sprint(*observed))
+	}
+}
+
+func (d *driftList) sets(field string, planned, observed []*string) {
+	if len(observed) == 0 {
+		return
+	}
+	p, o := sortedValues(planned), sortedValues(observed)
+	if !slices.Equal(p, o) {
+		d.add(field, "["+strings.Join(p, ", ")+"]", "["+strings.Join(o, ", ")+"]")
+	}
+}
+
+func sortedValues(in []*string) []string {
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v != nil {
+			out = append(out, *v)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

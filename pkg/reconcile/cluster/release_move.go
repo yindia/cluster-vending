@@ -59,6 +59,9 @@ type moveFacts struct {
 	// Running: the cluster is RUNNING; KubernetesUpgrading: a Kubernetes
 	// upgrade is in progress (status.upgrade).
 	Running, KubernetesUpgrading bool
+	// OlderChannel names the channel when Target is not newer than
+	// Current (releaseNotNewer): a move never goes back to an older release.
+	OlderChannel string
 	// Admitted: the channel's rollout lets the cluster start now;
 	// NotAdmitted says why not.
 	Admitted    bool
@@ -114,6 +117,9 @@ func decideMove(f moveFacts) moveDecision {
 	if !moving(f.Prev) {
 		st.Phase = movePending
 		switch {
+		case f.OlderChannel != "":
+			st.Message = fmt.Sprintf("waiting: channel %s offers an older release than the cluster's", f.OlderChannel)
+			return d
 		case !f.Automatic:
 			st.Message = fmt.Sprintf("release %s is available; the cluster is manual: set upgradeMode Automatic to move to it", f.Target)
 			return d
@@ -233,7 +239,11 @@ func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *
 	if f.Target != "" && f.Target != f.Current {
 		f.To, f.ToProblem = s.movePins(ctx, f.Target, in.Cluster.KubernetesMinor)
 		if !moving(prev) {
-			f.Admitted, f.NotAdmitted = s.moveAdmitted(ctx, channel, f.Target, row)
+			if s.releaseNotNewer(ctx, f.Current, f.Target) {
+				f.OlderChannel = channel
+			} else {
+				f.Admitted, f.NotAdmitted = s.moveAdmitted(ctx, channel, f.Target, row)
+			}
 		}
 	}
 	d := decideMove(f)
@@ -248,6 +258,32 @@ func (s *Reconciler) moveRelease(ctx context.Context, row *model.Cluster, spec *
 		ctx = withRetry(ctx, retryWith(row.Retry, d.Recover, f.Now))
 	}
 	return ctx, d.Status, d.Release, "", nil
+}
+
+// releaseNotNewer reports whether target is known not to be newer than
+// current: releases are ordered by their creation time (when they were
+// published). Either one gone, unreadable or without a time is not
+// known, and does not hold a move back.
+func (s *Reconciler) releaseNotNewer(ctx context.Context, current, target string) bool {
+	if current == "" {
+		return false
+	}
+	cur, err := s.deps.Platform.Release(ctx, current)
+	if err != nil || cur == nil {
+		return false
+	}
+	tgt, err := s.deps.Platform.Release(ctx, target)
+	if err != nil || tgt == nil {
+		return false
+	}
+	return notNewer(cur, tgt)
+}
+
+// notNewer: both releases have a creation time and target's is not after
+// current's.
+func notNewer(current, target *cloudv1alpha1.Release) bool {
+	c, t := current.CreationTimestamp, target.CreationTimestamp
+	return !c.IsZero() && !t.IsZero() && !t.After(c.Time)
 }
 
 // retryWith is the pass's retry with component added: what a person's

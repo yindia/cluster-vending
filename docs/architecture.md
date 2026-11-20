@@ -367,6 +367,13 @@ stored with the object for this. An imported network is never rendered from
 its spec, since that would create a second VPC. An import from before its
 discovery was stored has nothing to render from, and its takeover fails with a
 message to import it again.
+A takeover is also refused (`FAILED_PRECONDITION`, listing the differences) when the cluster
+changed in AWS after the import: the Observe-only objects report another Kubernetes version,
+endpoint access or CIDRs, node group scaling or instance types, add-on version or access
+entry groups than the stored plan, which full management would push back. The user imports
+it again and reviews the new plan (discovery is not re-run on its own). The takeover also
+needs the release of the cluster's channel (stable when it names none) to offer the minor
+the cluster runs, unless it skips the platform components.
 
 A taken-over cluster gets the platform components like any other cluster,
 unless the takeover asked for `skip_platform_components`. The platform never

@@ -1,15 +1,20 @@
 package cluster
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 
 	"github.com/yindia/cluster-vending/pkg/component"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 var moveNow = time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
@@ -49,6 +54,9 @@ func TestDecideMove(t *testing.T) {
 		wantRecover string
 	}{
 		{name: "nothing to move", change: func(f *moveFacts) { f.Target = "rel-a" }, wantPhase: moveIdle, wantRelease: "rel-a"},
+		{name: "the channel offers an older release: no move",
+			change:    func(f *moveFacts) { f.OlderChannel = "stable" },
+			wantPhase: movePending, wantRelease: "rel-a", wantMessage: "waiting: channel stable offers an older release than the cluster's"},
 		{name: "manual: available, not started", change: func(f *moveFacts) { f.Automatic = false },
 			wantPhase: movePending, wantRelease: "rel-a", wantMessage: "set upgradeMode Automatic"},
 		{name: "a Kubernetes upgrade goes first", change: func(f *moveFacts) { f.KubernetesUpgrading = true },
@@ -223,5 +231,58 @@ func TestDecideMoveIgnoresTheApplyingPass(t *testing.T) {
 	f.Prev = d.Status
 	if d := decideMove(f); d.Status.GetComponent() != "karpenter" {
 		t.Fatalf("next pass: %v, want karpenter", d.Status)
+	}
+}
+
+// Releases are ordered by when they were published: a move goes only to
+// a newer one, and what cannot be ordered does not hold a move back.
+func TestNotNewer(t *testing.T) {
+	at := func(h int) *cloudv1alpha1.Release {
+		return &cloudv1alpha1.Release{ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(moveNow.Add(time.Duration(h) * time.Hour))}}
+	}
+	tests := []struct {
+		name            string
+		current, target *cloudv1alpha1.Release
+		want            bool
+	}{
+		{"older target", at(5), at(1), true},
+		{"same time", at(5), at(5), true},
+		{"newer target", at(1), at(5), false},
+		{"current without a time", &cloudv1alpha1.Release{}, at(1), false},
+		{"target without a time", at(1), &cloudv1alpha1.Release{}, false},
+	}
+	for _, tt := range tests {
+		if got := notNewer(tt.current, tt.target); got != tt.want {
+			t.Errorf("%s: notNewer = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// releasesByName is a platform source that knows only releases.
+type releasesByName struct {
+	reconcile.PlatformSource
+	byName map[string]*cloudv1alpha1.Release
+}
+
+func (r releasesByName) Release(_ context.Context, name string) (*cloudv1alpha1.Release, error) {
+	return r.byName[name], nil
+}
+
+// A channel switch (or a repin) to an older release does not move the
+// cluster's components back; to a newer one it does.
+func TestReleaseNotNewerReadsTheReleases(t *testing.T) {
+	at := func(h int) *cloudv1alpha1.Release {
+		return &cloudv1alpha1.Release{ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(moveNow.Add(time.Duration(h) * time.Hour))}}
+	}
+	s := &Reconciler{deps: reconcile.Deps{Platform: releasesByName{byName: map[string]*cloudv1alpha1.Release{"old": at(1), "new": at(5)}}}}
+	ctx := context.Background()
+	if !s.releaseNotNewer(ctx, "new", "old") {
+		t.Error("a move from new to old must wait")
+	}
+	if s.releaseNotNewer(ctx, "old", "new") {
+		t.Error("a move from old to new must go on")
+	}
+	if s.releaseNotNewer(ctx, "gone", "new") || s.releaseNotNewer(ctx, "old", "gone") || s.releaseNotNewer(ctx, "", "new") {
+		t.Error("an unknown release does not hold a move back")
 	}
 }

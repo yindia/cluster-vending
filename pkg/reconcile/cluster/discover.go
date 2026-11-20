@@ -114,6 +114,11 @@ func (s *Reconciler) discoverImport(ctx context.Context, row *model.Cluster) (bo
 	if err != nil {
 		return false, err
 	}
+	if corecluster.TransientStatus(found.Status) {
+		// CREATING, UPDATING, ...: the cluster settles by itself; the import
+		// stays DISCOVERING and looks again, rather than blocking for good.
+		return false, fault.New(fault.Unavailable, fmt.Sprintf("the EKS cluster is %s; the import waits for it to be ACTIVE", found.Status))
+	}
 	plan := corecluster.PlanImport(corecluster.ImportInput{Found: found, Name: row.Name, NodeGroup: req.GetAws().GetDefaultNodeGroupName(),
 		NetworkID: network.ID, Region: network.Region, Subnets: corecluster.PrivateSubnets(views),
 		Base: s.Base(row, account), Scheme: s.deps.Kube.Scheme()})
@@ -138,6 +143,18 @@ func (s *Reconciler) discoverImport(ctx context.Context, row *model.Cluster) (bo
 // (status), and the adoption with the planned objects; IMPORTED, or, when
 // the plan is blocked, FAILED with nothing to apply.
 func (s *Reconciler) planned(row *model.Cluster, plan corecluster.ImportPlan) error {
+	raw, err3 := json.Marshal(plan.Adoption)
+	adoption := model.JSON(raw)
+	if err3 == nil && !plan.Blocked() {
+		adoption, err3 = WithImportObjects(adoption, plan, s.deps.Kube.Scheme())
+		if errors.Is(err3, ErrImportTooLarge) {
+			// Stored it would fail on every pass: the import stops here, with
+			// the reason in its plan.
+			plan.Lines = append(plan.Lines, &cloudv1.ImportedResource{Kind: "Cluster", ExternalName: row.Name,
+				Disposition: cloudv1.Disposition_DISPOSITION_BLOCKING, Detail: err3.Error()})
+			adoption, err3 = model.JSON(raw), nil
+		}
+	}
 	phase := cloudv1.ImportPhase_IMPORT_PHASE_PLANNED
 	row.State = StateImported
 	if plan.Blocked() {
@@ -149,12 +166,8 @@ func (s *Reconciler) planned(row *model.Cluster, plan corecluster.ImportPlan) er
 	}
 	rawSpec, err1 := Encode(spec)
 	status, err2 := Encode(&cloudv1.ClusterStatus{Import: &cloudv1.ImportStatus{Phase: phase, Resources: plan.Lines}})
-	raw, err3 := json.Marshal(plan.Adoption)
-	adoption := model.JSON(raw)
 	if plan.Blocked() {
 		row.AppliedGeneration, row.RenderVersion = row.Generation, crossplaneaws.RenderVersion
-	} else if err3 == nil {
-		adoption, err3 = WithImportObjects(adoption, plan, s.deps.Kube.Scheme())
 	}
 	if err := errors.Join(err1, err2, err3); err != nil {
 		return fault.New(fault.Internal, err.Error())

@@ -92,8 +92,11 @@ func readOffer(ctx context.Context, src reconcile.ReleaseReader, channel string,
 func (s *Reconciler) withChannelVersion(ctx context.Context, spec *cloudv1.ClusterSpec) error {
 	channel, ok := namedChannel(spec)
 	src := s.releases()
-	if !ok || src == nil {
+	if src == nil {
 		return nil
+	}
+	if !ok {
+		return s.withReleaseVersion(ctx, src, spec)
 	}
 	o, err := readOffer(ctx, src, channel, s.logger())
 	if err != nil || o == nil || o.minor == "" {
@@ -107,6 +110,66 @@ func (s *Reconciler) withChannelVersion(ctx context.Context, spec *cloudv1.Clust
 		return nil
 	}
 	return checkChannelVersion(o, spec.GetControlPlane().GetKubernetesVersion())
+}
+
+// withReleaseVersion is withChannelVersion for a spec on no channel: its
+// platform components come from the stable channel's release, so a version
+// that release does not offer is refused (FAILED_PRECONDITION, naming the
+// offered minors), and a spec that names none gets the release's default
+// minor (else the stable channel's), not EKS's default.
+func (s *Reconciler) withReleaseVersion(ctx context.Context, src reconcile.ReleaseReader, spec *cloudv1.ClusterSpec) error {
+	o, err := readOffer(ctx, src, channelOf(spec), s.logger())
+	if err != nil || o == nil {
+		return err
+	}
+	if spec.GetControlPlane().GetKubernetesVersion() == "" {
+		minor := o.minor
+		for _, k := range o.rel.Kubernetes {
+			if k.Default {
+				minor = k.Minor
+			}
+		}
+		if minor == "" {
+			return nil
+		}
+		if spec.ControlPlane == nil {
+			spec.ControlPlane = &cloudv1.ControlPlaneSpec{}
+		}
+		spec.ControlPlane.KubernetesVersion = minor
+		return nil
+	}
+	return checkOfferedMinor(o, spec.GetControlPlane().GetKubernetesVersion())
+}
+
+// CheckReleaseMinor refuses a Kubernetes version the release the cluster
+// will use (its channel's, else stable's) does not offer: every platform
+// component of the cluster would fail on it. An empty version, or a
+// release that cannot be read as offering nothing, passes; a read that
+// fails is UNAVAILABLE. The takeover uses it with the version the
+// imported control plane runs.
+func (s *Reconciler) CheckReleaseMinor(ctx context.Context, spec *cloudv1.ClusterSpec) error {
+	version := spec.GetControlPlane().GetKubernetesVersion()
+	src := s.releases()
+	if version == "" || src == nil {
+		return nil
+	}
+	o, err := readOffer(ctx, src, channelOf(spec), s.logger())
+	if err != nil || o == nil {
+		return err
+	}
+	return checkOfferedMinor(o, version)
+}
+
+// checkOfferedMinor is nil when the offer's release offers the minor of
+// version, else a FAILED_PRECONDITION fault naming the minors it offers.
+func checkOfferedMinor(o *channelOffer, version string) error {
+	minor := minorString(version)
+	if len(o.rel.Kubernetes) == 0 || contains(o.offered(), minor) {
+		return nil
+	}
+	return fault.New(fault.FailedPrecondition, fmt.Sprintf(
+		"Kubernetes %s is not offered by release %s of channel %s, which the cluster's platform components come from: it offers %s",
+		minor, o.rel.Name, o.channel, strings.Join(o.offered(), ", ")))
 }
 
 // CheckChannelVersion refuses an update that moves the Kubernetes

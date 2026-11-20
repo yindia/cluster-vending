@@ -469,8 +469,9 @@ func TestWithPlatformCondition(t *testing.T) {
 	}
 }
 
-// Deleting a cluster removes its platform components first; with the EKS
-// cluster not ACTIVE the charts are let go without an uninstall.
+// Deleting a cluster removes its platform components, highest sequence
+// first (stage 3, then Karpenter's, stage 5); with the EKS cluster not
+// ACTIVE the charts are let go without an uninstall.
 func TestDeletePlatformComponents(t *testing.T) {
 	for _, active := range []bool{true, false} {
 		name := map[bool]string{true: "EKS active: uninstalled", false: "EKS not active: released"}[active]
@@ -481,31 +482,35 @@ func TestDeletePlatformComponents(t *testing.T) {
 			w.deployed(t, "base")
 			w.install(t)
 			row := w.cluster(t)
-			records, err := w.store.ManagedResources().ListByOwner(t.Context(), model.OwnerCluster, row.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !active {
-				records = nil // no EKS cluster recorded: not ACTIVE
-			}
 
 			var gone bool
 			for i := 0; i < 5 && !gone; i++ {
-				if gone, err = w.svc.deletePlatform(t.Context(), row, records); err != nil {
+				if !active {
+					if err := w.svc.forceRelease(t.Context(), row); err != nil {
+						t.Fatal(err)
+					}
+				}
+				p, err := w.svc.loadPlatformRemoval(t.Context(), row)
+				if err != nil {
 					t.Fatal(err)
+				}
+				if gone, err = w.svc.removeAbove(t.Context(), row, p); err != nil {
+					t.Fatal(err)
+				}
+				if gone {
+					if gone, err = w.svc.removeKarpenterChart(t.Context(), row, p); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 
 			if !gone || w.release(t, "base") != nil || w.release(t, "mesh") != nil {
 				t.Fatalf("gone=%v, base=%v", gone, w.release(t, "base"))
 			}
-			left, err := w.store.ManagedResources().ListByOwner(t.Context(), model.OwnerClusterComponents, row.ID)
-			if err != nil || len(left) != 0 {
-				t.Errorf("%d records left, %v", len(left), err)
-			}
-			// Nothing to remove: gone at once.
-			if gone, err := w.svc.deletePlatform(t.Context(), row, records); err != nil || !gone {
-				t.Errorf("second call: %v, %v", gone, err)
+			// Nothing left to remove: gone at once.
+			p, err := w.svc.loadPlatformRemoval(t.Context(), row)
+			if err != nil || len(p.components) != 0 {
+				t.Errorf("%d components left, %v", len(p.components), err)
 			}
 		})
 	}

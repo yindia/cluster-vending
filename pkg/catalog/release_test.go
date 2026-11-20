@@ -137,3 +137,45 @@ components: {karpenter: "1.15.1", external-secrets: "2.15.0"}
 		}
 	}
 }
+
+// Every shipped minor pins the AL2023 AMI release its Karpenter node
+// classes use; a malformed pin is refused.
+func TestShippedReleasePinsTheNodeAMI(t *testing.T) {
+	rel, err := catalog.ShippedRelease()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range rel.Kubernetes {
+		if k.NodeAMIPin == "" {
+			t.Errorf("minor %s has no nodeAmiPin", k.Minor)
+		}
+	}
+	const bad = `
+kubernetes:
+- {minor: "1.37", default: true, endOfSupport: "2028-01-31", channel: alpha, nodeAmiPin: latest}
+components: {karpenter: "1.15.1"}
+channels:
+- {name: alpha, promotion: Pinned}
+`
+	if _, err := catalog.ParseRelease([]byte(bad)); err == nil || !strings.Contains(err.Error(), "nodeAmiPin") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Karpenter is the only platform component that runs before the platform
+// node group.
+func TestKarpenterIsSequenceZero(t *testing.T) {
+	defs, err := catalog.Definitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range defs {
+		got := int32(100)
+		if d.Spec.Sequence != nil {
+			got = *d.Spec.Sequence
+		}
+		if want := map[bool]int32{true: 0, false: 100}[d.Name == "karpenter"]; got != want {
+			t.Errorf("%s has sequence %d, want %d", d.Name, got, want)
+		}
+	}
+}

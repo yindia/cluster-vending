@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -20,11 +19,16 @@ const leftBehind = "load balancers and their security groups (of Services of typ
 	"Karpenter's EC2 instances, launch templates and instance profiles may be left in the account; " +
 	"network delete then waits until they are deleted"
 
-// teardown is the first step of a cluster's deletion: in the workload
-// cluster, what its controllers made in the cloud is deleted while those
-// controllers still run (planTeardown), before the platform components
-// that are those controllers are uninstalled. It reports whether the
-// deletion may go on. It is skipped (with a warning) when the deletion is
+// loadBalancerLeftBehind is what a skipped or timed-out load balancer
+// stage may leave.
+const loadBalancerLeftBehind = "load balancers and their security groups (of Services of type LoadBalancer and Ingresses) " +
+	"may be left in the account; network delete then waits until they are deleted"
+
+// teardown is the first stage of a cluster's deletion: in the workload
+// cluster, the load balancers its controllers made in the cloud are deleted
+// while the AWS Load Balancer Controller still runs (planTeardown), before
+// any platform component is uninstalled. (Karpenter's nodes are the fourth
+// stage, deleteNodeGroups.) It reports whether the deletion may go on. It is skipped (with a warning) when the deletion is
 // forced or the cluster's API cannot be reached, and ends after the
 // teardown timeout with a warning listing what is left: a deletion never
 // waits on it for ever. Its state is the status's teardown (kept across
@@ -69,13 +73,14 @@ func (s *Reconciler) runTeardown(ctx context.Context, row *model.Cluster, prev *
 	}
 	if prev == nil {
 		reconcile.AddNote(ctx, reconcile.Normal(reconcile.ReasonTeardownStarted,
-			"deleting what the cluster's controllers made in the cloud (load balancers, Karpenter's nodes) before its platform components"))
+			"deleting the cluster in reverse order of its creation, starting with its load balancers"))
 	}
-	step, err := s.stepTeardown(ctx, row)
+	step, err := s.stepTeardown(ctx, row, loadBalancerStages)
 	expired := at.Sub(t.StartTime.AsTime()) >= s.teardownTimeout()
 	switch {
 	case err != nil && !expired:
 		t.Message = "cannot reach the cluster's API: " + err.Error() + "; trying again"
+		setDeleteStage(ctx, stageLoadBalancers, t.Message)
 		s.logger().WarnContext(ctx, "teardown", "cluster_id", row.ID, "error", err)
 		return false
 	case err != nil:
@@ -83,27 +88,28 @@ func (s *Reconciler) runTeardown(ctx context.Context, row *model.Cluster, prev *
 	case step.finished():
 		t.FinishTime, t.Result = timestamppb.New(at), cloudv1.ClusterTeardownResult_CLUSTER_TEARDOWN_RESULT_FINISHED
 		reconcile.AddNote(ctx, reconcile.Normal(reconcile.ReasonTeardownFinished,
-			"the load balancers and Karpenter's nodes are gone; uninstalling the platform components"))
+			"the load balancers are gone; removing the tenant's components, then the platform's"))
 		return true
 	case expired:
 		return s.timedOut(ctx, t, at, step.message, step.waiting)
 	}
 	t.Message, t.Waiting = step.message, refs(step.waiting)
+	setDeleteStage(ctx, stageLoadBalancers, step.message)
 	return false
 }
 
-// stepTeardown lists the workload cluster's objects and asks to delete
-// those of the current stage.
-func (s *Reconciler) stepTeardown(ctx context.Context, row *model.Cluster) (teardownStep, error) {
+// stepTeardown lists the workload cluster's objects of the stages' kinds
+// and asks to delete those of the current stage.
+func (s *Reconciler) stepTeardown(ctx context.Context, row *model.Cluster, stages []teardownStage) (teardownStep, error) {
 	td, err := s.deps.Teardowns.Open(ctx, kube.TenantNamespace(row.TenantID), storedStatus(row).GetKubeconfigSecret())
 	if err != nil {
 		return teardownStep{}, err
 	}
-	objs, err := td.List(ctx)
+	objs, err := td.List(ctx, stageKinds(stages)...)
 	if err != nil {
 		return teardownStep{}, err
 	}
-	step := planTeardown(objs)
+	step := planTeardown(stages, objs)
 	for _, o := range step.delete {
 		if err := td.Delete(ctx, o); err != nil {
 			return teardownStep{}, fmt.Errorf("delete %s: %w", o.Ref(), err)
@@ -119,7 +125,7 @@ func (s *Reconciler) timedOut(ctx context.Context, t *cloudv1.ClusterTeardown, a
 	left []reconcile.WorkloadObject) bool {
 	t.FinishTime, t.Result = timestamppb.New(at), cloudv1.ClusterTeardownResult_CLUSTER_TEARDOWN_RESULT_TIMED_OUT
 	t.Waiting = refs(left)
-	t.Message = fmt.Sprintf("timed out after %s (%s); going on: %s", s.teardownTimeout(), what, leftBehind)
+	t.Message = fmt.Sprintf("timed out after %s (%s); going on: %s", s.teardownTimeout(), what, loadBalancerLeftBehind)
 	reconcile.AddNote(ctx, reconcile.Warning(reconcile.ReasonTeardownTimedOut, t.Message))
 	return true
 }
@@ -158,8 +164,7 @@ func setTeardown(ctx context.Context, t *cloudv1.ClusterTeardown) {
 }
 
 // withTeardownStatus puts the teardown into a status being built: the
-// one this pass computed, else the one recorded. While it runs, it is the
-// deleting cluster's message: what it waits for.
+// one this pass computed, else the one recorded.
 func withTeardownStatus(ctx context.Context, st, stored *cloudv1.ClusterStatus) {
 	t := stored.GetTeardown()
 	if h, ok := ctx.Value(teardownKey{}).(*teardownHolder); ok && h.t != nil {
@@ -169,8 +174,4 @@ func withTeardownStatus(ctx context.Context, st, stored *cloudv1.ClusterStatus) 
 		return
 	}
 	st.Teardown = t
-	if st.GetState() == cloudv1.ClusterState_CLUSTER_STATE_DELETING && t.GetFinishTime() == nil && t.GetMessage() != "" &&
-		!strings.HasPrefix(t.GetMessage(), "cannot reach") {
-		st.Message = "deleting; " + t.GetMessage() + " before the platform components are uninstalled"
-	}
 }

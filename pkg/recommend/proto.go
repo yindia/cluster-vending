@@ -27,3 +27,15 @@ func (r Row) Proto() *cloudv1.ResourceRecommendation {
 		UsagePeak: amounts(r.Peak), UsageAverage: amounts(r.Average), Source: sources[r.Source],
 		DataHours: r.DataHours, Samples: r.Samples}
 }
+
+// ProtoChanges is Row.Changes of a recommendation as it is stored or sent: it
+// differs from what is set by a tenth or more, or sets a request where there
+// is none. The API server filters a stored recommendation set with it.
+func ProtoChanges(r *cloudv1.ResourceRecommendation) bool {
+	rec := r.GetRecommendedRequests()
+	if rec.GetCpuMillis() == 0 && rec.GetMemoryBytes() == 0 {
+		return false
+	}
+	cur := r.GetCurrentRequests()
+	return differs(cur.GetCpuMillis(), rec.GetCpuMillis()) || differs(cur.GetMemoryBytes(), rec.GetMemoryBytes())
+}

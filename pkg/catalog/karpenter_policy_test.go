@@ -13,8 +13,8 @@ import (
 )
 
 // This fixture freezes the catalog's upstream-derived v1.15.1 permission
-// baseline before Sid removal: the five controller policies combined, the
-// interruption/SQS policy omitted, and platform placeholders substituted for
+// baseline before Sid removal: the five controller policies combined plus
+// the interruption (SQS) policy, and platform placeholders substituted for
 // CloudFormation parameters. Compare entire statements, not selected actions.
 func karpenterPolicyBaseline(t *testing.T) string {
 	t.Helper()
@@ -37,8 +37,8 @@ func withoutStatementSIDs(t *testing.T, policy string) map[string]any {
 		t.Fatal(err)
 	}
 	statements, ok := doc["Statement"].([]any)
-	if !ok || len(statements) != 17 {
-		t.Fatalf("expected the 17 controller statements, got %v", doc["Statement"])
+	if !ok || len(statements) != 18 {
+		t.Fatalf("expected the 18 controller statements, got %v", doc["Statement"])
 	}
 	for _, statement := range statements {
 		delete(statement.(map[string]any), "Sid")
@@ -72,10 +72,13 @@ func TestExpandedKarpenterPolicyFitsIAMManagedPolicyBudget(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			vars := component.Vars{
-				component.VarRegion:             "ap-northeast-1",
-				component.VarAccountID:          "111122223333",
-				component.VarClusterName:        name,
-				component.VarClusterNodeRoleARN: "arn:aws:iam::111122223333:role/" + strings.Repeat("r", 64),
+				component.VarRegion:               "ap-northeast-1",
+				component.VarAccountID:            "111122223333",
+				component.VarClusterName:          name,
+				component.VarKarpenterNodeRoleARN: "arn:aws:iam::111122223333:role/" + strings.Repeat("r", 64),
+				// A 40-character cluster name makes the longest queue name:
+				// "<name>-<hash8>-karpenter".
+				component.VarKarpenterInterruptionQueue: name + "-12345678-karpenter",
 			}
 			policy, err := component.ExpandPolicy(karpenterPolicy(t), vars)
 			if err != nil {
@@ -120,5 +123,45 @@ func TestExpandedKarpenterPolicyFitsIAMManagedPolicyBudget(t *testing.T) {
 				t.Fatalf("baseline no longer reproduces the expanded size failure: %d", len(baseline))
 			}
 		})
+	}
+}
+
+// The controller may read the interruption queue it is given, nothing
+// else of SQS, and pass only the Karpenter node role (not the managed node
+// group's) to EC2.
+func TestKarpenterPolicyScopesSQSAndPassRole(t *testing.T) {
+	var doc struct {
+		Statement []struct {
+			Effect   string
+			Action   any
+			Resource any
+		}
+	}
+	if err := json.Unmarshal([]byte(karpenterPolicy(t)), &doc); err != nil {
+		t.Fatal(err)
+	}
+	var sqs, passRole int
+	for _, st := range doc.Statement {
+		actions, _ := json.Marshal(st.Action)
+		resource, _ := json.Marshal(st.Resource)
+		switch {
+		case strings.Contains(string(actions), "sqs:"):
+			sqs++
+			if string(actions) != `["sqs:DeleteMessage","sqs:GetQueueUrl","sqs:ReceiveMessage"]` ||
+				string(resource) != `"arn:aws:sqs:${region}:${account.id}:${karpenter.interruptionQueue}"` {
+				t.Errorf("SQS statement = %s on %s", actions, resource)
+			}
+		case strings.Contains(string(actions), "iam:PassRole"):
+			passRole++
+			if string(resource) != `"${karpenter.nodeRoleArn}"` {
+				t.Errorf("iam:PassRole on %s, want the karpenter node role", resource)
+			}
+		}
+	}
+	if sqs != 1 || passRole != 1 {
+		t.Errorf("%d SQS and %d PassRole statements, want one of each", sqs, passRole)
+	}
+	if strings.Contains(karpenterPolicy(t), "${cluster.nodeRoleArn}") {
+		t.Error("the policy still names the managed node group's role")
 	}
 }

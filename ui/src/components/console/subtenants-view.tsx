@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { useEffect, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -33,7 +34,7 @@ export interface SubTenantRow extends Record<string, unknown> {
   allocationName: string;
 }
 
-export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onRefresh, onCreate, onView, onEdit, onDelete, onDisableProtection }: {
+export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onRefresh, onCreate, detailHref, onView, onEdit, onDelete, onDisableProtection }: {
   rows: SubTenantRow[];
   loading: boolean;
   refreshing: boolean;
@@ -41,6 +42,7 @@ export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onR
   canWrite: boolean;
   onRefresh: () => void;
   onCreate: () => void;
+  detailHref: (id: string) => string;
   onView: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -72,15 +74,15 @@ export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onR
     {error && <Banner status="error" title="Sub Tenants unavailable" description={error} />}
     {loading && <Text role="status">Loading all Sub Tenants…</Text>}
     {!canWrite && <Text type="supporting">Read-only access. Tenant administrator permission is required to create, edit or delete Sub Tenants.</Text>}
-    <HStack gap={3} vAlign="end" wrap="wrap">
+    <FilterRow label="Sub Tenant filters">
       <TextInput label="Search Sub Tenants" type="search" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" hasClear width="min(100%, 24rem)" />
       <Selector label="Sub Tenant kind" value={kind} onChange={(value) => { setKind(value); setPage(1); }} options={[{ value: "all", label: "All kinds" }, { value: "SubTenant", label: "Sub Tenant" }]} />
       <Selector label="Sub Tenant status" value={state} onChange={(value) => { setState(value); setPage(1); }} options={[{ value: "all", label: "All statuses" }, ...[...new Set(rows.map((row) => row.state))].sort().map((value) => ({ value, label: value }))]} />
       {(search || kind !== "all" || state !== "all") && <Button label="Clear Sub Tenant filters" variant="ghost" onClick={() => { setSearch(""); setKind("all"); setState("all"); setPage(1); }} />}
-    </HStack>
+    </FilterRow>
     {!loading && <Text type="supporting" role="status">{filtered.length} of {rows.length} Sub Tenants</Text>}
     {!!filtered.length && <ConsoleTable aria-label="Cluster Sub Tenants" data={filtered.slice((currentPage - 1) * 25, currentPage * 25)} idKey="id" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} columns={[
-      { key: "name", header: "Sub Tenant", align: "start", width: proportional(2, { minWidth: 100 }), renderCell: (row) => <Link tooltip={row.name} color="primary" weight="medium" maxLines={1} onClick={() => onView(row.id)}>{row.name}</Link> },
+      { key: "name", header: "Sub Tenant", align: "start", width: proportional(2, { minWidth: 100 }), renderCell: (row) => <Link tooltip={row.name} color="primary" weight="medium" maxLines={1} href={detailHref(row.id)}>{row.name}</Link> },
       ...(width >= 700 ? [{ key: "id", header: "ID", width: proportional(2, { minWidth: 130 }), renderCell: (row: SubTenantRow) => <CopyValue value={row.id} label="Sub Tenant ID" /> }] : []),
       ...(width >= 520 ? [{ key: "namespaces", header: "Namespaces", width: proportional(1, { minWidth: 82 }), renderCell: (row: SubTenantRow) => <Text>{row.namespaceCount}</Text> }] : []),
       ...(width >= 900 ? [{ key: "protection", header: "Protection", width: proportional(1, { minWidth: 86 }), renderCell: (row: SubTenantRow) => <Text>{row.protected ? "Protected" : "Off"}</Text> }] : []),

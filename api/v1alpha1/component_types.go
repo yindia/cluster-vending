@@ -267,6 +267,14 @@ type ComponentInstall struct {
 	// helm installs the component with provider-helm.
 	// +optional
 	Helm *HelmInstall `json:"helm,omitempty"`
+
+	// timeout is how long Helm waits for each of the component's charts to
+	// roll out (provider-helm forProvider.waitTimeout, with wait on), and
+	// what the platform counts a stuck operation from (timeout plus two
+	// minutes). Heavy charts (operators with hook Jobs, mesh control
+	// planes) need more than the default. Unset: 10m.
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // CloudProvider is a cloud a component can be installed on: aws, gcp or
@@ -363,6 +371,16 @@ type ComponentDefinitionSpec struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	Requires []string `json:"requires,omitempty"`
+	// sequence orders Platform components: they install in ascending
+	// sequence, and one starts only once every Platform component of a lower
+	// sequence is deployed and Ready (requires still applies). Karpenter is 0,
+	// the only sequence that runs before the platform node group exists:
+	// every Platform component above 0 also waits for it to be Ready.
+	// Removal runs in reverse. Ignored for tenant components.
+	// +optional
+	// +kubebuilder:default=100
+	// +kubebuilder:validation:Minimum=0
+	Sequence *int32 `json:"sequence,omitempty"`
 	// versionGroup names components that are versions of one product (the
 	// Istio charts, Kyverno and its policies): a release must pin every
 	// member it pins, on each Kubernetes minor, at the same version. Unset:

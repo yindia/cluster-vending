@@ -45,6 +45,9 @@ type KubernetesVersion struct {
 	UpgradeTo string `json:"upgradeTo,omitempty"`
 	// EndOfSupport is the day (YYYY-MM-DD, UTC) support for the minor ends.
 	EndOfSupport string `json:"endOfSupport"`
+	// NodeAMIPin is the AL2023 AMI release ("v20261107") the platform's
+	// Karpenter EC2NodeClasses pin on this minor (alias al2023@<pin>).
+	NodeAMIPin string `json:"nodeAmiPin,omitempty"`
 	// Values are locked Helm values of a component on this minor only.
 	Values map[string]map[string]any `json:"values,omitempty"`
 	// Components are chart versions on this minor only, overriding the
@@ -73,6 +76,8 @@ const (
 )
 
 const dayLayout = "2006-01-02"
+
+var amiPinPattern = regexp.MustCompile(`^v[0-9]{8}$`)
 
 var minorPattern = regexp.MustCompile(`^1\.[0-9]{2}$`)
 
@@ -138,6 +143,9 @@ func (r Release) check() error {
 		}
 		if _, err := k.EndOfSupportTime(); err != nil {
 			errs = append(errs, fmt.Errorf("kubernetes %s: endOfSupport %q is not a day like 2028-01-31", k.Minor, k.EndOfSupport))
+		}
+		if k.NodeAMIPin != "" && !amiPinPattern.MatchString(k.NodeAMIPin) {
+			errs = append(errs, fmt.Errorf("kubernetes %s: nodeAmiPin %q is not like v20261107", k.Minor, k.NodeAMIPin))
 		}
 		for name := range k.Values {
 			if _, ok := r.Components[name]; !ok {

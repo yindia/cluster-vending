@@ -40,13 +40,13 @@ test("fallback resolved spec updates contain only touched fields, with no defaul
 });
 
 test("leaf masks preserve false, zero, empty lists and clearing optional IRSA without replacing parent messages", () => {
-  const form = { ...clusterForm(resolved), publicAccess: false, minSize: "0", adminPrincipals: "", irsa: "default" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["publicAccess", "minSize", "adminPrincipals", "irsa"]));
+  const form = { ...clusterForm(resolved), publicAccess: false, diskSize: "", adminPrincipals: "", irsa: "default" };
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["publicAccess", "diskSize", "adminPrincipals", "irsa"]));
   assert.deepEqual(request.updateMask?.paths, [
-    "spec.access.admin_principals", "spec.aws.irsa", "spec.control_plane.endpoint_access.endpoint_public_access", "spec.default_node_pool.scaling_config.min_size",
+    "spec.access.admin_principals", "spec.aws.irsa", "spec.control_plane.endpoint_access.endpoint_public_access", "spec.default_node_pool.disk_size_gb",
   ]);
   assert.equal(request.cluster?.spec?.controlPlane?.endpointAccess?.endpointPublicAccess, false);
-  assert.equal(request.cluster?.spec?.defaultNodePool?.scalingConfig?.minSize, 0);
+  assert.equal(request.cluster?.spec?.defaultNodePool?.diskSizeGb, 0);
   assert.deepEqual(request.cluster?.spec?.access?.adminPrincipals, []);
   assert.equal(request.cluster?.spec?.provider.case, "aws");
   if (request.cluster?.spec?.provider.case === "aws") assert.equal(request.cluster.spec.provider.value.irsa, undefined);
@@ -77,9 +77,9 @@ test("switching to automatic mode never converts a resolved or previously edited
 });
 
 test("manual version is masked only after explicit editing; unedited resolved version stays absent", () => {
-  const form = { ...clusterForm(resolved), kubernetesVersion: "1.34", maxSize: "7" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["maxSize"]));
-  assert.deepEqual(request.updateMask?.paths, ["spec.default_node_pool.scaling_config.max_size"]);
+  const form = { ...clusterForm(resolved), kubernetesVersion: "1.34", diskSize: "40" };
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["diskSize"]));
+  assert.deepEqual(request.updateMask?.paths, ["spec.default_node_pool.disk_size_gb"]);
   assert.equal(request.cluster?.spec?.controlPlane, undefined);
   const pin = buildClusterUpdate("tenant-a", resolved, form, new Set(["kubernetesVersion"]));
   assert.deepEqual(pin.updateMask?.paths, ["spec.control_plane.kubernetes_version"]);
@@ -106,9 +106,9 @@ test("create derives immutable region and provider from existing network/account
 
 test("validate only touched inputs on updates, and validate endpoint and scaling dependencies on submit", () => {
   const form = clusterForm(resolved);
-  assert.doesNotThrow(() => buildClusterUpdate("tenant-a", resolved, { ...form, instanceTypes: "", minSize: "broken" }, new Set(["displayName"])));
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, minSize: "6" }, new Set(["minSize"])), /Minimum nodes/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, minSize: "-1" }, new Set(["minSize"])), /whole number/);
+  assert.doesNotThrow(() => buildClusterUpdate("tenant-a", resolved, { ...form, instanceTypes: "", diskSize: "broken" }, new Set(["displayName"])));
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, diskSize: "5" }, new Set(["diskSize"])), /Disk size/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, diskSize: "-1" }, new Set(["diskSize"])), /whole number/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "" }, new Set(["publicCIDRs"])), /requires at least one/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicAccess: false, privateAccess: false }, new Set(["publicAccess", "privateAccess"])), /at least one API endpoint/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "999.1.1.1/33" }, new Set(["publicCIDRs"])), /IPv4 CIDRs/);
@@ -154,8 +154,8 @@ test("NaaS updates use a sparse leaf mask and preserve disabling false through r
 });
 
 test("applying uses exact reviewed payload, tenant, mask and etag with explicit plan ID", () => {
-  const form = { ...clusterForm(resolved), maxSize: "7" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["maxSize"]));
+  const form = { ...clusterForm(resolved), diskSize: "40" };
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["diskSize"]));
   const plan = create(PlanSchema, { planId: "plan-1", applicable: true, changes: [{ action: 2, name: "nodegroup" }] });
   const review = bindClusterPlan(request, plan);
   const apply = applyReviewedClusterPlan(review, request);
@@ -165,7 +165,7 @@ test("applying uses exact reviewed payload, tenant, mask and etag with explicit 
   assert.deepEqual(apply.updateMask, request.updateMask);
   assert.equal(request.validateOnly, true);
   assert.equal(request.planId, "");
-  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, maxSize: "8" }, new Set(["maxSize"]));
+  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, diskSize: "50" }, new Set(["diskSize"]));
   assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
   assert.throws(() => applyReviewedClusterPlan(review, { ...request, tenantId: "tenant-b" }), /Inputs or etag changed/);
   assert.throws(() => applyReviewedClusterPlan(review, { ...request, cluster: { ...request.cluster!, etag: "new-etag" } }), /Inputs or etag changed/);
@@ -280,13 +280,11 @@ test("guided create covers tags, node metadata, initial size, maintenance, acces
   assert.deepEqual(toJson(ClusterSchema, roundtrip), toJson(ClusterSchema, created));
 });
 
-test("node metadata updates are separate sparse maps/lists and preserve all unshown settings", () => {
-  const form = { ...clusterForm(resolved), labels: '{"team":"platform"}', nodeLabels: '{"pool":"jobs"}', nodeTaints: '[{"key":"dedicated","effect":"TAINT_EFFECT_NO_EXECUTE"}]', oidcYaml: "malformed: [" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["labels", "nodeLabels", "nodeTaints"]));
-  assert.deepEqual(request.updateMask?.paths, ["labels", "spec.default_node_pool.labels", "spec.default_node_pool.taints"]);
+test("cloud tag updates are a sparse map and preserve all unshown settings", () => {
+  const form = { ...clusterForm(resolved), labels: '{"team":"platform"}', oidcYaml: "malformed: [" };
+  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["labels"]));
+  assert.deepEqual(request.updateMask?.paths, ["labels"]);
   assert.deepEqual(request.cluster?.labels, { team: "platform" });
-  assert.deepEqual(request.cluster?.spec?.defaultNodePool?.labels, { pool: "jobs" });
-  assert.equal(request.cluster?.spec?.defaultNodePool?.taints[0].effect, 3);
   assert.equal(request.cluster?.spec?.provider.case, undefined);
   assert.equal(request.cluster?.spec?.access, undefined);
   assert.deepEqual(resolved.labels, { environment: "production" });
@@ -295,12 +293,12 @@ test("node metadata updates are separate sparse maps/lists and preserve all unsh
 test("Kubernetes keys/values, duplicate taints and map keys are validated", () => {
   const form = clusterForm(resolved);
   for (const nodeLabels of ['{"UPPER.example/pool":"ok"}', '{"example.com/":"bad"}', '{"pool":"bad value"}', '{"a":"one","a":"two"}', '{"a":3}']) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, nodeLabels }, new Set(["nodeLabels"])));
+    assert.throws(() => validateClusterFormStep({ ...form, nodeLabels }, 1));
   }
   for (const nodeTaints of ['[{"key":"bad/key/extra","effect":1}]', '[{"key":"x","effect":0}]', '[{"key":"x","effect":1},{"key":"x","effect":1}]']) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, nodeTaints }, new Set(["nodeTaints"])));
+    assert.throws(() => validateClusterFormStep({ ...form, nodeTaints }, 1));
   }
-  assert.doesNotThrow(() => buildClusterUpdate("tenant-a", resolved, { ...form, nodeLabels: '{"example.com/pool":""}', nodeTaints: '[{"key":"x","effect":1},{"key":"x","effect":3}]' }, new Set(["nodeLabels", "nodeTaints"])));
+  assert.doesNotThrow(() => validateClusterFormStep({ ...form, nodeLabels: '{"example.com/pool":""}', nodeTaints: '[{"key":"x","effect":1},{"key":"x","effect":3}]' }, 1));
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, labels: '{"aws:reserved":"x"}' }, new Set(["labels"])), /AWS tag/);
 });
 
@@ -415,4 +413,21 @@ test("advanced AWS leaf edits never replace unrelated provider settings", () => 
       assert.equal(aws.controlPlaneLogGroup, undefined);
     }
   }
+});
+
+test("the default node group's labels, taints and scaling are platform-managed and refused in updates", () => {
+  const form = { ...clusterForm(resolved), minSize: "2", maxSize: "9", nodeLabels: '{"pool":"jobs"}', nodeTaints: '[{"key":"dedicated","effect":1}]' };
+  for (const field of ["minSize", "maxSize", "nodeLabels", "nodeTaints"]) {
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set([field])), /managed by the platform/);
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set(["displayName", field])), /managed by the platform/);
+  }
+  const editable = buildClusterUpdate("tenant-a", resolved, { ...form, capacityType: "2", instanceTypes: "m6i.xlarge" }, new Set(["capacityType", "instanceTypes"]));
+  assert.deepEqual(editable.updateMask?.paths, ["spec.default_node_pool.capacity_type", "spec.default_node_pool.instance_types"]);
+});
+
+test("create still sets the default node group's metadata and scaling", () => {
+  const form = { ...emptyClusterForm, name: "fresh", networkId: network.id, publicCIDRs: "203.0.113.0/24", minSize: "2", maxSize: "4", nodeLabels: '{"pool":"jobs"}' };
+  const pool = buildCreateCluster("tenant-a", form, network, accounts, "r1").cluster?.spec?.defaultNodePool;
+  assert.equal(pool?.scalingConfig?.minSize, 2);
+  assert.deepEqual(pool?.labels, { pool: "jobs" });
 });

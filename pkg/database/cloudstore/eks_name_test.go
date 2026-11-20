@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -152,10 +153,15 @@ func TestPhysicalEKSNameCrashRetryRetainsAllocatedID(t *testing.T) {
 	var fail atomic.Bool
 	fail.Store(true)
 	k := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-		if _, ok := obj.(*cloud.Cluster); ok && fail.Swap(false) {
+		if _, ok := obj.(*cloud.Cluster); ok && fail.Load() {
 			return fmt.Errorf("crash after reservation")
 		}
 		return c.Create(ctx, obj, opts...)
+	}, Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+		if _, ok := obj.(*corev1.ConfigMap); ok && fail.Load() {
+			return fmt.Errorf("process died before it could release the reservation")
+		}
+		return c.Delete(ctx, obj, opts...)
 	}})
 	s := cloudstore.New(k)
 	row := reservationCluster(t, w.network, "payments")
@@ -165,6 +171,7 @@ func TestPhysicalEKSNameCrashRetryRetainsAllocatedID(t *testing.T) {
 		t.Fatal("simulated failure ignored")
 	}
 	originalID := row.ID
+	fail.Store(false)
 	retry := reservationCluster(t, w.network, "payments")
 	retry.CreateRequestID = &request
 	if err := s.Clusters().Create(t.Context(), retry); err != nil || retry.ID != originalID {
@@ -372,5 +379,139 @@ func TestEstablishedEKSReservationUsesFreshGetWithoutClusterLists(t *testing.T) 
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// Kubernetes removes a deleting object as soon as its last finalizer is
+// removed. The explicit Delete that follows must not skip reservation release.
+func TestPhysicalEKSNameReleaseAfterFinalizerRemoval(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		deleting, foreign bool
+	}{
+		{name: "normal RPC deletion"},
+		{name: "finalizer auto deletion", deleting: true},
+		{name: "foreign finalizer retained", deleting: true, foreign: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := newWorld(t)
+			row := reservationCluster(t, w.network, "finalizing")
+			if err := w.s.Clusters().Create(t.Context(), row); err != nil {
+				t.Fatal(err)
+			}
+			obj := &cloud.Cluster{}
+			key := client.ObjectKey{Namespace: namespace, Name: row.Name}
+			if err := w.k.Get(t.Context(), key, obj); err != nil {
+				t.Fatal(err)
+			}
+			obj.Finalizers = []string{cloud.ClusterFinalizer}
+			if test.foreign {
+				obj.Finalizers = append(obj.Finalizers, "example.com/protection")
+			}
+			if err := w.k.Update(t.Context(), obj); err != nil {
+				t.Fatal(err)
+			}
+			if test.deleting {
+				if err := w.k.Delete(t.Context(), obj); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sawDeleteNotFound := false
+			k := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				err := c.Delete(ctx, obj, opts...)
+				if _, ok := obj.(*cloud.Cluster); ok && apierrors.IsNotFound(err) {
+					sawDeleteNotFound = true
+				}
+				return err
+			}})
+			err := cloudstore.New(k).Clusters().Delete(t.Context(), row.TenantID, row.ID)
+			if test.foreign {
+				if !errors.Is(err, repository.ErrConflict) {
+					t.Fatalf("foreign finalizer: %v", err)
+				}
+				if err := w.k.Get(t.Context(), key, obj); err != nil {
+					t.Fatal(err)
+				}
+				if len(obj.Finalizers) != 1 || obj.Finalizers[0] != "example.com/protection" {
+					t.Fatalf("foreign finalizer changed: %v", obj.Finalizers)
+				}
+			} else {
+				if test.deleting && !sawDeleteNotFound {
+					t.Fatal("did not reproduce automatic deletion after finalizer update")
+				}
+				if err != nil {
+					t.Fatalf("finalized cluster deletion: %v", err)
+				}
+				if err := w.k.Get(t.Context(), key, obj); !apierrors.IsNotFound(err) {
+					t.Fatalf("cluster still exists: %v", err)
+				}
+			}
+			claims := &corev1.ConfigMapList{}
+			if err := w.k.List(t.Context(), claims, client.InNamespace(cloudstore.EKSNameReservationNamespace)); err != nil {
+				t.Fatal(err)
+			}
+			wantClaims := 0
+			if test.foreign {
+				wantClaims = 1
+			}
+			if len(claims.Items) != wantClaims {
+				t.Fatalf("reservations = %d, want %d", len(claims.Items), wantClaims)
+			}
+			err = w.s.Clusters().Create(t.Context(), reservationCluster(t, w.network, row.Name))
+			if test.foreign {
+				if !errors.Is(err, repository.ErrAlreadyExists) {
+					t.Fatalf("foreign finalizer allowed name reuse: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("finalized name cannot be reused: %v", err)
+			}
+		})
+	}
+}
+
+// A real API server answers an orphan-propagation delete by setting the
+// deletion timestamp and adding the garbage collector's "orphan" finalizer;
+// the object goes once the collector removes it, a moment later. The fake
+// client deletes at once, so the interceptor plays the API server here.
+func TestPhysicalEKSNameReleasedWhenOnlyGarbageCollectorHoldsCluster(t *testing.T) {
+	w := newWorld(t)
+	row := reservationCluster(t, w.network, "inference")
+	if err := w.s.Clusters().Create(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	k := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+		cluster, ok := obj.(*cloud.Cluster)
+		if !ok {
+			return c.Delete(ctx, obj, opts...)
+		}
+		do := &client.DeleteOptions{}
+		do.ApplyOptions(opts)
+		if do.PropagationPolicy == nil || *do.PropagationPolicy != metav1.DeletePropagationOrphan {
+			return c.Delete(ctx, obj, opts...)
+		}
+		live := &cloud.Cluster{}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(cluster), live); err != nil {
+			return err
+		}
+		live.Finalizers = append(live.Finalizers, metav1.FinalizerOrphanDependents)
+		if err := c.Update(ctx, live); err != nil {
+			return err
+		}
+		return c.Delete(ctx, live)
+	}})
+	if err := cloudstore.New(k).Clusters().Delete(t.Context(), row.TenantID, row.ID); err != nil {
+		t.Fatalf("delete held only by the garbage collector: %v", err)
+	}
+	obj := &cloud.Cluster{}
+	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: row.Name}, obj); err != nil ||
+		obj.DeletionTimestamp.IsZero() || len(obj.Finalizers) != 1 || obj.Finalizers[0] != metav1.FinalizerOrphanDependents {
+		t.Fatalf("did not reproduce the API server's orphan finalizer: %v %v", err, obj.Finalizers)
+	}
+	claims := &corev1.ConfigMapList{}
+	if err := w.k.List(t.Context(), claims, client.InNamespace(cloudstore.EKSNameReservationNamespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(claims.Items) != 0 {
+		t.Fatalf("reservation kept after a confirmed deletion: %d claims", len(claims.Items))
 	}
 }

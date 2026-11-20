@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -29,6 +30,13 @@ func ParseUserValues(file string) (Values, error) {
 	return obj, nil
 }
 
+// The bounds of a definition's install.timeout: Helm waits at least a
+// minute, and a chart that needs more than two hours is not rolling out.
+const (
+	MinInstallTimeout = time.Minute
+	MaxInstallTimeout = 2 * time.Hour
+)
+
 // CheckDefinition reports what makes a definition's values unusable, for
 // its Valid condition, every problem at once; nil when they are usable:
 //   - the values schema uses what the subset does not support (CheckSchema);
@@ -37,6 +45,7 @@ func ParseUserValues(file string) (Values, error) {
 //   - the cloud resources are unusable (ValidateCloudResources: the IAM
 //     policy is no policy document, or uses an unknown placeholder);
 //   - a Platform component has userValues or a valuesSchema;
+//   - install.timeout is not between 1m and 2h;
 //   - a bundle (includes) has an install, values, a schema or cloud
 //     resources of its own, or is internal;
 //   - userValues does not parse as a YAML object;
@@ -63,6 +72,9 @@ func CheckDefinition(d Definition) []string {
 	}
 	if d.IsPlatform() && (d.UserValues != "" || d.ValuesSchema != nil) {
 		out = append(out, "a Platform component takes no tenant values: remove userValues and valuesSchema")
+	}
+	if d.InstallTimeout != 0 && (d.InstallTimeout < MinInstallTimeout || d.InstallTimeout > MaxInstallTimeout) {
+		out = append(out, fmt.Sprintf("install.timeout %s must be between 1m and 2h", d.InstallTimeout))
 	}
 	out = append(out, bundleProblems(d)...)
 	user, err := ParseUserValues(d.UserValues)

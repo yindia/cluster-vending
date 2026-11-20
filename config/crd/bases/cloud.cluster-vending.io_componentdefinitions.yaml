@@ -424,6 +424,14 @@ spec:
                     x-kubernetes-validations:
                     - message: plainHTTP is for oci:// registries
                       rule: '!has(self.plainHTTP) || !self.plainHTTP || self.repository.startsWith(''oci://'')'
+                  timeout:
+                    description: |-
+                      timeout is how long Helm waits for each of the component's charts to
+                      roll out (provider-helm forProvider.waitTimeout, with wait on), and
+                      what the platform counts a stuck operation from (timeout plus two
+                      minutes). Heavy charts (operators with hook Jobs, mesh control
+                      planes) need more than the default. Unset: 10m.
+                    type: string
                 type: object
                 x-kubernetes-validations:
                 - message: helm is the only install mechanism so far
@@ -489,6 +497,18 @@ spec:
                 maxItems: 16
                 type: array
                 x-kubernetes-list-type: set
+              sequence:
+                default: 100
+                description: |-
+                  sequence orders Platform components: they install in ascending
+                  sequence, and one starts only once every Platform component of a lower
+                  sequence is deployed and Ready (requires still applies). Karpenter is 0,
+                  the only sequence that runs before the platform node group exists:
+                  every Platform component above 0 also waits for it to be Ready.
+                  Removal runs in reverse. Ignored for tenant components.
+                format: int32
+                minimum: 0
+                type: integer
               upgradeOneMinorAtATime:
                 description: |-
                   upgradeOneMinorAtATime: the component supports in-place upgrades of

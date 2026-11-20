@@ -190,3 +190,35 @@ func TestSampleStartsOverOnUnreadableHistory(t *testing.T) {
 		t.Errorf("message = %q", s.summary.GetMessage())
 	}
 }
+
+// Publish gets a sample that worked, with the recorded usage, before the
+// summary is recorded; its notice joins the summary's message. A failed
+// sample publishes nothing.
+func TestSamplePublishesBeforeRecordingAndAddsItsNotice(t *testing.T) {
+	s := &store{}
+	sm := sampler(s, cluster{metrics: true}, t0)
+	var seen int
+	sm.Publish = func(_ context.Context, c recommendations.Cluster, sum *cloudv1.ClusterRecommendations, h recommend.History, at time.Time) string {
+		if s.summary != nil || c.ID != "c1" || !at.Equal(t0) || sum.GetContainers() != 2 {
+			t.Errorf("published too early or with %v for %s at %v", sum, c.ID, at)
+		}
+		seen = h.Containers()
+		return "results are kept in the cluster object: the results bucket is not ready yet"
+	}
+
+	if _, err := sm.Run(t.Context(), target(nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	if seen != 2 || !strings.Contains(s.summary.GetMessage(), "the results bucket is not ready yet") {
+		t.Fatalf("history of %d containers, message %q", seen, s.summary.GetMessage())
+	}
+	failing := sampler(&store{}, cluster{failWork: errors.New("down")}, t0)
+	failing.Publish = func(context.Context, recommendations.Cluster, *cloudv1.ClusterRecommendations, recommend.History, time.Time) string {
+		t.Error("a failed sample was published")
+		return ""
+	}
+	if _, err := failing.Run(t.Context(), target(nil)); err != nil {
+		t.Fatal(err)
+	}
+}

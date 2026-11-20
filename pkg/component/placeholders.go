@@ -36,20 +36,38 @@ const (
 
 	// VarSystemNodeSelector and VarSystemTolerations are whole-value
 	// placeholders: a string that is exactly ${system.nodeSelector} becomes
-	// the default node pool's labels (a map), ${system.tolerations} a list
-	// tolerating each of its taints ({key, operator: Equal, value,
-	// effect}). Platform components use them to run on the default node
-	// pool, which tenant workloads stay off. Only in platform values.
+	// the labels of the default managed node group (a map),
+	// ${system.tolerations} a list tolerating its taint ({key, operator:
+	// Equal, value, effect}). Only Karpenter uses them: it runs there,
+	// where tenant workloads and the other components do not. Only in
+	// platform values.
 	VarSystemNodeSelector = "system.nodeSelector"
 	VarSystemTolerations  = "system.tolerations"
+	// VarPlatformNodeSelector and VarPlatformTolerations are the same for
+	// the platform's Karpenter node pool: where every other platform
+	// component, the tenant's components and the add-on controllers run.
+	// An imported cluster has no platform pool: its components follow its
+	// default node pool (its labels and taints), as before.
+	VarPlatformNodeSelector = "platform.nodeSelector"
+	VarPlatformTolerations  = "platform.tolerations"
+
+	// VarKarpenterNodeRoleName and VarKarpenterNodeRoleARN are the role
+	// the Karpenter nodes run as, VarKarpenterInterruptionQueue the name of
+	// Karpenter's SQS queue (crossplaneaws.KarpenterNodeRoleName,
+	// KarpenterQueueName).
+	VarKarpenterNodeRoleName      = "karpenter.nodeRoleName"
+	VarKarpenterNodeRoleARN       = "karpenter.nodeRoleArn"
+	VarKarpenterInterruptionQueue = "karpenter.interruptionQueue"
 )
 
-// systemPrefix starts the whole-value placeholders.
-const systemPrefix = "system."
+// wholeValuePrefixes start the whole-value placeholders.
+var wholeValuePrefixes = []string{"system.", "platform."}
 
 // wholeValue reports whether name is replaced by a structured value and
 // may only be a field's entire value.
-func wholeValue(name string) bool { return strings.HasPrefix(name, systemPrefix) }
+func wholeValue(name string) bool {
+	return slices.ContainsFunc(wholeValuePrefixes, func(p string) bool { return strings.HasPrefix(name, p) })
+}
 
 // iamPrefix starts the placeholders of the component's own role and
 // policy: not available in that policy.
@@ -59,7 +77,8 @@ const iamPrefix = "iam."
 var placeholderNames = []string{
 	VarRegion, VarAccountID, VarClusterName, VarClusterEndpoint, VarClusterOIDCIssuer, VarClusterOIDCProviderARN,
 	VarClusterNodeRoleName, VarClusterNodeRoleARN, VarNetworkVPCID, VarIAMRoleARN, VarIAMRoleName, VarIAMPolicyARN,
-	VarSystemNodeSelector, VarSystemTolerations,
+	VarSystemNodeSelector, VarSystemTolerations, VarPlatformNodeSelector, VarPlatformTolerations,
+	VarKarpenterNodeRoleName, VarKarpenterNodeRoleARN, VarKarpenterInterruptionQueue,
 }
 
 // PlaceholderNames is every placeholder name, in a fixed order.
@@ -82,10 +101,14 @@ func whyKey(name string) string { return "why:" + name }
 // IAMOutputs are the IAM names the controller reads from the management
 // cluster: the component's role and policy (empty until they exist), and
 // the IAM name of the cluster's node role (crossplaneaws.NodeRoleName:
-// the name an import recorded, or the platform's).
+// the name an import recorded, or the platform's), and the cluster's
+// object prefix (crossplaneaws.ClusterPrefix) that names Karpenter's role
+// and queue. Without the prefix, the node role's name gives it when it is
+// the platform's own ("<prefix>-node-role").
 type IAMOutputs struct {
 	RoleARN, RoleName, PolicyARN string
 	NodeRoleName                 string
+	ClusterPrefix                string
 }
 
 // VarsFor are the placeholder values of a component on cluster, from the
@@ -97,9 +120,8 @@ func VarsFor(cluster *cloudv1alpha1.Cluster, network *cloudv1alpha1.Network, acc
 		VarClusterOIDCIssuer: cluster.Status.OIDCIssuerURL,
 		VarIAMRoleARN:        iam.RoleARN, VarIAMRoleName: iam.RoleName, VarIAMPolicyARN: iam.PolicyARN,
 		VarClusterNodeRoleName: iam.NodeRoleName,
-		VarSystemNodeSelector:  systemNodeSelector(cluster.Spec.DefaultNodePool),
-		VarSystemTolerations:   systemTolerations(cluster.Spec.DefaultNodePool),
 	}
+	placement(v, cluster)
 	if cluster.Status.Endpoint != nil {
 		v[VarClusterEndpoint] = cluster.Status.Endpoint.URL
 	}
@@ -118,6 +140,11 @@ func VarsFor(cluster *cloudv1alpha1.Cluster, network *cloudv1alpha1.Network, acc
 	if iam.NodeRoleName != "" {
 		v[VarClusterNodeRoleARN] = arn("role/" + iam.NodeRoleName)
 	}
+	if prefix := clusterPrefix(iam); prefix != "" {
+		v[VarKarpenterNodeRoleName] = crossplaneaws.KarpenterNodeRoleName(prefix)
+		v[VarKarpenterInterruptionQueue] = crossplaneaws.KarpenterQueueName(prefix)
+		v[VarKarpenterNodeRoleARN] = arn("role/" + v[VarKarpenterNodeRoleName])
+	}
 	switch {
 	case !clusterIRSA(cluster):
 		v[whyKey(VarClusterOIDCProviderARN)] = fmt.Sprintf("IRSA is off on cluster %s (spec.aws.irsa)", cluster.Name)
@@ -126,6 +153,72 @@ func VarsFor(cluster *cloudv1alpha1.Cluster, network *cloudv1alpha1.Network, acc
 	}
 	return v
 }
+
+// placement sets the whole-value placeholders of the node pools. A cluster
+// the platform created has the platform's pools (crossplaneaws.Pool*),
+// whatever its stored spec says. An imported one has its own default node
+// pool, for both: it has no platform pool.
+func placement(v Vars, cluster *cloudv1alpha1.Cluster) {
+	if cluster.Spec.ImportFrom != nil {
+		v[VarSystemNodeSelector] = systemNodeSelector(cluster.Spec.DefaultNodePool)
+		v[VarSystemTolerations] = systemTolerations(cluster.Spec.DefaultNodePool)
+		v[VarPlatformNodeSelector], v[VarPlatformTolerations] = v[VarSystemNodeSelector], v[VarSystemTolerations]
+		return
+	}
+	v[VarSystemNodeSelector] = mustJSON(crossplaneaws.PoolLabels(crossplaneaws.PoolSystem))
+	v[VarSystemTolerations] = mustJSON(crossplaneaws.PoolTolerations(crossplaneaws.PoolSystem))
+	v[VarPlatformNodeSelector] = mustJSON(crossplaneaws.PoolLabels(crossplaneaws.PoolPlatform))
+	v[VarPlatformTolerations] = mustJSON(crossplaneaws.PoolTolerations(crossplaneaws.PoolPlatform))
+}
+
+// Placement is where the pods of a node pool run: the labels they select and
+// the taints they tolerate.
+type Placement struct {
+	Labels map[string]string
+	Taints []crossplaneaws.TaintPlan
+}
+
+// WithPlacement is v with the whole-value placeholders of the default
+// managed node group (system.*) and of the platform pool (platform.*) set
+// from the given placements: what the live node group carries now, and the
+// platform pool once it is Ready. It never changes v.
+func WithPlacement(v Vars, system, platform Placement) Vars {
+	out := make(Vars, len(v)+4)
+	for k, val := range v {
+		out[k] = val
+	}
+	out[VarSystemNodeSelector], out[VarSystemTolerations] = system.selectorJSON(), system.tolerationsJSON()
+	out[VarPlatformNodeSelector], out[VarPlatformTolerations] = platform.selectorJSON(), platform.tolerationsJSON()
+	return out
+}
+
+func (p Placement) selectorJSON() string {
+	labels := map[string]string{}
+	for k, v := range p.Labels {
+		labels[k] = v
+	}
+	return mustJSON(labels)
+}
+
+func (p Placement) tolerationsJSON() string {
+	return mustJSON(crossplaneaws.TolerationsOf(p.Taints))
+}
+
+// clusterPrefix is the cluster's object prefix, or "" when it is not
+// known (an adopted node role's name says nothing about it).
+func clusterPrefix(iam IAMOutputs) string {
+	if iam.ClusterPrefix != "" {
+		return iam.ClusterPrefix
+	}
+	prefix, _ := strings.CutSuffix(iam.NodeRoleName, nodeRoleSuffix)
+	if prefix == iam.NodeRoleName {
+		return ""
+	}
+	return prefix
+}
+
+// nodeRoleSuffix ends the platform's own node role name.
+const nodeRoleSuffix = "-node-role"
 
 // systemNodeSelector is the default pool's labels as JSON; "{}" for none.
 func systemNodeSelector(pool *cloudv1alpha1.NodePoolSpec) string {

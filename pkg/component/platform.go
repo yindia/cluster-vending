@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -32,6 +33,9 @@ type Install struct {
 	Main       Chart
 	CRDs       *Chart
 	Companions []Companion
+	// Timeout is how long Helm waits for each chart to roll out
+	// (spec.install.timeout); 0: crossplaneaws.DefaultHelmTimeout.
+	Timeout time.Duration
 }
 
 // InstallOf is the install of def; false for a bundle, which has none.
@@ -45,6 +49,9 @@ func InstallOf(def *cloudv1alpha1.ComponentDefinition) (Install, bool) {
 			InsecureSkipTLSVerify: s.InsecureSkipTLSVerify, PlainHTTP: s.PlainHTTP}
 	}
 	out := Install{Namespace: def.Spec.Namespace, Main: chart(h.HelmChartSource)}
+	if t := def.Spec.Install.Timeout; t != nil && t.Duration > 0 {
+		out.Timeout = t.Duration
+	}
 	if h.CRDs != nil {
 		crds := chart(*h.CRDs)
 		out.CRDs = &crds
@@ -121,6 +128,9 @@ type PlatformInput struct {
 	// Vars are a component's placeholder values (VarsFor with its IAM
 	// outputs).
 	Vars func(component string) Vars
+	// HoldForPlatformNodeGroup holds every component above sequence 0 back
+	// (PENDING) until the platform node group is Ready.
+	HoldForPlatformNodeGroup bool
 	// Plan is the cluster's identity (namespace, IDs, prefix, node group);
 	// its Components are filled in.
 	Plan crossplaneaws.PlatformPlan
@@ -128,6 +138,10 @@ type PlatformInput struct {
 	// ProviderConfig, IDs, names, region, tags).
 	IAM crossplaneaws.ComponentIAMPlan
 }
+
+// PlatformNodeGroupWait is what a component above sequence 0 waits for
+// until the platform node group is Ready.
+const PlatformNodeGroupWait = "the platform node group to be Ready"
 
 // NotInstalled is a Platform component the plan leaves out, and why.
 type NotInstalled struct {
@@ -205,8 +219,11 @@ func planComponent(in PlatformInput, e PlatformEntry, out map[string]bool) (cros
 		return none, err.Error()
 	}
 	vars := in.Vars(e.Name)
-	c := crossplaneaws.PlatformComponentPlan{Name: e.Name, Namespace: e.Install.Namespace, Requires: slices.Clone(e.Requires)}
+	c := crossplaneaws.PlatformComponentPlan{Name: e.Name, Namespace: e.Install.Namespace, Requires: slices.Clone(e.Requires), Sequence: e.Sequence}
 	var waits []string
+	if in.HoldForPlatformNodeGroup && e.Sequence > 0 {
+		waits = append(waits, PlatformNodeGroupWait)
+	}
 	wait := func(err error) bool {
 		var notReady *NotReadyError
 		if errors.As(err, &notReady) {
@@ -238,12 +255,12 @@ func planComponent(in PlatformInput, e PlatformEntry, out map[string]bool) (cros
 		own, _ := values[comp.Name].(map[string]any)
 		delete(values, comp.Name)
 		if p, ok := in.Pins[comp.Name]; ok {
-			c.Companions = append(c.Companions, crossplaneaws.HelmReleasePlan{Name: comp.Name, Chart: chart(comp.Chart, p.Version), Values: own})
+			c.Companions = append(c.Companions, crossplaneaws.HelmReleasePlan{Name: comp.Name, Chart: chart(comp.Chart, p.Version), Values: own, Timeout: e.Install.Timeout})
 		}
 	}
-	c.Main = crossplaneaws.HelmReleasePlan{Name: e.Name, Chart: chart(e.Install.Main, pin.Version), Values: values, SkipCRDs: e.Install.CRDs != nil}
+	c.Main = crossplaneaws.HelmReleasePlan{Name: e.Name, Chart: chart(e.Install.Main, pin.Version), Values: values, SkipCRDs: e.Install.CRDs != nil, Timeout: e.Install.Timeout}
 	if e.Install.CRDs != nil {
-		c.CRDs = &crossplaneaws.HelmReleasePlan{Name: crossplaneaws.CRDsReleaseName(e.Name), Chart: chart(*e.Install.CRDs, pin.Version)}
+		c.CRDs = &crossplaneaws.HelmReleasePlan{Name: crossplaneaws.CRDsReleaseName(e.Name), Chart: chart(*e.Install.CRDs, pin.Version), Timeout: e.Install.Timeout}
 	}
 	if len(waits) > 0 {
 		slices.Sort(waits)

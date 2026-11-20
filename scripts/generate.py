@@ -18,12 +18,14 @@ Three roles, each a superset of the one before:
   clusters the platform vends. The controller needs this one: it is the
   role an account is onboarded with today.
 
-Every role trusts one principal: the platform's management role (the
-ManagementRoleArn parameter), the identity the controller and the
-Crossplane providers run as; with the ExternalId parameter (the account's,
-which the API server generates at account create) only when it passes
-that external ID (sts:ExternalId), so another tenant's account onboarded
-with the same management role cannot reach this one. The platform names its resources after the
+Every role trusts the platform's management role (the ManagementRoleArn
+parameter), the identity the controller and the Crossplane providers run as,
+and, when the ServerPrincipalArn parameter is not empty, the API server's
+principal, which reads the cluster results buckets (read-only: the server
+limits its session to that). With the ExternalId parameter (the account's,
+which the API server generates at account create) a principal is trusted
+only when it passes that external ID (sts:ExternalId), so another tenant's
+account onboarded with the same management role cannot reach this one. The platform names its resources after the
 network or cluster, without a common prefix, and adopts resources that it
 did not create (import, take over), so mutations cannot be scoped by name
 or by the platform's tags; IAM actions are limited by conditions where
@@ -61,13 +63,14 @@ from troposphere import (
     Tags,
     Template,
 )
-from troposphere.iam import ManagedPolicy, Role
+from troposphere.iam import ManagedPolicy, Role, ServiceLinkedRole
 
 # The platform's name, on every role, policy and stack.
 PLATFORM = "cluster-vending"
 
 # The roles, in the order each adds to the one before.
 ROLES = ["reader", "updater", "provisioner"]
+PROVISIONER = "provisioner"
 
 # IAM's limit on a managed policy document, without whitespace.
 MANAGED_POLICY_LIMIT = 6144
@@ -388,6 +391,44 @@ PROVISION_CLUSTERS = [
 ]
 
 # The managed policies of each role: (name suffix, statements).
+# The bucket of a cluster's scan results (docs/design/cluster-results-s3.md):
+# the platform creates, configures and deletes buckets named cv-*, and reads,
+# writes and deletes the objects in them. Nothing else of S3. The reads are
+# what the Crossplane provider refreshes a bucket with.
+RESULTS_BUCKETS = "arn:aws:s3:::cv-*"
+RESULTS_OBJECTS = "arn:aws:s3:::cv-*/*"
+
+PROVISION_RESULTS = [
+    statement(
+        "ProvisionResultsBuckets",
+        actions(
+            "s3",
+            "CreateBucket",
+            "DeleteBucket",
+            "ListBucket",
+            "PutBucketTagging",
+            "PutBucketPublicAccessBlock",
+            "PutBucketOwnershipControls",
+            "DeleteBucketOwnershipControls",
+            "PutEncryptionConfiguration",
+            "PutBucketPolicy",
+            "DeleteBucketPolicy",
+            "PutLifecycleConfiguration",
+            "GetBucket*",
+            "GetEncryptionConfiguration",
+            "GetLifecycleConfiguration",
+            "GetAccelerateConfiguration",
+            "GetReplicationConfiguration",
+        ),
+        RESULTS_BUCKETS,
+    ),
+    statement(
+        "ReadWriteResultsObjects",
+        actions("s3", "GetObject", "PutObject", "DeleteObject", "AbortMultipartUpload"),
+        RESULTS_OBJECTS,
+    ),
+]
+
 POLICIES = {
     "reader": [
         ("read-network", READ_NETWORK),
@@ -397,6 +438,7 @@ POLICIES = {
     "provisioner": [
         ("provision-network", PROVISION_NETWORK),
         ("provision-clusters", PROVISION_CLUSTERS),
+        ("provision-results", PROVISION_RESULTS),
     ],
 }
 
@@ -430,19 +472,59 @@ def managed_policy(role, suffix, statements):
     )
 
 
-def trust(management_role, external_id):
-    """Return the role's trust policy: the management role, passing the
-    external ID when there is one."""
+def trust(principals, external_id):
+    """Return the role's trust policy: the principals (parameters), passing
+    the external ID when there is one."""
     statement = Statement(
         Effect=Allow,
         Action=[AssumeRole],
-        Principal=Principal("AWS", Ref(management_role)),
+        Principal=Principal("AWS", [Ref(p) for p in principals]),
     )
     if external_id is not None:
         statement.Condition = Condition(
             StringEquals("sts:ExternalId", Ref(external_id))
         )
     return PolicyDocument(Version="2012-10-17", Statement=[statement])
+
+
+def add_spot_service_linked_role(template):
+    """Add the account's EC2 Spot service-linked role, on request.
+
+    Karpenter's Spot nodes need AWSServiceRoleForEC2Spot. CloudFormation
+    cannot create a resource that already exists, and an account that ever
+    used Spot has this role, so the stack creates it only when the
+    CreateSpotServiceLinkedRole parameter says "true" (off by default: no
+    stack update of an existing account can fail on it). The role is the
+    account's, not the stack's, so it is retained when the stack is deleted.
+    """
+    parameter = template.add_parameter(
+        Parameter(
+            "CreateSpotServiceLinkedRole",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description=(
+                "Create the account's EC2 Spot service-linked role "
+                "(AWSServiceRoleForEC2Spot), which Karpenter's Spot nodes need. "
+                "Set true only when the account does not have it yet "
+                "(aws iam get-role --role-name AWSServiceRoleForEC2Spot): "
+                "CloudFormation fails to create a role that exists."
+            ),
+        )
+    )
+    template.add_condition(
+        "CreateSpotServiceLinkedRole", Equals(Ref(parameter), "true")
+    )
+    template.add_resource(
+        ServiceLinkedRole(
+            "SpotServiceLinkedRole",
+            AWSServiceName="spot.amazonaws.com",
+            Description="EC2 Spot, for the platform's Karpenter nodes",
+            Condition="CreateSpotServiceLinkedRole",
+            DeletionPolicy="Retain",
+            UpdateReplacePolicy="Retain",
+        )
+    )
 
 
 def template_of(role):
@@ -491,7 +573,26 @@ def template_of(role):
             AllowedPattern=r"^$|^[A-Za-z0-9+=,.@:/_-]{32,1224}$",
         )
     )
+    server_principal = template.add_parameter(
+        Parameter(
+            "ServerPrincipalArn",
+            Type="String",
+            Default="",
+            Description=(
+                "ARN of the role the cluster-vending API server runs as, which "
+                "reads the cluster results buckets (read-only). cluster-vending "
+                "account create fills it in from the API server. Empty: the "
+                "server has no AWS access, and only the management role is trusted."
+            ),
+            AllowedPattern=r"^$|^arn:aws[a-z-]*:iam::\d{12}:role/.+$",
+        )
+    )
     template.add_condition("HasExternalId", Not(Equals(Ref(external_id), "")))
+    template.add_condition(
+        "HasServerPrincipalArn", Not(Equals(Ref(server_principal), ""))
+    )
+    if role == PROVISIONER:
+        add_spot_service_linked_role(template)
     refs = [
         Ref(template.add_resource(managed_policy(role, suffix, statements)))
         for suffix, statements in policies_of(role)
@@ -503,8 +604,16 @@ def template_of(role):
             Description=f"Assumed by the {PLATFORM} platform ({role})",
             AssumeRolePolicyDocument=If(
                 "HasExternalId",
-                trust(management_role, external_id),
-                trust(management_role, None),
+                If(
+                    "HasServerPrincipalArn",
+                    trust([management_role, server_principal], external_id),
+                    trust([management_role], external_id),
+                ),
+                If(
+                    "HasServerPrincipalArn",
+                    trust([management_role, server_principal], None),
+                    trust([management_role], None),
+                ),
             ),
             ManagedPolicyArns=refs,
             Tags=Tags({"managed-by": PLATFORM, f"{PLATFORM}.io/role": role}),

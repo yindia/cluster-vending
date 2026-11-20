@@ -45,7 +45,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	ctx = withPlatformDeletion(reconcile.WithCodeHolder(withTeardownHolder(reconcile.WithNotes(ctx))))
+	ctx = withHelmPass(withDeleteStage(withPlatformDeletion(reconcile.WithCodeHolder(withNodeGroupsHolder(withTeardownHolder(reconcile.WithNotes(ctx)))))))
 	row.Frozen, err = s.deps.SyncFreeze(ctx, reconcile.PauseScope{TenantID: tenantID, ClusterID: row.ID, NetworkID: row.NetworkID})
 	if err != nil {
 		return err
@@ -104,6 +104,9 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if perr != nil {
 		perr = fmt.Errorf("platform components: %w", perr)
 	}
+	// The Karpenter node groups, once Karpenter is Ready. They never fail
+	// the pass: what goes wrong is their status.
+	s.reconcileNodeGroups(ctx, current, installed)
 	// What changed about them is logged here, once: the status alone would
 	// leave a failed component out of the controller's log.
 	s.logPlatform(ctx, current, storedPlatform(current), installed)

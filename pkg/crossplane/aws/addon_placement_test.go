@@ -177,3 +177,51 @@ func TestDedicatedPoolWarning(t *testing.T) {
 		})
 	}
 }
+
+// On a cluster with Karpenter node groups, CoreDNS stays on the default
+// (system) group and the EBS CSI controller moves to the platform pool.
+func TestAddonsOnTheSystemAndPlatformPools(t *testing.T) {
+	system := map[string]any{"node.cluster-vending.io/pool": "system"}
+	platform := map[string]any{"node.cluster-vending.io/pool": "platform"}
+	systemToleration := map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}
+	platformToleration := map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "platform", "effect": "NoSchedule"}
+	tests := []struct {
+		name           string
+		configurations map[string]string
+		imported       bool
+		want           map[string]map[string]any
+	}{
+		{name: "coredns on the system group, the EBS controller on the platform pool",
+			want: map[string]map[string]any{
+				"coredns": {"nodeSelector": system, "tolerations": append([]any{systemToleration}, corednsDefaults...)},
+				"aws-ebs-csi-driver": {"controller": map[string]any{"nodeSelector": platform,
+					"tolerations": append([]any{platformToleration}, ebsDefaults...)}},
+			}},
+		{name: "the tenant's own placement wins",
+			configurations: map[string]string{
+				"coredns":            `{"nodeSelector":{"mine":"yes"}}`,
+				"aws-ebs-csi-driver": `{"controller":{"tolerations":[],"nodeSelector":{"a":"b"}}}`,
+			},
+			want: map[string]map[string]any{
+				"coredns":            {"nodeSelector": map[string]any{"mine": "yes"}, "tolerations": append([]any{systemToleration}, corednsDefaults...)},
+				"aws-ebs-csi-driver": {"controller": map[string]any{"tolerations": []any{}, "nodeSelector": map[string]any{"a": "b"}}},
+			}},
+		{name: "an imported cluster's add-ons stay where they are", imported: true, want: map[string]map[string]any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := planWithAddons(tt.configurations)
+			p.Karpenter = true
+			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool)
+			if tt.imported {
+				p.ExternalNames = map[string]string{"prod-1a2b3c4d-default": "ng-1"}
+			}
+
+			got := addonConfigurations(t, p)
+
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got  %v\nwant %v", got, tt.want)
+			}
+		})
+	}
+}

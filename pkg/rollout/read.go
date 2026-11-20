@@ -80,6 +80,11 @@ func Read(ctx context.Context, c client.Reader, ch *cloudv1alpha1.ReleaseChannel
 			return in, fmt.Errorf("network %s of cluster %s/%s is missing; cannot determine rollout tier", cluster.Spec.Network.NetworkRef.Name, cluster.Namespace, cluster.Name)
 		}
 	}
+	components := &cloudv1alpha1.ComponentList{}
+	if err := c.List(ctx, components); err != nil {
+		return in, fmt.Errorf("list tenant components: %w", err)
+	}
+	in.Components = components.Items
 	in.Clusters, in.Holds = clusters.Items, holds.Items
 	return in, nil
 }

@@ -57,6 +57,10 @@ const (
 
 	FlagRecoverStuckReleases = "recover-stuck-releases"
 	EnvRecoverStuckReleases  = "CV_RECOVER_STUCK_RELEASES"
+	FlagHelmBackoffMax       = "helm-backoff-max"
+	EnvHelmBackoffMax        = "CV_HELM_BACKOFF_MAX"
+	FlagHelmMaxFailures      = "helm-max-failures"
+	EnvHelmMaxFailures       = "CV_HELM_MAX_FAILURES"
 	FlagRecommendations      = "recommendations"
 	EnvRecommendations       = "CV_RECOMMENDATIONS"
 
@@ -126,6 +130,11 @@ var serveSettings = []Setting{
 		Usage: "how long in-flight requests get to finish on shutdown"},
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
 		Usage: "the platform's management role (the controller's aws-management-role-arn): the principal the account role templates trust, which account create prints as the role stack's parameter; the server makes no AWS call with it. Empty: account create says to set it and creates nothing"},
+	{Flag: FlagAWSServerRoleARN, Env: EnvAWSServerRoleARN,
+		Usage: "the IAM role the API server's own credentials are (its IRSA role): the principal the account role templates trust, next to the management role, to read the results buckets; account create prints it as the role stack's ServerPrincipalArn. Not needed when aws-source-role-arn is set (that role is it). Empty with no source role: the server cannot read results, and account create prints no server principal"},
+	awsAccessSettings[0], awsAccessSettings[1], awsAccessSettings[2],
+	nodeGroupFamiliesSetting,
+	nodeGroupTypesSetting,
 }
 
 // GlobalSettings returns the settings every command accepts.
@@ -154,6 +163,25 @@ type Serve struct {
 	// ManagementRoleARN is what account onboarding puts in the role's stack
 	// (optional).
 	ManagementRoleARN string
+	// NodeGroups is the instance allowlist of user node groups.
+	NodeGroups NodeGroupAllowlist
+	// ServerRoleARN is the role the server's own credentials are (optional;
+	// see ServerPrincipalARN).
+	ServerRoleARN string
+	// AWSAccess is how the server reaches tenant accounts to read the
+	// results buckets (pkg/cloud/aws). Its base credentials come from the
+	// AWS SDK's default chain, never from a setting.
+	AWSAccess AWSAccess
+}
+
+// ServerPrincipalARN is the principal a tenant role trusts for the server:
+// the source role when one is set (it is what assumes the tenant role),
+// else the server's own role (aws-server-role-arn); empty for none.
+func (s Serve) ServerPrincipalARN() string {
+	if s.AWSAccess.SourceRoleARN != "" {
+		return s.AWSAccess.SourceRoleARN
+	}
+	return s.ServerRoleARN
 }
 
 // LoadGlobal resolves and validates the global settings from the flags, the
@@ -179,12 +207,19 @@ func LoadGlobal(flags, env, file LookupFunc) (Global, error) {
 // reported together.
 func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 	v, errs := resolve(serveSettings, flags, env, file)
-	cfg := Serve{HTTPAddr: v[FlagHTTPAddr], ManagementRoleARN: v[FlagAWSManagementRoleARN]}
+	cfg := Serve{HTTPAddr: v[FlagHTTPAddr], ManagementRoleARN: v[FlagAWSManagementRoleARN], ServerRoleARN: v[FlagAWSServerRoleARN]}
+	access, accessErrs := awsAccessFrom(v)
+	cfg.AWSAccess = access
+	errs = append(errs, accessErrs...)
+	errs = append(errs, validateRoleARN(FlagAWSServerRoleARN, cfg.ServerRoleARN)...)
 	timeout, err := parseTimeout(v[FlagShutdownTimeout])
 	if err != nil {
 		errs = append(errs, err)
 	}
 	cfg.ShutdownTimeout = timeout
+	allow, allowErrs := nodeGroupAllowlistFrom(v)
+	cfg.NodeGroups = allow
+	errs = append(errs, allowErrs...)
 	errs = append(errs, cfg.validateOnboarding()...)
 	if cfg.HTTPAddr != "" {
 		if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {

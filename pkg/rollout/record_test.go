@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/upgrade"
 )
 
@@ -253,6 +254,34 @@ func TestPlatformReadyIgnoresComponentsBeingRemoved(t *testing.T) {
 
 			if blocked := r.Gate != nil && r.Gate.Code == upgrade.GatePlatform; blocked != tt.blocked {
 				t.Errorf("blocked by the platform = %v, want %v (%+v)", blocked, tt.blocked, r)
+			}
+		})
+	}
+}
+
+// Tenant components come after the platform's: an automatic Kubernetes
+// upgrade waits until every enabled one of the cluster is Ready. One
+// being removed does not hold it back, nor does another cluster's.
+func TestTenantComponentsNotReadyHoldTheUpgrade(t *testing.T) {
+	tests := []struct {
+		phase, cluster string
+		blocked        bool
+	}{
+		{"Ready", "id-c", false}, {"Deleting", "id-c", false}, {"Installing", "id-c", true},
+		{"Pending", "id-c", true}, {"Failed", "id-c", true}, {"", "id-c", true}, {"Failed", "id-other", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.phase+"/"+tt.cluster, func(t *testing.T) {
+			in := input(cluster("c", cloudv1alpha1.ClusterTier2, "1.35"))
+			in.Components = []cloudv1alpha1.Component{{
+				ObjectMeta: metav1.ObjectMeta{Name: "grafana", Namespace: "tenant-acme",
+					Labels: map[string]string{cloudstore.LabelClusterID: tt.cluster}},
+				Status: cloudv1alpha1.ComponentStatus{Phase: tt.phase}}}
+
+			r := rowOf(t, Compute(in), "c")
+
+			if blocked := r.Gate != nil && r.Gate.Code == upgrade.GateTenant; blocked != tt.blocked {
+				t.Errorf("blocked by a tenant component = %v, want %v (%+v)", blocked, tt.blocked, r)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -13,10 +14,15 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/deprecation"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/reconcile/deprecations"
+	"github.com/yindia/cluster-vending/pkg/reconcile/resultsink"
+	"github.com/yindia/cluster-vending/pkg/results"
 )
 
 // notScannableDelay is how long until a cluster that cannot be scanned
@@ -35,6 +41,8 @@ const defaultChannel = "stable"
 type DeprecationReconciler struct {
 	deps    Deps
 	scanner deprecations.Scanner
+	// sink writes the full scan to the cluster's results bucket.
+	sink *resultsink.Sink
 }
 
 // NewDeprecationReconciler returns the scanner of Clusters.
@@ -43,7 +51,7 @@ func NewDeprecationReconciler(d Deps) (*DeprecationReconciler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DeprecationReconciler{deps: d, scanner: deprecations.Scanner{Rules: rules}}, nil
+	return &DeprecationReconciler{deps: d, scanner: deprecations.Scanner{Rules: rules}, sink: resultsink.New(d.Deps, d.logger())}, nil
 }
 
 // The kubeconfig of a workload cluster is a Secret its ClusterAuth writes
@@ -99,7 +107,7 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if frozen.Holds() || id == "" || !scannable(obj) {
+	if frozen.Holds() || managed.IsPaused(obj) || id == "" || !scannable(obj) {
 		return ctrl.Result{RequeueAfter: notScannableDelay}, nil
 	}
 	current := obj.Status.CurrentKubernetesVersion
@@ -113,6 +121,11 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.deps.Emit(ctx, reconcile.Object{Kind: reconcile.KindCluster, Namespace: obj.Namespace, Name: obj.Name},
 			e.Type, e.Reason, e.Message)
 	}
+	// A scan that worked is also written whole to the cluster's results
+	// bucket, and the Cluster object then keeps its counts only.
+	scanner.Publish = func(ctx context.Context, _ deprecations.Cluster, _, full *cloudv1.ClusterDeprecations) {
+		r.publish(ctx, tenant, id, full)
+	}
 	next, err := scanner.Run(ctx, deprecations.Cluster{
 		TenantID: tenant, ID: id, Current: current, UpgradeTo: r.upgradeTo(ctx, obj, current),
 		Last:       convert.DeprecationsFromAPI(obj.Status.Deprecations),
@@ -122,6 +135,21 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: next}, nil
+}
+
+// publish writes the scan (every finding) to the results bucket and records
+// its summary. It never fails the scan: without a bucket the Cluster object
+// keeps the findings it has (the sink logs why).
+func (r *DeprecationReconciler) publish(ctx context.Context, tenant, id string, full *cloudv1.ClusterDeprecations) {
+	content := proto.CloneOf(full)
+	content.ScannedAt, content.AttemptedAt = nil, nil // times change on every scan, content does not
+	at := full.GetScannedAt().AsTime()
+	staged, _ := r.sink.Stage(ctx, tenant, id, results.Deprecations, full, at, model.ResultRef{
+		Digest: resultsink.Digest(content), CollectedAt: at, AttemptedAt: full.GetAttemptedAt().AsTime(),
+		Total: full.GetTotal(), Removed: full.GetRemoved()})
+	if err := staged.Commit(ctx); err != nil {
+		r.deps.logger().WarnContext(ctx, "deprecation scan summary not recorded", "tenant_id", tenant, "cluster_id", id, "error", err)
+	}
 }
 
 // scannable: the cluster runs (created by the platform, or imported) and

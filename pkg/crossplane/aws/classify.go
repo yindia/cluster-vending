@@ -99,6 +99,42 @@ var fieldClasses = map[string]map[string]ChangeClass{
 		"region": ChangeImmutable, "clusterName": ChangeImmutable, "oidc": ChangeImmutable, "tags": ChangeInPlace,
 	},
 	"ClusterAuth": {"region": ChangeImmutable, "clusterName": ChangeImmutable, "refreshPeriod": ChangeInPlace},
+	// The event bus of a rule or target is add-only: an earlier build left
+	// it unset, which means "default" (the provider cannot read the object
+	// without it), so setting it on an existing object is no replacement.
+	// Karpenter's interruption queue and its EventBridge rules
+	// (aws_sqs_queue, aws_sqs_queue_policy, aws_cloudwatch_event_rule,
+	// aws_cloudwatch_event_target): tags change in place (TagQueue,
+	// TagResource), names do not.
+	"Queue": {
+		"region": ChangeImmutable, "name": ChangeImmutable, "fifoQueue": ChangeImmutable,
+		"messageRetentionSeconds": ChangeInPlace, "sqsManagedSseEnabled": ChangeInPlace, "tags": ChangeInPlace,
+	},
+	"QueuePolicy": {"region": ChangeImmutable, "queueUrl": ChangeImmutable, "policy": ChangeInPlace},
+	"Rule": {
+		"region": ChangeImmutable, "name": ChangeImmutable, "eventBusName": ChangeAddOnly,
+		"description": ChangeInPlace, "eventPattern": ChangeInPlace, "state": ChangeInPlace, "tags": ChangeInPlace,
+	},
+	"Target": {
+		"region": ChangeImmutable, "rule": ChangeImmutable, "targetId": ChangeImmutable, "eventBusName": ChangeAddOnly,
+		"arn": ChangeInPlace,
+	},
+	// The results bucket and its settings (aws_s3_bucket and
+	// aws_s3_bucket_public_access_block, _ownership_controls,
+	// _server_side_encryption_configuration, _policy,
+	// _lifecycle_configuration). The bucket's name is its external name, not
+	// a field. Terraform marks the region, the object lock and the bucket
+	// of each setting ForceNew; tags and the settings' content change in
+	// place.
+	"Bucket": {"region": ChangeImmutable, "objectLockEnabled": ChangeImmutable, "tags": ChangeInPlace},
+	"BucketPublicAccessBlock": {
+		"region": ChangeImmutable, "blockPublicAcls": ChangeInPlace, "blockPublicPolicy": ChangeInPlace,
+		"ignorePublicAcls": ChangeInPlace, "restrictPublicBuckets": ChangeInPlace,
+	},
+	"BucketOwnershipControls":                 {"region": ChangeImmutable, "rule": ChangeInPlace},
+	"BucketServerSideEncryptionConfiguration": {"region": ChangeImmutable, "rule": ChangeInPlace},
+	"BucketPolicy":                            {"region": ChangeImmutable, "policy": ChangeInPlace},
+	"BucketLifecycleConfiguration":            {"region": ChangeImmutable, "rule": ChangeInPlace},
 }
 
 // ClassifyField is the class of a kind's spec.forProvider field (path

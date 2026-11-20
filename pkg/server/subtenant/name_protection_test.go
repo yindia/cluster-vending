@@ -212,6 +212,52 @@ func TestNameClaimCrashRecoveryAndRetention(t *testing.T) {
 	}
 }
 
+func TestCreateAndReplayWithUncachedNameReservations(t *testing.T) {
+	w := newWorld(t, interceptor.Funcs{})
+	w.service.deps.KubeReader = w.kube
+	failBind := true
+	w.service.deps.Kube = interceptor.NewClient(w.kube.(client.WithWatch), interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			t.Fatalf("ownership decision used a cached read of %T", obj)
+			return nil
+		},
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if _, claim := obj.(*corev1.ConfigMap); claim && failBind {
+				failBind = false
+				return fmt.Errorf("simulated interruption binding name claim")
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	})
+	req := createRequest()
+	_, err := w.service.CreateSubTenant(t.Context(), req)
+	requireCode(t, err, connect.CodeUnavailable)
+	if !strings.Contains(err.Error(), "was recorded") {
+		t.Fatalf("create did not report the persisted allocation: %v", err)
+	}
+	id, _, err := createIdentity(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocation := w.stored(t, id)
+	for range 2 { // First repair the missing owner, then verify the bound reservation.
+		out, err := w.service.CreateSubTenant(t.Context(), req)
+		if err != nil || out.GetSubtenant().GetId() != id {
+			t.Fatalf("replaying persisted request: %v, %v", out, err)
+		}
+	}
+	claim := &corev1.ConfigMap{}
+	if err := w.kube.Get(t.Context(), nameClaimKey(allocation.Namespace, allocation.Spec.ClusterRef.UID, req.Subtenant.Spec.Name), claim); err != nil {
+		t.Fatal(err)
+	}
+	if len(claim.OwnerReferences) != 1 || claim.OwnerReferences[0].UID != allocation.UID {
+		t.Fatalf("expected allocation UID %s to own the reservation, got %v", allocation.UID, claim.OwnerReferences)
+	}
+	req.RequestId = uuid.NewString()
+	_, err = w.service.CreateSubTenant(t.Context(), req)
+	requireCode(t, err, connect.CodeAlreadyExists)
+}
+
 func TestGroupsPersistAsExactClaimsBeforeOIDCReady(t *testing.T) {
 	w := newWorld(t, interceptor.Funcs{})
 	req := createRequest()

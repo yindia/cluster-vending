@@ -111,6 +111,10 @@ func roleSteps(server string, a *cloudv1.CloudAccount, ob *cloudv1.AccountOnboar
 			ob.GetRoleName(), aws.GetAccountId())
 		fmt.Fprintf(&b, "  Template:           %s\n  RoleName:           %s\n  ManagementRoleArn:  %s\n", url, ob.GetRoleName(), ob.GetManagementRoleArn())
 		params := fmt.Sprintf("ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterManagementRoleARN, ob.GetManagementRoleArn())
+		if ob.GetServerPrincipalArn() != "" {
+			fmt.Fprintf(&b, "  ServerPrincipalArn:  %s\n", ob.GetServerPrincipalArn())
+			params += fmt.Sprintf(" \\\n      ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterServerPrincipalARN, ob.GetServerPrincipalArn())
+		}
 		if ob.GetExternalId() != "" {
 			fmt.Fprintf(&b, "  ExternalId:         %s\n", ob.GetExternalId())
 			params += fmt.Sprintf(" \\\n      ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterExternalID, ob.GetExternalId())

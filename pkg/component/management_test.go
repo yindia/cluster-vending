@@ -250,3 +250,33 @@ func TestTenantCatalog(t *testing.T) {
 		t.Errorf("tenant catalog = %v, want %v", got, want)
 	}
 }
+
+// Components install in ascending sequence, requires still holding.
+func TestPlatformComponentsOrderBySequence(t *testing.T) {
+	defs := []Definition{
+		{Name: "aaa", Management: Platform, HasInstall: true, Sequence: 100},
+		{Name: "zzz", Management: Platform, HasInstall: true, Sequence: 0},
+		{Name: "mmm", Management: Platform, HasInstall: true, Sequence: 100, Requires: []string{"aaa"}},
+	}
+
+	got, err := PlatformComponents(defs)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"zzz", "aaa", "mmm"}; !slices.Equal(names(got), want) {
+		t.Errorf("order %v, want %v", names(got), want)
+	}
+}
+
+// A component cannot require one that installs after it.
+func TestPlatformComponentsRejectsRequiringAHigherSequence(t *testing.T) {
+	defs := []Definition{
+		{Name: "early", Management: Platform, HasInstall: true, Sequence: 0, Requires: []string{"late"}},
+		{Name: "late", Management: Platform, HasInstall: true, Sequence: 100},
+	}
+
+	if _, err := PlatformComponents(defs); err == nil || !strings.Contains(err.Error(), "sequence") {
+		t.Errorf("err = %v", err)
+	}
+}

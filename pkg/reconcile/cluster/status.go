@@ -100,6 +100,8 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 	c.Spec.ProtoReflect().Clear(c.Spec.ProtoReflect().Descriptor().Fields().ByName("tier"))
 	c.Status.Freeze = reconcile.FreezeProto(row.Frozen)
 	withTeardownStatus(ctx, c.GetStatus(), storedStatus(row))
+	withDeleteStageStatus(ctx, c.GetStatus())
+	withNodeGroups(ctx, c.GetStatus(), storedStatus(row))
 	c.GetStatus().CodeChange = reconcile.CodeOf(ctx, storedStatus(row).GetCodeChange())
 	pauseViews, err := s.upgradePauseViews(ctx, row, c.GetStatus())
 	if err != nil {
@@ -140,6 +142,10 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 	if err != nil {
 		s.logger().ErrorContext(ctx, "observe upgrade", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
+	}
+	u.karpenterNodes = platformNodeGroupReady(row)
+	if r := nodeGroupsOfPass(ctx); r != nil {
+		u.kubelets = &r.kubelets
 	}
 	st.Upgrade = u.status(row, views, storedUpgrade(row), comps)
 	upgrading(st)

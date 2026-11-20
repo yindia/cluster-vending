@@ -274,11 +274,18 @@ type Cluster struct {
 	// included). Not part of Status: the scan writes it on its own, with
 	// Clusters.SetDeprecations. Empty: never scanned.
 	Deprecations JSON
+	// PolicySnapshot is projected from Kubernetes status, never a database table.
+	PolicySnapshot JSON
 	// Recommendations is the summary of the usage the controller records
 	// to recommend resource requests (protojson cloud.v1
 	// ClusterRecommendations), set with Clusters.SetRecommendations.
 	// Empty: never sampled.
 	Recommendations JSON
+	// Results are the summaries of the scan results kept in the cluster's
+	// results bucket (one per kind), from status.results; set with
+	// Clusters.SetResultRefs. A kind without a summary is read from the
+	// fields above. Empty until a scanner has written to the bucket.
+	Results []ResultRef
 	// Rollout is the cluster's place in its release channel's rollout and
 	// its last automatic upgrade (protojson cloud.v1 ClusterRollout), set
 	// by the controller with Clusters.SetRollout. Empty: none yet.
@@ -304,4 +311,39 @@ type Event struct {
 	Count int32
 	// Kind and Name are the object the event is about.
 	Kind, Name string
+}
+
+// ResultRef is the summary of one kind of scan result whose full data is in
+// the cluster's results bucket (docs/design/cluster-results-s3.md): the
+// object it names, when it was collected and how much it holds.
+type ResultRef struct {
+	// Kind is a pkg/results Kind: deprecations, recommendations, violations
+	// or violation-events.
+	Kind string
+	// Bucket is the cluster's results bucket; Key the "latest" object of the
+	// kind and ETag its ETag when it was written.
+	Bucket, Key, ETag string
+	// Digest is a hash of the collected content, without its times: a scan
+	// that finds the same content does not rewrite the object. Empty: unknown.
+	Digest string
+	// CollectedAt is when the result was collected; AttemptedAt when the
+	// cluster was last scanned, or tried to. Zero: unknown.
+	CollectedAt, AttemptedAt time.Time
+	// Total is how many items the result holds; Removed, for deprecations,
+	// how many of them use a removed API version.
+	Total, Removed int32
+	// Incomplete: the sources were not fully read. Truncated: more was found
+	// than the object holds.
+	Incomplete, Truncated bool
+}
+
+// ResultRef is the cluster's summary of kind; nil when there is none (its
+// results are not in the bucket yet).
+func (c *Cluster) ResultRef(kind string) *ResultRef {
+	for i := range c.Results {
+		if c.Results[i].Kind == kind {
+			return &c.Results[i]
+		}
+	}
+	return nil
 }

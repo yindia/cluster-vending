@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yindia/cluster-vending/pkg/component"
 )
@@ -48,6 +49,12 @@ func TestCheckDefinition(t *testing.T) {
 		{name: "no platform values", d: component.Definition{UserValues: "replicas: 2\n", ValuesSchema: object(t, karpenterSchema)}},
 		{name: "nothing at all", d: component.Definition{}},
 
+		{name: "a long install timeout", d: component.Definition{HasInstall: true, InstallTimeout: 15 * time.Minute}},
+		{name: "no install timeout", d: component.Definition{HasInstall: true}},
+		{name: "an install timeout under a minute", d: component.Definition{HasInstall: true, InstallTimeout: 30 * time.Second},
+			wantIn: []string{"install.timeout 30s must be between 1m and 2h"}},
+		{name: "an install timeout past two hours", d: component.Definition{HasInstall: true, InstallTimeout: 3 * time.Hour},
+			wantIn: []string{"install.timeout 3h0m0s must be between 1m and 2h"}},
 		{name: "userValues not YAML", d: definition("replicas: [2\n"), wantIn: []string{"userValues: not YAML"}},
 		{name: "userValues a list", d: definition("- replicas\n"), wantIn: []string{"must be an object, got array"}},
 		{name: "userValues a scalar", d: definition("replicas\n"), wantIn: []string{"must be an object, got string"}},

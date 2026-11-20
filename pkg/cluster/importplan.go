@@ -116,7 +116,7 @@ func PlanImport(in ImportInput) ImportPlan {
 	if p.plan.Blocked() {
 		return p.plan
 	}
-	spec, err := ResolveSpec(p.deriveSpec(group, zones), zones)
+	spec, err := resolveSpec(p.deriveSpec(group, zones), zones, false)
 	if err == nil {
 		err = protovalidate.Validate(&cloudv1.Cluster{Name: in.Name, Spec: spec})
 	}
@@ -132,6 +132,10 @@ func PlanImport(in ImportInput) ImportPlan {
 	base.Adoption = p.plan.Adoption
 	render := RenderPlan(spec, subnetIDs, base)
 	render.SubnetObjects = subnetObjects
+	// A takeover installs the platform components, Karpenter's queue, rules
+	// and node role among them (the reconciler's RenderPlan), unless it is
+	// taken over with skip_platform_components: the plan announces them.
+	render.Karpenter = true
 	p.adopt(render, group)
 	p.carryOver(render)
 	p.leftAlone(group)

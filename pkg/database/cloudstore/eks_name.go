@@ -103,39 +103,47 @@ func (r clusters) checkLegacyEKSOwners(ctx context.Context, row *model.Cluster, 
 }
 
 func (r clusters) reserveEKSName(ctx context.Context, row *model.Cluster, network *cloud.Network, own *cloud.Cluster) error {
+	_, err := r.reserveEKSNameClaim(ctx, row, network, own)
+	return err
+}
+
+// reserveEKSNameClaim is reserveEKSName; it also returns the reservation this
+// call created, nil when it found an existing one (a retry or another actor's
+// that this attempt shares and must never release on its own).
+func (r clusters) reserveEKSNameClaim(ctx context.Context, row *model.Cluster, network *cloud.Network, own *cloud.Cluster) (*corev1.ConfigMap, error) {
 	accountID, err := r.physicalAccount(ctx, network)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	key := eksNameKey(accountID, row.Region, row.Name)
 	existing := &corev1.ConfigMap{}
 	lookupErr := r.c.Get(ctx, client.ObjectKey{Namespace: EKSNameReservationNamespace, Name: eksClaimName(key)}, existing)
 	if lookupErr == nil {
 		if !validEKSClaim(existing, key, row.TenantID) {
-			return eksNameConflict()
+			return nil, eksNameConflict()
 		}
 		if own != nil && existing.Data["clusterUID"] != "" && existing.Data["clusterUID"] != string(own.UID) {
-			return eksNameConflict()
+			return nil, eksNameConflict()
 		}
 		if own != nil && own.Labels[LabelID] == row.ID && existing.Data["clusterID"] != row.ID {
-			return eksNameConflict()
+			return nil, eksNameConflict()
 		}
 		// Established ownership requires only direct gets. All competing native
 		// and RPC writers must reserve the same name before cloud application;
 		// rescanning the whole management inventory on every pass is unnecessary.
 		if own != nil && existing.Data["clusterID"] == row.ID && existing.Data["clusterUID"] == string(own.UID) &&
 			own.Labels[LabelID] == row.ID && own.Name == row.Name && own.Namespace == kube.TenantNamespace(row.TenantID) {
-			return nil
+			return nil, nil
 		}
 	} else if !apierrors.IsNotFound(lookupErr) {
-		return translate(lookupErr)
+		return nil, translate(lookupErr)
 	}
 	if err := r.checkLegacyEKSOwners(ctx, row, accountID, own); err != nil {
-		return err
+		return nil, err
 	}
 	hash, err := clusterCreateHash(row)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	request := ""
 	if row.CreateRequestID != nil {
@@ -146,19 +154,20 @@ func (r clusters) reserveEKSName(ctx context.Context, row *model.Cluster, networ
 	if own != nil {
 		desired.Data["clusterUID"] = string(own.UID)
 	}
+	var created *corev1.ConfigMap
 	if err := r.c.Create(ctx, desired); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
-			return translate(err)
+			return nil, translate(err)
 		}
 		have := &corev1.ConfigMap{}
 		if err := r.c.Get(ctx, client.ObjectKeyFromObject(desired), have); err != nil {
-			return translate(err)
+			return nil, translate(err)
 		}
 		if !validEKSClaim(have, key, row.TenantID) {
-			return eksNameConflict()
+			return nil, eksNameConflict()
 		}
 		if own != nil && have.Data["clusterUID"] != "" && have.Data["clusterUID"] != string(own.UID) {
-			return eksNameConflict()
+			return nil, eksNameConflict()
 		}
 		if have.Data["clusterID"] != row.ID {
 			// A crash after reservation but before CR creation can be resumed only
@@ -166,11 +175,11 @@ func (r clusters) reserveEKSName(ctx context.Context, row *model.Cluster, networ
 			nativeRetry := own != nil && own.UID != "" && have.Data["clusterUID"] == string(own.UID) && own.Labels[LabelID] == ""
 			if !nativeRetry {
 				if have.Data["clusterUID"] != "" || request == "" || have.Data["requestID"] != request || have.Data["requestHash"] != hash {
-					return eksNameConflict()
+					return nil, eksNameConflict()
 				}
 				_, lookupErr := r.find(ctx, row.TenantID, have.Data["clusterID"])
 				if !errors.Is(lookupErr, repository.ErrNotFound) {
-					return eksNameConflict()
+					return nil, eksNameConflict()
 				}
 			}
 			row.ID = have.Data["clusterID"]
@@ -178,11 +187,48 @@ func (r clusters) reserveEKSName(ctx context.Context, row *model.Cluster, networ
 		if own != nil && own.UID != "" && have.Data["clusterUID"] == "" {
 			have.Data["clusterUID"] = string(own.UID)
 			if err := r.c.Update(ctx, have); err != nil {
-				return translate(err)
+				return nil, translate(err)
 			}
 		}
+	} else {
+		created = desired.DeepCopy()
 	}
-	return r.checkLegacyEKSOwners(ctx, row, accountID, own)
+	if err := r.checkLegacyEKSOwners(ctx, row, accountID, own); err != nil {
+		if created != nil {
+			// Nothing was stored under it yet: the reservation just taken is this
+			// attempt's alone.
+			_ = r.releaseAttemptReservation(ctx, created)
+		}
+		return nil, err
+	}
+	return created, nil
+}
+
+// releaseAttemptReservation deletes the reservation this attempt created, but
+// only while it is still that object (UID, resourceVersion preconditions) and
+// still says what the attempt wrote (tenant, cluster ID, request ID and hash).
+// Anything else belongs to someone else and stays.
+func (r clusters) releaseAttemptReservation(ctx context.Context, mine *corev1.ConfigMap) error {
+	have := &corev1.ConfigMap{}
+	if err := r.c.Get(ctx, client.ObjectKeyFromObject(mine), have); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return translate(err)
+	}
+	if have.UID != mine.UID || !validEKSClaim(have, mine.Data["key"], mine.Data["tenant"]) {
+		return nil
+	}
+	for _, k := range []string{"clusterID", "requestID", "requestHash", "clusterUID"} {
+		if have.Data[k] != mine.Data[k] {
+			return nil
+		}
+	}
+	err := r.c.Delete(ctx, have, client.Preconditions{UID: &have.UID, ResourceVersion: &have.ResourceVersion})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return translate(err)
+	}
+	return nil
 }
 
 func validEKSClaim(claim *corev1.ConfigMap, key, tenant string) bool {

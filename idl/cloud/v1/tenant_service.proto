@@ -316,6 +316,11 @@ message AccountOnboarding {
   // Where the API server serves the role's template, relative to its base
   // URL (/cloudformation/<role>.yaml), without authentication.
   string template_path = 12;
+  // The template's ServerPrincipalArn parameter: the role the API server
+  // runs as, which the tenant role trusts next to the management role so
+  // that the server can read the cluster results buckets (read-only).
+  // Empty: the server has no AWS access; the parameter is left empty.
+  string server_principal_arn = 13;
 }
 
 message ListCloudAccountsRequest {

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ResultIndex is the small object (latest/<kind>/index.json) that names the
+// shards of a result kind that grows with the cluster (nodes: one shard per
+// node group). A reader reads the index, then only the shard it needs
+// (docs/design/cluster-results-s3.md).
+message ResultIndex {
+  repeated ResultIndexShard shards = 1;
+  // When the shards were collected.
+  google.protobuf.Timestamp collected_at = 2;
+  // Every source was read in full; false when a read stopped early.
+  bool complete = 3;
+}
+
+// ResultIndexShard is one shard's entry in a ResultIndex.
+message ResultIndexShard {
+  // The shard's name (a node group).
+  string shard = 1;
+  // The shard's latest object key.
+  string key = 2;
+  // The shard object's ETag when it was written.
+  string etag = 3;
+  // How many items the shard holds.
+  int32 count = 4;
+  // A hash of the shard's content, without its times: an unchanged shard is
+  // not rewritten.
+  string digest = 5;
+}

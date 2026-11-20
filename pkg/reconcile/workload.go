@@ -36,6 +36,25 @@ type HelmStorage interface {
 	Remove(ctx context.Context, namespace, name string) error
 }
 
+// HelmOperator is what the platform does to a stuck Helm release, with
+// Helm itself, in the workload cluster (operations only: provider-helm still
+// owns the Release). A HelmStorage may also be a HelmOperator; one that is
+// not can only have its stuck record removed (HelmStorage.Remove).
+type HelmOperator interface {
+	// RollBack makes the release run revision again (the last one Helm
+	// deployed), as a new revision. The stuck revision, still pending, is
+	// first marked failed so Helm accepts the operation.
+	RollBack(ctx context.Context, namespace, release string, stuck, to int) error
+	// Uninstall removes a release that never finished its first install
+	// (nothing was deployed to go back to), history included, so the next
+	// attempt installs cleanly.
+	Uninstall(ctx context.Context, namespace, release string) error
+	// DeleteFailedHookJobs deletes the failed hook Jobs of release a
+	// failed attempt left behind (they block the retry's hook of the same
+	// name); it returns their names.
+	DeleteFailedHookJobs(ctx context.Context, namespace, release string) ([]string, error)
+}
+
 // Workloads reaches workload clusters with the kubeconfig the platform
 // holds for them.
 type Workloads interface {
@@ -48,6 +67,13 @@ type Workloads interface {
 // SubTenantWorkloads opens the target cluster without exposing its credentials
 // through RPCs. A per-subtenant reconciler writes only its Capsule Tenant there.
 type SubTenantWorkloads interface {
+	Client(ctx context.Context, namespace, secretRef string) (client.Client, error)
+}
+
+// WorkloadClients opens a client of the workload cluster whose kubeconfig
+// Secret is secretRef (in namespace, as Workloads.HelmStorage): the platform
+// applies and reads the cluster's Karpenter node groups through it.
+type WorkloadClients interface {
 	Client(ctx context.Context, namespace, secretRef string) (client.Client, error)
 }
 

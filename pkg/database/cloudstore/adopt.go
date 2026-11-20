@@ -3,7 +3,6 @@ package cloudstore
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -80,8 +79,8 @@ func AdoptCluster(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Cl
 	if err := onlyAWS(c.Provider); err != nil {
 		return err
 	}
-	if metaOf(network).State == networkDeleting {
-		return fmt.Errorf("%w: network %s is being deleted", repository.ErrConflict, network.Name)
+	if networkIsDeleting(network) {
+		return networkDeletingError(network)
 	}
 	c.CloudAccountID = network.Labels[LabelAccountID]
 	if err := prepare(&c.Resource); err != nil {

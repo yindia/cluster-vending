@@ -119,6 +119,25 @@ type ClusterPlan struct {
 	// cluster (known once it is ACTIVE): a rendered launch template with
 	// security groups lists it next to them.
 	ClusterSecurityGroupID string
+	// Karpenter renders what a cluster with Karpenter node groups needs
+	// beyond the managed node group: the node role with its EC2_LINUX
+	// access entry, and the interruption queue with its EventBridge rules
+	// (karpenter.go). It is also what places the EBS CSI controller on the
+	// platform pool (addon_placement.go). The platform's own clusters have
+	// it; an imported one does not unless the caller says so.
+	Karpenter bool
+	// AccountID is the AWS account of the cluster: with it the interruption
+	// queue's ARN is known up front. Without it (and without
+	// KarpenterQueueARN) the queue policy and the rules' targets wait for
+	// the queue to exist.
+	AccountID string
+	// KarpenterQueueARN is the interruption queue's ARN when AccountID is
+	// not known: read from the queue once it exists (FillLive).
+	KarpenterQueueARN string
+	// ResultsBucket renders the bucket of the cluster's scan results
+	// (results_bucket.go). It needs AccountID (the bucket's name) and is
+	// never rendered for an imported cluster (HasResultsBucket).
+	ResultsBucket bool
 	// Adoption is what an imported cluster keeps of its IAM roles; zero for
 	// a cluster the platform created.
 	Adoption
@@ -146,6 +165,12 @@ type Adoption struct {
 	// created (EKS cannot change it); nil is true, what the platform
 	// creates clusters with.
 	BootstrapAdmin *bool `json:"bootstrapAdmin,omitempty"`
+}
+
+// Imported reports whether the plan is of an imported cluster: it keeps the
+// IAM names or objects of the cluster it was imported from.
+func (a Adoption) Imported() bool {
+	return a.ClusterRoleName != "" || a.NodeRoleName != "" || len(a.ExternalNames) > 0
 }
 
 // AccessEntryPlan is one access entry with its policies.
@@ -238,6 +263,8 @@ func ClusterResources(p ClusterPlan) []client.Object {
 	out = append(out, b.nodeGroup())
 	out = append(out, addons...)
 	out = append(out, b.clusterAuth(), b.helmProviderConfig())
+	out = append(out, b.karpenterObjects()...)
+	out = append(out, b.resultsObjects()...)
 	for i, principal := range p.AdminPrincipals {
 		entry := fmt.Sprintf("admin-%d", i+1)
 		out = append(out, b.accessEntry(entry, principal), b.accessPolicy(entry, principal))
@@ -534,14 +561,14 @@ func strPtrs(in map[string]string) map[string]*string {
 // ClusterLists are empty lists of every kind ClusterResources creates, to
 // find a cluster's objects by label.
 func ClusterLists() []client.ObjectList {
-	return []client.ObjectList{
+	return append([]client.ObjectList{
 		&awseks.AccessPolicyAssociationList{}, &awseks.AccessEntryList{}, &awseks.PodIdentityAssociationList{},
 		&awseks.AddonList{}, &awseks.ClusterAuthList{}, &awseks.NodeGroupList{}, &awsec2.LaunchTemplateList{},
 		&awsiam.OpenIDConnectProviderList{}, &awseks.IdentityProviderConfigList{}, &awseks.ClusterList{},
 		&awsec2.SecurityGroupIngressRuleList{}, &awsec2.SecurityGroupEgressRuleList{}, &awsec2.SecurityGroupList{},
 		&awsiam.RolePolicyAttachmentList{}, &awsiam.PolicyList{}, &awsiam.RoleList{},
 		&awskms.AliasList{}, &awskms.KeyList{}, &awscwl.GroupList{},
-	}
+	}, append(karpenterLists(), resultsLists()...)...)
 }
 
 // DesiredSizeAtCreateOnly moves a NodeGroup's desired size (an apply body,

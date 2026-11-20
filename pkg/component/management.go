@@ -1,6 +1,7 @@
 package component
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -285,6 +286,14 @@ func PlatformComponents(defs []Definition) ([]Definition, error) {
 	for _, name := range order {
 		out = append(out, byName[name])
 	}
+	for _, d := range out {
+		for _, r := range d.Requires {
+			if req := byName[r]; req.Sequence > d.Sequence {
+				return nil, fmt.Errorf("platform component %s (sequence %d) requires %s, which has the later sequence %d", d.Name, d.Sequence, r, req.Sequence)
+			}
+		}
+	}
+	slices.SortStableFunc(out, func(a, b Definition) int { return cmp.Compare(a.Sequence, b.Sequence) })
 	return out, nil
 }
 

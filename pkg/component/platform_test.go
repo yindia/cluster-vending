@@ -4,7 +4,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
@@ -254,5 +256,72 @@ func TestPinValuesForPlatform(t *testing.T) {
 	v, err := component.PinValues(&runtime.RawExtension{Raw: []byte(`{"image":{"tag":"v1.37.0"}}`)})
 	if err != nil || !reflect.DeepEqual(v, component.Values{"image": map[string]any{"tag": "v1.37.0"}}) {
 		t.Errorf("PinValues = %v, %v", v, err)
+	}
+}
+
+// Every platform component above sequence 0 is held until the platform
+// node group is Ready; sequence 0 (Karpenter) is not.
+func TestPlanPlatformHoldsForThePlatformNodeGroup(t *testing.T) {
+	first, second := entry("karpenter"), entry("lb")
+	first.Sequence, second.Sequence = 0, 100
+	in := platformInput(first, second)
+	in.HoldForPlatformNodeGroup = true
+
+	plan, _ := component.PlanPlatform(in)
+
+	k, _ := named(plan, "karpenter")
+	lb, _ := named(plan, "lb")
+	if k.WaitsFor != "" {
+		t.Errorf("karpenter waits for %q", k.WaitsFor)
+	}
+	if lb.WaitsFor != "the platform node group to be Ready" || lb.Sequence != 100 {
+		t.Errorf("lb waits for %q, sequence %d", lb.WaitsFor, lb.Sequence)
+	}
+	in.HoldForPlatformNodeGroup = false
+	plan, _ = component.PlanPlatform(in)
+	if lb, _ = named(plan, "lb"); lb.WaitsFor != "" {
+		t.Errorf("released lb waits for %q", lb.WaitsFor)
+	}
+}
+
+// The definition's install timeout reaches every chart of the component;
+// without one the charts carry none (the renderer's default applies).
+func TestPlanPlatformCarriesTheInstallTimeout(t *testing.T) {
+	e := entry("gpu-operator")
+	e.Install.Timeout = 15 * time.Minute
+	crds := component.Chart{Repository: "https://charts.example.com", Name: "gpu-operator-crd"}
+	e.Install.CRDs = &crds
+	e.Install.Companions = []component.Companion{{Name: "gpu-extra", Chart: component.Chart{Repository: "https://charts.example.com", Name: "gpu-extra"}}}
+	in := platformInput(e)
+	in.Pins["gpu-extra"] = component.Pin{Version: "0.1.0"}
+	plain := platformInput(entry("kyverno"))
+
+	plan, _ := component.PlanPlatform(in)
+	unset, _ := component.PlanPlatform(plain)
+
+	c, _ := named(plan, "gpu-operator")
+	for name, got := range map[string]time.Duration{"main": c.Main.Timeout, "crds": c.CRDs.Timeout, "companion": c.Companions[0].Timeout} {
+		if got != 15*time.Minute {
+			t.Errorf("%s chart timeout %s, want 15m", name, got)
+		}
+	}
+	if k, _ := named(unset, "kyverno"); k.Main.Timeout != 0 {
+		t.Errorf("no install.timeout: %s", k.Main.Timeout)
+	}
+}
+
+func TestInstallOfReadsTheTimeout(t *testing.T) {
+	def := &cloudv1alpha1.ComponentDefinition{Spec: cloudv1alpha1.ComponentDefinitionSpec{Namespace: "x",
+		Install: &cloudv1alpha1.ComponentInstall{Helm: &cloudv1alpha1.HelmInstall{HelmChartSource: cloudv1alpha1.HelmChartSource{
+			Repository: "https://r", Chart: "c"}}, Timeout: &metav1.Duration{Duration: 20 * time.Minute}}}}
+
+	got, ok := component.InstallOf(def)
+
+	if !ok || got.Timeout != 20*time.Minute {
+		t.Errorf("%v %+v", ok, got)
+	}
+	def.Spec.Install.Timeout = nil
+	if got, _ := component.InstallOf(def); got.Timeout != 0 {
+		t.Errorf("unset: %s", got.Timeout)
 	}
 }

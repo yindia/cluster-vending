@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/node_group.proto";
+import "google/protobuf/timestamp.proto";
+
+// NodeStatusFilter selects the nodes of a node group by their Ready condition.
+enum NodeStatusFilter {
+  // All nodes.
+  NODE_STATUS_FILTER_UNSPECIFIED = 0;
+  NODE_STATUS_FILTER_ALL = 1;
+  NODE_STATUS_FILTER_READY = 2;
+  NODE_STATUS_FILTER_NOT_READY = 3;
+}
+
+// ListNodeGroupNodesRequest asks for a page of the nodes of one node group.
+message ListNodeGroupNodesRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  // The node group's name: "system" for the default managed node group,
+  // "platform" for the platform's, or one of the spec's.
+  string node_group = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+  }];
+  // Maximum nodes per page. Defaults to 100; values above 500 are coerced to
+  // 500.
+  int32 page_size = 4 [(buf.validate.field).int32 = {gte: 0}];
+  // next_page_token from a previous call. All other fields must match the
+  // call that produced it, and the node group's nodes must not have changed.
+  string page_token = 5 [(buf.validate.field).string = {
+    max_len: 8
+    pattern: "^[0-9]*$"
+  }];
+  // Only the nodes whose Ready condition matches. Unspecified: all.
+  NodeStatusFilter filter = 6 [(buf.validate.field).enum.defined_only = true];
+  // Only the nodes whose name contains this text (case-insensitive).
+  string name_contains = 7 [(buf.validate.field).string.max_len = 253];
+}
+
+// ListNodeGroupNodesResponse is a page of a node group's nodes, in name order,
+// read from the cluster's results bucket: the API server never reads the
+// workload cluster.
+message ListNodeGroupNodesResponse {
+  repeated NodeGroupNode nodes = 1;
+  // Empty when there are no more results.
+  string next_page_token = 2;
+  // How many nodes match the request in all.
+  int32 total = 3;
+  // When the controller collected the nodes. Unset: never.
+  google.protobuf.Timestamp collected_at = 4;
+  // False when the collection stopped early, so the list may miss nodes.
+  bool complete = 5;
+  // Why the list is empty or partial: the results are not available, or were
+  // not collected completely.
+  repeated string notices = 6;
+}

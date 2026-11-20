@@ -18,4 +18,4 @@ spec:
         spec:
           containers:
             - name: package-runtime
-              args: ["--poll=1m0s"]
+              args: ["--poll=15s", "--max-reconcile-rate=50"]

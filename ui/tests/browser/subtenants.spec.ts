@@ -23,7 +23,7 @@ async function mock(page: Page, options: { existing?: boolean; fail?: boolean; n
     switch (method) {
       case "WhoAmI": response = options.viewer ? { subject: "viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] } : { anonymous: true }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
-      case "GetCluster": response = { cluster: { id: clusterId, tenantId: "acme", name: "production", etag: "cluster-etag", spec: { naas: options.naas !== false, region: "us-west-1", defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } } }, status: { state: "CLUSTER_STATE_RUNNING" } }, asRequested: true }; break;
+      case "GetCluster": response = { cluster: { id: clusterId, tenantId: "acme", name: "production", etag: "cluster-etag", spec: { aws: {}, naas: options.naas !== false, region: "us-west-1", defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } } }, status: { state: "CLUSTER_STATE_RUNNING" } }, asRequested: true }; break;
       case "ListClusterEvents": response = { events: [] }; break;
       case "ListSubTenants": response = { subtenants: current ? [{ ...current, ...(options.foreign ? { tenantId: "foreign" } : {}) }] : [] }; break;
       case "GetSubTenant": if (!current) { await error(404, "not_found", "Sub Tenant no longer exists"); return; } response = { subtenant: current }; break;
@@ -81,10 +81,10 @@ test("view identifiers and YAML, etag update, observed generation, immediate del
   const table = page.getByRole("table", { name: "Cluster Sub Tenants", exact: true });
   await table.getByRole("button", { name: `Actions for Sub Tenant Payments (${id})`, exact: true }).click();
   await page.getByRole("menuitem", { name: "View", exact: true }).click();
-  const detail = page.getByRole("dialog", { name: "Sub Tenant details", exact: true });
+  const detail = page.getByRole("region", { name: "Sub Tenant details", exact: true });
   await expect(detail).toContainText("remote-team"); await expect(detail.getByRole("table", { name: "Sub Tenant namespaces", exact: true })).toContainText("namespace-uid");
   await detail.getByRole("button", { name: "View Sub Tenant YAML", exact: true }).click(); await expect(detail.getByRole("textbox", { name: "Sub Tenant YAML", exact: true })).toContainText("namespaceKeys:");
-  await detail.getByRole("button", { name: "Close", exact: true }).last().click();
+  await detail.getByRole("link", { name: "Cluster Sub Tenants", exact: true }).click();
   await table.getByRole("button", { name: `Actions for Sub Tenant Payments (${id})`, exact: true }).click();
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
   const d = page.getByRole("dialog", { name: "Edit Sub Tenant", exact: true });
@@ -134,7 +134,7 @@ test("row actions support keyboard opening, navigation, dismissal and selection"
   await page.keyboard.press("ArrowDown"); await expect(menu.getByRole("menuitem", { name: "Edit", exact: true })).toBeFocused();
   await page.keyboard.press("Escape"); await expect(menu).toHaveCount(0); await expect(trigger).toBeFocused();
   await trigger.press("ArrowDown"); await expect(menu.getByRole("menuitem", { name: "View", exact: true })).toBeFocused(); await page.keyboard.press("Enter");
-  await expect(page.getByRole("dialog", { name: "Sub Tenant details", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Sub Tenant details", exact: true })).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });
 
@@ -146,7 +146,8 @@ test("viewer action menus offer View only and never expose mutations", async ({ 
   await expect(menu.getByRole("menuitem", { name: "View", exact: true })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: /^(Edit|Delete)$/ })).toHaveCount(0);
   await menu.getByRole("menuitem", { name: "View", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Sub Tenant details", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Sub Tenant details", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create cloud resource" })).toHaveCount(0);
   expect(api.calls.filter((call) => /^(Create|Update|Delete)SubTenant$/.test(call.method))).toHaveLength(0);
   expect(api.unexpected).toEqual([]);
 });
@@ -231,8 +232,8 @@ test("YAML group arrays display in detail and guided edits clear groups through 
   await expect(d).toContainText("Admin groups: payments-admins"); await expect(d).toContainText("Viewer groups: payments-viewers");
   await d.getByRole("button", { name: "Confirm create Sub Tenant", exact: true }).click(); await expect(d).toHaveCount(0);
   await page.getByRole("button", { name: `Actions for Sub Tenant Payments (${id})`, exact: true }).click(); await page.getByRole("menuitem", { name: "View", exact: true }).click();
-  const detail = page.getByRole("dialog", { name: "Sub Tenant details", exact: true }); await expect(detail).toContainText("payments-admins"); await expect(detail).toContainText("payments-viewers");
-  await detail.getByRole("button", { name: "Close", exact: true }).last().click();
+  const detail = page.getByRole("region", { name: "Sub Tenant details", exact: true }); await expect(detail).toContainText("payments-admins"); await expect(detail).toContainText("payments-viewers");
+  await detail.getByRole("link", { name: "Cluster Sub Tenants", exact: true }).click();
   await page.getByRole("button", { name: `Actions for Sub Tenant Payments (${id})`, exact: true }).click(); await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit Sub Tenant", exact: true }); await edit.getByRole("button", { name: "Next", exact: true }).click();
   await expect(edit.getByRole("textbox", { name: "Admin groups", exact: true })).toHaveValue("payments-admins"); await edit.getByRole("textbox", { name: "Admin groups", exact: true }).fill(""); await edit.getByRole("textbox", { name: "Viewer groups", exact: true }).fill("");
@@ -262,16 +263,168 @@ test("Sub Tenant table fits its container at desktop, tablet and phone widths", 
       return { overflowing, right: Math.round(box.right) };
     })).toEqual({ overflowing: [], right: expect.any(Number) });
     const action = table.getByRole("button", { name: /^Actions for Sub Tenant/ });
-    await action.scrollIntoViewIfNeeded();
-    await expect(action).toBeInViewport();
+    // ResizeObserver can replace the responsive table between measuring it and scrolling.
+    await expect(async () => {
+      await action.scrollIntoViewIfNeeded();
+      await expect(action).toBeInViewport();
+    }).toPass({ timeout: 5000 });
     await expect(table.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
     const actionBox = await action.boundingBox();
     expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(width);
   }
   await table.getByRole("button", { name: /^Actions for Sub Tenant/ }).click();
   await page.getByRole("menuitem", { name: "View", exact: true }).click();
-  const detail = page.getByRole("dialog", { name: "Sub Tenant details", exact: true });
+  const detail = page.getByRole("region", { name: "Sub Tenant details", exact: true });
   await expect(detail).toContainText(id);
   await expect(detail).toContainText("remote-team");
   expect(api.unexpected).toEqual([]);
+});
+
+test("Sub Tenant detail saves three services locally and keeps its resources out of the cluster list", async ({ page }, info) => {
+  const api = await mock(page, { existing: true });
+  await open(page);
+  await page.getByRole("link", { name: "Payments", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/clusters/${clusterId}/subtenants/${id}$`));
+  const detail = page.getByRole("region", { name: "Sub Tenant cloud resources" });
+  const table = detail.getByRole("table", { name: "Managed resource previews" });
+  test.setTimeout(90000);
+  for (const [service, name, field, example] of [
+    ["S3 bucket", "payments-archive", "kind: Bucket", "bucketNamespace: global"],
+    ["RDS database", "payments-db", "engine: mysql", "copyTagsToSnapshot: true"],
+    ["ElastiCache cache", "payments-cache", "numCacheClusters: 2", "applyImmediately: false"],
+  ]) {
+    await detail.getByRole("button", { name: "Create cloud resource" }).click();
+    const dialog = page.getByRole("dialog", { name: "Create cloud resource" });
+    await dialog.getByRole("radio", { name: service, exact: true }).check();
+    await dialog.getByRole("textbox", { name: /^Resource name/ }).fill(name);
+    await dialog.getByRole("button", { name: "Configure resource" }).click();
+    if (service === "S3 bucket") {
+      await dialog.getByRole("checkbox", { name: "Object versioning" }).uncheck();
+      await dialog.getByRole("radio", { name: "AWS KMS" }).click();
+      await dialog.getByRole("textbox", { name: "KMS key ARN" }).fill("alias/example");
+    } else if (service === "RDS database") {
+      await dialog.getByRole("radio", { name: "MySQL", exact: true }).click();
+      await dialog.getByRole("textbox", { name: "DB instance class", exact: false }).fill("db.m6g.large");
+    } else {
+      await dialog.getByRole("checkbox", { name: "Multi-AZ with automatic failover" }).check();
+      await dialog.getByRole("button", { name: "Network settings" }).click();
+      await dialog.getByRole("textbox", { name: "Cache subnet group", exact: true }).fill("private-cache");
+    }
+    await dialog.getByRole("button", { name: "Additional spec (YAML)" }).click();
+    await dialog.getByRole("button", { name: "Use example spec" }).click();
+    await expect(dialog.getByRole("textbox", { name: "Additional provider spec" })).toContainText(example);
+    await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: "Review preview" })).toBeFocused();
+    await expect(dialog).toContainText("Sub Tenant · Payments");
+    await expect(dialog.getByRole("textbox", { name: "Crossplane preview", exact: true })).toContainText(field);
+    await dialog.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(dialog.getByRole("heading", { name: service + " settings" })).toBeFocused();
+    await dialog.getByRole("button", { name: "Additional spec (YAML)" }).click();
+    await expect(dialog.getByRole("textbox", { name: "Additional provider spec" })).toContainText(example);
+    await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+    await dialog.getByRole("button", { name: "Create preview", exact: true }).click();
+    await expect(table.getByRole("row").filter({ hasText: name })).toContainText(service);
+  }
+  await page.reload();
+  await expect(table.getByRole("row")).toHaveCount(4);
+  await page.screenshot({ path: info.outputPath("subtenant-managed-resources.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => table.evaluate(node => node.getBoundingClientRect().right)).toBeLessThanOrEqual(390);
+  await page.getByRole("link", { name: "Cluster Sub Tenants", exact: true }).click();
+  await page.getByRole("tab", { name: "Cloud Resource", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Platform-owned cloud resources" })).toContainText("No managed resource previews yet");
+  expect(api.calls.filter(({ method }) => /^(Create|Update|Delete|Apply)/.test(method))).toEqual([]);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("Sub Tenant name opens details and previews stay within their owner", async ({ page }) => {
+  await mock(page, { existing: true }); await open(page);
+  await page.getByRole("link", { name: "Payments", exact: true }).click();
+  const detail = page.getByRole("region", { name: "Sub Tenant cloud resources" });
+  await detail.getByRole("button", { name: "Create cloud resource" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create cloud resource" });
+  await dialog.getByRole("textbox", { name: /^Resource name/ }).fill("private-preview");
+  await dialog.getByRole("button", { name: "Configure resource" }).click();
+  await dialog.getByRole("button", { name: "Review preview", exact: true }).click();
+  await dialog.getByRole("button", { name: "Create preview", exact: true }).click();
+  const otherId = "00000000-0000-4000-8000-000000000005";
+  await page.route("**/GetSubTenant", route => route.fulfill({ json: { subtenant: { tenantId: "acme", clusterId, id: otherId, spec: { ...spec, displayName: "Analytics" } } } }));
+  await page.goto(`/clusters/${clusterId}/subtenants/${otherId}`);
+  await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
+  await expect(detail).toContainText("No managed resource previews yet");
+  await expect(detail).not.toContainText("private-preview");
+});
+
+test("cluster resources are available without NaaS but Sub Tenant creation is gated", async ({ page }) => {
+  const api = await mock(page, { naas: false });
+  await page.goto(`/clusters/${clusterId}?tab=cloud-resources`);
+  await expect(page.getByRole("region", { name: "Platform-owned cloud resources" }).getByRole("button", { name: "Create cloud resource" })).toBeVisible();
+  await page.goto(`/clusters/${clusterId}/subtenants/${id}`);
+  await expect(page.getByText("Namespace as a Service is disabled on this cluster.")).toBeVisible();
+  expect(api.calls.filter(({ method }) => method.endsWith("SubTenant") || method === "ListSubTenants")).toEqual([]);
+});
+
+test("Platform-owned previews validate additional fields against the pinned RDS CRD", async ({ page }) => {
+  const api = await mock(page);
+  await page.goto(`/clusters/${clusterId}?tab=cloud-resources`);
+  await page.getByRole("button", { name: "Create cloud resource" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create cloud resource" });
+  await dialog.getByRole("radio", { name: "RDS database" }).check();
+  await dialog.getByRole("textbox", { name: /^Resource name/ }).fill("team-db");
+  await dialog.getByRole("button", { name: "Configure resource" }).click();
+  await dialog.getByRole("button", { name: "Additional spec (YAML)" }).click();
+  await dialog.getByRole("button", { name: /Field reference/ }).click();
+  await dialog.getByRole("searchbox", { name: "Find fields in Instance" }).fill("backupRetentionPeriod");
+  await expect(dialog).toContainText("1 of 90 provider fields");
+  const editor = dialog.getByRole("textbox", { name: "Additional provider spec" });
+  await editor.fill("nonexistentField: true");
+  await dialog.getByRole("button", { name: "Review preview" }).click();
+  await expect(dialog.getByRole("alert").filter({ hasText: "Check the preview" })).toContainText("not defined by this CRD");
+  await editor.fill("spec:\n  forProvider:\n    backupRetentionPeriod: 14\n    multiAz: true");
+  await dialog.getByRole("button", { name: "Review preview" }).click();
+  await expect(dialog).toContainText("Platform · production");
+  await expect(dialog.getByRole("textbox", { name: "Crossplane preview" })).toContainText("backupRetentionPeriod: 14");
+  await dialog.getByRole("button", { name: "Create preview" }).click();
+  await page.reload();
+  await page.getByRole("region", { name: "Platform-owned cloud resources" }).getByRole("button", { name: "View YAML" }).click();
+  await expect(page.getByRole("textbox", { name: "Saved Crossplane preview" })).toContainText("multiAz: true");
+  expect(api.calls.filter(({ method }) => /^(Create|Update|Delete)/.test(method))).toEqual([]);
+});
+
+test("the cluster creates each service for the platform, independently of a Sub Tenant with the same name", async ({ page }) => {
+  const api = await mock(page, { existing: true });
+  await page.goto(`/clusters/${clusterId}?tab=cloud-resources`);
+  const platform = page.getByRole("region", { name: "Platform-owned cloud resources" });
+  const panel = page.getByRole("tabpanel", { name: "Cloud Resource" });
+  await expect(platform).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Reported infrastructure" })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Open Cluster snapshot" })).toHaveCount(0);
+  await expect(panel.getByRole("table")).toHaveCount(1);
+  for (const service of ["S3 bucket", "RDS database", "ElastiCache cache"]) {
+    await platform.getByRole("button", { name: "Create cloud resource" }).click();
+    const wizard = page.getByRole("dialog", { name: "Create cloud resource" });
+    await wizard.getByRole("radio", { name: service, exact: true }).check();
+    await wizard.getByRole("textbox", { name: /^Resource name/ }).fill("shared");
+    await wizard.getByRole("button", { name: "Configure resource" }).click();
+    await wizard.getByRole("button", { name: "Review preview" }).click();
+    const yaml = wizard.getByRole("textbox", { name: "Crossplane preview" });
+    await expect(yaml).toContainText(clusterId);
+    await expect(yaml).not.toContainText("subtenant-id");
+    if (service === "S3 bucket") await expect(yaml).toContainText("kind: BucketVersioning");
+    await wizard.getByRole("button", { name: "Create preview" }).click();
+  }
+  await expect(platform.getByRole("row")).toHaveCount(4);
+  await page.getByRole("tab", { name: "Sub Tenants", exact: true }).click();
+  await page.getByRole("link", { name: "Payments", exact: true }).click();
+  const allocation = page.getByRole("region", { name: "Sub Tenant cloud resources" });
+  await expect(allocation).toContainText("No managed resource previews yet");
+  await allocation.getByRole("button", { name: "Create cloud resource" }).click();
+  const wizard = page.getByRole("dialog", { name: "Create cloud resource" });
+  await wizard.getByRole("textbox", { name: /^Resource name/ }).fill("shared");
+  await wizard.getByRole("button", { name: "Configure resource" }).click();
+  await wizard.getByRole("button", { name: "Review preview" }).click();
+  await expect(wizard.getByRole("textbox", { name: "Crossplane preview" })).toContainText("cloud.cluster-vending.io/subtenant-id: " + id);
+  await wizard.getByRole("button", { name: "Create preview" }).click();
+  await expect(allocation.getByRole("row")).toHaveCount(2);
+  expect(api.calls.filter(({ method }) => /^(Create|Update|Delete)/.test(method))).toEqual([]);
 });

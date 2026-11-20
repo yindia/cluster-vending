@@ -23,6 +23,8 @@ func TestEveryRenderedFieldIsClassified(t *testing.T) {
 	plan.Tags = map[string]string{"team": "platform"}
 	plan.NodePool.DiskSizeGB = 50
 	allOptions(&plan)
+	plan.Karpenter, plan.AccountID = true, "111122223333" // the node role, access entry, interruption queue and rules
+	plan.ResultsBucket = true                             // the results bucket and its settings
 	plan.Addons = []crossplaneaws.AddonPlan{
 		{Name: "coredns", Version: "v1.12.0-eksbuild.1", ConfigurationValues: `{"replicaCount":3}`},
 		{Name: crossplaneaws.AddonEBSCSI}, {Name: crossplaneaws.AddonEFSCSI}, {Name: crossplaneaws.AddonFSxCSI},
@@ -67,6 +69,8 @@ func TestClassifyField(t *testing.T) {
 		{"Cluster", "vpcConfig.securityGroupIds", crossplaneaws.ChangeImmutable, true},
 		{"AccessPolicyAssociation", "accessScope.namespaces", crossplaneaws.ChangeImmutable, true},
 		{"NodeGroup", "remoteAccess.ec2SshKey", 0, false},
+		{"Rule", "eventBusName", crossplaneaws.ChangeAddOnly, true},
+		{"Target", "eventBusName", crossplaneaws.ChangeAddOnly, true},
 		{"Unknown", "x", 0, false},
 	} {
 		got, ok := crossplaneaws.ClassifyField(tt.kind, tt.path)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,7 +37,9 @@ func DefinitionOf(def *cloudv1alpha1.ComponentDefinition) (Definition, error) {
 		Internal:            def.Spec.Internal,
 		Includes:            slices.Clone(def.Spec.Includes),
 		HasInstall:          def.Spec.Install != nil,
+		InstallTimeout:      installTimeoutOf(def),
 		Requires:            slices.Clone(def.Spec.Requires),
+		Sequence:            sequenceOf(def),
 		Provider:            string(def.Spec.Provider),
 		Chart:               chartOf(def),
 		Namespace:           def.Spec.Namespace,
@@ -46,6 +49,14 @@ func DefinitionOf(def *cloudv1alpha1.ComponentDefinition) (Definition, error) {
 		ValuesSchema:        schema,
 		CloudResources:      CloudResourcesOf(def.Spec.CloudResources),
 	}, nil
+}
+
+// installTimeoutOf is spec.install.timeout; 0 when unset.
+func installTimeoutOf(def *cloudv1alpha1.ComponentDefinition) time.Duration {
+	if def.Spec.Install == nil || def.Spec.Install.Timeout == nil {
+		return 0
+	}
+	return def.Spec.Install.Timeout.Duration
 }
 
 // objectOf decodes a schemaless field that must hold a JSON object; nil
@@ -100,4 +111,15 @@ func chartOf(def *cloudv1alpha1.ComponentDefinition) string {
 		return ""
 	}
 	return def.Spec.Install.Helm.Repository + " " + def.Spec.Install.Helm.Chart
+}
+
+// DefaultSequence is the sequence of a definition that sets none.
+const DefaultSequence int32 = 100
+
+// sequenceOf is the definition's spec.sequence, DefaultSequence when unset.
+func sequenceOf(def *cloudv1alpha1.ComponentDefinition) int32 {
+	if def.Spec.Sequence == nil {
+		return DefaultSequence
+	}
+	return *def.Spec.Sequence
 }

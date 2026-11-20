@@ -111,6 +111,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 			return nil, err
 		}
 	}
+	c.Results = resultRefsFromAPI(obj.Status.Results)
 	if ro := convert.RolloutFromAPI(obj.Status.Rollout); ro != nil {
 		if c.Rollout, err = protojson.Marshal(ro); err != nil {
 			return nil, err
@@ -293,36 +294,50 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	if err := onlyAWS(c.Provider); err != nil {
 		return err
 	}
-	if metaOf(network).State == networkDeleting {
-		return fmt.Errorf("%w: network %s is being deleted", repository.ErrConflict, network.Name)
+	if networkIsDeleting(network) {
+		return networkDeletingError(network)
 	}
 	// The network's account is the cluster's.
 	c.CloudAccountID = network.Labels[LabelAccountID]
 	if err := prepare(&c.Resource); err != nil {
 		return err
 	}
-	if err := r.reserveEKSName(ctx, c, network, nil); err != nil {
+	reserved, err := r.reserveEKSNameClaim(ctx, c, network, nil)
+	if err != nil {
 		return err
 	}
 	obj := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: network.Namespace, Name: c.Name}}
 	if err := r.fill(c, network.Name, obj); err != nil {
+		_ = r.releaseAttemptReservation(ctx, reserved)
 		return err
 	}
 	if err := owner.Set(network, obj, r.c.Scheme()); err != nil {
+		_ = r.releaseAttemptReservation(ctx, reserved)
 		return invalid(err)
 	}
 	keys := clusterKeys(c)
 	if err := r.claimAll(ctx, obj.Namespace, kindCluster, c.ID, keys); err != nil {
+		_ = r.releaseAttemptReservation(ctx, reserved)
 		return err
 	}
+	// takeBack deletes the cluster, and only once it is confirmed gone (or held
+	// by nothing but the garbage collector's orphan finalizer, same UID) lets go
+	// of what this attempt took: its request claim and its reservation. An
+	// unconfirmed rollback keeps the reservation (fail closed).
 	takeBack := func(ctx context.Context) error {
 		err := r.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan))
-		r.release(ctx, obj.Namespace, keys...)
+		if err == nil || apierrors.IsNotFound(err) {
+			if r.rolledBack(ctx, obj) {
+				r.release(ctx, obj.Namespace, keys...)
+				if rerr := r.releaseAttemptReservation(ctx, reserved); rerr != nil {
+					return errors.Join(translate(err), fmt.Errorf("release the physical name: %w", rerr))
+				}
+			}
+		}
 		return translate(err)
 	}
 	if err := r.insert(ctx, obj, func() { r.setStatus(obj, c.Status, c.State) }); err != nil {
-		r.release(ctx, obj.Namespace, keys...)
-		return err
+		return r.insertFailed(ctx, c, obj, keys, reserved, err)
 	}
 	if err := r.claimNetwork(ctx, c.TenantID, c.NetworkID); err != nil {
 		if terr := takeBack(ctx); terr != nil && !errors.Is(terr, repository.ErrNotFound) {
@@ -334,20 +349,114 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	return nil
 }
 
-// claimNetwork gives the network a new etag unless it is DELETING
-// (ErrConflict) or gone (ErrNotFound). It is not conditional on an etag
-// read before: two creates in one network, or the loop touching the
-// network meanwhile, must not fail each other.
+// rolledBack reports whether the cluster this attempt stored is gone: not
+// found, or the same object (UID) held only by the garbage collector's orphan
+// finalizer after the orphan-propagation delete.
+func (r clusters) rolledBack(ctx context.Context, obj *cloudv1alpha1.Cluster) bool {
+	remaining := &cloudv1alpha1.Cluster{}
+	err := r.c.Get(ctx, client.ObjectKeyFromObject(obj), remaining)
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	return err == nil && onlyCollectorHolds(remaining, obj)
+}
+
+// insertFailed is the end of a create whose insert failed. A name collision is
+// another create's cluster: an identical retry (same request ID, network and
+// payload) that won gets its cluster returned as the idempotent result, and
+// nothing the winner owns (request claim, reservation) is released. Any other
+// failure releases the claims only when no cluster of this attempt remains.
+func (r clusters) insertFailed(ctx context.Context, c *model.Cluster, obj *cloudv1alpha1.Cluster, keys []string,
+	reserved *corev1.ConfigMap, err error) error {
+	if errors.Is(err, repository.ErrAlreadyExists) {
+		winner, werr := r.winner(ctx, c, obj)
+		switch {
+		case werr == nil && winner != nil:
+			*c = *winner
+			return nil
+		case werr == nil:
+			// The name is another request's: its claims are not ours, except the
+			// request claim, which only this attempt (a different ID) took.
+			if existing := r.holderOf(ctx, obj.Namespace, keys); existing == "" || existing == c.ID {
+				r.release(ctx, obj.Namespace, keys...)
+			}
+		}
+		return err
+	}
+	// The create may have stored the cluster before failing: only a proven
+	// absence frees the claims.
+	probe := &cloudv1alpha1.Cluster{}
+	gone := apierrors.IsNotFound(r.c.Get(ctx, client.ObjectKeyFromObject(obj), probe))
+	if gone {
+		r.release(ctx, obj.Namespace, keys...)
+		if rerr := r.releaseAttemptReservation(ctx, reserved); rerr != nil {
+			return errors.Join(err, fmt.Errorf("release the physical name: %w", rerr))
+		}
+	}
+	return err
+}
+
+// winner is the cluster that already holds obj's name when it is the same
+// create (request ID, network, operation and payload); nil when it is not.
+func (r clusters) winner(ctx context.Context, c *model.Cluster, obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
+	if c.CreateRequestID == nil {
+		return nil, nil
+	}
+	have := &cloudv1alpha1.Cluster{}
+	if err := r.c.Get(ctx, client.ObjectKeyFromObject(obj), have); err != nil {
+		return nil, translate(err)
+	}
+	row, err := r.row(have)
+	if err != nil {
+		return nil, err
+	}
+	if row.TenantID != c.TenantID || row.CreateRequestID == nil || *row.CreateRequestID != *c.CreateRequestID ||
+		row.Imported != c.Imported || row.NetworkID != c.NetworkID {
+		return nil, nil
+	}
+	want, err1 := clusterCreateHash(c)
+	got, err2 := clusterCreateHash(row)
+	if err := errors.Join(err1, err2); err != nil {
+		return nil, err
+	}
+	if want != got {
+		return nil, nil
+	}
+	return row, nil
+}
+
+// holderOf is the holder of the first of keys that has a claim, "" when none.
+func (r clusters) holderOf(ctx context.Context, namespace string, keys []string) string {
+	for _, key := range keys {
+		if id, err := r.holder(ctx, namespace, key); err == nil {
+			return id
+		}
+	}
+	return ""
+}
+
+func networkIsDeleting(n *cloudv1alpha1.Network) bool {
+	return metaOf(n).State == networkDeleting || !n.DeletionTimestamp.IsZero()
+}
+
+func networkDeletingError(n *cloudv1alpha1.Network) error {
+	return fmt.Errorf("%w: network %s is being deleted", repository.ErrConflict, n.Name)
+}
+
+// claimNetwork gives the network a new etag unless it is DELETING or has a
+// deletionTimestamp (ErrConflict) or is gone (ErrNotFound). It is not
+// conditional on an etag read before: two creates in one network, or the loop
+// touching the network meanwhile, must not fail each other.
 func (r clusters) claimNetwork(ctx context.Context, tenantID, id string) error {
 	err := translate(retry(func() error {
 		network, err := networks(r).find(ctx, tenantID, id)
 		if err != nil {
 			return err
 		}
-		m := metaOf(network)
-		if m.State == networkDeleting {
-			return fmt.Errorf("%w: network %s is being deleted", repository.ErrConflict, network.Name)
+		if networkIsDeleting(network) {
+			return networkDeletingError(network)
 		}
+		m := metaOf(network)
 		m.ETag = newETag()
 		if err := setMeta(network, m); err != nil {
 			return err
@@ -365,7 +474,13 @@ func (r clusters) Get(ctx context.Context, tenantID, id string) (*model.Cluster,
 	if err != nil {
 		return nil, err
 	}
-	return r.row(obj)
+	row, err := r.row(obj)
+	if err != nil {
+		return nil, err
+	}
+	// Up to 128 KiB: only a single-cluster read carries it, never a List.
+	row.PolicySnapshot = model.JSON(obj.Status.PolicySnapshot)
+	return row, nil
 }
 
 func (r clusters) GetByCreateRequest(ctx context.Context, tenantID, requestID string) (*model.Cluster, error) {
@@ -553,12 +668,17 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := r.remove(ctx, obj); err != nil {
+	// Dropping the last finalizer on a deleting CR removes it immediately;
+	// remove's subsequent Delete then returns NotFound. The inventory checks
+	// above and the fresh absence check below still gate reservation release.
+	if err := r.remove(ctx, obj); err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
 	remaining := &cloudv1alpha1.Cluster{}
 	if err := r.c.Get(ctx, client.ObjectKeyFromObject(obj), remaining); err == nil {
-		return fmt.Errorf("%w: cluster still has finalizers; physical name reservation retained", repository.ErrConflict)
+		if !onlyCollectorHolds(remaining, obj) {
+			return fmt.Errorf("%w: cluster still has finalizers; physical name reservation retained", repository.ErrConflict)
+		}
 	} else if !apierrors.IsNotFound(err) {
 		return translate(err)
 	}
@@ -567,4 +687,22 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	}
 	r.release(ctx, obj.Namespace, clusterKeys(row)...)
 	return nil
+}
+
+// onlyCollectorHolds reports whether remaining is the object remove just
+// deleted, held by nothing but the garbage collector's orphan finalizer.
+// remove deletes with orphan propagation, so the API server adds that
+// finalizer and drops the object once the collector has run, a moment
+// later: no pass would see the object again to release its reservation.
+// Any other finalizer still retains the reservation.
+func onlyCollectorHolds(remaining, deleted client.Object) bool {
+	if remaining.GetUID() != deleted.GetUID() || remaining.GetDeletionTimestamp().IsZero() {
+		return false
+	}
+	for _, f := range remaining.GetFinalizers() {
+		if f != metav1.FinalizerOrphanDependents {
+			return false
+		}
+	}
+	return true
 }

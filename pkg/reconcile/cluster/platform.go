@@ -151,6 +151,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if s.deps.Platform == nil || row.State == StateDeleting {
 		return nil, nil
 	}
+	ctx = ensureHelmPass(ctx)
 	if noPlatform(row) {
 		// Imported and only observed, or taken over with the platform
 		// components kept off: nothing is installed.
@@ -186,6 +187,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		s.describe(ctx, row, in.Plan.Namespace, p, nil)
 		return p, nil
 	}
+	in.HoldForPlatformNodeGroup = holdForPlatformNodeGroup(row, slices.ContainsFunc(in.Entries, func(e component.PlatformEntry) bool { return e.Name == karpenterComponent }))
 	plan, skipped := component.PlanPlatform(in)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
 	inventory := s.deps.Inventory(owner)
@@ -194,6 +196,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		// retain all previous inventory until the entire plan is renderable.
 		inventory = sequence.Keeping(inventory, func(sequence.Entry) bool { return true })
 	}
+	s.gateOf(ctx, row, in.Plan.Namespace).register(plan, false)
 	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.PlatformSet(plan), inventory)
 	if err != nil {
 		s.logger().ErrorContext(ctx, "apply platform components", "cluster_id", row.ID, "error", err)
@@ -208,10 +211,26 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		return nil, err
 	}
 	components, objects := platformStatus(in, plan, skipped, res, views)
+	gate := s.gateOf(ctx, row, in.Plan.Namespace)
+	for _, pc := range components {
+		if c, ok := plannedComponent(plan, pc.GetName()); ok {
+			gate.markUnchanged(pc, plan, c)
+		}
+	}
 	p := &platform{release: release, components: components, move: move}
 	s.describe(ctx, row, in.Plan.Namespace, p, objects)
 	explainTakenOver(row, p.components)
 	return p, nil
+}
+
+// plannedComponent is the plan's component of that name.
+func plannedComponent(plan crossplaneaws.PlatformPlan, name string) (crossplaneaws.PlatformComponentPlan, bool) {
+	for _, c := range plan.Components {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return crossplaneaws.PlatformComponentPlan{}, false
 }
 
 // unavailable reports every Platform component as not installable for one
@@ -320,14 +339,17 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 			return cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, fmt.Sprintf("chart %s: %s", v.GetExternalName(), v.GetMessage()), name
 		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING:
 			return cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING, removingMessage, name
-		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
-			ready++
 		case len(waiting[name]) > 0:
+			// Held back: not created yet, or (a change another Helm
+			// operation of the cluster holds back) not READY until it is
+			// written and rolled out, whatever the Release says now.
 			phase := cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING
 			if started {
 				phase = cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING
 			}
 			return phase, "waiting for " + strings.Join(waiting[name], ", "), ""
+		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
+			ready++
 		case recorded:
 			return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, v.GetMessage(), name
 		default:
@@ -372,7 +394,7 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 	}
 	clusterPlan := s.RenderPlan(spec, row, t)
 	in.Plan = crossplaneaws.PlatformPlan{Namespace: clusterPlan.Namespace, TenantID: row.TenantID, ClusterID: row.ID,
-		ClusterPrefix: clusterPlan.Prefix}
+		ClusterPrefix: clusterPlan.Prefix, ReleaseGate: s.gateOf(ctx, row, clusterPlan.Namespace).decide}
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return in, "", "", err
@@ -388,7 +410,7 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 		// The provider spec.aws.irsa renders, or the one a taken-over
 		// cluster was imported with.
 		IRSA: HasIRSA(spec, records)}
-	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM, in.Cluster.IRSA)
+	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM, in.Cluster.IRSA, in.Plan.NodeGroupName, installed)
 
 	// The recorded release is kept once something is installed from it.
 	// Until then the cluster follows its channel: a release that pinned no
@@ -526,7 +548,7 @@ func kubernetesMinor(version string) string {
 // own role and policy as the management cluster has them now. What does
 // not exist yet is left empty: the component then waits.
 func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, t Target,
-	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan, irsa bool) func(string) component.Vars {
+	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan, irsa bool, nodeGroup string, installed bool) func(string) component.Vars {
 	recorded := storedStatus(row)
 	kindSpec, _ := convert.ClusterSpecToAPI(spec, "")
 	if irsa {
@@ -548,10 +570,11 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		network.Status.Resources = &cloudv1alpha1.NetworkResources{CloudNetworkID: vpc}
 	}
 	nodeRole := crossplaneaws.NodeRoleName(clusterPlan)
+	live, liveErr := s.livePlacement(ctx, row, cluster, clusterPlan.Namespace, nodeGroup, installed)
 	return func(name string) component.Vars {
 		p := iam
 		p.Component = name
-		out := component.IAMOutputs{RoleName: crossplaneaws.ComponentRoleName(p), NodeRoleName: nodeRole}
+		out := component.IAMOutputs{RoleName: crossplaneaws.ComponentRoleName(p), NodeRoleName: nodeRole, ClusterPrefix: clusterPlan.Prefix}
 		role := &awsiam.Role{}
 		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: p.Namespace, Name: out.RoleName}, role); err == nil {
 			out.RoleARN = ptr.Deref(role.Status.AtProvider.Arn, "")
@@ -560,7 +583,19 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		if err := s.getIgnoreMissing(ctx, client.ObjectKey{Namespace: p.Namespace, Name: crossplaneaws.ComponentPolicyName(p)}, policy); err == nil {
 			out.PolicyARN = ptr.Deref(policy.Status.AtProvider.Arn, "")
 		}
-		return component.VarsFor(cluster, network, account, out)
+		vars := component.VarsFor(cluster, network, account, out)
+		if live != nil {
+			vars = component.WithPlacement(vars, live.system, live.platform)
+		}
+		if liveErr != nil {
+			// The node group cannot be read: the placement is not known,
+			// so the components that use it wait rather than move.
+			for _, n := range []string{component.VarSystemNodeSelector, component.VarSystemTolerations,
+				component.VarPlatformNodeSelector, component.VarPlatformTolerations} {
+				delete(vars, n)
+			}
+		}
+		return vars
 	}
 }
 
@@ -571,57 +606,4 @@ func vpcOf(n *model.Network) string {
 		return ""
 	}
 	return st.GetResources().GetCloudNetworkId()
-}
-
-// deletePlatform removes the cluster's platform components before the
-// cluster itself, and reports whether they are gone: every chart is
-// uninstalled, a chart before the one it was installed after (the Usages
-// of crossplaneaws.PlatformSet), then the roles. The charts are
-// uninstalled so that what they created in the account (load balancers,
-// nodes) goes while its controller still runs. When the workload cluster
-// cannot be reached anyway (its EKS cluster is not ACTIVE, or the deletion
-// is forced) the Releases are let go without an uninstall (forceRelease):
-// the deletion never waits for a cluster that is not there.
-func (s *Reconciler) deletePlatform(ctx context.Context, row *model.Cluster, clusterRecords []model.ManagedResource) (bool, error) {
-	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerClusterComponents, row.ID)
-	if err != nil {
-		return false, fmt.Errorf("list platform component resources: %w", err)
-	}
-	if len(records) == 0 {
-		recordPlatformDeletion(ctx, row, true)
-		return true, nil
-	}
-	if !row.DeleteForce {
-		active, err := s.eksActive(ctx, clusterRecords)
-		if err != nil {
-			return false, err
-		}
-		if !active {
-			if err := s.forceRelease(ctx, row); err != nil {
-				return false, err
-			}
-		}
-	}
-	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
-	if _, err := s.deps.Sequence().Delete(ctx, s.deps.Inventory(owner), crossplaneaws.PlatformDeleteOrder); err != nil {
-		return false, deleteError(err)
-	}
-	views, err := s.deps.Observe(ctx, records)
-	if err != nil {
-		return false, err
-	}
-	if err := s.deps.MarkGone(ctx, records, views); err != nil {
-		return false, err
-	}
-	if err := s.deps.ReleaseOrphanUsages(ctx, records, views); err != nil {
-		return false, err
-	}
-	recordPlatformDeletion(ctx, row, reconcile.AllGone(views))
-	if !reconcile.AllGone(views) {
-		return false, nil
-	}
-	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerClusterComponents, row.ID); err != nil {
-		return false, fmt.Errorf("forget the platform components' resources: %w", err)
-	}
-	return true, nil
 }

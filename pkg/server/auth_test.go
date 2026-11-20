@@ -88,3 +88,49 @@ func TestHandlerAuthenticatesTheServices(t *testing.T) {
 		}
 	}
 }
+
+// Policy findings can contain workload names and denial messages. Authentication
+// and tenant authorization must run before accessing the stored cluster scan.
+func TestPolicyReadRPCsEnforceTenantScope(t *testing.T) {
+	idp := authtest.New(t)
+	cfg, err := auth.Config{Mode: auth.ModeRequired,
+		Issuers: []auth.Issuer{{Name: "idp", Issuer: idp.URL, Audiences: []string{"api"}}},
+		Rules:   []auth.Rule{{Match: auth.Match{Issuer: "idp", Role: "viewers"}, Grant: auth.Grant{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}}},
+	}.Resolved()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.NewHandler(reconcile.Deps{Logger: discard()}, nil, server.WithAuth(cfg.Mode, auth.NewVerifier(cfg))))
+	t.Cleanup(srv.Close)
+	viewer := idp.Sign(t, idp.Claims("api", "reader", map[string]any{"groups": []string{"viewers"}}))
+	for _, method := range []string{"ListClusterViolations", "ListClusterViolationEvents"} {
+		for _, tc := range []struct {
+			name, token, body string
+			status            int
+		}{
+			{"anonymous", "", `{"tenantId":"acme","clusterId":"00000000-0000-4000-8000-000000000003"}`, http.StatusUnauthorized},
+			{"another tenant", viewer, `{"tenantId":"other","clusterId":"00000000-0000-4000-8000-000000000003"}`, http.StatusForbidden},
+			// An authorized viewer reaches input validation (not a write-role denial).
+			{"viewer input validation", viewer, `{"tenantId":"acme","clusterId":"invalid"}`, http.StatusBadRequest},
+		} {
+			t.Run(method+"/"+tc.name, func(t *testing.T) {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/cloud.v1.ClusterService/"+method, strings.NewReader(tc.body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Content-Type", "application/json")
+				if tc.token != "" {
+					req.Header.Set("Authorization", "Bearer "+tc.token)
+				}
+				res, err := srv.Client().Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = res.Body.Close() }()
+				if res.StatusCode != tc.status {
+					t.Errorf("status = %d, want %d", res.StatusCode, tc.status)
+				}
+			})
+		}
+	}
+}

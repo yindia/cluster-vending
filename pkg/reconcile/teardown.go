@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// TeardownListLimit bounds how many objects of one kind a Teardown reads in
+// a pass: one page. A pass deletes what it saw and the next sees the rest,
+// so a workload cluster with thousands of NodeClaims never costs a pass an
+// unbounded read.
+const TeardownListLimit = 500
+
 // DefaultTeardownTimeout bounds a cluster deletion's teardown (Deps):
 // deleting a load balancer takes a minute or two, draining and
 // terminating Karpenter's nodes a few minutes more.
@@ -28,6 +34,9 @@ type WorkloadObject struct {
 	// Deleting: its deletion was asked for (it waits for its controller
 	// to remove what it made in the cloud).
 	Deleting bool
+	// DeletedAt is when its deletion was asked for (its deletion
+	// timestamp); zero when it is not being deleted.
+	DeletedAt time.Time
 }
 
 // Ref is the object as a person reads it: "Service istio-system/gw".
@@ -42,11 +51,12 @@ func (o WorkloadObject) Ref() string {
 // deletion removes before it uninstalls the controllers that would clean
 // up after them.
 type Teardown interface {
-	// List is every Ingress of the AWS Load Balancer Controller (class
-	// alb), Service of type LoadBalancer, and Karpenter NodePool,
-	// NodeClaim and EC2NodeClass; a kind the cluster does not serve is
-	// left out.
-	List(ctx context.Context) ([]WorkloadObject, error)
+	// List is the objects of the given kinds (Kind* above): every Ingress
+	// of the AWS Load Balancer Controller (class alb), Service of type
+	// LoadBalancer, and Karpenter NodePool, NodeClaim and EC2NodeClass,
+	// at most TeardownListLimit of a kind per call; a kind the cluster
+	// does not serve is left out.
+	List(ctx context.Context, kinds ...string) ([]WorkloadObject, error)
 	// Delete asks for one object's deletion; gone already is no error.
 	Delete(ctx context.Context, o WorkloadObject) error
 }

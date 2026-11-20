@@ -29,6 +29,15 @@ func TestAccountOnboarding(t *testing.T) {
 				AccountId: "444455556666", ManagementRoleArn: platformRole, TemplatePath: "/cloudformation/provisioner.yaml"},
 		},
 		{
+			name: "the server's principal: the role trusts it too, to read the results buckets",
+			config: tenant.Onboarding{ManagementRoleARN: platformRole,
+				ServerPrincipalARN: "arn:aws:iam::111122223333:role/cluster-vending-api"},
+			req: &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", AccountId: "444455556666"},
+			want: &cloudv1.AccountOnboarding{Role: "provisioner", RoleName: "cluster-vending-provisioner",
+				AccountId: "444455556666", ManagementRoleArn: platformRole, TemplatePath: "/cloudformation/provisioner.yaml",
+				ServerPrincipalArn: "arn:aws:iam::111122223333:role/cluster-vending-api"},
+		},
+		{
 			name:   "another role",
 			config: tenant.Onboarding{ManagementRoleARN: platformRole},
 			req:    &cloudv1.GetAccountOnboardingRequest{TenantId: "acme", Role: "reader"},

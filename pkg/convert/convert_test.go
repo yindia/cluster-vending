@@ -70,6 +70,8 @@ func scalar(fd protoreflect.FieldDescriptor, n int) protoreflect.Value {
 		return protoreflect.ValueOfEnum(values.Get(1 + n%(values.Len()-1)).Number())
 	case protoreflect.BytesKind:
 		return protoreflect.ValueOfBytes(fmt.Appendf(nil, "bytes-%d", n))
+	case protoreflect.Int32Kind:
+		return protoreflect.ValueOfInt32(int32(n%1000) + 1)
 	case protoreflect.Int64Kind:
 		return protoreflect.ValueOfInt64(int64(n) + 1)
 	default:

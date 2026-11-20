@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -45,11 +46,11 @@ function ConsoleTableContent<T extends Record<string, unknown>>({ hasFullDetails
   const label = props["aria-label"] || "table";
   const resizable = (columns?.filter(column => column.resizable !== false).length ?? 0) > 1;
   return <Card padding={0}><VStack gap={0}>
-    {searchable && <HStack padding={3} gap={3} vAlign="end" wrap="wrap">
+    {searchable && <FilterRow label={`Filters for ${label}`} padding={3}>
       <TextInput label={`Search ${label}`} type="search" value={search} onChange={setSearch} placeholder="Search this table" hasClear autoComplete="off" width="min(100%, 24rem)" />
       {search && <Button label={`Clear ${label} search`} variant="ghost" onClick={() => setSearch("")} />}
       <Text type="supporting" role="status">{filtered?.length ?? 0} of {data?.length ?? 0} rows</Text>
-    </HStack>}
+    </FilterRow>}
     <Table {...props} columns={columns} data={filtered} plugins={{ ...plugins, consoleColumnResize: resize }} density="balanced" verticalAlign="middle" textOverflow={hasFullDetails ? "wrap" : "truncate"} dividers="rows" hasHover
       emptyState={search ? "No rows match this search. Clear the search to show all rows." : props.emptyState} />
     {resizable && <HStack padding={2} gap={3} hAlign="between" vAlign="center" wrap="wrap">

@@ -10,6 +10,7 @@ import { CreateClusterRequestSchema } from "../../gen/cloud/v1/cluster_service_p
 import type { BrowserClients } from "../api/client";
 import { supportsCapability } from "../providers/registry";
 import { parseComponentValues } from "./components";
+import { reviewClusterPlacement } from "./cluster-placement";
 
 import { parseImportManifest, reviewImportManifest, applyImportManifest, importManifestTemplate } from "./import-manifests";
 
@@ -86,27 +87,18 @@ export async function reviewManifest(api: BrowserClients, text: string, kind: Ma
   signal.throwIfAborted();
   if (kind === "NetworkImport" || kind === "ClusterImport") return reviewImportManifest(api, text, kind, tenantId, requestId, signal);
   const review = parseManifest(text, kind, tenantId, requestId);
-  let tier: string | undefined;
-  if (kind !== "CloudAccount") {
-    let accountId: string;
-    if (kind === "Network") {
-      accountId = fromJsonString(CreateNetworkRequestSchema, review.requestJson).network!.spec!.bootstrapId;
-    } else {
-      const cluster = fromJsonString(CreateClusterRequestSchema, review.requestJson).cluster!;
-      const networkId = cluster.spec!.network!.networkId;
-      const { network } = await api.network.getNetwork({ tenantId, networkId }, { signal });
-      signal.throwIfAborted();
-      if (!network || network.id !== networkId || network.tenantId !== tenantId) throw new Error("The referenced network does not belong to this tenant.");
-      if (network.spec?.region !== cluster.spec!.region) throw new Error("Cluster region must match the referenced network.");
-      accountId = network.spec.bootstrapId;
-      tier = network.spec.tier ? displayEnum(Tier, network.spec.tier) : "Tier 0 (default)";
-    }
+  if (kind === "Cluster") {
+    const spec = fromJsonString(CreateClusterRequestSchema, review.requestJson).cluster!.spec!;
+    return reviewClusterPlacement(api, review, spec.network!.networkId, signal, spec.region);
+  }
+  if (kind === "Network") {
+    const accountId = fromJsonString(CreateNetworkRequestSchema, review.requestJson).network!.spec!.bootstrapId;
     const { account } = await api.tenant.getCloudAccount({ tenantId, id: accountId }, { signal });
     signal.throwIfAborted();
     if (!account || account.id !== accountId || account.tenantId !== tenantId) throw new Error("The referenced account does not belong to this tenant.");
-    if (!supportsCapability(account.provider.case ?? "", kind === "Network" ? "network.create" : "cluster.create")) throw new Error("The referenced account has no supported provider for this resource.");
+    if (!supportsCapability(account.provider.case ?? "", "network.create")) throw new Error("The referenced account has no supported provider for this resource.");
   }
-  return tier ? Object.freeze({ ...review, summary: Object.freeze([...review.summary, Object.freeze({ label: "Inherited tier", value: tier })]) }) : review;
+  return review;
 }
 
 /** Submit the immutable reviewed protobuf snapshot, preserving optional fields. */

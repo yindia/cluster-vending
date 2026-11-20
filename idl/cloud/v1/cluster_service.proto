@@ -7,8 +7,11 @@ import "cloud/v1/cluster.proto";
 import "cloud/v1/cluster_retry.proto";
 import "cloud/v1/deprecation.proto";
 import "cloud/v1/events.proto";
+import "cloud/v1/node_group_manifest.proto";
+import "cloud/v1/node_group_nodes.proto";
 import "cloud/v1/plan.proto";
 import "cloud/v1/recommendation.proto";
+import "cloud/v1/violation.proto";
 import "google/protobuf/field_mask.proto";
 
 // ClusterService manages the lifecycle of tenant clusters.
@@ -26,6 +29,15 @@ import "google/protobuf/field_mask.proto";
 // catches up with generation and status.state is RUNNING (or the cluster is
 // gone, after a delete).
 service ClusterService {
+  // Reads the controller snapshot. Never connects to the workload cluster.
+  rpc ListClusterViolations(ListClusterViolationsRequest) returns (ListClusterViolationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Reads retained admission events in the snapshot, not historical audit data.
+  rpc ListClusterViolationEvents(ListClusterViolationEventsRequest) returns (ListClusterViolationEventsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // Creates a cluster. The call stores it (PROVISIONING) and returns; the
   // API server does not look at the cloud. Returns ALREADY_EXISTS if a
   // cluster of the platform already has the name (see Cluster.name for
@@ -94,6 +106,36 @@ service ClusterService {
   // (it samples the cluster every five minutes, read-only), read from the
   // platform's store. Empty for a cluster that was not sampled yet.
   rpc ListClusterRecommendations(ListClusterRecommendationsRequest) returns (ListClusterRecommendationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Reads what user node groups may use: the platform admin's allowlist of
+  // instance families and types (the server's node-group-instance-families
+  // and node-group-instance-types settings), the architectures and the
+  // capacity types. CreateCluster and UpdateCluster refuse node groups
+  // outside it.
+  rpc GetNodeGroupOptions(GetNodeGroupOptionsRequest) returns (GetNodeGroupOptionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists the Karpenter objects (EC2NodeClass and NodePool) of the
+  // cluster's node groups, the platform group first, rendered from the
+  // stored spec exactly as the controller applies them to the workload
+  // cluster. Empty for an imported cluster that was not taken over. Never
+  // connects to the workload cluster.
+  rpc ListClusterNodeGroupManifests(ListClusterNodeGroupManifestsRequest) returns (ListClusterNodeGroupManifestsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Lists a page of the nodes of one node group (name, status, instance
+  // type, zone, capacity, kubelet version, age, NodeClaim), filtered by their
+  // Ready condition and by a name search. Read from the node group's shard in
+  // the cluster's results bucket, which the controller writes while it
+  // converges the node groups (at most once a minute): the API server never
+  // connects to the workload cluster, and reads one shard, one page at a time.
+  // A bucket that cannot be read, or nodes not collected yet, is a notice in
+  // the response, not an error.
+  rpc ListNodeGroupNodes(ListNodeGroupNodesRequest) returns (ListNodeGroupNodesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

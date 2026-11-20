@@ -144,7 +144,8 @@ func TestResolveOptions(t *testing.T) {
 		t.Errorf("optional settings appeared in a spec without them: %v", plain)
 	}
 	base := crossplaneaws.ClusterPlan{Prefix: "prod", ClusterName: "prod"}
-	if p := RenderPlan(plain, []string{"subnet-a"}, base); len(p.Pending()) != 0 || p.LogGroupRetentionDays != 0 ||
+	// Only the queue policy and the targets wait: for Karpenter's queue.
+	if p := RenderPlan(plain, []string{"subnet-a"}, base); !reflect.DeepEqual(p.Pending(), []string{"QueuePolicy", "Target"}) || p.LogGroupRetentionDays != 0 ||
 		p.CreateEncryptionKey || p.EncryptionKeyARN != "" || p.IRSA || p.NodePool.LaunchTemplate != nil || p.AccessEntries != nil || p.IdentityProvider != nil ||
 		p.EndpointPublicAccess != nil || p.AdditionalSecurityGroupIDs != nil {
 		t.Errorf("plan of a spec without options = %+v", p)

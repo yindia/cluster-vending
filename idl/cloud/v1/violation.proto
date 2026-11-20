@@ -1,0 +1,94 @@
+syntax = "proto3";
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// A reference as reported by a policy engine; missing fields remain unknown.
+message PolicyObjectReference {
+  string api_version = 1;
+  string kind = 2;
+  string namespace = 3;
+  string name = 4;
+}
+
+// Coverage of a bounded controller scan, not proof of cluster compliance.
+message ClusterPolicySnapshotSummary {
+  google.protobuf.Timestamp collected_at = 1;
+  repeated string notices = 2;
+  bool incomplete = 3;
+  bool truncated = 4;
+  // Set by the API when collected_at is older than the expected collection
+  // cadence or unknown for a non-empty snapshot; distinct from incomplete.
+  bool stale = 5;
+}
+message ClusterViolation {
+  string id = 1;
+  string engine = 2;
+  PolicyObjectReference policy = 3;
+  PolicyObjectReference resource = 4;
+  string rule = 5;
+  string message = 6;
+  string result = 7;
+  string severity = 8;
+  // Unknown unless explicitly reported; a report failure does not prove denial.
+  string enforcement = 9;
+  google.protobuf.Timestamp observed_at = 10;
+}
+message ClusterViolationEvent {
+  string id = 1;
+  string engine = 2;
+  PolicyObjectReference policy = 3;
+  PolicyObjectReference resource = 4;
+  string message = 5;
+  string reason = 6;
+  string action = 7;
+  string enforcement = 8;
+  google.protobuf.Timestamp last_observed_at = 9;
+  int32 count = 10;
+}
+message ListClusterViolationsRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  string namespace = 3 [(buf.validate.field).string.max_len = 63];
+  string engine = 4 [(buf.validate.field).string.max_len = 128];
+  // Defaults to 50; capped at 200.
+  int32 page_size = 5 [(buf.validate.field).int32.gte = 0];
+  // Bound to the snapshot, tenant, cluster and filters; restart after collection.
+  string page_token = 6 [(buf.validate.field).string.max_len = 512];
+}
+message ListClusterViolationsResponse {
+  repeated ClusterViolation violations = 1;
+  string next_page_token = 2;
+  ClusterPolicySnapshotSummary summary = 3;
+}
+message ListClusterViolationEventsRequest {
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+  string namespace = 3 [(buf.validate.field).string.max_len = 63];
+  string engine = 4 [(buf.validate.field).string.max_len = 128];
+  int32 page_size = 5 [(buf.validate.field).int32.gte = 0];
+  string page_token = 6 [(buf.validate.field).string.max_len = 512];
+}
+message ListClusterViolationEventsResponse {
+  repeated ClusterViolationEvent events = 1;
+  string next_page_token = 2;
+  ClusterPolicySnapshotSummary summary = 3;
+  // Kubernetes events expire, emission may be disabled; never an audit history.
+  string retention_notice = 4;
+}
+
+// Internal bounded snapshot persisted only in the management Cluster status.
+message ClusterPolicySnapshot {
+  ClusterPolicySnapshotSummary summary = 1;
+  repeated ClusterViolation violations = 2;
+  repeated ClusterViolationEvent events = 3;
+}

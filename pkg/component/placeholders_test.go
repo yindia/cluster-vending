@@ -35,7 +35,7 @@ func testAccount() *cloudv1alpha1.CloudAccount {
 
 func TestVarsFor(t *testing.T) {
 	iam := IAMOutputs{RoleARN: "arn:aws:iam::444455556666:role/r", RoleName: "r",
-		PolicyARN: "arn:aws:iam::444455556666:policy/p", NodeRoleName: "prod-1a2b-node-role"}
+		PolicyARN: "arn:aws:iam::444455556666:policy/p", NodeRoleName: "prod-1a2b-node-role", ClusterPrefix: "prod-1a2b"}
 
 	v := VarsFor(testCluster(true), testNetwork(), testAccount(), iam)
 
@@ -47,12 +47,32 @@ func TestVarsFor(t *testing.T) {
 		VarClusterNodeRoleARN:     "arn:aws:iam::444455556666:role/prod-1a2b-node-role",
 		VarNetworkVPCID:           "vpc-0abc",
 		VarIAMRoleARN:             iam.RoleARN, VarIAMRoleName: "r", VarIAMPolicyARN: iam.PolicyARN,
-		VarSystemNodeSelector: "{}", VarSystemTolerations: "[]",
+		VarSystemNodeSelector:         `{"node.cluster-vending.io/pool":"system"}`,
+		VarSystemTolerations:          `[{"effect":"NoSchedule","key":"node.cluster-vending.io/pool","operator":"Equal","value":"system"}]`,
+		VarPlatformNodeSelector:       `{"node.cluster-vending.io/pool":"platform"}`,
+		VarPlatformTolerations:        `[{"effect":"NoSchedule","key":"node.cluster-vending.io/pool","operator":"Equal","value":"platform"}]`,
+		VarKarpenterNodeRoleName:      "prod-1a2b-karpenter-node",
+		VarKarpenterNodeRoleARN:       "arn:aws:iam::444455556666:role/prod-1a2b-karpenter-node",
+		VarKarpenterInterruptionQueue: "prod-1a2b-karpenter",
 	}
 	for _, name := range PlaceholderNames() {
 		if v[name] != want[name] {
 			t.Errorf("%s = %q, want %q", name, v[name], want[name])
 		}
+	}
+}
+
+// Without the cluster's prefix the karpenter names come from the node
+// role's name when it is the platform's ("<prefix>-node-role"); an adopted
+// node role's name says nothing about them.
+func TestKarpenterVarsWithoutAPrefix(t *testing.T) {
+	v := VarsFor(testCluster(true), testNetwork(), testAccount(), IAMOutputs{NodeRoleName: "prod-1a2b-node-role"})
+	if v[VarKarpenterNodeRoleName] != "prod-1a2b-karpenter-node" || v[VarKarpenterInterruptionQueue] != "prod-1a2b-karpenter" {
+		t.Errorf("derived from the node role: %q %q", v[VarKarpenterNodeRoleName], v[VarKarpenterInterruptionQueue])
+	}
+	v = VarsFor(testCluster(true), testNetwork(), testAccount(), IAMOutputs{NodeRoleName: "eksctl-nodes"})
+	if v[VarKarpenterNodeRoleName] != "" || v[VarKarpenterInterruptionQueue] != "" || v[VarKarpenterNodeRoleARN] != "" {
+		t.Errorf("an adopted node role's name must not give karpenter names: %v", v)
 	}
 }
 

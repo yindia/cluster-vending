@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -169,6 +170,9 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	if err := section(w, "Add-ons", []string{"NAME", "VERSION", "STATE", "MESSAGE"}, addons); err != nil {
 		return err
 	}
+	if err := nodeGroupSection(w, st.GetNodeGroups()); err != nil {
+		return err
+	}
 	components := make([][]string, 0, len(st.GetPlatformComponents()))
 	for _, p := range st.GetPlatformComponents() {
 		components = append(components, []string{p.GetName(), orNone(p.GetVersion()), word(p.GetPhase().String(), "COMPONENT_PHASE_"),
@@ -181,4 +185,23 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 		return err
 	}
 	return section(w, "Events", eventHeader, eventRows(st.GetRecentEvents()))
+}
+
+// nodeGroupSection lists the node groups the controller observed: the
+// platform's first, then the user's. Nothing is written for a cluster that
+// has reported none yet.
+func nodeGroupSection(w io.Writer, groups []*cloudv1.NodeGroupStatus) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	rows := make([][]string, 0, len(groups))
+	for _, g := range groups {
+		owner := "user"
+		if g.GetPlatformManaged() {
+			owner = "platform"
+		}
+		rows = append(rows, []string{g.GetName(), owner, word(g.GetPhase().String(), "NODE_GROUP_PHASE_"),
+			strconv.Itoa(int(g.GetNodes())), orNone(oneLine(g.GetMessage()))})
+	}
+	return section(w, "Node Groups", []string{"NAME", "OWNER", "PHASE", "NODES", "MESSAGE"}, rows)
 }

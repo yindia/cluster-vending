@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { useCallback, useState } from "react";
 import { VStack, HStack } from "@astryxdesign/core/Layout";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -73,13 +74,13 @@ export function OverviewPage() {
       </Grid>
       <VStack gap={3}>
         <HStack gap={3} hAlign="end" vAlign="center" wrap="wrap" width="100%"><StackItem size="fill"><Heading level={2}>Resource inventory</Heading></StackItem><Button label="Expand all" variant="ghost" size="sm" isDisabled={filtered.filtering || collapsed.size === 0} onClick={() => setCollapsed(new Set())} /><Button label="Collapse all" variant="ghost" size="sm" isDisabled={filtered.filtering || !tree.length} onClick={() => setCollapsed(new Set(rows.filter(row => row.children.length).map(row => row.id).concat(tree.filter(row => row.kind === "Group").map(row => row.id))))} /></HStack>
-        <HStack gap={3} wrap="wrap" vAlign="end">
+        <FilterRow label="Resource filters">
           <TextInput label="Search resources" type="search" placeholder="Name, platform ID, kind, status or provider" value={search} onChange={setSearch} autoComplete="off" />
           <Selector label="Resource kind" value={kindFilter} onChange={setKindFilter} options={[{ value: "all", label: "All kinds" }, ...filterOptions("kind")]} />
           <Selector label="Resource status" value={stateFilter} onChange={setStateFilter} options={[{ value: "all", label: "All statuses" }, ...filterOptions("state")]} />
           <Selector label="Provider" value={providerFilter} onChange={setProviderFilter} options={[{ value: "all", label: "All providers" }, ...filterOptions("provider")]} />
           {(search || kindFilter !== "all" || stateFilter !== "all" || providerFilter !== "all") && <Button label="Clear resource filters" onClick={clearFilters} />}
-        </HStack>
+        </FilterRow>
         <Text role="status" color="secondary">{filtered.matches} of {rows.length} resources{filtered.filtering ? " · Parent rows provide context" : " · Account → Network → Cluster"}</Text>
         {filtered.rows.length ? <Table data={filtered.rows} columns={columns} idKey="id" aria-label="Tenant resource inventory" /> : <Text color="secondary">{rows.length ? "No resources match the current filters." : "No resources were reported for this tenant."}</Text>}
         <Text type="supporting">Live API inventory for tenant {tenantId}. State is the controller’s last observation.</Text>

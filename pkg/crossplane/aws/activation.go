@@ -11,6 +11,7 @@ import (
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+	awss3 "github.com/upbound/provider-aws/v2/apis/namespaced/s3/v1beta1"
 	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,9 +50,14 @@ var managedMRDs = []string{
 	"identityproviderconfigs.eks.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io",
 	"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
 	// Karpenter's interruption queue and the EventBridge rules feeding it
-	// (components; nothing renders them yet).
+	// (ClusterResources, karpenter.go).
 	"queues.sqs.aws.m.upbound.io", "queuepolicies.sqs.aws.m.upbound.io",
 	"rules.cloudwatchevents.aws.m.upbound.io", "targets.cloudwatchevents.aws.m.upbound.io",
+	// The bucket of a cluster's scan results and its settings
+	// (results_bucket.go).
+	"buckets.s3.aws.m.upbound.io", "bucketpublicaccessblocks.s3.aws.m.upbound.io",
+	"bucketownershipcontrols.s3.aws.m.upbound.io", "bucketserversideencryptionconfigurations.s3.aws.m.upbound.io",
+	"bucketpolicies.s3.aws.m.upbound.io", "bucketlifecycleconfigurations.s3.aws.m.upbound.io",
 	// provider-helm.
 	"releases.helm.m.crossplane.io",
 }
@@ -87,6 +93,8 @@ func ManagedObjects() []client.Object {
 		&awseks.IdentityProviderConfig{}, &awsec2.SecurityGroup{}, &awsec2.SecurityGroupIngressRule{},
 		&awsec2.SecurityGroupEgressRule{},
 		&awssqs.Queue{}, &awssqs.QueuePolicy{}, &awsevents.Rule{}, &awsevents.Target{},
+		&awss3.Bucket{}, &awss3.BucketPublicAccessBlock{}, &awss3.BucketOwnershipControls{},
+		&awss3.BucketServerSideEncryptionConfiguration{}, &awss3.BucketPolicy{}, &awss3.BucketLifecycleConfiguration{},
 	)
 	// Networks and clusters share kinds (IAM): each once.
 	out := make([]client.Object, 0, len(all))

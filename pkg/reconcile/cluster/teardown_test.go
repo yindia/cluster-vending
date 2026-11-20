@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ type fakeTeardowns struct {
 	deleted []string
 	err     error // of opening the cluster
 	stuck   bool  // deleted objects never go away
+	// onDelete is told of each deletion asked for.
+	onDelete func(reconcile.WorkloadObject)
 }
 
 func (f *fakeTeardowns) Open(context.Context, string, string) (reconcile.Teardown, error) {
@@ -30,23 +33,29 @@ func (f *fakeTeardowns) Open(context.Context, string, string) (reconcile.Teardow
 	return f, nil
 }
 
-func (f *fakeTeardowns) List(context.Context) ([]reconcile.WorkloadObject, error) {
-	var kept []reconcile.WorkloadObject
+func (f *fakeTeardowns) List(_ context.Context, kinds ...string) ([]reconcile.WorkloadObject, error) {
+	var kept, out []reconcile.WorkloadObject
 	for _, o := range f.objs {
 		if o.Deleting && !f.stuck {
 			continue // its controller removed it since the last pass
 		}
 		kept = append(kept, o)
+		if slices.Contains(kinds, o.Kind) {
+			out = append(out, o)
+		}
 	}
 	f.objs = kept
-	return kept, nil
+	return out, nil
 }
 
 func (f *fakeTeardowns) Delete(_ context.Context, o reconcile.WorkloadObject) error {
+	if f.onDelete != nil {
+		f.onDelete(o)
+	}
 	f.deleted = append(f.deleted, o.Ref())
 	for i := range f.objs {
 		if f.objs[i].Ref() == o.Ref() {
-			f.objs[i].Deleting = true
+			f.objs[i].Deleting, f.objs[i].DeletedAt = true, now()
 		}
 	}
 	return nil
@@ -71,10 +80,10 @@ func reasons(notes []reconcile.Note) string {
 	return strings.Join(out, ",")
 }
 
-// The load balancers, then Karpenter's nodes, then its node classes are
-// deleted, each stage after the one before is gone; then the deletion
-// goes on, told once at the start and once at the end.
-func TestTeardownDeletesInStages(t *testing.T) {
+// The load balancer stage deletes Ingresses and Services only, then the
+// deletion goes on, told once at the start and once at the end; Karpenter's
+// objects are not its business.
+func TestTeardownDeletesTheLoadBalancers(t *testing.T) {
 	start := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
 	now = func() time.Time { return start }
 	t.Cleanup(func() { now = time.Now })
@@ -93,34 +102,32 @@ func TestTeardownDeletesInStages(t *testing.T) {
 	if !strings.Contains(td.GetMessage(), "1 load balancer (Service istio-system/istio-ingressgateway)") {
 		t.Errorf("pass 1 message = %q", td.GetMessage())
 	}
-	var passes int
-	for passes = 2; !done && passes < 10; passes++ {
-		done, td, notes = pass(t, s, row, td, true)
-	}
+	done, td, notes = pass(t, s, row, td, true)
 	if !done || td.GetResult() != cloudv1.ClusterTeardownResult_CLUSTER_TEARDOWN_RESULT_FINISHED ||
 		reasons(notes) != reconcile.ReasonTeardownFinished {
-		t.Fatalf("after %d passes: done %v, %v, notes %s", passes, done, td, reasons(notes))
+		t.Fatalf("pass 2: done %v, %v, notes %s", done, td, reasons(notes))
 	}
-	want := []string{"Service istio-system/istio-ingressgateway", "NodePool default", "EC2NodeClass default"}
-	if strings.Join(f.deleted, "|") != strings.Join(want, "|") {
-		t.Errorf("deleted %v, want %v", f.deleted, want)
+	if want := "Service istio-system/istio-ingressgateway"; strings.Join(f.deleted, "|") != want {
+		t.Errorf("deleted %v, want only %s", f.deleted, want)
 	}
 	if !td.GetStartTime().AsTime().Equal(start) {
 		t.Errorf("start = %v, want the first pass's", td.GetStartTime().AsTime())
 	}
 }
 
-// While it runs, the deleting cluster's message is what it waits for.
+// While it runs, the deleting cluster's message is the stage and what it
+// waits for.
 func TestTeardownIsTheDeletingMessage(t *testing.T) {
 	f := &fakeTeardowns{objs: []reconcile.WorkloadObject{obj(reconcile.KindService, "web", "shop", false)}}
 	s := New(reconcile.Deps{Teardowns: f})
-	ctx := withTeardownHolder(reconcile.WithNotes(t.Context()))
+	ctx := withDeleteStage(withTeardownHolder(reconcile.WithNotes(t.Context())))
 	s.runTeardown(ctx, &model.Cluster{TenantID: "acme"}, nil, true)
 	st := &cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_DELETING, Message: "deleting; 30 resources left"}
 
 	withTeardownStatus(ctx, st, &cloudv1.ClusterStatus{})
+	withDeleteStageStatus(ctx, st)
 
-	if want := "deleting; deleting 1 load balancer (Service web/shop) before the platform components are uninstalled"; st.GetMessage() != want {
+	if want := "deleting; stage 1 of 7, load balancers: deleting 1 load balancer (Service web/shop)"; st.GetMessage() != want {
 		t.Fatalf("message = %q, want %q", st.GetMessage(), want)
 	}
 }

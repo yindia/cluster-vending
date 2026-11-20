@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 
 import { RefreshButton } from "./refresh-button";
@@ -155,7 +156,7 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
     {inventory.error && <Banner status="error" title="Complete component inventory unavailable" description={inventory.error} />}
     {(catalog.loading || inventory.loading) && <Text role="status">Loading the tenant catalog and complete cluster inventory…</Text>}
     {accepted && <ComponentObservation key={accepted.revision} tenantId={tenantId} action={accepted.action} accepted={accepted.component} onSettled={refresh} />}
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Tenant component filters">
       <TextInput label="Search tenant components" type="search" placeholder="Name, description, ID or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />
       <Selector label="Component availability" value={availability} onChange={(value) => { setAvailability(value); setPage(1); }} options={[
         { value: "all", label: "All tenant entries" }, { value: "available", label: "Available in catalog" },
@@ -163,7 +164,7 @@ function TenantComponentsContent({ clusterId }: { clusterId: string }) {
         { value: "unavailable", label: "Platform disabled" }, { value: "read-only", label: "Unknown / read-only" },
       ]} />
       {(search || availability !== "all") && <Button label="Clear tenant component filters" onClick={() => { setSearch(""); setAvailability("all"); setPage(1); }} />}
-    </HStack>
+    </FilterRow>
     <Text role="status" color="secondary">{filtered.length} of {rows.length} tenant component entries</Text>
     {visible.length ? <ConsoleTable aria-label="Cluster tenant component catalog" data={visible} columns={columns} idKey="key" rowIndexStart={(currentPage - 1) * PAGE_SIZE + 1} rowCount={filtered.length} /> : !catalog.loading && !inventory.loading && <Text>{rows.length ? "No tenant components match the current filters." : catalog.error || inventory.error ? "Tenant entries could not be fully loaded. Refresh before making changes." : "No tenant component definitions or unmanaged inventory entries were returned."}</Text>}
     {filtered.length > PAGE_SIZE && <Pagination label="Tenant component pagination" page={currentPage} onChange={setPage} totalItems={filtered.length} pageSize={PAGE_SIZE} variant="count" />}

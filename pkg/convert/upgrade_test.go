@@ -98,3 +98,27 @@ func TestClusterStatusIntoCarriesWhyAComponentFailed(t *testing.T) {
 		t.Errorf("component = %+v", got)
 	}
 }
+
+// The Helm side of a component and the steps an upgrade skipped reach the
+// kind's status.
+func TestClusterStatusIntoCarriesHelmReliability(t *testing.T) {
+	var status cloudv1alpha1.ClusterStatus
+	retry := time.Date(2026, 11, 19, 10, 30, 0, 0, time.UTC)
+
+	convert.ClusterStatusInto(&cloudv1.ClusterStatus{State: cloudv1.ClusterState_CLUSTER_STATE_RUNNING,
+		PlatformComponents: []*cloudv1.PlatformComponent{{Name: "gpu-operator", ChartVersion: "v25.3.0", Revision: 15, Digest: "d", Attempts: 4,
+			CountedFailures: 3, NextRetryAt: timestamppb.New(retry), LastErrorClass: "release", LastRecovery: "rolled back to revision 14",
+			LastRecoveryAt: timestamppb.New(retry), Unchanged: true}},
+		Upgrade: &cloudv1.ClusterUpgrade{ToVersion: "1.37", SkippedSteps: []cloudv1.ClusterUpgradePhase{
+			cloudv1.ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS}}}, "", metav1.Now(), &status)
+
+	got := status.PlatformComponents[0]
+	if got.ChartVersion != "v25.3.0" || got.Revision != 15 || got.Digest != "d" || got.Attempts != 4 || got.CountedFailures != 3 ||
+		got.NextRetryAt == nil || !got.NextRetryAt.Time.Equal(retry) || got.LastErrorClass != "release" ||
+		got.LastRecovery != "rolled back to revision 14" || got.LastRecoveryTime == nil || !got.Unchanged {
+		t.Errorf("component = %+v", got)
+	}
+	if skipped := status.Upgrade.SkippedSteps; len(skipped) != 1 || skipped[0] != cloudv1alpha1.ClusterUpgradePlatformComponents {
+		t.Errorf("skipped steps = %v", skipped)
+	}
+}

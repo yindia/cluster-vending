@@ -15,12 +15,18 @@ import (
 type addonPlacement struct {
 	path               []string
 	defaultTolerations []map[string]any
+	// platform: the add-on's controller runs on the platform pool of a
+	// cluster with Karpenter node groups (ClusterPlan.Karpenter), not on
+	// the default group (docs/design/karpenter-node-groups.md).
+	platform bool
 }
 
-// addonPlacements are the add-ons whose controller pods follow the
-// default node pool: its labels become their nodeSelector, and they
-// tolerate each of its taints. With a tainted default pool the platform's
-// pods then run there and tenant workloads do not.
+// addonPlacements are the add-ons whose controller pods are placed by the
+// platform: on the default node pool (its labels become their
+// nodeSelector, and they tolerate each of its taints), or, on a cluster
+// with Karpenter node groups, the EBS CSI controller on the platform pool
+// (its label and taint). With tainted pools the platform's pods then run
+// there and tenant workloads do not.
 //
 // Only add-ons whose configuration schema (aws eks
 // describe-addon-configuration) is confirmed are listed; EKS refuses a
@@ -51,7 +57,7 @@ var addonPlacements = map[string]addonPlacement{
 		{"key": "CriticalAddonsOnly", "operator": "Exists"},
 		{"key": "node-role.kubernetes.io/control-plane", "effect": "NoSchedule"},
 	}},
-	AddonEBSCSI: {path: []string{"controller"}, defaultTolerations: []map[string]any{
+	AddonEBSCSI: {path: []string{"controller"}, platform: true, defaultTolerations: []map[string]any{
 		{"key": "CriticalAddonsOnly", "operator": "Exists"},
 		{"effect": "NoExecute", "operator": "Exists", "tolerationSeconds": 300},
 	}},
@@ -90,7 +96,14 @@ func TolerationsOf(taints []TaintPlan) []map[string]any {
 func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
 	pool := b.p.NodePool
 	placement, ok := addonPlacements[a.Name]
-	if !ok || len(pool.Labels) == 0 && len(pool.Taints) == 0 || len(b.p.ExternalNames) > 0 {
+	if !ok || len(b.p.ExternalNames) > 0 {
+		return a.ConfigurationValues
+	}
+	labels, taints := pool.Labels, pool.Taints
+	if placement.platform && b.p.Karpenter {
+		labels, taints = PoolLabels(PoolPlatform), []TaintPlan{PoolTaint(PoolPlatform)}
+	}
+	if len(labels) == 0 && len(taints) == 0 {
 		return a.ConfigurationValues
 	}
 	values := map[string]any{}
@@ -111,11 +124,11 @@ func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
 		}
 		target = child
 	}
-	if _, set := target["nodeSelector"]; !set && len(pool.Labels) > 0 {
-		target["nodeSelector"] = pool.Labels
+	if _, set := target["nodeSelector"]; !set && len(labels) > 0 {
+		target["nodeSelector"] = labels
 	}
-	if _, set := target["tolerations"]; !set && len(pool.Taints) > 0 {
-		target["tolerations"] = slices.Concat(TolerationsOf(pool.Taints), placement.defaultTolerations)
+	if _, set := target["tolerations"]; !set && len(taints) > 0 {
+		target["tolerations"] = slices.Concat(TolerationsOf(taints), placement.defaultTolerations)
 	}
 	out, err := json.Marshal(values) // keys sorted: the same plan renders the same string
 	if err != nil {

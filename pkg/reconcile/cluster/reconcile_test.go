@@ -159,8 +159,8 @@ func TestReconcileAppliesAgainAfterAFailedApply(t *testing.T) {
 		t.Errorf("node group not applied: %v", err)
 	}
 	usages := &protectionv1beta1.UsageList{}
-	if err := w.kube.List(ctx, usages, client.InNamespace(worldNS)); err != nil || len(usages.Items) != 14 {
-		t.Errorf("%d usages (%v), want 14 (12 + the 2 subnets)", len(usages.Items), err)
+	if err := w.kube.List(ctx, usages, client.InNamespace(worldNS)); err != nil || len(usages.Items) != 34 {
+		t.Errorf("%d usages (%v), want 34 (12 + the 2 subnets + 15 for Karpenter's node role, interruption queue and rules + 5 for the results bucket's ownership, public access, encryption, policy and lifecycle: each keeps the Bucket until its setting is gone)", len(usages.Items), err)
 	}
 }
 

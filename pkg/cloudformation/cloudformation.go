@@ -23,6 +23,17 @@ const Platform = "cluster-vending"
 // tenant role trusts (the platform's management role).
 const ParameterManagementRoleARN = "ManagementRoleArn"
 
+// ParameterServerPrincipalARN is the templates' parameter of the API
+// server's principal, which the role trusts next to the management role so
+// that the server can read the cluster results buckets (read-only; its
+// session is limited to that). Empty: the server has no AWS access and the
+// role trusts the management role only. ConditionHasServerPrincipal is the
+// template condition on it.
+const (
+	ParameterServerPrincipalARN = "ServerPrincipalArn"
+	ConditionHasServerPrincipal = "HasServerPrincipalArn"
+)
+
 // ParameterRoleName is the templates' parameter of the role's name (and
 // its policies' prefix): RoleName(role) by default, or
 // cluster-vending-<anything>-<role> for a stack of its own.
@@ -35,6 +46,19 @@ const ParameterRoleName = "RoleName"
 const (
 	ParameterExternalID    = "ExternalId"
 	ConditionHasExternalID = "HasExternalId"
+)
+
+// ParameterCreateSpotServiceLinkedRole is the provisioner template's
+// parameter that makes its stack create the account's EC2 Spot
+// service-linked role (AWSServiceRoleForEC2Spot), which Karpenter's Spot
+// nodes need: "true" or "false" (the default). CloudFormation cannot
+// create a resource that exists, and an account that ever used Spot has
+// this role, so it is off unless the account is known not to have it
+// (aws iam get-role --role-name AWSServiceRoleForEC2Spot).
+// ConditionCreateSpotServiceLinkedRole is the template condition on it.
+const (
+	ParameterCreateSpotServiceLinkedRole = "CreateSpotServiceLinkedRole"
+	ConditionCreateSpotServiceLinkedRole = "CreateSpotServiceLinkedRole"
 )
 
 // maxRoleName is IAM's limit on a role's name.

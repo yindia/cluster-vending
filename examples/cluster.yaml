@@ -49,23 +49,31 @@ spec:
     #   kmsKeyArn: arn:aws:kms:us-west-1:111122223333:key/00000000-0000-0000-0000-000000000000
     # An existing key is not created/deleted by the platform. Once enabled,
     # encryption cannot be disabled or switched to a different key.
-  defaultNodePool:           # platform workloads; user workloads run on Karpenter
-    instanceTypes: [t3.medium]
-    diskSizeGb: 30
-    scalingConfig: {minSize: 2, maxSize: 3}
-    capacityType: CAPACITY_TYPE_SPOT  # default; or CAPACITY_TYPE_SPOT
-    # instanceTypes: 1-20 unique AWS types. diskSizeGb: 20-16384 GiB.
-    # Changing instanceTypes, capacityType or diskSizeGb replaces the node group.
-    # Optional Kubernetes node labels (up to 64); separate from metadata cloud tags.
-    # labels: {workload: platform}
-    # Optional node taints (up to 50). Effects: TAINT_EFFECT_NO_SCHEDULE,
-    # TAINT_EFFECT_PREFER_NO_SCHEDULE, TAINT_EFFECT_NO_EXECUTE.
-    # taints:
-    #   - {key: workload, value: platform, effect: TAINT_EFFECT_NO_SCHEDULE}
-    # To set initial size, expand the existing scalingConfig mapping, for example:
-    # scalingConfig: {minSize: 2, maxSize: 3, desiredSize: 2}
-    # minSize: 0-1000; maxSize: 1-1000; minSize <= desiredSize <= maxSize.
-    # desiredSize is create-only, defaults to max(minSize, 1); ignored on update.
+  # The default node group is the platform's: it runs Karpenter and CoreDNS, is
+  # tainted and labelled for that, and has a fixed size. Omit defaultNodePool and
+  # the platform fills it; a request that changes its taints, labels or scaling
+  # is refused ("the default node group is managed by the platform").
+  # Your workloads run on Karpenter node groups, below.
+  # defaultNodePool:         # optional; instance types, capacity type and disk stay settable
+  #   instanceTypes: [t3.medium]    # 1-20 unique AWS types
+  #   scalingConfig: {minSize: 2, maxSize: 2}   # required when defaultNodePool is set; platform-managed
+  #   diskSizeGb: 30                # 20-16384 GiB
+  #   capacityType: CAPACITY_TYPE_ON_DEMAND
+  #   Changing instanceTypes, capacityType or diskSizeGb replaces the node group.
+  # nodeGroups: your Karpenter node groups (up to 20), each a NodePool with its own
+  # EC2NodeClass in the cluster. Updating compares the list whole (spec.node_groups):
+  # add, change or remove entries. Nodes get the label
+  # node.cluster-vending.io/pool=<name> next to your labels. Names are DNS labels
+  # of at most 40 characters, unique; platform, default and system are reserved.
+  # nodeGroups:
+  #   - name: batch
+  #     instanceFamilies: [m7i, c7g]         # or exact instanceTypes: [m7i.large]; empty: any
+  #     architectures: [ARCHITECTURE_AMD64, ARCHITECTURE_ARM64]   # empty: AMD64
+  #     capacityTypes: [CAPACITY_TYPE_ON_DEMAND, CAPACITY_TYPE_SPOT]   # empty: on-demand
+  #     labels: {team: data}                 # Kubernetes node labels (up to 64)
+  #     taints:                              # up to 50
+  #       - {key: dedicated, value: batch, effect: TAINT_EFFECT_NO_SCHEDULE}
+  #     limits: {cpu: 200, memoryGib: 800}   # ceiling of what the group may provision; optional, > 0
   releaseChannel: RELEASE_CHANNEL_ALPHA     # alpha: Kubernetes 1.37 | beta: 1.36 | stable: 1.35
   upgradeMode: UPGRADE_MODE_AUTOMATIC       # follow the channel's minor; MANUAL (default) never upgrades
   # Channels: RELEASE_CHANNEL_ALPHA, RELEASE_CHANNEL_BETA, RELEASE_CHANNEL_STABLE.
@@ -118,7 +126,7 @@ spec:
     # AWS_AUTHENTICATION_MODE_CONFIG_MAP (legacy; cannot use the access entries above).
     # Immutable extra control-plane security groups (up to 4); not created/deleted here.
     # additionalSecurityGroupIds: [sg-0123456789abcdef0]
-    # AWS settings for the defaultNodePool, separate from the common node-pool block:
+    # AWS settings for the default node group, separate from the common node-pool block:
     # defaultNodePool:
     #   amiType: AWS_AMI_TYPE_AL2023_X86_64_STANDARD  # default
     #   # Option A: existing launch template (id OR name, plus numeric version).

@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
@@ -84,13 +85,13 @@ function Catalog() {
     </HStack>
     {query.error && <Banner status="error" title="Catalog could not be loaded" description={query.error} />}
     {query.loading && <Text role="status">Loading catalog…</Text>}
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Component catalog filters">
       <TextInput label="Search component catalog" type="search" placeholder="Name, description, dependency or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} hasClear autoComplete="off" width="min(100%, 24rem)" />
       <Selector label="Catalog management" value={management} onChange={(value) => { setManagement(value); setPage(1); }} options={[{ value: "all", label: "All management" }, ...Object.values(ComponentManagement).filter((value) => typeof value === "number").map((value) => ({ value: String(value), label: enumLabel(ComponentManagement[value], value) }))]} />
       <Selector label="Catalog provider" value={provider} onChange={(value) => { setProvider(value); setPage(1); }} options={[{ value: "all", label: "All providers" }, ...Object.values(CloudProvider).filter((value) => typeof value === "number").map((value) => ({ value: String(value), label: enumLabel(CloudProvider[value], value) }))]} />
       <Selector label="Catalog availability" value={availability} onChange={(value) => { setAvailability(value); setPage(1); }} options={[{ value: "all", label: "All availability" }, { value: "available", label: "Available" }, { value: "unavailable", label: "Unavailable" }]} />
       {hasFilters && <Button label="Clear catalog filters" variant="ghost" onClick={() => { setSearch(""); setManagement("all"); setProvider("all"); setAvailability("all"); setPage(1); }} />}
-    </HStack>
+    </FilterRow>
     {query.data && <Text role="status" color="secondary">{filtered.length} of {definitions.length} catalog components{query.error ? " · Last successful load; refresh failed" : ""}</Text>}
     {query.data && <Table aria-label="Component catalog" idKey="id" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} data={visible.map(item => ({ id: item.name, item }))} columns={[
       { key: "name", header: "Component", width: proportional(2, { minWidth: 80 }), renderCell: ({ item }) => <HStack gap={2} vAlign="center"><Link href={componentHref(item.name)}>{item.name}</Link><CopyButton value={item.name} label="Component name" /></HStack> },

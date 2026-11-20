@@ -160,7 +160,9 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "tenant id 57 chars", wantErr: true, req: mutate(func(_ *spec, r *req) { r.TenantId = strings.Repeat("a", 57) })},
 
 		{name: "new cluster without network", wantErr: true, req: mutate(func(s *spec, _ *req) { s.Network = nil })},
-		{name: "new cluster without node pool", wantErr: true, req: mutate(func(s *spec, _ *req) { s.DefaultNodePool = nil })},
+		// default_node_pool is optional since the Karpenter-only layout: the
+		// platform fills the default managed node group.
+		{name: "new cluster without node pool is filled by the platform", req: mutate(func(s *spec, _ *req) { s.DefaultNodePool = nil })},
 
 		// Scaling: desired_size is create-only and optional.
 		{name: "desired size omitted", req: mutate(func(s *spec, _ *req) {

@@ -355,8 +355,8 @@ spec:
     serviceMaxConcurrentReconciles: 3
 
     # The cluster's default node pool: its labels, and a toleration per taint.
-    nodeSelector: ${system.nodeSelector}
-    tolerations: ${system.tolerations}
+    nodeSelector: ${platform.nodeSelector}
+    tolerations: ${platform.tolerations}
 
     # Controller feature gates (true/false). Gates that need IAM permissions
     # the platform policy does not grant (GlobalAcceleratorController,

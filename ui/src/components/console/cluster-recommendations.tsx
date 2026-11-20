@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 
 import { RefreshButton } from "./refresh-button";
@@ -182,7 +183,7 @@ function RecommendationsInventory({ clusterId }: { clusterId: string }) {
       </>}
       {query.data.total !== rows.length && <Banner status="warning" title="Stored results changed during pagination" description={`The first page reported ${query.data.total} matching containers; ${rows.length} rows were loaded. Refresh to read the stored results again.`} />}
     </>}
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Recommendation filters">
       <TextInput label="Search recommendations" type="search" value={search} onChange={(value) => { setSearch(value); setPage(1); }} placeholder="Namespace, kind, workload or container" hasClear autoComplete="off" />
       <Selector label="Namespace" hasSearch value={namespace} onChange={(value) => { setNamespace(value); setPage(1); }} options={[
         { value: "", label: "All loaded namespaces" }, ...namespaces.filter(Boolean).map((value) => ({ value, label: value })),
@@ -197,7 +198,7 @@ function RecommendationsInventory({ clusterId }: { clusterId: string }) {
       ]} />
       <CheckboxInput label="Only changes ≥10%" description="Uses the server's request-difference threshold." value={onlyChanges} onChange={(value) => { setOnlyChanges(value); setNamespace(""); setPage(1); setSelected(undefined); }} />
       <Button label="Clear recommendation filters" variant="ghost" onClick={() => { setSearch(""); setNamespace(""); setKind("scope:all"); setSource("all"); setOnlyChanges(false); setPage(1); setSelected(undefined); }} />
-    </HStack>
+    </FilterRow>
     <Text type="supporting">Namespace and kind options reflect loaded results{onlyChanges ? " that meet the server's change threshold" : ""}. Insufficient data and no-data rows do not carry recommendations.</Text>
     {query.data && <VStack gap={4}>
       <Text role="status" type="supporting">{filtered.length} of {rows.length} loaded container rows{summary?.truncated ? " · Truncated inventory" : ""}</Text>

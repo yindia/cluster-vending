@@ -378,7 +378,25 @@ type ComponentStatus struct {
 	Failures  int32  `protobuf:"varint,14,opt,name=failures,proto3" json:"failures,omitempty"`
 	// How many times the platform recovered a stuck Helm release of the
 	// component at this version (at most three).
-	Recoveries    int32 `protobuf:"varint,15,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
+	Recoveries int32 `protobuf:"varint,15,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
+	// Helm's side of the component's chart: the deployed chart version, its
+	// revision and the digest of the Release spec the platform applied.
+	ChartVersion string `protobuf:"bytes,16,opt,name=chart_version,json=chartVersion,proto3" json:"chart_version,omitempty"`
+	Revision     int32  `protobuf:"varint,17,opt,name=revision,proto3" json:"revision,omitempty"`
+	Digest       string `protobuf:"bytes,18,opt,name=digest,proto3" json:"digest,omitempty"`
+	// Backoff and give-up (see PlatformComponent): failed attempts, failures
+	// in a row that count (release errors only), the next retry, the class
+	// of the last error (transient, chart, release), and the last recovery
+	// of a stuck release.
+	Attempts        int32                  `protobuf:"varint,19,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	CountedFailures int32                  `protobuf:"varint,20,opt,name=counted_failures,json=countedFailures,proto3" json:"counted_failures,omitempty"`
+	NextRetryAt     *timestamppb.Timestamp `protobuf:"bytes,21,opt,name=next_retry_at,json=nextRetryAt,proto3" json:"next_retry_at,omitempty"`
+	LastErrorClass  string                 `protobuf:"bytes,22,opt,name=last_error_class,json=lastErrorClass,proto3" json:"last_error_class,omitempty"`
+	LastRecovery    string                 `protobuf:"bytes,23,opt,name=last_recovery,json=lastRecovery,proto3" json:"last_recovery,omitempty"`
+	LastRecoveryAt  *timestamppb.Timestamp `protobuf:"bytes,24,opt,name=last_recovery_at,json=lastRecoveryAt,proto3" json:"last_recovery_at,omitempty"`
+	// The Release already had this version and these values when the pass
+	// looked: nothing was written for it.
+	Unchanged     bool `protobuf:"varint,25,opt,name=unchanged,proto3" json:"unchanged,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -516,6 +534,76 @@ func (x *ComponentStatus) GetRecoveries() int32 {
 		return x.Recoveries
 	}
 	return 0
+}
+
+func (x *ComponentStatus) GetChartVersion() string {
+	if x != nil {
+		return x.ChartVersion
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetRevision() int32 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ComponentStatus) GetDigest() string {
+	if x != nil {
+		return x.Digest
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetAttempts() int32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *ComponentStatus) GetCountedFailures() int32 {
+	if x != nil {
+		return x.CountedFailures
+	}
+	return 0
+}
+
+func (x *ComponentStatus) GetNextRetryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextRetryAt
+	}
+	return nil
+}
+
+func (x *ComponentStatus) GetLastErrorClass() string {
+	if x != nil {
+		return x.LastErrorClass
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetLastRecovery() string {
+	if x != nil {
+		return x.LastRecovery
+	}
+	return ""
+}
+
+func (x *ComponentStatus) GetLastRecoveryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastRecoveryAt
+	}
+	return nil
+}
+
+func (x *ComponentStatus) GetUnchanged() bool {
+	if x != nil {
+		return x.Unchanged
+	}
+	return false
 }
 
 // ComponentDefinition is what tenants see of a catalog entry. How the
@@ -718,7 +806,7 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\n" +
 	"management\x18\n" +
 	" \x01(\x0e2\x1d.cloud.v1.ComponentManagementR\n" +
-	"management\"\xd8\x04\n" +
+	"management\"\xeb\a\n" +
 	"\x0fComponentStatus\x12.\n" +
 	"\x05phase\x18\x01 \x01(\x0e2\x18.cloud.v1.ComponentPhaseR\x05phase\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
@@ -741,7 +829,17 @@ const file_cloud_v1_component_proto_rawDesc = "" +
 	"\bfailures\x18\x0e \x01(\x05R\bfailures\x12\x1e\n" +
 	"\n" +
 	"recoveries\x18\x0f \x01(\x05R\n" +
-	"recoveries\"\x81\x06\n" +
+	"recoveries\x12#\n" +
+	"\rchart_version\x18\x10 \x01(\tR\fchartVersion\x12\x1a\n" +
+	"\brevision\x18\x11 \x01(\x05R\brevision\x12\x16\n" +
+	"\x06digest\x18\x12 \x01(\tR\x06digest\x12\x1a\n" +
+	"\battempts\x18\x13 \x01(\x05R\battempts\x12)\n" +
+	"\x10counted_failures\x18\x14 \x01(\x05R\x0fcountedFailures\x12>\n" +
+	"\rnext_retry_at\x18\x15 \x01(\v2\x1a.google.protobuf.TimestampR\vnextRetryAt\x12(\n" +
+	"\x10last_error_class\x18\x16 \x01(\tR\x0elastErrorClass\x12#\n" +
+	"\rlast_recovery\x18\x17 \x01(\tR\flastRecovery\x12D\n" +
+	"\x10last_recovery_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x0elastRecoveryAt\x12\x1c\n" +
+	"\tunchanged\x18\x19 \x01(\bR\tunchanged\"\x81\x06\n" +
 	"\x13ComponentDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1a\n" +
@@ -818,17 +916,19 @@ var file_cloud_v1_component_proto_depIdxs = []int32{
 	8,  // 4: cloud.v1.ComponentStatus.conditions:type_name -> cloud.v1.Condition
 	7,  // 5: cloud.v1.ComponentStatus.effective_values:type_name -> google.protobuf.Struct
 	9,  // 6: cloud.v1.ComponentStatus.since:type_name -> google.protobuf.Timestamp
-	7,  // 7: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
-	6,  // 8: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
-	7,  // 9: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
-	0,  // 10: cloud.v1.ComponentDefinition.management:type_name -> cloud.v1.ComponentManagement
-	1,  // 11: cloud.v1.ComponentDefinition.provider:type_name -> cloud.v1.CloudProvider
-	10, // 12: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	9,  // 7: cloud.v1.ComponentStatus.next_retry_at:type_name -> google.protobuf.Timestamp
+	9,  // 8: cloud.v1.ComponentStatus.last_recovery_at:type_name -> google.protobuf.Timestamp
+	7,  // 9: cloud.v1.ComponentDefinition.values_schema:type_name -> google.protobuf.Struct
+	6,  // 10: cloud.v1.ComponentDefinition.versions:type_name -> cloud.v1.ComponentDefinition.VersionsEntry
+	7,  // 11: cloud.v1.ComponentDefinition.platform_values:type_name -> google.protobuf.Struct
+	0,  // 12: cloud.v1.ComponentDefinition.management:type_name -> cloud.v1.ComponentManagement
+	1,  // 13: cloud.v1.ComponentDefinition.provider:type_name -> cloud.v1.CloudProvider
+	10, // 14: cloud.v1.ComponentDefinition.cloud_resources:type_name -> cloud.v1.ComponentCloudResources
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_component_proto_init() }

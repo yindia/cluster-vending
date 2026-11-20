@@ -140,14 +140,17 @@ and `--log-level`, and only these:
 | `--aws-management-role-arn` | required: the IAM role the Crossplane AWS providers run as (IRSA); the management account is taken from it |
 | `--install-providers` | create the providers, provider-helm and their runtime config when missing |
 | `--install-catalog` | create the shipped component definitions (`pkg/catalog/definitions`, [catalog.md](catalog.md)) that are missing; existing ones are never changed |
-| `--recover-stuck-releases` | default `true`: recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes) by removing the Helm record of the stuck revision in the workload cluster, at most 3 times per component version ([catalog.md](catalog.md), "When a component fails"); `false` leaves it failed for a person |
+| `--recover-stuck-releases` | default `true`: recover a platform or tenant component whose Helm release is stuck (pending or uninstalling for its chart's install timeout plus 2 minutes): with Helm, in the workload cluster, roll the release back to its last deployed revision (uninstall it when none was deployed) and delete a failed hook Job it left behind, at most 3 times per component version ([catalog.md](catalog.md), "When a component fails"); `false` leaves it failed for a person |
+| `--helm-backoff-max` | default `30m`, at least `1m`: the longest pause between two attempts at a Helm release that failed to install or upgrade. The pause starts at 1m, doubles, and has a little jitter; the Release is paused with `crossplane.io/paused` and the platform's marker meanwhile |
+| `--helm-max-failures` | default `5`: how many release failures in a row (a hook failed, the rollout timed out, invalid values; not transient API errors, not chart-fetch errors) make a component Failed, with a `HelmReleaseFailed` event; its retries then stay at `--helm-backoff-max` until its version or values change or `cluster retry --component` |
 | `--recommendations` | default `true`: every five minutes, sample each running cluster for resource recommendations (read-only: workloads, metrics-server usage, the cluster's own Vertical Pod Autoscalers) and record a week of usage in the tenant namespace ([recommendations.md](recommendations.md)); `false` records nothing |
 | `--reconcile-workers` | default `8`: how many cloud accounts, networks and clusters of each kind are reconciled at once; one object is never reconciled twice at the same time. The release, catalog, deprecation and recommendation controllers keep one worker |
 | `--automatic-upgrades` | default `false`: the rollout of each channel's Kubernetes minor is planned and reported on the ReleaseChannel and each cluster (`status.rollout`) only; no cluster is upgraded. `true` upgrades clusters with `upgradeMode: Automatic`, tier by tier; **irreversible** (EKS cannot downgrade). See "Rollout of a channel's Kubernetes minor" |
 | `--upgrade-timeout` | default `90m`: how long one step of an automatic upgrade (control plane, node groups, add-ons, platform components, tenant components) may go without progress before the upgrade counts as failed (`TimedOut`, against the tier's `maxFailed`). A long upgrade that keeps moving is not timed out |
-| `--teardown-timeout` | default `15m`: how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted before it goes on (see Deletion) |
+| `--teardown-timeout` | default `15m`: how long a cluster's deletion waits for the load balancers, and for Karpenter to terminate its nodes, before it goes on (see Deletion) |
 | `--provider-credentials-secret` | `<namespace>/<name>[:<key>]`: the providers authenticate with this Secret instead of IRSA (local kind only) |
 | `--skip-tenant-role` | local testing only, with `--provider-credentials-secret`: act with the Secret's keys directly instead of assuming each account's tenant role |
+| `--aws-region`, `--aws-source-role-arn`, `--aws-external-id` | how the controller reaches a tenant's account, the same three settings as the API server's: the AWS SDK's default region, an optional role to assume with the controller's own credentials before the tenant role (own credentials, source role, tenant role), and an optional external ID for a tenant role whose account has none of its own. The controller's own credentials are never a setting (IRSA in production; `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment locally). The same access writes each cluster's scan results to its S3 results bucket (deprecations, recommendations, policy violations and events) and empties that bucket when the cluster is deleted ([design/cluster-results-s3.md](design/cluster-results-s3.md)) |
 
 It installs the CRDs of the three kinds and the Crossplane AWS providers
 (unless `--install-providers=false`) and waits for their kinds. The API
@@ -193,10 +196,16 @@ objects take their place (docs/design/rollouts.md).
 The controller is the only command that looks at AWS: it discovers the VPC
 or EKS cluster of an import, checks a new cluster's name against EKS,
 resolves the Kubernetes and add-on versions EKS offers, and checks that it
-can reach and act in each account (the access check, below). The API server makes
-no AWS call and has no AWS credentials; its one AWS setting,
-`aws-management-role-arn`, is only handed to the tenant creating the role
-(`account create` prints it, [onboarding.md](onboarding.md)).
+can reach and act in each account (the access check, below). The API server
+makes one kind of AWS call, read-only: it reads the scan results and the node
+lists of the node groups from each cluster's results bucket, through the
+tenant role, with the AWS SDK's default credentials (IRSA in production) and
+a session limited to reading `cv-*` buckets
+([design/cluster-results-s3.md](design/cluster-results-s3.md)). It creates,
+changes and deletes nothing in AWS. Its settings are `aws-region`,
+`aws-source-role-arn` and `aws-external-id` (the same three as the
+controller's), and `aws-management-role-arn`, which is handed to the tenant
+creating the role (`account create` prints it, [onboarding.md](onboarding.md)).
 
 There is one rule, for the controller's lookups and for the Crossplane
 providers alike:
@@ -263,7 +272,9 @@ allow the IAM user or role the keys belong to.
    uncomment `provider-credentials-secret: crossplane-system/aws-local-credentials`.
 5. `make run-controller` in the shell with the keys.
 6. `make run` in another terminal: the API server (`hack/config.local.yaml`,
-   the Kubernetes store, no AWS setting).
+   the Kubernetes store; with the same AWS keys in its environment it reads
+   results buckets, without them it answers with a "results unavailable"
+   notice).
 
 With the Secret set, every ProviderConfig the platform writes is:
 
@@ -415,10 +426,15 @@ The plan (`pkg/upgrade`):
   upgrade ended. More than `spec.policy.maxFailed` failures in a tier halt the
   channel (`rollout.halted`, a `RolloutHalted` event).
 - Before a cluster starts, its own gates are checked: Manual mode, paused,
-  frozen (`admin freeze`), not Ready, platform components not Ready, no
+  frozen (`admin freeze`), not Ready (every resource, the EKS add-ons
+  included), platform components not Ready, tenant components not Ready
+  (`TENANT_COMPONENTS_NOT_READY`; one being removed does not count), no
   deprecation scan for the target minor or removed APIs in use, outside its
   maintenance window. A cluster blocked by its gates is listed in
   `rollout.blocked` with the first reason and does not hold the rollout back.
+  The controller checks readiness again against the stored cluster right
+  before it writes the new version, so a plan read from a cache that is
+  behind cannot start an upgrade on a cluster that is not ready.
 - `spec.paused` on the channel: the plan is reported, nothing starts.
 
 ```sh
@@ -480,6 +496,12 @@ the one that applied it (the cache may still hold the old state):
 1. **Control plane**: EKS runs the new minor (`atProvider.version`).
 2. **Node groups**: each runs the new minor, Ready, provider caught up. Until
    then the node groups render at the version the control plane reports.
+   Once the control plane is done the Karpenter EC2NodeClasses' AMI pin
+   moves to the target minor's (`nodeAmiPin` of the release); Karpenter
+   drift replaces the nodes. The step is settled when every NodeClaim has a
+   node and every Karpenter node runs the target kubelet minor (read through
+   the workload kubeconfig; a read that fails or is cut short keeps the step
+   where it is). The timeout and observation rules are the step's own.
 3. **Add-ons**: the add-ons take the versions EKS recommends for the new
    minor (always read from AWS, `DescribeAddonVersions`, never from
    `release.yaml`; a pinned add-on keeps its pin). Until this step they keep
@@ -526,6 +548,30 @@ cluster-vending cluster get --id <cluster>          # Rollout: 1.36 → 1.37 via
 cluster-vending cluster events --id <cluster>       # what happened, newest first
 cluster-vending admin channel get --id alpha        # the channel's rollout plan, tier by tier (-o wide: every cluster)
 ```
+
+### Helm operations
+
+Every Helm operation on a workload cluster goes through provider-helm and is
+managed by the controller around it ([design/helm-reliability.md](design/helm-reliability.md)):
+
+- Releases are rendered with `wait: true`, the definition's
+  `install.timeout` and `maxHistory: 5`, and carry a digest of chart,
+  version and values (`cloud.cluster-vending.io/helm-digest`); one whose
+  digest is the live one is not written. A Kubernetes upgrade where no
+  component changes reports the component steps as skipped
+  (`status.upgrade.skipped_steps`).
+- At most one Release of a cluster installs or upgrades at a time, in
+  `sequence`, then `requires` order. The controller lists a cluster's own
+  Releases once per pass (label selector); its work per pass is the
+  cluster's releases, never the fleet's.
+- A failed attempt pauses its Release and lifts the pause after an
+  exponential backoff (`--helm-backoff-max`); transient errors are retried
+  quietly and never counted; after `--helm-max-failures` counted failures the
+  component is Failed (`HelmReleaseFailed`). A cluster is looked at again when
+  a platform component's backoff ends.
+- A stuck release is rolled back or uninstalled with the Helm SDK through the
+  workload kubeconfig (`--recover-stuck-releases`), each time an event and
+  counted.
 
 ### Component upgrades
 
@@ -781,6 +827,19 @@ it is not applied at once: it rolls out like a Kubernetes upgrade.
   `status.observedGeneration` the row's generation is moved on and the
   reconciler applies the edit. The edit is applied as written: only the
   kinds' own validation rules check it, not the API's update checks.
+- **Karpenter node groups.** After the platform components, and only while
+  the Karpenter component is READY, the cluster pass server-side applies
+  (field manager `cluster-vending`, forced) the EC2NodeClass and NodePool
+  `platform` and one pair per `spec.node_groups` into the workload cluster
+  (`Deps.NodeGroupClients`, the kubeconfig the teardown uses), labelled
+  `cloud.cluster-vending.io/managed-by=platform`. Every pass puts them back;
+  a group removed from the spec is deleted (only labelled objects, pool
+  before class). The NodePools' `Ready` condition and node counts go into
+  `status.node_groups` (platform first). Reads and applies are bounded (10s
+  per call, 45s per pass, lists of at most 500) and never fail the pass: an
+  error is the group's message, the last good phase stays, missing Karpenter
+  CRDs are PENDING. The other platform components wait for the platform node
+  group to be READY (`sequence`, docs/catalog.md).
 - **Requeue.** 5s while a generation is not applied in full, 20s while the
   cloud works on it, 1m for an import that is only observed, 30s after a
   failed pass (and while a cluster's recorded object is missing), and a 10m
@@ -825,30 +884,61 @@ it is not applied at once: it rolls out like a Kubernetes upgrade.
   cloud resources pass by pass; when it removes the row, the store drops the
   finalizer and the object goes. A CloudAccount loses its ProviderConfig
   (the tenant namespace stays) and then its finalizer.
-- **Cluster teardown, first.** A cluster's controllers make cloud
-  resources the platform never recorded: the AWS Load Balancer Controller
-  makes a load balancer (and its security groups and network interfaces)
-  for every Service of type LoadBalancer and ALB Ingress, Karpenter makes
-  EC2 instances, launch templates and instance profiles. Uninstalling those
-  controllers first would leave them in the account, and a left load
-  balancer keeps the network's VPC from being deleted (AWS:
-  `DependencyViolation`). So a cluster's deletion starts, before any
-  component is uninstalled, by deleting in the workload cluster (with its
-  kubeconfig): the ALB Ingresses (the `alb` class, any IngressClass of
-  `ingress.k8s.aws/alb`, the old `kubernetes.io/ingress.class: alb`
-  annotation) and every Service of type LoadBalancer; once they are gone,
-  Karpenter's NodePools and NodeClaims; once those are gone, its
-  EC2NodeClasses. Each stage waits until the controllers have removed what
-  they made (the objects are gone). Meanwhile the cluster's message says
-  what it waits for, e.g. `deleting; deleting 1 load balancer (Service
-  istio-system/istio-ingressgateway) before the platform components are
-  uninstalled`, and `status.teardown` records it.
-  - **Timeout:** after `--teardown-timeout` (default 15m) the deletion goes
-    on, with a `TeardownTimedOut` warning listing what is left.
+- **Cluster deletion runs in the reverse of its creation**, in seven stages
+  (`driveDelete`, `delete_stage.go`); a stage starts only when the one before
+  it is fully gone, and the cluster's message names the current stage and
+  what it waits for, e.g. `deleting; stage 3 of 7, platform components:
+  uninstalling sequence 100; base waits for the components that require it;
+  mesh: waiting for Release prod-1a2b3c4d-mesh to be uninstalled (Helm state
+  uninstalling); next sequence 10`.
+  1. **Load balancers** in the workload cluster, while the AWS Load Balancer
+     Controller still runs: the ALB Ingresses (the `alb` class, any
+     IngressClass of `ingress.k8s.aws/alb`, the old
+     `kubernetes.io/ingress.class: alb` annotation) and every Service of type
+     LoadBalancer. A load balancer left behind keeps the network's VPC from
+     being deleted (AWS: `DependencyViolation`). `status.teardown` records
+     this stage.
+  2. **Tenant components**, a component after those that require it.
+  3. **Platform components above sequence 0**, highest sequence first, and
+     within a sequence a component after those that require it; each is
+     fully uninstalled (its Helm Releases gone, then its IAM objects gone)
+     before the next lower sequence starts.
+  4. **Node groups**: Karpenter's user NodePools, then the platform NodePool,
+     then the NodeClaims left (Karpenter terminates the nodes), then the
+     EC2NodeClasses (Karpenter removes their instance profiles). Reads are
+     one page of 500 per kind and bounded by a deadline per pass.
+  5. **Karpenter** (sequence 0): its chart and IAM role, then its
+     interruption queue, queue policy, EventBridge rules and targets, and the
+     `karpenter-node` role with its policy attachments and access entry. The
+     Usages that keep the node role until the EKS cluster is gone are
+     released: its nodes are gone.
+  6. **EKS add-ons** with their pod identity associations, roles and
+     policies.
+  7. **The rest**, ordered by the Usages as before: the default managed node
+     group, the EKS cluster, the cluster's IAM, the results bucket (emptied
+     first, every pass until the Bucket is gone), then the unrecorded
+     leftovers, the subnet tags and the records.
+  - **Helm reliability never blocks an uninstall.** Deletion lifts the
+    platform's own backoff pause (and the give-up mark) on a Release it
+    uninstalls; the one-operation gate only governs writes of a Release's
+    spec and plays no part. A Release paused by anyone else (an operator, a
+    freeze) is not touched: the message says `Release X is paused
+    (crossplane.io/paused) by an operator or a freeze, so it is not
+    uninstalled; unpause it to go on`, and the stage waits. A Release stuck
+    in `uninstalling` or a `pending-*` state for its timeout plus two
+    minutes is recovered like a stuck install (`--recover-stuck-releases`,
+    counted in `recoveries`).
+  - **Timeout:** the load balancer stage ends after `--teardown-timeout`
+    (default 15m) from its start, the node group stage after the same time
+    from the request to delete (or from the first time the API could not be
+    reached; a restart counts again), each with a `TeardownTimedOut` warning
+    listing what is left; the deletion goes on.
   - **Skipped**, with a `TeardownSkipped` warning, when the deletion is
     forced (`cluster delete --force`) or the cluster's API cannot be
-    reached (its EKS cluster is not ACTIVE): the load balancers and nodes
-    may then be left, and the network's deletion waits on them.
+    reached (its EKS cluster is not ACTIVE, no kubeconfig): the load
+    balancers and nodes may then be left, and the network's deletion waits on
+    them. The Helm Releases are then let go without an uninstall and the
+    other stages still run in order.
   - **Not deleted: PersistentVolumeClaims.** Their EBS volumes block
     nothing (they are not in the VPC), and deleting a claim deletes data;
     volumes of a `Delete` reclaim policy are left as an EKS deletion leaves

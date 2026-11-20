@@ -92,6 +92,11 @@ type KubernetesRelease struct {
 	// EndOfSupport is when this minor stops being supported.
 	// +required
 	EndOfSupport metav1.Time `json:"endOfSupport"`
+	// NodeAMIPin is the AL2023 AMI release the platform's Karpenter
+	// EC2NodeClasses pin on this minor (alias al2023@<pin>). Unset: latest.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^v[0-9]{8}$`
+	NodeAMIPin string `json:"nodeAmiPin,omitempty"`
 	// Components the platform installs on this minor, at these versions.
 	// +optional
 	// +listType=map

@@ -1495,6 +1495,44 @@ func (c *MockClustersSetRecommendationsCall) DoAndReturn(f func(context.Context,
 	return c
 }
 
+// SetResultRef mocks base method.
+func (m *MockClusters) SetResultRef(ctx context.Context, tenantID, id string, ref model.ResultRef) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetResultRef", ctx, tenantID, id, ref)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetResultRef indicates an expected call of SetResultRef.
+func (mr *MockClustersMockRecorder) SetResultRef(ctx, tenantID, id, ref any) *MockClustersSetResultRefCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetResultRef", reflect.TypeOf((*MockClusters)(nil).SetResultRef), ctx, tenantID, id, ref)
+	return &MockClustersSetResultRefCall{Call: call}
+}
+
+// MockClustersSetResultRefCall wrap *gomock.Call
+type MockClustersSetResultRefCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersSetResultRefCall) Return(arg0 error) *MockClustersSetResultRefCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersSetResultRefCall) Do(f func(context.Context, string, string, model.ResultRef) error) *MockClustersSetResultRefCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersSetResultRefCall) DoAndReturn(f func(context.Context, string, string, model.ResultRef) error) *MockClustersSetResultRefCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetRollout mocks base method.
 func (m *MockClusters) SetRollout(ctx context.Context, tenantID, id string, rollout model.JSON) error {
 	m.ctrl.T.Helper()

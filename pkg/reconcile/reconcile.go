@@ -19,6 +19,7 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/results"
 
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 )
@@ -26,6 +27,10 @@ import (
 // Deps are what reconciling works with: the repository backed by Kubernetes
 // custom resources, the management cluster where Crossplane managed resources
 // are created, and how tenant cloud accounts are reached.
+// ResultsS3 makes the S3 client that reads and writes the results buckets of
+// an account, in a region.
+type ResultsS3 func(a awscloud.Access, region string) (results.S3API, error)
+
 type Deps struct {
 	// ManagedResourceKinds lists the managed kinds supplied by active provider adapters.
 	// Nil preserves the current AWS installation; a future GCP adapter can
@@ -62,6 +67,11 @@ type Deps struct {
 	// the platform needs in an account (account.Reconciler.VerifyAccess);
 	// nil: accounts are not checked (tests, the API handlers).
 	AWSAccessCheck awscloud.AccessChecker
+	// ResultsS3 makes the S3 client of an account's tenant role in a region
+	// (Deps.AWSAccess gives the access): the scanners write the cluster's
+	// results bucket with it and a cluster's deletion empties it. Nil: no
+	// results are written to S3 and a bucket is not emptied (tests).
+	ResultsS3 ResultsS3
 	// ProviderCredentials, when set, is the Secret every account's
 	// ProviderConfig authenticates the Crossplane AWS providers with,
 	// instead of IRSA (a management cluster without IRSA, such as a local
@@ -89,6 +99,10 @@ type Deps struct {
 	// component's Helm release that is stuck (RecoverStuckReleases). Nil:
 	// nothing is recovered.
 	Workloads Workloads
+	// NodeGroupClients reaches workload clusters to apply their Karpenter
+	// node groups (EC2NodeClasses and NodePools) and read their status.
+	// Nil: no node group is applied or reported.
+	NodeGroupClients WorkloadClients
 	// SubTenantWorkloads opens provider-neutral workload clients using the parent
 	// cluster's namespaced kubeconfig reference. Only the controller has this.
 	SubTenantWorkloads SubTenantWorkloads
@@ -96,12 +110,26 @@ type Deps struct {
 	// record of a stuck revision in a workload cluster, so provider-helm
 	// can install again.
 	RecoverStuckReleases bool
+	// HelmBackoffMax caps the pause between two attempts at a failed
+	// Helm release (1m, 2m, 4m, ...); 0: helmrel.DefaultBackoffMax.
+	// HelmMaxFailures is how many failures in a row that count (release
+	// errors, not transient ones) make a component FAILED; 0:
+	// helmrel.DefaultMaxFailures.
+	HelmBackoffMax  time.Duration
+	HelmMaxFailures int
 	// Teardowns reaches workload clusters to delete, first in a cluster's
 	// deletion, what their controllers made in the cloud (load
 	// balancers, Karpenter's nodes). Nil: no teardown.
 	Teardowns Teardowns
 	// TeardownTimeout bounds that teardown; 0 is DefaultTeardownTimeout.
 	TeardownTimeout time.Duration
+	// NodeGroupInstanceFamilies and NodeGroupInstanceTypes are the platform
+	// admin's allowlist of node group machines (--node-group-instance-
+	// families, --node-group-instance-types); empty: no restriction. The
+	// API server refuses user groups outside it. The platform node group
+	// is the platform's own choice (crossplaneaws.PlatformInstanceFamilies)
+	// and ignores it. Set both to the same values.
+	NodeGroupInstanceFamilies, NodeGroupInstanceTypes []string
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool

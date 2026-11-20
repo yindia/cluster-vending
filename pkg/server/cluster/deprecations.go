@@ -5,10 +5,13 @@ import (
 	"strconv"
 
 	"connectrpc.com/connect/v2"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
+	"github.com/yindia/cluster-vending/pkg/results"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -48,6 +51,16 @@ func (s *ClusterService) ListClusterDeprecations(ctx context.Context, req *cloud
 		return nil, err
 	}
 	d := deprecations(row)
+	// The full scan is in the cluster's results bucket once a scanner wrote
+	// it there; the Cluster object then has its counts only.
+	fromBucket := &cloudv1.ClusterDeprecations{}
+	bucket := s.readResult(ctx, row, results.Deprecations, fromBucket)
+	switch {
+	case bucket.Used:
+		d = fromBucket
+	case bucket.Notice != "":
+		d = withDeprecationNotice(d, row.ResultRef(string(results.Deprecations)), bucket.Notice)
+	}
 	if d == nil {
 		return &cloudv1.ListClusterDeprecationsResponse{}, nil
 	}
@@ -61,7 +74,11 @@ func (s *ClusterService) ListClusterDeprecations(ctx context.Context, req *cloud
 		}
 	}
 	start := 0
-	if token := req.GetPageToken(); token != "" {
+	if bucket.Used {
+		if start, err = etagOffset(bucket.ETag, req.GetPageToken(), len(findings)); err != nil {
+			return nil, err
+		}
+	} else if token := req.GetPageToken(); token != "" {
 		if start, err = strconv.Atoi(token); err != nil || start > len(findings) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, "page_token is not a token of this list")
 		}
@@ -75,6 +92,31 @@ func (s *ClusterService) ListClusterDeprecations(ctx context.Context, req *cloud
 		ScannedAt: d.GetScannedAt(), Total: d.GetTotal(), Removed: d.GetRemoved(), Truncated: d.GetTruncated(), Error: d.GetError()}
 	if end < len(findings) {
 		out.NextPageToken = strconv.Itoa(end)
+		if bucket.Used {
+			out.NextPageToken = etagToken(bucket.ETag, end)
+		}
 	}
 	return out, nil
+}
+
+// withDeprecationNotice is the scan of the Cluster object (nil: none) with a
+// coverage notice in its error. The counts are the Cluster's, else those of
+// the summary ref names, so the answer says how much there is even when it
+// cannot list it.
+func withDeprecationNotice(d *cloudv1.ClusterDeprecations, ref *model.ResultRef, notice string) *cloudv1.ClusterDeprecations {
+	out := &cloudv1.ClusterDeprecations{}
+	if d != nil {
+		out = proto.CloneOf(d)
+	}
+	if ref != nil && out.Total == 0 && out.Removed == 0 && out.ScannedAt == nil {
+		out.Total, out.Removed, out.Truncated = ref.Total, ref.Removed, ref.Truncated
+		if !ref.CollectedAt.IsZero() {
+			out.ScannedAt = timestamppb.New(ref.CollectedAt)
+		}
+	}
+	if out.Error != "" {
+		notice = out.Error + "; " + notice
+	}
+	out.Error = notice
+	return out
 }

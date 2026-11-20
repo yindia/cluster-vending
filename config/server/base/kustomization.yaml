@@ -31,6 +31,9 @@ configMapGenerator:
   - CV_HTTP_ADDR=:8080
   - CV_LOG_FORMAT=json
   - CV_LOG_LEVEL=info
+  # Machines user node groups may use (the controller needs the same
+  # values: ../../manager). Empty: no restriction.
+  - CV_NODE_GROUP_INSTANCE_FAMILIES=m7i,m7a,m7g,c7i,c7a,c7g,r7i,r7a,r7g
   # Nothing of AWS: the server validates requests and stores the desired
   # state. The controller (../../default) installs the providers, looks the
   # cloud up and reconciles; it is the one with AWS settings and an IAM role.

@@ -64,6 +64,9 @@ func (s *TenantService) ListTenants(ctx context.Context, req *v1.ListTenantsRequ
 	}
 	list := &cloudv1alpha1.TenantList{}
 	if err := reader.List(ctx, list); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, service.ToConnect(err)
+		}
 		s.logger().ErrorContext(ctx, "list registered tenants", "error", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the tenant directory")
 	}
@@ -84,6 +87,10 @@ func (s *TenantService) ListTenants(ctx context.Context, req *v1.ListTenantsRequ
 				continue
 			}
 		} else if !apierrors.IsNotFound(err) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, service.ToConnect(err)
+			}
+			s.logger().ErrorContext(ctx, "read tenant namespace availability", "tenant_id", tenant, "error", err)
 			return nil, connect.NewError(connect.CodeUnavailable, "cannot read tenant namespace availability")
 		}
 		out.Tenants = append(out.Tenants, directoryInfo(tenant, tenantreconcile.Timestamp(registration)))

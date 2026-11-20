@@ -6,9 +6,12 @@ spec:
   # The cloud it is installed on; the same component for another cloud is
   # another definition, <name>-<provider> (docs/catalog.md).
   provider: aws
-  description: Karpenter node autoscaler. It launches EC2 nodes for the NodePools and EC2NodeClasses created on the cluster; none is shipped (docs/catalog.md).
+  description: Karpenter node autoscaler. It launches EC2 nodes for the platform's NodePool and the cluster's own node groups; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them (docs/catalog.md).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
+  # The first platform component: everything else waits for it and for the
+  # platform node group the controller creates once it is Ready.
+  sequence: 0
   namespace: kube-system
   install:
     helm:
@@ -24,10 +27,11 @@ spec:
       serviceAccounts: [{namespace: kube-system, name: karpenter}]
       # Official Karpenter v1.15.1 controller policy (website/content/en/v1.15/getting-started/
       # getting-started-with-karpenter/cloudformation.yaml): NodeLifecycle + IAMIntegration + EKSIntegration
-      # + ZonalShift + ResourceDiscovery statements. Permission semantics match upstream except
-      # the omitted InterruptionPolicy (SQS): no interruption queue exists. Placeholders scope the
-      # cluster/account; PassRole targets the managed node group role. Optional Sid fields are
-      # omitted to keep the expanded managed policy below IAM's 6144-character limit.
+      # + ZonalShift + ResourceDiscovery + Interruption (SQS) statements. Permission semantics match
+      # upstream. Placeholders scope the cluster/account; PassRole targets the platform's Karpenter node
+      # role (not the managed node group's) and the SQS statement the platform's interruption queue.
+      # Optional Sid fields are omitted to keep the expanded managed policy below IAM's
+      # 6144-character limit.
       policy: |
         {
           "Version": "2012-10-17",
@@ -159,7 +163,7 @@ spec:
             },
             {
               "Effect": "Allow",
-              "Resource": "${cluster.nodeRoleArn}",
+              "Resource": "${karpenter.nodeRoleArn}",
               "Action": "iam:PassRole",
               "Condition": {
                 "StringEquals": {
@@ -283,6 +287,15 @@ spec:
               "Effect": "Allow",
               "Resource": "arn:aws:iam::${account.id}:instance-profile/*",
               "Action": "iam:GetInstanceProfile"
+            },
+            {
+              "Effect": "Allow",
+              "Resource": "arn:aws:sqs:${region}:${account.id}:${karpenter.interruptionQueue}",
+              "Action": [
+                "sqs:DeleteMessage",
+                "sqs:GetQueueUrl",
+                "sqs:ReceiveMessage"
+              ]
             }
           ]
         }
@@ -295,8 +308,9 @@ spec:
     settings:
       clusterName: ${cluster.name}
       clusterEndpoint: ${cluster.endpoint}
-      # No SQS queue exists; empty disables interruption handling.
-      interruptionQueue: ""
+      # The platform's SQS queue (EventBridge: Spot interruption, rebalance,
+      # instance state change, AWS Health), rendered with the cluster.
+      interruptionQueue: ${karpenter.interruptionQueue}
     # Sizing from the official install command (1 CPU / 1Gi, requests = limits).
     controller:
       resources:
@@ -306,9 +320,10 @@ spec:
         limits:
           cpu: "1"
           memory: 1Gi
-    # The controller runs on the default node pool (with the affinity below,
-    # which keeps it off the nodes Karpenter launches).
-    # The cluster's default node pool: its labels, and a toleration per taint.
+    # The controller runs on the default managed node group (with the
+    # affinity below, which keeps it off the nodes Karpenter launches): its
+    # label, and a toleration of its taint. Every other component runs on
+    # the platform pool (${platform.*}).
     nodeSelector: ${system.nodeSelector}
     tolerations: ${system.tolerations}
     # Chart default already keeps Karpenter off Karpenter-launched nodes (karpenter.sh/nodepool DoesNotExist).

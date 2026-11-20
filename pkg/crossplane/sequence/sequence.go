@@ -13,6 +13,7 @@ package sequence
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -82,6 +83,22 @@ type Item struct {
 	// keeps the name it has, and one that brings its own name
 	// (Object's annotation) is applied as it is.
 	ExternalName string
+	// Gate, when set, is asked once per Apply for an item that would be
+	// applied now (its Build and conditions are met): whether to write it
+	// at all. It decides from what the caller knows of the live object (a
+	// digest that did not change, another object that is still settling).
+	Gate func(ctx context.Context, obj client.Object) Decision
+}
+
+// Decision is a Gate's answer. The zero value applies the object.
+type Decision struct {
+	// Skip: the live object is already what the item says; it stays
+	// remembered and is not written.
+	Skip bool
+	// Hold, when set, keeps the object from being written now, and says
+	// what it waits for: reported as Waiting, which also keeps anything
+	// from being removed meanwhile.
+	Hold string
 }
 
 // Set is the objects an owner should have, in the order they are applied.
@@ -242,7 +259,7 @@ func (e Engine) Apply(ctx context.Context, set Set, inv Inventory) (Result, erro
 	seen := e.observed(entries)
 	has := seen.has
 	var res Result
-	var ready Set
+	var ready, unchanged Set
 	wanted := make(map[string]bool, len(set))
 	checked := checks{engine: e, met: map[string]bool{}}
 	if err := checked.passed(set, has); err != nil {
@@ -270,11 +287,22 @@ func (e Engine) Apply(ctx context.Context, set Set, inv Inventory) (Result, erro
 			res.Waiting = append(res.Waiting, Waiting{Ref: ref, For: unmet})
 			continue
 		}
+		if item.Gate != nil {
+			d := item.Gate(ctx, item.Object)
+			if d.Hold != "" {
+				res.Waiting = append(res.Waiting, Waiting{Ref: ref, For: []string{d.Hold}})
+				continue
+			}
+			if d.Skip {
+				unchanged = append(unchanged, item)
+				continue
+			}
+		}
 		ready = append(ready, item)
 	}
 	// Remembered first: an object is never in the cluster without the
 	// owner knowing of it, so a failed apply can always be undone.
-	if err := inv.Add(ctx, ready.Objects()); err != nil {
+	if err := inv.Add(ctx, append(slices.Clone(ready), unchanged...).Objects()); err != nil {
 		return Result{}, fmt.Errorf("remember the owner's objects: %w", err)
 	}
 	for _, item := range ready {

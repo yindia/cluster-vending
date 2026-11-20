@@ -217,3 +217,41 @@ func TestLongErrorsAreCut(t *testing.T) {
 		t.Fatalf("error has %d bytes", len(rec.got.GetError()))
 	}
 }
+
+// Publish is told of a scan that worked, after it is recorded, with the full
+// result (the findings); a scan that failed publishes nothing.
+func TestRunPublishesAScanThatWorkedAfterRecordingIt(t *testing.T) {
+	rec := &recorder{}
+	var published *cloudv1.ClusterDeprecations
+	var recordedBefore bool
+	s := scanner(t, rec, workload{})
+	s.Publish = func(_ context.Context, c deprecations.Cluster, r, full *cloudv1.ClusterDeprecations) {
+		published, recordedBefore = r, rec.got != nil
+		if len(full.GetFindings()) != len(r.GetFindings()) || full.GetTruncated() {
+			t.Errorf("full has %d findings, the recorded %d", len(full.GetFindings()), len(r.GetFindings()))
+		}
+		if c.ID != "c1" {
+			t.Errorf("published for %s", c.ID)
+		}
+	}
+
+	if _, err := s.Run(t.Context(), cluster(nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	if published == nil || len(published.GetFindings()) != 1 || published.GetTotal() != 1 || !recordedBefore {
+		t.Fatalf("published %v (recorded first: %v)", published, recordedBefore)
+	}
+
+	published = nil
+	if _, err := s.Run(t.Context(), cluster(nil)); err != nil { // due again: the clock did not move, Last is nil
+		t.Fatal(err)
+	}
+	failing := scanner(t, &recorder{}, workload{err: errors.New("api down")})
+	failing.Publish = func(context.Context, deprecations.Cluster, *cloudv1.ClusterDeprecations, *cloudv1.ClusterDeprecations) {
+		t.Error("a failed scan was published")
+	}
+	if _, err := failing.Run(t.Context(), cluster(nil)); err != nil {
+		t.Fatal(err)
+	}
+}

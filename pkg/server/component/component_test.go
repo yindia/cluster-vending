@@ -7,10 +7,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -563,7 +565,10 @@ func TestListOnAClusterCarriesPlatformDetails(t *testing.T) {
 	w := newWorld(t)
 	status := &cloudv1.ClusterStatus{PlatformComponents: []*cloudv1.PlatformComponent{
 		{Name: "mesh-base", Version: "1.2.3", Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "chart mesh-base: boom",
-			Chart: "base", HelmState: "pending-install", LastError: "create failed: boom", Failures: 4, Recoveries: 1},
+			Chart: "base", HelmState: "pending-install", LastError: "create failed: boom", Failures: 4, Recoveries: 1,
+			ChartVersion: "1.2.2", Revision: 7, Digest: "abc", Attempts: 3, CountedFailures: 2, LastErrorClass: "release",
+			NextRetryAt: timestamppb.New(time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)), LastRecovery: "rolled back to revision 6",
+			LastRecoveryAt: timestamppb.New(time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC))},
 	}}
 	encoded, err := reconcilecluster.Encode(status)
 	if err != nil {
@@ -582,6 +587,11 @@ func TestListOnAClusterCarriesPlatformDetails(t *testing.T) {
 	if st.GetChart() != "base" || st.GetHelmState() != "pending-install" || st.GetLastError() != "create failed: boom" ||
 		st.GetFailures() != 4 || st.GetRecoveries() != 1 {
 		t.Fatalf("status = %v", st)
+	}
+	if st.GetChartVersion() != "1.2.2" || st.GetRevision() != 7 || st.GetDigest() != "abc" || st.GetAttempts() != 3 ||
+		st.GetCountedFailures() != 2 || st.GetLastErrorClass() != "release" || st.GetNextRetryAt().AsTime().Hour() != 10 ||
+		st.GetLastRecovery() != "rolled back to revision 6" || st.GetLastRecoveryAt().AsTime().Hour() != 9 {
+		t.Fatalf("Helm status = %v", st)
 	}
 }
 

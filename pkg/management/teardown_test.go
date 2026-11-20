@@ -89,7 +89,7 @@ func TestTeardownList(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(mapper).WithObjects(objs...).Build()
 	td := management.TeardownOf(c)
 
-	got, err := td.List(t.Context())
+	got, err := td.List(t.Context(), allKinds...)
 
 	if err != nil {
 		t.Fatal(err)
@@ -105,11 +105,31 @@ func TestTeardownList(t *testing.T) {
 			t.Fatalf("delete %s: %v", o.Ref(), err)
 		}
 	}
-	if left, err := td.List(t.Context()); err != nil || len(left) != 0 {
+	if left, err := td.List(t.Context(), allKinds...); err != nil || len(left) != 0 {
 		t.Fatalf("after delete: %v, %v", refsOf(left), err)
 	}
 	if err := td.Delete(t.Context(), reconcile.WorkloadObject{Kind: reconcile.KindService, Namespace: "web", Name: "gone"}); err != nil {
 		t.Errorf("deleting what is gone: %v", err)
+	}
+}
+
+var allKinds = []string{reconcile.KindIngress, reconcile.KindService, reconcile.KindNodePool, reconcile.KindNodeClaim, reconcile.KindEC2NodeClass}
+
+// Only the asked kinds are read, and a deleting object says since when.
+func TestTeardownListKinds(t *testing.T) {
+	scheme := teardownScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "istio-system", Name: "gw"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer}},
+	).Build()
+	td := management.TeardownOf(c)
+
+	got, err := td.List(t.Context(), reconcile.KindNodePool, reconcile.KindEC2NodeClass)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("node kinds listed %v, %v", refsOf(got), err)
+	}
+	got, err = td.List(t.Context(), reconcile.KindService)
+	if err != nil || len(got) != 1 || got[0].Deleting || !got[0].DeletedAt.IsZero() {
+		t.Fatalf("services listed %v, %v", got, err)
 	}
 }
 
@@ -120,7 +140,7 @@ func TestTeardownWithoutKarpenter(t *testing.T) {
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "istio-system", Name: "gw"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer}},
 	).Build()
 
-	got, err := management.TeardownOf(c).List(t.Context())
+	got, err := management.TeardownOf(c).List(t.Context(), allKinds...)
 
 	if err != nil || len(got) != 1 || got[0].Ref() != "Service istio-system/gw" {
 		t.Fatalf("listed %v, %v", refsOf(got), err)

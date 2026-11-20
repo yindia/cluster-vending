@@ -178,14 +178,17 @@ async function assertGeometry(canvas: Locator) {
   expect(errors).toEqual([]);
 }
 
-test("default topology shows only control plane and node groups with networking off", async ({ page }) => {
+test("default topology always shows the network with the control plane and node groups", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1200 });
   const api = await mockClusterTopology(page), canvas = await openTopology(page);
   await settleDiagram(page, canvas);
   await page.getByRole("button", { name: /fit view/i }).click();
   await settleDiagram(page, canvas);
   await assertGeometry(canvas);
-  await expect(page.getByRole("checkbox", { name: "Show Network", exact: true })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Show Network", exact: true })).toHaveCount(0);
+  await expect.poll(() => api.calls.some(call => call.method === "GetNetwork" && call.body.live === true)).toBe(true);
+  const vpc = api.linkedNetwork.status!.architecture!.resources.find(resource => resource.kind === "VPC")!;
+  await expect(canvas.getByRole("button", { name: `Inspect ${vpc.name}`, exact: true })).toBeVisible();
   for (const name of ["payments-control", "payments-workers"]) await expect(canvas.getByRole("button", { name: `Inspect ${name}`, exact: true })).toBeVisible();
   const workerCard = canvas.locator(".react-flow__node-resource").filter({ has: page.getByRole("button", { name: "Inspect payments-workers", exact: true }) });
   await expect(workerCard).toContainText("Configured default pool");
@@ -193,23 +196,15 @@ test("default topology shows only control plane and node groups with networking 
     await expect(workerCard.getByText(label, { exact: true }).locator("..").getByText(value, { exact: true })).toBeVisible();
   }
   await expect(workerCard.getByText("Initial desired nodes", { exact: true })).toHaveCount(0);
-  for (const resource of architecture.resources.filter(resource => !["Cluster", "NodeGroup"].includes(resource.kind))) await expect(canvas.getByRole("button", { name: `Inspect ${resource.name}`, exact: true })).toHaveCount(0);
-  for (const resource of api.linkedNetwork.status!.architecture!.resources) await expect(canvas.getByRole("button", { name: `Inspect ${resource.name}`, exact: true })).toHaveCount(0);
-  await expect(canvas.locator(".react-flow__node-resource")).toHaveCount(2);
-  await expect(canvas.locator(".react-flow__edge-path")).toHaveCount(1);
-  expect(api.calls.filter(call => call.method === "GetNetwork" && call.body.live === true)).toHaveLength(0);
   await expect(page.getByRole("table", { name: "Cluster topology resources", exact: true })).toHaveCount(0);
   await expect(page.getByRole("table", { name: "Cluster topology relationships", exact: true })).toHaveCount(0);
   assertReadOnly(api);
 });
 
-for (const networkFixture of ["C", "D"] as const) test(`Show Network loads actual ${networkFixture} architecture and preserves explicit node-group subnet paths`, async ({ page }) => {
+for (const networkFixture of ["C", "D"] as const) test(`network is always shown and loads actual ${networkFixture} architecture and preserves explicit node-group subnet paths`, async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1200 });
   const api = await mockClusterTopology(page, { networkFixture }), canvas = await openTopology(page);
   await settleDiagram(page, canvas);
-  const toggle = page.getByRole("checkbox", { name: "Show Network", exact: true });
-  await expect(toggle).not.toBeChecked();
-  await toggle.check();
   await expect.poll(() => api.calls.some(call => call.method === "GetNetwork" && call.body.live === true && call.body.networkId === networkId && call.body.tenantId === "acme")).toBe(true);
   const networkResources = api.linkedNetwork.status!.architecture!.resources;
   const vpc = networkResources.find(resource => resource.kind === "VPC")!;
@@ -244,11 +239,6 @@ for (const networkFixture of ["C", "D"] as const) test(`Show Network loads actua
     catch { return false; }
   }), { source, target: unrelatedId });
   expect(invented, "third AZ does not imply a node-group subnet relationship").toBe(false);
-  await toggle.uncheck();
-  await expect(canvas.getByRole("button", { name: `Inspect ${vpc.name}`, exact: true })).toHaveCount(0);
-  await expect(canvas.getByRole("button", { name: "Inspect external-security-group", exact: true })).toHaveCount(0);
-  await expect(canvas.locator(".react-flow__node-resource")).toHaveCount(2);
-  await expect(canvas.locator(".react-flow__edge-path")).toHaveCount(1);
   assertReadOnly(api);
 });
 
@@ -277,7 +267,6 @@ test("inspection preserves managed names, actual AWS IDs, relationship details a
 test("reference-only targets remain unverified and retain their exact referenced IDs", async ({ page }) => {
   const api = await mockClusterTopology(page), canvas = await openTopology(page);
   await settleDiagram(page, canvas);
-  await page.getByRole("checkbox", { name: "Show Network", exact: true }).check();
   await expect.poll(() => api.calls.some(call => call.method === "GetNetwork" && call.body.live === true)).toBe(true);
   await canvas.getByRole("button", { name: "Inspect external-security-group", exact: true }).click();
   const inspector = page.getByLabel("Selected cluster topology resource", { exact: true });
@@ -324,7 +313,6 @@ for (const theme of ["Light", "Dark"] as const) test(`${theme.toLowerCase()} ful
   await settings.getByRole("button", { name: "Close", exact: true }).last().click();
   await settleDiagram(page, canvas);
   if (theme === "Dark") {
-    await page.getByRole("checkbox", { name: "Show Network", exact: true }).check();
     const vpc = api.linkedNetwork.status!.architecture!.resources.find(resource => resource.kind === "VPC")!;
     await expect(canvas.getByRole("button", { name: `Inspect ${vpc.name}`, exact: true })).toBeVisible();
   }
@@ -362,7 +350,6 @@ test("mobile inspector remains usable without horizontal page overflow", async (
 test("network inspection exposes subnet routes and selection-only NAT egress", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1200 });
   const api = await mockClusterTopology(page, { networkFixture: "C" }), canvas = await openTopology(page);
-  await page.getByRole("checkbox", { name: "Show Network", exact: true }).check();
   await settleDiagram(page, canvas);
   const logical = canvas.locator('.react-flow__edge[aria-label*="nat internet egress"]');
   await expect(logical).toHaveCount(0);

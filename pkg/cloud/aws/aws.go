@@ -2,7 +2,8 @@
 // Crossplane cannot (it has no lookup kinds), such as discovering the
 // resources of an existing VPC so that an import can create Observe-only
 // managed resources for them (the calls are listed at AwsImportNetwork in
-// idl/cloud/v1/aws.proto). The API server makes none of them.
+// idl/cloud/v1/aws.proto). The API server makes none of them; it only reads
+// the results buckets (s3.go).
 //
 // Every call runs in a tenant's account, and there is one way in. The
 // controller starts from its own credentials, as the AWS SDK's default
@@ -13,11 +14,15 @@
 // base credentials themselves: keys of one account cannot read another,
 // and a tenant grants access in one place, its role's trust policy.
 //
-//	own credentials ─(tenant role ARN, always)─> tenant role ─> EC2, ...
+//	own credentials ─(source role, optional)─> ─(tenant role ARN, always)─> tenant role ─> EC2, S3, ...
+//
+// The API server reads the cluster results buckets (pkg/results) through
+// the same path (Client.S3): it has no other AWS access.
 package aws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -64,11 +69,30 @@ var (
 	ErrInvalid = errors.New("aws: invalid")
 )
 
-// Config says how the controller reaches tenant accounts.
+// Config says how the controller and the API server reach tenant accounts.
 type Config struct {
 	// SessionName defaults to DefaultSessionName.
 	SessionName string
+	// SourceRoleARN, when set, is a role the client's own credentials
+	// assume first; the tenant roles are then assumed with the source
+	// role's credentials (own -> source -> tenant). Empty: the own
+	// credentials assume the tenant roles.
+	SourceRoleARN string
+	// ExternalID is passed to AssumeRole of a tenant role (sts:ExternalId)
+	// when the account has none of its own (Access.ExternalID).
+	ExternalID string
+	// SessionPolicy, when set, is an IAM policy (JSON) passed with the
+	// assumption of every tenant role: the session can do what the role
+	// allows AND the policy allows. The API server uses it to read the
+	// results buckets and nothing else, whatever its tenant roles permit.
+	SessionPolicy string
 }
+
+// maxSessionPolicy is what STS accepts of an inline session policy.
+const maxSessionPolicy = 2048
+
+// roleARNPattern is an IAM role ARN of the platform's partition.
+var roleARNPattern = regexp.MustCompile(`^arn:` + awscatalog.PartitionAWS + `:iam::\d{12}:role/(?:[\x21-\x7e]*/)?[\w+=,.@-]{1,64}$`)
 
 func (c Config) withDefaults() (Config, error) {
 	if c.SessionName == "" {
@@ -76,6 +100,12 @@ func (c Config) withDefaults() (Config, error) {
 	}
 	if !sessionNamePattern.MatchString(c.SessionName) {
 		return c, fmt.Errorf("%w: role session name %q", ErrInvalid, c.SessionName)
+	}
+	if c.SessionPolicy != "" && (len(c.SessionPolicy) > maxSessionPolicy || !json.Valid([]byte(c.SessionPolicy))) {
+		return c, fmt.Errorf("%w: the session policy must be JSON of at most %d characters", ErrInvalid, maxSessionPolicy)
+	}
+	if c.SourceRoleARN != "" && !roleARNPattern.MatchString(c.SourceRoleARN) {
+		return c, fmt.Errorf("%w: source role %q is not an IAM role ARN", ErrInvalid, c.SourceRoleARN)
 	}
 	return c, nil
 }
@@ -140,17 +170,8 @@ func (c *Client) Tenant(accountID, roleARN, region string) (*Tenant, error) {
 // AWS: roles are assumed on the first request; VerifyAccess checks where
 // the credentials land.
 func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
-	if !accountIDPattern.MatchString(a.AccountID) {
-		return nil, fmt.Errorf("%w: account ID must be 12 digits, got %q", ErrInvalid, a.AccountID)
-	}
-	switch {
-	case a.Direct && a.RoleARN != "":
-		return nil, fmt.Errorf("%w: account %s: a direct access assumes no role, got %q", ErrInvalid, a.AccountID, a.RoleARN)
-	case !a.Direct && a.RoleARN == "":
-		return nil, fmt.Errorf("%w: account %s has no tenant role: a tenant's account is only reached through its role", ErrInvalid, a.AccountID)
-	}
-	if !a.Direct && !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
-		return nil, fmt.Errorf("%w: %q is not a role of account %s", ErrInvalid, a.RoleARN, a.AccountID)
+	if err := c.checkAccess(a); err != nil {
+		return nil, err
 	}
 	cfg, err := c.regionConfig(a, region)
 	if err != nil {
@@ -159,6 +180,24 @@ func (c *Client) TenantFor(a Access, region string) (*Tenant, error) {
 	eksClient, iamClient := eks.NewFromConfig(cfg), iam.NewFromConfig(cfg)
 	return &Tenant{AccountID: a.AccountID, Region: region, ec2: ec2.NewFromConfig(cfg), sts: sts.NewFromConfig(cfg),
 		eks: eksClient, eksImport: eksClient, logs: cloudwatchlogs.NewFromConfig(cfg), iam: iamClient, iamImport: iamClient}, nil
+}
+
+// checkAccess refuses an Access that does not reach a tenant's account
+// through the account's own role.
+func (c *Client) checkAccess(a Access) error {
+	if !accountIDPattern.MatchString(a.AccountID) {
+		return fmt.Errorf("%w: account ID must be 12 digits, got %q", ErrInvalid, a.AccountID)
+	}
+	switch {
+	case a.Direct && a.RoleARN != "":
+		return fmt.Errorf("%w: account %s: a direct access assumes no role, got %q", ErrInvalid, a.AccountID, a.RoleARN)
+	case !a.Direct && a.RoleARN == "":
+		return fmt.Errorf("%w: account %s has no tenant role: a tenant's account is only reached through its role", ErrInvalid, a.AccountID)
+	}
+	if !a.Direct && !strings.HasPrefix(a.RoleARN, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
+		return fmt.Errorf("%w: %q is not a role of account %s", ErrInvalid, a.RoleARN, a.AccountID)
+	}
+	return nil
 }
 
 // regionConfig is the SDK configuration of a in region: the client's own
@@ -170,7 +209,11 @@ func (c *Client) regionConfig(a Access, region string) (awssdk.Config, error) {
 	cfg := c.base.Copy()
 	cfg.Region = region
 	if !a.Direct {
-		cfg.Credentials = c.tenantCredentials(a.RoleARN, a.ExternalID, region)
+		externalID := a.ExternalID
+		if externalID == "" {
+			externalID = c.cfg.ExternalID
+		}
+		cfg.Credentials = c.tenantCredentials(a.RoleARN, externalID, region)
 	}
 	return cfg, nil
 }
@@ -184,21 +227,43 @@ func (c *Client) tenantCredentials(roleARN, externalID, region string) *awssdk.C
 	if cached, ok := c.creds[key]; ok {
 		return cached
 	}
-	source := c.base.Copy()
-	source.Region = region // regional STS endpoint, next to the calls
-	creds := c.assume(source, roleARN, externalID)
+	creds := c.assume(c.sourceConfig(region), roleARN, externalID, c.cfg.SessionPolicy)
 	c.creds[key] = creds
 	return creds
 }
 
+// sourceConfig is the configuration the tenant roles are assumed with, in
+// region (a regional STS endpoint, next to the calls): the client's own
+// credentials, or the source role's when one is configured. The source
+// role's credentials are cached per region, shared by every tenant. Called
+// with c.mu held.
+func (c *Client) sourceConfig(region string) awssdk.Config {
+	source := c.base.Copy()
+	source.Region = region
+	if c.cfg.SourceRoleARN == "" {
+		return source
+	}
+	key := "source/" + c.cfg.SourceRoleARN + "/" + region
+	cached, ok := c.creds[key]
+	if !ok {
+		cached = c.assume(source, c.cfg.SourceRoleARN, "", "")
+		c.creds[key] = cached
+	}
+	source.Credentials = cached
+	return source
+}
+
 // assume returns cached credentials of roleARN, assumed with from's
 // credentials, passing externalID when set.
-func (c *Client) assume(from awssdk.Config, roleARN, externalID string) *awssdk.CredentialsCache {
+func (c *Client) assume(from awssdk.Config, roleARN, externalID, policy string) *awssdk.CredentialsCache {
 	provider := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(from), roleARN, func(o *stscreds.AssumeRoleOptions) {
 		o.RoleSessionName = c.cfg.SessionName
 		o.Duration = sessionDuration
 		if externalID != "" {
 			o.ExternalID = awssdk.String(externalID)
+		}
+		if policy != "" {
+			o.Policy = awssdk.String(policy)
 		}
 	})
 	return awssdk.NewCredentialsCache(provider)

@@ -88,7 +88,7 @@ Order for a release B that moves the cluster's minor (`upgradeTo`):
 1. Components to B's pins for the **running** minor (section 1.3).
 2. Gates: deprecations, one minor step, B pins the new minor.
 3. Control plane, then add-ons and node group. This exists: `GateUpgrade` and `status.upgrade`. Add-on versions are looked up again for the new minor (`resolveVersions`).
-4. Components to B's pins for the **new** minor (the cluster autoscaler's image tag).
+4. Components to B's pins for the **new** minor (none pinned today).
 
 Changes needed:
 - `platformInput` takes the minor from `status.currentKubernetesVersion` while `status.upgrade` is set. This also fixes manual upgrades today.

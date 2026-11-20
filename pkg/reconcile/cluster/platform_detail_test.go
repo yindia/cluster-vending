@@ -15,6 +15,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/helmrel"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
@@ -278,7 +279,7 @@ func (f *fakeWorkloads) Remove(_ context.Context, _, name string) error {
 // A component whose Helm release is stuck is recovered: the stuck
 // revision's record is removed in the workload cluster, and nothing else.
 func TestStuckReleaseIsRecovered(t *testing.T) {
-	old := stuckAt.Add(-11 * time.Minute)
+	old := stuckAt.Add(-13 * time.Minute) // a Release of this build waits 10m: stuck after 12m
 	const noDeployed = `update failed: failed to upgrade release: "base" has no deployed releases`
 	stuckRecord := reconcile.HelmRecord{Name: "sh.helm.release.v1.base.v1", Revision: 1, Status: "uninstalling", Changed: old}
 	tests := []struct {
@@ -296,10 +297,10 @@ func TestStuckReleaseIsRecovered(t *testing.T) {
 			wantRemoved: []string{"sh.helm.release.v1.base.v1"}, wantPhase: cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING,
 			wantCount: 1, wantMessage: "recovered (1 of 3), removed Helm revision 1 (uninstalling)"},
 		{name: "not stuck for long enough", since: stuckAt.Add(-time.Minute), workloads: &fakeWorkloads{records: []reconcile.HelmRecord{stuckRecord}},
-			wantPhase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, wantMessage: "has no deployed releases"},
+			wantPhase: cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, wantMessage: "has no deployed releases"}, // a stuck state is a transient error until it is recovered
 		{name: "the newest revision is deployed", since: old,
 			workloads: &fakeWorkloads{records: []reconcile.HelmRecord{{Name: "sh.helm.release.v1.base.v1", Revision: 1, Status: "deployed", Changed: old}}},
-			wantPhase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, wantMessage: "has no deployed releases"},
+			wantPhase: cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, wantMessage: "has no deployed releases"}, // a stuck state is a transient error until it is recovered
 		{name: "recovered three times already", since: old, recoveries: 3, workloads: &fakeWorkloads{records: []reconcile.HelmRecord{stuckRecord}},
 			wantPhase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, wantCount: 3, wantMessage: "it was recovered 3 times and got stuck again"},
 		{name: "the setting is off", since: old, off: true, workloads: &fakeWorkloads{records: []reconcile.HelmRecord{stuckRecord}},
@@ -400,8 +401,15 @@ func TestDetailOfReadsThePause(t *testing.T) {
 
 	d := detailOf(u)
 
-	if d == nil || !d.Paused {
-		t.Fatalf("detail = %+v, want paused", d)
+	if d == nil || !d.Paused || d.PausedByUs {
+		t.Fatalf("detail = %+v, want paused by someone else", d)
+	}
+	// With the platform's marker the pause is the platform's own backoff.
+	until := stuckAt.Add(time.Minute)
+	u.SetAnnotations(map[string]string{managed.PausedAnnotation: "true", helmrel.BackoffAnnotation: until.Format(time.RFC3339)})
+	d = detailOf(u)
+	if d.Paused || !d.PausedByUs || !d.BackoffUntil.Equal(until) {
+		t.Fatalf("detail = %+v, want paused by us until %v", d, until)
 	}
 }
 
@@ -414,7 +422,8 @@ func TestDetailOfReadsWhatProviderHelmWrites(t *testing.T) {
 
 	d := detailOf(w.release(t, "base"))
 
-	want := releaseDetail{Chart: "base", TargetNamespace: "base-system", HelmState: "pending-upgrade", LastError: "boom", Failures: 2, Since: since}
+	want := releaseDetail{Chart: "base", TargetNamespace: "base-system", HelmState: "pending-upgrade", LastError: "boom", Failures: 2, Since: since,
+		Digest: w.release(t, "base").GetAnnotations()[helmrel.DigestAnnotation], Timeout: crossplaneaws.DefaultHelmTimeout}
 	if d == nil || *d != want {
 		t.Fatalf("detail = %+v, want %+v", d, want)
 	}

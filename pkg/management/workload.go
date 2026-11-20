@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,11 +37,15 @@ func (w workloads) HelmStorage(ctx context.Context, namespace, secretRef string)
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
+	if err := batchv1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
 	c, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, fmt.Errorf("workload cluster client: %w", err)
 	}
-	return HelmStorageOf(c), nil
+	// Records and, for a recovery, Helm itself (reconcile.HelmOperator).
+	return newHelmOps(c, cfg), nil
 }
 
 // Helm's labels on a release record (helm.sh/helm/v4

@@ -1,0 +1,17 @@
+# Cloud resource previews
+
+In a cluster, **Cloud Resource → Create cloud resource** creates a platform-owned preview for that cluster. In **Sub Tenants → select a Sub Tenant → Create cloud resource**, the preview belongs to that allocation. Both forms support the same AWS services and lock the owner to the entry point. A preview lives in the current browser tab and survives a refresh. Saving a preview does not submit a Kubernetes object or call AWS.
+
+## AWS inputs
+
+The form uses the namespaced managed-resource CRDs from the repository's pinned AWS provider, v2.9.0. Choose a service, name and region, then configure its common settings. Open **Additional spec (YAML)** and choose **Use example spec** for an editable service-specific example. The field reference lists the pinned provider parameters. The YAML mapping can override any top-level `spec.forProvider` field, including lists, references, selectors and nested configuration. The reviewed YAML shows the effective values. Cloud-provider and account-specific requirements still apply.
+
+| Service | Primary CR | Top-level provider fields | Create inputs |
+| --- | --- | ---: | --- |
+| Amazon S3 | Bucket | 5 | Region is required. The other fields are bucketNamespace, forceDestroy, objectLockEnabled and tags. The guided form exposes tags, versioning, Object Lock, public access blocking and S3-managed or KMS encryption. The preview renders separate BucketVersioning, BucketPublicAccessBlock and BucketServerSideEncryptionConfiguration resources as selected. |
+| Amazon RDS | Instance | 90 | The CRD requires region and, for creation, instanceClass. The form exposes engine and version, class, storage, backup retention, database name, master username, subnet group, security groups, Multi-AZ and deletion protection. Credentials default to an AWS-managed master password. Snapshot restore and read replicas have different AWS input requirements. |
+| Amazon ElastiCache | ReplicationGroup | 52 | The CRD requires region and, for creation, description. The form exposes engine and version, node type, node count, snapshots, subnet group, security groups and automatic failover across zones. In this version atRestEncryptionEnabled takes a string and transitEncryptionEnabled takes a boolean. |
+
+The full schemas describe nested types, enum values and the common management envelope. The primary CRDs support `forProvider`, `initProvider`, `managementPolicies`, `providerConfigRef` and `writeConnectionSecretToRef`. The form edits `forProvider`; management controls belong to the platform. The account's namespaced ProviderConfig is a placeholder in the preview. Use Secret references for credential inputs. [Bucket CRD](https://github.com/upbound/provider-aws/blob/v2.9.0/package/crds/s3.aws.m.upbound.io_buckets.yaml) · [BucketVersioning CRD](https://github.com/upbound/provider-aws/blob/v2.9.0/package/crds/s3.aws.m.upbound.io_bucketversionings.yaml) · [Instance CRD](https://github.com/upbound/provider-aws/blob/v2.9.0/package/crds/rds.aws.m.upbound.io_instances.yaml) · [ReplicationGroup CRD](https://github.com/upbound/provider-aws/blob/v2.9.0/package/crds/elasticache.aws.m.upbound.io_replicationgroups.yaml)
+
+Regenerate the static schema catalog from the Go module cache after a provider upgrade with `node ui/scripts/refresh-cloud-resource-schemas.mjs`. The generator reads the served storage version from each CRD and records its source link. The preview works independently of which provider packages are installed on the management cluster.

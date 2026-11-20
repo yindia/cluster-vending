@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -67,11 +69,14 @@ func PlatformStuck(row *model.Cluster) bool {
 
 // stuck reports whether a Release is stuck: Helm's state is one an
 // interrupted operation leaves, or Helm refuses the release with the
-// error of such a state, and it has been like that for stuckAfter. A
-// paused Release is never stuck: while an operator paused the cluster
-// (a provider upgrade), nothing is removed in the workload cluster.
+// error of such a state, and it has been like that for the Release's wait
+// timeout plus two minutes (releaseDetail.stuckAfter). A Release someone
+// else paused is never stuck: while an operator paused the cluster (a
+// provider upgrade), nothing is changed in the workload cluster. The
+// platform's own backoff pause does not count: no operation runs then,
+// which is when a stuck release is safest to recover.
 func stuck(d *releaseDetail, at time.Time) bool {
-	if d == nil || d.Paused || d.Since.IsZero() || at.Sub(d.Since) < stuckAfter {
+	if d == nil || d.Paused || d.Since.IsZero() || at.Sub(d.Since) < d.stuckAfter() {
 		return false
 	}
 	return stuckBy(d.HelmState, d.LastError)
@@ -89,6 +94,19 @@ func recordToRemove(records []reconcile.HelmRecord, at time.Time) (reconcile.Hel
 	return stuckRecord(records, at, stuckAfter)
 }
 
+// lastDeployed is the revision a stuck one is rolled back to: the newest
+// revision before it that Helm deployed (deployed, or superseded by a later
+// one); 0 when there is none (a first install that never finished).
+func lastDeployed(records []reconcile.HelmRecord, stuck int) int {
+	best := 0
+	for _, r := range records {
+		if r.Revision < stuck && r.Revision > best && (r.Status == "deployed" || r.Status == "superseded") {
+			best = r.Revision
+		}
+	}
+	return best
+}
+
 // stuckRecord is recordToRemove for a revision at least minAge old: a
 // retry a person asked for (cluster retry) takes it at once (0).
 func stuckRecord(records []reconcile.HelmRecord, at time.Time, minAge time.Duration) (reconcile.HelmRecord, bool) {
@@ -104,11 +122,46 @@ func stuckRecord(records []reconcile.HelmRecord, at time.Time, minAge time.Durat
 	return newest, true
 }
 
+// recoverRecord does the recovery of one stuck revision and says what it
+// did. With Helm itself (a HelmOperator): a failed hook Job left behind is
+// deleted, then the release is rolled back to the last revision Helm
+// deployed, or uninstalled when none was (a first install that never
+// finished), so the next attempt starts clean. A storage that is only
+// records gets the stuck revision's record removed, which has the same
+// effect on what Helm sees as newest.
+func (s *Reconciler) recoverRecord(ctx context.Context, storage reconcile.HelmStorage, d *releaseDetail,
+	records []reconcile.HelmRecord, stuck reconcile.HelmRecord) (string, error) {
+	ops, ok := storage.(reconcile.HelmOperator)
+	if !ok {
+		if err := storage.Remove(ctx, d.TargetNamespace, stuck.Name); err != nil {
+			return "", fmt.Errorf("its Helm record could not be removed: %w", err)
+		}
+		return fmt.Sprintf("removed Helm revision %d (%s)", stuck.Revision, stuck.Status), nil
+	}
+	hooks, err := ops.DeleteFailedHookJobs(ctx, d.TargetNamespace, d.Chart)
+	if err != nil {
+		s.logger().WarnContext(ctx, "failed hook Jobs not deleted", "chart", d.Chart, "error", err)
+	}
+	prefix := ""
+	if len(hooks) > 0 {
+		prefix = "deleted failed hook Job " + strings.Join(hooks, ", ") + ", "
+	}
+	if to := lastDeployed(records, stuck.Revision); to > 0 {
+		if err := ops.RollBack(ctx, d.TargetNamespace, d.Chart, stuck.Revision, to); err != nil {
+			return "", fmt.Errorf("the rollback to revision %d failed: %w", to, err)
+		}
+		return fmt.Sprintf("%srolled back to revision %d from the stuck revision %d (%s)", prefix, to, stuck.Revision, stuck.Status), nil
+	}
+	if err := ops.Uninstall(ctx, d.TargetNamespace, d.Chart); err != nil {
+		return "", fmt.Errorf("the uninstall failed: %w", err)
+	}
+	return fmt.Sprintf("%suninstalled: nothing was deployed before the stuck revision %d (%s)", prefix, stuck.Revision, stuck.Status), nil
+}
+
 // recoverStuck recovers a platform component's chart whose Helm release
-// is stuck (stuck): it removes the Helm record of the stuck revision in
-// the workload cluster (recordToRemove), with the kubeconfig the platform
-// holds for the cluster, so provider-helm's next attempt can install or
-// upgrade again. Nothing else in the workload cluster is touched.
+// is stuck (stuck) with the kubeconfig the platform holds for the cluster:
+// recoverRecord, so provider-helm's next attempt can install or upgrade
+// again. Nothing else in the workload cluster is touched.
 //
 // At most maxRecoveries times per component and version: after that the
 // component is FAILED and says so. Without the setting, or when the
@@ -142,20 +195,21 @@ func (s *Reconciler) recoverStuck(ctx context.Context, row *model.Cluster, names
 		fail("the cluster cannot be reached to recover it: " + err.Error())
 		return
 	}
-	record, ok := recordToRemove(records, at)
+	record, ok := stuckRecord(records, at, d.stuckAfter())
 	if !ok {
-		return // Helm's newest revision is not a stuck one (or not for long enough): nothing safe to remove
+		return // Helm's newest revision is not a stuck one (or not for long enough): nothing safe to do
 	}
-	if err := storage.Remove(ctx, d.TargetNamespace, record.Name); err != nil {
-		fail("its Helm record could not be removed: " + err.Error())
+	done, err := s.recoverRecord(ctx, storage, d, records, record)
+	if err != nil {
+		fail("it could not be recovered: " + err.Error())
 		return
 	}
 	c.Recoveries = c.GetRecoveries() + 1
+	c.LastRecovery, c.LastRecoveryAt = done, timestamppb.New(at)
 	c.Phase = cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING
-	c.Message = fmt.Sprintf("%s: recovered (%d of %d), removed Helm revision %d (%s); the chart is installed again",
-		what, c.GetRecoveries(), maxRecoveries, record.Revision, record.Status)
+	c.Message = fmt.Sprintf("%s: recovered (%d of %d), %s; the chart is installed again", what, c.GetRecoveries(), maxRecoveries, done)
 	s.logger().WarnContext(ctx, "platform component recovered: removed the Helm record of a stuck revision",
 		"cluster_id", row.ID, "cluster", row.Name, "tenant_id", row.TenantID, "component", c.GetName(), "version", c.GetVersion(),
 		"chart", d.Chart, "helm_state", d.HelmState, "revision", record.Revision, "record", record.Name,
-		"recoveries", c.GetRecoveries())
+		"recoveries", c.GetRecoveries(), "did", done)
 }

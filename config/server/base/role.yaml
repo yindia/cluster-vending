@@ -205,6 +205,23 @@ rules:
   - watch
   - create
   - patch
+# The bucket of a cluster's scan results and its settings (part of the
+# render, for the dry run).
+- apiGroups:
+  - s3.aws.m.upbound.io
+  resources:
+  - buckets
+  - bucketpublicaccessblocks
+  - bucketownershipcontrols
+  - bucketserversideencryptionconfigurations
+  - bucketpolicies
+  - bucketlifecycleconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
 # provider-helm: a cluster's ProviderConfig is part of its render (the dry
 # run above); Releases are read for their status.
 - apiGroups:

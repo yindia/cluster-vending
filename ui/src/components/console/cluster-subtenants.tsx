@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -33,16 +34,20 @@ export function subTenantRow(resource: SubTenant): SubTenantRow {
   return { id: resource.id, name: resource.spec?.displayName || resource.spec?.name || resource.id, allocationName: resource.spec?.name ?? "", protected: resource.spec?.deletionProtection !== false, hasEtag: !!resource.etag, namespaceCount: resource.spec?.namespaceKeys.length ?? 0, state, tone: stale ? "neutral" : ready ? "success" : status?.state === SubTenantState.FAILED ? "error" : status?.state === SubTenantState.DEGRADED ? "warning" : "neutral", message: stale ? "Waiting for setup and policy checks for the latest changes." : status?.message ?? "", mutable: !!resource.etag && status?.state !== SubTenantState.DELETING };
 }
 
-export function ClusterSubTenants({ clusterId }: { clusterId: string }) {
+type InventoryProps = { clusterId: string };
+
+export function ClusterSubTenants({ clusterId }: InventoryProps) {
   const { scopeKey } = usePlatform();
   return <ScopedSubTenants key={`${scopeKey}:${clusterId}`} clusterId={clusterId} />;
 }
-function ScopedSubTenants({ clusterId }: { clusterId: string }) {
+function ScopedSubTenants({ clusterId }: InventoryProps) {
+  const router = useRouter();
+  const detailHref = (id: string) => `/clusters/${encodeURIComponent(clusterId)}/subtenants/${encodeURIComponent(id)}`;
   const { api, tenantId, canWrite } = usePlatform();
   const scope = { tenantId, clusterId };
   const [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false);
-  const [selection, setSelection] = useState<{ id: string; mode: "view" | "edit" | "delete" | "unprotect" }>();
+  const [selection, setSelection] = useState<{ id: string; mode: "edit" | "delete" | "unprotect" }>();
   const [accepted, setAccepted] = useState<{ resource: SubTenant; action: "create" | "update" | "delete" }>();
   const load = useCallback((signal: AbortSignal) => collectPages(async (pageToken) => {
     const page = await api.subtenant.listSubTenants({ tenantId, clusterId, pageSize: 200, pageToken }, { signal });
@@ -53,7 +58,7 @@ function ScopedSubTenants({ clusterId }: { clusterId: string }) {
   return <VStack gap={4}>
     {notice && <Banner status="info" title="Deletion protection disabled" description={notice} />}
     {accepted && <SubmittedSubTenant key={`${accepted.resource.id}:${accepted.resource.generation}:${accepted.action}`} scope={scope} accepted={accepted} onRefresh={list.refresh} />}
-    <SubTenantsView rows={(list.data ?? []).map(subTenantRow)} loading={list.loading} refreshing={list.refreshing} error={list.error} canWrite={canWrite} onRefresh={list.refresh} onCreate={() => setCreating(true)} onView={(id) => setSelection({ id, mode: "view" })} onEdit={(id) => setSelection({ id, mode: "edit" })} onDelete={(id) => setSelection({ id, mode: "delete" })} onDisableProtection={(id) => setSelection({ id, mode: "unprotect" })} />
+    <SubTenantsView rows={(list.data ?? []).map(subTenantRow)} loading={list.loading} refreshing={list.refreshing} error={list.error} canWrite={canWrite} onRefresh={list.refresh} onCreate={() => setCreating(true)} detailHref={detailHref} onView={(id) => router.push(detailHref(id))} onEdit={(id) => setSelection({ id, mode: "edit" })} onDelete={(id) => setSelection({ id, mode: "delete" })} onDisableProtection={(id) => setSelection({ id, mode: "unprotect" })} />
     {creating && canWrite && <SubTenantEditor scope={scope} onClose={() => setCreating(false)} onAccepted={onAccepted} />}
     {selection && <SelectedSubTenant key={`${selection.id}:${selection.mode}`} scope={scope} {...selection} onClose={() => setSelection(undefined)} onAccepted={onAccepted} />}
   </VStack>;
@@ -74,7 +79,7 @@ function SubmittedSubTenant({ scope, accepted, onRefresh }: { scope: SubTenantSc
   const row = observation.data ? subTenantRow(observation.data) : undefined;
   return <Banner status={observation.error || row?.tone === "error" ? "error" : row?.tone === "warning" ? "warning" : "info"} title={observation.data === null ? "Sub Tenant deleted" : `Sub Tenant ${action === "create" ? "creation" : action} saved${row ? ` · ${row.state}` : ""}`} description={observation.error || row?.message || (observation.data === null ? "The allocation is no longer reported by the server." : "Changes are saved first. Namespaces become available after setup and policy checks finish.")} />;
 }
-function SelectedSubTenant({ scope, id, mode, onClose, onAccepted }: { scope: SubTenantScope; id: string; mode: "view" | "edit" | "delete" | "unprotect"; onClose: () => void; onAccepted: (resource: SubTenant, action: "create" | "update" | "delete" | "unprotect") => void }) {
+function SelectedSubTenant({ scope, id, mode, onClose, onAccepted }: { scope: SubTenantScope; id: string; mode: "edit" | "delete" | "unprotect"; onClose: () => void; onAccepted: (resource: SubTenant, action: "create" | "update" | "delete" | "unprotect") => void }) {
   const { api, canWrite } = usePlatform();
   const { tenantId, clusterId } = scope;
   const load = useCallback(async (signal: AbortSignal) => scopedSubTenant((await api.subtenant.getSubTenant({ tenantId, clusterId, subtenantId: id }, { signal })).subtenant, { tenantId, clusterId }, id), [api, tenantId, clusterId, id]);
@@ -82,19 +87,20 @@ function SelectedSubTenant({ scope, id, mode, onClose, onAccepted }: { scope: Su
   if (detail.data && !detail.error && mode === "edit" && canWrite && detail.data.status?.state !== SubTenantState.DELETING) return <SubTenantEditor scope={scope} baseline={detail.data} onClose={onClose} onAccepted={onAccepted} />;
   if (detail.data && !detail.error && mode === "delete" && canWrite) return <DeleteSubTenant scope={scope} resource={detail.data} onClose={onClose} onAccepted={onAccepted} />;
   if (detail.data && !detail.error && mode === "unprotect" && canWrite) return <DisableProtection scope={scope} resource={detail.data} onClose={onClose} onAccepted={onAccepted} />;
-  const resource = detail.data;
-  const row = resource && subTenantRow(resource);
-  return <WizardDialog isOpen onOpenChange={(open) => { if (!open) onClose(); }} title={mode === "view" ? "Sub Tenant details" : `Load Sub Tenant to ${mode}`} steps={["Details"]} step={0} footer={<HStack gap={2}><Button label="Close" onClick={onClose} /><RefreshButton label="Refresh Sub Tenant details" onClick={detail.refresh} isLoading={detail.refreshing} /></HStack>}>
-    {detail.loading && <Text role="status">Loading Sub Tenant…</Text>}
-    {detail.error && <Banner status="error" title="Sub Tenant unavailable" description={detail.error} />}
-    {resource && !detail.error && <VStack gap={4}>
-      <MetadataList><MetadataListItem label="Name">{resource.spec?.name ? <CopyValue value={resource.spec.name} label="Sub Tenant name" /> : "Legacy allocation"}</MetadataListItem><MetadataListItem label="Display name">{resource.spec?.displayName || "Not set"}</MetadataListItem><MetadataListItem label="Deletion protection">{resource.spec?.deletionProtection !== false ? "Protected" : "Off"}</MetadataListItem><MetadataListItem label="ID"><CopyValue value={resource.id} label="Sub Tenant ID" /></MetadataListItem><MetadataListItem label="Tenant"><CopyValue value={resource.tenantId} label="Tenant" /></MetadataListItem><MetadataListItem label="Cluster"><CopyValue value={resource.clusterId} label="Cluster ID" /></MetadataListItem><MetadataListItem label="Admin groups">{resource.spec?.access?.adminGroups.join(", ") || "None configured"}</MetadataListItem><MetadataListItem label="Viewer groups">{resource.spec?.access?.viewerGroups.join(", ") || "None configured"}</MetadataListItem><MetadataListItem label="Status"><StatusValue label={row!.state} tone={row!.tone} /></MetadataListItem><MetadataListItem label="Message">{row?.message || "No message reported"}</MetadataListItem><MetadataListItem label="Remote tenant">{resource.status?.remoteCapsuleTenant ? <CopyValue value={resource.status.remoteCapsuleTenant} label="Remote tenant" /> : "Not reported"}</MetadataListItem></MetadataList>
+  return <WizardDialog isOpen onOpenChange={(open) => { if (!open) onClose(); }} title={`Load Sub Tenant to ${mode}`} steps={["Details"]} step={0} footer={<RefreshButton label="Refresh Sub Tenant details" onClick={detail.refresh} isLoading={detail.refreshing} />}>
+    {detail.loading ? <Text role="status">Loading Sub Tenant…</Text> : <Banner status="warning" title="Sub Tenant action unavailable" description={detail.error || "This action is unavailable for the current allocation or permissions."} />}
+  </WizardDialog>;
+}
+
+export function SubTenantProperties({ resource }: { resource: SubTenant }) {
+  const row = subTenantRow(resource);
+  return <VStack gap={4}>
+      <MetadataList><MetadataListItem label="Name">{resource.spec?.name ? <CopyValue value={resource.spec.name} label="Sub Tenant name" /> : "Legacy allocation"}</MetadataListItem><MetadataListItem label="Display name">{resource.spec?.displayName || "Not set"}</MetadataListItem><MetadataListItem label="Deletion protection">{resource.spec?.deletionProtection !== false ? "Protected" : "Off"}</MetadataListItem><MetadataListItem label="ID"><CopyValue value={resource.id} label="Sub Tenant ID" /></MetadataListItem><MetadataListItem label="Tenant"><CopyValue value={resource.tenantId} label="Tenant" /></MetadataListItem><MetadataListItem label="Cluster"><CopyValue value={resource.clusterId} label="Cluster ID" /></MetadataListItem><MetadataListItem label="Admin groups">{resource.spec?.access?.adminGroups.join(", ") || "None configured"}</MetadataListItem><MetadataListItem label="Viewer groups">{resource.spec?.access?.viewerGroups.join(", ") || "None configured"}</MetadataListItem><MetadataListItem label="Status"><StatusValue label={row.state} tone={row.tone} /></MetadataListItem><MetadataListItem label="Message">{row.message || "No message reported"}</MetadataListItem><MetadataListItem label="Remote tenant">{resource.status?.remoteCapsuleTenant ? <CopyValue value={resource.status.remoteCapsuleTenant} label="Remote tenant" /> : "Not reported"}</MetadataListItem></MetadataList>
       <ConsoleTable aria-label="Sub Tenant namespaces" idKey="key" data={(resource.status?.namespaces ?? []).map((namespace) => ({ key: namespace.key, name: namespace.name, uid: namespace.uid, template: namespace.templateRevision }))} columns={[{ key: "key", header: "Namespace key" }, { key: "name", header: "Namespace", renderCell: (namespace) => namespace.name ? <CopyValue value={namespace.name} label="Namespace" /> : <Text>Not reported</Text> }, { key: "uid", header: "UID", renderCell: (namespace) => namespace.uid ? <CopyValue value={namespace.uid} label="Namespace UID" /> : <Text>Not reported</Text> }, ...(resource.status?.namespaces.some((namespace) => namespace.templateRevision) ? [{ key: "template", header: "Policy revision" }] : [])]} />
       {!resource.status?.namespaces.length && <Text>No namespaces have been reported yet.</Text>}
       {!!resource.status?.deletionBlockers.length && <Banner status="warning" title="Deletion blockers" description={resource.status.deletionBlockers.join("; ")} />}
-      <Collapsible trigger="View Sub Tenant YAML" defaultIsOpen={false}><ValuesEditor label="Sub Tenant YAML" value={subTenantYaml(scope, resource)} readOnly /></Collapsible>
-    </VStack>}
-  </WizardDialog>;
+      <Collapsible trigger="View Sub Tenant YAML" defaultIsOpen={false}><ValuesEditor label="Sub Tenant YAML" value={subTenantYaml({ tenantId: resource.tenantId, clusterId: resource.clusterId }, resource)} readOnly /></Collapsible>
+  </VStack>;
 }
 function DeleteSubTenant({ scope, resource, onClose, onAccepted }: { scope: SubTenantScope; resource: SubTenant; onClose: () => void; onAccepted: (resource: SubTenant, action: "delete") => void }) {
   const { api, canWrite } = usePlatform();

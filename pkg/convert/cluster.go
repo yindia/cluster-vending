@@ -34,6 +34,7 @@ func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1
 		UpgradeMode:       cloudv1alpha1.UpgradeMode(camel(p.GetUpgradeMode(), prefixUpgradeMode)),
 		MaintenanceWindow: windowToAPI(p.GetMaintenanceWindow()),
 		NaaS:              p.Naas,
+		NodeGroups:        nodeGroupsToAPI(p.GetNodeGroups()),
 		AWS:               awsToAPI(p.GetAws()),
 	}
 	return spec, nil
@@ -82,6 +83,7 @@ func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, _ *cloudv
 			cloudv1.UpgradeMode(0).Descriptor(), prefixUpgradeMode, string(s.UpgradeMode))),
 		MaintenanceWindow: windowFromAPI(s.MaintenanceWindow),
 		Naas:              s.NaaS,
+		NodeGroups:        nodeGroupsFromAPI(s.NodeGroups),
 	}
 	if s.AWS != nil {
 		p.Provider = &cloudv1.ClusterSpec_Aws{Aws: awsFromAPI(s.AWS)}

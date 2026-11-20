@@ -93,6 +93,7 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&cloudv1alpha1.Release{}, allChannels, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&cloudv1alpha1.ReleaseHold{}, allChannels).
 		Watches(&cloudv1alpha1.Network{}, allChannels, builder.WithPredicates(networkCodeInputChanged())).
+		Watches(&cloudv1alpha1.Component{}, allChannels, builder.WithPredicates(componentPhaseChanged())).
 		Complete(r)
 }
 
@@ -133,6 +134,20 @@ func networkCodeInputChanged() predicate.Predicate {
 			!equality.Semantic.DeepEqual(before.Status.CodeChange, after.Status.CodeChange) ||
 			rollout.NetworkCodeTarget(before) != rollout.NetworkCodeTarget(after) ||
 			before.Status.Phase != after.Status.Phase || !equality.Semantic.DeepEqual(before.Status.Conditions, after.Status.Conditions)
+	}}
+}
+
+// componentPhaseChanged wakes the rollout when a tenant component is
+// added, removed, or changes phase: an automatic upgrade waits until the
+// cluster's tenant components are Ready.
+func componentPhaseChanged() predicate.Predicate {
+	return predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		before, beforeOK := e.ObjectOld.(*cloudv1alpha1.Component)
+		after, afterOK := e.ObjectNew.(*cloudv1alpha1.Component)
+		if !beforeOK || !afterOK {
+			return true
+		}
+		return before.Status.Phase != after.Status.Phase || !equality.Semantic.DeepEqual(before.DeletionTimestamp, after.DeletionTimestamp)
 	}}
 }
 

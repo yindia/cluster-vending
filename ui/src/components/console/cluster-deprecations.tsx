@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 
 import { RefreshButton } from "./refresh-button";
@@ -140,14 +141,14 @@ export function ClusterDeprecationsPanel({ clusterId }: { clusterId: string }) {
       {!scan.scannedAt && <Banner status="info" title="Never scanned" description="No successful scan has been recorded for this cluster. An empty finding list does not establish API compatibility." />}
       {!!scan.scannedAt && scan.total === 0 && !scan.error && !scan.truncated && <Banner status="success" title="No deprecated API findings" description="The last successful scan reported no deprecated or removed APIs within its manifest and Helm coverage. This does not cover every client or API call." />}
     </>}
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Finding filters">
       <TextInput type="search" label="Search findings" description="Kind, object name, namespace or API version." value={search} onChange={(value) => { setSearch(value); setPage(0); }} autoComplete="off" hasSpellCheck={false} width="min(100%, 24rem)" />
       <Selector label="Namespace" value={namespace} onChange={(value) => { setNamespace(value); setPage(0); }} width="min(100%, 14rem)" options={[{ value: "scope:all", label: "All namespaces" }, { value: "scope:cluster", label: "Cluster scoped" }, ...namespaces.map((value) => ({ value: `namespace:${value}`, label: value }))]} />
       <Selector label="Kind" value={kind} onChange={(value) => { setKind(value); setPage(0); }} width="min(100%, 14rem)" options={[{ value: "scope:all", label: "All kinds" }, ...kinds.map((value) => ({ value: `kind:${value}`, label: value || "Not reported" }))]} />
       <Selector label="Severity" value={severity} onChange={(value) => { setSeverity(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All findings" }, { value: "removed", label: "Removed" }, { value: "deprecated", label: "Deprecated" }]} />
       <Selector label="Source" value={source} onChange={(value) => { setSource(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All sources" }, ...sources.map((value) => ({ value: String(value), label: sourceLabel(value) }))]} />
       {hasFilters && <Button label="Clear finding filters" variant="ghost" onClick={clear} />}
-    </HStack>
+    </FilterRow>
     {query.data && <>
       <Text type="supporting" role="status">{filtered.length} matching of {findings.length} retained findings · 25 per page{scan?.scannedAt ? ` · ${scan.total} reported by the last successful scan` : ""}</Text>
       {rows.length ? <ConsoleTable data={rows} columns={columns} idKey="id" aria-label="Cluster deprecated API findings" /> : <Text color="secondary">{hasFilters ? "No retained findings match your search and filters." : !scan?.scannedAt ? "Findings will appear after the first successful controller scan." : scan.error ? "No findings were retained from the last successful scan. The latest scan failed." : scan.total > 0 ? "The scan summary reports findings, but none were returned. Refresh findings to retry." : "No findings were retained from the last successful scan."}</Text>}

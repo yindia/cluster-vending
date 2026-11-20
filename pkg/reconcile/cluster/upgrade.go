@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,6 +34,11 @@ type upgrade struct {
 	nodeSpecs  map[string]string
 	// addons are the versions the Addon objects ask for now, by add-on.
 	addons map[string]string
+	// karpenterNodes: the cluster has Karpenter node groups (the platform
+	// node group is recorded READY), so their nodes follow the target too;
+	// kubelets is what the pass read of them (nil: not read).
+	karpenterNodes bool
+	kubelets       *kubeletView
 }
 
 // componentsState is how the components stand for an upgrade's last two
@@ -41,6 +47,10 @@ type upgrade struct {
 type componentsState struct {
 	platformReady, tenantReady   bool
 	platformBehind, tenantBehind []string
+	// platformUnchanged, tenantUnchanged: this pass wrote no Release of any
+	// platform (tenant) component, there being at least one: their versions
+	// and values are what the cluster already runs.
+	platformUnchanged, tenantUnchanged bool
 }
 
 // sameMinor reports whether two versions are of one minor ("1.37" and
@@ -69,7 +79,7 @@ func (u upgrade) nodesBehind() string {
 // nodesSettled: every node group reports the target, is applied at it, and
 // is READY with its provider caught up (so not UPDATING).
 func (u upgrade) nodesSettled(views []*cloudv1.ManagedResource) bool {
-	if u.nodesBehind() != "" {
+	if u.nodesBehind() != "" || !u.karpenterSettled() {
 		return false
 	}
 	for _, v := range u.nodeSpecs {
@@ -78,6 +88,24 @@ func (u upgrade) nodesSettled(views []*cloudv1.ManagedResource) bool {
 		}
 	}
 	return kindSettled(views, KindNodeGroup)
+}
+
+// karpenterSettled: no Karpenter node group, or every NodeClaim has a node
+// and every node runs the target's kubelet minor. A read that did not
+// happen or is incomplete is not settled: the step waits.
+func (u upgrade) karpenterSettled() bool {
+	if !u.karpenterNodes {
+		return true
+	}
+	if u.kubelets == nil || !u.kubelets.known || u.kubelets.launching > 0 {
+		return false
+	}
+	for _, m := range u.kubelets.minors {
+		if !sameMinor(m, u.target) {
+			return false
+		}
+	}
+	return true
 }
 
 // addonsSettled: the cluster's generation is applied (no add-on is held at
@@ -224,12 +252,33 @@ func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, st
 		out.FromVersion = orName(u.nodesBehind(), u.controlPlane)
 	}
 	out.Message = u.stepMessage(out, views, comps)
+	out.SkippedSteps = skippedSteps(prev, out, comps)
+	if slices.Contains(out.GetSkippedSteps(), step) {
+		out.Message += "; component versions unchanged, nothing to do in this step"
+	}
 	if upgradePauseReason(row, out, views) != "" {
 		out.Applied = false
 	} else if step == stepAddonsPhase && stepOf(prev) == step {
 		watchAddons(row, prev, out, views)
 	}
 	return out
+}
+
+// skippedSteps are the component steps found to have nothing to do: those
+// of prev, and the step out is at when this pass is the one that applies it
+// (prev was at it, not applied yet: the components were planned for the
+// new minor in this pass) and no component changed. Decided once, in that
+// pass: after it the Releases match whatever they were written for.
+func skippedSteps(prev, out *cloudv1.ClusterUpgrade, comps componentsState) []cloudv1.ClusterUpgradePhase {
+	skipped := slices.Clone(prev.GetSkippedSteps())
+	step := out.GetPhase()
+	applying := stepOf(prev) == step && !prev.GetApplied()
+	switch {
+	case !applying, slices.Contains(skipped, step):
+	case step == stepPlatformComps && comps.platformUnchanged, step == stepTenantComps && comps.tenantUnchanged:
+		skipped = append(skipped, step)
+	}
+	return skipped
 }
 
 // watchAddons is the add-ons' step watched as a release move watches a

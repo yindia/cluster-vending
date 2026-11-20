@@ -16,6 +16,8 @@ spec:
   # kyverno and kyverno-policies are released together.
   versionGroup: kyverno
   install:
+    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    timeout: 15m
     helm:
       repository: https://kyverno.github.io/kyverno/
       chart: kyverno
@@ -43,8 +45,8 @@ spec:
       # Every Kyverno workload (controllers, hook Jobs). The chart always adds
       # kubernetes.io/os: linux to the node selector.
       # The cluster's default node pool: its labels, and a toleration per taint.
-      nodeSelector: ${system.nodeSelector}
-      tolerations: ${system.tolerations}
+      nodeSelector: ${platform.nodeSelector}
+      tolerations: ${platform.tolerations}
     features:
       # Keep the resource webhooks fail closed: never let a values change force failurePolicy Ignore.
       forceFailurePolicyIgnore:

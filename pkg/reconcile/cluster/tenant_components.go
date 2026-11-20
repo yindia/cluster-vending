@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -46,6 +48,7 @@ func (s *Reconciler) installTenant(ctx context.Context, row *model.Cluster, p *p
 	if s.deps.Platform == nil || row.State == StateDeleting {
 		return nil
 	}
+	ctx = ensureHelmPass(ctx)
 	rows, err := s.deps.Store.Components().ListByCluster(ctx, row.TenantID, row.ID)
 	if err != nil || len(rows) == 0 {
 		return err
@@ -84,8 +87,9 @@ func (s *Reconciler) installTenant(ctx context.Context, row *model.Cluster, p *p
 		p = storedPlatform(row)
 	}
 	ready := s.requirable(in, p, entries, live)
+	wait := tenantInstallWait(row, p)
 	for _, c := range live {
-		errs = append(errs, s.installOneTenant(ctx, row, c, in, release, problem, entries, ready))
+		errs = append(errs, s.installOneTenant(ctx, row, c, in, release, problem, entries, ready, wait))
 	}
 	// TenantComponentsReady: the pass made the last one Ready. A failed
 	// read only loses the event; the components are installed either way.
@@ -145,7 +149,7 @@ func (s *Reconciler) requirable(in component.PlatformInput, p *platform, entries
 
 // installOneTenant plans, applies and reports one tenant component.
 func (s *Reconciler) installOneTenant(ctx context.Context, row *model.Cluster, c model.Component, in component.PlatformInput,
-	release, problem string, entries []component.PlatformEntry, ready map[string]string) error {
+	release, problem string, entries []component.PlatformEntry, ready map[string]string, wait string) error {
 	pc := &cloudv1.PlatformComponent{Name: c.Component, Version: in.Pins[c.Component].Version}
 	fail := func(why string) error {
 		pc.Phase, pc.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, why
@@ -177,7 +181,14 @@ func (s *Reconciler) installOneTenant(ctx context.Context, row *model.Cluster, c
 	if reason != "" {
 		return fail(reason)
 	}
+	// Valid and planned: one that has not started installing waits for the
+	// EKS add-ons and every platform component (tenantInstallWait).
+	if wait != "" && !tenantStarted(c) {
+		pc.Phase, pc.Message = cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING, wait
+		return s.setTenantStatus(ctx, row, c, pc, release)
+	}
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerComponent, ID: c.ID}
+	s.gateOf(ctx, row, plan.Namespace).register(plan, true)
 	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.PlatformSet(plan), s.deps.Inventory(owner))
 	if err != nil {
 		s.logger().ErrorContext(ctx, "apply tenant component", "cluster_id", row.ID, "component_id", c.ID, "error", err)
@@ -200,13 +211,30 @@ func (s *Reconciler) installOneTenant(ctx context.Context, row *model.Cluster, c
 	if prev.GetTargetVersion() == pc.GetVersion() {
 		pc.Recoveries = prev.GetRecoveries()
 	}
+	if planned, ok := plannedComponent(plan, c.Component); ok {
+		s.gateOf(ctx, row, plan.Namespace).markUnchanged(pc, plan, planned)
+	}
+	if prev.GetTargetVersion() == pc.GetVersion() {
+		pc.LastRecovery, pc.LastRecoveryAt = prev.GetLastRecovery(), prev.GetLastRecoveryAt()
+	}
 	if object := objects[c.Component]; object != "" {
 		if d := s.releaseDetail(ctx, plan.Namespace, object); d != nil {
 			pc.Chart, pc.HelmState, pc.LastError, pc.Failures = d.Chart, d.HelmState, d.LastError, d.Failures
-			s.recover(ctx, row, plan.Namespace, object, pc, d, now())
+			s.watchRelease(ctx, row, plan.Namespace, object, tenantPrevious(prev, c.Component), pc, d, now())
 		}
 	}
 	return s.setTenantStatus(ctx, row, c, pc, release)
+}
+
+// tenantPrevious is a tenant component's recorded status as the platform
+// component the backoff reads (its fields are the same).
+func tenantPrevious(st *cloudv1.ComponentStatus, name string) *cloudv1.PlatformComponent {
+	if st == nil || st.GetChart() == "" {
+		return nil
+	}
+	return &cloudv1.PlatformComponent{Name: name, Chart: st.GetChart(), Digest: st.GetDigest(), Attempts: st.GetAttempts(),
+		CountedFailures: st.GetCountedFailures(), Failures: st.GetFailures(), NextRetryAt: st.GetNextRetryAt(),
+		LastErrorClass: st.GetLastErrorClass(), LastError: st.GetLastError()}
 }
 
 // tenantStatus is the status recorded with a component; empty when there
@@ -229,7 +257,10 @@ func (s *Reconciler) setTenantStatus(ctx context.Context, row *model.Cluster, c 
 		Phase: pc.GetPhase(), Message: pc.GetMessage(), TargetVersion: pc.GetVersion(), Release: release,
 		InstalledVersion: prev.GetInstalledVersion(), ObservedGeneration: c.Generation,
 		Chart: pc.GetChart(), HelmState: pc.GetHelmState(), LastError: pc.GetLastError(),
-		Failures: pc.GetFailures(), Recoveries: pc.GetRecoveries()}
+		Failures: pc.GetFailures(), Recoveries: pc.GetRecoveries(),
+		ChartVersion: pc.GetChartVersion(), Revision: pc.GetRevision(), Digest: pc.GetDigest(), Attempts: pc.GetAttempts(),
+		CountedFailures: pc.GetCountedFailures(), NextRetryAt: pc.GetNextRetryAt(), LastErrorClass: pc.GetLastErrorClass(),
+		LastRecovery: pc.GetLastRecovery(), LastRecoveryAt: pc.GetLastRecoveryAt(), Unchanged: pc.GetUnchanged()}
 	if st.GetTargetVersion() == "" {
 		st.TargetVersion = prev.GetTargetVersion()
 	}
@@ -345,17 +376,28 @@ func (s *Reconciler) forgetComponent(ctx context.Context, row *model.Cluster, c 
 	return nil
 }
 
-// deleteTenant removes every tenant component of a cluster being deleted,
-// before anything of the platform's or the cluster's own: each is marked
-// as being removed (the API refuses to change it from then on) and
-// removed as a disable removes it. It reports whether they are all gone.
+// deleteTenant removes every tenant component of a cluster being deleted
+// (stage 2), before anything of the platform's or the cluster's own: each is
+// marked as being removed (the API refuses to change it from then on), then
+// removed as a disable removes it, in reverse order of installation: a
+// component that another still there requires is removed after it. It
+// reports whether they are all gone.
 func (s *Reconciler) deleteTenant(ctx context.Context, row *model.Cluster) (bool, error) {
 	rows, err := s.deps.Store.Components().ListByCluster(ctx, row.TenantID, row.ID)
 	if err != nil {
 		return false, fmt.Errorf("list the cluster's components: %w", err)
 	}
+	names := make([]string, 0, len(rows))
+	for _, c := range rows {
+		names = append(names, c.Component)
+	}
+	order := s.definitionOrder(ctx)
+	// A cycle of requirements (the catalog refuses one) must not hold the
+	// deletion for ever: when every component is held, none is.
+	cycle := len(rows) > 0 && !slices.ContainsFunc(names, func(n string) bool { return !order.requiredBy(n, names) })
 	all := true
 	var errs []error
+	var removing, held []string
 	for _, c := range rows {
 		if c.State != componentDeleting {
 			c.State = componentDeleting
@@ -365,11 +407,56 @@ func (s *Reconciler) deleteTenant(ctx context.Context, row *model.Cluster) (bool
 				continue
 			}
 		}
+		if !cycle && order.requiredBy(c.Component, names) {
+			held = append(held, c.Component)
+			all = false
+			continue
+		}
+		removing = append(removing, c.Component)
 		gone, err := s.removeTenant(ctx, row, c)
 		if err != nil {
 			errs = append(errs, err)
 		}
 		all = all && gone
 	}
+	if !all {
+		waits := "removing " + strings.Join(removing, ", ")
+		if len(held) > 0 {
+			waits += "; " + strings.Join(held, ", ") + " wait for the components that require them to be gone"
+		}
+		setDeleteStage(ctx, stageTenant, waits)
+	}
 	return all && len(errs) == 0, errors.Join(errs...)
+}
+
+// tenantInstallWait is why a tenant component that has not started
+// installing must wait; "" when it may start. The order is EKS add-ons
+// (with every other resource: the cluster is RUNNING), then every
+// platform component Ready, then tenant components. A platform component
+// being removed does not hold them back.
+func tenantInstallWait(row *model.Cluster, p *platform) string {
+	if row.State != StateRunning {
+		return "waiting for the cluster's EKS add-ons and resources to be Ready"
+	}
+	var waiting []string
+	for _, c := range p.components {
+		switch c.GetPhase() {
+		case cloudv1.ComponentPhase_COMPONENT_PHASE_READY, cloudv1.ComponentPhase_COMPONENT_PHASE_DELETING:
+		default:
+			waiting = append(waiting, c.GetName())
+		}
+	}
+	if len(waiting) > 0 {
+		return "waiting for the platform components to be Ready: " + strings.Join(waiting, ", ")
+	}
+	return ""
+}
+
+// tenantStarted reports whether the component's install has started (any
+// phase past PENDING): one that has is reconciled as it is, whatever the
+// platform's components do, so a platform hiccup never holds back a
+// tenant's change or strands a half-done install.
+func tenantStarted(c model.Component) bool {
+	phase := tenantStatus(c).GetPhase()
+	return phase != cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING && phase != cloudv1.ComponentPhase_COMPONENT_PHASE_UNSPECIFIED
 }

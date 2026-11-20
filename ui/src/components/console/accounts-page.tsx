@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
@@ -376,13 +377,13 @@ function AccountDetails({ id }: { id: string }) {
         </>}
         {tab === "resources" && <>
           <HStack gap={3} justify="between" wrap="wrap"><VStack gap={1}><Heading level={2}>Managed resources</Heading><Text role="status" color="secondary">{filtered.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack></HStack>
-          <HStack gap={3} wrap="wrap" vAlign="end">
+          <FilterRow label="Resource filters">
             <TextInput id={`${uiId}-search`} label="Search resources" type="search" placeholder="Name, kind or cloud ID" value={search} onChange={setSearch} autoComplete="off" />
             <Selector label="Resource kind" value={resourceKind} onChange={setResourceKind} options={[{ value: "all", label: "All kinds" }, ...resourceKinds.map((kind) => ({ value: kind, label: kind || "Unknown" }))]} />
             <Selector label="Resource status" value={resourceState} onChange={setResourceState} options={[{ value: "all", label: "All statuses" }, ...Object.values(ManagedResourceState).filter((state) => typeof state === "number").map((state) => ({ value: String(state), label: titleCase(ManagedResourceState[state]) }))]} />
             <Selector label="Paused resources" value={pausedFilter} onChange={setPausedFilter} options={[{ value: "all", label: "All resources" }, { value: "paused", label: "Paused only" }, { value: "active", label: "Not paused" }]} />
             {(search || resourceKind !== "all" || resourceState !== "all" || pausedFilter !== "all") && <Button label="Clear resource filters" onClick={() => { setSearch(""); setResourceKind("all"); setResourceState("all"); setPausedFilter("all"); }} />}
-          </HStack>
+          </FilterRow>
           {filtered.length ? <VStack isScrollable><Table aria-label="Account managed resource inventory" data={filtered} columns={inventoryColumns} idKey={(resource) => `${resource.kind}:${resource.name}`} density="compact" /></VStack> : <Text color="secondary">{resources.length ? "No resources match the current filters." : "No managed resources were reported."}</Text>}
         </>}
         {tab === "activity" && <>
@@ -462,13 +463,13 @@ function AccountsList() {
     <ErrorNotice error={list.error} />
     {saved && <Banner status="info" title="Account connection accepted" description="Access is checked asynchronously. Open the account to set up its role and review verification." endContent={<Button as={Link} href={`/accounts/${encodeURIComponent(saved.id)}`} label="View account" />} />}
     {list.loading && tenantId && <Text role="status">Loading accounts…</Text>}
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Account filters">
       <TextInput label="Search accounts" type="search" placeholder="Name, platform ID, cloud ID or role" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />
       <Selector label="Provider" value={providerFilter} onChange={(value) => { setProviderFilter(value); setPage(1); }} options={[{ value: "all", label: "All providers" }, { value: "aws", label: "AWS" }, { value: "unsupported", label: "Unsupported" }]} />
       <Selector label="Connection state" value={stateFilter} onChange={(value) => { setStateFilter(value); setPage(1); }} options={[{ value: "all", label: "All states" }, ...Object.values(CloudAccountState).filter((state) => typeof state === "number").map((state) => ({ value: String(state), label: titleCase(CloudAccountState[state]) }))]} />
       <Selector label="Access state" value={accessFilter} onChange={(value) => { setAccessFilter(value); setPage(1); }} options={[{ value: "all", label: "All access states" }, { value: "verified", label: "Verified" }, { value: "not-verified", label: "Not verified" }, { value: "stale", label: "Stale" }, { value: "not-checked", label: "Not checked" }]} />
       {(search || providerFilter !== "all" || stateFilter !== "all" || accessFilter !== "all") && <Button label="Clear account filters" onClick={clearFilters} />}
-    </HStack>
+    </FilterRow>
     {list.data && <Text role="status" color="secondary">{filtered.length} of {accounts.length} accounts</Text>}
     {list.data && (accounts.length ? filtered.length ? <><Table aria-label="Cloud accounts" data={visible.accounts} columns={columns} idKey="id" rowIndexStart={(visible.page - 1) * ACCOUNT_PAGE_SIZE + 1} rowCount={filtered.length} /><Pagination label="Accounts pagination" page={visible.page} onChange={setPage} totalItems={filtered.length} pageSize={ACCOUNT_PAGE_SIZE} variant="count" /></> : <Text>No accounts match the current filters.</Text> : <VStack padding={6} gap={3}><Heading level={3}>Connect your first cloud account</Heading><Text color="secondary">Connect an existing AWS account to begin creating networks and clusters.</Text></VStack>)}
   </VStack>;

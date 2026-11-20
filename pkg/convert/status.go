@@ -56,6 +56,7 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.PlatformRelease = p.GetPlatformRelease()
 	into.ReleaseMove = ReleaseMoveToAPI(p.GetReleaseMove())
 	into.CodeChange = CodeChangeToAPI(p.GetCodeChange())
+	into.NodeGroups = nodeGroupStatuses(p.GetNodeGroups())
 	into.Kubernetes = clusterKubernetes(p.GetKubernetes())
 	into.PlatformComponents = platformComponents(p.GetPlatformComponents())
 	into.RecentEvents = recentEvents(p.GetRecentEvents())
@@ -82,7 +83,10 @@ func platformComponents(in []*cloudv1.PlatformComponent) []cloudv1alpha1.Platfor
 		pc := cloudv1alpha1.PlatformComponentStatus{InstalledVersion: c.GetInstalledVersion(), Name: c.GetName(), Version: c.GetVersion(),
 			Phase: camel(c.GetPhase(), prefixComponentPhase), Message: c.GetMessage(),
 			Chart: c.GetChart(), HelmState: c.GetHelmState(), LastError: c.GetLastError(),
-			Failures: c.GetFailures(), Recoveries: c.GetRecoveries()}
+			Failures: c.GetFailures(), Recoveries: c.GetRecoveries(),
+			ChartVersion: c.GetChartVersion(), Revision: c.GetRevision(), Digest: c.GetDigest(), Attempts: c.GetAttempts(),
+			CountedFailures: c.GetCountedFailures(), NextRetryAt: timeOf(c.GetNextRetryAt()), LastErrorClass: c.GetLastErrorClass(),
+			LastRecovery: c.GetLastRecovery(), LastRecoveryTime: timeOf(c.GetLastRecoveryAt()), Unchanged: c.GetUnchanged()}
 		if since := c.GetSince(); since != nil {
 			pc.Since = &metav1.Time{Time: since.AsTime()}
 		}
@@ -111,6 +115,9 @@ func upgrade(p *cloudv1.ClusterUpgrade) *cloudv1alpha1.ClusterUpgrade {
 		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage(), AddonsBehind: p.GetAddonsBehind(),
 		PhaseStartTime: timeOf(p.GetPhaseStartTime()), ComponentsBehind: p.GetComponentsBehind(),
 		Recoveries: p.GetRecoveries(), Halted: p.GetHalted()}
+	for _, step := range p.GetSkippedSteps() {
+		out.SkippedSteps = append(out.SkippedSteps, upgradePhases[step])
+	}
 	for _, g := range p.GetNodeGroups() {
 		out.NodeGroups = append(out.NodeGroups, cloudv1alpha1.ClusterUpgradeNodeGroup{Name: g.GetName(),
 			FromVersion: g.GetFromVersion(), ToVersion: g.GetToVersion(), State: camel(g.GetState(), "MANAGED_RESOURCE_STATE_")})

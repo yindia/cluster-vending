@@ -62,12 +62,16 @@ func (w world) componentStatus(t *testing.T, id string) (*model.Component, *clou
 	return c, st
 }
 
-// baseDeployed installs the platform's base and marks it deployed.
+// baseDeployed installs the platform's components and marks each deployed
+// (base, then mesh, which installs once base is): tenant components start
+// only once every platform component is Ready.
 func (w world) baseDeployed(t *testing.T) {
 	t.Helper()
 	w.helmConfig(t)
 	w.tenantPass(t)
 	w.deployed(t, "base")
+	w.tenantPass(t)
+	w.deployed(t, "mesh")
 }
 
 // A tenant component waits for the platform component it requires, then
@@ -84,6 +88,8 @@ func TestTenantComponentInstalls(t *testing.T) {
 	}
 
 	w.deployed(t, "base")
+	w.tenantPass(t) // mesh installs once base is deployed
+	w.deployed(t, "mesh")
 	w.tenantPass(t)
 	rel := w.release(t, "gpu")
 	if rel == nil {
@@ -218,5 +224,30 @@ func TestClusterDeleteRemovesTenantComponentsFirst(t *testing.T) {
 	}
 	if _, err := w.store.Components().Get(t.Context(), worldTenant, c.ID); err == nil {
 		t.Error("the component is still stored")
+	}
+}
+
+// EKS add-ons, then platform components, then tenant components: a tenant
+// component is not installed while any platform component is not Ready,
+// even one it does not require, and says what it waits for.
+func TestTenantComponentWaitsForEveryPlatformComponent(t *testing.T) {
+	w, _, c := tenantWorld(t)
+	w.helmConfig(t)
+	w.tenantPass(t)
+	w.deployed(t, "base") // gpu's own requirement, but mesh is not Ready yet
+
+	w.tenantPass(t)
+	w.tenantPass(t) // mesh is installed now, not Ready
+
+	if _, st := w.componentStatus(t, c.ID); st.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_PENDING ||
+		!strings.Contains(st.GetMessage(), "waiting for the platform components to be Ready: mesh") || w.release(t, "gpu") != nil {
+		t.Fatalf("with mesh not Ready: %v %q, want PENDING and nothing installed", st.GetPhase(), st.GetMessage())
+	}
+
+	w.deployed(t, "mesh")
+	w.tenantPass(t)
+
+	if w.release(t, "gpu") == nil {
+		t.Fatal("gpu is not installed once every platform component is Ready")
 	}
 }

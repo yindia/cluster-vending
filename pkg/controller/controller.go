@@ -70,6 +70,10 @@ var (
 	// upgradeDelay is how soon a cluster with an upgrade in progress is
 	// looked at again: each step is read as AWS and Helm report it.
 	upgradeDelay = 30 * time.Second
+
+	// retryFloor is the soonest a cluster is looked at again for the end of
+	// a Helm release's backoff.
+	retryFloor = 5 * time.Second
 	// codeDelay: a code change waits its turn in the rollout, or is being
 	// applied; the rollout's admissions wake no one.
 	codeDelay = time.Minute
@@ -159,6 +163,9 @@ func SetupAll(mgr ctrl.Manager, d Deps) error {
 	}
 	if err := scans.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("set up the deprecation scans: %w", err)
+	}
+	if err := NewPolicyReconciler(d).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("set up policy collection: %w", err)
 	}
 	if !d.NoRecommendations {
 		if err := NewRecommendationReconciler(d).SetupWithManager(mgr); err != nil {

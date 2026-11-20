@@ -10,6 +10,7 @@ import (
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect/v2"
+	"google.golang.org/protobuf/proto"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -32,6 +33,34 @@ const (
 	pathAddons            = "spec.aws.addons"
 	pathSecretsEncryption = "spec.control_plane.secrets_encryption"
 )
+
+// pathNodeGroups is the user's Karpenter node groups, one path for the whole
+// list.
+const pathNodeGroups = "spec.node_groups"
+
+// managedNodeGroupPaths are the default node group's fields that the platform
+// owns: an update that names one is refused. Instance types, capacity type
+// and disk size stay changeable.
+var managedNodeGroupPaths = []string{
+	"spec.default_node_pool.taints",
+	"spec.default_node_pool.labels",
+	"spec.default_node_pool.scaling_config",
+}
+
+// errDefaultNodeGroupManaged is the refusal of a change to a field of the
+// default node group the platform owns.
+func errDefaultNodeGroupManaged(path string) error {
+	return connect.NewError(connect.CodeFailedPrecondition,
+		fmt.Sprintf("the default node group is managed by the platform: %s cannot be changed", path))
+}
+
+// isManagedNodeGroupPath reports whether path is, or is inside, one of
+// managedNodeGroupPaths.
+func isManagedNodeGroupPath(path string) bool {
+	return slices.ContainsFunc(managedNodeGroupPaths, func(m string) bool {
+		return path == m || strings.HasPrefix(path, m+".")
+	})
+}
 
 // Spec paths that only say how platform releases treat the cluster: no
 // rendered object depends on them, so no cloud resource changes.
@@ -68,6 +97,10 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 			dst.Naas = src.Naas
 		}
 	},
+	// The user's node groups are compared and applied as a whole list.
+	pathNodeGroups: func(dst, src *cloudv1.ClusterSpec) {
+		dst.NodeGroups = proto.CloneOf(&cloudv1.ClusterSpec{NodeGroups: src.GetNodeGroups()}).GetNodeGroups()
+	},
 	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
 	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
 	pathMaintenanceWindow: func(dst, src *cloudv1.ClusterSpec) {
@@ -79,12 +112,6 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	"spec.control_plane.endpoint_access.public_access_cidrs": func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.EndpointAccess.PublicAccessCidrs = src.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()
 	},
-	"spec.default_node_pool.scaling_config.min_size": func(dst, src *cloudv1.ClusterSpec) {
-		scaling(dst).MinSize = src.GetDefaultNodePool().GetScalingConfig().GetMinSize()
-	},
-	"spec.default_node_pool.scaling_config.max_size": func(dst, src *cloudv1.ClusterSpec) {
-		scaling(dst).MaxSize = src.GetDefaultNodePool().GetScalingConfig().GetMaxSize()
-	},
 	// EKS cannot change these in place: the node group is replaced.
 	"spec.default_node_pool.instance_types": func(dst, src *cloudv1.ClusterSpec) {
 		dst.DefaultNodePool.InstanceTypes = src.GetDefaultNodePool().GetInstanceTypes()
@@ -94,12 +121,6 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	},
 	"spec.default_node_pool.disk_size_gb": func(dst, src *cloudv1.ClusterSpec) {
 		dst.DefaultNodePool.DiskSizeGb = src.GetDefaultNodePool().GetDiskSizeGb()
-	},
-	"spec.default_node_pool.labels": func(dst, src *cloudv1.ClusterSpec) {
-		dst.DefaultNodePool.Labels = src.GetDefaultNodePool().GetLabels()
-	},
-	"spec.default_node_pool.taints": func(dst, src *cloudv1.ClusterSpec) {
-		dst.DefaultNodePool.Taints = src.GetDefaultNodePool().GetTaints()
 	},
 	"spec.aws.enabled_cluster_log_types": func(dst, src *cloudv1.ClusterSpec) {
 		dst.GetAws().EnabledClusterLogTypes = src.GetAws().GetEnabledClusterLogTypes()
@@ -189,13 +210,6 @@ func awsNodePool(spec *cloudv1.ClusterSpec) *cloudv1.AwsNodePoolSpec {
 	return spec.GetAws().DefaultNodePool
 }
 
-func scaling(spec *cloudv1.ClusterSpec) *cloudv1.ScalingConfig {
-	if spec.DefaultNodePool.ScalingConfig == nil {
-		spec.DefaultNodePool.ScalingConfig = &cloudv1.ScalingConfig{}
-	}
-	return spec.DefaultNodePool.ScalingConfig
-}
-
 // UpdateCluster changes the fields named in update_mask in the stored
 // cluster. The reconciler rolls spec changes out by applying the cluster's
 // resources again; resources the new spec no longer has (a removed admin's
@@ -236,9 +250,16 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return &cloudv1.UpdateClusterResponse{Cluster: c}, err
 	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
+	nodeGroupsBefore := spec.GetNodeGroups()
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
+	}
+	if slices.Contains(paths, pathNodeGroups) {
+		if err := checkNodeGroupAllowlist(spec.GetNodeGroups(), nodeGroupsBefore,
+			s.deps.NodeGroupInstanceFamilies, s.deps.NodeGroupInstanceTypes); err != nil {
+			return nil, err
+		}
 	}
 	if slices.Contains(paths, "spec.naas") && !spec.GetNaas() {
 		if err := s.requireNoSubTenants(ctx, row); err != nil {
@@ -382,6 +403,8 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 			row.DisplayName = in.GetDisplayName()
 		case p == pathLabels:
 			row.Labels = model.Labels(in.GetLabels())
+		case isManagedNodeGroupPath(p):
+			return false, errDefaultNodeGroupManaged(p)
 		case ok:
 			copyField(spec, in.GetSpec())
 		case p == "spec.aws.access_config.authentication_mode":

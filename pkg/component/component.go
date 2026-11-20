@@ -28,6 +28,7 @@ package component
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/yindia/cluster-vending/pkg/fault"
 )
@@ -60,8 +61,14 @@ type Definition struct {
 	Includes []string
 	// HasInstall: the definition has an install of its own (spec.install).
 	HasInstall bool
+	// InstallTimeout is spec.install.timeout: how long Helm waits for each
+	// chart to roll out; 0 when unset (the default applies).
+	InstallTimeout time.Duration
 	// Requires are components that must be enabled first.
 	Requires []string
+	// Sequence orders Platform components: one installs once every Platform
+	// component of a lower sequence is Ready (DefaultSequence when unset).
+	Sequence int32
 	// Provider is the cloud the component is installed on (aws, gcp,
 	// azure); Covers.
 	Provider string

@@ -355,6 +355,11 @@ func printDetails(w io.Writer, components []*cloudv1.Component) error {
 				return err
 			}
 		}
+		for _, line := range helmDetails(st) {
+			if _, err := fmt.Fprintf(w, "  %s\n", line); err != nil {
+				return err
+			}
+		}
 		if hint := retryHint(comp.GetClusterId(), comp.GetComponent(), st.GetPhase(), st.GetChart(), st.GetMessage()); hint != "" {
 			if _, err := fmt.Fprintf(w, "  %s\n", hint); err != nil {
 				return err
@@ -362,4 +367,27 @@ func printDetails(w io.Writer, components []*cloudv1.Component) error {
 		}
 	}
 	return nil
+}
+
+// helmDetails are the lines under a component's chart that say how Helm
+// stands: the deployed chart version and revision, the class of the last
+// error, the retries (attempts, those that count, the next try) and the
+// last recovery. None for a component that has nothing to say.
+func helmDetails(st *cloudv1.ComponentStatus) []string {
+	var out []string
+	if st.GetChartVersion() != "" || st.GetRevision() > 0 {
+		out = append(out, fmt.Sprintf("deployed chart version %s, Helm revision %d", orNone(st.GetChartVersion()), st.GetRevision()))
+	}
+	if st.GetAttempts() > 0 {
+		line := fmt.Sprintf("retries: %d failed attempts (%d counted), last error is %s", st.GetAttempts(), st.GetCountedFailures(),
+			orNone(st.GetLastErrorClass()))
+		if t := st.GetNextRetryAt(); t != nil {
+			line += ", next try at " + t.AsTime().UTC().Format("2006-01-02 15:04:05Z")
+		}
+		out = append(out, line)
+	}
+	if st.GetLastRecovery() != "" {
+		out = append(out, "last recovery: "+st.GetLastRecovery())
+	}
+	return out
 }

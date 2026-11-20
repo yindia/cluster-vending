@@ -881,9 +881,14 @@ type AccountOnboarding struct {
 	ExternalId string `protobuf:"bytes,11,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	// Where the API server serves the role's template, relative to its base
 	// URL (/cloudformation/<role>.yaml), without authentication.
-	TemplatePath  string `protobuf:"bytes,12,opt,name=template_path,json=templatePath,proto3" json:"template_path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TemplatePath string `protobuf:"bytes,12,opt,name=template_path,json=templatePath,proto3" json:"template_path,omitempty"`
+	// The template's ServerPrincipalArn parameter: the role the API server
+	// runs as, which the tenant role trusts next to the management role so
+	// that the server can read the cluster results buckets (read-only).
+	// Empty: the server has no AWS access; the parameter is left empty.
+	ServerPrincipalArn string `protobuf:"bytes,13,opt,name=server_principal_arn,json=serverPrincipalArn,proto3" json:"server_principal_arn,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *AccountOnboarding) Reset() {
@@ -954,6 +959,13 @@ func (x *AccountOnboarding) GetExternalId() string {
 func (x *AccountOnboarding) GetTemplatePath() string {
 	if x != nil {
 		return x.TemplatePath
+	}
+	return ""
+}
+
+func (x *AccountOnboarding) GetServerPrincipalArn() string {
+	if x != nil {
+		return x.ServerPrincipalArn
 	}
 	return ""
 }
@@ -1600,7 +1612,7 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\x1cGetAccountOnboardingResponse\x12;\n" +
 	"\n" +
 	"onboarding\x18\x01 \x01(\v2\x1b.cloud.v1.AccountOnboardingR\n" +
-	"onboarding\"\xca\x02\n" +
+	"onboarding\"\xfc\x02\n" +
 	"\x11AccountOnboarding\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1b\n" +
 	"\trole_name\x18\x02 \x01(\tR\broleName\x12\x1d\n" +
@@ -1609,7 +1621,8 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\x13management_role_arn\x18\x06 \x01(\tR\x11managementRoleArn\x12\x1f\n" +
 	"\vexternal_id\x18\v \x01(\tR\n" +
 	"externalId\x12#\n" +
-	"\rtemplate_path\x18\f \x01(\tR\ftemplatePathJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"\rtemplate_path\x18\f \x01(\tR\ftemplatePath\x120\n" +
+	"\x14server_principal_arn\x18\r \x01(\tR\x12serverPrincipalArnJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
 	"J\x04\b\n" +
 	"\x10\vR\n" +
 	"stack_nameR\x06regionR\rtemplate_bodyR\rtemplate_fileR\ftemplate_urlR\vconsole_url\"h\n" +

@@ -5,7 +5,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { HStack, VStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Stepper, Step } from "@astryxdesign/core/Stepper";
@@ -20,32 +20,36 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { CopyValue } from "./copy-value";
 import { ValuesEditor, type ValuesEditorHandle } from "./values-editor";
 import { WizardDialog, type WizardDialogProps } from "./wizard-dialog";
+import { KubernetesIcon } from "./provider-icons";
 
-/** The two cluster drafts share a header and keep their existing reviewed workflows. */
-export function ClusterCreateDialog({ mode, onModeChange, yamlContent, modeDisabled = false, busy = false, ...props }: WizardDialogProps & {
-  mode: "guided" | "yaml";
-  onModeChange: (mode: "guided" | "yaml") => void;
+/** Guided and YAML drafts share a dialog while keeping independent reviews. */
+export function ResourceWorkflowDialog({ mark, method, yamlContent, placement, busy = false, ...props }: WizardDialogProps & {
+  mark?: ReactNode;
+  method?: { label: string; value: "guided" | "yaml"; onChange: (mode: "guided" | "yaml") => void };
   yamlContent?: ReactNode;
-  modeDisabled?: boolean;
+  placement?: ReactNode;
 }) {
   const changeOpen = (open: boolean) => { if (!busy) props.onOpenChange(open); };
-  return <Dialog isOpen={props.isOpen} onOpenChange={changeOpen} purpose={busy ? "required" : "form"} width="min(48rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={0}>
-    <Layout padding={6}
-      header={<VStack gap={4}>
-        <DialogHeader title="Create cluster" subtitle="Choose how to configure your cluster, then review before creating it." onOpenChange={busy ? undefined : changeOpen} />
-        <HStack paddingInline={6}>
-          <SegmentedControl label="Creation method" value={mode} onChange={(value) => { if (value === "guided" || value === "yaml") onModeChange(value); }} isDisabled={busy || modeDisabled} layout="hug" size="md">
-            <SegmentedControlItem value="guided" label="Guided form" />
-            <SegmentedControlItem value="yaml" label="Paste YAML" />
-          </SegmentedControl>
-        </HStack>
+  return <Dialog isOpen={props.isOpen} onOpenChange={changeOpen} purpose={busy ? "required" : "form"} width="min(60rem, calc(100vw - 1.5rem))" maxHeight="92dvh" padding={0}>
+    <VStack data-resource-workflow={method ? "with-method" : "guided-only"}>
+      <VStack data-workflow-header="">
+        <DialogHeader title={props.title} subtitle={props.description} onOpenChange={busy ? undefined : changeOpen}
+          startContent={<HStack data-workflow-mark="" padding={2}>{mark ?? <KubernetesIcon size="lg" />}</HStack>} />
+      </VStack>
+      {method && <VStack data-workflow-method="" gap={2}>
+        <Text type="label">{method.label}</Text>
+        <SegmentedControl label={method.label} value={method.value} onChange={(value) => { if (value === "guided" || value === "yaml") method.onChange(value); }} isDisabled={busy} layout="hug" size="md">
+          <SegmentedControlItem value="guided" label="Guided form" />
+          <SegmentedControlItem value="yaml" label="Paste YAML" />
+        </SegmentedControl>
       </VStack>}
-      content={<><ClusterCreationBody {...props} isOpen={props.isOpen && mode === "guided"} />{yamlContent}</>}
-    />
+      <ResourceWorkflowBody {...props} placement={placement} isOpen={props.isOpen && method?.value !== "yaml"} />
+      {yamlContent}
+    </VStack>
   </Dialog>;
 }
 
-function ClusterCreationBody({ isOpen, steps, step, children, footer }: WizardDialogProps) {
+function ResourceWorkflowBody({ isOpen, title, steps, step, children, footer, placement }: WizardDialogProps & { placement?: ReactNode }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const previousStep = useRef(step);
   useEffect(() => {
@@ -53,19 +57,27 @@ function ClusterCreationBody({ isOpen, steps, step, children, footer }: WizardDi
     previousStep.current = step;
   }, [isOpen, step]);
   if (!isOpen) return null;
-  return <Layout
-      content={<LayoutContent padding={6}><VStack gap={5} minHeight="min(24rem, 50dvh)">
-        <Stepper activeStep={step} label="Create cluster progress" density="compact">{steps.map((label, index) => <Step key={label} step={index} label={label} />)}</Stepper>
-        <Heading level={3} ref={heading} tabIndex={-1}>{steps[step]}</Heading>
-        {children}
-      </VStack></LayoutContent>}
-      footer={footer ? <LayoutFooter padding={5} hasDivider><HStack hAlign="end">{footer}</HStack></LayoutFooter> : undefined}
-    />;
+  return <>
+    <VStack as="aside" data-workflow-rail="" gap={5}>
+      <Stepper activeStep={step} label={`${title} progress`} orientation="vertical" indicatorPosition="on-track">
+        {steps.map((label, index) => <Step key={label} step={index} label={label} />)}
+      </Stepper>
+      {placement}
+    </VStack>
+    <VStack data-workflow-body="" gap={5} key={step}>
+      <VStack gap={1}>
+        <Text type="supporting" color="secondary">Step {step + 1} of {steps.length}</Text>
+        <Heading level={2} accessibilityLevel={3} ref={heading} tabIndex={-1}>{steps[step]}</Heading>
+      </VStack>
+      {children}
+    </VStack>
+    {footer && <HStack as="footer" data-workflow-footer="">{footer}</HStack>}
+  </>;
 }
 
 function ManifestDialogFrame({ embedded, ...props }: WizardDialogProps & { embedded: boolean }) {
   return embedded
-    ? <ClusterCreationBody {...props} />
+    ? <ResourceWorkflowBody {...props} />
     : <WizardDialog {...props} />;
 }
 
@@ -73,7 +85,7 @@ export type ManifestCreateDialogProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onUseForm?: () => void;
-  /** Cluster creation owns one modal and embeds this draft's reviewed workflow. */
+  /** The resource workflow owns one modal and embeds this draft's reviewed workflow. */
   embedded?: boolean;
   onBusyChange?: (busy: boolean) => void;
 } & (
@@ -281,12 +293,13 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
         {!canWrite && <Banner status="warning" title="Write access is required" description="You need write permission in the active tenant to submit a manifest." />}
         {!tenantId && <Banner status="warning" title="Select a tenant before continuing" />}
         {step === 0 && <>
-          <Text color="secondary">Paste one {kind} manifest. Review checks the manifest and its referenced accounts and networks. Nothing is submitted until you confirm.</Text>
-          <HStack gap={2} wrap="wrap">
+          {!embedded && <Text color="secondary">Paste one {kind} manifest. Review checks the manifest and its referenced accounts and networks. Nothing is submitted until you confirm.</Text>}
+          <HStack gap={2} wrap="wrap" hAlign={embedded ? "between" : "start"} vAlign="center">
+            {embedded && <Text color="secondary">Use the same manifest as the CLI.</Text>}
             {onUseForm && <Button type="button" label="Use guided form" isDisabled={!!busy} onClick={() => { cancel(); setStep(0); setReviewed(undefined); onUseForm(); }} />}
             <Button type="button" label={text ? "Replace with example" : "Load example"} isDisabled={locked} isLoading={busy === "example"} onClick={() => { void loadExample(); }} />
           </HStack>
-          <ValuesEditor ref={editor} label={`${kind} manifest`} language="yaml" value={text} onChange={changeText} disabled={locked} error={validationError || undefined} description="Required. Paste YAML using apiVersion: cluster-vending.io/v1 and the selected kind. Maximum size: 64 KiB. Example reference IDs must be replaced." />
+          <ValuesEditor ref={editor} label={`${kind} manifest`} language="yaml" value={text} onChange={changeText} disabled={locked} error={validationError || undefined} description={embedded ? "Maximum 64 KiB. Replace example resource IDs before review." : "Required. Paste YAML using apiVersion: cluster-vending.io/v1 and the selected kind. Maximum size: 64 KiB. Example reference IDs must be replaced."} />
         </>}
         {step === 1 && reviewed && <>
           <MetadataList columns="multi">{reviewed.review.summary.map(item => <MetadataListItem key={item.label} label={item.label}>{item.label.endsWith("ID") ? <CopyValue value={item.value} label={item.label} /> : item.value}</MetadataListItem>)}</MetadataList>

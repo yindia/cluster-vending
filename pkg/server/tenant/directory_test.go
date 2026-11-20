@@ -1,7 +1,11 @@
 package tenant
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -29,6 +33,54 @@ import (
 )
 
 var directoryCreatedAt = time.Date(2026, 11, 16, 1, 2, 3, 456789123, time.UTC)
+
+func TestDirectoryListReadErrors(t *testing.T) {
+	for _, stage := range []string{"list", "namespace"} {
+		for _, test := range []struct {
+			name         string
+			err          error
+			code         connect.Code
+			wantErrorLog bool
+		}{
+			{"canceled", context.Canceled, connect.CodeCanceled, false},
+			{"wrapped canceled", fmt.Errorf("read interrupted: %w", context.Canceled), connect.CodeCanceled, false},
+			{"deadline", context.DeadlineExceeded, connect.CodeDeadlineExceeded, false},
+			{"wrapped deadline", fmt.Errorf("read interrupted: %w", context.DeadlineExceeded), connect.CodeDeadlineExceeded, false},
+			{"backend failure", errors.New("management transport failed"), connect.CodeUnavailable, true},
+		} {
+			t.Run(stage+"/"+test.name, func(t *testing.T) {
+				s, c := directoryWorld(t, directoryRegistration("acme"), directoryNamespace("acme"))
+				var logs bytes.Buffer
+				s.deps.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+				s.deps.KubeReader = interceptor.NewClient(c, interceptor.Funcs{
+					List: func(ctx context.Context, underlying client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if stage == "list" {
+							return test.err
+						}
+						return underlying.List(ctx, list, opts...)
+					},
+					Get: func(ctx context.Context, underlying client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if stage == "namespace" {
+							return test.err
+						}
+						return underlying.Get(ctx, key, obj, opts...)
+					},
+				})
+				ctx := directoryContext(t, auth.Grant{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}})
+				out, err := s.ListTenants(ctx, &v1.ListTenantsRequest{})
+				if out != nil || connect.CodeOf(err) != test.code {
+					t.Fatalf("ListTenants = %v, %v; want %v", out, err, test.code)
+				}
+				if got := strings.Contains(logs.String(), `"level":"ERROR"`); got != test.wantErrorLog {
+					t.Fatalf("ERROR log = %v, want %v: %s", got, test.wantErrorLog, logs.String())
+				}
+				if test.wantErrorLog && (!strings.Contains(logs.String(), test.err.Error()) || strings.Contains(err.Error(), test.err.Error())) {
+					t.Fatalf("backend error must be logged, not exposed: log=%s err=%v", logs.String(), err)
+				}
+			})
+		}
+	}
+}
 
 func directoryNamespace(id string) *corev1.Namespace {
 	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: kube.TenantNamespace(id),

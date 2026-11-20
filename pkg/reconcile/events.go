@@ -136,6 +136,7 @@ const (
 	ReasonReleaseMoveRecovering       = "ReleaseMoveRecovering"
 	ReasonReleaseMoveFinished         = "ReleaseMoveFinished"
 	ReasonComponentRetried            = "ComponentRetried"
+	ReasonHelmReleaseFailed           = "HelmReleaseFailed"
 	ReasonUpgradeRetried              = "UpgradeRetried"
 	ReasonDeprecatedAPIs              = "DeprecatedAPIs"
 	ReasonDeprecationScanFailed       = "DeprecationScanFailed"

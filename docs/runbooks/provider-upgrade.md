@@ -1,7 +1,7 @@
 # Runbook: upgrading the Crossplane providers
 
 How to upgrade the AWS providers (provider-upjet-aws: `provider-aws-ec2`,
-`-eks`, `-iam`, `-cloudwatchlogs`, `-kms`, `-sqs`, `-cloudwatchevents` and
+`-eks`, `-iam`, `-cloudwatchlogs`, `-kms`, `-sqs`, `-cloudwatchevents`, `-s3` and
 their family provider) and `provider-helm` under a running platform, without
 a provider acting on a tenant's cloud resources or charts in the middle of it.
 
@@ -129,7 +129,7 @@ kubectl get providers.pkg.crossplane.io          # find the family provider's na
 kubectl patch providers.pkg.crossplane.io <family provider> --type merge \
   -p "{\"spec\":{\"package\":\"xpkg.crossplane.io/crossplane-contrib/provider-family-aws:$V\"}}"
 for p in provider-aws-ec2 provider-aws-eks provider-aws-iam provider-aws-cloudwatchlogs \
-         provider-aws-kms provider-aws-sqs provider-aws-cloudwatchevents; do
+         provider-aws-kms provider-aws-sqs provider-aws-cloudwatchevents provider-aws-s3; do
   kubectl patch providers.pkg.crossplane.io "$p" --type merge \
     -p "{\"spec\":{\"package\":\"xpkg.crossplane.io/crossplane-contrib/$p:$V\"}}"
 done

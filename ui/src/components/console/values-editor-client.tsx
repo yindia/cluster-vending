@@ -44,7 +44,7 @@ const highlighting = HighlightStyle.define([
   { tag: tags.punctuation, color: "var(--color-syntax-punctuation)" },
 ]);
 
-export default function ValuesEditorClient({ value, label, language = "yaml", readOnly = false, disabled = false, onChange, error, height = readOnly ? "auto" : "20rem", ref, descriptionId, errorId }: ValuesEditorProps & { descriptionId: string; errorId: string }) {
+export default function ValuesEditorClient({ value, label, language = "yaml", readOnly = false, disabled = false, onChange, error, height = readOnly ? "auto" : "20rem", ref, descriptionId, errorId, placeholder }: ValuesEditorProps & { descriptionId: string; errorId: string }) {
   const editor = useRef<ReactCodeMirrorRef>(null);
   useImperativeHandle(ref, () => ({ focus: () => editor.current?.view?.focus() }), []);
   const extensions = useMemo(() => [
@@ -56,7 +56,7 @@ export default function ValuesEditorClient({ value, label, language = "yaml", re
       tabindex: disabled ? "-1" : "0",
     }),
   ], [language, label, readOnly, disabled, error, descriptionId, errorId]);
-  return <CodeMirror ref={editor} value={value} height={height} minHeight={readOnly ? "8rem" : undefined} maxHeight="24rem" maxWidth="100%" theme="none" extensions={extensions}
+  return <CodeMirror ref={editor} value={value} placeholder={placeholder} height={height} minHeight={readOnly ? "8rem" : undefined} maxHeight="24rem" maxWidth="100%" theme="none" extensions={extensions}
     readOnly={readOnly || disabled} editable={!disabled} indentWithTab={false}
     basicSetup={{ lineNumbers: true, foldGutter: true, syntaxHighlighting: false, highlightActiveLine: !readOnly, highlightActiveLineGutter: !readOnly }}
     onChange={(next) => { if (!readOnly && !disabled) onChange?.(next); }} />;

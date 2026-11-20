@@ -135,7 +135,7 @@
     {
       "Sid": "AllowPassingInstanceRole",
       "Effect": "Allow",
-      "Resource": "${cluster.nodeRoleArn}",
+      "Resource": "${karpenter.nodeRoleArn}",
       "Action": "iam:PassRole",
       "Condition": {
         "StringEquals": {
@@ -269,6 +269,16 @@
       "Effect": "Allow",
       "Resource": "arn:aws:iam::${account.id}:instance-profile/*",
       "Action": "iam:GetInstanceProfile"
+    },
+    {
+      "Sid": "AllowInterruptionQueueActions",
+      "Effect": "Allow",
+      "Resource": "arn:aws:sqs:${region}:${account.id}:${karpenter.interruptionQueue}",
+      "Action": [
+        "sqs:DeleteMessage",
+        "sqs:GetQueueUrl",
+        "sqs:ReceiveMessage"
+      ]
     }
   ]
 }

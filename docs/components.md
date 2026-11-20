@@ -153,20 +153,37 @@ without a shell (`code --wait` works).
 
 | Step | What happens |
 |---|---|
-| `enable` | Checked and stored `Pending`. On the cluster's next pass it is planned like a platform component: the release's version and locked values, your values under the platform's. It waits for what it requires, then its IAM role (if any) and its chart are applied: `Installing`, then `Ready` once Helm reports the chart deployed. |
+| `enable` | Checked and stored `Pending`. On the cluster's next pass it is planned like a platform component: the release's version and locked values, your values under the platform's. It waits for what it requires, and its install starts only once the cluster's EKS add-ons (the cluster is `RUNNING`) and every platform component are Ready: the order is EKS add-ons, platform components, tenant components. Then its IAM role (if any) and its chart are applied: `Installing`, then `Ready` once Helm reports the chart deployed. A component already installed keeps being updated whatever the platform's components do. |
 | `update` | New values make a new generation; the next pass upgrades the chart, and `status.observedGeneration` follows. The same values again change nothing. |
 | `disable` | Marked `Deleting`. The next passes uninstall its chart, then remove its role, then the component. A component another enabled one requires cannot be disabled. |
-| cluster delete | Every tenant component is removed first, then the platform's, then the cluster. |
+| cluster delete | The reverse of the creation, each stage gone before the next: load balancers, tenant components (a component after those that require it), platform components by sequence (highest first), Karpenter's node groups, Karpenter, the EKS add-ons, then the cluster. |
 
 - **`--wait`** follows the component until it is `Ready` (or `Failed`,
   an error), or gone after a `disable`.
 - **Nothing is installed** while the cluster is imported and not taken
   over, taken over with the platform components kept off, paused, or not
-  running yet: the component stays `Pending` and says why.
+  running yet, or while a platform component is not Ready: the component
+  stays `Pending` and says why.
+
 - **A stuck Helm release** is recovered as a platform component's is
-  (at most three times per version; `status.recoveries`).
-- **Ready means Helm finished**, as for platform components: that the
-  workloads run is not checked.
+  (rolled back or uninstalled with Helm; at most three times per version;
+  `status.recoveries`, `status.lastRecovery`).
+- **A failed install or upgrade is retried with a backoff**, not at every
+  poll: `status.attempts` counts the failed attempts, `status.nextRetryAt`
+  says when the next is, `status.lastErrorClass` is `transient` (retried
+  quietly, never a failure), `chart` or `release`. After the controller's
+  `--helm-max-failures` counted failures (default 5) the component is
+  `Failed` with the last error and is retried only at the backoff cap
+  (`--helm-backoff-max`, default 30m), until its version or values change or
+  `cluster retry --component`.
+- **One Helm operation per cluster at a time:** a component whose change
+  waits for another's says "waiting for Helm release X to settle".
+- **Statuses** that report Helm: `chart`, `chartVersion`, `helmState`,
+  `revision`, `digest`, `attempts`, `countedFailures`, `nextRetryAt`,
+  `lastError`, `lastErrorClass`, `lastRecovery`, `unchanged` (nothing was
+  written because the version and values are the live ones).
+- **Ready means Helm finished and the workloads rolled out**: every Release
+  waits for its rollout (`wait`, the definition's `install.timeout`).
 - **Placeholders** in `status.effectiveValues` (`${cluster.name}`) are
   shown as written; they are filled in in what is installed.
 

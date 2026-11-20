@@ -1,9 +1,11 @@
 package aws_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -11,6 +13,7 @@ import (
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
+	"github.com/yindia/cluster-vending/pkg/helmrel"
 )
 
 func chart(name, version string) crossplaneaws.HelmChart {
@@ -66,8 +69,8 @@ func TestHelmReleaseFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"apiVersion":"helm.m.crossplane.io/v1beta1","kind":"Release","metadata":{"annotations":{"crossplane.io/external-name":"base"},"labels":{"app.kubernetes.io/managed-by":"cluster-vending","cluster-vending.io/cluster":"c-1","cluster-vending.io/component":"base","cluster-vending.io/tenant-id":"acme"},"name":"` +
-		plan.ClusterPrefix + `-base","namespace":"tenant-acme"},"spec":{"forProvider":{"chart":{"name":"base","repository":"https://charts.example.com","version":"1.2.0"},"namespace":"base-system","skipCRDs":true,"values":{"replicas":2}},"providerConfigRef":{"kind":"ProviderConfig","name":"` +
+	want := `{"apiVersion":"helm.m.crossplane.io/v1beta1","kind":"Release","metadata":{"annotations":{"cloud.cluster-vending.io/helm-digest":"` + plan.Components[0].Main.Digest() + `","crossplane.io/external-name":"base"},"labels":{"app.kubernetes.io/managed-by":"cluster-vending","cluster-vending.io/cluster":"c-1","cluster-vending.io/component":"base","cluster-vending.io/tenant-id":"acme"},"name":"` +
+		plan.ClusterPrefix + `-base","namespace":"tenant-acme"},"spec":{"forProvider":{"chart":{"name":"base","repository":"https://charts.example.com","version":"1.2.0"},"maxHistory":5,"namespace":"base-system","skipCRDs":true,"values":{"replicas":2},"wait":true,"waitTimeout":"10m0s"},"providerConfigRef":{"kind":"ProviderConfig","name":"` +
 		plan.ClusterPrefix + `-helm"},"rollbackLimit":100}}`
 	if string(got) != want {
 		t.Errorf("Release\n got %s\nwant %s", got, want)
@@ -237,6 +240,83 @@ func TestHelmReleaseRegistryFlags(t *testing.T) {
 	for _, field := range []string{"insecureSkipTLSVerify", "plainHTTP"} {
 		if v, _, _ := unstructured.NestedBool(releases[0].Object, "spec", "forProvider", field); !v {
 			t.Errorf("%s is not set", field)
+		}
+	}
+}
+
+// Every Release waits for its rollout (Ready means the workloads run), for
+// the definition's install timeout, and keeps five revisions.
+func TestHelmReleaseWaitsForTheRollout(t *testing.T) {
+	plan := platformPlan()
+	plan.Components[1].Main.Timeout = 15 * time.Minute
+
+	releases := releasesOf(crossplaneaws.PlatformSet(plan))
+
+	want := map[string]string{"base": "10m0s", "mesh": "15m0s", "edge": "10m0s"}
+	for _, r := range releases {
+		name := r.GetAnnotations()["crossplane.io/external-name"]
+		wait, _, _ := unstructured.NestedBool(r.Object, "spec", "forProvider", "wait")
+		timeout, _, _ := unstructured.NestedString(r.Object, "spec", "forProvider", "waitTimeout")
+		history, _, _ := unstructured.NestedInt64(r.Object, "spec", "forProvider", "maxHistory")
+		if !wait || history != 5 {
+			t.Errorf("%s: wait %v maxHistory %d, want true and 5", name, wait, history)
+		}
+		if w, ok := want[name]; ok && timeout != w {
+			t.Errorf("%s: waitTimeout %q, want %q", name, timeout, w)
+		}
+	}
+}
+
+// The digest is on the Release, follows chart, version and values, and is
+// what the plan reports for it.
+func TestHelmReleaseDigest(t *testing.T) {
+	plan := platformPlan()
+	base := releasesOf(crossplaneaws.PlatformSet(plan))
+	plan.Components[0].Main.Values = map[string]any{"replicas": int64(3)}
+	changed := releasesOf(crossplaneaws.PlatformSet(plan))
+
+	digest := func(r *unstructured.Unstructured) string { return r.GetAnnotations()[helmrel.DigestAnnotation] }
+	for i := range base {
+		if digest(base[i]) == "" {
+			t.Fatalf("%s has no digest", base[i].GetName())
+		}
+	}
+	if digest(base[1]) == digest(changed[1]) {
+		t.Error("new values must change the digest of their Release")
+	}
+	for _, i := range []int{0, 2, 3, 4} {
+		if digest(base[i]) != digest(changed[i]) {
+			t.Errorf("%s: another Release's change moved its digest", base[i].GetName())
+		}
+	}
+	if digest(base[1]) != plan.Components[0].Main.Digest() && digest(changed[1]) != plan.Components[0].Main.Digest() {
+		t.Error("the plan's Digest is the Release's annotation")
+	}
+}
+
+// The plan's ReleaseGate is asked about every Release, in install order,
+// with the Release as it would be written (its digest annotation on it).
+func TestPlatformSetAsksTheReleaseGate(t *testing.T) {
+	plan := platformPlan()
+	var asked []string
+	plan.ReleaseGate = func(_ context.Context, r *unstructured.Unstructured) sequence.Decision {
+		asked = append(asked, strings.TrimPrefix(r.GetName(), plan.ClusterPrefix+"-")+":"+r.GetAnnotations()[helmrel.DigestAnnotation][:8])
+		return sequence.Decision{}
+	}
+
+	set := crossplaneaws.PlatformSet(plan)
+	for _, item := range set {
+		if item.Gate != nil {
+			item.Gate(t.Context(), item.Object)
+		}
+	}
+
+	if len(asked) != 5 || !strings.HasPrefix(asked[0], "base-crds:") || !strings.HasPrefix(asked[4], "edge:") {
+		t.Errorf("asked %v", asked)
+	}
+	for _, item := range crossplaneaws.PlatformSet(platformPlan()) {
+		if item.Gate != nil {
+			t.Error("without a ReleaseGate nothing is gated")
 		}
 	}
 }

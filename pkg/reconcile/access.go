@@ -2,10 +2,8 @@ package reconcile
 
 import (
 	"context"
-	"strings"
 
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
-	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/fault"
 )
@@ -26,19 +24,17 @@ import (
 // one place: its role's trust policy.
 //
 // It only says where to go; it makes no call. The role must be a role of
-// the account.
+// the account (awscloud.AccessFor, which the API server uses too).
 func (d Deps) AWSAccess(_ context.Context, a *model.CloudAccount) (awscloud.Access, error) {
-	if a.Identity == "" {
-		return awscloud.Access{}, fault.Newf(fault.FailedPrecondition, "account %s has no tenant role yet; bootstrap it again", a.ID)
-	}
-	if !strings.HasPrefix(a.Identity, "arn:"+awscatalog.PartitionAWS+":iam::"+a.AccountID+":role/") {
-		return awscloud.Access{}, fault.Newf(fault.FailedPrecondition,
-			"account %s: its tenant role %s is not a role of AWS account %s; bootstrap it again", a.ID, a.Identity, a.AccountID)
+	// The one rule for the controller and the API server alike.
+	access, err := awscloud.AccessFor(a.AccountID, a.Identity, a.ExternalID)
+	if err != nil {
+		return awscloud.Access{}, fault.New(fault.FailedPrecondition, err.Error())
 	}
 	if d.ProviderCredentials != nil && d.ProviderCredentials.Direct {
 		// Local testing (--skip-tenant-role): the controller's own keys,
 		// as they are.
 		return awscloud.Access{AccountID: a.AccountID, Direct: true}, nil
 	}
-	return awscloud.Access{AccountID: a.AccountID, RoleARN: a.Identity, ExternalID: a.ExternalID}, nil
+	return access, nil
 }

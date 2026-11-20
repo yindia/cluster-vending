@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yindia/cluster-vending/pkg/convert"
@@ -60,6 +61,12 @@ type Scanner struct {
 	// removed API versions, failed, clean again): the controller emits it
 	// as an event of the cluster. Nil reports nothing.
 	Report func(ctx context.Context, c Cluster, e Event)
+	// Publish is given a scan that worked once it is recorded: result as the
+	// Cluster object keeps it (at most deprecation.MaxFindings findings) and
+	// full with every finding. The controller writes full to the cluster's
+	// results bucket and records its summary. It cannot fail the scan. Nil
+	// publishes nothing.
+	Publish func(ctx context.Context, c Cluster, result, full *cloudv1.ClusterDeprecations)
 }
 
 func (s Scanner) now() time.Time {
@@ -109,6 +116,7 @@ func (s Scanner) Run(ctx context.Context, c Cluster) (time.Duration, error) {
 	now := timestamppb.New(s.now())
 	result, next := &cloudv1.ClusterDeprecations{TargetVersion: target, AttemptedAt: now}, Interval
 	report, err := s.scan(ctx, c, target)
+	var full *cloudv1.ClusterDeprecations
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return 0, ctx.Err() // shutting down: say nothing about the cluster
@@ -129,6 +137,13 @@ func (s Scanner) Run(ctx context.Context, c Cluster) (time.Duration, error) {
 		for _, f := range report.Findings {
 			result.Findings = append(result.Findings, convert.DeprecationFinding(f))
 		}
+		if s.Publish != nil {
+			full = proto.CloneOf(result)
+			full.Findings, full.Truncated = nil, false
+			for _, f := range report.All {
+				full.Findings = append(full.Findings, convert.DeprecationFinding(f))
+			}
+		}
 	}
 	raw, err := protojson.Marshal(result)
 	if err != nil {
@@ -140,6 +155,9 @@ func (s Scanner) Run(ctx context.Context, c Cluster) (time.Duration, error) {
 	// What the result means next to the last one, once it is recorded.
 	if e := scanEvent(c.Last, result); e != nil && s.Report != nil {
 		s.Report(ctx, c, *e)
+	}
+	if result.GetError() == "" && s.Publish != nil {
+		s.Publish(ctx, c, result, full)
 	}
 	return next, nil
 }

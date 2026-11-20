@@ -8,14 +8,14 @@ The components this build ships, as `ComponentDefinition` files in
 
 | `management` | Components | How they reach a cluster |
 |---|---|---|
-| `Platform` | `aws-load-balancer-controller`, `cluster-autoscaler`, `external-secrets`, `karpenter`, `istio` (a bundle of five charts); `capsule` only when cluster `spec.naas: true`; `kyverno` is enabled by default (the policy engine only; `kyverno-policies` remains tenant opt-in) | Installed automatically on applicable clusters, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
+| `Platform` | `aws-load-balancer-controller`, `external-secrets`, `karpenter`, `istio` (a bundle of five charts); `capsule` only when cluster `spec.naas: true`; `kyverno` is enabled by default (the policy engine only; `kyverno-policies` remains tenant opt-in) | Installed automatically on applicable clusters, with fixed values. There is no `Component` object for them, they are not in `ListComponents`, and the Component API refuses their names (`PERMISSION_DENIED`, "installed with the cluster"). |
 | `Tenant` (default) | `gpu-operator`, `kyverno-policies` | A tenant enables and disables them on a cluster (a `Component`), and may set the values the schema allows. |
 
 **Platform components are part of the cluster.** Once a cluster is
 RUNNING (its node group is ready and its kubeconfig exists), its reconcile
 installs them: for each component its IAM role, then its CRD chart, its
-chart and its companions; components in `requires` order
-(`component.PlatformComponents`), versions from the release the cluster's
+chart and its companions; components in ascending `sequence`, and within
+it in `requires` order (`component.PlatformComponents`), versions from the release the cluster's
 channel offered at that moment (`status.platformRelease`). Their state is
 on the Cluster: `status.platformComponents` (name, version, phase, message)
 and the condition `PlatformComponentsReady`; it does not hold back the
@@ -66,6 +66,12 @@ A component that is not Ready says why, on the cluster's status
 | `failures` | failed attempts in a row (the Release's `status.failed`) |
 | `since` | when the component entered its phase |
 | `recoveries` | how often the platform recovered a stuck release of it at this version |
+| `chartVersion`, `revision` | the chart version Helm has deployed and its Helm revision |
+| `attempts`, `countedFailures` | failed attempts backed off from, and the failures in a row that count toward giving up |
+| `nextRetryAt` | when the paused Release is tried again |
+| `lastErrorClass` | `transient`, `chart` or `release` ([design/helm-reliability.md](design/helm-reliability.md)) |
+| `lastRecovery`, `lastRecoveryTime` | what the platform last did to a stuck release (rolled back to revision N, uninstalled, deleted a failed hook Job) |
+| `digest`, `unchanged` | the digest of the Release spec applied; `unchanged`: the live Release already had it, nothing was written |
 
 The controller logs each change of phase once, with the cluster and the
 component: `platform component failed` (warn, with the message),
@@ -76,31 +82,58 @@ nothing.
 
 **What recovers by itself.**
 
-- A failed install or upgrade is retried by provider-helm (up to the
-  Release's `rollbackLimit`, 100).
+- A failed install or upgrade is retried with a backoff: the Release is
+  paused (`crossplane.io/paused`, with the platform's marker
+  `cloud.cluster-vending.io/helm-backoff-until`) and lifted after 1m, 2m,
+  4m, ... at most `--helm-backoff-max` (default 30m, a little jitter), so a
+  failure costs one Helm revision per step, not one per 15-second poll. A
+  pause an operator or a freeze set is never lifted by this. A new version
+  or new values (a new digest) end the backoff at once.
+- **Errors are classified.** *Transient* (the workload API unreachable,
+  "could not get server version", TLS handshake or i/o timeout, throttling,
+  Helm's lock "another operation ... is in progress"): retried quietly,
+  INSTALLING, never a failure. *Chart* (not found, pull failed): retried
+  and reported, never given up on. *Release* (a hook failed, the rollout
+  timed out, invalid values): counted.
+- **Giving up.** After `--helm-max-failures` (default 5) counted failures
+  in a row the component is Failed with the classified last error, an event
+  `HelmReleaseFailed` is emitted once, and retries stay at the cap until
+  its version or values change or `cluster retry --component`. A Release
+  given up on no longer holds back the cluster's other Helm operations.
+- **One Helm operation per cluster at a time.** A Release that is new or
+  changes is written only when no other Release of the cluster is
+  installing or upgrading; the others show "waiting for Helm release X to
+  settle". Releases whose version and values did not change are not
+  written at all (digest annotation `cloud.cluster-vending.io/helm-digest`);
+  a Kubernetes upgrade where none changes reports the component steps as
+  skipped (`status.upgrade.skippedSteps`, "component versions unchanged").
 - **A stuck Helm release.** When an install, upgrade, rollback or uninstall
   is interrupted or its hooks fail, Helm leaves the release's newest
   revision in `pending-install`, `pending-upgrade`, `pending-rollback` or
   `uninstalling`, and every later attempt fails ("has no deployed
   releases", "another operation (install/upgrade/rollback) is in
   progress"): provider-helm has no option that clears it. Once a
-  component's Release has been like that for 10 minutes, and Helm has not
-  written that revision for 10 minutes, the controller removes the Helm
-  record of that one revision in the workload cluster (the Secret
-  `sh.helm.release.v1.<release>.v<revision>`), with the kubeconfig the
-  platform holds for the cluster. The revision before it is the newest
-  again: the deployed one after a stuck upgrade or rollback, none after a
-  stuck first install or uninstall, so the chart is installed anew.
-  A `deployed`, `superseded` or `failed` revision is never removed, and
-  nothing else in the workload cluster is touched. Each recovery is logged
-  (`platform component recovered`) and counted in `recoveries`. No
-  permission in the management cluster is added for this: the controller
-  already reads the kubeconfig Secret through the tenant namespace's
-  binding, and the record is removed in the workload cluster.
+  component's Release has been like that for its `install.timeout` plus 2
+  minutes (10 minutes for a Release an older build wrote), and Helm has
+  not written that revision for as long, the controller, with Helm
+  (`helm.sh/helm/v3`) in the workload cluster through the kubeconfig the
+  platform holds for it, marks that revision failed and rolls the release
+  back to the last revision Helm deployed, or uninstalls it when none was
+  (a first install that never finished), so the next attempt starts
+  clean. A failed hook Job of the release is deleted first (also before
+  each retry after a hook failure). Each recovery is an event
+  (`StuckReleaseRecovered`), is logged (`platform component recovered`),
+  and is counted in `recoveries` and described in `lastRecovery`. At most
+  3 per component version. No permission in the management cluster is
+  added for this: the controller already reads the kubeconfig Secret
+  through the tenant namespace's binding.
 - A deleted recorded object of the cluster (docs/controller.md).
 
 **What does not.**
 
+- A component given up on after `--helm-max-failures` counted failures (it
+  keeps being tried at the backoff cap): fix what `lastError` says, or
+  change its version or values.
 - A release that got stuck again after 3 recoveries at one version: the
   component stays Failed and says so. Look at the chart's hook Jobs and at
   whether the default node pool has room (a hook Job preempted on a full
@@ -112,8 +145,9 @@ nothing.
   pulled, a component that needs IRSA on a cluster without it: those are
   not Helm's state, and need the release, the definition or the cluster
   changed.
-- Whether the chart's pods run: a component is Ready when Helm deployed
-  its charts.
+- Whether the chart's pods run: every Release waits for its rollout
+  (`wait: true`, `install.timeout`), so a component is Ready when Helm
+  deployed its charts and their workloads rolled out.
 
 **Recovering a failed component or upgrade.** One command:
 
@@ -127,7 +161,7 @@ It answers per item what happens:
 
 | Action | When | What the controller does on its next pass |
 |---|---|---|
-| `Retry` | a component whose chart failed (any Helm state) | starts its recovery count over; removes a stuck Helm revision at once (no 10-minute wait, past the 3-recovery limit); annotates its Release (`cloud.cluster-vending.io/retried-at`) so provider-helm tries now; event `ComponentRetried` |
+| `Retry` | a component whose chart failed (any Helm state) | starts its recovery count and its backoff over (the pause is lifted, attempts and failures reset); recovers a stuck Helm revision at once (no timeout wait, past the 3-recovery limit); annotates its Release (`cloud.cluster-vending.io/retried-at`) so provider-helm tries now; event `ComponentRetried` |
 | `Retry` | a Failed or TimedOut automatic upgrade (`status.rollout`) | the upgrade is in progress again from now, with a new `upgrade-timeout`; it no longer counts against the channel's `maxFailed` (a halted channel resumes when no failed cluster is left); event `UpgradeRetried` |
 | `Fix` | a component that failed before it had a chart (IRSA off, a requirement missing, not in the release) | nothing: change what its message says; it installs by itself afterwards |
 | `Nothing` | it has not failed | nothing |
@@ -149,14 +183,13 @@ in reverse; the bundle is Ready when every member is. A release pins every
 member of a bundle or none. Tenants never see internal definitions, and
 cannot enable one by itself.
 
-**Karpenter and the cluster autoscaler both run on every cluster.** They do
-not compete because platform pods select the cluster's default node pool
-and tenant pods are kept off it: the cluster autoscaler only grows the
-default managed node group, for platform pods, and Karpenter launches nodes
-for everything else. Karpenter's NodePool puts none of the default pool's
-labels on its nodes. **This split relies on the default node pool being
-tainted**: without a taint, a pending tenant pod fits both, and both may
-add a node for it.
+**Karpenter is the only node autoscaler.** The platform runs no cluster
+autoscaler: the cluster's default managed node group has a fixed size (two
+nodes) and runs Karpenter and CoreDNS only, and every other pod runs on nodes
+Karpenter launches (see [Where the pods run](#where-the-pods-run)).
+`cluster-autoscaler` was removed from the platform set: the build no longer
+ships its definition, so an existing cluster uninstalls it on its next pass
+(the same path as "Disabling and removing a component").
 
 ## One definition per cloud
 
@@ -345,8 +378,8 @@ What still needs code:
 
 Versions are data, in one file: `pkg/catalog/release.yaml`. It lists the
 Kubernetes minors on offer (default, upgrade target, end of support), the
-chart version of every component, per-minor Helm values (the cluster
-autoscaler's image tag), and the channels a new management cluster gets. To
+chart version of every component, per-minor Helm values (none today), and
+the channels a new management cluster gets. To
 change a version, edit that file and ship the build: the controller turns it
 into the shipped `Release` (named after its content, so a change gives a new
 one) and moves `alpha` to it unless an operator took `alpha` over. No
@@ -395,7 +428,6 @@ Each minor in `release.yaml` names the channel whose clusters run it:
 | Component | Chart (version checked) | Namespace | Tenant values | CRD chart |
 |---|---|---|---|---|
 | `aws-load-balancer-controller` | `aws-load-balancer-controller` 3.6.2, `https://aws.github.io/eks-charts` | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
-| `cluster-autoscaler` | `cluster-autoscaler` 9.60.0, `https://kubernetes.github.io/autoscaler`; image tag from the release pin | `kube-system` | none: fixed | none |
 | `external-secrets` | `external-secrets` 2.15.0 (External Secrets Operator v2.15.0), `https://charts.external-secrets.io` | `external-secrets` | none: fixed | none: the chart installs and upgrades its own CRDs (`installCRDs`) |
 | `capsule` | `capsule` 0.15.2, `oci://ghcr.io/projectcapsule/charts` | `capsule-system` | none: fixed | Existing cert-manager required; the chart installs/upgrades its CRDs through its lifecycle hook. [Values and operation](components/capsule.md). |
 | `karpenter` | `karpenter` 1.15.1, `oci://public.ecr.aws/karpenter`; no node class or node pool is shipped | `kube-system` | none: fixed | none: the chart installs its own CRDs once |
@@ -429,19 +461,43 @@ supported by the versions above. The GPU operator's pin carries the leading
 
 ## Where the pods run
 
-Platform pods run on the cluster's default node pool. Each definition sets
-`${system.nodeSelector}` (the pool's labels) and `${system.tolerations}` (a
-toleration per taint of the pool) at its chart's own keys, checked in each
-chart's `values.yaml`:
+A cluster has three kinds of nodes, told apart by a label and, for the two
+the platform owns, a taint
+([design](design/karpenter-node-groups.md)):
+
+| Pool | Label | Taint | What runs |
+|---|---|---|---|
+| default managed node group (`system`) | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, CoreDNS |
+| Karpenter NodePool `platform` | `node.cluster-vending.io/pool=platform` | `node.cluster-vending.io/pool=platform:NoSchedule` | the platform components, the tenant's components, the EKS add-on controllers (the EBS CSI driver's) |
+| the cluster's own node groups (`spec.node_groups`) | `node.cluster-vending.io/pool=<name>` and the user's labels | the user's | the user's workloads |
+
+DaemonSets (vpc-cni, kube-proxy, the pod identity agent, istio-cni, ztunnel)
+tolerate every taint and run everywhere. The platform fixes the default
+managed node group's taint, label and size (min = max = desired = 2, Karpenter
+runs two replicas) and the `platform` pool: users cannot change them. An
+imported cluster keeps its own node group and its components follow it as
+before (`${system.*}` and `${platform.*}` both resolve to its default node
+pool's labels and taints).
+
+Each definition sets `${platform.nodeSelector}` (the pool's label) and
+`${platform.tolerations}` (a toleration of its taint) at its chart's own
+keys, checked in each chart's `values.yaml`. Only Karpenter uses
+`${system.nodeSelector}` / `${system.tolerations}`: it must run where it needs
+no node of its own.
 
 | Component | Keys |
 |---|---|
-| `aws-load-balancer-controller`, `cluster-autoscaler`, `karpenter`, `istiod` | `nodeSelector`, `tolerations` |
+| `aws-load-balancer-controller`, `istiod` | `nodeSelector`, `tolerations` |
+| `karpenter` | `nodeSelector`, `tolerations` (the system pool) |
 | `kyverno` | `global.nodeSelector`, `global.tolerations` (all controllers and hook Jobs) |
 | `external-secrets` | `global.nodeSelector`, `global.tolerations` (the controller, webhook and cert-controller Deployments fall back to them) |
 | `capsule` | Root `nodeSelector` / `tolerations` for the controller, `global.jobs.kubectl.nodeSelector` / `tolerations` for lifecycle hooks |
 | `istio-ingress-gateway` | `nodeSelector`, `tolerations` of Istio's gateway chart |
 | `gpu-operator` | `operator.nodeSelector`, `operator.tolerations` (the operator's Deployment only) |
+
+EKS add-ons: CoreDNS gets the system pool's label and toleration, the EBS CSI
+driver's controller the platform pool's (an add-on's `configurationValues`
+keys win over them).
 
 Not placed, on purpose or for lack of a verified key:
 - `istio-cni` and `ztunnel` are DaemonSets that must run on every node;
@@ -481,48 +537,47 @@ registry.
 
 ## What the platform does not install
 
-**Karpenter's node class and node pool.** Karpenter runs, but launches
-nothing until an `EC2NodeClass` and a `NodePool` exist: no upstream chart
-ships them, so the cluster's users create them. A starting point, with the
-cluster's node role and the tags the platform puts on the cluster's subnets
-and EKS on its security group (`<cluster>` is the EKS name, the node role
-is `<prefix>-node-role`):
+**Karpenter's node classes and node pools as a chart.** No upstream chart
+ships them and the platform ships none (no companion chart): the controller
+server-side applies them into the workload cluster, through the kubeconfig it
+already uses, on every pass. A platform object that was edited or deleted is
+put back.
 
-```yaml
-apiVersion: karpenter.k8s.aws/v1
-kind: EC2NodeClass
-metadata:
-  name: default
-spec:
-  role: <prefix>-node-role
-  amiSelectorTerms:
-  - alias: al2023@v20261107        # a pinned EKS AMI release; "latest" replaces nodes on every release
-  subnetSelectorTerms:
-  - tags: {karpenter.sh/discovery: <cluster>}
-  securityGroupSelectorTerms:
-  - tags: {aws:eks:cluster-name: <cluster>}
-  metadataOptions: {httpEndpoint: enabled, httpPutResponseHopLimit: 1, httpTokens: required}
----
-apiVersion: karpenter.sh/v1
-kind: NodePool
-metadata:
-  name: default
-spec:
-  template:
-    spec:
-      nodeClassRef: {group: karpenter.k8s.aws, kind: EC2NodeClass, name: default}
-      expireAfter: 720h
-      requirements:
-      - {key: kubernetes.io/arch, operator: In, values: [amd64]}
-      - {key: kubernetes.io/os, operator: In, values: [linux]}
-      - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
-      - {key: karpenter.k8s.aws/instance-category, operator: In, values: [c, m, r]}
-      - {key: karpenter.k8s.aws/instance-generation, operator: Gt, values: ["2"]}
-  limits: {cpu: "100", memory: 400Gi}
-  disruption:
-    consolidationPolicy: WhenEmptyOrUnderutilized
-    consolidateAfter: 1m
-```
+- **The `platform` pool**: one `NodePool` and one `EC2NodeClass`, both named
+  `platform`, owned by the platform; users cannot create, change or delete
+  them. Platform components, tenant components and the EKS add-on
+  controllers run there (see [Where the pods run](#where-the-pods-run)).
+- **The user's node groups** (`spec.node_groups`, up to 20): each a
+  `NodePool` plus an `EC2NodeClass` of the same name, with the instance
+  types or families, architectures, capacity types (on-demand, Spot), labels,
+  taints and CPU and memory limits the spec gives. Users add, change and
+  remove them; a removed one is deleted from the cluster and Karpenter drains
+  its nodes. Nothing else is user-editable: a tenant that applies its own
+  `NodePool` by hand is outside the platform's guarantees.
+
+Every `EC2NodeClass` has the platform's values: `role` the cluster's
+Karpenter node role (`<prefix>-karpenter-node`, which has an `EC2_LINUX`
+access entry), subnets and security groups found by the tag
+`karpenter.sh/discovery=<cluster>` (or, where another cluster of the network
+holds that tag, `kubernetes.io/cluster/<cluster>`), and an AMI
+`alias: al2023@<pin>` from the release's pin for the cluster's Kubernetes
+minor (not `latest`, which would replace nodes on every AMI release).
+
+What the platform creates in AWS for Karpenter, with the cluster:
+- the node role `<prefix>-karpenter-node` (worker, CNI, ECR read and SSM core
+  policies) and its access entry;
+- the interruption queue `<prefix>-karpenter` (SQS, server-side encrypted)
+  with EventBridge rules for Spot interruption warnings, rebalance
+  recommendations, instance state changes and AWS Health events, which
+  Karpenter reads (`settings.interruptionQueue`);
+- Karpenter's controller policy allows `iam:PassRole` on the node role only
+  and reading that queue.
+
+The EC2 Spot service-linked role (`AWSServiceRoleForEC2Spot`) is the
+account's: the provisioner stack template creates it when its
+`CreateSpotServiceLinkedRole` parameter is `true` (off by default, because
+CloudFormation fails to create a role that already exists; check with
+`aws iam get-role --role-name AWSServiceRoleForEC2Spot`).
 
 **The Gateway API CRDs.** Kubernetes publishes them as a manifest, not as a
 Helm chart, so the platform does not install them. The mesh (mTLS and L4
@@ -619,6 +674,26 @@ spec:
   members. A channel does not move to a release whose pin skips a
   minor version of such a component relative to the release it offers now
   (1.31 to 1.32 is fine, 1.30 to 1.32 is not).
+- **Sequence** (`spec.sequence`, int32, default 100, minimum 0): Platform
+  components install in ascending sequence. A component starts only once
+  every Platform component of a lower sequence is deployed and Ready (the
+  same wait as `requires`, which still applies; a component may not require
+  one of a higher sequence). Karpenter is `0`, the only sequence that runs
+  before the platform node group: every Platform component above 0 is also
+  held (PENDING, "waiting for the platform node group to be Ready") until
+  that node group is Ready. Removal runs in reverse. Ignored for tenant
+  components. Definition fields otherwise: `provider`, `management`,
+  `namespace`, `install`, `requires`, `sequence`, `cloudResources`,
+  `platformValues`, `userValues`, `valuesSchema`.
+- **Install timeout** (`spec.install.timeout`, a duration, default `10m`,
+  1m to 2h): how long Helm waits for each of the component's charts to roll
+  out (provider-helm `waitTimeout`, with `wait: true`), and what a stuck
+  operation is counted from (timeout plus 2 minutes). Heavy charts set more:
+  `gpu-operator`, `istiod`, `istio-ingress-gateway` and `kyverno` ship `15m`.
+  A change of it reaches the live Releases (it is part of their digest).
+- **Release pin for the nodes**: each Kubernetes minor of a release pins
+  `nodeAmiPin` (`release.yaml`, `Release.spec.content.kubernetes[].nodeAmiPin`,
+  e.g. `v20261107`), the AL2023 AMI release of the EC2NodeClasses.
 - **Order**: components are installed and upgraded in `requires` order
   (`release.UpgradeOrder`): `kyverno` before `kyverno-policies`;
   `istio-base`, then `istiod`, `istio-cni`,
@@ -645,12 +720,6 @@ managed resources are created or updated, and an existing installation is
 retained. Reducing the policy or splitting it into reviewed named policies is
 required; the platform does not automatically drop permissions or split policies.
 
-The cluster autoscaler needs it: its minor version must equal the cluster's
-Kubernetes minor, the chart hardcodes one image per chart release, and no
-chart ships an image for 1.36. The shipped release pins chart 9.60.0 on
-every minor with `image.tag` `v1.37.0`, `v1.36.2` and `v1.35.3`; a test
-holds that a pin's image minor is the minor it is pinned under.
-
 ## Chart versions per Kubernetes minor
 
 `components:` in `pkg/catalog/release.yaml` is every component's chart
@@ -674,29 +743,21 @@ makes the release not Valid (override every `istio-*` member together).
 
 ## Caveats
 
-**Cluster autoscaler**
-- It only resizes existing managed node groups between their minimum and
-  maximum size; it never changes instance types.
-- The platform sets a node group's desired size at creation only
-  (`DesiredSizeAtCreateOnly`), so it does not undo the autoscaler's changes.
-- EKS tags a managed node group's Auto Scaling group for auto-discovery
-  itself. The IAM policy allows changes only where the tag
-  `k8s.io/cluster-autoscaler/<cluster>` has the value `owned`: **verify that
-  value on a real Auto Scaling group before release.**
-- One node group across several zones can scale up in the wrong zone for a
-  pod bound to a zonal volume.
-- Its resource requests (100m CPU, 300Mi; 600Mi memory limit) are the
-  platform's choice; the chart sets none.
-
 **Karpenter**
-- The node class uses a pinned AMI release (`al2023@v20261107`), not
+- The node classes use a pinned AMI release (`al2023@<pin>`), not
   `al2023@latest`, which would replace every Karpenter node on each AMI
-  release. The platform bumps the pin by changing the definition.
-- The default NodePool is on-demand only. Spot needs the
-  `AWSServiceRoleForEC2Spot` service-linked role, which the single IAM role a
-  definition can declare does not cover, and there is no interruption queue.
-- Nodes reuse the managed node group's role; no extra access entry is needed.
-- Two controller replicas need at least two managed node group nodes.
+  release. The release's pin moves with the Kubernetes minor.
+- Spot needs the account's `AWSServiceRoleForEC2Spot` service-linked role
+  (the provisioner stack's `CreateSpotServiceLinkedRole` parameter); without
+  it a Spot launch fails and the NodeClaim reports it.
+- Nodes use the platform's own role (`<prefix>-karpenter-node`) with its
+  `EC2_LINUX` access entry, not the managed node group's.
+- Two controller replicas need the two managed node group nodes; their size
+  is fixed. A new cluster's default group is `t3.medium` (1 CPU / 1Gi per
+  replica plus CoreDNS fit); existing clusters keep their instance type.
+- The `platform` NodePool is `t3` (`medium`, `large`, `xlarge`), amd64,
+  on-demand, whatever the admin's node group allowlist says; t3 is
+  burstable, so sustained load above its baseline is throttled.
 - Karpenter manages the instance profile through the IAM API, so private
   subnets need outbound internet (NAT).
 

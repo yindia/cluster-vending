@@ -73,9 +73,22 @@ type Options struct {
 	// record of a platform component's stuck revision in the workload
 	// cluster (docs/catalog.md).
 	RecoverStuckReleases bool
+	// HelmBackoffMax and HelmMaxFailures are how a failed Helm release is
+	// retried (--helm-backoff-max, --helm-max-failures); zero: the
+	// defaults of pkg/helmrel.
+	HelmBackoffMax  time.Duration
+	HelmMaxFailures int
 	// Recommendations samples running clusters for resource
 	// recommendations.
 	Recommendations bool
+	// AWSAccess is how the controller reaches tenant accounts: the default
+	// region of its SDK, the optional source role and external ID
+	// (aws-region, aws-source-role-arn, aws-external-id).
+	AWSAccess config.AWSAccess
+	// NodeGroupInstanceFamilies and NodeGroupInstanceTypes are the platform
+	// admin's allowlist of node group machines, for user node groups (the
+	// platform node group is the platform's own choice).
+	NodeGroupInstanceFamilies, NodeGroupInstanceTypes []string
 	// ReconcileWorkers is how many accounts, networks and clusters of each
 	// kind are reconciled at once (0: one).
 	ReconcileWorkers int
@@ -181,7 +194,11 @@ func Run(ctx context.Context, o Options) error {
 	// Always this build's renderer, for every resource: releases replace
 	// a configurable target later (docs/design/rollouts.md).
 	renderTarget := int64(crossplaneaws.RenderVersion)
-	reconciling, err := management.WithAWS(ctx, reconcile.Deps{
+	lookups, err := management.NewAWSClient(ctx, o.AWSAccess, "")
+	if err != nil {
+		return err
+	}
+	reconciling := management.WithAWSClient(reconcile.Deps{
 		Store:                    store,
 		Kube:                     mgr.GetClient(), // reads from the informer cache
 		KubeReader:               mgr.GetAPIReader(),
@@ -195,18 +212,20 @@ func Run(ctx context.Context, o Options) error {
 		// the API server, in tenant namespaces only): to recover a stuck
 		// Helm release of a platform component.
 		Workloads:            management.Workloads(direct),
+		NodeGroupClients:     management.WorkloadClients(direct),
 		SubTenantWorkloads:   management.SubTenantWorkloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
+		HelmBackoffMax:       o.HelmBackoffMax,
+		HelmMaxFailures:      o.HelmMaxFailures,
 		// The same, first in a cluster's deletion: its load balancers and
 		// Karpenter's nodes, while their controllers still run.
 		Teardowns:         management.Teardowns(direct),
 		TeardownTimeout:   o.TeardownTimeout,
 		NoRecommendations: !o.Recommendations,
 		Logger:            logger,
-	})
-	if err != nil {
-		return err
-	}
+
+		NodeGroupInstanceFamilies: o.NodeGroupInstanceFamilies, NodeGroupInstanceTypes: o.NodeGroupInstanceTypes,
+	}, lookups)
 	checkCredentialsSecret(ctx, reconciling, logger)
 	// What happens to accounts, networks, clusters and releases is also a
 	// Kubernetes event of the object (docs/events.md).

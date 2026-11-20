@@ -40,7 +40,7 @@ func (s *Service) reserveName(ctx context.Context, namespace string, tenant *clo
 	}
 	existing := &corev1.ConfigMap{}
 	// Use the live client, never a cached list/get, for claim decisions.
-	if err := s.deps.Kube.Get(ctx, key, existing); err != nil {
+	if err := s.reader().Get(ctx, key, existing); err != nil {
 		return kubeError(err)
 	}
 	if !existing.DeletionTimestamp.IsZero() || existing.Labels[cloudstore.LabelTenant] != tenant.Name ||
@@ -50,7 +50,7 @@ func (s *Service) reserveName(ctx context.Context, namespace string, tenant *clo
 	}
 	if len(existing.OwnerReferences) > 0 {
 		owner := &cloud.SubTenant{}
-		err := s.deps.Kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: id}, owner)
+		err := s.reader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: id}, owner)
 		if err != nil && !apierrors.IsNotFound(err) {
 			return kubeError(err)
 		}
@@ -73,12 +73,12 @@ func (s *Service) bindNameClaim(ctx context.Context, obj *cloud.SubTenant, hash 
 		return connect.NewError(connect.CodeUnavailable, "allocation has no UID yet; retry the same create request to bind its name claim")
 	}
 	key := nameClaimKey(obj.Namespace, obj.Spec.ClusterRef.UID, obj.Spec.Name)
-	return kubeError(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		claim := &corev1.ConfigMap{}
-		if err := s.deps.Kube.Get(ctx, key, claim); err != nil {
+		if err := s.reader().Get(ctx, key, claim); err != nil {
 			return err
 		}
-		if !claim.DeletionTimestamp.IsZero() || claim.Data["name"] != obj.Spec.Name || claim.Data["clusterUID"] != obj.Spec.ClusterRef.UID ||
+		if !claim.DeletionTimestamp.IsZero() || claim.Labels[cloudstore.LabelTenant] != obj.Spec.TenantRef.Name || claim.Data["name"] != obj.Spec.Name || claim.Data["clusterUID"] != obj.Spec.ClusterRef.UID ||
 			claim.Data["tenantUID"] != obj.Spec.TenantRef.UID || claim.Data["allocationID"] != obj.Name || claim.Data["requestHash"] != hash {
 			return connect.NewError(connect.CodeAlreadyExists, "allocation name claim no longer matches this request")
 		}
@@ -92,5 +92,16 @@ func (s *Service) bindNameClaim(ctx context.Context, obj *cloud.SubTenant, hash 
 		before := claim.DeepCopy()
 		claim.OwnerReferences = []metav1.OwnerReference{owner}
 		return s.deps.Kube.Patch(ctx, claim, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
-	}))
+	})
+	if err == nil {
+		return nil
+	}
+	if s.deps.Logger != nil {
+		s.deps.Logger.ErrorContext(ctx, "bind subtenant name reservation", "namespace", obj.Namespace, "subtenant_id", obj.Name, "error", err)
+	}
+	mapped := kubeError(err)
+	if connect.CodeOf(mapped) == connect.CodeUnavailable || apierrors.IsConflict(err) {
+		return connect.NewError(connect.CodeOf(mapped), fmt.Sprintf("Sub Tenant %s was recorded, but its name reservation could not be confirmed. Retry the same create request.", obj.Name))
+	}
+	return mapped
 }

@@ -39,8 +39,8 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Created) != 11 || len(got.Existing) != 1 {
-		t.Fatalf("created %v, existing %v; want the activation policy, 3 runtime configs, ec2, iam, cloudwatchlogs, kms, sqs, cloudwatchevents and helm created, eks existing", got.Created, got.Existing)
+	if len(got.Created) != 12 || len(got.Existing) != 1 {
+		t.Fatalf("created %v, existing %v; want the activation policy, 3 runtime configs, ec2, iam, cloudwatchlogs, kms, sqs, cloudwatchevents, s3 and helm created, eks existing", got.Created, got.Existing)
 	}
 	helm := &pkgv1.Provider{}
 	if err := k.Get(ctx, client.ObjectKey{Name: crossplane.HelmProviderName}, helm); err != nil ||
@@ -65,7 +65,7 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 
 	// Second start: nothing to create.
 	again, err := crossplaneaws.InstallProviders(ctx, k, withRole)
-	if err != nil || len(again.Created) != 0 || len(again.Existing) != 12 || len(again.Updated) != 0 {
+	if err != nil || len(again.Created) != 0 || len(again.Existing) != 13 || len(again.Updated) != 0 {
 		t.Errorf("second run: %+v, %v", again, err)
 	}
 }
@@ -75,7 +75,7 @@ func TestInstallProvidersCreatesMissingAndKeepsExisting(t *testing.T) {
 func TestInstallProvidersAddsMissingActivations(t *testing.T) {
 	ctx := context.Background()
 	old := crossplaneaws.ActivationPolicy()
-	old.Spec.Activations = []apiextv1alpha1.ActivationPolicy{"vpcs.ec2.aws.m.upbound.io", "buckets.s3.aws.m.upbound.io"}
+	old.Spec.Activations = []apiextv1alpha1.ActivationPolicy{"vpcs.ec2.aws.m.upbound.io", "vaults.glacier.aws.m.upbound.io"}
 	k := fakeKube(t, old)
 	got, err := crossplaneaws.InstallProviders(ctx, k, crossplaneaws.DefaultProviderRuntime())
 	if err != nil || len(got.Updated) != 1 {
@@ -85,7 +85,7 @@ func TestInstallProvidersAddsMissingActivations(t *testing.T) {
 	if err := k.Get(ctx, client.ObjectKey{Name: crossplaneaws.ActivationPolicyName}, policy); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []apiextv1alpha1.ActivationPolicy{"buckets.s3.aws.m.upbound.io", "flowlogs.ec2.aws.m.upbound.io",
+	for _, want := range []apiextv1alpha1.ActivationPolicy{"vaults.glacier.aws.m.upbound.io", "buckets.s3.aws.m.upbound.io", "flowlogs.ec2.aws.m.upbound.io",
 		"groups.cloudwatchlogs.aws.m.upbound.io"} {
 		if !slices.Contains(policy.Spec.Activations, want) {
 			t.Errorf("activations lack %s: %v", want, policy.Spec.Activations)

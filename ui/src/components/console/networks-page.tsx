@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 import dynamic from "next/dynamic";
 
@@ -28,8 +29,9 @@ import { fromJson } from "@bufbuild/protobuf";
 import { usePlatform } from "@/components/platform-provider";
 import { PlanReview } from "@/components/resources";
 import { WizardDialog } from "./wizard-dialog";
-import { ManifestCreateDialog } from "./manifest-create-dialog";
-import { ImportManifestDialog } from "./import-manifest-dialog";
+import { ManifestCreateDialog, ResourceWorkflowDialog } from "./manifest-create-dialog";
+import { FormEntryRows, keyIssues, type FormEntry } from "./form-entry-rows";
+import { Icon } from "@astryxdesign/core/Icon";
 import { ConsoleTable as Table } from "./console-table";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
@@ -118,6 +120,21 @@ function DraftSubnetSummary({ json }: { json: string }) {
     ]} /> : <Text>Return to Connectivity to correct the explicit subnets.</Text>;
 }
 
+const networkMark = <Icon icon="viewColumns" size="lg" />;
+const editSteps = ["Network settings", "Review"];
+
+function NetworkPlacement({ account, region, name }: { account?: CloudAccount; region: string; name?: string }) {
+  if (!account && !region && !name) return null;
+  return <VStack gap={3}>
+    <Divider />
+    <MetadataList label={{ position: "top" }}>
+      {name && <MetadataListItem label="Network">{name}</MetadataListItem>}
+      {account && <MetadataListItem label="Cloud account">{account.accountName || account.id}</MetadataListItem>}
+      {region && <MetadataListItem label="Region">{region}</MetadataListItem>}
+    </MetadataList>
+  </VStack>;
+}
+
 function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted, onCancel }: {
   accounts: CloudAccount[];
   baseline?: Network;
@@ -127,22 +144,27 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
   onCancel: () => void;
 }) {
   const { api, tenantId, canWrite } = usePlatform();
+  const helpId = useId();
   const [draft, setDraft] = useState<NetworkDraft>(() => baseline ? networkDraft(baseline) : newNetworkDraft());
   const [review, setReview] = useState<ReviewedNetworkUpdate>();
+  const planFocus = useRef<HTMLElement>(null);
+  useEffect(() => { if (review) planFocus.current?.focus(); }, [review]);
   const [validation, setValidation] = useState("");
   const errorFocus = useRef<HTMLElement>(null);
   const attempt = useRef<CreateAttempt | undefined>(undefined);
   const mutation = useNetworkMutation();
   const edit = !!baseline;
-  const [yamlMode, setYamlMode] = useState(false);
-  const createMode = useRef<"guided" | "yaml">("guided");
+  const [mode, setMode] = useState<"guided" | "yaml">("guided");
+  const [manifestBusy, setManifestBusy] = useState(false);
+  const [tags, setTags] = useState<FormEntry[]>(() => Object.entries(baseline?.labels ?? {}).map(([key, value]) => ({ id: crypto.randomUUID(), key, value, choice: "" })));
+  const [subnets, setSubnets] = useState<FormEntry[]>([]);
+  const [showTagIssues, setShowTagIssues] = useState(false);
   const [step, setStep] = useState(0);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [subnetsOpen, setSubnetsOpen] = useState(false);
   const [flowOpen, setFlowOpen] = useState(false);
   const [loggingOpen, setLoggingOpen] = useState(!!baseline?.spec?.flowLogs?.enabled);
-  const steps = edit ? ["Configure", "Review"] : ["Basics", "Networking", "Review"];
-  const help = edit ? ["Update network details, rollout tier and optional logging.", "Review the requested changes, then generate a server plan."] : ["Choose the cloud account and region for your network.", "Use a balanced subnet layout and add optional traffic logging.", "Confirm the network and its impact before provisioning."];
+  const steps = edit ? editSteps : ["Network settings", "Connectivity", "Review"];
   const finalStep = steps.length - 1;
   const account = accounts.find(({ id }) => id === draft.accountId);
   const supported = !!networkProvider(account);
@@ -161,6 +183,15 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
     setValidation(""); setReview(undefined);
     try {
       if (step < finalStep) {
+        if (step === 0) {
+          const issues = keyIssues(tags);
+          setShowTagIssues(true);
+          const index = tags.findIndex(tag => issues.has(tag.id));
+          if (index >= 0) {
+            setLabelsOpen(true);
+            throw new Error(`Resource label ${index + 1}: ${issues.get(tags[index].id)}`);
+          }
+        }
         validateNetworkStep(tenantId, draft, edit ? "metadata" : step === 0 ? "identity" : "layout", account, baseline);
         if (edit || step === 1) validateNetworkStep(tenantId, draft, "flowLogs", account, baseline);
         setStep(step + 1); return;
@@ -183,9 +214,9 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
       }
     } catch (error) {
       setValidation(errorMessage(error));
-      if (step === 0) setLabelsOpen(true);
-      if (!edit && step === 1) setSubnetsOpen(true);
-      if (step === (edit ? 0 : 1)) { setLoggingOpen(true); setFlowOpen(true); }
+      if (step === 0 && tags.length) setLabelsOpen(true);
+      if (!edit && step === 1 && subnets.length) setSubnetsOpen(true);
+      if (step === (edit ? 0 : 1) && draft.flowEnabled) { setLoggingOpen(true); setFlowOpen(true); }
       requestAnimationFrame(() => errorFocus.current?.focus());
     }
   };
@@ -201,38 +232,59 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
     });
   };
   return (
-    <>
-    <WizardDialog isOpen={!yamlMode} onOpenChange={(open) => { if (!open && !mutation.busy && createMode.current === "guided") onCancel(); }} title={edit ? "Edit network" : "Create network"} description={help[step]} steps={steps} step={step} busy={mutation.busy} footer={<HStack gap={2} wrap="wrap">
-      <Button label="Cancel" type="button" onClick={onCancel} isDisabled={mutation.busy} />
-      <Button label="Back" type="button" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={step === 0 || mutation.busy} />
+    <ResourceWorkflowDialog isOpen mark={networkMark} onOpenChange={open => { if (!open) onCancel(); }}
+      title={edit ? "Edit network" : "Create network"}
+      description={edit ? `Review changes to ${draft.name} before applying.` : "Configure the account, address space, and routing for your network."}
+      steps={steps} step={step} busy={mutation.busy || manifestBusy}
+      method={edit ? undefined : { label: "Creation method", value: mode, onChange: setMode }}
+      yamlContent={!edit && <ManifestCreateDialog kind="Network" embedded isOpen={mode === "yaml"} onBusyChange={setManifestBusy} onOpenChange={open => { if (!open) onCancel(); }} onCreated={network => onAccepted(network, "Create request accepted. Open network details to track provisioning.")} />}
+      placement={<NetworkPlacement account={account} region={draft.region} name={baseline?.name} />}
+      footer={<HStack gap={2} wrap="wrap">
+      <Button label="Cancel" variant="secondary" type="button" onClick={onCancel} isDisabled={mutation.busy} />
+      {step > 0 && <Button label="Back" type="button" variant="secondary" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={mutation.busy} />}
       <Button label={step < finalStep ? "Next" : edit ? "Preview changes" : "Create network"} form="network-write-form" variant={step === finalStep && review ? "secondary" : "primary"} type="submit" isDisabled={!canWrite || stale} isLoading={mutation.busy} />
       {step === finalStep && review && <Button label="Apply reviewed plan" type="button" variant="primary" onClick={apply} isLoading={mutation.busy} isDisabled={!canWrite || !supported || stale || !canApplyNetworkPlan(review.plan)} />}
     </HStack>}>
     <VStack gap={4}>
-      {!edit && step === 0 && <HStack gap={2} wrap="wrap"><Button label="Use guided form" type="button" aria-pressed variant="secondary" isDisabled={locked} /><Button label="Paste YAML" type="button" aria-pressed={false} variant="ghost" onClick={() => { createMode.current = "yaml"; setYamlMode(true); }} isDisabled={locked} /></HStack>}
-      {edit && <Text type="supporting">{asRequested ? "Editing stored client input (as requested)." : "Stored client input is unavailable; editing the resolved spec."} Name, account, region and layout are immutable.</Text>}
+      {edit && !asRequested && <Banner status="info" title="Original request unavailable" description="The form shows the resolved network configuration." />}
       {stale && <Banner status="warning" title="Network changed" description="Close and reopen this editor to load the current etag. This review cannot be applied." />}
+      {step === finalStep && review && <VStack ref={planFocus} role="region" aria-label="Network update plan" tabIndex={-1}>
+        <PlanReview plan={review.plan} />
+      </VStack>}
       <form id="network-write-form" method="post" aria-label={edit ? "Edit network fields" : "Create network fields"} onSubmit={submit} noValidate>
         <VStack gap={4}>
           <FormLayout direction="vertical">
-            {step === 0 && <>{edit ? <Text>Account: {account?.accountName || draft.accountId} · Region: {draft.region} · Name: {draft.name}</Text> : <>
+            {step === 0 && <>{edit ? <VStack data-placement-inline=""><Text type="supporting">{account?.accountName || draft.accountId} · {draft.region}</Text></VStack> : <>
               <Selector label="Cloud account" htmlName="account" value={draft.accountId} onChange={(accountId) => change({ accountId })} isRequired isDisabled={locked}
                 options={accounts.map((entry) => ({ value: entry.id, label: `${entry.accountName || entry.id} · ${networkProvider(entry) || "Unsupported provider"}`, disabled: !networkProvider(entry) }))} />
               {!accounts.length && <Text>No cloud accounts are available. Add an account before creating a network.</Text>}
               <TextInput label="Resource name" htmlName="name" value={draft.name} onChange={(name) => change({ name })} description="Immutable DNS name, up to 40 characters." isRequired isDisabled={locked} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
               <TextInput label="Region" htmlName="region" value={draft.region} onChange={(region) => change({ region })} description="Provider region, for example us-east-1. The server validates available zones." isRequired isDisabled={locked} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
             </>}
+            <FormLayout direction="horizontal" data-workflow-fields="">
             <TextInput label="Display name" htmlName="displayName" value={draft.displayName} onChange={(displayName) => change({ displayName })} isDisabled={locked} isOptional />
-            <Selector label="Network tier" htmlName="tier" description="All clusters on this network inherit its rollout tier." value={String(draft.tier)} onChange={(tier) => change({ tier: Number(tier) })} options={tierOptions} isDisabled={locked} />
-            <Collapsible trigger="Optional · resource labels" isOpen={labelsOpen} onOpenChange={setLabelsOpen}><TextArea label="Labels (JSON object)" htmlName="labels" description={'String keys and values, for example {"team":"platform"}. Applied as cloud tags.'} value={draft.labelsJson} onChange={(labelsJson) => change({ labelsJson })} isDisabled={locked} hasSpellCheck={false} /></Collapsible>
+            <Selector label="Network tier" htmlName="tier" aria-describedby={helpId} value={String(draft.tier)} onChange={(tier) => change({ tier: Number(tier) })} options={tierOptions} isDisabled={locked} />
+            </FormLayout>
+            <Text id={helpId} type="supporting">Clusters on this network inherit its rollout tier.</Text>
+            <Collapsible trigger="Resource labels" isOpen={labelsOpen} onOpenChange={setLabelsOpen}><VStack gap={3} paddingBlock={3}>
+              <FormEntryRows label="Resource labels" hint="These labels are applied as cloud tags." rowLabel="resource label" rows={tags} disabled={locked} limit={40} issues={showTagIssues ? keyIssues(tags) : undefined}
+                onChange={rows => { setTags(rows); change({ labelsJson: JSON.stringify(Object.fromEntries(rows.map(({ key, value }) => [key, value]))) }); }} />
+            </VStack></Collapsible>
             </>}
             {!edit && step === 1 && <>
               <TextInput label="Network CIDR" htmlName="cidr" description="IPv4 /16 to /24. Default subnet carving requires /22 or larger." value={draft.cidrBlock} onChange={(cidrBlock) => change({ cidrBlock })} isRequired isDisabled={locked} />
+              <FormLayout direction="horizontal" data-workflow-fields="">
               <Selector label="NAT mode" htmlName="natMode" value={String(draft.natMode)} onChange={(natMode) => change({ natMode: Number(natMode) })} isDisabled={locked} options={[
                 { value: String(NatGatewayMode.SINGLE), label: "Single gateway" }, { value: String(NatGatewayMode.PER_ZONE), label: "Gateway per zone" },
               ]} />
-              <TextInput label="Availability zone count" htmlName="zoneCount" description="Default 3; choose 2 to 6. Ignored when explicit subnets are supplied." value={draft.zoneCount} onChange={(zoneCount) => change({ zoneCount })} inputMode="numeric" isDisabled={locked || !!draft.subnetsJson.trim()} />
-              <Collapsible trigger="Advanced · explicit subnet layout" isOpen={subnetsOpen} onOpenChange={setSubnetsOpen}><VStack gap={3}><Text type="supporting">Leave this empty to create a public and private subnet in each selected zone.</Text><TextArea label="Advanced: explicit subnets (JSON array)" htmlName="subnets" description={'Generated JSON: [{"role":"SUBNET_ROLE_PUBLIC","cidrBlock":"10.0.0.0/24","zoneId":"use1-az1"}, …]. Include PRIVATE subnets in at least two zones.'} value={draft.subnetsJson} onChange={(subnetsJson) => change({ subnetsJson })} isDisabled={locked} hasSpellCheck={false} rows={5} isOptional /></VStack></Collapsible>
+              <TextInput label="Availability zone count" htmlName="zoneCount" aria-describedby={helpId} value={draft.zoneCount} onChange={(zoneCount) => change({ zoneCount })} inputMode="numeric" isDisabled={locked || !!draft.subnetsJson.trim()} />
+              </FormLayout>
+              <Text id={helpId} type="supporting">{subnets.length ? "Availability zones come from your custom subnets." : "Choose 2 to 6 zones. Each gets a public and a private subnet."}</Text>
+              <Collapsible trigger="Custom subnet layout" isOpen={subnetsOpen} onOpenChange={setSubnetsOpen}><VStack gap={3} paddingBlock={3}>
+                <FormEntryRows label="Custom subnets" hint="Include private subnets in at least two zones and a public subnet for each NAT gateway. Use zone IDs such as usw1-az1." rowLabel="subnet" rows={subnets} disabled={locked} limit={32} columns={{ key: "Subnet CIDR", value: "Zone ID" }}
+                  select={{ label: "Role", initial: "SUBNET_ROLE_PRIVATE", options: [{ value: "SUBNET_ROLE_PRIVATE", label: "Private" }, { value: "SUBNET_ROLE_PUBLIC", label: "Public" }] }}
+                  onChange={rows => { setSubnets(rows); change({ subnetsJson: rows.length ? JSON.stringify(rows.map(row => ({ cidrBlock: row.key, zoneId: row.value, role: row.choice }))) : "" }); }} />
+              </VStack></Collapsible>
             </>}
             {step === (edit ? 0 : 1) && <Collapsible trigger="Optional · flow logging" isOpen={loggingOpen} onOpenChange={setLoggingOpen}><VStack gap={4}><CheckboxInput label="Enable flow logs" htmlName="flowEnabled" description="Record IP traffic in CloudWatch Logs. Logging may incur provider charges." value={draft.flowEnabled} onChange={(flowEnabled) => change({ flowEnabled })} isDisabled={locked || importedFlow} />
             {importedFlow && <Text type="supporting">Imported flow logs are carried over; their settings cannot be changed here.</Text>}
@@ -254,17 +306,12 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
               <Section variant="muted" padding={4}><VStack gap={2}><Heading level={3}>Impact</Heading><Text>{edit ? "Generate a server plan to inspect the exact changes before applying. The account, region and address layout remain fixed." : `Creates a VPC with ${draft.natMode === NatGatewayMode.PER_ZONE ? "a NAT gateway in every zone" : "one shared NAT gateway"}. Cloud resources may incur provider charges while provisioning and running.`}</Text><Text type="supporting">Clusters inherit this network’s tier. Release channels remain a per-cluster setting.</Text></VStack></Section>
             </VStack>}
           </FormLayout>
-          <VStack ref={errorFocus} tabIndex={-1} role="alert" gap={1}>{validation && <Text>{validation}</Text>}</VStack>
+          {validation && <VStack ref={errorFocus} tabIndex={-1} role="alert"><ErrorNotice error={validation} /></VStack>}
           <ErrorNotice error={mutation.error} />
         </VStack>
       </form>
-      {step === finalStep && review && <VStack gap={4}>
-        <PlanReview plan={review.plan} />
-      </VStack>}
     </VStack>
-    </WizardDialog>
-    {!edit && <ManifestCreateDialog kind="Network" isOpen={yamlMode} onOpenChange={(open: boolean) => { if (!open && createMode.current === "yaml") onCancel(); }} onUseForm={() => { createMode.current = "guided"; setYamlMode(false); }} onCreated={(network: Network) => onAccepted(network, "Create request accepted from the reviewed YAML manifest. Cloud provisioning continues asynchronously; open network details to track readiness.")} />}
-    </>
+    </ResourceWorkflowDialog>
   );
 }
 
@@ -277,7 +324,7 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
   const [draft, setDraft] = useState(newNetworkImportDraft);
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<"guided" | "yaml">("guided");
-  const [manifestVisited, setManifestVisited] = useState(false);
+  const [manifestBusy, setManifestBusy] = useState(false);
   const [validation, setValidation] = useState("");
   const errorFocus = useRef<HTMLElement>(null);
   const attempt = useRef<CreateAttempt | undefined>(undefined);
@@ -308,13 +355,18 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
       requestAnimationFrame(() => errorFocus.current?.focus());
     }
   };
-  return <><WizardDialog isOpen={mode === "guided"} onOpenChange={(open) => { if (!open && !mutation.busy) onCancel(); }} title="Import existing network" description={["Choose the account and region of your existing VPC.", "Select the VPC and the public and private subnets to discover.", "Review the discovery request. Ownership is confirmed separately."][step]} steps={["Identity", "Cloud resources", "Review"]} step={step} busy={mutation.busy} footer={<HStack gap={2} wrap="wrap">
-    <Button label="Cancel import" type="button" onClick={onCancel} isDisabled={mutation.busy} />
-    <Button label="Back" type="button" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={step === 0 || mutation.busy} />
+  const account = accounts.find(entry => entry.id === draft.accountId);
+  return <ResourceWorkflowDialog isOpen mark={networkMark} onOpenChange={open => { if (!open) onCancel(); }} title="Import network"
+    description="Discover a VPC and its subnets with read-only access."
+    steps={["Network settings", "Cloud resources", "Review"]} step={step} busy={mutation.busy || manifestBusy}
+    placement={<NetworkPlacement account={account} region={draft.region} />}
+    method={{ label: "Import method", value: mode, onChange: setMode }}
+    yamlContent={<ManifestCreateDialog kind="NetworkImport" embedded isOpen={mode === "yaml"} onBusyChange={setManifestBusy} onOpenChange={open => { if (!open) onCancel(); }} onCreated={network => onAccepted(network, "Import request accepted for read-only discovery. Review the discovered plan before takeover.")} />}
+    footer={<HStack gap={2} wrap="wrap">
+    <Button label="Cancel import" variant="secondary" type="button" onClick={onCancel} isDisabled={mutation.busy} />
+    {step > 0 && <Button label="Back" type="button" variant="secondary" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={mutation.busy} />}
     <Button label={step < 2 ? "Next" : "Import for discovery"} form="network-import-form" type="submit" variant="primary" isDisabled={!canWrite} isLoading={mutation.busy} />
   </HStack>}><VStack gap={4}>
-    {step === 0 && <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center" width="100%"><Text type="label">Use guided form</Text><Button type="button" label="Paste YAML" variant="secondary" isDisabled={locked} onClick={() => { setManifestVisited(true); setMode("yaml"); }} /></HStack>}
-    {step === 0 && <Text type="supporting">Import starts read-only discovery. The platform will not take ownership until you review the discovered resources and confirm takeover.</Text>}
     <form id="network-import-form" method="post" aria-label="Import network fields" onSubmit={submit} noValidate>
       <VStack gap={4}>
         <FormLayout direction="vertical">
@@ -322,12 +374,14 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
           <Selector label="Import cloud account" htmlName="importAccount" value={draft.accountId} onChange={(accountId) => change({ accountId })} isDisabled={locked} isRequired options={accounts.map((entry) => ({ value: entry.id, label: `${entry.accountName || entry.id} · ${networkProvider(entry) || "Unsupported provider"}`, disabled: !networkProvider(entry) }))} />
           {!accounts.length && <Text>No cloud accounts are available. Add an account before importing a network.</Text>}
           <TextInput label="Imported resource name" htmlName="importName" description="Immutable DNS name, up to 40 characters." value={draft.name} onChange={(name) => change({ name })} isDisabled={locked} isRequired autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
+          <FormLayout direction="horizontal" data-workflow-fields="">
+          <TextInput label="Import region" htmlName="importRegion" placeholder="us-east-1" value={draft.region} onChange={(region) => change({ region })} isDisabled={locked} isRequired autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
           <TextInput label="Imported display name" htmlName="importDisplayName" value={draft.displayName} onChange={(displayName) => change({ displayName })} isDisabled={locked} isOptional />
-          <TextInput label="Import region" htmlName="importRegion" description="AWS region holding the VPC, for example us-east-1." value={draft.region} onChange={(region) => change({ region })} isDisabled={locked} isRequired autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
+          </FormLayout>
           </>}
           {step === 1 && <>
           <TextInput label="AWS VPC ID" htmlName="importVpcId" description="The VPC must belong to the selected account." value={draft.vpcId} onChange={(vpcId) => change({ vpcId })} isDisabled={locked} isRequired autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
-          <TextArea label="AWS subnet IDs" htmlName="importSubnetIds" description="1 to 32 unique IDs separated by commas or whitespace. Include the public and private subnets to use. Other VPC subnets stay with their current owner; discovery verifies membership and routes." value={draft.subnetIds} onChange={(subnetIds) => change({ subnetIds })} isDisabled={locked} isRequired hasSpellCheck={false} autoCapitalize="none" hasAutoCorrect={false} />
+          <TextArea label="AWS subnet IDs" htmlName="importSubnetIds" description="Paste up to 32 subnet IDs, separated by spaces, commas, or new lines. Discovery checks that each subnet belongs to this VPC." value={draft.subnetIds} onChange={(subnetIds) => change({ subnetIds })} isDisabled={locked} isRequired hasSpellCheck={false} autoCapitalize="none" hasAutoCorrect={false} />
           </>}
           {step === 2 && <VStack gap={5}>
             <VStack gap={3}><Heading level={3}>Network</Heading><MetadataList columns="multi">
@@ -338,13 +392,11 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
             <Section variant="muted" padding={4}><VStack gap={2}><Heading level={3}>Discovery only</Heading><Text>Cloud resources remain unchanged. The controller will map the selected resources and publish an import plan for you to review.</Text><Text type="supporting">Review rollout settings after discovery. Each cluster keeps its own release channel.</Text></VStack></Section>
           </VStack>}
         </FormLayout>
-        <VStack ref={errorFocus} tabIndex={-1} role="alert" gap={1}>{validation && <Text>{validation}</Text>}</VStack>
+        {validation && <VStack ref={errorFocus} tabIndex={-1} role="alert"><ErrorNotice error={validation} /></VStack>}
         <ErrorNotice error={mutation.error} />
       </VStack>
     </form>
-  </VStack></WizardDialog>
-  {manifestVisited && <ImportManifestDialog kind="NetworkImport" isOpen={mode === "yaml"} onOpenChange={open => { if (!open) onCancel(); }} onUseForm={() => setMode("guided")} onImported={resource => onAccepted(resource, "Import request accepted from YAML for read-only discovery. Review the discovered plan before a separate takeover.")} />}
-  </>;
+  </VStack></ResourceWorkflowDialog>;
 }
 
 function TakeOverNetworkForm({ network, accounts, onAccepted, onReload }: {
@@ -408,7 +460,7 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload }: {
       <VStack gap={3}>
         <TextInput label={`Type take over ${network.name} to confirm ownership`} htmlName="takeoverConfirmation" description="This confirms that the previous tool no longer manages these resources." value={consent.ownershipConfirmation} onChange={(ownershipConfirmation) => change({ ownershipConfirmation })} isDisabled={locked} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
         {!!notImported.length && <CheckboxInput label="I confirm every NOT_IMPORTED resource has another owner or was deleted, and the previous tool no longer manages anything here" htmlName="acknowledgeNotImported" value={consent.acknowledgeNotImported} onChange={(acknowledgeNotImported) => change({ acknowledgeNotImported })} isDisabled={locked} description={`${notImported.length} resources remain outside platform management; inspect their details in the preview above.`} />}
-        <VStack ref={errorFocus} tabIndex={-1} role="alert" gap={1}>{validation && <Text>{validation}</Text>}</VStack>
+        {validation && <VStack ref={errorFocus} tabIndex={-1} role="alert"><ErrorNotice error={validation} /></VStack>}
         <ErrorNotice error={mutation.error} />
       </VStack>
     </form>
@@ -422,14 +474,12 @@ function NetworkEditor({ networkId, currentEtag, accounts, onAccepted, onCancel 
   const { api, tenantId } = usePlatform();
   const load = useCallback((signal: AbortSignal) => api.network.getNetwork({ tenantId, networkId, asRequested: true }, { signal }), [api, tenantId, networkId]);
   const query = useAsyncQuery(load);
-  return <VStack gap={4}>
-    {query.loading && <Text role="status">Loading stored input for editing…</Text>}
+  if (query.data?.network) return <NetworkForm baseline={query.data.network} asRequested={query.data.asRequested} currentEtag={currentEtag} accounts={accounts} onAccepted={onAccepted} onCancel={onCancel} />;
+  return <ResourceWorkflowDialog isOpen mark={networkMark} title="Edit network" steps={editSteps} step={0} onOpenChange={open => { if (!open) onCancel(); }}
+    footer={<HStack gap={3}><Button label="Cancel edit" variant="secondary" onClick={onCancel} />{query.error && <Button label="Retry loading editor" onClick={query.refresh} isLoading={query.refreshing} />}</HStack>}>
     <ErrorNotice error={query.error} />
-    {query.error && <HStack hAlign="end" vAlign="center" width="100%"><RefreshButton label="Retry loading editor" onClick={query.refresh} isLoading={query.refreshing} /></HStack>}
-    {query.data?.network && <NetworkForm baseline={query.data.network} asRequested={query.data.asRequested} currentEtag={currentEtag} accounts={accounts} onAccepted={onAccepted} onCancel={onCancel} />}
-    {!query.loading && !query.error && !query.data?.network && <Text>The server returned no network to edit.</Text>}
-    {!query.data?.network && <Button label="Cancel edit" onClick={onCancel} />}
-  </VStack>;
+    {query.loading ? <Text role="status">Loading network settings…</Text> : !query.error && <Text>The server returned no network to edit.</Text>}
+  </ResourceWorkflowDialog>;
 }
 
 function NetworkConditions({ conditions }: { conditions: Condition[] }) {
@@ -588,13 +638,13 @@ function NetworkResourceInventory({ network }: { network: Network }) {
       <VStack gap={1}><Heading level={2}>Resource inventory</Heading><Text type="supporting">Every managed resource returned by the platform, including paused and unhealthy resources.</Text></VStack>
       <Text type="supporting" role="status">{filtered.length} of {resources.length} managed resources</Text>
     </HStack>
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Resource filters">
       <TextInput type="search" label="Search resources" description="Name, kind or cloud ID." value={search} onChange={setSearch} autoComplete="off" hasSpellCheck={false} width="min(100%, 24rem)" />
       <Selector label="Resource kind" value={kindFilter} onChange={setKindFilter} width="min(100%, 12rem)" options={[{ value: "all", label: "All kinds" }, ...kinds.map((kind) => ({ value: kind, label: kind || "Unspecified kind" }))]} />
       <Selector label="Resource state" value={stateFilter} onChange={setStateFilter} width="min(100%, 12rem)" options={[{ value: "all", label: "All states" }, ...states.map((state) => ({ value: String(state), label: enumLabel(ManagedResourceState, state) }))]} />
       <Selector label="Pause status" value={pausedFilter} onChange={setPausedFilter} width="min(100%, 12rem)" options={[{ value: "all", label: "Any pause status" }, { value: "paused", label: "Paused" }, { value: "active", label: "Not paused" }]} />
       {hasFilters && <Button label="Clear resource filters" variant="ghost" onClick={clear} />}
-    </HStack>
+    </FilterRow>
     {filtered.length ? <Table data={filtered.map((resource, id) => ({ id, resource }))} idKey="id" aria-label="Network managed resource inventory" columns={[
       { key: "name", header: "Name", width: proportional(3, { minWidth: 80 }), renderCell: ({ resource }) => <CopyValue value={resource.name} label="Managed resource name" /> },
       { key: "kind", header: "Kind", width: proportional(1, { minWidth: 80 }), renderCell: ({ resource }) => <Text maxLines={1} hasTruncateTooltip>{resource.kind || "Not reported"}</Text> },
@@ -812,14 +862,14 @@ function NetworksList() {
     <ErrorNotice error={list.error} />
     {list.error && list.data && <Text type="supporting">Showing the last fully loaded network inventory. Refresh failed; no partial pages were added.</Text>}
     <ErrorNotice error={accounts.error} />
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Network filters">
       <TextInput type="search" label="Search networks" description="Search all tenant networks by name, ID, account or region." value={search} onChange={(value) => { setSearch(value); setPage(0); }} width="min(100%, 24rem)" autoComplete="off" hasSpellCheck={false} />
       <Selector label="Filter by account" value={accountFilter} onChange={(value) => { setAccountFilter(value); setPage(0); }} width="min(100%, 14rem)" options={[{ value: "all", label: "All accounts" }, ...accountIds.map((id) => ({ value: id, label: accountMap.get(id)?.accountName || id }))]} />
       <Selector label="Filter by tier" value={tierFilter} onChange={(value) => { setTierFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All tiers" }, ...tiers.map((tier) => ({ value: String(tier), label: enumLabel(Tier, tier) }))]} />
       <Selector label="Filter by status" value={stateFilter} onChange={(value) => { setStateFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All statuses" }, ...states.map((state) => ({ value: String(state), label: enumLabel(NetworkState, state) }))]} />
       <Selector label="Filter by pause" value={pauseFilter} onChange={(value) => { setPauseFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All pause states" }, { value: "paused", label: "Paused" }, { value: "not-paused", label: "Not paused" }, { value: "let-through", label: "Let through" }]} />
       {hasFilters && <Button label="Clear network filters" variant="ghost" onClick={() => { setSearch(""); setAccountFilter("all"); setTierFilter("all"); setStateFilter("all"); setPauseFilter("all"); setPage(0); }} />}
-    </HStack>
+    </FilterRow>
     {list.loading && <Text role="status">Loading all network pages…</Text>}
     {list.data && <Text type="supporting" role="status">{filtered.length} of {allNetworks.length} tenant networks · 25 per page</Text>}
     {list.data && (rows.length ? <Table data={rows} columns={columns} idKey="id" aria-label="Tenant networks" /> : <Text>{hasFilters ? "No networks match your search and filters." : "No networks in this tenant."}</Text>)}

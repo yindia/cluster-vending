@@ -13,7 +13,7 @@ export interface ValuesEditorHandle { focus: () => void }
 export interface ValuesEditorProps {
   value: string; label: string; language?: "yaml" | "json";
   readOnly?: boolean; disabled?: boolean; onChange?: (value: string) => void;
-  error?: string; description?: string; height?: string;
+  error?: string; description?: string; height?: string; placeholder?: string;
   ref?: Ref<ValuesEditorHandle>;
 }
 

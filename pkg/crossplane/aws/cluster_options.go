@@ -8,11 +8,13 @@ import (
 	"strings"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -70,6 +72,11 @@ func (p ClusterPlan) Waits() map[string]string {
 			waits[kind] = strings.Join(cluster, " and ")
 		}
 	}
+	if p.Karpenter && p.queueARN() == "" {
+		for _, kind := range []string{awssqs.QueuePolicy_Kind, awsevents.Target_Kind} {
+			waits[kind] = "the interruption queue exists (its ARN is known then)"
+		}
+	}
 	if p.IRSA && p.OIDCIssuer == "" {
 		waits[awsiam.OpenIDConnectProvider_Kind] = "the EKS cluster is ACTIVE (its OIDC issuer is known then)"
 	}
@@ -103,6 +110,9 @@ func (p *ClusterPlan) AssumeLive() {
 	}
 	if p.IRSA && p.OIDCIssuer == "" {
 		p.OIDCIssuer = KnownAfterApply
+	}
+	if p.Karpenter && p.queueARN() == "" {
+		p.KarpenterQueueARN = KnownAfterApply
 	}
 	if lt := p.NodePool.LaunchTemplate; lt.Rendered() && len(lt.SecurityGroupIDs) > 0 && p.ClusterSecurityGroupID == "" {
 		p.ClusterSecurityGroupID = KnownAfterApply

@@ -8,6 +8,7 @@ import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Heading } from "@astryxdesign/core/Heading";
+import { FormEntryRows, keyIssues, type FormEntry } from "./form-entry-rows";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
@@ -15,7 +16,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { AwsAmiTypeSchema, AwsAuthenticationModeSchema, AwsClusterLogTypeSchema, AwsSupportTypeSchema } from "@/gen/cloud/v1/aws_pb";
 import { Weekday, type Cluster } from "@/gen/cloud/v1/cluster_pb";
 import { TaintEffectSchema } from "@/gen/cloud/v1/node_pool_pb";
-import type { ClusterForm } from "@/lib/workflows/clusters";
+import { emptyClusterForm, type ClusterForm } from "@/lib/workflows/clusters";
 import { ValuesEditor } from "./values-editor";
 
 const title = (value: string) => value.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
@@ -23,54 +24,61 @@ const enumOptions = (schema: DescEnum, numeric = true) => schema.values.map((val
 const weekdays = [Weekday.MONDAY, Weekday.TUESDAY, Weekday.WEDNESDAY, Weekday.THURSDAY, Weekday.FRIDAY, Weekday.SATURDAY, Weekday.SUNDAY];
 const enumLabel = (schema: DescEnum, value: string) => { const entry = schema.values.find((entry) => entry.name === value || String(entry.number) === value); return !value || !entry?.number ? "Server default" : title(entry.localName); };
 const tokens = (value: string) => value.split(/[\s,]+/).filter(Boolean);
+export const taintEffectOptions = () => enumOptions(TaintEffectSchema, false).filter(option => option.value !== "TAINT_EFFECT_UNSPECIFIED");
 type RowField = "labels" | "nodeLabels" | "nodeTaints";
-type Entry = { id: string; key: string; value: string; effect: string };
 function taintEffectName(value: string | number | undefined): string {
   const effect = value ?? "TAINT_EFFECT_NO_SCHEDULE";
   return TaintEffectSchema.values.find((entry) => entry.name === effect || String(entry.number) === String(effect))?.name ?? String(effect);
 }
-function entries(value: string, taints = false): Entry[] {
+function entries(value: string, taints = false): FormEntry[] {
   try {
     const parsed = JSON.parse(value);
     const rows: { key: string; value: string; effect?: string | number }[] = taints ? parsed : Object.entries(parsed).map(([key, value]) => ({ key, value: String(value) }));
-    return rows.map((row) => ({ id: crypto.randomUUID(), key: row.key, value: row.value ?? "", effect: taintEffectName(row.effect) }));
+    return rows.map((row) => ({ id: crypto.randomUUID(), key: row.key, value: row.value ?? "", choice: taintEffectName(row.effect) }));
   } catch { return []; }
+}
+/** Read-only view of the platform-managed default node group's labels and taints. */
+function lockedEntries(value: string, taints: boolean) {
+  const items = entries(value, taints).map(row => taints ? `${row.key}=${row.value}:${row.choice.replace("TAINT_EFFECT_", "")}` : `${row.key}=${row.value}`);
+  return items.length ? <VStack gap={1}>{items.map(item => <Text key={item} type="code">{item}</Text>)}</VStack> : "None";
 }
 /** UI row identities survive key edits, wizard steps and creation mode changes. */
 export function useClusterFieldRows(form: ClusterForm) {
-  const [rows, setRows] = useState<Record<RowField, Entry[]>>(() => ({ labels: entries(form.labels), nodeLabels: entries(form.nodeLabels), nodeTaints: entries(form.nodeTaints, true) }));
+  const [rows, setRows] = useState<Record<RowField, FormEntry[]>>(() => ({ labels: entries(form.labels), nodeLabels: entries(form.nodeLabels), nodeTaints: entries(form.nodeTaints, true) }));
+  const [invalidIds, setInvalidIds] = useState<ReadonlySet<string>>(new Set());
   function validate(step: number) {
+    const invalid = new Set<string>();
+    let message = "";
     for (const field of step === 0 ? ["labels"] as const : step === 1 ? ["nodeLabels", "nodeTaints"] as const : []) {
-      const values = rows[field];
-      if (values.some((row) => !row.key.trim())) throw new Error(`Enter a key for every ${field === "labels" ? "cloud tag" : field === "nodeLabels" ? "node label" : "node taint"}, or remove its empty row.`);
-      const keys = values.map((row) => field === "nodeTaints" ? `${row.key}\u0000${row.effect}` : row.key);
-      if (new Set(keys).size !== keys.length) throw new Error(field === "nodeTaints" ? "Node taints must use unique key and effect pairs." : "Tag and label keys must be unique.");
+      for (const [id, issue] of keyIssues(rows[field], field === "nodeTaints")) {
+        invalid.add(id);
+        if (!message) {
+          const index = rows[field].findIndex(row => row.id === id);
+          const label = field === "labels" ? "Cloud tag" : field === "nodeLabels" ? "Node label" : "Node taint";
+          message = `${label} ${index + 1}: ${issue}`;
+        }
+      }
     }
+    setInvalidIds(invalid);
+    if (message) throw new Error(message);
   }
-  return { rows, setRows, validate };
+  return { rows, setRows, validate, invalidIds };
 }
 type RowState = ReturnType<typeof useClusterFieldRows>;
 type Change = <K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) => void;
 
-function KeyValueRows({ field, label, rowLabel, state, onChange, disabled, taints = false }: { field: RowField; label: string; rowLabel: string; state: RowState; onChange: Change; disabled: boolean; taints?: boolean }) {
+function KeyValueRows({ field, label, rowLabel, state, onChange, disabled }: { field: RowField; label: string; rowLabel: string; state: RowState; onChange: Change; disabled: boolean }) {
   const rows = state.rows[field];
-  function update(next: Entry[]) {
-    state.setRows((previous) => ({ ...previous, [field]: next }));
-    onChange(field, JSON.stringify(taints ? next.map(({ key, value, effect }) => ({ key, value, effect })) : Object.fromEntries(next.map(({ key, value }) => [key, value]))));
-  }
-  function change(id: string, patch: Partial<Entry>) { update(rows.map((row) => row.id === id ? { ...row, ...patch } : row)); }
-  return <VStack gap={3} role="group" aria-label={label}>
-    <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap" width="100%"><Heading level={4}>{label}</Heading><Button label={`Add ${rowLabel}`} type="button" onClick={() => update([...rows, { id: crypto.randomUUID(), key: "", value: "", effect: "TAINT_EFFECT_NO_SCHEDULE" }])} isDisabled={disabled} /></HStack>
-    {!rows.length && <Text type="supporting">No {label.toLowerCase()} configured.</Text>}
-    {rows.map((row, index) => <VStack key={row.id} gap={2}>
-      <FormLayout direction="horizontal">
-        <TextInput label={`${rowLabel[0].toUpperCase() + rowLabel.slice(1)} ${index + 1} key`} htmlName={`${field}-${row.id}-key`} value={row.key} onChange={(value) => change(row.id, { key: value })} isDisabled={disabled} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
-        <TextInput label={`${rowLabel[0].toUpperCase() + rowLabel.slice(1)} ${index + 1} value`} htmlName={`${field}-${row.id}-value`} value={row.value} onChange={(value) => change(row.id, { value })} isDisabled={disabled} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
-        {taints && <Selector label={`Node taint ${index + 1} effect`} value={row.effect} onChange={(effect) => change(row.id, { effect })} options={enumOptions(TaintEffectSchema, false).filter((option) => option.value !== "TAINT_EFFECT_UNSPECIFIED")} isDisabled={disabled} />}
-      </FormLayout>
-      <HStack hAlign="end"><Button label={`Remove ${rowLabel} ${index + 1}`} type="button" variant="ghost" onClick={() => update(rows.filter((entry) => entry.id !== row.id))} isDisabled={disabled} /></HStack>
-    </VStack>)}
-  </VStack>;
+  const taints = field === "nodeTaints";
+  const issues = state.invalidIds.size ? keyIssues(rows, taints) : new Map<string, string>();
+  for (const id of issues.keys()) if (!state.invalidIds.has(id)) issues.delete(id);
+  return <FormEntryRows label={label} hint={field === "labels" ? "Tags apply to the cluster and its managed resources." : undefined} rowLabel={rowLabel} rows={rows} disabled={disabled} issues={issues}
+    limit={field === "labels" ? 40 : taints ? 50 : 64}
+    select={taints ? { label: "Effect", initial: "TAINT_EFFECT_NO_SCHEDULE", options: taintEffectOptions() } : undefined}
+    onChange={next => {
+      state.setRows(previous => ({ ...previous, [field]: next }));
+      onChange(field, JSON.stringify(taints ? next.map(({ key, value, choice }) => ({ key, value, effect: choice })) : Object.fromEntries(next.map(({ key, value }) => [key, value]))));
+    }} />;
 }
 
 export function ClusterExtraFields({ value, onChange, disabled, creating, step, rows, baseline }: { value: ClusterForm; onChange: Change; disabled: boolean; creating: boolean; step: number; rows: RowState; baseline?: Cluster }) {
@@ -80,9 +88,9 @@ export function ClusterExtraFields({ value, onChange, disabled, creating, step, 
   const choice = (field: keyof ClusterForm, label: string, options: { label: string; value: string }[], locked = false) => <Selector label={label} value={String(value[field])} onChange={(next) => { if (!locked) onChange(field, next); }} options={options} isDisabled={disabled || locked} />;
   const booleanOptions = [{ value: "", label: "Server default" }, { value: "true", label: "Enabled" }, { value: "false", label: "Disabled" }];
   const yaml = (field: "oidcYaml" | "accessEntriesYaml" | "launchTemplateYaml" | "addonsYaml", label: string, description: string) => <ValuesEditor label={label} value={value[field]} onChange={(next) => onChange(field, next)} disabled={disabled} description={description} language="yaml" />;
-  return <VStack gap={4}>
+  return <VStack gap={4} data-extra-fields="">
     {step === 0 && <>
-      <Collapsible trigger="Cloud tags" defaultIsOpen={false}><VStack gap={3} paddingBlock={3}><Text type="supporting">Cloud tags apply to the cluster and its managed resources.</Text><KeyValueRows field="labels" label="Cloud tags" rowLabel="cloud tag" state={rows} onChange={onChange} disabled={disabled} /></VStack></Collapsible>
+      <Collapsible trigger="Cloud tags" defaultIsOpen={false}><VStack gap={3} paddingBlock={3}><KeyValueRows field="labels" label="Cloud tags" rowLabel="cloud tag" state={rows} onChange={onChange} disabled={disabled} /></VStack></Collapsible>
       <Collapsible trigger="Maintenance window" defaultIsOpen={false}><VStack gap={4} paddingBlock={3}>
         <Text type="supporting">Weekly upgrade window in UTC. Leave start and duration empty for no restriction. No selected weekdays means every day.</Text>
         <HStack gap={3} wrap="wrap" role="group" aria-label="Maintenance weekdays">{weekdays.map((day) => <CheckboxInput key={day} label={title(Weekday[day])} value={tokens(value.maintenanceDays).includes(String(day))} isDisabled={disabled} onChange={(checked) => onChange("maintenanceDays", (checked ? [...tokens(value.maintenanceDays), String(day)] : tokens(value.maintenanceDays).filter((entry) => entry !== String(day))).join(","))} />)}</HStack>
@@ -91,11 +99,16 @@ export function ClusterExtraFields({ value, onChange, disabled, creating, step, 
       </VStack></Collapsible>
     </>}
     {step === 1 && <>
-      {text("desiredSize", "Initial desired nodes", "Optional. Used only at creation; subsequent capacity is managed by the autoscaler.", true)}
-      <Collapsible trigger="Node labels and taints" defaultIsOpen={false}><VStack gap={5} paddingBlock={3}>
+      <Collapsible trigger="Node labels and taints" defaultIsOpen={false}>{creating ? <VStack gap={5} paddingBlock={3}>
         <KeyValueRows field="nodeLabels" label="Node labels" rowLabel="node label" state={rows} onChange={onChange} disabled={disabled} />
-        <KeyValueRows field="nodeTaints" label="Node taints" rowLabel="node taint" state={rows} onChange={onChange} disabled={disabled} taints />
-      </VStack></Collapsible>
+        <KeyValueRows field="nodeTaints" label="Node taints" rowLabel="node taint" state={rows} onChange={onChange} disabled={disabled} />
+      </VStack> : <VStack gap={3} paddingBlock={3} data-platform-managed="">
+        <Text type="supporting">Managed by the platform: runs Karpenter only. Set labels and taints on a node group instead.</Text>
+        <MetadataList>
+          <MetadataListItem label="Node labels">{lockedEntries(value.nodeLabels, false)}</MetadataListItem>
+          <MetadataListItem label="Node taints">{lockedEntries(value.nodeTaints, true)}</MetadataListItem>
+        </MetadataList>
+      </VStack>}</Collapsible>
       <Collapsible trigger="AWS node image and launch template" defaultIsOpen={false}><VStack gap={4} paddingBlock={3}>
         {choice("awsAmiType", "AWS AMI type", enumOptions(AwsAmiTypeSchema))}
         {yaml("launchTemplateYaml", "AWS launch template (YAML)", "An existing template (id or name plus version) or rendered template settings. Leave empty to remove the template. Some changes replace the node group; inspect the server plan.")}
@@ -125,20 +138,22 @@ export function ClusterExtraFields({ value, onChange, disabled, creating, step, 
 }
 
 export function ClusterExtraReview({ form, creating = false, touched }: { form: ClusterForm; creating?: boolean; touched?: ReadonlySet<string> }) {
-  const shown = (fields: string[]) => creating || fields.some((field) => touched?.has(field));
-  if (!creating && !["labels", "nodeLabels", "nodeTaints", "maintenanceDays", "maintenanceStart", "maintenanceDuration", "encryptionEnabled", "encryptionKeyArn", "awsAmiType", "awsAdditionalSecurityGroups", "awsAuthenticationMode", "awsSupportType", "awsLogGroupEnabled", "awsLogRetentionDays", "awsLogTypes", "oidcYaml", "accessEntriesYaml", "launchTemplateYaml", "addonsYaml"].some((field) => touched?.has(field))) return null;
+  const shown = (fields: (keyof ClusterForm)[]) => fields.some((field) => creating ? form[field] !== emptyClusterForm[field] : touched?.has(field));
+  if (!shown(["labels", "nodeLabels", "nodeTaints", "maintenanceDays", "maintenanceStart", "maintenanceDuration", "zoneIds", "serviceCidr", "encryptionEnabled", "encryptionKeyArn", "awsAmiType", "awsAdditionalSecurityGroups", "awsAuthenticationMode", "awsSupportType", "awsLogGroupEnabled", "awsLogRetentionDays", "awsLogTypes", "oidcYaml", "accessEntriesYaml", "launchTemplateYaml", "addonsYaml"])) return null;
   const map = (text: string) => { try { return Object.entries(JSON.parse(text) as Record<string, string>); } catch { return []; } };
   const taints = (() => { try { return JSON.parse(form.nodeTaints) as { key: string; value: string; effect: string | number }[]; } catch { return []; } })();
   const list = (value: string) => value || "None";
+  const reviewRows = (items: string[]) => items.length
+    ? <VStack gap={1} data-entry-review="">{items.map(item => <Text key={item} type="code">{item}</Text>)}</VStack>
+    : creating ? "None" : "Remove all";
   const reviewYaml = (field: "oidcYaml" | "accessEntriesYaml" | "launchTemplateYaml" | "addonsYaml", label: string) => shown([field]) && <Collapsible trigger={`Reviewed ${label}`} defaultIsOpen={false}><ValuesEditor label={`Reviewed ${label}`} value={form[field]} readOnly language="yaml" /></Collapsible>;
   return <VStack gap={4}>
     <MetadataList title={<Heading level={4}>Additional configuration</Heading>}>
-      {shown(["labels"]) && <MetadataListItem label="Cloud tags">{map(form.labels).length} · {map(form.labels).map(([key, value]) => `${key}=${value}`).join(", ") || "None"}</MetadataListItem>}
+      {shown(["labels"]) && <MetadataListItem label="Cloud tags">{reviewRows(map(form.labels).map(([key, value]) => `${key}=${value}`))}</MetadataListItem>}
       {shown(["maintenanceDays", "maintenanceStart", "maintenanceDuration"]) && <MetadataListItem label="Maintenance window">{form.maintenanceStart ? `${tokens(form.maintenanceDays).map((day) => title(Weekday[Number(day)])).join(", ") || "Every day"} · ${form.maintenanceStart} UTC · ${form.maintenanceDuration}` : "No restriction"}</MetadataListItem>}
-      {shown(["nodeLabels"]) && <MetadataListItem label="Node labels">{map(form.nodeLabels).length} · {map(form.nodeLabels).map(([key, value]) => `${key}=${value}`).join(", ") || "None"}</MetadataListItem>}
-      {shown(["nodeTaints"]) && <MetadataListItem label="Node taints">{taints.length} · {taints.map((taint) => `${taint.key}=${taint.value}:${taintEffectName(taint.effect).replace("TAINT_EFFECT_", "")}`).join(", ") || "None"}</MetadataListItem>}
-      {creating && <MetadataListItem label="Initial desired nodes">{form.desiredSize || "Server default"}</MetadataListItem>}
-      {creating && <MetadataListItem label="Cluster network">Zones: {list(form.zoneIds)} · Service CIDR: {form.serviceCidr || "Server default"}</MetadataListItem>}
+      {shown(["nodeLabels"]) && <MetadataListItem label="Node labels">{reviewRows(map(form.nodeLabels).map(([key, value]) => `${key}=${value}`))}</MetadataListItem>}
+      {shown(["nodeTaints"]) && <MetadataListItem label="Node taints">{reviewRows(taints.map((taint) => `${taint.key}=${taint.value}:${taintEffectName(taint.effect).replace("TAINT_EFFECT_", "")}`))}</MetadataListItem>}
+      {shown(["zoneIds", "serviceCidr"]) && <MetadataListItem label="Cluster network">Zones: {list(form.zoneIds)} · Service CIDR: {form.serviceCidr || "Server default"}</MetadataListItem>}
       {shown(["encryptionEnabled", "encryptionKeyArn"]) && <MetadataListItem label="Secrets encryption">{form.encryptionKeyArn || (form.encryptionEnabled === "true" ? "Enabled · platform key" : form.encryptionEnabled === "false" ? "Disabled" : "Server default")}</MetadataListItem>}
       {shown(["awsAmiType", "awsAdditionalSecurityGroups"]) && <MetadataListItem label="AWS settings">AMI: {enumLabel(AwsAmiTypeSchema, form.awsAmiType)} · Security groups: {list(form.awsAdditionalSecurityGroups)}</MetadataListItem>}
       {shown(["awsAuthenticationMode", "awsSupportType"]) && <MetadataListItem label="AWS policies">Authentication: {enumLabel(AwsAuthenticationModeSchema, form.awsAuthenticationMode)} · Support: {enumLabel(AwsSupportTypeSchema, form.awsSupportType)}</MetadataListItem>}

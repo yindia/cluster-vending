@@ -36,18 +36,19 @@ var Cluster = []string{
 	"spec.default_node_pool.capacity_type",
 	"spec.default_node_pool.disk_size_gb",
 	"spec.default_node_pool.instance_types",
-	"spec.default_node_pool.labels",
-	"spec.default_node_pool.scaling_config.max_size",
-	"spec.default_node_pool.scaling_config.min_size",
-	"spec.default_node_pool.taints",
 	"spec.maintenance_window",
 	"spec.naas",
+	"spec.node_groups",
 	"spec.release_channel",
 	"spec.upgrade_mode",
 }
 
 // Network are the paths UpdateNetwork accepts.
 var Network = []string{"display_name", "labels", "spec.flow_logs", "spec.tier"}
+
+// managedDefaultGroup is why the default node group's taints, labels and
+// scaling cannot be changed.
+const managedDefaultGroup = "the default node group is managed by the platform"
 
 // fixedWhy says why a field that is set at creation cannot change.
 var fixedWhy = map[string]string{
@@ -56,6 +57,10 @@ var fixedWhy = map[string]string{
 	"spec.network":      "a cluster stays in the network it was created in",
 	"spec.bootstrap_id": "a network stays in its account",
 	"spec.layout":       "a network's layout is set when it is created",
+
+	"spec.default_node_pool.taints":         managedDefaultGroup,
+	"spec.default_node_pool.labels":         managedDefaultGroup,
+	"spec.default_node_pool.scaling_config": managedDefaultGroup,
 }
 
 // skipped are the fields of the object itself that are not the client's

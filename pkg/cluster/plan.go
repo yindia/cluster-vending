@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"k8s.io/utils/ptr"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -89,9 +90,24 @@ func ChooseSubnets(subnets []PrivateSubnet, zoneIDs []string) ([]string, []strin
 // endpoint's CIDRs have no default: who may reach the API is the
 // client's choice (the contract requires at least one while that endpoint
 // is on).
+//
+// The default node pool is the platform's: omitted, it is filled with the
+// default instance type and capacity; its labels, taints and size are
+// always the fixed ones (crossplaneaws.FixedSystemNodePool), whatever the
+// request said. Instance types, capacity type, AMI, disk and launch
+// template stay the client's.
 func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
+	return resolveSpec(in, zones, true)
+}
+
+// resolveSpec is ResolveSpec; fixPool false leaves the default node pool's
+// placement and size as they are (an imported cluster's: PlanImport).
+func resolveSpec(in *cloudv1.ClusterSpec, zones []string, fixPool bool) (*cloudv1.ClusterSpec, error) {
 	spec := cloneSpec(in)
 	spec.Network.ZoneIds = zones
+	if fixPool {
+		spec.DefaultNodePool = fixedNodePool(spec.DefaultNodePool)
+	}
 	pool := spec.DefaultNodePool
 	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED {
 		pool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND
@@ -112,6 +128,26 @@ func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 	aws.Addons = MergeAddons(aws.GetAddons())
 	ResolveReleaseFields(spec)
 	return spec, ResolveOptions(spec)
+}
+
+// fixedNodePool is pool (nil: an empty one) with the platform's placement
+// and size, and the default instance type when it names none.
+func fixedNodePool(pool *cloudv1.NodePoolSpec) *cloudv1.NodePoolSpec {
+	if pool == nil {
+		pool = &cloudv1.NodePoolSpec{}
+	}
+	if len(pool.InstanceTypes) == 0 {
+		pool.InstanceTypes = []string{crossplaneaws.DefaultSystemInstanceType}
+	}
+	fixed := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{})
+	pool.Labels = fixed.Labels
+	pool.Taints = nil
+	for _, t := range fixed.Taints {
+		pool.Taints = append(pool.Taints, &cloudv1.Taint{Key: t.Key, Value: t.Value, Effect: cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE})
+	}
+	pool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: crossplaneaws.SystemPoolSize, MaxSize: crossplaneaws.SystemPoolSize,
+		DesiredSize: ptr.To(uint32(crossplaneaws.SystemPoolSize))}
+	return pool
 }
 
 // ResolveReleaseFields stores the defaults of the fields that say how
@@ -194,6 +230,15 @@ func RenderPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplaneaw
 			Effect: CrossplaneName(t.GetEffect(), "")})
 	}
 	optionsPlan(spec, &p)
+	// A cluster the platform created has the fixed default node group and
+	// Karpenter's setup, whatever its stored spec says (a cluster created
+	// before them is moved in place: nothing EKS cannot change changes).
+	// An imported cluster (it has adopted objects) keeps what it has.
+	if !base.Imported() {
+		p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool)
+		p.Karpenter = true
+		p.ResultsBucket = true // rendered once the plan has the account (HasResultsBucket)
+	}
 	return p
 }
 

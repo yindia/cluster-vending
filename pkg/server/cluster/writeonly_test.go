@@ -9,6 +9,7 @@ import (
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -152,9 +153,9 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 	reconcile(t, w, w.row.ID) // the world's cluster, applied
 	before := row(w.row.ID)
 	g.during(t, "UpdateCluster", func() error {
-		spec := minimalSpec()
-		spec.DefaultNodePool.ScalingConfig.MaxSize = 9
-		_, err := w.svc.UpdateCluster(ctx, updateRequest(w, spec, "spec.default_node_pool.scaling_config.max_size"))
+		req := updateRequest(w, &cloudv1.ClusterSpec{}, "labels")
+		req.Cluster.Labels = map[string]string{"env": "prod"}
+		_, err := w.svc.UpdateCluster(ctx, req)
 		return err
 	})
 	if r := row(w.row.ID); r.Generation != before.Generation+1 || r.AppliedGeneration >= r.Generation || r.State != reconcilecluster.StateUpdating {
@@ -163,8 +164,8 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 	reconcile(t, w, w.row.ID)
 	group := &awseks.NodeGroup{}
 	groupKey := client.ObjectKey{Namespace: worldNS, Name: crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name) + "-default"}
-	if err := w.kube.Get(ctx, groupKey, group); err != nil || *group.Spec.ForProvider.ScalingConfig.MaxSize != 9 {
-		t.Errorf("the reconciler did not apply the stored update: %v (%v)", group.Spec.ForProvider.ScalingConfig, err)
+	if err := w.kube.Get(ctx, groupKey, group); err != nil || ptr.Deref(group.Spec.ForProvider.Tags["env"], "") != "prod" {
+		t.Errorf("the reconciler did not apply the stored update: %v (%v)", group.Spec.ForProvider.Tags, err)
 	}
 
 	// Import: stored as DISCOVERING without a look at the cloud; the

@@ -36,6 +36,9 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 	}
 	if rid := req.GetRequestId(); rid != "" {
 		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
+			if !importMatches(row, req) {
+				return nil, requestIDReused(rid)
+			}
 			c, err := s.stored(ctx, row)
 			return &cloudv1.ImportClusterResponse{Cluster: c}, err
 		} else if !errors.Is(err, repository.ErrNotFound) {

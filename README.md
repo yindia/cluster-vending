@@ -75,6 +75,15 @@ Both the controller's lookups and the providers assume each account's
 tenant role, whatever their own credentials are, so the tenant role's trust
 policy must allow the IAM user or role the keys belong to.
 
+The API server also reads the scan results of a cluster from its results
+bucket in the tenant's account (read-only, through the tenant role). Start it
+(terminal 2) in a shell that has the same `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` exported, and let the tenant role trust the same IAM
+user or role (the stack's `ServerPrincipalArn` parameter). Without keys it
+still runs: a cluster whose results are in a bucket is answered with a
+"results unavailable" notice. Keys are never settings; `aws-region`,
+`aws-source-role-arn` and `aws-external-id` are optional.
+
 Local API and UI login is disabled by default. Run `make run-ui` for the UI.
 For optional login, run `make keycloak` separately, uncomment the `auth` block
 in `hack/config.local.yaml`, then restart the API and UI. Comment it out again
@@ -189,6 +198,8 @@ bin/cluster-vending cluster get CLUSTER_ID --tenant acme -o yaml
   anything in the workload cluster.
 - [docs/deprecations.md](docs/deprecations.md): how deprecated and removed
   API versions in workload clusters are found and shown.
+- [docs/cluster-policy-visibility.md](docs/cluster-policy-visibility.md): cluster policy
+  violations, retained admission events, and collection coverage.
 - [docs/events.md](docs/events.md): the events the controller emits about
   accounts, networks, clusters and releases, their reasons, and how to read
   them (`cluster events`, `network events`, `status.recentEvents`).

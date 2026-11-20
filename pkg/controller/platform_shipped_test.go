@@ -19,7 +19,6 @@ func shippedVars(name string) component.Vars {
 	cluster := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "prod"}}
 	cluster.Spec.Region = "us-east-1"
 	cluster.Spec.AWS = &cloudv1alpha1.AWSClusterSpec{IRSA: ptr.To(true)}
-	cluster.Spec.DefaultNodePool = &cloudv1alpha1.NodePoolSpec{Labels: map[string]string{"pool": "system"}}
 	cluster.Status.OIDCIssuerURL = "https://oidc.eks.us-east-1.amazonaws.com/id/ABC"
 	cluster.Status.Endpoint = &cloudv1alpha1.ClusterEndpoint{URL: "https://abc.eks.amazonaws.com"}
 	network := &cloudv1alpha1.Network{}
@@ -27,7 +26,8 @@ func shippedVars(name string) component.Vars {
 	account := &cloudv1alpha1.CloudAccount{Spec: cloudv1alpha1.CloudAccountSpec{AWS: &cloudv1alpha1.AWSAccount{AccountID: "444455556666"}}}
 	return component.VarsFor(cluster, network, account, component.IAMOutputs{
 		RoleARN: "arn:aws:iam::444455556666:role/prod-" + name + "-role", RoleName: "prod-" + name + "-role",
-		PolicyARN: "arn:aws:iam::444455556666:policy/prod-" + name + "-policy", NodeRoleName: "prod-node-role"})
+		PolicyARN: "arn:aws:iam::444455556666:policy/prod-" + name + "-policy", NodeRoleName: "prod-node-role",
+		ClusterPrefix: "prod"})
 }
 
 // The shipped catalog and the shipped release plan on every Kubernetes
@@ -44,8 +44,8 @@ func TestShippedPlatformComponentsPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "istio-base", "istio-cni",
-		"istio-ingress-gateway", "istiod", "karpenter", "ztunnel"} // kyverno ships disabled
+	want := []string{"aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istio-cni",
+		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "ztunnel"} // kyverno ships enabled (d510cd1)
 	for _, k := range DefaultRelease().Spec.Content.Kubernetes {
 		t.Run(k.Minor, func(t *testing.T) {
 			pins := map[string]component.Pin{}

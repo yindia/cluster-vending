@@ -79,6 +79,9 @@ type Report struct {
 	// MaxFindings of them, removed first.
 	Total, Removed int
 	Findings       []Finding
+	// All is every finding, with no cap: for what is kept outside the
+	// Cluster object (the results bucket, bounded by its object size).
+	All []Finding
 	// Skipped are the resources that could not be listed (forbidden,
 	// gone), by name; the scan goes on without them.
 	Skipped []string
@@ -96,6 +99,7 @@ func Summarize(target string, findings []Finding, max int) Report {
 		}
 	}
 	r.Findings = findings[:min(len(findings), max)]
+	r.All = findings
 	return r
 }
 

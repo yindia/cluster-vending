@@ -135,6 +135,12 @@ spec:
                           description: Minor, e.g. "1.37".
                           pattern: ^1\.[0-9]{2}$
                           type: string
+                        nodeAmiPin:
+                          description: |-
+                            NodeAMIPin is the AL2023 AMI release the platform's Karpenter
+                            EC2NodeClasses pin on this minor (alias al2023@<pin>). Unset: latest.
+                          pattern: ^v[0-9]{8}$
+                          type: string
                         upgradeTo:
                           description: |-
                             UpgradeTo moves automatic clusters on this minor to the next one

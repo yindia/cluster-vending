@@ -43,6 +43,8 @@ func TestCheck(t *testing.T) {
 			want: []Gate{{Code: GateNotReady, Blocking: true, Message: "the cluster is not Ready"}}},
 		{name: "platform not ready", facts: with(func(f *Facts) { f.PlatformReady = false }),
 			want: []Gate{{Code: GatePlatform, Blocking: true, Message: "a platform component is not Ready"}}},
+		{name: "tenant component not ready", facts: with(func(f *Facts) { f.TenantNotReady = true }),
+			want: []Gate{{Code: GateTenant, Blocking: true, Message: "a tenant component is not Ready"}}},
 		{name: "never scanned", facts: with(func(f *Facts) { f.DeprecationsScanned = false }),
 			want: []Gate{{Code: GateDeprecations, Blocking: true, Message: "waiting for the deprecation scan of 1.37"}}},
 		{name: "scanned for another minor", facts: with(func(f *Facts) { f.DeprecationsTarget = "1.36" }),

@@ -26,6 +26,8 @@ import { RefreshButton } from "./refresh-button";
 import { OverviewPage } from "./overview-page";
 import { AccountsPage } from "./accounts-page";
 import { NetworksPage } from "./networks-page";
+import { NodeGroupDetail } from "./cluster-node-group-detail";
+import { SubTenantDetail } from "./subtenant-detail";
 import { ClustersPage } from "./clusters-page";
 import { ReleasesPage } from "./releases-page";
 import { ComponentsPage } from "./components-page";
@@ -52,26 +54,26 @@ function SessionGate({ children, onConfigure }: { children: ReactNode; onConfigu
   return children;
 }
 
-function SectionPage({ section, resourceId, channelId, componentClusterId, freezeSelection }: { section: Section; resourceId?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
+function SectionPage({ section, resourceId, subtenantId, nodeGroup, channelId, componentClusterId, freezeSelection }: { section: Section; resourceId?: string; subtenantId?: string; nodeGroup?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
   const { tenantId } = usePlatform();
   if (!tenantId) return <ConnectionPanel />;
   switch (section) {
     case "overview": return <OverviewPage />;
     case "accounts": return <AccountsPage resourceId={resourceId} />;
     case "networks": return <NetworksPage resourceId={resourceId} />;
-    case "clusters": return <ClustersPage resourceId={resourceId} />;
+    case "clusters": return resourceId && nodeGroup ? <NodeGroupDetail key={nodeGroup} clusterId={resourceId} group={nodeGroup} /> : resourceId && subtenantId ? <SubTenantDetail key={subtenantId} clusterId={resourceId} subtenantId={subtenantId} /> : <ClustersPage resourceId={resourceId} />;
     case "components": return <ComponentsPage resourceId={resourceId} clusterId={componentClusterId} />;
     case "releases": return <ReleasesPage resourceId={resourceId} channelId={channelId} />;
     case "freeze": return <FreezePage initialSelection={freezeSelection} />;
   }
 }
 
-export default function ConsoleApp({ section = "overview", resourceId, channelId, componentClusterId, freezeSelection }: { section?: Section; resourceId?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
+export default function ConsoleApp({ section = "overview", resourceId, subtenantId, nodeGroup, channelId, componentClusterId, freezeSelection }: { section?: Section; resourceId?: string; subtenantId?: string; nodeGroup?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
   const { mode, setMode } = useAppearance();
   const browserAuth = useBrowserAuth();
   const { scopeKey, identity, liveUpdates, setLiveUpdates, connect } = usePlatform();
   const router = useRouter();
-  const routeContext = JSON.stringify([section, resourceId, channelId, componentClusterId, freezeSelection?.scope, freezeSelection?.id]);
+  const routeContext = JSON.stringify([section, resourceId, subtenantId, nodeGroup, channelId, componentClusterId, freezeSelection?.scope, freezeSelection?.id]);
   const [leavingResource, setLeavingResource] = useState<string>();
   // Clear the guard as soon as new route props arrive, including when React reuses this instance.
   if (leavingResource !== undefined && leavingResource !== routeContext) setLeavingResource(undefined);
@@ -91,7 +93,7 @@ export default function ConsoleApp({ section = "overview", resourceId, channelId
       <SideNavSection title="Workspace">{navigation.map((item) => <SideNavItem key={item.section} label={item.label} href={item.section === "overview" ? "/" : `/${item.section}`} isSelected={item.section === section} />)}</SideNavSection>
     </SideNav>}
   ><Layout height="fill" content={<LayoutContent padding={6}><VStack gap={6}>
-    {resourceId || channelId || ["releases", "freeze", "components"].includes(section) ? <HStack as="nav" aria-label="Breadcrumb" gap={2} vAlign="center"><Link href="/">Workspace</Link><Text color="secondary" aria-hidden="true">/</Text><Link href={section === "components" && componentClusterId ? `/components?cluster=${encodeURIComponent(componentClusterId)}` : `/${section}`}>{current.label}</Link>{(resourceId || channelId) && <><Text color="secondary" aria-hidden="true">/</Text><Text color="secondary" aria-current="page">{channelId ? "Channel" : "Details"}</Text></>}</HStack> : <VStack gap={2}><Text type="supporting">WORKSPACE / {current.label.toUpperCase()}</Text><Heading level={1}>{current.label}</Heading><Text color="secondary">{current.description}</Text></VStack>}
+    {resourceId || channelId || ["releases", "freeze", "components"].includes(section) ? <HStack as="nav" aria-label="Breadcrumb" gap={2} vAlign="center" wrap="wrap"><Link href="/">Workspace</Link><Text color="secondary" aria-hidden="true">/</Text><Link href={section === "components" && componentClusterId ? `/components?cluster=${encodeURIComponent(componentClusterId)}` : `/${section}`}>{current.label}</Link>{(subtenantId || nodeGroup) && resourceId && <><Text color="secondary" aria-hidden="true">/</Text><Link href={`/clusters/${encodeURIComponent(resourceId)}`}>Cluster details</Link></>}{(resourceId || channelId) && <><Text color="secondary" aria-hidden="true">/</Text><Text color="secondary" aria-current="page">{nodeGroup ? "Node group" : subtenantId ? "Sub Tenant" : channelId ? "Channel" : "Details"}</Text></>}</HStack> : <VStack gap={2}><Text type="supporting">WORKSPACE / {current.label.toUpperCase()}</Text><Heading level={1}>{current.label}</Heading><Text color="secondary">{current.description}</Text></VStack>}
     <Dialog isOpen={connectionOpen} onOpenChange={setConnectionOpen} purpose="form" width="min(40rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={0}>
       <Layout padding={6}
         header={<DialogHeader title="Settings" subtitle="Manage your workspace connection and display preferences." onOpenChange={setConnectionOpen} />}
@@ -113,6 +115,6 @@ export default function ConsoleApp({ section = "overview", resourceId, channelId
         footer={<LayoutFooter padding={6} hasDivider><HStack gap={2} hAlign="end" wrap="wrap"><Button label="Close" onClick={() => setConnectionOpen(false)} />{!browserAuth.enabled && <Button label="Connect" variant="primary" type="submit" form={`${settingsId}-form`} />}</HStack></LayoutFooter>}
       />
     </Dialog>
-    {leavingResource === routeContext && hasResourceContext ? <Text role="status">Switching tenant and opening Overview…</Text> : <SessionGate key={scopeKey} onConfigure={() => setConnectionOpen(true)}><SectionPage key={`${section}:${channelId ?? resourceId ?? "list"}:${componentClusterId ?? ""}:${freezeSelection?.scope ?? ""}:${freezeSelection?.id ?? ""}`} section={section} resourceId={resourceId} channelId={channelId} componentClusterId={componentClusterId} freezeSelection={freezeSelection} /></SessionGate>}
+    {leavingResource === routeContext && hasResourceContext ? <Text role="status">Switching tenant and opening Overview…</Text> : <SessionGate key={scopeKey} onConfigure={() => setConnectionOpen(true)}><SectionPage key={`${section}:${channelId ?? resourceId ?? "list"}:${nodeGroup ?? ""}:${componentClusterId ?? ""}:${freezeSelection?.scope ?? ""}:${freezeSelection?.id ?? ""}`} section={section} resourceId={resourceId} subtenantId={subtenantId} nodeGroup={nodeGroup} channelId={channelId} componentClusterId={componentClusterId} freezeSelection={freezeSelection} /></SessionGate>}
   </VStack></LayoutContent>} /></AppShell>;
 }

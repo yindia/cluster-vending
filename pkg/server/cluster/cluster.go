@@ -42,13 +42,20 @@ const (
 type ClusterService struct {
 	*reconcilecluster.Reconciler
 	deps recon.Deps
+	// results reads scan results from the clusters' results buckets
+	// (WithResults); nil: none can be.
+	results ResultStore
 }
 
 var _ cloudv1connect.ClusterServiceHandler = (*ClusterService)(nil)
 
 // NewClusterService returns the ClusterService.
-func NewClusterService(d recon.Deps) *ClusterService {
-	return &ClusterService{Reconciler: reconcilecluster.New(d), deps: d}
+func NewClusterService(d recon.Deps, opts ...Option) *ClusterService {
+	s := &ClusterService{Reconciler: reconcilecluster.New(d), deps: d}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *ClusterService) logger() *slog.Logger {
@@ -72,11 +79,18 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	}
 	if rid := req.GetRequestId(); rid != "" {
 		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
+			if !createMatches(row, req) {
+				return nil, requestIDReused(rid)
+			}
 			c, err := s.stored(ctx, row)
 			return &cloudv1.CreateClusterResponse{Cluster: c}, err
 		} else if !errors.Is(err, repository.ErrNotFound) {
 			return nil, service.ToConnect(err)
 		}
+	}
+	if err := checkNodeGroupAllowlist(req.GetCluster().GetSpec().GetNodeGroups(), nil,
+		s.deps.NodeGroupInstanceFamilies, s.deps.NodeGroupInstanceTypes); err != nil {
+		return nil, err
 	}
 	row, err := s.NewRow(ctx, req)
 	if err != nil {

@@ -58,6 +58,7 @@ test("cluster creation mode chooser preserves both drafts and keeps tenant valid
   await page.getByRole("option", { name: /Production network/ }).click();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Compute", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("complementary")).toContainText("111122223333");
   await dialog.getByRole("textbox", { name: /^Instance types\b/ }).fill("c7i.large");
   await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
   const editor = dialog.getByRole("textbox", { name: "Cluster manifest", exact: true });
@@ -129,6 +130,16 @@ test("cluster creation mode chooser supports keyboard selection and fits mobile"
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(375);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(812);
   await expect(dialog.getByRole("radiogroup", { name: "Creation method", exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole("complementary")).toBeHidden();
+  const fields = dialog.locator("[data-workflow-body]");
+  const next = dialog.getByRole("button", { name: "Next", exact: true });
+  const footerPosition = (await next.boundingBox())!;
+  await fields.evaluate(element => element.scrollTop = element.scrollHeight);
+  expect(await fields.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  const afterScroll = (await next.boundingBox())!;
+  expect(Math.abs(afterScroll.y - footerPosition.y)).toBeLessThan(1);
+  expect(Math.abs(afterScroll.x - footerPosition.x)).toBeLessThan(1);
+  await fields.evaluate(element => element.scrollTop = 0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await page.screenshot({ path: "/tmp/cv-cluster-create-mode-mobile.png" });
   await page.keyboard.press("Escape");

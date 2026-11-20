@@ -33,8 +33,8 @@ func TestLoadController(t *testing.T) {
 	want := config.Controller{MetricsAddr: "0", ProbeAddr: ":8081", LeaderElect: true, LeaseNamespace: config.DefaultLeaseNamespace,
 		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true, Recommendations: true,
 		ReconcileWorkers: config.DefaultReconcileWorkers, UpgradeTimeout: config.DefaultUpgradeTimeout,
-		TeardownTimeout: config.DefaultTeardownTimeout,
-		AWS:             config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
+		TeardownTimeout: config.DefaultTeardownTimeout, HelmBackoffMax: config.DefaultHelmBackoffMax, HelmMaxFailures: config.DefaultHelmMaxFailures,
+		AWS: config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("defaults = %+v, want %+v", cfg, want)
 	}
@@ -68,6 +68,10 @@ func TestLoadController(t *testing.T) {
 		"timeout word":    {config.FlagUpgradeTimeout: "long"},
 		"timeout zero":    {config.FlagUpgradeTimeout: "0s"},
 		"teardown word":   {config.FlagTeardownTimeout: "soon"},
+		"backoff word":    {config.FlagHelmBackoffMax: "long"},
+		"backoff small":   {config.FlagHelmBackoffMax: "30s"},
+		"failures zero":   {config.FlagHelmMaxFailures: "0"},
+		"failures word":   {config.FlagHelmMaxFailures: "many"},
 		"teardown zero":   {config.FlagTeardownTimeout: "0s"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
@@ -134,10 +138,10 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	}
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
-		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagRecommendations,
+		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagHelmBackoffMax, config.FlagHelmMaxFailures, config.FlagRecommendations,
 		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
-		config.FlagProviderCredentialsSecret,
-		config.FlagSkipTenantRole}
+		config.FlagProviderCredentialsSecret, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
+		config.FlagSkipTenantRole, config.FlagAWSRegion, config.FlagAWSSourceRoleARN, config.FlagAWSExternalID}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("controller settings = %v, want %v", got, want)
 	}
@@ -186,5 +190,19 @@ func TestSkipTenantRole(t *testing.T) {
 		lookupIn(management(nil)), nil)
 	if err != nil || cfg.AWS.ProviderCredentials.Direct {
 		t.Errorf("default: %+v (%v), want the tenant role assumed", cfg.AWS.ProviderCredentials, err)
+	}
+}
+
+// The Helm reliability settings: the design's defaults, and what a person
+// may set.
+func TestHelmSettings(t *testing.T) {
+	cfg, err := config.LoadController(lookupIn(map[string]string{config.FlagHelmBackoffMax: "45m", config.FlagHelmMaxFailures: "8"}),
+		lookupIn(management(nil)), nil)
+
+	if err != nil || cfg.HelmBackoffMax != 45*time.Minute || cfg.HelmMaxFailures != 8 {
+		t.Fatalf("%+v (%v)", cfg, err)
+	}
+	if config.DefaultHelmBackoffMax != 30*time.Minute || config.DefaultHelmMaxFailures != 5 {
+		t.Error("the defaults are the design's: 30m and 5")
 	}
 }

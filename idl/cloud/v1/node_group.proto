@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/node_pool.proto";
+import "google/protobuf/timestamp.proto";
+
+// NodeGroupSpec is one user node group: a Karpenter NodePool with its own
+// EC2NodeClass in the workload cluster (docs/design/karpenter-node-groups.md).
+// Nodes carry the label node.cluster-vending.io/pool=<name> in addition to
+// labels. The platform's own groups (the default managed node group and the
+// `platform` NodePool) are not part of the spec.
+message NodeGroupSpec {
+  // DNS label, unique within the cluster, at most 40 characters. "platform",
+  // "default" and "system" are reserved. Immutable in effect: renaming a
+  // group removes it and adds another.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 40
+    pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+    not_in: [
+      "platform",
+      "default",
+      "system"
+    ]
+  }];
+
+  // Exact machine types, e.g. "m7i.large". Empty: any type of
+  // instance_families.
+  repeated string instance_types = 2 [(buf.validate.field).repeated = {
+    max_items: 20
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 64
+        pattern: "^[a-z][a-z0-9-]*[.][a-z0-9]+$"
+      }
+    }
+  }];
+
+  // Instance families, e.g. "m7i", "c7g".
+  repeated string instance_families = 3 [(buf.validate.field).repeated = {
+    max_items: 20
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 32
+        pattern: "^[a-z][a-z0-9-]*$"
+      }
+    }
+  }];
+
+  // CPU architectures. Empty: AMD64.
+  repeated Architecture architectures = 4 [(buf.validate.field).repeated = {
+    max_items: 2
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+
+  // Capacity types. Empty: ON_DEMAND.
+  repeated CapacityType capacity_types = 5 [(buf.validate.field).repeated = {
+    max_items: 2
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+
+  // Kubernetes labels of the group's nodes.
+  map<string, string> labels = 6 [(buf.validate.field).map = {
+    max_pairs: 64
+    keys: {
+      string: {
+        min_len: 1
+        max_len: 317
+        pattern: "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+      }
+    }
+    values: {
+      string: {
+        max_len: 63
+        pattern: "^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$"
+      }
+    }
+  }];
+
+  // Kubernetes taints of the group's nodes. Capped at 50, like
+  // NodePoolSpec.taints.
+  repeated Taint taints = 7 [(buf.validate.field).repeated.max_items = 50];
+
+  // Ceiling of the resources the group may provision. Unset: no ceiling.
+  NodeGroupLimits limits = 8;
+}
+
+// NodeGroupLimits bounds what a node group may provision in total
+// (NodePool.spec.limits).
+message NodeGroupLimits {
+  // vCPUs.
+  optional int32 cpu = 1 [(buf.validate.field).int32.gt = 0];
+  // Memory in GiB.
+  optional int32 memory_gib = 2 [(buf.validate.field).int32.gt = 0];
+}
+
+// Architecture is a node CPU architecture.
+enum Architecture {
+  // Server default: AMD64.
+  ARCHITECTURE_UNSPECIFIED = 0;
+  ARCHITECTURE_AMD64 = 1;
+  ARCHITECTURE_ARM64 = 2;
+}
+
+// NodeGroupStatus is what the controller observed of one node group. The
+// platform group comes first, then the user's.
+message NodeGroupStatus {
+  string name = 1;
+  // True for the platform's own groups, false for the user's.
+  bool platform_managed = 2;
+  NodeGroupPhase phase = 3;
+  // Why the group is not ready, when it is not.
+  string message = 4;
+  // Nodes the group runs now.
+  int32 nodes = 5;
+  // Why the group's node list (ListNodeGroupNodes) is not available, when
+  // it is not: the results bucket cannot be written. The counts above are
+  // still kept.
+  string nodes_notice = 6;
+}
+
+// NodeGroupPhase is where a node group is.
+enum NodeGroupPhase {
+  NODE_GROUP_PHASE_UNSPECIFIED = 0;
+  // Not applied yet, or not ready.
+  NODE_GROUP_PHASE_PENDING = 1;
+  NODE_GROUP_PHASE_READY = 2;
+  NODE_GROUP_PHASE_FAILED = 3;
+  // Removed from the spec, being deleted from the workload cluster.
+  NODE_GROUP_PHASE_DELETING = 4;
+}
+
+// NodeGroupNodes is the nodes of one node group: one shard of the `nodes`
+// result in the cluster's results bucket (docs/design/cluster-results-s3.md).
+// The controller collects it while it reads the workload cluster's nodes and
+// NodeClaims; ListNodeGroupNodes pages through it.
+message NodeGroupNodes {
+  // The node group's name; "system" for the default managed node group.
+  string group = 1;
+  repeated NodeGroupNode nodes = 2;
+}
+
+// NodeGroupNode is one node of a node group and its NodeClaim, with only the
+// fields a console shows.
+message NodeGroupNode {
+  string name = 1;
+  string instance_type = 2;
+  string zone = 3;
+  // "on-demand" or "spot" (the node's karpenter.sh/capacity-type label; the
+  // default managed group's eks.amazonaws.com/capacityType).
+  string capacity_type = 4;
+  // "amd64" or "arm64".
+  string architecture = 5;
+  string kubelet_version = 6;
+  // The node's Ready condition is True.
+  bool ready = 7;
+  // The pressure conditions that are True: MemoryPressure, DiskPressure,
+  // PIDPressure, NetworkUnavailable.
+  repeated string conditions = 8;
+  // The node is cordoned.
+  bool unschedulable = 9;
+  int32 taints_count = 10;
+  google.protobuf.Timestamp created_at = 11;
+  // The Karpenter NodeClaim of the node; empty for the default managed group.
+  string nodeclaim_name = 12;
+  // The NodeClaim's phase: Launched, Registered, Initialized, or Unknown.
+  string nodeclaim_phase = 13;
+  // The NodeClaim's Ready condition is True.
+  bool nodeclaim_ready = 14;
+  string provider_id = 15;
+}

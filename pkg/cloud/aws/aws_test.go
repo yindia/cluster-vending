@@ -33,7 +33,7 @@ type fakeSTS struct {
 	callerAccount string // GetCallerIdentity's answer
 }
 
-type stsCall struct{ role, session, signedBy, externalID string }
+type stsCall struct{ role, session, signedBy, externalID, policy string }
 
 func (f *fakeSTS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -67,7 +67,7 @@ func (f *fakeSTS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		signedBy, _, _ = strings.Cut(after, "/")
 	}
 	f.calls = append(f.calls, stsCall{role: r.Form.Get("RoleArn"), session: r.Form.Get("RoleSessionName"), signedBy: signedBy,
-		externalID: r.Form.Get("ExternalId")})
+		externalID: r.Form.Get("ExternalId"), policy: r.Form.Get("Policy")})
 	w.Header().Set("Content-Type", "text/xml")
 	_, _ = fmt.Fprintf(w, `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult>
 <Credentials><AccessKeyId>ASIA%d</AccessKeyId><SecretAccessKey>secret</SecretAccessKey>

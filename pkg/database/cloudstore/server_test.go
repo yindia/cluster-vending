@@ -249,7 +249,10 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 
 	got, err := svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: row.ID})
 	if err != nil || got.GetCluster().GetSpec().GetNetwork().GetNetworkId() != net.ID ||
-		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 4 {
+		// The default managed node group is fixed at two nodes (Karpenter runs two
+		// replicas, FixedSystemNodePool): the requested 2..4 is not kept.
+		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 2 ||
+		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMinSize() != 2 {
 		t.Fatalf("GetCluster = %v, %v", got.GetCluster().GetSpec(), err)
 	}
 	updated, err := svc.UpdateCluster(ctx, &cloudv1.UpdateClusterRequest{TenantId: tenant,

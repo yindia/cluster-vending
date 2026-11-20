@@ -113,6 +113,16 @@ func (r *RolloutReconciler) startHop(ctx context.Context, channel string, row ro
 		// A release move and a Kubernetes upgrade never run at once.
 		why = "its components are moving to a new release"
 	}
+	if why == "" {
+		// EKS add-ons, then platform components, then tenant components:
+		// all Ready, as stored now (the plan read a cache).
+		components, err := r.store.Components().ListByCluster(ctx, row.Tenant, row.ID)
+		if err != nil {
+			log.WarnContext(ctx, "automatic upgrade: read the tenant components", "error", err)
+			return false
+		}
+		why = reconcilecluster.UpgradeHold(stored, components)
+	}
 	if why != "" {
 		log.InfoContext(ctx, "automatic upgrade not started", "why", why)
 		return false

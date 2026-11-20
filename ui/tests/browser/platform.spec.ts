@@ -175,7 +175,7 @@ test("YAML creates preserve advanced configuration and require explicit reviewed
   ] as const) {
     await page.goto(url);
     await page.getByRole("button", { name: action, exact: true }).click();
-    await page.getByRole(kind === "Cluster" ? "radio" : "button", { name: "Paste YAML", exact: true }).click();
+    await page.getByRole(kind === "CloudAccount" ? "button" : "radio", { name: "Paste YAML", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const draft = stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: "yaml-production", tenant: "acme" }, spec });
     const editor = dialog.getByRole("textbox", { name: `${kind} manifest`, exact: true });
@@ -207,8 +207,9 @@ test("YAML import reviews existing infrastructure before recording observe-only 
   ] as const) {
     await page.goto(url);
     await page.getByRole("button", { name: `Import ${label}`, exact: true }).click();
-    await page.getByRole("button", { name: "Paste YAML", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: `Import ${label} from YAML`, exact: true });
+    await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
+    const dialogTitle = `Import ${label}`;
+    const dialog = page.getByRole("dialog", { name: dialogTitle, exact: true });
     await dialog.getByRole("textbox", { name: `${kind} manifest`, exact: true }).fill(stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: "existing-prod", tenant: "acme" }, spec }));
     await dialog.getByRole("button", { name: "Review", exact: true }).click();
     await expect(dialog.getByRole("heading", { name: "Review import", exact: true })).toBeVisible();
@@ -217,7 +218,7 @@ test("YAML import reviews existing infrastructure before recording observe-only 
     await page.screenshot({ path: `/tmp/cv-ui-${label}-yaml-import.png`, animations: "disabled" });
     await dialog.getByRole("button", { name: `Import ${label}`, exact: true }).click();
     await expect.poll(() => calls.filter(call => call.method === method).length).toBe(1);
-    await expect(page.getByRole("alertdialog", { name: `Import ${label} from YAML`, exact: true })).toHaveCount(0);
+    await expect(page.getByRole("alertdialog", { name: dialogTitle, exact: true })).toHaveCount(0);
     await expect(dialog).toHaveCount(0);
     const writes = calls.filter(call => call.method === method);
     expect(writes).toHaveLength(1);
@@ -231,8 +232,8 @@ test("import YAML rejects another tenant without losing its draft", async ({ pag
   const calls = await mockAPI(page);
   await page.goto("/clusters");
   await page.getByRole("button", { name: "Import cluster", exact: true }).click();
-  await page.getByRole("button", { name: "Paste YAML", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Import cluster from YAML", exact: true });
+  await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Import cluster", exact: true });
   const editor = dialog.getByRole("textbox", { name: "ClusterImport manifest", exact: true });
   await editor.fill(stringify({ apiVersion: "cluster-vending.io/v1", kind: "ClusterImport", metadata: { name: "existing-prod", tenant: "foreign" }, spec: { networkId, aws: { defaultNodeGroupName: "workers" } } }));
   await dialog.getByRole("button", { name: "Review", exact: true }).click();
@@ -240,6 +241,36 @@ test("import YAML rejects another tenant without losing its draft", async ({ pag
   await expect(editor).toBeFocused();
   await expect(editor).toContainText("foreign");
   expect(calls.filter(call => call.method === "ImportCluster")).toHaveLength(0);
+});
+
+test("guided cluster import keeps placement and node group when switching to YAML", async ({ page }) => {
+  const calls = await mockAPI(page);
+  await page.goto("/clusters");
+  await page.getByRole("button", { name: "Import cluster", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Import cluster", exact: true });
+  await dialog.getByRole("button", { name: /^Existing network/ }).click();
+  await page.getByRole("option", { name: /Production network/ }).click();
+  await expect(dialog).toContainText("111122223333");
+  await dialog.getByRole("textbox", { name: /^Existing cluster name/ }).fill("existing-prod");
+  await dialog.getByRole("textbox", { name: /^Existing default node group name/ }).fill("workers");
+  await page.screenshot({ path: "/tmp/cv-cluster-import-guided.png", animations: "disabled" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog.getByRole("complementary")).toBeHidden();
+  await expect(dialog.getByRole("button", { name: "Review import" })).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: "/tmp/cv-cluster-import-mobile.png", animations: "disabled" });
+  await dialog.getByRole("radio", { name: "Paste YAML" }).click();
+  await expect(dialog.getByRole("textbox", { name: "ClusterImport manifest" })).toBeVisible();
+  await dialog.getByRole("radio", { name: "Guided form" }).click();
+  await dialog.getByRole("button", { name: "Review import" }).click();
+  await expect(dialog.getByRole("heading", { name: "Review import" })).toBeFocused();
+  await expect(dialog).toContainText("workers");
+  await expect(dialog).toContainText("Read-only discovery");
+  expect(calls.filter(call => call.method === "ImportCluster")).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Import cluster", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(calls.filter(call => call.method === "ImportCluster").map(call => call.body)).toEqual([
+    { tenantId: "acme", networkId, name: "existing-prod", aws: { defaultNodeGroupName: "workers" }, requestId: expect.any(String) },
+  ]);
 });
 
 test("tenant selector moves scope out of Settings and drops resource context on switching", async ({ page }) => {
@@ -1290,4 +1321,104 @@ test("disabled add-ons and catalog components never appear Ready", async ({ page
   await page.goto(`/components?cluster=${clusterId}`);
   await expect(page.getByRole("table", { name: "Component catalog", exact: true })).toContainText("policies");
   await expect(page.getByRole("table", { name: "Installed components", exact: true })).toHaveCount(0);
+});
+
+test("guided network creation keeps label and subnet rows across modes and submits the reviewed layout", async ({ page }) => {
+  const calls = await mockAPI(page);
+  await page.goto("/networks");
+  await page.getByRole("button", { name: "Create network", exact: true }).click();
+  const d = page.getByRole("dialog", { name: "Create network", exact: true });
+  await d.getByRole("combobox", { name: /^Cloud account/ }).click();
+  await page.getByRole("option", { name: /Production/ }).click();
+  await d.getByRole("textbox", { name: /^Resource name/ }).fill("payments");
+  await d.getByRole("textbox", { name: /^Region/ }).fill("us-west-1");
+  await d.getByRole("button", { name: "Resource labels", exact: true }).click();
+  await d.getByRole("button", { name: "Add resource label" }).click();
+  await d.getByRole("textbox", { name: "Resource label 1 key", exact: true }).fill("team");
+  await d.getByRole("textbox", { name: "Resource label 1 value", exact: true }).fill("payments");
+  await d.getByRole("radio", { name: "Paste YAML" }).click();
+  await expect(d.getByRole("textbox", { name: "Network manifest" })).toBeVisible();
+  await d.getByRole("radio", { name: "Guided form" }).click();
+  await expect(d.getByRole("textbox", { name: "Resource label 1 value", exact: true })).toHaveValue("payments");
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await d.getByRole("button", { name: "Custom subnet layout" }).click();
+  await d.getByRole("button", { name: "Add subnet" }).click();
+  await d.getByRole("button", { name: "Remove subnet 1" }).click();
+  await expect(d.getByRole("textbox", { name: /^Availability zone count/ })).toBeEnabled();
+  const subnets = [
+    { cidrBlock: "10.0.1.0/24", zoneId: "usw1-az1", role: "SUBNET_ROLE_PRIVATE" },
+    { cidrBlock: "10.0.2.0/24", zoneId: "usw1-az2", role: "SUBNET_ROLE_PRIVATE" },
+    { cidrBlock: "10.0.3.0/24", zoneId: "usw1-az1", role: "SUBNET_ROLE_PUBLIC" },
+  ];
+  for (const [index, subnet] of subnets.entries()) {
+    await d.getByRole("button", { name: "Add subnet" }).click();
+    await d.getByRole("textbox", { name: `Subnet ${index + 1} subnet cidr` }).fill(subnet.cidrBlock);
+    await d.getByRole("textbox", { name: `Subnet ${index + 1} zone id` }).fill(subnet.zoneId);
+    if (subnet.role === "SUBNET_ROLE_PUBLIC") {
+      await d.getByRole("combobox", { name: `Subnet ${index + 1} role` }).click();
+      await page.getByRole("option", { name: "Public", exact: true }).click();
+    }
+  }
+  await d.screenshot({ path: "/tmp/cv-network-create-subnets.png", animations: "disabled" });
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(d.getByRole("table", { name: "Subnets to create" }).getByRole("row")).toHaveCount(4);
+  expect(calls.filter(c => c.method === "CreateNetwork")).toHaveLength(0);
+  await d.getByRole("button", { name: "Create network", exact: true }).click();
+  await expect(d).toHaveCount(0);
+  expect(calls.find(c => c.method === "CreateNetwork")?.body.network).toMatchObject({ labels: { team: "payments" }, spec: { layout: { subnets } } });
+});
+
+test("guided network import on mobile preserves the bulk subnet draft and submits discovery", async ({ page }) => {
+  const calls = await mockAPI(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/networks");
+  await page.getByRole("button", { name: "Import network", exact: true }).click();
+  const d = page.getByRole("dialog", { name: "Import network", exact: true });
+  await d.getByRole("combobox", { name: /^Import cloud account/ }).click();
+  await page.getByRole("option", { name: /Production/ }).click();
+  await d.getByRole("textbox", { name: /^Imported resource name/ }).fill("existing");
+  await d.getByRole("textbox", { name: /^Import region/ }).fill("us-west-1");
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await d.getByRole("textbox", { name: /^AWS VPC ID/ }).fill("vpc-0123456789abcdef0");
+  const ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"];
+  await d.getByRole("textbox", { name: /^AWS subnet IDs/ }).fill(ids.join("\n"));
+  await d.getByRole("radio", { name: "Paste YAML" }).click();
+  await d.getByRole("radio", { name: "Guided form" }).click();
+  await expect(d.getByRole("textbox", { name: /^AWS subnet IDs/ })).toHaveValue(ids.join("\n"));
+  await expect(d.getByRole("button", { name: "Next", exact: true })).toBeInViewport();
+  expect(await d.locator("[data-workflow-body]").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await d.screenshot({ path: "/tmp/cv-network-import-mobile.png", animations: "disabled" });
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(d.getByRole("table", { name: "Subnet IDs selected for network discovery" })).toContainText(ids[1]);
+  expect(calls.filter(c => c.method === "ImportNetwork")).toHaveLength(0);
+  await d.getByRole("button", { name: "Import for discovery" }).click();
+  await expect(d).toHaveCount(0);
+  expect(calls.find(c => c.method === "ImportNetwork")?.body).toMatchObject({ aws: { subnetIds: ids } });
+  expect(calls.some(c => c.method === "TakeOverNetwork")).toBe(false);
+});
+
+test("editing network labels previews a replacement with the reviewed etag", async ({ page }) => {
+  const calls = await mockAPI(page);
+  await page.route("**/api/rpc/cloud.v1.NetworkService/GetNetwork", route => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ network: { ...network, labels: { env: "prod", old: "retired" } }, asRequested: true }),
+  }));
+  await page.goto(`/networks/${networkId}`);
+  await page.getByRole("button", { name: "Edit network", exact: true }).click();
+  const d = page.getByRole("dialog", { name: "Edit network", exact: true });
+  await expect(d.locator("[data-workflow-rail]")).toContainText("Production");
+  await d.getByRole("button", { name: "Resource labels", exact: true }).click();
+  const second = d.getByRole("textbox", { name: "Resource label 2 key", exact: true });
+  await second.fill("env");
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(second).toHaveAttribute("aria-invalid", "true");
+  await second.fill("team");
+  await d.getByRole("textbox", { name: "Resource label 2 value", exact: true }).fill("platform");
+  await d.screenshot({ path: "/tmp/cv-network-edit.png", animations: "disabled" });
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await d.getByRole("button", { name: "Preview changes" }).click();
+  await expect(d.getByRole("button", { name: "Apply reviewed plan" })).toBeEnabled();
+  const previews = calls.filter(c => c.method === "UpdateNetwork");
+  expect(previews).toHaveLength(1);
+  expect(previews[0].body).toMatchObject({ validateOnly: true, updateMask: "labels", network: { etag: "network-etag", labels: { team: "platform", env: "prod" } } });
+  expect((previews[0].body.network as { labels: Record<string, string> }).labels).not.toHaveProperty("old");
 });

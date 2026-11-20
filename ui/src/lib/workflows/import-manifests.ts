@@ -7,6 +7,7 @@ import type { BrowserClients } from "../api/client";
 import { supportsCapability } from "../providers/registry";
 import { parseComponentValues } from "./components";
 import type { ManifestReview } from "./manifests";
+import { reviewClusterPlacement } from "./cluster-placement";
 
 export type ImportManifestKind = "NetworkImport" | "ClusterImport";
 const validator = createValidator();
@@ -59,19 +60,15 @@ export function parseImportManifest(text: string, kind: ImportManifestKind, tena
 export async function reviewImportManifest(api: BrowserClients, text: string, kind: ImportManifestKind, tenantId: string, requestId: string, signal: AbortSignal): Promise<ManifestReview> {
   signal.throwIfAborted();
   const review = parseImportManifest(text, kind, tenantId, requestId);
-  let accountId: string;
-  if (kind === "NetworkImport") accountId = fromJsonString(ImportNetworkRequestSchema, review.requestJson).bootstrapId;
-  else {
+  if (kind === "ClusterImport") {
     const request = fromJsonString(ImportClusterRequestSchema, review.requestJson);
-    const { network } = await api.network.getNetwork({ tenantId, networkId: request.networkId }, { signal });
-    signal.throwIfAborted();
-    if (!network || network.id !== request.networkId || network.tenantId !== tenantId || !network.spec) throw new Error("The referenced network does not belong to this tenant or has no discovered configuration.");
-    accountId = network.spec.bootstrapId;
+    return reviewClusterPlacement(api, review, request.networkId, signal);
   }
+  const accountId = fromJsonString(ImportNetworkRequestSchema, review.requestJson).bootstrapId;
   const { account } = await api.tenant.getCloudAccount({ tenantId, id: accountId }, { signal });
   signal.throwIfAborted();
   if (!account || account.id !== accountId || account.tenantId !== tenantId) throw new Error("The referenced account does not belong to this tenant.");
-  if (!supportsCapability(account.provider.case ?? "", kind === "NetworkImport" ? "network.import" : "cluster.import")) throw new Error("The referenced account provider does not support this import.");
+  if (!supportsCapability(account.provider.case ?? "", "network.import")) throw new Error("The referenced account provider does not support this import.");
   return review;
 }
 

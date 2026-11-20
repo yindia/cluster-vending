@@ -569,14 +569,17 @@ name and its path in the message).
 | `${network.vpcId}` | the owning Network `status.resources.cloudNetworkID` | the network is built |
 | `${iam.roleArn}`, `${iam.roleName}` | the component's own role (section 5.2), from its status | the role exists |
 | `${iam.policyArn}` | the component's own policy | the policy exists |
-| `${system.nodeSelector}` | the labels of the cluster's default node pool (`spec.defaultNodePool.labels`), as a map; `{}` for none | always |
-| `${system.tolerations}` | one toleration per taint of the default node pool (`spec.defaultNodePool.taints`): `{key, operator: Equal, value, effect}`; `[]` for none | always |
+| `${system.nodeSelector}` | the label of the default managed node group, `{node.cluster-vending.io/pool: system}`, as a map (an imported cluster: its default node pool's labels) | always |
+| `${system.tolerations}` | the toleration of the default managed node group's taint: `{key, operator: Equal, value, effect}` (an imported cluster: one per taint of its default node pool) | always |
+| `${platform.nodeSelector}`, `${platform.tolerations}` | the same for the platform's Karpenter node pool (`node.cluster-vending.io/pool=platform`, NoSchedule); an imported cluster has none, so they are its default node pool's | always |
+| `${karpenter.nodeRoleName}`, `${karpenter.nodeRoleArn}` | the role Karpenter's nodes run as, `<prefix>-karpenter-node`, and its ARN | the cluster's prefix is known |
+| `${karpenter.interruptionQueue}` | the name of Karpenter's interruption queue, `<prefix>-karpenter` | the cluster's prefix is known |
 
 Rules:
 
 - A placeholder may sit inside a longer string
   (`arn:aws:iam::${account.id}:policy/x`). `$${` writes a literal `${`.
-- The two `system.*` names are **whole values**: the field's value must be
+- The `system.*` and `platform.*` names are **whole values**: the field's value must be
   exactly the placeholder (`nodeSelector: ${system.nodeSelector}`), and it is
   replaced by the map or the list. Inside a longer string they are refused,
   with the path. They are for `platformValues` only, not the IAM policy.
@@ -680,6 +683,11 @@ associations, then the attachments, then the role and the policy.
 
 ## 6. Karpenter, end to end
 
+> **Superseded in part** by [karpenter-node-groups.md](karpenter-node-groups.md):
+> the node role, its access entry, the interruption queue and its rules are
+> rendered with the cluster, and the NodePools and EC2NodeClasses are applied
+> by the controller (no companion chart). The rest is the earlier target.
+>
 > **Later.** This section is the target for Karpenter. What can be declared
 > today is an IAM role and policy (section 5.2); the interruption queue, its
 > EventBridge rules, the node role and access entry below need a Karpenter

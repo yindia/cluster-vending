@@ -32,6 +32,7 @@ proto comments are the intended mapping for providers that do not exist yet.
 | `cluster.proto` | `Cluster`, `ClusterSpec` with its CEL rules, `ReleaseChannel`, `ClusterTier`, `ClusterState`, `ClusterStatus`, `ClusterEndpoint`, `ClusterUpgrade`, `ClusterUpgradePhase`, `ClusterKubernetes` |
 | `control_plane.proto` | `ControlPlaneSpec`, `SecretsEncryption`, `EndpointAccess` |
 | `node_pool.proto` | `NodePoolSpec`, `ScalingConfig`, `Taint`, `CapacityType`, `TaintEffect` |
+| `node_group.proto` | `NodeGroupSpec`, `NodeGroupLimits`, `Architecture`, `NodeGroupStatus`, `NodeGroupPhase` (Karpenter node groups) |
 | `access.proto` | `AccessSpec`, `AccessEntry`, `AccessPolicy` and their enums |
 | `aws.proto` | The AWS provider block: `AwsClusterSpec`, add-ons, control plane log group, launch template, AMI types, `AwsClusterStatus`; `AwsImportNetwork` |
 | `import.proto` | Import plans: `ImportStatus`, `ImportedResource`, `ImportPhase`, `Disposition` |
@@ -305,12 +306,14 @@ Common spec:
 | `spec.control_plane.endpoint_access.endpoint_public_access` | no | true | mutable |
 | `spec.control_plane.secrets_encryption.enabled` | no | off | can be turned on, never off |
 | `spec.control_plane.secrets_encryption.kms_key_arn` | no | the platform creates a key | can be set on a cluster without encryption; then fixed |
-| `spec.default_node_pool.instance_types` | yes | - | mutable: replaces the node group |
+| `spec.default_node_pool` | no: when omitted the platform fills it | the platform's fixed default group | see below: its taints, labels and scaling are the platform's |
+| `spec.default_node_pool.instance_types` | yes, when the pool is set | - | mutable: replaces the node group |
 | `spec.default_node_pool.capacity_type` | no | `ON_DEMAND` | mutable: replaces the node group |
-| `spec.default_node_pool.scaling_config.min_size`, `max_size` | yes | - | mutable |
-| `spec.default_node_pool.scaling_config.desired_size` | no | `max(min_size, 1)` | create-only; the autoscaler owns the count |
+| `spec.default_node_pool.scaling_config.min_size`, `max_size` | yes, when the pool is set | - | platform-managed: a change is refused (`FAILED_PRECONDITION`, "the default node group is managed by the platform") |
+| `spec.default_node_pool.scaling_config.desired_size` | no | `max(min_size, 1)` | create-only |
 | `spec.default_node_pool.disk_size_gb` | no; not with a launch template | the provider default | mutable: replaces the node group |
-| `spec.default_node_pool.labels`, `taints` | no | none | mutable |
+| `spec.default_node_pool.labels`, `taints` | no | the platform's (they keep user workloads off the default group) | platform-managed: a change is refused like the scaling |
+| `spec.node_groups` | no; up to 20 entries, see below | none | mutable: the list is one update-mask path, compared whole |
 | `spec.access.admin_principals` | no | none | mutable |
 | `spec.access.access_entries` | no | none; an entry's `type` defaults to `STANDARD`, a policy's `scope` to `CLUSTER` | mutable |
 | `spec.access.oidc` | no; with it, either `entra` (`tenant_id` and `client_id`, both GUIDs: Microsoft Entra ID, the platform fills in the issuer and the claims) or `name`, `issuer_url` (HTTPS) and `client_id` | none: IAM only | mutable: a change removes the association and makes a new one (EKS takes several minutes for each); see [docs/oidc.md](../docs/oidc.md) |
@@ -318,6 +321,31 @@ Common spec:
 | `spec.tier` | no | `CLUSTER_TIER_0` | yes; changes no cloud resource |
 | `spec.upgrade_mode` | no | `UPGRADE_MODE_MANUAL` | yes; changes no cloud resource |
 | `spec.maintenance_window` | no; with it, `start` (`HH:MM`, UTC) and `duration` (`1h` to `24h`, like `4h`, `90m`, `1h30m`); `days` (`WEEKDAY_MONDAY` to `WEEKDAY_SUNDAY`, each once) is optional | none: an upgrade may start at any time | yes; changes no cloud resource |
+
+Node groups (`spec.node_groups`, [design](../docs/design/karpenter-node-groups.md)).
+Workloads run on Karpenter only; each entry is a NodePool with its own
+EC2NodeClass in the workload cluster. Its nodes carry the label
+`node.cluster-vending.io/pool=<name>` next to the entry's `labels`.
+`ClusterStatus.node_groups` reports the platform's own group first, then the
+user's (`name`, `platform_managed`, `phase` PENDING/READY/FAILED/DELETING,
+`message`, `nodes`).
+
+| Field of a `NodeGroupSpec` | Required | Default | Rules |
+|---|---|---|---|
+| `name` | yes | - | DNS label, at most 40 characters, unique in the cluster; `platform`, `default` and `system` are reserved |
+| `instance_types` | no | any type of `instance_families` | up to 20, like `m7i.large` |
+| `instance_families` | no | - | up to 20, like `m7i`, `c7g` |
+| `architectures` | no | `AMD64` | `AMD64`, `ARM64` |
+| `capacity_types` | no | `ON_DEMAND` | `ON_DEMAND`, `SPOT` |
+| `labels` | no | none | up to 64 valid Kubernetes label pairs |
+| `taints` | no | none | up to 50, like `NodePoolSpec.taints` |
+| `limits.cpu`, `limits.memory_gib` | no | no ceiling | greater than 0 when set |
+
+The default node group is the platform's (it runs Karpenter and CoreDNS).
+Omit `spec.default_node_pool` and the platform fills it; an update that
+changes its taints, labels or scaling is refused with `FAILED_PRECONDITION`.
+`update --plan` lists each node group change as a `NodePool` entry
+(`CREATE`, `UPDATE_IN_PLACE`, `DELETE`, `spec_path` `spec.node_groups`).
 
 AWS block (`spec.aws`, required, may be empty: `aws: {}`):
 
@@ -357,13 +385,10 @@ spec.control_plane.endpoint_access.public_access_cidrs
 spec.control_plane.endpoint_access.endpoint_private_access
 spec.control_plane.endpoint_access.endpoint_public_access
 spec.control_plane.secrets_encryption
-spec.default_node_pool.scaling_config.min_size
-spec.default_node_pool.scaling_config.max_size
+spec.node_groups
 spec.default_node_pool.instance_types
 spec.default_node_pool.capacity_type
 spec.default_node_pool.disk_size_gb
-spec.default_node_pool.labels
-spec.default_node_pool.taints
 spec.access.admin_principals
 spec.access.access_entries
 spec.access.oidc

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -38,7 +39,7 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "gpu-operator", "istio", "istio-base",
+	want := []string{"aws-load-balancer-controller", "capsule", "external-secrets", "gpu-operator", "istio", "istio-base",
 		"istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
@@ -149,8 +150,8 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
-		"istio-cni", "istio-ingress-gateway", "karpenter", "kyverno", "ztunnel"}
+	want := []string{"karpenter", "aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istiod",
+		"istio-cni", "istio-ingress-gateway", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
 	}
@@ -201,16 +202,16 @@ func TestIstioBundle(t *testing.T) {
 	}
 }
 
-// The Deployments of the catalog run on the cluster's default node pool:
-// each definition sets the node selector and the tolerations placeholders
-// at its chart's keys. DaemonSets (istio-cni, ztunnel, the GPU operands)
-// run on every node and keep their charts' tolerations.
-func TestPlacementOnTheDefaultNodePool(t *testing.T) {
+// The Deployments of the catalog run on the platform's Karpenter node pool:
+// each definition sets the platform node selector and tolerations
+// placeholders at its chart's keys. Only Karpenter itself runs on the
+// default managed node group (the system pool), where it must be to launch
+// the others. DaemonSets (istio-cni, ztunnel, the GPU operands) run on every
+// node and keep their charts' tolerations.
+func TestPlacementOnThePlatformPool(t *testing.T) {
 	where := map[string][]any{
 		"aws-load-balancer-controller": {},
 		"capsule":                      {},
-		"cluster-autoscaler":           {},
-		"karpenter":                    {},
 		"istiod":                       {},
 		"istio-ingress-gateway":        {},
 		"kyverno":                      {"global"},
@@ -222,32 +223,50 @@ func TestPlacementOnTheDefaultNodePool(t *testing.T) {
 		at := lookup(d.PlatformValues, path...)
 		selector := lookup(at, "nodeSelector")
 		tolerations := lookup(at, "tolerations")
-		if placed && (selector != "${system.nodeSelector}" || tolerations != "${system.tolerations}") {
+		if placed && (selector != "${platform.nodeSelector}" || tolerations != "${platform.tolerations}") {
 			t.Errorf("%s: nodeSelector %v, tolerations %v at %v", d.Name, selector, tolerations, path)
 		}
-		if !placed && slices.Contains(component.Placeholders(d.PlatformValues), "system.nodeSelector") {
-			t.Errorf("%s selects the default node pool; it is not expected to", d.Name)
+		used := component.Placeholders(d.PlatformValues)
+		if d.Name != "karpenter" && (slices.Contains(used, "system.nodeSelector") || slices.Contains(used, "system.tolerations")) {
+			t.Errorf("%s selects the default managed node group; only karpenter does", d.Name)
+		}
+		if !placed && slices.Contains(used, "platform.nodeSelector") {
+			t.Errorf("%s selects the platform pool; it is not expected to", d.Name)
 		}
 	}
 	// CRD hooks run before the Capsule controller can start. Keeping only the
-	// Deployment on the system pool leaves installs stuck on a tainted pool.
+	// Deployment on the platform pool leaves installs stuck on a tainted pool.
 	capsule, err := component.DefinitionOf(byName(t)["capsule"])
 	if err != nil {
 		t.Fatal(err)
 	}
 	jobs := lookup(capsule.PlatformValues, "global", "jobs", "kubectl")
-	if lookup(jobs, "nodeSelector") != "${system.nodeSelector}" || lookup(jobs, "tolerations") != "${system.tolerations}" {
-		t.Error("Capsule lifecycle hooks must select and tolerate the default node pool")
+	if lookup(jobs, "nodeSelector") != "${platform.nodeSelector}" || lookup(jobs, "tolerations") != "${platform.tolerations}" {
+		t.Error("Capsule lifecycle hooks must select and tolerate the platform pool")
 	}
 	karpenter, err := component.DefinitionOf(byName(t)["karpenter"])
 	if err != nil {
 		t.Fatal(err)
 	}
+	if lookup(karpenter.PlatformValues, "nodeSelector") != "${system.nodeSelector}" || lookup(karpenter.PlatformValues, "tolerations") != "${system.tolerations}" {
+		t.Error("karpenter must run on the default managed node group")
+	}
 	if lookup(karpenter.PlatformValues, "affinity", "nodeAffinity") == nil {
 		t.Error("karpenter lost the affinity that keeps it off its own nodes")
 	}
+	if got := lookup(karpenter.PlatformValues, "settings", "interruptionQueue"); got != "${karpenter.interruptionQueue}" {
+		t.Errorf("karpenter's interruption queue = %v", got)
+	}
 	if labels := lookup(karpenter.PlatformValues, "karpenter-nodeclass", "nodePool", "labels"); labels != nil {
-		t.Errorf("karpenter's NodePool labels its nodes (%v): they must not carry the default pool's labels", labels)
+		t.Errorf("karpenter's NodePool labels its nodes (%v): the platform applies the NodePools, not the chart", labels)
+	}
+}
+
+// The cluster autoscaler is gone from the platform: Karpenter is the only
+// node autoscaler, and the default managed node group has a fixed size.
+func TestClusterAutoscalerIsNotShipped(t *testing.T) {
+	if _, ok := byName(t)["cluster-autoscaler"]; ok {
+		t.Error("the catalog still ships cluster-autoscaler")
 	}
 }
 
@@ -271,7 +290,8 @@ func TestOnlyTwoDefinitionsAcceptOverrides(t *testing.T) {
 	}
 }
 
-// Karpenter ships without a node class or node pool: no companion chart,
+// Karpenter ships no chart for node classes or node pools (the controller
+// applies the platform's and the cluster's own directly): no companion chart,
 // and nothing of one left in its values.
 func TestKarpenterShipsNoNodeClass(t *testing.T) {
 	def := byName(t)["karpenter"]
@@ -523,6 +543,23 @@ func TestShippedDefinitionsAreForAWS(t *testing.T) {
 	for _, d := range definitions(t) {
 		if d.Spec.Provider != cloudv1alpha1.CloudProviderAWS {
 			t.Errorf("%s is for %q, want aws", d.Name, d.Spec.Provider)
+		}
+	}
+}
+
+// Heavy charts get a longer rollout wait than Helm's ten minutes default:
+// operators with hook Jobs and the mesh control plane.
+func TestHeavyChartsWaitLonger(t *testing.T) {
+	defs := byName(t)
+	for _, name := range []string{"gpu-operator", "istiod", "istio-ingress-gateway", "kyverno"} {
+		d := defs[name]
+		if d == nil || d.Spec.Install == nil || d.Spec.Install.Timeout == nil || d.Spec.Install.Timeout.Duration != 15*time.Minute {
+			t.Errorf("%s: install.timeout is not 15m", name)
+		}
+	}
+	for name, d := range defs {
+		if d.Spec.Install != nil && d.Spec.Install.Timeout != nil && d.Spec.Install.Timeout.Duration < 10*time.Minute {
+			t.Errorf("%s: install.timeout %s is shorter than the default", name, d.Spec.Install.Timeout.Duration)
 		}
 	}
 }

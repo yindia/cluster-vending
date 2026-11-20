@@ -37,8 +37,11 @@ func TestActivationPolicy(t *testing.T) {
 		"routetables.ec2.aws.m.upbound.io", "rules.cloudwatchevents.aws.m.upbound.io", "securitygroupegressrules.ec2.aws.m.upbound.io",
 		"securitygroupingressrules.ec2.aws.m.upbound.io", "securitygroups.ec2.aws.m.upbound.io", "subnets.ec2.aws.m.upbound.io",
 		"targets.cloudwatchevents.aws.m.upbound.io", "vpcs.ec2.aws.m.upbound.io",
+		"buckets.s3.aws.m.upbound.io", "bucketlifecycleconfigurations.s3.aws.m.upbound.io",
+		"bucketownershipcontrols.s3.aws.m.upbound.io", "bucketpolicies.s3.aws.m.upbound.io",
+		"bucketpublicaccessblocks.s3.aws.m.upbound.io", "bucketserversideencryptionconfigurations.s3.aws.m.upbound.io",
 	}
-	if strings.Join(slices.Sorted(slices.Values(got)), ",") != strings.Join(want, ",") {
+	if strings.Join(slices.Sorted(slices.Values(got)), ",") != strings.Join(slices.Sorted(slices.Values(want)), ",") {
 		t.Errorf("activations\n got %v\nwant %v", got, want)
 	}
 
@@ -49,6 +52,7 @@ func TestActivationPolicy(t *testing.T) {
 		{Name: "aws-mountpoint-s3-csi-driver", S3BucketNames: []string{"b"}}}
 	plan.LogGroupRetentionDays, plan.CreateEncryptionKey, plan.EncryptionKeyARN = 90, true, "arn:aws:kms:us-east-1:111122223333:key/k"
 	plan.IRSA, plan.OIDCIssuer = true, "https://oidc.eks.us-east-1.amazonaws.com/id/ABC"
+	plan.AccountID, plan.ResultsBucket = "111122223333", true
 	plan.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ImageID: "ami-0123456789abcdef0", UserData: "Zm9v"}
 	built := append(crossplaneaws.ClusterResources(plan), crossplaneaws.NetworkObjects()...)
 	for _, obj := range built {
@@ -78,6 +82,9 @@ func TestActivationPolicy(t *testing.T) {
 // singular undoes the providers' plurals: policies, accessentries, vpcs,
 // aliases.
 func singular(plural string) string {
+	if plural == "bucketownershipcontrols" { // already plural in Kind
+		return plural
+	}
 	if s, ok := strings.CutSuffix(plural, "ases"); ok {
 		return s + "as"
 	}

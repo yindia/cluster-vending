@@ -149,6 +149,27 @@ message ComponentStatus {
   // How many times the platform recovered a stuck Helm release of the
   // component at this version (at most three).
   int32 recoveries = 15;
+
+  // Helm's side of the component's chart: the deployed chart version, its
+  // revision and the digest of the Release spec the platform applied.
+  string chart_version = 16;
+  int32 revision = 17;
+  string digest = 18;
+
+  // Backoff and give-up (see PlatformComponent): failed attempts, failures
+  // in a row that count (release errors only), the next retry, the class
+  // of the last error (transient, chart, release), and the last recovery
+  // of a stuck release.
+  int32 attempts = 19;
+  int32 counted_failures = 20;
+  google.protobuf.Timestamp next_retry_at = 21;
+  string last_error_class = 22;
+  string last_recovery = 23;
+  google.protobuf.Timestamp last_recovery_at = 24;
+
+  // The Release already had this version and these values when the pass
+  // looked: nothing was written for it.
+  bool unchanged = 25;
 }
 
 // ComponentDefinition is what tenants see of a catalog entry. How the

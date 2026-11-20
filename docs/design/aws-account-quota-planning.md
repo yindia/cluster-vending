@@ -1,0 +1,71 @@
+# AWS account quota planning
+
+**Proposed design.** A tenant can inspect remaining AWS capacity, preview a network or cluster request, and learn which resource would prevent provisioning before submitting it. Start with EKS clusters, managed node groups, VPCs, Internet gateways, NAT gateways, and Elastic IPs. These have identifiable owners, well-defined scopes, and demand that the platform can derive from its plans.
+
+For example, a network spanning three zones with a NAT in each zone needs three regional Elastic IPs. With a limit of five and four already allocated, return **“Elastic IP quota exceeded in us-west-1. This network needs 3 addresses, 1 is available, and the shortfall is 2.”** A shared NAT would require one EIP. Report the zonal NAT checks separately so the caller can tell whether that alternative fits. The numbers in this example are illustrative.
+
+## Read account capacity
+
+1. Add a quota collector to the existing account controller. Reuse the assumed tenant role in `pkg/cloud/aws`. Verify the physical account and partition. Collect on bootstrap/verification, for active regions on a jittered schedule, and on a coalesced refresh request. Keep AWS reads out of API request handlers. Add the required read actions to onboarding and report missing permissions to the account owner.
+2. Maintain a small catalog of supported dimensions with their AWS service and quota codes, scope, unit, usage collector, and freshness policy. Resolve and verify codes with `ListServiceQuotas`. Read the applied limit with `GetServiceQuota`, using resource context when AWS supports overrides. Cache global limits once per partition/account. Keep documented fixed constraints explicitly identified. An absent applied value for an adjustable quota is unknown. [AWS GetServiceQuota](https://docs.aws.amazon.com/servicequotas/2019-06-24/apireference/API_GetServiceQuota.html) and [ServiceQuota fields](https://docs.aws.amazon.com/servicequotas/2019-06-24/apireference/API_ServiceQuota.html).
+3. Measure usage independently. Use fully paginated, account-wide service inventory with the quota's exact inclusion rules. Use CloudWatch when the quota advertises a usage metric, preserving its dimensions, statistic, period and sample timestamp. Keep delayed or unattributable metrics advisory. A permission error, incomplete pagination, or missing sample yields an unknown value. An empty **completed** inventory can establish zero. [AWS quota usage metrics](https://docs.aws.amazon.com/servicequotas/2019-06-24/apireference/API_MetricInfo.html).
+4. Store aggregate observations in Kubernetes. Key public views by tenant and bootstrap account ID. Internally key enforcement by physical AWS partition/account plus the applicable region, AZ ID, VPC, subnet or cluster. Two registrations of the same AWS account share capacity. Authorize each lookup through its tenant-owned account or network and its verified role permissions. Return aggregate counts and only caller-authorized resource details. Keep identities of other tenants' pending requests private.
+
+To validate the first collector manually, use credentials for the intended AWS account. These read-only commands return the caller's account, its applied regional cluster limit, and its current EKS cluster count. The CLI paginates the list before evaluating the JSON query. [EKS cluster quota](https://console.aws.amazon.com/servicequotas/home/services/eks/quotas/L-1194D53C).
+
+```sh
+region=us-west-1
+aws sts get-caller-identity --query Account --output text
+aws service-quotas get-service-quota --region "$region" \
+  --service-code eks --quota-code L-1194D53C --query Quota.Value --output json
+aws eks list-clusters --region "$region" --query 'length(clusters)' --output json
+```
+
+## Map requests to quota demand
+
+| Request or check | Scope and usage | Requested change |
+| --- | --- | --- |
+| Create network | Regional VPCs, attached/unattached Internet gateways counted under their applicable regional limit, regional EIPs, NAT gateways in each AZ. Use EC2 DescribeVpcs, DescribeInternetGateways, DescribeAddresses and DescribeNatGateways with the relevant state filters. | Take the resolved layout from `pkg/network.PlanLayout` and the same desired network resources as `pkg/crossplane/aws.NetworkResources`. Charge one VPC and IGW, one EIP per public NAT, and NAT capacity in each actual target AZ. |
+| VPC-local limits | Subnets and route tables per VPC, routes per table. Use EC2 subnet/route-table inventory for existing VPCs. | Evaluate the explicit or default subnet layout. Include AWS-created defaults such as the main route table when the quota counts them. Count each shared table once. A route-table association consumes no route-table slot. |
+| Create cluster | Regional EKS clusters from ListClusters, managed groups from ListNodegroups for the target cluster. | One EKS cluster and its default managed group. Include the group's launch demand in the same request. Reuse the existing network and subnets. |
+| Create, scale or replace the default node group | Managed groups per cluster, nodes per group, regional EC2 vCPU pool by purchasing option and instance family. Read EKS group/ASG state, instance type specifications and qualified EC2 usage. | Use initial desired size (explicit zero included), defaulting to `max(minSize, 1)` as in `pkg/cluster/plan.go`. For scale-up charge the positive delta from live capacity. Check the per-group size constraint separately. Show growth to configured maximum as a forecast. For replacement use the actual create/delete order and include any overlap. |
+| Subnet headroom | Per selected subnet, from EC2 DescribeSubnets available IPv4 addresses. | Check the EKS control-plane subnet requirements. Display worker, pod and upgrade headroom separately when placement or CNI allocation is uncertain. The six-address EKS prerequisite applies per selected cluster subnet and does not mean each creation consumes six addresses in each subnet. |
+
+AWS publishes the distinct scopes and NAT lifecycle counting rules. EC2 quota headroom depends on purchase option and instance family. Mixed-type node groups can draw from different pools. Evaluate feasible alternatives and show a range. Reject vCPU demand only if all eligible alternatives provably exceed the relevant limits. Include non-platform workloads and account for outstanding Spot requests or capacity reservations where applicable. Classify estimates as advisory until the usage collector has been qualified. [VPC quotas](https://docs.aws.amazon.com/vpc/latest/userguide/amazon-vpc-limits.html), [EKS quotas](https://docs.aws.amazon.com/general/latest/gr/eks.html), [EC2 instance quotas](https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-quotas.html), and [EKS subnet requirements](https://docs.aws.amazon.com/eks/latest/userguide/network-reqs.html).
+
+For upgrades, report temporary node and IP headroom using the actual EKS update strategy, zones and live scaling configuration. Show the potential surge separately from confirmed immediate demand. For fleet planning, allow a repeated scenario such as 100 identical clusters in one existing VPC. Multiply per-cluster and per-node consumption in their shared account pools, evaluate per-cluster limits independently, and charge the VPC once. A new network per cluster is a different scenario. Karpenter's future workload-driven capacity is outside a managed node group's initial demand. [EKS managed node update behavior](https://docs.aws.amazon.com/eks/latest/userguide/managed-node-update-behavior.html).
+
+Extend coverage to EBS storage by volume type, ENIs, IAM roles/customer-managed policies/OIDC providers and optional KMS keys after verifying their accounting. Use the resolved add-on/component and ownership plans for optional resources. Exclude reused keys, shared roles, Helm objects and Crossplane bookkeeping from new AWS resource demand. Keep IAM document size and resource naming in deterministic input validation. A count of rendered Kubernetes objects is insufficient for account planning.
+
+## API, CLI and dashboard
+
+| Proposed operation | Contract |
+| --- | --- |
+| `TenantService.GetCloudAccountQuotas` | Tenant, bootstrap account ID, region, optional service filter and page token. Return each quota's scope, unit, applied limit, usage, outstanding platform demand, available capacity, observation times, confidence, adjustable flag and refresh status. Use presence-aware numbers. |
+| `PlanNetworkCreate` and `PlanClusterCreate` | Reuse the existing typed create inputs, validation and defaulting. Return per-dimension demand, forecast, remaining capacity, evidence time, warnings and blockers. Dry runs perform no writes or reservations. |
+| Existing `UpdateCluster` preview/apply | Add the same quota assessment to the existing plan for default-pool growth or replacement. Bind review to the requested spec and etag. Recheck capacity on apply even with a valid plan ID. There is currently no standalone node-group creation RPC. A future one can reuse the evaluator. |
+
+Add an account **Quotas** view with a region selector, freshness and refresh status. Use a compact **Capacity** section in the create or update review with shortfalls first. Proposed CLI entry points are `account quotas`, `network create --plan` and `cluster create --plan`. Guided forms, YAML, CLI and other clients submit through the same authoritative API. A read-only import discovers existing infrastructure and has zero provisioning demand. For takeover evaluate only the resources actually added or replaced by its plan.
+
+## Admission, retries and races
+
+1. Replay a previously accepted matching request first. For a new request, run existing tenant, account, network, freeze and validation checks, resolve defaults, then call one pure evaluator. Integrate immediately before persistence in `pkg/server/network/network.go`, `pkg/server/cluster/cluster.go`, and the apply path in `pkg/server/cluster/mutate.go`. Directly authored CRs and controller-originated upgrades need the equivalent gate before the first cloud-increasing action. A blocked CR records a condition, an event and an actionable message.
+2. For each exact dimension compute `available = applied limit − observed use − pending demand missing from that observation`. Admit equality. Compare only positive demand. Allow deletes, unchanged resources and reductions even in an over-quota account. Never credit a planned deletion before AWS releases it.
+3. Serialize platform admissions with a Kubernetes resourceVersion compare-and-swap on an internal, account-scoped ledger. Commit **all** dimension reservations for one operation in one update. Store only active claims and compact observation references, with a bounded size monitored before rollout. Re-read and re-evaluate on conflict. Keys include tenant, operation, request ID and normalized input digest. Record the target resource UID or preassigned ID and generation. For a request without a supplied ID, assign an internal operation identity for this attempt.
+4. Claim capacity before storing desired state. On ambiguous API timeouts, retry with the same identity and recover from the ledger. Reconcile interrupted writes against the actual target and recorded operation. Release only the losing request's unmatched claim. Expire abandoned, uncommitted claims after checking for a surviving object. A paused or partially provisioned operation can still consume capacity. A timer alone must never free its committed demand.
+5. Reconcile each accepted claim with discovered AWS resource IDs and quantities. Only subtract the portion already included in the **same** usage observation. Publish the observation revision and outstanding claims consistently. For aggregate metrics that cannot prove attribution, keep that dimension advisory. Requests submitted outside this management plane can still consume headroom after admission. Surface AWS quota rejections in resource status and events and trigger refresh.
+
+### Error contract
+
+| Evidence at admission | Result |
+| --- | --- |
+| Fresh, verified shortfall for an enforced quota | Connect `resource_exhausted` with structured details for every blocker. Include service/quota code, scope, unit, applied limit, used, pending, requested, shortfall, observation time and actionable remediation. Persist no new desired state for this RPC. |
+| Known unmet subnet prerequisite | `failed_precondition` with the affected subnet, free addresses and required floor. Help the user select or expand a subnet. |
+| Stale, partial or unavailable observation | Advisory rollout returns a warning. With enforcement enabled for a required dimension, queue refresh and return retryable `unavailable`. A missing tenant-role permission returns `failed_precondition` naming the missing read action. Do not report exhaustion without evidence. |
+| AWS capacity shortage or throttling during provisioning | Record the provider's distinct reason and retry policy. Spare quota cannot guarantee EC2 capacity in a particular AZ. |
+
+## Delivery and acceptance
+
+1. Ship read-only collection and account quota lookup. Qualify a small catalog against AWS in a test account. Use separate timestamps for limit and usage. Suggested starting targets are hourly limits and five-minute usage, with bounded retries and per-account refresh deduplication. Tune against actual throttling and API cost.
+2. Ship advisory plans to CLI and UI. Compare forecasts against rendered plans and actual consumption. Exercise two/three AZs, shared/per-zone NAT, custom subnet lists, non-platform usage, missing permissions, pagination, mixed Spot/On-Demand pools across requests, a zero-size start, maximum-only edits, replacements, imports and controller-driven upgrades.
+3. Enable hard admission per verified dimension after concurrency and recovery tests pass. Test two clients competing for the last slot, duplicate request IDs, multiple tenant registrations of the same account, global quotas across regions, process failure between claim and persistence, partial provisioning and out-of-band AWS consumption. Verify tenant isolation on both read and error paths. Instrument observation age, collector errors, blocked requests and unmatched claims with bounded labels.

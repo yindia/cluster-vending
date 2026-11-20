@@ -609,8 +609,8 @@ spec:
                 type: object
               defaultNodePool:
                 description: |-
-                  defaultNodePool is the node pool created together with the cluster.
-                  Required for a cluster the platform creates.
+                  defaultNodePool is the default managed node group. Optional: the
+                  platform fills it; its taints, labels and scaling are the platform's.
                 properties:
                   capacityType:
                     default: OnDemand
@@ -851,6 +851,127 @@ spec:
                 x-kubernetes-validations:
                 - message: network is immutable
                   rule: self == oldSelf
+              nodeGroups:
+                description: nodeGroups are the user's Karpenter node groups.
+                items:
+                  description: |-
+                    NodeGroupSpec is one user node group: a Karpenter NodePool with its own
+                    EC2NodeClass in the workload cluster.
+                  properties:
+                    architectures:
+                      description: 'architectures of the nodes. Empty: Amd64.'
+                      items:
+                        description: Architecture is a node CPU architecture, as the
+                          kinds spell it.
+                        enum:
+                        - Amd64
+                        - Arm64
+                        type: string
+                      maxItems: 2
+                      type: array
+                      x-kubernetes-list-type: set
+                    capacityTypes:
+                      description: 'capacityTypes are how the nodes are bought. Empty:
+                        OnDemand.'
+                      items:
+                        description: CapacityType is how the nodes of a pool are bought.
+                        enum:
+                        - OnDemand
+                        - Spot
+                        type: string
+                      maxItems: 2
+                      type: array
+                      x-kubernetes-list-type: set
+                    instanceFamilies:
+                      description: instanceFamilies are instance families, e.g. m7i,
+                        c7g.
+                      items:
+                        maxLength: 32
+                        minLength: 1
+                        pattern: ^[a-z][a-z0-9-]*$
+                        type: string
+                      maxItems: 20
+                      type: array
+                      x-kubernetes-list-type: set
+                    instanceTypes:
+                      description: |-
+                        instanceTypes are exact machine types, e.g. m7i.large. Empty: any
+                        type of instanceFamilies.
+                      items:
+                        maxLength: 64
+                        minLength: 1
+                        pattern: ^[a-z][a-z0-9-]*[.][a-z0-9]+$
+                        type: string
+                      maxItems: 20
+                      type: array
+                      x-kubernetes-list-type: set
+                    labels:
+                      additionalProperties:
+                        type: string
+                      description: labels of the nodes.
+                      maxProperties: 64
+                      type: object
+                    limits:
+                      description: 'limits is the ceiling of what the group may provision.
+                        Unset: none.'
+                      properties:
+                        cpu:
+                          description: cpu is the vCPU ceiling.
+                          format: int32
+                          minimum: 1
+                          type: integer
+                        memoryGiB:
+                          description: memoryGiB is the memory ceiling in GiB.
+                          format: int32
+                          minimum: 1
+                          type: integer
+                      type: object
+                    name:
+                      description: |-
+                        name is a DNS label, unique in the cluster. "platform", "default" and
+                        "system" are reserved.
+                      maxLength: 40
+                      minLength: 1
+                      pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                      x-kubernetes-validations:
+                      - message: name is reserved
+                        rule: '!(self in [''platform'', ''default'', ''system''])'
+                    taints:
+                      description: taints of the nodes.
+                      items:
+                        description: Taint is a taint on the nodes of a pool.
+                        properties:
+                          effect:
+                            description: effect of the taint.
+                            enum:
+                            - NoSchedule
+                            - PreferNoSchedule
+                            - NoExecute
+                            type: string
+                          key:
+                            description: key of the taint.
+                            maxLength: 253
+                            minLength: 1
+                            type: string
+                          value:
+                            description: value of the taint.
+                            maxLength: 63
+                            type: string
+                        required:
+                        - effect
+                        - key
+                        type: object
+                      maxItems: 50
+                      type: array
+                  required:
+                  - name
+                  type: object
+                maxItems: 20
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               region:
                 description: 'region the cluster runs in: its network''s. Immutable.'
                 maxLength: 64
@@ -902,9 +1023,9 @@ spec:
             - message: 'a cluster is created or imported for good: importFrom cannot
                 be added or removed'
               rule: has(self.importFrom) == has(oldSelf.importFrom)
-            - message: defaultNodePool is required (an imported cluster's is read
-                from the cloud)
-              rule: has(self.importFrom) || has(self.defaultNodePool)
+            - message: node group names must be unique
+              rule: '!has(self.nodeGroups) || self.nodeGroups.all(g, self.nodeGroups.exists_one(h,
+                h.name == g.name))'
             - message: controlPlane.endpointAccess.publicAccessCIDRs needs at least
                 one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)
               rule: has(self.importFrom) || (has(self.controlPlane) && has(self.controlPlane.endpointAccess)
@@ -1467,6 +1588,46 @@ spec:
                     type: array
                     x-kubernetes-list-type: set
                 type: object
+              nodeGroups:
+                description: |-
+                  nodeGroups are the node groups as observed: the platform's first,
+                  then the user's.
+                items:
+                  description: NodeGroupStatus is what the controller observed of
+                    one node group.
+                  properties:
+                    message:
+                      description: message says why the group is not ready.
+                      type: string
+                    name:
+                      description: name of the group.
+                      type: string
+                    nodes:
+                      description: nodes is the number of nodes the group runs.
+                      format: int32
+                      type: integer
+                    nodesNotice:
+                      description: |-
+                        nodesNotice says why the group's node list is not stored: the results
+                        bucket cannot be written. The counts above are still kept.
+                      maxLength: 256
+                      type: string
+                    phase:
+                      description: phase of the group.
+                      enum:
+                      - Pending
+                      - Ready
+                      - Failed
+                      - Deleting
+                      type: string
+                    platformManaged:
+                      description: platformManaged is true for the platform's own
+                        groups.
+                      type: boolean
+                  required:
+                  - name
+                  type: object
+                type: array
               observedGeneration:
                 description: observedGeneration is the generation the status reflects.
                 format: int64
@@ -1499,10 +1660,31 @@ spec:
                     PlatformComponentStatus is one component the platform installed with a
                     cluster.
                   properties:
+                    attempts:
+                      description: |-
+                        attempts are the failed install or upgrade attempts backed off from;
+                        countedFailures the failures in a row that count toward giving up
+                        (release errors, never transient ones); nextRetryAt when the release
+                        is tried again.
+                      format: int32
+                      type: integer
                     chart:
                       description: |-
                         chart is the Helm release name of the component's chart that failed
                         or is being installed; the fields below are about it.
+                      type: string
+                    chartVersion:
+                      description: |-
+                        chartVersion is the chart version Helm has deployed for that chart
+                        and revision its Helm revision.
+                      type: string
+                    countedFailures:
+                      format: int32
+                      type: integer
+                    digest:
+                      description: |-
+                        digest of the Release spec (chart, version, rendered values) the
+                        platform applied; a new one starts the retries over.
                       type: string
                     failures:
                       description: failures is how many times in a row installing
@@ -1522,11 +1704,29 @@ spec:
                       description: lastError is the provider's last error for that
                         chart, in full.
                       type: string
+                    lastErrorClass:
+                      description: |-
+                        lastErrorClass is transient (workload API unreachable, Helm's lock),
+                        chart (the chart did not come) or release (a hook failed, the
+                        rollout timed out, invalid values).
+                      type: string
+                    lastRecovery:
+                      description: |-
+                        lastRecovery says what the platform last did to a stuck release of
+                        this component (rolled back to revision N, uninstalled, deleted a
+                        failed hook Job) and when.
+                      type: string
+                    lastRecoveryTime:
+                      format: date-time
+                      type: string
                     message:
                       description: message says what it waits for or why it failed.
                       type: string
                     name:
                       description: name in the catalog, e.g. karpenter.
+                      type: string
+                    nextRetryAt:
+                      format: date-time
                       type: string
                     phase:
                       description: 'phase: Pending (waits), Installing, Ready or Failed.'
@@ -1537,10 +1737,18 @@ spec:
                         release of this component at this version (at most 3).
                       format: int32
                       type: integer
+                    revision:
+                      format: int32
+                      type: integer
                     since:
                       description: since is when the component entered this phase.
                       format: date-time
                       type: string
+                    unchanged:
+                      description: |-
+                        unchanged: the Release already had this version and these values
+                        when the last pass looked, so nothing was written.
+                      type: boolean
                     version:
                       description: version of the chart the cluster's release pins.
                       type: string
@@ -1556,6 +1764,12 @@ spec:
                   platformRelease is the release the platform components' versions
                   come from: the one the cluster's channel offered when they were
                   first installed.
+                type: string
+              policySnapshot:
+                description: |-
+                  PolicySnapshot is bounded protojson cloud.v1.ClusterPolicySnapshot, replaced
+                  by each controller collection. It is not an admission audit history.
+                maxLength: 131072
                 type: string
               recentEvents:
                 description: |-
@@ -1684,6 +1898,94 @@ spec:
                     description: target is the release they move to.
                     type: string
                 type: object
+              results:
+                description: |-
+                  results are the summaries of the scan results kept in the cluster's
+                  results bucket, one per kind (docs/design/cluster-results-s3.md). A
+                  kind with a summary here is read from the bucket; one without is read
+                  from the fields above.
+                items:
+                  description: |-
+                    ClusterResultRef is the summary of one kind of scan result whose full data
+                    is in the cluster's results bucket: the object it names, when it was
+                    collected and how much it holds. The Cluster keeps this and not the lists,
+                    so a large cluster is not limited by the size of a Kubernetes object.
+                    Gates that read the cluster (an upgrade blocked by removed APIs in use)
+                    read the counts here.
+                  properties:
+                    attemptedAt:
+                      description: attemptedAt is when the cluster was last scanned,
+                        or tried to.
+                      format: date-time
+                      type: string
+                    bucket:
+                      description: |-
+                        bucket is the S3 bucket of the cluster's results, in the cluster's
+                        account.
+                      maxLength: 63
+                      type: string
+                    collectedAt:
+                      description: |-
+                        collectedAt is when the result was collected (the last scan that
+                        worked); with attemptedAt it is the input of staleness.
+                      format: date-time
+                      type: string
+                    digest:
+                      description: |-
+                        digest is a hash of the collected content (not of its times): a scan
+                        whose content has the same digest does not rewrite the object.
+                      maxLength: 128
+                      type: string
+                    etag:
+                      description: |-
+                        etag is the ETag of that object when it was written: a reader that
+                        finds another one knows the object is newer than this summary.
+                      maxLength: 128
+                      type: string
+                    incomplete:
+                      description: 'incomplete: the sources were not fully read.'
+                      type: boolean
+                    key:
+                      description: |-
+                        key is the "latest" object of the kind, for example
+                        latest/deprecations.json; a sharded kind (nodes) names its index,
+                        latest/nodes/index.json.
+                      maxLength: 256
+                      type: string
+                    kind:
+                      description: kind is what the result is.
+                      enum:
+                      - deprecations
+                      - recommendations
+                      - violations
+                      - violation-events
+                      - nodes
+                      type: string
+                    removed:
+                      description: |-
+                        removed, for deprecations: how many items use an API version removed
+                        at the target version.
+                      format: int32
+                      type: integer
+                    total:
+                      description: |-
+                        total is how many items the result holds (findings, recommendations,
+                        violations, events).
+                      format: int32
+                      type: integer
+                    truncated:
+                      description: 'truncated: more was found than the object holds.'
+                      type: boolean
+                  required:
+                  - bucket
+                  - key
+                  - kind
+                  type: object
+                maxItems: 4
+                type: array
+                x-kubernetes-list-map-keys:
+                - kind
+                x-kubernetes-list-type: map
               rollout:
                 description: |-
                   rollout is the cluster's last automatic upgrade, as its release
@@ -1829,6 +2131,25 @@ spec:
                       upgrade waits for cluster retry.
                     format: int32
                     type: integer
+                  skippedSteps:
+                    description: |-
+                      skippedSteps are the component steps found to have nothing to do:
+                      none of their charts changed version or values for this upgrade.
+                    items:
+                      description: |-
+                        ClusterUpgradePhase is the step of a Kubernetes upgrade. An upgrade runs
+                        in the order a cluster is created, each step once the one before is
+                        settled: ControlPlane, NodeGroups, Addons, PlatformComponents,
+                        TenantComponents.
+                      enum:
+                      - ControlPlane
+                      - NodesAndAddons
+                      - NodeGroups
+                      - Addons
+                      - PlatformComponents
+                      - TenantComponents
+                      type: string
+                    type: array
                   startTime:
                     description: startTime is when the upgrade was first seen in progress.
                     format: date-time

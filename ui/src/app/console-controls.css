@@ -39,3 +39,63 @@
     opacity: 1;
   }
 }
+
+/* Shrink the fields together, then scroll this row when they reach a readable width. */
+.cv-filter-row {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-block: var(--spacing-1);
+}
+
+.cv-filter-row > * {
+  flex: none;
+}
+
+.cv-filter-row > :has(button[aria-haspopup]) {
+  flex: 0 1 13rem;
+  min-inline-size: 8rem;
+}
+
+.cv-filter-row > :has(input[type="search"]) {
+  flex: 0 1 20rem;
+  min-inline-size: 11rem;
+}
+
+.cv-policy-panel {
+  container: policy-panel / inline-size;
+  min-inline-size: 0;
+  inline-size: 100%;
+}
+.cv-policy-panel .cv-policy-summary {
+  padding-block: var(--spacing-2);
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+.cv-policy-cell, .cv-policy-filters, .cv-policy-filters > *, .cv-policy-selectors > * { min-inline-size: 0; }
+.cv-policy-filters > :first-child { flex: 1.75 1 0; }
+.cv-policy-filters .cv-policy-selectors { display: contents; }
+.cv-policy-selectors > :has([aria-haspopup]) { flex: 1 1 0; }
+.cv-policy-filters .cv-policy-filter-toggle { display: none; }
+.cv-policy-panel .cv-policy-resource-outcome {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+.cv-policy-resource-outcome > :last-child { min-inline-size: 0; }
+[data-policy-finding] { overflow-wrap: anywhere; }
+[data-policy-finding] > button { max-inline-size: 100%; align-self: flex-start; text-align: start; }
+[data-policy-details] { min-inline-size: 0; overflow-wrap: anywhere; }
+[data-policy-details] .cv-copy-target { min-inline-size: 0; }
+@container policy-panel (max-width: 58rem) {
+  .cv-policy-panel .cv-policy-filters { flex-wrap: wrap; }
+  .cv-policy-filters .cv-policy-filter-toggle { display: inline-flex; }
+  .cv-policy-filters .cv-policy-selectors { display: none; }
+  .cv-policy-filters .cv-policy-selectors[data-open="true"] {
+    display: grid;
+    flex-basis: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    align-items: end;
+  }
+}

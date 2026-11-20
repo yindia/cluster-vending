@@ -42,10 +42,16 @@ What the table would otherwise hide:
 
 ## Who talks to AWS
 
-Only what reconciles: the controller (`cluster-vending controller`). The API
+Reconciling is the controller's (`cluster-vending controller`). The API
 server (`cluster-vending serve`) validates a request against the store and
-the management cluster, stores the desired state, and returns. It has no AWS
-setting, no AWS credentials and no IAM role.
+the management cluster, stores the desired state, and returns. It makes one
+kind of AWS call, **read-only**: it reads the scan results of a cluster
+(deprecated APIs, recommendations, policy violations) from the cluster's
+results bucket in the tenant's account, through the tenant role
+([design/cluster-results-s3.md](design/cluster-results-s3.md)). Its session
+is limited to reading the objects of `cv-*` buckets
+(`results.ReadOnlySessionPolicy`), whatever the tenant role allows, and it
+creates, changes and deletes nothing there.
 
 | What needs the cloud | Where it runs | What the client sees when it fails |
 |---|---|---|
@@ -54,16 +60,30 @@ setting, no AWS credentials and no IAM role.
 | Is the EKS name of a new cluster taken by a cluster made elsewhere | `pkg/reconcile/cluster` (`resolve`), before anything is created | The cluster is `FAILED`: "account ... already has an EKS cluster named ...". |
 | Which Kubernetes and add-on versions EKS offers | `pkg/reconcile/cluster` (`resolve`), for a new cluster and after an update of the version or the add-ons, before anything is rendered | The cluster is `FAILED` with what EKS refused; nothing is applied. |
 | Installing the Crossplane AWS providers | `pkg/management`, at the controller's start | The controller does not start. |
+| Reading a cluster's scan results from its results bucket | The API server, `pkg/server/cluster` (`ListClusterDeprecations`, `ListClusterRecommendations`, `ListClusterViolations`, `ListClusterViolationEvents`), through `pkg/results` | A coverage notice in the response ("results unavailable: ..."), never a failed call: in `error` of the deprecations, in the summary's message of the recommendations and in the summary's notices (incomplete) of the policy lists. 5 second timeout, 16 MiB bound, an ETag-keyed cache. |
+| Writing the results, and emptying the bucket when the cluster is deleted | The controller's scanners, through `pkg/results` (a later phase) | The scan fails and is retried. |
 
-The controller's lookups have one way into a tenant's account
-(`reconcile.Deps.AWSAccess`, `pkg/cloud/aws`): its own credentials, as the AWS
-SDK's default chain finds them (IRSA in production, keys in the environment
-for local testing), then optionally a source role, then always the tenant
-role stored at the account's bootstrap. Nothing is read with the base
-credentials themselves.
+The controller's lookups and the API server's reads have one way into a
+tenant's account (`reconcile.Deps.AWSAccess` for the controller,
+`pkg/cloud/aws`, `AccessFor` and `Client.S3` for both): the process's own
+credentials, as the AWS SDK's default chain finds them (IRSA in production,
+keys in the environment for local testing, never a setting), then optionally
+a source role (`aws-source-role-arn`), then always the tenant role stored at
+the account's bootstrap (with the account's external ID, else
+`aws-external-id`). Nothing is read with the base credentials themselves.
 
-The API server has no AWS setting, credentials or role: it only stores the
-desired state.
+```text
+own credentials ─(source role, optional)─> tenant role ─> EC2, EKS, IAM ... (controller)
+                                                       └─> S3 results bucket, read only (API server)
+```
+
+The tenant role trusts the management role (the controller and the
+providers) and, when the account was onboarded with it, the server's
+principal (`ServerPrincipalArn`, [onboarding.md](onboarding.md)). The
+server's settings are `aws-region`, `aws-source-role-arn`, `aws-external-id`
+and `aws-server-role-arn` (the principal the templates trust when there is no
+source role); with none of them it still starts, and a cluster whose results
+are in a bucket is answered with a coverage notice.
 
 ## How a create flows
 
@@ -202,11 +222,31 @@ import it again; it is never rendered from something else.
   associations; then log group, route tables and NAT gateways; then role,
   policy and Elastic IPs; then subnets and the internet gateway; then the
   VPC. The next tier starts only when the previous one is gone.
-- **Clusters** have no tiers (`crossplaneaws.ClusterDeleteOrder` is empty).
-  Every object is deleted at once and the rendered Crossplane Usages order
-  the cloud deletion: the Usage webhook holds an object until what uses it
-  is gone. The reconciler also sweeps objects that carry the cluster's label
-  but were never recorded, and removes the cluster's tags from the subnets.
+- **Clusters** are deleted in the reverse of their creation, in stages
+  (`driveDelete`); a stage starts only when the one before it is fully gone,
+  and the cluster's status message names the stage and what it waits for:
+  1. the workload cluster's load balancers (Ingresses, Services of type
+     LoadBalancer), while the AWS Load Balancer Controller still runs;
+  2. tenant components, a component after those that require it;
+  3. platform components above sequence 0, highest sequence first (within a
+     sequence, reverse `requires`), each with its Helm Releases and IAM gone;
+  4. Karpenter's node groups: user NodePools, the platform NodePool, the
+     remaining NodeClaims, then the EC2NodeClasses;
+  5. Karpenter: its chart and IAM, the interruption queue, rules and targets,
+     the node role and its access entry;
+  6. the EKS add-ons with their pod identity associations and roles;
+  7. the rest (`crossplaneaws.ClusterDeleteOrder` is empty): the Usages
+     order it, as the Usage webhook holds an object until what uses it is
+     gone: the default node group, the EKS cluster, its IAM, the results
+     bucket (emptied first).
+
+  The platform's Helm reliability machinery never blocks an uninstall: its
+  backoff pause is lifted, a stuck release is recovered, and only a pause by
+  an operator or a freeze holds the stage (and is reported). A forced
+  deletion, or one whose EKS cluster is not ACTIVE, skips the workload
+  stages and lets the Releases go without an uninstall. The reconciler also
+  sweeps objects that carry the cluster's label but were never recorded, and
+  removes the cluster's tags from the subnets.
 - **Before forgetting.** When the cache shows nothing left, the reconciler
   asks the API server directly. Only then are the records and the row
   removed, so a cache that lost its objects cannot make the platform forget

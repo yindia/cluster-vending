@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -70,26 +71,29 @@ func TeardownOf(c client.Client) reconcile.Teardown { return teardown{c: c} }
 
 type teardown struct{ c client.Client }
 
-func (t teardown) List(ctx context.Context) ([]reconcile.WorkloadObject, error) {
-	ingresses, err := t.albIngresses(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := ingresses
-	services := &corev1.ServiceList{}
-	if err := t.c.List(ctx, services); err != nil {
-		return nil, fmt.Errorf("list services: %w", err)
-	}
-	for i := range services.Items {
-		s := &services.Items[i]
-		if s.Spec.Type == corev1.ServiceTypeLoadBalancer {
-			out = append(out, workloadObject(reconcile.KindService, s))
+func (t teardown) List(ctx context.Context, kinds ...string) ([]reconcile.WorkloadObject, error) {
+	var out []reconcile.WorkloadObject
+	if slices.Contains(kinds, reconcile.KindIngress) {
+		ingresses, err := t.albIngresses(ctx)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, ingresses...)
+	}
+	if slices.Contains(kinds, reconcile.KindService) {
+		services, err := t.loadBalancerServices(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, services...)
 	}
 	for _, k := range karpenterKinds {
+		if !slices.Contains(kinds, k.kind) {
+			continue
+		}
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(k.gvk.GroupVersion().WithKind(k.gvk.Kind + "List"))
-		err := t.c.List(ctx, list)
+		err := t.c.List(ctx, list, client.Limit(reconcile.TeardownListLimit))
 		if meta.IsNoMatchError(err) {
 			continue // Karpenter is not installed
 		}
@@ -101,6 +105,30 @@ func (t teardown) List(ctx context.Context) ([]reconcile.WorkloadObject, error) 
 		}
 	}
 	return out, nil
+}
+
+// loadBalancerServices are the Services of type LoadBalancer. The API
+// server filters nothing by type, so the pages are read to the end (only
+// the matches are kept): a Service is small and the read is what finds
+// every cloud load balancer.
+func (t teardown) loadBalancerServices(ctx context.Context) ([]reconcile.WorkloadObject, error) {
+	var out []reconcile.WorkloadObject
+	token := ""
+	for {
+		services := &corev1.ServiceList{}
+		if err := t.c.List(ctx, services, client.Limit(reconcile.TeardownListLimit), client.Continue(token)); err != nil {
+			return nil, fmt.Errorf("list services: %w", err)
+		}
+		for i := range services.Items {
+			s := &services.Items[i]
+			if s.Spec.Type == corev1.ServiceTypeLoadBalancer {
+				out = append(out, workloadObject(reconcile.KindService, s))
+			}
+		}
+		if token = services.Continue; token == "" {
+			return out, nil
+		}
+	}
 }
 
 // albIngresses are the Ingresses the AWS Load Balancer Controller serves:
@@ -163,6 +191,9 @@ func (t teardown) Delete(ctx context.Context, o reconcile.WorkloadObject) error 
 }
 
 func workloadObject(kind string, o client.Object) reconcile.WorkloadObject {
-	return reconcile.WorkloadObject{Kind: kind, Namespace: o.GetNamespace(), Name: o.GetName(),
-		Deleting: o.GetDeletionTimestamp() != nil}
+	w := reconcile.WorkloadObject{Kind: kind, Namespace: o.GetNamespace(), Name: o.GetName(), Deleting: o.GetDeletionTimestamp() != nil}
+	if ts := o.GetDeletionTimestamp(); ts != nil {
+		w.DeletedAt = ts.Time
+	}
+	return w
 }

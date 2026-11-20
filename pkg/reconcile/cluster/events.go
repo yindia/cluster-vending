@@ -228,8 +228,8 @@ func platformEvents(before, after *cloudv1.ClusterStatus) []reconcile.Note {
 		}
 		if known && c.GetRecoveries() > prev.GetRecoveries() {
 			out = append(out, reconcile.Warning(reconcile.ReasonStuckReleaseRecovered,
-				fmt.Sprintf("%s: removed the record of its stuck Helm release so it installs again (recovery %d of %d)",
-					name, c.GetRecoveries(), maxRecoveries)))
+				fmt.Sprintf("%s: %s so it installs again (recovery %d of %d)", name,
+					orDefault(c.GetLastRecovery(), "recovered its stuck Helm release"), c.GetRecoveries(), maxRecoveries)))
 			if c.GetRecoveries() >= maxRecoveries {
 				out = append(out, reconcile.Warning(reconcile.ReasonRecoveryLimitReached,
 					fmt.Sprintf("%s was recovered %d times and is not recovered again: look at chart %s in the cluster",

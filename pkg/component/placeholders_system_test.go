@@ -16,6 +16,21 @@ func clusterWithPool(labels map[string]string, taints []cloudv1alpha1.Taint) *cl
 	return c
 }
 
+// importedClusterWithPool is a cluster that was imported: its default node
+// pool is what it had, not the platform's.
+func importedClusterWithPool(labels map[string]string, taints []cloudv1alpha1.Taint) *cloudv1alpha1.Cluster {
+	c := clusterWithPool(labels, taints)
+	c.Spec.ImportFrom = &cloudv1alpha1.ClusterImport{}
+	return c
+}
+
+var (
+	systemSelector   = map[string]any{"node.cluster-vending.io/pool": "system"}
+	systemTaints     = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}}
+	platformSelector = map[string]any{"node.cluster-vending.io/pool": "platform"}
+	platformTaints   = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "platform", "effect": "NoSchedule"}}
+)
+
 func TestExpandSystemPlacement(t *testing.T) {
 	doc := map[string]any{
 		"nodeSelector": "${system.nodeSelector}",
@@ -28,11 +43,14 @@ func TestExpandSystemPlacement(t *testing.T) {
 		wantSelector    map[string]any
 		wantTolerations []any
 	}{
-		{name: "no default pool", cluster: testCluster(true), wantSelector: map[string]any{}, wantTolerations: []any{}},
-		{name: "pool without labels or taints", cluster: clusterWithPool(nil, nil),
+		{name: "no default pool: the platform's", cluster: testCluster(true), wantSelector: systemSelector, wantTolerations: systemTaints},
+		{name: "a stored pool's old labels and taints do not count",
+			cluster:      clusterWithPool(map[string]string{"role": "old"}, []cloudv1alpha1.Taint{{Key: "old", Effect: "NoSchedule"}}),
+			wantSelector: systemSelector, wantTolerations: systemTaints},
+		{name: "imported, pool without labels or taints", cluster: importedClusterWithPool(nil, nil),
 			wantSelector: map[string]any{}, wantTolerations: []any{}},
-		{name: "two labels and two taints",
-			cluster: clusterWithPool(map[string]string{"role": "system", "team": "platform"}, []cloudv1alpha1.Taint{
+		{name: "imported, two labels and two taints",
+			cluster: importedClusterWithPool(map[string]string{"role": "system", "team": "platform"}, []cloudv1alpha1.Taint{
 				{Key: "dedicated", Value: "system", Effect: "NoSchedule"},
 				{Key: "critical", Effect: "NoExecute"}}),
 			wantSelector: map[string]any{"role": "system", "team": "platform"},
@@ -61,6 +79,43 @@ func TestExpandSystemPlacement(t *testing.T) {
 				t.Error("Expand changed its input")
 			}
 		})
+	}
+}
+
+// ${platform.*} is the platform pool; an imported cluster has none, so its
+// components keep following its default pool as before.
+func TestExpandPlatformPlacement(t *testing.T) {
+	doc := map[string]any{"nodeSelector": "${platform.nodeSelector}", "tolerations": "${platform.tolerations}"}
+	tests := []struct {
+		name         string
+		cluster      *cloudv1alpha1.Cluster
+		wantSelector map[string]any
+		wantTol      []any
+	}{
+		{name: "a platform cluster", cluster: testCluster(true), wantSelector: platformSelector, wantTol: platformTaints},
+		{name: "imported: its default pool", cluster: importedClusterWithPool(map[string]string{"role": "system"}, nil),
+			wantSelector: map[string]any{"role": "system"}, wantTol: []any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Expand(doc, VarsFor(tt.cluster, testNetwork(), testAccount(), IAMOutputs{}))
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := map[string]any{"nodeSelector": tt.wantSelector, "tolerations": tt.wantTol}; !reflect.DeepEqual(got, want) {
+				t.Errorf("got %v want %v", got, want)
+			}
+		})
+	}
+	for _, name := range []string{"platform.nodeSelector", "platform.tolerations"} {
+		if err := Validate(map[string]any{"a": "x-${" + name + "}"}); !fault.Is(err, fault.Invalid) || !strings.Contains(err.Error(), "whole value") {
+			t.Errorf("${%s} inside a string = %v", name, err)
+		}
+		resources := role(func(r *IAMRole) { r.Policy = strings.Replace(testPolicy, "${region}", "${"+name+"}", 1) })
+		if err := ValidateCloudResources(resources); !fault.Is(err, fault.Invalid) || !strings.Contains(err.Error(), "only for platform values") {
+			t.Errorf("policy with ${%s} = %v", name, err)
+		}
 	}
 }
 

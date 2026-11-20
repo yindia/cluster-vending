@@ -619,7 +619,7 @@ type ClusterImport struct {
 // (`aws: {}`).
 // +kubebuilder:validation:XValidation:rule="has(self.aws)",message="exactly one provider must be set: aws (it may be empty)"
 // +kubebuilder:validation:XValidation:rule="has(self.importFrom) == has(oldSelf.importFrom)",message="a cluster is created or imported for good: importFrom cannot be added or removed"
-// +kubebuilder:validation:XValidation:rule="has(self.importFrom) || has(self.defaultNodePool)",message="defaultNodePool is required (an imported cluster's is read from the cloud)"
+// +kubebuilder:validation:XValidation:rule="!has(self.nodeGroups) || self.nodeGroups.all(g, self.nodeGroups.exists_one(h, h.name == g.name))",message="node group names must be unique"
 // +kubebuilder:validation:XValidation:rule="has(self.importFrom) || (has(self.controlPlane) && has(self.controlPlane.endpointAccess) && ((has(self.controlPlane.endpointAccess.publicAccessCIDRs) && size(self.controlPlane.endpointAccess.publicAccessCIDRs) > 0) || (has(self.controlPlane.endpointAccess.publicAccess) && !self.controlPlane.endpointAccess.publicAccess)))",message="controlPlane.endpointAccess.publicAccessCIDRs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || self.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')",message="region must be an AWS region, e.g. us-east-1"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.defaultNodePool) || self.defaultNodePool.instanceTypes.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))",message="AWS instance types look like m6i.large"
@@ -654,8 +654,8 @@ type ClusterSpec struct {
 	// controlPlane settings.
 	// +optional
 	ControlPlane *ControlPlaneSpec `json:"controlPlane,omitempty"`
-	// defaultNodePool is the node pool created together with the cluster.
-	// Required for a cluster the platform creates.
+	// defaultNodePool is the default managed node group. Optional: the
+	// platform fills it; its taints, labels and scaling are the platform's.
 	// +optional
 	DefaultNodePool *NodePoolSpec `json:"defaultNodePool,omitempty"`
 	// access controls who administers the cluster. Mutable.
@@ -688,6 +688,12 @@ type ClusterSpec struct {
 	// +optional
 	// +kubebuilder:default=false
 	NaaS *bool `json:"naas,omitempty"`
+	// nodeGroups are the user's Karpenter node groups.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=20
+	NodeGroups []NodeGroupSpec `json:"nodeGroups,omitempty"`
 	// aws selects AWS (EKS) and carries its settings.
 	// +optional
 	AWS *AWSClusterSpec `json:"aws,omitempty"`
@@ -900,6 +906,10 @@ type ClusterUpgrade struct {
 	Recoveries int32 `json:"recoveries,omitempty"`
 	// +optional
 	Halted bool `json:"halted,omitempty"`
+	// skippedSteps are the component steps found to have nothing to do:
+	// none of their charts changed version or values for this upgrade.
+	// +optional
+	SkippedSteps []ClusterUpgradePhase `json:"skippedSteps,omitempty"`
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes
@@ -962,6 +972,42 @@ type PlatformComponentStatus struct {
 	// release of this component at this version (at most 3).
 	// +optional
 	Recoveries int32 `json:"recoveries,omitempty"`
+	// chartVersion is the chart version Helm has deployed for that chart
+	// and revision its Helm revision.
+	// +optional
+	ChartVersion string `json:"chartVersion,omitempty"`
+	// +optional
+	Revision int32 `json:"revision,omitempty"`
+	// digest of the Release spec (chart, version, rendered values) the
+	// platform applied; a new one starts the retries over.
+	// +optional
+	Digest string `json:"digest,omitempty"`
+	// attempts are the failed install or upgrade attempts backed off from;
+	// countedFailures the failures in a row that count toward giving up
+	// (release errors, never transient ones); nextRetryAt when the release
+	// is tried again.
+	// +optional
+	Attempts int32 `json:"attempts,omitempty"`
+	// +optional
+	CountedFailures int32 `json:"countedFailures,omitempty"`
+	// +optional
+	NextRetryAt *metav1.Time `json:"nextRetryAt,omitempty"`
+	// lastErrorClass is transient (workload API unreachable, Helm's lock),
+	// chart (the chart did not come) or release (a hook failed, the
+	// rollout timed out, invalid values).
+	// +optional
+	LastErrorClass string `json:"lastErrorClass,omitempty"`
+	// lastRecovery says what the platform last did to a stuck release of
+	// this component (rolled back to revision N, uninstalled, deleted a
+	// failed hook Job) and when.
+	// +optional
+	LastRecovery string `json:"lastRecovery,omitempty"`
+	// +optional
+	LastRecoveryTime *metav1.Time `json:"lastRecoveryTime,omitempty"`
+	// unchanged: the Release already had this version and these values
+	// when the last pass looked, so nothing was written.
+	// +optional
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 // ClusterStatus is the observed state of a Cluster, aggregated from its
@@ -1051,6 +1097,22 @@ type ClusterStatus struct {
 	// deprecations is what the last scan for deprecated API versions found.
 	// +optional
 	Deprecations *ClusterDeprecations `json:"deprecations,omitempty"`
+
+	// results are the summaries of the scan results kept in the cluster's
+	// results bucket, one per kind (docs/design/cluster-results-s3.md). A
+	// kind with a summary here is read from the bucket; one without is read
+	// from the fields above.
+	// +listType=map
+	// +listMapKey=kind
+	// +kubebuilder:validation:MaxItems=4
+	// +optional
+	Results []ClusterResultRef `json:"results,omitempty"`
+
+	// PolicySnapshot is bounded protojson cloud.v1.ClusterPolicySnapshot, replaced
+	// by each controller collection. It is not an admission audit history.
+	// +optional
+	// +kubebuilder:validation:MaxLength=131072
+	PolicySnapshot string `json:"policySnapshot,omitempty"`
 	// rollout is the cluster's last automatic upgrade, as its release
 	// channel's rollout started and followed it. Written by the controller
 	// only; a version a person changed writes none.
@@ -1064,6 +1126,10 @@ type ClusterStatus struct {
 	// (a new controller build), applied in turn by its channel's rollout.
 	// +optional
 	CodeChange *CodeChange `json:"codeChange,omitempty"`
+	// nodeGroups are the node groups as observed: the platform's first,
+	// then the user's.
+	// +optional
+	NodeGroups []NodeGroupStatus `json:"nodeGroups,omitempty"`
 	// recommendations summarises the usage recorded to recommend resource
 	// requests (ListClusterRecommendations).
 	// +optional

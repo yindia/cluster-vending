@@ -30,8 +30,8 @@ spec:
     proxy:
       enabled: false
     replicaCount: 2
-    nodeSelector: ${system.nodeSelector}
-    tolerations: ${system.tolerations}
+    nodeSelector: ${platform.nodeSelector}
+    tolerations: ${platform.tolerations}
     priorityClassName: system-cluster-critical
     podLabels:
       cluster-vending.io/platform-component: capsule
@@ -62,8 +62,8 @@ spec:
       jobs:
         kubectl:
           # CRD install/upgrade and cleanup hooks must tolerate the system pool.
-          nodeSelector: ${system.nodeSelector}
-          tolerations: ${system.tolerations}
+          nodeSelector: ${platform.nodeSelector}
+          tolerations: ${platform.tolerations}
           priorityClassName: system-cluster-critical
           resources:
             requests: {cpu: 100m, memory: 128Mi}

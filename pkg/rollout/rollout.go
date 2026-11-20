@@ -44,6 +44,9 @@ type Input struct {
 	Networks []cloudv1alpha1.Network
 	// NetworkClusters includes other channels when evaluating shared-network holds.
 	NetworkClusters []cloudv1alpha1.Cluster
+	// Components are the tenant components (of every cluster): an automatic
+	// Kubernetes upgrade waits until the cluster's are Ready.
+	Components []cloudv1alpha1.Component
 	// CodeEpoch is the controller observation session for shared network code.
 	CodeEpoch string
 	Holds     []cloudv1alpha1.ReleaseHold
@@ -125,7 +128,7 @@ func Compute(in Input) Result {
 		out.Problem, out.Rollout.Waiting = problem, problem
 		return out
 	}
-	m := memberInputs{channel: ch.Name, target: target, offered: OfferedMinors(content), holds: in.Holds, now: in.Now}
+	m := memberInputs{channel: ch.Name, target: target, offered: OfferedMinors(content), holds: in.Holds, now: in.Now, tenantNotReady: TenantNotReady(in.Components)}
 	var members []upgrade.Member
 	var blocked []cloudv1alpha1.BlockedCluster
 	for i := range in.Clusters {
@@ -226,6 +229,9 @@ type memberInputs struct {
 	// holds are the release holds: the freezes (HoldOf).
 	holds []cloudv1alpha1.ReleaseHold
 	now   time.Time
+	// tenantNotReady names (by cluster ID) the clusters with an enabled
+	// tenant component that is not Ready; only the Kubernetes rollout reads it.
+	tenantNotReady map[string]bool
 }
 
 // row is the cluster's place in the channel's rollout: false when it is
@@ -278,6 +284,7 @@ func (in memberInputs) row(c *cloudv1alpha1.Cluster) (r Row, wake time.Time, ok 
 	r.Target = next
 	window := convert.ClusterSpecFromAPI(c.Spec, "", nil).GetMaintenanceWindow()
 	facts := in.facts(c, next)
+	facts.TenantNotReady = in.tenantNotReady[c.Labels[cloudstore.LabelID]]
 	facts.WindowOpen, facts.NextOpen = maintenance.Open(window, in.now), maintenance.Next(window, in.now)
 	for _, g := range upgrade.Check(facts) {
 		if !g.Blocking {
@@ -568,4 +575,24 @@ func Freeze(holds []cloudv1alpha1.ReleaseHold, now time.Time) *cloudv1alpha1.Rel
 		}
 	}
 	return nil
+}
+
+// TenantNotReady names, by cluster ID, the clusters with an enabled tenant
+// component that is not Ready. A component being removed (Deleting) does
+// not count: it must not hold an upgrade back.
+func TenantNotReady(components []cloudv1alpha1.Component) map[string]bool {
+	out := map[string]bool{}
+	for i := range components {
+		c := &components[i]
+		id := c.Labels[cloudstore.LabelClusterID]
+		if id == "" || !c.DeletionTimestamp.IsZero() {
+			continue
+		}
+		switch c.Status.Phase {
+		case "Ready", "Deleting":
+		default:
+			out[id] = true
+		}
+	}
+	return out
 }

@@ -45,8 +45,9 @@ func newControllerCmd(g *globals) *cobra.Command {
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext,
 				MetricsAddr: cfg.MetricsAddr, ProbeAddr: cfg.ProbeAddr,
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace, ServiceAccount: cfg.ServiceAccount,
-				AWS: cfg.AWS, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
-				RecoverStuckReleases: cfg.RecoverStuckReleases, Recommendations: cfg.Recommendations,
+				AWS: cfg.AWS, AWSAccess: cfg.AWSAccess, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
+				RecoverStuckReleases: cfg.RecoverStuckReleases, HelmBackoffMax: cfg.HelmBackoffMax, HelmMaxFailures: cfg.HelmMaxFailures, Recommendations: cfg.Recommendations,
+				NodeGroupInstanceFamilies: cfg.NodeGroups.InstanceFamilies, NodeGroupInstanceTypes: cfg.NodeGroups.InstanceTypes,
 				ReconcileWorkers: cfg.ReconcileWorkers, AutomaticUpgrades: cfg.AutomaticUpgrades, UpgradeTimeout: cfg.UpgradeTimeout, TeardownTimeout: cfg.TeardownTimeout,
 			})
 		},

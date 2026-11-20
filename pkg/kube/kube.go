@@ -24,6 +24,7 @@ import (
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+	awss3 "github.com/upbound/provider-aws/v2/apis/namespaced/s3/v1beta1"
 	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -87,6 +88,7 @@ func Scheme() (*runtime.Scheme, error) {
 		awscwl.AddToScheme,
 		awskms.AddToScheme,
 		awssqs.AddToScheme,
+		awss3.AddToScheme,
 		awsevents.AddToScheme,
 		awseks.AddToScheme,
 		awsiam.AddToScheme,

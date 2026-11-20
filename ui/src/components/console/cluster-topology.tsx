@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { Background, MarkerType, ReactFlow, type Edge, type ReactFlowInstance } from "@xyflow/react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
@@ -40,14 +39,13 @@ export function ClusterTopology({ cluster, network }: { cluster: Cluster; networ
   const live = useAsyncQuery(load, { pollMs: 5000 });
   const safeCluster = live.data ?? (cluster.tenantId === tenantId ? cluster : undefined);
   const linkedNetwork = network && network.tenantId === tenantId && network.id === safeCluster?.spec?.network?.networkId ? network : undefined;
-  const [showNetwork, setShowNetwork] = useState(false);
   const networkId = safeCluster?.spec?.network?.networkId;
   const loadNetwork = useCallback(async (signal: AbortSignal) => {
-    if (!showNetwork || !networkId) return undefined;
+    if (!networkId) return undefined;
     const result = await api.network.getNetwork({ tenantId, networkId, live: true }, { signal });
     if (!result.network || result.network.id !== networkId || result.network.tenantId !== tenantId) throw new Error("The network architecture response did not match this cluster and tenant.");
     return result.network;
-  }, [api, tenantId, networkId, showNetwork]);
+  }, [api, tenantId, networkId]);
   const liveNetwork = useAsyncQuery(loadNetwork, { pollMs: 5000 });
   const overlayNetwork = liveNetwork.data ?? linkedNetwork;
   const [dimensions, setDimensions] = useState<ArchitectureDimensions>(new Map());
@@ -60,7 +58,8 @@ export function ClusterTopology({ cluster, network }: { cluster: Cluster; networ
       return next;
     });
   }, []);
-  const graph = useMemo(() => buildClusterArchitecture(safeCluster, dimensions, { showNetwork, network: overlayNetwork }), [safeCluster, dimensions, showNetwork, overlayNetwork]);
+  // The network is always part of the cluster topology.
+  const graph = useMemo(() => buildClusterArchitecture(safeCluster, dimensions, { showNetwork: true, network: overlayNetwork }), [safeCluster, dimensions, overlayNetwork]);
   const [selectedId, select] = useState("");
   const excludedKinds = new Set(["Addon", "Release", "Component", "Pod", "Deployment", "DaemonSet", "Service", "ConfigMap", "Secret", "Controller"]);
   const inspectorResources = graph.inventoryNodes.filter(node => !excludedKinds.has(node.data.kind));
@@ -128,7 +127,7 @@ export function ClusterTopology({ cluster, network }: { cluster: Cluster; networ
   }, [layoutKey]);
   const resourceById = new Map(inspectorResources.map(node => [node.id, node]));
   return <VStack gap={3}>
-    {showNetwork && liveNetwork.error && <Banner status="warning" title="Live network architecture unavailable" description={liveNetwork.error} />}
+    {liveNetwork.error && <Banner status="warning" title="Live network architecture unavailable" description={liveNetwork.error} />}
     {live.error && <Banner status="warning" title="Live architecture unavailable" description={live.error} />}
     {routing.error && <Banner status="warning" title="Routing unavailable" description={routing.error} />}
     {fullscreenError && <Banner status="warning" title="Fullscreen unavailable" description={fullscreenError} />}
@@ -136,13 +135,13 @@ export function ClusterTopology({ cluster, network }: { cluster: Cluster; networ
       <HStack padding={3} gap={3} wrap="wrap" hAlign="between" vAlign="center" style={{ flex: "0 0 auto", borderBlockEnd: "thin solid var(--color-border)" }}>
         <VStack gap={2} style={{ minWidth: 0 }}>
           <HStack gap={2} vAlign="center"><KubernetesIcon size="sm" /><Heading level={2}>Cluster architecture</Heading></HStack>
-          <HStack gap={2} wrap="wrap" vAlign="center"><Text type="supporting">{safeCluster?.spec?.region || "Region not reported"} · {graph.resources.length} resources{live.loading || showNetwork && liveNetwork.loading ? " · Loading…" : ""}</Text>{linkedNetwork && <Link href={`/networks/${encodeURIComponent(linkedNetwork.id)}`}>{linkedNetwork.displayName || linkedNetwork.name || linkedNetwork.id}</Link>}</HStack>
+          <HStack gap={2} wrap="wrap" vAlign="center"><Text type="supporting">{safeCluster?.spec?.region || "Region not reported"} · {graph.resources.length} resources{live.loading || liveNetwork.loading ? " · Loading…" : ""}</Text>{linkedNetwork && <Link href={`/networks/${encodeURIComponent(linkedNetwork.id)}`}>{linkedNetwork.displayName || linkedNetwork.name || linkedNetwork.id}</Link>}</HStack>
         </VStack>
-        <RefreshButton label="Refresh cluster topology" onClick={() => { live.refresh(); if (showNetwork) liveNetwork.refresh(); }} isLoading={live.refreshing || showNetwork && liveNetwork.refreshing} />
+        <RefreshButton label="Refresh cluster topology" onClick={() => { live.refresh(); liveNetwork.refresh(); }} isLoading={live.refreshing || liveNetwork.refreshing} />
       </HStack>
       <HStack padding={2} gap={3} wrap="wrap" hAlign="between" vAlign="center" aria-label="Diagram controls" role="group" style={{ flex: "0 0 auto", borderBlockEnd: "thin solid var(--color-border)" }}>
-        <HStack gap={3} wrap="wrap" vAlign="center"><Text type="supporting">Solid: route / ownership · Dashed: association / configured</Text><Text type="supporting">{showNetwork ? "Cluster + Network" : "Cluster Architecture"}</Text></HStack>
-        <HStack gap={2} wrap="wrap" vAlign="center"><CheckboxInput label="Show Network" size="sm" value={showNetwork} onChange={value => { setShowNetwork(value); select(""); }} /><Text type="supporting">{showNetwork ? "On" : "Off"}</Text><Button label="Zoom out" variant="ghost" size="sm" onClick={() => { void flow.current?.zoomOut({ duration: 0 }); }}>−</Button><Button label="Zoom in" variant="ghost" size="sm" onClick={() => { void flow.current?.zoomIn({ duration: 0 }); }}>+</Button><Button label="Fit view" variant="ghost" size="sm" onClick={fit} /><Button label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"} variant="ghost" size="sm" clickAction={toggleFullscreen} /></HStack>
+        <HStack gap={3} wrap="wrap" vAlign="center"><Text type="supporting">Solid: route / ownership · Dashed: association / configured</Text><Text type="supporting">Cluster + Network</Text></HStack>
+        <HStack gap={2} wrap="wrap" vAlign="center"><Button label="Zoom out" variant="ghost" size="sm" onClick={() => { void flow.current?.zoomOut({ duration: 0 }); }}>−</Button><Button label="Zoom in" variant="ghost" size="sm" onClick={() => { void flow.current?.zoomIn({ duration: 0 }); }}>+</Button><Button label="Fit view" variant="ghost" size="sm" onClick={fit} /><Button label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"} variant="ghost" size="sm" clickAction={toggleFullscreen} /></HStack>
       </HStack>
       {!graph.resources.length && <VStack gap={2} padding={4}><Heading level={3}>{live.loading ? "Loading cluster architecture" : "No cluster architecture reported"}</Heading><Text type="supporting">{live.loading ? "Reading current resource references." : "Refresh after the server and controller report cluster relationships. Resource inventory remains available in the Resources tab."}</Text></VStack>}
       <HStack gap={0} width="100%" vAlign="stretch" wrap="wrap" style={{ flex: "1 1 0%", minHeight: 0, overflow: "auto" }}>
@@ -181,6 +180,6 @@ export function ClusterTopology({ cluster, network }: { cluster: Cluster; networ
         </VStack>}
       </HStack>
     </Card>
-    {!!graph.diagnostics.length && !(showNetwork && liveNetwork.loading) && <Banner status="warning" title="Incomplete architecture" description={graph.diagnostics.join(" ")} />}
+    {!!graph.diagnostics.length && !liveNetwork.loading && <Banner status="warning" title="Incomplete architecture" description={graph.diagnostics.join(" ")} />}
   </VStack>;
 }

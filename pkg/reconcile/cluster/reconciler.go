@@ -43,10 +43,15 @@ type Reconciler struct {
 	// checks are when each cluster's add-on versions are checked again
 	// (recheckAddons); nil: never.
 	checks *addonChecks
+	// nodeRows throttles the writes of the node group node lists to the
+	// results bucket (writeNodeRows); nil: never throttled.
+	nodeRows *nodeRowWrites
 }
 
 // New returns the Reconciler.
-func New(d reconcile.Deps) *Reconciler { return &Reconciler{deps: d, checks: &addonChecks{}} }
+func New(d reconcile.Deps) *Reconciler {
+	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}}
+}
 
 // Target is everything a cluster is built from: its network, account and
 // the network's private subnets in the cluster's zones.
@@ -134,12 +139,18 @@ func (s *Reconciler) targetIn(ctx context.Context, tenantID string, n *model.Net
 func (s *Reconciler) RenderPlan(spec *cloudv1.ClusterSpec, row *model.Cluster, t Target) crossplaneaws.ClusterPlan {
 	p := corecluster.RenderPlan(spec, t.SubnetIDs, s.Base(row, t.Account))
 	p.SubnetObjects = t.SubnetObjects
+	// A cluster taken over gets the platform components, Karpenter's among
+	// them: its queue and node role exist for the chart's values. One that
+	// is only observed, or taken over without them, is left as it is.
+	if row.Imported && !noPlatform(row) {
+		p.Karpenter = true
+	}
 	return p
 }
 
 func (s *Reconciler) Base(row *model.Cluster, a *model.CloudAccount) crossplaneaws.ClusterPlan {
 	return crossplaneaws.ClusterPlan{
-		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: row.TenantID,
+		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: row.TenantID, AccountID: a.AccountID,
 		ClusterID: row.ID, ClusterName: row.Name, Prefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
 		Tags: row.Labels, Adoption: Adoption(row),
 	}

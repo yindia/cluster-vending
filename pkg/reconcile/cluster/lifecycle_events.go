@@ -103,6 +103,16 @@ func managedLifecycleEvents(before, after *v1.ClusterStatus) []reconcile.Note {
 }
 
 func tenantComponentEvents(name string, before, after *v1.ComponentStatus) []reconcile.Note {
+	var recovered []reconcile.Note
+	if after.GetRecoveries() > before.GetRecoveries() {
+		recovered = append(recovered, reconcile.Warning(reconcile.ReasonStuckReleaseRecovered,
+			fmt.Sprintf("component %s: %s so it installs again (recovery %d of %d)", name,
+				orDefault(after.GetLastRecovery(), "recovered its stuck Helm release"), after.GetRecoveries(), maxRecoveries)))
+	}
+	return append(recovered, tenantPhaseEvents(name, before, after)...)
+}
+
+func tenantPhaseEvents(name string, before, after *v1.ComponentStatus) []reconcile.Note {
 	sameTarget := before.GetTargetVersion() == after.GetTargetVersion() && before.GetObservedGeneration() == after.GetObservedGeneration()
 	if before.GetPhase() == after.GetPhase() && sameTarget {
 		return nil

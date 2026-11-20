@@ -1,11 +1,11 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { useRef } from "react";
 import { Text } from "@astryxdesign/core/Text";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import { HStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -26,12 +26,12 @@ export function filterActivityEvents(events: readonly Event[], filters: Activity
 
 export function ActivityEventFilters({ value, onChange, events, onRequestKinds }: { value: ActivityFilters; onChange: (value: ActivityFilters) => void; events: readonly Event[]; onRequestKinds: () => void }) {
   const kinds = [...new Set([...events.map(event => event.objectKind), ...(value.kind === "all" ? [] : [value.kind])])].sort();
-  return <HStack gap={3} wrap="wrap" vAlign="end" onFocusCapture={onRequestKinds} onPointerDownCapture={onRequestKinds}>
+  return <FilterRow label="Event filters" onFocusCapture={onRequestKinds} onPointerDownCapture={onRequestKinds}>
     <TextInput label="Search events" type="search" placeholder="Message, reason, kind or resource" value={value.search} onChange={search => onChange({ ...value, search })} hasClear autoComplete="off" width="min(100%, 24rem)" />
     <Selector label="Event kind" value={value.kind} onChange={kind => onChange({ ...value, kind })} options={[{ value: "all", label: "All kinds" }, ...kinds.map(kind => ({ value: kind, label: kind || "Unspecified kind" }))]} width="min(100%, 12rem)" />
     <CheckboxInput label="Warnings only" value={value.onlyWarnings} onChange={onlyWarnings => onChange({ ...value, onlyWarnings })} />
     <Button label="Clear activity filters" variant="ghost" onClick={() => onChange({ search: "", kind: "all", onlyWarnings: false })} />
-  </HStack>;
+  </FilterRow>;
 }
 
 function EventMessage({ message }: { message: string }) {

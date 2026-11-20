@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awss3 "github.com/upbound/provider-aws/v2/apis/namespaced/s3/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -18,42 +20,88 @@ import (
 	"github.com/yindia/cluster-vending/pkg/fault"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
+	"github.com/yindia/cluster-vending/pkg/results"
 )
 
-// driveDelete moves a DELETING cluster on: its recorded objects are
-// deleted all at once (sequence.Engine.Delete with
-// crossplaneaws.ClusterDeleteOrder; a forced deletion first releases its
-// Helm Releases, forceRelease); the Usages
-// rendered with them (see crossplaneaws.ClusterResources) make the webhook
-// hold each object until what uses it is gone, and replay its deletion
-// then: node groups before the EKS cluster before its IAM. Once every
-// recorded object is gone it deletes objects labelled with the cluster but
-// never recorded, removes the network subnet tags and the cluster's rows.
-// It reports whether the cluster is gone. Every step is idempotent: the
-// controller calls it; DeleteCluster only stores the deletion.
+// driveDelete moves a DELETING cluster on, in the reverse of its creation
+// (delete_stage.go): the workload cluster's load balancers; the tenant's
+// components; the platform's components above sequence 0, highest sequence
+// first; Karpenter's node groups; Karpenter; the EKS add-ons; then the
+// rest, which the Usages rendered with the objects order (see
+// crossplaneaws.ClusterResources: the webhook holds each object until what
+// uses it is gone and replays its deletion then): the default node group,
+// the EKS cluster, its IAM, the results bucket. A stage starts only when
+// the one before is gone, and the cluster's status says which it waits in.
+// A forced deletion first releases its Helm Releases (forceRelease), and
+// so does one whose EKS cluster is not ACTIVE: nothing is uninstalled from
+// a cluster that cannot be reached. Once every recorded object is gone it
+// deletes objects labelled with the cluster but never recorded, removes the
+// network subnet tags and the cluster's rows. It reports whether the
+// cluster is gone. Every step is idempotent: the controller calls it;
+// DeleteCluster only stores the deletion.
 func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerCluster, row.ID)
 	if err != nil {
 		return false, fmt.Errorf("list cluster resources: %w", err)
 	}
-	// First, while the controllers that made them still run: the load
-	// balancers and Karpenter's nodes the workload cluster has in the
-	// cloud, which nothing else would delete.
+	// 1. While the controllers that made them still run: the load
+	// balancers the workload cluster has in the cloud, which nothing else
+	// would delete.
 	if done, err := s.teardown(ctx, row, records); err != nil || !done {
 		return false, err
 	}
-	if row.DeleteForce {
+	active, err := s.eksActive(ctx, records)
+	if err != nil {
+		return false, err
+	}
+	if row.DeleteForce || !active {
 		if err := s.forceRelease(ctx, row); err != nil {
 			return false, err
 		}
 	}
-	// The tenant's components first, then the platform's: their charts are
-	// uninstalled while the cluster and its nodes are still there, and a
-	// tenant component may require a platform one.
+	// 2. The tenant's components, a tenant component may require a
+	// platform one.
 	if gone, err := s.deleteTenant(ctx, row); err != nil || !gone {
 		return false, err
 	}
-	if gone, err := s.deletePlatform(ctx, row, records); err != nil || !gone {
+	// 3. The platform's components above Karpenter.
+	plat, err := s.loadPlatformRemoval(ctx, row)
+	if err != nil {
+		return false, err
+	}
+	recordPlatformDeletion(ctx, row, len(plat.components) == 0)
+	if gone, err := s.removeAbove(ctx, row, plat); err != nil || !gone {
+		return false, err
+	}
+	// 4. Karpenter's node groups, while Karpenter still runs to terminate
+	// their nodes.
+	cl, err := s.loadClusterRemoval(ctx, row, records)
+	if err != nil {
+		return false, err
+	}
+	reachable := !row.DeleteForce && active && storedStatus(row).GetKubeconfigSecret() != ""
+	if !s.deleteNodeGroups(ctx, row, cl, reachable) {
+		return false, nil
+	}
+	// 5. Karpenter: its chart and IAM, then its queue, rules and node role.
+	if gone, err := s.removeKarpenterChart(ctx, row, plat); err != nil || !gone {
+		return false, err
+	}
+	if gone, err := s.removeStage(ctx, cl, crossplaneaws.DeleteStageKarpenter, stageKarpenter,
+		"removing its interruption queue, rules and targets, node role and access entry"); err != nil || !gone {
+		return false, err
+	}
+	// 6. The EKS add-ons with their pod identity associations and roles.
+	if gone, err := s.removeStage(ctx, cl, crossplaneaws.DeleteStageAddons, stageAddons,
+		"removing the add-ons, their pod identity associations and roles"); err != nil || !gone {
+		return false, err
+	}
+	// 7. The rest.
+	// The results bucket is emptied before its Bucket resource is deleted
+	// (AWS refuses a bucket with objects and the platform never
+	// force-destroys one): every pass until the Bucket is gone, so a scan that
+	// wrote late is emptied too.
+	if err := s.emptyResultsBucket(ctx, row); err != nil {
 		return false, err
 	}
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerCluster, ID: row.ID}
@@ -83,6 +131,9 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	}
 	if err := s.untagSubnets(ctx, row, namespace); err != nil {
 		return false, fmt.Errorf("untag network subnets: %w", err)
+	}
+	if err := s.deps.Store.ManagedResources().DeleteByOwner(ctx, model.OwnerClusterComponents, row.ID); err != nil {
+		return false, fmt.Errorf("forget the platform components' resources: %w", err)
 	}
 	// Records first: a failure after it is retried on the next pass (the
 	// row is still there), never leaving records without a cluster.
@@ -165,4 +216,55 @@ func kindOf(list client.ObjectList) string {
 		}
 	}
 	return name[:len(name)-len("List")]
+}
+
+// emptyResultsBucketTimeout bounds emptying a bucket in one pass (listing
+// and deleting pages of 1,000 keys); what is left is the next pass's.
+const emptyResultsBucketTimeout = time.Minute
+
+// emptyResultsBucket deletes the objects of the cluster's results bucket
+// (results.EmptyBucket, with the tenant role of its account) while the
+// Bucket managed resource exists. A failure is the cluster's status
+// (UNAVAILABLE, with the reason) and the pass is tried again; nothing of the
+// Bucket is deleted before it succeeds. A bucket already gone is empty.
+// Without S3 clients (Deps.ResultsS3 nil: tests) it does nothing.
+func (s *Reconciler) emptyResultsBucket(ctx context.Context, row *model.Cluster) error {
+	if s.deps.ResultsS3 == nil {
+		return nil
+	}
+	prefix := crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name)
+	account, err := s.deps.Store.Tenants().GetCloudAccountByID(ctx, row.TenantID, row.CloudAccountID)
+	if err != nil {
+		return fmt.Errorf("read the cluster's account: %w", storeError(err))
+	}
+	err = s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: account.Namespace, Name: crossplaneaws.ResultsBucketObjectName(prefix)}, &awss3.Bucket{})
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil // no Bucket (an imported cluster's, or already deleted): nothing to empty
+	}
+	if err != nil {
+		return fmt.Errorf("read the results Bucket: %w", err)
+	}
+	bucket := crossplaneaws.ResultsBucketName(prefix, account.AccountID, row.Region, row.ID)
+	fail := func(why string, cause error) error {
+		s.logger().WarnContext(ctx, "results bucket not emptied", "cluster_id", row.ID, "bucket", bucket, "error", cause)
+		return fault.New(fault.Unavailable, fmt.Sprintf("deleting; cannot empty the results bucket %s yet (%s); retrying", bucket, why))
+	}
+	access, err := s.deps.AWSAccess(ctx, account)
+	if err != nil {
+		return fail("the account cannot be reached", err)
+	}
+	client, err := s.deps.ResultsS3(access, row.Region)
+	if err != nil {
+		return fail("the account cannot be reached", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, emptyResultsBucketTimeout)
+	defer cancel()
+	n, err := results.EmptyBucket(ctx, client, bucket)
+	if err != nil {
+		return fail(results.Notice(err), err)
+	}
+	if n > 0 {
+		s.logger().InfoContext(ctx, "results bucket emptied", "cluster_id", row.ID, "bucket", bucket, "objects", n)
+	}
+	return nil
 }

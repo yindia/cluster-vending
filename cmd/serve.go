@@ -29,8 +29,10 @@ func newServeCmd(g *globals) *cobra.Command {
 			"The server validates requests and stores the desired state as\n" +
 			"CloudAccount, Network and Cluster objects in the tenants' namespaces of\n" +
 			"the management cluster. It reconciles nothing, installs nothing and\n" +
-			"makes no AWS call: `cluster-vending controller` does, and installs the\n" +
-			"custom resource definitions the server waits for at startup.\n\n" +
+			"calls AWS only to read the scan results in the clusters' results\n" +
+			"buckets (read-only, through each account's tenant role): `cluster-vending\n" +
+			"controller` does the rest, and installs the custom resource definitions\n" +
+			"the server waits for at startup.\n\n" +
 			"Who may call the API is the \"auth\" section of the settings file\n" +
 			"(--config): OIDC issuers whose bearer tokens are accepted and the rules\n" +
 			"that give their callers roles. Without it nothing is authenticated\n" +
@@ -85,6 +87,8 @@ func newServeCmd(g *globals) *cobra.Command {
 				// minor its release channel offers.
 				Releases: catalog,
 				Logger:   g.logger,
+				// The allowlist of user node groups' machines.
+				NodeGroupInstanceFamilies: cfg.NodeGroups.InstanceFamilies, NodeGroupInstanceTypes: cfg.NodeGroups.InstanceTypes,
 			}
 			var ready atomic.Bool
 			done, err := management.Start(ctx, mgr, &ready)
@@ -101,10 +105,17 @@ func newServeCmd(g *globals) *cobra.Command {
 				}
 			}()
 			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
+			// The scan results are read from the clusters' buckets, through
+			// each account's tenant role, read-only (docs/design/
+			// cluster-results-s3.md); nothing else of AWS is called.
+			results, err := server.NewResultsStore(ctx, cfg.AWSAccess)
+			if err != nil {
+				return err
+			}
 			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
-				server.WithCatalog(catalog),
-				// What account onboarding prints; the server makes no AWS call.
-				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN}))
+				server.WithCatalog(catalog), server.WithResults(results),
+				// What account onboarding prints.
+				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN, ServerPrincipalARN: cfg.ServerPrincipalARN()}))
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}

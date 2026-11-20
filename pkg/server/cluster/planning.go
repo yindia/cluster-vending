@@ -135,6 +135,9 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 	if warning := crossplaneaws.DedicatedPoolWarning(final.NodePool); warning != "" {
 		plan.Warnings = append(plan.Warnings, warning)
 	}
+	if stored, err := reconcilecluster.SpecOf(row); err == nil && slices.Contains(req.GetUpdateMask().GetPaths(), pathNodeGroups) {
+		plan.Changes = append(plan.Changes, nodeGroupChanges(stored, spec)...)
+	}
 	capsuleVersions, err := s.planNaaS(ctx, row, spec, plan)
 	if err != nil {
 		return nil, err

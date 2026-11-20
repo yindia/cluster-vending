@@ -15,6 +15,7 @@ import "cloud/v1/freeze.proto";
 import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
+import "cloud/v1/node_group.proto";
 import "cloud/v1/node_pool.proto";
 import "cloud/v1/recommendation.proto";
 import "google/protobuf/timestamp.proto";
@@ -110,7 +111,7 @@ message ClusterSpec {
   option (buf.validate.message).cel = {
     id: "aws.instance_types"
     message: "AWS instance types look like m6i.large"
-    expression: "!has(this.aws) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))"
+    expression: "!has(this.aws) || !has(this.default_node_pool) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))"
   };
 
   option (buf.validate.message).cel = {
@@ -159,6 +160,11 @@ message ClusterSpec {
 
   // --- Constraints for every non-AWS provider ---
   option (buf.validate.message).cel = {
+    id: "node_groups.unique_names"
+    message: "node group names must be unique"
+    expression: "this.node_groups.all(g, this.node_groups.exists_one(h, h.name == g.name))"
+  };
+  option (buf.validate.message).cel = {
     id: "oidc_aws_only"
     message: "only AWS takes access.oidc"
     expression: "has(this.aws) || !has(this.access.oidc)"
@@ -166,7 +172,7 @@ message ClusterSpec {
   option (buf.validate.message).cel = {
     id: "single_instance_type"
     message: "only AWS accepts more than one instance type"
-    expression: "has(this.aws) || size(this.default_node_pool.instance_types) == 1"
+    expression: "has(this.aws) || !has(this.default_node_pool) || size(this.default_node_pool.instance_types) == 1"
   };
 
   // Region the cluster runs in. Immutable.
@@ -186,9 +192,11 @@ message ClusterSpec {
   // Control plane settings. Optional; every field has a default.
   ControlPlaneSpec control_plane = 3;
 
-  // The node pool created together with the cluster, changed through
-  // UpdateCluster.
-  NodePoolSpec default_node_pool = 4 [(buf.validate.field).required = true];
+  // The default managed node group: the platform's system group, which runs
+  // Karpenter and CoreDNS. Optional: when omitted the platform fills it.
+  // Its taints, labels and scaling are managed by the platform; UpdateCluster
+  // refuses a change to them (FAILED_PRECONDITION).
+  NodePoolSpec default_node_pool = 4;
 
   // Cloud tags are the cluster's labels (Cluster.labels).
   reserved 5;
@@ -232,6 +240,11 @@ message ClusterSpec {
   // managed Helm installation. Existing tenant workloads and CRDs may remain.
   // cert-manager is an external prerequisite and is not installed by this flag.
   optional bool naas = 15;
+
+  // User node groups: further Karpenter NodePools, each with its own
+  // EC2NodeClass (docs/design/karpenter-node-groups.md). At most 20. One
+  // update-mask path: the list is compared whole.
+  repeated NodeGroupSpec node_groups = 16 [(buf.validate.field).repeated.max_items = 20];
 
   // The cloud the cluster runs on. Exactly one must be set, even if empty
   // (e.g. `aws: {}`).
@@ -502,6 +515,9 @@ message ClusterStatus {
   // last applied.
   CodeChange code_change = 51;
 
+  // Node groups as observed: the platform group first, then the user's.
+  repeated NodeGroupStatus node_groups = 52;
+
   // Read-only topology from scoped live managed-resource inventory. Unset in
   // older stored snapshots; missing links do not prove absence or reachability.
   ClusterArchitecture architecture = 20;
@@ -638,6 +654,41 @@ message PlatformComponent {
   int32 recoveries = 10;
   // Last version observed Ready; retained while the target version is upgrading.
   string installed_version = 11;
+
+  // The chart version Helm has deployed (Release.status.atProvider.version)
+  // and its Helm revision, for the chart the phase is about.
+  string chart_version = 12;
+  int32 revision = 13;
+
+  // Digest of the Release spec (chart, version, rendered values) the
+  // platform applied for that chart; a new one starts the retries over.
+  string digest = 14;
+
+  // Backoff after a failed install or upgrade: the failed attempts so far
+  // (any class), the failures in a row that count toward giving up
+  // (release errors only; transient errors never count), and when the
+  // Release is tried again. After the limit (--helm-max-failures) the
+  // component is FAILED and the retry stays at its cap
+  // (--helm-backoff-max).
+  int32 attempts = 15;
+  int32 counted_failures = 16;
+  google.protobuf.Timestamp next_retry_at = 17;
+
+  // Class of the last error: "transient" (workload API unreachable, Helm's
+  // lock; retried quietly), "chart" (the chart did not come) or "release"
+  // (a hook failed, the rollout timed out, invalid values). Empty when
+  // there is no error.
+  string last_error_class = 18;
+
+  // The last time the platform recovered a stuck Helm release of this
+  // component, and what it did (rolled back to revision N, uninstalled,
+  // deleted a failed hook Job). Empty when it never did.
+  string last_recovery = 19;
+  google.protobuf.Timestamp last_recovery_at = 20;
+
+  // The Release already had this version and these values when the pass
+  // looked: nothing was written for it.
+  bool unchanged = 21;
 }
 
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in
@@ -689,6 +740,12 @@ message ClusterUpgrade {
   // upgrade waits for cluster retry.
   int32 recoveries = 11;
   bool halted = 12;
+
+  // Steps that were skipped because there was nothing to do in them: the
+  // platform or tenant components, when none of their charts changed
+  // version or values for this Kubernetes minor ("component versions
+  // unchanged"). Informational: the upgrade still passes through them.
+  repeated ClusterUpgradePhase skipped_steps = 13;
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes

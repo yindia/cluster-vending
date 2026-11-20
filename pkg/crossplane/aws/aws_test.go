@@ -27,7 +27,9 @@ func TestAWSRuntimeConfigs(t *testing.T) {
 		t.Fatalf("configs = %d, %v", len(configs), err)
 	}
 	wantPoll := map[string]string{crossplaneaws.RuntimeConfigName: "--poll=10m0s", crossplaneaws.RuntimeConfigEC2Name: "--poll=30m0s",
-		crossplaneaws.RuntimeConfigHelmName: "--poll=1m0s"}
+		crossplaneaws.RuntimeConfigHelmName: "--poll=15s"}
+	wantRate := map[string]string{crossplaneaws.RuntimeConfigName: "--max-reconcile-rate=10", crossplaneaws.RuntimeConfigEC2Name: "--max-reconcile-rate=10",
+		crossplaneaws.RuntimeConfigHelmName: "--max-reconcile-rate=50"}
 	for _, rc := range configs {
 		if rc.Namespace != "" || wantPoll[rc.Name] == "" {
 			t.Errorf("metadata = %+v", rc.ObjectMeta)
@@ -45,7 +47,7 @@ func TestAWSRuntimeConfigs(t *testing.T) {
 			t.Errorf("%s: replicas = %v, want 2", rc.Name, r)
 		}
 		c := rc.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0]
-		if c.Name != "package-runtime" || len(c.Args) != 3 || c.Args[0] != wantPoll[rc.Name] || c.Args[1] != "--max-reconcile-rate=10" ||
+		if c.Name != "package-runtime" || len(c.Args) != 3 || c.Args[0] != wantPoll[rc.Name] || c.Args[1] != wantRate[rc.Name] ||
 			c.Args[2] != "--leader-election" {
 			t.Errorf("%s: container %s args %v", rc.Name, c.Name, c.Args)
 		}
@@ -81,7 +83,7 @@ func TestAWSRuntimeConfigsIndependentHelmPoll(t *testing.T) {
 		want     string
 	}{
 		{"override", 20 * time.Second, "--poll=20s"},
-		{"legacy-zero-fallback", 0, "--poll=1m0s"},
+		{"legacy-zero-fallback", 0, "--poll=15s"},
 		{"small-positive", time.Nanosecond, "--poll=1ns"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -246,5 +248,27 @@ func TestAWSProviderConfigExternalID(t *testing.T) {
 		&crossplaneaws.CredentialsSecret{Namespace: "tenant-acme", Name: "k", Key: "credentials", Direct: true})
 	if len(direct.Spec.AssumeRoleChain) != 0 {
 		t.Errorf("direct assumeRoleChain = %+v, want none", direct.Spec.AssumeRoleChain)
+	}
+}
+
+// provider-helm reads only the workload clusters (never AWS), so it polls
+// releases every 15s and is not held to the AWS providers' reconcile rate:
+// a chart that became deployed is reported in seconds, not minutes, also
+// with ~1200 releases (100 clusters of ~12 components).
+func TestHelmProviderPollsFastWithItsOwnReconcileRate(t *testing.T) {
+	configs, err := crossplaneaws.RuntimeConfigs(crossplaneaws.DefaultProviderRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		crossplaneaws.RuntimeConfigName:     {"--poll=10m0s", "--max-reconcile-rate=10"},
+		crossplaneaws.RuntimeConfigEC2Name:  {"--poll=30m0s", "--max-reconcile-rate=10"},
+		crossplaneaws.RuntimeConfigHelmName: {"--poll=15s", "--max-reconcile-rate=50"},
+	}
+	for _, rc := range configs {
+		args := rc.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0].Args
+		if !reflect.DeepEqual(args[:2], want[rc.Name]) {
+			t.Errorf("%s args = %v, want %v first", rc.Name, args, want[rc.Name])
+		}
 	}
 }

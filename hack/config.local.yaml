@@ -31,3 +31,5 @@ http-addr: 127.0.0.1:8080
 log-format: text
 log-level: debug
 provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
+# Instance families user node groups (and the platform node group) may use; empty: any.
+node-group-instance-families: m7i,m7a,m7g,c7i,c7a,c7g,r7i,r7a,r7g

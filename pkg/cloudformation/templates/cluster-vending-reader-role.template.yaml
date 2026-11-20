@@ -4,6 +4,10 @@ Conditions:
     - !Equals
       - !Ref 'ExternalId'
       - ''
+  HasServerPrincipalArn: !Not
+    - !Equals
+      - !Ref 'ServerPrincipalArn'
+      - ''
 Description: >-
   cluster-vending reader role: read-only access for the cluster-vending platform to the networks and EKS clusters of this account (import, the access check, observation). It cannot create, change or delete
   anything.
@@ -33,6 +37,13 @@ Parameters:
     Default: cluster-vending-reader
     Description: 'Name of the IAM role, and prefix of its policies: cluster-vending-reader, or cluster-vending-<anything>-reader for a stack of its own.'
     MaxLength: 64
+    Type: String
+  ServerPrincipalArn:
+    AllowedPattern: ^$|^arn:aws[a-z-]*:iam::\d{12}:role/.+$
+    Default: ''
+    Description: >-
+      ARN of the role the cluster-vending API server runs as, which reads the cluster results buckets (read-only). cluster-vending account create fills it in from the API server. Empty: the server has no
+      AWS access, and only the management role is trusted.
     Type: String
 Resources:
   ReadClustersPolicy:
@@ -118,23 +129,50 @@ Resources:
     Properties:
       AssumeRolePolicyDocument: !If
         - HasExternalId
-        - Statement:
-            - Action:
-                - sts:AssumeRole
-              Condition:
-                StringEquals:
-                  sts:ExternalId: !Ref 'ExternalId'
-              Effect: Allow
-              Principal:
-                AWS: !Ref 'ManagementRoleArn'
-          Version: '2012-10-17'
-        - Statement:
-            - Action:
-                - sts:AssumeRole
-              Effect: Allow
-              Principal:
-                AWS: !Ref 'ManagementRoleArn'
-          Version: '2012-10-17'
+        - !If
+          - HasServerPrincipalArn
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Condition:
+                  StringEquals:
+                    sts:ExternalId: !Ref 'ExternalId'
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+                    - !Ref 'ServerPrincipalArn'
+            Version: '2012-10-17'
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Condition:
+                  StringEquals:
+                    sts:ExternalId: !Ref 'ExternalId'
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+            Version: '2012-10-17'
+        - !If
+          - HasServerPrincipalArn
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+                    - !Ref 'ServerPrincipalArn'
+            Version: '2012-10-17'
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+            Version: '2012-10-17'
       Description: Assumed by the cluster-vending platform (reader)
       ManagedPolicyArns:
         - !Ref 'ReadNetworkPolicy'

@@ -45,6 +45,14 @@ type options struct {
 	auth       authn.Options
 	catalog    reconcile.PlatformSource
 	onboarding tenant.Onboarding
+	results    cluster.ResultStore
+}
+
+// WithResults gives ClusterService where it reads scan results from: the
+// clusters' results buckets (NewResultsStore). Without it a cluster whose
+// results are in its bucket is answered with a coverage notice.
+func WithResults(store cluster.ResultStore) Option {
+	return func(o *options) { o.results = store }
 }
 
 // WithOnboarding gives TenantService.GetAccountOnboarding the platform's
@@ -86,7 +94,7 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 	o.auth.Logger = d.Logger
 	// Measure after fault translation, including refusals before the handler runs.
 	server := connect.NewServer(rpcMetrics.Interceptor, service.Faults, authn.Interceptor(o.auth))
-	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d))
+	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d, cluster.WithResults(o.results)))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d, tenant.WithOnboarding(o.onboarding)))
 	cloudv1connect.RegisterAdminServiceHandler(server, admin.NewService(d))

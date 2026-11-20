@@ -44,14 +44,24 @@ const ProviderVersion = "v2.9.0"
 //	   EKS cluster and node groups, keys, roles, policies, the OIDC
 //	   provider, log groups) are managed without Delete while their owner
 //	   exists (protect)
-const RenderVersion = 5
+//	6  Karpenter node groups: the default node group is fixed (system label
+//	   and taint, two nodes), the karpenter node role with its EC2_LINUX
+//	   access entry and the interruption queue with its EventBridge rules
+//	   are rendered, and the EBS CSI controller follows the platform pool
+//	   (docs/design/karpenter-node-groups.md)
+//	7  the bucket of the cluster's scan results with its public access
+//	   block, ownership controls, encryption, TLS-only policy and lifecycle
+//	   (results_bucket.go), for clusters the platform created
+const RenderVersion = 7
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.
 // provider-aws-sqs and provider-aws-cloudwatchevents are for Karpenter's
-// interruption queue and the EventBridge rules feeding it (components).
+// interruption queue and the EventBridge rules feeding it (karpenter.go).
+// provider-aws-s3 is for the bucket of a cluster's scan results
+// (results_bucket.go, docs/design/cluster-results-s3.md).
 var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam", "provider-aws-cloudwatchlogs",
-	"provider-aws-kms", "provider-aws-sqs", "provider-aws-cloudwatchevents"}
+	"provider-aws-kms", "provider-aws-sqs", "provider-aws-cloudwatchevents", "provider-aws-s3"}
 
 const (
 	// RuntimeConfigName is the DeploymentRuntimeConfig the AWS providers
@@ -84,11 +94,13 @@ type ProviderRuntime struct {
 	// Poll is how often an AWS provider checks each resource for drift; EC2Poll
 	// the same for provider-aws-ec2, whose network resources are many and
 	// change rarely. HelmPoll independently checks Helm release readiness;
-	// zero uses the one-minute default for callers predating this field.
+	// zero uses the 15s default for callers predating this field.
 	Poll, EC2Poll, HelmPoll time.Duration
 	// MaxReconcileRate caps a provider's reconciles per second (and so its
 	// AWS API calls).
 	MaxReconcileRate int
+	// HelmMaxReconcileRate caps provider-helm's (no AWS calls); zero: 50.
+	HelmMaxReconcileRate int
 	// Resource requests and limits of a provider's container (quantities;
 	// empty: none).
 	CPURequest, MemoryRequest, CPULimit, MemoryLimit string
@@ -102,16 +114,21 @@ type ProviderRuntime struct {
 // DefaultProviderRuntime is the providers' runtime for ~100 clusters of
 // ~80 managed resources each on one management cluster. Poll 10m (the
 // providers' own default) and 30m for EC2's many, rarely changing network
-// resources. Helm polls every minute to observe release readiness promptly,
-// without increasing AWS drift polling; at most 10 reconciles a second per provider (the providers
-// default to 100, which AWS API throttling punishes at this size). Two
+// resources. Helm polls every 15s to report release readiness within seconds,
+// without increasing AWS drift polling; at most 10 reconciles a second per AWS
+// provider (the providers default to 100, which AWS API throttling punishes at
+// this size) and 50 for provider-helm, which reads only the workload clusters
+// (~1200 releases in about 25s). Two
 // replicas with leader election: one active, one hot standby.
 func DefaultProviderRuntime() ProviderRuntime {
-	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, HelmPoll: defaultHelmPoll, MaxReconcileRate: 10,
+	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, HelmPoll: defaultHelmPoll, MaxReconcileRate: 10, HelmMaxReconcileRate: defaultHelmMaxReconcileRate,
 		CPURequest: "1", MemoryRequest: "2Gi", CPULimit: "4", MemoryLimit: "4Gi", Replicas: 2}
 }
 
-const defaultHelmPoll = time.Minute
+const (
+	defaultHelmPoll             = 15 * time.Second
+	defaultHelmMaxReconcileRate = 50
+)
 
 // leaderElectionArg turns on leader election in provider-upjet-aws
 // (v2.9.0) and provider-helm (v1.5.0): both read the same flag (default
@@ -134,12 +151,16 @@ func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, 
 	if err != nil {
 		return nil, err
 	}
-	config := func(name string, poll time.Duration, irsa bool) *pkgv1beta1.DeploymentRuntimeConfig {
+	helmRate := rt.HelmMaxReconcileRate
+	if helmRate <= 0 {
+		helmRate = defaultHelmMaxReconcileRate
+	}
+	config := func(name string, poll time.Duration, rate int, irsa bool) *pkgv1beta1.DeploymentRuntimeConfig {
 		spec := &appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{}, // required by the type; Crossplane sets it
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
 				Name: runtimeContainer, Resources: resources,
-				Args: []string{"--poll=" + poll.String(), fmt.Sprintf("--max-reconcile-rate=%d", rt.MaxReconcileRate), leaderElectionArg},
+				Args: []string{"--poll=" + poll.String(), fmt.Sprintf("--max-reconcile-rate=%d", rate), leaderElectionArg},
 			}}}},
 		}
 		if rt.Replicas > 0 {
@@ -156,8 +177,8 @@ func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, 
 		}
 		return c
 	}
-	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll, true), config(RuntimeConfigEC2Name, rt.EC2Poll, true),
-		config(RuntimeConfigHelmName, rt.HelmPoll, false)}, nil
+	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll, rt.MaxReconcileRate, true), config(RuntimeConfigEC2Name, rt.EC2Poll, rt.MaxReconcileRate, true),
+		config(RuntimeConfigHelmName, rt.HelmPoll, helmRate, false)}, nil
 }
 
 // HelmProvider is provider-helm (crossplane.HelmProvider) running with

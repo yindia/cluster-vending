@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "cloud/v1/node_group.proto";
+import "cloud/v1/node_pool.proto";
+
+// GetNodeGroupOptionsRequest asks what a tenant's node groups may use.
+message GetNodeGroupOptionsRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+}
+
+// GetNodeGroupOptionsResponse is the platform admin's allowlist for user
+// node groups (the server's node-group-instance-families and
+// node-group-instance-types settings). The server is the authority:
+// CreateCluster and UpdateCluster refuse a group outside it.
+message GetNodeGroupOptionsResponse {
+  // Allowed instance families, e.g. "m7i". Empty: any family.
+  repeated string instance_families = 1;
+  // Allowed instance types besides every type of an allowed family, e.g.
+  // "r7i.large". Empty: only the families' types (or any, when no family
+  // is listed either).
+  repeated string instance_types = 2;
+  // Architectures a group may ask for.
+  repeated Architecture architectures = 3;
+  // Capacity types a group may ask for.
+  repeated CapacityType capacity_types = 4;
+}
+
+// ListClusterNodeGroupManifestsRequest asks for the Karpenter objects of
+// one cluster's node groups.
+message ListClusterNodeGroupManifestsRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+// ListClusterNodeGroupManifestsResponse lists the platform group first,
+// then the user's groups in spec order. Empty for a cluster whose node
+// groups the platform does not manage (imported, not taken over).
+message ListClusterNodeGroupManifestsResponse {
+  repeated NodeGroupManifest node_groups = 1;
+}
+
+// NodeGroupManifest is a node group's Karpenter objects, rendered from the
+// stored spec exactly as the controller applies them to the workload
+// cluster.
+message NodeGroupManifest {
+  string name = 1;
+  // True for the platform's own group.
+  bool platform_managed = 2;
+  // The group's EC2NodeClass as YAML.
+  string ec2_node_class_yaml = 3;
+  // The group's NodePool as YAML.
+  string node_pool_yaml = 4;
+}

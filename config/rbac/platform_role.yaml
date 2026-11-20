@@ -177,6 +177,26 @@ rules:
   - patch
   - delete
   - deletecollection
+# The bucket of a cluster's scan results and its settings
+# (docs/design/cluster-results-s3.md).
+- apiGroups:
+  - s3.aws.m.upbound.io
+  resources:
+  - buckets
+  - bucketpublicaccessblocks
+  - bucketownershipcontrols
+  - bucketserversideencryptionconfigurations
+  - bucketpolicies
+  - bucketlifecycleconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
 # provider-helm: a cluster's ProviderConfig (<prefix>-helm, reaching the
 # workload cluster through its ClusterAuth's kubeconfig) is applied with the
 # cluster; Releases are installed through it, and stuck ones are released

@@ -22,14 +22,16 @@ spec:
   versionGroup: istio
   upgradeOneMinorAtATime: true
   install:
+    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    timeout: 15m
     helm:
       # Istio's own gateway chart, at the version of the other Istio charts.
       repository: https://blob.istio.io/istio-release/charts
       chart: gateway
   platformValues:
     # The cluster's default node pool: its labels, and a toleration per taint.
-    nodeSelector: ${system.nodeSelector}
-    tolerations: ${system.tolerations}
+    nodeSelector: ${platform.nodeSelector}
+    tolerations: ${platform.tolerations}
     labels:
       # What an Istio Gateway's spec.selector names: istio: ingressgateway.
       istio: ingressgateway

@@ -84,18 +84,18 @@ test("guided create reviews and sends tags, node labels, all taint effects and a
   expect(api.unexpected).toEqual([]);
 });
 
-test("edit preserves immutable values and encryption while sending sparse tag, label, taint and maintenance masks", async ({ page }) => {
+test("edit preserves platform-managed placement and encryption while sending sparse tag and maintenance masks", async ({ page }) => {
   const api = await mock(page), d = await edit(page);
   await d.getByRole("button", { name: "Cloud tags", exact: true }).click(); await input(d, "Cloud tag 1 value").fill("staging"); await d.getByRole("button", { name: "Maintenance window", exact: true }).click(); await input(d, "Maintenance start (UTC)").fill("03:00"); await d.getByRole("button", { name: "Next", exact: true }).click();
   await expect(input(d, "Initial desired nodes")).toHaveAttribute("readonly", ""); await expect(input(d, "Initial desired nodes")).toHaveValue("2");
-  await d.getByRole("button", { name: "Node labels and taints", exact: true }).click(); await input(d, "Node label 1 value").fill("compute"); await d.getByRole("button", { name: "Remove node taint 1", exact: true }).click(); await d.getByRole("button", { name: "Next", exact: true }).click();
+  await d.getByRole("button", { name: "Node labels and taints", exact: true }).click(); await expect(d).toContainText("role=worker"); await expect(d).toContainText("dedicated=payments:NO_SCHEDULE"); await expect(d.getByRole("button", { name: "Add node taint" })).toHaveCount(0); await d.getByRole("button", { name: "Next", exact: true }).click();
   await d.getByRole("button", { name: "Cluster network settings", exact: true }).click(); for (const label of ["Availability zone IDs", "Kubernetes service CIDR", "Additional cluster security groups"]) await expect(input(d, label)).toHaveAttribute("readonly", "");
   await d.getByRole("button", { name: "Secrets encryption", exact: true }).click(); await expect(input(d, "Encryption KMS key ARN")).toHaveAttribute("readonly", ""); await expect(input(d, "Encryption KMS key ARN")).toHaveValue(keyArn); await expect(d.getByRole("combobox", { name: "Encrypt Kubernetes Secrets", exact: true })).toBeDisabled();
   await d.getByRole("button", { name: "OIDC and access entries", exact: true }).click(); await expect(d.getByRole("combobox", { name: "AWS authentication mode", exact: true })).toBeDisabled();
-  await d.getByRole("button", { name: "Preview update plan", exact: true }).click(); await expect(d).toContainText("environment=staging"); await expect(d).toContainText("role=compute");
+  await d.getByRole("button", { name: "Preview update plan", exact: true }).click(); await expect(d).toContainText("environment=staging");
   const preview = api.calls.find((call) => call.method === "UpdateCluster")!.body;
-  expect(String(preview.updateMask).split(",").sort()).toEqual(["labels", "spec.defaultNodePool.labels", "spec.defaultNodePool.taints", "spec.maintenanceWindow"].sort());
-  expect(preview.cluster).toEqual({ id: clusterId, etag: "cluster-etag", labels: { environment: "staging" }, spec: { defaultNodePool: { labels: { role: "compute" } }, maintenanceWindow: { days: ["WEEKDAY_MONDAY"], start: "03:00", duration: "4h" } } });
+  expect(String(preview.updateMask).split(",").sort()).toEqual(["labels", "spec.maintenanceWindow"].sort());
+  expect(preview.cluster).toEqual({ id: clusterId, etag: "cluster-etag", labels: { environment: "staging" }, spec: { maintenanceWindow: { days: ["WEEKDAY_MONDAY"], start: "03:00", duration: "4h" } } });
   await d.getByRole("button", { name: "Apply reviewed plan", exact: true }).click(); await expect(d).toHaveCount(0); const applied = api.calls.filter((call) => call.method === "UpdateCluster")[1].body; expect(applied.cluster).toEqual(preview.cluster); expect(applied.updateMask).toBe(preview.updateMask); expect(applied.planId).toBe("guided-plan"); expect(api.unexpected).toEqual([]);
 });
 
@@ -112,28 +112,70 @@ test("mobile map rows keep stable input identities through key edits, removal, m
   await page.setViewportSize({ width: 375, height: 812 }); const api = await mock(page), d = await create(page);
   await d.getByRole("button", { name: "Cloud tags", exact: true }).click(); await d.getByRole("button", { name: "Add cloud tag", exact: true }).click(); await input(d, "Cloud tag 1 key").fill("team"); await input(d, "Cloud tag 1 value").fill("first");
   await d.getByRole("button", { name: "Add cloud tag", exact: true }).click(); await input(d, "Cloud tag 2 key").fill("team"); await input(d, "Cloud tag 2 value").fill("second"); const id = await input(d, "Cloud tag 2 key").getAttribute("id");
-  await d.getByRole("button", { name: "Next", exact: true }).click(); await expect(d).toContainText("Tag and label keys must be unique");
+  await d.getByRole("button", { name: "Next", exact: true }).click(); await expect(d).toContainText("Cloud tag 2: This key already appears in row 1.");
+  await expect(input(d, "Cloud tag 2 key")).toHaveAttribute("aria-invalid", "true");
   await d.getByRole("button", { name: "Remove cloud tag 1", exact: true }).click(); await expect(input(d, "Cloud tag 1 key")).toHaveAttribute("id", id!); await expect(input(d, "Cloud tag 1 value")).toHaveValue("second");
   await input(d, "Cloud tag 1 key").fill("owner"); await expect(input(d, "Cloud tag 1 key")).toBeFocused(); await d.getByRole("radio", { name: "Paste YAML", exact: true }).click(); await d.getByRole("radio", { name: "Guided form", exact: true }).click(); await d.getByRole("button", { name: "Cloud tags", exact: true }).click(); await expect(input(d, "Cloud tag 1 value")).toHaveValue("second");
   await d.getByRole("button", { name: "Next", exact: true }).click(); await expect(d.getByRole("heading", { name: "Compute", exact: true })).toBeFocused(); expect(api.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0); expect(api.unexpected).toEqual([]);
 });
 
 
-test("existing numeric taint effects hydrate, retain their selection and review without changing the effect", async ({ page }) => {
+test("edit displays the current placement and can remove every cloud tag", async ({ page }) => {
   const api = await mock(page), d = await edit(page);
+  await expect(d.locator("[data-workflow-rail]")).toContainText("Production network");
+  await expect(d.getByRole("radio")).toHaveCount(0);
+  await d.getByRole("button", { name: "Cloud tags", exact: true }).click();
+  await d.getByRole("button", { name: "Remove cloud tag 1", exact: true }).click();
+  await expect(d.getByRole("button", { name: "Add cloud tag", exact: true })).toBeFocused();
   await d.getByRole("button", { name: "Next", exact: true }).click();
-  await d.getByRole("button", { name: "Node labels and taints", exact: true }).click();
-  await expect(d.getByRole("combobox", { name: "Node taint 1 effect", exact: true })).toHaveText("No schedule");
-  await expect(input(d, "Node taint 1 key")).toHaveValue("dedicated");
-  await input(d, "Node taint 1 value").fill("batch");
   await d.getByRole("button", { name: "Next", exact: true }).click();
   await d.getByRole("button", { name: "Preview update plan", exact: true }).click();
-  await expect(d.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
-  await expect(d).toContainText("dedicated=batch:NO_SCHEDULE");
-  const preview = api.calls.find((call) => call.method === "UpdateCluster")!.body;
-  expect(preview.updateMask).toBe("spec.defaultNodePool.taints");
-  expect(preview.cluster).toEqual({ id: clusterId, etag: "cluster-etag", spec: { defaultNodePool: { taints: [{ key: "dedicated", value: "batch", effect: "TAINT_EFFECT_NO_SCHEDULE" }] } } });
-  await d.getByRole("button", { name: "Apply reviewed plan", exact: true }).click(); await expect(d).toHaveCount(0);
-  expect(api.calls.filter((call) => call.method === "UpdateCluster")[1].body.cluster).toEqual(preview.cluster);
-  expect(api.unexpected).toEqual([]);
+  await expect(d).toContainText("Remove all");
+  const preview = api.calls.filter(call => call.method === "UpdateCluster");
+  expect(preview).toHaveLength(1);
+  expect(preview[0].body).toMatchObject({ validateOnly: true, updateMask: "labels" });
+});
+
+test("cluster creation aligns repeated fields on desktop and stacks each taint on mobile", async ({ page }) => {
+  const api = await mock(page), d = await create(page);
+  await expect(d.locator("[data-workflow-rail]")).toContainText("Production network");
+
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await d.getByRole("button", { name: "Node labels and taints", exact: true }).click();
+  await d.getByRole("button", { name: "Add node taint", exact: true }).click();
+  await input(d, "Node taint 1 key").fill("dedicated");
+  await input(d, "Node taint 1 value").fill("payments");
+  await d.getByRole("button", { name: "Add node taint", exact: true }).click();
+  const key = input(d, "Node taint 2 key"), value = input(d, "Node taint 2 value");
+  const effect = d.getByRole("combobox", { name: "Node taint 2 effect", exact: true });
+  await expect(key).toBeFocused();
+  await key.fill("dedicated");
+  await value.fill("batch");
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(d).toContainText("Node taint 2: This key and effect already appear in row 1.");
+  await choose(page, d, "Node taint 2 effect", "Prefer no schedule");
+  await expect(key).not.toHaveAttribute("aria-invalid", "true");
+  const row = d.getByRole("group", { name: "Node taint 2", exact: true });
+  await row.scrollIntoViewIfNeeded();
+  const desktop = await Promise.all([key, value, effect, row.getByRole("button", { name: "Remove node taint 2" })].map(control => control.boundingBox()));
+  const centers = desktop.map(box => box!.y + box!.height / 2);
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(2);
+  await d.screenshot({ path: "/tmp/cv-create-cluster-rows.png", animations: "disabled" });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await key.fill("platform.example.com/scheduling-pool-for-specialized-workloads");
+  await row.scrollIntoViewIfNeeded();
+  const mobile = await Promise.all([key, value, effect].map(control => control.boundingBox()));
+  expect(mobile[1]!.y).toBeGreaterThan(mobile[0]!.y + mobile[0]!.height);
+  expect(mobile[2]!.y).toBeGreaterThan(mobile[1]!.y + mobile[1]!.height);
+  expect(await d.locator("[data-workflow-body]").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await expect(d.getByRole("button", { name: "Next", exact: true })).toBeInViewport();
+  await d.screenshot({ path: "/tmp/cv-create-cluster-rows-mobile.png", animations: "disabled" });
+  await d.getByRole("button", { name: "Remove node taint 1", exact: true }).click();
+  await expect(input(d, "Node taint 1 key")).toBeFocused();
+  await expect(input(d, "Node taint 1 value")).toHaveValue("batch");
+  await d.getByRole("button", { name: "Remove node taint 1", exact: true }).click();
+  await expect(d.getByRole("button", { name: "Add node taint", exact: true })).toBeFocused();
+  await d.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(d.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
+  expect(api.calls.some(call => call.method === "CreateCluster")).toBe(false);
 });

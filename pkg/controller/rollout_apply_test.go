@@ -344,3 +344,44 @@ func TestAutomaticUpgradeFinishes(t *testing.T) {
 }
 
 const config90m = 90 * time.Minute
+
+// Tenant components come after the platform's, and an automatic upgrade
+// waits for both: one that is not Ready holds the cluster back in the
+// plan, and the start rechecks the store, so a cache that has not seen
+// the component yet cannot start it either.
+func TestAutomaticUpgradeWaitsForTenantComponents(t *testing.T) {
+	for _, staleCache := range []bool{false, true} {
+		t.Run(map[bool]string{false: "plan sees it", true: "stale cache"}[staleCache], func(t *testing.T) {
+			w := newUpgradeWorld(t, twoAtOnce, "a")
+			row, err := w.store.Clusters().Get(t.Context(), upgradeTenant, w.ids["a"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			storetest.MustComponent(t, w.store, row, "grafana") // enabled, not installed yet
+			plan := w.k
+			if staleCache {
+				plan = interceptor.NewClient(w.k, interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if err := c.List(ctx, list, opts...); err != nil {
+						return err
+					}
+					if components, ok := list.(*cloudv1alpha1.ComponentList); ok {
+						components.Items = nil
+					}
+					return nil
+				}})
+			}
+
+			events := w.pass(t, true, plan, rolloutNow)
+
+			if v := w.version(t, "a"); v != "1.35" || events.count(platform.ReasonAutomaticUpgradeStarted) != 0 {
+				t.Fatalf("upgraded with a tenant component not Ready: asks for %s, %d started", v,
+					events.count(platform.ReasonAutomaticUpgradeStarted))
+			}
+			if !staleCache {
+				if rec := w.object(t, "a").Status.Rollout; rec == nil || !strings.Contains(rec.Message, "a tenant component is not Ready") {
+					t.Errorf("record = %+v, want it held by a tenant component", rec)
+				}
+			}
+		})
+	}
+}

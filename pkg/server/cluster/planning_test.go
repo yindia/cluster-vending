@@ -118,15 +118,15 @@ func TestPlanInstanceTypeChangeReplacesTheNodeGroup(t *testing.T) {
 func TestUpdateWithAStalePlanIsRefused(t *testing.T) {
 	w := appliedWorld(t)
 	ctx := t.Context()
-	spec := &cloudv1.ClusterSpec{DefaultNodePool: &cloudv1.NodePoolSpec{ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 9}}}
-	req := planRequest(w, spec, "spec.default_node_pool.scaling_config.max_size")
+	req := planRequest(w, &cloudv1.ClusterSpec{}, "labels")
+	req.Cluster.Labels = map[string]string{"env": "prod"}
 	planned, err := update(t, w, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := changesOf(planned.GetPlan(), "NodeGroup", cloudv1.PlannedAction_PLANNED_ACTION_UPDATE_IN_PLACE); len(got) != 1 ||
-		got[0].GetSpecPath() != "spec.default_node_pool.scaling_config.max_size" {
-		t.Fatalf("plan = %v, want max size in place", planned.GetPlan().GetChanges())
+		got[0].GetSpecPath() != "labels" {
+		t.Fatalf("plan = %v, want the node group's tags in place", planned.GetPlan().GetChanges())
 	}
 
 	// Something changes the node group after the plan.
@@ -156,8 +156,8 @@ func TestUpdateWithAStalePlanIsRefused(t *testing.T) {
 		t.Fatalf("apply with a fresh plan: %v, plan %q", err, res.GetPlan().GetPlanId())
 	}
 	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix + "-default"}, ng); err != nil ||
-		*ng.Spec.ForProvider.ScalingConfig.MaxSize != 9 {
-		t.Errorf("node group max size after the update: %v (%v), want 9", ng.Spec.ForProvider.ScalingConfig, err)
+		ptr.Deref(ng.Spec.ForProvider.Tags["env"], "") != "prod" {
+		t.Errorf("node group tags after the update: %v (%v), want env=prod", ng.Spec.ForProvider.Tags, err)
 	}
 }
 

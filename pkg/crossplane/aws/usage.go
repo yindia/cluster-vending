@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
+	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
+	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
@@ -90,6 +92,11 @@ var (
 	oidcKind        = UsageRef{APIVersion: awsiam.CRDGroupVersion.String(), Kind: awsiam.OpenIDConnectProvider_Kind}
 	launchTmplKind  = UsageRef{APIVersion: awsec2.CRDGroupVersion.String(), Kind: awsec2.LaunchTemplate_Kind}
 	logGroupKind    = UsageRef{APIVersion: awscwl.CRDGroupVersion.String(), Kind: awscwl.Group_Kind}
+	accessEntryKind = UsageRef{APIVersion: awseks.CRDGroupVersion.String(), Kind: awseks.AccessEntry_Kind}
+	queueKind       = UsageRef{APIVersion: awssqs.CRDGroupVersion.String(), Kind: awssqs.Queue_Kind}
+	queuePolicyKind = UsageRef{APIVersion: awssqs.CRDGroupVersion.String(), Kind: awssqs.QueuePolicy_Kind}
+	ruleKind        = UsageRef{APIVersion: awsevents.CRDGroupVersion.String(), Kind: awsevents.Rule_Kind}
+	targetKind      = UsageRef{APIVersion: awsevents.CRDGroupVersion.String(), Kind: awsevents.Target_Kind}
 )
 
 func (r UsageRef) named(name string) UsageRef { r.Name = name; return r }
@@ -128,6 +135,8 @@ func (b clusterBuilder) usagePairs() []UsagePair {
 	for _, subnet := range p.SubnetObjects {
 		pairs = append(pairs, UsagePair{Of: subnetKind.named(subnet), By: eks})
 	}
+	pairs = append(pairs, b.karpenterUsagePairs(eks)...)
+	pairs = append(pairs, b.resultsUsagePairs()...)
 	return append(pairs, b.optionUsagePairs(eks, nodeGroup)...)
 }
 

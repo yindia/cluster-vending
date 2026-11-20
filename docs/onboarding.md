@@ -20,7 +20,7 @@ named after the role.
 |---|---|---|
 | `reader` | `ec2:Describe*`; EKS `Describe*` and `List*`; IAM `Get*`/`List*` of roles, policies and OIDC providers; KMS, CloudWatch Logs, SQS and EventBridge reads | imports and the providers' observation only: the access check reports `ec2:CreateVpc` as not allowed, so no network or cluster is created |
 | `updater` | `reader`, plus changes to what exists: tags; VPC, subnet and security group rule attributes; routes and NACL entries; launch template versions; EKS cluster, node group, add-on, access entry and pod identity updates; IAM role, trust policy and policy versions; KMS key rotation and aliases; log retention; Karpenter queue attributes and targets | changing what exists, without creating or deleting anything |
-| `provisioner` | `updater`, plus creating and deleting VPCs, subnets, internet and NAT gateways, Elastic IPs, route tables and routes, NACLs, security groups, flow logs and launch templates; EKS clusters, node groups, add-ons, access entries and policies, pod identity associations and OIDC identity providers; IAM roles, inline and managed policies and OIDC providers; KMS keys and aliases; log groups; Karpenter's SQS queue and EventBridge rules | **what the controller needs today**: it creates and deletes networks and clusters |
+| `provisioner` | `updater`, plus creating and deleting VPCs, subnets, internet and NAT gateways, Elastic IPs, route tables and routes, NACLs, security groups, flow logs and launch templates; EKS clusters, node groups, add-ons, access entries and policies, pod identity associations and OIDC identity providers; IAM roles, inline and managed policies and OIDC providers; KMS keys and aliases; log groups; Karpenter's SQS queue and EventBridge rules; the S3 bucket of a cluster's scan results (buckets named `cv-*` and their objects, nothing else of S3) | **what the controller needs today**: it creates and deletes networks and clusters |
 
 Conditions limit what AWS allows to be limited:
 
@@ -38,9 +38,14 @@ the cluster and component roles need; give it to the platform only, in
 accounts meant for it, and keep service control policies as the outer
 bound.
 
-Each role trusts exactly one principal: the template's `ManagementRoleArn`
-parameter, and only when it passes the account's external ID (the
-`ExternalId` parameter, `sts:ExternalId` in the trust). The management role
+Each role trusts the template's `ManagementRoleArn` parameter and, when it
+is not empty, the `ServerPrincipalArn` parameter (the API server's principal,
+which reads the cluster results buckets, read-only), and only when they pass
+the account's external ID (the `ExternalId` parameter, `sts:ExternalId` in
+the trust). `ServerPrincipalArn` is optional: empty, only the management
+role is trusted, and the server cannot read results. An account onboarded
+before it keeps working; update its stack with the parameter to let the
+server read results. The management role
 is the platform's, shared by every tenant; the external ID is what stops
 one tenant from onboarding another tenant's account and having the
 platform act in it (the "confused deputy").
@@ -95,7 +100,7 @@ cluster-vending account create -f cloudaccount.yaml
 3. **The steps to create the role** are printed, from the account's
    onboarding (`GetAccountOnboarding` with its `id`): the template's URL on
    the API server, its parameters (`RoleName`, `ManagementRoleArn`, the
-   account's `ExternalId`) and the command that creates the stack, to run
+   account's `ExternalId`, and `ServerPrincipalArn` when the server has one) and the command that creates the stack, to run
    with your AWS credentials of the account:
 
 ```
@@ -104,12 +109,14 @@ Create the IAM role cluster-vending-provisioner in account 444455556666 with Clo
   Template:           http://127.0.0.1:8080/cloudformation/provisioner.yaml
   RoleName:           cluster-vending-provisioner
   ManagementRoleArn:  arn:aws:iam::111122223333:role/platform
+  ServerPrincipalArn:  arn:aws:iam::111122223333:role/cluster-vending-api
   ExternalId:         <the account's external ID>
 
   curl -fsSL http://127.0.0.1:8080/cloudformation/provisioner.yaml -o cluster-vending-provisioner.yaml && \
   aws cloudformation create-stack --stack-name cluster-vending-provisioner \
     --template-body file://cluster-vending-provisioner.yaml --capabilities CAPABILITY_NAMED_IAM \
     --parameters ParameterKey=ManagementRoleArn,ParameterValue=arn:aws:iam::111122223333:role/platform \
+      ParameterKey=ServerPrincipalArn,ParameterValue=arn:aws:iam::111122223333:role/cluster-vending-api \
       ParameterKey=ExternalId,ParameterValue=<the account's external ID> \
       ParameterKey=RoleName,ParameterValue=cluster-vending-provisioner \
     --region us-east-1
@@ -167,6 +174,8 @@ cluster-vending account delete --id <account id> --tenant acme [--wait]
 
 | Setting | |
 |---|---|
+| `aws-server-role-arn` | The role the API server's own credentials are (its IRSA role): the second principal the templates trust, `account create` prints it as `ServerPrincipalArn`. Not needed with `aws-source-role-arn` (that role is the principal). Neither: the parameter is left empty and the server cannot read results. |
+| `aws-region`, `aws-source-role-arn`, `aws-external-id` | How the server reaches an account to read the results buckets, as the controller does: the SDK's default region, an optional role to assume first, an optional external ID for a tenant role whose account has none. Credentials are the AWS SDK's default chain (IRSA; for local use `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment), never a setting. |
 | `aws-management-role-arn` | The role the templates trust: the controller's setting of the same name. Without it `account create` cannot say what the role trusts: `GetAccountOnboarding` fails with `FAILED_PRECONDITION`, saying so, and nothing is created. The server makes no AWS call with it. |
 
 ## Changing the templates

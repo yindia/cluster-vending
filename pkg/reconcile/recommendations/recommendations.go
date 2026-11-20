@@ -58,6 +58,13 @@ type Sampler struct {
 	Connect func(kubeconfig []byte) (recommend.Reader, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+	// Publish is given a sample that worked, before its summary is recorded:
+	// the controller computes the recommendations from the recorded usage and
+	// writes them to the cluster's results bucket. What it returns, when not
+	// empty, is a notice added to the summary's message (the results are in
+	// the Cluster object's reach only). It cannot fail the sample. Nil
+	// publishes nothing.
+	Publish func(ctx context.Context, c Cluster, summary *cloudv1.ClusterRecommendations, h recommend.History, at time.Time) string
 }
 
 func (s Sampler) now() time.Time {
@@ -120,7 +127,13 @@ func (s Sampler) Run(ctx context.Context, c Cluster) (time.Duration, error) {
 		summary.Workloads, summary.Containers = int32(len(h.Workloads)), int32(h.Containers()) //nolint:gosec // bounded by recommend.MaxContainers
 		summary.WindowDays = int32(recommend.Window / (24 * time.Hour))
 		summary.MetricsAvailable, summary.VpaAvailable, summary.Truncated = h.Metrics, h.VPA, h.Truncated
-		summary.Message = cut(message(h, notes, at))
+		summary.Message = message(h, notes, at)
+		if s.Publish != nil {
+			if notice := s.Publish(ctx, c, summary, h, at); notice != "" {
+				summary.Message = strings.TrimSpace(summary.Message + " " + notice)
+			}
+		}
+		summary.Message = cut(summary.Message)
 	}
 	raw, err := protojson.Marshal(summary)
 	if err != nil {

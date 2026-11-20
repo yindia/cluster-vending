@@ -389,3 +389,27 @@ func TestCatalogDescriptionOfADisabledComponent(t *testing.T) {
 		})
 	}
 }
+
+// --details says how Helm stands: the chart version and revision, the
+// retries with the class of the last error and when the next is, and the
+// last recovery.
+func TestComponentListDetailsSayHowHelmStands(t *testing.T) {
+	api := &componentAPI{}
+	api.details = &cloudv1.Component{Component: "gpu-operator", Version: "v25.3.0", Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM,
+		Status: &cloudv1.ComponentStatus{Phase: cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, Message: "gave up",
+			Chart: "gpu-operator", HelmState: "failed", LastError: "pre-upgrade hooks failed", Failures: 5,
+			ChartVersion: "v25.2.0", Revision: 15, Attempts: 5, CountedFailures: 5, LastErrorClass: "release",
+			NextRetryAt:  timestamppb.New(time.Date(2026, 11, 19, 10, 30, 0, 0, time.UTC)),
+			LastRecovery: "rolled back to revision 14"}}
+	var out bytes.Buffer
+
+	err := Run(t.Context(), ComponentList, Clients{Component: api}, Options{Tenant: "acme", Cluster: componentCluster, Details: true}, &out, OutputTable)
+
+	for _, want := range []string{"  deployed chart version v25.2.0, Helm revision 15\n",
+		"  retries: 5 failed attempts (5 counted), last error is release, next try at 2026-11-19 10:30:00Z\n",
+		"  last recovery: rolled back to revision 14\n"} {
+		if err != nil || !strings.Contains(out.String(), want) {
+			t.Errorf("got %v\n%s\nwant it to contain %q", err, out.String(), want)
+		}
+	}
+}

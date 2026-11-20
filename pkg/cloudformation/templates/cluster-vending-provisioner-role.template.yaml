@@ -1,8 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Conditions:
+  CreateSpotServiceLinkedRole: !Equals
+    - !Ref 'CreateSpotServiceLinkedRole'
+    - 'true'
   HasExternalId: !Not
     - !Equals
       - !Ref 'ExternalId'
+      - ''
+  HasServerPrincipalArn: !Not
+    - !Equals
+      - !Ref 'ServerPrincipalArn'
       - ''
 Description: >-
   cluster-vending provisioner role: the updater role, and creating and deleting the networks (VPC, subnets, gateways, routes, flow logs) and EKS clusters (node groups, add-ons, access, IAM roles, KMS keys,
@@ -15,6 +22,15 @@ Outputs:
     Description: 'The role''s name: spec.aws.role of the CloudAccount'
     Value: !Ref 'Role'
 Parameters:
+  CreateSpotServiceLinkedRole:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: >-
+      Create the account's EC2 Spot service-linked role (AWSServiceRoleForEC2Spot), which Karpenter's Spot nodes need. Set true only when the account does not have it yet (aws iam get-role --role-name AWSServiceRoleForEC2Spot):
+      CloudFormation fails to create a role that exists.
+    Type: String
   ExternalId:
     AllowedPattern: ^$|^[A-Za-z0-9+=,.@:/_-]{32,1224}$
     Default: ''
@@ -33,6 +49,13 @@ Parameters:
     Default: cluster-vending-provisioner
     Description: 'Name of the IAM role, and prefix of its policies: cluster-vending-provisioner, or cluster-vending-<anything>-provisioner for a stack of its own.'
     MaxLength: 64
+    Type: String
+  ServerPrincipalArn:
+    AllowedPattern: ^$|^arn:aws[a-z-]*:iam::\d{12}:role/.+$
+    Default: ''
+    Description: >-
+      ARN of the role the cluster-vending API server runs as, which reads the cluster results buckets (read-only). cluster-vending account create fills it in from the API server. Empty: the server has no
+      AWS access, and only the management role is trusted.
     Type: String
 Resources:
   ProvisionClustersPolicy:
@@ -187,6 +210,44 @@ Resources:
             Sid: ProvisionNetwork
         Version: '2012-10-17'
     Type: AWS::IAM::ManagedPolicy
+  ProvisionResultsPolicy:
+    Properties:
+      Description: 'cluster-vending provisioner role: provision results'
+      ManagedPolicyName: !Sub '${RoleName}-provision-results'
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:ListBucket
+              - s3:PutBucketTagging
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketOwnershipControls
+              - s3:DeleteBucketOwnershipControls
+              - s3:PutEncryptionConfiguration
+              - s3:PutBucketPolicy
+              - s3:DeleteBucketPolicy
+              - s3:PutLifecycleConfiguration
+              - s3:GetBucket*
+              - s3:GetEncryptionConfiguration
+              - s3:GetLifecycleConfiguration
+              - s3:GetAccelerateConfiguration
+              - s3:GetReplicationConfiguration
+            Effect: Allow
+            Resource:
+              - arn:aws:s3:::cv-*
+            Sid: ProvisionResultsBuckets
+          - Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:AbortMultipartUpload
+            Effect: Allow
+            Resource:
+              - arn:aws:s3:::cv-*/*
+            Sid: ReadWriteResultsObjects
+        Version: '2012-10-17'
+    Type: AWS::IAM::ManagedPolicy
   ReadClustersPolicy:
     Properties:
       Description: 'cluster-vending provisioner role: read clusters'
@@ -270,23 +331,50 @@ Resources:
     Properties:
       AssumeRolePolicyDocument: !If
         - HasExternalId
-        - Statement:
-            - Action:
-                - sts:AssumeRole
-              Condition:
-                StringEquals:
-                  sts:ExternalId: !Ref 'ExternalId'
-              Effect: Allow
-              Principal:
-                AWS: !Ref 'ManagementRoleArn'
-          Version: '2012-10-17'
-        - Statement:
-            - Action:
-                - sts:AssumeRole
-              Effect: Allow
-              Principal:
-                AWS: !Ref 'ManagementRoleArn'
-          Version: '2012-10-17'
+        - !If
+          - HasServerPrincipalArn
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Condition:
+                  StringEquals:
+                    sts:ExternalId: !Ref 'ExternalId'
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+                    - !Ref 'ServerPrincipalArn'
+            Version: '2012-10-17'
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Condition:
+                  StringEquals:
+                    sts:ExternalId: !Ref 'ExternalId'
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+            Version: '2012-10-17'
+        - !If
+          - HasServerPrincipalArn
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+                    - !Ref 'ServerPrincipalArn'
+            Version: '2012-10-17'
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'ManagementRoleArn'
+            Version: '2012-10-17'
       Description: Assumed by the cluster-vending platform (provisioner)
       ManagedPolicyArns:
         - !Ref 'ReadNetworkPolicy'
@@ -294,6 +382,7 @@ Resources:
         - !Ref 'UpdatePolicy'
         - !Ref 'ProvisionNetworkPolicy'
         - !Ref 'ProvisionClustersPolicy'
+        - !Ref 'ProvisionResultsPolicy'
       RoleName: !Ref 'RoleName'
       Tags:
         - Key: cluster-vending.io/role
@@ -301,6 +390,14 @@ Resources:
         - Key: managed-by
           Value: cluster-vending
     Type: AWS::IAM::Role
+  SpotServiceLinkedRole:
+    Condition: CreateSpotServiceLinkedRole
+    DeletionPolicy: Retain
+    Properties:
+      AWSServiceName: spot.amazonaws.com
+      Description: EC2 Spot, for the platform's Karpenter nodes
+    Type: AWS::IAM::ServiceLinkedRole
+    UpdateReplacePolicy: Retain
   UpdatePolicy:
     Properties:
       Description: 'cluster-vending provisioner role: update'

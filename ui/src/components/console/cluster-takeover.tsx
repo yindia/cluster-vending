@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -100,10 +101,10 @@ function ClusterTakeover({ cluster, onAccepted }: { cluster: Cluster; onAccepted
           <DetailSummary items={[{ label: "Cluster", value: review.cluster.name }, { label: "Network", value: review.network.displayName || review.network.name }, { label: "Tenant", value: tenantId }]} />
           {step === 0 ? <>
             <Text>Review every change and replacement. Stop the previous tool from managing these resources before taking ownership. CARRIED_OVER resources become platform-owned; NOT_IMPORTED resources remain outside platform management and need another owner.</Text>
-            <HStack gap={3} wrap="wrap" vAlign="end">
+            <FilterRow label="Takeover resource filters">
               <TextInput label="Search takeover resources" type="search" value={search} onChange={setSearch} hasClear />
               <Selector label="Resource kind" value={kind} onChange={setKind} options={[{ value: "all", label: "All kinds" }, ...kinds.map(value => ({ value, label: value || "Unspecified kind" }))]} />
-            </HStack>
+            </FilterRow>
             <Text type="supporting">{rows.length} of {resources.length} resources. Ownership acknowledgment covers the complete plan, including filtered-out resources.</Text>
             <ConsoleTable aria-label="Resources reviewed for cluster takeover" idKey="id" data={rows} emptyState="No resources match these filters." columns={[
               { key: "kind", header: "Kind", renderCell: ({ resource }) => <Text maxLines={1} hasTruncateTooltip>{resource.kind}</Text> },

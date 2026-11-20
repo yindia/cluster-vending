@@ -29,7 +29,7 @@ export interface ClusterForm {
 export const emptyClusterForm: ClusterForm = {
   name: "", displayName: "", networkId: "", releaseChannel: "0", upgradeMode: "1",
   kubernetesVersion: "", publicAccess: true, privateAccess: true, publicCIDRs: "",
-  instanceTypes: "m6i.large", minSize: "1", maxSize: "3", diskSize: "", capacityType: "0",
+  instanceTypes: "t3.medium", minSize: "1", maxSize: "3", diskSize: "", capacityType: "0",
   adminPrincipals: "", irsa: "default", naas: false,
   labels: "{}", nodeLabels: "{}", nodeTaints: "[]", desiredSize: "",
   maintenanceDays: "", maintenanceStart: "", maintenanceDuration: "", zoneIds: "", serviceCidr: "",
@@ -70,10 +70,10 @@ export function clusterForm(cluster: Cluster): ClusterForm {
 }
 
 // The only provider adapter in this workflow. Never infer AWS from an unknown account.
-export function clusterProvider(network: Network, accounts: readonly CloudAccount[]): string {
+export function clusterProvider(network: Network, accounts: readonly CloudAccount[], operation: "cluster.create" | "cluster.import" = "cluster.create"): string {
   const account = accounts.find((item) => item.id === network.spec?.bootstrapId);
   const provider = account?.provider.case ?? "unknown";
-  if (!supportsCapability(provider, "cluster.create")) throw new Error("This network's account has no supported cluster provider.");
+  if (!supportsCapability(provider, operation)) throw new Error("This network's account has no supported cluster provider.");
   return provider;
 }
 
@@ -91,25 +91,30 @@ const mutable = {
   privateAccess: "spec.control_plane.endpoint_access.endpoint_private_access",
   publicCIDRs: "spec.control_plane.endpoint_access.public_access_cidrs",
   instanceTypes: "spec.default_node_pool.instance_types",
-  minSize: "spec.default_node_pool.scaling_config.min_size",
-  maxSize: "spec.default_node_pool.scaling_config.max_size",
   diskSize: "spec.default_node_pool.disk_size_gb",
   capacityType: "spec.default_node_pool.capacity_type",
   adminPrincipals: "spec.access.admin_principals",
   irsa: "spec.aws.irsa",
   naas: "spec.naas",
-  labels: "labels", nodeLabels: "spec.default_node_pool.labels", nodeTaints: "spec.default_node_pool.taints",
+  labels: "labels",
   maintenanceDays: "spec.maintenance_window", maintenanceStart: "spec.maintenance_window", maintenanceDuration: "spec.maintenance_window",
   encryptionEnabled: "spec.control_plane.secrets_encryption", encryptionKeyArn: "spec.control_plane.secrets_encryption",
   oidcYaml: "spec.access.oidc", accessEntriesYaml: "spec.access.access_entries",
   ...awsMutableClusterFields,
 } as const;
 export type EditableClusterField = keyof typeof mutable;
-const createOnly = { desiredSize: "spec.default_node_pool.scaling_config.desired_size", zoneIds: "spec.network.zone_ids", serviceCidr: "spec.network.service_cidr", ...awsCreateOnlyClusterFields } as const;
+/** The default node group runs Karpenter only: the server refuses (FailedPrecondition) any change to its
+ * taints, labels or scaling, so these are set when creating a cluster and never sent in an update mask. */
+const platformManagedPool = {
+  minSize: "spec.default_node_pool.scaling_config.min_size", maxSize: "spec.default_node_pool.scaling_config.max_size",
+  nodeLabels: "spec.default_node_pool.labels", nodeTaints: "spec.default_node_pool.taints",
+} as const;
+export const platformManagedClusterFields: readonly string[] = Object.keys(platformManagedPool);
+const createOnly = { ...platformManagedPool, desiredSize: "spec.default_node_pool.scaling_config.desired_size", zoneIds: "spec.network.zone_ids", serviceCidr: "spec.network.service_cidr", ...awsCreateOnlyClusterFields } as const;
 type ClusterInputField = EditableClusterField | keyof typeof createOnly;
 const allPaths = { ...mutable, ...createOnly };
 
-export const clusterWizardSteps = ["Basics", "Compute", "Access", "Review"] as const;
+export const clusterWizardSteps = ["Cluster settings", "Compute", "Access", "Review"] as const;
 const stepFields: readonly (readonly ClusterInputField[])[] = [
   ["displayName", "labels", "releaseChannel", "upgradeMode", "kubernetesVersion", "naas", "maintenanceDays", "maintenanceStart", "maintenanceDuration"],
   ["instanceTypes", "minSize", "maxSize", "diskSize", "capacityType", "desiredSize", "nodeLabels", "nodeTaints", "awsAmiType", "launchTemplateYaml"],
@@ -130,7 +135,7 @@ export function validateClusterFormStep(form: ClusterForm, step: number, touched
 
 export interface ClusterImportForm { name: string; displayName: string; networkId: string; defaultNodeGroupName: string }
 export function buildImportCluster(tenantId: string, form: ClusterImportForm, network: Network, accounts: readonly CloudAccount[], requestId: string) {
-  clusterProvider(network, accounts);
+  clusterProvider(network, accounts, "cluster.import");
   if (network.id !== form.networkId || !network.spec?.region) throw new Error("Choose an existing network with a region.");
   if (!/^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$/.test(form.name)) throw new Error("Cluster name must be a lowercase DNS label starting with a letter, at most 40 characters.");
   if (form.displayName.length > 128) throw new Error("Display name must be at most 128 characters.");
@@ -284,7 +289,10 @@ export function buildCreateCluster(tenantId: string, form: ClusterForm, network:
 export function buildClusterUpdate(tenantId: string, baseline: Cluster, form: ClusterForm, touched: ReadonlySet<string>): UpdateClusterRequest {
   if (!baseline.etag) throw new Error("Reload the cluster: an etag is required for a reviewed update.");
   if (form.name !== baseline.name || form.networkId !== baseline.spec?.network?.networkId) throw new Error("Name and network are immutable.");
-  for (const field of touched) if (!Object.hasOwn(mutable, field)) throw new Error(`Field is immutable or unsupported: ${field}`);
+  for (const field of touched) {
+    if (platformManagedClusterFields.includes(field)) throw new Error(`The default node group is managed by the platform (it runs Karpenter only): ${field} cannot be changed.`);
+    if (!Object.hasOwn(mutable, field)) throw new Error(`Field is immutable or unsupported: ${field}`);
+  }
   const fields = [...touched] as EditableClusterField[];
   const effective = { ...clusterForm(baseline) };
   for (const field of fields) Object.assign(effective, { [field]: form[field] });

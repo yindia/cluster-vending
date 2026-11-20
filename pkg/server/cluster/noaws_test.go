@@ -162,11 +162,9 @@ func TestVersionsAreResolvedByTheReconciler(t *testing.T) {
 	}
 
 	// A change that has nothing to look up is not resolved again.
-	spec := minimalSpec()
-	spec.DefaultNodePool.ScalingConfig.MaxSize = 9
 	if _, err := w.svc.UpdateCluster(ctx, &cloudv1.UpdateClusterRequest{TenantId: worldTenant,
-		Cluster:    &cloudv1.Cluster{Id: id, Spec: spec},
-		UpdateMask: mask("spec.default_node_pool.scaling_config.max_size")}); err != nil {
+		Cluster:    &cloudv1.Cluster{Id: id, Labels: map[string]string{"env": "prod"}},
+		UpdateMask: mask("labels")}); err != nil {
 		t.Fatal(err)
 	}
 	reconcile(t, w, id)

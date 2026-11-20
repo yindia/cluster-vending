@@ -91,7 +91,7 @@ func ContentOf(rel catalog.Release) cloudv1alpha1.ReleaseContent {
 	for _, k := range rel.Kubernetes {
 		end, _ := k.EndOfSupportTime() // checked by catalog.ParseRelease
 		minor := cloudv1alpha1.KubernetesRelease{Minor: k.Minor, Default: k.Default, Channel: k.Channel, UpgradeTo: k.UpgradeTo,
-			EndOfSupport: metav1.NewTime(end)}
+			EndOfSupport: metav1.NewTime(end), NodeAMIPin: k.NodeAMIPin}
 		for _, name := range rel.ComponentNames() {
 			pin := cloudv1alpha1.ComponentPin{Name: name, Version: rel.VersionOn(k, name)}
 			values, ok := k.Values[name]

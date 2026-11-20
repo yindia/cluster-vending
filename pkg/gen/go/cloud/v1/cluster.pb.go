@@ -780,8 +780,10 @@ type ClusterSpec struct {
 	Network *ClusterNetwork `protobuf:"bytes,2,opt,name=network,proto3" json:"network,omitempty"`
 	// Control plane settings. Optional; every field has a default.
 	ControlPlane *ControlPlaneSpec `protobuf:"bytes,3,opt,name=control_plane,json=controlPlane,proto3" json:"control_plane,omitempty"`
-	// The node pool created together with the cluster, changed through
-	// UpdateCluster.
+	// The default managed node group: the platform's system group, which runs
+	// Karpenter and CoreDNS. Optional: when omitted the platform fills it.
+	// Its taints, labels and scaling are managed by the platform; UpdateCluster
+	// refuses a change to them (FAILED_PRECONDITION).
 	DefaultNodePool *NodePoolSpec `protobuf:"bytes,4,opt,name=default_node_pool,json=defaultNodePool,proto3" json:"default_node_pool,omitempty"`
 	// Who administers the cluster. Mutable.
 	Access *AccessSpec `protobuf:"bytes,6,opt,name=access,proto3" json:"access,omitempty"`
@@ -808,6 +810,10 @@ type ClusterSpec struct {
 	// managed Helm installation. Existing tenant workloads and CRDs may remain.
 	// cert-manager is an external prerequisite and is not installed by this flag.
 	Naas *bool `protobuf:"varint,15,opt,name=naas,proto3,oneof" json:"naas,omitempty"`
+	// User node groups: further Karpenter NodePools, each with its own
+	// EC2NodeClass (docs/design/karpenter-node-groups.md). At most 20. One
+	// update-mask path: the list is compared whole.
+	NodeGroups []*NodeGroupSpec `protobuf:"bytes,16,rep,name=node_groups,json=nodeGroups,proto3" json:"node_groups,omitempty"`
 	// The cloud the cluster runs on. Exactly one must be set, even if empty
 	// (e.g. `aws: {}`).
 	//
@@ -918,6 +924,13 @@ func (x *ClusterSpec) GetNaas() bool {
 		return *x.Naas
 	}
 	return false
+}
+
+func (x *ClusterSpec) GetNodeGroups() []*NodeGroupSpec {
+	if x != nil {
+		return x.NodeGroups
+	}
+	return nil
 }
 
 func (x *ClusterSpec) GetProvider() isClusterSpec_Provider {
@@ -1137,6 +1150,8 @@ type ClusterStatus struct {
 	// unset when nothing was rendered differently since the cluster was
 	// last applied.
 	CodeChange *CodeChange `protobuf:"bytes,51,opt,name=code_change,json=codeChange,proto3" json:"code_change,omitempty"`
+	// Node groups as observed: the platform group first, then the user's.
+	NodeGroups []*NodeGroupStatus `protobuf:"bytes,52,rep,name=node_groups,json=nodeGroups,proto3" json:"node_groups,omitempty"`
 	// Read-only topology from scoped live managed-resource inventory. Unset in
 	// older stored snapshots; missing links do not prove absence or reachability.
 	Architecture  *ClusterArchitecture `protobuf:"bytes,20,opt,name=architecture,proto3" json:"architecture,omitempty"`
@@ -1361,6 +1376,13 @@ func (x *ClusterStatus) GetReleaseMove() *ClusterReleaseMove {
 func (x *ClusterStatus) GetCodeChange() *CodeChange {
 	if x != nil {
 		return x.CodeChange
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetNodeGroups() []*NodeGroupStatus {
+	if x != nil {
+		return x.NodeGroups
 	}
 	return nil
 }
@@ -1630,8 +1652,37 @@ type PlatformComponent struct {
 	Recoveries int32 `protobuf:"varint,10,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
 	// Last version observed Ready; retained while the target version is upgrading.
 	InstalledVersion string `protobuf:"bytes,11,opt,name=installed_version,json=installedVersion,proto3" json:"installed_version,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The chart version Helm has deployed (Release.status.atProvider.version)
+	// and its Helm revision, for the chart the phase is about.
+	ChartVersion string `protobuf:"bytes,12,opt,name=chart_version,json=chartVersion,proto3" json:"chart_version,omitempty"`
+	Revision     int32  `protobuf:"varint,13,opt,name=revision,proto3" json:"revision,omitempty"`
+	// Digest of the Release spec (chart, version, rendered values) the
+	// platform applied for that chart; a new one starts the retries over.
+	Digest string `protobuf:"bytes,14,opt,name=digest,proto3" json:"digest,omitempty"`
+	// Backoff after a failed install or upgrade: the failed attempts so far
+	// (any class), the failures in a row that count toward giving up
+	// (release errors only; transient errors never count), and when the
+	// Release is tried again. After the limit (--helm-max-failures) the
+	// component is FAILED and the retry stays at its cap
+	// (--helm-backoff-max).
+	Attempts        int32                  `protobuf:"varint,15,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	CountedFailures int32                  `protobuf:"varint,16,opt,name=counted_failures,json=countedFailures,proto3" json:"counted_failures,omitempty"`
+	NextRetryAt     *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=next_retry_at,json=nextRetryAt,proto3" json:"next_retry_at,omitempty"`
+	// Class of the last error: "transient" (workload API unreachable, Helm's
+	// lock; retried quietly), "chart" (the chart did not come) or "release"
+	// (a hook failed, the rollout timed out, invalid values). Empty when
+	// there is no error.
+	LastErrorClass string `protobuf:"bytes,18,opt,name=last_error_class,json=lastErrorClass,proto3" json:"last_error_class,omitempty"`
+	// The last time the platform recovered a stuck Helm release of this
+	// component, and what it did (rolled back to revision N, uninstalled,
+	// deleted a failed hook Job). Empty when it never did.
+	LastRecovery   string                 `protobuf:"bytes,19,opt,name=last_recovery,json=lastRecovery,proto3" json:"last_recovery,omitempty"`
+	LastRecoveryAt *timestamppb.Timestamp `protobuf:"bytes,20,opt,name=last_recovery_at,json=lastRecoveryAt,proto3" json:"last_recovery_at,omitempty"`
+	// The Release already had this version and these values when the pass
+	// looked: nothing was written for it.
+	Unchanged     bool `protobuf:"varint,21,opt,name=unchanged,proto3" json:"unchanged,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PlatformComponent) Reset() {
@@ -1741,6 +1792,76 @@ func (x *PlatformComponent) GetInstalledVersion() string {
 	return ""
 }
 
+func (x *PlatformComponent) GetChartVersion() string {
+	if x != nil {
+		return x.ChartVersion
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetRevision() int32 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *PlatformComponent) GetDigest() string {
+	if x != nil {
+		return x.Digest
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetAttempts() int32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *PlatformComponent) GetCountedFailures() int32 {
+	if x != nil {
+		return x.CountedFailures
+	}
+	return 0
+}
+
+func (x *PlatformComponent) GetNextRetryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextRetryAt
+	}
+	return nil
+}
+
+func (x *PlatformComponent) GetLastErrorClass() string {
+	if x != nil {
+		return x.LastErrorClass
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetLastRecovery() string {
+	if x != nil {
+		return x.LastRecovery
+	}
+	return ""
+}
+
+func (x *PlatformComponent) GetLastRecoveryAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastRecoveryAt
+	}
+	return nil
+}
+
+func (x *PlatformComponent) GetUnchanged() bool {
+	if x != nil {
+		return x.Unchanged
+	}
+	return false
+}
+
 // ClusterUpgrade is where a Kubernetes upgrade stands. An upgrade runs in
 // the order a cluster is created, one step at a time, each starting once
 // the one before is settled as AWS and Helm report it: the control plane,
@@ -1779,8 +1900,13 @@ type ClusterUpgrade struct {
 	// add-ons that failed, or did not settle within 30 minutes, applied
 	// again); halted: still not settled after the last recovery. A halted
 	// upgrade waits for cluster retry.
-	Recoveries    int32 `protobuf:"varint,11,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
-	Halted        bool  `protobuf:"varint,12,opt,name=halted,proto3" json:"halted,omitempty"`
+	Recoveries int32 `protobuf:"varint,11,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
+	Halted     bool  `protobuf:"varint,12,opt,name=halted,proto3" json:"halted,omitempty"`
+	// Steps that were skipped because there was nothing to do in them: the
+	// platform or tenant components, when none of their charts changed
+	// version or values for this Kubernetes minor ("component versions
+	// unchanged"). Informational: the upgrade still passes through them.
+	SkippedSteps  []ClusterUpgradePhase `protobuf:"varint,13,rep,packed,name=skipped_steps,json=skippedSteps,proto3,enum=cloud.v1.ClusterUpgradePhase" json:"skipped_steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1897,6 +2023,13 @@ func (x *ClusterUpgrade) GetHalted() bool {
 		return x.Halted
 	}
 	return false
+}
+
+func (x *ClusterUpgrade) GetSkippedSteps() []ClusterUpgradePhase {
+	if x != nil {
+		return x.SkippedSteps
+	}
+	return nil
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes
@@ -2316,7 +2449,7 @@ var File_cloud_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x1acloud/v1/code_change.proto\x1a\x18cloud/v1/component.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/freeze.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1dcloud/v1/recommendation.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
+	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x1acloud/v1/code_change.proto\x1a\x18cloud/v1/component.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/freeze.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x19cloud/v1/node_group.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1dcloud/v1/recommendation.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aCluster\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
@@ -2336,24 +2469,26 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"updateTime\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd3\x19\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd9\x1b\n" +
 	"\vClusterSpec\x12/\n" +
 	"\x06region\x18\x01 \x01(\tB\x17\xbaH\x14r\x12\x10\x01\x18@2\f^[a-z0-9-]+$R\x06region\x12:\n" +
 	"\anetwork\x18\x02 \x01(\v2\x18.cloud.v1.ClusterNetworkB\x06\xbaH\x03\xc8\x01\x01R\anetwork\x12?\n" +
-	"\rcontrol_plane\x18\x03 \x01(\v2\x1a.cloud.v1.ControlPlaneSpecR\fcontrolPlane\x12J\n" +
-	"\x11default_node_pool\x18\x04 \x01(\v2\x16.cloud.v1.NodePoolSpecB\x06\xbaH\x03\xc8\x01\x01R\x0fdefaultNodePool\x12,\n" +
+	"\rcontrol_plane\x18\x03 \x01(\v2\x1a.cloud.v1.ControlPlaneSpecR\fcontrolPlane\x12B\n" +
+	"\x11default_node_pool\x18\x04 \x01(\v2\x16.cloud.v1.NodePoolSpecR\x0fdefaultNodePool\x12,\n" +
 	"\x06access\x18\x06 \x01(\v2\x14.cloud.v1.AccessSpecR\x06access\x12K\n" +
 	"\x0frelease_channel\x18\b \x01(\x0e2\x18.cloud.v1.ReleaseChannelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x0ereleaseChannel\x125\n" +
 	"\x04tier\x18\t \x01(\x0e2\x15.cloud.v1.ClusterTierB\n" +
 	"\xbaH\x05\x82\x01\x02\x10\x01\x18\x01R\x04tier\x12B\n" +
 	"\fupgrade_mode\x18\r \x01(\x0e2\x15.cloud.v1.UpgradeModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vupgradeMode\x12J\n" +
 	"\x12maintenance_window\x18\x0e \x01(\v2\x1b.cloud.v1.MaintenanceWindowR\x11maintenanceWindow\x12\x17\n" +
-	"\x04naas\x18\x0f \x01(\bH\x01R\x04naas\x88\x01\x01\x12,\n" +
+	"\x04naas\x18\x0f \x01(\bH\x01R\x04naas\x88\x01\x01\x12B\n" +
+	"\vnode_groups\x18\x10 \x03(\v2\x17.cloud.v1.NodeGroupSpecB\b\xbaH\x05\x92\x01\x02\x10\x14R\n" +
+	"nodeGroups\x12,\n" +
 	"\x03aws\x18\n" +
-	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\x80\x14\xbaH\xfc\x13\x1a\x8f\x01\n" +
+	" \x01(\v2\x18.cloud.v1.AwsClusterSpecH\x00R\x03aws:\xca\x15\xbaH\xc6\x15\x1a\x8f\x01\n" +
 	"\n" +
-	"aws.region\x12,region must be an AWS region, e.g. us-east-1\x1aS!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')\x1a\xa8\x01\n" +
-	"\x12aws.instance_types\x12&AWS instance types look like m6i.large\x1aj!has(this.aws) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))\x1a\xd4\x02\n" +
+	"aws.region\x12,region must be an AWS region, e.g. us-east-1\x1aS!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')\x1a\xc9\x01\n" +
+	"\x12aws.instance_types\x12&AWS instance types look like m6i.large\x1a\x8a\x01!has(this.aws) || !has(this.default_node_pool) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))\x1a\xd4\x02\n" +
 	"\x14aws.admin_principals\x12\x8a\x01AWS admin principals must be IAM role or user ARNs, not service-linked roles (role/aws-service-role/...: EKS manages their access entries)\x1a\xae\x01!has(this.aws) || this.access.admin_principals.all(p, p.matches('^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$') && !p.contains(':role/aws-service-role/'))\x1a\xe4\x01\n" +
 	"\x1aaws.admin_access_auth_mode\x12Xadmin_principals need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)\x1al!has(this.aws) || size(this.access.admin_principals) == 0 || this.aws.access_config.authentication_mode != 3\x1a\x92\x01\n" +
 	"\x0faws.no_pod_cidr\x12PAWS pods take IPs from the VPC subnets (VPC CNI); network.pod_cidr must be empty\x1a-!has(this.aws) || this.network.pod_cidr == ''\x1a\xfe\x01\n" +
@@ -2361,16 +2496,17 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x15aws.service_cidr_size\x12#EKS service_cidr must be /12 to /24\x1ak!has(this.aws) || this.network.service_cidr == '' || this.network.service_cidr.matches('/(1[2-9]|2[0-4])$')\x1a\xb4\x03\n" +
 	"\x1cpublic_access_cidrs_required\x12\x86\x01control_plane.endpoint_access.public_access_cidrs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)\x1a\x8a\x02has(this.control_plane) && has(this.control_plane.endpoint_access) && (size(this.control_plane.endpoint_access.public_access_cidrs) > 0 || (has(this.control_plane.endpoint_access.endpoint_public_access) && !this.control_plane.endpoint_access.endpoint_public_access))\x1a\xe2\x01\n" +
 	"\x1caws.access_entries_auth_mode\x12Vaccess_entries need authentication_mode API or API_AND_CONFIG_MAP (EKS access entries)\x1aj!has(this.aws) || size(this.access.access_entries) == 0 || this.aws.access_config.authentication_mode != 3\x1a\xc0\x01\n" +
-	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1aT\n" +
-	"\roidc_aws_only\x12\x1aonly AWS takes access.oidc\x1a'has(this.aws) || !has(this.access.oidc)\x1a\x87\x01\n" +
-	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aAhas(this.aws) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
+	"\x1daws.access_entries_not_admins\x12Ha principal is either in admin_principals or in access_entries, not both\x1aUthis.access.access_entries.all(e, !(e.principal_arn in this.access.admin_principals))\x1a\x86\x01\n" +
+	"\x18node_groups.unique_names\x12\x1fnode group names must be unique\x1aIthis.node_groups.all(g, this.node_groups.exists_one(h, h.name == g.name))\x1aT\n" +
+	"\roidc_aws_only\x12\x1aonly AWS takes access.oidc\x1a'has(this.aws) || !has(this.access.oidc)\x1a\xa7\x01\n" +
+	"\x14single_instance_type\x12,only AWS accepts more than one instance type\x1aahas(this.aws) || !has(this.default_node_pool) || size(this.default_node_pool.instance_types) == 1B\x11\n" +
 	"\bprovider\x12\x05\xbaH\x02\b\x01B\a\n" +
 	"\x05_naasJ\x04\b\x05\x10\x06J\x04\b\a\x10\bR\x04tagsR\x10existing_cluster\"\xb4\x03\n" +
 	"\x11MaintenanceWindow\x12:\n" +
 	"\x04days\x18\x01 \x03(\x0e2\x11.cloud.v1.WeekdayB\x13\xbaH\x10\x92\x01\r\x10\a\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x04days\x12<\n" +
 	"\x05start\x18\x02 \x01(\tB&\xbaH#r!2\x1f^([01][0-9]|2[0-3]):[0-5][0-9]$R\x05start\x12\x1a\n" +
 	"\bduration\x18\x03 \x01(\tR\bduration:\x88\x02\xbaH\x84\x02\x1a\x81\x02\n" +
-	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xef\v\n" +
+	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xab\f\n" +
 	"\rClusterStatus\x12)\n" +
 	"\x04tier\x18< \x01(\x0e2\x15.cloud.v1.ClusterTierR\x04tier\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
@@ -2403,7 +2539,9 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\bteardown\x181 \x01(\v2\x19.cloud.v1.ClusterTeardownR\bteardown\x12?\n" +
 	"\frelease_move\x182 \x01(\v2\x1c.cloud.v1.ClusterReleaseMoveR\vreleaseMove\x125\n" +
 	"\vcode_change\x183 \x01(\v2\x14.cloud.v1.CodeChangeR\n" +
-	"codeChange\x12A\n" +
+	"codeChange\x12:\n" +
+	"\vnode_groups\x184 \x03(\v2\x19.cloud.v1.NodeGroupStatusR\n" +
+	"nodeGroups\x12A\n" +
 	"\farchitecture\x18\x14 \x01(\v2\x1d.cloud.v1.ClusterArchitectureR\farchitectureB\n" +
 	"\n" +
 	"\bproviderJ\x04\b0\x101R\rupgrade_pause\"\xca\x02\n" +
@@ -2424,7 +2562,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\rchannel_minor\x18\x02 \x01(\tR\fchannelMinor\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\tR\tavailable\x12\x16\n" +
 	"\x06ending\x18\x04 \x01(\bR\x06ending\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage\"\xfa\x02\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\"\x8d\x06\n" +
 	"\x11PlatformComponent\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12.\n" +
@@ -2441,7 +2579,17 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"recoveries\x18\n" +
 	" \x01(\x05R\n" +
 	"recoveries\x12+\n" +
-	"\x11installed_version\x18\v \x01(\tR\x10installedVersion\"\x8a\x04\n" +
+	"\x11installed_version\x18\v \x01(\tR\x10installedVersion\x12#\n" +
+	"\rchart_version\x18\f \x01(\tR\fchartVersion\x12\x1a\n" +
+	"\brevision\x18\r \x01(\x05R\brevision\x12\x16\n" +
+	"\x06digest\x18\x0e \x01(\tR\x06digest\x12\x1a\n" +
+	"\battempts\x18\x0f \x01(\x05R\battempts\x12)\n" +
+	"\x10counted_failures\x18\x10 \x01(\x05R\x0fcountedFailures\x12>\n" +
+	"\rnext_retry_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\vnextRetryAt\x12(\n" +
+	"\x10last_error_class\x18\x12 \x01(\tR\x0elastErrorClass\x12#\n" +
+	"\rlast_recovery\x18\x13 \x01(\tR\flastRecovery\x12D\n" +
+	"\x10last_recovery_at\x18\x14 \x01(\v2\x1a.google.protobuf.TimestampR\x0elastRecoveryAt\x12\x1c\n" +
+	"\tunchanged\x18\x15 \x01(\bR\tunchanged\"\xce\x04\n" +
 	"\x0eClusterUpgrade\x12!\n" +
 	"\ffrom_version\x18\x01 \x01(\tR\vfromVersion\x12\x1d\n" +
 	"\n" +
@@ -2460,7 +2608,8 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"recoveries\x18\v \x01(\x05R\n" +
 	"recoveries\x12\x16\n" +
-	"\x06halted\x18\f \x01(\bR\x06halted\"\xa5\x01\n" +
+	"\x06halted\x18\f \x01(\bR\x06halted\x12B\n" +
+	"\rskipped_steps\x18\r \x03(\x0e2\x1d.cloud.v1.ClusterUpgradePhaseR\fskippedSteps\"\xa5\x01\n" +
 	"\x17ClusterUpgradeNodeGroup\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\ffrom_version\x18\x02 \x01(\tR\vfromVersion\x12\x1d\n" +
@@ -2600,22 +2749,24 @@ var file_cloud_v1_cluster_proto_goTypes = []any{
 	(*ControlPlaneSpec)(nil),              // 25: cloud.v1.ControlPlaneSpec
 	(*NodePoolSpec)(nil),                  // 26: cloud.v1.NodePoolSpec
 	(*AccessSpec)(nil),                    // 27: cloud.v1.AccessSpec
-	(*AwsClusterSpec)(nil),                // 28: cloud.v1.AwsClusterSpec
-	(*Condition)(nil),                     // 29: cloud.v1.Condition
-	(*NetworkResources)(nil),              // 30: cloud.v1.NetworkResources
-	(*AwsClusterStatus)(nil),              // 31: cloud.v1.AwsClusterStatus
-	(*ImportStatus)(nil),                  // 32: cloud.v1.ImportStatus
-	(*ImportedResource)(nil),              // 33: cloud.v1.ImportedResource
-	(*ManagedResource)(nil),               // 34: cloud.v1.ManagedResource
-	(*ClusterDeprecations)(nil),           // 35: cloud.v1.ClusterDeprecations
-	(*Event)(nil),                         // 36: cloud.v1.Event
-	(*Freeze)(nil),                        // 37: cloud.v1.Freeze
-	(*ClusterRecommendations)(nil),        // 38: cloud.v1.ClusterRecommendations
-	(*CodeChange)(nil),                    // 39: cloud.v1.CodeChange
-	(ComponentPhase)(0),                   // 40: cloud.v1.ComponentPhase
-	(ManagedResourceState)(0),             // 41: cloud.v1.ManagedResourceState
-	(*NetworkArchitectureResource)(nil),   // 42: cloud.v1.NetworkArchitectureResource
-	(*NetworkArchitectureConnection)(nil), // 43: cloud.v1.NetworkArchitectureConnection
+	(*NodeGroupSpec)(nil),                 // 28: cloud.v1.NodeGroupSpec
+	(*AwsClusterSpec)(nil),                // 29: cloud.v1.AwsClusterSpec
+	(*Condition)(nil),                     // 30: cloud.v1.Condition
+	(*NetworkResources)(nil),              // 31: cloud.v1.NetworkResources
+	(*AwsClusterStatus)(nil),              // 32: cloud.v1.AwsClusterStatus
+	(*ImportStatus)(nil),                  // 33: cloud.v1.ImportStatus
+	(*ImportedResource)(nil),              // 34: cloud.v1.ImportedResource
+	(*ManagedResource)(nil),               // 35: cloud.v1.ManagedResource
+	(*ClusterDeprecations)(nil),           // 36: cloud.v1.ClusterDeprecations
+	(*Event)(nil),                         // 37: cloud.v1.Event
+	(*Freeze)(nil),                        // 38: cloud.v1.Freeze
+	(*ClusterRecommendations)(nil),        // 39: cloud.v1.ClusterRecommendations
+	(*CodeChange)(nil),                    // 40: cloud.v1.CodeChange
+	(*NodeGroupStatus)(nil),               // 41: cloud.v1.NodeGroupStatus
+	(ComponentPhase)(0),                   // 42: cloud.v1.ComponentPhase
+	(ManagedResourceState)(0),             // 43: cloud.v1.ManagedResourceState
+	(*NetworkArchitectureResource)(nil),   // 44: cloud.v1.NetworkArchitectureResource
+	(*NetworkArchitectureConnection)(nil), // 45: cloud.v1.NetworkArchitectureConnection
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	22, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
@@ -2631,52 +2782,57 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	1,  // 10: cloud.v1.ClusterSpec.tier:type_name -> cloud.v1.ClusterTier
 	3,  // 11: cloud.v1.ClusterSpec.upgrade_mode:type_name -> cloud.v1.UpgradeMode
 	11, // 12: cloud.v1.ClusterSpec.maintenance_window:type_name -> cloud.v1.MaintenanceWindow
-	28, // 13: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
-	2,  // 14: cloud.v1.MaintenanceWindow.days:type_name -> cloud.v1.Weekday
-	1,  // 15: cloud.v1.ClusterStatus.tier:type_name -> cloud.v1.ClusterTier
-	4,  // 16: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
-	29, // 17: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
-	18, // 18: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
-	30, // 19: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
-	31, // 20: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
-	32, // 21: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
-	33, // 22: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
-	34, // 23: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
-	16, // 24: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
-	15, // 25: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
-	35, // 26: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
-	36, // 27: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
-	37, // 28: cloud.v1.ClusterStatus.freeze:type_name -> cloud.v1.Freeze
-	38, // 29: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
-	14, // 30: cloud.v1.ClusterStatus.kubernetes:type_name -> cloud.v1.ClusterKubernetes
-	13, // 31: cloud.v1.ClusterStatus.rollout:type_name -> cloud.v1.ClusterRollout
-	19, // 32: cloud.v1.ClusterStatus.teardown:type_name -> cloud.v1.ClusterTeardown
-	20, // 33: cloud.v1.ClusterStatus.release_move:type_name -> cloud.v1.ClusterReleaseMove
-	39, // 34: cloud.v1.ClusterStatus.code_change:type_name -> cloud.v1.CodeChange
-	21, // 35: cloud.v1.ClusterStatus.architecture:type_name -> cloud.v1.ClusterArchitecture
-	23, // 36: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
-	23, // 37: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
-	5,  // 38: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
-	40, // 39: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	23, // 40: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
-	6,  // 41: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	23, // 42: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	17, // 43: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
-	23, // 44: cloud.v1.ClusterUpgrade.phase_start_time:type_name -> google.protobuf.Timestamp
-	41, // 45: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
-	23, // 46: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
-	23, // 47: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
-	7,  // 48: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
-	8,  // 49: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
-	23, // 50: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
-	23, // 51: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
-	42, // 52: cloud.v1.ClusterArchitecture.resources:type_name -> cloud.v1.NetworkArchitectureResource
-	43, // 53: cloud.v1.ClusterArchitecture.connections:type_name -> cloud.v1.NetworkArchitectureConnection
-	54, // [54:54] is the sub-list for method output_type
-	54, // [54:54] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	28, // 13: cloud.v1.ClusterSpec.node_groups:type_name -> cloud.v1.NodeGroupSpec
+	29, // 14: cloud.v1.ClusterSpec.aws:type_name -> cloud.v1.AwsClusterSpec
+	2,  // 15: cloud.v1.MaintenanceWindow.days:type_name -> cloud.v1.Weekday
+	1,  // 16: cloud.v1.ClusterStatus.tier:type_name -> cloud.v1.ClusterTier
+	4,  // 17: cloud.v1.ClusterStatus.state:type_name -> cloud.v1.ClusterState
+	30, // 18: cloud.v1.ClusterStatus.conditions:type_name -> cloud.v1.Condition
+	18, // 19: cloud.v1.ClusterStatus.endpoint:type_name -> cloud.v1.ClusterEndpoint
+	31, // 20: cloud.v1.ClusterStatus.network:type_name -> cloud.v1.NetworkResources
+	32, // 21: cloud.v1.ClusterStatus.aws:type_name -> cloud.v1.AwsClusterStatus
+	33, // 22: cloud.v1.ClusterStatus.import:type_name -> cloud.v1.ImportStatus
+	34, // 23: cloud.v1.ClusterStatus.carried_over:type_name -> cloud.v1.ImportedResource
+	35, // 24: cloud.v1.ClusterStatus.managed_resources:type_name -> cloud.v1.ManagedResource
+	16, // 25: cloud.v1.ClusterStatus.upgrade:type_name -> cloud.v1.ClusterUpgrade
+	15, // 26: cloud.v1.ClusterStatus.platform_components:type_name -> cloud.v1.PlatformComponent
+	36, // 27: cloud.v1.ClusterStatus.deprecations:type_name -> cloud.v1.ClusterDeprecations
+	37, // 28: cloud.v1.ClusterStatus.recent_events:type_name -> cloud.v1.Event
+	38, // 29: cloud.v1.ClusterStatus.freeze:type_name -> cloud.v1.Freeze
+	39, // 30: cloud.v1.ClusterStatus.recommendations:type_name -> cloud.v1.ClusterRecommendations
+	14, // 31: cloud.v1.ClusterStatus.kubernetes:type_name -> cloud.v1.ClusterKubernetes
+	13, // 32: cloud.v1.ClusterStatus.rollout:type_name -> cloud.v1.ClusterRollout
+	19, // 33: cloud.v1.ClusterStatus.teardown:type_name -> cloud.v1.ClusterTeardown
+	20, // 34: cloud.v1.ClusterStatus.release_move:type_name -> cloud.v1.ClusterReleaseMove
+	40, // 35: cloud.v1.ClusterStatus.code_change:type_name -> cloud.v1.CodeChange
+	41, // 36: cloud.v1.ClusterStatus.node_groups:type_name -> cloud.v1.NodeGroupStatus
+	21, // 37: cloud.v1.ClusterStatus.architecture:type_name -> cloud.v1.ClusterArchitecture
+	23, // 38: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
+	23, // 39: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
+	5,  // 40: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
+	42, // 41: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
+	23, // 42: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	23, // 43: cloud.v1.PlatformComponent.next_retry_at:type_name -> google.protobuf.Timestamp
+	23, // 44: cloud.v1.PlatformComponent.last_recovery_at:type_name -> google.protobuf.Timestamp
+	6,  // 45: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	23, // 46: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	17, // 47: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
+	23, // 48: cloud.v1.ClusterUpgrade.phase_start_time:type_name -> google.protobuf.Timestamp
+	6,  // 49: cloud.v1.ClusterUpgrade.skipped_steps:type_name -> cloud.v1.ClusterUpgradePhase
+	43, // 50: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
+	23, // 51: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
+	23, // 52: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
+	7,  // 53: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
+	8,  // 54: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
+	23, // 55: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
+	23, // 56: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
+	44, // 57: cloud.v1.ClusterArchitecture.resources:type_name -> cloud.v1.NetworkArchitectureResource
+	45, // 58: cloud.v1.ClusterArchitecture.connections:type_name -> cloud.v1.NetworkArchitectureConnection
+	59, // [59:59] is the sub-list for method output_type
+	59, // [59:59] is the sub-list for method input_type
+	59, // [59:59] is the sub-list for extension type_name
+	59, // [59:59] is the sub-list for extension extendee
+	0,  // [0:59] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -2696,6 +2852,7 @@ func file_cloud_v1_cluster_proto_init() {
 	file_cloud_v1_import_proto_init()
 	file_cloud_v1_managed_resource_proto_init()
 	file_cloud_v1_network_proto_init()
+	file_cloud_v1_node_group_proto_init()
 	file_cloud_v1_node_pool_proto_init()
 	file_cloud_v1_recommendation_proto_init()
 	file_cloud_v1_cluster_proto_msgTypes[1].OneofWrappers = []any{

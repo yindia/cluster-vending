@@ -38,6 +38,8 @@ type accountAPI struct {
 	verified     bool
 	verifiedIn   []string // the regions VerifyCloudAccount was asked to check
 	onboardErr   error    // what GetAccountOnboarding answers instead
+	// serverPrincipal is the server's principal GetAccountOnboarding names.
+	serverPrincipal string
 	// verdict is the access check's result once verify was asked; nil:
 	// the controller never checks.
 	verdict *cloudv1.AccountAccess
@@ -68,7 +70,7 @@ func (f *accountAPI) GetAccountOnboarding(_ context.Context, req *cloudv1.GetAcc
 		name = "cluster-vending-" + role
 	}
 	ob := &cloudv1.AccountOnboarding{Role: role, RoleName: name, AccountId: req.GetAccountId(),
-		ManagementRoleArn: managementRole, TemplatePath: "/cloudformation/" + role + ".yaml"}
+		ManagementRoleArn: managementRole, TemplatePath: "/cloudformation/" + role + ".yaml", ServerPrincipalArn: f.serverPrincipal}
 	if req.GetId() != "" {
 		ob.ExternalId = externalID
 	}
@@ -356,5 +358,26 @@ func TestAccountDelete(t *testing.T) {
 				contains(t, "output", r.out, "cloudaccount/acme-prod ("+accountID+") deleted")
 			}
 		})
+	}
+}
+
+// A server that reads the results buckets has a principal the role trusts
+// too: the stack's ServerPrincipalArn parameter is printed, and left out when
+// the server has none.
+func TestAccountCreatePrintsTheServerPrincipalWhenThereIsOne(t *testing.T) {
+	const principal = "arn:aws:iam::111122223333:role/cluster-vending-api"
+	with := runAccount(t, AccountCreate, Options{Input: manifest(t, "cluster-vending-provisioner"), Server: apiServer},
+		&accountAPI{serverPrincipal: principal}, "")
+	if with.err != nil {
+		t.Fatal(with.err)
+	}
+	contains(t, "output", with.out, "ServerPrincipalArn:  "+principal, "ParameterKey=ServerPrincipalArn,ParameterValue="+principal)
+
+	without := runAccount(t, AccountCreate, Options{Input: manifest(t, "cluster-vending-provisioner"), Server: apiServer}, &accountAPI{}, "")
+	if without.err != nil {
+		t.Fatal(without.err)
+	}
+	if strings.Contains(without.out, "ServerPrincipalArn") {
+		t.Errorf("a server without a principal prints one:\n%s", without.out)
 	}
 }

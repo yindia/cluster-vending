@@ -1,5 +1,6 @@
 "use client";
 
+import { FilterRow } from "./filter-row";
 import { StackItem } from "@astryxdesign/core/Stack";
 
 import { RefreshButton } from "./refresh-button";
@@ -114,13 +115,13 @@ function ChannelSubscriberList({ channel }: { channel: ReleaseChannel }) {
     {tenantId && query.loading && <Text role="status">Loading all subscribed clusters and network metadata…</Text>}
     {query.error && <Banner status="error" title="Channel subscriptions could not be loaded" description={query.error} />}
     {query.data?.networkError && <Banner status="warning" title="Network metadata unavailable" description={`${query.data.networkError} Cluster subscriptions are retained. Network UUIDs are shown where names are unavailable, and tiers fall back to the cluster’s observed status.`} />}
-    <HStack gap={3} wrap="wrap" vAlign="end">
+    <FilterRow label="Subscribed cluster filters">
       <TextInput label="Search subscribed clusters" type="search" placeholder="Cluster, network, ID or region" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" width="min(100%, 24rem)" />
       <Selector label="Subscription cluster status" value={stateFilter} onChange={(value) => { setStateFilter(value); setPage(1); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All statuses" }, ...Object.values(ClusterState).filter((state) => typeof state === "number").map((state) => ({ value: String(state), label: label(ClusterState[state]) }))]} />
       <Selector label="Subscription rollout tier" value={tierFilter} onChange={(value) => { setTierFilter(value); setPage(1); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All tiers" }, { value: "0", label: "Tier 0" }, { value: "1", label: "Tier 1" }, { value: "2", label: "Tier 2" }, { value: "unknown", label: "Unknown / not reported" }]} />
       <Selector label="Subscription upgrade mode" value={modeFilter} onChange={(value) => { setModeFilter(value); setPage(1); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All upgrade modes" }, ...["Manual", "Automatic", "Unknown"].map((value) => ({ value, label: value }))]} />
       {hasFilters && <Button label="Clear subscription filters" variant="ghost" onClick={() => { setSearch(""); setStateFilter("all"); setTierFilter("all"); setModeFilter("all"); setPage(1); }} />}
-    </HStack>
+    </FilterRow>
     {query.data && <Text role="status" color="secondary">{filtered.length} matching / {subscribers.length} subscribed clusters · {channelName} channel · Tenant {tenantId}{query.error ? " · Last successful load; refresh failed" : ""}</Text>}
     {query.data && (visible.length ? <ConsoleTable aria-label="Channel subscribed clusters" data={visible} columns={columns} idKey="id" rowIndexStart={(currentPage - 1) * PAGE_SIZE + 1} rowCount={filtered.length} /> : !query.error && <Text>{subscribers.length ? "No subscribed clusters match the current filters." : `No subscribed clusters were returned for tenant ${tenantId} on the ${channelName} channel.`}</Text>)}
     {filtered.length > PAGE_SIZE && <Pagination label="Subscribed cluster pagination" page={currentPage} onChange={setPage} totalItems={filtered.length} pageSize={PAGE_SIZE} variant="count" />}

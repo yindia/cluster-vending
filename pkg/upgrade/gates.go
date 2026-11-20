@@ -28,6 +28,7 @@ const (
 	GatePaused       GateCode = "PAUSED"
 	GateNotReady     GateCode = "NOT_READY"
 	GatePlatform     GateCode = "PLATFORM_NOT_READY"
+	GateTenant       GateCode = "TENANT_COMPONENTS_NOT_READY"
 	GateDeprecations GateCode = "DEPRECATIONS"
 	GateWindow       GateCode = "MAINTENANCE_WINDOW"
 )
@@ -49,6 +50,9 @@ type Facts struct {
 	// Ready: the cluster is Ready; PlatformReady: every platform
 	// component is Ready.
 	Ready, PlatformReady bool
+	// TenantNotReady: an enabled tenant component is not Ready. Tenant
+	// components come after the platform's, and an upgrade waits for both.
+	TenantNotReady bool
 	// Frozen: a freeze (AdminService.Freeze: of the platform, the
 	// cluster's tenant or its channel) holds the cluster and does not let
 	// it through; FrozenMessage says which, why and until when.
@@ -102,6 +106,9 @@ func Check(f Facts) []Gate {
 	}
 	if !f.PlatformReady {
 		block(GatePlatform, "a platform component is not Ready")
+	}
+	if f.TenantNotReady {
+		block(GateTenant, "a tenant component is not Ready")
 	}
 	if message := deprecations(f); message != "" {
 		block(GateDeprecations, message)

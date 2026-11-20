@@ -47,6 +47,14 @@ const (
 	DefaultUpgradeTimeout = 90 * time.Minute
 	// DefaultTeardownTimeout: deleting a load balancer takes a minute or
 	// two, draining and terminating Karpenter's nodes a few minutes more.
+	// DefaultHelmBackoffMax caps the pause between two attempts at a failed
+	// Helm release; DefaultHelmMaxFailures is how many failures in a row that
+	// count make a component FAILED (docs/design/helm-reliability.md).
+	DefaultHelmBackoffMax  = 30 * time.Minute
+	DefaultHelmMaxFailures = 5
+	// minHelmBackoffMax is the shortest cap: the first step is a minute.
+	minHelmBackoffMax = time.Minute
+
 	DefaultTeardownTimeout = 15 * time.Minute
 )
 
@@ -76,7 +84,11 @@ var controllerSettings = []Setting{
 	{Flag: FlagInstallCatalog, Env: EnvInstallCatalog, Default: "true",
 		Usage: "on startup, create the component catalog this build ships (pkg/catalog/definitions) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
 	{Flag: FlagRecoverStuckReleases, Env: EnvRecoverStuckReleases, Default: "true",
-		Usage: "recover a platform component whose Helm release is stuck (uninstalling or pending for 10 minutes): remove the Helm record of the stuck revision in the workload cluster so the chart is installed again, at most 3 times per component version; false leaves such a component failed for a person to look at"},
+		Usage: "recover a platform or tenant component whose Helm release is stuck (pending-install, pending-upgrade, pending-rollback or uninstalling for longer than the chart's install timeout plus 2 minutes): with Helm, in the workload cluster, roll the release back to its last deployed revision (or uninstall it when none was deployed) and delete a failed hook Job it left behind, at most 3 times per component version; false leaves such a component failed for a person to look at"},
+	{Flag: FlagHelmBackoffMax, Env: EnvHelmBackoffMax, Default: DefaultHelmBackoffMax.String(),
+		Usage: "the longest pause between two attempts at a Helm release that failed to install or upgrade (the pause starts at 1m and doubles, with jitter), e.g. 30m; at least 1m"},
+	{Flag: FlagHelmMaxFailures, Env: EnvHelmMaxFailures, Default: strconv.Itoa(DefaultHelmMaxFailures),
+		Usage: "how many release failures in a row (a hook failed, the rollout timed out, invalid values; not transient API errors) make a component FAILED, with a HelmReleaseFailed event; its retries then stay at --helm-backoff-max until its version or values change or `cluster retry --component` (at least 1)"},
 	{Flag: FlagRecommendations, Env: EnvRecommendations, Default: "true",
 		Usage: "every five minutes, read each running cluster's workloads, the usage its metrics-server reports and its own Vertical Pod Autoscalers (read-only, nothing is installed there) and record a week of usage, for resource recommendations (ListClusterRecommendations); false records nothing"},
 	{Flag: FlagReconcileWorkers, Env: EnvReconcileWorkers, Default: strconv.Itoa(DefaultReconcileWorkers),
@@ -88,8 +100,11 @@ var controllerSettings = []Setting{
 	{Flag: FlagTeardownTimeout, Env: EnvTeardownTimeout, Default: DefaultTeardownTimeout.String(),
 		Usage: "how long a cluster's deletion waits for the load balancers and Karpenter nodes its controllers made to be deleted, before it goes on (what is left is reported), e.g. 30m"},
 	providerCredentialsSetting,
+	nodeGroupFamiliesSetting,
+	nodeGroupTypesSetting,
 	{Flag: FlagSkipTenantRole, Env: EnvSkipTenantRole, Default: "false",
 		Usage: "local testing only, with --provider-credentials-secret: the controller and the providers act with those keys directly, without assuming each account's tenant role (for an account whose policies forbid assuming roles); every account is then reached as that one identity"},
+	awsAccessSettings[0], awsAccessSettings[1], awsAccessSettings[2],
 }
 
 // ControllerSettings returns the settings of the controller command.
@@ -112,6 +127,11 @@ type Controller struct {
 	// RecoverStuckReleases: remove the Helm record of a platform
 	// component's stuck revision in the workload cluster.
 	RecoverStuckReleases bool
+	// HelmBackoffMax and HelmMaxFailures: how long a failed Helm release
+	// waits between attempts at most, and how many failures in a row make
+	// its component FAILED.
+	HelmBackoffMax  time.Duration
+	HelmMaxFailures int
 	// Recommendations: sample running clusters for resource
 	// recommendations.
 	Recommendations bool
@@ -125,10 +145,16 @@ type Controller struct {
 	UpgradeTimeout time.Duration
 	// TeardownTimeout bounds a cluster deletion's teardown.
 	TeardownTimeout time.Duration
+	// NodeGroups is the instance allowlist of node groups: user groups are
+	// checked by the server; the platform node group uses its families.
+	NodeGroups NodeGroupAllowlist
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,
 	// and whether keys were found in the environment.
 	AWS AWS
+	// AWSAccess is how the controller reaches tenant accounts (pkg/cloud/
+	// aws): the default region, the optional source role and external ID.
+	AWSAccess AWSAccess
 }
 
 // LoadController resolves and validates the controller settings from the
@@ -140,6 +166,12 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	aws, awsErrs := managementFromRole(v[FlagAWSManagementRoleARN])
 	errs = append(errs, awsErrs...)
 	cfg.AWS = aws
+	access, accessErrs := awsAccessFrom(v)
+	cfg.AWSAccess = access
+	errs = append(errs, accessErrs...)
+	allow, allowErrs := nodeGroupAllowlistFrom(v)
+	cfg.NodeGroups = allow
+	errs = append(errs, allowErrs...)
 	cfg.AWS.StaticKeys = staticKeysFrom(env)
 	account, err := serviceAccountRef(v[FlagLeaseNamespace], v[FlagServiceAccount])
 	if err != nil {
@@ -169,6 +201,12 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	}
 	if cfg.RecoverStuckReleases, err = strconv.ParseBool(v[FlagRecoverStuckReleases]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagRecoverStuckReleases), v[FlagRecoverStuckReleases]))
+	}
+	if cfg.HelmBackoffMax, err = time.ParseDuration(v[FlagHelmBackoffMax]); err != nil || cfg.HelmBackoffMax < minHelmBackoffMax {
+		errs = append(errs, fmt.Errorf("%s must be a duration of at least 1m like 30m, got %q", setting(FlagHelmBackoffMax), v[FlagHelmBackoffMax]))
+	}
+	if cfg.HelmMaxFailures, err = strconv.Atoi(v[FlagHelmMaxFailures]); err != nil || cfg.HelmMaxFailures < 1 {
+		errs = append(errs, fmt.Errorf("%s must be a whole number of at least 1, got %q", setting(FlagHelmMaxFailures), v[FlagHelmMaxFailures]))
 	}
 	if cfg.Recommendations, err = strconv.ParseBool(v[FlagRecommendations]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagRecommendations), v[FlagRecommendations]))

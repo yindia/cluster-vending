@@ -139,6 +139,15 @@ type Clusters interface {
 	// resource recommendations (protojson cloud.v1 ClusterRecommendations)
 	// and nothing else, like SetDeprecations.
 	SetRecommendations(ctx context.Context, tenantID, id string, recommendations model.JSON) error
+	// SetResultRef records the summary of one kind of scan result whose
+	// full data is in the cluster's results bucket (model.ResultRef), over
+	// the summary of that kind and leaving the others, and nothing else.
+	// Once a kind is summarised the full list it replaces leaves the
+	// cluster: the deprecation findings, and the policy snapshot when
+	// violations and violation events both are. A summary that says what
+	// is stored writes nothing. ErrInvalid for a kind, bucket or key that
+	// is not a results object.
+	SetResultRef(ctx context.Context, tenantID, id string, ref model.ResultRef) error
 	// SetRollout records the cluster's place in its release channel's
 	// rollout and its last automatic upgrade (protojson cloud.v1
 	// ClusterRollout) and nothing else, like SetDeprecations.

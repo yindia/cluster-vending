@@ -19,13 +19,15 @@ spec:
   versionGroup: istio
   upgradeOneMinorAtATime: true
   install:
+    # Helm waits this long for each chart to roll out (docs/catalog.md).
+    timeout: 15m
     helm:
       repository: https://blob.istio.io/istio-release/charts
       chart: istiod
   platformValues:
     # The cluster's default node pool: its labels, and a toleration per taint.
-    nodeSelector: ${system.nodeSelector}
-    tolerations: ${system.tolerations}
+    nodeSelector: ${platform.nodeSelector}
+    tolerations: ${platform.tolerations}
     # `--set profile=ambient` from the ambient guide. The profile sets
     # PILOT_ENABLE_AMBIENT=true, HBONE for proxies and distroless images.
     profile: ambient

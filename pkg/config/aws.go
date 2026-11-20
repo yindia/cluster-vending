@@ -18,6 +18,19 @@ const (
 	EnvProviderCredentialsSecret  = "CV_PROVIDER_CREDENTIALS_SECRET" //nolint:gosec // a variable name, not a credential
 	FlagSkipTenantRole            = "skip-tenant-role"
 	EnvSkipTenantRole             = "CV_SKIP_TENANT_ROLE"
+
+	// How the server and the controller reach a tenant's account
+	// (AWSAccess).
+	FlagAWSRegion        = "aws-region"
+	EnvAWSRegion         = "CV_AWS_REGION"
+	FlagAWSSourceRoleARN = "aws-source-role-arn"
+	EnvAWSSourceRoleARN  = "CV_AWS_SOURCE_ROLE_ARN"
+	FlagAWSExternalID    = "aws-external-id"
+	EnvAWSExternalID     = "CV_AWS_EXTERNAL_ID"
+	// FlagAWSServerRoleARN is the server's own: the principal the account
+	// role templates trust for reading the results buckets.
+	FlagAWSServerRoleARN = "aws-server-role-arn"
+	EnvAWSServerRoleARN  = "CV_AWS_SERVER_ROLE_ARN"
 )
 
 // DefaultCredentialsKey is the key of a credentials Secret when the
@@ -139,4 +152,59 @@ func (a AWS) validate() []error {
 		}
 	}
 	return errs
+}
+
+// awsAccessSettings are how the API server and the controller reach a
+// tenant's account (pkg/cloud/aws): the same three for both. Their base
+// credentials are never a setting: they come from the AWS SDK's default
+// chain (IRSA in production; for local testing export AWS_ACCESS_KEY_ID and
+// AWS_SECRET_ACCESS_KEY, never in a file or flag). The tenant role of an
+// account is always assumed last.
+var awsAccessSettings = []Setting{
+	{Flag: FlagAWSRegion, Env: EnvAWSRegion,
+		Usage: "default AWS region of the AWS SDK (used for the role assumptions; each call is made in the region of the cluster it is for); empty uses AWS_REGION or the SDK's own default"},
+	{Flag: FlagAWSSourceRoleARN, Env: EnvAWSSourceRoleARN,
+		Usage: "optional IAM role ARN to assume with the own credentials first; the tenant roles are then assumed with the source role's credentials (own credentials, source role, tenant role). Empty: the own credentials assume the tenant roles"},
+	{Flag: FlagAWSExternalID, Env: EnvAWSExternalID,
+		Usage: "optional external ID (sts:ExternalId) passed when a tenant role is assumed, for an account that has none of its own"},
+}
+
+// AWSAccess is how the process reaches tenant accounts. The zero value is
+// the default: the SDK's chain, no source role, no external ID.
+type AWSAccess struct {
+	Region, SourceRoleARN, ExternalID string
+}
+
+// externalIDPattern is what IAM accepts as an external ID: 2 to 1224
+// characters.
+var externalIDPattern = regexp.MustCompile(`^[\w+=,.@:/-]+$`)
+
+// awsAccessFrom reads and validates the settings above.
+func awsAccessFrom(v map[string]string) (AWSAccess, []error) {
+	a := AWSAccess{Region: v[FlagAWSRegion], SourceRoleARN: v[FlagAWSSourceRoleARN], ExternalID: v[FlagAWSExternalID]}
+	var errs []error
+	if a.Region != "" && !awscatalog.IsRegion(a.Region) {
+		errs = append(errs, fmt.Errorf("%s must be an AWS region code like us-east-1, got %q", setting(FlagAWSRegion), a.Region))
+	}
+	errs = append(errs, validateRoleARN(FlagAWSSourceRoleARN, a.SourceRoleARN)...)
+	if a.ExternalID != "" && (len(a.ExternalID) < 2 || len(a.ExternalID) > 1224 || !externalIDPattern.MatchString(a.ExternalID)) {
+		errs = append(errs, fmt.Errorf("%s must be 2 to 1224 letters, digits and +=,.@:/_-, got %d characters", setting(FlagAWSExternalID), len(a.ExternalID)))
+	}
+	return a, errs
+}
+
+// validateRoleARN checks an optional role ARN setting: an IAM role in the
+// platform's partition.
+func validateRoleARN(flag, arn string) []error {
+	if arn == "" {
+		return nil
+	}
+	m := roleARNPattern.FindStringSubmatch(arn)
+	if m == nil {
+		return []error{fmt.Errorf("%s must be an IAM role ARN (arn:aws:iam::<account>:role/<name>), got %q", setting(flag), arn)}
+	}
+	if m[1] != awscatalog.PartitionAWS {
+		return []error{fmt.Errorf("%s must be in the %q partition, got %q", setting(flag), awscatalog.PartitionAWS, m[1])}
+	}
+	return nil
 }

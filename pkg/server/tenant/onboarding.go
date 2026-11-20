@@ -24,6 +24,11 @@ type Onboarding struct {
 	// ManagementRoleARN is the role the tenant role trusts; empty: the
 	// server cannot say, and GetAccountOnboarding fails.
 	ManagementRoleARN string
+	// ServerPrincipalARN is the role the API server's credentials end as
+	// (config.Serve.ServerPrincipalARN): the tenant role trusts it too, so
+	// that the server can read the cluster results buckets. Empty: the
+	// server has no AWS access, and the stack's parameter stays empty.
+	ServerPrincipalARN string
 }
 
 // Option configures the TenantService.
@@ -77,7 +82,8 @@ func (s *TenantService) GetAccountOnboarding(ctx context.Context, req *cloudv1.G
 			"role_name "+name+" is not a name of the "+role+" template: cluster-vending-"+role+" or cluster-vending-<anything>-"+role)
 	}
 	out := &cloudv1.AccountOnboarding{Role: role, RoleName: name, AccountId: req.GetAccountId(),
-		ManagementRoleArn: s.onboarding.ManagementRoleARN, TemplatePath: cloudformation.TemplatePath(role)}
+		ManagementRoleArn: s.onboarding.ManagementRoleARN, TemplatePath: cloudformation.TemplatePath(role),
+		ServerPrincipalArn: s.onboarding.ServerPrincipalARN}
 	if account != nil {
 		out.AccountId, out.ExternalId = account.AccountID, account.ExternalID
 	}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/protobuf/proto"
+
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -98,6 +100,46 @@ func pinnedOf(row *model.Cluster) (map[string]string, error) {
 		}
 	}
 	return PinnedAddons(input.GetSpec()), nil
+}
+
+// EditedInput is the stored input of a cluster whose object's spec was edited
+// (row.Spec is the edited spec): what an update through the API does with
+// the add-ons it is given (UpdateCluster, spec.aws.addons), for an edit that
+// has no request. The add-ons become the edited ones, and a version is a pin
+// only when the client chose it: the version of an add-on that was pinned
+// before (it is the one in the edit now), or one that is not what the add-on
+// has installed (the resolved versions the object shows are not pins). A
+// cleared version is no pin: the version EKS recommends is looked up again.
+// installed maps add-on names to the versions the cluster has now.
+func EditedInput(row *model.Cluster, installed map[string]string) (model.JSON, error) {
+	if len(row.Input) == 0 {
+		return row.Input, nil
+	}
+	input := &cloudv1.Cluster{}
+	if err := Lenient.Unmarshal(row.Input, input); err != nil {
+		return nil, fmt.Errorf("cluster %s: stored input: %w", row.ID, err)
+	}
+	edited, err := SpecOf(row)
+	if err != nil {
+		return nil, err
+	}
+	before := PinnedAddons(input.GetSpec())
+	addons := make([]*cloudv1.AwsAddon, 0, len(edited.GetAws().GetAddons()))
+	for _, a := range edited.GetAws().GetAddons() {
+		in := proto.Clone(a).(*cloudv1.AwsAddon)
+		if _, was := before[a.GetName()]; !was && a.GetVersion() == installed[a.GetName()] {
+			in.Version = ""
+		}
+		addons = append(addons, in)
+	}
+	if input.Spec == nil {
+		input.Spec = &cloudv1.ClusterSpec{}
+	}
+	if input.Spec.GetAws() == nil {
+		input.Spec.Provider = &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}}
+	}
+	input.Spec.GetAws().Addons = addons
+	return Encode(input)
 }
 
 // checkEKSName refuses a cluster name EKS already has in the account and

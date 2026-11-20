@@ -79,7 +79,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if edited(obj.Generation, obj.Status.ObservedGeneration) {
-		if err := r.bump(ctx, tenant, id); err != nil {
+		if err := r.bump(ctx, obj, tenant, id); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -141,11 +141,12 @@ func nextCluster(row *model.Cluster, err error) ctrl.Result {
 
 // bump makes the reconciler apply a spec that was edited on the object:
 // the row's generation moves on, as an update through the API would have
-// moved it. The edit is applied as written; of what the API's update
+// moved it, and its input follows the edit as an API update's does (the
+// add-ons the client pinned). The edit is applied as written; of what the API's update
 // checks (version steps, what a carried-over resource allows, resolving
 // add-on versions) only what the kind's own validation rules say is
 // checked.
-func (r *ClusterReconciler) bump(ctx context.Context, tenant, id string) error {
+func (r *ClusterReconciler) bump(ctx context.Context, obj *cloudv1alpha1.Cluster, tenant, id string) error {
 	row, err := r.deps.Store.Clusters().Get(ctx, tenant, id)
 	if err != nil {
 		return fmt.Errorf("read cluster %s: %w", id, err)
@@ -158,6 +159,15 @@ func (r *ClusterReconciler) bump(ctx context.Context, tenant, id string) error {
 		// generation; the reconciler puts the discovered spec back and
 		// reports it (keepDiscovered).
 		return nil
+	}
+	installed := map[string]string{}
+	if obj.Status.AWS != nil {
+		for _, a := range obj.Status.AWS.Addons {
+			installed[a.Name] = a.Version
+		}
+	}
+	if row.Input, err = reconcilecluster.EditedInput(row, installed); err != nil {
+		return fmt.Errorf("rebuild the input of cluster %s: %w", id, err)
 	}
 	row.Generation++
 	if row.State == reconcilecluster.StateRunning {

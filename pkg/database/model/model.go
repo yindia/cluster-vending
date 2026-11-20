@@ -240,6 +240,12 @@ type Cluster struct {
 	// Input is the cluster as the client sent it (protojson cloud.v1
 	// Cluster); Spec is the resolved one.
 	Input JSON
+	// SeenGeneration is the metadata.generation of the Cluster object when the
+	// row was read (0 for a row not read from the store). A write refuses a
+	// row whose object has been edited since, instead of putting the row's
+	// older spec over the edit, and no status write marks an edit as observed
+	// that this read did not see.
+	SeenGeneration int64
 	// NetworkID is the networks row the cluster runs in (Network.Clusters
 	// owns the foreign key).
 	NetworkID string
@@ -314,7 +320,7 @@ type Event struct {
 }
 
 // ResultRef is the summary of one kind of scan result whose full data is in
-// the cluster's results bucket (docs/design/cluster-results-s3.md): the
+// the cluster's results bucket (docs/architecture.md#results-in-s3): the
 // object it names, when it was collected and how much it holds.
 type ResultRef struct {
 	// Kind is a pkg/results Kind: deprecations, recommendations, violations

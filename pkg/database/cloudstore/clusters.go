@@ -124,7 +124,7 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 		}
 	}
 	m.into(&c.Resource)
-	c.Seen = seen(obj)
+	c.Seen, c.SeenGeneration = seen(obj), obj.Generation
 	c.Retry = retryOf(obj)
 	return c, nil
 }
@@ -132,7 +132,12 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 // setStatus writes a row's status onto obj.Status: the contract status
 // verbatim, and the typed fields read from it. The inventory and the
 // deprecation scan (its result and its condition) stay.
-func (r clusters) setStatus(obj *cloudv1alpha1.Cluster, raw model.JSON, state string) {
+//
+// observed is the object generation the status acknowledges; nil leaves
+// status.observedGeneration as it is. It is never taken from obj: obj may
+// have been fetched after an edit that the writer never saw, and stamping
+// that edit as observed would lose it (see write).
+func (r clusters) setStatus(obj *cloudv1alpha1.Cluster, raw model.JSON, state string, observed *int64) {
 	p := &cloudv1.ClusterStatus{}
 	_ = decode(raw, p) // a status this build cannot read is still kept verbatim
 	st := &obj.Status
@@ -142,7 +147,9 @@ func (r clusters) setStatus(obj *cloudv1alpha1.Cluster, raw model.JSON, state st
 	if scan != nil {
 		meta.SetStatusCondition(&st.Conditions, *scan)
 	}
-	st.ObservedGeneration = obj.Generation
+	if observed != nil {
+		st.ObservedGeneration = *observed
+	}
 }
 
 // SetDeprecations writes the scan result and its DeprecationScan
@@ -309,35 +316,17 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	}
 	obj := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: network.Namespace, Name: c.Name}}
 	if err := r.fill(c, network.Name, obj); err != nil {
-		_ = r.releaseAttemptReservation(ctx, reserved)
-		return err
+		return r.dropReservation(ctx, reserved, err)
 	}
 	if err := owner.Set(network, obj, r.c.Scheme()); err != nil {
-		_ = r.releaseAttemptReservation(ctx, reserved)
-		return invalid(err)
+		return r.dropReservation(ctx, reserved, invalid(err))
 	}
 	keys := clusterKeys(c)
 	if err := r.claimAll(ctx, obj.Namespace, kindCluster, c.ID, keys); err != nil {
-		_ = r.releaseAttemptReservation(ctx, reserved)
-		return err
+		return r.dropReservation(ctx, reserved, err)
 	}
-	// takeBack deletes the cluster, and only once it is confirmed gone (or held
-	// by nothing but the garbage collector's orphan finalizer, same UID) lets go
-	// of what this attempt took: its request claim and its reservation. An
-	// unconfirmed rollback keeps the reservation (fail closed).
-	takeBack := func(ctx context.Context) error {
-		err := r.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan))
-		if err == nil || apierrors.IsNotFound(err) {
-			if r.rolledBack(ctx, obj) {
-				r.release(ctx, obj.Namespace, keys...)
-				if rerr := r.releaseAttemptReservation(ctx, reserved); rerr != nil {
-					return errors.Join(translate(err), fmt.Errorf("release the physical name: %w", rerr))
-				}
-			}
-		}
-		return translate(err)
-	}
-	if err := r.insert(ctx, obj, func() { r.setStatus(obj, c.Status, c.State) }); err != nil {
+	takeBack := func(ctx context.Context) error { return r.takeBack(ctx, obj, keys, reserved) }
+	if err := r.insert(ctx, obj, func() { r.setStatus(obj, c.Status, c.State, &obj.Generation) }); err != nil {
 		return r.insertFailed(ctx, c, obj, keys, reserved, err)
 	}
 	if err := r.claimNetwork(ctx, c.TenantID, c.NetworkID); err != nil {
@@ -348,6 +337,68 @@ func (r clusters) Create(ctx context.Context, c *model.Cluster) error {
 	}
 	r.created(takeBack)
 	return nil
+}
+
+// rollbackTimeout bounds the cleanup of a failed create: it runs detached
+// from the caller's context, which is often the very reason the create failed.
+const rollbackTimeout = 10 * time.Second
+
+// rollbackContext is a context for a rollback step: not cancelled with ctx,
+// but time-limited.
+func rollbackContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+}
+
+// dropReservation releases the reservation of an attempt that stored nothing
+// and returns err, with the failure to release joined to it.
+func (r clusters) dropReservation(ctx context.Context, reserved *corev1.ConfigMap, err error) error {
+	ctx, cancel := rollbackContext(ctx)
+	defer cancel()
+	if rerr := r.releaseAttemptReservation(ctx, reserved); rerr != nil {
+		return errors.Join(err, fmt.Errorf("release the physical name: %w", rerr))
+	}
+	return err
+}
+
+// releaseKeys deletes the claims of keys; a claim that stays is reported (it
+// is taken over once it is older than claimGrace).
+func (r clusters) releaseKeys(ctx context.Context, namespace string, keys ...string) error {
+	var errs []error
+	for _, key := range keys {
+		err := r.c.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: claimName(key)}})
+		if err != nil && !apierrors.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("release claim %s: %w", key, translate(err)))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// takeBack deletes the cluster, and only once it is confirmed gone (or held
+// by nothing but the garbage collector's orphan finalizer, same UID) lets go
+// of what this attempt took: its request claim and its reservation. An
+// unconfirmed rollback keeps the reservation (fail closed). It runs detached
+// from ctx's cancellation.
+func (r clusters) takeBack(ctx context.Context, obj *cloudv1alpha1.Cluster, keys []string, reserved *corev1.ConfigMap) error {
+	ctx, cancel := rollbackContext(ctx)
+	defer cancel()
+	err := r.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan))
+	if err != nil && !apierrors.IsNotFound(err) {
+		return translate(err)
+	}
+	if !r.rolledBack(ctx, obj) {
+		return translate(err)
+	}
+	var errs []error
+	if kerr := r.releaseKeys(ctx, obj.Namespace, keys...); kerr != nil {
+		errs = append(errs, kerr)
+	}
+	if rerr := r.releaseAttemptReservation(ctx, reserved); rerr != nil {
+		errs = append(errs, fmt.Errorf("release the physical name: %w", rerr))
+	}
+	if len(errs) > 0 {
+		return errors.Join(append([]error{translate(err)}, errs...)...)
+	}
+	return translate(err)
 }
 
 // rolledBack reports whether the cluster this attempt stored is gone: not
@@ -366,7 +417,10 @@ func (r clusters) rolledBack(ctx context.Context, obj *cloudv1alpha1.Cluster) bo
 // another create's cluster: an identical retry (same request ID, network and
 // payload) that won gets its cluster returned as the idempotent result, and
 // nothing the winner owns (request claim, reservation) is released. Any other
-// failure releases the claims only when no cluster of this attempt remains.
+// failure releases the claims only when no cluster of this attempt remains; a
+// cluster of this attempt that did get stored (the failure may be the
+// caller's context ending after the write) is taken back, so that the outcome
+// is what the caller is told.
 func (r clusters) insertFailed(ctx context.Context, c *model.Cluster, obj *cloudv1alpha1.Cluster, keys []string,
 	reserved *corev1.ConfigMap, err error) error {
 	if errors.Is(err, repository.ErrAlreadyExists) {
@@ -379,20 +433,40 @@ func (r clusters) insertFailed(ctx context.Context, c *model.Cluster, obj *cloud
 			// The name is another request's: its claims are not ours, except the
 			// request claim, which only this attempt (a different ID) took.
 			if existing := r.holderOf(ctx, obj.Namespace, keys); existing == "" || existing == c.ID {
-				r.release(ctx, obj.Namespace, keys...)
+				rctx, cancel := rollbackContext(ctx)
+				defer cancel()
+				if kerr := r.releaseKeys(rctx, obj.Namespace, keys...); kerr != nil {
+					return errors.Join(err, kerr)
+				}
 			}
 		}
 		return err
 	}
 	// The create may have stored the cluster before failing: only a proven
 	// absence frees the claims.
+	rctx, cancel := rollbackContext(ctx)
+	defer cancel()
 	probe := &cloudv1alpha1.Cluster{}
-	gone := apierrors.IsNotFound(r.c.Get(ctx, client.ObjectKeyFromObject(obj), probe))
-	if gone {
-		r.release(ctx, obj.Namespace, keys...)
-		if rerr := r.releaseAttemptReservation(ctx, reserved); rerr != nil {
-			return errors.Join(err, fmt.Errorf("release the physical name: %w", rerr))
+	perr := r.c.Get(rctx, client.ObjectKeyFromObject(obj), probe)
+	switch {
+	case apierrors.IsNotFound(perr):
+		var errs []error
+		if kerr := r.releaseKeys(rctx, obj.Namespace, keys...); kerr != nil {
+			errs = append(errs, kerr)
 		}
+		if rerr := r.releaseAttemptReservation(rctx, reserved); rerr != nil {
+			errs = append(errs, fmt.Errorf("release the physical name: %w", rerr))
+		}
+		return errors.Join(append([]error{err}, errs...)...)
+	case perr == nil && probe.Labels[LabelID] == c.ID:
+		// Stored by this attempt although it failed: take it back.
+		stored := obj.DeepCopy()
+		stored.UID = probe.UID
+		if terr := r.takeBack(ctx, stored, keys, reserved); terr != nil && !errors.Is(terr, repository.ErrNotFound) {
+			return errors.Join(err, fmt.Errorf("take the cluster back: %w", terr))
+		}
+	case perr != nil:
+		return errors.Join(err, fmt.Errorf("check whether the cluster was stored: %w", translate(perr)))
 	}
 	return err
 }
@@ -561,19 +635,31 @@ func (r clusters) Record(ctx context.Context, c *model.Cluster) error {
 }
 
 // write stores the row if the stored etag is c's and the row did not
-// change since c was read (c.Seen); with newETag it gives c a new etag.
+// change since c was read (c.Seen), and the object's spec was not edited
+// since (c.SeenGeneration: the edit is not overwritten with the row's older
+// spec; ErrConflict, the pass after sees it). With rotate it gives c a new
+// etag.
+//
+// The status acknowledges the object generation this write produced, unless
+// an edit is still waiting to be taken up (generation ahead of the observed
+// one) and this write does not take it up (a new row generation): that edit
+// stays unobserved, for the controller to bump and apply.
 func (r clusters) write(ctx context.Context, c *model.Cluster, rotate bool) error {
 	old, updated := c.ETag, c.UpdatedAt
 	var obj *cloudv1alpha1.Cluster
+	var observed *int64
 	err := retry(func() error {
 		var err error
+		observed = nil
 		if obj, err = r.find(ctx, c.TenantID, c.ID); err != nil {
 			return err
 		}
 		m := metaOf(obj)
-		if m.ETag != old || changedSince(obj, c.Seen) {
+		if m.ETag != old || changedSince(obj, c.Seen) || c.SeenGeneration != 0 && obj.Generation != c.SeenGeneration {
 			return repository.ErrConflict
 		}
+		pending := obj.Status.ObservedGeneration != 0 && obj.Generation > obj.Status.ObservedGeneration
+		takesUp := c.Generation > m.Generation
 		c.CreatedAt = m.CreatedAt
 		if rotate {
 			c.ETag, c.UpdatedAt = newETag(), now()
@@ -581,18 +667,27 @@ func (r clusters) write(ctx context.Context, c *model.Cluster, rotate bool) erro
 		if err := r.fill(c, obj.Spec.Network.NetworkRef.Name, obj); err != nil {
 			return err
 		}
-		return r.c.Update(ctx, obj)
+		if err := r.c.Update(ctx, obj); err != nil {
+			return err
+		}
+		if !pending || takesUp {
+			g := obj.Generation
+			observed = &g
+		}
+		return nil
 	})
 	if err != nil {
 		c.ETag, c.UpdatedAt = old, updated
 		return translate(err)
 	}
-	c.Seen = seen(obj)
-	return r.writeStatus(ctx, c.TenantID, c.ID, c.ETag, c.Status, obj)
+	c.Seen, c.SeenGeneration = seen(obj), obj.Generation
+	return r.writeStatus(ctx, c.TenantID, c.ID, c.ETag, c.Status, obj, observed)
 }
 
-// writeStatus is networks.writeStatus for a cluster.
-func (r clusters) writeStatus(ctx context.Context, tenantID, id, etag string, status model.JSON, obj *cloudv1alpha1.Cluster) error {
+// writeStatus is networks.writeStatus for a cluster. observed is what the
+// status acknowledges, as write decided (nil: leave it).
+func (r clusters) writeStatus(ctx context.Context, tenantID, id, etag string, status model.JSON, obj *cloudv1alpha1.Cluster,
+	observed *int64) error {
 	return translate(retry(func() error {
 		if obj == nil {
 			var err error
@@ -607,7 +702,7 @@ func (r clusters) writeStatus(ctx context.Context, tenantID, id, etag string, st
 			return nil
 		}
 		before := current.Status.DeepCopy()
-		r.setStatus(current, status, m.State)
+		r.setStatus(current, status, m.State, observed)
 		if equality.Semantic.DeepEqual(before, &current.Status) {
 			return nil
 		}
@@ -616,7 +711,7 @@ func (r clusters) writeStatus(ctx context.Context, tenantID, id, etag string, st
 }
 
 // SetStatus writes the status only, and only while the row has etag; the
-// etag and the update time stay.
+// etag, the update time and the observed generation stay.
 func (r clusters) SetStatus(ctx context.Context, tenantID, id, etag string, status model.JSON) error {
 	return translate(retry(func() error {
 		obj, err := r.find(ctx, tenantID, id)
@@ -628,7 +723,7 @@ func (r clusters) SetStatus(ctx context.Context, tenantID, id, etag string, stat
 			return repository.ErrConflict
 		}
 		before := obj.Status.DeepCopy()
-		r.setStatus(obj, status, m.State)
+		r.setStatus(obj, status, m.State, nil)
 		if equality.Semantic.DeepEqual(before, &obj.Status) {
 			return nil
 		}

@@ -10,6 +10,7 @@ import (
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
@@ -317,6 +318,86 @@ func TestPlatformSetAsksTheReleaseGate(t *testing.T) {
 	for _, item := range crossplaneaws.PlatformSet(platformPlan()) {
 		if item.Gate != nil {
 			t.Error("without a ReleaseGate nothing is gated")
+		}
+	}
+}
+
+// owned is the Observed of an owner whose inventory has the named objects.
+type owned map[string]bool
+
+func (o owned) Get(context.Context, client.Object) (bool, error)   { return false, nil }
+func (o owned) Ready(context.Context, client.Object) (bool, error) { return false, nil }
+func (o owned) Owned(obj client.Object) bool                       { return o[obj.GetName()] }
+
+// A Usage is applied only once its user exists: when the Release gate holds
+// a Release (another is in the middle of an operation), the Usages it is the
+// user of wait too, and follow once the Release is there. Else a Usage would
+// protect a Release that never was, and block the deletion of what it uses.
+func TestPlatformSetHoldsAUsageWithItsHeldRelease(t *testing.T) {
+	plan := platformPlan()
+	plan.ReleaseGate = func(context.Context, *unstructured.Unstructured) sequence.Decision {
+		return sequence.Decision{Hold: "busy"}
+	}
+	set := crossplaneaws.PlatformSet(plan)
+
+	checked := 0
+	for _, item := range set {
+		u, ok := item.Object.(*protectionv1beta1.Usage)
+		if !ok || u.Spec.By.Kind != "Release" {
+			continue
+		}
+		by := u.Spec.By.ResourceRef.Name
+		if item.Build == nil {
+			t.Errorf("Usage %s of %s has no Build: applied while %s may not exist", u.Name, u.Spec.Of.ResourceRef.Name, by)
+			continue
+		}
+		obj, reason, err := item.Build(t.Context(), owned{})
+		if obj != nil || err != nil || reason == "" {
+			t.Errorf("Usage %s, user absent: Build = %v, %q, %v; must wait", u.Name, obj, reason, err)
+		}
+		obj, reason, err = item.Build(t.Context(), owned{by: true})
+		if obj == nil || err != nil || reason != "" || obj.GetName() != u.Name {
+			t.Errorf("Usage %s, user present: Build = %v, %q, %v; must be the Usage", u.Name, obj, reason, err)
+		}
+		checked++
+	}
+	if checked != 6 {
+		t.Errorf("checked %d Usages by a Release, want 6", checked)
+	}
+}
+
+// Without a gate every Release is written in the same pass, before its
+// Usages: nothing needs to wait.
+func TestPlatformSetUsagesNeedNoBuildWithoutAGate(t *testing.T) {
+	for _, item := range crossplaneaws.PlatformSet(platformPlan()) {
+		if _, ok := item.Object.(*protectionv1beta1.Usage); ok && item.Build != nil {
+			t.Errorf("Usage %s waits without a gate", item.Object.GetName())
+		}
+	}
+}
+
+// Karpenter (sequence 0) gates everything after it; the autoscaler, which
+// the system group works without, does not gate the components after it:
+// they wait for Karpenter and not for it. A component it is required by
+// would still wait (requires is hard).
+func TestPlatformSetOnlyKarpenterGatesTheRest(t *testing.T) {
+	plan := platformPlan()
+	plan.Components = []crossplaneaws.PlatformComponentPlan{
+		{Name: "karpenter", Namespace: "karpenter", Sequence: 0, Main: crossplaneaws.HelmReleasePlan{Name: "karpenter", Chart: chart("karpenter", "1.0.0")}},
+		{Name: "cluster-autoscaler", Namespace: "kube-system", Sequence: 100, Main: crossplaneaws.HelmReleasePlan{Name: "cluster-autoscaler", Chart: chart("ca", "9.0.0")}},
+		{Name: "app", Namespace: "app", Sequence: 100, Main: crossplaneaws.HelmReleasePlan{Name: "app", Chart: chart("app", "1.0.0")}},
+		{Name: "needs-ca", Namespace: "n", Sequence: 100, Requires: []string{"cluster-autoscaler"}, Main: crossplaneaws.HelmReleasePlan{Name: "needs-ca", Chart: chart("n", "1.0.0")}},
+	}
+	after := map[string]int{}
+	for _, item := range crossplaneaws.PlatformSet(plan) {
+		if u, ok := item.Object.(*unstructured.Unstructured); ok {
+			after[strings.TrimPrefix(u.GetName(), plan.ClusterPrefix+"-")] = len(item.After)
+		}
+	}
+	// 2 (ProviderConfig, node group) + 2 for each Release waited for.
+	for name, want := range map[string]int{"karpenter": 2, "cluster-autoscaler": 4, "app": 4, "needs-ca": 6} {
+		if after[name] != want {
+			t.Errorf("%s waits for %d conditions, want %d", name, after[name], want)
 		}
 	}
 }

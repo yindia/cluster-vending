@@ -82,8 +82,9 @@ func (s *ClusterService) ListClusterNodeGroupManifests(ctx context.Context, req 
 // checkNodeGroupAllowlist refuses the groups of want that ask for machines
 // outside the platform admin's allowlist. Groups equal to one in have (the
 // stored spec) are left alone, so a cluster keeps working when the
-// allowlist is narrowed later. An empty families list restricts no family;
-// a type is allowed when listed or when its family is.
+// allowlist is narrowed later. With any allowlist set, a group must name
+// families or types, a family must be listed, and a type is allowed when
+// listed or when its family is. Both lists empty restricts nothing.
 func checkNodeGroupAllowlist(want, have []*cloudv1.NodeGroupSpec, families, types []string) error {
 	if len(families) == 0 && len(types) == 0 {
 		return nil
@@ -105,11 +106,11 @@ func checkNodeGroupAllowlist(want, have []*cloudv1.NodeGroupSpec, families, type
 
 func checkGroupAllowed(g *cloudv1.NodeGroupSpec, families, types []string) error {
 	list := allowedText(families, types)
-	if len(families) > 0 {
-		for _, f := range g.GetInstanceFamilies() {
-			if !slices.Contains(families, f) {
-				return fmt.Errorf("node group %q: instance family %q is not allowed; %s", g.GetName(), f, list)
-			}
+	// A family is allowed only when listed: with a types-only allowlist no
+	// family is, the group has to name allowed types.
+	for _, f := range g.GetInstanceFamilies() {
+		if !slices.Contains(families, f) {
+			return fmt.Errorf("node group %q: instance family %q is not allowed; %s", g.GetName(), f, list)
 		}
 	}
 	for _, t := range g.GetInstanceTypes() {
@@ -118,7 +119,7 @@ func checkGroupAllowed(g *cloudv1.NodeGroupSpec, families, types []string) error
 			return fmt.Errorf("node group %q: instance type %q is not allowed; %s", g.GetName(), t, list)
 		}
 	}
-	if len(families) > 0 && len(g.GetInstanceFamilies()) == 0 && len(g.GetInstanceTypes()) == 0 {
+	if len(g.GetInstanceFamilies()) == 0 && len(g.GetInstanceTypes()) == 0 {
 		// Without either, Karpenter picks from its default categories:
 		// that would sidestep the allowlist.
 		return fmt.Errorf("node group %q: name instance_families or instance_types from the allowed list; %s", g.GetName(), list)

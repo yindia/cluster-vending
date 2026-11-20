@@ -208,7 +208,7 @@ func (r clusters) reserveEKSNameClaim(ctx context.Context, row *model.Cluster, n
 		if created != nil {
 			// Nothing was stored under it yet: the reservation just taken is this
 			// attempt's alone.
-			_ = r.releaseAttemptReservation(ctx, created)
+			return nil, r.dropReservation(ctx, created, err)
 		}
 		return nil, err
 	}

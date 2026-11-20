@@ -98,7 +98,7 @@ func AdoptCluster(ctx context.Context, s repository.Store, obj *cloudv1alpha1.Cl
 	if err := r.c.Update(ctx, obj); err != nil {
 		return translate(err)
 	}
-	r.setStatus(obj, c.Status, c.State)
+	r.setStatus(obj, c.Status, c.State, &obj.Generation)
 	if err := r.c.Status().Update(ctx, obj); err != nil {
 		return translate(err)
 	}

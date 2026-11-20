@@ -139,7 +139,7 @@ func resolveSpecWith(in *cloudv1.ClusterSpec, zones []string, fixPool bool, syst
 	spec := cloneSpec(in)
 	spec.Network.ZoneIds = zones
 	if fixPool {
-		spec.DefaultNodePool = fixedNodePool(spec.DefaultNodePool, system)
+		spec.DefaultNodePool = fixedNodePool(spec.DefaultNodePool, system, spec.GetAws().GetDefaultNodePool().GetLaunchTemplate() != nil)
 	}
 	pool := spec.DefaultNodePool
 	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED {
@@ -164,8 +164,9 @@ func resolveSpecWith(in *cloudv1.ClusterSpec, zones []string, fixPool bool, syst
 }
 
 // fixedNodePool is pool (nil: an empty one) with the platform's placement
-// and size, and the admin's (default) instance type when it names none.
-func fixedNodePool(pool *cloudv1.NodePoolSpec, system SystemPool) *cloudv1.NodePoolSpec {
+// and size, and the admin's (default) instance type when it names none. The
+// admin's disk size is not applied with a launch template: it owns the disk.
+func fixedNodePool(pool *cloudv1.NodePoolSpec, system SystemPool, hasLaunchTemplate bool) *cloudv1.NodePoolSpec {
 	if pool == nil {
 		pool = &cloudv1.NodePoolSpec{}
 	}
@@ -175,7 +176,7 @@ func fixedNodePool(pool *cloudv1.NodePoolSpec, system SystemPool) *cloudv1.NodeP
 	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED && system.CapacityType == "SPOT" {
 		pool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_SPOT
 	}
-	if pool.DiskSizeGb == 0 && system.DiskSizeGiB > 0 {
+	if pool.DiskSizeGb == 0 && system.DiskSizeGiB > 0 && !hasLaunchTemplate {
 		pool.DiskSizeGb = uint32(system.DiskSizeGiB) //nolint:gosec // validated: at most 16384
 	}
 	fixed := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{}, system.MinSize, system.MaxSize)

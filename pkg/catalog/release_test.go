@@ -162,9 +162,12 @@ channels:
 	}
 }
 
-// Karpenter installs first (sequence 0), cluster-autoscaler right after it
-// (10): it waits for Karpenter only, never for a node group, and everything
-// else (the default, 100) installs after both.
+// Karpenter installs first (sequence 0) and gates everything after it; every
+// other component, cluster-autoscaler too, is at the default 100. A
+// component of a lower sequence is waited for by the later ones, and the
+// autoscaler is not to be waited for: the system group works at its minimum
+// size without it, and one that failed or gave up must not leave every other
+// platform and tenant component pending.
 func TestKarpenterAndTheAutoscalerInstallFirst(t *testing.T) {
 	defs, err := catalog.Definitions()
 	if err != nil {
@@ -175,7 +178,7 @@ func TestKarpenterAndTheAutoscalerInstallFirst(t *testing.T) {
 		if d.Spec.Sequence != nil {
 			got = *d.Spec.Sequence
 		}
-		want, ok := map[string]int32{"karpenter": 0, "cluster-autoscaler": 10}[d.Name]
+		want, ok := map[string]int32{"karpenter": 0}[d.Name]
 		if !ok {
 			want = 100
 		}

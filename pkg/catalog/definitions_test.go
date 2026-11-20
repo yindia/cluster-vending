@@ -150,7 +150,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"karpenter", "cluster-autoscaler", "aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istiod",
+	want := []string{"karpenter", "aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)

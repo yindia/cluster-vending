@@ -349,11 +349,33 @@ func PlatformSet(p PlatformPlan) sequence.Set {
 		if !ok || u.Spec.By == nil || u.Spec.By.ResourceRef == nil || u.Spec.By.Kind != HelmReleaseGVK.Kind {
 			continue
 		}
-		if reason, held := waiting[u.Spec.By.ResourceRef.Name]; held {
+		by := u.Spec.By.ResourceRef.Name
+		if reason, held := waiting[by]; held {
 			set[i].Build = waits(reason)
+		} else if p.ReleaseGate != nil {
+			// The Release gate may hold the user back, and the Usage has no
+			// gate of its own (asking the same gate twice is not its
+			// contract): it is applied once the owner has the user. Apply
+			// remembers a Release as it writes it, so the Usage follows in
+			// the next pass.
+			set[i].Build = p.afterUser(u, by)
 		}
 	}
 	return set
+}
+
+// afterUser is the Build of a Usage whose user is the Release by: the Usage
+// itself once the owner has that Release, else a wait. A Usage of a Release
+// that does not exist protects nothing, is never garbage-collected, and
+// blocks the deletion of what it uses once the Release is dropped before it
+// ever installed.
+func (p PlatformPlan) afterUser(u *protectionv1beta1.Usage, by string) func(context.Context, sequence.Observed) (client.Object, string, error) {
+	return func(_ context.Context, seen sequence.Observed) (client.Object, string, error) {
+		if seen == nil || !seen.Owned(p.named(by)) {
+			return nil, "the Helm release " + by + " to be written", nil
+		}
+		return u, "", nil
+	}
 }
 
 // waits is the Build of an object that cannot be rendered yet.

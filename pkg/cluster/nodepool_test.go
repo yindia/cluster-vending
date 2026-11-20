@@ -256,3 +256,27 @@ func TestResolveSpecWithSystemCapacityTypeAndDisk(t *testing.T) {
 		t.Errorf("the request was replaced: %v %d", p.GetCapacityType(), p.GetDiskSizeGb())
 	}
 }
+
+// The launch template owns the disk: the admin's default disk size must not
+// turn a request without disk_size_gb into an invalid one.
+func TestResolveSpecWithSystemDiskAndLaunchTemplate(t *testing.T) {
+	withTemplate := func() *cloudv1.ClusterSpec {
+		in := minimalSpec()
+		in.DefaultNodePool.DiskSizeGb = 0
+		in.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{Id: "lt-0123456789abcdef0", Version: "1"}}
+		return in
+	}
+	spec, err := ResolveSpecWith(withTemplate(), zonesAB, SystemPool{DiskSizeGiB: 50})
+	if err != nil {
+		t.Fatalf("admin disk default must not apply with a launch template: %v", err)
+	}
+	if got := spec.GetDefaultNodePool().GetDiskSizeGb(); got != 0 {
+		t.Errorf("disk_size_gb = %d, want 0", got)
+	}
+
+	set := withTemplate()
+	set.DefaultNodePool.DiskSizeGb = 80
+	if _, err := ResolveSpecWith(set, zonesAB, SystemPool{DiskSizeGiB: 50}); err == nil {
+		t.Error("a user-set disk_size_gb with a launch template must still be refused")
+	}
+}

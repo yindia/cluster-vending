@@ -9,15 +9,15 @@ metadata:
   name: cluster-autoscaler
 spec:
   # The cloud it is installed on; the same component for another cloud is
-  # another definition, <name>-<provider> (docs/catalog.md).
+  # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
   description: Kubernetes Cluster Autoscaler. It resizes the system managed node group, the only Auto Scaling group tagged for it, between its minimum and maximum size when pods need room; Karpenter's nodes are in no Auto Scaling group and are never touched by it.
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
-  # After Karpenter (sequence 0), before the rest (default 100): it does not
-  # wait for a node group of the cluster, only for the system group it
-  # runs on, which exists before any platform component installs.
-  sequence: 10
+  # Default sequence (100), after Karpenter (0) like everything else. Not
+  # lower: the components after a lower sequence wait for it to be deployed,
+  # and the system group works at its minimum size without the autoscaler, so
+  # a failed or given-up autoscaler must not hold the other components back.
   namespace: kube-system
   install:
     helm:
@@ -86,7 +86,7 @@ spec:
         name: cluster-autoscaler
         annotations:
           eks.amazonaws.com/role-arn: ${iam.roleArn}
-    # One replica (system group sizing, docs/catalog.md): a restart only
+    # One replica (system group sizing, docs/architecture.md#node-layout): a restart only
     # pauses scaling for a moment.
     replicaCount: 1
     priorityClassName: system-cluster-critical

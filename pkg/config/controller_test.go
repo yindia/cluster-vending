@@ -143,7 +143,7 @@ func TestControllerSettingsAreFew(t *testing.T) {
 		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
 		config.FlagProviderCredentialsSecret,
 		config.FlagSkipTenantRole, config.FlagAWSRegion, config.FlagAWSSourceRoleARN, config.FlagAWSExternalID,
-		config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupCapacityType,
+		config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupMinSize, config.FlagSystemNodeGroupMaxSize, config.FlagSystemNodeGroupCapacityType,
 		config.FlagSystemNodeGroupDiskSizeGiB, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
 		config.FlagNodeGroupDefaultArchitectures, config.FlagNodeGroupDefaultCapacityTypes}
 	if !reflect.DeepEqual(got, want) {

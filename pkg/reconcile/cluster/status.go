@@ -154,16 +154,19 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 }
 
 // withLiveSystemSize shows the default node group's size as it is rendered
-// now, the platform admin's (nodeGroups.system.size), not the one stored at
-// creation: the platform fixes it for every cluster it created, in place.
+// now, the platform admin's (nodeGroups.system.minSize and maxSize), not
+// the one stored at creation: the platform sets them for every cluster it
+// created, in place.
 // An imported cluster keeps its own. spec is a copy of the stored one.
 func (s *Reconciler) withLiveSystemSize(row *model.Cluster, spec *cloudv1.ClusterSpec) {
 	pool := spec.GetDefaultNodePool()
 	if row.Imported || pool == nil {
 		return
 	}
-	size := uint32(crossplaneaws.SystemPoolSize(s.deps.NodeGroups.System.Size)) //nolint:gosec // validated, small
-	pool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: size, MaxSize: size, DesiredSize: &size}
+	minSize, maxSize := crossplaneaws.SystemPoolBounds(s.deps.NodeGroups.System.MinSize, s.deps.NodeGroups.System.MaxSize)
+	// No desired size: it is cluster-autoscaler's; the node count is on the
+	// system group's status.
+	pool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: uint32(minSize), MaxSize: uint32(maxSize)} //nolint:gosec // validated, small
 }
 
 // observeEKS copies what the EKS Cluster and NodeGroup report into st.

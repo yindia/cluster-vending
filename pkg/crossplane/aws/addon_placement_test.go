@@ -210,7 +210,7 @@ func TestAddonsOnTheSystemPool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := planWithAddons(tt.configurations)
 			p.Karpenter = true
-			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2)
+			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2, 6)
 			if tt.imported {
 				p.ExternalNames = map[string]string{"prod-1a2b3c4d-default": "ng-1"}
 			}

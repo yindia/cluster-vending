@@ -82,12 +82,16 @@ spec:
         # The node group layout (nodeGroups in a config file, --config /
         # CV_CONFIG, is the same thing; docs/controller.md). The API server
         # (config/server) must have the same values. The system node group
-        # runs Karpenter, CoreDNS and every platform component at a fixed
-        # size; instance type and capacity type apply to new clusters only.
+        # runs Karpenter, cluster-autoscaler, CoreDNS and every platform
+        # component, autoscaled between the minimum and maximum size (both
+        # change existing clusters in place); instance type and capacity
+        # type apply to new clusters only.
         - name: CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE
           value: "t3.medium"
-        - name: CV_SYSTEM_NODE_GROUP_SIZE
+        - name: CV_SYSTEM_NODE_GROUP_MIN_SIZE
           value: "2"
+        - name: CV_SYSTEM_NODE_GROUP_MAX_SIZE
+          value: "6"
         # What users may create as their own (Karpenter) node groups: the
         # families the API server allows ("none": no restriction), and what a
         # group that sets none gets.

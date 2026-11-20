@@ -17,11 +17,21 @@ spec:
   # No cloudResources: the operator and its operands make no AWS API calls.
   platformValues:
     operator:
-      # The operator's own Deployment runs on the default node pool; its
+      # The operator's own Deployment runs on the system node group; its
       # operands (DaemonSets) keep the chart's GPU tolerations.
-      # The cluster's default node pool: its labels, and a toleration per taint.
+      # The system node group: its labels, and a toleration per taint.
       nodeSelector: ${platform.nodeSelector}
       tolerations: ${platform.tolerations}
+    # Node Feature Discovery's own Deployments (the master, which also runs
+    # the Job that prunes it on delete, and the garbage collector) run on the
+    # system node group too; its worker DaemonSet stays on GPU nodes.
+    node-feature-discovery:
+      master:
+        nodeSelector: ${platform.nodeSelector}
+        tolerations: ${platform.tolerations}
+      gc:
+        nodeSelector: ${platform.nodeSelector}
+        tolerations: ${platform.tolerations}
     # The EKS-optimized AL2023 NVIDIA AMI ships the NVIDIA driver and container toolkit, and
     # nodeadm makes "nvidia" the default containerd runtime. AWS says to disable both in the
     # operator (docs.aws.amazon.com/eks/latest/userguide/ml-eks-optimized-ami.html).

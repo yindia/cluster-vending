@@ -39,7 +39,7 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "capsule", "external-secrets", "gpu-operator", "istio", "istio-base",
+	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "gpu-operator", "istio", "istio-base",
 		"istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
@@ -150,7 +150,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"karpenter", "aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istiod",
+	want := []string{"karpenter", "cluster-autoscaler", "aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
@@ -202,54 +202,96 @@ func TestIstioBundle(t *testing.T) {
 	}
 }
 
-// The Deployments of the catalog run on the platform's Karpenter node pool:
-// each definition sets the platform node selector and tolerations
-// placeholders at its chart's keys. Only Karpenter itself runs on the
-// default managed node group (the system pool), where it must be to launch
-// the others. DaemonSets (istio-cni, ztunnel, the GPU operands) run on every
-// node and keep their charts' tolerations.
-func TestPlacementOnThePlatformPool(t *testing.T) {
-	where := map[string][]any{
-		"aws-load-balancer-controller": {},
-		"capsule":                      {},
-		"istiod":                       {},
-		"istio-ingress-gateway":        {},
-		"kyverno":                      {"global"},
-		"external-secrets":             {"global"},
-		"gpu-operator":                 {"operator"},
-	}
+// Everything the platform and tenants run is on the system managed node
+// group (the cluster's only platform node group, tainted: platform.* is the
+// alias of system.*), so each Platform and Tenant definition places its
+// Deployments and StatefulSets there with the nodeSelector and tolerations
+// placeholders at its chart's keys, and its DaemonSets run on every node.
+//
+// The keys are checked against `helm template` of the pinned chart (see
+// pkg/catalog/release.yaml) with these values: every Deployment, StatefulSet,
+// Job and CronJob of the chart then carries the system selector and
+// toleration, except the DaemonSets listed below. A new definition must be
+// listed in placedWorkloads or noWorkloads.
+var placedWorkloads = map[string][][]any{
+	// Paths of the values at which a nodeSelector and tolerations are set.
+	"aws-load-balancer-controller": {{}},
+	"capsule":                      {{}, {"global", "jobs", "kubectl"}}, // the Deployment, and the CRD and delete hook Jobs
+	"cluster-autoscaler":           {{}},
+	"istiod":                       {{}},
+	"istio-ingress-gateway":        {{}},
+	"kyverno":                      {{"global"}},
+	"external-secrets":             {{"global"}}, // the controller, webhook and cert controller
+	"karpenter":                    {{}},
+	// The operator Deployment and its hook Jobs; Node Feature Discovery's
+	// master (and the Job that prunes it on delete) and garbage collector are
+	// Deployments too. The operands, and NFD's worker, are DaemonSets that
+	// stay on GPU nodes (their charts' GPU tolerations).
+	"gpu-operator": {{"operator"}, {"node-feature-discovery", "master"}, {"node-feature-discovery", "gc"}},
+}
+
+// DaemonSets run on every node: the chart's own tolerations of everything
+// (istio-cni, ztunnel; verified with helm template at the pinned version)
+// and no nodeSelector of ours, so they reach the system nodes too.
+var placedDaemonSets = map[string]bool{"istio-cni": true, "ztunnel": true}
+
+// Definitions whose charts run no pod of their own: CRDs, the mesh's
+// cluster-wide resources, the umbrella bundle, policies Kyverno enforces
+// (kyverno-policies: ClusterPolicy-like objects only, verified with helm
+// template).
+var noWorkloads = map[string]bool{"istio": true, "istio-base": true, "kyverno-policies": true}
+
+func TestEveryWorkloadRunsOnTheSystemNodeGroup(t *testing.T) {
+	seen := map[string]bool{}
 	for _, d := range catalogDefinitions(t) {
-		path, placed := where[d.Name]
-		at := lookup(d.PlatformValues, path...)
-		selector := lookup(at, "nodeSelector")
-		tolerations := lookup(at, "tolerations")
-		if placed && (selector != "${platform.nodeSelector}" || tolerations != "${platform.tolerations}") {
-			t.Errorf("%s: nodeSelector %v, tolerations %v at %v", d.Name, selector, tolerations, path)
-		}
 		used := component.Placeholders(d.PlatformValues)
-		if d.Name != "karpenter" && (slices.Contains(used, "system.nodeSelector") || slices.Contains(used, "system.tolerations")) {
-			t.Errorf("%s selects the default managed node group; only karpenter does", d.Name)
+		switch {
+		case placedWorkloads[d.Name] != nil:
+			seen[d.Name] = true
+			for _, path := range placedWorkloads[d.Name] {
+				at := lookup(d.PlatformValues, path...)
+				selector, tolerations := lookup(at, "nodeSelector"), lookup(at, "tolerations")
+				if !isSystemGroup(selector, "nodeSelector") || !isSystemGroup(tolerations, "tolerations") {
+					t.Errorf("%s: nodeSelector %v, tolerations %v at %v: want the system node group (${system.*} or ${platform.*})", d.Name, selector, tolerations, path)
+				}
+			}
+		case placedDaemonSets[d.Name]:
+			seen[d.Name] = true
+			if slices.Contains(used, "system.nodeSelector") || slices.Contains(used, "platform.nodeSelector") {
+				t.Errorf("%s is a DaemonSet that must run on every node, but selects the system group", d.Name)
+			}
+		case noWorkloads[d.Name]:
+			seen[d.Name] = true
+		default:
+			t.Errorf("%s (%s) is in no placement list: add where its Deployments take a nodeSelector and tolerations to placedWorkloads, or to placedDaemonSets / noWorkloads", d.Name, d.Management)
 		}
-		if !placed && slices.Contains(used, "platform.nodeSelector") {
-			t.Errorf("%s selects the platform pool; it is not expected to", d.Name)
+	}
+	for _, list := range []map[string]bool{placedDaemonSets, noWorkloads} {
+		for name := range list {
+			if !seen[name] {
+				t.Errorf("placement list names %s, which is not in the catalog", name)
+			}
 		}
 	}
-	// CRD hooks run before the Capsule controller can start. Keeping only the
-	// Deployment on the platform pool leaves installs stuck on a tainted pool.
-	capsule, err := component.DefinitionOf(byName(t)["capsule"])
-	if err != nil {
-		t.Fatal(err)
+	for name := range placedWorkloads {
+		if !seen[name] {
+			t.Errorf("placedWorkloads names %s, which is not in the catalog", name)
+		}
 	}
-	jobs := lookup(capsule.PlatformValues, "global", "jobs", "kubectl")
-	if lookup(jobs, "nodeSelector") != "${platform.nodeSelector}" || lookup(jobs, "tolerations") != "${platform.tolerations}" {
-		t.Error("Capsule lifecycle hooks must select and tolerate the platform pool")
-	}
+}
+
+// isSystemGroup: v is the whole-value placeholder of the system group (system.* and
+// platform.* are the same group).
+func isSystemGroup(v any, key string) bool {
+	return v == "${system."+key+"}" || v == "${platform."+key+"}"
+}
+
+// Karpenter must run on the system group (where it launches the others'
+// nodes) and off its own nodes.
+func TestKarpenterRunsOnTheSystemGroupAndOffItsOwnNodes(t *testing.T) {
 	karpenter, err := component.DefinitionOf(byName(t)["karpenter"])
 	if err != nil {
 		t.Fatal(err)
-	}
-	if lookup(karpenter.PlatformValues, "nodeSelector") != "${system.nodeSelector}" || lookup(karpenter.PlatformValues, "tolerations") != "${system.tolerations}" {
-		t.Error("karpenter must run on the default managed node group")
 	}
 	if lookup(karpenter.PlatformValues, "affinity", "nodeAffinity") == nil {
 		t.Error("karpenter lost the affinity that keeps it off its own nodes")
@@ -262,11 +304,46 @@ func TestPlacementOnThePlatformPool(t *testing.T) {
 	}
 }
 
-// The cluster autoscaler is gone from the platform: Karpenter is the only
-// node autoscaler, and the default managed node group has a fixed size.
-func TestClusterAutoscalerIsNotShipped(t *testing.T) {
-	if _, ok := byName(t)["cluster-autoscaler"]; ok {
-		t.Error("the catalog still ships cluster-autoscaler")
+// cluster-autoscaler resizes the system managed node group only: it
+// discovers Auto Scaling groups by the two tags the platform puts on that
+// node group (and no other), it sets no --nodes, its IAM write access is
+// scoped to groups tagged for this cluster, and Karpenter's nodes (in no
+// Auto Scaling group) are not its.
+func TestClusterAutoscalerScalesOnlyTheSystemGroup(t *testing.T) {
+	def, err := component.DefinitionOf(byName(t)["cluster-autoscaler"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Management != component.Platform {
+		t.Errorf("management = %v, want Platform", def.Management)
+	}
+	v := def.PlatformValues
+	if lookup(v, "cloudProvider") != "aws" {
+		t.Errorf("cloudProvider = %v", lookup(v, "cloudProvider"))
+	}
+	tags := stringList(t, lookup(v, "autoDiscovery", "tags"))
+	if want := []string{"k8s.io/cluster-autoscaler/enabled", "k8s.io/cluster-autoscaler/${cluster.name}"}; !slices.Equal(tags, want) {
+		t.Errorf("autoDiscovery.tags = %v, want %v", tags, want)
+	}
+	if extra, _ := lookup(v, "extraArgs").(map[string]any); extra != nil {
+		if _, has := extra["nodes"]; has {
+			t.Error("extraArgs sets nodes: only autoDiscovery picks the node group")
+		}
+	}
+	if _, has := v["autoscalingGroups"]; has {
+		t.Error("autoscalingGroups names groups by hand: only autoDiscovery picks the node group")
+	}
+	if lookup(v, "image") != nil {
+		t.Error("the definition sets image: the release pins the tag per Kubernetes minor")
+	}
+	policy := byName(t)["cluster-autoscaler"].Spec.CloudResources.IAMRole.Policy
+	if !strings.Contains(policy, "aws:ResourceTag/k8s.io/cluster-autoscaler/${cluster.name}") ||
+		strings.Contains(policy, `"autoscaling:*"`) {
+		t.Errorf("the IAM policy does not scope writes to this cluster's tagged groups:\n%s", policy)
+	}
+	reqs, _ := lookup(v, "resources", "requests").(map[string]any)
+	if reqs["cpu"] != "50m" || reqs["memory"] != "128Mi" {
+		t.Errorf("requests = %v, want 50m / 128Mi (the system group's budget)", reqs)
 	}
 }
 

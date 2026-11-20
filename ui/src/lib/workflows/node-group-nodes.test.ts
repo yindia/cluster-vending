@@ -112,7 +112,7 @@ test("collection state: never collected, collected, incomplete, with notices", (
 
 test("a group's detail: user groups show their spec, the system group says who manages it", () => {
   const cluster = create(ClusterSchema, {
-    id: "c1", spec: { nodeGroups: [create(NodeGroupSpecSchema, { name: "gpu", instanceFamilies: ["g5"], capacityTypes: [CapacityType.SPOT] })], defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 2, maxSize: 2 } } },
+    id: "c1", spec: { nodeGroups: [create(NodeGroupSpecSchema, { name: "gpu", instanceFamilies: ["g5"], capacityTypes: [CapacityType.SPOT] })], defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 2, maxSize: 6 } } },
     status: { nodeGroups: [
       create(NodeGroupStatusSchema, { name: "gpu", phase: NodeGroupPhase.FAILED, message: "No GPU capacity", nodes: 0 }),
       create(NodeGroupStatusSchema, { name: "system", platformManaged: true, phase: NodeGroupPhase.READY, nodes: 2 }),
@@ -130,7 +130,10 @@ test("a group's detail: user groups show their spec, the system group says who m
   assert.match(String(system?.summary[0].value), /Karpenter, CoreDNS/);
   assert.match(String(system?.summary[0].value), /every platform component/);
   assert.equal(system?.summary.find(item => item.label === "Instance types")?.value, "t3.large");
-  assert.equal(system?.summary.find(item => item.label === "Size")?.value, "2 nodes (fixed)");
+  assert.equal(system?.summary.find(item => item.label === "Size")?.value, "2–6 (autoscaled)");
+  assert.match(String(system?.summary[0].value), /autoscaled/);
+  assert.doesNotMatch(String(system?.summary[0].value), /fixed/);
+  assert.equal(system?.summary.find(item => item.label === "Nodes now")?.value, "2 nodes");
 
   // "platform" is no node group any more: it is reserved, and unknown unless a status still says so.
   assert.equal(groupDetail(cluster, "platform"), undefined);
@@ -141,5 +144,6 @@ test("system exists before the controller reports it", () => {
   const cluster = create(ClusterSchema, { id: "c1", spec: { defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 1, maxSize: 3 } } } });
   const system = groupDetail(cluster, "system");
   assert.deepEqual([system?.phaseLabel, system?.tone, system?.nodes], ["Not reported", "neutral", undefined]);
-  assert.equal(system?.summary.find(item => item.label === "Size")?.value, "1–3 nodes");
+  assert.equal(system?.summary.find(item => item.label === "Size")?.value, "1–3 (autoscaled)");
+  assert.equal(system?.summary.find(item => item.label === "Nodes now"), undefined, "no count before the controller reports it");
 });

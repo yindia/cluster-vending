@@ -179,7 +179,7 @@ func TestOldPlatformPoolIsKeptWhileATenantComponentIsNotSettled(t *testing.T) {
 	require.Nil(t, lw.legacyObject(t, "NodePool"), "settled: the pool goes")
 }
 
-// The system group must be at its size, Ready and carrying the system
+// The system group must be at least at its minimum size, Ready and carrying the system
 // placement before the old pool goes.
 func TestOldPlatformPoolIsKeptUntilTheSystemGroupIsReady(t *testing.T) {
 	for name, tt := range map[string]struct {
@@ -188,7 +188,7 @@ func TestOldPlatformPoolIsKeptUntilTheSystemGroupIsReady(t *testing.T) {
 		want           string
 	}{
 		"not labelled yet":        {false, 2, 2, "its system label is not applied yet"},
-		"not at its size yet":     {true, 1, 2, "not at its size of 2 yet"},
+		"not at its minimum yet":  {true, 1, 2, "not at its minimum size of 2 yet"},
 		"a node is not Ready yet": {true, 2, 1, "1 of 2 nodes are Ready"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -202,6 +202,17 @@ func TestOldPlatformPoolIsKeptUntilTheSystemGroupIsReady(t *testing.T) {
 			require.Contains(t, res.system.move, tt.want)
 		})
 	}
+}
+
+// The system group is autoscaled: more nodes than its minimum (the
+// autoscaler added one) is not a reason to keep the old pool.
+func TestOldPlatformPoolGoesWhenTheAutoscalerHasAddedNodes(t *testing.T) {
+	lw := newLegacyWorld(t)
+	lw.systemNodeGroup(t, true, 3, 3) // the render's minimum is 2
+
+	lw.pass(t, lw.platformComponents())
+
+	require.Nil(t, lw.legacyObject(t, "NodePool"), "settled: the pool goes")
 }
 
 // Settled: the pool is deleted; its node class only once its pool and its

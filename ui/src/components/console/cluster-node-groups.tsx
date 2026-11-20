@@ -64,7 +64,7 @@ export function ClusterNodeGroups({ cluster, onApplied, onRefresh, refreshing }:
     <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap" width="100%">
       <VStack gap={1}>
         <Heading level={3}>Node groups</Heading>
-        <Text type="supporting">Karpenter provisions workload nodes for each group of your own. The system group runs Karpenter and the platform and cannot be changed.</Text>
+        <Text type="supporting">Karpenter provisions workload nodes for each group of your own. The system group runs Karpenter, the cluster autoscaler and the platform, is autoscaled between its minimum and maximum size, and cannot be changed here.</Text>
       </VStack>
       <HStack gap={2} wrap="wrap" vAlign="center">
         {canWrite && <Button label="Add node group" variant="primary" onClick={() => setDialog({ mode: "add" })} isDisabled={full} tooltip={full ? `A cluster allows at most ${MAX_NODE_GROUPS} node groups.` : undefined} />}
@@ -100,7 +100,7 @@ function NodeGroupTable({ clusterId, rows, canWrite, onEdit, onRemove }: { clust
         {row.platformManaged && <Text type="supporting">Managed by platform</Text>}
       </VStack> },
       ...(width >= 560 ? [{ key: "capacity", header: "Capacity", width: proportional(1.5, { minWidth: 90 }), renderCell: (row: NodeGroupRow) => row.spec ? <VStack gap={1}><Text>{summarizeNodeGroup(row.spec).capacity}</Text><Text type="supporting">{summarizeNodeGroup(row.spec).architectures}</Text></VStack>
-        : row.system ? <VStack gap={1}><Text>{row.system.capacity}</Text><Text type="supporting">{row.system.size}</Text></VStack> : <Text color="secondary">Platform</Text> }] : []),
+        : row.system ? <VStack gap={1}><Text>{row.system.capacity}</Text><Text type="supporting">{row.system.size}</Text>{row.system.current && <Text type="supporting">{row.system.current}</Text>}</VStack> : <Text color="secondary">Platform</Text> }] : []),
       ...(width >= 760 ? [{ key: "instances", header: "Instances", width: proportional(2, { minWidth: 120 }), renderCell: (row: NodeGroupRow) => row.spec ? <Text>{summarizeNodeGroup(row.spec).instances}</Text>
         : row.system ? <Text>{row.system.instanceTypes}</Text> : <Text color="secondary">Managed by platform</Text> }] : []),
       ...(width >= 960 ? [{ key: "scheduling", header: "Labels and taints", width: proportional(2, { minWidth: 140 }), renderCell: (row: NodeGroupRow) => row.spec ? <VStack gap={1}><Text type="supporting">Labels: {summarizeNodeGroup(row.spec).labels}</Text><Text type="supporting">Taints: {summarizeNodeGroup(row.spec).taints}</Text></VStack> : <Text color="secondary">Not applicable</Text> }] : []),

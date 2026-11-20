@@ -15,7 +15,8 @@ import (
 //	nodeGroups:
 //	  system:                     # the default EKS managed node group
 //	    instanceType: t3.medium   # new clusters only; existing ones keep theirs
-//	    size: 2                   # desired = min = max; at least 2
+//	    minSize: 2                # at least 2; the size at creation
+//	    maxSize: 6                # at least minSize; cluster-autoscaler grows to it
 //	    capacityType: ON_DEMAND
 //	    diskSizeGiB: 0            # 0: EKS's default
 //	  karpenter:                  # what users may create as their own groups
@@ -34,6 +35,12 @@ import (
 const (
 	FlagSystemNodeGroupInstanceType = "system-node-group-instance-type"
 	EnvSystemNodeGroupInstanceType  = "CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE"
+	FlagSystemNodeGroupMinSize      = "system-node-group-min-size"
+	EnvSystemNodeGroupMinSize       = "CV_SYSTEM_NODE_GROUP_MIN_SIZE"
+	FlagSystemNodeGroupMaxSize      = "system-node-group-max-size"
+	EnvSystemNodeGroupMaxSize       = "CV_SYSTEM_NODE_GROUP_MAX_SIZE"
+	// FlagSystemNodeGroupSize is the setting of the fixed-size group, which
+	// stays accepted as an alias of the minimum.
 	FlagSystemNodeGroupSize         = "system-node-group-size"
 	EnvSystemNodeGroupSize          = "CV_SYSTEM_NODE_GROUP_SIZE"
 	FlagSystemNodeGroupCapacityType = "system-node-group-capacity-type"
@@ -57,12 +64,16 @@ const (
 	DefaultSystemNodeGroupInstanceType = "t3.medium"
 	// MinSystemNodeGroupSize is the least the system group may have:
 	// Karpenter runs two replicas with anti-affinity.
-	MinSystemNodeGroupSize     = 2
-	DefaultSystemNodeGroupSize = 2
-	defaultCapacityType        = "ON_DEMAND"
-	defaultArchitecture        = "AMD64"
-	defaultInstanceFamily      = "t3"
-	maxSystemDiskSizeGiB       = 16384
+	MinSystemNodeGroupSize = 2
+	// DefaultSystemNodeGroupMinSize is the size at creation; the default
+	// maximum is how far cluster-autoscaler may grow the group (or the
+	// minimum, when that is higher).
+	DefaultSystemNodeGroupMinSize = 2
+	DefaultSystemNodeGroupMaxSize = 6
+	defaultCapacityType           = "ON_DEMAND"
+	defaultArchitecture           = "AMD64"
+	defaultInstanceFamily         = "t3"
+	maxSystemDiskSizeGiB          = 16384
 	// noList is the value of a list setting that means "empty": the setting
 	// is set (a flag or variable may not be empty), and restricts nothing.
 	noList = "none"
@@ -80,8 +91,12 @@ var (
 var nodeGroupSettings = []Setting{
 	{Flag: FlagSystemNodeGroupInstanceType, Env: EnvSystemNodeGroupInstanceType, Default: DefaultSystemNodeGroupInstanceType,
 		Usage: "instance type of the default (system) managed node group of NEW clusters (nodeGroups.system.instanceType); existing clusters keep theirs: EKS cannot change it in place"},
-	{Flag: FlagSystemNodeGroupSize, Env: EnvSystemNodeGroupSize, Default: strconv.Itoa(DefaultSystemNodeGroupSize),
-		Usage: "size of the system managed node group, fixed: desired = min = max (nodeGroups.system.size); at least 2, Karpenter runs two replicas with anti-affinity. A change resizes existing clusters in place"},
+	{Flag: FlagSystemNodeGroupSize, Env: EnvSystemNodeGroupSize,
+		Usage: "deprecated alias of --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.size)"},
+	{Flag: FlagSystemNodeGroupMinSize, Env: EnvSystemNodeGroupMinSize,
+		Usage: "minimum size of the system managed node group, and its size at creation (nodeGroups.system.minSize); default 2, at least 2: Karpenter runs two replicas with anti-affinity. A change applies to existing clusters in place, without touching the node count"},
+	{Flag: FlagSystemNodeGroupMaxSize, Env: EnvSystemNodeGroupMaxSize,
+		Usage: "maximum size of the system managed node group, which cluster-autoscaler grows it to when pods need room (nodeGroups.system.maxSize); default 6, at least the minimum. A change applies to existing clusters in place"},
 	{Flag: FlagSystemNodeGroupCapacityType, Env: EnvSystemNodeGroupCapacityType, Default: defaultCapacityType,
 		Usage: "capacity type of the system node group of NEW clusters, ON_DEMAND or SPOT (nodeGroups.system.capacityType)"},
 	{Flag: FlagSystemNodeGroupDiskSizeGiB, Env: EnvSystemNodeGroupDiskSizeGiB, Default: "0",
@@ -112,9 +127,12 @@ type NodeGroups struct {
 // Karpenter, CoreDNS and every platform and tenant component.
 type SystemNodeGroup struct {
 	// InstanceType, CapacityType and DiskSizeGiB apply to new clusters
-	// only. Size applies to every cluster, in place.
+	// only. MinSize and MaxSize apply to every cluster, in place; the
+	// node count between them is cluster-autoscaler's (MinSize is the
+	// count at creation only).
 	InstanceType string
-	Size         int
+	MinSize      int
+	MaxSize      int
 	CapacityType string
 	DiskSizeGiB  int
 }
@@ -137,7 +155,7 @@ type NodeGroupDefaults struct {
 // DefaultNodeGroups is the layout when nothing is configured.
 func DefaultNodeGroups() NodeGroups {
 	return NodeGroups{
-		System: SystemNodeGroup{InstanceType: DefaultSystemNodeGroupInstanceType, Size: DefaultSystemNodeGroupSize, CapacityType: defaultCapacityType},
+		System: SystemNodeGroup{InstanceType: DefaultSystemNodeGroupInstanceType, MinSize: DefaultSystemNodeGroupMinSize, MaxSize: DefaultSystemNodeGroupMaxSize, CapacityType: defaultCapacityType},
 		Karpenter: KarpenterNodeGroups{InstanceFamilies: []string{defaultInstanceFamily},
 			Defaults: NodeGroupDefaults{Architectures: []string{defaultArchitecture}, CapacityTypes: []string{defaultCapacityType}}},
 	}
@@ -160,15 +178,8 @@ func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
 	if !instanceTypePattern.MatchString(out.System.InstanceType) {
 		errs = append(errs, fmt.Errorf("%s: %q is not an instance type like t3.large", setting(FlagSystemNodeGroupInstanceType), v[FlagSystemNodeGroupInstanceType]))
 	}
-	size, err := strconv.Atoi(strings.TrimSpace(v[FlagSystemNodeGroupSize]))
-	switch {
-	case err != nil:
-		errs = append(errs, fmt.Errorf("%s: %q is not a number", setting(FlagSystemNodeGroupSize), v[FlagSystemNodeGroupSize]))
-	case size < MinSystemNodeGroupSize:
-		errs = append(errs, fmt.Errorf("%s must be at least %d (Karpenter runs two replicas with anti-affinity), got %d",
-			setting(FlagSystemNodeGroupSize), MinSystemNodeGroupSize, size))
-	}
-	out.System.Size = size
+	out.System.MinSize, out.System.MaxSize, errs = systemSizes(v, errs)
+	var err error
 	out.System.CapacityType, err = oneOf(setting(FlagSystemNodeGroupCapacityType), v[FlagSystemNodeGroupCapacityType], capacityTypes)
 	check(err)
 	disk, err := strconv.Atoi(strings.TrimSpace(v[FlagSystemNodeGroupDiskSizeGiB]))
@@ -185,6 +196,49 @@ func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
 	out.Karpenter.Defaults.CapacityTypes, err = enumList(setting(FlagNodeGroupDefaultCapacityTypes), v[FlagNodeGroupDefaultCapacityTypes], capacityTypes)
 	check(err)
 	return out, errs
+}
+
+// systemSizes reads the system group's minimum and maximum. size is the
+// old fixed-size setting: it means the minimum (it may also be set to the
+// same number). An unset minimum is DefaultSystemNodeGroupMinSize, an unset
+// maximum DefaultSystemNodeGroupMaxSize or the minimum when that is higher.
+func systemSizes(v map[string]string, errs []error) (minSize, maxSize int, _ []error) {
+	number := func(flag string) (int, bool) {
+		raw := strings.TrimSpace(v[flag])
+		if raw == "" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %q is not a number", setting(flag), v[flag]))
+			return 0, false
+		}
+		return n, true
+	}
+	size, hasSize := number(FlagSystemNodeGroupSize)
+	minSize, hasMin := number(FlagSystemNodeGroupMinSize)
+	maxSize, hasMax := number(FlagSystemNodeGroupMaxSize)
+	switch {
+	case hasSize && hasMin && size != minSize:
+		errs = append(errs, fmt.Errorf("%s and %s are different (%d and %d): size is the old name of the minimum, set one",
+			setting(FlagSystemNodeGroupSize), setting(FlagSystemNodeGroupMinSize), size, minSize))
+	case hasSize && !hasMin:
+		minSize, hasMin = size, true
+	}
+	if !hasMin {
+		minSize = DefaultSystemNodeGroupMinSize
+	}
+	if minSize < MinSystemNodeGroupSize {
+		errs = append(errs, fmt.Errorf("the system node group's minimum size (%s) must be at least %d (Karpenter runs two replicas with anti-affinity), got %d",
+			setting(FlagSystemNodeGroupMinSize), MinSystemNodeGroupSize, minSize))
+	}
+	if !hasMax {
+		maxSize = max(DefaultSystemNodeGroupMaxSize, minSize)
+	}
+	if maxSize < minSize {
+		errs = append(errs, fmt.Errorf("%s must be at least the minimum size (%d), got %d", setting(FlagSystemNodeGroupMaxSize), minSize, maxSize))
+	}
+	return minSize, maxSize, errs
 }
 
 func oneOf(s Setting, raw string, allowed []string) (string, error) {

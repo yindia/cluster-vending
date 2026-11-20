@@ -49,8 +49,8 @@ spec:
     #   kmsKeyArn: arn:aws:kms:us-west-1:111122223333:key/00000000-0000-0000-0000-000000000000
     # An existing key is not created/deleted by the platform. Once enabled,
     # encryption cannot be disabled or switched to a different key.
-  # The default node group is the platform's: it runs Karpenter and CoreDNS, is
-  # tainted and labelled for that, and has a fixed size. Omit defaultNodePool and
+  # The default node group is the platform's: it runs Karpenter, the cluster autoscaler and CoreDNS, is
+  # tainted and labelled for that, and is autoscaled between a size range the platform admin sets. Omit defaultNodePool and
   # the platform fills it; a request that changes its taints, labels or scaling
   # is refused ("the default node group is managed by the platform").
   # Your workloads run on Karpenter node groups, below.

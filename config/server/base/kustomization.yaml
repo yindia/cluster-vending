@@ -39,7 +39,8 @@ configMapGenerator:
   - CV_NODE_GROUP_DEFAULT_ARCHITECTURES=AMD64
   - CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES=ON_DEMAND
   - CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE=t3.medium
-  - CV_SYSTEM_NODE_GROUP_SIZE=2
+  - CV_SYSTEM_NODE_GROUP_MIN_SIZE=2
+  - CV_SYSTEM_NODE_GROUP_MAX_SIZE=6
   # Nothing of AWS: the server validates requests and stores the desired
   # state. The controller (../../default) installs the providers, looks the
   # cloud up and reconciles; it is the one with AWS settings and an IAM role.

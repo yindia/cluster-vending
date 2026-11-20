@@ -11,12 +11,15 @@ import (
 	"github.com/yindia/cluster-vending/pkg/config"
 )
 
-// The system managed node group runs Karpenter, the EKS add-on controllers,
-// every platform component and the DaemonSets of each node. This file
-// fails when what the shipped catalog REQUESTS there no longer fits the
-// DEFAULT group (config.DefaultNodeGroups) with headroom: a chart bump or a
-// definition edit cannot silently outgrow it (docs/catalog.md, "Sizing the
-// system group").
+// The system managed node group runs Karpenter, cluster-autoscaler, the EKS
+// add-on controllers, every platform component and the DaemonSets of each
+// node. This file fails when what the shipped catalog REQUESTS there no
+// longer fits the DEFAULT group at its MINIMUM size (config.DefaultNodeGroups,
+// MinSize nodes) with headroom: a chart bump or a definition edit cannot
+// silently outgrow it (docs/catalog.md, "Sizing the system group"). The
+// group is autoscaled: when pending pods need room, cluster-autoscaler adds
+// nodes up to MaxSize, so what does not fit at the minimum is a cost
+// (more nodes), not an outage, but the default stays one that needs none.
 //
 // Only what a definition's platformValues set is counted, so a component's
 // requests and replicas must be explicit there: a chart default is never
@@ -119,8 +122,10 @@ type workload struct {
 // platformDeployments are the Deployments each Platform definition runs on
 // the system group. Karpenter's own two replicas are the only HA the
 // platform keeps beyond CoreDNS and the EBS CSI controller (add-ons).
+// cluster-autoscaler runs one replica.
 var platformDeployments = map[string][]workload{
-	"karpenter": {{"karpenter", "replicas", "controller.resources.requests"}},
+	"cluster-autoscaler": {{"cluster-autoscaler", "replicaCount", "resources.requests"}},
+	"karpenter":          {{"karpenter", "replicas", "controller.resources.requests"}},
 	"kyverno": {
 		{"kyverno-admission", "admissionController.replicas", "admissionController.container.resources.requests"},
 		{"kyverno-background", "backgroundController.replicas", "backgroundController.resources.requests"},
@@ -280,14 +285,15 @@ func TestSizingNamesEveryPlatformDefinition(t *testing.T) {
 	}
 }
 
-// The default system group holds the platform's requests with headroom.
+// The default system group, at its MINIMUM size, holds the platform's
+// requests with headroom (pods limit included).
 func TestCatalogFitsTheDefaultSystemNodeGroup(t *testing.T) {
 	group := config.DefaultNodeGroups().System
 	shape, ok := instanceShapes[group.InstanceType]
 	if !ok {
 		t.Fatalf("default system instance type %q is not in instanceShapes: add its size", group.InstanceType)
 	}
-	nodes := int64(group.Size)
+	nodes := int64(group.MinSize)
 	nodeCPU, nodeMem := shape.allocatable()
 	allocCPU, allocMem, maxPods := nodeCPU*nodes, nodeMem*nodes, shape.maxPods*nodes
 
@@ -314,6 +320,36 @@ func TestCatalogFitsTheDefaultSystemNodeGroup(t *testing.T) {
 	}
 	if sum.pods > maxPods {
 		t.Errorf("%d pods exceed the %d the nodes hold (%d x %d)\n%s", sum.pods, maxPods, nodes, shape.maxPods, summary)
+	}
+}
+
+// The autoscaler has room to add nodes by default, and what it may add is
+// at least what the DaemonSets of those nodes take: the maximum is above the
+// minimum, and a full group of MaxSize nodes still has room for pods.
+func TestDefaultSystemNodeGroupCanGrow(t *testing.T) {
+	group := config.DefaultNodeGroups().System
+	if group.MaxSize <= group.MinSize {
+		t.Fatalf("max %d is not above min %d: cluster-autoscaler could never add a node", group.MaxSize, group.MinSize)
+	}
+	shape := instanceShapes[group.InstanceType]
+	nodeCPU, nodeMem := shape.allocatable()
+	maxNodes := int64(group.MaxSize)
+	var perNodeCPU, perNodeMem int64
+	var requested usage
+	for _, l := range sizingTable(t, maxNodes) {
+		requested = requested.plus(l.total())
+	}
+	for _, ds := range addonDaemonSetsPer {
+		perNodeCPU += ds.each.cpuMilli
+		perNodeMem += ds.each.memMiB
+	}
+	if requested.pods >= maxNodes*shape.maxPods || requested.cpuMilli >= nodeCPU*maxNodes || requested.memMiB >= nodeMem*maxNodes {
+		t.Errorf("at the maximum of %d nodes the requests (%dm, %d MiB, %d pods) fill the group (%dm per node of DaemonSets %dm, %d MiB)",
+			maxNodes, requested.cpuMilli, requested.memMiB, requested.pods, nodeCPU, perNodeCPU, perNodeMem)
+	}
+	// Each added node nets room: its DaemonSets leave allocatable CPU and memory.
+	if nodeCPU-perNodeCPU <= 0 || nodeMem-perNodeMem <= 0 {
+		t.Error("a node's add-on DaemonSets take all of it: adding nodes would not help")
 	}
 }
 

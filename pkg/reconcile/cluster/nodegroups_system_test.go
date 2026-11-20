@@ -89,26 +89,26 @@ func TestSystemNodeGroupSaysWhenMovingOffTheOldPool(t *testing.T) {
 	require.Equal(t, "moving components off the old platform pool: 2 left (a, b)", st.NodeGroups[0].GetMessage())
 }
 
-// The cluster's default node group shows the admin's size now, not the one
+// The cluster's default node group shows the admin's min and max now, not the one
 // stored when it was created; an imported cluster keeps its own.
 func TestViewShowsTheAdminsSystemNodeGroupSize(t *testing.T) {
 	w, row := nodeGroupWorld(t, newFakeWorkload(interceptor.Funcs{}))
-	w.svc.deps.NodeGroups.System.Size = 4
+	w.svc.deps.NodeGroups.System.MinSize, w.svc.deps.NodeGroups.System.MaxSize = 4, 9
 
 	c, err := w.svc.View(t.Context(), row)
 
 	require.NoError(t, err)
 	sc := c.GetSpec().GetDefaultNodePool().GetScalingConfig()
 	require.EqualValues(t, 4, sc.GetMinSize())
-	require.EqualValues(t, 4, sc.GetMaxSize())
-	require.EqualValues(t, 4, sc.GetDesiredSize())
+	require.EqualValues(t, 9, sc.GetMaxSize())
+	require.Nil(t, sc.DesiredSize, "the node count is cluster-autoscaler's")
 	stored, err := SpecOf(row)
 	require.NoError(t, err)
-	require.NotEqualValues(t, 4, stored.GetDefaultNodePool().GetScalingConfig().GetMaxSize(), "the stored spec is not rewritten")
+	require.NotEqualValues(t, 9, stored.GetDefaultNodePool().GetScalingConfig().GetMaxSize(), "the stored spec is not rewritten")
 
 	imported := w.cluster(t)
 	imported.Imported, imported.State = true, StateImported
 	c, err = w.svc.View(t.Context(), imported)
 	require.NoError(t, err)
-	require.NotEqualValues(t, 4, c.GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize())
+	require.NotEqualValues(t, 9, c.GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize())
 }

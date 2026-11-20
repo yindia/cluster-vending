@@ -41,9 +41,14 @@ nodeGroups:
     # New clusters only; an existing cluster keeps its instance type (EKS
     # cannot change it in place, the node group would be replaced).
     instanceType: t3.medium
-    # Desired = min = max, no autoscaler; at least 2 (Karpenter runs two
-    # replicas with anti-affinity). Resizes existing clusters in place.
-    size: 2
+    # The group is autoscaled by cluster-autoscaler between minSize and
+    # maxSize. minSize is also the size at creation (at least 2: Karpenter
+    # runs two replicas with anti-affinity); after that the node count is
+    # the autoscaler's. Both change existing clusters in place, never the
+    # node count. (`size` still works as an alias of minSize.)
+    minSize: 2
+    # At least minSize.
+    maxSize: 6
     # New clusters only: ON_DEMAND or SPOT.
     capacityType: ON_DEMAND
     # New clusters only, in GiB; 0: EKS's default.

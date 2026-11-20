@@ -9,6 +9,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	shipped "github.com/yindia/cluster-vending/pkg/catalog"
+	"github.com/yindia/cluster-vending/pkg/component"
 	"github.com/yindia/cluster-vending/pkg/release"
 )
 
@@ -58,15 +59,45 @@ func TestShippedReleasePinsTheShippedCatalog(t *testing.T) {
 	}
 }
 
-// The cluster autoscaler left the platform with the Karpenter node groups:
-// no minor pins it (or its image tag), and nothing is pinned that the
-// catalog does not have.
-func TestNoMinorPinsTheClusterAutoscaler(t *testing.T) {
+// The cluster autoscaler's image is of the Kubernetes minor it is pinned
+// under (v1.36.x under 1.36), and its definition leaves the tag to the pin.
+func TestClusterAutoscalerImageFollowsTheMinor(t *testing.T) {
 	for _, k := range DefaultRelease().Spec.Content.Kubernetes {
+		found := false
 		for _, c := range k.Components {
-			if c.Name == "cluster-autoscaler" {
-				t.Errorf("%s still pins cluster-autoscaler", k.Minor)
+			if c.Name != "cluster-autoscaler" {
+				continue
 			}
+			found = true
+			values, err := component.PinValues(c.Values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			image, _ := values["image"].(map[string]any)
+			tag, _ := image["tag"].(string)
+			if !strings.HasPrefix(tag, "v"+k.Minor+".") {
+				t.Errorf("on %s the cluster autoscaler image is %q, want v%s.x", k.Minor, tag, k.Minor)
+			}
+		}
+		if !found {
+			t.Errorf("%s does not pin cluster-autoscaler", k.Minor)
+		}
+	}
+	defs, _ := shippedCatalog(t)
+	for _, d := range defs {
+		if d.Name != "cluster-autoscaler" {
+			continue
+		}
+		def, err := component.DefinitionOf(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, set := def.PlatformValues["image"]; set {
+			t.Error("the definition sets image: the release pins the tag per Kubernetes minor")
+		}
+		pinned := component.WithPinValues(def, component.Values{"image": map[string]any{"tag": "v1.37.0"}})
+		if touched := component.LockedPathsTouched(component.Values{"image": map[string]any{"tag": "x"}}, pinned.PlatformValues); len(touched) != 1 {
+			t.Errorf("the pinned tag is not locked: %v", touched)
 		}
 	}
 }
@@ -77,11 +108,11 @@ func TestValidateReleaseChecksPinValues(t *testing.T) {
 	for _, tc := range []struct{ values, want string }{
 		{`{"image":{"tag":"v1.37.0"}}`, ""},
 		{`{"awsRegion":"${region}"}`, ""},
-		{`["x"]`, "the values of karpenter"},
+		{`["x"]`, "the values of cluster-autoscaler"},
 		{`{"a":"${nope}"}`, "${nope}"},
 	} {
 		content := DefaultRelease().Spec.Content
-		content.Kubernetes[0].Components = []cloudv1alpha1.ComponentPin{{Name: "karpenter", Version: "1.15.1",
+		content.Kubernetes[0].Components = []cloudv1alpha1.ComponentPin{{Name: "cluster-autoscaler", Version: "9.60.0",
 			Values: &runtime.RawExtension{Raw: []byte(tc.values)}}}
 		got := strings.Join(pinValueProblems(content), "; ")
 		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {

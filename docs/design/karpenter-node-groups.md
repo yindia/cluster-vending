@@ -10,14 +10,14 @@ platform node group now, `system` (see "Migration of existing clusters").
 
 | Question | Decision |
 |---|---|
-| Platform node group | **One**, `system`: the default EKS managed node group. It runs Karpenter, CoreDNS, every platform component, the tenant's components and the EKS add-on controllers. There is no Karpenter pool for the platform and no autoscaler for the group. |
-| Its size | Fixed: min = max = desired = `nodeGroups.system.size` (default 2, at least 2: Karpenter runs two replicas with anti-affinity). Set by the platform admin only; a change resizes existing clusters in place. |
+| Platform node group | **One**, `system`: the default EKS managed node group. It runs Karpenter, cluster-autoscaler, CoreDNS, every platform component, the tenant's components and the EKS add-on controllers. There is no Karpenter pool for the platform. |
+| Its size | **Autoscaled by cluster-autoscaler, by default**: `nodeGroups.system.minSize` (default 2, at least 2: Karpenter runs two replicas with anti-affinity) to `maxSize` (default 6, at least `minSize`). `size` still works as an alias of `minSize`. The desired size is `minSize` at creation only; after that it is the autoscaler's (the apply sends it in `initProvider`, never in `forProvider`). Set by the platform admin only; a change of min or max applies to existing clusters in place and never touches the node count or replaces the node group. |
 | Its machines | `nodeGroups.system.instanceType` (default `t3.medium`), `capacityType`, `diskSizeGiB`: new clusters only. A cluster created before keeps the instance type, capacity type, AMI and disk of its stored spec: EKS cannot change them in place, the node group would be replaced. |
 | Its placement | Label `node.cluster-vending.io/pool=system`, taint `node.cluster-vending.io/pool=system:NoSchedule`. Users cannot change its taints, labels or scaling (`failed_precondition`). |
 | User node groups | `ClusterSpec.node_groups`: Karpenter NodePools, each with its own EC2NodeClass. Users add, change and remove them. Karpenter serves them only. |
 | Delivery | The controller server-side applies the user groups' EC2NodeClasses and NodePools into the workload cluster through the kubeconfig it already uses (teardown, scans), on every pass. A platform object that was edited or deleted is put back. No chart. A cluster with no user node groups gets nothing applied. |
-| cluster-autoscaler | Removed from the platform set. Existing clusters have it uninstalled through the normal component removal. |
-| Existing clusters | Move in place: the default group's taints, labels and size change (no replacement: instance types and AMI stay), platform components get the system placement, and the old `platform` NodePool and EC2NodeClass are removed once nothing needs them (see "Migration"). Imported clusters are untouched until taken over; a takeover with `skip_platform_components` keeps its adopted group as it is. |
+| cluster-autoscaler | A default Platform component (sequence 10: after Karpenter, before the rest; it waits for no node group), one replica on the system group. Its `autoDiscovery` lists the Auto Scaling groups tagged `k8s.io/cluster-autoscaler/enabled` and `k8s.io/cluster-autoscaler/<cluster>`; the platform puts those tags on the system managed node group only (EKS copies them to its Auto Scaling group), no `--nodes` is set, and its IAM write access is scoped to groups tagged for this cluster. Karpenter's nodes are in no Auto Scaling group, so it never counts or scales them. Its image follows the Kubernetes minor (pinned per minor in the release). An admin who disables the definition (`spec.disabled`) keeps it disabled across builds; the sync re-creates it only where it was deleted. |
+| Existing clusters | Move in place: the default group's taints, labels, tags and min/max size change (desired does not) (no replacement: instance types and AMI stay), platform components get the system placement, and the old `platform` NodePool and EC2NodeClass are removed once nothing needs them (see "Migration"). Imported clusters are untouched until taken over; a takeover with `skip_platform_components` keeps its adopted group as it is. |
 | User fields | Instance types and families, architectures, capacity types (on-demand, Spot), labels, taints, CPU and memory limits. |
 
 ## Placement
@@ -91,9 +91,10 @@ message NodeGroupStatus {
   platform fills it; a request that changes its taints, labels or scaling is
   refused (`failed_precondition: the default node group is managed by the
   platform`). Instance types, capacity type and AMI stay as they are for
-  existing clusters. The size is the platform admin's setting
-  (`nodeGroups.system.size`), not the spec's: the render takes the current
-  setting, whatever the stored spec says.
+  existing clusters. The min and max size are the platform admin's settings
+  (`nodeGroups.system.minSize` and `maxSize`), not the spec's: the render takes
+  the current settings, whatever the stored spec says. The spec's desired size
+  is not rendered after creation.
 - CRD `ClusterSpec.NodeGroups` / `ClusterStatus.NodeGroups` mirror it;
   `pkg/convert` converts both ways.
 
@@ -197,18 +198,23 @@ Deviations and deferred:
 ### Sizing
 
 The system group holds Karpenter (2 replicas, 250m CPU / 512 MiB requested
-each, limits 1 CPU / 1 GiB), CoreDNS, every platform component and the add-on
-controllers, with the DaemonSets on each node. On 2 x `t3.medium` (2 vCPU,
-4 GiB, 17 pods per node; allocatable 1.93 CPU / 3.2 GiB per node by the EKS
-AL2023 reservations, so 3.86 CPU / 6.3 GiB / 34 pods) the requests sum to 2.4
-CPU (63%), 4.3 GiB (66%) and 30 pods (88%). The pod count is the tight
-limit. Only Karpenter keeps two replicas among the platform components
+each, limits 1 CPU / 1 GiB), cluster-autoscaler (1 replica, 50m / 128 MiB),
+CoreDNS, every platform component and the add-on controllers, with the
+DaemonSets on each node. At its minimum, 2 x `t3.medium` (2 vCPU, 4 GiB, 17
+pods per node; allocatable 1.93 CPU / 3.2 GiB per node by the EKS AL2023
+reservations, so 3.86 CPU / 6.3 GiB / 34 pods) the requests sum to 2.5 CPU
+(64%), 4.4 GiB (68%) and 31 pods (91%). The pod count is the tight limit.
+When pending pods need room (a tenant component, a rollout surge) the
+autoscaler adds nodes up to `maxSize` (default 6) and removes the idle ones
+later, so that is a cost, not an outage; the default still fits at the
+minimum with nothing to add. Only Karpenter keeps two replicas among the platform components
 (Capsule keeps 2 too); the rest run one, without a PodDisruptionBudget so a
 drain can proceed. Requests are explicit in the definitions and summed by
 `pkg/catalog/system_group_sizing_test.go`, which fails above 85% of the
-default group's CPU or memory allocatable or above its pod capacity: size
-`nodeGroups.system` up (`t3.large`, or more nodes) before adding replicas or
-components.
+default group's CPU or memory allocatable **at its minimum size**, or above
+its pod capacity there: raise `nodeGroups.system.minSize` or the instance
+type (`t3.large`) before adding replicas or components, so a default cluster
+needs no scale-up to start.
 
 ### Migration of existing clusters
 
@@ -233,7 +239,7 @@ platform intends to roll out:
   the applier's normal removal path, but only in this order, and until it
   holds they are kept exactly as they are (not applied again, not changed):
   1. the system node group has the system label and taint, is ACTIVE at
-     the admin's size and that many of its nodes are Ready;
+     at least the admin's minimum size and that many of its nodes are Ready;
   2. every platform component is READY with its Helm release settled
      (nothing written in this pass, the gate's `unchanged`), every tenant
      component is READY, and no pod but a DaemonSet's or a static one is
@@ -266,7 +272,8 @@ platform intends to roll out:
   nodeGroups:
     system:                      # the default EKS managed node group
       instanceType: t3.medium    # new clusters only
-      size: 2                    # desired = min = max; at least 2
+      minSize: 2                 # at least 2; the size at creation
+      maxSize: 6                 # at least minSize; cluster-autoscaler grows to it
       capacityType: ON_DEMAND    # new clusters only
       diskSizeGiB: 0             # new clusters only; 0: EKS's default
     karpenter:                   # what users may create
@@ -277,14 +284,16 @@ platform intends to roll out:
         capacityTypes: [ON_DEMAND]
   ```
 
-  Each value is also a flag and `CV_*` variable (`system-node-group-size`,
-  `system-node-group-instance-type`, `system-node-group-capacity-type`,
+  Each value is also a flag and `CV_*` variable (`system-node-group-min-size`,
+  `system-node-group-max-size`, `system-node-group-instance-type`, `system-node-group-capacity-type`,
   `system-node-group-disk-size-gib`, `node-group-instance-families`,
   `node-group-instance-types`, `node-group-default-architectures`,
   `node-group-default-capacity-types`; lists comma-separated); they win over
   the file. The two allowlist names are the ones that shipped before the
   section and still work as flat file keys. An empty list or `none` restricts
-  nothing. Validation: size at least 2, an instance type like `t3.medium`,
+  nothing. `size` (and `--system-node-group-size`) remains as an alias of `minSize`;
+  setting both to different numbers is an error. Validation: `minSize` at
+  least 2, `maxSize` at least `minSize`, an instance type like `t3.medium`,
   families like `t3`, `ON_DEMAND`/`SPOT`, `AMD64`/`ARM64`.
 - The server refuses (InvalidArgument) a new or changed user group whose
   families are outside the family list, whose types are in neither list nor

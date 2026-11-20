@@ -94,9 +94,9 @@ export interface GroupDetail {
   summary: { label: string; value: string }[];
 }
 
+/** The default managed node group's range, which cluster-autoscaler moves it in: "2–6 (autoscaled)". */
 function sizeLabel(min: number, max: number): string {
-  if (min === max) return `${count(min, "node")} (fixed)`;
-  return `${min}–${max} nodes`;
+  return `${min}–${max} (autoscaled)`;
 }
 
 function userSummary(group: NodeGroupSpec) {
@@ -121,9 +121,10 @@ export function groupDetail(cluster: Cluster, name: string): GroupDetail | undef
   let summary: GroupDetail["summary"];
   if (kind === "system") {
     const pool = cluster.spec?.defaultNodePool;
-    summary = [{ label: "Managed by", value: "The platform: the default managed node group, at a fixed size. It runs Karpenter, CoreDNS, every platform component, tenant components and add-on controllers, and cannot be changed." }];
+    summary = [{ label: "Managed by", value: "The platform: the default managed node group, autoscaled by the cluster autoscaler between its minimum and maximum size. It runs Karpenter, CoreDNS, the cluster autoscaler, every platform component, tenant components and add-on controllers, and cannot be changed." }];
     if (pool?.instanceTypes.length) summary.push({ label: "Instance types", value: pool.instanceTypes.join(", ") });
     if (pool?.scalingConfig) summary.push({ label: "Size", value: sizeLabel(pool.scalingConfig.minSize, pool.scalingConfig.maxSize) });
+    if (observed) summary.push({ label: "Nodes now", value: count(observed.nodes, "node") });
   } else summary = spec ? userSummary(spec) : [];
   return {
     name, kind, platformManaged: kind === "system" || !!observed?.platformManaged, phase, phaseLabel, tone, message: observed?.message ?? "", nodes: observed?.nodes, nodesNotice: observed?.nodesNotice ?? "", summary,

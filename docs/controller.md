@@ -165,7 +165,8 @@ renders, the server validates):
 nodeGroups:
   system:                      # the default EKS managed node group
     instanceType: t3.medium    # new clusters only; existing ones keep theirs (no replacement)
-    size: 2                    # desired = min = max, no autoscaler; at least 2
+    minSize: 2                 # at least 2 (Karpenter's two replicas); the size at creation
+    maxSize: 6                 # at least minSize; cluster-autoscaler grows the group to it
     capacityType: ON_DEMAND    # new clusters only
     diskSizeGiB: 0             # new clusters only; 0: EKS's default
   karpenter:                   # what users may create as their own node groups
@@ -184,7 +185,9 @@ file; lists are comma-separated there:
 | Key | Flag | Variable | Default |
 |---|---|---|---|
 | `system.instanceType` | `--system-node-group-instance-type` | `CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE` | `t3.medium` |
-| `system.size` | `--system-node-group-size` | `CV_SYSTEM_NODE_GROUP_SIZE` | `2` (minimum 2: Karpenter runs two replicas with anti-affinity) |
+| `system.minSize` | `--system-node-group-min-size` | `CV_SYSTEM_NODE_GROUP_MIN_SIZE` | `2` (minimum 2: Karpenter runs two replicas with anti-affinity) |
+| `system.maxSize` | `--system-node-group-max-size` | `CV_SYSTEM_NODE_GROUP_MAX_SIZE` | `6` (at least `minSize`; the higher of 6 and `minSize` when unset) |
+| `system.size` | `--system-node-group-size` | `CV_SYSTEM_NODE_GROUP_SIZE` | none: the old fixed-size setting, an alias of `minSize` (both set to different numbers is an error) |
 | `system.capacityType` | `--system-node-group-capacity-type` | `CV_SYSTEM_NODE_GROUP_CAPACITY_TYPE` | `ON_DEMAND` |
 | `system.diskSizeGiB` | `--system-node-group-disk-size-gib` | `CV_SYSTEM_NODE_GROUP_DISK_SIZE_GIB` | `0` |
 | `karpenter.instanceFamilies` | `--node-group-instance-families` | `CV_NODE_GROUP_INSTANCE_FAMILIES` | `t3` |
@@ -194,14 +197,18 @@ file; lists are comma-separated there:
 
 The two allowlist flags are the names that shipped before the section and
 still work (as flags, variables and flat keys in the file). Startup fails with
-every problem listed: a size below 2, an instance type that is not like
+every problem listed: a `minSize` below 2, a `maxSize` below `minSize`, an instance type that is not like
 `t3.large`, a family that is not like `t3`, a capacity type other than
 `ON_DEMAND`/`SPOT`, an architecture other than `AMD64`/`ARM64`.
 
 - `system` is the one node group of the platform: Karpenter, CoreDNS, every
   platform and tenant component and the EKS add-on controllers run on it.
-  **`size` applies to every cluster, in place**: a change resizes the existing
-  clusters' node group (EKS scales it; nothing is replaced). `instanceType`,
+  The group is autoscaled by cluster-autoscaler (a default Platform
+  component) between `minSize` and `maxSize`. **`minSize` and `maxSize` apply
+  to every cluster, in place**: a change updates the existing clusters' node
+  group's scaling limits (nothing is replaced). The node count is the
+  autoscaler's: it is `minSize` at creation only and a change never resets it
+  (the render sends desired size in `initProvider`). `instanceType`,
   `capacityType` and `diskSizeGiB` apply to new clusters only, because EKS
   cannot change them on a node group: an existing cluster keeps what its
   stored spec says, and a changed default never replaces its node group.
@@ -897,7 +904,7 @@ it is not applied at once: it rolls out like a Kubernetes upgrade.
   nothing applied. Every pass puts them back; a group removed from the spec
   is deleted (only labelled objects, pool before class). An old `platform`
   pool and class of a cluster built before the system group took over are
-  removed too, but only once the system group is at its size and Ready and
+  removed too, but only once the system group is at least at its minimum size and Ready and
   every component has moved off them (the system group's message says "moving
   components off the old platform pool: N left"). The NodePools' `Ready`
   condition and node counts go into `status.node_groups`, after the `system`

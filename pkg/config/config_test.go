@@ -127,7 +127,7 @@ func TestLoadServeDefaults(t *testing.T) {
 	}
 	if want := []string{config.FlagConfig, config.FlagHTTPAddr, config.FlagShutdownTimeout,
 		config.FlagAWSManagementRoleARN, config.FlagAWSServerRoleARN, config.FlagAWSRegion, config.FlagAWSSourceRoleARN,
-		config.FlagAWSExternalID, config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupCapacityType,
+		config.FlagAWSExternalID, config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupMinSize, config.FlagSystemNodeGroupMaxSize, config.FlagSystemNodeGroupCapacityType,
 		config.FlagSystemNodeGroupDiskSizeGiB, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
 		config.FlagNodeGroupDefaultArchitectures, config.FlagNodeGroupDefaultCapacityTypes}; !slices.Equal(flags, want) {
 		t.Errorf("serve settings = %v, want only %v", flags, want)

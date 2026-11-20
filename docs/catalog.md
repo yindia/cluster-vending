@@ -183,15 +183,20 @@ in reverse; the bundle is Ready when every member is. A release pins every
 member of a bundle or none. Tenants never see internal definitions, and
 cannot enable one by itself.
 
-**Karpenter is the only node autoscaler, and only for users' node groups.**
-The platform runs no cluster autoscaler: the cluster's default managed node
-group (`system`) has a fixed size (the admin's `nodeGroups.system.size`,
-default 2) and runs Karpenter, CoreDNS and every platform and tenant
-component; Karpenter launches the nodes of the users' own node groups (see
-[Where the pods run](#where-the-pods-run)).
-`cluster-autoscaler` was removed from the platform set: the build no longer
-ships its definition, so an existing cluster uninstalls it on its next pass
-(the same path as "Disabling and removing a component").
+**Two node autoscalers, each for its own nodes.** The cluster's default
+managed node group (`system`) is autoscaled by `cluster-autoscaler`, a default
+Platform component (sequence 10, one replica on the group itself), between the
+admin's `nodeGroups.system.minSize` (default 2) and `maxSize` (default 6). It
+finds the group by the `k8s.io/cluster-autoscaler/enabled` and
+`k8s.io/cluster-autoscaler/<cluster>` tags the platform puts on that managed
+node group alone, and its IAM write access is scoped to groups tagged for the
+cluster. Karpenter launches the nodes of the users' own node groups only (see
+[Where the pods run](#where-the-pods-run)); its nodes are in no Auto Scaling
+group, so the cluster autoscaler never sees them. The autoscaler's image is
+of the cluster's Kubernetes minor, pinned per minor in the release. Disabling
+its definition (`spec.disabled`, see "Disabling and removing a component")
+removes it from clusters and keeps it off across builds, and the group then
+stays at the size it has.
 
 ## One definition per cloud
 
@@ -468,14 +473,14 @@ platform owns, a taint ([design](design/karpenter-node-groups.md)):
 
 | Pool | Label | Taint | What runs |
 |---|---|---|---|
-| default managed node group (`system`) | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, CoreDNS, the platform components, the tenant's components, the EKS add-on controllers (the EBS CSI driver's) |
+| default managed node group (`system`) | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, cluster-autoscaler, CoreDNS, the platform components, the tenant's components, the EKS add-on controllers (the EBS CSI driver's) |
 | the cluster's own node groups (`spec.node_groups`) | `node.cluster-vending.io/pool=<name>` and the user's labels | the user's | the user's workloads |
 
 DaemonSets (vpc-cni, kube-proxy, the pod identity agent, istio-cni, ztunnel)
 tolerate every taint and run everywhere. The platform fixes the default
-managed node group's taint, label and size (min = max = desired =
-`nodeGroups.system.size`, at least 2: Karpenter runs two replicas): users
-cannot change them. An imported cluster keeps its own node group and its
+managed node group's taint, label and size range (`nodeGroups.system.minSize`,
+at least 2: Karpenter runs two replicas, to `maxSize`, with the node count
+between them the cluster autoscaler's): users cannot change them. An imported cluster keeps its own node group and its
 components follow it as before (`${system.*}` and `${platform.*}` both resolve
 to its default node pool's labels and taints). There is no separate platform
 pool: an earlier build's Karpenter `platform` NodePool is removed from an
@@ -502,15 +507,20 @@ group's label and toleration (an add-on's `configurationValues` keys win over
 them).
 
 **Sizing the system group.** Everything above runs on `system`: 2 x `t3.medium`
-by default (2 vCPU, 4 GiB, at most 17 pods each). Allocatable per node, by the
+by default at its minimum (2 vCPU, 4 GiB, at most 17 pods each), autoscaled by
+cluster-autoscaler up to `nodeGroups.system.maxSize` (default 6). Allocatable per node, by the
 EKS AL2023 reservations, is 1.93 CPU, about 3.2 GiB and 17 pods (3.86 CPU,
 6.3 GiB, 34 pods for the group). The catalog's requests plus the add-ons and
-DaemonSets (Karpenter 2 x 250m / 512Mi, ztunnel 200m / 512Mi and istio-cni
+DaemonSets (Karpenter 2 x 250m / 512Mi, cluster-autoscaler 50m / 128Mi, ztunnel 200m / 512Mi and istio-cni
 100m / 100Mi per node, CoreDNS 2 x 100m / 70Mi, the EBS CSI controller and the
-per-node add-on DaemonSets, every other component 50m-100m) come to 2.4 CPU
-(63%), 4.3 GiB (66%) and 30 pods (88%). The pod count is the tight limit:
-about 4 pods are left for tenant components, so a larger `size` or
-`instanceType` is the way to grow.
+per-node add-on DaemonSets, every other component 50m-100m) come to 2.5 CPU
+(64%), 4.4 GiB (68%) and 31 pods (91%) at the minimum. The pod count is the
+tight limit: about 3 pods are left for tenant components. When pods are
+Pending for lack of room, cluster-autoscaler adds a node (up to `maxSize`)
+and removes it again when idle; for a steady need, raise `minSize` or the
+`instanceType` instead. It only touches the system group: the platform tags
+that managed node group for it (`k8s.io/cluster-autoscaler/enabled` and
+`.../<cluster>`), and Karpenter's nodes are in no Auto Scaling group.
 
 To fit, only Karpenter (2 replicas, required anti-affinity) is highly
 available; Kyverno (admission and the three controllers), istiod, the Istio
@@ -521,16 +531,24 @@ stay up would stop a node drain); Capsule keeps 2. Raise the replicas in a
 definition on a larger group. Requests are trimmed, limits are not.
 `pkg/catalog/system_group_sizing_test.go` sums the shipped values (explicit
 requests and replicas are required there) and fails above 85% of the default
-group's CPU and memory allocatable or above its pod capacity. Pods that do
+group's CPU and memory allocatable at its minimum size, or above its pod
+capacity. Pods that do
 not fit stay Pending and their component's Helm release does not become Ready.
 
-Not placed, on purpose or for lack of a verified key:
+`pkg/catalog` tests every Platform and Tenant definition: each is in a
+placement list (Deployments and Jobs select and tolerate the system group
+through `${system.*}` or its alias `${platform.*}`), or is a DaemonSet, or
+runs no pod. The keys were checked with `helm template` of the pinned chart.
+
+Not placed, on purpose:
 - `istio-cni` and `ztunnel` are DaemonSets that must run on every node;
   their charts' default tolerations already accept every taint.
-- The GPU operator's operands keep the chart's `nvidia.com/gpu` toleration:
-  a placeholder is a whole value and cannot be added to a list. Its Node
-  Feature Discovery master is a subchart whose keys were not checked.
-- `kyverno-policies` (hook Jobs) is not placed.
+- The GPU operator's operands (and Node Feature Discovery's worker) are
+  DaemonSets that keep the chart's `nvidia.com/gpu` toleration and run on GPU
+  nodes: a placeholder is a whole value and cannot be added to a list. The
+  operator, Node Feature Discovery's master (and its delete Job) and
+  garbage collector are placed on the system group.
+- `kyverno-policies` and `istio-base` run no pod.
 
 Karpenter keeps its affinity (off the nodes it launches, on a managed node
 group) next to the selector.

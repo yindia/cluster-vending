@@ -125,10 +125,11 @@ type ClusterPlan struct {
 	// (karpenter.go). The platform's own clusters have it; an imported one
 	// does not unless the caller says so.
 	Karpenter bool
-	// SystemPoolSize is the platform admin's size of the default node
-	// group (min = max = desired); 0 or below MinSystemPoolSize:
-	// DefaultSystemPoolSize. Not used for an imported cluster's own group.
-	SystemPoolSize int
+	// SystemPoolMin and SystemPoolMax are the platform admin's minimum and
+	// maximum size of the default node group (SystemPoolBounds: 0 is the
+	// default). The desired size is the minimum at creation only, then
+	// cluster-autoscaler's. Not used for an imported cluster's own group.
+	SystemPoolMin, SystemPoolMax int
 	// AccountID is the AWS account of the cluster: with it the interruption
 	// queue's ARN is known up front. Without it (and without
 	// KarpenterQueueARN) the queue policy and the rules' targets wait for
@@ -330,6 +331,17 @@ func (b clusterBuilder) tags(name string) map[string]*string {
 	return out
 }
 
+// ClusterAutoscalerTags are the tags that make a managed node group's Auto
+// Scaling group one cluster-autoscaler manages on the named cluster
+// (autoDiscovery.tags; the IAM policy's condition on the cluster name's tag
+// is "owned").
+func ClusterAutoscalerTags(clusterName string) map[string]*string {
+	return map[string]*string{
+		"k8s.io/cluster-autoscaler/enabled":        ptr.To("true"),
+		"k8s.io/cluster-autoscaler/" + clusterName: ptr.To("owned"),
+	}
+}
+
 func (b clusterBuilder) ref(name string) *xpv2.NamespacedReference {
 	return &xpv2.NamespacedReference{Name: name}
 }
@@ -480,6 +492,13 @@ func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 			MaxSize: ptr.To(float64(n.MaxSize)), DesiredSize: ptr.To(float64(n.Desired))},
 		Labels: strPtrs(n.Labels),
 		Tags:   b.tags(name),
+	}
+	if n.Labels[PoolLabelKey] == PoolSystem {
+		// EKS copies a managed node group's tags to its Auto Scaling group,
+		// which is how cluster-autoscaler finds this group (its
+		// autoDiscovery tags) and no other: Karpenter's nodes are in no
+		// Auto Scaling group.
+		maps.Copy(params.Tags, ClusterAutoscalerTags(b.p.ClusterName))
 	}
 	// A custom AMI brings its own Kubernetes version: EKS refuses one here.
 	if v := b.nodeVersion(); v != "" && n.AMIType != amiTypeCustom {

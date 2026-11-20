@@ -188,14 +188,19 @@ test("a platform group an earlier controller recorded is not a row: the system g
   assert.deepEqual(rows.map(row => row.name), ["system", "a"]);
 });
 
-test("the system row carries the default node group's instance type, capacity and fixed size", () => {
-  const pool = create(NodePoolSpecSchema, { instanceTypes: ["t3.large"], capacityType: CapacityType.ON_DEMAND, scalingConfig: { minSize: 2, maxSize: 2 } });
-  const [system, user] = nodeGroupRows([spec("a")], [status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 2 })], undefined, pool);
-  assert.deepEqual(system.system, { instanceTypes: "t3.large", capacity: "On-demand", size: "2 nodes (fixed)" });
+test("the system row carries the default node group's instance type, capacity, autoscaled range and current node count", () => {
+  const pool = create(NodePoolSpecSchema, { instanceTypes: ["t3.large"], capacityType: CapacityType.ON_DEMAND, scalingConfig: { minSize: 2, maxSize: 6 } });
+  const [system, user] = nodeGroupRows([spec("a")], [status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 3 })], undefined, pool);
+  assert.deepEqual(system.system, { instanceTypes: "t3.large", capacity: "On-demand", size: "2–6 (autoscaled)", current: "3 nodes now" });
   assert.equal(user.system, undefined);
   assert.equal(nodeGroupRows([], [], undefined, undefined)[0].system, undefined, "no default pool: no summary");
   const spot = create(NodePoolSpecSchema, { instanceTypes: ["t3.large", "t3.xlarge"], capacityType: CapacityType.SPOT, scalingConfig: { minSize: 3, maxSize: 3 } });
-  assert.deepEqual(nodeGroupRows([], [], undefined, spot)[0].system, { instanceTypes: "t3.large, t3.xlarge", capacity: "Spot", size: "3 nodes (fixed)" });
+  // Not reported yet: no current count; a range of one node is still the autoscaled range, never "fixed".
+  assert.deepEqual(nodeGroupRows([], [], undefined, spot)[0].system, { instanceTypes: "t3.large, t3.xlarge", capacity: "Spot", size: "3–3 (autoscaled)", current: undefined });
+  const one = nodeGroupRows([], [status("system", NodeGroupPhase.READY, { platformManaged: true, nodes: 1 })], undefined, pool)[0].system;
+  assert.equal(one?.current, "1 node now");
+  const none = create(NodePoolSpecSchema, { instanceTypes: ["t3.large"] });
+  assert.equal(nodeGroupRows([], [], undefined, none)[0].system?.size, "—", "no scaling config: no range");
 });
 
 const manifest = (name: string, platformManaged = false) => create(NodeGroupManifestSchema, { name, platformManaged, ec2NodeClassYaml: `kind: EC2NodeClass\nname: ${name}\n`, nodePoolYaml: `kind: NodePool\nname: ${name}\n` });

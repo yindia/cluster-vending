@@ -459,8 +459,8 @@ func (g *legacyPoolGate) systemNotReady(ctx context.Context) string {
 		return "not active yet"
 	case at.Labels[crossplaneaws.PoolLabelKey] == nil || ptr.Deref(at.Labels[crossplaneaws.PoolLabelKey], "") != crossplaneaws.PoolSystem:
 		return "its system label is not applied yet"
-	case at.ScalingConfig == nil || int(ptr.Deref(at.ScalingConfig.DesiredSize, 0)) != g.extra.systemSize:
-		return fmt.Sprintf("not at its size of %d yet", g.extra.systemSize)
+	case at.ScalingConfig == nil || int(ptr.Deref(at.ScalingConfig.DesiredSize, 0)) < g.extra.systemMin:
+		return fmt.Sprintf("not at its minimum size of %d yet", g.extra.systemMin)
 	}
 	if !g.nodes.complete {
 		return "its nodes could not be read"
@@ -471,8 +471,8 @@ func (g *legacyPoolGate) systemNotReady(ctx context.Context) string {
 			ready++
 		}
 	}
-	if ready < g.extra.systemSize {
-		return fmt.Sprintf("%d of %d nodes are Ready", ready, g.extra.systemSize)
+	if ready < g.extra.systemMin {
+		return fmt.Sprintf("%d of %d nodes are Ready", ready, g.extra.systemMin)
 	}
 	return ""
 }
@@ -617,7 +617,7 @@ func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, sp
 	}
 	extra.namespace, extra.accountID = t.Account.Namespace, t.Account.AccountID
 	plan := s.RenderPlan(spec, row, t)
-	extra.systemSize = plan.NodePool.Desired
+	extra.systemMin = plan.NodePool.Desired
 	if name, _, err := s.NodeGroupName(ctx, row, plan); err == nil {
 		extra.systemGroup = name
 	}
@@ -638,9 +638,9 @@ func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, sp
 type nodeGroupsExtra struct {
 	amiNotice, namespace, accountID string
 	// systemGroup is the default managed node group's object name and
-	// systemSize the size the render gives it ("" and 0: not known).
+	// systemMin the minimum size the render gives it (the autoscaler may add nodes above it) ("" and 0: not known).
 	systemGroup string
-	systemSize  int
+	systemMin   int
 }
 
 // shippedAMIPins are the AMI pins this build's release.yaml ships, by

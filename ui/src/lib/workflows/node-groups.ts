@@ -222,7 +222,8 @@ export interface NodeGroupRow extends Record<string, unknown> {
   /** What the system group is made of, from the cluster's default node pool; set on that row only. */
   system?: SystemGroupSummary;
 }
-export interface SystemGroupSummary { instanceTypes: string; capacity: string; size: string }
+/** `size` is the autoscaled range ("2–6 (autoscaled)"); `current` the node count now ("3 nodes now"), absent until the controller reports it. */
+export interface SystemGroupSummary { instanceTypes: string; capacity: string; size: string; current?: string }
 
 const phaseLabels: Record<number, [string, NodeGroupTone]> = {
   [NodeGroupPhase.UNSPECIFIED]: ["Not reported", "neutral"], [NodeGroupPhase.PENDING]: ["Pending", "warning"],
@@ -235,15 +236,16 @@ export function phaseDisplay(phase: NodeGroupPhase): [string, NodeGroupTone] {
 const waiting = "Waiting for the controller to report this node group.";
 const systemWaiting = "Pending — waiting for the controller";
 
-/** "2 nodes (fixed)" or "1–3 nodes": the default managed node group's size. */
+/** "2–6 (autoscaled)": the default managed node group's minimum and maximum size; cluster-autoscaler moves it between them. */
 function systemSize(min: number, max: number): string {
-  return min === max ? `${min} ${min === 1 ? "node" : "nodes"} (fixed)` : `${min}–${max} nodes`;
+  return `${min}–${max} (autoscaled)`;
 }
 
-function systemSummary(pool: NodePoolSpec): SystemGroupSummary {
+function systemSummary(pool: NodePoolSpec, nodes: number | undefined): SystemGroupSummary {
   return {
     instanceTypes: pool.instanceTypes.join(", ") || "—", capacity: pool.capacityType === CapacityType.SPOT ? "Spot" : "On-demand",
     size: pool.scalingConfig ? systemSize(pool.scalingConfig.minSize, pool.scalingConfig.maxSize) : "—",
+    current: nodes === undefined ? undefined : `${nodes} ${nodes === 1 ? "node" : "nodes"} now`,
   };
 }
 
@@ -273,7 +275,7 @@ export function nodeGroupRows(spec: readonly NodeGroupSpec[], status: readonly N
       name, platformManaged, editable: !platformManaged && !!group && phase !== NodeGroupPhase.DELETING, observed: !!observed,
       phase, phaseLabel, tone, message: observed ? observed.message : platform ? systemWaiting : waiting, nodes: observed?.nodes, spec: group,
       manifest: hasManifestYaml(manifest) ? manifest : undefined,
-      system: platformManaged && name === systemGroupName && defaultPool ? systemSummary(defaultPool) : undefined,
+      system: platformManaged && name === systemGroupName && defaultPool ? systemSummary(defaultPool, observed?.nodes) : undefined,
     };
   };
   // The platform group of an earlier layout (a Karpenter pool) is gone with its pool: never a row.

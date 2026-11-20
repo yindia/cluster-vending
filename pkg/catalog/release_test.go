@@ -162,9 +162,10 @@ channels:
 	}
 }
 
-// Karpenter is the only platform component that runs before the platform
-// node group.
-func TestKarpenterIsSequenceZero(t *testing.T) {
+// Karpenter installs first (sequence 0), cluster-autoscaler right after it
+// (10): it waits for Karpenter only, never for a node group, and everything
+// else (the default, 100) installs after both.
+func TestKarpenterAndTheAutoscalerInstallFirst(t *testing.T) {
 	defs, err := catalog.Definitions()
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +175,11 @@ func TestKarpenterIsSequenceZero(t *testing.T) {
 		if d.Spec.Sequence != nil {
 			got = *d.Spec.Sequence
 		}
-		if want := map[bool]int32{true: 0, false: 100}[d.Name == "karpenter"]; got != want {
+		want, ok := map[string]int32{"karpenter": 0, "cluster-autoscaler": 10}[d.Name]
+		if !ok {
+			want = 100
+		}
+		if got != want {
 			t.Errorf("%s has sequence %d, want %d", d.Name, got, want)
 		}
 	}

@@ -155,6 +155,8 @@ var nodeGroupsSection = map[string]struct {
 	list bool
 }{
 	"system.instanceType":              {FlagSystemNodeGroupInstanceType, false},
+	"system.minSize":                   {FlagSystemNodeGroupMinSize, false},
+	"system.maxSize":                   {FlagSystemNodeGroupMaxSize, false},
 	"system.size":                      {FlagSystemNodeGroupSize, false},
 	"system.capacityType":              {FlagSystemNodeGroupCapacityType, false},
 	"system.diskSizeGiB":               {FlagSystemNodeGroupDiskSizeGiB, false},

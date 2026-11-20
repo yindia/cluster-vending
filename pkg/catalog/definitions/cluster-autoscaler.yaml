@@ -1,0 +1,105 @@
+# Checked against chart cluster-autoscaler 9.60.0 from
+# https://kubernetes.github.io/autoscaler. The autoscaler's minor version must
+# equal the cluster's Kubernetes minor, and the chart hardcodes one image per
+# chart release, so the Release sets image.tag per Kubernetes minor in the
+# component's pin (ComponentPin.values).
+apiVersion: cloud.cluster-vending.io/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: cluster-autoscaler
+spec:
+  # The cloud it is installed on; the same component for another cloud is
+  # another definition, <name>-<provider> (docs/catalog.md).
+  provider: aws
+  description: Kubernetes Cluster Autoscaler. It resizes the system managed node group, the only Auto Scaling group tagged for it, between its minimum and maximum size when pods need room; Karpenter's nodes are in no Auto Scaling group and are never touched by it.
+  # Installed with every cluster by the platform; not a tenant's to enable.
+  management: Platform
+  # After Karpenter (sequence 0), before the rest (default 100): it does not
+  # wait for a node group of the cluster, only for the system group it
+  # runs on, which exists before any platform component installs.
+  sequence: 10
+  namespace: kube-system
+  install:
+    helm:
+      repository: https://kubernetes.github.io/autoscaler
+      chart: cluster-autoscaler
+  cloudResources:
+    iamRole:
+      access: IRSA
+      serviceAccounts: [{namespace: kube-system, name: cluster-autoscaler}]
+      # Read access to what the autoscaler inspects; changing capacity only on
+      # Auto Scaling groups tagged for this cluster.
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeScalingActivities",
+                "ec2:DescribeImages",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeLaunchTemplateVersions",
+                "ec2:GetInstanceTypesFromInstanceRequirements",
+                "eks:DescribeNodegroup"
+              ],
+              "Resource": ["*"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup"
+              ],
+              "Resource": ["*"],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/k8s.io/cluster-autoscaler/${cluster.name}": "owned"
+                }
+              }
+            }
+          ]
+        }
+  # Fixed by the platform.
+  # image.tag is not here: the Release pins it per Kubernetes minor.
+  platformValues:
+    cloudProvider: aws
+    awsRegion: ${region}
+    # Only the system managed node group is autoscaled: autoDiscovery lists
+    # the Auto Scaling groups carrying both tags, and the platform puts
+    # them on that node group alone (crossplaneaws.ClusterAutoscalerTags;
+    # EKS copies a managed node group's tags to its group). The IAM policy
+    # above scopes writes to the same tag. Karpenter's nodes belong to no
+    # Auto Scaling group, so the autoscaler neither counts them as a node
+    # group nor scales them down. No --nodes is set.
+    autoDiscovery:
+      clusterName: ${cluster.name}
+      tags:
+      - k8s.io/cluster-autoscaler/enabled
+      - k8s.io/cluster-autoscaler/${cluster.name}
+    rbac:
+      serviceAccount:
+        create: true
+        name: cluster-autoscaler
+        annotations:
+          eks.amazonaws.com/role-arn: ${iam.roleArn}
+    # One replica (system group sizing, docs/catalog.md): a restart only
+    # pauses scaling for a moment.
+    replicaCount: 1
+    priorityClassName: system-cluster-critical
+    # The system managed node group: its labels, and a toleration per taint.
+    nodeSelector: ${system.nodeSelector}
+    tolerations: ${system.tolerations}
+    extraArgs:
+      skip-nodes-with-system-pods: true
+      scale-down-unneeded-time: 10m
+    # The chart sets none; these are the platform's choice, not from the docs.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi

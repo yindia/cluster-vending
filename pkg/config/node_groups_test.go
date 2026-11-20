@@ -22,9 +22,9 @@ func loadSection(t *testing.T, yaml string) config.LookupFunc {
 	return file
 }
 
-func TestNodeGroupsDefaultsAreT3AndTwoNodes(t *testing.T) {
+func TestNodeGroupsDefaultsAreT3AndTwoToSixNodes(t *testing.T) {
 	want := config.NodeGroups{
-		System: config.SystemNodeGroup{InstanceType: "t3.medium", Size: 2, CapacityType: "ON_DEMAND"},
+		System: config.SystemNodeGroup{InstanceType: "t3.medium", MinSize: 2, MaxSize: 6, CapacityType: "ON_DEMAND"},
 		Karpenter: config.KarpenterNodeGroups{InstanceFamilies: []string{"t3"},
 			Defaults: config.NodeGroupDefaults{Architectures: []string{"AMD64"}, CapacityTypes: []string{"ON_DEMAND"}}},
 	}
@@ -48,7 +48,8 @@ func TestNodeGroupsSectionWithLists(t *testing.T) {
 nodeGroups:
   system:
     instanceType: t3.xlarge
-    size: 4
+    minSize: 3
+    maxSize: 8
     capacityType: SPOT
     diskSizeGiB: 50
   karpenter:
@@ -60,7 +61,7 @@ nodeGroups:
       capacityTypes: [ON_DEMAND, SPOT]
 `)
 	want := config.NodeGroups{
-		System: config.SystemNodeGroup{InstanceType: "t3.xlarge", Size: 4, CapacityType: "SPOT", DiskSizeGiB: 50},
+		System: config.SystemNodeGroup{InstanceType: "t3.xlarge", MinSize: 3, MaxSize: 8, CapacityType: "SPOT", DiskSizeGiB: 50},
 		Karpenter: config.KarpenterNodeGroups{InstanceFamilies: []string{"t3", "t3a"}, InstanceTypes: []string{"m7i.large"},
 			Defaults: config.NodeGroupDefaults{Architectures: []string{"AMD64", "ARM64"}, CapacityTypes: []string{"ON_DEMAND", "SPOT"}}},
 	}
@@ -76,15 +77,15 @@ nodeGroups:
 
 // A flag beats the environment, which beats the section.
 func TestNodeGroupsFlagAndEnvOverrideTheSection(t *testing.T) {
-	file := loadSection(t, "nodeGroups:\n  system:\n    size: 4\n  karpenter:\n    instanceFamilies: [t3]\n")
-	env := lookupIn(map[string]string{config.EnvSystemNodeGroupSize: "5", config.EnvNodeGroupInstanceFamilies: " c7i, m7i,c7i"})
+	file := loadSection(t, "nodeGroups:\n  system:\n    minSize: 4\n    maxSize: 9\n  karpenter:\n    instanceFamilies: [t3]\n")
+	env := lookupIn(map[string]string{config.EnvSystemNodeGroupMinSize: "5", config.EnvNodeGroupInstanceFamilies: " c7i, m7i,c7i"})
 	serve, err := config.LoadServe(nil, env, file)
-	if err != nil || serve.NodeGroups.System.Size != 5 || !reflect.DeepEqual(serve.NodeGroups.Karpenter.InstanceFamilies, []string{"c7i", "m7i"}) {
+	if err != nil || serve.NodeGroups.System.MinSize != 5 || serve.NodeGroups.System.MaxSize != 9 || !reflect.DeepEqual(serve.NodeGroups.Karpenter.InstanceFamilies, []string{"c7i", "m7i"}) {
 		t.Fatalf("env: %+v (%v)", serve.NodeGroups, err)
 	}
-	flags := lookupIn(map[string]string{config.FlagSystemNodeGroupSize: "3"})
+	flags := lookupIn(map[string]string{config.FlagSystemNodeGroupMinSize: "3", config.FlagSystemNodeGroupMaxSize: "4"})
 	serve, err = config.LoadServe(flags, env, file)
-	if err != nil || serve.NodeGroups.System.Size != 3 {
+	if err != nil || serve.NodeGroups.System.MinSize != 3 || serve.NodeGroups.System.MaxSize != 4 {
 		t.Fatalf("flag: %+v (%v)", serve.NodeGroups, err)
 	}
 }
@@ -118,18 +119,24 @@ func TestNodeGroupsValidationErrors(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		"size below two":       {map[string]string{config.EnvSystemNodeGroupSize: "1"}, "at least 2"},
-		"size not a number":    {map[string]string{config.EnvSystemNodeGroupSize: "two"}, "not a number"},
-		"empty instance type":  {map[string]string{config.EnvSystemNodeGroupInstanceType: " "}, "instance type"},
-		"type without a dot":   {map[string]string{config.EnvSystemNodeGroupInstanceType: "t3large"}, "instance type"},
-		"bad capacity type":    {map[string]string{config.EnvSystemNodeGroupCapacityType: "reserved"}, "ON_DEMAND, SPOT"},
-		"negative disk":        {map[string]string{config.EnvSystemNodeGroupDiskSizeGiB: "-1"}, "0 to"},
-		"family with a dot":    {map[string]string{config.EnvNodeGroupInstanceFamilies: "m7i.large"}, "instance family"},
-		"family uppercase":     {map[string]string{config.EnvNodeGroupInstanceFamilies: "M7i"}, "instance family"},
-		"empty item":           {map[string]string{config.EnvNodeGroupInstanceFamilies: "m7i,,c7i"}, "instance family"},
-		"type without dot":     {map[string]string{config.EnvNodeGroupInstanceTypes: "m7i"}, "instance type"},
-		"bad architecture":     {map[string]string{config.EnvNodeGroupDefaultArchitectures: "x86"}, "AMD64, ARM64"},
-		"bad default capacity": {map[string]string{config.EnvNodeGroupDefaultCapacityTypes: "ON_DEMAND,free"}, "ON_DEMAND, SPOT"},
+		"min below two":         {map[string]string{config.EnvSystemNodeGroupMinSize: "1"}, "at least 2"},
+		"min not a number":      {map[string]string{config.EnvSystemNodeGroupMinSize: "two"}, "not a number"},
+		"max not a number":      {map[string]string{config.EnvSystemNodeGroupMaxSize: "many"}, "not a number"},
+		"max below min":         {map[string]string{config.EnvSystemNodeGroupMinSize: "4", config.EnvSystemNodeGroupMaxSize: "3"}, "at least the minimum"},
+		"max below default min": {map[string]string{config.EnvSystemNodeGroupMaxSize: "1"}, "at least the minimum"},
+		"size below two":        {map[string]string{config.EnvSystemNodeGroupSize: "1"}, "at least 2"},
+		"size not a number":     {map[string]string{config.EnvSystemNodeGroupSize: "two"}, "not a number"},
+		"size and min differ":   {map[string]string{config.EnvSystemNodeGroupSize: "3", config.EnvSystemNodeGroupMinSize: "4"}, "different"},
+		"empty instance type":   {map[string]string{config.EnvSystemNodeGroupInstanceType: " "}, "instance type"},
+		"type without a dot":    {map[string]string{config.EnvSystemNodeGroupInstanceType: "t3large"}, "instance type"},
+		"bad capacity type":     {map[string]string{config.EnvSystemNodeGroupCapacityType: "reserved"}, "ON_DEMAND, SPOT"},
+		"negative disk":         {map[string]string{config.EnvSystemNodeGroupDiskSizeGiB: "-1"}, "0 to"},
+		"family with a dot":     {map[string]string{config.EnvNodeGroupInstanceFamilies: "m7i.large"}, "instance family"},
+		"family uppercase":      {map[string]string{config.EnvNodeGroupInstanceFamilies: "M7i"}, "instance family"},
+		"empty item":            {map[string]string{config.EnvNodeGroupInstanceFamilies: "m7i,,c7i"}, "instance family"},
+		"type without dot":      {map[string]string{config.EnvNodeGroupInstanceTypes: "m7i"}, "instance type"},
+		"bad architecture":      {map[string]string{config.EnvNodeGroupDefaultArchitectures: "x86"}, "AMD64, ARM64"},
+		"bad default capacity":  {map[string]string{config.EnvNodeGroupDefaultCapacityTypes: "ON_DEMAND,free"}, "ON_DEMAND, SPOT"},
 	} {
 		_, serveErr := config.LoadServe(nil, lookupIn(tt.env), nil)
 		_, ctlErr := config.LoadController(nil, lookupIn(management(tt.env)), nil)
@@ -161,3 +168,30 @@ func TestNodeGroupsSectionErrors(t *testing.T) {
 }
 
 func writeFile(path, content string) error { return os.WriteFile(path, []byte(content), 0o600) }
+
+// size is the old fixed-size setting: it still works, as the minimum (and so
+// the size at creation). The maximum is the default one unless it is lower
+// than the minimum or set.
+func TestNodeGroupsSizeIsAnAliasOfTheMinimum(t *testing.T) {
+	for name, tt := range map[string]struct {
+		file     string
+		env      map[string]string
+		min, max int
+	}{
+		"section":           {file: "nodeGroups:\n  system:\n    size: 3\n", min: 3, max: 6},
+		"large size":        {file: "nodeGroups:\n  system:\n    size: 8\n", min: 8, max: 8},
+		"size and max":      {file: "nodeGroups:\n  system:\n    size: 3\n    maxSize: 5\n", min: 3, max: 5},
+		"env":               {env: map[string]string{config.EnvSystemNodeGroupSize: "4"}, min: 4, max: 6},
+		"same size and min": {env: map[string]string{config.EnvSystemNodeGroupSize: "4", config.EnvSystemNodeGroupMinSize: "4"}, min: 4, max: 6},
+		"min only":          {env: map[string]string{config.EnvSystemNodeGroupMinSize: "7"}, min: 7, max: 7},
+	} {
+		var file config.LookupFunc
+		if tt.file != "" {
+			file = loadSection(t, tt.file)
+		}
+		serve, err := config.LoadServe(nil, lookupIn(tt.env), file)
+		if err != nil || serve.NodeGroups.System.MinSize != tt.min || serve.NodeGroups.System.MaxSize != tt.max {
+			t.Errorf("%s: %+v (%v), want %d..%d", name, serve.NodeGroups.System, err, tt.min, tt.max)
+		}
+	}
+}

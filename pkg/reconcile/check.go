@@ -19,14 +19,29 @@ func Validate(msg proto.Message) error {
 	return nil
 }
 
+// reservedTagPrefixes are the tag key prefixes the platform writes itself
+// (ownership, Karpenter and Kubernetes discovery, the cluster autoscaler): a
+// label with such a key would be overridden by the platform's tag on every
+// resource, silently. Matched without regard to case.
+var reservedTagPrefixes = []string{"cluster-vending.io/", "karpenter.sh/", "kubernetes.io/cluster/", "k8s.io/cluster-autoscaler/"}
+
 // CheckAWSLabels refuses labels AWS cannot take as tags: keys starting
-// with "aws:" are reserved. The other tag rules (characters, lengths, 40
-// pairs) are in the contract. Labels become the AWS tags of every
-// resource of the network or cluster.
+// with "aws:" are reserved, and so are the keys the platform tags its
+// resources with (reservedTagPrefixes; not "Name": on a taken-over network a
+// Name label replaces the imported tag on purpose, see
+// TestALabelThatGoesGivesTheImportedTagBack). The other tag rules
+// (characters, lengths, 40 pairs) are in the contract. Labels become the AWS
+// tags of every resource of the network or cluster.
 func CheckAWSLabels(labels map[string]string) error {
 	for k := range labels {
-		if strings.HasPrefix(strings.ToLower(k), "aws:") {
+		lower := strings.ToLower(k)
+		if strings.HasPrefix(lower, "aws:") {
 			return fault.New(fault.Invalid, fmt.Sprintf("label %q: AWS tag keys must not start with %q", k, "aws:"))
+		}
+		for _, prefix := range reservedTagPrefixes {
+			if strings.HasPrefix(lower, prefix) {
+				return fault.New(fault.Invalid, fmt.Sprintf("label %q: AWS tag keys starting with %q are set by the platform", k, prefix))
+			}
 		}
 	}
 	return nil

@@ -193,12 +193,15 @@ func (s *ClusterService) encryptionChange(row *model.Cluster, spec *cloudv1.Clus
 		Detail: "secrets encryption cannot be turned off or moved to another key once it is on: EKS cannot change it"}
 }
 
-// planID hashes the request (without validate_only and plan_id) and the
-// live objects' versions: the same request against unchanged resources
-// gives the same ID.
+// planID hashes the request (without validate_only, plan_id and the optional
+// etag, which is checked on its own) and the live objects' versions: the same
+// request against unchanged resources gives the same ID.
 func planID(req *cloudv1.UpdateClusterRequest, versions []string) (string, error) {
 	r := proto.CloneOf(req)
 	r.ValidateOnly, r.PlanId = false, ""
+	if r.GetCluster() != nil {
+		r.Cluster.Etag = ""
+	}
 	return planning.ID(r, versions)
 }
 
@@ -219,7 +222,7 @@ func (s *ClusterService) planNaaS(ctx context.Context, row *model.Cluster, desir
 	live.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
 	version := "capsule-release=absent"
 	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, live); err == nil {
-		version = "capsule-release=" + string(live.GetUID()) + "/" + live.GetResourceVersion()
+		version = "capsule-release=" + planning.ObjectVersion(live)
 	} else if !apierrors.IsNotFound(err) {
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot verify namespace tenancy controls for plan review")
 	}

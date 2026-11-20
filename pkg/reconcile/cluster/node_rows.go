@@ -62,6 +62,17 @@ func (w *nodeRowWrites) claim(id string, at time.Time) bool {
 	return true
 }
 
+// forget drops the cluster's entry: a deleted cluster is not written again,
+// and the map would keep one entry for every cluster that ever was.
+func (w *nodeRowWrites) forget(id string) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.last, id)
+}
+
 // nodeRowOf is the row of a node: only what the console shows.
 func nodeRowOf(n *unstructured.Unstructured) *cloudv1.NodeGroupNode {
 	labels := n.GetLabels()

@@ -20,28 +20,35 @@ func retryOf(obj client.Object) *model.Retry {
 	return model.ParseRetry(obj.GetAnnotations()[AnnotationRetry])
 }
 
-// RequestRetry implements repository.Clusters.
-func (r clusters) RequestRetry(ctx context.Context, tenantID, id string, retry model.Retry) error {
-	obj, err := r.find(ctx, tenantID, id)
-	if err != nil {
-		return translate(err)
-	}
-	return r.writeRetry(ctx, obj, retryOf(obj).Merge(retry))
+// RequestRetry implements repository.Clusters. The write is conditional on
+// the version read: a ClearRetry that acted meanwhile is not undone by the
+// merge of a stale read; the merge is made again from what is there.
+func (r clusters) RequestRetry(ctx context.Context, tenantID, id string, request model.Retry) error {
+	return translate(retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		return r.writeRetry(ctx, obj, retryOf(obj).Merge(request))
+	}))
 }
 
-// ClearRetry implements repository.Clusters.
+// ClearRetry implements repository.Clusters, with the same condition: a
+// request that came after the read is not cleared.
 func (r clusters) ClearRetry(ctx context.Context, tenantID, id string, at time.Time) error {
-	obj, err := r.find(ctx, tenantID, id)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return translate(err)
-	}
-	if current := retryOf(obj); current == nil || !current.At.Equal(at) {
-		return nil // none, or one asked after the pass that acted
-	}
-	return r.writeRetry(ctx, obj, nil)
+	return translate(retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current := retryOf(obj); current == nil || !current.At.Equal(at) {
+			return nil // none, or one asked after the pass that acted
+		}
+		return r.writeRetry(ctx, obj, nil)
+	}))
 }
 
 func (r clusters) writeRetry(ctx context.Context, obj client.Object, next *model.Retry) error {
@@ -52,7 +59,7 @@ func (r clusters) writeRetry(ctx context.Context, obj client.Object, next *model
 	if value == obj.GetAnnotations()[AnnotationRetry] {
 		return nil
 	}
-	before := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+	before := client.MergeFromWithOptions(obj.DeepCopyObject().(client.Object), client.MergeFromWithOptimisticLock{})
 	annotate(obj, map[string]string{AnnotationRetry: value})
-	return translate(r.c.Patch(ctx, obj, before))
+	return r.c.Patch(ctx, obj, before)
 }

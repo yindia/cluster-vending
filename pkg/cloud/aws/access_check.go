@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
+	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 )
 
@@ -28,6 +29,9 @@ const (
 	ActionCreateTagsDryRun          = "ec2:CreateTags"
 	ActionListClusters              = "eks:ListClusters"
 	ActionGetRole                   = "iam:GetRole"
+	// ActionListRoleTags reads the tenant role's template version tag;
+	// not one of AccessChecks: a role that cannot read it is not denied.
+	ActionListRoleTags = "iam:ListRoleTags"
 )
 
 // Reasons of a failed check.
@@ -52,7 +56,10 @@ const (
 
 // globalRegion is where the partition's global services (IAM) are
 // called, and the region every check includes.
-const globalRegion = "us-east-1"
+const globalRegion = GlobalRegion
+
+// GlobalRegion is the region of the partition's global services.
+const GlobalRegion = "us-east-1"
 
 // AccessCheck is one call of an access check: what it is, how it is made
 // without changing anything, and why the platform needs it.
@@ -105,6 +112,13 @@ type AccessReport struct {
 	// Transient: a call failed for a reason that says nothing about the
 	// account (throttling, the network); the report is not a verdict.
 	Transient bool
+	// TemplateVersion is the version of the role template the tenant
+	// role's stack was created from (cloudformation.TagTemplateVersion; 0
+	// when the role has no such tag: a stack from before versions), when
+	// TemplateVersionKnown: the tags could be read. Reading them never
+	// fails the check.
+	TemplateVersion      int
+	TemplateVersionKnown bool
 }
 
 // OK reports whether every region and check passed.
@@ -162,7 +176,11 @@ type (
 		sts STSAPI
 		ec2 accessEC2
 		eks accessEKS
-		iam IAMAPI
+		iam accessIAM
+	}
+	accessIAM interface {
+		IAMAPI
+		ListRoleTags(context.Context, *iam.ListRoleTagsInput, ...func(*iam.Options)) (*iam.ListRoleTagsOutput, error)
 	}
 )
 
@@ -182,6 +200,11 @@ func (c *Client) CheckAccess(ctx context.Context, access Access, regions []strin
 	}, time.Sleep), nil
 }
 
+// regionTimeout bounds all the checks of one region (each call is bounded
+// too, Config.CallTimeout), so that a region that does not answer costs a
+// minute or two, not the retries of every call.
+const regionTimeout = 90 * time.Second
+
 // retries is how often a transient failure is tried again, and backoff
 // the first wait (doubled each time).
 const (
@@ -194,46 +217,78 @@ func checkAccess(ctx context.Context, access Access, regions []string, apis func
 	sleep func(time.Duration)) AccessReport {
 	var report AccessReport
 	for _, region := range checkedRegions(regions) {
-		api, err := apis(region)
-		if err != nil {
-			report.Regions = append(report.Regions, RegionAccess{Region: region, Reason: ReasonNotAllowed, Message: err.Error()})
-			continue
-		}
-		regional := RegionAccess{Region: region, OK: true}
-		var out *sts.GetCallerIdentityOutput
-		err = retry(ctx, sleep, func() error {
-			var err error
-			out, err = api.sts.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-			return err
-		})
-		if err != nil {
-			regional.OK, regional.Reason, regional.Message = false, identityReason(err), errorText(err)
-			report.Transient = report.Transient || regional.Reason == ReasonUnavailable
-			report.Regions = append(report.Regions, regional)
-			continue
-		}
-		if reason, msg := principalProblem(access, out); reason != "" {
-			regional.OK, regional.Reason, regional.Message = false, reason, msg
-			report.Regions = append(report.Regions, regional)
-			continue
-		}
-		report.PrincipalARN = awssdk.ToString(out.Arn)
-		report.Regions = append(report.Regions, regional)
-		for _, action := range regionalChecks {
-			report.Checks = append(report.Checks, run(ctx, sleep, action, region, func() error { return call(ctx, api, action) }))
-		}
-		if region == globalRegion && !access.Direct {
-			name := access.RoleARN[strings.LastIndex(access.RoleARN, "/")+1:]
-			report.Checks = append(report.Checks, run(ctx, sleep, ActionGetRole, region, func() error {
-				_, err := api.iam.GetRole(ctx, &iam.GetRoleInput{RoleName: awssdk.String(name)})
-				return err
-			}))
-		}
+		checkRegion(ctx, &report, access, region, apis, sleep)
 	}
 	for _, c := range report.Checks {
 		report.Transient = report.Transient || c.Reason == ReasonUnavailable
 	}
 	return report
+}
+
+// checkRegion adds the checks of one region to report, within regionTimeout.
+func checkRegion(ctx context.Context, report *AccessReport, access Access, region string,
+	apis func(region string) (accessAPIs, error), sleep func(time.Duration)) {
+	ctx, cancel := context.WithTimeout(ctx, regionTimeout)
+	defer cancel()
+	api, err := apis(region)
+	if err != nil {
+		report.Regions = append(report.Regions, RegionAccess{Region: region, Reason: ReasonNotAllowed, Message: err.Error()})
+		return
+	}
+	regional := RegionAccess{Region: region, OK: true}
+	var out *sts.GetCallerIdentityOutput
+	err = retry(ctx, sleep, func() error {
+		var err error
+		out, err = api.sts.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		return err
+	})
+	if err != nil {
+		regional.OK, regional.Reason, regional.Message = false, identityReason(err), errorText(err)
+		report.Transient = report.Transient || regional.Reason == ReasonUnavailable
+		report.Regions = append(report.Regions, regional)
+		return
+	}
+	if reason, msg := principalProblem(access, out); reason != "" {
+		regional.OK, regional.Reason, regional.Message = false, reason, msg
+		report.Regions = append(report.Regions, regional)
+		return
+	}
+	report.PrincipalARN = awssdk.ToString(out.Arn)
+	report.Regions = append(report.Regions, regional)
+	for _, action := range regionalChecks {
+		report.Checks = append(report.Checks, run(ctx, sleep, action, region, func() error { return call(ctx, api, action) }))
+	}
+	if region == globalRegion && !access.Direct {
+		name := access.RoleARN[strings.LastIndex(access.RoleARN, "/")+1:]
+		report.Checks = append(report.Checks, run(ctx, sleep, ActionGetRole, region, func() error {
+			_, err := api.iam.GetRole(ctx, &iam.GetRoleInput{RoleName: awssdk.String(name)})
+			return err
+		}))
+		readTemplateVersion(ctx, report, api.iam, name, sleep)
+	}
+}
+
+// readTemplateVersion reads the template version tag of the tenant role
+// (once: IAM is global). A role whose tags cannot be read leaves the
+// version unknown; only a transient failure is noted, for the check to be
+// tried again.
+func readTemplateVersion(ctx context.Context, report *AccessReport, api accessIAM, roleName string, sleep func(time.Duration)) {
+	var out *iam.ListRoleTagsOutput
+	err := retry(ctx, sleep, func() error {
+		var err error
+		out, err = api.ListRoleTags(ctx, &iam.ListRoleTagsInput{RoleName: awssdk.String(roleName)})
+		return err
+	})
+	switch {
+	case err == nil:
+		tags := make(map[string]string, len(out.Tags))
+		for _, t := range out.Tags {
+			tags[awssdk.ToString(t.Key)] = awssdk.ToString(t.Value)
+		}
+		report.TemplateVersion, report.TemplateVersionKnown = cloudformation.VersionOfTags(tags), true
+	case callReason(err) == ReasonUnavailable:
+		report.Transient = true
+	}
 }
 
 // checkedRegions are regions and globalRegion, globalRegion first, each

@@ -220,6 +220,9 @@ func (r clusters) reserveEKSNameClaim(ctx context.Context, row *model.Cluster, n
 // still says what the attempt wrote (tenant, cluster ID, request ID and hash).
 // Anything else belongs to someone else and stays.
 func (r clusters) releaseAttemptReservation(ctx context.Context, mine *corev1.ConfigMap) error {
+	if mine == nil {
+		return nil // the attempt resumed an earlier reservation: nothing of its own
+	}
 	have := &corev1.ConfigMap{}
 	if err := r.c.Get(ctx, client.ObjectKeyFromObject(mine), have); err != nil {
 		if apierrors.IsNotFound(err) {

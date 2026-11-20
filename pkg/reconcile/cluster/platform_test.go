@@ -561,3 +561,22 @@ func TestKubernetesMinorAndChannel(t *testing.T) {
 		}
 	}
 }
+
+// The release chosen for the first install is stored with it: a pass whose
+// status write is lost (remember swallows a conflict) must not leave a later
+// pass to pick again what the channel offers by then.
+func TestPlatformFirstReleaseIsStoredBeforeTheInstall(t *testing.T) {
+	w, src := platformWorld(t)
+	w.helmConfig(t)
+	if p := w.install(t); p.release != "2026-11-a" { // the status of the pass is never recorded here
+		t.Fatalf("release %q", p.release)
+	}
+	if got := storedStatus(w.cluster(t)).GetPlatformRelease(); got != "2026-11-a" {
+		t.Fatalf("stored release %q before any status was recorded, want 2026-11-a", got)
+	}
+	src.offered = "2026-12-a"
+	p, err := w.svc.installPlatform(t.Context(), w.cluster(t))
+	if err != nil || p.release != "2026-11-a" {
+		t.Fatalf("release %q, %v; the cluster installed from 2026-11-a must stay on it", p.release, err)
+	}
+}

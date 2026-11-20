@@ -1,19 +1,50 @@
 package cluster
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
+	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 func requestIDReused(rid string) error {
 	return connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
 		"request_id %s was already used for a different request (another operation or another payload)", rid))
+}
+
+// requestWinner resolves an insert that failed with AlreadyExists on a
+// request_id: the claim of the request ID is held by a create that ran
+// concurrently. Its cluster is the idempotent result when it is the same
+// request (matches), else the ID was reused for another one
+// (requestIDReused). Neither (nil, nil): the failure is not about the request
+// ID (or its winner is gone), the caller maps err itself.
+func (s *ClusterService) requestWinner(ctx context.Context, row *model.Cluster, err error,
+	matches func(*model.Cluster) bool) (*model.Cluster, error) {
+	if !errors.Is(err, repository.ErrAlreadyExists) || row.CreateRequestID == nil {
+		return nil, nil
+	}
+	won, gerr := s.deps.Store.Clusters().GetByCreateRequest(ctx, row.TenantID, *row.CreateRequestID)
+	if errors.Is(gerr, repository.ErrNotFound) {
+		return nil, nil // the winner was rolled back
+	}
+	if gerr != nil {
+		return nil, service.ToConnect(gerr)
+	}
+	if won.ID == row.ID {
+		return nil, nil
+	}
+	if !matches(won) {
+		return nil, requestIDReused(*row.CreateRequestID)
+	}
+	return won, nil
 }
 
 // createMatches reports whether row, found by the request ID of req, is the

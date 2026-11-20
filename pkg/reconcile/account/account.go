@@ -279,6 +279,9 @@ func Proto(a *model.CloudAccount) *cloudv1.CloudAccount {
 	out := proto(a)
 	out.Status.Access = accessProto(a.Access)
 	out.Status.Conditions = append(out.Status.Conditions, withExternalIDWarning(AccessCondition(a.Access), a))
+	if c := TemplateCondition(a); c != nil {
+		out.Status.Conditions = append(out.Status.Conditions, c)
+	}
 	if AccessDenied(a.Access) {
 		// Bootstrapped, but the platform cannot act in it.
 		out.Status.State = cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_FAILED

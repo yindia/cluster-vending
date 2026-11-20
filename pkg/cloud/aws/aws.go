@@ -25,12 +25,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	awsretry "github.com/aws/aws-sdk-go-v2/aws/retry"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -39,6 +45,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/middleware"
 
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 )
@@ -46,6 +53,66 @@ import (
 // DefaultSessionName is the role session name of every assumed role; it
 // shows up in the tenant's CloudTrail as the platform's calls.
 const DefaultSessionName = "cluster-vending"
+
+// Bounds of the AWS calls: no call may hold a controller worker for long.
+const (
+	// DefaultCallTimeout bounds every SDK operation (one API call, with
+	// its retries; a paginated list: each page), Config.CallTimeout.
+	DefaultCallTimeout = 20 * time.Second
+	// LookupTimeout bounds what a reconciler asks of one lookup of this
+	// package (EKSClusterExists, ResolveEKSVersions: a few calls and the
+	// pages of a list), whatever the transport does.
+	LookupTimeout = 60 * time.Second
+	// MaxAttempts is how often the SDK tries a call (retryable errors:
+	// throttling, 5xx, connection errors), and MaxBackoff the longest wait
+	// between two.
+	MaxAttempts = 3
+	MaxBackoff  = 5 * time.Second
+	// HTTPTimeout bounds one HTTP attempt, whole body included; the other
+	// transport timeouts bound its phases.
+	HTTPTimeout           = 30 * time.Second
+	dialTimeout           = 5 * time.Second
+	tlsHandshakeTimeout   = 5 * time.Second
+	responseHeaderTimeout = 15 * time.Second
+)
+
+// defaultLoadOptions are the SDK configuration options of New, before the
+// caller's: bounded retries and an HTTP client with timeouts.
+func defaultLoadOptions() []func(*awsconfig.LoadOptions) error {
+	client := awshttp.NewBuildableClient().WithTimeout(HTTPTimeout).WithDialerOptions(func(d *net.Dialer) {
+		d.Timeout = dialTimeout
+	}).WithTransportOptions(func(t *http.Transport) {
+		t.TLSHandshakeTimeout = tlsHandshakeTimeout
+		t.ResponseHeaderTimeout = responseHeaderTimeout
+	})
+	return []func(*awsconfig.LoadOptions) error{
+		awsconfig.WithHTTPClient(client),
+		awsconfig.WithRetryer(func() awssdk.Retryer {
+			return awsretry.NewStandard(func(o *awsretry.StandardOptions) {
+				o.MaxAttempts = MaxAttempts
+				o.MaxBackoff = MaxBackoff
+			})
+		}),
+	}
+}
+
+// callTimeout is the API option that bounds every SDK operation of a client
+// by d (retries included), whatever context the caller gave. S3 is left to
+// its HTTP timeouts: its calls hand back a body that is read after the
+// call, which a context cancelled at the call's end would cut.
+func callTimeout(d time.Duration) func(*middleware.Stack) error {
+	return func(stack *middleware.Stack) error {
+		return stack.Initialize.Add(middleware.InitializeMiddlewareFunc("ClusterVendingCallTimeout",
+			func(ctx context.Context, in middleware.InitializeInput, next middleware.InitializeHandler) (middleware.InitializeOutput, middleware.Metadata, error) {
+				if awsmiddleware.GetServiceID(ctx) == "S3" {
+					return next.HandleInitialize(ctx, in)
+				}
+				ctx, cancel := context.WithTimeout(ctx, d)
+				defer cancel()
+				return next.HandleInitialize(ctx, in)
+			}), middleware.Before)
+	}
+}
 
 // sessionDuration is how long assumed-role credentials last. The cache
 // refreshes them shortly before they expire.
@@ -86,6 +153,8 @@ type Config struct {
 	// allows AND the policy allows. The API server uses it to read the
 	// results buckets and nothing else, whatever its tenant roles permit.
 	SessionPolicy string
+	// CallTimeout bounds every AWS API call; DefaultCallTimeout when zero.
+	CallTimeout time.Duration
 }
 
 // maxSessionPolicy is what STS accepts of an inline session policy.
@@ -95,6 +164,12 @@ const maxSessionPolicy = 2048
 var roleARNPattern = regexp.MustCompile(`^arn:` + awscatalog.PartitionAWS + `:iam::\d{12}:role/(?:[\x21-\x7e]*/)?[\w+=,.@-]{1,64}$`)
 
 func (c Config) withDefaults() (Config, error) {
+	if c.CallTimeout < 0 {
+		return c, fmt.Errorf("%w: the call timeout %s is negative", ErrInvalid, c.CallTimeout)
+	}
+	if c.CallTimeout == 0 {
+		c.CallTimeout = DefaultCallTimeout
+	}
 	if c.SessionName == "" {
 		c.SessionName = DefaultSessionName
 	}
@@ -125,7 +200,7 @@ type Client struct {
 // chain (keys in the environment, shared config, the IRSA web identity,
 // an instance role) and returns a Client that starts from it.
 func New(ctx context.Context, cfg Config, optFns ...func(*awsconfig.LoadOptions) error) (*Client, error) {
-	base, err := awsconfig.LoadDefaultConfig(ctx, optFns...)
+	base, err := awsconfig.LoadDefaultConfig(ctx, append(defaultLoadOptions(), optFns...)...)
 	if err != nil {
 		return nil, fmt.Errorf("aws: load configuration: %w", err)
 	}
@@ -138,6 +213,7 @@ func NewFromConfig(base awssdk.Config, cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	base.APIOptions = append(slices.Clone(base.APIOptions), callTimeout(cfg.CallTimeout))
 	return &Client{base: base, cfg: cfg, creds: map[string]*awssdk.CredentialsCache{}}, nil
 }
 

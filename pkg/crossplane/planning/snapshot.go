@@ -91,7 +91,7 @@ func (s Snapshot) Render(ctx context.Context, objects []client.Object, plan *v1.
 		if err != nil {
 			return nil, nil, fault.New(fault.Unavailable, fmt.Sprintf("cannot read %s: %v", key, err))
 		}
-		versions = append(versions, key+"="+string(live.GetUID())+"/"+live.GetResourceVersion())
+		versions = append(versions, key+"="+ObjectVersion(live))
 		dry, err := kube.DryRunApply(ctx, s.Client, body)
 		if err != nil {
 			return nil, nil, fault.New(fault.FailedPrecondition, "the management cluster refuses the planned resource: "+err.Error())
@@ -134,7 +134,7 @@ func (s Snapshot) Removals(ctx context.Context, entries []Entry, rendered map[st
 		case err != nil:
 			return nil, fault.New(fault.Unavailable, fmt.Sprintf("cannot read removal target %s: %v", key, err))
 		default:
-			versions = append(versions, key+"="+string(live.GetUID())+"/"+live.GetResourceVersion())
+			versions = append(versions, key+"="+ObjectVersion(live))
 			if external := live.GetAnnotations()[managed.ExternalNameAnnotation]; external != "" {
 				change.ExternalName = external
 			}
@@ -148,6 +148,18 @@ func (s Snapshot) Removals(ctx context.Context, entries []Entry, rendered map[st
 		plan.Changes = append(plan.Changes, change)
 	}
 	return versions, nil
+}
+
+// ObjectVersion is what a plan binds to of a live object: its identity, its
+// generation and a digest of its spec and annotations (retention and the
+// external name live there). Not its resourceVersion, which every status
+// write of a controller changes: a plan made while the object is being
+// updated would be stale before it is applied.
+func ObjectVersion(live *unstructured.Unstructured) string {
+	spec, _, _ := unstructured.NestedMap(live.Object, "spec")
+	encoded, _ := json.Marshal([]any{spec, live.GetAnnotations()}) // maps marshal with sorted keys
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%s/gen%d/%s", live.GetUID(), live.GetGeneration(), hex.EncodeToString(digest[:8]))
 }
 
 func ID(request proto.Message, versions []string) (string, error) {

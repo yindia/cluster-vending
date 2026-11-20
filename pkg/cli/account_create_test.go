@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 )
@@ -40,6 +41,9 @@ type accountAPI struct {
 	onboardErr   error    // what GetAccountOnboarding answers instead
 	// serverPrincipal is the server's principal GetAccountOnboarding names.
 	serverPrincipal string
+	// outdated: the account's status says its role template is older than
+	// the platform needs (RoleTemplateCurrent False).
+	outdated bool
 	// verdict is the access check's result once verify was asked; nil:
 	// the controller never checks.
 	verdict *cloudv1.AccountAccess
@@ -107,6 +111,10 @@ func (f *accountAPI) account() *cloudv1.CloudAccount {
 		Status:   &cloudv1.CloudAccountStatus{State: cloudv1.CloudAccountState_CLOUD_ACCOUNT_STATE_READY}}
 	if f.verified && f.verdict != nil {
 		a.Status.Access = f.verdict
+	}
+	if f.outdated {
+		a.Status.Conditions = append(a.Status.Conditions, &cloudv1.Condition{Type: cloudformation.ConditionTemplateCurrent,
+			Status: cloudv1.ConditionStatus_CONDITION_STATUS_FALSE, Reason: cloudformation.ReasonTemplateOutdated})
 	}
 	return a
 }
@@ -379,5 +387,28 @@ func TestAccountCreatePrintsTheServerPrincipalWhenThereIsOne(t *testing.T) {
 	}
 	if strings.Contains(without.out, "ServerPrincipalArn") {
 		t.Errorf("a server without a principal prints one:\n%s", without.out)
+	}
+}
+
+// For an account whose role template is older than the platform needs,
+// account create prints the update-stack command (same template and
+// parameters) instead of create-stack.
+func TestAccountCreatePrintsTheUpdateCommandForAnOutdatedStack(t *testing.T) {
+	api := &accountAPI{outdated: true}
+
+	r := runAccount(t, AccountCreate, Options{Input: manifest(t, "cluster-vending-provisioner"), Server: apiServer}, api, "")
+
+	if r.err != nil {
+		t.Fatalf("%v\n%s", r.err, r.progress)
+	}
+	url := apiServer + "/cloudformation/provisioner.yaml"
+	contains(t, "output", r.out,
+		"curl -fsSL "+url+" -o cluster-vending-provisioner.yaml",
+		"aws cloudformation update-stack --stack-name cluster-vending-provisioner",
+		"--capabilities CAPABILITY_NAMED_IAM",
+		"ParameterKey=ExternalId,ParameterValue="+externalID,
+		"When the stack is UPDATE_COMPLETE: cluster-vending account verify")
+	if strings.Contains(r.out, "create-stack") {
+		t.Errorf("an update prints create-stack:\n%s", r.out)
 	}
 }

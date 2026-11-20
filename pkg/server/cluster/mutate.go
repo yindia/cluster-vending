@@ -250,7 +250,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return &cloudv1.UpdateClusterResponse{Cluster: c}, err
 	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
-	nodeGroupsBefore := spec.GetNodeGroups()
+	nodeGroupsBefore, addonsBefore := spec.GetNodeGroups(), slices.Clone(spec.GetAws().GetAddons())
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
@@ -299,7 +299,9 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	// A change of the Kubernetes version or the add-ons has versions to
 	// look up at EKS: the reconciler does that before it applies the
 	// change (the row's resolved generation stays behind).
-	unresolved := slices.Contains(paths, pathKubernetesVersion) || slices.Contains(paths, pathAddons)
+	// A mask that names them with the value they have changes nothing.
+	unresolved := slices.Contains(paths, pathKubernetesVersion) && spec.GetControlPlane().GetKubernetesVersion() != versionBefore ||
+		slices.Contains(paths, pathAddons) && !slices.EqualFunc(addonsBefore, spec.GetAws().GetAddons(), func(a, b *cloudv1.AwsAddon) bool { return proto.Equal(a, b) })
 	if unresolved {
 		if err := s.prepareVersions(ctx, row, spec); err != nil {
 			return nil, err

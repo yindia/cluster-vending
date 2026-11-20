@@ -95,6 +95,9 @@ func MergeAccess(prev *model.AccountAccess, report awscloud.AccessReport, now ti
 	for _, c := range report.Checks[:min(len(report.Checks), maxAccessChecks)] {
 		next.Checks = append(next.Checks, model.AccessResult{Action: c.Action, Region: c.Region, OK: c.OK, Reason: c.Reason, Message: c.Message})
 	}
+	if report.TemplateVersionKnown {
+		next.Checks = append(next.Checks, templateVersionResult(report.TemplateVersion))
+	}
 	return next
 }
 

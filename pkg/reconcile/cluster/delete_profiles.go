@@ -7,6 +7,7 @@ import (
 	awscloud "github.com/yindia/cluster-vending/pkg/cloud/aws"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 )
 
 // releaseProfilesTimeout bounds the IAM calls of one pass.
@@ -53,7 +54,8 @@ func (s *Reconciler) releaseNodeProfiles(ctx context.Context, row *model.Cluster
 		log.InfoContext(ctx, "instance profiles of Karpenter's node role deleted", "profiles", deleted)
 	}
 	if err != nil {
-		log.WarnContext(ctx, "instance profiles of Karpenter's node role not all deleted; the role's deletion waits", "error", err)
+		log.WarnContext(ctx, "instance profiles of Karpenter's node role not all deleted; the role's deletion waits", "error", err,
+			"hint", accountreconcile.TemplateHint(account, "cleaning up Karpenter's instance profiles", accountreconcile.SinceInstanceProfileCleanup))
 	}
 }
 

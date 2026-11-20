@@ -14,6 +14,7 @@ import (
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/database/storetest"
@@ -40,6 +42,8 @@ type world struct {
 	store repository.Store
 	kube  client.Client
 	row   *model.Cluster
+	// storeKube is the API server the store keeps its rows in.
+	storeKube client.Client
 }
 
 const worldTenant, worldNS = "acme", "tenant-acme"
@@ -47,7 +51,8 @@ const worldTenant, worldNS = "acme", "tenant-acme"
 func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts ...func(*reconcile.Deps)) world {
 	t.Helper()
 	ctx := t.Context()
-	store := storetest.NewStore(t)
+	storeKube := storetest.NewClient(t)
+	store := cloudstore.New(storeKube)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -114,7 +119,7 @@ func newWorld(t *testing.T, funcs interceptor.Funcs, reader client.Reader, opts 
 	for _, opt := range opts {
 		opt(&deps)
 	}
-	return world{svc: New(deps), store: store, kube: k, row: row}
+	return world{svc: New(deps), store: store, kube: k, row: row, storeKube: storeKube}
 }
 
 func (w world) cluster(t *testing.T) *model.Cluster {
@@ -557,5 +562,34 @@ func TestStaleApplyDoesNotHideAChange(t *testing.T) {
 	}
 	if got := w.cluster(t); got.AppliedGeneration != got.Generation {
 		t.Errorf("applied %d of %d after the next pass", got.AppliedGeneration, got.Generation)
+	}
+}
+
+// A deletion does not ask for the physical name's reservation: a claim that
+// conflicts (another owner's) must not keep the cluster from being deleted.
+func TestReconcileOfADeletionSkipsTheNameReservation(t *testing.T) {
+	w := newWorld(t, interceptor.Funcs{}, nil)
+	ctx := t.Context()
+	claims := &corev1.ConfigMapList{}
+	if err := w.storeKube.List(ctx, claims, client.InNamespace(cloudstore.EKSNameReservationNamespace)); err != nil || len(claims.Items) != 1 {
+		t.Fatalf("reservations: %d (%v)", len(claims.Items), err)
+	}
+	claim := claims.Items[0]
+	claim.Data["clusterID"] = "someone-else"
+	if err := w.storeKube.Update(ctx, &claim); err != nil {
+		t.Fatal(err)
+	}
+	row := w.cluster(t)
+	row.State = StateDeleting
+	if err := w.store.Clusters().Update(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 6; i++ {
+		if err := w.svc.Reconcile(ctx, worldTenant, w.row.ID); err != nil {
+			t.Fatalf("pass %d: %v", i, err)
+		}
+	}
+	if _, err := w.store.Clusters().Get(ctx, worldTenant, w.row.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("cluster row after the deletion: %v, want not found", err)
 	}
 }

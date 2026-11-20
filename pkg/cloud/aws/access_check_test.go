@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+
+	"github.com/yindia/cluster-vending/pkg/cloudformation"
 )
 
 // probeFake answers every call of an access check in one region. An
@@ -24,6 +28,8 @@ type probeFake struct {
 	calls        *[]string
 	// flaky fails an action with Throttling this many times first.
 	flaky map[string]int
+	// tags are the tenant role's tags.
+	tags map[string]string
 }
 
 func (f probeFake) fail(action string) error {
@@ -78,6 +84,19 @@ func (f probeFake) GetRole(context.Context, *iam.GetRoleInput, ...func(*iam.Opti
 	return &iam.GetRoleOutput{}, f.fail(ActionGetRole)
 }
 
+func (f probeFake) ListRoleTags(context.Context, *iam.ListRoleTagsInput, ...func(*iam.Options)) (*iam.ListRoleTagsOutput, error) {
+	if err := f.fail(ActionListRoleTags); err != nil {
+		return nil, err
+	}
+	out := &iam.ListRoleTagsOutput{}
+	if f.tags != nil {
+		for k, v := range f.tags {
+			out.Tags = append(out.Tags, iamtypes.Tag{Key: awssdk.String(k), Value: awssdk.String(v)})
+		}
+	}
+	return out, nil
+}
+
 func apiErr(code, message string) error { return &smithy.GenericAPIError{Code: code, Message: message} }
 
 const assumedARN = "arn:aws:sts::444455556666:assumed-role/cluster-vending-provisioner/cluster-vending"
@@ -86,9 +105,14 @@ const assumedARN = "arn:aws:sts::444455556666:assumed-role/cluster-vending-provi
 // byRegion (a region not listed answers everything).
 func checkWith(t *testing.T, a Access, regions []string, byRegion map[string]map[string]error) (AccessReport, []string) {
 	t.Helper()
+	return checkWithTags(t, a, regions, byRegion, nil)
+}
+
+func checkWithTags(t *testing.T, a Access, regions []string, byRegion map[string]map[string]error, tags map[string]string) (AccessReport, []string) {
+	t.Helper()
 	var calls []string
 	report := checkAccess(t.Context(), a, regions, func(region string) (accessAPIs, error) {
-		f := probeFake{account: tenantAccount, arn: assumedARN, errs: byRegion[region], calls: &calls}
+		f := probeFake{account: tenantAccount, arn: assumedARN, errs: byRegion[region], calls: &calls, tags: tags}
 		if a.Direct {
 			f.arn = "arn:aws:iam::444455556666:user/dev"
 		}
@@ -202,7 +226,7 @@ func TestCheckAccessStopsInARegionWithoutIdentity(t *testing.T) {
 		}
 	}
 	// us-east-1 runs its checks; us-west-1 only the identity call.
-	if want := len(regionalChecks) + 1; west != want {
+	if want := len(regionalChecks) + 2; west != want { // and GetRole, ListRoleTags
 		t.Errorf("%d other calls, want %d (us-east-1's only): %v", west, want, calls)
 	}
 }
@@ -265,5 +289,40 @@ func TestAccessChecksTable(t *testing.T) {
 		if c.Action == "" || c.How == "" || c.NeededFor == "" {
 			t.Errorf("check %+v is not documented", c)
 		}
+	}
+}
+
+func TestCheckAccessReadsTheTemplateVersion(t *testing.T) {
+	a := Access{AccountID: tenantAccount, RoleARN: tenantRole}
+	versioned := func(v string) map[string]string { return map[string]string{cloudformation.TagTemplateVersion: v} }
+
+	tests := []struct {
+		name      string
+		access    Access
+		tags      map[string]string
+		errs      map[string]error
+		want      int
+		wantKnown bool
+	}{
+		{"current", a, versioned(strconv.Itoa(cloudformation.TemplateVersion)), nil, cloudformation.TemplateVersion, true},
+		{"older", a, versioned("0"), nil, 0, true},
+		{"no tag: a stack from before versions", a, map[string]string{"managed-by": "cluster-vending"}, nil, 0, true},
+		{"newer than the platform", a, versioned("99"), nil, 99, true},
+		{"tags not readable: unknown", a, nil, map[string]error{ActionListRoleTags: apiErr("AccessDenied", "no")}, 0, false},
+		{"direct access has no role", Access{AccountID: tenantAccount, Direct: true}, nil, nil, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report, calls := checkWithTags(t, tt.access, nil, map[string]map[string]error{"us-east-1": tt.errs}, tt.tags)
+			if report.TemplateVersion != tt.want || report.TemplateVersionKnown != tt.wantKnown {
+				t.Errorf("version = %d known %t, want %d %t", report.TemplateVersion, report.TemplateVersionKnown, tt.want, tt.wantKnown)
+			}
+			if !report.OK() || report.Transient {
+				t.Errorf("reading the version must not fail the check: %+v", report)
+			}
+			if n := strings.Count(strings.Join(calls, ","), ActionListRoleTags); tt.access.Direct != (n == 0) {
+				t.Errorf("ListRoleTags called %d times", n)
+			}
+		})
 	}
 }

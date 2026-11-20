@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -15,6 +16,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	accountreconcile "github.com/yindia/cluster-vending/pkg/reconcile/account"
 	"github.com/yindia/cluster-vending/pkg/results"
 )
 
@@ -138,7 +140,15 @@ func (s *ClusterService) readResult(ctx context.Context, row *model.Cluster, kin
 	etag, collected, err := s.results.Latest(ctx, account, row.Region, ref.Bucket, kind, into)
 	if err != nil {
 		s.logger().Warn("cluster results: not read", "cluster", row.ID, "kind", kind, "bucket", ref.Bucket, "error", err)
-		return bucketRead{Notice: results.Notice(err)}
+		notice := results.Notice(err)
+		if errors.Is(err, results.ErrAccessDenied) {
+			// Denied by an account whose role predates the results
+			// permissions: say which stack update fixes it.
+			if hint := accountreconcile.TemplateHint(account, "reading cluster results", accountreconcile.SinceResultsBuckets); hint != "" {
+				notice += "; " + hint
+			}
+		}
+		return bucketRead{Notice: notice}
 	}
 	return bucketRead{Used: true, ETag: etag, Collected: collected}
 }

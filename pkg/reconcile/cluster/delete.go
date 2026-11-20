@@ -162,6 +162,7 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 		return false, fmt.Errorf("remove the cluster row: %w", err)
 	}
 	forgetDeleteClocks(row.ID)
+	s.nodeRows.forget(row.ID)
 	s.logger().InfoContext(ctx, "cluster deleted", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name)
 	return true, nil
 }

@@ -18,6 +18,9 @@ Outputs:
   RoleName:
     Description: 'The role''s name: spec.aws.role of the CloudAccount'
     Value: !Ref 'Role'
+  TemplateVersion:
+    Description: 'The version of this template: the platform compares it with what it needs and says when the stack is to be updated'
+    Value: '1'
 Parameters:
   ExternalId:
     AllowedPattern: ^$|^[A-Za-z0-9+=,.@:/_-]{32,1224}$
@@ -181,6 +184,8 @@ Resources:
       Tags:
         - Key: cluster-vending.io/role
           Value: reader
+        - Key: cluster-vending.io/template-version
+          Value: '1'
         - Key: managed-by
           Value: cluster-vending
     Type: AWS::IAM::Role

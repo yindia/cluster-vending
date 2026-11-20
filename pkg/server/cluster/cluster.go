@@ -101,6 +101,13 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 		return nil, err
 	}
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
+		if won, werr := s.requestWinner(ctx, row, err, func(w *model.Cluster) bool { return createMatches(w, req) }); won != nil || werr != nil {
+			if werr != nil {
+				return nil, werr
+			}
+			c, err := s.stored(ctx, won)
+			return &cloudv1.CreateClusterResponse{Cluster: c}, err
+		}
 		return nil, createError(err, row)
 	}
 	s.logger().InfoContext(ctx, "cluster stored", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,
@@ -112,14 +119,18 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 // createError maps a failed insert: a duplicate is a second cluster of the
 // name in the tenant (the name check passed, but another create won the
 // race) or a reused request_id; a conflict is the network being deleted at
-// the same moment.
+// the same moment (FailedPrecondition), or any other concurrent change
+// (Aborted: retry).
 func createError(err error, row *model.Cluster) error {
 	if errors.Is(err, cloudstore.ErrEKSNameReserved) {
 		return connect.NewError(connect.CodeAlreadyExists, cloudstore.ErrEKSNameReserved.Error())
 	}
-	if errors.Is(err, repository.ErrConflict) {
+	if errors.Is(err, cloudstore.ErrNetworkDeleting) {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
 			"network %s is being deleted; a cluster cannot be created in it", row.NetworkID))
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		return connect.NewError(connect.CodeAborted, "the create conflicted with a concurrent change; retry it")
 	}
 	if errors.Is(err, repository.ErrAlreadyExists) {
 		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf(

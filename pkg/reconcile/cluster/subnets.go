@@ -58,7 +58,21 @@ func (s *Reconciler) TagSubnets(ctx context.Context, row *model.Cluster, t Targe
 		if err := unstructured.SetNestedMap(u.Object, tags, "spec", "forProvider", "tags"); err != nil {
 			return err
 		}
-		if err := kube.ApplyFields(ctx, s.deps.Kube, u, subnetManager(row.ID)); err != nil {
+		err := kube.ApplyFields(ctx, s.deps.Kube, u, subnetManager(row.ID))
+		if apierrors.IsConflict(err) && tags[crossplaneaws.TagKarpenterDiscovery] != nil {
+			// Another cluster of the network tagged the subnet since it was read:
+			// its karpenter.sh/discovery tag is not ours to fight over (see
+			// clusterSubnetTags); this cluster's Karpenter selects by
+			// kubernetes.io/cluster/<name>.
+			s.logger().WarnContext(ctx, "subnet got a karpenter discovery tag meanwhile; skipping it for the cluster",
+				"cluster_id", row.ID, "subnet", name)
+			delete(tags, crossplaneaws.TagKarpenterDiscovery)
+			if err := unstructured.SetNestedMap(u.Object, tags, "spec", "forProvider", "tags"); err != nil {
+				return err
+			}
+			err = kube.ApplyFields(ctx, s.deps.Kube, u, subnetManager(row.ID))
+		}
+		if err != nil {
 			s.logger().ErrorContext(ctx, "tag network subnet", "cluster_id", row.ID, "subnet", name, "error", err)
 			return fault.New(fault.Internal, "could not tag the network's subnet "+name+" for the cluster")
 		}

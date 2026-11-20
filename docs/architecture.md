@@ -327,6 +327,26 @@ reason) and the condition `AccessVerified`. Reasons: `AssumeRoleDenied`,
 keeps the last verdict, marked `stale`, and retries after 15 minutes. Reads,
 updates, deletes, pauses and resumes never check.
 
+**Template versions.** `cloudformation.TemplateVersion` (`pkg/cloudformation/version.go`) is
+bumped whenever a template's permissions or trust change; a test (`version_test.go`) fails when
+a template changes without it. Every template writes the version as the tag
+`cluster-vending.io/template-version` on the tenant role and as the stack output
+`TemplateVersion`. The access check reads the tag (`iam:ListRoleTags`, which every role
+grants itself) once per check and keeps it among `status.access.checks` (`iam:ListRoleTags`,
+always `ok`, message `template version N`). A role without the tag is version 0. When the
+stack is older than the build, the account gets the condition `RoleTemplateCurrent` `False`
+(reason `TemplateOutdated`) saying "the account's role template is version N, this platform
+needs M; update the stack: ..."; the account is not failed. `account create -f` for such an
+account prints `update-stack` instead of `create-stack`. A refusal of take over or create
+names the old template. A tag that cannot be read leaves the version unknown and says nothing.
+
+**Bounded AWS calls.** Every SDK operation is bounded by `aws.Config.CallTimeout` (default
+20s, retries included; each page of a list separately), whatever context the caller gives; S3 is
+left to the HTTP timeouts, since its calls return a body read after the call. The SDK config has
+3 attempts with at most 5s of backoff, a 30s HTTP timeout, and dial, TLS and response-header
+timeouts. The reconciler's lookups (`resolve`) add a 60s bound, and an access check bounds
+a region at 90s. A call that times out is `Unavailable`: retried, never a denial or a failure.
+
 ### Create, import and takeover
 
 **Create** (network or cluster). Cluster-specific steps before the first
@@ -1606,6 +1626,7 @@ Make targets:
 | `make check` | Lint (protos and Go), `go vet` and the unit tests: the gate before a commit. |
 | `make test` | Unit tests with the race detector. They use a fake API server; no cluster needed. |
 | `make cover` | Unit tests with a coverage report in `bin/coverage.html`. |
+| `make e2e`, `make e2e-lint` | The end-to-end tests on a sandbox AWS account (below; real resources, hours), and their vet and lint (nothing is run). |
 | `make generate` | Regenerates Go in `pkg/gen` and TypeScript in `ui/src/gen` from `idl/` (buf, remote plugins). |
 | `make controller-apis` | Regenerates the deepcopy code, the CRDs and the RBAC of `api/`. |
 | `make mocks` | Regenerates the repository mocks. |
@@ -1765,6 +1786,102 @@ Keycloak. [Authentication](#authentication) describes the settings.
   the definitions agree on the components.
 - The console has its own checks, described in the Checks section of
   [`ui/README.md`](../ui/README.md#checks).
+
+### End-to-end on a sandbox account
+
+`test/e2e` drives a running API server and controller against a real AWS account,
+with the same Connect clients as the CLI. It is behind the `e2e` build tag and off
+unless `CV_E2E=1`, so `make check` and `go test ./...` never build or run it.
+`make e2e-lint` vets and lints it without running anything. It creates real
+resources and costs money: use an account you can empty.
+
+**Prerequisites**
+
+- A sandbox AWS account that holds nothing you need. The harness creates a VPC with one
+  NAT gateway, an EKS cluster with a two-node system group, Karpenter nodes, an S3 bucket
+  and IAM roles, and deletes them.
+- The tenant role's stack (`cluster-vending-<role>`) applied in that account, from the
+  template of the build under test (`GET /cloudformation/`): a stale template fails the
+  access check or, worse, a deletion. The role is `provisioner` for the full run; with
+  `reader` or `updater` the harness asserts the verdict and the refusal to create, and runs
+  only the import scenario.
+- An API server and a controller running (`make run`, `make run-controller`, or a
+  deployment), with `aws-management-role-arn` set, against a management cluster with
+  Crossplane, its providers and room for the platform's pods: 12 GB of memory at least.
+- Optional, each adds checks: `CV_E2E_KUBECONTEXT` (the management cluster: node group
+  `atProvider`, the workload kubeconfig for the Karpenter nodes, EKS name reservations,
+  leftover managed resources), the `aws` CLI with credentials of the sandbox account
+  (node group, bucket, tags, instance profiles, the tag-based leak check) and `kubectl`.
+  A check whose tool is missing is logged as skipped, not failed.
+
+**Variables**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CV_E2E` | | `1` turns the harness on. |
+| `CV_E2E_SERVER` | `http://127.0.0.1:8080` | The API server. `CV_E2E_TOKEN` is sent as a bearer token when set. |
+| `CV_E2E_TENANT` | required | The tenant, created when missing. A tenant cannot be deleted through the API and stays. |
+| `CV_E2E_ACCOUNT_ID`, `CV_E2E_REGION` | required | The sandbox account and its region. |
+| `CV_E2E_ROLE`, `CV_E2E_ROLE_NAME` | `provisioner`, `cluster-vending-<role>` | `provisioner`, `reader` or `updater`, and the IAM role's name. |
+| `CV_E2E_KUBECONTEXT` | | The management cluster's kubectl context. |
+| `CV_E2E_CIDR`, `CV_E2E_CHANNEL`, `CV_E2E_K8S_FROM` | `10.77.0.0/16`, `RELEASE_CHANNEL_ALPHA`, `1.35` | The network, and the channel and Kubernetes minor of the cluster. The upgrade scenario moves it to `status.kubernetes.available`, so the minor must be behind what the channel offers. |
+| `CV_E2E_IMPORT_CLUSTER`, `_VPC`, `_SUBNETS`, `_NODE_GROUP` | | An existing EKS cluster, its VPC, the VPC's subnets (comma separated) and the cluster's default node group (`default`). Without the cluster, scenario 8 is skipped. |
+| `CV_E2E_IMPORT_TAKEOVER=1` | off | Also take the import over. The platform then owns the cluster and the VPC, and the cleanup deletes them from AWS. |
+| `CV_E2E_IMPORT_DRIFT=1` | off | Change the imported cluster's endpoint access in AWS, assert the takeover is refused, restore it and import again. Needs `aws` and the management cluster. |
+| `CV_E2E_IMPORT_PLATFORM=1` | off | Install the platform components on a taken-over cluster (default: skipped). |
+| `CV_E2E_STRICT_STAGES=1` | off | Require all seven deletion stages to be seen. By default stages 4 to 7 are required: stages 1 to 3 can pass within one reconcile on a cluster with nothing in them, between two polls. |
+| `CV_E2E_RECREATE_RUNNING=1` | off | Wait for the re-created cluster to be RUNNING (default: until its resources are rendered). |
+| `CV_E2E_POLL`, `_REQUEST_TIMEOUT` | `10s`, `60s` | Polling interval and the bound of one API call. |
+| `CV_E2E_NETWORK_TIMEOUT`, `_CLUSTER_TIMEOUT`, `_COMPONENTS_TIMEOUT`, `_UPDATE_TIMEOUT`, `_UPGRADE_TIMEOUT`, `_DELETE_TIMEOUT`, `_SCAN_TIMEOUT` | `30m`, `60m`, `45m`, `30m`, `120m`, `60m`, `20m` | Deadline of each wait. A Go duration or a number of minutes. |
+
+```sh
+export CV_E2E_TENANT=e2e CV_E2E_ACCOUNT_ID=111122223333 CV_E2E_REGION=us-west-2 \
+       CV_E2E_KUBECONTEXT=mgmt
+make e2e                                           # everything
+CV_E2E=1 go test -tags e2e ./test/e2e/ -v -run 'TestE2E/0[12]'   # scenarios 1 and 2
+```
+
+The scenarios are subtests of `TestE2E`, in order, and share what they create: `01_account_onboarding`
+(onboarding, the access verdict of the role, what a reader or updater may not do), `02_network_create`,
+`03_cluster_create` (install order, platform components, system node group, autoscaler tags, results bucket,
+node lists), `04_cluster_update` (labels in place; a user Karpenter group `t3` with real nodes; its removal),
+`05_cluster_upgrade` (one minor, manually: steps in order, components skipped when unchanged),
+`06_scanners`, `07_cluster_delete` (seven stages, name reservation released, the same name again, deleted
+again), `08_import_takeover`, `09_network_delete`. A scenario whose predecessor failed is skipped. A failing
+wait logs the cluster's status, conditions, resources that are not ready, components and events.
+
+**Cost and time.** A full run takes 3 to 4 hours: the network about 10 minutes, the cluster 15 to 20 and its
+components 15 to 25 more, the upgrade 45 to 90, each deletion 20 to 30. While it lives it costs roughly what an
+EKS control plane, two `t3.medium` nodes, a NAT gateway and a `t3` Karpenter node cost per hour, a few US
+dollars in all; a run that is killed leaves the money running.
+
+**Cleanup.** Each scenario that creates something registers its deletion on `TestE2E`. When the scenarios are done
+(or the test is stopped by a failure or `-timeout`, but not when the process is killed) the cleanups run, last created
+first, and each verifies the deletion completed. Then the leak check lists what the run left: Crossplane managed
+resources named after the run id on the management cluster, and, with credentials, AWS resources tagged with the
+run's label (`cv-e2e=<run id>`, which every resource of the run carries as a tag) or with the ids of its networks and
+clusters, and an EKS cluster by name. A leak fails the run, and is logged as `LEAK:` with what to delete. After a
+killed run, delete the cluster and the network through the API (`cluster delete --force` if stuck), then look for the
+`cv-e2e-*` names and the `cv-e2e` tag.
+
+**What it checks that unit tests cannot.** The AWS behaviours the platform assumes:
+
+- **The `ec2:CreateTags` DryRun on a VPC that does not exist** tells an updater from a reader: scenario 1
+  asserts the verdict of the configured role (updater: CreateTags passes, CreateVpc does not, condition
+  `AccessVerified` True with `VerifiedForImport`; reader: both fail; provisioner: verified).
+- **Node group `status.atProvider` has the labels, taints, tags and scaling**, which the platform reads back:
+  scenario 3 reads the system group from the managed resource and from EKS and asserts the pool label and
+  taint, the autoscaler tags (on that group only) and `min <= desired <= max` with `min >= 2`.
+- **EKS accepts a node group update where min is above desired.** Only the shape is asserted on a new group;
+  changing `nodeGroups.system.minSize` of the controller is not driven by the harness. Do it by hand between
+  scenarios 3 and 4 and watch the system group stay `Ready` in `status.nodeGroups`.
+- **provider-helm resumes a paused Release.** Install (scenario 3) and uninstall (scenario 7, stages 2 and 3, which
+  lift the platform's own pause) go through it; a component that needed a retry is logged with its failures.
+- **EventBridge rules carry an `eventBusName` that is read back on rules that already exist**: scenario 3
+  asserts Karpenter's rules are READY and at the generation applied, and stage 5 of scenario 7 deletes them.
+- **The tenant role may delete Karpenter's instance profiles**: scenario 4 makes nodes, so Karpenter makes
+  profiles; scenario 7 asserts the deletion does not stall at the node role and leaves no profile tagged with
+  the cluster.
 
 ## 7. Known limits
 

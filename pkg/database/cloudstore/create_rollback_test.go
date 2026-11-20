@@ -262,3 +262,88 @@ func TestListLeavesPolicySnapshotOutAndGetFillsIt(t *testing.T) {
 		t.Fatalf("get lost the snapshot: %v %v", got, err)
 	}
 }
+
+// regionNetwork is a second network of the tenant, in another region of the
+// same account.
+func regionNetwork(t *testing.T, w world, region string) *model.Network {
+	t.Helper()
+	n := &model.Network{TenantID: "acme", Name: "second", Provider: model.ProviderAWS, Region: region,
+		CloudAccountID: w.account, Resource: model.Resource{State: "NETWORK_STATE_PROVISIONING"}}
+	n.Spec = document(t, networkSpec(n))
+	if err := w.s.Networks().Create(t.Context(), n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestCreateCollisionWithOtherRegionReleasesOwnReservation(t *testing.T) {
+	w := newWorld(t)
+	other := regionNetwork(t, w, "eu-west-1")
+	ridWinner, ridLoser := uuid.NewString(), uuid.NewString()
+	winner := reservationCluster(t, w.network, "twice")
+	winner.CreateRequestID = &ridWinner
+	armed := true
+	k := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+		if _, ok := obj.(*cloud.Cluster); ok && armed {
+			armed = false
+			if err := w.s.Clusters().Create(ctx, winner); err != nil {
+				t.Fatalf("winner: %v", err)
+			}
+		}
+		return c.Create(ctx, obj, opts...)
+	}})
+	loser := reservationCluster(t, other, "twice")
+	loser.CreateRequestID = &ridLoser
+	err := cloudstore.New(k).Clusters().Create(t.Context(), loser)
+	if !errors.Is(err, repository.ErrAlreadyExists) {
+		t.Fatalf("collision: %v", err)
+	}
+	if n := len(reservations(t, w.k)); n != 1 {
+		t.Fatalf("loser's reservation kept: %d reservations", n)
+	}
+	if _, err := w.s.Clusters().GetByCreateRequest(t.Context(), "acme", ridLoser); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("loser's request claim kept: %v", err)
+	}
+	if _, err := w.s.Clusters().GetByCreateRequest(t.Context(), "acme", ridWinner); err != nil {
+		t.Fatalf("winner's request claim lost: %v", err)
+	}
+}
+
+func TestCreateIdenticalRetryDoesNotSucceedForARolledBackWinner(t *testing.T) {
+	w := newWorld(t)
+	rid := uuid.NewString()
+	mk := func() *model.Cluster {
+		c := reservationCluster(t, w.network, "twice")
+		c.CreateRequestID = &rid
+		return c
+	}
+	winner := mk()
+	armed, rolledBack := true, false
+	k := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, ok := obj.(*cloud.Cluster); ok && armed {
+				armed = false
+				if err := w.s.Clusters().Create(ctx, winner); err != nil {
+					t.Fatalf("winner: %v", err)
+				}
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			err := c.Get(ctx, key, obj, opts...)
+			if _, ok := obj.(*cloud.Cluster); ok && err == nil && !armed && !rolledBack {
+				rolledBack = true // the winner is taken back right after the loser read it
+				if derr := c.Delete(ctx, obj.DeepCopyObject().(client.Object)); derr != nil {
+					t.Fatal(derr)
+				}
+			}
+			return err
+		}})
+	err := cloudstore.New(k).Clusters().Create(t.Context(), mk())
+	if !rolledBack {
+		t.Fatal("the winner was never taken back by the test")
+	}
+	if err == nil || !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("retry reported %v for a cluster that is gone", err)
+	}
+}

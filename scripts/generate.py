@@ -38,6 +38,7 @@ policies; main() checks it.
 
 import json
 import os
+import re
 import sys
 
 from awacs.aws import (
@@ -45,6 +46,7 @@ from awacs.aws import (
     Allow,
     Bool,
     Condition,
+    Null,
     PolicyDocument,
     Principal,
     Statement,
@@ -71,6 +73,20 @@ PLATFORM = "cluster-vending"
 # The roles, in the order each adds to the one before.
 ROLES = ["reader", "updater", "provisioner"]
 PROVISIONER = "provisioner"
+
+
+def template_version(root):
+    """Return TemplateVersion of pkg/cloudformation/version.go: the Go
+    constant is the one source, bumped whenever a template changes (a test
+    fails otherwise), and written into every template as a role tag and an
+    output."""
+    path = os.path.join(root, "pkg", "cloudformation", "version.go")
+    with open(path) as file:
+        match = re.search(r"^const TemplateVersion = (\d+)$", file.read(), re.M)
+    if match is None:
+        sys.exit(f"{path}: no line 'const TemplateVersion = N'")
+    return match.group(1)
+
 
 # IAM's limit on a managed policy document, without whitespace.
 MANAGED_POLICY_LIMIT = 6144
@@ -331,6 +347,20 @@ PROVISION_CLUSTERS = [
             "DeleteOpenIDConnectProvider",
         ),
     ),
+    # Karpenter's instance profiles hold the node role, which cannot be
+    # deleted while they do: the platform removes the ones Karpenter made
+    # (tagged with its EC2NodeClass) for a cluster it deletes.
+    statement(
+        "ReadInstanceProfileTags",
+        actions("iam", "ListInstanceProfileTags"),
+    ),
+    statement(
+        "CleanKarpenterInstanceProfiles",
+        actions("iam", "RemoveRoleFromInstanceProfile", "DeleteInstanceProfile"),
+        condition=Condition(
+            Null("aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass", "false")
+        ),
+    ),
     # The cluster, node and component roles the platform creates are handed
     # only to the AWS services that use them.
     statement(
@@ -527,7 +557,7 @@ def add_spot_service_linked_role(template):
     )
 
 
-def template_of(role):
+def template_of(role, version):
     """Return the CloudFormation template of one role."""
     template = Template()
     template.set_version("2010-09-09")
@@ -616,7 +646,13 @@ def template_of(role):
                 ),
             ),
             ManagedPolicyArns=refs,
-            Tags=Tags({"managed-by": PLATFORM, f"{PLATFORM}.io/role": role}),
+            Tags=Tags(
+                {
+                    "managed-by": PLATFORM,
+                    f"{PLATFORM}.io/role": role,
+                    f"{PLATFORM}.io/template-version": version,
+                }
+            ),
         )
     )
     template.add_output(
@@ -633,6 +669,16 @@ def template_of(role):
             Value=Ref(iam_role),
         )
     )
+    template.add_output(
+        Output(
+            "TemplateVersion",
+            Description=(
+                "The version of this template: the platform compares it with "
+                "what it needs and says when the stack is to be updated"
+            ),
+            Value=version,
+        )
+    )
     return template
 
 
@@ -640,10 +686,11 @@ def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir = os.path.join(root, "pkg", "cloudformation", "templates")
     os.makedirs(out_dir, exist_ok=True)
+    version = template_version(root)
     for role in ROLES:
         path = os.path.join(out_dir, f"{PLATFORM}-{role}-role.template.yaml")
         with open(path, "w") as file:
-            file.write(template_of(role).to_yaml())
+            file.write(template_of(role, version).to_yaml())
 
 
 if __name__ == "__main__":

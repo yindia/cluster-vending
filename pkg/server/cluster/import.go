@@ -66,6 +66,13 @@ func (s *ClusterService) ImportCluster(ctx context.Context, req *cloudv1.ImportC
 		return nil, err
 	}
 	if err := s.deps.Store.Clusters().Create(ctx, row); err != nil {
+		if won, werr := s.requestWinner(ctx, row, err, func(w *model.Cluster) bool { return importMatches(w, req) }); won != nil || werr != nil {
+			if werr != nil {
+				return nil, werr
+			}
+			c, err := s.stored(ctx, won)
+			return &cloudv1.ImportClusterResponse{Cluster: c}, err
+		}
 		return nil, createError(err, row)
 	}
 	s.logger().InfoContext(ctx, "cluster import stored", "tenant_id", row.TenantID, "cluster_id", row.ID, "name", row.Name,

@@ -43,10 +43,10 @@ func Usable(a *model.CloudAccount, region string, capability Capability) (warnin
 			// A reader or updater role, for what it can do.
 		case capability == Create && partial(last):
 			return "", fault.Newf(fault.FailedPrecondition, "account %s cannot create networks or clusters: %s; "+
-				"use a provisioner role to create, or run: %s", name, partialMessage(last), verify)
+				"use a provisioner role to create, or run: %s%s", name, partialMessage(last), verify, refusalNote(a, capability))
 		default:
-			return "", fault.Newf(fault.FailedPrecondition, "account %s cannot be used: %s: %s; fix the account and run: %s",
-				name, last.Reason, last.Message, verify)
+			return "", fault.Newf(fault.FailedPrecondition, "account %s cannot be used: %s: %s; fix the account and run: %s%s",
+				name, last.Reason, last.Message, verify, refusalNote(a, capability))
 		}
 	}
 	if region != "" && i < 0 {
@@ -59,6 +59,20 @@ func Usable(a *model.CloudAccount, region string, capability Capability) (warnin
 			name, last.CheckedAt.UTC().Format(time.RFC3339))
 	}
 	return warning, nil
+}
+
+// refusalNote is what to add to the refusal of capability when the account's
+// role template is older than the capability's permissions need: "; ..." or
+// nothing.
+func refusalNote(a *model.CloudAccount, c Capability) string {
+	need, ok := capabilityNeeds[c]
+	if !ok {
+		return ""
+	}
+	if hint := TemplateHint(a, need.what, need.since); hint != "" {
+		return "; " + hint
+	}
+	return ""
 }
 
 // accountLabel names an account in a message: its name and cloud ID, or

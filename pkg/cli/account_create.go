@@ -98,6 +98,10 @@ func roleSteps(server string, a *cloudv1.CloudAccount, ob *cloudv1.AccountOnboar
 	aws := a.GetAws()
 	url := strings.TrimSuffix(server, "/") + ob.GetTemplatePath()
 	ref := fmt.Sprintf("--id %s --tenant %s", a.GetId(), a.GetTenantId())
+	verb, done, action := "create-stack", "CREATE_COMPLETE", "Create"
+	if templateOutdated(a) {
+		verb, done, action = "update-stack", "UPDATE_COMPLETE", "Update"
+	}
 	var b strings.Builder
 	if cloudformation.RoleOf(aws.GetRole()) == "" {
 		fmt.Fprintf(&b, "\nCreate the role %s in account %s yourself, trusting %s", aws.GetRole(), aws.GetAccountId(), ob.GetManagementRoleArn())
@@ -107,8 +111,8 @@ func roleSteps(server string, a *cloudv1.CloudAccount, ob *cloudv1.AccountOnboar
 		fmt.Fprintf(&b, ", with the permissions of %s.\n\nWhen the role is there:", url)
 	} else {
 		file := cloudformation.RoleName(ob.GetRole()) + ".yaml"
-		fmt.Fprintf(&b, "\nCreate the IAM role %s in account %s with CloudFormation, with your AWS credentials of that account:\n\n",
-			ob.GetRoleName(), aws.GetAccountId())
+		fmt.Fprintf(&b, "\n%s the IAM role %s in account %s with CloudFormation, with your AWS credentials of that account:\n\n",
+			action, ob.GetRoleName(), aws.GetAccountId())
 		fmt.Fprintf(&b, "  Template:           %s\n  RoleName:           %s\n  ManagementRoleArn:  %s\n", url, ob.GetRoleName(), ob.GetManagementRoleArn())
 		params := fmt.Sprintf("ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterManagementRoleARN, ob.GetManagementRoleArn())
 		if ob.GetServerPrincipalArn() != "" {
@@ -121,14 +125,26 @@ func roleSteps(server string, a *cloudv1.CloudAccount, ob *cloudv1.AccountOnboar
 		}
 		params += fmt.Sprintf(" \\\n      ParameterKey=%s,ParameterValue=%s", cloudformation.ParameterRoleName, ob.GetRoleName())
 		fmt.Fprintf(&b, "\n  curl -fsSL %s -o %s && \\\n", url, file)
-		fmt.Fprintf(&b, "  aws cloudformation create-stack --stack-name %s \\\n", ob.GetRoleName())
+		fmt.Fprintf(&b, "  aws cloudformation %s --stack-name %s \\\n", verb, ob.GetRoleName())
 		fmt.Fprintf(&b, "    --template-body file://%s --capabilities CAPABILITY_NAMED_IAM \\\n", file)
 		fmt.Fprintf(&b, "    --parameters %s \\\n", params)
 		fmt.Fprintf(&b, "    --region %s\n\n  (any region works: IAM is global, the stack is regional)\n\n", stackRegion)
-		b.WriteString("When the stack is CREATE_COMPLETE:")
+		b.WriteString("When the stack is " + done + ":")
 	}
 	fmt.Fprintf(&b, " cluster-vending account verify %s --wait\n", ref)
 	fmt.Fprintf(&b, "Then: cluster-vending network create -f <Network manifest with spec.bootstrapId: %s> --tenant %s\n",
 		a.GetId(), a.GetTenantId())
 	return b.String()
+}
+
+// templateOutdated: the account's status says its role's template is older
+// than the platform needs (the controller's access check reads its version),
+// so its stack is updated, not created.
+func templateOutdated(a *cloudv1.CloudAccount) bool {
+	for _, c := range a.GetStatus().GetConditions() {
+		if c.GetType() == cloudformation.ConditionTemplateCurrent {
+			return c.GetStatus() == cloudv1.ConditionStatus_CONDITION_STATUS_FALSE
+		}
+	}
+	return false
 }

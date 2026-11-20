@@ -129,13 +129,14 @@ func TestUpdateWithAStalePlanIsRefused(t *testing.T) {
 		t.Fatalf("plan = %v, want the node group's tags in place", planned.GetPlan().GetChanges())
 	}
 
-	// Something changes the node group after the plan.
+	// Something changes the node group's spec after the plan (a status write
+	// or an annotation would not: see TestPlanSurvivesStatusWrites).
 	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
 	ng := &awseks.NodeGroup{}
 	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix + "-default"}, ng); err != nil {
 		t.Fatal(err)
 	}
-	ng.Annotations = map[string]string{"touched": "true"}
+	ng.Spec.ForProvider.Tags = map[string]*string{"touched": ptr.To("true")}
 	if err := w.kube.Update(ctx, ng); err != nil {
 		t.Fatal(err)
 	}
@@ -246,5 +247,31 @@ func TestPlanShowsWhatWaitsForAnotherResource(t *testing.T) {
 	if deleted := plan.GetChanges(); len(changesOf(plan, "Cluster", cloudv1.PlannedAction_PLANNED_ACTION_DELETE))+
 		len(changesOf(plan, "NodeGroup", cloudv1.PlannedAction_PLANNED_ACTION_DELETE)) != 0 || !plan.GetApplicable() {
 		t.Errorf("a waiting resource is planned as deleted, or the plan is not applicable: %v", deleted)
+	}
+}
+
+// A plan made while the cluster is UPDATING stays good: the controllers' status
+// writes change the objects' resourceVersion, not what the plan is about.
+func TestPlanSurvivesStatusWrites(t *testing.T) {
+	w := appliedWorld(t)
+	ctx := t.Context()
+	req := planRequest(w, &cloudv1.ClusterSpec{}, "labels")
+	req.Cluster.Labels = map[string]string{"env": "prod"}
+	planned, err := update(t, w, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
+	ng := &awseks.NodeGroup{}
+	if err := w.kube.Get(ctx, client.ObjectKey{Namespace: worldNS, Name: prefix + "-default"}, ng); err != nil {
+		t.Fatal(err)
+	}
+	ng.Status.AtProvider.Status = ptr.To("UPDATING")
+	if err := w.kube.Update(ctx, ng); err != nil {
+		t.Fatal(err)
+	}
+	again, err := update(t, w, req)
+	if err != nil || again.GetPlan().GetPlanId() != planned.GetPlan().GetPlanId() {
+		t.Fatalf("plan id after a status write: %s (%v), was %s", again.GetPlan().GetPlanId(), err, planned.GetPlan().GetPlanId())
 	}
 }

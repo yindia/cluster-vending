@@ -14,6 +14,12 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
+// lookupTimeout bounds one lookup of resolve (the EKS name, the versions:
+// a few AWS calls, each bounded by awscloud.Config.CallTimeout already), so
+// that a call that never answers frees the controller's worker, and the
+// lookup is tried again (fault.Unavailable). A variable for tests.
+var lookupTimeout = awscloud.LookupTimeout
+
 // unresolved reports whether row's generation still needs its cloud
 // lookups before anything is rendered for it: the API stored it (a new
 // cluster, or an update of its Kubernetes version or add-ons) without
@@ -156,10 +162,18 @@ func (s *Reconciler) checkEKSName(ctx context.Context, row *model.Cluster, a *mo
 	if len(records) > 0 {
 		return nil
 	}
+	return s.lookupEKSName(ctx, row, a)
+}
+
+// lookupEKSName asks EKS whether the account and region have a cluster of
+// the row's name, within lookupTimeout.
+func (s *Reconciler) lookupEKSName(ctx context.Context, row *model.Cluster, a *model.CloudAccount) error {
 	access, err := s.deps.AWSAccess(ctx, a)
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
 	exists, err := s.deps.AWSClusters.EKSClusterExists(ctx, access, row.Region, row.Name)
 	switch {
 	case errors.Is(err, awscloud.ErrAccessDenied):
@@ -187,7 +201,9 @@ func (s *Reconciler) resolveVersions(ctx context.Context, a *model.CloudAccount,
 	for _, addon := range spec.GetAws().GetAddons() {
 		req.Addons = append(req.Addons, awscloud.AddonVersionRequest{Name: addon.GetName(), Version: pinned[addon.GetName()]})
 	}
-	got, err := s.deps.AWSClusters.ResolveEKSVersions(ctx, access, spec.GetRegion(), req)
+	lookupCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	got, err := s.deps.AWSClusters.ResolveEKSVersions(lookupCtx, access, spec.GetRegion(), req)
 	switch {
 	case errors.Is(err, awscloud.ErrInvalid):
 		return fault.New(fault.Invalid, err.Error())

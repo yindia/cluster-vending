@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
+	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/fault"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -187,6 +189,14 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		s.describe(ctx, row, in.Plan.Namespace, p, nil)
 		return p, nil
 	}
+	if len(records) == 0 {
+		// The first install: the chosen release is stored before any Release
+		// object exists, so no later pass (whatever happened to the status
+		// write of this one) picks again what the channel offers by then.
+		if err := s.pinRelease(ctx, row, release); err != nil {
+			return nil, err
+		}
+	}
 	plan, skipped := component.PlanPlatform(in)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
 	inventory := s.deps.Inventory(owner)
@@ -220,6 +230,40 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	s.describe(ctx, row, in.Plan.Namespace, p, objects)
 	explainTakenOver(row, p.components)
 	return p, nil
+}
+
+// pinReleaseAttempts bounds the re-reads of pinRelease when the row changes
+// under it.
+const pinReleaseAttempts = 5
+
+// pinRelease records release as the cluster's platform release in the stored
+// status, on the row as it is now (the row of the pass may be older: a call
+// that changed the spec meanwhile makes the write conflict and it is made
+// again). An error leaves the first install for the next pass.
+func (s *Reconciler) pinRelease(ctx context.Context, row *model.Cluster, release string) error {
+	var err error
+	for range pinReleaseAttempts {
+		var cur *model.Cluster
+		if cur, err = s.deps.Store.Clusters().Get(ctx, row.TenantID, row.ID); err != nil {
+			return storeError(err)
+		}
+		st := storedStatus(cur)
+		if st.GetPlatformRelease() == release {
+			return nil
+		}
+		st.PlatformRelease = release
+		raw, eerr := Encode(st)
+		if eerr != nil {
+			return eerr
+		}
+		if err = s.deps.Store.Clusters().SetStatus(ctx, cur.TenantID, cur.ID, cur.ETag, raw); err == nil {
+			return nil
+		}
+		if !errors.Is(err, repository.ErrConflict) {
+			return storeError(err)
+		}
+	}
+	return storeError(err)
 }
 
 // plannedComponent is the plan's component of that name.

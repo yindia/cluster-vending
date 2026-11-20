@@ -56,7 +56,7 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if row.Frozen.Holds() {
 		return s.observePaused(ctx, row)
 	}
-	if err := cloudstore.EnsureEKSNameReservation(ctx, s.deps.Store, row); err != nil {
+	if err := s.ensureNameReserved(ctx, row); err != nil {
 		// Ownership refusal must not proceed to either infrastructure or
 		// platform writes, but its root cause still belongs in stored status.
 		view, viewErr := s.viewWith(ctx, row, FailureCondition(storeError(err)), nil)
@@ -238,4 +238,14 @@ func (s *Reconciler) recordConverged(ctx context.Context, row *model.Cluster, st
 		return err // a conflict: an API call changed the row; the next pass sees it
 	}
 	return nil
+}
+
+// ensureNameReserved reserves the cluster's physical EKS name before any
+// write. Not for a deletion: the name is released at its end, and a
+// reservation another owner holds must not keep the cluster from being deleted.
+func (s *Reconciler) ensureNameReserved(ctx context.Context, row *model.Cluster) error {
+	if row.State == StateDeleting {
+		return nil
+	}
+	return cloudstore.EnsureEKSNameReservation(ctx, s.deps.Store, row)
 }

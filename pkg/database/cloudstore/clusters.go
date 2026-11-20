@@ -452,11 +452,19 @@ func (r clusters) insertFailed(ctx context.Context, c *model.Cluster, obj *cloud
 		winner, werr := r.winner(ctx, c, obj)
 		switch {
 		case werr == nil && winner != nil:
+			if gerr := r.stillStands(ctx, c, winner); gerr != nil {
+				return gerr
+			}
 			*c = *winner
 			return nil
 		case werr == nil:
 			// The name is another request's: its claims are not ours, except the
-			// request claim, which only this attempt (a different ID) took.
+			// request claim, which only this attempt (a different ID) took. The
+			// reservation is this attempt's own (another region or account's
+			// cluster of the same name holds the object name, not the physical one).
+			if rerr := r.dropReservation(ctx, reserved, nil); rerr != nil {
+				err = errors.Join(err, rerr)
+			}
 			if existing := r.holderOf(ctx, obj.Namespace, keys); existing == "" || existing == c.ID {
 				rctx, cancel := rollbackContext(ctx)
 				defer cancel()
@@ -525,6 +533,30 @@ func (r clusters) winner(ctx context.Context, c *model.Cluster, obj *cloudv1alph
 	return row, nil
 }
 
+// stillStands confirms that the winner of a name collision is still there and
+// is not being taken back (its network claim failing, or being deleted): an
+// idempotent success must not name a cluster that is rolled back right after.
+func (r clusters) stillStands(ctx context.Context, c *model.Cluster, winner *model.Cluster) error {
+	live, err := r.find(ctx, winner.TenantID, winner.ID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return fmt.Errorf("%w: the cluster of this request was rolled back, retry the create", repository.ErrConflict)
+	}
+	if err != nil {
+		return err
+	}
+	if !live.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("%w: the cluster of this request is being taken back, retry the create", repository.ErrConflict)
+	}
+	network, err := r.network(ctx, c)
+	if err != nil {
+		return err
+	}
+	if networkIsDeleting(network) {
+		return networkDeletingError(network)
+	}
+	return nil
+}
+
 // holderOf is the holder of the first of keys that has a claim, "" when none.
 func (r clusters) holderOf(ctx context.Context, namespace string, keys []string) string {
 	for _, key := range keys {
@@ -539,8 +571,13 @@ func networkIsDeleting(n *cloudv1alpha1.Network) bool {
 	return metaOf(n).State == networkDeleting || !n.DeletionTimestamp.IsZero()
 }
 
+// ErrNetworkDeleting is wrapped by the ErrConflict of a create in a network
+// that is being deleted; other conflicts (a write that kept changing, an
+// account being deleted) are not it.
+var ErrNetworkDeleting = errors.New("network is being deleted")
+
 func networkDeletingError(n *cloudv1alpha1.Network) error {
-	return fmt.Errorf("%w: network %s is being deleted", repository.ErrConflict, n.Name)
+	return fmt.Errorf("%w: %w: network %s", repository.ErrConflict, ErrNetworkDeleting, n.Name)
 }
 
 // claimNetwork gives the network a new etag unless it is DELETING or has a

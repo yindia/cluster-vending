@@ -302,16 +302,52 @@ func TestReservationDeleteFailureAfterClusterGoneRetainsSafety(t *testing.T) {
 	if _, err := s.Clusters().Get(t.Context(), "acme", row.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatal("Cluster removal did not precede failure", err)
 	}
-	// Missing registration alone cannot prove that cloud cleanup succeeded.
+	// The reservation was marked releasing once the inventory was confirmed
+	// empty (the cloud side is gone), before the Cluster was removed: that
+	// mark, not the missing Cluster alone, lets the name be taken again.
+	claims := &corev1.ConfigMapList{}
+	if err := w.k.List(t.Context(), claims, client.InNamespace(cloudstore.EKSNameReservationNamespace)); err != nil || len(claims.Items) != 1 ||
+		claims.Items[0].Data["releasing"] == "" {
+		t.Fatalf("the reservation of a finalized cluster is not marked releasing: %v %v", claims.Items, err)
+	}
 	if err := clusterreconcile.New(reconcile.Deps{Store: s, Kube: k}).Reconcile(t.Context(), "acme", row.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Clusters().Create(t.Context(), reservationCluster(t, w.network, row.Name)); !errors.Is(err, repository.ErrAlreadyExists) {
-		t.Fatal("missing Cluster caused unsafe automatic name reuse", err)
+	if err := w.s.Clusters().Create(t.Context(), reservationCluster(t, w.network, row.Name)); err != nil {
+		t.Fatal("a reservation marked releasing whose Cluster is gone still blocks the name", err)
+	}
+}
+
+// A Cluster object that disappears without the platform's deletion (its
+// finalizer removed by hand) leaves a reservation with a cluster UID and no
+// releasing mark: nothing proves the cloud side is gone, so it still fails
+// closed for the verified operator procedure.
+func TestReservationOfAClusterRemovedBehindThePlatformStaysClosed(t *testing.T) {
+	w := newWorld(t)
+	row := reservationCluster(t, w.network, "payments")
+	if err := w.s.Clusters().Create(t.Context(), row); err != nil {
+		t.Fatal(err)
 	}
 	claims := &corev1.ConfigMapList{}
 	if err := w.k.List(t.Context(), claims, client.InNamespace(cloudstore.EKSNameReservationNamespace)); err != nil || len(claims.Items) != 1 {
-		t.Fatal("failed cleanup did not retain reservation for verified recovery", err)
+		t.Fatal(err)
+	}
+	claim := claims.Items[0]
+	claim.Data["clusterUID"] = "uid-of-the-removed-object"
+	claim.Data["reservedAt"] = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	if err := w.k.Update(t.Context(), &claim); err != nil {
+		t.Fatal(err)
+	}
+	obj := &cloud.Cluster{}
+	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: row.Name}, obj); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.k.Delete(t.Context(), obj); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.s.Clusters().Create(t.Context(), reservationCluster(t, w.network, row.Name)); !errors.Is(err, repository.ErrAlreadyExists) {
+		t.Fatal("a reservation without the releasing mark was reclaimed", err)
 	}
 }
 

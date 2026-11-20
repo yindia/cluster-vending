@@ -52,12 +52,17 @@ delete all claims, or adopt an EKS cluster merely because its name matches. A
 foreign-finalizer completion after the store's finalization attempt may require
 this explicit verified cleanup.
 
-There is also a deliberate fail-closed gap between deleting the management Cluster
-CR and deleting its reservation. If claim deletion fails or the process crashes
-in that interval, later reconciliation sees no Cluster and does **not** release
-the claim automatically. A repeated delete may return NotFound while the name is
-still reserved. This case requires the verified operator procedure above; there
-is no durable cleanup tombstone or automatic availability guarantee for it.
+Release is two-phase, so the interval between deleting the management Cluster CR
+and deleting its reservation is covered. Once the cluster's inventory is
+finalized (every cloud resource gone), the reservation is marked `releasing`
+(a durable tombstone) before the CR is removed; then the CR goes, then the
+reservation. If the process crashes or the reservation delete fails in that
+interval, the next create of the name finds a reservation marked `releasing`
+whose Cluster is gone and takes it over at once (deleted with UID and
+resourceVersion preconditions). A reservation without the mark whose Cluster
+disappeared (for example a CR whose finalizer was removed by hand) proves
+nothing about the cloud side: it still fails closed and needs the verified
+operator procedure above.
 
 ## Account deletion versus network creation
 

@@ -302,15 +302,23 @@ const eksClaimAbandonAfter = 10 * time.Minute
 // and resourceVersion, so a claim that changed meanwhile is not removed.
 func (r clusters) reclaimAbandonedEKSClaim(ctx context.Context, claim *corev1.ConfigMap, key string, now time.Time) (bool, error) {
 	if !claim.DeletionTimestamp.IsZero() || len(claim.OwnerReferences) != 0 || claim.Labels[eksNameClaimLabel] != "true" ||
-		claim.Data["key"] != key || claim.Data["clusterUID"] != "" || claim.Data["clusterID"] == "" || claim.Data["tenant"] == "" {
+		claim.Data["key"] != key || claim.Data["clusterID"] == "" || claim.Data["tenant"] == "" {
 		return false, nil
 	}
-	reserved := claim.CreationTimestamp.Time
-	if at, err := time.Parse(time.RFC3339, claim.Data[eksClaimReservedAt]); err == nil {
-		reserved = at
-	}
-	if reserved.IsZero() || now.Sub(reserved) < eksClaimAbandonAfter {
-		return false, nil
+	// Marked releasing by a finalized deletion: reclaimable at once once its
+	// Cluster is gone. Otherwise only a claim no Cluster ever held, and only
+	// once it is clearly not a create in flight.
+	if claim.Data[eksClaimReleasing] == "" {
+		if claim.Data["clusterUID"] != "" {
+			return false, nil
+		}
+		reserved := claim.CreationTimestamp.Time
+		if at, err := time.Parse(time.RFC3339, claim.Data[eksClaimReservedAt]); err == nil {
+			reserved = at
+		}
+		if reserved.IsZero() || now.Sub(reserved) < eksClaimAbandonAfter {
+			return false, nil
+		}
 	}
 	if _, err := r.find(ctx, claim.Data["tenant"], claim.Data["clusterID"]); !errors.Is(err, repository.ErrNotFound) {
 		return false, nil // a Cluster has it, or it cannot be told: keep it
@@ -326,4 +334,31 @@ func (r clusters) reclaimAbandonedEKSClaim(ctx context.Context, claim *corev1.Co
 		return false, translate(err)
 	}
 	return true, nil
+}
+
+// eksClaimReleasing is set on a reservation once its cluster's inventory is
+// finalized (every cloud resource gone), before the Cluster object is
+// removed (RFC 3339). It is the proof that lets a later create take the
+// name when the release itself did not finish.
+const eksClaimReleasing = "releasing"
+
+// markEKSNameReleasing marks the reservations of row releasing. Called only
+// once the cluster's inventory is finalized; a reservation that changed
+// meanwhile is retried by the next pass (the conflict is returned).
+func (r clusters) markEKSNameReleasing(ctx context.Context, row *model.Cluster, now time.Time) error {
+	claims := &corev1.ConfigMapList{}
+	if err := r.c.List(ctx, claims, client.InNamespace(EKSNameReservationNamespace), client.MatchingLabels{eksNameClaimLabel: "true"}); err != nil {
+		return translate(err)
+	}
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		if claim.Data["tenant"] != row.TenantID || claim.Data["clusterID"] != row.ID || claim.Data[eksClaimReleasing] != "" {
+			continue
+		}
+		claim.Data[eksClaimReleasing] = now.UTC().Format(time.RFC3339)
+		if err := r.c.Update(ctx, claim); err != nil && !apierrors.IsNotFound(err) {
+			return translate(err)
+		}
+	}
+	return nil
 }

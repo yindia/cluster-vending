@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -666,6 +667,12 @@ func (r clusters) Delete(ctx context.Context, tenantID, id string) error {
 	}
 	row, err := r.row(obj)
 	if err != nil {
+		return err
+	}
+	// The inventory is finalized (the cloud side is gone): mark the
+	// reservation releasing before the CR goes, so a crash or a failed
+	// release after it does not keep the name reserved forever.
+	if err := r.markEKSNameReleasing(ctx, row, time.Now()); err != nil {
 		return err
 	}
 	// Dropping the last finalizer on a deleting CR removes it immediately;

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -513,5 +514,66 @@ func TestPhysicalEKSNameReleasedWhenOnlyGarbageCollectorHoldsCluster(t *testing.
 	}
 	if len(claims.Items) != 0 {
 		t.Fatalf("reservation kept after a confirmed deletion: %d claims", len(claims.Items))
+	}
+}
+
+// A process that dies between reserving a name and storing its Cluster
+// leaves a reservation no cluster ever got: no clusterUID, no Cluster with
+// its ID. Nothing reached the cloud for it (cloud resources come only from
+// a stored Cluster), so once it is clearly not an in-flight create (older
+// than the abandon age) another create takes the name over. One a Cluster
+// holds, or a young one, still fails closed.
+func TestAbandonedEKSReservationIsReclaimed(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		age       time.Duration
+		withUID   bool
+		reclaimed bool
+	}{
+		{name: "abandoned", age: 11 * time.Minute, reclaimed: true},
+		{name: "maybe still in flight", age: 2 * time.Minute},
+		{name: "held by a cluster object", age: time.Hour, withUID: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			// The crash: the Cluster is never stored and the claim stays.
+			crashed := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{
+				Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if _, ok := obj.(*cloud.Cluster); ok {
+						return fmt.Errorf("process died after the reservation")
+					}
+					return c.Create(ctx, obj, opts...)
+				},
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if _, ok := obj.(*corev1.ConfigMap); ok {
+						return fmt.Errorf("process died before it could release the reservation")
+					}
+					return c.Delete(ctx, obj, opts...)
+				}})
+			if err := cloudstore.New(crashed).Clusters().Create(t.Context(), reservationCluster(t, w.network, "infra")); err == nil {
+				t.Fatal("simulated crash ignored")
+			}
+			claims := &corev1.ConfigMapList{}
+			if err := w.k.List(t.Context(), claims, client.InNamespace(cloudstore.EKSNameReservationNamespace)); err != nil || len(claims.Items) != 1 {
+				t.Fatalf("crash left %d reservations (%v), want 1", len(claims.Items), err)
+			}
+			claim := claims.Items[0]
+			claim.Data["reservedAt"] = time.Now().Add(-tt.age).UTC().Format(time.RFC3339)
+			if tt.withUID {
+				claim.Data["clusterUID"] = "uid-of-a-cluster-object"
+			}
+			if err := w.k.Update(t.Context(), &claim); err != nil {
+				t.Fatal(err)
+			}
+
+			err := w.s.Clusters().Create(t.Context(), reservationCluster(t, w.network, "infra"))
+
+			if tt.reclaimed && err != nil {
+				t.Fatalf("an abandoned reservation still blocks the name: %v", err)
+			}
+			if !tt.reclaimed && !errors.Is(err, repository.ErrAlreadyExists) {
+				t.Fatalf("reservation reclaimed although it may be in use: %v", err)
+			}
+		})
 	}
 }

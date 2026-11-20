@@ -33,7 +33,14 @@ losing the management cluster is not evidence that the AWS cluster is absent.
 
 After a crash between reservation and Cluster persistence, retrying the exact
 create request UUID and payload recovers the reserved allocation UUID. A different
-request cannot take the name. Reservations also remain on ambiguous storage or
+request can take the name only once the reservation is clearly abandoned: it has
+no cluster UID (no Cluster object ever held it), no Cluster with its allocation
+UUID exists in its tenant, and it was taken more than 10 minutes ago
+(`reservedAt`, else the ConfigMap's creation time). Nothing reached the cloud for
+such a reservation, because cloud resources come only from a stored Cluster. It
+is deleted with its UID and resourceVersion as preconditions, and the
+legacy-owner check still runs before the name is taken. A reservation a Cluster
+ever held is never reclaimed this way. Reservations also remain on ambiguous storage or
 cleanup failures; they are not leases.
 
 For an orphaned reservation, an operator must inspect its complete scope and owner,

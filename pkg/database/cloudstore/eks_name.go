@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -119,6 +120,15 @@ func (r clusters) reserveEKSNameClaim(ctx context.Context, row *model.Cluster, n
 	existing := &corev1.ConfigMap{}
 	lookupErr := r.c.Get(ctx, client.ObjectKey{Namespace: EKSNameReservationNamespace, Name: eksClaimName(key)}, existing)
 	if lookupErr == nil {
+		reclaimed, err := r.reclaimAbandonedEKSClaim(ctx, existing, key, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if reclaimed {
+			lookupErr = apierrors.NewNotFound(corev1.Resource("configmaps"), existing.Name)
+		}
+	}
+	if lookupErr == nil {
 		if !validEKSClaim(existing, key, row.TenantID) {
 			return nil, eksNameConflict()
 		}
@@ -150,7 +160,8 @@ func (r clusters) reserveEKSNameClaim(ctx context.Context, row *model.Cluster, n
 		request = *row.CreateRequestID
 	}
 	desired := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: EKSNameReservationNamespace, Name: eksClaimName(key), Labels: map[string]string{eksNameClaimLabel: "true"}},
-		Data: map[string]string{"key": key, "tenant": row.TenantID, "clusterID": row.ID, "requestID": request, "requestHash": hash}}
+		Data: map[string]string{"key": key, "tenant": row.TenantID, "clusterID": row.ID, "requestID": request, "requestHash": hash,
+			eksClaimReservedAt: time.Now().UTC().Format(time.RFC3339)}}
 	if own != nil {
 		desired.Data["clusterUID"] = string(own.UID)
 	}
@@ -270,4 +281,49 @@ func (r clusters) releaseEKSName(ctx context.Context, row *model.Cluster) error 
 		}
 	}
 	return nil
+}
+
+// eksClaimReservedAt is when a create took the reservation (RFC 3339).
+const eksClaimReservedAt = "reservedAt"
+
+// eksClaimAbandonAfter is how old a reservation that never got a cluster
+// must be before another create may take the name over: far longer than a
+// create takes between reserving the name and storing its Cluster.
+const eksClaimAbandonAfter = 10 * time.Minute
+
+// reclaimAbandonedEKSClaim deletes claim when no cluster ever got it: a
+// create that died between reserving the name and storing its Cluster (a
+// crash or restart; a failed create releases its own). Such a claim has no
+// clusterUID, no Cluster has its ID, and it is older than
+// eksClaimAbandonAfter. Nothing reached the cloud for it: cloud resources
+// come only from a stored Cluster. A claim a Cluster holds, a young one
+// (maybe a create in flight) or one that cannot be checked is kept: the
+// caller then fails closed as before. The delete carries the claim's UID
+// and resourceVersion, so a claim that changed meanwhile is not removed.
+func (r clusters) reclaimAbandonedEKSClaim(ctx context.Context, claim *corev1.ConfigMap, key string, now time.Time) (bool, error) {
+	if !claim.DeletionTimestamp.IsZero() || len(claim.OwnerReferences) != 0 || claim.Labels[eksNameClaimLabel] != "true" ||
+		claim.Data["key"] != key || claim.Data["clusterUID"] != "" || claim.Data["clusterID"] == "" || claim.Data["tenant"] == "" {
+		return false, nil
+	}
+	reserved := claim.CreationTimestamp.Time
+	if at, err := time.Parse(time.RFC3339, claim.Data[eksClaimReservedAt]); err == nil {
+		reserved = at
+	}
+	if reserved.IsZero() || now.Sub(reserved) < eksClaimAbandonAfter {
+		return false, nil
+	}
+	if _, err := r.find(ctx, claim.Data["tenant"], claim.Data["clusterID"]); !errors.Is(err, repository.ErrNotFound) {
+		return false, nil // a Cluster has it, or it cannot be told: keep it
+	}
+	uid, version := claim.UID, claim.ResourceVersion
+	if err := r.c.Delete(ctx, claim, client.Preconditions{UID: &uid, ResourceVersion: &version}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if apierrors.IsConflict(err) {
+			return false, eksNameConflict() // it changed meanwhile: not ours to take
+		}
+		return false, translate(err)
+	}
+	return true, nil
 }

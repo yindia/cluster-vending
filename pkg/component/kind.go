@@ -113,6 +113,10 @@ func chartOf(def *cloudv1alpha1.ComponentDefinition) string {
 	return def.Spec.Install.Helm.Repository + " " + def.Spec.Install.Helm.Chart
 }
 
+// KarpenterComponent is the definition that makes the platform node group:
+// it is never held for that node group, whatever its sequence.
+const KarpenterComponent = "karpenter"
+
 // DefaultSequence is the sequence of a definition that sets none.
 const DefaultSequence = cloudv1alpha1.DefaultComponentSequence
 

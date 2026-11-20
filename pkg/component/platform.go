@@ -221,7 +221,7 @@ func planComponent(in PlatformInput, e PlatformEntry, out map[string]bool) (cros
 	vars := in.Vars(e.Name)
 	c := crossplaneaws.PlatformComponentPlan{Name: e.Name, Namespace: e.Install.Namespace, Requires: slices.Clone(e.Requires), Sequence: e.Sequence}
 	var waits []string
-	if in.HoldForPlatformNodeGroup && e.Sequence > 0 {
+	if in.HoldForPlatformNodeGroup && e.Sequence > 0 && e.Name != KarpenterComponent {
 		waits = append(waits, PlatformNodeGroupWait)
 	}
 	wait := func(err error) bool {

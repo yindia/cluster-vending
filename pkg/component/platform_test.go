@@ -325,3 +325,24 @@ func TestInstallOfReadsTheTimeout(t *testing.T) {
 		t.Errorf("unset: %s", got.Timeout)
 	}
 }
+
+// Karpenter makes the platform node group, so it is never held for it,
+// whatever its definition's sequence says: a definition left at the
+// default (a catalog that was not synced, or edited) must not deadlock
+// the cluster (Karpenter waiting for the node group, the node group for
+// Karpenter).
+func TestPlanPlatformNeverHoldsKarpenter(t *testing.T) {
+	k, lb := entry(component.KarpenterComponent), entry("lb")
+	k.Sequence, lb.Sequence = 100, 100
+	in := platformInput(k, lb)
+	in.HoldForPlatformNodeGroup = true
+
+	plan, _ := component.PlanPlatform(in)
+
+	if got, _ := named(plan, component.KarpenterComponent); got.WaitsFor != "" {
+		t.Errorf("karpenter at sequence 100 waits for %q: the cluster would deadlock", got.WaitsFor)
+	}
+	if got, _ := named(plan, "lb"); got.WaitsFor != "the platform node group to be Ready" {
+		t.Errorf("lb waits for %q, want the platform node group", got.WaitsFor)
+	}
+}

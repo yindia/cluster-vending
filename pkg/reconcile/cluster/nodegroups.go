@@ -19,6 +19,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/catalog"
+	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -34,7 +35,7 @@ const (
 	nodeGroupMessageMax   = 200
 	// karpenterComponent is the platform component whose Ready phase
 	// releases the node groups.
-	karpenterComponent = "karpenter"
+	karpenterComponent = component.KarpenterComponent
 	// PlatformNodeGroupName is the status name of the platform node group.
 	platformNodeGroup = crossplaneaws.PoolPlatform
 )

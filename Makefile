@@ -153,6 +153,17 @@ cover: ## Unit tests with a coverage report in bin/coverage.html
 	go tool cover -func=$(BIN_DIR)/coverage.out | tail -1
 	go tool cover -html=$(BIN_DIR)/coverage.out -o $(BIN_DIR)/coverage.html
 
+# The end-to-end harness (test/e2e) is behind the e2e build tag, so make check,
+# test and lint never build or run it.
+.PHONY: e2e
+e2e: ## End-to-end tests on a sandbox AWS account (CV_E2E_* variables; creates real resources, costs money, takes hours: docs/architecture.md)
+	CV_E2E=1 go test -tags e2e ./test/e2e/... -v -count=1 -timeout 4h
+
+.PHONY: e2e-lint
+e2e-lint: $(GOLANGCI_LINT) ## Vet and lint the end-to-end harness (nothing is run)
+	go vet -tags e2e ./test/e2e/...
+	$(GOLANGCI_LINT) run --build-tags e2e ./test/e2e/...
+
 ##@ Local cluster
 
 .PHONY: kind-up

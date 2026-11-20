@@ -222,9 +222,9 @@ func (d *delOrder) deleteCluster() {
 func (d *delOrder) workload() {
 	d.td.objs = []reconcile.WorkloadObject{
 		obj(reconcile.KindService, "istio-system", "gateway", false),
-		obj(reconcile.KindNodePool, "", "gpu", false), obj(reconcile.KindNodePool, "", "platform", false),
-		obj(reconcile.KindNodeClaim, "", "gpu-x1", false), obj(reconcile.KindNodeClaim, "", "platform-y1", false),
-		obj(reconcile.KindEC2NodeClass, "", "gpu", false), obj(reconcile.KindEC2NodeClass, "", "platform", false),
+		obj(reconcile.KindNodePool, "", "gpu", false), obj(reconcile.KindNodePool, "", "platform", false), obj(reconcile.KindNodePool, "", crossplaneaws.PoolPlatform, false),
+		obj(reconcile.KindNodeClaim, "", "gpu-x1", false), obj(reconcile.KindNodeClaim, "", "platform-y1", false), obj(reconcile.KindNodeClaim, "", crossplaneaws.PoolPlatform+"-z1", false),
+		obj(reconcile.KindEC2NodeClass, "", "gpu", false), obj(reconcile.KindEC2NodeClass, "", "platform", false), obj(reconcile.KindEC2NodeClass, "", crossplaneaws.PoolPlatform, false),
 	}
 	ranks := map[string]int{reconcile.KindService: rankLoadBalancer, reconcile.KindNodeClaim: rankNodeClaim, reconcile.KindEC2NodeClass: rankNodeClass}
 	for _, o := range d.td.objs {

@@ -1609,6 +1609,44 @@ func (c *MockClustersSetStatusCall) DoAndReturn(f func(context.Context, string, 
 	return c
 }
 
+// SetSummary mocks base method.
+func (m *MockClusters) SetSummary(ctx context.Context, tenantID, id string, summary model.JSON) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetSummary", ctx, tenantID, id, summary)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetSummary indicates an expected call of SetSummary.
+func (mr *MockClustersMockRecorder) SetSummary(ctx, tenantID, id, summary any) *MockClustersSetSummaryCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSummary", reflect.TypeOf((*MockClusters)(nil).SetSummary), ctx, tenantID, id, summary)
+	return &MockClustersSetSummaryCall{Call: call}
+}
+
+// MockClustersSetSummaryCall wrap *gomock.Call
+type MockClustersSetSummaryCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClustersSetSummaryCall) Return(arg0 error) *MockClustersSetSummaryCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClustersSetSummaryCall) Do(f func(context.Context, string, string, model.JSON) error) *MockClustersSetSummaryCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClustersSetSummaryCall) DoAndReturn(f func(context.Context, string, string, model.JSON) error) *MockClustersSetSummaryCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetUsageHistory mocks base method.
 func (m *MockClusters) SetUsageHistory(ctx context.Context, tenantID, id string, history []byte) error {
 	m.ctrl.T.Helper()

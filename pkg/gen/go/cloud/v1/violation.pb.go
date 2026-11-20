@@ -23,6 +23,111 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ViolationSortBy is how ListClusterViolations orders the violations.
+// Unspecified: NAMESPACE (of the resource). Ties are broken by id.
+type ViolationSortBy int32
+
+const (
+	ViolationSortBy_VIOLATION_SORT_BY_UNSPECIFIED ViolationSortBy = 0
+	ViolationSortBy_VIOLATION_SORT_BY_NAMESPACE   ViolationSortBy = 1
+	ViolationSortBy_VIOLATION_SORT_BY_ENGINE      ViolationSortBy = 2
+	ViolationSortBy_VIOLATION_SORT_BY_SEVERITY    ViolationSortBy = 3
+)
+
+// Enum value maps for ViolationSortBy.
+var (
+	ViolationSortBy_name = map[int32]string{
+		0: "VIOLATION_SORT_BY_UNSPECIFIED",
+		1: "VIOLATION_SORT_BY_NAMESPACE",
+		2: "VIOLATION_SORT_BY_ENGINE",
+		3: "VIOLATION_SORT_BY_SEVERITY",
+	}
+	ViolationSortBy_value = map[string]int32{
+		"VIOLATION_SORT_BY_UNSPECIFIED": 0,
+		"VIOLATION_SORT_BY_NAMESPACE":   1,
+		"VIOLATION_SORT_BY_ENGINE":      2,
+		"VIOLATION_SORT_BY_SEVERITY":    3,
+	}
+)
+
+func (x ViolationSortBy) Enum() *ViolationSortBy {
+	p := new(ViolationSortBy)
+	*p = x
+	return p
+}
+
+func (x ViolationSortBy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ViolationSortBy) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_violation_proto_enumTypes[0].Descriptor()
+}
+
+func (ViolationSortBy) Type() protoreflect.EnumType {
+	return &file_cloud_v1_violation_proto_enumTypes[0]
+}
+
+func (x ViolationSortBy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ViolationSortBy.Descriptor instead.
+func (ViolationSortBy) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_violation_proto_rawDescGZIP(), []int{0}
+}
+
+// ViolationEventSortBy is how ListClusterViolationEvents orders the events.
+// Unspecified: TIME, newest first. Ties are broken by id.
+type ViolationEventSortBy int32
+
+const (
+	ViolationEventSortBy_VIOLATION_EVENT_SORT_BY_UNSPECIFIED ViolationEventSortBy = 0
+	ViolationEventSortBy_VIOLATION_EVENT_SORT_BY_TIME        ViolationEventSortBy = 1
+	ViolationEventSortBy_VIOLATION_EVENT_SORT_BY_COUNT       ViolationEventSortBy = 2
+)
+
+// Enum value maps for ViolationEventSortBy.
+var (
+	ViolationEventSortBy_name = map[int32]string{
+		0: "VIOLATION_EVENT_SORT_BY_UNSPECIFIED",
+		1: "VIOLATION_EVENT_SORT_BY_TIME",
+		2: "VIOLATION_EVENT_SORT_BY_COUNT",
+	}
+	ViolationEventSortBy_value = map[string]int32{
+		"VIOLATION_EVENT_SORT_BY_UNSPECIFIED": 0,
+		"VIOLATION_EVENT_SORT_BY_TIME":        1,
+		"VIOLATION_EVENT_SORT_BY_COUNT":       2,
+	}
+)
+
+func (x ViolationEventSortBy) Enum() *ViolationEventSortBy {
+	p := new(ViolationEventSortBy)
+	*p = x
+	return p
+}
+
+func (x ViolationEventSortBy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ViolationEventSortBy) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_violation_proto_enumTypes[1].Descriptor()
+}
+
+func (ViolationEventSortBy) Type() protoreflect.EnumType {
+	return &file_cloud_v1_violation_proto_enumTypes[1]
+}
+
+func (x ViolationEventSortBy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ViolationEventSortBy.Descriptor instead.
+func (ViolationEventSortBy) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_violation_proto_rawDescGZIP(), []int{1}
+}
+
 // A reference as reported by a policy engine; missing fields remain unknown.
 type PolicyObjectReference struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -413,7 +518,12 @@ type ListClusterViolationsRequest struct {
 	// Defaults to 50; capped at 200.
 	PageSize int32 `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Bound to the snapshot, tenant, cluster and filters; restart after collection.
-	PageToken     string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Unspecified: NAMESPACE. Served by the live reader; a list that is not
+	// live yet answers UNIMPLEMENTED for any other value.
+	SortBy ViolationSortBy `protobuf:"varint,7,opt,name=sort_by,json=sortBy,proto3,enum=cloud.v1.ViolationSortBy" json:"sort_by,omitempty"`
+	// Unspecified: ascending.
+	SortOrder     SortOrder `protobuf:"varint,8,opt,name=sort_order,json=sortOrder,proto3,enum=cloud.v1.SortOrder" json:"sort_order,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -490,11 +600,30 @@ func (x *ListClusterViolationsRequest) GetPageToken() string {
 	return ""
 }
 
+func (x *ListClusterViolationsRequest) GetSortBy() ViolationSortBy {
+	if x != nil {
+		return x.SortBy
+	}
+	return ViolationSortBy_VIOLATION_SORT_BY_UNSPECIFIED
+}
+
+func (x *ListClusterViolationsRequest) GetSortOrder() SortOrder {
+	if x != nil {
+		return x.SortOrder
+	}
+	return SortOrder_SORT_ORDER_UNSPECIFIED
+}
+
 type ListClusterViolationsResponse struct {
 	state         protoimpl.MessageState        `protogen:"open.v1"`
 	Violations    []*ClusterViolation           `protobuf:"bytes,1,rep,name=violations,proto3" json:"violations,omitempty"`
 	NextPageToken string                        `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	Summary       *ClusterPolicySnapshotSummary `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
+	// When a live read started. Unset: not a live read.
+	LiveAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=live_at,json=liveAt,proto3" json:"live_at,omitempty"`
+	// Every row was read within the caps (live reads).
+	Complete      bool     `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
+	Notices       []string `protobuf:"bytes,6,rep,name=notices,proto3" json:"notices,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -550,14 +679,40 @@ func (x *ListClusterViolationsResponse) GetSummary() *ClusterPolicySnapshotSumma
 	return nil
 }
 
+func (x *ListClusterViolationsResponse) GetLiveAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LiveAt
+	}
+	return nil
+}
+
+func (x *ListClusterViolationsResponse) GetComplete() bool {
+	if x != nil {
+		return x.Complete
+	}
+	return false
+}
+
+func (x *ListClusterViolationsResponse) GetNotices() []string {
+	if x != nil {
+		return x.Notices
+	}
+	return nil
+}
+
 type ListClusterViolationEventsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	ClusterId     string                 `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	Namespace     string                 `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	Engine        string                 `protobuf:"bytes,4,opt,name=engine,proto3" json:"engine,omitempty"`
-	PageSize      int32                  `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string                 `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	TenantId  string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	ClusterId string                 `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	Namespace string                 `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Engine    string                 `protobuf:"bytes,4,opt,name=engine,proto3" json:"engine,omitempty"`
+	PageSize  int32                  `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageToken string                 `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Unspecified: TIME. Served by the live reader; a list that is not live
+	// yet answers UNIMPLEMENTED for any other value.
+	SortBy ViolationEventSortBy `protobuf:"varint,7,opt,name=sort_by,json=sortBy,proto3,enum=cloud.v1.ViolationEventSortBy" json:"sort_by,omitempty"`
+	// Unspecified: the key's default (TIME: descending; COUNT: descending).
+	SortOrder     SortOrder `protobuf:"varint,8,opt,name=sort_order,json=sortOrder,proto3,enum=cloud.v1.SortOrder" json:"sort_order,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -634,6 +789,20 @@ func (x *ListClusterViolationEventsRequest) GetPageToken() string {
 	return ""
 }
 
+func (x *ListClusterViolationEventsRequest) GetSortBy() ViolationEventSortBy {
+	if x != nil {
+		return x.SortBy
+	}
+	return ViolationEventSortBy_VIOLATION_EVENT_SORT_BY_UNSPECIFIED
+}
+
+func (x *ListClusterViolationEventsRequest) GetSortOrder() SortOrder {
+	if x != nil {
+		return x.SortOrder
+	}
+	return SortOrder_SORT_ORDER_UNSPECIFIED
+}
+
 type ListClusterViolationEventsResponse struct {
 	state         protoimpl.MessageState        `protogen:"open.v1"`
 	Events        []*ClusterViolationEvent      `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
@@ -641,8 +810,13 @@ type ListClusterViolationEventsResponse struct {
 	Summary       *ClusterPolicySnapshotSummary `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
 	// Kubernetes events expire, emission may be disabled; never an audit history.
 	RetentionNotice string `protobuf:"bytes,4,opt,name=retention_notice,json=retentionNotice,proto3" json:"retention_notice,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// When a live read started. Unset: not a live read.
+	LiveAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=live_at,json=liveAt,proto3" json:"live_at,omitempty"`
+	// Every row was read within the caps (live reads).
+	Complete      bool     `protobuf:"varint,6,opt,name=complete,proto3" json:"complete,omitempty"`
+	Notices       []string `protobuf:"bytes,7,rep,name=notices,proto3" json:"notices,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListClusterViolationEventsResponse) Reset() {
@@ -701,6 +875,27 @@ func (x *ListClusterViolationEventsResponse) GetRetentionNotice() string {
 		return x.RetentionNotice
 	}
 	return ""
+}
+
+func (x *ListClusterViolationEventsResponse) GetLiveAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LiveAt
+	}
+	return nil
+}
+
+func (x *ListClusterViolationEventsResponse) GetComplete() bool {
+	if x != nil {
+		return x.Complete
+	}
+	return false
+}
+
+func (x *ListClusterViolationEventsResponse) GetNotices() []string {
+	if x != nil {
+		return x.Notices
+	}
+	return nil
 }
 
 // Internal bounded snapshot persisted only in the management Cluster status.
@@ -768,7 +963,7 @@ var File_cloud_v1_violation_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_violation_proto_rawDesc = "" +
 	"\n" +
-	"\x18cloud/v1/violation.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"~\n" +
+	"\x18cloud/v1/violation.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x13cloud/v1/sort.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"~\n" +
 	"\x15PolicyObjectReference\x12\x1f\n" +
 	"\vapi_version\x18\x01 \x01(\tR\n" +
 	"apiVersion\x12\x12\n" +
@@ -807,7 +1002,7 @@ const file_cloud_v1_violation_proto_rawDesc = "" +
 	"\venforcement\x18\b \x01(\tR\venforcement\x12D\n" +
 	"\x10last_observed_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0elastObservedAt\x12\x14\n" +
 	"\x05count\x18\n" +
-	" \x01(\x05R\x05count\"\xad\x02\n" +
+	" \x01(\x05R\x05count\"\xa9\x03\n" +
 	"\x1cListClusterViolationsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -816,13 +1011,19 @@ const file_cloud_v1_violation_proto_rawDesc = "" +
 	"\x06engine\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x06engine\x12$\n" +
 	"\tpage_size\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x12'\n" +
 	"\n" +
-	"page_token\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\tpageToken\"\xc5\x01\n" +
+	"page_token\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\tpageToken\x12<\n" +
+	"\asort_by\x18\a \x01(\x0e2\x19.cloud.v1.ViolationSortByB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06sortBy\x12<\n" +
+	"\n" +
+	"sort_order\x18\b \x01(\x0e2\x13.cloud.v1.SortOrderB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsortOrder\"\xb0\x02\n" +
 	"\x1dListClusterViolationsResponse\x12:\n" +
 	"\n" +
 	"violations\x18\x01 \x03(\v2\x1a.cloud.v1.ClusterViolationR\n" +
 	"violations\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12@\n" +
-	"\asummary\x18\x03 \x01(\v2&.cloud.v1.ClusterPolicySnapshotSummaryR\asummary\"\xb2\x02\n" +
+	"\asummary\x18\x03 \x01(\v2&.cloud.v1.ClusterPolicySnapshotSummaryR\asummary\x123\n" +
+	"\alive_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x06liveAt\x12\x1a\n" +
+	"\bcomplete\x18\x05 \x01(\bR\bcomplete\x12\x18\n" +
+	"\anotices\x18\x06 \x03(\tR\anotices\"\xb3\x03\n" +
 	"!ListClusterViolationEventsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -831,18 +1032,33 @@ const file_cloud_v1_violation_proto_rawDesc = "" +
 	"\x06engine\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x06engine\x12$\n" +
 	"\tpage_size\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x12'\n" +
 	"\n" +
-	"page_token\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\tpageToken\"\xf2\x01\n" +
+	"page_token\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\tpageToken\x12A\n" +
+	"\asort_by\x18\a \x01(\x0e2\x1e.cloud.v1.ViolationEventSortByB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06sortBy\x12<\n" +
+	"\n" +
+	"sort_order\x18\b \x01(\x0e2\x13.cloud.v1.SortOrderB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsortOrder\"\xdd\x02\n" +
 	"\"ListClusterViolationEventsResponse\x127\n" +
 	"\x06events\x18\x01 \x03(\v2\x1f.cloud.v1.ClusterViolationEventR\x06events\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12@\n" +
 	"\asummary\x18\x03 \x01(\v2&.cloud.v1.ClusterPolicySnapshotSummaryR\asummary\x12)\n" +
-	"\x10retention_notice\x18\x04 \x01(\tR\x0fretentionNotice\"\xce\x01\n" +
+	"\x10retention_notice\x18\x04 \x01(\tR\x0fretentionNotice\x123\n" +
+	"\alive_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x06liveAt\x12\x1a\n" +
+	"\bcomplete\x18\x06 \x01(\bR\bcomplete\x12\x18\n" +
+	"\anotices\x18\a \x03(\tR\anotices\"\xce\x01\n" +
 	"\x15ClusterPolicySnapshot\x12@\n" +
 	"\asummary\x18\x01 \x01(\v2&.cloud.v1.ClusterPolicySnapshotSummaryR\asummary\x12:\n" +
 	"\n" +
 	"violations\x18\x02 \x03(\v2\x1a.cloud.v1.ClusterViolationR\n" +
 	"violations\x127\n" +
-	"\x06events\x18\x03 \x03(\v2\x1f.cloud.v1.ClusterViolationEventR\x06eventsB\x9e\x01\n" +
+	"\x06events\x18\x03 \x03(\v2\x1f.cloud.v1.ClusterViolationEventR\x06events*\x93\x01\n" +
+	"\x0fViolationSortBy\x12!\n" +
+	"\x1dVIOLATION_SORT_BY_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bVIOLATION_SORT_BY_NAMESPACE\x10\x01\x12\x1c\n" +
+	"\x18VIOLATION_SORT_BY_ENGINE\x10\x02\x12\x1e\n" +
+	"\x1aVIOLATION_SORT_BY_SEVERITY\x10\x03*\x84\x01\n" +
+	"\x14ViolationEventSortBy\x12'\n" +
+	"#VIOLATION_EVENT_SORT_BY_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cVIOLATION_EVENT_SORT_BY_TIME\x10\x01\x12!\n" +
+	"\x1dVIOLATION_EVENT_SORT_BY_COUNT\x10\x02B\x9e\x01\n" +
 	"\fcom.cloud.v1B\x0eViolationProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -857,39 +1073,49 @@ func file_cloud_v1_violation_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_violation_proto_rawDescData
 }
 
+var file_cloud_v1_violation_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_cloud_v1_violation_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_cloud_v1_violation_proto_goTypes = []any{
-	(*PolicyObjectReference)(nil),              // 0: cloud.v1.PolicyObjectReference
-	(*ClusterPolicySnapshotSummary)(nil),       // 1: cloud.v1.ClusterPolicySnapshotSummary
-	(*ClusterViolation)(nil),                   // 2: cloud.v1.ClusterViolation
-	(*ClusterViolationEvent)(nil),              // 3: cloud.v1.ClusterViolationEvent
-	(*ListClusterViolationsRequest)(nil),       // 4: cloud.v1.ListClusterViolationsRequest
-	(*ListClusterViolationsResponse)(nil),      // 5: cloud.v1.ListClusterViolationsResponse
-	(*ListClusterViolationEventsRequest)(nil),  // 6: cloud.v1.ListClusterViolationEventsRequest
-	(*ListClusterViolationEventsResponse)(nil), // 7: cloud.v1.ListClusterViolationEventsResponse
-	(*ClusterPolicySnapshot)(nil),              // 8: cloud.v1.ClusterPolicySnapshot
-	(*timestamppb.Timestamp)(nil),              // 9: google.protobuf.Timestamp
+	(ViolationSortBy)(0),                       // 0: cloud.v1.ViolationSortBy
+	(ViolationEventSortBy)(0),                  // 1: cloud.v1.ViolationEventSortBy
+	(*PolicyObjectReference)(nil),              // 2: cloud.v1.PolicyObjectReference
+	(*ClusterPolicySnapshotSummary)(nil),       // 3: cloud.v1.ClusterPolicySnapshotSummary
+	(*ClusterViolation)(nil),                   // 4: cloud.v1.ClusterViolation
+	(*ClusterViolationEvent)(nil),              // 5: cloud.v1.ClusterViolationEvent
+	(*ListClusterViolationsRequest)(nil),       // 6: cloud.v1.ListClusterViolationsRequest
+	(*ListClusterViolationsResponse)(nil),      // 7: cloud.v1.ListClusterViolationsResponse
+	(*ListClusterViolationEventsRequest)(nil),  // 8: cloud.v1.ListClusterViolationEventsRequest
+	(*ListClusterViolationEventsResponse)(nil), // 9: cloud.v1.ListClusterViolationEventsResponse
+	(*ClusterPolicySnapshot)(nil),              // 10: cloud.v1.ClusterPolicySnapshot
+	(*timestamppb.Timestamp)(nil),              // 11: google.protobuf.Timestamp
+	(SortOrder)(0),                             // 12: cloud.v1.SortOrder
 }
 var file_cloud_v1_violation_proto_depIdxs = []int32{
-	9,  // 0: cloud.v1.ClusterPolicySnapshotSummary.collected_at:type_name -> google.protobuf.Timestamp
-	0,  // 1: cloud.v1.ClusterViolation.policy:type_name -> cloud.v1.PolicyObjectReference
-	0,  // 2: cloud.v1.ClusterViolation.resource:type_name -> cloud.v1.PolicyObjectReference
-	9,  // 3: cloud.v1.ClusterViolation.observed_at:type_name -> google.protobuf.Timestamp
-	0,  // 4: cloud.v1.ClusterViolationEvent.policy:type_name -> cloud.v1.PolicyObjectReference
-	0,  // 5: cloud.v1.ClusterViolationEvent.resource:type_name -> cloud.v1.PolicyObjectReference
-	9,  // 6: cloud.v1.ClusterViolationEvent.last_observed_at:type_name -> google.protobuf.Timestamp
-	2,  // 7: cloud.v1.ListClusterViolationsResponse.violations:type_name -> cloud.v1.ClusterViolation
-	1,  // 8: cloud.v1.ListClusterViolationsResponse.summary:type_name -> cloud.v1.ClusterPolicySnapshotSummary
-	3,  // 9: cloud.v1.ListClusterViolationEventsResponse.events:type_name -> cloud.v1.ClusterViolationEvent
-	1,  // 10: cloud.v1.ListClusterViolationEventsResponse.summary:type_name -> cloud.v1.ClusterPolicySnapshotSummary
-	1,  // 11: cloud.v1.ClusterPolicySnapshot.summary:type_name -> cloud.v1.ClusterPolicySnapshotSummary
-	2,  // 12: cloud.v1.ClusterPolicySnapshot.violations:type_name -> cloud.v1.ClusterViolation
-	3,  // 13: cloud.v1.ClusterPolicySnapshot.events:type_name -> cloud.v1.ClusterViolationEvent
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	11, // 0: cloud.v1.ClusterPolicySnapshotSummary.collected_at:type_name -> google.protobuf.Timestamp
+	2,  // 1: cloud.v1.ClusterViolation.policy:type_name -> cloud.v1.PolicyObjectReference
+	2,  // 2: cloud.v1.ClusterViolation.resource:type_name -> cloud.v1.PolicyObjectReference
+	11, // 3: cloud.v1.ClusterViolation.observed_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: cloud.v1.ClusterViolationEvent.policy:type_name -> cloud.v1.PolicyObjectReference
+	2,  // 5: cloud.v1.ClusterViolationEvent.resource:type_name -> cloud.v1.PolicyObjectReference
+	11, // 6: cloud.v1.ClusterViolationEvent.last_observed_at:type_name -> google.protobuf.Timestamp
+	0,  // 7: cloud.v1.ListClusterViolationsRequest.sort_by:type_name -> cloud.v1.ViolationSortBy
+	12, // 8: cloud.v1.ListClusterViolationsRequest.sort_order:type_name -> cloud.v1.SortOrder
+	4,  // 9: cloud.v1.ListClusterViolationsResponse.violations:type_name -> cloud.v1.ClusterViolation
+	3,  // 10: cloud.v1.ListClusterViolationsResponse.summary:type_name -> cloud.v1.ClusterPolicySnapshotSummary
+	11, // 11: cloud.v1.ListClusterViolationsResponse.live_at:type_name -> google.protobuf.Timestamp
+	1,  // 12: cloud.v1.ListClusterViolationEventsRequest.sort_by:type_name -> cloud.v1.ViolationEventSortBy
+	12, // 13: cloud.v1.ListClusterViolationEventsRequest.sort_order:type_name -> cloud.v1.SortOrder
+	5,  // 14: cloud.v1.ListClusterViolationEventsResponse.events:type_name -> cloud.v1.ClusterViolationEvent
+	3,  // 15: cloud.v1.ListClusterViolationEventsResponse.summary:type_name -> cloud.v1.ClusterPolicySnapshotSummary
+	11, // 16: cloud.v1.ListClusterViolationEventsResponse.live_at:type_name -> google.protobuf.Timestamp
+	3,  // 17: cloud.v1.ClusterPolicySnapshot.summary:type_name -> cloud.v1.ClusterPolicySnapshotSummary
+	4,  // 18: cloud.v1.ClusterPolicySnapshot.violations:type_name -> cloud.v1.ClusterViolation
+	5,  // 19: cloud.v1.ClusterPolicySnapshot.events:type_name -> cloud.v1.ClusterViolationEvent
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_violation_proto_init() }
@@ -897,18 +1123,20 @@ func file_cloud_v1_violation_proto_init() {
 	if File_cloud_v1_violation_proto != nil {
 		return
 	}
+	file_cloud_v1_sort_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_violation_proto_rawDesc), len(file_cloud_v1_violation_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      2,
 			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_cloud_v1_violation_proto_goTypes,
 		DependencyIndexes: file_cloud_v1_violation_proto_depIdxs,
+		EnumInfos:         file_cloud_v1_violation_proto_enumTypes,
 		MessageInfos:      file_cloud_v1_violation_proto_msgTypes,
 	}.Build()
 	File_cloud_v1_violation_proto = out.File

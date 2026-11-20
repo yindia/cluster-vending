@@ -13,12 +13,12 @@ import (
 // server and the controller:
 //
 //	nodeGroups:
-//	  system:                     # the default EKS managed node group
-//	    instanceType: t3.medium   # new clusters only; existing ones keep theirs
-//	    minSize: 2                # at least 2; the size at creation
-//	    maxSize: 6                # at least minSize; cluster-autoscaler grows to it
+//	  system:                     # the bootstrap group: the default EKS managed node group
+//	    instanceTypes: [t3.medium] # new clusters only; existing ones keep theirs
+//	    minSize: 2                # at least 2; the fixed size (maxSize is deprecated)
 //	    capacityType: ON_DEMAND
 //	    diskSizeGiB: 0            # 0: EKS's default
+//	  platform: {...}             # the platform pool (node_groups_platform.go)
 //	  karpenter:                  # what users may create as their own groups
 //	    instanceFamilies: [t3]
 //	    instanceTypes: []
@@ -33,6 +33,8 @@ import (
 // Flag names and environment variables of the node group layout. The two
 // allowlist flags are older than the section and stay.
 const (
+	// FlagSystemNodeGroupInstanceType is the old single type; it stays
+	// accepted (with a warning) as a list of one.
 	FlagSystemNodeGroupInstanceType = "system-node-group-instance-type"
 	EnvSystemNodeGroupInstanceType  = "CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE"
 	FlagSystemNodeGroupMinSize      = "system-node-group-min-size"
@@ -69,6 +71,8 @@ const (
 	// maximum is how far cluster-autoscaler may grow the group (or the
 	// minimum, when that is higher).
 	DefaultSystemNodeGroupMinSize = 2
+	// DefaultSystemNodeGroupMaxSize is the old cluster-autoscaler ceiling,
+	// kept until cluster-autoscaler leaves the default set (PROP-03 phase 4).
 	DefaultSystemNodeGroupMaxSize = 6
 	defaultCapacityType           = "ON_DEMAND"
 	defaultArchitecture           = "AMD64"
@@ -89,14 +93,16 @@ var (
 // nodeGroupSettings are the layout's settings, for the server and the
 // controller alike.
 var nodeGroupSettings = []Setting{
-	{Flag: FlagSystemNodeGroupInstanceType, Env: EnvSystemNodeGroupInstanceType, Default: DefaultSystemNodeGroupInstanceType,
-		Usage: "instance type of the default (system) managed node group of NEW clusters (nodeGroups.system.instanceType); existing clusters keep theirs: EKS cannot change it in place"},
+	{Flag: FlagSystemInstanceTypes, Env: EnvSystemInstanceTypes,
+		Usage: "comma-separated instance types of the bootstrap (system) managed node group of NEW clusters, one architecture and one vCPU/memory class (nodeGroups.system.instanceTypes); default t3.medium; existing clusters keep theirs: EKS cannot change it in place"},
+	{Flag: FlagSystemNodeGroupInstanceType, Env: EnvSystemNodeGroupInstanceType,
+		Usage: "deprecated: one instance type, the old form of --" + FlagSystemInstanceTypes + " (nodeGroups.system.instanceType)"},
 	{Flag: FlagSystemNodeGroupSize, Env: EnvSystemNodeGroupSize,
 		Usage: "deprecated alias of --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.size)"},
 	{Flag: FlagSystemNodeGroupMinSize, Env: EnvSystemNodeGroupMinSize,
 		Usage: "minimum size of the system managed node group, and its size at creation (nodeGroups.system.minSize); default 2, at least 2: Karpenter runs two replicas with anti-affinity. A change applies to existing clusters in place, without touching the node count"},
 	{Flag: FlagSystemNodeGroupMaxSize, Env: EnvSystemNodeGroupMaxSize,
-		Usage: "maximum size of the system managed node group, which cluster-autoscaler grows it to when pods need room (nodeGroups.system.maxSize); default 6, at least the minimum. A change applies to existing clusters in place"},
+		Usage: "deprecated: maximum size of the system managed node group, which cluster-autoscaler grows it to until it leaves the default set (nodeGroups.system.maxSize); default 6, at least the minimum"},
 	{Flag: FlagSystemNodeGroupCapacityType, Env: EnvSystemNodeGroupCapacityType, Default: defaultCapacityType,
 		Usage: "capacity type of the system node group of NEW clusters, ON_DEMAND or SPOT (nodeGroups.system.capacityType)"},
 	{Flag: FlagSystemNodeGroupDiskSizeGiB, Env: EnvSystemNodeGroupDiskSizeGiB, Default: "0",
@@ -113,25 +119,30 @@ var nodeGroupSettings = []Setting{
 
 // withNodeGroupSettings is settings followed by the node group layout's.
 func withNodeGroupSettings(settings []Setting) []Setting {
-	return slices.Concat(settings, nodeGroupSettings)
+	return slices.Concat(settings, nodeGroupSettings, platformSettings)
 }
 
 // NodeGroups is the validated node group layout. Server and controller load
 // the same struct from the same section, so their views cannot drift.
 type NodeGroups struct {
 	System    SystemNodeGroup
+	Platform  PlatformNodePool
 	Karpenter KarpenterNodeGroups
+	// Warnings are keys that still work but are on their way out; the
+	// commands log them at start.
+	Warnings []string
 }
 
 // SystemNodeGroup is the default EKS managed node group, which runs
 // Karpenter, CoreDNS and every platform and tenant component.
 type SystemNodeGroup struct {
-	// InstanceType, CapacityType and DiskSizeGiB apply to new clusters
-	// only. MinSize and MaxSize apply to every cluster, in place; the
-	// node count between them is cluster-autoscaler's (MinSize is the
-	// count at creation only).
-	InstanceType string
-	MinSize      int
+	// InstanceTypes, CapacityType and DiskSizeGiB apply to new clusters
+	// only. MinSize applies to every cluster, in place.
+	InstanceTypes []string
+	MinSize       int
+	// MaxSize is the ceiling cluster-autoscaler still grows the group to,
+	// until it leaves the default set (PROP-03 phase 4); the key is
+	// deprecated and warned about.
 	MaxSize      int
 	CapacityType string
 	DiskSizeGiB  int
@@ -155,7 +166,8 @@ type NodeGroupDefaults struct {
 // DefaultNodeGroups is the layout when nothing is configured.
 func DefaultNodeGroups() NodeGroups {
 	return NodeGroups{
-		System: SystemNodeGroup{InstanceType: DefaultSystemNodeGroupInstanceType, MinSize: DefaultSystemNodeGroupMinSize, MaxSize: DefaultSystemNodeGroupMaxSize, CapacityType: defaultCapacityType},
+		System:   SystemNodeGroup{InstanceTypes: []string{DefaultSystemNodeGroupInstanceType}, MinSize: DefaultSystemNodeGroupMinSize, MaxSize: DefaultSystemNodeGroupMaxSize, CapacityType: defaultCapacityType},
+		Platform: defaultPlatformNodePool(),
 		Karpenter: KarpenterNodeGroups{InstanceFamilies: []string{defaultInstanceFamily},
 			Defaults: NodeGroupDefaults{Architectures: []string{defaultArchitecture}, CapacityTypes: []string{defaultCapacityType}}},
 	}
@@ -174,10 +186,12 @@ func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
 			errs = append(errs, err)
 		}
 	}
-	out.System.InstanceType = strings.TrimSpace(v[FlagSystemNodeGroupInstanceType])
-	if !instanceTypePattern.MatchString(out.System.InstanceType) {
-		errs = append(errs, fmt.Errorf("%s: %q is not an instance type like t3.large", setting(FlagSystemNodeGroupInstanceType), v[FlagSystemNodeGroupInstanceType]))
+	var warnings []string
+	out.System.InstanceTypes, errs, warnings = systemInstanceTypes(v, errs)
+	if v[FlagSystemNodeGroupMaxSize] != "" {
+		warnings = append(warnings, "nodeGroups.system.maxSize is deprecated: the bootstrap group has a fixed size (minSize). It still sets the cluster-autoscaler ceiling until cluster-autoscaler leaves the default set; remove it")
 	}
+	out.Warnings = warnings
 	out.System.MinSize, out.System.MaxSize, errs = systemSizes(v, errs)
 	var err error
 	out.System.CapacityType, err = oneOf(setting(FlagSystemNodeGroupCapacityType), v[FlagSystemNodeGroupCapacityType], capacityTypes)
@@ -195,7 +209,38 @@ func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
 	check(err)
 	out.Karpenter.Defaults.CapacityTypes, err = enumList(setting(FlagNodeGroupDefaultCapacityTypes), v[FlagNodeGroupDefaultCapacityTypes], capacityTypes)
 	check(err)
+	var platformErrs []error
+	out.Platform, platformErrs = platformFrom(v)
+	errs = append(errs, platformErrs...)
 	return out, errs
+}
+
+// systemInstanceTypes reads the bootstrap group's types: a non-empty list
+// of one architecture. The old single-type key is a list of one, with a
+// warning, and may not be set together with the list.
+func systemInstanceTypes(v map[string]string, errs []error) ([]string, []error, []string) {
+	var warnings []string
+	raw, legacy := strings.TrimSpace(v[FlagSystemInstanceTypes]), strings.TrimSpace(v[FlagSystemNodeGroupInstanceType])
+	switch {
+	case raw != "" && legacy != "":
+		errs = append(errs, fmt.Errorf("%s and %s are both set: instanceType is the old name of instanceTypes, set one",
+			nodeSetting(FlagSystemNodeGroupInstanceType), nodeSetting(FlagSystemInstanceTypes)))
+	case legacy != "":
+		raw = legacy
+		warnings = append(warnings, "nodeGroups.system.instanceType is deprecated: use instanceTypes, a list")
+	case v[FlagSystemInstanceTypes] == "":
+		raw = DefaultSystemNodeGroupInstanceType
+	}
+	types, err := parseList(nodeSetting(FlagSystemInstanceTypes), raw, instanceTypePattern, "an instance type like t3.large")
+	switch {
+	case err != nil:
+		errs = append(errs, err)
+	case len(types) == 0:
+		errs = append(errs, fmt.Errorf("%s must name at least one instance type", nodeSetting(FlagSystemInstanceTypes)))
+	case mixed(types):
+		errs = append(errs, fmt.Errorf("%s mixes architectures (%s): every type of the bootstrap group must have one", nodeSetting(FlagSystemInstanceTypes), strings.Join(types, ", ")))
+	}
+	return types, errs, warnings
 }
 
 // systemSizes reads the system group's minimum and maximum. size is the
@@ -293,7 +338,7 @@ func parseList(s Setting, raw string, pattern *regexp.Regexp, what string) ([]st
 // start to make a forgotten one visible.
 func LeftoverNodeGroupVariables(env LookupFunc) []string {
 	var set []string
-	for _, s := range nodeGroupSettings {
+	for _, s := range slices.Concat(nodeGroupSettings, platformSettings) {
 		if _, ok := get(env, s.Env); ok {
 			set = append(set, s.Env)
 		}

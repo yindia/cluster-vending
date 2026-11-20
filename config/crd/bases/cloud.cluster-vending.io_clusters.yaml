@@ -1596,6 +1596,18 @@ spec:
                   description: NodeGroupStatus is what the controller observed of
                     one node group.
                   properties:
+                    allocatableCPUMillis:
+                      description: |-
+                        allocatableCPUMillis, allocatableMemoryBytes and allocatablePods are the
+                        sums of the nodes' status.allocatable.
+                      format: int64
+                      type: integer
+                    allocatableMemoryBytes:
+                      format: int64
+                      type: integer
+                    allocatablePods:
+                      format: int64
+                      type: integer
                     message:
                       description: message says why the group is not ready.
                       type: string
@@ -1612,6 +1624,10 @@ spec:
                         bucket cannot be written. The counts above are still kept.
                       maxLength: 256
                       type: string
+                    notReady:
+                      description: notReady nodes of the group.
+                      format: int32
+                      type: integer
                     phase:
                       description: phase of the group.
                       enum:
@@ -1624,10 +1640,58 @@ spec:
                       description: platformManaged is true for the platform's own
                         groups.
                       type: boolean
+                    podCount:
+                      description: podCount is the pods bound to the nodes that are
+                        not finished.
+                      format: int32
+                      type: integer
+                    podsWithoutRequests:
+                      description: |-
+                        podsWithoutRequests are the pods with a container that sets no CPU or
+                        memory request.
+                      format: int32
+                      type: integer
+                    ready:
+                      description: ready nodes of the group.
+                      format: int32
+                      type: integer
+                    requestedCPUMillis:
+                      description: |-
+                        requestedCPUMillis and requestedMemoryBytes are the sums over the pods
+                        bound to the group's nodes.
+                      format: int64
+                      type: integer
+                    requestedMemoryBytes:
+                      format: int64
+                      type: integer
                   required:
                   - name
                   type: object
                 type: array
+              nodes:
+                description: nodes are the node totals the controller's node pass
+                  read last.
+                properties:
+                  nodesCollectedAt:
+                    description: nodesCollectedAt is when the node pass last read
+                      the nodes.
+                    format: date-time
+                    type: string
+                  notReady:
+                    description: notReady is how many are not.
+                    format: int32
+                    type: integer
+                  ready:
+                    description: ready is how many of them are Ready.
+                    format: int32
+                    type: integer
+                  total:
+                    description: total is the number of nodes in the node groups.
+                    format: int32
+                    type: integer
+                required:
+                - total
+                type: object
               observedGeneration:
                 description: observedGeneration is the generation the status reflects.
                 format: int64
@@ -2159,6 +2223,87 @@ spec:
                       toVersion is the version being moved to
                       (spec.controlPlane.kubernetesVersion).
                     type: string
+                type: object
+              violationEvents:
+                description: |-
+                  violationEvents are the policy and admission event counts of the last
+                  hour, as the controller's last policy pass saw them.
+                properties:
+                  byReason:
+                    description: |-
+                      byReason: PolicyViolation, FailedAdmission, WarningAdmission,
+                      DryrunViolation.
+                    items:
+                      description: ClusterCount is a count under a name (a severity
+                        or a reason).
+                      properties:
+                        count:
+                          description: count of violations or events.
+                          format: int32
+                          type: integer
+                        name:
+                          description: name of the severity or reason.
+                          maxLength: 64
+                          type: string
+                      required:
+                      - count
+                      - name
+                      type: object
+                    maxItems: 4
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  policyCollectedAt:
+                    description: policyCollectedAt is when the policy pass last collected.
+                    format: date-time
+                    type: string
+                  total:
+                    description: total events in the last hour.
+                    format: int32
+                    type: integer
+                required:
+                - total
+                type: object
+              violations:
+                description: |-
+                  violations are the policy violation counts of the controller's last
+                  policy pass.
+                properties:
+                  bySeverity:
+                    description: 'bySeverity: up to 8 severities, the rest summed
+                      under "other".'
+                    items:
+                      description: ClusterCount is a count under a name (a severity
+                        or a reason).
+                      properties:
+                        count:
+                          description: count of violations or events.
+                          format: int32
+                          type: integer
+                        name:
+                          description: name of the severity or reason.
+                          maxLength: 64
+                          type: string
+                      required:
+                      - count
+                      - name
+                      type: object
+                    maxItems: 9
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  policyCollectedAt:
+                    description: policyCollectedAt is when the policy pass last collected.
+                    format: date-time
+                    type: string
+                  total:
+                    description: total violations.
+                    format: int32
+                    type: integer
+                required:
+                - total
                 type: object
             type: object
         required:

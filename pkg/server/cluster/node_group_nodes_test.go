@@ -370,7 +370,7 @@ func TestListNodeGroupNodesValidatesTheRequest(t *testing.T) {
 		"no group":       {TenantId: worldTenant, ClusterId: w.row.ID},
 		"bad group":      {TenantId: worldTenant, ClusterId: w.row.ID, NodeGroup: "../x"},
 		"negative size":  {TenantId: worldTenant, ClusterId: w.row.ID, NodeGroup: "batch", PageSize: -1},
-		"long token":     {TenantId: worldTenant, ClusterId: w.row.ID, NodeGroup: "batch", PageToken: "123456789"},
+		"long token":     {TenantId: worldTenant, ClusterId: w.row.ID, NodeGroup: "batch", PageToken: strings.Repeat("1", 513)},
 		"bad cluster id": {TenantId: worldTenant, ClusterId: "x", NodeGroup: "batch"},
 	} {
 		if _, err := w.svc.ListNodeGroupNodes(t.Context(), req); connect.CodeOf(err) != connect.CodeInvalidArgument {

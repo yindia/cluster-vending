@@ -2,10 +2,8 @@ package cluster
 
 import (
 	"context"
-	"strconv"
 	"time"
 
-	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -65,7 +63,7 @@ func (s *ClusterService) ListClusterRecommendations(ctx context.Context, req *cl
 		// caller's fault: there are no recommendations until it rewrites it.
 		return out, nil
 	}
-	var rows []recommend.Row
+	var rows []*cloudv1.ResourceRecommendation
 	for _, r := range recommend.Rows(history, now()) {
 		if req.GetNamespace() != "" && r.Namespace != req.GetNamespace() {
 			continue
@@ -73,27 +71,37 @@ func (s *ClusterService) ListClusterRecommendations(ctx context.Context, req *cl
 		if req.GetOnlyChanges() && !r.Changes() {
 			continue
 		}
-		rows = append(rows, r)
+		rows = append(rows, r.Proto())
 	}
-	start := 0
-	if token := req.GetPageToken(); token != "" {
-		if start, err = strconv.Atoi(token); err != nil || start > len(rows) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, "page_token is not a token of this list")
-		}
+	scope, desc := recommendationScope(req)
+	if scope != "" {
+		rows = sortRecommendations(rows, req.GetSortBy(), desc)
+	}
+	start, err := pageStart(scope, scope, req.GetPageToken(), len(rows), false)
+	if err != nil {
+		return nil, err
 	}
 	size := int(req.GetPageSize())
 	if size <= 0 {
 		size = defaultPageSize
 	}
 	end := min(start+min(size, maxPageSize), len(rows))
-	for _, r := range rows[start:end] {
-		out.Recommendations = append(out.Recommendations, r.Proto())
-	}
+	out.Recommendations = rows[start:end]
 	out.Total = int32(len(rows)) //nolint:gosec // bounded by recommend.MaxContainers
 	if end < len(rows) {
-		out.NextPageToken = strconv.Itoa(end)
+		out.NextPageToken = nextToken(scope, scope, end, false)
 	}
 	return out, nil
+}
+
+// recommendationScope is the sort scope of the request's page tokens ("" for
+// the default sort) and its effective direction: the change keys default to
+// the largest change first.
+func recommendationScope(req *cloudv1.ListClusterRecommendationsRequest) (string, bool) {
+	byChange := req.GetSortBy() == cloudv1.RecommendationSortBy_RECOMMENDATION_SORT_BY_CPU_CHANGE ||
+		req.GetSortBy() == cloudv1.RecommendationSortBy_RECOMMENDATION_SORT_BY_MEMORY_CHANGE
+	desc := isDesc(req.GetSortOrder(), byChange)
+	return sortScope(int32(req.GetSortBy()), desc, false), desc
 }
 
 // pageStoredRecommendations is the page of a recommendation set read from
@@ -110,7 +118,12 @@ func (s *ClusterService) pageStoredRecommendations(req *cloudv1.ListClusterRecom
 		}
 		rows = append(rows, r)
 	}
-	start, err := etagOffset(bucket.ETag, req.GetPageToken(), len(rows))
+	scope, desc := recommendationScope(req)
+	if scope != "" {
+		rows = sortRecommendations(rows, req.GetSortBy(), desc)
+	}
+	binding := bucket.ETag + scope
+	start, err := etagOffset(binding, req.GetPageToken(), len(rows))
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +135,7 @@ func (s *ClusterService) pageStoredRecommendations(req *cloudv1.ListClusterRecom
 	out := &cloudv1.ListClusterRecommendationsResponse{Summary: set.GetSummary(), Recommendations: rows[start:end],
 		Total: int32(len(rows))} //nolint:gosec // bounded by the object's size
 	if end < len(rows) {
-		out.NextPageToken = etagToken(bucket.ETag, end)
+		out.NextPageToken = etagToken(binding, end)
 	}
 	return out, nil
 }

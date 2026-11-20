@@ -1,6 +1,7 @@
 "use client";
 
-import { FilterRow } from "./filter-row";
+import { Pagination } from "@astryxdesign/core/Pagination";
+import { SearchFilters } from "./filter-row";
 import dynamic from "next/dynamic";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
@@ -19,7 +20,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ResourceActions } from "./resource-actions";
 import { DetailNavigation, useDetailSection } from "./detail-navigation";
-import { proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -631,18 +632,18 @@ function NetworkResourceInventory({ network }: { network: Network }) {
       <VStack gap={1}><Heading level={2}>Resource inventory</Heading><Text type="supporting">Every managed resource returned by the platform, including paused and unhealthy resources.</Text></VStack>
       <Text type="supporting" role="status">{filtered.length} of {resources.length} managed resources</Text>
     </HStack>
-    <FilterRow label="Resource filters">
-      <TextInput type="search" label="Search resources" description="Name, kind or cloud ID." value={search} onChange={setSearch} autoComplete="off" hasSpellCheck={false} width="min(100%, 24rem)" />
+    <SearchFilters label="Resource filters" values={[kindFilter, stateFilter, pausedFilter]}
+      search={<TextInput type="search" label="Search resources" placeholder="Name, kind or cloud ID" hasClear value={search} onChange={setSearch} autoComplete="off" hasSpellCheck={false} width="min(100%, 24rem)" />}>
       <Selector label="Resource kind" value={kindFilter} onChange={setKindFilter} width="min(100%, 12rem)" options={[{ value: "all", label: "All kinds" }, ...kinds.map((kind) => ({ value: kind, label: kind || "Unspecified kind" }))]} />
       <Selector label="Resource state" value={stateFilter} onChange={setStateFilter} width="min(100%, 12rem)" options={[{ value: "all", label: "All states" }, ...states.map((state) => ({ value: String(state), label: enumLabel(ManagedResourceState, state) }))]} />
       <Selector label="Pause status" value={pausedFilter} onChange={setPausedFilter} width="min(100%, 12rem)" options={[{ value: "all", label: "Any pause status" }, { value: "paused", label: "Paused" }, { value: "active", label: "Not paused" }]} />
       {hasFilters && <Button label="Clear resource filters" variant="ghost" onClick={clear} />}
-    </FilterRow>
+    </SearchFilters>
     {filtered.length ? <Table data={filtered.map((resource, id) => ({ id, resource }))} idKey="id" aria-label="Network managed resource inventory" columns={[
-      { key: "name", header: "Name", width: proportional(3, { minWidth: 80 }), renderCell: ({ resource }) => <CopyValue value={resource.name} label="Managed resource name" /> },
+      { key: "name", header: "Name", width: proportional(2, { minWidth: 80 }), renderCell: ({ resource }) => <CopyValue value={resource.name} label="Managed resource name" /> },
+      { key: "state", header: "Status", width: pixel(152), renderCell: ({ resource }) => <StatusValue tone={resource.state === ManagedResourceState.READY ? "success" : resource.state === ManagedResourceState.FAILED ? "error" : "warning"} label={enumLabel(ManagedResourceState, resource.state)} /> },
       { key: "kind", header: "Kind", width: proportional(1, { minWidth: 80 }), renderCell: ({ resource }) => <Text maxLines={1} hasTruncateTooltip>{resource.kind || "Not reported"}</Text> },
       { key: "external", header: "Cloud ID", width: proportional(3, { minWidth: 80 }), renderCell: ({ resource }) => resource.externalName ? <CopyValue value={resource.externalName} label="Cloud resource ID" /> : <Text maxLines={1}>Pending assignment</Text> },
-      { key: "state", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: ({ resource }) => <StatusValue tone={resource.state === ManagedResourceState.READY ? "success" : resource.state === ManagedResourceState.FAILED ? "error" : "warning"} label={enumLabel(ManagedResourceState, resource.state)} /> },
       { key: "ready", header: "Ready", width: proportional(1, { minWidth: 80 }), renderCell: ({ resource }) => <Text maxLines={1}>{enumLabel(ConditionStatus, resource.ready)}</Text> },
       { key: "synced", header: "Synced", width: proportional(1, { minWidth: 80 }), renderCell: ({ resource }) => <Text maxLines={1}>{enumLabel(ConditionStatus, resource.synced)}</Text> },
       { key: "paused", header: "Paused", width: proportional(1, { minWidth: 80 }), renderCell: ({ resource }) => <StatusValue tone={resource.paused ? "warning" : "neutral"} label={resource.paused ? "Paused" : "No"} /> },
@@ -736,16 +737,15 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
     <ErrorNotice error={query.error} />
     {query.loading && <Text role="status">Loading network health and resources…</Text>}
     {network && <>
-
       <DetailNavigation resource="Network" pages={tabs} selection={navigation} actions={["overview", "resources", "configuration"].includes(tab) && <RefreshButton label="Refresh details" onClick={query.refresh} isLoading={query.refreshing} />} />
       {tabs.map((item) => item.value === tab ? <VStack key={item.value} id={navigation.panelId(tab)} role="tabpanel" aria-label={navigation.label} tabIndex={0} gap={6}>
         {tab === "overview" && <>
-      <DetailSummary items={[
-        { label: "Managed resources", value: resources.length, note: `${paused} paused` },
-        { label: "Resources ready", value: `${ready} / ${resources.length}`, note: "Observed cloud readiness" },
-        { label: "Connected clusters", value: status?.clusterIds.length ?? 0, note: "Share this network" },
-        { label: "Rollout tier", value: enumLabel(Tier, network.spec?.tier), note: "Inherited by every cluster" },
-      ]} />
+          <DetailSummary items={[
+            { label: "Managed resources", value: resources.length, note: `${paused} paused` },
+            { label: "Resources ready", value: resources.length ? `${ready} / ${resources.length}` : "Not reported", note: "Observed cloud readiness" },
+            { label: "Connected clusters", value: status?.clusterIds.length ?? 0, note: "Share this network" },
+            { label: "Rollout tier", value: enumLabel(Tier, network.spec?.tier), note: "Inherited by every cluster" },
+          ]} />
           <VStack gap={4}>
             <HStack hAlign="between" vAlign="start" gap={4} wrap="wrap"><VStack gap={1}><Heading level={2}>Network health</Heading><Text type="supporting">{healthy ? "The cloud matches the current desired generation." : "Waiting for cloud reconciliation to confirm the desired generation."}</Text></VStack><Text type="supporting">Generation {String(status?.observedGeneration ?? 0)} / {String(network.generation)}</Text></HStack>
             <Text>{status?.message || (healthy ? "All reported checks are current." : "No controller message yet.")}</Text>
@@ -859,23 +859,18 @@ function NetworksList() {
     <ErrorNotice error={list.error} />
     {list.error && list.data && <Text type="supporting">Showing the last fully loaded network inventory. Refresh failed; no partial pages were added.</Text>}
     <ErrorNotice error={accounts.error} />
-    <FilterRow label="Network filters">
-      <TextInput type="search" label="Search networks" description="Search all tenant networks by name, ID, account or region." value={search} onChange={(value) => { setSearch(value); setPage(0); }} width="min(100%, 24rem)" autoComplete="off" hasSpellCheck={false} />
+    <SearchFilters label="Network filters" values={[accountFilter, tierFilter, stateFilter, pauseFilter]}
+      search={<TextInput type="search" label="Search networks" placeholder="Name, ID, account or region" hasClear value={search} onChange={(value) => { setSearch(value); setPage(0); }} width="min(100%, 24rem)" autoComplete="off" hasSpellCheck={false} />}>
       <Selector label="Filter by account" value={accountFilter} onChange={(value) => { setAccountFilter(value); setPage(0); }} width="min(100%, 14rem)" options={[{ value: "all", label: "All accounts" }, ...accountIds.map((id) => ({ value: id, label: accountMap.get(id)?.accountName || id }))]} />
       <Selector label="Filter by tier" value={tierFilter} onChange={(value) => { setTierFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All tiers" }, ...tiers.map((tier) => ({ value: String(tier), label: enumLabel(Tier, tier) }))]} />
       <Selector label="Filter by status" value={stateFilter} onChange={(value) => { setStateFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All statuses" }, ...states.map((state) => ({ value: String(state), label: enumLabel(NetworkState, state) }))]} />
       <Selector label="Filter by pause" value={pauseFilter} onChange={(value) => { setPauseFilter(value); setPage(0); }} width="min(100%, 12rem)" options={[{ value: "all", label: "All pause states" }, { value: "paused", label: "Paused" }, { value: "not-paused", label: "Not paused" }, { value: "let-through", label: "Let through" }]} />
       {hasFilters && <Button label="Clear network filters" variant="ghost" onClick={() => { setSearch(""); setAccountFilter("all"); setTierFilter("all"); setStateFilter("all"); setPauseFilter("all"); setPage(0); }} />}
-    </FilterRow>
+    </SearchFilters>
     {list.loading && <Text role="status">Loading all network pages…</Text>}
-    {list.data && <Text type="supporting" role="status">{filtered.length} of {allNetworks.length} tenant networks · 25 per page</Text>}
-    {list.data && (rows.length ? <Table data={rows} columns={columns} idKey="id" aria-label="Tenant networks" /> : <Text>{hasFilters ? "No networks match your search and filters." : "No networks in this tenant."}</Text>)}
-    <HStack gap={2} wrap="wrap">
-      <Button label="First page" onClick={() => setPage(0)} isDisabled={currentPage === 0} />
-      <Button label="Previous networks" onClick={() => setPage(currentPage - 1)} isDisabled={currentPage === 0} />
-      <Text>Page {currentPage + 1} of {pageCount}</Text>
-      <Button label="Next networks" onClick={() => setPage(currentPage + 1)} isDisabled={currentPage + 1 >= pageCount} />
-    </HStack>
+    {list.data && <Text type="supporting" role="status">{filtered.length} of {allNetworks.length} tenant networks</Text>}
+    {list.data && (rows.length ? <Table data={rows} columns={columns} idKey="id" aria-label="Tenant networks" rowIndexStart={currentPage * 25 + 1} rowCount={filtered.length} /> : <Text>{hasFilters ? "No networks match your search and filters." : "No networks in this tenant."}</Text>)}
+    {pageCount > 1 && <Pagination label="Networks pagination" page={currentPage + 1} onChange={next => setPage(next - 1)} totalItems={filtered.length} pageSize={25} variant="count" />}
     {creating && canWrite && <NetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setCreating(false)} />}
     {importing && canWrite && <ImportNetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setImporting(false)} />}
   </VStack>;

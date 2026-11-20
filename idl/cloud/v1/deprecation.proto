@@ -3,6 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/sort.proto";
 import "google/protobuf/timestamp.proto";
 
 // DeprecationSource is where the manifest of a finding was read.
@@ -71,6 +72,17 @@ message ClusterDeprecations {
   google.protobuf.Timestamp attempted_at = 8;
 }
 
+// DeprecationSortBy is how ListClusterDeprecations orders the findings.
+// Unspecified: REMOVED_FIRST. Ties keep the scan's order.
+enum DeprecationSortBy {
+  DEPRECATION_SORT_BY_UNSPECIFIED = 0;
+  // Findings whose API version is removed first (ascending); deprecated
+  // only first when descending.
+  DEPRECATION_SORT_BY_REMOVED_FIRST = 1;
+  DEPRECATION_SORT_BY_NAMESPACE = 2;
+  DEPRECATION_SORT_BY_KIND = 3;
+}
+
 message ListClusterDeprecationsRequest {
   // Tenant scope. DNS label, at most 56 chars so the tenant namespace
   // "tenant-<id>" fits the 63-char Kubernetes limit.
@@ -95,6 +107,12 @@ message ListClusterDeprecationsRequest {
 
   // Only the findings whose API version is removed at the target version.
   bool only_removed = 5;
+
+  // Unspecified: REMOVED_FIRST. A token is good for the sort it was made
+  // with.
+  DeprecationSortBy sort_by = 6 [(buf.validate.field).enum.defined_only = true];
+  // Unspecified: ascending.
+  SortOrder sort_order = 7 [(buf.validate.field).enum.defined_only = true];
 }
 
 message ListClusterDeprecationsResponse {

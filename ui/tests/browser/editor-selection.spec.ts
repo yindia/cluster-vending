@@ -10,13 +10,14 @@ async function mockEditorReads(page: Page) {
   });
   await page.route("**/api/rpc/**", async route => {
     const method = new URL(route.request().url()).pathname.split("/").at(-1)!;
-    const component = { id: "00000000-0000-4000-8000-000000000004", tenantId: "acme", clusterId, component: "external-dns", etag: "editor-etag", values, management: "COMPONENT_MANAGEMENT_TENANT", version: "0.16.0" };
+    const component = { id: "00000000-0000-4000-8000-000000000004", tenantId: "acme", clusterId, component: "external-dns", etag: "editor-etag", values, management: "COMPONENT_MANAGEMENT_TENANT", version: "0.16.0", status: { phase: "COMPONENT_PHASE_READY" } };
     let response: object;
     switch (method) {
       case "WhoAmI": response = { subject: "editor-reader", grants: [{ role: "ACCESS_ROLE_TENANT_ADMIN", tenants: ["acme"] }] }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
       case "ListCloudAccounts": response = { accounts: [] }; break;
       case "ListNetworks": response = { networks: [] }; break;
+      case "GetCluster": response = { cluster: { id: clusterId, tenantId: "acme", name: "production", spec: {}, status: { state: "CLUSTER_STATE_RUNNING" } } }; break;
       case "ListClusters": response = { clusters: [] }; break;
       case "GetReleaseChannel": response = { channel: { channel: "RELEASE_CHANNEL_STABLE", release: "selection-release", kubernetesMinor: "1.35" } }; break;
       case "GetRelease": response = { release: { name: "selection-release", valid: true, kubernetes: [{ minor: "1.35", components: [{ name: "external-dns", version: "0.16.0", values }] }] } }; break;
@@ -81,7 +82,7 @@ for (const mode of ["Light", "Dark"] as const) {
         copyLabel = "Locked Helm values for external-dns on Kubernetes 1.35";
         editor = page.getByRole("textbox", { name: copyLabel, exact: true });
       } else if (scenario === "editable Helm values") {
-        await page.goto(`/components/external-dns?cluster=${clusterId}`);
+        await page.goto(`/clusters/${clusterId}?tab=components`);
         await setAppearance(page, mode);
         await page.getByRole("button", { name: "Manage component", exact: true }).click();
         copyLabel = "Tenant values (YAML object)";
@@ -90,7 +91,7 @@ for (const mode of ["Light", "Dark"] as const) {
         await page.goto("/networks");
         await setAppearance(page, mode);
         await page.getByRole("button", { name: "Import network", exact: true }).click();
-        await page.getByRole("button", { name: "Paste YAML", exact: true }).click();
+        await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
         copyLabel = "NetworkImport manifest";
         editor = page.getByRole("textbox", { name: copyLabel, exact: true });
         await editor.fill("apiVersion: cluster-vending.io/v1\nkind: NetworkImport\nmetadata:\n  name: selected-network\nspec:\n  enabled: true\n  count: 2\n");

@@ -2,9 +2,11 @@
 // @generated from file cloud/v1/violation.proto (package cloud.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
+import type { SortOrder } from "./sort_pb";
+import { file_cloud_v1_sort } from "./sort_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -13,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/violation.proto.
  */
 export const file_cloud_v1_violation: GenFile = /*@__PURE__*/
-  fileDesc("ChhjbG91ZC92MS92aW9sYXRpb24ucHJvdG8SCGNsb3VkLnYxIlsKFVBvbGljeU9iamVjdFJlZmVyZW5jZRITCgthcGlfdmVyc2lvbhgBIAEoCRIMCgRraW5kGAIgASgJEhEKCW5hbWVzcGFjZRgDIAEoCRIMCgRuYW1lGAQgASgJIpcBChxDbHVzdGVyUG9saWN5U25hcHNob3RTdW1tYXJ5EjAKDGNvbGxlY3RlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHbm90aWNlcxgCIAMoCRISCgppbmNvbXBsZXRlGAMgASgIEhEKCXRydW5jYXRlZBgEIAEoCBINCgVzdGFsZRgFIAEoCCKZAgoQQ2x1c3RlclZpb2xhdGlvbhIKCgJpZBgBIAEoCRIOCgZlbmdpbmUYAiABKAkSLwoGcG9saWN5GAMgASgLMh8uY2xvdWQudjEuUG9saWN5T2JqZWN0UmVmZXJlbmNlEjEKCHJlc291cmNlGAQgASgLMh8uY2xvdWQudjEuUG9saWN5T2JqZWN0UmVmZXJlbmNlEgwKBHJ1bGUYBSABKAkSDwoHbWVzc2FnZRgGIAEoCRIOCgZyZXN1bHQYByABKAkSEAoIc2V2ZXJpdHkYCCABKAkSEwoLZW5mb3JjZW1lbnQYCSABKAkSLwoLb2JzZXJ2ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqICChVDbHVzdGVyVmlvbGF0aW9uRXZlbnQSCgoCaWQYASABKAkSDgoGZW5naW5lGAIgASgJEi8KBnBvbGljeRgDIAEoCzIfLmNsb3VkLnYxLlBvbGljeU9iamVjdFJlZmVyZW5jZRIxCghyZXNvdXJjZRgEIAEoCzIfLmNsb3VkLnYxLlBvbGljeU9iamVjdFJlZmVyZW5jZRIPCgdtZXNzYWdlGAUgASgJEg4KBnJlYXNvbhgGIAEoCRIOCgZhY3Rpb24YByABKAkSEwoLZW5mb3JjZW1lbnQYCCABKAkSNAoQbGFzdF9vYnNlcnZlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFY291bnQYCiABKAUi8AEKHExpc3RDbHVzdGVyVmlvbGF0aW9uc1JlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIcCgpjbHVzdGVyX2lkGAIgASgJQgi6SAVyA7ABARIaCgluYW1lc3BhY2UYAyABKAlCB7pIBHICGD8SGAoGZW5naW5lGAQgASgJQgi6SAVyAxiAARIaCglwYWdlX3NpemUYBSABKAVCB7pIBBoCKAASHAoKcGFnZV90b2tlbhgGIAEoCUIIukgFcgMYgAQioQEKHUxpc3RDbHVzdGVyVmlvbGF0aW9uc1Jlc3BvbnNlEi4KCnZpb2xhdGlvbnMYASADKAsyGi5jbG91ZC52MS5DbHVzdGVyVmlvbGF0aW9uEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRI3CgdzdW1tYXJ5GAMgASgLMiYuY2xvdWQudjEuQ2x1c3RlclBvbGljeVNuYXBzaG90U3VtbWFyeSL1AQohTGlzdENsdXN0ZXJWaW9sYXRpb25FdmVudHNSZXF1ZXN0EkIKCXRlbmFudF9pZBgBIAEoCUIvukgscioQARg4MiReW2EtejAtOV0oW2EtejAtOS1dezAsNTR9W2EtejAtOV0pPyQSHAoKY2x1c3Rlcl9pZBgCIAEoCUIIukgFcgOwAQESGgoJbmFtZXNwYWNlGAMgASgJQge6SARyAhg/EhgKBmVuZ2luZRgEIAEoCUIIukgFcgMYgAESGgoJcGFnZV9zaXplGAUgASgFQge6SAQaAigAEhwKCnBhZ2VfdG9rZW4YBiABKAlCCLpIBXIDGIAEIsEBCiJMaXN0Q2x1c3RlclZpb2xhdGlvbkV2ZW50c1Jlc3BvbnNlEi8KBmV2ZW50cxgBIAMoCzIfLmNsb3VkLnYxLkNsdXN0ZXJWaW9sYXRpb25FdmVudBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkSNwoHc3VtbWFyeRgDIAEoCzImLmNsb3VkLnYxLkNsdXN0ZXJQb2xpY3lTbmFwc2hvdFN1bW1hcnkSGAoQcmV0ZW50aW9uX25vdGljZRgEIAEoCSKxAQoVQ2x1c3RlclBvbGljeVNuYXBzaG90EjcKB3N1bW1hcnkYASABKAsyJi5jbG91ZC52MS5DbHVzdGVyUG9saWN5U25hcHNob3RTdW1tYXJ5Ei4KCnZpb2xhdGlvbnMYAiADKAsyGi5jbG91ZC52MS5DbHVzdGVyVmlvbGF0aW9uEi8KBmV2ZW50cxgDIAMoCzIfLmNsb3VkLnYxLkNsdXN0ZXJWaW9sYXRpb25FdmVudEKeAQoMY29tLmNsb3VkLnYxQg5WaW9sYXRpb25Qcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("ChhjbG91ZC92MS92aW9sYXRpb24ucHJvdG8SCGNsb3VkLnYxIlsKFVBvbGljeU9iamVjdFJlZmVyZW5jZRITCgthcGlfdmVyc2lvbhgBIAEoCRIMCgRraW5kGAIgASgJEhEKCW5hbWVzcGFjZRgDIAEoCRIMCgRuYW1lGAQgASgJIpcBChxDbHVzdGVyUG9saWN5U25hcHNob3RTdW1tYXJ5EjAKDGNvbGxlY3RlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHbm90aWNlcxgCIAMoCRISCgppbmNvbXBsZXRlGAMgASgIEhEKCXRydW5jYXRlZBgEIAEoCBINCgVzdGFsZRgFIAEoCCKZAgoQQ2x1c3RlclZpb2xhdGlvbhIKCgJpZBgBIAEoCRIOCgZlbmdpbmUYAiABKAkSLwoGcG9saWN5GAMgASgLMh8uY2xvdWQudjEuUG9saWN5T2JqZWN0UmVmZXJlbmNlEjEKCHJlc291cmNlGAQgASgLMh8uY2xvdWQudjEuUG9saWN5T2JqZWN0UmVmZXJlbmNlEgwKBHJ1bGUYBSABKAkSDwoHbWVzc2FnZRgGIAEoCRIOCgZyZXN1bHQYByABKAkSEAoIc2V2ZXJpdHkYCCABKAkSEwoLZW5mb3JjZW1lbnQYCSABKAkSLwoLb2JzZXJ2ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqICChVDbHVzdGVyVmlvbGF0aW9uRXZlbnQSCgoCaWQYASABKAkSDgoGZW5naW5lGAIgASgJEi8KBnBvbGljeRgDIAEoCzIfLmNsb3VkLnYxLlBvbGljeU9iamVjdFJlZmVyZW5jZRIxCghyZXNvdXJjZRgEIAEoCzIfLmNsb3VkLnYxLlBvbGljeU9iamVjdFJlZmVyZW5jZRIPCgdtZXNzYWdlGAUgASgJEg4KBnJlYXNvbhgGIAEoCRIOCgZhY3Rpb24YByABKAkSEwoLZW5mb3JjZW1lbnQYCCABKAkSNAoQbGFzdF9vYnNlcnZlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFY291bnQYCiABKAUi2QIKHExpc3RDbHVzdGVyVmlvbGF0aW9uc1JlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIcCgpjbHVzdGVyX2lkGAIgASgJQgi6SAVyA7ABARIaCgluYW1lc3BhY2UYAyABKAlCB7pIBHICGD8SGAoGZW5naW5lGAQgASgJQgi6SAVyAxiAARIaCglwYWdlX3NpemUYBSABKAVCB7pIBBoCKAASHAoKcGFnZV90b2tlbhgGIAEoCUIIukgFcgMYgAQSNAoHc29ydF9ieRgHIAEoDjIZLmNsb3VkLnYxLlZpb2xhdGlvblNvcnRCeUIIukgFggECEAESMQoKc29ydF9vcmRlchgIIAEoDjITLmNsb3VkLnYxLlNvcnRPcmRlckIIukgFggECEAEi8QEKHUxpc3RDbHVzdGVyVmlvbGF0aW9uc1Jlc3BvbnNlEi4KCnZpb2xhdGlvbnMYASADKAsyGi5jbG91ZC52MS5DbHVzdGVyVmlvbGF0aW9uEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRI3CgdzdW1tYXJ5GAMgASgLMiYuY2xvdWQudjEuQ2x1c3RlclBvbGljeVNuYXBzaG90U3VtbWFyeRIrCgdsaXZlX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCghjb21wbGV0ZRgFIAEoCBIPCgdub3RpY2VzGAYgAygJIuMCCiFMaXN0Q2x1c3RlclZpb2xhdGlvbkV2ZW50c1JlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIcCgpjbHVzdGVyX2lkGAIgASgJQgi6SAVyA7ABARIaCgluYW1lc3BhY2UYAyABKAlCB7pIBHICGD8SGAoGZW5naW5lGAQgASgJQgi6SAVyAxiAARIaCglwYWdlX3NpemUYBSABKAVCB7pIBBoCKAASHAoKcGFnZV90b2tlbhgGIAEoCUIIukgFcgMYgAQSOQoHc29ydF9ieRgHIAEoDjIeLmNsb3VkLnYxLlZpb2xhdGlvbkV2ZW50U29ydEJ5Qgi6SAWCAQIQARIxCgpzb3J0X29yZGVyGAggASgOMhMuY2xvdWQudjEuU29ydE9yZGVyQgi6SAWCAQIQASKRAgoiTGlzdENsdXN0ZXJWaW9sYXRpb25FdmVudHNSZXNwb25zZRIvCgZldmVudHMYASADKAsyHy5jbG91ZC52MS5DbHVzdGVyVmlvbGF0aW9uRXZlbnQSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEjcKB3N1bW1hcnkYAyABKAsyJi5jbG91ZC52MS5DbHVzdGVyUG9saWN5U25hcHNob3RTdW1tYXJ5EhgKEHJldGVudGlvbl9ub3RpY2UYBCABKAkSKwoHbGl2ZV9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIY29tcGxldGUYBiABKAgSDwoHbm90aWNlcxgHIAMoCSKxAQoVQ2x1c3RlclBvbGljeVNuYXBzaG90EjcKB3N1bW1hcnkYASABKAsyJi5jbG91ZC52MS5DbHVzdGVyUG9saWN5U25hcHNob3RTdW1tYXJ5Ei4KCnZpb2xhdGlvbnMYAiADKAsyGi5jbG91ZC52MS5DbHVzdGVyVmlvbGF0aW9uEi8KBmV2ZW50cxgDIAMoCzIfLmNsb3VkLnYxLkNsdXN0ZXJWaW9sYXRpb25FdmVudCqTAQoPVmlvbGF0aW9uU29ydEJ5EiEKHVZJT0xBVElPTl9TT1JUX0JZX1VOU1BFQ0lGSUVEEAASHwobVklPTEFUSU9OX1NPUlRfQllfTkFNRVNQQUNFEAESHAoYVklPTEFUSU9OX1NPUlRfQllfRU5HSU5FEAISHgoaVklPTEFUSU9OX1NPUlRfQllfU0VWRVJJVFkQAyqEAQoUVmlvbGF0aW9uRXZlbnRTb3J0QnkSJwojVklPTEFUSU9OX0VWRU5UX1NPUlRfQllfVU5TUEVDSUZJRUQQABIgChxWSU9MQVRJT05fRVZFTlRfU09SVF9CWV9USU1FEAESIQodVklPTEFUSU9OX0VWRU5UX1NPUlRfQllfQ09VTlQQAkKeAQoMY29tLmNsb3VkLnYxQg5WaW9sYXRpb25Qcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_cloud_v1_sort, file_google_protobuf_timestamp]);
 
 /**
  * A reference as reported by a policy engine; missing fields remain unknown.
@@ -254,6 +256,21 @@ export type ListClusterViolationsRequest = Message<"cloud.v1.ListClusterViolatio
    * @generated from field: string page_token = 6;
    */
   pageToken: string;
+
+  /**
+   * Unspecified: NAMESPACE. Served by the live reader; a list that is not
+   * live yet answers UNIMPLEMENTED for any other value.
+   *
+   * @generated from field: cloud.v1.ViolationSortBy sort_by = 7;
+   */
+  sortBy: ViolationSortBy;
+
+  /**
+   * Unspecified: ascending.
+   *
+   * @generated from field: cloud.v1.SortOrder sort_order = 8;
+   */
+  sortOrder: SortOrder;
 };
 
 /**
@@ -281,6 +298,25 @@ export type ListClusterViolationsResponse = Message<"cloud.v1.ListClusterViolati
    * @generated from field: cloud.v1.ClusterPolicySnapshotSummary summary = 3;
    */
   summary?: ClusterPolicySnapshotSummary | undefined;
+
+  /**
+   * When a live read started. Unset: not a live read.
+   *
+   * @generated from field: google.protobuf.Timestamp live_at = 4;
+   */
+  liveAt?: Timestamp | undefined;
+
+  /**
+   * Every row was read within the caps (live reads).
+   *
+   * @generated from field: bool complete = 5;
+   */
+  complete: boolean;
+
+  /**
+   * @generated from field: repeated string notices = 6;
+   */
+  notices: string[];
 };
 
 /**
@@ -323,6 +359,21 @@ export type ListClusterViolationEventsRequest = Message<"cloud.v1.ListClusterVio
    * @generated from field: string page_token = 6;
    */
   pageToken: string;
+
+  /**
+   * Unspecified: TIME. Served by the live reader; a list that is not live
+   * yet answers UNIMPLEMENTED for any other value.
+   *
+   * @generated from field: cloud.v1.ViolationEventSortBy sort_by = 7;
+   */
+  sortBy: ViolationEventSortBy;
+
+  /**
+   * Unspecified: the key's default (TIME: descending; COUNT: descending).
+   *
+   * @generated from field: cloud.v1.SortOrder sort_order = 8;
+   */
+  sortOrder: SortOrder;
 };
 
 /**
@@ -357,6 +408,25 @@ export type ListClusterViolationEventsResponse = Message<"cloud.v1.ListClusterVi
    * @generated from field: string retention_notice = 4;
    */
   retentionNotice: string;
+
+  /**
+   * When a live read started. Unset: not a live read.
+   *
+   * @generated from field: google.protobuf.Timestamp live_at = 5;
+   */
+  liveAt?: Timestamp | undefined;
+
+  /**
+   * Every row was read within the caps (live reads).
+   *
+   * @generated from field: bool complete = 6;
+   */
+  complete: boolean;
+
+  /**
+   * @generated from field: repeated string notices = 7;
+   */
+  notices: string[];
 };
 
 /**
@@ -394,4 +464,67 @@ export type ClusterPolicySnapshot = Message<"cloud.v1.ClusterPolicySnapshot"> & 
  */
 export const ClusterPolicySnapshotSchema: GenMessage<ClusterPolicySnapshot> = /*@__PURE__*/
   messageDesc(file_cloud_v1_violation, 8);
+
+/**
+ * ViolationSortBy is how ListClusterViolations orders the violations.
+ * Unspecified: NAMESPACE (of the resource). Ties are broken by id.
+ *
+ * @generated from enum cloud.v1.ViolationSortBy
+ */
+export enum ViolationSortBy {
+  /**
+   * @generated from enum value: VIOLATION_SORT_BY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: VIOLATION_SORT_BY_NAMESPACE = 1;
+   */
+  NAMESPACE = 1,
+
+  /**
+   * @generated from enum value: VIOLATION_SORT_BY_ENGINE = 2;
+   */
+  ENGINE = 2,
+
+  /**
+   * @generated from enum value: VIOLATION_SORT_BY_SEVERITY = 3;
+   */
+  SEVERITY = 3,
+}
+
+/**
+ * Describes the enum cloud.v1.ViolationSortBy.
+ */
+export const ViolationSortBySchema: GenEnum<ViolationSortBy> = /*@__PURE__*/
+  enumDesc(file_cloud_v1_violation, 0);
+
+/**
+ * ViolationEventSortBy is how ListClusterViolationEvents orders the events.
+ * Unspecified: TIME, newest first. Ties are broken by id.
+ *
+ * @generated from enum cloud.v1.ViolationEventSortBy
+ */
+export enum ViolationEventSortBy {
+  /**
+   * @generated from enum value: VIOLATION_EVENT_SORT_BY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: VIOLATION_EVENT_SORT_BY_TIME = 1;
+   */
+  TIME = 1,
+
+  /**
+   * @generated from enum value: VIOLATION_EVENT_SORT_BY_COUNT = 2;
+   */
+  COUNT = 2,
+}
+
+/**
+ * Describes the enum cloud.v1.ViolationEventSortBy.
+ */
+export const ViolationEventSortBySchema: GenEnum<ViolationEventSortBy> = /*@__PURE__*/
+  enumDesc(file_cloud_v1_violation, 1);
 

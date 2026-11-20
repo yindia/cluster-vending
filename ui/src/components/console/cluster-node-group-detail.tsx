@@ -130,7 +130,7 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
     {detail.message && <Banner status={detail.tone === "error" ? "error" : "warning"} title="Node group status" description={detail.message} />}
     <DetailSummary items={[
       { label: "Phase", value: <StatusValue label={detail.phaseLabel} tone={detail.tone} /> },
-      { label: "Nodes", value: nodeCount === undefined ? "—" : String(nodeCount), note: detail.nodes === undefined ? "Not reported yet" : undefined },
+      { label: "Nodes", value: nodeCount === undefined ? "—" : String(nodeCount), note: nodeCount === undefined ? "Not reported yet" : undefined },
       ...detail.summary,
     ]} />
     <VStack as="section" aria-label="Nodes" gap={3} width="100%">

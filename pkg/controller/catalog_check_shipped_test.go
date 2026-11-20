@@ -29,8 +29,8 @@ func TestShippedCatalogPassesTheOfflineCheck(t *testing.T) {
 		ch.Annotations = map[string]string{catalog.SchemaAnnotation: catalog.SchemaVersion}
 		set.Channels = append(set.Channels, *ch)
 	}
-	group := config.DefaultNodeGroups().System
-	problems := catalog.Check(set, catalog.Options{RenderVersion: crossplaneaws.RenderVersion, SystemGroup: &group})
+	group, platform := config.DefaultNodeGroups().System, config.DefaultNodeGroups().Platform
+	problems := catalog.Check(set, catalog.Options{RenderVersion: crossplaneaws.RenderVersion, SystemGroup: &group, PlatformPool: &platform})
 	var text []string
 	for _, p := range problems {
 		text = append(text, p.String())

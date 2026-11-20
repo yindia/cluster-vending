@@ -14,6 +14,10 @@ const (
 	// PoolSystem is the default managed node group, the platform's only
 	// node group.
 	PoolSystem = "system"
+	// PoolPlatform is the name of the platform pool (PROP-03): the Karpenter
+	// NodePool and EC2NodeClass, and the value of its node label and taint.
+	// It is not the legacy "platform" the legacy gate removes.
+	PoolPlatform = "platform-pool"
 	// DefaultSystemPoolMin is the size of the default managed node group at
 	// creation, and its minimum, unless the admin sets another
 	// (--system-node-group-min-size).

@@ -1,6 +1,6 @@
 "use client";
 
-import { FilterRow } from "./filter-row";
+import { FilterRow, SearchFilters } from "./filter-row";
 import { useCallback, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -132,13 +132,13 @@ function ReleaseInventory({ channels, channelsError }: { channels?: readonly Rel
     <HStack width="100%" gap={3} hAlign="between" vAlign="center" wrap="wrap"><Heading level={2}>Release inventory</Heading><RefreshButton label="Refresh releases" isLoading={query.refreshing} onClick={query.refresh} /></HStack>
     {query.error && <Banner status="error" title="Releases could not be loaded" description={query.error} />}
     {query.loading && <Text role="status">Loading the complete release inventory…</Text>}
-    <FilterRow label="Release filters">
-      <TextInput label="Search releases" type="search" placeholder="Release, channel, origin or hold" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" hasClear width="min(100%, 24rem)" />
+    <SearchFilters label="Release filters" values={[channel, state, origin]}
+      search={<TextInput label="Search releases" type="search" placeholder="Release, channel, origin or hold" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" hasClear width="min(100%, 24rem)" />}>
       <Selector label="Release channel" value={channel} onChange={(value) => { setChannel(value); setPage(1); }} options={[{ value: "all", label: "All channels" }, { value: "none", label: "No channel" }, ...[ReleaseChannel.ALPHA, ReleaseChannel.BETA, ReleaseChannel.STABLE].map((value) => ({ value: String(value), label: channelLabel(value) }))]} />
       <Selector label="Release state" value={state} onChange={(value) => { setState(value); setPage(1); }} options={[{ value: "all", label: "All states" }, { value: "active", label: "Active · Current offering" }, { value: "available", label: "Available" }, { value: "invalid", label: "Invalid configuration" }, { value: "withdrawn", label: "Withdrawn" }, { value: "unknown", label: "Offering unknown" }]} />
       <Selector label="Release origin" value={origin} onChange={(value) => { setOrigin(value); setPage(1); }} options={[{ value: "all", label: "All origins" }, { value: "shipped", label: "Controller build" }, { value: "published", label: "Operator published" }]} />
       {hasFilters && <Button label="Clear release filters" variant="ghost" onClick={() => { setSearch(""); setChannel("all"); setState("all"); setOrigin("all"); setPage(1); }} />}
-    </FilterRow>
+    </SearchFilters>
     {query.data && <Text role="status" color="secondary">{filtered.length} of {releases.length} releases{query.error ? " · Last successful load; refresh failed" : ""}</Text>}
     <Text color="secondary">Active marks the current offering reported for a channel. Other valid releases remain available; validation alone does not make a release current.{channelsError && channels ? " Channel references reflect the last successful load." : !channels ? " Current offerings are unavailable until channels load." : ""}</Text>
     {query.data && <Table aria-label="Releases" idKey="id" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} data={visible.map(item => ({ id: item.name, item }))} columns={[

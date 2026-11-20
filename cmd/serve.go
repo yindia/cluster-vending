@@ -44,6 +44,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			warnNodeGroups(g.logger, cfg.NodeGroups)
 			// Who may call the API: the "auth" section of the settings file.
 			authCfg, err := config.AuthFrom(changedFlags(cmd.Flags()), os.LookupEnv)
 			if err != nil {

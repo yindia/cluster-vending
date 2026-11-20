@@ -24,7 +24,7 @@ func nodeGroupVariables() []string {
 	_, envNames := known(config.ServeSettings(), config.ControllerSettings())
 	var out []string
 	for _, name := range envNames {
-		if strings.HasPrefix(name, "CV_SYSTEM_NODE_GROUP_") || strings.HasPrefix(name, "CV_NODE_GROUP_") {
+		if strings.HasPrefix(name, "CV_SYSTEM_") || strings.HasPrefix(name, "CV_PLATFORM_") || strings.HasPrefix(name, "CV_NODE_GROUP_") {
 			out = append(out, name)
 		}
 	}

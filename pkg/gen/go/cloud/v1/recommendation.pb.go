@@ -84,6 +84,65 @@ func (RecommendationSource) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_recommendation_proto_rawDescGZIP(), []int{0}
 }
 
+// RecommendationSortBy is how ListClusterRecommendations orders the
+// containers. Unspecified: NAMESPACE (then workload kind, name and
+// container). Ties keep that order.
+type RecommendationSortBy int32
+
+const (
+	RecommendationSortBy_RECOMMENDATION_SORT_BY_UNSPECIFIED RecommendationSortBy = 0
+	RecommendationSortBy_RECOMMENDATION_SORT_BY_NAMESPACE   RecommendationSortBy = 1
+	// The size of the change of the CPU request, in millicores, whether up or
+	// down. Descending (the default for this key): the largest change first.
+	// Containers without a recommendation come last either way.
+	RecommendationSortBy_RECOMMENDATION_SORT_BY_CPU_CHANGE RecommendationSortBy = 2
+	// The same for the memory request, in bytes.
+	RecommendationSortBy_RECOMMENDATION_SORT_BY_MEMORY_CHANGE RecommendationSortBy = 3
+)
+
+// Enum value maps for RecommendationSortBy.
+var (
+	RecommendationSortBy_name = map[int32]string{
+		0: "RECOMMENDATION_SORT_BY_UNSPECIFIED",
+		1: "RECOMMENDATION_SORT_BY_NAMESPACE",
+		2: "RECOMMENDATION_SORT_BY_CPU_CHANGE",
+		3: "RECOMMENDATION_SORT_BY_MEMORY_CHANGE",
+	}
+	RecommendationSortBy_value = map[string]int32{
+		"RECOMMENDATION_SORT_BY_UNSPECIFIED":   0,
+		"RECOMMENDATION_SORT_BY_NAMESPACE":     1,
+		"RECOMMENDATION_SORT_BY_CPU_CHANGE":    2,
+		"RECOMMENDATION_SORT_BY_MEMORY_CHANGE": 3,
+	}
+)
+
+func (x RecommendationSortBy) Enum() *RecommendationSortBy {
+	p := new(RecommendationSortBy)
+	*p = x
+	return p
+}
+
+func (x RecommendationSortBy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RecommendationSortBy) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_recommendation_proto_enumTypes[1].Descriptor()
+}
+
+func (RecommendationSortBy) Type() protoreflect.EnumType {
+	return &file_cloud_v1_recommendation_proto_enumTypes[1]
+}
+
+func (x RecommendationSortBy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RecommendationSortBy.Descriptor instead.
+func (RecommendationSortBy) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_recommendation_proto_rawDescGZIP(), []int{1}
+}
+
 // ResourceAmounts are CPU in millicores and memory in bytes. Zero is
 // "not set" for what a workload asks for, and "none" for a recommendation.
 type ResourceAmounts struct {
@@ -488,7 +547,11 @@ type ListClusterRecommendationsRequest struct {
 	PageToken string `protobuf:"bytes,5,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// Only the containers whose recommended requests differ from what they
 	// set by a tenth or more.
-	OnlyChanges   bool `protobuf:"varint,6,opt,name=only_changes,json=onlyChanges,proto3" json:"only_changes,omitempty"`
+	OnlyChanges bool `protobuf:"varint,6,opt,name=only_changes,json=onlyChanges,proto3" json:"only_changes,omitempty"`
+	// Unspecified: NAMESPACE. A token is good for the sort it was made with.
+	SortBy RecommendationSortBy `protobuf:"varint,7,opt,name=sort_by,json=sortBy,proto3,enum=cloud.v1.RecommendationSortBy" json:"sort_by,omitempty"`
+	// Unspecified: ascending, except for the change keys (descending).
+	SortOrder     SortOrder `protobuf:"varint,8,opt,name=sort_order,json=sortOrder,proto3,enum=cloud.v1.SortOrder" json:"sort_order,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -563,6 +626,20 @@ func (x *ListClusterRecommendationsRequest) GetOnlyChanges() bool {
 		return x.OnlyChanges
 	}
 	return false
+}
+
+func (x *ListClusterRecommendationsRequest) GetSortBy() RecommendationSortBy {
+	if x != nil {
+		return x.SortBy
+	}
+	return RecommendationSortBy_RECOMMENDATION_SORT_BY_UNSPECIFIED
+}
+
+func (x *ListClusterRecommendationsRequest) GetSortOrder() SortOrder {
+	if x != nil {
+		return x.SortOrder
+	}
+	return SortOrder_SORT_ORDER_UNSPECIFIED
 }
 
 type ListClusterRecommendationsResponse struct {
@@ -641,7 +718,7 @@ var File_cloud_v1_recommendation_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_recommendation_proto_rawDesc = "" +
 	"\n" +
-	"\x1dcloud/v1/recommendation.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"S\n" +
+	"\x1dcloud/v1/recommendation.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x13cloud/v1/sort.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"S\n" +
 	"\x0fResourceAmounts\x12\x1d\n" +
 	"\n" +
 	"cpu_millis\x18\x01 \x01(\x03R\tcpuMillis\x12!\n" +
@@ -686,7 +763,7 @@ const file_cloud_v1_recommendation_proto_rawDesc = "" +
 	"\ttruncated\x18\b \x01(\bR\ttruncated\x12\x14\n" +
 	"\x05error\x18\t \x01(\tR\x05error\x12\x18\n" +
 	"\amessage\x18\n" +
-	" \x01(\tR\amessage\"\xe5\x02\n" +
+	" \x01(\tR\amessage\"\xe6\x03\n" +
 	"!ListClusterRecommendationsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -695,7 +772,10 @@ const file_cloud_v1_recommendation_proto_rawDesc = "" +
 	"\tpage_size\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x120\n" +
 	"\n" +
 	"page_token\x18\x05 \x01(\tB\x11\xbaH\x0er\f\x18\b2\b^[0-9]*$R\tpageToken\x12!\n" +
-	"\fonly_changes\x18\x06 \x01(\bR\vonlyChanges\"\xea\x01\n" +
+	"\fonly_changes\x18\x06 \x01(\bR\vonlyChanges\x12A\n" +
+	"\asort_by\x18\a \x01(\x0e2\x1e.cloud.v1.RecommendationSortByB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06sortBy\x12<\n" +
+	"\n" +
+	"sort_order\x18\b \x01(\x0e2\x13.cloud.v1.SortOrderB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsortOrder\"\xea\x01\n" +
 	"\"ListClusterRecommendationsResponse\x12J\n" +
 	"\x0frecommendations\x18\x01 \x03(\v2 .cloud.v1.ResourceRecommendationR\x0frecommendations\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12:\n" +
@@ -706,7 +786,12 @@ const file_cloud_v1_recommendation_proto_rawDesc = "" +
 	"\x19RECOMMENDATION_SOURCE_VPA\x10\x01\x12(\n" +
 	"$RECOMMENDATION_SOURCE_USAGE_ESTIMATE\x10\x02\x12+\n" +
 	"'RECOMMENDATION_SOURCE_INSUFFICIENT_DATA\x10\x03\x12!\n" +
-	"\x1dRECOMMENDATION_SOURCE_NO_DATA\x10\x04B\xa3\x01\n" +
+	"\x1dRECOMMENDATION_SOURCE_NO_DATA\x10\x04*\xb5\x01\n" +
+	"\x14RecommendationSortBy\x12&\n" +
+	"\"RECOMMENDATION_SORT_BY_UNSPECIFIED\x10\x00\x12$\n" +
+	" RECOMMENDATION_SORT_BY_NAMESPACE\x10\x01\x12%\n" +
+	"!RECOMMENDATION_SORT_BY_CPU_CHANGE\x10\x02\x12(\n" +
+	"$RECOMMENDATION_SORT_BY_MEMORY_CHANGE\x10\x03B\xa3\x01\n" +
 	"\fcom.cloud.v1B\x13RecommendationProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -721,35 +806,39 @@ func file_cloud_v1_recommendation_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_recommendation_proto_rawDescData
 }
 
-var file_cloud_v1_recommendation_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_cloud_v1_recommendation_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_cloud_v1_recommendation_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_cloud_v1_recommendation_proto_goTypes = []any{
 	(RecommendationSource)(0),                  // 0: cloud.v1.RecommendationSource
-	(*ResourceAmounts)(nil),                    // 1: cloud.v1.ResourceAmounts
-	(*ResourceRecommendation)(nil),             // 2: cloud.v1.ResourceRecommendation
-	(*ClusterRecommendations)(nil),             // 3: cloud.v1.ClusterRecommendations
-	(*ListClusterRecommendationsRequest)(nil),  // 4: cloud.v1.ListClusterRecommendationsRequest
-	(*ListClusterRecommendationsResponse)(nil), // 5: cloud.v1.ListClusterRecommendationsResponse
-	(*timestamppb.Timestamp)(nil),              // 6: google.protobuf.Timestamp
+	(RecommendationSortBy)(0),                  // 1: cloud.v1.RecommendationSortBy
+	(*ResourceAmounts)(nil),                    // 2: cloud.v1.ResourceAmounts
+	(*ResourceRecommendation)(nil),             // 3: cloud.v1.ResourceRecommendation
+	(*ClusterRecommendations)(nil),             // 4: cloud.v1.ClusterRecommendations
+	(*ListClusterRecommendationsRequest)(nil),  // 5: cloud.v1.ListClusterRecommendationsRequest
+	(*ListClusterRecommendationsResponse)(nil), // 6: cloud.v1.ListClusterRecommendationsResponse
+	(*timestamppb.Timestamp)(nil),              // 7: google.protobuf.Timestamp
+	(SortOrder)(0),                             // 8: cloud.v1.SortOrder
 }
 var file_cloud_v1_recommendation_proto_depIdxs = []int32{
-	1,  // 0: cloud.v1.ResourceRecommendation.current_requests:type_name -> cloud.v1.ResourceAmounts
-	1,  // 1: cloud.v1.ResourceRecommendation.current_limits:type_name -> cloud.v1.ResourceAmounts
-	1,  // 2: cloud.v1.ResourceRecommendation.recommended_requests:type_name -> cloud.v1.ResourceAmounts
-	1,  // 3: cloud.v1.ResourceRecommendation.recommended_limits:type_name -> cloud.v1.ResourceAmounts
-	1,  // 4: cloud.v1.ResourceRecommendation.difference:type_name -> cloud.v1.ResourceAmounts
-	1,  // 5: cloud.v1.ResourceRecommendation.usage_peak:type_name -> cloud.v1.ResourceAmounts
-	1,  // 6: cloud.v1.ResourceRecommendation.usage_average:type_name -> cloud.v1.ResourceAmounts
+	2,  // 0: cloud.v1.ResourceRecommendation.current_requests:type_name -> cloud.v1.ResourceAmounts
+	2,  // 1: cloud.v1.ResourceRecommendation.current_limits:type_name -> cloud.v1.ResourceAmounts
+	2,  // 2: cloud.v1.ResourceRecommendation.recommended_requests:type_name -> cloud.v1.ResourceAmounts
+	2,  // 3: cloud.v1.ResourceRecommendation.recommended_limits:type_name -> cloud.v1.ResourceAmounts
+	2,  // 4: cloud.v1.ResourceRecommendation.difference:type_name -> cloud.v1.ResourceAmounts
+	2,  // 5: cloud.v1.ResourceRecommendation.usage_peak:type_name -> cloud.v1.ResourceAmounts
+	2,  // 6: cloud.v1.ResourceRecommendation.usage_average:type_name -> cloud.v1.ResourceAmounts
 	0,  // 7: cloud.v1.ResourceRecommendation.source:type_name -> cloud.v1.RecommendationSource
-	6,  // 8: cloud.v1.ClusterRecommendations.sampled_at:type_name -> google.protobuf.Timestamp
-	6,  // 9: cloud.v1.ClusterRecommendations.attempted_at:type_name -> google.protobuf.Timestamp
-	2,  // 10: cloud.v1.ListClusterRecommendationsResponse.recommendations:type_name -> cloud.v1.ResourceRecommendation
-	3,  // 11: cloud.v1.ListClusterRecommendationsResponse.summary:type_name -> cloud.v1.ClusterRecommendations
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	7,  // 8: cloud.v1.ClusterRecommendations.sampled_at:type_name -> google.protobuf.Timestamp
+	7,  // 9: cloud.v1.ClusterRecommendations.attempted_at:type_name -> google.protobuf.Timestamp
+	1,  // 10: cloud.v1.ListClusterRecommendationsRequest.sort_by:type_name -> cloud.v1.RecommendationSortBy
+	8,  // 11: cloud.v1.ListClusterRecommendationsRequest.sort_order:type_name -> cloud.v1.SortOrder
+	3,  // 12: cloud.v1.ListClusterRecommendationsResponse.recommendations:type_name -> cloud.v1.ResourceRecommendation
+	4,  // 13: cloud.v1.ListClusterRecommendationsResponse.summary:type_name -> cloud.v1.ClusterRecommendations
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_recommendation_proto_init() }
@@ -757,12 +846,13 @@ func file_cloud_v1_recommendation_proto_init() {
 	if File_cloud_v1_recommendation_proto != nil {
 		return
 	}
+	file_cloud_v1_sort_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_recommendation_proto_rawDesc), len(file_cloud_v1_recommendation_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,

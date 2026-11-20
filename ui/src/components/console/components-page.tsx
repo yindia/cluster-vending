@@ -1,6 +1,6 @@
 "use client";
 
-import { FilterRow } from "./filter-row";
+import { SearchFilters } from "./filter-row";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -74,13 +74,13 @@ function Catalog() {
       actions={<RefreshButton label="Refresh catalog" isLoading={query.refreshing} onClick={query.refresh} />} />
     {query.error && <Banner status="error" title="Catalog could not be loaded" description={query.error} />}
     {query.loading && <Text role="status">Loading catalog…</Text>}
-    <FilterRow label="Component catalog filters">
-      <TextInput label="Search component catalog" type="search" placeholder="Name, description, dependency or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} hasClear autoComplete="off" width="min(100%, 24rem)" />
+    <SearchFilters label="Component catalog filters" values={[management, provider, availability]}
+      search={<TextInput label="Search component catalog" type="search" placeholder="Name, description, dependency or version" value={search} onChange={(value) => { setSearch(value); setPage(1); }} hasClear autoComplete="off" width="min(100%, 24rem)" />}>
       <Selector label="Catalog management" value={management} onChange={(value) => { setManagement(value); setPage(1); }} options={[{ value: "all", label: "All management" }, ...Object.values(ComponentManagement).filter((value) => typeof value === "number").map((value) => ({ value: String(value), label: enumLabel(ComponentManagement[value], value) }))]} />
       <Selector label="Catalog provider" value={provider} onChange={(value) => { setProvider(value); setPage(1); }} options={[{ value: "all", label: "All providers" }, ...Object.values(CloudProvider).filter((value) => typeof value === "number").map((value) => ({ value: String(value), label: enumLabel(CloudProvider[value], value) }))]} />
       <Selector label="Catalog availability" value={availability} onChange={(value) => { setAvailability(value); setPage(1); }} options={[{ value: "all", label: "All availability" }, { value: "available", label: "Available" }, { value: "unavailable", label: "Unavailable" }]} />
       {hasFilters && <Button label="Clear catalog filters" variant="ghost" onClick={() => { setSearch(""); setManagement("all"); setProvider("all"); setAvailability("all"); setPage(1); }} />}
-    </FilterRow>
+    </SearchFilters>
     {query.data && <Text role="status" color="secondary">{filtered.length} of {definitions.length} catalog components{query.error ? " · Last successful load; refresh failed" : ""}</Text>}
     {query.data && <Table aria-label="Component catalog" idKey="id" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} data={visible.map(item => ({ id: item.name, item }))} columns={[
       { key: "name", header: "Component", width: proportional(2, { minWidth: 80 }), renderCell: ({ item }) => <HStack gap={2} vAlign="center"><Link href={componentHref(item.name)}>{item.name}</Link><CopyButton value={item.name} label="Component name" /></HStack> },
@@ -110,17 +110,16 @@ function ComponentDetail({ name }: { name: string }) {
     {definitionQuery.error && <Banner status="error" title="Component catalog unavailable" description={definitionQuery.error} />}
     {definitionQuery.data && !definition && <Banner status="warning" title="Component not found" description="This component is not in the current catalog. Return to components or refresh the catalog." />}
     {definition && <>
-
       {definition.disabled && <Banner status="warning" title="Catalog availability" description={definition.disabledReason || "This component is unavailable."} />}
       <DetailNavigation resource="Component" pages={tabs} selection={navigation} actions={tab !== "values" && <RefreshButton label="Refresh component" isLoading={definitionQuery.refreshing} onClick={definitionQuery.refresh} />} />
       {tabs.map(item => item.value === tab ? <VStack key={item.value} id={navigation.panelId(tab)} role="tabpanel" aria-label={navigation.label} tabIndex={0} gap={6}>
         {tab === "overview" && <>
-      <DetailSummary items={[
-        { label: "Management", value: enumLabel(ComponentManagement[definition.management], definition.management) },
-        { label: "Provider", value: enumLabel(CloudProvider[definition.provider], definition.provider) },
-        { label: "Availability", value: definition.disabled ? "Unavailable" : "Available" },
-        { label: "Tenant values", value: definition.configurable ? "Configurable" : "Not configurable" },
-      ]} />
+          <DetailSummary items={[
+            { label: "Management", value: enumLabel(ComponentManagement[definition.management], definition.management) },
+            { label: "Provider", value: enumLabel(CloudProvider[definition.provider], definition.provider) },
+            { label: "Availability", value: definition.disabled ? "Unavailable" : "Available" },
+            { label: "Tenant values", value: definition.configurable ? "Configurable" : "Not configurable" },
+          ]} />
           <VStack gap={3}>
             <Heading level={2}>Release versions</Heading>
             {Object.keys(definition.versions).length ? <Table aria-label="Component release versions" idKey="minor" data={Object.entries(definition.versions).map(([minor, version]) => ({ minor, version }))} columns={[

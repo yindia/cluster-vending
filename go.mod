@@ -2,6 +2,10 @@ module github.com/yindia/cluster-vending
 
 go 1.27.1
 
+// The UI's npm packages can carry Go sources (flatted does); they are not part
+// of this module.
+ignore ./ui/node_modules
+
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2
 	buf.build/go/protovalidate v1.4.0

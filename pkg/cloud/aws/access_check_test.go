@@ -11,6 +11,7 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
@@ -53,7 +54,9 @@ func (f probeFake) DescribeAvailabilityZones(context.Context, *ec2.DescribeAvail
 }
 
 func (f probeFake) DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
-	return &ec2.DescribeVpcsOutput{}, f.fail(ActionDescribeVpcs)
+	// One VPC: the CreateTags check tags it (access_check_tags_test.go has
+	// the region without one).
+	return &ec2.DescribeVpcsOutput{Vpcs: []ec2types.Vpc{{VpcId: awssdk.String("vpc-0a1b2c3d4e5f60718")}}}, f.fail(ActionDescribeVpcs)
 }
 
 func (f probeFake) CreateVpc(_ context.Context, in *ec2.CreateVpcInput, _ ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error) {
@@ -73,7 +76,7 @@ func (f probeFake) CreateTags(_ context.Context, in *ec2.CreateTagsInput, _ ...f
 	if err := f.fail(ActionCreateTagsDryRun); err != nil {
 		return nil, err
 	}
-	return nil, &smithy.GenericAPIError{Code: "InvalidVpcID.NotFound", Message: "The vpc ID does not exist"}
+	return nil, &smithy.GenericAPIError{Code: "DryRunOperation", Message: "Request would have succeeded, but DryRun flag is set."}
 }
 
 func (f probeFake) ListClusters(context.Context, *eks.ListClustersInput, ...func(*eks.Options)) (*eks.ListClustersOutput, error) {
@@ -226,7 +229,8 @@ func TestCheckAccessStopsInARegionWithoutIdentity(t *testing.T) {
 		}
 	}
 	// us-east-1 runs its checks; us-west-1 only the identity call.
-	if want := len(regionalChecks) + 2; west != want { // and GetRole, ListRoleTags
+	// The tag check lists the VPCs once more for its target.
+	if want := len(regionalChecks) + 3; west != want { // and GetRole, ListRoleTags
 		t.Errorf("%d other calls, want %d (us-east-1's only): %v", west, want, calls)
 	}
 }

@@ -689,8 +689,61 @@ acceptance test for phases 2 to 4.
     may enable it only through a documented manual node replacement. There is no automatic
     migration (4.6, 4.9). Spot is out of scope as decided in 4.3.
 
-**Phase 0 results.** Recorded here when phase 0 is done: the webhook table, the managed
-scale-in answers, and the per-class requests and idle capacity.
+**Phase 0 results (offline part, 2026-11-20).** The five pinned charts were pulled and rendered with
+`helm template` (Helm 4.1.0, the charts' own repositories, the platformValues of each
+`pkg/catalog/definitions/*.yaml` with the `${...}` placeholders removed): kyverno 3.10.0,
+aws-load-balancer-controller 3.6.2, external-secrets 2.15.0, istio `base` and `istiod` 1.32.0,
+capsule 0.15.2. Every row below is read from the rendered output or the chart's templates and values.
+Nothing is guessed: what a chart does not render is marked, with where the answer is.
+
+Finding that changes the webhook rule of 4.11: **Karpenter runs in `kube-system` in this catalog**
+(`karpenter.yaml`, `namespace: kube-system`), not in a `karpenter-system` namespace. A `Fail` webhook
+that excludes `kube-system` therefore protects Karpenter and CoreDNS and the EBS controller, and the
+rule's second namespace name does not exist.
+
+| Component (chart) | Webhook configuration | Webhook | `failurePolicy` | `namespaceSelector` | Chart keys that set it |
+|---|---|---|---|---|---|
+| kyverno 3.10.0 | none in the chart: the admission controller creates its configurations at runtime (`autoUpdateWebhooks`) | resource validating/mutating, policy, exception, verify, cleanup, ttl | **not in the chart: needs a cluster** (kind or the sandbox account). The controller decides per policy. | The chart's `config.webhooks.namespaceSelector` applies; the shipped value excludes `kube-system`, `kube-public`, `kube-node-lease`, `kyverno`, `capsule-system`, `external-secrets`, `gpu-operator`, `istio-ingress`, `istio-system` (the Kyverno namespace is added by `config.excludeKyvernoNamespace`) | `config.webhooks.namespaceSelector`, `config.webhooks.objectSelector`, `features.forceFailurePolicyIgnore.enabled` (shipped `false`: resource webhooks stay fail closed), `features.excludeBootstrapResources.enabled` (shipped `true`: Node and CSR out of `Fail` webhooks) |
+| aws-load-balancer-controller 3.6.2 | MutatingWebhookConfiguration `aws-load-balancer-webhook` | `mpod.elbv2.k8s.aws` (pods) | `Ignore` | namespaces labelled `elbv2.k8s.aws/pod-readiness-gate-inject=enabled`; object not the controller itself | `webhookNamespaceSelectors` |
+| | | `quicid.elbv2.k8s.aws` (pods) | `Fail` | namespaces labelled `elbv2.k8s.aws/quic-server-id-inject=enabled`; object not the controller | `webhookNamespaceSelectors` |
+| | | `alb-target-control.namespace.elbv2.k8s.aws` (pods) | `Fail` | namespaces labelled `elbv2.k8s.aws/alb-target-control-agent-injection=enabled`; pods without inject=false | none for the selector |
+| | | `alb-target-control.object.elbv2.k8s.aws` (pods) | `Fail` | namespaces **without** that label (kube-system included), but only pods labelled `elbv2.k8s.aws/alb-target-control-agent-inject=true` | none for the selector |
+| | | `mtargetgroupbinding.elbv2.k8s.aws` (TargetGroupBinding only) | `Fail` | none (cluster-wide, one CRD kind) | none |
+| | ValidatingWebhookConfiguration `aws-load-balancer-webhook` | `vingressclassparams`, `vtargetgroupbinding`, `vingress` | `Fail` | none (Ingress, IngressClassParams, TargetGroupBinding in every namespace) | none (`serviceMutatorWebhookConfig.namespaceSelectors` exists for the Service mutator, which the shipped values do not render) |
+| external-secrets 2.15.0 | ValidatingWebhookConfiguration `secretstore-validate` | `validate.secretstore...`, `validate.clustersecretstore...` | `Fail` | none (SecretStore and ClusterSecretStore objects only) | `webhook.failurePolicy` (applies to all three) |
+| | ValidatingWebhookConfiguration `externalsecret-validate` | `validate.externalsecret...` | `Fail` | none (ExternalSecret objects only) | `webhook.failurePolicy` |
+| istio base 1.32.0 | ValidatingWebhookConfiguration `istiod-default-validator` | `validation.istio.io` | `Ignore` (istiod flips it to `Fail` once ready, `base.validationFailurePolicy` pins it) | none (Istio config resources) | `base.validationFailurePolicy` |
+| istiod 1.32.0 | ValidatingWebhookConfiguration `istio-validator-istio-system` | `rev.validation.istio.io` | `Ignore` | none; object label `istio.io/rev=default` | none |
+| | MutatingWebhookConfiguration `istio-sidecar-injector` | `rev.namespace.sidecar-injector.istio.io`, `rev.object...`, `namespace.sidecar-injector.istio.io`, `object.sidecar-injector.istio.io` (pods) | `Fail` | opt-in by label: `istio.io/rev=default` or `istio-injection=enabled`; the `object` forms match namespaces with neither label, kube-system included, but only pods labelled `sidecar.istio.io/inject=true` | `sidecarInjectorWebhook.enableNamespacesByDefault`, `neverInjectSelector`, `alwaysInjectSelector` (pod level) |
+| capsule 0.15.2 | none rendered as such: the chart puts them in `CapsuleConfiguration.spec.admission` and the controller creates `capsule-dynamic-webhook` (validating and mutating) | 23 validating, 12 mutating | `Fail` for all but 3 (`serviceaccount-references` and `config` validating, `metadata` mutating are `Ignore`) | pods, PVCs, services, ingresses, gateways, service accounts: namespaces labelled `capsule.clastix.io/tenant` (so kube-system is not matched). **Not selected by namespace and `Fail`:** `namespaces` (create, update, delete of every namespace, system serviceaccounts of kube-system, kyverno, capsule-system and cert-manager excluded by a match condition), `replications` (all resources, all scopes), `managed` (by object label), the Capsule CRDs | `webhooks.hooks.<name>.failurePolicy`, `.namespaceSelector`, `.objectSelector`, `.matchConditions`; `webhooks.matchConditions` for all |
+
+What this means for 4.11:
+
+- No `Fail` webhook of the five matches pods of `kube-system` unless the pod opts in by a label, except
+  the two pod webhooks of Kyverno (runtime), which the shipped `namespaceSelector` excludes from
+  `kube-system`. The webhook rule holds for ALB, External Secrets, istio and Capsule's pod webhooks.
+- An outage of the pool does stop: Ingress and TargetGroupBinding writes (ALB), SecretStore and
+  ExternalSecret writes (External Secrets), every namespace create, update and delete, and Capsule's CRDs
+  (Capsule `namespaces` and `replications`), and pod creation in opted-in namespaces (istio, ALB readiness
+  gate, Capsule tenants). Karpenter's own pods and CoreDNS are not in that set.
+- Capsule's `namespaces` and `replications` webhooks are `Fail` with no namespace selector. Moving
+  Capsule to the pool makes a pool outage block namespace changes cluster-wide (the platform's own
+  namespaces included), where today it is the same outage of the system group. Phase 4 moves Capsule only
+  after the first runtime check below, and may set `webhooks.hooks.<name>.failurePolicy: Ignore` for those two.
+- Still to check on a cluster (needs a cluster; kind is enough): Kyverno's runtime webhook
+  configurations (names, `failurePolicy` per webhook with the shipped policies, `namespaceSelector` as the
+  controller writes it); Capsule's generated `capsule-dynamic-webhook`, which should equal the rendered
+  `CapsuleConfiguration`.
+
+| Phase 0 check | Result |
+|---|---|
+| Webhook `failurePolicy` and `namespaceSelector` of the five charts | Above, from the rendered charts. Kyverno's runtime webhooks: needs a cluster. |
+| Managed node group scale-in against PodDisruptionBudgets, and which node it removes | **Needs a sandbox account.** Not answerable offline. The design does not rely on it (4.9, M3). |
+| Idle capacity that `WhenEmpty` leaves, per class | **Needs a sandbox account** (a running pool). |
+| Platform pool steady node count per class | **Needs a sandbox account.** Offline: the platform set requests 675m CPU and 1,088 MiB at minimum replicas (`pkg/catalog` `CheckPlatformSizing` on the shipped catalog), which fits one `m7i.large`; the floor of two nodes in 4.6 is for spread, not for these requests. |
+| Requests of the bootstrap set on a `t3.medium` | Offline, from `CheckBootstrapSizing`: 2 x `t3.medium` allocate 3,860m CPU, 6,492 MiB, 34 pods; the bootstrap set requests 1,750m (45%), 3,172 MiB (49%) and 18 pods (53%). It fits, and the 17-pod limit is the one counted. An `m6i.large` (29 pods) was not measured on a node. |
+
+The class values of 4.6 are neither confirmed nor changed: they need the sandbox measurements.
 
 **Open questions.** None remain. The facts this design depends on are the Phase 0 checks in
 section 6.

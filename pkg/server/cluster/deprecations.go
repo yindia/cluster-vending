@@ -2,9 +2,7 @@ package cluster
 
 import (
 	"context"
-	"strconv"
 
-	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -73,15 +71,18 @@ func (s *ClusterService) ListClusterDeprecations(ctx context.Context, req *cloud
 			}
 		}
 	}
-	start := 0
+	desc := isDesc(req.GetSortOrder(), false)
+	scope := sortScope(int32(req.GetSortBy()), desc, false)
+	if scope != "" {
+		findings = sortDeprecations(findings, req.GetSortBy(), desc)
+	}
+	binding := scope
 	if bucket.Used {
-		if start, err = etagOffset(bucket.ETag, req.GetPageToken(), len(findings)); err != nil {
-			return nil, err
-		}
-	} else if token := req.GetPageToken(); token != "" {
-		if start, err = strconv.Atoi(token); err != nil || start > len(findings) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, "page_token is not a token of this list")
-		}
+		binding = bucket.ETag + scope
+	}
+	start, err := pageStart(binding, scope, req.GetPageToken(), len(findings), bucket.Used)
+	if err != nil {
+		return nil, err
 	}
 	size := int(req.GetPageSize())
 	if size <= 0 {
@@ -91,10 +92,7 @@ func (s *ClusterService) ListClusterDeprecations(ctx context.Context, req *cloud
 	out := &cloudv1.ListClusterDeprecationsResponse{Findings: findings[start:end], TargetVersion: d.GetTargetVersion(),
 		ScannedAt: d.GetScannedAt(), Total: d.GetTotal(), Removed: d.GetRemoved(), Truncated: d.GetTruncated(), Error: d.GetError()}
 	if end < len(findings) {
-		out.NextPageToken = strconv.Itoa(end)
-		if bucket.Used {
-			out.NextPageToken = etagToken(bucket.ETag, end)
-		}
+		out.NextPageToken = nextToken(binding, scope, end, bucket.Used)
 	}
 	return out, nil
 }

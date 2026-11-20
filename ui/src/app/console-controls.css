@@ -110,3 +110,24 @@
   .cv-detail-navigation .cv-detail-mobile-nav { display: flex; }
   .cv-detail-mobile-nav > :first-child { flex: 1; min-inline-size: 0; }
 }
+
+.cv-search-filters {
+  container: search-filters / inline-size;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+.cv-search-controls > :first-child { flex: 1.6 1 0; min-inline-size: 0; }
+.cv-search-controls .cv-search-filter-toggle { display: none; }
+.cv-search-controls .cv-search-filter-fields { display: contents; }
+.cv-search-filter-fields > :has([aria-haspopup]) { flex: 1 1 0; min-inline-size: 0; }
+@container search-filters (max-width: 48rem) {
+  .cv-search-controls { flex-wrap: wrap; }
+  .cv-search-controls .cv-search-filter-toggle { display: inline-flex; }
+  .cv-search-controls .cv-search-filter-fields { display: none; }
+  .cv-search-controls .cv-search-filter-fields[data-open="true"] {
+    display: grid;
+    flex-basis: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  }
+  .cv-search-filter-fields > * { inline-size: 100%; min-inline-size: 0; }
+}

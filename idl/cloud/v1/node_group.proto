@@ -186,4 +186,18 @@ message NodeGroupNode {
   // The NodeClaim's Ready condition is True.
   bool nodeclaim_ready = 14;
   string provider_id = 15;
+  // What the node offers (its status.allocatable), from a live read; zero
+  // when the row was not read live. CPU in millicores, memory in bytes.
+  int64 allocatable_cpu_millis = 16;
+  int64 allocatable_memory_bytes = 17;
+  int32 allocatable_pods = 18;
+  // The sum of the requests of the node's pods, by the scheduler's
+  // definition (init containers and overhead included).
+  int64 requested_cpu_millis = 19;
+  int64 requested_memory_bytes = 20;
+  // Pods bound to the node that are not Succeeded or Failed.
+  int32 pod_count = 21;
+  // Of those pods, the ones with a container that sets no CPU or memory
+  // request.
+  int32 pods_without_requests = 22;
 }

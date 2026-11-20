@@ -285,6 +285,7 @@ test("Sub Tenant detail saves three services locally and keeps its resources out
   await open(page);
   await page.getByRole("link", { name: "Payments", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/clusters/${clusterId}/subtenants/${id}$`));
+  await page.getByRole("tab", { name: "Cloud resources", exact: true }).click();
   const detail = page.getByRole("region", { name: "Sub Tenant cloud resources" });
   const table = detail.getByRole("table", { name: "Managed resource previews" });
   test.setTimeout(90000);
@@ -341,6 +342,7 @@ test("Sub Tenant detail saves three services locally and keeps its resources out
 test("Sub Tenant name opens details and previews stay within their owner", async ({ page }) => {
   await mock(page, { existing: true }); await open(page);
   await page.getByRole("link", { name: "Payments", exact: true }).click();
+  await page.getByRole("tab", { name: "Cloud resources", exact: true }).click();
   const detail = page.getByRole("region", { name: "Sub Tenant cloud resources" });
   await detail.getByRole("button", { name: "Create cloud resource" }).click();
   const dialog = page.getByRole("dialog", { name: "Create cloud resource" });
@@ -350,7 +352,7 @@ test("Sub Tenant name opens details and previews stay within their owner", async
   await dialog.getByRole("button", { name: "Create preview", exact: true }).click();
   const otherId = "00000000-0000-4000-8000-000000000005";
   await page.route("**/GetSubTenant", route => route.fulfill({ json: { subtenant: { tenantId: "acme", clusterId, id: otherId, spec: { ...spec, displayName: "Analytics" } } } }));
-  await page.goto(`/clusters/${clusterId}/subtenants/${otherId}`);
+  await page.goto(`/clusters/${clusterId}/subtenants/${otherId}?tab=cloud-resources`);
   await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
   await expect(detail).toContainText("No managed resource previews yet");
   await expect(detail).not.toContainText("private-preview");
@@ -417,6 +419,7 @@ test("the cluster creates each service for the platform, independently of a Sub 
   await expect(platform.getByRole("row")).toHaveCount(4);
   await page.getByRole("tab", { name: "Sub Tenants", exact: true }).click();
   await page.getByRole("link", { name: "Payments", exact: true }).click();
+  await page.getByRole("tab", { name: "Cloud resources", exact: true }).click();
   const allocation = page.getByRole("region", { name: "Sub Tenant cloud resources" });
   await expect(allocation).toContainText("No managed resource previews yet");
   await allocation.getByRole("button", { name: "Create cloud resource" }).click();

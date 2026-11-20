@@ -235,7 +235,7 @@ func TestCheckOrderIsStable(t *testing.T) {
 
 func TestCheckSystemGroupSizingRule(t *testing.T) {
 	s := goodSet()
-	small := config.SystemNodeGroup{InstanceType: "t3.small", MinSize: 1, MaxSize: 2}
+	small := config.SystemNodeGroup{InstanceTypes: []string{"t3.small"}, MinSize: 1, MaxSize: 2}
 	opts := checkOptions
 	opts.SystemGroup = &small
 	// karpenter's requests are not set in the small catalog: the rule says so.

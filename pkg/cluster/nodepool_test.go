@@ -173,19 +173,19 @@ func TestResolveSpecWithTheAdminsSystemNodeGroupSettings(t *testing.T) {
 	in := minimalSpec()
 	in.DefaultNodePool = nil
 
-	spec, err := ResolveSpecWith(in, zonesAB, SystemPool{MinSize: 5, MaxSize: 9, InstanceType: "m7i.large"})
+	spec, err := ResolveSpecWith(in, zonesAB, SystemPool{MinSize: 5, MaxSize: 9, InstanceTypes: []string{"m7i.large", "m6i.large"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"m7i.large"}) {
-		t.Errorf("instance types = %v, want the admin's", got)
+	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"m7i.large", "m6i.large"}) {
+		t.Errorf("instance types = %v, want the admin's list", got)
 	}
 	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 5, 9)
 
 	named := minimalSpec()
 	named.DefaultNodePool.InstanceTypes = []string{"c7i.xlarge"}
-	spec, err = ResolveSpecWith(named, zonesAB, SystemPool{MinSize: 4, InstanceType: "m7i.large"})
+	spec, err = ResolveSpecWith(named, zonesAB, SystemPool{MinSize: 4, InstanceTypes: []string{"m7i.large"}})
 	if err != nil {
 		t.Fatal(err)
 	}

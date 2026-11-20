@@ -52,6 +52,16 @@ var instanceShapes = map[string]Shape{
 	"m5.2xlarge": {VCPU: 8, MemMiB: 32768, MaxPods: 58},
 	"m6i.large":  {VCPU: 2, MemMiB: 8192, MaxPods: 29},
 	"m6i.xlarge": {VCPU: 4, MemMiB: 16384, MaxPods: 58},
+	// The platform pool's families (PROP-03): max pods are Karpenter's
+	// ENI-limited default for the shape.
+	"m6i.2xlarge": {VCPU: 8, MemMiB: 32768, MaxPods: 58},
+	"m6i.4xlarge": {VCPU: 16, MemMiB: 65536, MaxPods: 234},
+	"m6i.8xlarge": {VCPU: 32, MemMiB: 131072, MaxPods: 234},
+	"m7i.large":   {VCPU: 2, MemMiB: 8192, MaxPods: 29},
+	"m7i.xlarge":  {VCPU: 4, MemMiB: 16384, MaxPods: 58},
+	"m7i.2xlarge": {VCPU: 8, MemMiB: 32768, MaxPods: 58},
+	"m7i.4xlarge": {VCPU: 16, MemMiB: 65536, MaxPods: 234},
+	"m7i.8xlarge": {VCPU: 32, MemMiB: 131072, MaxPods: 234},
 }
 
 // InstanceShape is the size of an instance type the sizing rule knows.
@@ -260,12 +270,17 @@ func SizingTable(defs []component.Definition, nodes int64) ([]SizingLine, []stri
 // no size for, and what SizingTable could not count. The summary is the
 // sizing table, for a log. Nothing is reported for a group that fits.
 func CheckSystemGroupSizing(defs []component.Definition, group config.SystemNodeGroup) (problems []string, summary string) {
-	shape, ok := instanceShapes[group.InstanceType]
-	if !ok {
-		return []string{fmt.Sprintf("nodeGroups.system.instanceType %q is not an instance type the sizing rule knows (%s): add its size to instanceShapes (pkg/catalog/sizing.go)",
-			group.InstanceType, strings.Join(shapeNames(), ", "))}, ""
+	shape, typeName, problems := smallestShape(group.InstanceTypes)
+	if len(problems) > 0 {
+		return problems, ""
 	}
-	nodes := int64(group.MinSize)
+	return fitGroup(defs, shape, typeName, int64(group.MinSize), "system node group")
+}
+
+// fitGroup is the sizing table of defs (every enabled Platform component
+// and the add-ons) against nodes nodes of shape: CPU and memory at
+// SystemGroupFillLimit, and the pods the nodes hold.
+func fitGroup(defs []component.Definition, shape Shape, typeName string, nodes int64, label string) (problems []string, summary string) {
 	nodeCPU, nodeMem := shape.Allocatable()
 	allocCPU, allocMem, maxPods := nodeCPU*nodes, nodeMem*nodes, shape.MaxPods*nodes
 
@@ -279,21 +294,21 @@ func CheckSystemGroupSizing(defs []component.Definition, group config.SystemNode
 			l.Name, l.Replicas, l.Each.CPUMilli, l.Each.MemMiB, tot.CPUMilli, tot.MemMiB, tot.Pods)
 	}
 	summary = fmt.Sprintf("%d x %s allocatable %dm / %d MiB / %d pods; requests %dm (%.0f%%) / %d MiB (%.0f%%) / %d pods (%.0f%%)\n%s",
-		nodes, group.InstanceType, allocCPU, allocMem, maxPods,
+		nodes, typeName, allocCPU, allocMem, maxPods,
 		sum.CPUMilli, 100*float64(sum.CPUMilli)/float64(allocCPU),
 		sum.MemMiB, 100*float64(sum.MemMiB)/float64(allocMem),
 		sum.Pods, 100*float64(sum.Pods)/float64(maxPods), table.String())
 
 	if float64(sum.CPUMilli) > SystemGroupFillLimit*float64(allocCPU) {
-		problems = append(problems, fmt.Sprintf("system node group: CPU requests %dm exceed %.0f%% of the %dm allocatable by %d x %s (nodeGroups.system minSize, instanceType)",
-			sum.CPUMilli, 100*SystemGroupFillLimit, allocCPU, nodes, group.InstanceType))
+		problems = append(problems, fmt.Sprintf("%s: CPU requests %dm exceed %.0f%% of the %dm allocatable by %d x %s (nodeGroups.system minSize, instanceTypes)",
+			label, sum.CPUMilli, 100*SystemGroupFillLimit, allocCPU, nodes, typeName))
 	}
 	if float64(sum.MemMiB) > SystemGroupFillLimit*float64(allocMem) {
-		problems = append(problems, fmt.Sprintf("system node group: memory requests %d MiB exceed %.0f%% of the %d MiB allocatable by %d x %s (nodeGroups.system minSize, instanceType)",
-			sum.MemMiB, 100*SystemGroupFillLimit, allocMem, nodes, group.InstanceType))
+		problems = append(problems, fmt.Sprintf("%s: memory requests %d MiB exceed %.0f%% of the %d MiB allocatable by %d x %s (nodeGroups.system minSize, instanceTypes)",
+			label, sum.MemMiB, 100*SystemGroupFillLimit, allocMem, nodes, typeName))
 	}
 	if sum.Pods > maxPods {
-		problems = append(problems, fmt.Sprintf("system node group: %d pods exceed the %d the nodes hold (%d x %d)", sum.Pods, maxPods, nodes, shape.MaxPods))
+		problems = append(problems, fmt.Sprintf("%s: %d pods exceed the %d the nodes hold (%d x %d)", label, sum.Pods, maxPods, nodes, shape.MaxPods))
 	}
 	return problems, summary
 }

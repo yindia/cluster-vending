@@ -1130,6 +1130,17 @@ type ClusterStatus struct {
 	// then the user's.
 	// +optional
 	NodeGroups []NodeGroupStatus `json:"nodeGroups,omitempty"`
+	// nodes are the node totals the controller's node pass read last.
+	// +optional
+	Nodes *ClusterNodesStatus `json:"nodes,omitempty"`
+	// violations are the policy violation counts of the controller's last
+	// policy pass.
+	// +optional
+	Violations *ClusterViolationsStatus `json:"violations,omitempty"`
+	// violationEvents are the policy and admission event counts of the last
+	// hour, as the controller's last policy pass saw them.
+	// +optional
+	ViolationEvents *ClusterViolationEventsStatus `json:"violationEvents,omitempty"`
 	// recommendations summarises the usage recorded to recommend resource
 	// requests (ListClusterRecommendations).
 	// +optional
@@ -1232,4 +1243,93 @@ type ClusterReleaseMove struct {
 	StartTime *metav1.Time `json:"startTime,omitempty"`
 	// +optional
 	ComponentStartTime *metav1.Time `json:"componentStartTime,omitempty"`
+}
+
+// ConditionReachable is the Cluster condition of whether the controller could
+// read the workload cluster on its last pass. False keeps the counts of the
+// last successful pass; their ...CollectedAt times show their age.
+const ConditionReachable = "Reachable"
+
+// Reasons of a False Reachable condition.
+const (
+	ReasonClusterUnreachable   = "CLUSTER_UNREACHABLE"
+	ReasonCredentialsRejected  = "CREDENTIALS_REJECTED"
+	StatusOtherNodeGroup       = "other"
+	StatusOtherSeverity        = "other"
+	StatusUnknownSeverityLabel = "unknown"
+)
+
+// ClusterNodesStatus are the node totals of the workload cluster.
+type ClusterNodesStatus struct {
+	// total is the number of nodes in the node groups.
+	Total int32 `json:"total"`
+	// ready is how many of them are Ready.
+	// +optional
+	Ready int32 `json:"ready,omitempty"`
+	// notReady is how many are not.
+	// +optional
+	NotReady int32 `json:"notReady,omitempty"`
+	// nodesCollectedAt is when the node pass last read the nodes.
+	// +optional
+	NodesCollectedAt *metav1.Time `json:"nodesCollectedAt,omitempty"`
+}
+
+// ClusterCount is a count under a name (a severity or a reason).
+type ClusterCount struct {
+	// name of the severity or reason.
+	// +kubebuilder:validation:MaxLength=64
+	Name string `json:"name"`
+	// count of violations or events.
+	Count int32 `json:"count"`
+}
+
+// ClusterViolationsStatus are the counts of the policy violations.
+type ClusterViolationsStatus struct {
+	// total violations.
+	Total int32 `json:"total"`
+	// bySeverity: up to 8 severities, the rest summed under "other".
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=9
+	// +optional
+	BySeverity []ClusterCount `json:"bySeverity,omitempty"`
+	// policyCollectedAt is when the policy pass last collected.
+	// +optional
+	PolicyCollectedAt *metav1.Time `json:"policyCollectedAt,omitempty"`
+}
+
+// ClusterViolationEventsStatus are the counts of the events of the last hour.
+type ClusterViolationEventsStatus struct {
+	// total events in the last hour.
+	Total int32 `json:"total"`
+	// byReason: PolicyViolation, FailedAdmission, WarningAdmission,
+	// DryrunViolation.
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=4
+	// +optional
+	ByReason []ClusterCount `json:"byReason,omitempty"`
+	// policyCollectedAt is when the policy pass last collected.
+	// +optional
+	PolicyCollectedAt *metav1.Time `json:"policyCollectedAt,omitempty"`
+}
+
+// ClusterSummary is what one controller pass learned of the workload cluster,
+// as the store records it in the Cluster's status (SetSummary): the node
+// totals, the per-group usage by group name, and whether the cluster could be
+// read. It is not a stored kind of its own.
+type ClusterSummary struct {
+	// reachable is whether the pass could read the cluster; reason says why
+	// not (CLUSTER_UNREACHABLE, CREDENTIALS_REJECTED).
+	Reachable bool   `json:"reachable"`
+	Reason    string `json:"reason,omitempty"`
+	// at is the time of the pass.
+	At metav1.Time `json:"at"`
+	// nodes and nodeGroups are set by a pass that read them; absent: the
+	// recorded ones stay.
+	Nodes      *ClusterNodesStatus       `json:"nodes,omitempty"`
+	NodeGroups map[string]NodeGroupUsage `json:"nodeGroups,omitempty"`
+	// requestsKnown: the pod list was read, so the requested numbers are
+	// fresh; otherwise the recorded requested numbers stay.
+	RequestsKnown bool `json:"requestsKnown,omitempty"`
 }

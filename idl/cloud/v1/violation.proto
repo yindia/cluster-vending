@@ -2,6 +2,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/sort.proto";
 import "google/protobuf/timestamp.proto";
 
 // A reference as reported by a policy engine; missing fields remain unknown.
@@ -47,6 +48,24 @@ message ClusterViolationEvent {
   google.protobuf.Timestamp last_observed_at = 9;
   int32 count = 10;
 }
+
+// ViolationSortBy is how ListClusterViolations orders the violations.
+// Unspecified: NAMESPACE (of the resource). Ties are broken by id.
+enum ViolationSortBy {
+  VIOLATION_SORT_BY_UNSPECIFIED = 0;
+  VIOLATION_SORT_BY_NAMESPACE = 1;
+  VIOLATION_SORT_BY_ENGINE = 2;
+  VIOLATION_SORT_BY_SEVERITY = 3;
+}
+
+// ViolationEventSortBy is how ListClusterViolationEvents orders the events.
+// Unspecified: TIME, newest first. Ties are broken by id.
+enum ViolationEventSortBy {
+  VIOLATION_EVENT_SORT_BY_UNSPECIFIED = 0;
+  VIOLATION_EVENT_SORT_BY_TIME = 1;
+  VIOLATION_EVENT_SORT_BY_COUNT = 2;
+}
+
 message ListClusterViolationsRequest {
   string tenant_id = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -60,11 +79,21 @@ message ListClusterViolationsRequest {
   int32 page_size = 5 [(buf.validate.field).int32.gte = 0];
   // Bound to the snapshot, tenant, cluster and filters; restart after collection.
   string page_token = 6 [(buf.validate.field).string.max_len = 512];
+  // Unspecified: NAMESPACE. Served by the live reader; a list that is not
+  // live yet answers UNIMPLEMENTED for any other value.
+  ViolationSortBy sort_by = 7 [(buf.validate.field).enum.defined_only = true];
+  // Unspecified: ascending.
+  SortOrder sort_order = 8 [(buf.validate.field).enum.defined_only = true];
 }
 message ListClusterViolationsResponse {
   repeated ClusterViolation violations = 1;
   string next_page_token = 2;
   ClusterPolicySnapshotSummary summary = 3;
+  // When a live read started. Unset: not a live read.
+  google.protobuf.Timestamp live_at = 4;
+  // Every row was read within the caps (live reads).
+  bool complete = 5;
+  repeated string notices = 6;
 }
 message ListClusterViolationEventsRequest {
   string tenant_id = 1 [(buf.validate.field).string = {
@@ -77,6 +106,11 @@ message ListClusterViolationEventsRequest {
   string engine = 4 [(buf.validate.field).string.max_len = 128];
   int32 page_size = 5 [(buf.validate.field).int32.gte = 0];
   string page_token = 6 [(buf.validate.field).string.max_len = 512];
+  // Unspecified: TIME. Served by the live reader; a list that is not live
+  // yet answers UNIMPLEMENTED for any other value.
+  ViolationEventSortBy sort_by = 7 [(buf.validate.field).enum.defined_only = true];
+  // Unspecified: the key's default (TIME: descending; COUNT: descending).
+  SortOrder sort_order = 8 [(buf.validate.field).enum.defined_only = true];
 }
 message ListClusterViolationEventsResponse {
   repeated ClusterViolationEvent events = 1;
@@ -84,6 +118,11 @@ message ListClusterViolationEventsResponse {
   ClusterPolicySnapshotSummary summary = 3;
   // Kubernetes events expire, emission may be disabled; never an audit history.
   string retention_notice = 4;
+  // When a live read started. Unset: not a live read.
+  google.protobuf.Timestamp live_at = 5;
+  // Every row was read within the caps (live reads).
+  bool complete = 6;
+  repeated string notices = 7;
 }
 
 // Internal bounded snapshot persisted only in the management Cluster status.

@@ -2,6 +2,7 @@ package cloudstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/clustersummary"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -148,7 +150,9 @@ func (r clusters) setStatus(obj *cloudv1alpha1.Cluster, raw model.JSON, state st
 	st := &obj.Status
 	scan := meta.FindStatusCondition(st.Conditions, cloudv1alpha1.ConditionDeprecationScan)
 	st.ContractStatus = keepStatus(st.ContractStatus, raw)
+	was := st.DeepCopy()
 	convert.ClusterStatusInto(p, state, metav1.NewTime(now()), st)
+	clustersummary.Keep(st, was) // the summary is not part of the contract status
 	if scan != nil {
 		meta.SetStatusCondition(&st.Conditions, *scan)
 	}
@@ -173,6 +177,25 @@ func (r clusters) SetDeprecations(ctx context.Context, tenantID, id string, depr
 		obj.Status.Deprecations = convert.DeprecationsToAPI(p)
 		meta.SetStatusCondition(&obj.Status.Conditions, convert.DeprecationCondition(obj.Status.Deprecations, obj.Generation))
 		if equality.Semantic.DeepEqual(before, &obj.Status) {
+			return nil
+		}
+		return r.c.Status().Update(ctx, obj)
+	}))
+}
+
+// SetSummary writes what a controller pass learned of the workload cluster
+// (clustersummary.Apply); no change writes nothing.
+func (r clusters) SetSummary(ctx context.Context, tenantID, id string, summary model.JSON) error {
+	var sum cloudv1alpha1.ClusterSummary
+	if err := json.Unmarshal(summary, &sum); err != nil {
+		return fmt.Errorf("%w: cluster summary: %w", repository.ErrInvalid, err)
+	}
+	return translate(retry(func() error {
+		obj, err := r.find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		if !clustersummary.Apply(&obj.Status, sum) {
 			return nil
 		}
 		return r.c.Status().Update(ctx, obj)

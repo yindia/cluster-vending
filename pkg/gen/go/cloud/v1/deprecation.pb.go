@@ -75,6 +75,62 @@ func (DeprecationSource) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_deprecation_proto_rawDescGZIP(), []int{0}
 }
 
+// DeprecationSortBy is how ListClusterDeprecations orders the findings.
+// Unspecified: REMOVED_FIRST. Ties keep the scan's order.
+type DeprecationSortBy int32
+
+const (
+	DeprecationSortBy_DEPRECATION_SORT_BY_UNSPECIFIED DeprecationSortBy = 0
+	// Findings whose API version is removed first (ascending); deprecated
+	// only first when descending.
+	DeprecationSortBy_DEPRECATION_SORT_BY_REMOVED_FIRST DeprecationSortBy = 1
+	DeprecationSortBy_DEPRECATION_SORT_BY_NAMESPACE     DeprecationSortBy = 2
+	DeprecationSortBy_DEPRECATION_SORT_BY_KIND          DeprecationSortBy = 3
+)
+
+// Enum value maps for DeprecationSortBy.
+var (
+	DeprecationSortBy_name = map[int32]string{
+		0: "DEPRECATION_SORT_BY_UNSPECIFIED",
+		1: "DEPRECATION_SORT_BY_REMOVED_FIRST",
+		2: "DEPRECATION_SORT_BY_NAMESPACE",
+		3: "DEPRECATION_SORT_BY_KIND",
+	}
+	DeprecationSortBy_value = map[string]int32{
+		"DEPRECATION_SORT_BY_UNSPECIFIED":   0,
+		"DEPRECATION_SORT_BY_REMOVED_FIRST": 1,
+		"DEPRECATION_SORT_BY_NAMESPACE":     2,
+		"DEPRECATION_SORT_BY_KIND":          3,
+	}
+)
+
+func (x DeprecationSortBy) Enum() *DeprecationSortBy {
+	p := new(DeprecationSortBy)
+	*p = x
+	return p
+}
+
+func (x DeprecationSortBy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DeprecationSortBy) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_deprecation_proto_enumTypes[1].Descriptor()
+}
+
+func (DeprecationSortBy) Type() protoreflect.EnumType {
+	return &file_cloud_v1_deprecation_proto_enumTypes[1]
+}
+
+func (x DeprecationSortBy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DeprecationSortBy.Descriptor instead.
+func (DeprecationSortBy) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_deprecation_proto_rawDescGZIP(), []int{1}
+}
+
 // DeprecationFinding is one object of a cluster that was written with an
 // API version that is deprecated or removed at the target version.
 type DeprecationFinding struct {
@@ -352,7 +408,12 @@ type ListClusterDeprecationsRequest struct {
 	// call that produced it.
 	PageToken string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// Only the findings whose API version is removed at the target version.
-	OnlyRemoved   bool `protobuf:"varint,5,opt,name=only_removed,json=onlyRemoved,proto3" json:"only_removed,omitempty"`
+	OnlyRemoved bool `protobuf:"varint,5,opt,name=only_removed,json=onlyRemoved,proto3" json:"only_removed,omitempty"`
+	// Unspecified: REMOVED_FIRST. A token is good for the sort it was made
+	// with.
+	SortBy DeprecationSortBy `protobuf:"varint,6,opt,name=sort_by,json=sortBy,proto3,enum=cloud.v1.DeprecationSortBy" json:"sort_by,omitempty"`
+	// Unspecified: ascending.
+	SortOrder     SortOrder `protobuf:"varint,7,opt,name=sort_order,json=sortOrder,proto3,enum=cloud.v1.SortOrder" json:"sort_order,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -420,6 +481,20 @@ func (x *ListClusterDeprecationsRequest) GetOnlyRemoved() bool {
 		return x.OnlyRemoved
 	}
 	return false
+}
+
+func (x *ListClusterDeprecationsRequest) GetSortBy() DeprecationSortBy {
+	if x != nil {
+		return x.SortBy
+	}
+	return DeprecationSortBy_DEPRECATION_SORT_BY_UNSPECIFIED
+}
+
+func (x *ListClusterDeprecationsRequest) GetSortOrder() SortOrder {
+	if x != nil {
+		return x.SortOrder
+	}
+	return SortOrder_SORT_ORDER_UNSPECIFIED
 }
 
 type ListClusterDeprecationsResponse struct {
@@ -528,7 +603,7 @@ var File_cloud_v1_deprecation_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_deprecation_proto_rawDesc = "" +
 	"\n" +
-	"\x1acloud/v1/deprecation.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb2\x03\n" +
+	"\x1acloud/v1/deprecation.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x13cloud/v1/sort.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb2\x03\n" +
 	"\x12DeprecationFinding\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
@@ -554,7 +629,7 @@ const file_cloud_v1_deprecation_proto_rawDesc = "" +
 	"\bfindings\x18\x05 \x03(\v2\x1c.cloud.v1.DeprecationFindingR\bfindings\x12\x1c\n" +
 	"\ttruncated\x18\x06 \x01(\bR\ttruncated\x12\x14\n" +
 	"\x05error\x18\a \x01(\tR\x05error\x12=\n" +
-	"\fattempted_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\vattemptedAt\"\x92\x02\n" +
+	"\fattempted_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\vattemptedAt\"\x90\x03\n" +
 	"\x1eListClusterDeprecationsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -562,7 +637,10 @@ const file_cloud_v1_deprecation_proto_rawDesc = "" +
 	"\tpage_size\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x120\n" +
 	"\n" +
 	"page_token\x18\x04 \x01(\tB\x11\xbaH\x0er\f\x18\b2\b^[0-9]*$R\tpageToken\x12!\n" +
-	"\fonly_removed\x18\x05 \x01(\bR\vonlyRemoved\"\xc9\x02\n" +
+	"\fonly_removed\x18\x05 \x01(\bR\vonlyRemoved\x12>\n" +
+	"\asort_by\x18\x06 \x01(\x0e2\x1b.cloud.v1.DeprecationSortByB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06sortBy\x12<\n" +
+	"\n" +
+	"sort_order\x18\a \x01(\x0e2\x13.cloud.v1.SortOrderB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsortOrder\"\xc9\x02\n" +
 	"\x1fListClusterDeprecationsResponse\x128\n" +
 	"\bfindings\x18\x01 \x03(\v2\x1c.cloud.v1.DeprecationFindingR\bfindings\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12%\n" +
@@ -576,7 +654,12 @@ const file_cloud_v1_deprecation_proto_rawDesc = "" +
 	"\x11DeprecationSource\x12\"\n" +
 	"\x1eDEPRECATION_SOURCE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bDEPRECATION_SOURCE_MANIFEST\x10\x01\x12#\n" +
-	"\x1fDEPRECATION_SOURCE_HELM_RELEASE\x10\x02B\xa0\x01\n" +
+	"\x1fDEPRECATION_SOURCE_HELM_RELEASE\x10\x02*\xa0\x01\n" +
+	"\x11DeprecationSortBy\x12#\n" +
+	"\x1fDEPRECATION_SORT_BY_UNSPECIFIED\x10\x00\x12%\n" +
+	"!DEPRECATION_SORT_BY_REMOVED_FIRST\x10\x01\x12!\n" +
+	"\x1dDEPRECATION_SORT_BY_NAMESPACE\x10\x02\x12\x1c\n" +
+	"\x18DEPRECATION_SORT_BY_KIND\x10\x03B\xa0\x01\n" +
 	"\fcom.cloud.v1B\x10DeprecationProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -591,28 +674,32 @@ func file_cloud_v1_deprecation_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_deprecation_proto_rawDescData
 }
 
-var file_cloud_v1_deprecation_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_cloud_v1_deprecation_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_cloud_v1_deprecation_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_cloud_v1_deprecation_proto_goTypes = []any{
 	(DeprecationSource)(0),                  // 0: cloud.v1.DeprecationSource
-	(*DeprecationFinding)(nil),              // 1: cloud.v1.DeprecationFinding
-	(*ClusterDeprecations)(nil),             // 2: cloud.v1.ClusterDeprecations
-	(*ListClusterDeprecationsRequest)(nil),  // 3: cloud.v1.ListClusterDeprecationsRequest
-	(*ListClusterDeprecationsResponse)(nil), // 4: cloud.v1.ListClusterDeprecationsResponse
-	(*timestamppb.Timestamp)(nil),           // 5: google.protobuf.Timestamp
+	(DeprecationSortBy)(0),                  // 1: cloud.v1.DeprecationSortBy
+	(*DeprecationFinding)(nil),              // 2: cloud.v1.DeprecationFinding
+	(*ClusterDeprecations)(nil),             // 3: cloud.v1.ClusterDeprecations
+	(*ListClusterDeprecationsRequest)(nil),  // 4: cloud.v1.ListClusterDeprecationsRequest
+	(*ListClusterDeprecationsResponse)(nil), // 5: cloud.v1.ListClusterDeprecationsResponse
+	(*timestamppb.Timestamp)(nil),           // 6: google.protobuf.Timestamp
+	(SortOrder)(0),                          // 7: cloud.v1.SortOrder
 }
 var file_cloud_v1_deprecation_proto_depIdxs = []int32{
 	0, // 0: cloud.v1.DeprecationFinding.source:type_name -> cloud.v1.DeprecationSource
-	5, // 1: cloud.v1.ClusterDeprecations.scanned_at:type_name -> google.protobuf.Timestamp
-	1, // 2: cloud.v1.ClusterDeprecations.findings:type_name -> cloud.v1.DeprecationFinding
-	5, // 3: cloud.v1.ClusterDeprecations.attempted_at:type_name -> google.protobuf.Timestamp
-	1, // 4: cloud.v1.ListClusterDeprecationsResponse.findings:type_name -> cloud.v1.DeprecationFinding
-	5, // 5: cloud.v1.ListClusterDeprecationsResponse.scanned_at:type_name -> google.protobuf.Timestamp
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 1: cloud.v1.ClusterDeprecations.scanned_at:type_name -> google.protobuf.Timestamp
+	2, // 2: cloud.v1.ClusterDeprecations.findings:type_name -> cloud.v1.DeprecationFinding
+	6, // 3: cloud.v1.ClusterDeprecations.attempted_at:type_name -> google.protobuf.Timestamp
+	1, // 4: cloud.v1.ListClusterDeprecationsRequest.sort_by:type_name -> cloud.v1.DeprecationSortBy
+	7, // 5: cloud.v1.ListClusterDeprecationsRequest.sort_order:type_name -> cloud.v1.SortOrder
+	2, // 6: cloud.v1.ListClusterDeprecationsResponse.findings:type_name -> cloud.v1.DeprecationFinding
+	6, // 7: cloud.v1.ListClusterDeprecationsResponse.scanned_at:type_name -> google.protobuf.Timestamp
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_deprecation_proto_init() }
@@ -620,12 +707,13 @@ func file_cloud_v1_deprecation_proto_init() {
 	if File_cloud_v1_deprecation_proto != nil {
 		return
 	}
+	file_cloud_v1_sort_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_deprecation_proto_rawDesc), len(file_cloud_v1_deprecation_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,

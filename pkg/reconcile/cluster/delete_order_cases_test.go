@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +146,32 @@ func TestDeletionNodeGroupWaitEnds(t *testing.T) {
 	require.True(t, timedOut, "a warning names what is left: %v", storedStatus(row).GetRecentEvents())
 	d.run(80)
 	require.True(t, d.gone())
+}
+
+// The platform pool goes in the node groups' stage: its NodePool before its
+// NodeClaims, its class after them, and all of it before Karpenter's chart
+// (stage 5) is uninstalled. The registry's ranks enforce the order; this
+// pins that the pool's objects are among the ones deleted.
+func TestDeletionRemovesThePlatformPoolBeforeKarpenter(t *testing.T) {
+	d := newDelOrder(t)
+
+	d.run(80)
+
+	require.True(t, d.gone(), "log %v", d.log)
+	index := func(want string) int {
+		for i, l := range d.log {
+			if strings.Contains(l, want) {
+				return i
+			}
+		}
+		t.Fatalf("%q was never deleted: %v", want, d.log)
+		return -1
+	}
+	pool, claim, class := index("NodePool platform-pool"), index("NodeClaim platform-pool-z1"), index("EC2NodeClass platform-pool")
+	karpenter := index(fmt.Sprintf("%02d", rankKarpenterChart))
+	require.Less(t, pool, claim)
+	require.Less(t, claim, class)
+	require.Less(t, class, karpenter, "the pool is removed in stage 4, before Karpenter's stage 5")
 }
 
 // A forced deletion does not wait for the workload cluster: no load

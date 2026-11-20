@@ -483,8 +483,22 @@ type NodeGroupNode struct {
 	// The NodeClaim's Ready condition is True.
 	NodeclaimReady bool   `protobuf:"varint,14,opt,name=nodeclaim_ready,json=nodeclaimReady,proto3" json:"nodeclaim_ready,omitempty"`
 	ProviderId     string `protobuf:"bytes,15,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// What the node offers (its status.allocatable), from a live read; zero
+	// when the row was not read live. CPU in millicores, memory in bytes.
+	AllocatableCpuMillis   int64 `protobuf:"varint,16,opt,name=allocatable_cpu_millis,json=allocatableCpuMillis,proto3" json:"allocatable_cpu_millis,omitempty"`
+	AllocatableMemoryBytes int64 `protobuf:"varint,17,opt,name=allocatable_memory_bytes,json=allocatableMemoryBytes,proto3" json:"allocatable_memory_bytes,omitempty"`
+	AllocatablePods        int32 `protobuf:"varint,18,opt,name=allocatable_pods,json=allocatablePods,proto3" json:"allocatable_pods,omitempty"`
+	// The sum of the requests of the node's pods, by the scheduler's
+	// definition (init containers and overhead included).
+	RequestedCpuMillis   int64 `protobuf:"varint,19,opt,name=requested_cpu_millis,json=requestedCpuMillis,proto3" json:"requested_cpu_millis,omitempty"`
+	RequestedMemoryBytes int64 `protobuf:"varint,20,opt,name=requested_memory_bytes,json=requestedMemoryBytes,proto3" json:"requested_memory_bytes,omitempty"`
+	// Pods bound to the node that are not Succeeded or Failed.
+	PodCount int32 `protobuf:"varint,21,opt,name=pod_count,json=podCount,proto3" json:"pod_count,omitempty"`
+	// Of those pods, the ones with a container that sets no CPU or memory
+	// request.
+	PodsWithoutRequests int32 `protobuf:"varint,22,opt,name=pods_without_requests,json=podsWithoutRequests,proto3" json:"pods_without_requests,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NodeGroupNode) Reset() {
@@ -622,6 +636,55 @@ func (x *NodeGroupNode) GetProviderId() string {
 	return ""
 }
 
+func (x *NodeGroupNode) GetAllocatableCpuMillis() int64 {
+	if x != nil {
+		return x.AllocatableCpuMillis
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetAllocatableMemoryBytes() int64 {
+	if x != nil {
+		return x.AllocatableMemoryBytes
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetAllocatablePods() int32 {
+	if x != nil {
+		return x.AllocatablePods
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetRequestedCpuMillis() int64 {
+	if x != nil {
+		return x.RequestedCpuMillis
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetRequestedMemoryBytes() int64 {
+	if x != nil {
+		return x.RequestedMemoryBytes
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetPodCount() int32 {
+	if x != nil {
+		return x.PodCount
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetPodsWithoutRequests() int32 {
+	if x != nil {
+		return x.PodsWithoutRequests
+	}
+	return 0
+}
+
 var File_cloud_v1_node_group_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_node_group_proto_rawDesc = "" +
@@ -654,7 +717,7 @@ const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\fnodes_notice\x18\x06 \x01(\tR\vnodesNotice\"U\n" +
 	"\x0eNodeGroupNodes\x12\x14\n" +
 	"\x05group\x18\x01 \x01(\tR\x05group\x12-\n" +
-	"\x05nodes\x18\x02 \x03(\v2\x17.cloud.v1.NodeGroupNodeR\x05nodes\"\xa2\x04\n" +
+	"\x05nodes\x18\x02 \x03(\v2\x17.cloud.v1.NodeGroupNodeR\x05nodes\"\xf6\x06\n" +
 	"\rNodeGroupNode\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
 	"\rinstance_type\x18\x02 \x01(\tR\finstanceType\x12\x12\n" +
@@ -675,7 +738,14 @@ const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\x0fnodeclaim_phase\x18\r \x01(\tR\x0enodeclaimPhase\x12'\n" +
 	"\x0fnodeclaim_ready\x18\x0e \x01(\bR\x0enodeclaimReady\x12\x1f\n" +
 	"\vprovider_id\x18\x0f \x01(\tR\n" +
-	"providerId*\\\n" +
+	"providerId\x124\n" +
+	"\x16allocatable_cpu_millis\x18\x10 \x01(\x03R\x14allocatableCpuMillis\x128\n" +
+	"\x18allocatable_memory_bytes\x18\x11 \x01(\x03R\x16allocatableMemoryBytes\x12)\n" +
+	"\x10allocatable_pods\x18\x12 \x01(\x05R\x0fallocatablePods\x120\n" +
+	"\x14requested_cpu_millis\x18\x13 \x01(\x03R\x12requestedCpuMillis\x124\n" +
+	"\x16requested_memory_bytes\x18\x14 \x01(\x03R\x14requestedMemoryBytes\x12\x1b\n" +
+	"\tpod_count\x18\x15 \x01(\x05R\bpodCount\x122\n" +
+	"\x15pods_without_requests\x18\x16 \x01(\x05R\x13podsWithoutRequests*\\\n" +
 	"\fArchitecture\x12\x1c\n" +
 	"\x18ARCHITECTURE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ARCHITECTURE_AMD64\x10\x01\x12\x16\n" +

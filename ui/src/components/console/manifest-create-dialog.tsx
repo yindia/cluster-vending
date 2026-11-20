@@ -84,7 +84,6 @@ function ManifestDialogFrame({ embedded, ...props }: WizardDialogProps & { embed
 export type ManifestCreateDialogProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onUseForm?: () => void;
   /** The resource workflow owns one modal and embeds this draft's reviewed workflow. */
   embedded?: boolean;
   onBusyChange?: (busy: boolean) => void;
@@ -104,7 +103,7 @@ function ErrorNotice({ error }: { error: string }) {
 }
 
 export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
-  const { isOpen, kind, onOpenChange, onUseForm, embedded = false, onBusyChange } = props;
+  const { isOpen, kind, onOpenChange, embedded = false, onBusyChange } = props;
   const { api, tenantId, scopeKey, canWrite } = usePlatform();
   const formId = useId();
   const editor = useRef<ValuesEditorHandle>(null);
@@ -296,7 +295,6 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
           {!embedded && <Text color="secondary">Paste one {kind} manifest. Review checks the manifest and its referenced accounts and networks. Nothing is submitted until you confirm.</Text>}
           <HStack gap={2} wrap="wrap" hAlign={embedded ? "between" : "start"} vAlign="center">
             {embedded && <Text color="secondary">Use the same manifest as the CLI.</Text>}
-            {onUseForm && <Button type="button" label="Use guided form" isDisabled={!!busy} onClick={() => { cancel(); setStep(0); setReviewed(undefined); onUseForm(); }} />}
             <Button type="button" label={text ? "Replace with example" : "Load example"} isDisabled={locked} isLoading={busy === "example"} onClick={() => { void loadExample(); }} />
           </HStack>
           <ValuesEditor ref={editor} label={`${kind} manifest`} language="yaml" value={text} onChange={changeText} disabled={locked} error={validationError || undefined} description={embedded ? "Maximum 64 KiB. Replace example resource IDs before review." : "Required. Paste YAML using apiVersion: cluster-vending.io/v1 and the selected kind. Maximum size: 64 KiB. Example reference IDs must be replaced."} />

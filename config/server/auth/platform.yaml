@@ -20,17 +20,38 @@ auth:
     grant: {role: TenantViewer, tenants: [acme]}
 
 nodeGroups:
-  # The default EKS managed node group: runs Karpenter, cluster-autoscaler,
-  # CoreDNS and every platform and tenant component.
+  # The bootstrap group, the default EKS managed node group: runs Karpenter,
+  # CoreDNS and the EBS CSI controller (and, until PROP-03 phase 3, every
+  # platform and tenant component). Tainted node.cluster-vending.io/pool=system.
   system:
-    # New clusters only: instanceType, capacityType, diskSizeGiB.
-    instanceType: t3.medium
-    # In place, on every cluster. minSize is also the size at creation (at
-    # least 2: Karpenter runs two replicas); maxSize is at least minSize.
+    # New clusters only; an existing cluster keeps its instance types (EKS
+    # cannot change them in place). A list of one architecture and one
+    # vCPU/memory class, so a capacity shortage of one type does not block creation.
+    instanceTypes: [t3.medium]
+    # The fixed size, at least 2: Karpenter runs two replicas with
+    # anti-affinity. Applies to every cluster, in place. (maxSize is
+    # deprecated: a value still set is warned about.)
     minSize: 2
-    maxSize: 6
+    # New clusters only: ON_DEMAND or SPOT.
     capacityType: ON_DEMAND
+    # New clusters only, in GiB; 0: EKS's default.
     diskSizeGiB: 0
+  # The platform pool, the Karpenter NodePool and EC2NodeClass "platform-pool"
+  # (built and empty until PROP-03 phase 3 places components on it).
+  platform:
+    instanceFamilies: [m7i, m6i]
+    instanceSizes: [large, xlarge, 2xlarge]
+    architectures: [AMD64]          # one per pool
+    capacityTypes: [ON_DEMAND]      # SPOT is refused in this version
+    limits:
+      cpu: 128
+      memory: 512Gi
+    consolidationPolicy: WhenEmpty  # or WhenEmptyOrUnderutilized
+    consolidateAfter: 5m
+    expireAfter: 336h
+    terminationGracePeriod: 1h
+    disruptionBudget: 1             # nodes disrupted at once
+    maxPods: 0                      # 0: Karpenter's default for the shape
   # What tenants may create as their own node groups.
   karpenter:
     # An empty list restricts nothing.

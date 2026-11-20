@@ -2,6 +2,7 @@
 
 import { useId, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+import { StackItem } from "@astryxdesign/core/Stack";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
@@ -37,11 +38,11 @@ export function DetailNavigation({ resource, pages, selection, groups, actions }
   return <VStack as="nav" aria-label={`${resource} navigation`} className="cv-detail-navigation">
     <VStack className="cv-detail-desktop-nav" gap={2}>
       <HStack gap={2} hAlign="between" vAlign="center" width="100%">
-      <TabList value={current?.pages[0].value ?? active} onChange={open} role="tablist" aria-label={`${resource} sections`} hasDivider>
-        {primary.map(page => <Tab key={page.value} value={page.value} label={page.label}
-          panelId={panelId(current?.pages[0].value === page.value ? active : page.value)} />)}
-      </TabList>
-      {actions}
+        <StackItem size="fill"><TabList value={current?.pages[0].value ?? active} onChange={open} role="tablist" aria-label={`${resource} sections`} hasDivider>
+          {primary.map(page => <Tab key={page.value} value={page.value} label={page.label}
+            panelId={panelId(current?.pages[0].value === page.value ? active : page.value)} />)}
+        </TabList></StackItem>
+        {actions}
       </HStack>
       {current && current.pages.length > 1 && <TabList value={active} onChange={open} role="tablist" aria-label={current.label}>
         {current.pages.map(page => <Tab key={page.value} value={page.value} label={page.label} panelId={panelId(page.value)} />)}

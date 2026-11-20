@@ -77,6 +77,71 @@ func (NodeStatusFilter) EnumDescriptor() ([]byte, []int) {
 	return file_cloud_v1_node_group_nodes_proto_rawDescGZIP(), []int{0}
 }
 
+// NodeSortBy is how ListNodeGroupNodes orders the nodes. Unspecified: NAME.
+// Ties are broken by node name.
+type NodeSortBy int32
+
+const (
+	NodeSortBy_NODE_SORT_BY_UNSPECIFIED NodeSortBy = 0
+	NodeSortBy_NODE_SORT_BY_NAME        NodeSortBy = 1
+	NodeSortBy_NODE_SORT_BY_AGE         NodeSortBy = 2
+	// Ascending: not Ready nodes first.
+	NodeSortBy_NODE_SORT_BY_READINESS NodeSortBy = 3
+	// Requested CPU as a percentage of allocatable CPU.
+	NodeSortBy_NODE_SORT_BY_CPU_REQUESTED_PERCENT    NodeSortBy = 4
+	NodeSortBy_NODE_SORT_BY_MEMORY_REQUESTED_PERCENT NodeSortBy = 5
+	NodeSortBy_NODE_SORT_BY_POD_COUNT                NodeSortBy = 6
+)
+
+// Enum value maps for NodeSortBy.
+var (
+	NodeSortBy_name = map[int32]string{
+		0: "NODE_SORT_BY_UNSPECIFIED",
+		1: "NODE_SORT_BY_NAME",
+		2: "NODE_SORT_BY_AGE",
+		3: "NODE_SORT_BY_READINESS",
+		4: "NODE_SORT_BY_CPU_REQUESTED_PERCENT",
+		5: "NODE_SORT_BY_MEMORY_REQUESTED_PERCENT",
+		6: "NODE_SORT_BY_POD_COUNT",
+	}
+	NodeSortBy_value = map[string]int32{
+		"NODE_SORT_BY_UNSPECIFIED":              0,
+		"NODE_SORT_BY_NAME":                     1,
+		"NODE_SORT_BY_AGE":                      2,
+		"NODE_SORT_BY_READINESS":                3,
+		"NODE_SORT_BY_CPU_REQUESTED_PERCENT":    4,
+		"NODE_SORT_BY_MEMORY_REQUESTED_PERCENT": 5,
+		"NODE_SORT_BY_POD_COUNT":                6,
+	}
+)
+
+func (x NodeSortBy) Enum() *NodeSortBy {
+	p := new(NodeSortBy)
+	*p = x
+	return p
+}
+
+func (x NodeSortBy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NodeSortBy) Descriptor() protoreflect.EnumDescriptor {
+	return file_cloud_v1_node_group_nodes_proto_enumTypes[1].Descriptor()
+}
+
+func (NodeSortBy) Type() protoreflect.EnumType {
+	return &file_cloud_v1_node_group_nodes_proto_enumTypes[1]
+}
+
+func (x NodeSortBy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NodeSortBy.Descriptor instead.
+func (NodeSortBy) EnumDescriptor() ([]byte, []int) {
+	return file_cloud_v1_node_group_nodes_proto_rawDescGZIP(), []int{1}
+}
+
 // ListNodeGroupNodesRequest asks for a page of the nodes of one node group.
 type ListNodeGroupNodesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -93,11 +158,18 @@ type ListNodeGroupNodesRequest struct {
 	PageSize int32 `protobuf:"varint,4,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// next_page_token from a previous call. All other fields must match the
 	// call that produced it, and the node group's nodes must not have changed.
+	// Tokens of the stored list are decimal numbers; tokens of a live list
+	// are longer strings, hence the bound.
 	PageToken string `protobuf:"bytes,5,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// Only the nodes whose Ready condition matches. Unspecified: all.
 	Filter NodeStatusFilter `protobuf:"varint,6,opt,name=filter,proto3,enum=cloud.v1.NodeStatusFilter" json:"filter,omitempty"`
 	// Only the nodes whose name contains this text (case-insensitive).
-	NameContains  string `protobuf:"bytes,7,opt,name=name_contains,json=nameContains,proto3" json:"name_contains,omitempty"`
+	NameContains string `protobuf:"bytes,7,opt,name=name_contains,json=nameContains,proto3" json:"name_contains,omitempty"`
+	// Unspecified: NAME. Served by the live reader; a list that is not live
+	// yet answers UNIMPLEMENTED for any other value.
+	SortBy NodeSortBy `protobuf:"varint,8,opt,name=sort_by,json=sortBy,proto3,enum=cloud.v1.NodeSortBy" json:"sort_by,omitempty"`
+	// Unspecified: ascending.
+	SortOrder     SortOrder `protobuf:"varint,9,opt,name=sort_order,json=sortOrder,proto3,enum=cloud.v1.SortOrder" json:"sort_order,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -181,6 +253,20 @@ func (x *ListNodeGroupNodesRequest) GetNameContains() string {
 	return ""
 }
 
+func (x *ListNodeGroupNodesRequest) GetSortBy() NodeSortBy {
+	if x != nil {
+		return x.SortBy
+	}
+	return NodeSortBy_NODE_SORT_BY_UNSPECIFIED
+}
+
+func (x *ListNodeGroupNodesRequest) GetSortOrder() SortOrder {
+	if x != nil {
+		return x.SortOrder
+	}
+	return SortOrder_SORT_ORDER_UNSPECIFIED
+}
+
 // ListNodeGroupNodesResponse is a page of a node group's nodes, in name order,
 // read from the cluster's results bucket: the API server never reads the
 // workload cluster.
@@ -197,7 +283,9 @@ type ListNodeGroupNodesResponse struct {
 	Complete bool `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
 	// Why the list is empty or partial: the results are not available, or were
 	// not collected completely.
-	Notices       []string `protobuf:"bytes,6,rep,name=notices,proto3" json:"notices,omitempty"`
+	Notices []string `protobuf:"bytes,6,rep,name=notices,proto3" json:"notices,omitempty"`
+	// When a live read of the nodes started. Unset: not a live read.
+	LiveAt        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=live_at,json=liveAt,proto3" json:"live_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -274,34 +362,54 @@ func (x *ListNodeGroupNodesResponse) GetNotices() []string {
 	return nil
 }
 
+func (x *ListNodeGroupNodesResponse) GetLiveAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LiveAt
+	}
+	return nil
+}
+
 var File_cloud_v1_node_group_nodes_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_node_group_nodes_proto_rawDesc = "" +
 	"\n" +
-	"\x1fcloud/v1/node_group_nodes.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/node_group.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa9\x03\n" +
+	"\x1fcloud/v1/node_group_nodes.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/node_group.proto\x1a\x13cloud/v1/sort.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x04\n" +
 	"\x19ListNodeGroupNodesRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
 	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\x12P\n" +
 	"\n" +
 	"node_group\x18\x03 \x01(\tB1\xbaH.r,\x10\x01\x18@2&^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$R\tnodeGroup\x12$\n" +
-	"\tpage_size\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x120\n" +
+	"\tpage_size\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\bpageSize\x12'\n" +
 	"\n" +
-	"page_token\x18\x05 \x01(\tB\x11\xbaH\x0er\f\x18\b2\b^[0-9]*$R\tpageToken\x12<\n" +
+	"page_token\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\tpageToken\x12<\n" +
 	"\x06filter\x18\x06 \x01(\x0e2\x1a.cloud.v1.NodeStatusFilterB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06filter\x12-\n" +
-	"\rname_contains\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xfd\x01R\fnameContains\"\xfe\x01\n" +
+	"\rname_contains\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\xfd\x01R\fnameContains\x127\n" +
+	"\asort_by\x18\b \x01(\x0e2\x14.cloud.v1.NodeSortByB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06sortBy\x12<\n" +
+	"\n" +
+	"sort_order\x18\t \x01(\x0e2\x13.cloud.v1.SortOrderB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsortOrder\"\xb3\x02\n" +
 	"\x1aListNodeGroupNodesResponse\x12-\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x17.cloud.v1.NodeGroupNodeR\x05nodes\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12\x14\n" +
 	"\x05total\x18\x03 \x01(\x05R\x05total\x12=\n" +
 	"\fcollected_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vcollectedAt\x12\x1a\n" +
 	"\bcomplete\x18\x05 \x01(\bR\bcomplete\x12\x18\n" +
-	"\anotices\x18\x06 \x03(\tR\anotices*\x92\x01\n" +
+	"\anotices\x18\x06 \x03(\tR\anotices\x123\n" +
+	"\alive_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x06liveAt*\x92\x01\n" +
 	"\x10NodeStatusFilter\x12\"\n" +
 	"\x1eNODE_STATUS_FILTER_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16NODE_STATUS_FILTER_ALL\x10\x01\x12\x1c\n" +
 	"\x18NODE_STATUS_FILTER_READY\x10\x02\x12 \n" +
-	"\x1cNODE_STATUS_FILTER_NOT_READY\x10\x03B\xa3\x01\n" +
+	"\x1cNODE_STATUS_FILTER_NOT_READY\x10\x03*\xe2\x01\n" +
+	"\n" +
+	"NodeSortBy\x12\x1c\n" +
+	"\x18NODE_SORT_BY_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11NODE_SORT_BY_NAME\x10\x01\x12\x14\n" +
+	"\x10NODE_SORT_BY_AGE\x10\x02\x12\x1a\n" +
+	"\x16NODE_SORT_BY_READINESS\x10\x03\x12&\n" +
+	"\"NODE_SORT_BY_CPU_REQUESTED_PERCENT\x10\x04\x12)\n" +
+	"%NODE_SORT_BY_MEMORY_REQUESTED_PERCENT\x10\x05\x12\x1a\n" +
+	"\x16NODE_SORT_BY_POD_COUNT\x10\x06B\xa3\x01\n" +
 	"\fcom.cloud.v1B\x13NodeGroupNodesProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (
@@ -316,24 +424,29 @@ func file_cloud_v1_node_group_nodes_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_node_group_nodes_proto_rawDescData
 }
 
-var file_cloud_v1_node_group_nodes_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_cloud_v1_node_group_nodes_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_cloud_v1_node_group_nodes_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_cloud_v1_node_group_nodes_proto_goTypes = []any{
 	(NodeStatusFilter)(0),              // 0: cloud.v1.NodeStatusFilter
-	(*ListNodeGroupNodesRequest)(nil),  // 1: cloud.v1.ListNodeGroupNodesRequest
-	(*ListNodeGroupNodesResponse)(nil), // 2: cloud.v1.ListNodeGroupNodesResponse
-	(*NodeGroupNode)(nil),              // 3: cloud.v1.NodeGroupNode
-	(*timestamppb.Timestamp)(nil),      // 4: google.protobuf.Timestamp
+	(NodeSortBy)(0),                    // 1: cloud.v1.NodeSortBy
+	(*ListNodeGroupNodesRequest)(nil),  // 2: cloud.v1.ListNodeGroupNodesRequest
+	(*ListNodeGroupNodesResponse)(nil), // 3: cloud.v1.ListNodeGroupNodesResponse
+	(SortOrder)(0),                     // 4: cloud.v1.SortOrder
+	(*NodeGroupNode)(nil),              // 5: cloud.v1.NodeGroupNode
+	(*timestamppb.Timestamp)(nil),      // 6: google.protobuf.Timestamp
 }
 var file_cloud_v1_node_group_nodes_proto_depIdxs = []int32{
 	0, // 0: cloud.v1.ListNodeGroupNodesRequest.filter:type_name -> cloud.v1.NodeStatusFilter
-	3, // 1: cloud.v1.ListNodeGroupNodesResponse.nodes:type_name -> cloud.v1.NodeGroupNode
-	4, // 2: cloud.v1.ListNodeGroupNodesResponse.collected_at:type_name -> google.protobuf.Timestamp
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	1, // 1: cloud.v1.ListNodeGroupNodesRequest.sort_by:type_name -> cloud.v1.NodeSortBy
+	4, // 2: cloud.v1.ListNodeGroupNodesRequest.sort_order:type_name -> cloud.v1.SortOrder
+	5, // 3: cloud.v1.ListNodeGroupNodesResponse.nodes:type_name -> cloud.v1.NodeGroupNode
+	6, // 4: cloud.v1.ListNodeGroupNodesResponse.collected_at:type_name -> google.protobuf.Timestamp
+	6, // 5: cloud.v1.ListNodeGroupNodesResponse.live_at:type_name -> google.protobuf.Timestamp
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_node_group_nodes_proto_init() }
@@ -342,12 +455,13 @@ func file_cloud_v1_node_group_nodes_proto_init() {
 		return
 	}
 	file_cloud_v1_node_group_proto_init()
+	file_cloud_v1_sort_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_node_group_nodes_proto_rawDesc), len(file_cloud_v1_node_group_nodes_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,

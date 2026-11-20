@@ -42,6 +42,9 @@ func (s *ClusterService) ListNodeGroupNodes(ctx context.Context, req *cloudv1.Li
 	if err != nil {
 		return nil, err
 	}
+	if sortScope(int32(req.GetSortBy()), isDesc(req.GetSortOrder(), false), false) != "" {
+		return nil, errSortNotLive("the node list")
+	}
 	known, notice := nodeGroupKnown(row, req.GetNodeGroup())
 	if !known {
 		return nil, connect.NewError(connect.CodeNotFound, "cluster "+req.GetClusterId()+" has no node group "+req.GetNodeGroup())
@@ -160,4 +163,18 @@ func filterNodes(nodes []*cloudv1.NodeGroupNode, filter cloudv1.NodeStatusFilter
 		out = append(out, n)
 	}
 	return out
+}
+
+// GetNodeResources is the live resource totals of the cluster's node groups.
+// The live reader that serves them does not exist yet (PROP-02 phase 3), so
+// the answer is UNIMPLEMENTED once the caller's tenant and cluster check out.
+func (s *ClusterService) GetNodeResources(ctx context.Context, req *cloudv1.GetNodeResourcesRequest) (_ *cloudv1.GetNodeResourcesResponse, err error) {
+	defer func() { err = rpcError(err) }()
+	if err := service.Validate(req); err != nil {
+		return nil, err
+	}
+	if _, err := s.get(ctx, req.GetTenantId(), req.GetClusterId()); err != nil {
+		return nil, err
+	}
+	return nil, connect.NewError(connect.CodeUnimplemented, "node resources are read live from the workload cluster, which this deployment does not do yet")
 }

@@ -78,7 +78,7 @@ var AccessChecks = []AccessCheck{
 	{ActionDescribeAvailabilityZones, "read", "network layouts and their zones", false},
 	{ActionDescribeVpcs, "read (one page)", "network import and the providers' observation", false},
 	{ActionCreateVpcDryRun, "DryRun=true: DryRunOperation when allowed, UnauthorizedOperation when not", "creating networks", false},
-	{ActionCreateTagsDryRun, "DryRun=true on a resource that does not exist: DryRunOperation or a not-found answer when allowed (the permission is checked first), UnauthorizedOperation when not",
+	{ActionCreateTagsDryRun, "DryRun=true on a VPC of the region, or a DryRun CreateVpc tagging on create when there is none (never a made-up ID): DryRunOperation when allowed, UnauthorizedOperation when not",
 		"taking over existing networks and clusters (the updater role's write)", false},
 	{ActionListClusters, "read (one page)", "EKS name checks, import and the providers' clusters", false},
 	{ActionGetRole, "read of the tenant role itself, once (IAM is global)", "the IAM roles the platform creates and reads", true},
@@ -319,15 +319,57 @@ func call(ctx context.Context, api accessAPIs, action string) error {
 			err = nil // allowed: the DryRun answer when the call would succeed
 		}
 	case ActionCreateTagsDryRun:
-		_, err = api.ec2.CreateTags(ctx, &ec2.CreateTagsInput{Resources: []string{"vpc-00000000000000000"},
-			Tags: []ec2types.Tag{{Key: awssdk.String("cluster-vending.io/access-check"), Value: awssdk.String("dry-run")}}, DryRun: awssdk.Bool(true)})
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) && (apiErr.ErrorCode() == "DryRunOperation" || strings.HasSuffix(apiErr.ErrorCode(), ".NotFound") ||
-			strings.HasSuffix(apiErr.ErrorCode(), ".Malformed")) {
-			err = nil // allowed: the permission is checked before the resource
-		}
+		err = createTagsDryRun(ctx, api.ec2)
 	case ActionListClusters:
 		_, err = api.eks.ListClusters(ctx, &eks.ListClustersInput{MaxResults: awssdk.Int32(1)})
+	}
+	return err
+}
+
+// accessCheckTag is the tag of the dry-run calls; nothing is ever written.
+var accessCheckTag = ec2types.Tag{Key: awssdk.String("cluster-vending.io/access-check"), Value: awssdk.String("dry-run")}
+
+// createTagsDryRun checks ec2:CreateTags without a made-up resource ID: AWS
+// rejects an ID that does not exist (InvalidID) before it checks the
+// permission, so such an answer says nothing about the role. In a region with
+// a VPC it is a dry-run tag on that VPC; in a region with none, a dry-run
+// CreateVpc that tags on create, which AWS authorizes as ec2:CreateTags on the
+// new VPC. DryRunOperation is allowed; anything else is the answer.
+func createTagsDryRun(ctx context.Context, api interface {
+	DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
+	CreateVpc(context.Context, *ec2.CreateVpcInput, ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error)
+	CreateTags(context.Context, *ec2.CreateTagsInput, ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+}) error {
+	out, err := api.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{MaxResults: awssdk.Int32(5)})
+	if err != nil {
+		return fmt.Errorf("listing a VPC to test tagging on: %w", err)
+	}
+	target := ""
+	for _, v := range out.Vpcs {
+		if id := awssdk.ToString(v.VpcId); id != "" {
+			target = id
+			break
+		}
+	}
+	if target != "" {
+		_, err = api.CreateTags(ctx, &ec2.CreateTagsInput{Resources: []string{target},
+			Tags: []ec2types.Tag{accessCheckTag}, DryRun: awssdk.Bool(true)})
+		return dryRunAnswer(err, "")
+	}
+	_, err = api.CreateVpc(ctx, &ec2.CreateVpcInput{CidrBlock: awssdk.String("10.255.0.0/28"), DryRun: awssdk.Bool(true),
+		TagSpecifications: []ec2types.TagSpecification{{ResourceType: ec2types.ResourceTypeVpc, Tags: []ec2types.Tag{accessCheckTag}}}})
+	return dryRunAnswer(err, "no VPC in the region to test on; tagging a new VPC on create")
+}
+
+// dryRunAnswer is nil for DryRunOperation (the call would have succeeded) and
+// the error otherwise, prefixed with context when given.
+func dryRunAnswer(err error, context string) error {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) && apiErr.ErrorCode() == "DryRunOperation" {
+		return nil
+	}
+	if err != nil && context != "" {
+		return fmt.Errorf("%s: %w", context, err)
 	}
 	return err
 }

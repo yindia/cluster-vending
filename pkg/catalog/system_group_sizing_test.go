@@ -66,7 +66,7 @@ func TestDefaultSystemNodeGroupCanGrow(t *testing.T) {
 	if group.MaxSize <= group.MinSize {
 		t.Fatalf("max %d is not above min %d: cluster-autoscaler could never add a node", group.MaxSize, group.MinSize)
 	}
-	shape, _ := catalog.InstanceShape(group.InstanceType)
+	shape, _ := catalog.InstanceShape(group.InstanceTypes[0])
 	nodeCPU, nodeMem := shape.Allocatable()
 	maxNodes := int64(group.MaxSize)
 	rows, problems := catalog.SizingTable(catalogDefinitions(t), maxNodes)
@@ -111,7 +111,7 @@ func TestSizingTableIsNotEmpty(t *testing.T) {
 // The rule on its own: each way a group fails, and what is not counted.
 func TestCheckSystemGroupSizing(t *testing.T) {
 	group := func(instanceType string, min int) config.SystemNodeGroup {
-		return config.SystemNodeGroup{InstanceType: instanceType, MinSize: min, MaxSize: min + 4}
+		return config.SystemNodeGroup{InstanceTypes: []string{instanceType}, MinSize: min, MaxSize: min + 4}
 	}
 	defs := catalogDefinitions(t)
 	without := func(name string) []component.Definition {
@@ -132,7 +132,7 @@ func TestCheckSystemGroupSizing(t *testing.T) {
 		{"the default fits", defs, config.DefaultNodeGroups().System, nil},
 		{"a bigger instance fits", defs, group("t3.xlarge", 2), nil},
 		{"one small node does not", defs, group("t3.small", 1), []string{"CPU requests", "memory requests", "pods exceed"}},
-		{"unknown instance type", defs, group("x9.huge", 2), []string{`instanceType "x9.huge" is not an instance type the sizing rule knows`}},
+		{"unknown instance type", defs, group("x9.huge", 2), []string{`"x9.huge" is not an instance type the sizing rule knows`}},
 		{"a definition no list names", append(append([]component.Definition{}, defs...),
 			component.Definition{Name: "extra", Management: component.Platform, HasInstall: true}), config.DefaultNodeGroups().System,
 			[]string{"extra is in no sizing list"}},

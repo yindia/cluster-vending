@@ -9,6 +9,7 @@ import "cloud/v1/deprecation.proto";
 import "cloud/v1/events.proto";
 import "cloud/v1/node_group_manifest.proto";
 import "cloud/v1/node_group_nodes.proto";
+import "cloud/v1/node_resources.proto";
 import "cloud/v1/plan.proto";
 import "cloud/v1/recommendation.proto";
 import "cloud/v1/violation.proto";
@@ -136,6 +137,15 @@ service ClusterService {
   // A bucket that cannot be read, or nodes not collected yet, is a notice in
   // the response, not an error.
   rpc ListNodeGroupNodes(ListNodeGroupNodesRequest) returns (ListNodeGroupNodesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Returns the resource totals (allocatable and requested CPU, memory and
+  // pods) per node group and for the cluster, read live from the workload
+  // cluster by the live reader (the API server never connects to it).
+  // UNIMPLEMENTED until the live reader exists. An unreadable cluster is
+  // UNAVAILABLE, with a LiveUnavailableDetail.
+  rpc GetNodeResources(GetNodeResourcesRequest) returns (GetNodeResourcesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

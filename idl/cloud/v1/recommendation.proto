@@ -3,6 +3,7 @@ syntax = "proto3";
 package cloud.v1;
 
 import "buf/validate/validate.proto";
+import "cloud/v1/sort.proto";
 import "google/protobuf/timestamp.proto";
 
 // RecommendationSource is where a recommendation comes from.
@@ -102,6 +103,20 @@ message ClusterRecommendations {
   string message = 10;
 }
 
+// RecommendationSortBy is how ListClusterRecommendations orders the
+// containers. Unspecified: NAMESPACE (then workload kind, name and
+// container). Ties keep that order.
+enum RecommendationSortBy {
+  RECOMMENDATION_SORT_BY_UNSPECIFIED = 0;
+  RECOMMENDATION_SORT_BY_NAMESPACE = 1;
+  // The size of the change of the CPU request, in millicores, whether up or
+  // down. Descending (the default for this key): the largest change first.
+  // Containers without a recommendation come last either way.
+  RECOMMENDATION_SORT_BY_CPU_CHANGE = 2;
+  // The same for the memory request, in bytes.
+  RECOMMENDATION_SORT_BY_MEMORY_CHANGE = 3;
+}
+
 message ListClusterRecommendationsRequest {
   // Tenant scope. DNS label, at most 56 chars so the tenant namespace
   // "tenant-<id>" fits the 63-char Kubernetes limit.
@@ -133,6 +148,11 @@ message ListClusterRecommendationsRequest {
   // Only the containers whose recommended requests differ from what they
   // set by a tenth or more.
   bool only_changes = 6;
+
+  // Unspecified: NAMESPACE. A token is good for the sort it was made with.
+  RecommendationSortBy sort_by = 7 [(buf.validate.field).enum.defined_only = true];
+  // Unspecified: ascending, except for the change keys (descending).
+  SortOrder sort_order = 8 [(buf.validate.field).enum.defined_only = true];
 }
 
 message ListClusterRecommendationsResponse {

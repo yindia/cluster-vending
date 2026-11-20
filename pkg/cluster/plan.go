@@ -104,22 +104,22 @@ func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec,
 
 // SystemPool is the platform admin's settings of the default node group of
 // a new cluster (--system-node-group-min-size and -max-size, --system-node-
-// group-instance-type). Zero values, and a minimum below
+// group-instance-types). Zero values, and a minimum below
 // crossplaneaws.MinSystemPoolSize, are the defaults.
 type SystemPool struct {
 	MinSize, MaxSize int
-	InstanceType     string
+	InstanceTypes    []string
 	// CapacityType ("ON_DEMAND", "SPOT") and DiskSizeGiB are used when the
 	// request names none; empty and 0: ON_DEMAND and EKS's default.
 	CapacityType string
 	DiskSizeGiB  int
 }
 
-func (p SystemPool) instanceType() string {
-	if p.InstanceType == "" {
-		return crossplaneaws.DefaultSystemInstanceType
+func (p SystemPool) instanceTypes() []string {
+	if len(p.InstanceTypes) == 0 {
+		return []string{crossplaneaws.DefaultSystemInstanceType}
 	}
-	return p.InstanceType
+	return slices.Clone(p.InstanceTypes)
 }
 
 // ResolveSpecWith is ResolveSpec with the admin's settings of the default
@@ -171,7 +171,7 @@ func fixedNodePool(pool *cloudv1.NodePoolSpec, system SystemPool, hasLaunchTempl
 		pool = &cloudv1.NodePoolSpec{}
 	}
 	if len(pool.InstanceTypes) == 0 {
-		pool.InstanceTypes = []string{system.instanceType()}
+		pool.InstanceTypes = system.instanceTypes()
 	}
 	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED && system.CapacityType == "SPOT" {
 		pool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_SPOT

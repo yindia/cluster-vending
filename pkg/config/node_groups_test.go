@@ -24,7 +24,8 @@ func loadSection(t *testing.T, yaml string) config.LookupFunc {
 
 func TestNodeGroupsDefaultsAreT3AndTwoToSixNodes(t *testing.T) {
 	want := config.NodeGroups{
-		System: config.SystemNodeGroup{InstanceType: "t3.medium", MinSize: 2, MaxSize: 6, CapacityType: "ON_DEMAND"},
+		Platform: config.DefaultNodeGroups().Platform,
+		System:   config.SystemNodeGroup{InstanceTypes: []string{"t3.medium"}, MinSize: 2, MaxSize: 6, CapacityType: "ON_DEMAND"},
 		Karpenter: config.KarpenterNodeGroups{InstanceFamilies: []string{"t3"},
 			Defaults: config.NodeGroupDefaults{Architectures: []string{"AMD64"}, CapacityTypes: []string{"ON_DEMAND"}}},
 	}
@@ -47,7 +48,7 @@ func TestNodeGroupsSectionWithLists(t *testing.T) {
 	file := loadSection(t, `
 nodeGroups:
   system:
-    instanceType: t3.xlarge
+    instanceTypes: [t3.xlarge]
     minSize: 3
     maxSize: 8
     capacityType: SPOT
@@ -61,9 +62,11 @@ nodeGroups:
       capacityTypes: [ON_DEMAND, SPOT]
 `)
 	want := config.NodeGroups{
-		System: config.SystemNodeGroup{InstanceType: "t3.xlarge", MinSize: 3, MaxSize: 8, CapacityType: "SPOT", DiskSizeGiB: 50},
+		Platform: config.DefaultNodeGroups().Platform,
+		System:   config.SystemNodeGroup{InstanceTypes: []string{"t3.xlarge"}, MinSize: 3, MaxSize: 8, CapacityType: "SPOT", DiskSizeGiB: 50},
 		Karpenter: config.KarpenterNodeGroups{InstanceFamilies: []string{"t3", "t3a"}, InstanceTypes: []string{"m7i.large"},
 			Defaults: config.NodeGroupDefaults{Architectures: []string{"AMD64", "ARM64"}, CapacityTypes: []string{"ON_DEMAND", "SPOT"}}},
+		Warnings: serveWarnings(t, file),
 	}
 	serve, err := config.LoadServe(nil, nil, file)
 	if err != nil || !reflect.DeepEqual(serve.NodeGroups, want) {
@@ -127,8 +130,8 @@ func TestNodeGroupsValidationErrors(t *testing.T) {
 		"size below two":        {map[string]string{config.EnvSystemNodeGroupSize: "1"}, "at least 2"},
 		"size not a number":     {map[string]string{config.EnvSystemNodeGroupSize: "two"}, "not a number"},
 		"size and min differ":   {map[string]string{config.EnvSystemNodeGroupSize: "3", config.EnvSystemNodeGroupMinSize: "4"}, "different"},
-		"empty instance type":   {map[string]string{config.EnvSystemNodeGroupInstanceType: " "}, "instance type"},
-		"type without a dot":    {map[string]string{config.EnvSystemNodeGroupInstanceType: "t3large"}, "instance type"},
+		"empty instance type":   {map[string]string{config.EnvSystemInstanceTypes: " "}, "at least one instance type"},
+		"type without a dot":    {map[string]string{config.EnvSystemInstanceTypes: "t3large"}, "instance type"},
 		"bad capacity type":     {map[string]string{config.EnvSystemNodeGroupCapacityType: "reserved"}, "ON_DEMAND, SPOT"},
 		"negative disk":         {map[string]string{config.EnvSystemNodeGroupDiskSizeGiB: "-1"}, "0 to"},
 		"family with a dot":     {map[string]string{config.EnvNodeGroupInstanceFamilies: "m7i.large"}, "instance family"},
@@ -194,4 +197,15 @@ func TestNodeGroupsSizeIsAnAliasOfTheMinimum(t *testing.T) {
 			t.Errorf("%s: %+v (%v), want %d..%d", name, serve.NodeGroups.System, err, tt.min, tt.max)
 		}
 	}
+}
+
+// serveWarnings are the warnings the file earns: the test names the keys
+// that cause them, not their text.
+func serveWarnings(t *testing.T, file config.LookupFunc) []string {
+	t.Helper()
+	serve, err := config.LoadServe(nil, nil, file)
+	if err != nil || len(serve.NodeGroups.Warnings) != 1 || !strings.Contains(serve.NodeGroups.Warnings[0], "nodeGroups.system.maxSize") {
+		t.Fatalf("warnings = %v (%v)", serve.NodeGroups.Warnings, err)
+	}
+	return serve.NodeGroups.Warnings
 }

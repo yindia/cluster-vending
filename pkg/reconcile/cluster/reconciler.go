@@ -46,11 +46,14 @@ type Reconciler struct {
 	// nodeRows throttles the writes of the node group node lists to the
 	// results bucket (writeNodeRows); nil: never throttled.
 	nodeRows *nodeRowWrites
+	// summary throttles the cluster status summary of the node pass (the
+	// pod list and the write); nil: never throttled.
+	summary *nodeRowWrites
 }
 
 // New returns the Reconciler.
 func New(d reconcile.Deps) *Reconciler {
-	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}}
+	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}, summary: &nodeRowWrites{}}
 }
 
 // Target is everything a cluster is built from: its network, account and

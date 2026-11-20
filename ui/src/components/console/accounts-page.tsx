@@ -1,6 +1,6 @@
 "use client";
 
-import { FilterRow } from "./filter-row";
+import { SearchFilters } from "./filter-row";
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -9,6 +9,7 @@ import { create } from "@bufbuild/protobuf";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -19,7 +20,7 @@ import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ResourceActions } from "./resource-actions";
 import { DetailNavigation, useDetailSection } from "./detail-navigation";
-import type { TableColumn } from "@astryxdesign/core/Table";
+import { pixel, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { VStack } from "@astryxdesign/core/VStack";
@@ -33,7 +34,7 @@ import { NetworkState, type Network } from "@/gen/cloud/v1/network_pb";
 import { ClusterState, ClusterTier, ReleaseChannel, type Cluster } from "@/gen/cloud/v1/cluster_pb";
 import { Tier } from "@/gen/cloud/v1/tier_pb";
 import { WizardDialog } from "./wizard-dialog";
-import { ManifestCreateDialog } from "./manifest-create-dialog";
+import { ManifestCreateDialog, ResourceWorkflowDialog } from "./manifest-create-dialog";
 import { ConsoleTable as Table } from "./console-table";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
@@ -107,6 +108,7 @@ function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAcc
   const id = useId();
   const form = useRef<HTMLFormElement>(null);
   const [open, setOpen] = useState(false);
+  const [manifestBusy, setManifestBusy] = useState(false);
   const [createMode, setCreateMode] = useState<"guided" | "yaml">("guided");
   const [step, setStep] = useState(0);
   const [fields, setFields] = useState<AccountBootstrapFields>(() => accountBootstrapFields(account));
@@ -134,7 +136,13 @@ function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAcc
   const status = (field: keyof AccountBootstrapFields) => errors[field] ? { type: "error" as const, message: errors[field] } : undefined;
   return <>
     <Button label={account ? "Edit account" : "Connect account"} variant={account ? "secondary" : "primary"} isDisabled={disabled || !!account && account.provider.case !== "aws"} onClick={() => { setFields(accountBootstrapFields(account)); setCreateMode("guided"); setStep(0); setErrors({}); mutation.clearError(); setOpen(true); }} />
-    <WizardDialog isOpen={open && createMode === "guided"} onOpenChange={(next) => { if (!mutation.busy) setOpen(next); }} title={account ? "Edit account" : "Connect cloud account"} description="Give the platform access to an existing cloud account. No cloud credentials are collected." steps={["Account identity", "AWS access", "Review connection"]} step={step} busy={mutation.busy}
+    {open && <ResourceWorkflowDialog isOpen={open} onOpenChange={setOpen} title={account ? "Edit account" : "Connect cloud account"}
+      description={account ? "Update the display name or IAM role for this connection." : "Connect an existing cloud account to this tenant."}
+      mark={<ProviderIcon provider={fields.provider} size="lg" />}
+      method={account ? undefined : { label: "Connection method", value: createMode, onChange: setCreateMode }}
+      yamlContent={!account && <ManifestCreateDialog kind="CloudAccount" embedded isOpen={createMode === "yaml"} onBusyChange={setManifestBusy}
+        onOpenChange={setOpen} onCreated={(saved: CloudAccount) => { setOpen(false); onAccepted(saved); }} />}
+      steps={["Account identity", "AWS access", "Review connection"]} step={step} busy={mutation.busy || manifestBusy}
       footer={<HStack gap={2} justify="between" wrap="wrap">
         <Button label="Cancel" isDisabled={mutation.busy} onClick={() => setOpen(false)} />
         <HStack gap={2}>
@@ -145,22 +153,11 @@ function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAcc
       <form id={id} ref={form} method="post" aria-label={account ? "Edit account" : "Connect cloud account"} noValidate onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <VStack gap={5}>
           {step === 0 && <>
-            {!account && <VStack gap={2}>
-              <Text type="label">Connection method</Text>
-              <HStack gap={2} wrap="wrap" vAlign="center">
-                <Button type="button" label="Use guided form" variant="primary" aria-pressed={true} isDisabled={disabled} onClick={() => setCreateMode("guided")} />
-                <Button type="button" label="Paste YAML" isDisabled={disabled} onClick={() => setCreateMode("yaml")} />
-              </HStack>
-              <Text type="supporting" color="secondary">Use the form or paste the CloudAccount YAML used by the CLI. Both connect an existing cloud account.</Text>
-            </VStack>}
-            <Text color="secondary">Choose a provider and a name your team will recognize.</Text>
             <FormLayout>
               <TextInput id={`${id}-name`} htmlName="accountName" label="Display name" description="Optional. Up to 128 characters." value={fields.accountName} onChange={(value) => change("accountName", value)} status={status("accountName")} isDisabled={disabled} isOptional hasAutoFocus />
             </FormLayout>
-            <VStack gap={2}>
-              <Text type="label">Cloud provider</Text>
-              <HStack gap={2} wrap="wrap">{Object.values(providerRegistry).map((provider) => <Button key={provider.id} label={`${provider.id === "aws" ? "AWS" : provider.label}${provider.enabled ? " · Selected" : " · Planned"}`} isDisabled={disabled || !provider.enabled || !!account} tooltip={provider.enabled ? "Amazon Web Services" : provider.disabledReason} onClick={() => change("provider", provider.id)} />)}</HStack>
-            </VStack>
+            <Selector label="Cloud provider" value={fields.provider} onChange={value => change("provider", value)} isDisabled={disabled || !!account}
+              options={Object.values(providerRegistry).map(provider => ({ value: provider.id, label: provider.enabled ? provider.label : `${provider.label} · Planned`, disabled: !provider.enabled }))} />
           </>}
           {step === 1 && <>
             <Text color="secondary">Use the account ID and the IAM role the platform will assume. The standard role works with the onboarding template.</Text>
@@ -184,8 +181,7 @@ function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAcc
           <ErrorNotice error={mutation.error} />
         </VStack>
       </form>
-    </WizardDialog>
-    {!account && <ManifestCreateDialog kind="CloudAccount" isOpen={open && createMode === "yaml"} onOpenChange={setOpen} onCreated={(saved: CloudAccount) => { setOpen(false); onAccepted(saved); }} onUseForm={() => { setCreateMode("guided"); setOpen(true); }} />}
+    </ResourceWorkflowDialog>}
   </>;
 }
 
@@ -250,9 +246,9 @@ function DeleteAccount({ account, onAccepted }: { account: CloudAccount; onAccep
 
 const inventoryColumns: TableColumn<ManagedResource>[] = [
   { key: "name", header: "Resource", renderCell: (row) => <CopyValue value={row.name} label="Resource name" /> },
+  { key: "state", header: "Status", width: pixel(152), renderCell: (row) => <StatusValue label={`${titleCase(ManagedResourceState[row.state] ?? "Unknown")}${row.paused ? " · Paused" : ""}`} tone={row.state === ManagedResourceState.READY ? "success" : row.state === ManagedResourceState.FAILED ? "error" : "neutral"} /> },
   { key: "kind", header: "Kind", renderCell: (row) => <Text maxLines={1}>{row.kind}{row.zoneId ? ` · ${row.zoneId}` : ""}{row.role ? ` · ${row.role}` : ""}</Text> },
   { key: "externalName", header: "Cloud ID", renderCell: (row) => row.externalName ? <CopyValue value={row.externalName} label="Cloud resource ID" /> : <Text>Not assigned</Text> },
-  { key: "state", header: "Status", renderCell: (row) => <StatusValue label={`${titleCase(ManagedResourceState[row.state] ?? "Unknown")}${row.paused ? " · Paused" : ""}`} tone={row.state === ManagedResourceState.READY ? "success" : row.state === ManagedResourceState.FAILED ? "error" : "neutral"} /> },
   { key: "ready", header: "Ready / synced", renderCell: (row) => <Text>{titleCase(ConditionStatus[row.ready] ?? "Unknown")} / {titleCase(ConditionStatus[row.synced] ?? "Unknown")}</Text> },
   { key: "message", header: "Details", renderCell: (row) => <Text maxLines={1}>{[row.reason, row.message, row.observedGeneration < row.generation ? "Latest change pending reconciliation" : "", row.deletionTime ? `Deleting since ${timestampText(row.deletionTime)}` : ""].filter(Boolean).join(" · ") || "No issues reported"}</Text> },
 ];
@@ -356,16 +352,15 @@ function AccountDetails({ id }: { id: string }) {
     <ErrorNotice error={detail.error} />
     {(notice || awaitingAttempt && !deletionRequested) && <VStack aria-live="polite" role="status" gap={2}>{notice && <Banner status="info" title={notice} />}{awaitingAttempt && !deletionRequested && <Text>Waiting for a new access-check attempt. Acceptance does not mean verified.</Text>}</VStack>}
     {account && <>
-
       <DetailNavigation resource="Account" pages={tabs} selection={navigation} actions={<RefreshButton label="Refresh account section" isLoading={detail.refreshing || (tab === "overview" && related.refreshing) || (tab === "access" && onboarding.refreshing)} onClick={refresh} />} />
       <VStack role="tabpanel" id={navigation.panelId(tab)} aria-label={navigation.label} tabIndex={0} gap={6}>
         {tab === "overview" && <>
-      <DetailSummary items={[
-        { label: "Account access", value: <AccessStatus account={account} />, note: titleCase(accountStateLabel(account)) },
-        { label: "Managed resources", value: resources.length, note: `${resources.filter((resource) => resource.state === ManagedResourceState.READY).length} ready` },
-        { label: "Networks", value: related.data ? related.data.networks.length : related.error ? "Unavailable" : "Loading…", note: "Connected to this account" },
-        { label: "Clusters", value: related.data ? related.data.clusters.length : related.error ? "Unavailable" : "Loading…", note: "On connected networks" },
-      ]} />
+          <DetailSummary items={[
+            { label: "Account access", value: <AccessStatus account={account} />, note: titleCase(accountStateLabel(account)) },
+            { label: "Managed resources", value: resources.length, note: `${resources.filter((resource) => resource.state === ManagedResourceState.READY).length} ready` },
+            { label: "Networks", value: related.data ? related.data.networks.length : related.error ? "Unavailable" : "Loading…", note: "Connected to this account" },
+            { label: "Clusters", value: related.data ? related.data.clusters.length : related.error ? "Unavailable" : "Loading…", note: "On connected networks" },
+          ]} />
           <HStack gap={6} wrap="wrap"><Value label="Regions">{regions.join(", ") || "Not reported"}</Value><Value label="IAM role"><CopyValue value={awsRole} label="IAM role name" /></Value><Value label="Last access check">{timestampText(access?.checkedTime)}</Value><Value label="Created">{timestampText(account.createTime)}</Value></HStack>
           {healthIssues.length > 0 ? <Banner status={healthIssues.some((condition) => condition.status === ConditionStatus.FALSE) ? "warning" : "info"} title="Account needs attention" description={healthIssues.map((condition) => condition.message || condition.reason || condition.type).join(" · ")} /> : <Text color="secondary">{access?.verified && !access.stale ? "The last access check passed. Resource health is reported separately in Resources." : "Access has not been confirmed. Open Access to configure the role and request a verification."}</Text>}
           <Divider />
@@ -376,17 +371,24 @@ function AccountDetails({ id }: { id: string }) {
         </>}
         {tab === "configuration" && <>
           <HStack hAlign="between" vAlign="center" wrap="wrap" gap={2}><Heading level={2}>Platform connection details</Heading><ResourceYamlButton kind="CloudAccount" resourceId={id} /></HStack>
-          <VStack gap={4}><Value label="Platform account ID"><CopyValue value={account.id} label="Platform account ID" /></Value><Value label="Tenant"><CopyValue value={account.tenantId} label="Tenant ID" /></Value><Value label="ProviderConfig"><CopyValue value={account.status?.providerConfigName ?? ""} label="ProviderConfig name" /></Value><Value label="Namespace"><CopyValue value={account.status?.namespace ?? ""} label="Namespace" /></Value><Value label="Assumed identity"><CopyValue value={account.status?.identity ?? ""} label="Assumed identity" /></Value><Value label="Updated">{timestampText(account.updateTime)}</Value></VStack>
+          <MetadataList columns="multi">
+            <MetadataListItem label="Account name"><CopyValue value={account.accountName} label="Account name" /></MetadataListItem>
+            <MetadataListItem label="Tenant"><CopyValue value={account.tenantId} label="Tenant ID" /></MetadataListItem>
+            <MetadataListItem label="ProviderConfig"><CopyValue value={account.status?.providerConfigName ?? ""} label="ProviderConfig name" /></MetadataListItem>
+            <MetadataListItem label="Namespace"><CopyValue value={account.status?.namespace ?? ""} label="Namespace" /></MetadataListItem>
+            <MetadataListItem label="Assumed identity"><CopyValue value={account.status?.identity ?? ""} label="Assumed identity" /></MetadataListItem>
+            <MetadataListItem label="Updated">{timestampText(account.updateTime)}</MetadataListItem>
+          </MetadataList>
         </>}
         {tab === "resources" && <>
           <HStack gap={3} justify="between" wrap="wrap"><VStack gap={1}><Heading level={2}>Managed resources</Heading><Text role="status" color="secondary">{filtered.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack></HStack>
-          <FilterRow label="Resource filters">
-            <TextInput id={`${uiId}-search`} label="Search resources" type="search" placeholder="Name, kind or cloud ID" value={search} onChange={setSearch} autoComplete="off" />
+          <SearchFilters label="Resource filters" values={[resourceKind, resourceState, pausedFilter]}
+            search={<TextInput id={`${uiId}-search`} label="Search resources" type="search" placeholder="Name, kind or cloud ID" value={search} onChange={setSearch} autoComplete="off" />}>
             <Selector label="Resource kind" value={resourceKind} onChange={setResourceKind} options={[{ value: "all", label: "All kinds" }, ...resourceKinds.map((kind) => ({ value: kind, label: kind || "Unknown" }))]} />
             <Selector label="Resource status" value={resourceState} onChange={setResourceState} options={[{ value: "all", label: "All statuses" }, ...Object.values(ManagedResourceState).filter((state) => typeof state === "number").map((state) => ({ value: String(state), label: titleCase(ManagedResourceState[state]) }))]} />
             <Selector label="Paused resources" value={pausedFilter} onChange={setPausedFilter} options={[{ value: "all", label: "All resources" }, { value: "paused", label: "Paused only" }, { value: "active", label: "Not paused" }]} />
             {(search || resourceKind !== "all" || resourceState !== "all" || pausedFilter !== "all") && <Button label="Clear resource filters" onClick={() => { setSearch(""); setResourceKind("all"); setResourceState("all"); setPausedFilter("all"); }} />}
-          </FilterRow>
+          </SearchFilters>
           {filtered.length ? <VStack isScrollable><Table aria-label="Account managed resource inventory" data={filtered} columns={inventoryColumns} idKey={(resource) => `${resource.kind}:${resource.name}`} density="compact" /></VStack> : <Text color="secondary">{resources.length ? "No resources match the current filters." : "No managed resources were reported."}</Text>}
         </>}
         {tab === "activity" && <>
@@ -468,15 +470,15 @@ function AccountsList() {
     <ErrorNotice error={list.error} />
     {saved && <Banner status="info" title="Account connection accepted" description="Access is checked asynchronously. Open the account to set up its role and review verification." endContent={<Button as={Link} href={`/accounts/${encodeURIComponent(saved.id)}`} label="View account" />} />}
     {list.loading && tenantId && <Text role="status">Loading accounts…</Text>}
-    <FilterRow label="Account filters">
-      <TextInput label="Search accounts" type="search" placeholder="Name, platform ID, cloud ID or role" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />
+    <SearchFilters label="Account filters" values={[providerFilter, stateFilter, accessFilter]}
+      search={<TextInput label="Search accounts" type="search" placeholder="Name, platform ID, cloud ID or role" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" />}>
       <Selector label="Provider" value={providerFilter} onChange={(value) => { setProviderFilter(value); setPage(1); }} options={[{ value: "all", label: "All providers" }, { value: "aws", label: "AWS" }, { value: "unsupported", label: "Unsupported" }]} />
       <Selector label="Connection state" value={stateFilter} onChange={(value) => { setStateFilter(value); setPage(1); }} options={[{ value: "all", label: "All states" }, ...Object.values(CloudAccountState).filter((state) => typeof state === "number").map((state) => ({ value: String(state), label: titleCase(CloudAccountState[state]) }))]} />
       <Selector label="Access state" value={accessFilter} onChange={(value) => { setAccessFilter(value); setPage(1); }} options={[{ value: "all", label: "All access states" }, { value: "verified", label: "Verified" }, { value: "not-verified", label: "Not verified" }, { value: "stale", label: "Stale" }, { value: "not-checked", label: "Not checked" }]} />
       {(search || providerFilter !== "all" || stateFilter !== "all" || accessFilter !== "all") && <Button label="Clear account filters" onClick={clearFilters} />}
-    </FilterRow>
+    </SearchFilters>
     {list.data && <Text role="status" color="secondary">{filtered.length} of {accounts.length} accounts</Text>}
-    {list.data && (accounts.length ? filtered.length ? <><Table aria-label="Cloud accounts" data={visible.accounts} columns={columns} idKey="id" rowIndexStart={(visible.page - 1) * ACCOUNT_PAGE_SIZE + 1} rowCount={filtered.length} /><Pagination label="Accounts pagination" page={visible.page} onChange={setPage} totalItems={filtered.length} pageSize={ACCOUNT_PAGE_SIZE} variant="count" /></> : <Text>No accounts match the current filters.</Text> : <VStack padding={6} gap={3}><Heading level={3}>Connect your first cloud account</Heading><Text color="secondary">Connect an existing AWS account to begin creating networks and clusters.</Text></VStack>)}
+    {list.data && (accounts.length ? filtered.length ? <><Table aria-label="Cloud accounts" data={visible.accounts} columns={columns} idKey="id" rowIndexStart={(visible.page - 1) * ACCOUNT_PAGE_SIZE + 1} rowCount={filtered.length} />{filtered.length > ACCOUNT_PAGE_SIZE && <Pagination label="Accounts pagination" page={visible.page} onChange={setPage} totalItems={filtered.length} pageSize={ACCOUNT_PAGE_SIZE} variant="count" />}</> : <Text>No accounts match the current filters.</Text> : <VStack padding={6} gap={3}><Heading level={3}>Connect your first cloud account</Heading><Text color="secondary">Connect an existing AWS account to begin creating networks and clusters.</Text></VStack>)}
   </VStack>;
 }
 

@@ -4,6 +4,7 @@ package cloud.v1;
 
 import "buf/validate/validate.proto";
 import "cloud/v1/node_group.proto";
+import "cloud/v1/sort.proto";
 import "google/protobuf/timestamp.proto";
 
 // NodeStatusFilter selects the nodes of a node group by their Ready condition.
@@ -13,6 +14,20 @@ enum NodeStatusFilter {
   NODE_STATUS_FILTER_ALL = 1;
   NODE_STATUS_FILTER_READY = 2;
   NODE_STATUS_FILTER_NOT_READY = 3;
+}
+
+// NodeSortBy is how ListNodeGroupNodes orders the nodes. Unspecified: NAME.
+// Ties are broken by node name.
+enum NodeSortBy {
+  NODE_SORT_BY_UNSPECIFIED = 0;
+  NODE_SORT_BY_NAME = 1;
+  NODE_SORT_BY_AGE = 2;
+  // Ascending: not Ready nodes first.
+  NODE_SORT_BY_READINESS = 3;
+  // Requested CPU as a percentage of allocatable CPU.
+  NODE_SORT_BY_CPU_REQUESTED_PERCENT = 4;
+  NODE_SORT_BY_MEMORY_REQUESTED_PERCENT = 5;
+  NODE_SORT_BY_POD_COUNT = 6;
 }
 
 // ListNodeGroupNodesRequest asks for a page of the nodes of one node group.
@@ -38,14 +53,18 @@ message ListNodeGroupNodesRequest {
   int32 page_size = 4 [(buf.validate.field).int32 = {gte: 0}];
   // next_page_token from a previous call. All other fields must match the
   // call that produced it, and the node group's nodes must not have changed.
-  string page_token = 5 [(buf.validate.field).string = {
-    max_len: 8
-    pattern: "^[0-9]*$"
-  }];
+  // Tokens of the stored list are decimal numbers; tokens of a live list
+  // are longer strings, hence the bound.
+  string page_token = 5 [(buf.validate.field).string.max_len = 512];
   // Only the nodes whose Ready condition matches. Unspecified: all.
   NodeStatusFilter filter = 6 [(buf.validate.field).enum.defined_only = true];
   // Only the nodes whose name contains this text (case-insensitive).
   string name_contains = 7 [(buf.validate.field).string.max_len = 253];
+  // Unspecified: NAME. Served by the live reader; a list that is not live
+  // yet answers UNIMPLEMENTED for any other value.
+  NodeSortBy sort_by = 8 [(buf.validate.field).enum.defined_only = true];
+  // Unspecified: ascending.
+  SortOrder sort_order = 9 [(buf.validate.field).enum.defined_only = true];
 }
 
 // ListNodeGroupNodesResponse is a page of a node group's nodes, in name order,
@@ -64,4 +83,6 @@ message ListNodeGroupNodesResponse {
   // Why the list is empty or partial: the results are not available, or were
   // not collected completely.
   repeated string notices = 6;
+  // When a live read of the nodes started. Unset: not a live read.
+  google.protobuf.Timestamp live_at = 7;
 }

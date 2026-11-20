@@ -21,6 +21,7 @@ import (
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/catalog"
+	"github.com/yindia/cluster-vending/pkg/clustersummary"
 	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -78,8 +79,11 @@ type kubeletView struct {
 // nodeGroupsResult is what a pass learned of the cluster's node groups.
 type nodeGroupsResult struct {
 	// groups are the user groups' statuses.
-	groups   []*cloudv1.NodeGroupStatus
-	kubelets kubeletView
+	groups []*cloudv1.NodeGroupStatus
+	// platformPool is the platform pool's status (PROP-03); nil: there is
+	// no pool configured, or nothing is known of it.
+	platformPool *cloudv1.NodeGroupStatus
+	kubelets     kubeletView
 	// system is what the pass saw of the default managed node group's nodes
 	// and of the move off the old platform pool; zero: nothing, the
 	// recorded values stay.
@@ -124,18 +128,27 @@ func nodeGroupsOfPass(ctx context.Context) *nodeGroupsResult {
 func withNodeGroups(ctx context.Context, st, stored *cloudv1.ClusterStatus) {
 	var observed systemObserved
 	var user []*cloudv1.NodeGroupStatus
+	var pool *cloudv1.NodeGroupStatus
 	if r := nodeGroupsOfPass(ctx); r != nil {
-		observed, user = r.system, r.groups
+		observed, user, pool = r.system, r.groups, r.platformPool
 	} else {
 		for _, g := range stored.GetNodeGroups() {
-			// The system group is rebuilt below; a platform group recorded
-			// by an earlier build is gone with its pool.
-			if !g.GetPlatformManaged() {
+			// The system group is rebuilt below; the platform pool's record
+			// stays; a platform group recorded by an earlier build is gone
+			// with its pool.
+			switch {
+			case g.GetPlatformManaged() && g.GetName() == crossplaneaws.PoolPlatform:
+				pool = g
+			case !g.GetPlatformManaged():
 				user = append(user, g)
 			}
 		}
 	}
-	st.NodeGroups = append([]*cloudv1.NodeGroupStatus{systemStatus(st, stored, observed)}, user...)
+	platform := []*cloudv1.NodeGroupStatus{systemStatus(st, stored, observed)}
+	if pool != nil {
+		platform = append(platform, pool)
+	}
+	st.NodeGroups = slices.Concat(platform, user)
 }
 
 // systemStatus is the status of the default managed node group: PENDING,
@@ -256,6 +269,9 @@ func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster
 			}
 		}
 		holder.r = &nodeGroupsResult{groups: pending}
+		if s.platformPoolOn() {
+			holder.r.platformPool = recordedPool(stored, "waiting for Karpenter to be Ready")
+		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, nodeGroupTotalTimeout)
@@ -321,19 +337,23 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 	in, extra, err := s.nodeGroupsInput(ctx, row, spec, release)
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: prepare", "cluster_id", row.ID, "error", err)
-		return degraded(groups, stored, err.Error())
+		return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
 	}
 	// The node classes name Karpenter's node role: no user group is applied
-	// before its IAM chain is Ready and the controller policy passes it. A
-	// cluster without user groups needs none of it.
-	if len(groups) > 0 {
+	// before its IAM chain is Ready and the controller policy passes it, and
+	// neither is the platform pool's. A cluster with neither needs none of it.
+	if len(groups) > 0 || s.platformPoolOn() {
 		wait, err := s.karpenterIAMWait(ctx, extra.namespace, in.ClusterPrefix, extra.accountID, spec.GetRegion())
 		if err != nil {
 			s.logger().WarnContext(ctx, "node groups: read Karpenter's IAM", "cluster_id", row.ID, "error", err)
-			return degraded(groups, stored, err.Error())
+			return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
 		}
 		if wait != "" {
-			return waitingForIAM(groups, stored, wait)
+			res := waitingForIAM(groups, stored, wait)
+			if s.platformPoolOn() {
+				res.platformPool = recordedPool(stored, "waiting for Karpenter's IAM ("+wait+")")
+			}
+			return res
 		}
 	}
 	var c client.Client
@@ -343,12 +363,13 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 	})
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: open the cluster", "cluster_id", row.ID, "error", err)
-		return degraded(groups, stored, "cannot reach the cluster: "+err.Error())
+		s.noteUnreachable(ctx, row, err)
+		return s.withPoolUnavailable(degraded(groups, stored, "cannot reach the cluster: "+err.Error()), stored, "cannot reach the cluster: "+err.Error())
 	}
 	failed := map[string]string{}
 	objects, err := crossplaneaws.KarpenterNodeGroupObjects(in)
 	if err != nil {
-		return degraded(groups, stored, err.Error())
+		return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
 	}
 	for _, obj := range objects {
 		err := call(ctx, func(ctx context.Context) error {
@@ -361,11 +382,19 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 			}
 		}
 	}
-	nodes, kubelets := s.readNodes(ctx, c, extra.systemGroup)
+	var usage *clustersummary.Aggregator
+	if s.summaryDue(row.ID) {
+		usage = clustersummary.NewAggregator()
+	}
+	nodes, kubelets := s.readNodesInto(ctx, c, extra.systemGroup, usage)
+	s.summarize(ctx, c, row, nodes)
 	legacy := &legacyPoolGate{s: s, c: c, row: row, installed: installed, extra: extra, nodes: nodes}
 	removing := s.removeNodeGroups(ctx, c, row, groups, legacy, nodes)
 	out := &nodeGroupsResult{kubelets: kubelets, system: systemObserved{nodes: nodes.count[systemNodeGroup], counted: nodes.complete,
 		move: legacy.message}}
+	if s.platformPoolOn() {
+		out.platformPool = s.readPlatformPool(ctx, c, stored, failed[crossplaneaws.PoolPlatform], nodes)
+	}
 	for _, g := range groups {
 		out.groups = append(out.groups, s.readGroup(ctx, c, g, stored, failed[g.Name], nodes))
 	}
@@ -601,7 +630,8 @@ func (s *Reconciler) NodeGroupObjects(ctx context.Context, row *model.Cluster) (
 func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, release string) (crossplaneaws.KarpenterNodeGroupsInput, nodeGroupsExtra, error) {
 	in := crossplaneaws.KarpenterNodeGroupsInput{ClusterName: row.Name, ClusterPrefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
 		Discovery: true, NodeGroups: spec.GetNodeGroups(),
-		DefaultArchitectures: s.deps.NodeGroups.Karpenter.Defaults.Architectures, DefaultCapacityTypes: s.deps.NodeGroups.Karpenter.Defaults.CapacityTypes}
+		DefaultArchitectures: s.deps.NodeGroups.Karpenter.Defaults.Architectures, DefaultCapacityTypes: s.deps.NodeGroups.Karpenter.Defaults.CapacityTypes,
+		PlatformPool: s.platformPoolInput()}
 	var rel *cloudv1alpha1.Release
 	if src := s.releases(); src != nil && release != "" {
 		var err error
@@ -718,6 +748,9 @@ func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row 
 	for _, g := range groups {
 		want[g.Name] = true
 	}
+	if s.platformPoolOn() {
+		want[crossplaneaws.PoolPlatform] = true // the platform's own pool, not a user group
+	}
 	var still []string
 	pools := map[string]bool{}
 	for _, gvk := range []struct {
@@ -791,6 +824,11 @@ type nodeCounts struct {
 	// Cluster.
 	rows     map[string][]*cloudv1.NodeGroupNode
 	complete bool
+	// usage sums the nodes (and, once read, the pods) per group for the
+	// cluster status summary; nil when the summary is not due.
+	usage *clustersummary.Aggregator
+	// err is why the node lists could not be read, nil when they were.
+	err error
 }
 
 // eachPage lists kind with limit nodeListLimit and continue, calling f with
@@ -825,7 +863,13 @@ func eachPage(ctx context.Context, c client.Client, gvk schema.GroupVersionKind,
 // joined with its NodeClaim. A failed or unfinished read is "not known", and
 // its rows are incomplete.
 func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup string) (nodeCounts, kubeletView) {
-	counts := nodeCounts{count: map[string]int32{}, rows: map[string][]*cloudv1.NodeGroupNode{}}
+	return s.readNodesInto(ctx, c, systemGroup, nil)
+}
+
+// readNodesInto is readNodes that also sums the nodes into usage when it is
+// not nil.
+func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemGroup string, usage *clustersummary.Aggregator) (nodeCounts, kubeletView) {
+	counts := nodeCounts{count: map[string]int32{}, rows: map[string][]*cloudv1.NodeGroupNode{}, usage: usage}
 	view := kubeletView{}
 	minors := map[string]bool{}
 	byNode := map[string]*cloudv1.NodeGroupNode{}
@@ -838,6 +882,9 @@ func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup
 			row := nodeRowOf(n)
 			counts.rows[pool] = append(counts.rows[pool], row)
 			byNode[n.GetName()] = row
+			if usage != nil {
+				usage.AddNodeObject(pool, n)
+			}
 			if v, _, _ := unstructured.NestedString(n.Object, "status", "nodeInfo", "kubeletVersion"); v != "" {
 				minors[kubernetesMinor(strings.TrimPrefix(v, "v"))] = true
 			}
@@ -845,7 +892,7 @@ func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup
 	}, client.HasLabels{crossplaneaws.KarpenterNodePoolLabel})
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: list nodes", "error", err)
-		return nodeCounts{count: map[string]int32{}, rows: counts.rows}, kubeletView{}
+		return nodeCounts{count: map[string]int32{}, rows: counts.rows, usage: usage, err: err}, kubeletView{}
 	}
 	counts.complete = true
 	// The default managed node group's nodes are the "system" group: the
@@ -859,11 +906,15 @@ func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup
 		for i := range items {
 			counts.count[systemNodeGroup]++
 			counts.rows[systemNodeGroup] = append(counts.rows[systemNodeGroup], nodeRowOf(&items[i]))
+			if usage != nil {
+				usage.AddNodeObject(systemNodeGroup, &items[i])
+			}
 		}
 	}, managed)
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: list managed nodes", "error", err)
 		counts.complete = false
+		counts.err = err
 	}
 	for m := range minors {
 		view.minors = append(view.minors, m)

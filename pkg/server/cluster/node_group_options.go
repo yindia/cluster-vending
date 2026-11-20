@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
@@ -64,7 +65,7 @@ func (s *ClusterService) ListClusterNodeGroupManifests(ctx context.Context, req 
 		}
 		m := byName[o.GetName()]
 		if m == nil {
-			m = &cloudv1.NodeGroupManifest{Name: o.GetName()}
+			m = &cloudv1.NodeGroupManifest{Name: o.GetName(), PlatformManaged: o.GetName() == crossplaneaws.PoolPlatform}
 			byName[o.GetName()] = m
 			out.NodeGroups = append(out.NodeGroups, m)
 		}

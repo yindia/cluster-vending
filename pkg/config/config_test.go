@@ -127,9 +127,12 @@ func TestLoadServeDefaults(t *testing.T) {
 	}
 	if want := []string{config.FlagConfig, config.FlagHTTPAddr, config.FlagShutdownTimeout,
 		config.FlagAWSManagementRoleARN, config.FlagAWSServerRoleARN, config.FlagAWSRegion, config.FlagAWSSourceRoleARN,
-		config.FlagAWSExternalID, config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupMinSize, config.FlagSystemNodeGroupMaxSize, config.FlagSystemNodeGroupCapacityType,
+		config.FlagAWSExternalID, config.FlagSystemInstanceTypes, config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupMinSize, config.FlagSystemNodeGroupMaxSize, config.FlagSystemNodeGroupCapacityType,
 		config.FlagSystemNodeGroupDiskSizeGiB, config.FlagNodeGroupInstanceFamilies, config.FlagNodeGroupInstanceTypes,
-		config.FlagNodeGroupDefaultArchitectures, config.FlagNodeGroupDefaultCapacityTypes}; !slices.Equal(flags, want) {
+		config.FlagNodeGroupDefaultArchitectures, config.FlagNodeGroupDefaultCapacityTypes,
+		config.FlagPlatformInstanceFamilies, config.FlagPlatformInstanceSizes, config.FlagPlatformArchitectures, config.FlagPlatformCapacityTypes,
+		config.FlagPlatformLimitCPU, config.FlagPlatformLimitMemory, config.FlagPlatformConsolidationPolicy, config.FlagPlatformConsolidateAfter,
+		config.FlagPlatformExpireAfter, config.FlagPlatformTerminationGracePeriod, config.FlagPlatformDisruptionBudget, config.FlagPlatformMaxPods}; !slices.Equal(flags, want) {
 		t.Errorf("serve settings = %v, want only %v", flags, want)
 	}
 }

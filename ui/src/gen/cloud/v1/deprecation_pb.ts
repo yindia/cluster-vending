@@ -5,6 +5,8 @@
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
+import type { SortOrder } from "./sort_pb";
+import { file_cloud_v1_sort } from "./sort_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -13,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/deprecation.proto.
  */
 export const file_cloud_v1_deprecation: GenFile = /*@__PURE__*/
-  fileDesc("ChpjbG91ZC92MS9kZXByZWNhdGlvbi5wcm90bxIIY2xvdWQudjEipQIKEkRlcHJlY2F0aW9uRmluZGluZxIRCgluYW1lc3BhY2UYASABKAkSDAoEa2luZBgCIAEoCRIMCgRuYW1lGAMgASgJEhMKC2FwaV92ZXJzaW9uGAQgASgJEhEKCWNvbXBvbmVudBgFIAEoCRIVCg1kZXByZWNhdGVkX2luGAYgASgJEhIKCnJlbW92ZWRfaW4YByABKAkSFwoPcmVwbGFjZW1lbnRfYXBpGAggASgJEiAKGHJlcGxhY2VtZW50X2F2YWlsYWJsZV9pbhgJIAEoCRIrCgZzb3VyY2UYCiABKA4yGy5jbG91ZC52MS5EZXByZWNhdGlvblNvdXJjZRIUCgxoZWxtX3JlbGVhc2UYCyABKAkSDwoHcmVtb3ZlZBgMIAEoCCKBAgoTQ2x1c3RlckRlcHJlY2F0aW9ucxIWCg50YXJnZXRfdmVyc2lvbhgBIAEoCRIuCgpzY2FubmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgV0b3RhbBgDIAEoBRIPCgdyZW1vdmVkGAQgASgFEi4KCGZpbmRpbmdzGAUgAygLMhwuY2xvdWQudjEuRGVwcmVjYXRpb25GaW5kaW5nEhEKCXRydW5jYXRlZBgGIAEoCBINCgVlcnJvchgHIAEoCRIwCgxhdHRlbXB0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wItsBCh5MaXN0Q2x1c3RlckRlcHJlY2F0aW9uc1JlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIcCgpjbHVzdGVyX2lkGAIgASgJQgi6SAVyA7ABARIaCglwYWdlX3NpemUYAyABKAVCB7pIBBoCKAASJQoKcGFnZV90b2tlbhgEIAEoCUIRukgOcgwYCDIIXlswLTldKiQSFAoMb25seV9yZW1vdmVkGAUgASgIIvQBCh9MaXN0Q2x1c3RlckRlcHJlY2F0aW9uc1Jlc3BvbnNlEi4KCGZpbmRpbmdzGAEgAygLMhwuY2xvdWQudjEuRGVwcmVjYXRpb25GaW5kaW5nEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRIWCg50YXJnZXRfdmVyc2lvbhgDIAEoCRIuCgpzY2FubmVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgV0b3RhbBgFIAEoBRIPCgdyZW1vdmVkGAYgASgFEhEKCXRydW5jYXRlZBgHIAEoCBINCgVlcnJvchgIIAEoCSp9ChFEZXByZWNhdGlvblNvdXJjZRIiCh5ERVBSRUNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIfChtERVBSRUNBVElPTl9TT1VSQ0VfTUFOSUZFU1QQARIjCh9ERVBSRUNBVElPTl9TT1VSQ0VfSEVMTV9SRUxFQVNFEAJCoAEKDGNvbS5jbG91ZC52MUIQRGVwcmVjYXRpb25Qcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("ChpjbG91ZC92MS9kZXByZWNhdGlvbi5wcm90bxIIY2xvdWQudjEipQIKEkRlcHJlY2F0aW9uRmluZGluZxIRCgluYW1lc3BhY2UYASABKAkSDAoEa2luZBgCIAEoCRIMCgRuYW1lGAMgASgJEhMKC2FwaV92ZXJzaW9uGAQgASgJEhEKCWNvbXBvbmVudBgFIAEoCRIVCg1kZXByZWNhdGVkX2luGAYgASgJEhIKCnJlbW92ZWRfaW4YByABKAkSFwoPcmVwbGFjZW1lbnRfYXBpGAggASgJEiAKGHJlcGxhY2VtZW50X2F2YWlsYWJsZV9pbhgJIAEoCRIrCgZzb3VyY2UYCiABKA4yGy5jbG91ZC52MS5EZXByZWNhdGlvblNvdXJjZRIUCgxoZWxtX3JlbGVhc2UYCyABKAkSDwoHcmVtb3ZlZBgMIAEoCCKBAgoTQ2x1c3RlckRlcHJlY2F0aW9ucxIWCg50YXJnZXRfdmVyc2lvbhgBIAEoCRIuCgpzY2FubmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgV0b3RhbBgDIAEoBRIPCgdyZW1vdmVkGAQgASgFEi4KCGZpbmRpbmdzGAUgAygLMhwuY2xvdWQudjEuRGVwcmVjYXRpb25GaW5kaW5nEhEKCXRydW5jYXRlZBgGIAEoCBINCgVlcnJvchgHIAEoCRIwCgxhdHRlbXB0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIsYCCh5MaXN0Q2x1c3RlckRlcHJlY2F0aW9uc1JlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIcCgpjbHVzdGVyX2lkGAIgASgJQgi6SAVyA7ABARIaCglwYWdlX3NpemUYAyABKAVCB7pIBBoCKAASJQoKcGFnZV90b2tlbhgEIAEoCUIRukgOcgwYCDIIXlswLTldKiQSFAoMb25seV9yZW1vdmVkGAUgASgIEjYKB3NvcnRfYnkYBiABKA4yGy5jbG91ZC52MS5EZXByZWNhdGlvblNvcnRCeUIIukgFggECEAESMQoKc29ydF9vcmRlchgHIAEoDjITLmNsb3VkLnYxLlNvcnRPcmRlckIIukgFggECEAEi9AEKH0xpc3RDbHVzdGVyRGVwcmVjYXRpb25zUmVzcG9uc2USLgoIZmluZGluZ3MYASADKAsyHC5jbG91ZC52MS5EZXByZWNhdGlvbkZpbmRpbmcSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhYKDnRhcmdldF92ZXJzaW9uGAMgASgJEi4KCnNjYW5uZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg0KBXRvdGFsGAUgASgFEg8KB3JlbW92ZWQYBiABKAUSEQoJdHJ1bmNhdGVkGAcgASgIEg0KBWVycm9yGAggASgJKn0KEURlcHJlY2F0aW9uU291cmNlEiIKHkRFUFJFQ0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEh8KG0RFUFJFQ0FUSU9OX1NPVVJDRV9NQU5JRkVTVBABEiMKH0RFUFJFQ0FUSU9OX1NPVVJDRV9IRUxNX1JFTEVBU0UQAiqgAQoRRGVwcmVjYXRpb25Tb3J0QnkSIwofREVQUkVDQVRJT05fU09SVF9CWV9VTlNQRUNJRklFRBAAEiUKIURFUFJFQ0FUSU9OX1NPUlRfQllfUkVNT1ZFRF9GSVJTVBABEiEKHURFUFJFQ0FUSU9OX1NPUlRfQllfTkFNRVNQQUNFEAISHAoYREVQUkVDQVRJT05fU09SVF9CWV9LSU5EEANCoAEKDGNvbS5jbG91ZC52MUIQRGVwcmVjYXRpb25Qcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_cloud_v1_sort, file_google_protobuf_timestamp]);
 
 /**
  * DeprecationFinding is one object of a cluster that was written with an
@@ -229,6 +231,21 @@ export type ListClusterDeprecationsRequest = Message<"cloud.v1.ListClusterDeprec
    * @generated from field: bool only_removed = 5;
    */
   onlyRemoved: boolean;
+
+  /**
+   * Unspecified: REMOVED_FIRST. A token is good for the sort it was made
+   * with.
+   *
+   * @generated from field: cloud.v1.DeprecationSortBy sort_by = 6;
+   */
+  sortBy: DeprecationSortBy;
+
+  /**
+   * Unspecified: ascending.
+   *
+   * @generated from field: cloud.v1.SortOrder sort_order = 7;
+   */
+  sortOrder: SortOrder;
 };
 
 /**
@@ -325,4 +342,41 @@ export enum DeprecationSource {
  */
 export const DeprecationSourceSchema: GenEnum<DeprecationSource> = /*@__PURE__*/
   enumDesc(file_cloud_v1_deprecation, 0);
+
+/**
+ * DeprecationSortBy is how ListClusterDeprecations orders the findings.
+ * Unspecified: REMOVED_FIRST. Ties keep the scan's order.
+ *
+ * @generated from enum cloud.v1.DeprecationSortBy
+ */
+export enum DeprecationSortBy {
+  /**
+   * @generated from enum value: DEPRECATION_SORT_BY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Findings whose API version is removed first (ascending); deprecated
+   * only first when descending.
+   *
+   * @generated from enum value: DEPRECATION_SORT_BY_REMOVED_FIRST = 1;
+   */
+  REMOVED_FIRST = 1,
+
+  /**
+   * @generated from enum value: DEPRECATION_SORT_BY_NAMESPACE = 2;
+   */
+  NAMESPACE = 2,
+
+  /**
+   * @generated from enum value: DEPRECATION_SORT_BY_KIND = 3;
+   */
+  KIND = 3,
+}
+
+/**
+ * Describes the enum cloud.v1.DeprecationSortBy.
+ */
+export const DeprecationSortBySchema: GenEnum<DeprecationSortBy> = /*@__PURE__*/
+  enumDesc(file_cloud_v1_deprecation, 1);
 

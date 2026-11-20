@@ -1,6 +1,6 @@
 "use client";
 
-import { FilterRow } from "./filter-row";
+import { SearchFilters } from "./filter-row";
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { toJsonString } from "@bufbuild/protobuf";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -19,7 +19,7 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ConsoleTable as Table } from "./console-table";
-import { proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { ManagedResourcePreviews } from "./managed-resource-previews";
 import { ClusterSubTenants } from "./cluster-subtenants";
 import { clusterSections } from "./cluster-sections";
@@ -177,15 +177,15 @@ function ClusterList() {
     {!canWrite && <Text type="supporting">Read-only access. Tenant administrators can create and change clusters.</Text>}
     {acknowledgement && <VStack role="status"><Text>{acknowledgement}</Text></VStack>}
     {acceptedId && <Link href={`/clusters/${encodeURIComponent(acceptedId)}`}>View cluster details and readiness</Link>}
-    <FilterRow label="Cluster filters">
-      <TextInput label="Search clusters" value={search} onChange={changeFilter(setSearch)} type="search" placeholder="Name, ID, network or region" hasClear autoComplete="off" />
+    <SearchFilters label="Cluster filters" values={[stateFilter, pauseFilter, networkFilter, channelFilter, tierFilter]}
+      search={<TextInput label="Search clusters" value={search} onChange={changeFilter(setSearch)} type="search" placeholder="Name, ID, network or region" hasClear autoComplete="off" />}>
       <Selector label="Status" value={stateFilter} onChange={changeFilter(setStateFilter)} options={[{ value: "all", label: "All states" }, ...[...new Set(inventory.map((cluster) => cluster.status?.state ?? 0))].sort((a, b) => a - b).map((state) => ({ value: String(state), label: label(ClusterState, state) }))]} />
       <Selector label="Filter by pause" value={pauseFilter} onChange={changeFilter(setPauseFilter)} options={[{ value: "all", label: "All pause states" }, { value: "paused", label: "Paused" }, { value: "let-through", label: "Let through" }, { value: "resources-paused", label: "Resources paused" }, { value: "not-paused", label: "Not paused" }]} />
       <Selector label="Network" hasSearch value={networkFilter} onChange={changeFilter(setNetworkFilter)} options={[{ value: "all", label: "All networks" }, ...networkIds.map((id) => ({ value: id, label: networkById.get(id)?.displayName || networkById.get(id)?.name || id }))]} />
       <Selector label="Channel" value={channelFilter} onChange={changeFilter(setChannelFilter)} options={[{ value: "all", label: "All channels" }, ...[0, 1, 2, 3].map((channel) => ({ value: String(channel), label: channelName(channel) }))]} />
       <Selector label="Tier" value={tierFilter} onChange={changeFilter(setTierFilter)} options={[{ value: "all", label: "All tiers" }, { value: "0", label: "Default" }, ...[1, 2, 3].map((tier) => ({ value: String(tier), label: `Tier ${tier - 1}` }))]} />
       <Button label="Clear filters" variant="ghost" onClick={() => { setSearch(""); setStateFilter("all"); setPauseFilter("all"); setNetworkFilter("all"); setChannelFilter("all"); setTierFilter("all"); setPage(1); }} />
-    </FilterRow>
+    </SearchFilters>
     <ErrorNotice message={list.error} />
     <ErrorNotice message={networks.error} />
     {list.loading && <Text role="status">Loading all clusters…</Text>}
@@ -787,9 +787,9 @@ function ManagedInventory({ resources, title, onRefresh, refreshing }: { resourc
   const states = [...new Set(resources.map((resource) => resource.state))].sort((a, b) => a - b);
   const columns: TableColumn<ManagedResource>[] = [
     { key: "name", header: "Name", width: proportional(2, { minWidth: 80 }), renderCell: (resource) => <CopyValue value={resource.name} label="managed resource name" /> },
+    { key: "state", header: "Status", width: pixel(152), renderCell: (resource) => statusValue(ManagedResourceState, resource.state) },
     { key: "kind", header: "Kind", width: proportional(1, { minWidth: 80 }) },
     { key: "externalName", header: "Cloud ID", width: proportional(2, { minWidth: 80 }), renderCell: (resource) => resource.externalName ? <CopyValue value={resource.externalName} label="managed resource cloud ID" /> : <Text>Not assigned</Text> },
-    { key: "state", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (resource) => statusValue(ManagedResourceState, resource.state) },
     { key: "paused", header: "Paused", width: proportional(1, { minWidth: 80 }), renderCell: (resource) => <Text maxLines={1}>{resource.paused ? "Paused" : "Active"}</Text> },
     { key: "ready", header: "Ready", width: proportional(1, { minWidth: 80 }), renderCell: (resource) => <Text maxLines={1}>{label(ConditionStatus, resource.ready)}</Text> },
     { key: "synced", header: "Synced", width: proportional(1, { minWidth: 80 }), renderCell: (resource) => <Text maxLines={1}>{label(ConditionStatus, resource.synced)}</Text> },
@@ -797,17 +797,18 @@ function ManagedInventory({ resources, title, onRefresh, refreshing }: { resourc
     { key: "message", header: "Message", width: proportional(2, { minWidth: 80 }), renderCell: (resource) => <Text maxLines={1}>{resource.message || "No message reported"}</Text> },
   ];
   return <VStack gap={4}>
-    <HStack gap={4} wrap="wrap" hAlign="between" vAlign="center">
-      <HStack hAlign="between" vAlign="center"><VStack gap={1}><Heading level={3}>Infrastructure inventory</Heading><Text type="supporting" role="status">{matching.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack><RefreshButton label="Refresh infrastructure inventory" onClick={onRefresh} isLoading={refreshing} /></HStack>
+    <HStack hAlign="between" vAlign="center" gap={3} width="100%">
+      <VStack gap={1}><Heading level={3}>Infrastructure inventory</Heading><Text type="supporting" role="status">{matching.length} of {resources.length} resources · {resources.filter((resource) => resource.paused).length} paused</Text></VStack>
+      <RefreshButton label="Refresh infrastructure inventory" onClick={onRefresh} isLoading={refreshing} />
     </HStack>
-    <FilterRow label="Resource filters">
-      <TextInput label="Search resources" placeholder="Name, kind or cloud ID" type="search" value={search} onChange={setSearch} hasClear autoComplete="off" />
+    <SearchFilters label="Resource filters" values={[kind, state, health, paused]}
+      search={<TextInput label="Search resources" placeholder="Name, kind or cloud ID" type="search" value={search} onChange={setSearch} hasClear autoComplete="off" />}>
       <Selector label="Resource kind" hasSearch value={kind} onChange={setKind} options={[{ value: "all", label: "All kinds" }, ...kinds.map((value) => ({ value, label: value || "Unspecified" }))]} />
       <Selector label="State" value={state} onChange={setState} options={[{ value: "all", label: "All states" }, ...states.map((value) => ({ value: String(value), label: label(ManagedResourceState, value) }))]} />
       <Selector label="Health" value={health} onChange={setHealth} options={[{ value: "all", label: "All health" }, { value: "ready", label: "Ready and synced" }, { value: "attention", label: "Needs attention" }]} />
       <Selector label="Paused" value={paused} onChange={setPaused} options={[{ value: "all", label: "All resources" }, { value: "paused", label: "Paused" }, { value: "active", label: "Active" }]} />
       <Button label="Clear resource filters" variant="ghost" onClick={() => { setSearch(""); setKind("all"); setState("all"); setHealth("all"); setPaused("all"); }} />
-    </FilterRow>
+    </SearchFilters>
     {matching.length ? <Table aria-label={title} data={matching} columns={columns} idKey={(resource) => `${resource.kind}:${resource.name}`} /> : <Text>{resources.length ? "No resources match these filters." : "No managed resources reported yet."}</Text>}
   </VStack>;
 }

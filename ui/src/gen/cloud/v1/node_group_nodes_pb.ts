@@ -7,6 +7,8 @@ import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
 import type { NodeGroupNode } from "./node_group_pb";
 import { file_cloud_v1_node_group } from "./node_group_pb";
+import type { SortOrder } from "./sort_pb";
+import { file_cloud_v1_sort } from "./sort_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -15,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/node_group_nodes.proto.
  */
 export const file_cloud_v1_node_group_nodes: GenFile = /*@__PURE__*/
-  fileDesc("Ch9jbG91ZC92MS9ub2RlX2dyb3VwX25vZGVzLnByb3RvEghjbG91ZC52MSLeAgoZTGlzdE5vZGVHcm91cE5vZGVzUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEhwKCmNsdXN0ZXJfaWQYAiABKAlCCLpIBXIDsAEBEkUKCm5vZGVfZ3JvdXAYAyABKAlCMbpILnIsEAEYQDImXlthLXowLTldKFthLXowLTkuXy1dezAsNjJ9W2EtejAtOV0pPyQSGgoJcGFnZV9zaXplGAQgASgFQge6SAQaAigAEiUKCnBhZ2VfdG9rZW4YBSABKAlCEbpIDnIMGAgyCF5bMC05XSokEjQKBmZpbHRlchgGIAEoDjIaLmNsb3VkLnYxLk5vZGVTdGF0dXNGaWx0ZXJCCLpIBYIBAhABEh8KDW5hbWVfY29udGFpbnMYByABKAlCCLpIBXIDGP0BIsEBChpMaXN0Tm9kZUdyb3VwTm9kZXNSZXNwb25zZRImCgVub2RlcxgBIAMoCzIXLmNsb3VkLnYxLk5vZGVHcm91cE5vZGUSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEg0KBXRvdGFsGAMgASgFEjAKDGNvbGxlY3RlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIY29tcGxldGUYBSABKAgSDwoHbm90aWNlcxgGIAMoCSqSAQoQTm9kZVN0YXR1c0ZpbHRlchIiCh5OT0RFX1NUQVRVU19GSUxURVJfVU5TUEVDSUZJRUQQABIaChZOT0RFX1NUQVRVU19GSUxURVJfQUxMEAESHAoYTk9ERV9TVEFUVVNfRklMVEVSX1JFQURZEAISIAocTk9ERV9TVEFUVVNfRklMVEVSX05PVF9SRUFEWRADQqMBCgxjb20uY2xvdWQudjFCE05vZGVHcm91cE5vZGVzUHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_cloud_v1_node_group, file_google_protobuf_timestamp]);
+  fileDesc("Ch9jbG91ZC92MS9ub2RlX2dyb3VwX25vZGVzLnByb3RvEghjbG91ZC52MSK5AwoZTGlzdE5vZGVHcm91cE5vZGVzUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEhwKCmNsdXN0ZXJfaWQYAiABKAlCCLpIBXIDsAEBEkUKCm5vZGVfZ3JvdXAYAyABKAlCMbpILnIsEAEYQDImXlthLXowLTldKFthLXowLTkuXy1dezAsNjJ9W2EtejAtOV0pPyQSGgoJcGFnZV9zaXplGAQgASgFQge6SAQaAigAEhwKCnBhZ2VfdG9rZW4YBSABKAlCCLpIBXIDGIAEEjQKBmZpbHRlchgGIAEoDjIaLmNsb3VkLnYxLk5vZGVTdGF0dXNGaWx0ZXJCCLpIBYIBAhABEh8KDW5hbWVfY29udGFpbnMYByABKAlCCLpIBXIDGP0BEi8KB3NvcnRfYnkYCCABKA4yFC5jbG91ZC52MS5Ob2RlU29ydEJ5Qgi6SAWCAQIQARIxCgpzb3J0X29yZGVyGAkgASgOMhMuY2xvdWQudjEuU29ydE9yZGVyQgi6SAWCAQIQASLuAQoaTGlzdE5vZGVHcm91cE5vZGVzUmVzcG9uc2USJgoFbm9kZXMYASADKAsyFy5jbG91ZC52MS5Ob2RlR3JvdXBOb2RlEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRINCgV0b3RhbBgDIAEoBRIwCgxjb2xsZWN0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhAKCGNvbXBsZXRlGAUgASgIEg8KB25vdGljZXMYBiADKAkSKwoHbGl2ZV9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAqkgEKEE5vZGVTdGF0dXNGaWx0ZXISIgoeTk9ERV9TVEFUVVNfRklMVEVSX1VOU1BFQ0lGSUVEEAASGgoWTk9ERV9TVEFUVVNfRklMVEVSX0FMTBABEhwKGE5PREVfU1RBVFVTX0ZJTFRFUl9SRUFEWRACEiAKHE5PREVfU1RBVFVTX0ZJTFRFUl9OT1RfUkVBRFkQAyriAQoKTm9kZVNvcnRCeRIcChhOT0RFX1NPUlRfQllfVU5TUEVDSUZJRUQQABIVChFOT0RFX1NPUlRfQllfTkFNRRABEhQKEE5PREVfU09SVF9CWV9BR0UQAhIaChZOT0RFX1NPUlRfQllfUkVBRElORVNTEAMSJgoiTk9ERV9TT1JUX0JZX0NQVV9SRVFVRVNURURfUEVSQ0VOVBAEEikKJU5PREVfU09SVF9CWV9NRU1PUllfUkVRVUVTVEVEX1BFUkNFTlQQBRIaChZOT0RFX1NPUlRfQllfUE9EX0NPVU5UEAZCowEKDGNvbS5jbG91ZC52MUITTm9kZUdyb3VwTm9kZXNQcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_cloud_v1_node_group, file_cloud_v1_sort, file_google_protobuf_timestamp]);
 
 /**
  * ListNodeGroupNodesRequest asks for a page of the nodes of one node group.
@@ -57,6 +59,8 @@ export type ListNodeGroupNodesRequest = Message<"cloud.v1.ListNodeGroupNodesRequ
   /**
    * next_page_token from a previous call. All other fields must match the
    * call that produced it, and the node group's nodes must not have changed.
+   * Tokens of the stored list are decimal numbers; tokens of a live list
+   * are longer strings, hence the bound.
    *
    * @generated from field: string page_token = 5;
    */
@@ -75,6 +79,21 @@ export type ListNodeGroupNodesRequest = Message<"cloud.v1.ListNodeGroupNodesRequ
    * @generated from field: string name_contains = 7;
    */
   nameContains: string;
+
+  /**
+   * Unspecified: NAME. Served by the live reader; a list that is not live
+   * yet answers UNIMPLEMENTED for any other value.
+   *
+   * @generated from field: cloud.v1.NodeSortBy sort_by = 8;
+   */
+  sortBy: NodeSortBy;
+
+  /**
+   * Unspecified: ascending.
+   *
+   * @generated from field: cloud.v1.SortOrder sort_order = 9;
+   */
+  sortOrder: SortOrder;
 };
 
 /**
@@ -132,6 +151,13 @@ export type ListNodeGroupNodesResponse = Message<"cloud.v1.ListNodeGroupNodesRes
    * @generated from field: repeated string notices = 6;
    */
   notices: string[];
+
+  /**
+   * When a live read of the nodes started. Unset: not a live read.
+   *
+   * @generated from field: google.protobuf.Timestamp live_at = 7;
+   */
+  liveAt?: Timestamp | undefined;
 };
 
 /**
@@ -175,4 +201,57 @@ export enum NodeStatusFilter {
  */
 export const NodeStatusFilterSchema: GenEnum<NodeStatusFilter> = /*@__PURE__*/
   enumDesc(file_cloud_v1_node_group_nodes, 0);
+
+/**
+ * NodeSortBy is how ListNodeGroupNodes orders the nodes. Unspecified: NAME.
+ * Ties are broken by node name.
+ *
+ * @generated from enum cloud.v1.NodeSortBy
+ */
+export enum NodeSortBy {
+  /**
+   * @generated from enum value: NODE_SORT_BY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: NODE_SORT_BY_NAME = 1;
+   */
+  NAME = 1,
+
+  /**
+   * @generated from enum value: NODE_SORT_BY_AGE = 2;
+   */
+  AGE = 2,
+
+  /**
+   * Ascending: not Ready nodes first.
+   *
+   * @generated from enum value: NODE_SORT_BY_READINESS = 3;
+   */
+  READINESS = 3,
+
+  /**
+   * Requested CPU as a percentage of allocatable CPU.
+   *
+   * @generated from enum value: NODE_SORT_BY_CPU_REQUESTED_PERCENT = 4;
+   */
+  CPU_REQUESTED_PERCENT = 4,
+
+  /**
+   * @generated from enum value: NODE_SORT_BY_MEMORY_REQUESTED_PERCENT = 5;
+   */
+  MEMORY_REQUESTED_PERCENT = 5,
+
+  /**
+   * @generated from enum value: NODE_SORT_BY_POD_COUNT = 6;
+   */
+  POD_COUNT = 6,
+}
+
+/**
+ * Describes the enum cloud.v1.NodeSortBy.
+ */
+export const NodeSortBySchema: GenEnum<NodeSortBy> = /*@__PURE__*/
+  enumDesc(file_cloud_v1_node_group_nodes, 1);
 

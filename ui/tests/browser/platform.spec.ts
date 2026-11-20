@@ -175,7 +175,7 @@ test("YAML creates preserve advanced configuration and require explicit reviewed
   ] as const) {
     await page.goto(url);
     await page.getByRole("button", { name: action, exact: true }).click();
-    await page.getByRole(kind === "CloudAccount" ? "button" : "radio", { name: "Paste YAML", exact: true }).click();
+    await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const draft = stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: "yaml-production", tenant: "acme" }, spec });
     const editor = dialog.getByRole("textbox", { name: `${kind} manifest`, exact: true });
@@ -372,7 +372,8 @@ test("imported clusters require explicit ownership consent before takeover", asy
 test("network takeover is discoverable and requires ownership acknowledgement", async ({ page }) => {
   const calls = await mockAPI(page, { importedNetwork: true, tenantAdmin: true });
   await page.goto(`/networks/${networkId}`);
-  await page.getByRole("button", { name: "Take over imported network", exact: true }).click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Take over imported network", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Take over imported network", exact: true });
   await dialog.getByRole("textbox", { name: /^Type take over prod-network/ }).fill("take over prod-network");
   await expect(dialog.getByRole("button", { name: "Confirm network takeover", exact: true })).toBeDisabled();
@@ -388,7 +389,7 @@ test("YAML validation rejects another tenant and retains the pasted draft", asyn
   const calls = await mockAPI(page);
   await page.goto("/accounts");
   await page.getByRole("button", { name: "Connect account", exact: true }).click();
-  await page.getByRole("button", { name: "Paste YAML", exact: true }).click();
+  await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const editor = dialog.getByRole("textbox", { name: "CloudAccount manifest", exact: true });
   await editor.fill(stringify({ apiVersion: "cluster-vending.io/v1", kind: "CloudAccount", metadata: { name: "production", tenant: "other" }, spec: { aws: account.aws } }));
@@ -397,9 +398,9 @@ test("YAML validation rejects another tenant and retains the pasted draft", asyn
   await expect(editor).toBeFocused();
   await expect(editor).toContainText("other");
   expect(calls.filter(call => call.method === "BootstrapTenant")).toHaveLength(0);
-  await dialog.getByRole("button", { name: "Use guided form", exact: true }).click();
+  await dialog.getByRole("radio", { name: "Guided form", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Display name" })).toBeVisible();
-  await page.getByRole("button", { name: "Paste YAML", exact: true }).click();
+  await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
   await expect(editor).toContainText("other");
 });
 
@@ -541,7 +542,7 @@ test("tenant viewers can inspect and copy YAML for accounts, networks and cluste
   const calls = await mockAPI(page, { viewer: true });
   await mockClipboard(page);
   for (const [url, kind, id] of [[`/accounts/${accountId}`, "CloudAccount", accountId], [`/networks/${networkId}`, "Network", networkId], [`/clusters/${clusterId}`, "Cluster", clusterId]]) {
-    await page.goto(kind === "Cluster" ? `${url}?tab=configuration` : url);
+    await page.goto(`${url}?tab=configuration`);
     await page.getByRole("button", { name: "View YAML", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `${kind} YAML`, exact: true });
     await expect(dialog).toBeVisible();
@@ -855,7 +856,7 @@ test("table statuses preserve the full ink height of deleting and missing labels
   await page.route("**/api/rpc/cloud.v1.NetworkService/GetNetwork", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ network: { ...network, status: { ...network.status, managedResources: [{ ...network.status.managedResources[0], state: "MANAGED_RESOURCE_STATE_MISSING", ready: "CONDITION_STATUS_FALSE", synced: "CONDITION_STATUS_FALSE" }] } }, asRequested: true }) }));
   for (const [url, label, tableName] of [["/clusters", "Deleting", "Clusters"], [`/networks/${networkId}`, "Missing", "Network managed resource inventory"]]) {
     await page.goto(url);
-    if (label === "Missing") { await page.getByRole("tab", { name: "Infrastructure", exact: true }).click(); await page.getByRole("tab", { name: "Infrastructure inventory", exact: true }).click(); }
+    if (label === "Missing") await page.getByRole("tab", { name: "Resources", exact: true }).click();
     const text = page.getByRole("table", { name: tableName, exact: true }).getByText(label, { exact: true });
     await expect(text).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
@@ -1111,6 +1112,11 @@ test("account form sends a generated bootstrap request and reports acceptance", 
   await page.goto("/accounts");
   await page.getByRole("button", { name: "Connect account", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Connect cloud account", exact: true });
+  const provider = dialog.getByRole("combobox", { name: "Cloud provider" });
+  await provider.click();
+  await expect(page.getByRole("option", { name: /Google Cloud/ })).toBeDisabled();
+  await expect(page.getByRole("option", { name: /Microsoft Azure/ })).toBeDisabled();
+  await page.keyboard.press("Escape");
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("textbox", { name: /^AWS account ID\b/ }).fill("111122223333");
   await dialog.getByRole("textbox", { name: /^IAM role name\b/ }).fill("cluster-vending-provisioner");
@@ -1200,12 +1206,8 @@ test("resource details link to their own freeze scope without changing policy", 
   const calls = await mockAPI(page);
   for (const [url, scope, id] of [[`/clusters/${clusterId}`, "cluster", clusterId], [`/networks/${networkId}`, "network", networkId]]) {
     await page.goto(url);
-    if (scope === "cluster") {
-      await page.getByRole("button", { name: "Actions", exact: true }).click();
-      await page.getByRole("menuitem", { name: "Freeze cluster", exact: true }).click();
-    } else {
-      await page.getByRole("link", { name: "Freeze network", exact: true }).click();
-    }
+    await page.getByRole("button", { name: "Actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: `Freeze ${scope}`, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/freeze\\?scope=${scope}&id=${id}`));
     await expect(page.getByRole("button", { name: "Unfreeze scope", exact: true })).toBeEnabled();
     expect(calls.filter(call => call.method === "Freeze" || call.method === "Unfreeze")).toHaveLength(0);
@@ -1431,4 +1433,85 @@ test("editing network labels previews a replacement with the reviewed etag", asy
   expect(previews).toHaveLength(1);
   expect(previews[0].body).toMatchObject({ validateOnly: true, updateMask: "labels", network: { etag: "network-etag", labels: { team: "platform", env: "prod" } } });
   expect((previews[0].body.network as { labels: Record<string, string> }).labels).not.toHaveProperty("old");
+});
+
+for (const [resource, path, section] of [
+  ["Account", `/accounts/${accountId}`, "Configuration"],
+  ["Network", `/networks/${networkId}`, "Resources"],
+  ["Release", "/releases/release-stable", "Components"],
+  ["Channel", "/channels/stable", "History"],
+  ["Component", "/components/external-dns", "Values"],
+]) {
+  test(`${resource} sections survive reload, resizing and browser navigation`, async ({ page }, info) => {
+    await mockAPI(page, { componentCatalog: true });
+    await page.goto(`${path}?context=test`);
+    const navigation = page.getByRole("navigation", { name: `${resource} navigation` });
+    await navigation.getByRole("tab", { name: section, exact: true }).click();
+    const expected = new URL(page.url());
+    expect(expected.searchParams.get("context")).toBe("test");
+    expect(expected.searchParams.get("tab")).toBe(section.toLowerCase());
+    await page.reload();
+    await expect(page.getByRole("tabpanel", { name: section })).toBeVisible();
+    if (resource === "Network") await page.screenshot({ path: info.outputPath("network-resources-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const selector = navigation.getByRole("combobox", { name: `${resource} section` });
+    await expect(selector).toBeInViewport();
+    await expect(navigation.getByRole("tablist")).toHaveCount(0);
+    if (resource === "Network") {
+      const status = page.getByRole("table", { name: "Network managed resource inventory" }).getByRole("row").nth(1).getByText("Ready", { exact: true });
+      await expect(status).toBeInViewport({ ratio: 1 });
+      expect(await status.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath("network-resources-mobile.png") });
+    }
+    await selector.click();
+    await page.getByRole("option", { name: "Overview", exact: true }).click();
+    await expect(page).toHaveURL(`${path}?context=test`);
+    await page.goBack();
+    await expect(page.getByRole("tabpanel", { name: section })).toBeVisible();
+  });
+}
+
+test("inventory filters stay within the viewport and show applied selections when collapsed", async ({ page }, info) => {
+  await mockAPI(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [path, label, filter, option] of [
+    ["/accounts", "Account filters", "Provider", "AWS"],
+    ["/networks", "Network filters", "Filter by tier", "Tier 1"],
+    ["/clusters", "Cluster filters", "Channel", "Alpha"],
+    ["/releases", "Release filters", "Release origin", "Controller build"],
+    ["/components", "Component catalog filters", "Catalog availability", "Available"],
+  ]) {
+    await page.goto(path);
+    const filters = page.getByRole("search", { name: label, exact: true });
+    const toggle = filters.getByRole("button", { name: /^Filters/ });
+    await expect(filters.getByRole("searchbox")).toBeVisible();
+    await toggle.click();
+    await filters.getByRole("combobox", { name: filter, exact: true }).click();
+    await page.getByRole("option", { name: option, exact: true }).click();
+    await expect(toggle).toHaveAccessibleName("Filters (1)");
+    await expect.poll(() => filters.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+    if (path === "/networks") await page.screenshot({ path: info.outputPath("network-filters-mobile.png") });
+    await toggle.click();
+    await expect(filters.getByRole("combobox")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect(filters.getByRole("combobox", { name: filter, exact: true })).toContainText(option);
+    await expect(toggle).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+});
+
+test("network pagination follows the filtered inventory", async ({ page }) => {
+  await mockAPI(page);
+  const networks = Array.from({ length: 26 }, (_, i) => ({ ...network, id: String(i + 1), displayName: `Network ${i + 1}` }));
+  await page.route("**/cloud.v1.NetworkService/ListNetworks", route => route.fulfill({ json: { networks } }));
+  await page.goto("/networks");
+  const pager = page.getByRole("navigation", { name: "Networks pagination" });
+  const table = page.getByRole("table", { name: "Tenant networks" });
+  await pager.getByRole("button", { name: /next/i }).click();
+  await expect(table.getByRole("row")).toHaveCount(2);
+  await expect(table).toContainText("Network 26");
+  await page.getByRole("searchbox", { name: "Search networks" }).fill("Network 14");
+  await expect(table).toContainText("Network 14");
+  await expect(pager).toHaveCount(0);
 });

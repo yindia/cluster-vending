@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// GetNodeResourcesRequest asks for the resource totals of a cluster's node
+// groups.
+message GetNodeResourcesRequest {
+  // Tenant scope. DNS label, at most 56 chars so the tenant namespace
+  // "tenant-<id>" fits the 63-char Kubernetes limit.
+  string tenant_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 56
+    pattern: "^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$"
+  }];
+  // Cluster.id.
+  string cluster_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+// NodeResourceTotals are the sums over the nodes of one node group, or of the
+// whole cluster. CPU in millicores, memory in bytes.
+message NodeResourceTotals {
+  // The node group's name; empty for the cluster's total.
+  string node_group = 1;
+  int32 nodes = 2;
+  int32 ready_nodes = 3;
+  int64 allocatable_cpu_millis = 4;
+  int64 allocatable_memory_bytes = 5;
+  int64 allocatable_pods = 6;
+  int64 requested_cpu_millis = 7;
+  int64 requested_memory_bytes = 8;
+  int64 pod_count = 9;
+  int64 pods_without_requests = 10;
+}
+
+// GetNodeResourcesResponse is read live from the workload cluster.
+message GetNodeResourcesResponse {
+  // One entry per node group, in name order.
+  repeated NodeResourceTotals groups = 1;
+  // The total of all the groups.
+  NodeResourceTotals cluster = 2;
+  // When the read started.
+  google.protobuf.Timestamp live_at = 3;
+  // Every node and pod was read within the caps.
+  bool complete = 4;
+  // For example, pod requests that refer to nodes not in the read.
+  repeated string notices = 5;
+}

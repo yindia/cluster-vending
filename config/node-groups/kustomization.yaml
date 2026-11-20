@@ -5,7 +5,7 @@
 # "platform-config" (the volume of each), which kustomize rewrites.
 #
 # To change the layout, edit platform.yaml or patch the generator in an
-# overlay. Do not set CV_SYSTEM_NODE_GROUP_* or CV_NODE_GROUP_* variables:
+# overlay. Do not set CV_SYSTEM_* or CV_PLATFORM_* or CV_NODE_GROUP_* variables:
 # they win over the file and the processes warn about them at start.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+// SortOrder is the direction of a list's sort. Unspecified is the default
+// of the kind's sort key (ascending unless the key says otherwise).
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_ASC = 1;
+  SORT_ORDER_DESC = 2;
+}
+
+// LiveUnavailableReason is why a live read of a workload cluster could not
+// be served. It is the reason in the details (LiveUnavailableDetail) of the
+// UNAVAILABLE error such a read returns.
+enum LiveUnavailableReason {
+  LIVE_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  // The cluster could not be reached: no kubeconfig, connect, DNS or TLS
+  // failed, or the build's deadline passed before the first page.
+  LIVE_UNAVAILABLE_REASON_CLUSTER_UNREACHABLE = 1;
+  // The workload cluster's API server answered 401 or 403.
+  LIVE_UNAVAILABLE_REASON_CREDENTIALS_REJECTED = 2;
+  // Too many live reads are in flight; no slot became free in time.
+  LIVE_UNAVAILABLE_REASON_BUSY = 3;
+  // A cap (rows, pages or time) was exceeded before the read finished.
+  LIVE_UNAVAILABLE_REASON_CAP_EXCEEDED = 4;
+  // A list's continue token expired while the read was running.
+  LIVE_UNAVAILABLE_REASON_LIST_EXPIRED = 5;
+  // The cluster's or the tenant's rate limit for live reads was reached.
+  LIVE_UNAVAILABLE_REASON_RATE_LIMITED = 6;
+  // Live reads are not served by this deployment (yet).
+  LIVE_UNAVAILABLE_REASON_NOT_AVAILABLE = 7;
+}
+
+// LiveUnavailableDetail is the error detail of an UNAVAILABLE live read.
+message LiveUnavailableDetail {
+  LiveUnavailableReason reason = 1;
+  // A short explanation fit for the tenant; no internal names.
+  string message = 2;
+}

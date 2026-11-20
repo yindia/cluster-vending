@@ -59,6 +59,9 @@ const (
 	// ClusterServiceListNodeGroupNodesProcedure is the procedure name of the ClusterService's
 	// ListNodeGroupNodes RPC.
 	ClusterServiceListNodeGroupNodesProcedure = "/cloud.v1.ClusterService/ListNodeGroupNodes"
+	// ClusterServiceGetNodeResourcesProcedure is the procedure name of the ClusterService's
+	// GetNodeResources RPC.
+	ClusterServiceGetNodeResourcesProcedure = "/cloud.v1.ClusterService/GetNodeResources"
 	// ClusterServiceListClustersProcedure is the procedure name of the ClusterService's ListClusters
 	// RPC.
 	ClusterServiceListClustersProcedure = "/cloud.v1.ClusterService/ListClusters"
@@ -164,6 +167,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListNodeGroupNodes"),
 			Procedure:        ClusterServiceListNodeGroupNodesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	clusterServiceGetNodeResourcesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetNodeResources"),
+			Procedure:        ClusterServiceGetNodeResourcesProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -283,6 +294,12 @@ type ClusterServiceClient interface {
 	// A bucket that cannot be read, or nodes not collected yet, is a notice in
 	// the response, not an error.
 	ListNodeGroupNodes(context.Context, *v1.ListNodeGroupNodesRequest) (*v1.ListNodeGroupNodesResponse, error)
+	// Returns the resource totals (allocatable and requested CPU, memory and
+	// pods) per node group and for the cluster, read live from the workload
+	// cluster by the live reader (the API server never connects to it).
+	// UNIMPLEMENTED until the live reader exists. An unreadable cluster is
+	// UNAVAILABLE, with a LiveUnavailableDetail.
+	GetNodeResources(context.Context, *v1.GetNodeResourcesRequest) (*v1.GetNodeResourcesResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -402,6 +419,12 @@ type ClusterServiceHandler interface {
 	// A bucket that cannot be read, or nodes not collected yet, is a notice in
 	// the response, not an error.
 	ListNodeGroupNodes(context.Context, *v1.ListNodeGroupNodesRequest) (*v1.ListNodeGroupNodesResponse, error)
+	// Returns the resource totals (allocatable and requested CPU, memory and
+	// pods) per node group and for the cluster, read live from the workload
+	// cluster by the live reader (the API server never connects to it).
+	// UNIMPLEMENTED until the live reader exists. An unreadable cluster is
+	// UNAVAILABLE, with a LiveUnavailableDetail.
+	GetNodeResources(context.Context, *v1.GetNodeResourcesRequest) (*v1.GetNodeResourcesResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
 	ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error)
@@ -449,6 +472,7 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceGetNodeGroupOptionsSpec(), Handler: adapter.getNodeGroupOptions},
 		connect.Method{Spec: clusterServiceListClusterNodeGroupManifestsSpec(), Handler: adapter.listClusterNodeGroupManifests},
 		connect.Method{Spec: clusterServiceListNodeGroupNodesSpec(), Handler: adapter.listNodeGroupNodes},
+		connect.Method{Spec: clusterServiceGetNodeResourcesSpec(), Handler: adapter.getNodeResources},
 		connect.Method{Spec: clusterServiceListClustersSpec(), Handler: adapter.listClusters},
 		connect.Method{Spec: clusterServiceUpdateClusterSpec(), Handler: adapter.updateCluster},
 		connect.Method{Spec: clusterServiceDeleteClusterSpec(), Handler: adapter.deleteCluster},
@@ -505,6 +529,10 @@ func (UnimplementedClusterServiceHandler) ListClusterNodeGroupManifests(context.
 
 func (UnimplementedClusterServiceHandler) ListNodeGroupNodes(context.Context, *v1.ListNodeGroupNodesRequest) (*v1.ListNodeGroupNodesResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListNodeGroupNodes is not implemented")
+}
+
+func (UnimplementedClusterServiceHandler) GetNodeResources(context.Context, *v1.GetNodeResourcesRequest) (*v1.GetNodeResourcesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetNodeResources is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusters(context.Context, *v1.ListClustersRequest) (*v1.ListClustersResponse, error) {
@@ -618,6 +646,14 @@ func (c *clusterServiceClient) ListClusterNodeGroupManifests(ctx context.Context
 func (c *clusterServiceClient) ListNodeGroupNodes(ctx context.Context, req *v1.ListNodeGroupNodesRequest) (*v1.ListNodeGroupNodesResponse, error) {
 	var res v1.ListNodeGroupNodesResponse
 	if err := c.client.CallUnary(ctx, clusterServiceListNodeGroupNodesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *clusterServiceClient) GetNodeResources(ctx context.Context, req *v1.GetNodeResourcesRequest) (*v1.GetNodeResourcesResponse, error) {
+	var res v1.GetNodeResourcesResponse
+	if err := c.client.CallUnary(ctx, clusterServiceGetNodeResourcesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -795,6 +831,18 @@ func (h clusterServiceHandler) listNodeGroupNodes(ctx context.Context, _ connect
 		return err
 	}
 	res, err := h.svc.ListNodeGroupNodes(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h clusterServiceHandler) getNodeResources(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.GetNodeResourcesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetNodeResources(ctx, &req)
 	if err != nil {
 		return err
 	}

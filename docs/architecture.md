@@ -623,11 +623,12 @@ with leader election. The runtime configs are `cluster-vending-aws`,
 
 ### Node layout
 
-A cluster has two kinds of nodes:
+A cluster has three kinds of nodes:
 
 | Pool | Label | Taint | Runs |
 |---|---|---|---|
 | The system node group (`system`), EKS managed | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, cluster-autoscaler, CoreDNS, the platform and tenant components, the EKS add-on controllers |
+| The platform pool (`platform-pool`, Karpenter) | `node.cluster-vending.io/pool=platform-pool` | `node.cluster-vending.io/pool=platform-pool:NoSchedule` | Nothing yet: built and empty ([PROP-03](proposals/PROP-03-component-placement.md) phase 2; components move to it in phases 3 and 4) |
 | The tenant's Karpenter node groups (`spec.nodeGroups`) | `node.cluster-vending.io/pool=<name>` and the tenant's labels | The tenant's taints | The tenant's workloads |
 
 DaemonSets (VPC CNI, kube-proxy, the pod identity agent, istio-cni, ztunnel)
@@ -636,16 +637,28 @@ tolerate every taint and run everywhere.
 **System group.** The default managed node group of every new cluster, sized from
 the platform's `nodeGroups.system` settings. It is autoscaled by
 cluster-autoscaler between `minSize` (default 2, the least allowed, since
-Karpenter runs two replicas) and `maxSize` (default 6). The cluster autoscaler
+Karpenter runs two replicas) and the deprecated `maxSize` (default 6; still the
+cluster-autoscaler ceiling until that leaves the default set). The cluster autoscaler
 finds the group by the tags `k8s.io/cluster-autoscaler/enabled` and
 `k8s.io/cluster-autoscaler/<cluster>`, which the platform puts on that group
 alone. Changing `minSize` or `maxSize` applies to existing clusters in place; the
-node count stays with the autoscaler. `instanceType`, `capacityType` and
-`diskSizeGiB` apply to new clusters only, since EKS cannot change them on a node
+node count stays with the autoscaler. `instanceTypes` (a list of one architecture and
+one vCPU and memory class), `capacityType` and `diskSizeGiB` apply to new clusters only, since EKS cannot change them on a node
 group. Users cannot change the group's labels, taints or scaling.
 
+**Platform pool.** `nodeGroups.platform` configures one Karpenter `NodePool` and one
+`EC2NodeClass`, both named `platform-pool` (not the legacy `platform`, which the legacy gate removes).
+The controller applies them through the workload kubeconfig, like a tenant group, once Karpenter is
+`Ready` and its IAM chain is. The pool is on-demand only (`SPOT` is refused), tainted and labelled
+with its own name, `WhenEmpty` consolidation by default, with limits, a disruption budget, `expireAfter`
+and `terminationGracePeriod`. It is `Ready` when its two objects are `Ready`, not when it has nodes: pods
+create the nodes, so no wait for nodes can deadlock Karpenter. `status.nodeGroups` lists it after `system`
+(`platformManaged`). A deletion removes it in the node groups stage, before Karpenter's stage.
+`controller --check` sizes the bootstrap set (CPU, memory and pods per node: 17 on a `t3.medium`) against
+`nodeGroups.system`, and the platform set against `nodeGroups.platform.limits` and the shapes the pool allows.
+
 **Tenant node groups.** `spec.nodeGroups` is a list of Karpenter node groups
-(at most 20, names unique and not `platform`, `default` or `system`). For each
+(at most 20, names unique and not `platform`, `platform-pool`, `default` or `system`). For each
 one, the controller applies one `EC2NodeClass` and one `NodePool` into the
 workload cluster after Karpenter is ready, labelled
 `cloud.cluster-vending.io/managed-by=platform`, and removes them when the group
@@ -845,7 +858,9 @@ shard keys, counts and ETags.
 **Write rules.** The controller's scanners write. A digest of the collected
 content is compared with the last write, so unchanged results are not written
 again. History is written at most once per change of the scan's interval (the
-recommendation history is hourly). A failed write does not fail the scan: the
+recommendation and violation history are hourly). Violation events get no history
+object: they are an hour of Kubernetes events, and only `latest` is written
+([PROP-02](proposals/PROP-02-cluster-data-live-and-snapshot.md), phase 0). A failed write does not fail the scan: the
 caller keeps the summary and a notice that says why.
 
 **Read rules.** The API server reads `latest` objects with `GetObject` through the
@@ -855,11 +870,33 @@ missing bucket or object, a denied read, or a timeout is a coverage notice in th
 response ("results unavailable: ..."), never a failed call. The server's session is
 limited to reading objects in `cv-*` buckets (`results.ReadOnlySessionPolicy`).
 
+**Sorting and the live API shape** (PROP-02 phase 1). The lists have `sort_by` and
+`sort_order` (an enum per kind, `SortOrder` shared). Deprecations (`REMOVED_FIRST`,
+`NAMESPACE`, `KIND`) and recommendations (`NAMESPACE`, `CPU_CHANGE`,
+`MEMORY_CHANGE`) sort in memory after the filters. Their page tokens are bound to
+the sort as well as to the object's ETag; a request with the default sort makes and
+accepts the tokens it always did. The node, violation and event lists have the same
+fields plus `live_at`, `complete` and `notices`, and `GetNodeResources` exists, but
+the live reader that serves them is not built yet: the lists keep answering from the
+stored results with the default order, and ask for another sort or call
+`GetNodeResources` and the answer is `UNIMPLEMENTED`. `LiveUnavailableDetail` is the
+detail of the `UNAVAILABLE` a live read will return.
+
 **Targets.** Designed for 100 clusters of up to 1,000 nodes and 10,000 pods each.
 This is a design target: it has not been load tested
 ([Known limits](#7-known-limits)).
 
 ### Scanners
+
+**Cluster status summary** (`pkg/clustersummary`, `pkg/reconcile/cluster/summary.go`). The node pass
+(at most once a minute per cluster) sums the nodes it already reads per group and lists the pods once
+(`limit` 500 and `continue`, at most 200 pages), adding each page as it arrives; no pod is kept. A pod's
+request is the scheduler's: the larger of the containers' sum (plus restartable init containers) and the
+init containers' peak, plus `spec.overhead`; pods bound to no node, Succeeded or Failed are excluded; a
+missing request is zero. The totals go to the status (`SetSummary`); counts that did not change move their
+collected time at most every 10 minutes. The policy pass writes the violation and event counts with the
+snapshot. An unreachable pass changes only the `Reachable` condition. A node outside the platform's groups
+(not in a Karpenter pool or the default managed group) is not counted.
 
 **Policy violations** (`pkg/controller/policy_controller.go`). Every 5 minutes, for
 each cluster that is Running, Updating, Failed or Imported with a kubeconfig, and
@@ -1230,6 +1267,7 @@ are marked so in the type; the rest can be updated.
 | `status.rollout` | object | The cluster's last automatic upgrade: `channel`, `fromVersion`, `toVersion`, `startTime`, `finishTime`, `result` (`Pending`, `Blocked`, `InProgress`, `Succeeded`, `Failed`, `TimedOut`), `message`, `tier`. |
 | `status.releaseMove` | object | The component move to the channel's release: `current`, `target`, `phase` (`Idle`, `Pending`, `Components`, `Halted`), `component`, `step`, `steps`, `message`. |
 | `status.kubernetes` | object | `channel`, `channelMinor`, `available` (the next minor), `ending`, `message`. |
+| `status.nodes`, `status.nodeGroups[]` (usage), `status.violations`, `status.violationEvents` | objects | The cluster status summary (PROP-02 5.2), a few KiB at most. `nodes`: total, ready, not ready, `nodesCollectedAt`. Each node group entry also has `ready`, `notReady`, allocatable CPU (millicores), memory (bytes) and pods, requested CPU and memory, `podCount` and `podsWithoutRequests`; at most 16 entries, the groups after the 15th summed into one `other`. `violations`: total and counts by severity (8 values, the rest in `other`). `violationEvents`: last-hour total and counts by reason. `Reachable` (a condition) is False with `CLUSTER_UNREACHABLE` or `CREDENTIALS_REJECTED` when the pass cannot read the cluster; the counts of the last good pass stay and their collected times show their age. |
 | `status.platformComponents` | list | Per platform component: `name`, `version`, `phase` (`Pending`, `Installing`, `Ready`, `Failed`), `message`, `chart`, `helmState`, `lastError`, `failures`, `since`, `recoveries`, `chartVersion`, `revision`, `digest`, `attempts`, `countedFailures`, `nextRetryAt`, `lastErrorClass` (`transient`, `chart`, `release`), `lastRecovery`, `unchanged`. |
 | `status.platformRelease` | string | The release the platform components' versions come from. |
 | `status.componentInventory` | list | The Crossplane objects of the platform components (IAM roles, Helm releases). |
@@ -1522,7 +1560,7 @@ Accepted by every command.
 | Flag | Meaning |
 |---|---|
 | `--export` | Reads the management cluster (`--kubeconfig`) and writes its `ComponentDefinition`s, `Release`s and `ReleaseChannel`s as clean manifests (no status, uid, resourceVersion, managed fields, finalizers or shipped label and hash; the `cloud.cluster-vending.io/catalog-schema: "1"` annotation added; releases without a serial numbered in creation order). One multi-document stream on stdout, or with `--export-dir <dir>` the layout `definitions/`, `releases/`, `channels/` with one file per object and a `kustomization.yaml`. On stderr it lists how the live definitions differ from this build's embedded catalog. |
-| `--check -f <path\|->` | Reads rendered manifests (`kustomize build ... \| cluster-vending controller --config platform.yaml --check -f -`), makes no cluster call, prints every problem and exits 1 if there is any: the three channels once each, requirements that exist and do not cycle, a requirement's sequence not above its dependent's, sequence 0 for karpenter alone, unique serials, consecutive minors and one minor per channel, a pin for every enabled chart (and companion) on every minor, channels naming releases of the set, each definition's `Valid` checks, the schema annotation, and the system node group sizing against `nodeGroups.system` of `--config` (the default group without it). Disabling a component switches its dependents off with it: that is not a problem. |
+| `--check -f <path\|->` | Reads rendered manifests (`kustomize build ... \| cluster-vending controller --config platform.yaml --check -f -`), makes no cluster call, prints every problem and exits 1 if there is any: the three channels once each, requirements that exist and do not cycle, a requirement's sequence not above its dependent's, sequence 0 for karpenter alone, unique serials, consecutive minors and one minor per channel, a pin for every enabled chart (and companion) on every minor, channels naming releases of the set, each definition's `Valid` checks, the schema annotation, and the sizing of the system group, of the bootstrap set (CPU, memory and pods per node) and of the platform pool against `nodeGroups.system` and `nodeGroups.platform` of `--config` (the defaults without it). Disabling a component switches its dependents off with it: that is not a problem. |
 
 
 The controller's `--aws-region`, `--aws-source-role-arn` and `--aws-external-id` are
@@ -1548,7 +1586,7 @@ its `configMapGenerator` makes the ConfigMap `platform-config` from `platform.ya
 content hash in its name, so a change of the file rolls both Deployments. The server and the
 controller mount it at `/etc/cluster-vending` and pass `--config=/etc/cluster-vending/platform.yaml`.
 They load it with the same code, so an invalid file stops both with the same problems.
-The manifests set no `CV_SYSTEM_NODE_GROUP_*` or `CV_NODE_GROUP_*` variable. A variable still
+The manifests set no `CV_SYSTEM_*`, `CV_PLATFORM_*` or `CV_NODE_GROUP_*` node group variable. A variable still
 wins over the file (flag, then variable, then file), so one that is set anywhere logs a
 warning at start of either command. Locally, `make run` and `make run-controller` both pass
 `hack/config.local.yaml`. `config/server/auth` carries the same `nodeGroups` plus the `auth`
@@ -1556,12 +1594,23 @@ section for the server's one `--config` (a config test keeps the two equal).
 
 ```yaml
 nodeGroups:
-  system:                      # the system managed node group of every cluster
-    instanceType: t3.medium    # new clusters only
-    minSize: 2                 # at least 2 (Karpenter's two replicas); the size at creation
-    maxSize: 6                 # at least minSize; cluster-autoscaler grows the group to it
+  system:                      # the bootstrap group: the default managed node group of every cluster
+    instanceTypes: [t3.medium] # new clusters only; one architecture, one vCPU/memory class
+    minSize: 2                 # at least 2 (Karpenter's two replicas); the fixed size
     capacityType: ON_DEMAND    # new clusters only
     diskSizeGiB: 0             # new clusters only; 0 is EKS's default
+  platform:                    # the Karpenter pool `platform-pool` (PROP-03)
+    instanceFamilies: [m7i, m6i]
+    instanceSizes: [large, xlarge, 2xlarge]
+    architectures: [AMD64]     # exactly one
+    capacityTypes: [ON_DEMAND] # SPOT is refused
+    limits: {cpu: 128, memory: 512Gi}
+    consolidationPolicy: WhenEmpty   # or WhenEmptyOrUnderutilized
+    consolidateAfter: 5m
+    expireAfter: 336h
+    terminationGracePeriod: 1h
+    disruptionBudget: 1        # nodes disrupted at once
+    maxPods: 0                 # 0: Karpenter's default; at most 110
   karpenter:                   # what tenants may create as their own node groups
     instanceFamilies: [t3]     # empty list or `none`: no restriction
     instanceTypes: []          # extra allowed types
@@ -1572,19 +1621,27 @@ nodeGroups:
 
 | Key | Flag | Environment | Default |
 |---|---|---|---|
-| `system.instanceType` | `--system-node-group-instance-type` | `CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE` | `t3.medium` |
+| `system.instanceTypes` | `--system-instance-types` | `CV_SYSTEM_INSTANCE_TYPES` | `t3.medium` |
+| `system.instanceType` | `--system-node-group-instance-type` | `CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE` | none: deprecated, a list of one, warned about (not together with `instanceTypes`) |
 | `system.minSize` | `--system-node-group-min-size` | `CV_SYSTEM_NODE_GROUP_MIN_SIZE` | `2` (minimum 2) |
-| `system.maxSize` | `--system-node-group-max-size` | `CV_SYSTEM_NODE_GROUP_MAX_SIZE` | `6` (at least `minSize`) |
+| `system.maxSize` | `--system-node-group-max-size` | `CV_SYSTEM_NODE_GROUP_MAX_SIZE` | deprecated, warned about at start: the cluster-autoscaler ceiling (default 6, at least `minSize`) until it leaves the default set |
 | `system.size` | `--system-node-group-size` | `CV_SYSTEM_NODE_GROUP_SIZE` | none: the old fixed-size setting, an alias of `minSize` (two different values are an error) |
 | `system.capacityType` | `--system-node-group-capacity-type` | `CV_SYSTEM_NODE_GROUP_CAPACITY_TYPE` | `ON_DEMAND` |
 | `system.diskSizeGiB` | `--system-node-group-disk-size-gib` | `CV_SYSTEM_NODE_GROUP_DISK_SIZE_GIB` | `0` (EKS default) |
+| `platform.instanceFamilies`, `.instanceSizes`, `.architectures`, `.capacityTypes` | `--platform-instance-families`, `-sizes`, `-architectures`, `-capacity-types` | `CV_PLATFORM_INSTANCE_FAMILIES`, ... | `m7i,m6i`; `large,xlarge,2xlarge`; `AMD64`; `ON_DEMAND` |
+| `platform.limits.cpu`, `.memory` | `--platform-limit-cpu`, `--platform-limit-memory` | `CV_PLATFORM_LIMIT_CPU`, `CV_PLATFORM_LIMIT_MEMORY` | `128`, `512Gi` |
+| `platform.consolidationPolicy`, `.consolidateAfter`, `.expireAfter`, `.terminationGracePeriod` | `--platform-consolidation-policy`, `-consolidate-after`, `-expire-after`, `-termination-grace-period` | `CV_PLATFORM_*` | `WhenEmpty`, `5m`, `336h`, `1h` |
+| `platform.disruptionBudget`, `.maxPods` | `--platform-disruption-budget`, `--platform-max-pods` | `CV_PLATFORM_DISRUPTION_BUDGET`, `CV_PLATFORM_MAX_PODS` | `1`, `0` |
 | `karpenter.instanceFamilies` | `--node-group-instance-families` | `CV_NODE_GROUP_INSTANCE_FAMILIES` | `t3` |
 | `karpenter.instanceTypes` | `--node-group-instance-types` | `CV_NODE_GROUP_INSTANCE_TYPES` | none |
 | `karpenter.defaults.architectures` | `--node-group-default-architectures` | `CV_NODE_GROUP_DEFAULT_ARCHITECTURES` | `AMD64` |
 | `karpenter.defaults.capacityTypes` | `--node-group-default-capacity-types` | `CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES` | `ON_DEMAND` |
 
 Startup fails with every problem listed: a `minSize` below 2, a `maxSize` below
-`minSize`, an instance type not like `t3.large`, a family not like `t3`, a capacity
+`minSize`, an empty `system.instanceTypes` or one that mixes architectures, a platform
+family or size not shaped like `m7i` or `xlarge`, a platform pool with more than one
+architecture, a family of another architecture than the pool's, `SPOT` in the platform pool,
+non-positive limits, a disruption budget below 1, `maxPods` above 110, an instance type not like `t3.large`, a family not like `t3`, a capacity
 type other than `ON_DEMAND` or `SPOT`, an architecture other than `AMD64` or `ARM64`.
 The two allowlist flags are the names that shipped before the section, and they
 still work.

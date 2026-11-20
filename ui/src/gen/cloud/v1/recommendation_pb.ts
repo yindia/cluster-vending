@@ -5,6 +5,8 @@
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
+import type { SortOrder } from "./sort_pb";
+import { file_cloud_v1_sort } from "./sort_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -13,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/recommendation.proto.
  */
 export const file_cloud_v1_recommendation: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jbG91ZC92MS9yZWNvbW1lbmRhdGlvbi5wcm90bxIIY2xvdWQudjEiOwoPUmVzb3VyY2VBbW91bnRzEhIKCmNwdV9taWxsaXMYASABKAMSFAoMbWVtb3J5X2J5dGVzGAIgASgDIvoEChZSZXNvdXJjZVJlY29tbWVuZGF0aW9uEhEKCW5hbWVzcGFjZRgBIAEoCRIVCg13b3JrbG9hZF9raW5kGAIgASgJEhUKDXdvcmtsb2FkX25hbWUYAyABKAkSEQoJY29udGFpbmVyGAQgASgJEhAKCHJlcGxpY2FzGAUgASgFEhAKCHBsYXRmb3JtGAYgASgIEjMKEGN1cnJlbnRfcmVxdWVzdHMYByABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSMQoOY3VycmVudF9saW1pdHMYCCABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSNwoUcmVjb21tZW5kZWRfcmVxdWVzdHMYCSABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSNQoScmVjb21tZW5kZWRfbGltaXRzGAogASgLMhkuY2xvdWQudjEuUmVzb3VyY2VBbW91bnRzEi0KCmRpZmZlcmVuY2UYCyABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSEwoLY3B1X3BlcmNlbnQYDCABKAUSFgoObWVtb3J5X3BlcmNlbnQYDSABKAUSLQoKdXNhZ2VfcGVhaxgOIAEoCzIZLmNsb3VkLnYxLlJlc291cmNlQW1vdW50cxIwCg11c2FnZV9hdmVyYWdlGA8gASgLMhkuY2xvdWQudjEuUmVzb3VyY2VBbW91bnRzEi4KBnNvdXJjZRgQIAEoDjIeLmNsb3VkLnYxLlJlY29tbWVuZGF0aW9uU291cmNlEhIKCmRhdGFfaG91cnMYESABKAUSDwoHc2FtcGxlcxgSIAEoBSKbAgoWQ2x1c3RlclJlY29tbWVuZGF0aW9ucxIuCgpzYW1wbGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxhdHRlbXB0ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhEKCXdvcmtsb2FkcxgDIAEoBRISCgpjb250YWluZXJzGAQgASgFEhMKC3dpbmRvd19kYXlzGAUgASgFEhkKEW1ldHJpY3NfYXZhaWxhYmxlGAYgASgIEhUKDXZwYV9hdmFpbGFibGUYByABKAgSEQoJdHJ1bmNhdGVkGAggASgIEg0KBWVycm9yGAkgASgJEg8KB21lc3NhZ2UYCiABKAkiowIKIUxpc3RDbHVzdGVyUmVjb21tZW5kYXRpb25zUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEhwKCmNsdXN0ZXJfaWQYAiABKAlCCLpIBXIDsAEBEkMKCW5hbWVzcGFjZRgDIAEoCUIwukgtcisYPzInXihbYS16MC05XShbYS16MC05LV17MCw2MX1bYS16MC05XSk/KT8kEhoKCXBhZ2Vfc2l6ZRgEIAEoBUIHukgEGgIoABIlCgpwYWdlX3Rva2VuGAUgASgJQhG6SA5yDBgIMgheWzAtOV0qJBIUCgxvbmx5X2NoYW5nZXMYBiABKAgiugEKIkxpc3RDbHVzdGVyUmVjb21tZW5kYXRpb25zUmVzcG9uc2USOQoPcmVjb21tZW5kYXRpb25zGAEgAygLMiAuY2xvdWQudjEuUmVzb3VyY2VSZWNvbW1lbmRhdGlvbhIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkSMQoHc3VtbWFyeRgDIAEoCzIgLmNsb3VkLnYxLkNsdXN0ZXJSZWNvbW1lbmRhdGlvbnMSDQoFdG90YWwYBCABKAUq1gEKFFJlY29tbWVuZGF0aW9uU291cmNlEiUKIVJFQ09NTUVOREFUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEh0KGVJFQ09NTUVOREFUSU9OX1NPVVJDRV9WUEEQARIoCiRSRUNPTU1FTkRBVElPTl9TT1VSQ0VfVVNBR0VfRVNUSU1BVEUQAhIrCidSRUNPTU1FTkRBVElPTl9TT1VSQ0VfSU5TVUZGSUNJRU5UX0RBVEEQAxIhCh1SRUNPTU1FTkRBVElPTl9TT1VSQ0VfTk9fREFUQRAEQqMBCgxjb20uY2xvdWQudjFCE1JlY29tbWVuZGF0aW9uUHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Ch1jbG91ZC92MS9yZWNvbW1lbmRhdGlvbi5wcm90bxIIY2xvdWQudjEiOwoPUmVzb3VyY2VBbW91bnRzEhIKCmNwdV9taWxsaXMYASABKAMSFAoMbWVtb3J5X2J5dGVzGAIgASgDIvoEChZSZXNvdXJjZVJlY29tbWVuZGF0aW9uEhEKCW5hbWVzcGFjZRgBIAEoCRIVCg13b3JrbG9hZF9raW5kGAIgASgJEhUKDXdvcmtsb2FkX25hbWUYAyABKAkSEQoJY29udGFpbmVyGAQgASgJEhAKCHJlcGxpY2FzGAUgASgFEhAKCHBsYXRmb3JtGAYgASgIEjMKEGN1cnJlbnRfcmVxdWVzdHMYByABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSMQoOY3VycmVudF9saW1pdHMYCCABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSNwoUcmVjb21tZW5kZWRfcmVxdWVzdHMYCSABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSNQoScmVjb21tZW5kZWRfbGltaXRzGAogASgLMhkuY2xvdWQudjEuUmVzb3VyY2VBbW91bnRzEi0KCmRpZmZlcmVuY2UYCyABKAsyGS5jbG91ZC52MS5SZXNvdXJjZUFtb3VudHMSEwoLY3B1X3BlcmNlbnQYDCABKAUSFgoObWVtb3J5X3BlcmNlbnQYDSABKAUSLQoKdXNhZ2VfcGVhaxgOIAEoCzIZLmNsb3VkLnYxLlJlc291cmNlQW1vdW50cxIwCg11c2FnZV9hdmVyYWdlGA8gASgLMhkuY2xvdWQudjEuUmVzb3VyY2VBbW91bnRzEi4KBnNvdXJjZRgQIAEoDjIeLmNsb3VkLnYxLlJlY29tbWVuZGF0aW9uU291cmNlEhIKCmRhdGFfaG91cnMYESABKAUSDwoHc2FtcGxlcxgSIAEoBSKbAgoWQ2x1c3RlclJlY29tbWVuZGF0aW9ucxIuCgpzYW1wbGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxhdHRlbXB0ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhEKCXdvcmtsb2FkcxgDIAEoBRISCgpjb250YWluZXJzGAQgASgFEhMKC3dpbmRvd19kYXlzGAUgASgFEhkKEW1ldHJpY3NfYXZhaWxhYmxlGAYgASgIEhUKDXZwYV9hdmFpbGFibGUYByABKAgSEQoJdHJ1bmNhdGVkGAggASgIEg0KBWVycm9yGAkgASgJEg8KB21lc3NhZ2UYCiABKAkikQMKIUxpc3RDbHVzdGVyUmVjb21tZW5kYXRpb25zUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEhwKCmNsdXN0ZXJfaWQYAiABKAlCCLpIBXIDsAEBEkMKCW5hbWVzcGFjZRgDIAEoCUIwukgtcisYPzInXihbYS16MC05XShbYS16MC05LV17MCw2MX1bYS16MC05XSk/KT8kEhoKCXBhZ2Vfc2l6ZRgEIAEoBUIHukgEGgIoABIlCgpwYWdlX3Rva2VuGAUgASgJQhG6SA5yDBgIMgheWzAtOV0qJBIUCgxvbmx5X2NoYW5nZXMYBiABKAgSOQoHc29ydF9ieRgHIAEoDjIeLmNsb3VkLnYxLlJlY29tbWVuZGF0aW9uU29ydEJ5Qgi6SAWCAQIQARIxCgpzb3J0X29yZGVyGAggASgOMhMuY2xvdWQudjEuU29ydE9yZGVyQgi6SAWCAQIQASK6AQoiTGlzdENsdXN0ZXJSZWNvbW1lbmRhdGlvbnNSZXNwb25zZRI5Cg9yZWNvbW1lbmRhdGlvbnMYASADKAsyIC5jbG91ZC52MS5SZXNvdXJjZVJlY29tbWVuZGF0aW9uEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRIxCgdzdW1tYXJ5GAMgASgLMiAuY2xvdWQudjEuQ2x1c3RlclJlY29tbWVuZGF0aW9ucxINCgV0b3RhbBgEIAEoBSrWAQoUUmVjb21tZW5kYXRpb25Tb3VyY2USJQohUkVDT01NRU5EQVRJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASHQoZUkVDT01NRU5EQVRJT05fU09VUkNFX1ZQQRABEigKJFJFQ09NTUVOREFUSU9OX1NPVVJDRV9VU0FHRV9FU1RJTUFURRACEisKJ1JFQ09NTUVOREFUSU9OX1NPVVJDRV9JTlNVRkZJQ0lFTlRfREFUQRADEiEKHVJFQ09NTUVOREFUSU9OX1NPVVJDRV9OT19EQVRBEAQqtQEKFFJlY29tbWVuZGF0aW9uU29ydEJ5EiYKIlJFQ09NTUVOREFUSU9OX1NPUlRfQllfVU5TUEVDSUZJRUQQABIkCiBSRUNPTU1FTkRBVElPTl9TT1JUX0JZX05BTUVTUEFDRRABEiUKIVJFQ09NTUVOREFUSU9OX1NPUlRfQllfQ1BVX0NIQU5HRRACEigKJFJFQ09NTUVOREFUSU9OX1NPUlRfQllfTUVNT1JZX0NIQU5HRRADQqMBCgxjb20uY2xvdWQudjFCE1JlY29tbWVuZGF0aW9uUHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_cloud_v1_sort, file_google_protobuf_timestamp]);
 
 /**
  * ResourceAmounts are CPU in millicores and memory in bytes. Zero is
@@ -311,6 +313,20 @@ export type ListClusterRecommendationsRequest = Message<"cloud.v1.ListClusterRec
    * @generated from field: bool only_changes = 6;
    */
   onlyChanges: boolean;
+
+  /**
+   * Unspecified: NAMESPACE. A token is good for the sort it was made with.
+   *
+   * @generated from field: cloud.v1.RecommendationSortBy sort_by = 7;
+   */
+  sortBy: RecommendationSortBy;
+
+  /**
+   * Unspecified: ascending, except for the change keys (descending).
+   *
+   * @generated from field: cloud.v1.SortOrder sort_order = 8;
+   */
+  sortOrder: SortOrder;
 };
 
 /**
@@ -406,4 +422,45 @@ export enum RecommendationSource {
  */
 export const RecommendationSourceSchema: GenEnum<RecommendationSource> = /*@__PURE__*/
   enumDesc(file_cloud_v1_recommendation, 0);
+
+/**
+ * RecommendationSortBy is how ListClusterRecommendations orders the
+ * containers. Unspecified: NAMESPACE (then workload kind, name and
+ * container). Ties keep that order.
+ *
+ * @generated from enum cloud.v1.RecommendationSortBy
+ */
+export enum RecommendationSortBy {
+  /**
+   * @generated from enum value: RECOMMENDATION_SORT_BY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: RECOMMENDATION_SORT_BY_NAMESPACE = 1;
+   */
+  NAMESPACE = 1,
+
+  /**
+   * The size of the change of the CPU request, in millicores, whether up or
+   * down. Descending (the default for this key): the largest change first.
+   * Containers without a recommendation come last either way.
+   *
+   * @generated from enum value: RECOMMENDATION_SORT_BY_CPU_CHANGE = 2;
+   */
+  CPU_CHANGE = 2,
+
+  /**
+   * The same for the memory request, in bytes.
+   *
+   * @generated from enum value: RECOMMENDATION_SORT_BY_MEMORY_CHANGE = 3;
+   */
+  MEMORY_CHANGE = 3,
+}
+
+/**
+ * Describes the enum cloud.v1.RecommendationSortBy.
+ */
+export const RecommendationSortBySchema: GenEnum<RecommendationSortBy> = /*@__PURE__*/
+  enumDesc(file_cloud_v1_recommendation, 1);
 

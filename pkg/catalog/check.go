@@ -19,6 +19,9 @@ type Options struct {
 	// SystemGroup is nodeGroups.system of the config file; nil: the
 	// sizing rule is not run.
 	SystemGroup *config.SystemNodeGroup
+	// PlatformPool is nodeGroups.platform of the config file; nil: the
+	// platform pool's sizing rule is not run.
+	PlatformPool *config.PlatformNodePool
 }
 
 // karpenterName is the one definition that must be first: every other
@@ -47,6 +50,16 @@ func Check(set Set, opts Options) []Problem {
 	if opts.SystemGroup != nil {
 		sizing, _ := CheckSystemGroupSizing(defs, *opts.SystemGroup)
 		for _, p := range sizing {
+			problems = append(problems, Problem{Object: "set", Message: p})
+		}
+		bootstrap, _ := CheckBootstrapSizing(defs, *opts.SystemGroup)
+		for _, p := range bootstrap {
+			problems = append(problems, Problem{Object: "set", Message: p})
+		}
+	}
+	if opts.PlatformPool != nil {
+		platform, _ := CheckPlatformSizing(defs, *opts.PlatformPool)
+		for _, p := range platform {
 			problems = append(problems, Problem{Object: "set", Message: p})
 		}
 	}

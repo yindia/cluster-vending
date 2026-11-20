@@ -56,7 +56,7 @@ func TestServeAndControllerReadTheSameNodeGroupsFromOneFile(t *testing.T) {
 	if !reflect.DeepEqual(serve.NodeGroups, controller.NodeGroups) {
 		t.Errorf("serve %+v != controller %+v", serve.NodeGroups, controller.NodeGroups)
 	}
-	if got := serve.NodeGroups.System; got.MaxSize != 9 || got.MinSize != 3 || got.InstanceType != "m7i.large" {
+	if got := serve.NodeGroups.System; got.MaxSize != 9 || got.MinSize != 3 || !reflect.DeepEqual(got.InstanceTypes, []string{"m7i.large"}) {
 		t.Errorf("system = %+v", got)
 	}
 }

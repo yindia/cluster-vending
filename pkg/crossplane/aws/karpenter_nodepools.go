@@ -60,33 +60,42 @@ type KarpenterNodeGroupsInput struct {
 	// group that sets none (nodeGroups.karpenter.defaults); empty: AMD64
 	// and ON_DEMAND.
 	DefaultArchitectures, DefaultCapacityTypes []string
+	// PlatformPool is the platform pool (nodeGroups.platform): rendered
+	// first, a class and a pool named PoolPlatform. Nil: not rendered.
+	PlatformPool *PlatformPoolInput
 }
 
 // KarpenterNodeGroupObjects are the objects of the cluster's Karpenter
 // node groups, exactly as they are applied to the workload cluster: each
 // user group's EC2NodeClass and NodePool, a class before its pool, in the
-// spec's order. The platform runs on the default managed node group
-// ("system"), so there is no platform group. The same input
-// always gives the same objects. A name that is empty, repeated, reserved
-// ("platform", "default", "system") or not a DNS label is an error.
+// spec's order, after the platform pool's when the input has one. The same
+// input always gives the same objects. A name that is empty, repeated, reserved
+// ("platform", "platform-pool", "default", "system") or not a DNS label is an error.
 func KarpenterNodeGroupObjects(in KarpenterNodeGroupsInput) ([]*unstructured.Unstructured, error) {
 	if in.ClusterName == "" || in.ClusterPrefix == "" {
 		return nil, fmt.Errorf("cluster name and prefix are required")
 	}
 	groups := make([]karpenterGroup, 0, len(in.NodeGroups))
 	seen := map[string]bool{}
+	var out []*unstructured.Unstructured
+	if in.PlatformPool != nil {
+		pool, err := renderPlatformPool(in)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pool...)
+	}
 	for _, g := range in.NodeGroups {
 		name := g.GetName()
 		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
 			return nil, fmt.Errorf("node group name %q: %s", name, strings.Join(errs, "; "))
 		}
-		if name == "platform" || name == "default" || name == PoolSystem || seen[name] {
+		if name == "platform" || name == PoolPlatform || name == "default" || name == PoolSystem || seen[name] {
 			return nil, fmt.Errorf("node group name %q is reserved or repeated", name)
 		}
 		seen[name] = true
 		groups = append(groups, karpenterGroup{Name: name, Spec: g})
 	}
-	out := make([]*unstructured.Unstructured, 0, 2*len(groups))
 	for _, g := range groups {
 		out = append(out, renderNodeClass(in, g.Name), renderNodePool(g, in))
 	}
@@ -103,6 +112,12 @@ type karpenterGroup struct {
 // node role, the subnets and the security group found by tag, and the
 // pinned AL2023 AMI.
 func renderNodeClass(in KarpenterNodeGroupsInput, name string) *unstructured.Unstructured {
+	return renderNodeClassWith(in, name, 0)
+}
+
+// renderNodeClassWith is renderNodeClass with the kubelet's maxPods (0: not
+// set, Karpenter's default for the shape).
+func renderNodeClassWith(in KarpenterNodeGroupsInput, name string, maxPods int) *unstructured.Unstructured {
 	subnetTag := map[string]any{TagKarpenterDiscovery: in.ClusterName}
 	if !in.Discovery {
 		subnetTag = map[string]any{TagKubernetesClusterPrefix + in.ClusterName: "*"}
@@ -117,6 +132,9 @@ func renderNodeClass(in KarpenterNodeGroupsInput, name string) *unstructured.Uns
 		"subnetSelectorTerms":        []any{map[string]any{"tags": subnetTag}},
 		"securityGroupSelectorTerms": []any{map[string]any{"tags": map[string]any{eksClusterNameTag: in.ClusterName}}},
 	}}}
+	if maxPods > 0 {
+		_ = unstructured.SetNestedField(u.Object, map[string]any{"maxPods": int64(maxPods)}, "spec", "kubelet")
+	}
 	u.SetGroupVersionKind(KarpenterNodeClassGVK)
 	u.SetName(name)
 	u.SetLabels(map[string]string{LabelManagedBy: ManagedByPlatform})

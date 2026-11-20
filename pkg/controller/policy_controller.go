@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/clustersummary"
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -36,14 +37,18 @@ type PolicyReconciler struct {
 	// the collection is not bounded by the Cluster object's caps (the S3
 	// object takes what the cluster has), and the Cluster object keeps a
 	// bounded copy.
-	sink    *resultsink.Sink
-	full    bool
+	sink *resultsink.Sink
+	full bool
+	// history decides when a cluster's violations get a history object (at
+	// most one an hour). Violation events never get one: they are kept for the
+	// last hour only (PROP-02 5.4).
+	history *historyGate
 	collect func(context.Context, []byte, time.Time) (*cloudv1.ClusterPolicySnapshot, error)
 }
 
 func NewPolicyReconciler(d Deps) *PolicyReconciler {
 	full := d.ResultsS3 != nil
-	return &PolicyReconciler{deps: d, full: full, sink: resultsink.New(d.Deps, d.logger()),
+	return &PolicyReconciler{deps: d, full: full, history: &historyGate{}, sink: resultsink.New(d.Deps, d.logger()),
 		collect: func(ctx context.Context, k []byte, now time.Time) (*cloudv1.ClusterPolicySnapshot, error) {
 			r, e := policy.NewReader(k)
 			if e != nil {
@@ -133,9 +138,15 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if fresh.UID != obj.UID {
 		return ctrl.Result{}, apierrors.NewConflict(cloudv1alpha1.GroupVersion.WithResource("clusters").GroupResource(), obj.Name, errors.New("cluster was recreated during the scan"))
 	}
+	status := map[string]any{"policySnapshot": string(raw)}
+	if collected {
+		// The counts of the cluster status summary (PROP-02 5.2); a failed
+		// collection keeps the ones recorded.
+		status["violations"], status["violationEvents"] = clustersummary.ViolationCounts(snapshot, now)
+	}
 	patch, err := json.Marshal(map[string]any{
 		"metadata": map[string]any{"uid": obj.UID},
-		"status":   map[string]any{"policySnapshot": string(raw)},
+		"status":   status,
 	})
 	if err != nil {
 		return ctrl.Result{}, err
@@ -186,13 +197,19 @@ func (r *PolicyReconciler) stage(ctx context.Context, obj *cloudv1alpha1.Cluster
 		kind    results.Kind
 		message *cloudv1.ClusterPolicySnapshot
 		total   int
+		history bool
 	}{
-		{results.Violations, &cloudv1.ClusterPolicySnapshot{Summary: snapshot.Summary, Violations: snapshot.Violations}, len(snapshot.Violations)},
-		{results.ViolationEvents, &cloudv1.ClusterPolicySnapshot{Summary: snapshot.Summary, Events: snapshot.Events}, len(snapshot.Events)},
+		{results.Violations, &cloudv1.ClusterPolicySnapshot{Summary: snapshot.Summary, Violations: snapshot.Violations}, len(snapshot.Violations), true},
+		{results.ViolationEvents, &cloudv1.ClusterPolicySnapshot{Summary: snapshot.Summary, Events: snapshot.Events}, len(snapshot.Events), false},
 	} {
+		withHistory := part.history && (r.history == nil || r.history.due(id, now))
+		opts := policyPutOptions(withHistory)
 		st, notice := r.sink.Stage(ctx, tenant, id, part.kind, part.message, now, model.ResultRef{
 			Digest: policyDigest(part.message), CollectedAt: snapshot.Summary.CollectedAt.AsTime(), AttemptedAt: now,
-			Total: int32(part.total), Incomplete: snapshot.Summary.Incomplete, Truncated: snapshot.Summary.Truncated}) //nolint:gosec // bounded by the object size
+			Total: int32(part.total), Incomplete: snapshot.Summary.Incomplete, Truncated: snapshot.Summary.Truncated}, opts...) //nolint:gosec // bounded by the object size
+		if st != nil && !st.Unchanged && withHistory && r.history != nil {
+			r.history.wrote(id, now)
+		}
 		if st != nil {
 			staged = append(staged, st)
 		}
@@ -201,6 +218,15 @@ func (r *PolicyReconciler) stage(ctx context.Context, obj *cloudv1alpha1.Cluster
 		}
 	}
 	return staged, dedupe(notices)
+}
+
+// policyPutOptions are the writer's options for a policy result: latest only
+// unless its history object is due.
+func policyPutOptions(withHistory bool) []results.PutOption {
+	if withHistory {
+		return nil
+	}
+	return []results.PutOption{results.WithoutHistory()}
 }
 
 // policyDigest is the digest of a policy result without what changes on every

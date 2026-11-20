@@ -60,6 +60,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			warnNodeGroups(g.logger, cfg.NodeGroups)
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return manager.Run(ctx, manager.Options{
@@ -126,5 +127,5 @@ func runCatalogCheck(cmd *cobra.Command, g *globals) error {
 		in = f
 	}
 	return catalog.RunCheck(in, cmd.OutOrStdout(), catalog.Options{
-		RenderVersion: crossplaneaws.RenderVersion, SystemGroup: &serve.NodeGroups.System})
+		RenderVersion: crossplaneaws.RenderVersion, SystemGroup: &serve.NodeGroups.System, PlatformPool: &serve.NodeGroups.Platform})
 }

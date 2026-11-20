@@ -13,10 +13,16 @@ type Setting struct {
 	Env     string
 	Default string
 	Usage   string
+	// Key is the setting's place in the config file's nodeGroups section,
+	// when it has one; messages name it first.
+	Key string
 }
 
 // String names the setting the way errors report it.
 func (s Setting) String() string {
+	if s.Key != "" {
+		return fmt.Sprintf("%s (--%s, %s)", s.Key, s.Flag, s.Env)
+	}
 	return fmt.Sprintf("--%s (%s)", s.Flag, s.Env)
 }
 

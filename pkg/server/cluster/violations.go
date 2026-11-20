@@ -80,6 +80,9 @@ func (s *ClusterService) ListClusterViolations(ctx context.Context, req *cloudv1
 	if err != nil {
 		return nil, err
 	}
+	if sortScope(int32(req.GetSortBy()), isDesc(req.GetSortOrder(), false), false) != "" {
+		return nil, errSortNotLive("the violation list")
+	}
 	p, raw := s.policySnapshot(ctx, row, results.Violations)
 	policySummary(p, now())
 	var rows []*cloudv1.ClusterViolation
@@ -102,6 +105,9 @@ func (s *ClusterService) ListClusterViolationEvents(ctx context.Context, req *cl
 	row, err := s.get(ctx, req.TenantId, req.ClusterId)
 	if err != nil {
 		return nil, err
+	}
+	if sortScope(int32(req.GetSortBy()), isDesc(req.GetSortOrder(), true), true) != "" {
+		return nil, errSortNotLive("the event list")
 	}
 	p, raw := s.policySnapshot(ctx, row, results.ViolationEvents)
 	policySummary(p, now())

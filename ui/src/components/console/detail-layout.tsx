@@ -14,7 +14,7 @@ export function StatusValue({ label, tone = "neutral" }: { label: string; tone?:
   // Cap-height trimming and ellipsis clipping together cut off g/p/y descenders.
   return <HStack gap={2} vAlign="center" minHeight="1.5rem">
     <StatusDot label={label} variant={tone} aria-hidden="true" />
-    <Text type="label" hasCapsize={false} maxLines={1}>{label}</Text>
+    <Text type="label" hasCapsize={false} maxLines={1} hasTruncateTooltip>{label}</Text>
   </HStack>;
 }
 

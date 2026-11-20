@@ -152,6 +152,13 @@ type Clusters interface {
 	// rollout and its last automatic upgrade (protojson cloud.v1
 	// ClusterRollout) and nothing else, like SetDeprecations.
 	SetRollout(ctx context.Context, tenantID, id string, rollout model.JSON) error
+	// SetSummary records what a controller pass learned of the workload
+	// cluster (JSON of v1alpha1.ClusterSummary): the node totals, the node
+	// groups' usage and the Reachable condition (PROP-02 5.2), and nothing
+	// else. An unreachable pass changes only the condition; unchanged counts
+	// move their time at most every 10 minutes; a summary that says what is
+	// stored writes nothing.
+	SetSummary(ctx context.Context, tenantID, id string, summary model.JSON) error
 	// RequestRetry records a request to recover what failed on the
 	// cluster, added to one not yet acted on; the etag stays.
 	RequestRetry(ctx context.Context, tenantID, id string, retry model.Retry) error

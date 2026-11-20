@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,12 +53,33 @@ func (c Client) delete(ctx context.Context, refs []Ref, release bool) error {
 		}
 		err := c.Kube.Delete(ctx, r.empty())
 		switch {
-		case err == nil, apierrors.IsNotFound(err), meta.IsNoMatchError(err), apierrors.IsConflict(err):
+		case err == nil, apierrors.IsNotFound(err), meta.IsNoMatchError(err), apierrors.IsConflict(err), IsUsageRefusal(err):
 		default:
 			errs = append(errs, fmt.Errorf("delete %s %s: %w", r.Kind, r.Name, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// usageWebhookName is the name of Crossplane's Usage protection webhook as
+// it appears in the error of a deletion it refuses.
+const usageWebhookName = "nousages.protection.crossplane.io"
+
+// IsUsageRefusal reports whether err is Crossplane's Usage webhook
+// refusing the deletion of an object that is still in use. It is not a
+// failure: the object waits for its users (Crossplane replays the deletion
+// once they are gone), and the caller leaves it to a later pass. The API
+// server relays the denial with the code the webhook chose (409 or 403), so
+// the webhook's name and message are matched too.
+func IsUsageRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apierrors.IsConflict(err) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, usageWebhookName) || strings.Contains(msg, "is in-use by")
 }
 
 // DeleteDropped deletes one object a render no longer contains. Unlike

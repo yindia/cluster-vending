@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
@@ -35,6 +36,10 @@ func (s *Reconciler) forceRelease(ctx context.Context, row *model.Cluster) error
 	if err != nil {
 		return fmt.Errorf("list helm releases: %w", err)
 	}
+	held, err := s.usageHolders(ctx, kube.TenantNamespace(row.TenantID), row.ID)
+	if err != nil {
+		return err
+	}
 	var errs []error
 	for i := range releases.Items {
 		r := &releases.Items[i]
@@ -48,7 +53,14 @@ func (s *Reconciler) forceRelease(ctx context.Context, row *model.Cluster) error
 			errs = append(errs, fmt.Errorf("release helm release %s: %w", r.GetName(), err))
 			continue
 		}
-		errs = append(errs, client.IgnoreNotFound(s.deps.Kube.Delete(ctx, r)))
+		// Never a delete the Usage webhook would refuse: a Release that
+		// something still uses goes once its users are gone.
+		if held.by(helmRelease.Kind, r.GetName()) != "" {
+			continue
+		}
+		if err := s.deps.Kube.Delete(ctx, r); err != nil && !managed.IsUsageRefusal(err) {
+			errs = append(errs, client.IgnoreNotFound(err))
+		}
 	}
 	return errors.Join(errs...)
 }

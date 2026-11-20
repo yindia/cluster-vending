@@ -65,6 +65,11 @@ type delOrder struct {
 	deleting map[string]int
 	// relaxed: the order is not checked (a forced deletion, a timeout).
 	relaxed bool
+	// webhook, when set, is asked about every deletion before it happens
+	// (the Usage protection webhook): an error refuses it, and the refusal
+	// is kept in refused.
+	webhook func(ctx context.Context, c client.Reader, obj client.Object) error
+	refused []string
 }
 
 type delObject struct {
@@ -146,6 +151,12 @@ func newDelOrder(t *testing.T) *delOrder {
 		}
 	}
 	funcs := interceptor.Funcs{Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+		if d.webhook != nil {
+			if err := d.webhook(ctx, c, obj); err != nil {
+				d.refused = append(d.refused, gvkOf(obj).Kind+" "+obj.GetName())
+				return err
+			}
+		}
 		if r := d.rankOf(gvkOf(obj).Kind, obj.GetName()); r > 0 {
 			d.deleted(ctx, c, delObject{rank: r, gvk: gvkOf(obj), name: obj.GetName()})
 		}

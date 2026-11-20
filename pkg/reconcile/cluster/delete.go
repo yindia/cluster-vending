@@ -44,6 +44,12 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	if err != nil {
 		return false, fmt.Errorf("list cluster resources: %w", err)
 	}
+	// Before anything is deleted: the platform's own Helm pause is lifted
+	// from every Release, so no pass that fails or waits later can leave one
+	// that the provider never uninstalls.
+	if err := s.liftPlatformPauses(ctx, row); err != nil {
+		return false, err
+	}
 	// 1. While the controllers that made them still run: the load
 	// balancers the workload cluster has in the cloud, which nothing else
 	// would delete.
@@ -197,7 +203,7 @@ func (s *Reconciler) sweep(ctx context.Context, row *model.Cluster, namespace st
 				continue
 			}
 			err := s.deps.Kube.Delete(ctx, obj)
-			if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+			if err != nil && !apierrors.IsNotFound(err) && !managed.IsUsageRefusal(err) {
 				return found, fmt.Errorf("delete %s %s: %w", kindOf(list), obj.GetName(), err)
 			}
 			s.logger().InfoContext(ctx, "deleting leftover cluster resource", "cluster_id", row.ID, "kind", kindOf(list), "name", obj.GetName())

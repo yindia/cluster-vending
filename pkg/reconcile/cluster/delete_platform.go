@@ -12,6 +12,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
 // removalComponent is one platform component's recorded objects: its Helm
@@ -166,6 +167,10 @@ func (s *Reconciler) removeGroup(ctx context.Context, row *model.Cluster, p *pla
 	for _, c := range group {
 		names = append(names, c.name)
 	}
+	held, err := s.usageHolders(ctx, kube.TenantNamespace(row.TenantID), row.ID)
+	if err != nil {
+		return "", err
+	}
 	var (
 		waits   []string
 		started []model.ManagedResource
@@ -176,21 +181,51 @@ func (s *Reconciler) removeGroup(ctx context.Context, row *model.Cluster, p *pla
 			continue
 		}
 		if len(c.releases) > 0 && !p.allGone(c.releases) {
+			free, users := p.unheld(c.releases, held)
+			if len(free) == 0 {
+				waits = append(waits, fmt.Sprintf("%s waits for %s (Usage)", c.name, users))
+				continue
+			}
 			why, err := s.prepareReleases(ctx, row, p, c)
 			if err != nil {
 				return "", err
 			}
 			waits = append(waits, why)
-			started = append(started, c.releases...)
+			started = append(started, free...)
 			continue
 		}
-		started = append(started, c.iam...)
+		free, users := p.unheld(c.iam, held)
+		started = append(started, free...)
+		if users != "" {
+			waits = append(waits, fmt.Sprintf("%s: its IAM waits for %s (Usage)", c.name, users))
+			continue
+		}
 		waits = append(waits, c.name+": removing its IAM")
 	}
 	if err := s.finishRemoval(ctx, p, started); err != nil {
 		return "", err
 	}
 	return strings.Join(waits, "; "), nil
+}
+
+// unheld are the objects (not gone) that no Usage keeps, and who keeps the
+// others: the webhook refuses their deletion, so none is sent.
+func (p *platformRemoval) unheld(objects []model.ManagedResource, held usageHolders) ([]model.ManagedResource, string) {
+	var free []model.ManagedResource
+	var users []string
+	for _, r := range objects {
+		if p.gone(r) {
+			continue
+		}
+		if by := held.by(r.Kind, r.Name); by != "" {
+			if !slices.Contains(users, by) {
+				users = append(users, by)
+			}
+			continue
+		}
+		free = append(free, r)
+	}
+	return free, strings.Join(users, ", ")
 }
 
 // finishRemoval deletes the records, then reads them again: what went

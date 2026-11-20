@@ -241,8 +241,12 @@ import it again; it is never rendered from something else.
      bucket (emptied first).
 
   The platform's Helm reliability machinery never blocks an uninstall: its
-  backoff pause is lifted, a stuck release is recovered, and only a pause by
-  an operator or a freeze holds the stage (and is reported). A forced
+  backoff pause is lifted from every Release at the start of each pass, a
+  stuck release is recovered, and only a pause by an operator or a freeze
+  holds the stage (and is reported). The platform sends no delete the Usage
+  webhook would refuse (a Release goes once nothing that uses it exists, a
+  forced deletion included), and a refusal that still comes is "waiting for
+  its users", never a failure of the pass. A forced
   deletion, or one whose EKS cluster is not ACTIVE, skips the workload
   stages and lets the Releases go without an uninstall. The reconciler also
   sweeps objects that carry the cluster's label but were never recorded, and

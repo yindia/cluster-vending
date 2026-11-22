@@ -24,11 +24,15 @@ func ClusterRecommendations(ctx context.Context, c Clients, o Options) (proto.Me
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
+	by, order, err := sortOf[cloudv1.RecommendationSortBy](o, "RECOMMENDATION_SORT_BY_")
+	if err != nil {
+		return nil, err
+	}
 	all := &cloudv1.ListClusterRecommendationsResponse{}
 	token := o.PageToken
 	for range maxRecommendationPages {
 		res, err := call(ctx, &cloudv1.ListClusterRecommendationsRequest{TenantId: o.Tenant, ClusterId: o.ID,
-			Namespace: o.Namespace, OnlyChanges: o.OnlyChanges, PageSize: o.PageSize, PageToken: token},
+			Namespace: o.Namespace, OnlyChanges: o.OnlyChanges, PageSize: o.PageSize, PageToken: token, SortBy: by, SortOrder: order},
 			c.Cluster.ListClusterRecommendations)
 		if err != nil {
 			return nil, err

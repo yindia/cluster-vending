@@ -33,6 +33,11 @@ type verb struct {
 	retry bool
 	// recommend adds --namespace and --only-changes.
 	recommend bool
+	// sort adds --sort (its values, for the help) and --order.
+	sort string
+	// nodes adds --group, --ready, --not-ready, --name, --manifests and
+	// --options; violations --namespace, --engine and --events.
+	nodes, violations bool
 	// until adds --until; letThrough adds --cluster and --network.
 	until, letThrough bool
 	freezeTargets     bool
@@ -152,6 +157,23 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		}
 		if v.force {
 			f.BoolVar(&o.Force, "force", false, "tear the cluster down even if its API is unreachable: Helm releases are released without uninstalling")
+		}
+		if v.sort != "" {
+			f.StringVar(&o.SortBy, "sort", "", "order the rows by "+v.sort+"; default: the list's own order")
+			f.StringVar(&o.SortOrder, "order", "", "asc or desc; default: the order --sort usually means (largest first for sizes and counts, newest first for times)")
+		}
+		if v.nodes {
+			f.StringVar(&o.NodeGroup, "group", "", "only this node group; default: every group the cluster reports")
+			f.BoolVar(&o.Ready, "ready", false, "only Ready nodes")
+			f.BoolVar(&o.NotReady, "not-ready", false, "only nodes that are not Ready")
+			f.StringVar(&o.NameContains, "name", "", "only nodes whose name contains this")
+			f.BoolVar(&o.Manifests, "manifests", false, "print the NodePool and EC2NodeClass YAML the platform applies for the Karpenter groups (one with --group) instead of the nodes")
+			f.BoolVar(&o.NodeGroupOptions, "options", false, "print what the tenant's node groups may use (instance families and types, architectures, capacity types); needs no cluster ID")
+		}
+		if v.violations {
+			f.StringVar(&o.Namespace, "namespace", "", "only this namespace of the cluster")
+			f.StringVar(&o.Engine, "engine", "", "only this policy engine (kyverno, gatekeeper, ...)")
+			f.BoolVar(&o.Events, "events", false, "the policy and admission events of the last hour instead of the violations")
 		}
 		if v.recommend {
 			f.StringVar(&o.Namespace, "namespace", "", "only the workloads of this namespace of the cluster")
@@ -293,9 +315,13 @@ func newClusterCmd() *cobra.Command {
 		verb{use: "takeover <id>", short: "Take over an imported cluster: the platform becomes its owner",
 			run: cli.ClusterTakeOver, args: cobra.ExactArgs(1), etag: true, ack: true, wait: true, noPlatform: true},
 		verb{use: "deprecations <id>", short: "List the cluster's objects written with deprecated or removed API versions (the controller's last scan); -o table, yaml or json",
-			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, removed: true},
+			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, removed: true, sort: "removed-first, namespace or kind"},
 		verb{use: "recommendations <id>", short: "Recommend the requests and limits of the cluster's containers from a week of recorded usage (read-only: nothing is installed); -o table, yaml or json",
-			run: cli.ClusterRecommendations, args: cobra.ExactArgs(1), page: true, recommend: true},
+			run: cli.ClusterRecommendations, args: cobra.ExactArgs(1), page: true, recommend: true, sort: "namespace, cpu-change or memory-change (the size of the change)"},
+		verb{use: "nodes [id]", short: "List the nodes of the cluster's node groups (all, or --group): status, instance type, zone, capacity, kubelet, NodeClaim and requested CPU, memory and pods; --manifests prints the groups' NodePool and EC2NodeClass YAML, --options what node groups may use; -o wide, yaml or json",
+			run: cli.ClusterNodes, args: cobra.MaximumNArgs(1), page: true, nodes: true, sort: "name, age, readiness, cpu-requested-percent, memory-requested-percent or pod-count"},
+		verb{use: "violations <id>", short: "List the policy violations the cluster's engines report (Kyverno, Gatekeeper); --events lists the policy and admission events of the last hour instead; -o wide, yaml or json",
+			run: cli.ClusterViolations, args: cobra.ExactArgs(1), page: true, violations: true, sort: "namespace, engine or severity (violations); time or count (--events)"},
 		verb{use: "events <id>", short: "List what the controller reported about the cluster, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
 			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",

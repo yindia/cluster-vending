@@ -1,12 +1,13 @@
-# Create a SubTenant from the cluster detail page:
-#   1. Enable spec.naas: true on the cluster (examples/cluster.yaml).
-#   2. Open SubTenants -> Create SubTenant -> Paste YAML.
-#   3. Replace metadata.clusterId with that cluster's ID, then review and create.
+# Create a SubTenant on a cluster with spec.naas: true (examples/cluster.yaml).
+# Replace metadata.clusterId with that cluster's ID, then either:
+#   - console: the cluster's SubTenants -> Create SubTenant -> Paste YAML; or
+#   - CLI:     cluster-vending subtenant create -f examples/subtenant.yaml --wait
 #
 # This is the UI/API manifest envelope, not a native Kubernetes CR.
 # SubTenantService.CreateSubTenant generates the allocation ID and resolves the
-# canonical parent names/UIDs. The UI supplies a stable request UUID for retries.
-# A SubTenant CLI command is not implemented yet.
+# canonical parent names/UIDs. The UI supplies a stable request UUID for retries;
+# the CLI derives it from the request, so creating the same file again returns
+# the same SubTenant. To edit, add metadata.id and run subtenant update -f.
 #
 # Creation stores desired state. Workload provisioning remains pending until
 # the workload controller is implemented; this file applies no resources itself.

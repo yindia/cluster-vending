@@ -122,6 +122,27 @@ type Options struct {
 	Namespace string
 	// OnlyChanges is --only-changes of cluster recommendations.
 	OnlyChanges bool
+	// SortBy and SortOrder are --sort and --order of the cluster lists
+	// (nodes, violations, deprecations, recommendations): an enum value in
+	// lower case with dashes (cpu-requested-percent), and asc or desc.
+	// Empty: the server's default for the list.
+	SortBy, SortOrder string
+	// NodeGroup, Ready, NotReady and NameContains are --group, --ready,
+	// --not-ready and --name of cluster nodes.
+	NodeGroup       string
+	Ready, NotReady bool
+	NameContains    string
+	// Manifests is --manifests of cluster nodes: the NodePool and
+	// EC2NodeClass YAML of the groups instead of their nodes.
+	Manifests bool
+	// NodeGroupOptions is --options of cluster nodes: what node groups of
+	// the tenant may use (families, types, architectures, capacity types).
+	NodeGroupOptions bool
+	// Engine and Events are --engine and --events of cluster violations:
+	// one policy engine; the admission events of the last hour instead of
+	// the violations.
+	Engine string
+	Events bool
 	// OnlyWarnings is --only-warnings of cluster events and network events.
 	OnlyWarnings bool
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
@@ -171,6 +192,8 @@ type Clients struct {
 	Admin   cloudv1connect.AdminServiceClient
 	// Component is the component catalog and a tenant's components.
 	Component cloudv1connect.ComponentServiceClient
+	// SubTenant is the namespace allocations of a cluster that runs Capsule.
+	SubTenant cloudv1connect.SubTenantServiceClient
 }
 
 // NewClients returns clients of the API at server (a base URL) over
@@ -195,6 +218,7 @@ func NewClients(server string, httpClient *http.Client, opts ...ClientOption) Cl
 		Cluster:   cloudv1connect.NewClusterServiceClient(c),
 		Admin:     cloudv1connect.NewAdminServiceClient(c),
 		Component: cloudv1connect.NewComponentServiceClient(c),
+		SubTenant: cloudv1connect.NewSubTenantServiceClient(c),
 	}
 }
 

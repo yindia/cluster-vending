@@ -22,11 +22,15 @@ func ClusterDeprecations(ctx context.Context, c Clients, o Options) (proto.Messa
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
+	by, order, err := sortOf[cloudv1.DeprecationSortBy](o, "DEPRECATION_SORT_BY_")
+	if err != nil {
+		return nil, err
+	}
 	all := &cloudv1.ListClusterDeprecationsResponse{}
 	token := o.PageToken
 	for range maxDeprecationPages {
 		res, err := call(ctx, &cloudv1.ListClusterDeprecationsRequest{TenantId: o.Tenant, ClusterId: o.ID,
-			PageSize: o.PageSize, PageToken: token, OnlyRemoved: o.OnlyRemoved}, c.Cluster.ListClusterDeprecations)
+			PageSize: o.PageSize, PageToken: token, OnlyRemoved: o.OnlyRemoved, SortBy: by, SortOrder: order}, c.Cluster.ListClusterDeprecations)
 		if err != nil {
 			return nil, err
 		}

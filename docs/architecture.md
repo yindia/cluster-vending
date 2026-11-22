@@ -1122,8 +1122,8 @@ workload cluster. Its spec is described in [SubTenant](#subtenant). The controll
 
 The sub-tenant access rules are in `pkg/naas`: an access binding is trusted template
 input, and nothing in a tenant request or in a sub-tenant's own status can open access.
-The CLI has no sub-tenant commands. `SubTenantService` is served over Connect, and the
-console uses it.
+`SubTenantService` is served over Connect. The console and the CLI's `subtenant` commands
+use it, with the same manifest (`examples/subtenant.yaml`).
 
 ## 4. CR definitions
 
@@ -1728,14 +1728,13 @@ commands `login`, `logout`, `whoami`, `serve`, `controller` are the complete set
 | `tenant` | `create <id>`, `list`, `freeze [--reason --until --wait]`, `freeze status`, `unfreeze [--wait]` | `list` needs no `--tenant`. Freezes are the tenant's own scope. |
 | `account` | `create -f`, `get --id`, `list`, `verify --id [--region ... --wait]`, `delete --id [--wait]` | `create` prints the role template's steps (or the trust, for a custom role). |
 | `network` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--wait]`, `import -f`, `takeover <id> [--wait]`, `events <id> [--only-warnings]` | `--plan` shows the changes without applying them. `--live` reads the status from the management cluster. |
-| `cluster` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed]`, `recommendations <id> [--namespace --only-changes]`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. |
+| `cluster` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed --sort --order]`, `recommendations <id> [--namespace --only-changes --sort --order]`, `nodes <id> [--group --ready \| --not-ready --name --sort --order]`, `nodes <id> --manifests [--group]`, `nodes --options`, `violations <id> [--namespace --engine --sort --order]`, `violations <id> --events`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. `nodes` reads every group the cluster reports unless `--group`; `--manifests` prints the NodePool and EC2NodeClass YAML; `--options` is what the tenant's node groups may use. `violations --events` is the policy and admission events of the last hour. `--sort` takes the list's keys in lower case (`cpu-requested-percent`, `cpu-change`); `--order` is `asc` or `desc`. |
+| `subtenant` | `create -f [--cluster] [--wait]`, `get <id> --cluster`, `list [--cluster]`, `update <id> -f [--wait]`, `delete <id> --cluster [--etag] [--wait]` | The console's SubTenant manifest: the cluster is `metadata.clusterId` or `--cluster`, the name is `spec.name`. `delete` reads the etag when `--etag` is not given and refuses while deletion protection is on. |
 | `component` | `catalog [--cluster]`, `template <name>`, `enable <name> --cluster [-f] [--validate-only] [--wait]`, `update <id> -f [--validate-only] [--etag]`, `disable <id> [--etag]`, `get <id> [--values]`, `list [--cluster] [--details]` | `template` prints the values file to start from. The version is not a flag. |
 | `admin` | `freeze [--platform \| --tenant \| --network \| --cluster] --reason [--until --wait --reset-exceptions]`, `freeze status`, `unfreeze [scope] [--wait]`, `release list`, `release get --id`, `channel list`, `channel get --id` | Platform admins only. Releases and channels are read-only. |
 
-Sub-tenants have no CLI commands. Their `SubTenantService` is served over Connect.
-
 Manifests are the API's messages (`apiVersion: cluster-vending.io/v1`, kinds
-`CloudAccount`, `Network`, `NetworkImport`, `Cluster`, `ClusterImport`). `update -f`
+`CloudAccount`, `Network`, `NetworkImport`, `Cluster`, `ClusterImport`, `SubTenant`). `update -f`
 compares the manifest with the stored object, prints each change (for example
 `spec.release_channel: Beta → Alpha`), and applies only those. A field the manifest
 leaves out is left as it is. `--wait` follows an operation to its end.

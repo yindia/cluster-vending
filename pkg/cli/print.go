@@ -75,6 +75,9 @@ func printData(w io.Writer, msg proto.Message, format string) error {
 // printTable writes msg as a table when it has a table form; false when
 // it has none.
 func printTable(w io.Writer, msg proto.Message, wide bool) (bool, error) {
+	if ok, err := printSubTenantTable(w, msg, wide); ok || err != nil {
+		return ok, err
+	}
 	switch m := msg.(type) {
 	case *cloudv1.ListClustersResponse:
 		return true, printClusters(w, m.GetClusters(), wide)

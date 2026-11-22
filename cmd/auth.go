@@ -133,7 +133,7 @@ func newWhoamiCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:   "whoami",
-		Short: "Show who the API sees you as and what you may do (TenantService.WhoAmI)",
+		Short: "Show who the API sees you as (TenantService.WhoAmI)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.LoadClient(changedFlags(cmd.Flags()), os.LookupEnv)

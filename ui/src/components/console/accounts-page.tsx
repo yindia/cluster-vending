@@ -104,7 +104,7 @@ function AccessStatus({ account }: { account: CloudAccount }) {
 }
 
 function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAccepted: (account: CloudAccount) => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const id = useId();
   const form = useRef<HTMLFormElement>(null);
   const [open, setOpen] = useState(false);
@@ -114,7 +114,7 @@ function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAcc
   const [fields, setFields] = useState<AccountBootstrapFields>(() => accountBootstrapFields(account));
   const [errors, setErrors] = useState<ReturnType<typeof validateAccount>>({});
   const mutation = useAccountMutation();
-  const disabled = !tenantId || !canWrite || mutation.busy;
+  const disabled = !tenantId || mutation.busy;
   function change(field: keyof AccountBootstrapFields, value: string) {
     const next = { ...fields, [field]: value };
     setFields(next);
@@ -186,14 +186,14 @@ function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAcc
 }
 
 function VerifyAccount({ account, onAccepted }: { account: CloudAccount; onAccepted: (account: CloudAccount) => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const id = useId();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
   const [regions, setRegions] = useState("");
   const [validation, setValidation] = useState("");
   const mutation = useAccountMutation();
-  const disabled = !tenantId || !canWrite || mutation.busy;
+  const disabled = !tenantId || mutation.busy;
   function submit() {
     if (disabled) return;
     try { parseVerifyRegions(regions); setValidation(""); } catch (cause) { setValidation(errorMessage(cause)); return; }
@@ -218,12 +218,12 @@ function VerifyAccount({ account, onAccepted }: { account: CloudAccount; onAccep
 }
 
 function DeleteAccount({ account, onAccepted }: { account: CloudAccount; onAccepted: () => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const id = useId();
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const mutation = useAccountMutation();
-  const disabled = !tenantId || !canWrite || mutation.busy;
+  const disabled = !tenantId || mutation.busy;
   return <>
     <ResourceActions resource="Account" items={[{ id: "delete", label: "Delete account", variant: "destructive", isDisabled: disabled, onClick: () => { setConfirmation(""); mutation.clearError(); setOpen(true); } }]} />
     <Dialog isOpen={open} onOpenChange={(next) => { if (!mutation.busy) setOpen(next); }} purpose={mutation.busy ? "required" : "form"} aria-describedby={`${id}-impact`} padding={0}>
@@ -281,7 +281,7 @@ const clusterColumns = (networks: readonly Network[]): TableColumn<Cluster>[] =>
 ];
 
 function AccountDetails({ id }: { id: string }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const uiId = useId();
   const tabs = ["overview", "resources", "activity", "access", "configuration"].map(value => ({ value, label: titleCase(value) }));
   const navigation = useDetailSection(tabs);
@@ -342,12 +342,11 @@ function AccountDetails({ id }: { id: string }) {
       metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={account?.provider.case ?? ""} size="sm" /><Text color="secondary">{account?.provider.case === "aws" ? "Amazon Web Services" : "Cloud account"}</Text></HStack>{awsId && <CopyValue value={awsId} label="AWS account ID" isSecondary />}{account && <CopyValue value={account.id} label="Platform account ID" isSecondary />}</>}
       status={account && <AccessStatus account={account} />}
       actions={<>
-        {account && canWrite && <ConnectAccount account={account} onAccepted={(saved) => accepted(saved, "Account update accepted. Access will be checked asynchronously.")} />}
-        {account && canWrite && <DeleteAccount account={account} onAccepted={() => { setDeletionRequested(true); setNotice("Deletion requested. The controller must remove the ProviderConfig and account record. Return to accounts to observe completion."); }} />}
+        {account && <ConnectAccount account={account} onAccepted={(saved) => accepted(saved, "Account update accepted. Access will be checked asynchronously.")} />}
+        {account && <DeleteAccount account={account} onAccepted={() => { setDeletionRequested(true); setNotice("Deletion requested. The controller must remove the ProviderConfig and account record. Return to accounts to observe completion."); }} />}
         {!account && detail.error && <RefreshButton label="Retry account details" onClick={refresh} />}
       </>} />
     {!tenantId && <Banner status="warning" title="Select a tenant to view this account" />}
-    {tenantId && !canWrite && <Text color="secondary">Read-only access · Account mutations require tenant permissions.</Text>}
     {detail.loading && !deletionRequested && <Text role="status">Loading account…</Text>}
     <ErrorNotice error={detail.error} />
     {(notice || awaitingAttempt && !deletionRequested) && <VStack aria-live="polite" role="status" gap={2}>{notice && <Banner status="info" title={notice} />}{awaitingAttempt && !deletionRequested && <Text>Waiting for a new access-check attempt. Acceptance does not mean verified.</Text>}</VStack>}
@@ -418,7 +417,7 @@ function AccountDetails({ id }: { id: string }) {
 }
 
 function AccountsList() {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
@@ -466,7 +465,6 @@ function AccountsList() {
       <RefreshButton label="Refresh accounts" isDisabled={!tenantId} isLoading={list.refreshing} onClick={refresh} />
     </>} />
     {!tenantId && <Banner status="warning" title="Select a tenant to manage accounts" />}
-    {tenantId && !canWrite && <Text color="secondary">Read-only access · Account mutations require tenant permissions.</Text>}
     <ErrorNotice error={list.error} />
     {saved && <Banner status="info" title="Account connection accepted" description="Access is checked asynchronously. Open the account to set up its role and review verification." endContent={<Button as={Link} href={`/accounts/${encodeURIComponent(saved.id)}`} label="View account" />} />}
     {list.loading && tenantId && <Text role="status">Loading accounts…</Text>}

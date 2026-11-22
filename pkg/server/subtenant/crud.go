@@ -79,7 +79,7 @@ func belongs(obj *cloud.SubTenant, tenant *cloud.Tenant, clusterID string) bool 
 }
 
 func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRequest) (*v1.CreateSubTenantResponse, error) {
-	if err := s.access(ctx, req.GetTenantId(), true, req); err != nil {
+	if err := s.access(req.GetTenantId(), req); err != nil {
 		return nil, err
 	}
 	in := req.GetSubtenant()
@@ -185,7 +185,7 @@ func (s *Service) replayCreate(ctx context.Context, obj *cloud.SubTenant, tenant
 }
 
 func (s *Service) GetSubTenant(ctx context.Context, req *v1.GetSubTenantRequest) (*v1.GetSubTenantResponse, error) {
-	if err := s.access(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := s.access(req.GetTenantId(), req); err != nil {
 		return nil, err
 	}
 	tenant, err := s.tenant(ctx, req.TenantId, false)
@@ -200,7 +200,7 @@ func (s *Service) GetSubTenant(ctx context.Context, req *v1.GetSubTenantRequest)
 }
 
 func (s *Service) UpdateSubTenant(ctx context.Context, req *v1.UpdateSubTenantRequest) (*v1.UpdateSubTenantResponse, error) {
-	if err := s.access(ctx, req.GetTenantId(), true, req); err != nil {
+	if err := s.access(req.GetTenantId(), req); err != nil {
 		return nil, err
 	}
 	in := req.GetSubtenant()
@@ -300,7 +300,7 @@ func (s *Service) UpdateSubTenant(ctx context.Context, req *v1.UpdateSubTenantRe
 }
 
 func (s *Service) DeleteSubTenant(ctx context.Context, req *v1.DeleteSubTenantRequest) (*v1.DeleteSubTenantResponse, error) {
-	if err := s.access(ctx, req.GetTenantId(), true, req); err != nil {
+	if err := s.access(req.GetTenantId(), req); err != nil {
 		return nil, err
 	}
 	tenant, err := s.tenant(ctx, req.TenantId, false)

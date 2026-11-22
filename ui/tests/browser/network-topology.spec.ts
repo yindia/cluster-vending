@@ -78,7 +78,7 @@ async function mockTopology(page: Page, options: { failClusters?: boolean; failL
     calls.push({ method, body });
     let response: object;
     switch (method) {
-      case "WhoAmI": response = { subject: "topology-viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] }; break;
+      case "WhoAmI": response = { subject: "topology-viewer" }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }], canCreateTenants: false }; break;
       case "ListCloudAccounts": response = { accounts: [account] }; break;
       case "GetCloudAccount": response = { account }; break;

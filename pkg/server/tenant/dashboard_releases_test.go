@@ -1,18 +1,15 @@
 package tenant
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/auth"
 	v1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
@@ -40,7 +37,7 @@ func dashboardReleases(t *testing.T) *TenantService {
 
 func TestDashboardViewerReadsReleaseCatalogAndTenantRollout(t *testing.T) {
 	s := dashboardReleases(t)
-	ctx := dashboardIdentity(t, auth.RoleTenantViewer)
+	ctx := dashboardIdentity(t)
 	first, err := s.ListReleases(ctx, &v1.TenantListReleasesRequest{TenantId: "acme", PageSize: 1})
 	if err != nil || len(first.GetReleases()) != 1 || first.NextPageToken == "" {
 		t.Fatalf("list: %v %v", first, err)
@@ -80,34 +77,6 @@ func TestDashboardViewerReadsReleaseCatalogAndTenantRollout(t *testing.T) {
 		if strings.Contains(string(encoded), "foreign") || strings.Contains(string(encoded), dashboardForeignCluster) {
 			t.Fatalf("foreign metadata leaked: %s", encoded)
 		}
-	}
-}
-
-func TestDashboardReleaseReadsRequireTenantGrant(t *testing.T) {
-	s := dashboardReleases(t)
-	for name, call := range map[string]func(context.Context) error{
-		"list releases": func(ctx context.Context) error {
-			_, err := s.ListReleases(ctx, &v1.TenantListReleasesRequest{TenantId: "foreign-tenant"})
-			return err
-		},
-		"get release": func(ctx context.Context) error {
-			_, err := s.GetRelease(ctx, &v1.TenantGetReleaseRequest{TenantId: "foreign-tenant", Name: "2026-11-a"})
-			return err
-		},
-		"list channels": func(ctx context.Context) error {
-			_, err := s.ListReleaseChannels(ctx, &v1.TenantListReleaseChannelsRequest{TenantId: "foreign-tenant"})
-			return err
-		},
-		"get channel": func(ctx context.Context) error {
-			_, err := s.GetReleaseChannel(ctx, &v1.TenantGetReleaseChannelRequest{TenantId: "foreign-tenant", Channel: v1.ReleaseChannel_RELEASE_CHANNEL_STABLE})
-			return err
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := call(dashboardIdentity(t, auth.RoleTenantViewer)); connect.CodeOf(err) != connect.CodePermissionDenied {
-				t.Fatalf("cross-tenant read: %v", err)
-			}
-		})
 	}
 }
 

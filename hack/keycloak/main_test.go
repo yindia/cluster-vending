@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -40,12 +41,18 @@ func TestPreparePreservesPersonalSettingsAndCredentials(t *testing.T) {
 		t.Fatal("generated overlay did not preserve settings and loopback binding")
 	}
 	cfg, err := config.LoadAuth(filepath.Join(state, "server.yaml"))
-	if err != nil || cfg.Mode != auth.ModeRequired || len(cfg.Rules) != 2 {
-		t.Fatalf("required auth: %v", err)
+	if err != nil || cfg.Mode != auth.ModeRequired || len(cfg.Issuers) != 1 || len(cfg.Ignored) != 0 {
+		t.Fatalf("required auth, one issuer, no ignored role keys: %+v, %v", cfg, err)
 	}
-	for _, rule := range cfg.Rules {
-		if rule.Match.Role == "" || rule.Grant.Role == auth.RolePlatformAdmin || len(rule.Grant.Tenants) != 1 || rule.Grant.Tenants[0] != "acme" {
-			t.Fatal("unexpected broad grant")
+	realm := string(mustRead(t, filepath.Join(state, "import", "cluster-vending-realm.json")))
+	for _, gone := range []string{"tenant-acme-admin", "tenant-acme-viewer", "oidc-group-membership-mapper"} {
+		if strings.Contains(realm, gone) {
+			t.Fatalf("the realm still has the role fixture %q", gone)
+		}
+	}
+	for _, user := range []string{`"acme-admin"`, `"acme-viewer"`} {
+		if !strings.Contains(realm, user) {
+			t.Fatalf("the realm lost the local user %s", user)
 		}
 	}
 	before, err := os.ReadFile(filepath.Join(state, "secrets.env"))

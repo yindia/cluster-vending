@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { createBrowserClients, type BrowserClients } from "@/lib/api/client";
 import type { WhoAmIResponse } from "@/gen/cloud/v1/tenant_service_pb";
 import type { TenantInfo } from "@/gen/cloud/v1/tenant_directory_pb";
-import { sessionAccess } from "@/lib/api/access";
 import { useBrowserAuth } from "./auth-boundary";
 
 interface Session { tenantId: string; token: string; revision: number; connectionRevision: number }
@@ -15,7 +14,6 @@ interface PlatformContext {
   identity?: WhoAmIResponse;
   confirmedTenants: readonly TenantInfo[];
   rememberCreatedTenant: (tenant: TenantInfo) => void;
-  canWrite: boolean;
   liveUpdates: boolean;
   setLiveUpdates: (enabled: boolean) => void;
   setIdentity: (identity?: WhoAmIResponse) => void;
@@ -31,11 +29,9 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
   const [confirmed, setConfirmed] = useState<{ scope: string; tenants: TenantInfo[] }>();
   const [liveUpdates, setLiveUpdates] = useState(false);
   const api = useMemo(() => createBrowserClients({ baseUrl: "/api/rpc", bearerToken: browserAuth.enabled ? undefined : session.token || undefined, csrfToken: browserAuth.csrfToken }), [session, browserAuth.enabled, browserAuth.csrfToken]);
-  const { canWrite } = sessionAccess(identity, session.tenantId);
   // Tenant switches remount the console, but do not change the credential connection.
-  // Never expose prior confirmations before WhoAmI verifies the same principal and grants again.
-  const grantScope = identity ? [...new Set(identity.grants.map((grant) => JSON.stringify([grant.role, [...new Set(grant.tenants)].sort()])))].sort() : undefined;
-  const confirmationScope = identity ? JSON.stringify([session.connectionRevision, identity.anonymous, identity.issuer, identity.subject, identity.username, grantScope]) : undefined;
+  // Never expose prior confirmations before WhoAmI verifies the same principal again.
+  const confirmationScope = identity ? JSON.stringify([session.connectionRevision, identity.anonymous, identity.issuer, identity.subject, identity.username]) : undefined;
   const confirmedTenants = confirmationScope && confirmed?.scope === confirmationScope ? confirmed.tenants : [];
   const rememberCreatedTenant = useCallback((tenant: TenantInfo) => {
     if (!confirmationScope) return;
@@ -49,7 +45,7 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
     setSession((previous) => ({ tenantId: tenantId.trim(), token: token?.trim() ?? previous.token, revision: previous.revision + 1, connectionRevision: previous.connectionRevision + (token !== undefined && token.trim() !== previous.token ? 1 : 0) }));
   }, []);
   const disconnect = useCallback(() => { setIdentity(undefined); setSession((previous) => ({ tenantId: previous.tenantId, token: "", revision: previous.revision + 1, connectionRevision: previous.connectionRevision + 1 })); }, []);
-  return <Platform value={{ api, tenantId: session.tenantId, scopeKey: `${session.tenantId}:${session.revision}`, identity, confirmedTenants, rememberCreatedTenant, canWrite, liveUpdates, setLiveUpdates, connect, disconnect, setIdentity }}>{children}</Platform>;
+  return <Platform value={{ api, tenantId: session.tenantId, scopeKey: `${session.tenantId}:${session.revision}`, identity, confirmedTenants, rememberCreatedTenant, liveUpdates, setLiveUpdates, connect, disconnect, setIdentity }}>{children}</Platform>;
 }
 
 export function usePlatform() {

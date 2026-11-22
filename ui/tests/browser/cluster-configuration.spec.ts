@@ -32,7 +32,7 @@ async function mockConfiguration(page: Page, spec: object) {
     calls.push({ method, body });
     let result: object;
     switch (method) {
-      case "WhoAmI": result = { subject: "config-viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] }; break;
+      case "WhoAmI": result = { subject: "config-viewer" }; break;
       case "ListTenants": result = { tenants: [{ id: "acme" }] }; break;
       case "GetCluster": result = { cluster, asRequested: true }; break;
       case "GetNetwork": result = { network: { tenantId: "acme", id: networkId, name: "config-network", spec: { region: "us-east-1" }, status: { state: "NETWORK_STATE_READY" } } }; break;

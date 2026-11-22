@@ -14,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
@@ -25,12 +24,6 @@ import (
 )
 
 var directoryTenantID = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$`)
-
-func directoryCanCreate(id *auth.Identity) bool {
-	return id.Anonymous || id.IsPlatformAdmin() || slices.ContainsFunc(id.Grants, func(grant auth.Grant) bool {
-		return grant.Role == auth.RoleTenantAdmin
-	})
-}
 
 func directoryInfo(id string, created time.Time) *v1.TenantInfo {
 	out := &v1.TenantInfo{Id: id}
@@ -47,14 +40,11 @@ func (s *TenantService) directoryReader() client.Reader {
 	return s.deps.Kube
 }
 
-// ListTenants is open to accepted callers, but visibility is checked for EACH
-// registered tenant. Neither grants for absent tenants nor unrelated namespaces
-// become directory entries. No account, provider, annotation or grant is returned.
+// ListTenants lists every registered tenant whose namespace can serve it:
+// the API has no roles, so every caller sees every tenant. Unrelated
+// namespaces never become entries. No account, provider or annotation is
+// returned.
 func (s *TenantService) ListTenants(ctx context.Context, req *v1.ListTenantsRequest) (*v1.ListTenantsResponse, error) {
-	id := auth.FromContext(ctx)
-	if err := id.Authorize(auth.Access{Scope: auth.ScopeAuthenticated}, ""); err != nil {
-		return nil, service.ToConnect(err)
-	}
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
@@ -70,14 +60,12 @@ func (s *TenantService) ListTenants(ctx context.Context, req *v1.ListTenantsRequ
 		s.logger().ErrorContext(ctx, "list registered tenants", "error", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "cannot read the tenant directory")
 	}
-	out := &v1.ListTenantsResponse{CanCreateTenants: directoryCanCreate(id)}
+	// Every caller may create tenants.
+	out := &v1.ListTenantsResponse{CanCreateTenants: true}
 	for i := range list.Items {
 		registration := &list.Items[i]
 		tenant := registration.Name
 		if registration.DeletionTimestamp != nil || !directoryTenantID.MatchString(tenant) {
-			continue
-		}
-		if err := id.Authorize(auth.Access{Scope: auth.ScopeTenant}, tenant); err != nil {
 			continue
 		}
 		// A deleting namespace cannot serve a tenant even before its CR is removed.
@@ -111,9 +99,6 @@ func (s *TenantService) ListTenants(ctx context.Context, req *v1.ListTenantsRequ
 // The shared lifecycle helper exclusively creates/validates its namespace;
 // unmarked and foreign namespace collisions are never adopted.
 func (s *TenantService) CreateTenant(ctx context.Context, req *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error) {
-	if err := auth.FromContext(ctx).Authorize(auth.Access{Scope: auth.ScopeTenant, Write: true}, req.GetTenantId()); err != nil {
-		return nil, service.ToConnect(err)
-	}
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}

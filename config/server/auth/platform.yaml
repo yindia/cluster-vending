@@ -3,8 +3,9 @@
 # check it); the controller reads that one.
 #
 # Public verification settings only: no client secrets, passwords or tokens.
-# Replace the HTTPS issuer, API audience and exact tenant/group grants before
-# deployment. Unassigned users receive no tenant or platform grant.
+# Replace the HTTPS issuer and API audience before deployment. Authentication
+# only: every user the issuer signs a token for (with this audience) may call
+# every RPC, for every tenant. There are no roles or grants.
 auth:
   mode: required
   issuers:
@@ -12,12 +13,6 @@ auth:
     issuer: https://login.example.com/realms/platform
     audiences: [cv-api]
     usernameClaim: preferred_username
-    rolesClaim: groups
-  rules:
-  - match: {issuer: keycloak, role: tenant-acme-admin}
-    grant: {role: TenantAdmin, tenants: [acme]}
-  - match: {issuer: keycloak, role: tenant-acme-viewer}
-    grant: {role: TenantViewer, tenants: [acme]}
 
 nodeGroups:
   # The bootstrap group, the default EKS managed node group: runs Karpenter,

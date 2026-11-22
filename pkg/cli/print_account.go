@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -121,19 +120,12 @@ func describeAccount(w io.Writer, a *cloudv1.CloudAccount) error {
 	return section(w, "Conditions", conditionHeader, conditionRows(st.GetConditions()))
 }
 
-// printWhoAmI is who the API sees the caller as, and what they may do.
+// printWhoAmI is who the API sees the caller as. The API has no roles, so
+// there is nothing more to show.
 func printWhoAmI(w io.Writer, m *cloudv1.WhoAmIResponse) error {
 	user := m.GetUsername()
 	if m.GetAnonymous() {
-		user = "anonymous"
+		user = "anonymous (the server does not authenticate)"
 	}
-	if err := fields(w, [][2]string{{"User", user}, {"Subject", m.GetSubject()}, {"Issuer", m.GetIssuer()},
-		{"Roles", strings.Join(m.GetRoles(), ",")}}); err != nil {
-		return err
-	}
-	rows := make([][]string, 0, len(m.GetGrants()))
-	for _, g := range m.GetGrants() {
-		rows = append(rows, []string{word(g.GetRole().String(), "ACCESS_ROLE_"), orNone(strings.Join(g.GetTenants(), ","))})
-	}
-	return section(w, "Grants", []string{"ROLE", "TENANTS"}, rows)
+	return fields(w, [][2]string{{"User", user}, {"Subject", m.GetSubject()}, {"Issuer", m.GetIssuer()}})
 }

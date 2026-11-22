@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,20 +16,16 @@ import (
 
 const audience = "api://cluster-vending"
 
-// verifierFor is a Verifier of one issuer named "idp" with the usual
-// three rules, and the issuer itself.
+// verifierFor is a Verifier of one issuer named "idp", and the issuer
+// itself.
 func verifierFor(t *testing.T, change func(*auth.Issuer), opts ...auth.VerifierOption) (*auth.Verifier, *authtest.Issuer) {
 	t.Helper()
 	idp := authtest.New(t)
-	issuer := auth.Issuer{Name: "idp", Issuer: idp.URL, Audiences: []string{audience, "second-audience"}, RolesClaim: "roles"}
+	issuer := auth.Issuer{Name: "idp", Issuer: idp.URL, Audiences: []string{audience, "second-audience"}}
 	if change != nil {
 		change(&issuer)
 	}
-	cfg, err := auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{issuer}, Rules: []auth.Rule{
-		{Match: auth.Match{Issuer: "idp", Role: "platform-admin"}, Grant: auth.Grant{Role: auth.RolePlatformAdmin}},
-		{Match: auth.Match{Issuer: "idp", Role: "acme.admin"}, Grant: auth.Grant{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}},
-		{Match: auth.Match{Issuer: "idp", Role: "acme.viewer"}, Grant: auth.Grant{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}},
-	}}.Resolved()
+	cfg, err := auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{issuer}}.Resolved()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,35 +44,20 @@ func TestVerifyAcceptsAGoodToken(t *testing.T) {
 	if id.Anonymous || id.Subject != "user-1" || id.Username != "user-1" || id.Issuer != "idp" {
 		t.Errorf("identity = %+v", id)
 	}
-	if !slices.Equal(id.Roles, []string{"acme.admin", "acme.viewer", "unrelated"}) {
-		t.Errorf("roles = %v", id.Roles)
-	}
-	if len(id.Grants) != 2 || id.Grants[0].Role != auth.RoleTenantAdmin || id.Grants[1].Role != auth.RoleTenantViewer {
-		t.Errorf("grants = %+v, want both matching rules", id.Grants)
-	}
-	if err := id.Authorize(auth.Access{Scope: auth.ScopeTenant, Write: true}, "acme"); err != nil {
-		t.Errorf("the admin may write its tenant: %v", err)
-	}
 }
 
 func TestVerifyReadsTheConfiguredClaims(t *testing.T) {
 	tests := []struct {
-		name       string
-		change     func(*auth.Issuer)
-		claims     map[string]any
-		wantUser   string
-		wantRoles  []string
-		wantGrants int
+		name     string
+		change   func(*auth.Issuer)
+		claims   map[string]any
+		wantUser string
 	}{
-		{"second audience, role as a string", nil, map[string]any{"aud": "second-audience", "roles": "platform-admin"},
-			"u", []string{"platform-admin"}, 1},
-		{"several audiences in the token", nil, map[string]any{"aud": []string{"other", audience}}, "u", nil, 0},
+		{"second audience", nil, map[string]any{"aud": "second-audience"}, "u"},
+		{"several audiences in the token", nil, map[string]any{"aud": []string{"other", audience}}, "u"},
 		{"username claim", func(i *auth.Issuer) { i.UsernameClaim = "preferred_username" },
-			map[string]any{"preferred_username": "ada@example.com"}, "ada@example.com", nil, 0},
-		{"username claim missing falls back to sub", func(i *auth.Issuer) { i.UsernameClaim = "email" }, nil, "u", nil, 0},
-		{"groups claim", func(i *auth.Issuer) { i.RolesClaim = "groups" },
-			map[string]any{"groups": []any{"acme.viewer", 7, ""}, "roles": []string{"platform-admin"}}, "u", []string{"acme.viewer"}, 1},
-		{"roles of another type", nil, map[string]any{"roles": 7}, "u", nil, 0},
+			map[string]any{"preferred_username": "ada@example.com"}, "ada@example.com"},
+		{"username claim missing falls back to sub", func(i *auth.Issuer) { i.UsernameClaim = "email" }, nil, "u"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,51 +69,8 @@ func TestVerifyReadsTheConfiguredClaims(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if id.Username != tt.wantUser || !slices.Equal(id.Roles, tt.wantRoles) || len(id.Grants) != tt.wantGrants {
-				t.Errorf("identity = %+v, want user %s, roles %v, %d grants", id, tt.wantUser, tt.wantRoles, tt.wantGrants)
-			}
-		})
-	}
-}
-
-// A rule without tenants grants its role for the tenant in the token.
-func TestVerifyTakesTheTenantFromItsClaim(t *testing.T) {
-	idp := authtest.New(t)
-	cfg, err := auth.Config{Mode: auth.ModeRequired,
-		Issuers: []auth.Issuer{{Name: "idp", Issuer: idp.URL, Audiences: []string{audience}, TenantClaim: "org"}},
-		Rules: []auth.Rule{
-			{Match: auth.Match{Issuer: "idp"}, Grant: auth.Grant{Role: auth.RoleTenantViewer}},
-			{Match: auth.Match{Issuer: "idp", Role: "admins"}, Grant: auth.Grant{Role: auth.RoleTenantAdmin}},
-		}}.Resolved()
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := auth.NewVerifier(cfg)
-	tests := []struct {
-		name   string
-		claims map[string]any
-		want   []auth.Grant
-	}{
-		{"everyone views its tenant", map[string]any{"org": "acme"}, []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}}},
-		{"admins administer it", map[string]any{"org": "acme", "groups": []string{"admins"}}, []auth.Grant{
-			{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}, {Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}}},
-		{"no tenant claim grants nothing", map[string]any{"groups": []string{"admins"}}, nil},
-		{"a claim that is no tenant ID grants nothing", map[string]any{"org": "*"}, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			id, err := v.Verify(t.Context(), idp.Sign(t, idp.Claims(audience, "u", tt.claims)))
-
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(id.Grants) != len(tt.want) {
-				t.Fatalf("grants = %+v, want %+v", id.Grants, tt.want)
-			}
-			for i, g := range id.Grants {
-				if g.Role != tt.want[i].Role || !slices.Equal(g.Tenants, tt.want[i].Tenants) {
-					t.Errorf("grant %d = %+v, want %+v", i, g, tt.want[i])
-				}
+			if id.Username != tt.wantUser {
+				t.Errorf("identity = %+v, want user %s", id, tt.wantUser)
 			}
 		})
 	}
@@ -208,10 +145,9 @@ func TestVerifyEntraV1AndV2(t *testing.T) {
 	v1Issuer := auth.EntraV1Issuer(tenant)
 	v1 := authtest.NewNamed(t, v1Issuer)
 	issuer := auth.Issuer{Name: "entra", Issuer: v2.URL, Audiences: []string{clientID, appURI},
-		UsernameClaim: "oid", RolesClaim: "roles",
-		Alternates: []auth.Alternate{{Issuer: v1Issuer, DiscoveryURL: v1.URL}}}
-	rules := []auth.Rule{{Match: auth.Match{Issuer: "entra", Role: "Platform.Admin"}, Grant: auth.Grant{Role: auth.RolePlatformAdmin}}}
-	v := auth.NewVerifier(auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{issuer}, Rules: rules})
+		UsernameClaim: "oid",
+		Alternates:    []auth.Alternate{{Issuer: v1Issuer, DiscoveryURL: v1.URL}}}
+	v := auth.NewVerifier(auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{issuer}})
 	tests := []struct {
 		name   string
 		token  string
@@ -237,8 +173,8 @@ func TestVerifyEntraV1AndV2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if id.Username != "object-id" || id.Issuer != "entra" || !id.IsPlatformAdmin() {
-				t.Errorf("identity = %+v, want the oid as username and the app role's grant", id)
+			if id.Username != "object-id" || id.Issuer != "entra" {
+				t.Errorf("identity = %+v, want the oid as username", id)
 			}
 		})
 	}

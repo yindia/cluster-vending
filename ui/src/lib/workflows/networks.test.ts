@@ -246,7 +246,7 @@ test("import retries reuse idempotency IDs until inputs change", () => {
 test("takeover generates a current-etag request only after typed ownership confirmation", () => {
   const network = plannedImport();
   const original = clone(NetworkSchema, network);
-  const request = buildTakeOverNetwork("acme", network, account, ownershipConsent(network), true);
+  const request = buildTakeOverNetwork("acme", network, account, ownershipConsent(network));
   assert.equal(request.$typeName, "cloud.v1.TakeOverNetworkRequest");
   assert.equal(request.tenantId, "acme");
   assert.equal(request.networkId, network.id);
@@ -254,28 +254,27 @@ test("takeover generates a current-etag request only after typed ownership confi
   assert.equal(request.acknowledgeNotImported, false);
   assert.equal("updateMask" in request, false);
   assert(equals(NetworkSchema, network, original));
-  for (const text of ["", network.name, "take over another", `TAKE OVER ${network.name}`]) assert.throws(() => buildTakeOverNetwork("acme", network, account, { ...ownershipConsent(network), ownershipConfirmation: text }, true), /Type take over/);
-  assert.throws(() => buildTakeOverNetwork("acme", network, account, ownershipConsent(network), false), /Write access/);
+  for (const text of ["", network.name, "take over another", `TAKE OVER ${network.name}`]) assert.throws(() => buildTakeOverNetwork("acme", network, account, { ...ownershipConsent(network), ownershipConfirmation: text }), /Type take over/);
 });
 
 test("takeover requires explicit NOT_IMPORTED acknowledgment and preserves its exact wire field", () => {
   const network = plannedImport();
   network.status!.import!.resources.push({ ...network.status!.import!.resources[0], name: "external-owner", disposition: Disposition.NOT_IMPORTED });
   const confirmation = ownershipConsent(network);
-  assert.throws(() => buildTakeOverNetwork("acme", network, account, confirmation, true), /Acknowledge/);
-  assert.equal(buildTakeOverNetwork("acme", network, account, { ...confirmation, acknowledgeNotImported: true }, true).acknowledgeNotImported, true);
+  assert.throws(() => buildTakeOverNetwork("acme", network, account, confirmation), /Acknowledge/);
+  assert.equal(buildTakeOverNetwork("acme", network, account, { ...confirmation, acknowledgeNotImported: true }).acknowledgeNotImported, true);
 });
 
 test("takeover refuses discovery, blocked, converging, converged, unknown and absent import phases", () => {
   for (const phase of [ImportPhase.UNSPECIFIED, ImportPhase.DISCOVERING, ImportPhase.BLOCKED, ImportPhase.CONVERGING, ImportPhase.CONVERGED, 99]) {
     const network = plannedImport(); network.status!.import!.phase = phase;
-    assert.throws(() => buildTakeOverNetwork("acme", network, account, ownershipConsent(network), true), /PLANNED import/);
+    assert.throws(() => buildTakeOverNetwork("acme", network, account, ownershipConsent(network)), /PLANNED import/);
   }
   const network = plannedImport(); network.status!.import = undefined;
-  assert.throws(() => buildTakeOverNetwork("acme", network, account, ownershipConsent(network), true), /PLANNED import/);
+  assert.throws(() => buildTakeOverNetwork("acme", network, account, ownershipConsent(network)), /PLANNED import/);
   for (const state of [NetworkState.READY, NetworkState.FAILED, NetworkState.DELETING, NetworkState.PROVISIONING, NetworkState.UPDATING]) {
     const value = plannedImport(); value.status!.state = state;
-    assert.throws(() => buildTakeOverNetwork("acme", value, account, ownershipConsent(value), true), /IMPORTED network/);
+    assert.throws(() => buildTakeOverNetwork("acme", value, account, ownershipConsent(value)), /IMPORTED network/);
   }
 });
 
@@ -283,7 +282,7 @@ test("takeover refuses blocking or unknown resource dispositions even in PLANNED
   for (const disposition of [Disposition.BLOCKING, Disposition.UNSPECIFIED, 99]) {
     const network = plannedImport(); network.status!.import!.resources[0].disposition = disposition;
     assert(networkTakeoverBlockReason("acme", network, account));
-    assert.throws(() => buildTakeOverNetwork("acme", network, account, { ...ownershipConsent(network), acknowledgeNotImported: true }, true));
+    assert.throws(() => buildTakeOverNetwork("acme", network, account, { ...ownershipConsent(network), acknowledgeNotImported: true }));
   }
 });
 
@@ -300,20 +299,20 @@ test("takeover confirmation expires on etag, generation, account, identity or pl
   ];
   for (const change of changes) {
     const network = clone(NetworkSchema, before); change(network);
-    assert.throws(() => buildTakeOverNetwork("acme", network, account, confirmation, true), /plan changed/);
+    assert.throws(() => buildTakeOverNetwork("acme", network, account, confirmation), /plan changed/);
   }
   const observed = clone(NetworkSchema, before);
   observed.status!.message = "New observation";
   observed.status!.observedGeneration = BigInt(0);
   assert.equal(networkTakeoverKey(observed), confirmation.reviewKey);
-  assert.equal(buildTakeOverNetwork("acme", observed, account, confirmation, true).etag, before.etag);
+  assert.equal(buildTakeOverNetwork("acme", observed, account, confirmation).etag, before.etag);
 });
 
 test("takeover refuses missing etags and mismatched tenant or provider account", () => {
   const network = plannedImport();
-  assert.throws(() => buildTakeOverNetwork("acme", { ...network, etag: "" }, account, ownershipConsent(network), true), /etag/);
-  assert.throws(() => buildTakeOverNetwork("other", network, account, ownershipConsent(network), true), /tenant/);
-  for (const value of [undefined, create(CloudAccountSchema, { id: account.id }), create(CloudAccountSchema, { ...account, id: "different" }), create(CloudAccountSchema, { ...account, tenantId: "different" })]) assert.throws(() => buildTakeOverNetwork("acme", network, value, ownershipConsent(network), true), /supported takeover provider/);
+  assert.throws(() => buildTakeOverNetwork("acme", { ...network, etag: "" }, account, ownershipConsent(network)), /etag/);
+  assert.throws(() => buildTakeOverNetwork("other", network, account, ownershipConsent(network)), /tenant/);
+  for (const value of [undefined, create(CloudAccountSchema, { id: account.id }), create(CloudAccountSchema, { ...account, id: "different" }), create(CloudAccountSchema, { ...account, tenantId: "different" })]) assert.throws(() => buildTakeOverNetwork("acme", network, value, ownershipConsent(network)), /supported takeover provider/);
 });
 
 test("identity step validates visible fields without depending on unfinished layout or flow fields", () => {

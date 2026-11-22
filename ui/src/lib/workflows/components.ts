@@ -17,7 +17,6 @@ export interface ComponentMutationContext {
   clusterId: string;
   definition: ComponentDefinition;
   current?: Component;
-  canWrite: boolean;
 }
 export type ComponentAction = "enable" | "update" | "disable";
 /** Immutable JSON snapshots keep server preview normalization out of the apply payload. */
@@ -96,8 +95,7 @@ export function parseComponentValues(text: string): Component["values"] {
 }
 
 function requireMutable(context: ComponentMutationContext, action: ComponentAction) {
-  const { tenantId, clusterId, definition, current, canWrite } = context;
-  if (!canWrite) throw new Error("Tenant write permission is required.");
+  const { tenantId, clusterId, definition, current } = context;
   if (!tenantId || !clusterId) throw new Error("Select a tenant and cluster first.");
   if (definition.management !== ComponentManagement.TENANT || current && current.management !== ComponentManagement.TENANT) {
     throw new Error("Platform managed or unknown components are read-only, including entries without IDs.");

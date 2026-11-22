@@ -9,7 +9,6 @@ import { StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { usePlatform } from "@/components/platform-provider";
 import type { Cluster } from "@/gen/cloud/v1/cluster_pb";
-import { AccessRole } from "@/gen/cloud/v1/tenant_service_pb";
 import { useAsyncQuery } from "@/lib/api/use-query";
 import { supportsCapability } from "@/lib/providers/registry";
 import { clusterAccessCommand } from "@/lib/workflows/cluster-access";
@@ -19,16 +18,13 @@ import { RefreshButton } from "./refresh-button";
 
 export function ClusterAccessButton({ cluster }: { cluster: Cluster }) {
   const { tenantId, scopeKey, identity } = usePlatform();
-  const canRead = !!identity && (identity.anonymous || identity.grants.some((grant) =>
-    grant.role === AccessRole.PLATFORM_ADMIN ||
-    ([AccessRole.TENANT_ADMIN, AccessRole.TENANT_VIEWER].includes(grant.role) && (grant.tenants.includes(tenantId) || grant.tenants.includes("*")))));
-  return <ClusterAccess key={`${scopeKey}:${cluster.id}`} cluster={cluster} tenantId={tenantId} canRead={canRead} />;
+  return <ClusterAccess key={`${scopeKey}:${cluster.id}`} cluster={cluster} tenantId={tenantId} signedIn={!!identity} />;
 }
 
-function ClusterAccess({ cluster, tenantId, canRead }: { cluster: Cluster; tenantId: string; canRead: boolean }) {
+function ClusterAccess({ cluster, tenantId, signedIn }: { cluster: Cluster; tenantId: string; signedIn: boolean }) {
   const [open, setOpen] = useState(false);
   const supported = supportsCapability(cluster.spec?.provider.case ?? "", "cluster.kubeconfig");
-  const available = supported && canRead && !!tenantId && !!cluster.id && cluster.tenantId === tenantId;
+  const available = supported && signedIn && !!tenantId && !!cluster.id && cluster.tenantId === tenantId;
   return <>
     <Button label="Get kubeconfig" onClick={() => setOpen(true)} isDisabled={!available} tooltip={!supported ? "This provider does not support kubeconfig access." : undefined} aria-haspopup="dialog" />
     {open && available && <ClusterAccessDialog clusterId={cluster.id} tenantId={tenantId} name={cluster.displayName || cluster.name} onOpenChange={setOpen} />}

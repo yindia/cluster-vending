@@ -7,7 +7,6 @@ async function mockTenantHeader(page: Page, options: { returnedId?: string; paus
   const calls: RpcCall[] = [];
   const unexpected: string[] = [];
   let identityChanged = false;
-  let grantsRevoked = false;
   let releaseCreate: () => void = () => {};
   const pendingCreate = options.pauseCreate ? new Promise<void>((resolve) => { releaseCreate = resolve; }) : undefined;
   let finishCreate: () => void = () => {};
@@ -17,11 +16,11 @@ async function mockTenantHeader(page: Page, options: { returnedId?: string; paus
     const method = new URL(request.url()).pathname.split("/").at(-1)!;
     const body = request.postDataJSON() as Record<string, unknown>;
     const authorization = request.headers().authorization ?? "";
-    const viewer = authorization === "Bearer viewer-token" || identityChanged || grantsRevoked;
+    const viewer = authorization === "Bearer viewer-token" || identityChanged;
     calls.push({ method, body, authorization });
     let response: object;
     switch (method) {
-      case "WhoAmI": response = { subject: identityChanged ? "different-operator" : "same-operator", issuer: "test", grants: [{ role: viewer ? "ACCESS_ROLE_TENANT_VIEWER" : "ACCESS_ROLE_TENANT_ADMIN", tenants: viewer ? ["acme"] : ["acme", "other", "new-team"] }] }; break;
+      case "WhoAmI": response = { subject: identityChanged ? "different-operator" : "same-operator", issuer: "test" }; break;
       case "ListTenants": response = { tenants: viewer ? [{ id: "acme" }] : [{ id: "acme" }, { id: "other" }], canCreateTenants: !viewer }; break;
       case "CreateTenant":
         if (pendingCreate) await pendingCreate;
@@ -42,7 +41,7 @@ async function mockTenantHeader(page: Page, options: { returnedId?: string; paus
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(response) }).catch(() => {}).finally(finishCreate);
     } else await route.fulfill({ contentType: "application/json", body: JSON.stringify(response) });
   });
-  return { calls, unexpected, releaseCreate, createResponded, changeIdentity: () => { identityChanged = true; }, revokeGrants: () => { grantsRevoked = true; } };
+  return { calls, unexpected, releaseCreate, createResponded, changeIdentity: () => { identityChanged = true; } };
 }
 
 function tenantControl(page: Page) {
@@ -194,28 +193,6 @@ test("leaving during a pending create cancels confirmation and never remembers i
   } finally {
     mock.releaseCreate();
   }
-});
-
-test("revoking grants hides confirmed tenants for the same principal and credentials", async ({ page }) => {
-  const mock = await mockTenantHeader(page);
-  await page.goto("/");
-  await createTenant(page);
-  await expect(tenantControl(page)).toContainText("new-team");
-  await expect(page.getByRole("button", { name: "Create tenant", exact: true })).toBeVisible();
-  await tenantControl(page).click();
-  await expect(page.getByRole("option", { name: "new-team", exact: true })).toBeEnabled();
-  await page.getByRole("option", { name: "acme", exact: true }).click();
-  const priorIdentityCalls = mock.calls.filter((call) => call.method === "WhoAmI").length;
-  mock.revokeGrants();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("dialog", { name: "Settings", exact: true }).getByRole("button", { name: "Connect", exact: true }).click();
-  await expect.poll(() => mock.calls.filter((call) => call.method === "WhoAmI").length).toBeGreaterThan(priorIdentityCalls);
-  await expect(page.getByRole("button", { name: "Create tenant", exact: true })).toHaveCount(0);
-  await tenantControl(page).click();
-  await expect(page.getByRole("option", { name: "acme", exact: true })).toBeVisible();
-  await expect(page.getByRole("option", { name: "new-team", exact: true })).toHaveCount(0);
-  expect(mock.calls.every((call) => call.authorization === "")).toBe(true);
-  expect(mock.unexpected).toEqual([]);
 });
 
 test("canceling the tenant review never sends a create RPC or remembers the draft", async ({ page }) => {

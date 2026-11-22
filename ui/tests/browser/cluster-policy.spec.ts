@@ -15,7 +15,7 @@ async function mockPolicy(page: Page, fixture: Fixture = {}) {
     calls.push({ method, body });
     let response: object;
     switch (method) {
-      case "WhoAmI": response = { subject: "policy-viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] }; break;
+      case "WhoAmI": response = { subject: "policy-viewer" }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
       case "GetCluster": response = { cluster: body.clusterId === otherClusterId ? clusterRow(otherClusterId, "billing") : clusterRow(clusterId, "payments"), asRequested: true }; break;
       case "ListClusters": response = { clusters: [clusterRow(clusterId, "payments"), clusterRow(otherClusterId, "billing")] }; break;

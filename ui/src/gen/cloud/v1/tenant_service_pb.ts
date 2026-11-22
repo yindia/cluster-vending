@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/tenant_service.proto.
  */
 export const file_cloud_v1_tenant_service: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jbG91ZC92MS90ZW5hbnRfc2VydmljZS5wcm90bxIIY2xvdWQudjEiDwoNV2hvQW1JUmVxdWVzdCKMAQoOV2hvQW1JUmVzcG9uc2USEQoJYW5vbnltb3VzGAEgASgIEg8KB3N1YmplY3QYAiABKAkSEAoIdXNlcm5hbWUYAyABKAkSDgoGaXNzdWVyGAQgASgJEg0KBXJvbGVzGAUgAygJEiUKBmdyYW50cxgGIAMoCzIVLmNsb3VkLnYxLkFjY2Vzc0dyYW50IkIKC0FjY2Vzc0dyYW50EiIKBHJvbGUYASABKA4yFC5jbG91ZC52MS5BY2Nlc3NSb2xlEg8KB3RlbmFudHMYAiADKAkijQEKFkJvb3RzdHJhcFRlbmFudFJlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIvCgdhY2NvdW50GAIgASgLMhYuY2xvdWQudjEuQ2xvdWRBY2NvdW50Qga6SAPIAQEiQgoXQm9vdHN0cmFwVGVuYW50UmVzcG9uc2USJwoHYWNjb3VudBgBIAEoCzIWLmNsb3VkLnYxLkNsb3VkQWNjb3VudCJyChZHZXRDbG91ZEFjY291bnRSZXF1ZXN0EkIKCXRlbmFudF9pZBgBIAEoCUIvukgscioQARg4MiReW2EtejAtOV0oW2EtejAtOS1dezAsNTR9W2EtejAtOV0pPyQSFAoCaWQYAiABKAlCCLpIBXIDsAEBIkIKF0dldENsb3VkQWNjb3VudFJlc3BvbnNlEicKB2FjY291bnQYASABKAsyFi5jbG91ZC52MS5DbG91ZEFjY291bnQidQoZRGVsZXRlQ2xvdWRBY2NvdW50UmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEhQKAmlkGAIgASgJQgi6SAVyA7ABASJFChpEZWxldGVDbG91ZEFjY291bnRSZXNwb25zZRInCgdhY2NvdW50GAEgASgLMhYuY2xvdWQudjEuQ2xvdWRBY2NvdW50IrcBChlWZXJpZnlDbG91ZEFjY291bnRSZXF1ZXN0EkIKCXRlbmFudF9pZBgBIAEoCUIvukgscioQARg4MiReW2EtejAtOV0oW2EtejAtOS1dezAsNTR9W2EtejAtOV0pPyQSFAoCaWQYAiABKAlCCLpIBXIDsAEBEkAKB3JlZ2lvbnMYAyADKAlCL7pILJIBKRAKGAEiI3IhEAEYIDIbXlthLXpdezJ9KC1bYS16XSspKy1bMC05XSskIkUKGlZlcmlmeUNsb3VkQWNjb3VudFJlc3BvbnNlEicKB2FjY291bnQYASABKAsyFi5jbG91ZC52MS5DbG91ZEFjY291bnQizgIKG0dldEFjY291bnRPbmJvYXJkaW5nUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEjMKBHJvbGUYAiABKAlCJbpIInIgUgBSBnJlYWRlclIHdXBkYXRlclILcHJvdmlzaW9uZXISKQoKYWNjb3VudF9pZBgEIAEoCUIVukgSchAyDl4oWzAtOV17MTJ9KT8kEmQKCXJvbGVfbmFtZRgFIAEoCUJRukhOckwYQDJIXihjbHVzdGVyLXZlbmRpbmctKFtBLVphLXowLTkrPSwuQF8tXSstKT8ocmVhZGVyfHVwZGF0ZXJ8cHJvdmlzaW9uZXIpKT8kEhcKAmlkGAYgASgJQgu6SAjYAQFyA7ABAUoECAMQBFIGcmVnaW9uIk8KHEdldEFjY291bnRPbmJvYXJkaW5nUmVzcG9uc2USLwoKb25ib2FyZGluZxgBIAEoCzIbLmNsb3VkLnYxLkFjY291bnRPbmJvYXJkaW5nIqACChFBY2NvdW50T25ib2FyZGluZxIMCgRyb2xlGAEgASgJEhEKCXJvbGVfbmFtZRgCIAEoCRISCgphY2NvdW50X2lkGAUgASgJEhsKE21hbmFnZW1lbnRfcm9sZV9hcm4YBiABKAkSEwoLZXh0ZXJuYWxfaWQYCyABKAkSFQoNdGVtcGxhdGVfcGF0aBgMIAEoCRIcChRzZXJ2ZXJfcHJpbmNpcGFsX2FybhgNIAEoCUoECAMQBEoECAQQBUoECAcQCEoECAgQCUoECAkQCkoECAoQC1IKc3RhY2tfbmFtZVIGcmVnaW9uUg10ZW1wbGF0ZV9ib2R5Ug10ZW1wbGF0ZV9maWxlUgx0ZW1wbGF0ZV91cmxSC2NvbnNvbGVfdXJsIl4KGExpc3RDbG91ZEFjY291bnRzUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kIkUKGUxpc3RDbG91ZEFjY291bnRzUmVzcG9uc2USKAoIYWNjb3VudHMYASADKAsyFi5jbG91ZC52MS5DbG91ZEFjY291bnQilQIKDENsb3VkQWNjb3VudBIKCgJpZBgHIAEoCRIRCgl0ZW5hbnRfaWQYASABKAkSHgoMYWNjb3VudF9uYW1lGAIgASgJQgi6SAVyAxiAARIsCgZzdGF0dXMYAyABKAsyHC5jbG91ZC52MS5DbG91ZEFjY291bnRTdGF0dXMSLwoLY3JlYXRlX3RpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC3VwZGF0ZV90aW1lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIjCgNhd3MYCiABKAsyFC5jbG91ZC52MS5Bd3NBY2NvdW50SABCEQoIcHJvdmlkZXISBbpIAggBInYKCkF3c0FjY291bnQSJgoKYWNjb3VudF9pZBgBIAEoCUISukgPcg0yC15bMC05XXsxMn0kEicKBHJvbGUYAiABKAlCGbpIFnIUMhJeW1x3Kz0sLkAtXXsxLDY0fSQSFwoPZXh0ZXJuYWxfaWRfc2V0GAMgASgIIpgCChJDbG91ZEFjY291bnRTdGF0dXMSKgoFc3RhdGUYASABKA4yGy5jbG91ZC52MS5DbG91ZEFjY291bnRTdGF0ZRIRCgluYW1lc3BhY2UYAiABKAkSHAoUcHJvdmlkZXJfY29uZmlnX25hbWUYAyABKAkSJwoKY29uZGl0aW9ucxgEIAMoCzITLmNsb3VkLnYxLkNvbmRpdGlvbhIQCghpZGVudGl0eRgFIAEoCRI0ChFtYW5hZ2VkX3Jlc291cmNlcxgGIAMoCzIZLmNsb3VkLnYxLk1hbmFnZWRSZXNvdXJjZRInCgZhY2Nlc3MYCCABKAsyFy5jbG91ZC52MS5BY2NvdW50QWNjZXNzSgQIBxAIUgVwYXVzZSKfAgoNQWNjb3VudEFjY2VzcxIQCgh2ZXJpZmllZBgBIAEoCBIwCgxjaGVja2VkX3RpbWUYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKDmF0dGVtcHRlZF90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVzdGFsZRgEIAEoCBIVCg1wcmluY2lwYWxfYXJuGAUgASgJEg4KBnJlYXNvbhgGIAEoCRIPCgdtZXNzYWdlGAcgASgJEicKB3JlZ2lvbnMYCCADKAsyFi5jbG91ZC52MS5BY2Nlc3NSZXN1bHQSJgoGY2hlY2tzGAkgAygLMhYuY2xvdWQudjEuQWNjZXNzUmVzdWx0IlsKDEFjY2Vzc1Jlc3VsdBIOCgZhY3Rpb24YASABKAkSDgoGcmVnaW9uGAIgASgJEgoKAm9rGAMgASgIEg4KBnJlYXNvbhgEIAEoCRIPCgdtZXNzYWdlGAUgASgJKoYBCgpBY2Nlc3NSb2xlEhsKF0FDQ0VTU19ST0xFX1VOU1BFQ0lGSUVEEAASHgoaQUNDRVNTX1JPTEVfUExBVEZPUk1fQURNSU4QARIcChhBQ0NFU1NfUk9MRV9URU5BTlRfQURNSU4QAhIdChlBQ0NFU1NfUk9MRV9URU5BTlRfVklFV0VSEAMqngEKEUNsb3VkQWNjb3VudFN0YXRlEiMKH0NMT1VEX0FDQ09VTlRfU1RBVEVfVU5TUEVDSUZJRUQQABIlCiFDTE9VRF9BQ0NPVU5UX1NUQVRFX0JPT1RTVFJBUFBJTkcQARIdChlDTE9VRF9BQ0NPVU5UX1NUQVRFX1JFQURZEAISHgoaQ0xPVURfQUNDT1VOVF9TVEFURV9GQUlMRUQQAzKuCwoNVGVuYW50U2VydmljZRJPCgtMaXN0VGVuYW50cxIcLmNsb3VkLnYxLkxpc3RUZW5hbnRzUmVxdWVzdBodLmNsb3VkLnYxLkxpc3RUZW5hbnRzUmVzcG9uc2UiA5ACARJSCgxDcmVhdGVUZW5hbnQSHS5jbG91ZC52MS5DcmVhdGVUZW5hbnRSZXF1ZXN0Gh4uY2xvdWQudjEuQ3JlYXRlVGVuYW50UmVzcG9uc2UiA5ACAhJBCgZGcmVlemUSHS5jbG91ZC52MS5UZW5hbnRGcmVlemVSZXF1ZXN0GhguY2xvdWQudjEuRnJlZXplUmVzcG9uc2USRwoIVW5mcmVlemUSHy5jbG91ZC52MS5UZW5hbnRVbmZyZWV6ZVJlcXVlc3QaGi5jbG91ZC52MS5VbmZyZWV6ZVJlc3BvbnNlEk8KCUdldEZyZWV6ZRIgLmNsb3VkLnYxLlRlbmFudEdldEZyZWV6ZVJlcXVlc3QaGy5jbG91ZC52MS5HZXRGcmVlemVSZXNwb25zZSIDkAIBElgKDExpc3RSZWxlYXNlcxIjLmNsb3VkLnYxLlRlbmFudExpc3RSZWxlYXNlc1JlcXVlc3QaHi5jbG91ZC52MS5MaXN0UmVsZWFzZXNSZXNwb25zZSIDkAIBElIKCkdldFJlbGVhc2USIS5jbG91ZC52MS5UZW5hbnRHZXRSZWxlYXNlUmVxdWVzdBocLmNsb3VkLnYxLkdldFJlbGVhc2VSZXNwb25zZSIDkAIBEm0KE0xpc3RSZWxlYXNlQ2hhbm5lbHMSKi5jbG91ZC52MS5UZW5hbnRMaXN0UmVsZWFzZUNoYW5uZWxzUmVxdWVzdBolLmNsb3VkLnYxLkxpc3RSZWxlYXNlQ2hhbm5lbHNSZXNwb25zZSIDkAIBEmcKEUdldFJlbGVhc2VDaGFubmVsEiguY2xvdWQudjEuVGVuYW50R2V0UmVsZWFzZUNoYW5uZWxSZXF1ZXN0GiMuY2xvdWQudjEuR2V0UmVsZWFzZUNoYW5uZWxSZXNwb25zZSIDkAIBElsKD0Jvb3RzdHJhcFRlbmFudBIgLmNsb3VkLnYxLkJvb3RzdHJhcFRlbmFudFJlcXVlc3QaIS5jbG91ZC52MS5Cb290c3RyYXBUZW5hbnRSZXNwb25zZSIDkAICElsKD0dldENsb3VkQWNjb3VudBIgLmNsb3VkLnYxLkdldENsb3VkQWNjb3VudFJlcXVlc3QaIS5jbG91ZC52MS5HZXRDbG91ZEFjY291bnRSZXNwb25zZSIDkAIBEmEKEUxpc3RDbG91ZEFjY291bnRzEiIuY2xvdWQudjEuTGlzdENsb3VkQWNjb3VudHNSZXF1ZXN0GiMuY2xvdWQudjEuTGlzdENsb3VkQWNjb3VudHNSZXNwb25zZSIDkAIBEmQKElZlcmlmeUNsb3VkQWNjb3VudBIjLmNsb3VkLnYxLlZlcmlmeUNsb3VkQWNjb3VudFJlcXVlc3QaJC5jbG91ZC52MS5WZXJpZnlDbG91ZEFjY291bnRSZXNwb25zZSIDkAICEmQKEkRlbGV0ZUNsb3VkQWNjb3VudBIjLmNsb3VkLnYxLkRlbGV0ZUNsb3VkQWNjb3VudFJlcXVlc3QaJC5jbG91ZC52MS5EZWxldGVDbG91ZEFjY291bnRSZXNwb25zZSIDkAICEmoKFEdldEFjY291bnRPbmJvYXJkaW5nEiUuY2xvdWQudjEuR2V0QWNjb3VudE9uYm9hcmRpbmdSZXF1ZXN0GiYuY2xvdWQudjEuR2V0QWNjb3VudE9uYm9hcmRpbmdSZXNwb25zZSIDkAIBEkAKBldob0FtSRIXLmNsb3VkLnYxLldob0FtSVJlcXVlc3QaGC5jbG91ZC52MS5XaG9BbUlSZXNwb25zZSIDkAIBQqIBCgxjb20uY2xvdWQudjFCElRlbmFudFNlcnZpY2VQcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_cloud_v1_admin_freeze, file_cloud_v1_admin_release, file_cloud_v1_conditions, file_cloud_v1_managed_resource, file_cloud_v1_tenant_dashboard, file_cloud_v1_tenant_directory, file_google_protobuf_timestamp]);
+  fileDesc("Ch1jbG91ZC92MS90ZW5hbnRfc2VydmljZS5wcm90bxIIY2xvdWQudjEiDwoNV2hvQW1JUmVxdWVzdCJxCg5XaG9BbUlSZXNwb25zZRIRCglhbm9ueW1vdXMYASABKAgSDwoHc3ViamVjdBgCIAEoCRIQCgh1c2VybmFtZRgDIAEoCRIOCgZpc3N1ZXIYBCABKAlKBAgFEAZKBAgGEAdSBXJvbGVzUgZncmFudHMijQEKFkJvb3RzdHJhcFRlbmFudFJlcXVlc3QSQgoJdGVuYW50X2lkGAEgASgJQi+6SCxyKhABGDgyJF5bYS16MC05XShbYS16MC05LV17MCw1NH1bYS16MC05XSk/JBIvCgdhY2NvdW50GAIgASgLMhYuY2xvdWQudjEuQ2xvdWRBY2NvdW50Qga6SAPIAQEiQgoXQm9vdHN0cmFwVGVuYW50UmVzcG9uc2USJwoHYWNjb3VudBgBIAEoCzIWLmNsb3VkLnYxLkNsb3VkQWNjb3VudCJyChZHZXRDbG91ZEFjY291bnRSZXF1ZXN0EkIKCXRlbmFudF9pZBgBIAEoCUIvukgscioQARg4MiReW2EtejAtOV0oW2EtejAtOS1dezAsNTR9W2EtejAtOV0pPyQSFAoCaWQYAiABKAlCCLpIBXIDsAEBIkIKF0dldENsb3VkQWNjb3VudFJlc3BvbnNlEicKB2FjY291bnQYASABKAsyFi5jbG91ZC52MS5DbG91ZEFjY291bnQidQoZRGVsZXRlQ2xvdWRBY2NvdW50UmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEhQKAmlkGAIgASgJQgi6SAVyA7ABASJFChpEZWxldGVDbG91ZEFjY291bnRSZXNwb25zZRInCgdhY2NvdW50GAEgASgLMhYuY2xvdWQudjEuQ2xvdWRBY2NvdW50IrcBChlWZXJpZnlDbG91ZEFjY291bnRSZXF1ZXN0EkIKCXRlbmFudF9pZBgBIAEoCUIvukgscioQARg4MiReW2EtejAtOV0oW2EtejAtOS1dezAsNTR9W2EtejAtOV0pPyQSFAoCaWQYAiABKAlCCLpIBXIDsAEBEkAKB3JlZ2lvbnMYAyADKAlCL7pILJIBKRAKGAEiI3IhEAEYIDIbXlthLXpdezJ9KC1bYS16XSspKy1bMC05XSskIkUKGlZlcmlmeUNsb3VkQWNjb3VudFJlc3BvbnNlEicKB2FjY291bnQYASABKAsyFi5jbG91ZC52MS5DbG91ZEFjY291bnQizgIKG0dldEFjY291bnRPbmJvYXJkaW5nUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kEjMKBHJvbGUYAiABKAlCJbpIInIgUgBSBnJlYWRlclIHdXBkYXRlclILcHJvdmlzaW9uZXISKQoKYWNjb3VudF9pZBgEIAEoCUIVukgSchAyDl4oWzAtOV17MTJ9KT8kEmQKCXJvbGVfbmFtZRgFIAEoCUJRukhOckwYQDJIXihjbHVzdGVyLXZlbmRpbmctKFtBLVphLXowLTkrPSwuQF8tXSstKT8ocmVhZGVyfHVwZGF0ZXJ8cHJvdmlzaW9uZXIpKT8kEhcKAmlkGAYgASgJQgu6SAjYAQFyA7ABAUoECAMQBFIGcmVnaW9uIk8KHEdldEFjY291bnRPbmJvYXJkaW5nUmVzcG9uc2USLwoKb25ib2FyZGluZxgBIAEoCzIbLmNsb3VkLnYxLkFjY291bnRPbmJvYXJkaW5nIqACChFBY2NvdW50T25ib2FyZGluZxIMCgRyb2xlGAEgASgJEhEKCXJvbGVfbmFtZRgCIAEoCRISCgphY2NvdW50X2lkGAUgASgJEhsKE21hbmFnZW1lbnRfcm9sZV9hcm4YBiABKAkSEwoLZXh0ZXJuYWxfaWQYCyABKAkSFQoNdGVtcGxhdGVfcGF0aBgMIAEoCRIcChRzZXJ2ZXJfcHJpbmNpcGFsX2FybhgNIAEoCUoECAMQBEoECAQQBUoECAcQCEoECAgQCUoECAkQCkoECAoQC1IKc3RhY2tfbmFtZVIGcmVnaW9uUg10ZW1wbGF0ZV9ib2R5Ug10ZW1wbGF0ZV9maWxlUgx0ZW1wbGF0ZV91cmxSC2NvbnNvbGVfdXJsIl4KGExpc3RDbG91ZEFjY291bnRzUmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kIkUKGUxpc3RDbG91ZEFjY291bnRzUmVzcG9uc2USKAoIYWNjb3VudHMYASADKAsyFi5jbG91ZC52MS5DbG91ZEFjY291bnQilQIKDENsb3VkQWNjb3VudBIKCgJpZBgHIAEoCRIRCgl0ZW5hbnRfaWQYASABKAkSHgoMYWNjb3VudF9uYW1lGAIgASgJQgi6SAVyAxiAARIsCgZzdGF0dXMYAyABKAsyHC5jbG91ZC52MS5DbG91ZEFjY291bnRTdGF0dXMSLwoLY3JlYXRlX3RpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC3VwZGF0ZV90aW1lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIjCgNhd3MYCiABKAsyFC5jbG91ZC52MS5Bd3NBY2NvdW50SABCEQoIcHJvdmlkZXISBbpIAggBInYKCkF3c0FjY291bnQSJgoKYWNjb3VudF9pZBgBIAEoCUISukgPcg0yC15bMC05XXsxMn0kEicKBHJvbGUYAiABKAlCGbpIFnIUMhJeW1x3Kz0sLkAtXXsxLDY0fSQSFwoPZXh0ZXJuYWxfaWRfc2V0GAMgASgIIpgCChJDbG91ZEFjY291bnRTdGF0dXMSKgoFc3RhdGUYASABKA4yGy5jbG91ZC52MS5DbG91ZEFjY291bnRTdGF0ZRIRCgluYW1lc3BhY2UYAiABKAkSHAoUcHJvdmlkZXJfY29uZmlnX25hbWUYAyABKAkSJwoKY29uZGl0aW9ucxgEIAMoCzITLmNsb3VkLnYxLkNvbmRpdGlvbhIQCghpZGVudGl0eRgFIAEoCRI0ChFtYW5hZ2VkX3Jlc291cmNlcxgGIAMoCzIZLmNsb3VkLnYxLk1hbmFnZWRSZXNvdXJjZRInCgZhY2Nlc3MYCCABKAsyFy5jbG91ZC52MS5BY2NvdW50QWNjZXNzSgQIBxAIUgVwYXVzZSKfAgoNQWNjb3VudEFjY2VzcxIQCgh2ZXJpZmllZBgBIAEoCBIwCgxjaGVja2VkX3RpbWUYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKDmF0dGVtcHRlZF90aW1lGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVzdGFsZRgEIAEoCBIVCg1wcmluY2lwYWxfYXJuGAUgASgJEg4KBnJlYXNvbhgGIAEoCRIPCgdtZXNzYWdlGAcgASgJEicKB3JlZ2lvbnMYCCADKAsyFi5jbG91ZC52MS5BY2Nlc3NSZXN1bHQSJgoGY2hlY2tzGAkgAygLMhYuY2xvdWQudjEuQWNjZXNzUmVzdWx0IlsKDEFjY2Vzc1Jlc3VsdBIOCgZhY3Rpb24YASABKAkSDgoGcmVnaW9uGAIgASgJEgoKAm9rGAMgASgIEg4KBnJlYXNvbhgEIAEoCRIPCgdtZXNzYWdlGAUgASgJKp4BChFDbG91ZEFjY291bnRTdGF0ZRIjCh9DTE9VRF9BQ0NPVU5UX1NUQVRFX1VOU1BFQ0lGSUVEEAASJQohQ0xPVURfQUNDT1VOVF9TVEFURV9CT09UU1RSQVBQSU5HEAESHQoZQ0xPVURfQUNDT1VOVF9TVEFURV9SRUFEWRACEh4KGkNMT1VEX0FDQ09VTlRfU1RBVEVfRkFJTEVEEAMyrgsKDVRlbmFudFNlcnZpY2USTwoLTGlzdFRlbmFudHMSHC5jbG91ZC52MS5MaXN0VGVuYW50c1JlcXVlc3QaHS5jbG91ZC52MS5MaXN0VGVuYW50c1Jlc3BvbnNlIgOQAgESUgoMQ3JlYXRlVGVuYW50Eh0uY2xvdWQudjEuQ3JlYXRlVGVuYW50UmVxdWVzdBoeLmNsb3VkLnYxLkNyZWF0ZVRlbmFudFJlc3BvbnNlIgOQAgISQQoGRnJlZXplEh0uY2xvdWQudjEuVGVuYW50RnJlZXplUmVxdWVzdBoYLmNsb3VkLnYxLkZyZWV6ZVJlc3BvbnNlEkcKCFVuZnJlZXplEh8uY2xvdWQudjEuVGVuYW50VW5mcmVlemVSZXF1ZXN0GhouY2xvdWQudjEuVW5mcmVlemVSZXNwb25zZRJPCglHZXRGcmVlemUSIC5jbG91ZC52MS5UZW5hbnRHZXRGcmVlemVSZXF1ZXN0GhsuY2xvdWQudjEuR2V0RnJlZXplUmVzcG9uc2UiA5ACARJYCgxMaXN0UmVsZWFzZXMSIy5jbG91ZC52MS5UZW5hbnRMaXN0UmVsZWFzZXNSZXF1ZXN0Gh4uY2xvdWQudjEuTGlzdFJlbGVhc2VzUmVzcG9uc2UiA5ACARJSCgpHZXRSZWxlYXNlEiEuY2xvdWQudjEuVGVuYW50R2V0UmVsZWFzZVJlcXVlc3QaHC5jbG91ZC52MS5HZXRSZWxlYXNlUmVzcG9uc2UiA5ACARJtChNMaXN0UmVsZWFzZUNoYW5uZWxzEiouY2xvdWQudjEuVGVuYW50TGlzdFJlbGVhc2VDaGFubmVsc1JlcXVlc3QaJS5jbG91ZC52MS5MaXN0UmVsZWFzZUNoYW5uZWxzUmVzcG9uc2UiA5ACARJnChFHZXRSZWxlYXNlQ2hhbm5lbBIoLmNsb3VkLnYxLlRlbmFudEdldFJlbGVhc2VDaGFubmVsUmVxdWVzdBojLmNsb3VkLnYxLkdldFJlbGVhc2VDaGFubmVsUmVzcG9uc2UiA5ACARJbCg9Cb290c3RyYXBUZW5hbnQSIC5jbG91ZC52MS5Cb290c3RyYXBUZW5hbnRSZXF1ZXN0GiEuY2xvdWQudjEuQm9vdHN0cmFwVGVuYW50UmVzcG9uc2UiA5ACAhJbCg9HZXRDbG91ZEFjY291bnQSIC5jbG91ZC52MS5HZXRDbG91ZEFjY291bnRSZXF1ZXN0GiEuY2xvdWQudjEuR2V0Q2xvdWRBY2NvdW50UmVzcG9uc2UiA5ACARJhChFMaXN0Q2xvdWRBY2NvdW50cxIiLmNsb3VkLnYxLkxpc3RDbG91ZEFjY291bnRzUmVxdWVzdBojLmNsb3VkLnYxLkxpc3RDbG91ZEFjY291bnRzUmVzcG9uc2UiA5ACARJkChJWZXJpZnlDbG91ZEFjY291bnQSIy5jbG91ZC52MS5WZXJpZnlDbG91ZEFjY291bnRSZXF1ZXN0GiQuY2xvdWQudjEuVmVyaWZ5Q2xvdWRBY2NvdW50UmVzcG9uc2UiA5ACAhJkChJEZWxldGVDbG91ZEFjY291bnQSIy5jbG91ZC52MS5EZWxldGVDbG91ZEFjY291bnRSZXF1ZXN0GiQuY2xvdWQudjEuRGVsZXRlQ2xvdWRBY2NvdW50UmVzcG9uc2UiA5ACAhJqChRHZXRBY2NvdW50T25ib2FyZGluZxIlLmNsb3VkLnYxLkdldEFjY291bnRPbmJvYXJkaW5nUmVxdWVzdBomLmNsb3VkLnYxLkdldEFjY291bnRPbmJvYXJkaW5nUmVzcG9uc2UiA5ACARJACgZXaG9BbUkSFy5jbG91ZC52MS5XaG9BbUlSZXF1ZXN0GhguY2xvdWQudjEuV2hvQW1JUmVzcG9uc2UiA5ACAUKiAQoMY29tLmNsb3VkLnYxQhJUZW5hbnRTZXJ2aWNlUHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_cloud_v1_admin_freeze, file_cloud_v1_admin_release, file_cloud_v1_conditions, file_cloud_v1_managed_resource, file_cloud_v1_tenant_dashboard, file_cloud_v1_tenant_directory, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message cloud.v1.WhoAmIRequest
@@ -45,7 +45,7 @@ export const WhoAmIRequestSchema: GenMessage<WhoAmIRequest> = /*@__PURE__*/
  */
 export type WhoAmIResponse = Message<"cloud.v1.WhoAmIResponse"> & {
   /**
-   * No token was sent and the server let the request through.
+   * The server does not authenticate (auth.mode none).
    *
    * @generated from field: bool anonymous = 1;
    */
@@ -71,21 +71,6 @@ export type WhoAmIResponse = Message<"cloud.v1.WhoAmIResponse"> & {
    * @generated from field: string issuer = 4;
    */
   issuer: string;
-
-  /**
-   * Values of the issuer's roles claim (Microsoft Entra ID: app roles).
-   *
-   * @generated from field: repeated string roles = 5;
-   */
-  roles: string[];
-
-  /**
-   * What the server's rules grant the caller. Empty: only the calls open
-   * to every accepted caller.
-   *
-   * @generated from field: repeated cloud.v1.AccessGrant grants = 6;
-   */
-  grants: AccessGrant[];
 };
 
 /**
@@ -94,32 +79,6 @@ export type WhoAmIResponse = Message<"cloud.v1.WhoAmIResponse"> & {
  */
 export const WhoAmIResponseSchema: GenMessage<WhoAmIResponse> = /*@__PURE__*/
   messageDesc(file_cloud_v1_tenant_service, 1);
-
-/**
- * AccessGrant is a role and the tenants it is for.
- *
- * @generated from message cloud.v1.AccessGrant
- */
-export type AccessGrant = Message<"cloud.v1.AccessGrant"> & {
-  /**
-   * @generated from field: cloud.v1.AccessRole role = 1;
-   */
-  role: AccessRole;
-
-  /**
-   * Tenant IDs; "*" for every tenant. Empty for ACCESS_ROLE_PLATFORM_ADMIN.
-   *
-   * @generated from field: repeated string tenants = 2;
-   */
-  tenants: string[];
-};
-
-/**
- * Describes the message cloud.v1.AccessGrant.
- * Use `create(AccessGrantSchema)` to create a new message.
- */
-export const AccessGrantSchema: GenMessage<AccessGrant> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 2);
 
 /**
  * @generated from message cloud.v1.BootstrapTenantRequest
@@ -146,7 +105,7 @@ export type BootstrapTenantRequest = Message<"cloud.v1.BootstrapTenantRequest"> 
  * Use `create(BootstrapTenantRequestSchema)` to create a new message.
  */
 export const BootstrapTenantRequestSchema: GenMessage<BootstrapTenantRequest> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 3);
+  messageDesc(file_cloud_v1_tenant_service, 2);
 
 /**
  * @generated from message cloud.v1.BootstrapTenantResponse
@@ -163,7 +122,7 @@ export type BootstrapTenantResponse = Message<"cloud.v1.BootstrapTenantResponse"
  * Use `create(BootstrapTenantResponseSchema)` to create a new message.
  */
 export const BootstrapTenantResponseSchema: GenMessage<BootstrapTenantResponse> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 4);
+  messageDesc(file_cloud_v1_tenant_service, 3);
 
 /**
  * @generated from message cloud.v1.GetCloudAccountRequest
@@ -189,7 +148,7 @@ export type GetCloudAccountRequest = Message<"cloud.v1.GetCloudAccountRequest"> 
  * Use `create(GetCloudAccountRequestSchema)` to create a new message.
  */
 export const GetCloudAccountRequestSchema: GenMessage<GetCloudAccountRequest> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 5);
+  messageDesc(file_cloud_v1_tenant_service, 4);
 
 /**
  * @generated from message cloud.v1.GetCloudAccountResponse
@@ -206,7 +165,7 @@ export type GetCloudAccountResponse = Message<"cloud.v1.GetCloudAccountResponse"
  * Use `create(GetCloudAccountResponseSchema)` to create a new message.
  */
 export const GetCloudAccountResponseSchema: GenMessage<GetCloudAccountResponse> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 6);
+  messageDesc(file_cloud_v1_tenant_service, 5);
 
 /**
  * @generated from message cloud.v1.DeleteCloudAccountRequest
@@ -232,7 +191,7 @@ export type DeleteCloudAccountRequest = Message<"cloud.v1.DeleteCloudAccountRequ
  * Use `create(DeleteCloudAccountRequestSchema)` to create a new message.
  */
 export const DeleteCloudAccountRequestSchema: GenMessage<DeleteCloudAccountRequest> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 7);
+  messageDesc(file_cloud_v1_tenant_service, 6);
 
 /**
  * @generated from message cloud.v1.DeleteCloudAccountResponse
@@ -251,7 +210,7 @@ export type DeleteCloudAccountResponse = Message<"cloud.v1.DeleteCloudAccountRes
  * Use `create(DeleteCloudAccountResponseSchema)` to create a new message.
  */
 export const DeleteCloudAccountResponseSchema: GenMessage<DeleteCloudAccountResponse> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 8);
+  messageDesc(file_cloud_v1_tenant_service, 7);
 
 /**
  * @generated from message cloud.v1.VerifyCloudAccountRequest
@@ -287,7 +246,7 @@ export type VerifyCloudAccountRequest = Message<"cloud.v1.VerifyCloudAccountRequ
  * Use `create(VerifyCloudAccountRequestSchema)` to create a new message.
  */
 export const VerifyCloudAccountRequestSchema: GenMessage<VerifyCloudAccountRequest> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 9);
+  messageDesc(file_cloud_v1_tenant_service, 8);
 
 /**
  * @generated from message cloud.v1.VerifyCloudAccountResponse
@@ -307,7 +266,7 @@ export type VerifyCloudAccountResponse = Message<"cloud.v1.VerifyCloudAccountRes
  * Use `create(VerifyCloudAccountResponseSchema)` to create a new message.
  */
 export const VerifyCloudAccountResponseSchema: GenMessage<VerifyCloudAccountResponse> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 10);
+  messageDesc(file_cloud_v1_tenant_service, 9);
 
 /**
  * @generated from message cloud.v1.GetAccountOnboardingRequest
@@ -360,7 +319,7 @@ export type GetAccountOnboardingRequest = Message<"cloud.v1.GetAccountOnboarding
  * Use `create(GetAccountOnboardingRequestSchema)` to create a new message.
  */
 export const GetAccountOnboardingRequestSchema: GenMessage<GetAccountOnboardingRequest> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 11);
+  messageDesc(file_cloud_v1_tenant_service, 10);
 
 /**
  * @generated from message cloud.v1.GetAccountOnboardingResponse
@@ -377,7 +336,7 @@ export type GetAccountOnboardingResponse = Message<"cloud.v1.GetAccountOnboardin
  * Use `create(GetAccountOnboardingResponseSchema)` to create a new message.
  */
 export const GetAccountOnboardingResponseSchema: GenMessage<GetAccountOnboardingResponse> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 12);
+  messageDesc(file_cloud_v1_tenant_service, 11);
 
 /**
  * AccountOnboarding is what a tenant needs to create the platform's role
@@ -451,7 +410,7 @@ export type AccountOnboarding = Message<"cloud.v1.AccountOnboarding"> & {
  * Use `create(AccountOnboardingSchema)` to create a new message.
  */
 export const AccountOnboardingSchema: GenMessage<AccountOnboarding> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 13);
+  messageDesc(file_cloud_v1_tenant_service, 12);
 
 /**
  * @generated from message cloud.v1.ListCloudAccountsRequest
@@ -470,7 +429,7 @@ export type ListCloudAccountsRequest = Message<"cloud.v1.ListCloudAccountsReques
  * Use `create(ListCloudAccountsRequestSchema)` to create a new message.
  */
 export const ListCloudAccountsRequestSchema: GenMessage<ListCloudAccountsRequest> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 14);
+  messageDesc(file_cloud_v1_tenant_service, 13);
 
 /**
  * @generated from message cloud.v1.ListCloudAccountsResponse
@@ -489,7 +448,7 @@ export type ListCloudAccountsResponse = Message<"cloud.v1.ListCloudAccountsRespo
  * Use `create(ListCloudAccountsResponseSchema)` to create a new message.
  */
 export const ListCloudAccountsResponseSchema: GenMessage<ListCloudAccountsResponse> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 15);
+  messageDesc(file_cloud_v1_tenant_service, 14);
 
 /**
  * CloudAccount is a cloud account a tenant gave the platform access to. A
@@ -568,7 +527,7 @@ export type CloudAccount = Message<"cloud.v1.CloudAccount"> & {
  * Use `create(CloudAccountSchema)` to create a new message.
  */
 export const CloudAccountSchema: GenMessage<CloudAccount> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 16);
+  messageDesc(file_cloud_v1_tenant_service, 15);
 
 /**
  * AwsAccount identifies a tenant's AWS account and the role the platform
@@ -610,7 +569,7 @@ export type AwsAccount = Message<"cloud.v1.AwsAccount"> & {
  * Use `create(AwsAccountSchema)` to create a new message.
  */
 export const AwsAccountSchema: GenMessage<AwsAccount> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 17);
+  messageDesc(file_cloud_v1_tenant_service, 16);
 
 /**
  * CloudAccountStatus is the observed state of a tenant's cloud account.
@@ -677,7 +636,7 @@ export type CloudAccountStatus = Message<"cloud.v1.CloudAccountStatus"> & {
  * Use `create(CloudAccountStatusSchema)` to create a new message.
  */
 export const CloudAccountStatusSchema: GenMessage<CloudAccountStatus> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 18);
+  messageDesc(file_cloud_v1_tenant_service, 17);
 
 /**
  * AccountAccess is what an access check of an account found.
@@ -754,7 +713,7 @@ export type AccountAccess = Message<"cloud.v1.AccountAccess"> & {
  * Use `create(AccountAccessSchema)` to create a new message.
  */
 export const AccountAccessSchema: GenMessage<AccountAccess> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 19);
+  messageDesc(file_cloud_v1_tenant_service, 18);
 
 /**
  * AccessResult is one region's or call's outcome; action is empty for a
@@ -794,46 +753,7 @@ export type AccessResult = Message<"cloud.v1.AccessResult"> & {
  * Use `create(AccessResultSchema)` to create a new message.
  */
 export const AccessResultSchema: GenMessage<AccessResult> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_tenant_service, 20);
-
-/**
- * AccessRole is what a caller may do.
- *
- * @generated from enum cloud.v1.AccessRole
- */
-export enum AccessRole {
-  /**
-   * @generated from enum value: ACCESS_ROLE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * Everything, for every tenant.
-   *
-   * @generated from enum value: ACCESS_ROLE_PLATFORM_ADMIN = 1;
-   */
-  PLATFORM_ADMIN = 1,
-
-  /**
-   * Every tenant RPC of the grant's tenants.
-   *
-   * @generated from enum value: ACCESS_ROLE_TENANT_ADMIN = 2;
-   */
-  TENANT_ADMIN = 2,
-
-  /**
-   * The RPCs without side effects of the grant's tenants.
-   *
-   * @generated from enum value: ACCESS_ROLE_TENANT_VIEWER = 3;
-   */
-  TENANT_VIEWER = 3,
-}
-
-/**
- * Describes the enum cloud.v1.AccessRole.
- */
-export const AccessRoleSchema: GenEnum<AccessRole> = /*@__PURE__*/
-  enumDesc(file_cloud_v1_tenant_service, 0);
+  messageDesc(file_cloud_v1_tenant_service, 19);
 
 /**
  * CloudAccountState is the coarse state of a tenant's cloud account.
@@ -876,7 +796,7 @@ export enum CloudAccountState {
  * Describes the enum cloud.v1.CloudAccountState.
  */
 export const CloudAccountStateSchema: GenEnum<CloudAccountState> = /*@__PURE__*/
-  enumDesc(file_cloud_v1_tenant_service, 1);
+  enumDesc(file_cloud_v1_tenant_service, 0);
 
 /**
  * TenantService onboards tenants' cloud accounts. A tenant can have any
@@ -1074,10 +994,10 @@ export const TenantService: GenService<{
     output: typeof GetAccountOnboardingResponseSchema;
   },
   /**
-   * Returns the caller as the server sees it: who its token stands for and
-   * what the server's rules let it do. Any accepted caller may ask. Where
-   * the server does not authenticate (auth.mode none, or optional and no
-   * token sent) the caller is anonymous and may do everything.
+   * Returns the caller as the server sees it: who its token stands for.
+   * Any accepted caller may ask. The API has no roles: an accepted caller
+   * may call every RPC, for every tenant. Where the server does not
+   * authenticate (auth.mode none) the caller is anonymous.
    *
    * @generated from rpc cloud.v1.TenantService.WhoAmI
    */

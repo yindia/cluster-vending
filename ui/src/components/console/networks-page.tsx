@@ -144,7 +144,7 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
   onAccepted: (network: Network | undefined, message: string) => void;
   onCancel: () => void;
 }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const helpId = useId();
   const [draft, setDraft] = useState<NetworkDraft>(() => baseline ? networkDraft(baseline) : newNetworkDraft());
   const [review, setReview] = useState<ReviewedNetworkUpdate>();
@@ -169,7 +169,7 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
   const finalStep = steps.length - 1;
   const account = accounts.find(({ id }) => id === draft.accountId);
   const supported = !!networkProvider(account);
-  const locked = mutation.busy || !canWrite;
+  const locked = mutation.busy;
   const importedFlow = !!baseline?.status?.import;
   const stale = edit && baseline.etag !== currentEtag;
   const change = (next: Partial<NetworkDraft>) => {
@@ -243,8 +243,8 @@ function NetworkForm({ accounts, baseline, currentEtag, asRequested, onAccepted,
       footer={<HStack gap={2} wrap="wrap">
       <Button label="Cancel" variant="secondary" type="button" onClick={onCancel} isDisabled={mutation.busy} />
       {step > 0 && <Button label="Back" type="button" variant="secondary" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={mutation.busy} />}
-      <Button label={step < finalStep ? "Next" : edit ? "Preview changes" : "Create network"} form="network-write-form" variant={step === finalStep && review ? "secondary" : "primary"} type="submit" isDisabled={!canWrite || stale} isLoading={mutation.busy} />
-      {step === finalStep && review && <Button label="Apply reviewed plan" type="button" variant="primary" onClick={apply} isLoading={mutation.busy} isDisabled={!canWrite || !supported || stale || !canApplyNetworkPlan(review.plan)} />}
+      <Button label={step < finalStep ? "Next" : edit ? "Preview changes" : "Create network"} form="network-write-form" variant={step === finalStep && review ? "secondary" : "primary"} type="submit" isDisabled={stale} isLoading={mutation.busy} />
+      {step === finalStep && review && <Button label="Apply reviewed plan" type="button" variant="primary" onClick={apply} isLoading={mutation.busy} isDisabled={!supported || stale || !canApplyNetworkPlan(review.plan)} />}
     </HStack>}>
     <VStack gap={4}>
       {edit && !asRequested && <Banner status="info" title="Original request unavailable" description="The form shows the resolved network configuration." />}
@@ -321,7 +321,7 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
   onAccepted: (network: Network | undefined, message: string) => void;
   onCancel: () => void;
 }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [draft, setDraft] = useState(newNetworkImportDraft);
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<"guided" | "yaml">("guided");
@@ -330,7 +330,7 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
   const errorFocus = useRef<HTMLElement>(null);
   const attempt = useRef<CreateAttempt | undefined>(undefined);
   const mutation = useNetworkMutation();
-  const locked = !canWrite || mutation.busy;
+  const locked = mutation.busy;
   const change = (patch: Partial<NetworkImportDraft>) => {
     if (locked) return;
     setDraft((previous) => ({ ...previous, ...patch }));
@@ -366,7 +366,7 @@ function ImportNetworkForm({ accounts, onAccepted, onCancel }: {
     footer={<HStack gap={2} wrap="wrap">
     <Button label="Cancel import" variant="secondary" type="button" onClick={onCancel} isDisabled={mutation.busy} />
     {step > 0 && <Button label="Back" type="button" variant="secondary" onClick={() => { setValidation(""); setStep(step - 1); }} isDisabled={mutation.busy} />}
-    <Button label={step < 2 ? "Next" : "Import for discovery"} form="network-import-form" type="submit" variant="primary" isDisabled={!canWrite} isLoading={mutation.busy} />
+    <Button label={step < 2 ? "Next" : "Import for discovery"} form="network-import-form" type="submit" variant="primary" isLoading={mutation.busy} />
   </HStack>}><VStack gap={4}>
     <form id="network-import-form" method="post" aria-label="Import network fields" onSubmit={submit} noValidate>
       <VStack gap={4}>
@@ -405,7 +405,7 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload, onClose 
   onAccepted: (network: Network | undefined, message: string) => void;
   onReload: () => void; onClose: () => void;
 }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const reviewKey = networkTakeoverKey(network);
   const [confirmation, setConfirmation] = useState<NetworkTakeoverConfirmation>({ reviewKey, ownershipConfirmation: "", acknowledgeNotImported: false });
   const [validation, setValidation] = useState("");
@@ -416,7 +416,7 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload, onClose 
   const current = confirmation.reviewKey === reviewKey;
   const consent = current ? confirmation : { reviewKey, ownershipConfirmation: "", acknowledgeNotImported: false };
   const notImported = network.status?.import?.resources.filter(({ disposition }) => disposition === Disposition.NOT_IMPORTED) ?? [];
-  const locked = !canWrite || mutation.busy || !!blocked;
+  const locked = mutation.busy || !!blocked;
   const change = (patch: Partial<NetworkTakeoverConfirmation>) => {
     if (locked) return;
     setConfirmation({ ...consent, ...patch }); setValidation(""); mutation.setError("");
@@ -426,7 +426,7 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload, onClose 
     if (locked) return;
     setValidation("");
     try {
-      buildTakeOverNetwork(tenantId, network, account, confirmation, canWrite);
+      buildTakeOverNetwork(tenantId, network, account, confirmation);
       void mutation.run(async (signal) => {
         const current = (await api.network.getNetwork({ tenantId, networkId: network.id }, { signal })).network;
         signal.throwIfAborted();
@@ -435,7 +435,7 @@ function TakeOverNetworkForm({ network, accounts, onAccepted, onReload, onClose 
           onReload();
           throw new Error("The network or import plan changed. Network details are being reloaded; review takeover and confirm ownership again.");
         }
-        const request = buildTakeOverNetwork(tenantId, current, account, confirmation, canWrite);
+        const request = buildTakeOverNetwork(tenantId, current, account, confirmation);
         const response = await api.network.takeOverNetwork(request, { signal });
         if (!signal.aborted) { onAccepted(response.network, "Takeover request accepted. The controller will acquire management and converge the reviewed import plan asynchronously. Cloud readiness has not yet been confirmed."); }
       });
@@ -552,12 +552,12 @@ function NetworkEvents({ networkId, onRefreshNetwork }: { networkId: string; onR
 }
 
 function DeleteNetwork({ network, onAccepted, onClose }: { onClose: () => void; network: Network; onAccepted: (network: Network | undefined, message: string) => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [confirmation, setConfirmation] = useState({ etag: network.etag, text: "" });
   const mutation = useNetworkMutation();
   const dependencies = network.status?.clusterIds ?? [];
   const confirmed = confirmation.etag === network.etag && confirmation.text === network.name;
-  const disabled = !canWrite || !network.etag || !!dependencies.length || network.status?.state === NetworkState.DELETING;
+  const disabled = !network.etag || !!dependencies.length || network.status?.state === NetworkState.DELETING;
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (disabled || !confirmed || mutation.busy) return;
@@ -697,7 +697,7 @@ function NetworkConfiguration({ network, account }: { network: Network; account?
 }
 
 function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: CloudAccount[] }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [action, setAction] = useState<"delete" | "takeover">();
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState("");
@@ -722,8 +722,8 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
       metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={networkProvider(account) || ""} size="sm" /><Text type="supporting">{networkProvider(account) === "aws" ? "Amazon Web Services" : "Cloud network"}</Text></HStack><Text type="supporting">{network?.spec?.region || "Region pending"}</Text>{network && <CopyValue value={network.name} label="Network resource name" isSecondary />}{network && <CopyValue value={network.id} label="Network ID" isSecondary />}</>}
       status={network && <><StatusValue tone={healthy ? "success" : status?.state === NetworkState.FAILED ? "error" : "warning"} label={state} />{status?.freeze && <PauseValue freeze={status.freeze} />}</>}
       actions={<>
-            {network && canWrite && <Button label="Edit network" onClick={() => setEditing(true)} isDisabled={editing || !network.etag || !networkProvider(account) || status?.state === NetworkState.IMPORTED || status?.state === NetworkState.DELETING} />}
-            {network && canWrite && <ResourceActions resource="Network" items={[
+            {network && <Button label="Edit network" onClick={() => setEditing(true)} isDisabled={editing || !network.etag || !networkProvider(account) || status?.state === NetworkState.IMPORTED || status?.state === NetworkState.DELETING} />}
+            {network && <ResourceActions resource="Network" items={[
               { id: "freeze", label: status?.freeze && !status.freeze.letThrough ? "Unfreeze network" : "Freeze network", href: `/freeze?scope=network&id=${encodeURIComponent(network.id)}` },
               ...(status?.import && (status.state === NetworkState.IMPORTED || status.state === NetworkState.FAILED) ? [{
                 id: "takeover", label: "Take over imported network", description: takeoverBlock || undefined, isDisabled: !!takeoverBlock, onClick: () => setAction("takeover"),
@@ -768,9 +768,9 @@ function NetworkDetails({ networkId, accounts }: { networkId: string; accounts: 
         {tab === "activity" && <VStack gap={6}><NetworkEvents networkId={networkId} onRefreshNetwork={query.refresh} /><Collapsible trigger="Persisted recent events" defaultIsOpen={false}><ActivityEventTable events={status?.recentEvents ?? []} title="Persisted recent network events" /></Collapsible></VStack>}
         {tab === "configuration" && <NetworkConfiguration network={network} account={account} />}
       </VStack> : null)}
-      {network && canWrite && action === "delete" && <DeleteNetwork network={network} onClose={() => setAction(undefined)} onAccepted={accepted} />}
-      {network && canWrite && action === "takeover" && <TakeOverNetworkForm network={network} accounts={accounts} onClose={() => setAction(undefined)} onAccepted={accepted} onReload={query.refresh} />}
-      {canWrite && editing && <NetworkEditor networkId={networkId} currentEtag={network.etag} accounts={accounts} onAccepted={accepted} onCancel={() => setEditing(false)} />}
+      {network && action === "delete" && <DeleteNetwork network={network} onClose={() => setAction(undefined)} onAccepted={accepted} />}
+      {network && action === "takeover" && <TakeOverNetworkForm network={network} accounts={accounts} onClose={() => setAction(undefined)} onAccepted={accepted} onReload={query.refresh} />}
+      {editing && <NetworkEditor networkId={networkId} currentEtag={network.etag} accounts={accounts} onAccepted={accepted} onCancel={() => setEditing(false)} />}
     </>}
   </VStack>;
 }
@@ -794,7 +794,7 @@ function NetworkDetailPage({ resourceId }: { resourceId: string }) {
 }
 
 function NetworksList() {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("all");
@@ -849,11 +849,10 @@ function NetworksList() {
   };
   return <VStack gap={5}>
     <DetailHeader title="Networks" description="Manage network placement and the rollout tier inherited by clusters." actions={<>
-        {canWrite && <Button label="Create network" variant="primary" onClick={() => { setCreating(true); setImporting(false); }} isDisabled={creating} />}
-        {canWrite && <Button label="Import network" onClick={() => { setImporting(true); setCreating(false); }} isDisabled={importing} />}
+        {<Button label="Create network" variant="primary" onClick={() => { setCreating(true); setImporting(false); }} isDisabled={creating} />}
+        {<Button label="Import network" onClick={() => { setImporting(true); setCreating(false); }} isDisabled={importing} />}
         <RefreshButton label="Refresh networks" onClick={() => { list.refresh(); accounts.refresh(); }} isLoading={list.refreshing || accounts.refreshing} />
     </>} />
-    {!canWrite && <Text type="supporting">Your tenant access is read only.</Text>}
     {notice && <Banner status="info" title="Request accepted" description={notice} />}
     {acceptedId && <Link href={`/networks/${encodeURIComponent(acceptedId)}`}>View network details and progress</Link>}
     <ErrorNotice error={list.error} />
@@ -871,7 +870,7 @@ function NetworksList() {
     {list.data && <Text type="supporting" role="status">{filtered.length} of {allNetworks.length} tenant networks</Text>}
     {list.data && (rows.length ? <Table data={rows} columns={columns} idKey="id" aria-label="Tenant networks" rowIndexStart={currentPage * 25 + 1} rowCount={filtered.length} /> : <Text>{hasFilters ? "No networks match your search and filters." : "No networks in this tenant."}</Text>)}
     {pageCount > 1 && <Pagination label="Networks pagination" page={currentPage + 1} onChange={next => setPage(next - 1)} totalItems={filtered.length} pageSize={25} variant="count" />}
-    {creating && canWrite && <NetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setCreating(false)} />}
-    {importing && canWrite && <ImportNetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setImporting(false)} />}
+    {creating && <NetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setCreating(false)} />}
+    {importing && <ImportNetworkForm accounts={accounts.data?.accounts ?? []} onAccepted={accepted} onCancel={() => setImporting(false)} />}
   </VStack>;
 }

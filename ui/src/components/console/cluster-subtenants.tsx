@@ -43,7 +43,7 @@ export function ClusterSubTenants({ clusterId }: InventoryProps) {
 function ScopedSubTenants({ clusterId }: InventoryProps) {
   const router = useRouter();
   const detailHref = (id: string) => `/clusters/${encodeURIComponent(clusterId)}/subtenants/${encodeURIComponent(id)}`;
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const scope = { tenantId, clusterId };
   const [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false);
@@ -58,8 +58,8 @@ function ScopedSubTenants({ clusterId }: InventoryProps) {
   return <VStack gap={4}>
     {notice && <Banner status="info" title="Deletion protection disabled" description={notice} />}
     {accepted && <SubmittedSubTenant key={`${accepted.resource.id}:${accepted.resource.generation}:${accepted.action}`} scope={scope} accepted={accepted} onRefresh={list.refresh} />}
-    <SubTenantsView rows={(list.data ?? []).map(subTenantRow)} loading={list.loading} refreshing={list.refreshing} error={list.error} canWrite={canWrite} onRefresh={list.refresh} onCreate={() => setCreating(true)} detailHref={detailHref} onView={(id) => router.push(detailHref(id))} onEdit={(id) => setSelection({ id, mode: "edit" })} onDelete={(id) => setSelection({ id, mode: "delete" })} onDisableProtection={(id) => setSelection({ id, mode: "unprotect" })} />
-    {creating && canWrite && <SubTenantEditor scope={scope} onClose={() => setCreating(false)} onAccepted={onAccepted} />}
+    <SubTenantsView rows={(list.data ?? []).map(subTenantRow)} loading={list.loading} refreshing={list.refreshing} error={list.error} onRefresh={list.refresh} onCreate={() => setCreating(true)} detailHref={detailHref} onView={(id) => router.push(detailHref(id))} onEdit={(id) => setSelection({ id, mode: "edit" })} onDelete={(id) => setSelection({ id, mode: "delete" })} onDisableProtection={(id) => setSelection({ id, mode: "unprotect" })} />
+    {creating && <SubTenantEditor scope={scope} onClose={() => setCreating(false)} onAccepted={onAccepted} />}
     {selection && <SelectedSubTenant key={`${selection.id}:${selection.mode}`} scope={scope} {...selection} onClose={() => setSelection(undefined)} onAccepted={onAccepted} />}
   </VStack>;
 }
@@ -80,13 +80,13 @@ function SubmittedSubTenant({ scope, accepted, onRefresh }: { scope: SubTenantSc
   return <Banner status={observation.error || row?.tone === "error" ? "error" : row?.tone === "warning" ? "warning" : "info"} title={observation.data === null ? "Sub Tenant deleted" : `Sub Tenant ${action === "create" ? "creation" : action} saved${row ? ` · ${row.state}` : ""}`} description={observation.error || row?.message || (observation.data === null ? "The allocation is no longer reported by the server." : "Changes are saved first. Namespaces become available after setup and policy checks finish.")} />;
 }
 function SelectedSubTenant({ scope, id, mode, onClose, onAccepted }: { scope: SubTenantScope; id: string; mode: "edit" | "delete" | "unprotect"; onClose: () => void; onAccepted: (resource: SubTenant, action: "create" | "update" | "delete" | "unprotect") => void }) {
-  const { api, canWrite } = usePlatform();
+  const { api } = usePlatform();
   const { tenantId, clusterId } = scope;
   const load = useCallback(async (signal: AbortSignal) => scopedSubTenant((await api.subtenant.getSubTenant({ tenantId, clusterId, subtenantId: id }, { signal })).subtenant, { tenantId, clusterId }, id), [api, tenantId, clusterId, id]);
   const detail = useAsyncQuery(load);
-  if (detail.data && !detail.error && mode === "edit" && canWrite && detail.data.status?.state !== SubTenantState.DELETING) return <SubTenantEditor scope={scope} baseline={detail.data} onClose={onClose} onAccepted={onAccepted} />;
-  if (detail.data && !detail.error && mode === "delete" && canWrite) return <DeleteSubTenant scope={scope} resource={detail.data} onClose={onClose} onAccepted={onAccepted} />;
-  if (detail.data && !detail.error && mode === "unprotect" && canWrite) return <DisableProtection scope={scope} resource={detail.data} onClose={onClose} onAccepted={onAccepted} />;
+  if (detail.data && !detail.error && mode === "edit" && detail.data.status?.state !== SubTenantState.DELETING) return <SubTenantEditor scope={scope} baseline={detail.data} onClose={onClose} onAccepted={onAccepted} />;
+  if (detail.data && !detail.error && mode === "delete") return <DeleteSubTenant scope={scope} resource={detail.data} onClose={onClose} onAccepted={onAccepted} />;
+  if (detail.data && !detail.error && mode === "unprotect") return <DisableProtection scope={scope} resource={detail.data} onClose={onClose} onAccepted={onAccepted} />;
   return <WizardDialog isOpen onOpenChange={(open) => { if (!open) onClose(); }} title={`Load Sub Tenant to ${mode}`} steps={["Details"]} step={0} footer={<RefreshButton label="Refresh Sub Tenant details" onClick={detail.refresh} isLoading={detail.refreshing} />}>
     {detail.loading ? <Text role="status">Loading Sub Tenant…</Text> : <Banner status="warning" title="Sub Tenant action unavailable" description={detail.error || "This action is unavailable for the current allocation or permissions."} />}
   </WizardDialog>;
@@ -103,14 +103,14 @@ export function SubTenantProperties({ resource }: { resource: SubTenant }) {
   </VStack>;
 }
 function DeleteSubTenant({ scope, resource, onClose, onAccepted }: { scope: SubTenantScope; resource: SubTenant; onClose: () => void; onAccepted: (resource: SubTenant, action: "delete") => void }) {
-  const { api, canWrite } = usePlatform();
+  const { api } = usePlatform();
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   async function remove() {
-    if (!canWrite || pending.current) return;
+    if (pending.current) return;
     const controller = new AbortController();
     try {
       const request = deleteSubTenantRequest(scope, resource, confirmation);
@@ -120,19 +120,19 @@ function DeleteSubTenant({ scope, resource, onClose, onAccepted }: { scope: SubT
     } catch (cause) { if (!controller.signal.aborted) setError(errorMessage(cause)); }
     finally { if (!controller.signal.aborted) { pending.current = null; setBusy(false); } }
   }
-  return <WizardDialog isOpen title="Delete Sub Tenant" steps={["Review deletion"]} step={0} busy={busy} onOpenChange={(open) => { if (!open && !pending.current) onClose(); }} footer={<HStack gap={2}><Button label="Cancel" isDisabled={busy} onClick={onClose} /><Button label="Confirm delete Sub Tenant" variant="destructive" isLoading={busy} isDisabled={!canWrite || resource.spec?.deletionProtection !== false || confirmation !== resource.id || resource.status?.state === SubTenantState.DELETING} onClick={() => void remove()} /></HStack>}>
+  return <WizardDialog isOpen title="Delete Sub Tenant" steps={["Review deletion"]} step={0} busy={busy} onOpenChange={(open) => { if (!open && !pending.current) onClose(); }} footer={<HStack gap={2}><Button label="Cancel" isDisabled={busy} onClick={onClose} /><Button label="Confirm delete Sub Tenant" variant="destructive" isLoading={busy} isDisabled={resource.spec?.deletionProtection !== false || confirmation !== resource.id || resource.status?.state === SubTenantState.DELETING} onClick={() => void remove()} /></HStack>}>
     <VStack gap={4}>{resource.spec?.deletionProtection !== false && <Banner status="warning" title="Deletion protection is on" description="Disable deletion protection and save before deleting this Sub Tenant." />}<Banner status="warning" title="Only empty allocations can be deleted" description="Remove workloads and other blocking contents from every allocated namespace first. Setup and deletion checks must finish before the allocation disappears. Forced deletion is not available." /><CopyValue value={resource.id} label="Sub Tenant ID" />{!!resource.status?.deletionBlockers.length && <Banner status="warning" title="Deletion blockers" description={resource.status.deletionBlockers.join("; ")} />}{error && <Banner status="error" role="alert" title="Sub Tenant could not be deleted" description={error} />}<TextInput label="Confirm Sub Tenant ID" value={confirmation} onChange={(value) => { setConfirmation(value); setError(""); }} isDisabled={busy} autoComplete="off" /></VStack>
   </WizardDialog>;
 }
 
 function DisableProtection({ scope, resource, onClose, onAccepted }: { scope: SubTenantScope; resource: SubTenant; onClose: () => void; onAccepted: (resource: SubTenant, action: "unprotect") => void }) {
-  const { api, canWrite } = usePlatform();
+  const { api } = usePlatform();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   async function apply() {
-    if (!canWrite || pending.current) return;
+    if (pending.current) return;
     const controller = new AbortController(); pending.current = controller; setBusy(true); setError("");
     try {
       const updated = await disableSubTenantProtection(api, scope, resource.id, controller.signal);
@@ -140,7 +140,7 @@ function DisableProtection({ scope, resource, onClose, onAccepted }: { scope: Su
     } catch (cause) { if (!controller.signal.aborted) setError(errorMessage(cause)); }
     finally { if (!controller.signal.aborted) { pending.current = null; setBusy(false); } }
   }
-  return <WizardDialog isOpen title="Disable deletion protection" steps={["Review change"]} step={0} busy={busy} onOpenChange={(open) => { if (!open && !pending.current) onClose(); }} footer={<HStack gap={2}><Button label="Cancel" isDisabled={busy} onClick={onClose} /><Button label="Disable deletion protection" variant="destructive" isLoading={busy} isDisabled={!canWrite} onClick={() => void apply()} /></HStack>}>
+  return <WizardDialog isOpen title="Disable deletion protection" steps={["Review change"]} step={0} busy={busy} onOpenChange={(open) => { if (!open && !pending.current) onClose(); }} footer={<HStack gap={2}><Button label="Cancel" isDisabled={busy} onClick={onClose} /><Button label="Disable deletion protection" variant="destructive" isLoading={busy} onClick={() => void apply()} /></HStack>}>
     <VStack gap={4}><CopyValue value={resource.id} label="Sub Tenant ID" /><Banner status="warning" title="Allow this allocation to be deleted" description={resource.status?.state === SubTenantState.DELETING ? "Deletion is already pending. Turning off protection allows cleanup to resume when all deletion requirements are met." : "Turning off protection does not delete anything. Use Delete separately after this change is saved and the allocation is empty."} /><Text>Only deletion protection changes. Names, namespace keys, quotas, policy and access remain as stored.</Text>{error && <Banner role="alert" status="error" title="Deletion protection could not be disabled" description={error} />}</VStack>
   </WizardDialog>;
 }

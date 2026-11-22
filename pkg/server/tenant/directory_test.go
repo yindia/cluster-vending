@@ -66,7 +66,7 @@ func TestDirectoryListReadErrors(t *testing.T) {
 						return underlying.Get(ctx, key, obj, opts...)
 					},
 				})
-				ctx := directoryContext(t, auth.Grant{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}})
+				ctx := directoryContext(t)
 				out, err := s.ListTenants(ctx, &v1.ListTenantsRequest{})
 				if out != nil || connect.CodeOf(err) != test.code {
 					t.Fatalf("ListTenants = %v, %v; want %v", out, err, test.code)
@@ -103,9 +103,9 @@ func directoryWorld(t *testing.T, objects ...client.Object) (*TenantService, cli
 	return NewTenantService(reconcile.Deps{Kube: c, Store: cloudstore.New(c)}), c
 }
 
-func directoryContext(t *testing.T, grants ...auth.Grant) context.Context {
+func directoryContext(t *testing.T) context.Context {
 	t.Helper()
-	return auth.WithIdentity(t.Context(), &auth.Identity{Subject: "directory-user", Grants: grants})
+	return auth.WithIdentity(t.Context(), &auth.Identity{Subject: "directory-user"})
 }
 
 func TestDirectoryListVisibilityAndCreationCapability(t *testing.T) {
@@ -115,13 +115,9 @@ func TestDirectoryListVisibilityAndCreationCapability(t *testing.T) {
 		want      []string
 		canCreate bool
 	}{
-		{"viewer", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}}}, []string{"acme"}, false},
-		{"exact admin", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantAdmin, Tenants: []string{"acme", "absent"}}}}, []string{"acme"}, true},
-		{"wildcard viewer", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"*"}}}}, []string{"acme", "foreign"}, false},
-		{"wildcard admin", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantAdmin, Tenants: []string{"*"}}}}, []string{"acme", "foreign"}, true},
-		{"platform admin", &auth.Identity{Grants: []auth.Grant{{Role: auth.RolePlatformAdmin}}}, []string{"acme", "foreign"}, true},
+		// No roles: every caller sees every registered tenant and may create.
+		{"authenticated", &auth.Identity{Subject: "someone"}, []string{"acme", "foreign"}, true},
 		{"anonymous", auth.Anonymous(), []string{"acme", "foreign"}, true},
-		{"no grants", &auth.Identity{Subject: "no-grants"}, nil, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mislabeled := directoryNamespace("acme")
@@ -154,7 +150,7 @@ func TestDirectoryListVisibilityAndCreationCapability(t *testing.T) {
 
 func TestDirectoryCreateRegistersTenantCRAndNamespaceAndReturnsCanonical(t *testing.T) {
 	s, c := directoryWorld(t)
-	ctx := directoryContext(t, auth.Grant{Role: auth.RoleTenantAdmin, Tenants: []string{"new-tenant"}})
+	ctx := directoryContext(t)
 	before := time.Now()
 	first, err := s.CreateTenant(ctx, &v1.CreateTenantRequest{TenantId: "new-tenant"})
 	if err != nil {
@@ -195,17 +191,13 @@ func TestDirectoryCreateRegistersTenantCRAndNamespaceAndReturnsCanonical(t *test
 	}
 }
 
-func TestDirectoryCreatePermissionsAndValidation(t *testing.T) {
+func TestDirectoryCreateValidation(t *testing.T) {
 	for _, test := range []struct {
 		name, target string
 		identity     *auth.Identity
 		want         connect.Code
 	}{
-		{"viewer denied", "acme", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}}}, connect.CodePermissionDenied},
-		{"exact admin wrong target", "foreign", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}}}, connect.CodePermissionDenied},
-		{"exact admin own", "acme", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}}}, 0},
-		{"wildcard admin", "new-team", &auth.Identity{Grants: []auth.Grant{{Role: auth.RoleTenantAdmin, Tenants: []string{"*"}}}}, 0},
-		{"platform admin", "new-team", &auth.Identity{Grants: []auth.Grant{{Role: auth.RolePlatformAdmin}}}, 0},
+		{"authenticated caller", "new-team", &auth.Identity{Subject: "someone"}, 0},
 		{"anonymous", "new-team", auth.Anonymous(), 0},
 		{"empty ID", "", auth.Anonymous(), connect.CodeInvalidArgument},
 		{"uppercase ID", "Bad_Tenant", auth.Anonymous(), connect.CodeInvalidArgument},
@@ -224,7 +216,7 @@ func TestDirectoryCreatePermissionsAndValidation(t *testing.T) {
 				t.Fatal(err)
 			}
 			if (len(all.Items) == 0) != (test.want != 0) {
-				t.Fatal("denied/invalid create changed namespace inventory")
+				t.Fatal("an invalid create changed the namespace inventory")
 			}
 		})
 	}
@@ -244,7 +236,7 @@ func TestDirectoryNeverAdoptsNamespaceCollisions(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := stored.DeepCopy()
-			_, err := s.CreateTenant(directoryContext(t, auth.Grant{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}), &v1.CreateTenantRequest{TenantId: "acme"})
+			_, err := s.CreateTenant(directoryContext(t), &v1.CreateTenantRequest{TenantId: "acme"})
 			if connect.CodeOf(err) != connect.CodeAlreadyExists || strings.Contains(err.Error(), "foreign-private") {
 				t.Fatalf("collision = %v", err)
 			}

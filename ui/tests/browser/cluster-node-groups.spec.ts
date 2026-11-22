@@ -4,7 +4,7 @@ const networkId = "00000000-0000-4000-8000-000000000002", clusterId = "00000000-
 type Group = Record<string, unknown> & { name: string };
 type Body = { validateOnly?: boolean; planId?: string; updateMask?: string; cluster: { etag: string; spec: { nodeGroups: Group[] } } };
 type Call = { method: string; body: Body };
-type Options = { viewer?: boolean; failPreview?: string; emptyStatus?: boolean; allow?: { instanceFamilies: string[]; instanceTypes?: string[] }; imported?: boolean };
+type Options = { failPreview?: string; emptyStatus?: boolean; allow?: { instanceFamilies: string[]; instanceTypes?: string[] }; imported?: boolean };
 
 const initialGroups = (): Group[] => [
   { name: "batch", instanceFamilies: ["m7i"], architectures: ["ARCHITECTURE_AMD64"], capacityTypes: ["CAPACITY_TYPE_ON_DEMAND"], labels: { team: "data" }, taints: [{ key: "dedicated", value: "batch", effect: "TAINT_EFFECT_NO_SCHEDULE" }], limits: { cpu: 64 } },
@@ -43,7 +43,7 @@ async function mock(page: Page, options: Options = {}) {
     calls.push({ method, body });
     let response: object;
     switch (method) {
-      case "WhoAmI": response = options.viewer ? { subject: "viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] } : { anonymous: true }; break;
+      case "WhoAmI": response = { anonymous: true }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
       case "GetCluster": response = { cluster: cluster(), asRequested: true }; break;
       case "GetNetwork": response = { network }; break;
@@ -115,15 +115,6 @@ test("the system group is first and read-only, there is no platform row, and use
   await expect(row(panel, "fresh")).toContainText("Pending");
   await expect(panel.getByRole("button", { name: "Add node group", exact: true })).toBeEnabled();
   expect(api.unexpected).toEqual([]);
-});
-
-test("a viewer sees node groups without add, edit or remove controls", async ({ page }) => {
-  await mock(page, { viewer: true });
-  const panel = await open(page);
-  await expect(row(panel, "batch")).toContainText("m7i family");
-  await expect(panel.getByRole("button", { name: "Add node group", exact: true })).toHaveCount(0);
-  await expect(panel.getByRole("button", { name: /^Actions for node group/ })).toHaveCount(0);
-  await expect(panel).toContainText("Read-only access");
 });
 
 test("adding a Spot group reviews the plan and sends the full list under the node groups mask with the etag", async ({ page }) => {

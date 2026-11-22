@@ -108,7 +108,7 @@ function clusterPause(cluster: Cluster): { key: string; label: string; detail: s
 }
 
 function ClusterList() {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
@@ -171,10 +171,9 @@ function ClusterList() {
   ];
   return <VStack gap={6}>
     <DetailHeader title="Clusters" description="Manage Kubernetes clusters, node groups, and upgrades." actions={<>
-        {canWrite && <><Button label="Create cluster" variant="primary" onClick={() => setCreating(true)} /><Button label="Import cluster" variant="secondary" onClick={() => setImporting(true)} /></>}
+        {<><Button label="Create cluster" variant="primary" onClick={() => setCreating(true)} /><Button label="Import cluster" variant="secondary" onClick={() => setImporting(true)} /></>}
         <RefreshButton label="Refresh clusters" isLoading={list.refreshing || networks.refreshing} onClick={() => { list.refresh(); networks.refresh(); }} />
     </>} />
-    {!canWrite && <Text type="supporting">Read-only access. Tenant administrators can create and change clusters.</Text>}
     {acknowledgement && <VStack role="status"><Text>{acknowledgement}</Text></VStack>}
     {acceptedId && <Link href={`/clusters/${encodeURIComponent(acceptedId)}`}>View cluster details and readiness</Link>}
     <SearchFilters label="Cluster filters" values={[stateFilter, pauseFilter, networkFilter, channelFilter, tierFilter]}
@@ -194,8 +193,8 @@ function ClusterList() {
       {visible.length ? <Table data={visible.map((cluster) => ({ id: cluster.id, cluster }))} columns={columns} idKey="id" aria-label="Clusters" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} /> : <Text>{inventory.length ? "No clusters match these filters." : "No clusters found for this tenant."}</Text>}
       {filtered.length > 25 && <Pagination label="Clusters pagination" page={currentPage} onChange={setPage} totalItems={filtered.length} pageSize={25} variant="count" />}
     </VStack>}
-    {creating && canWrite && <CreateCluster onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setAcceptedId(id); setAcknowledgement("Create request recorded. Readiness is reported separately in cluster details."); list.refresh(); }} />}
-    {importing && canWrite && <ImportCluster onClose={() => setImporting(false)} onImported={(id) => { setImporting(false); setAcceptedId(id); setAcknowledgement("Import request recorded. Discovery is asynchronous; cloud resources remain read-only until takeover."); list.refresh(); }} />}
+    {creating && <CreateCluster onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setAcceptedId(id); setAcknowledgement("Create request recorded. Readiness is reported separately in cluster details."); list.refresh(); }} />}
+    {importing && <ImportCluster onClose={() => setImporting(false)} onImported={(id) => { setImporting(false); setAcceptedId(id); setAcknowledgement("Import request recorded. Discovery is asynchronous; cloud resources remain read-only until takeover."); list.refresh(); }} />}
   </VStack>;
 }
 
@@ -375,7 +374,7 @@ function NetworkPicker({ choices, value, disabled, onChange, operation }: { choi
 }
 
 function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [form, setForm] = useState<ClusterForm>({ ...emptyClusterForm });
   const rows = useClusterFieldRows(form);
   const [step, setStep] = useState(0);
@@ -396,7 +395,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
     setForm((old) => ({ ...old, [field]: value }));
   }
   async function submit() {
-    if (!canWrite || locked.current) return;
+    if (locked.current) return;
     try {
       if (step < 3) {
         rows.validate(step);
@@ -427,13 +426,13 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
     footer={<HStack gap={3} wrap="wrap">
       <Button label="Cancel creation" variant="secondary" onClick={onClose} isDisabled={busy} />
       {step > 0 && <Button label="Back" variant="secondary" onClick={() => { setStep(step - 1); setError(""); }} isDisabled={busy} />}
-      <Button label={step === 3 ? "Create cluster" : "Next"} variant="primary" type="submit" form={formId} isLoading={busy} isDisabled={!canWrite} />
+      <Button label={step === 3 ? "Create cluster" : "Next"} variant="primary" type="submit" form={formId} isLoading={busy} />
     </HStack>}>
     <form id={formId} method="post" aria-label="Cluster creation settings" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VStack gap={5}>
         {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
-        {step < 3 ? <ClusterFields step={step} value={form} onChange={change} rows={rows} disabled={busy || !canWrite} creating region={network?.spec?.region ?? "Select a network"} tier={network?.spec?.tier}
-          networkPicker={<NetworkPicker operation="cluster.create" choices={choices} value={form.networkId} disabled={busy || !canWrite} onChange={(next) => change("networkId", next)} />} /> : <>
+        {step < 3 ? <ClusterFields step={step} value={form} onChange={change} rows={rows} disabled={busy} creating region={network?.spec?.region ?? "Select a network"} tier={network?.spec?.tier}
+          networkPicker={<NetworkPicker operation="cluster.create" choices={choices} value={form.networkId} disabled={busy} onChange={(next) => change("networkId", next)} />} /> : <>
           <ClusterReview form={form} region={network?.spec?.region ?? ""} networkName={network?.displayName || network?.name || form.networkId} accountName={accountDescription(choices.data?.accounts.find((account) => account.id === network?.spec?.bootstrapId))} tier={network?.spec?.tier} />
           <Banner status="info" title="Creates managed cloud resources" description="The controller provisions the control plane and node pool asynchronously. Readiness appears on the detail page; cloud charges may apply." />
           <Collapsible trigger="Advanced · exact API request" defaultIsOpen={false}><VStack as="pre" isScrollable><Text type="code">{review && toJsonString(CreateClusterRequestSchema, review, { prettySpaces: 2 })}</Text></VStack></Collapsible>
@@ -445,7 +444,7 @@ function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated:
 }
 
 function ImportCluster({ onClose, onImported }: { onClose: () => void; onImported: (id: string) => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [form, setForm] = useState<ClusterImportForm>({ name: "", displayName: "", networkId: "", defaultNodeGroupName: "" });
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<"guided" | "yaml">("guided");
@@ -464,7 +463,7 @@ function ImportCluster({ onClose, onImported }: { onClose: () => void; onImporte
     identity.current.invalidate(); setReview(undefined); setError(""); setForm((old) => ({ ...old, [field]: value }));
   }
   async function submit() {
-    if (!canWrite || locked.current) return;
+    if (locked.current) return;
     try {
       if (!network || !choices.data) throw new Error("Choose an existing network.");
       if (step === 0) {
@@ -489,7 +488,7 @@ function ImportCluster({ onClose, onImported }: { onClose: () => void; onImporte
     footer={<HStack gap={3} wrap="wrap">
       <Button type="button" label="Cancel import" variant="secondary" onClick={onClose} isDisabled={busy} />
       {step === 1 && <Button type="button" label="Back" variant="secondary" onClick={() => { setStep(0); setError(""); }} isDisabled={busy} />}
-      <Button label={step === 1 ? "Import cluster" : "Review import"} variant="primary" type="submit" form={formId} isLoading={busy} isDisabled={!canWrite} />
+      <Button label={step === 1 ? "Import cluster" : "Review import"} variant="primary" type="submit" form={formId} isLoading={busy} />
     </HStack>}>
     <form id={formId} method="post" aria-label="Cluster import settings" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <VStack gap={5}>
@@ -526,7 +525,7 @@ function ImportCluster({ onClose, onImported }: { onClose: () => void; onImporte
 }
 
 function ClusterDetails({ clusterId }: { clusterId: string }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [polling, setPolling] = useState(true);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -601,8 +600,8 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         status={<>{statusValue(ClusterState, status?.state)}{pause && pause.key !== "not-paused" && <StatusValue label={[pause.label, status?.freeze?.scope].filter(Boolean).join(" · ")} tone={pause.tone} />}</>}
         actions={<HStack gap={2} wrap="wrap" vAlign="center">
           <ClusterAccessButton cluster={cluster} />
-          {canWrite && <Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
-          {canWrite && <ClusterActions cluster={cluster} onDelete={() => setDeleting(true)}
+          {<Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
+          {<ClusterActions cluster={cluster} onDelete={() => setDeleting(true)}
             onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously."); refresh(); }} />}
         </HStack>}
       />
@@ -643,7 +642,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
             <HStack gap={2} wrap="wrap"><Button label="View deprecated APIs" onClick={() => openTab("deprecations")} /><Button label="View recommendations" onClick={() => openTab("recommendations")} /></HStack>
             {(failedComponents.length > 0 || failedUpgrade) && <VStack gap={2}>
               <Banner status="error" title="Failed work" description={[failedUpgrade && (rollout?.message || "Automatic upgrade failed"), ...failedComponents.map(component => component.name)].filter(Boolean).join(" · ")} />
-              {canWrite && <HStack><Button label="Retry failed work" variant="secondary" onClick={() => setRetrying(true)} /></HStack>}
+              {<HStack><Button label="Retry failed work" variant="secondary" onClick={() => setRetrying(true)} /></HStack>}
             </VStack>}
           </VStack>
         </Grid>
@@ -746,9 +745,9 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
       </VStack>}
       {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="Sub Tenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
       {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
-      {editing && canWrite && <EditCluster network={network.data?.network} clusterId={clusterId} currentEtag={cluster.etag} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
-      {deleting && canWrite && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
-      {retrying && canWrite && <RetryCluster clusterId={clusterId} onClose={() => setRetrying(false)} onRetried={refresh} />}
+      {editing && <EditCluster network={network.data?.network} clusterId={clusterId} currentEtag={cluster.etag} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
+      {deleting && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
+      {retrying && <RetryCluster clusterId={clusterId} onClose={() => setRetrying(false)} onRetried={refresh} />}
     </>}
   </VStack>;
 }
@@ -837,7 +836,7 @@ function EditCluster({ clusterId, currentEtag, network, onClose, onApplied }: { 
 }
 
 function ClusterEditor({ baseline, network, asRequested, currentEtag, onApplied, onClose, onReload }: { baseline: Cluster; network?: Network; asRequested: boolean; currentEtag: string; onApplied: () => void; onClose: () => void; onReload: () => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const loadSubTenants = useCallback(async (signal: AbortSignal) => baseline.spec?.naas ? api.subtenant.listSubTenants({ tenantId, clusterId: baseline.id, pageSize: 1 }, { signal }) : undefined, [api, tenantId, baseline.id, baseline.spec?.naas]);
   const allocations = useAsyncQuery(loadSubTenants);
   const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing Sub Tenants before allowing NaaS to be disabled…" : allocations.error ? "Sub Tenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all Sub Tenants, including those still deleting, before disabling NaaS." : undefined;
@@ -861,7 +860,7 @@ function ClusterEditor({ baseline, network, asRequested, currentEtag, onApplied,
     setTouched((old) => new Set([...old, field]));
   }
   async function submit(apply: boolean) {
-    if (!canWrite || locked.current) return;
+    if (locked.current) return;
     if (!apply && step < 2) {
       try { rows.validate(step); validateClusterFormStep(form, step, touched); setStep(step + 1); setError(""); }
       catch (cause) { setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
@@ -894,7 +893,7 @@ function ClusterEditor({ baseline, network, asRequested, currentEtag, onApplied,
     footer={<HStack gap={3} wrap="wrap">
       <Button label="Cancel editing" variant="secondary" onClick={onClose} isDisabled={busy} />
       {step > 0 && <Button label="Back" variant="secondary" onClick={() => { setStep(step - 1); setError(""); }} isDisabled={busy} />}
-      <Button label={step === 3 ? "Apply reviewed plan" : step === 2 ? "Preview update plan" : "Next"} type="submit" form={formId} variant="primary" isLoading={busy} isDisabled={!canWrite || (step === 3 && (!review || !clusterPlanApplicable(review.plan) || baseline.etag !== currentEtag))} />
+      <Button label={step === 3 ? "Apply reviewed plan" : step === 2 ? "Preview update plan" : "Next"} type="submit" form={formId} variant="primary" isLoading={busy} isDisabled={(step === 3 && (!review || !clusterPlanApplicable(review.plan) || baseline.etag !== currentEtag))} />
     </HStack>}>
     {!asRequested && <Banner status="info" title="Original input unavailable" description="The server returned resolved defaults. Only fields you edit will be included in the update mask." />}
     {baseline.etag !== currentEtag && <Banner status="warning" title="Cluster changed" description="Reload editable cluster before previewing or applying changes." />}
@@ -902,7 +901,7 @@ function ClusterEditor({ baseline, network, asRequested, currentEtag, onApplied,
     {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
     <form id={formId} method="post" aria-label="Cluster update settings" onSubmit={(event) => { event.preventDefault(); void submit(step === 3); }}>
       <VStack gap={6}>
-        {step < 3 && <ClusterFields step={step} value={form} onChange={change} rows={rows} baseline={baseline} naasLockReason={naasLockReason} disabled={busy || !canWrite} networkName={network?.displayName || network?.name} region={baseline.spec?.region ?? ""} tier={network?.spec?.tier || baseline.status?.tier} />}
+        {step < 3 && <ClusterFields step={step} value={form} onChange={change} rows={rows} baseline={baseline} naasLockReason={naasLockReason} disabled={busy} networkName={network?.displayName || network?.name} region={baseline.spec?.region ?? ""} tier={network?.spec?.tier || baseline.status?.tier} />}
     {step === 3 && review && <VStack gap={4}>
       <PlanReview plan={review.plan} />
       <ClusterExtraReview form={form} touched={touched} />
@@ -916,7 +915,7 @@ function ClusterEditor({ baseline, network, asRequested, currentEtag, onApplied,
 }
 
 function DeleteCluster({ cluster, onCancel, onDeleted }: { cluster: Cluster; onCancel: () => void; onDeleted: () => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [confirmation, setConfirmation] = useState("");
   const [force, setForce] = useState(false);
   const [error, setError] = useState("");
@@ -928,7 +927,7 @@ function DeleteCluster({ cluster, onCancel, onDeleted }: { cluster: Cluster; onC
     <Text>Normal deletion removes the cluster, node pools and owned cloud resources. The shared network remains. Imported observe-only resources and resources marked shared are retained.</Text>
     <form method="post" onSubmit={(event) => {
       event.preventDefault();
-      if (!canWrite || locked.current) return;
+      if (locked.current) return;
       if (confirmation !== cluster.name) { setError(`Type ${cluster.name} exactly to confirm deletion.`); return; }
       if (!cluster.etag) { setError("Reload details before deleting: the cluster has no etag."); return; }
       locked.current = true; setBusy(true); setError("");
@@ -938,7 +937,7 @@ function DeleteCluster({ cluster, onCancel, onDeleted }: { cluster: Cluster; onC
         <VStack role="alert"><ErrorNotice message={error} /></VStack>
         <CheckboxInput label="Force deletion" value={force} onChange={(next) => { setForce(next); setConfirmation(""); setError(""); }} isDisabled={busy} description="For an unreachable Kubernetes API: skip Helm uninstall. Chart-created load balancers or volumes may remain in the cloud. Force is sticky once deletion starts." />
         <TextInput label={`Type ${cluster.name} to confirm`} value={confirmation} onChange={(next) => { setConfirmation(next); setError(""); }} isDisabled={busy} autoComplete="off" />
-        <HStack gap={3} wrap="wrap"><Button label="Cancel deletion" variant="secondary" onClick={onCancel} isDisabled={busy} /><Button label={force ? "Confirm forced deletion" : "Confirm normal deletion"} variant="destructive" type="submit" isLoading={busy} isDisabled={!canWrite} /></HStack>
+        <HStack gap={3} wrap="wrap"><Button label="Cancel deletion" variant="secondary" onClick={onCancel} isDisabled={busy} /><Button label={force ? "Confirm forced deletion" : "Confirm normal deletion"} variant="destructive" type="submit" isLoading={busy} /></HStack>
       </VStack>
     </form>
     </VStack>
@@ -946,7 +945,7 @@ function DeleteCluster({ cluster, onCancel, onDeleted }: { cluster: Cluster; onC
 }
 
 function RetryCluster({ clusterId, onRetried, onClose }: { clusterId: string; onRetried: () => void; onClose: () => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [names, setNames] = useState("");
   const [upgrade, setUpgrade] = useState(false);
   const [error, setError] = useState("");
@@ -958,7 +957,7 @@ function RetryCluster({ clusterId, onRetried, onClose }: { clusterId: string; on
     <VStack gap={4} padding={4}>
     <form method="post" onSubmit={(event) => {
       event.preventDefault();
-      if (!canWrite || locked.current) return;
+      if (locked.current) return;
       locked.current = true; setBusy(true); setError(""); setResult([]);
       void api.cluster.retryCluster({ tenantId, clusterId, components: names.split(/[\s,]+/).filter(Boolean), upgrade })
         .then((response) => { setResult(response.items.map((item) => `${item.name}: ${label(RetryAction, item.action)} · ${item.message}`)); onRetried(); })
@@ -968,7 +967,7 @@ function RetryCluster({ clusterId, onRetried, onClose }: { clusterId: string; on
         <VStack role="alert"><ErrorNotice message={error} /></VStack>
         <TextInput label="Components to retry" description="Optional comma-separated names. Empty with upgrade unchecked retries all failed work." value={names} onChange={setNames} isDisabled={busy} />
         <CheckboxInput label="Retry failed automatic upgrade" value={upgrade} onChange={setUpgrade} isDisabled={busy} />
-        <Button label="Request retry" type="submit" isLoading={busy} isDisabled={!canWrite} />
+        <Button label="Request retry" type="submit" isLoading={busy} />
         <Button label="Close retry" variant="secondary" onClick={onClose} isDisabled={busy} />
         <VStack role="status">{result.map((item, index) => <Text key={index}>{item}</Text>)}</VStack>
       </VStack>

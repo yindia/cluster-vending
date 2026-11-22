@@ -10,7 +10,7 @@ import (
 )
 
 func (s *TenantService) ListReleases(ctx context.Context, req *v1.TenantListReleasesRequest) (*v1.ListReleasesResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	out, err := admin.NewService(s.deps).ListReleases(ctx, &v1.ListReleasesRequest{PageSize: req.GetPageSize(), PageToken: req.GetPageToken()})
@@ -24,7 +24,7 @@ func (s *TenantService) ListReleases(ctx context.Context, req *v1.TenantListRele
 }
 
 func (s *TenantService) GetRelease(ctx context.Context, req *v1.TenantGetReleaseRequest) (*v1.GetReleaseResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	out, err := admin.NewService(s.deps).GetRelease(ctx, &v1.GetReleaseRequest{Name: req.GetName()})
@@ -55,7 +55,7 @@ func dashboardChannel(in *v1.ReleaseChannelInfo) *v1.ReleaseChannelInfo {
 }
 
 func (s *TenantService) ListReleaseChannels(ctx context.Context, req *v1.TenantListReleaseChannelsRequest) (*v1.ListReleaseChannelsResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	result, err := admin.NewService(s.deps).ListReleaseChannels(ctx, &v1.ListReleaseChannelsRequest{})
@@ -88,7 +88,7 @@ func dashboardRollout(in *v1.Rollout, tenant string) *v1.Rollout {
 }
 
 func (s *TenantService) GetReleaseChannel(ctx context.Context, req *v1.TenantGetReleaseChannelRequest) (*v1.GetReleaseChannelResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	result, err := admin.NewService(s.deps).GetReleaseChannel(ctx, &v1.GetReleaseChannelRequest{Channel: req.GetChannel()})

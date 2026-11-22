@@ -246,12 +246,16 @@ func TestPrintAccountsAndWhoAmI(t *testing.T) {
 		"cloudaccount/aws-111122223333 (01a1d0a0-4a34-735f-be7d-19d1662f1138) bootstrapped\n") {
 		t.Errorf("bootstrap: got\n%s", got)
 	}
-	who := &cloudv1.WhoAmIResponse{Username: "alice@example.com", Subject: "s1", Issuer: "entra",
-		Roles: []string{"Acme.Admin"}, Grants: []*cloudv1.AccessGrant{{Role: cloudv1.AccessRole_ACCESS_ROLE_TENANT_ADMIN, Tenants: []string{"acme"}}}}
+	who := &cloudv1.WhoAmIResponse{Username: "alice@example.com", Subject: "s1", Issuer: "entra"}
 	got := printed(t, who, OutputTable)
-	for _, want := range []string{"User:      alice@example.com\n", "  ROLE          TENANTS\n  TenantAdmin   acme\n"} {
+	for _, want := range []string{"alice@example.com", "s1", "entra"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("whoami lacks %q:\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"ROLE", "Grants", "Roles"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("whoami still shows %q:\n%s", gone, got)
 		}
 	}
 }

@@ -104,7 +104,7 @@ function ErrorNotice({ error }: { error: string }) {
 
 export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   const { isOpen, kind, onOpenChange, embedded = false, onBusyChange } = props;
-  const { api, tenantId, scopeKey, canWrite } = usePlatform();
+  const { api, tenantId, scopeKey } = usePlatform();
   const formId = useId();
   const editor = useRef<ValuesEditorHandle>(null);
   const [text, setText] = useState("");
@@ -115,8 +115,8 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   const [validationError, setValidationError] = useState("");
   const operation = useRef<Operation | null>(null);
   const requestId = useRef<{ text: string; kind: ManifestKind; tenantId: string; scopeKey: string; id: string } | null>(null);
-  const latest = useRef({ props, api, tenantId, scopeKey, canWrite });
-  useLayoutEffect(() => { latest.current = { props, api, tenantId, scopeKey, canWrite }; }, [props, api, tenantId, scopeKey, canWrite]);
+  const latest = useRef({ props, api, tenantId, scopeKey });
+  useLayoutEffect(() => { latest.current = { props, api, tenantId, scopeKey }; }, [props, api, tenantId, scopeKey]);
   const previousScope = useRef({ scopeKey, tenantId, kind });
   useEffect(() => { onBusyChange?.(!!busy); }, [busy, onBusyChange]);
 
@@ -169,7 +169,7 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   }
 
   function start(mode: Operation["mode"]) {
-    if (operation.current || !isOpen || !canWrite || !tenantId) return;
+    if (operation.current || !isOpen || !tenantId) return;
     const active: Operation = { controller: new AbortController(), mode };
     operation.current = active; // Synchronous guard against double clicks and submits.
     setBusy(mode);
@@ -242,7 +242,7 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
     let resource: CloudAccount | Network | Cluster;
     try {
       const { applyManifest } = await import("@/lib/workflows/manifests");
-      if (!isCurrent(active) || !latest.current.canWrite) return;
+      if (!isCurrent(active)) return;
       resource = await applyManifest(api, reviewed.review, active.controller.signal);
       if (!isCurrent(active)) return;
     } catch (cause) {
@@ -272,7 +272,7 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   const account = kind === "CloudAccount";
   const importing = kind === "NetworkImport" || kind === "ClusterImport";
   const resourceLabel = account ? "cloud account" : kind.replace("Import", "").toLowerCase();
-  const locked = !!busy || !canWrite || !tenantId;
+  const locked = !!busy || !tenantId;
   return <ManifestDialogFrame
     embedded={embedded}
     isOpen={isOpen} onOpenChange={changeOpen}
@@ -289,7 +289,6 @@ export function ManifestCreateDialog(props: ManifestCreateDialogProps) {
   >
     <form id={formId} method="post" aria-label={`${kind} YAML manifest`} noValidate onSubmit={(event) => { event.preventDefault(); if (step === 0) void reviewDraft(); }}>
       <VStack gap={5}>
-        {!canWrite && <Banner status="warning" title="Write access is required" description="You need write permission in the active tenant to submit a manifest." />}
         {!tenantId && <Banner status="warning" title="Select a tenant before continuing" />}
         {step === 0 && <>
           {!embedded && <Text color="secondary">Paste one {kind} manifest. Review checks the manifest and its referenced accounts and networks. Nothing is submitted until you confirm.</Text>}

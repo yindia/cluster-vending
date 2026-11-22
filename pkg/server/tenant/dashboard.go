@@ -11,7 +11,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	v1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -22,11 +21,9 @@ import (
 
 const platformFreezeReadOnly = "A platform freeze is active. Tenant operators cannot unfreeze or bypass it; only a platform administrator can resume these resources."
 
-// dashboardAccess also protects direct service calls, without the RPC interceptor.
-func dashboardAccess(ctx context.Context, tenant string, write bool, req proto.Message) error {
-	if err := auth.FromContext(ctx).Authorize(auth.Access{Scope: auth.ScopeTenant, Write: write}, tenant); err != nil {
-		return service.ToConnect(err)
-	}
+// dashboardAccess checks a tenant dashboard request: valid, with no
+// unknown fields. It checks no caller: the API has no roles.
+func dashboardAccess(req proto.Message) error {
 	if err := service.Validate(req); err != nil {
 		return err
 	}
@@ -118,7 +115,7 @@ func dashboardSafeStatus(in *v1.FreezeStatus, selected dashboardSelection) *v1.F
 }
 
 func (s *TenantService) Freeze(ctx context.Context, req *v1.TenantFreezeRequest) (*v1.FreezeResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), true, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	selected, err := s.dashboardTarget(ctx, req.GetTenantId(), req.GetTarget())
@@ -153,7 +150,7 @@ func (c *dashboardUnfreezeClient) Update(ctx context.Context, obj client.Object,
 }
 
 func (s *TenantService) Unfreeze(ctx context.Context, req *v1.TenantUnfreezeRequest) (*v1.UnfreezeResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), true, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	selected, err := s.dashboardTarget(ctx, req.GetTenantId(), req.GetTarget())
@@ -184,7 +181,7 @@ func (s *TenantService) Unfreeze(ctx context.Context, req *v1.TenantUnfreezeRequ
 }
 
 func (s *TenantService) GetFreeze(ctx context.Context, req *v1.TenantGetFreezeRequest) (*v1.GetFreezeResponse, error) {
-	if err := dashboardAccess(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := dashboardAccess(req); err != nil {
 		return nil, err
 	}
 	selected, err := s.dashboardTarget(ctx, req.GetTenantId(), req.GetTarget())

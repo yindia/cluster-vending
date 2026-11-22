@@ -28,7 +28,7 @@ func TestResolvedAppliesIssuerDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := cfg.Issuers[0]
-	if got.UsernameClaim != "sub" || got.RolesClaim != "groups" || len(got.Alternates) != 0 {
+	if got.UsernameClaim != "sub" || len(got.Alternates) != 0 {
 		t.Errorf("generic defaults = %+v", got)
 	}
 }
@@ -58,8 +58,8 @@ func TestResolvedAppliesTheEntraPreset(t *testing.T) {
 			if got.Issuer != "https://login.microsoftonline.com/"+entraTenant+"/v2.0" {
 				t.Errorf("issuer = %s", got.Issuer)
 			}
-			if got.UsernameClaim != "oid" || got.RolesClaim != "roles" {
-				t.Errorf("claims = %s, %s; want oid, roles", got.UsernameClaim, got.RolesClaim)
+			if got.UsernameClaim != "oid" {
+				t.Errorf("username claim = %s, want oid", got.UsernameClaim)
 			}
 			if len(got.Alternates) != len(tt.wantAlternates) || (len(got.Alternates) == 1 && got.Alternates[0] != tt.wantAlternates[0]) {
 				t.Errorf("alternates = %+v, want %+v", got.Alternates, tt.wantAlternates)
@@ -71,32 +71,59 @@ func TestResolvedAppliesTheEntraPreset(t *testing.T) {
 	}
 }
 
-func TestResolvedKeepsExplicitClaims(t *testing.T) {
+func TestResolvedKeepsAnExplicitUsernameClaim(t *testing.T) {
 	issuer := generic()
-	issuer.UsernameClaim, issuer.RolesClaim, issuer.TenantClaim = "email", "roles", "org"
+	issuer.UsernameClaim = "email"
 
-	cfg, err := auth.Config{Mode: auth.ModeOptional, Issuers: []auth.Issuer{issuer}}.Resolved()
+	cfg, err := auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{issuer}}.Resolved()
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Issuers[0]; got.UsernameClaim != "email" || got.RolesClaim != "roles" || got.TenantClaim != "org" {
+	if got := cfg.Issuers[0]; got.UsernameClaim != "email" {
 		t.Errorf("claims = %+v", got)
 	}
 }
 
-func TestResolvedReportsProblems(t *testing.T) {
-	withClaim := generic()
-	withClaim.TenantClaim = "org"
-	rule := func(issuer string, role auth.Role, tenants ...string) auth.Rule {
-		return auth.Rule{Match: auth.Match{Issuer: issuer}, Grant: auth.Grant{Role: role, Tenants: tenants}}
+// The keys of the removed roles still load, each ignored with a warning,
+// so an older file does not stop the server.
+func TestResolvedIgnoresTheRemovedRoleKeysWithAWarning(t *testing.T) {
+	issuer := generic()
+	issuer.LegacyTenantClaim, issuer.LegacyRolesClaim = "org", "groups"
+	cfg, err := auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{issuer},
+		LegacyRules: []any{map[string]any{"match": map[string]any{"issuer": "keycloak"}}}}.Resolved()
+
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(cfg.Ignored) != 3 {
+		t.Fatalf("ignored = %q, want a warning for rules, tenantClaim and rolesClaim", cfg.Ignored)
+	}
+	for i, want := range []string{"auth.rules is ignored", "auth.issuers[0].tenantClaim is ignored", "auth.issuers[0].rolesClaim is ignored"} {
+		if !strings.Contains(cfg.Ignored[i], want) {
+			t.Errorf("warning %d = %q, want %q", i, cfg.Ignored[i], want)
+		}
+	}
+	if cfg.LegacyRules != nil || cfg.Issuers[0].LegacyTenantClaim != "" || cfg.Issuers[0].LegacyRolesClaim != "" {
+		t.Errorf("the resolved configuration keeps an ignored key: %+v", cfg)
+	}
+}
+
+func TestResolvedRefusesTheRemovedOptionalMode(t *testing.T) {
+	_, err := auth.Config{Mode: "optional", Issuers: []auth.Issuer{generic()}}.Resolved()
+
+	if err == nil || !strings.Contains(err.Error(), "optional is removed") || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("optional = %v, want a refusal naming required", err)
+	}
+}
+
+func TestResolvedReportsProblems(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  auth.Config
 		want []string
 	}{
-		{"unknown mode", auth.Config{Mode: "strict"}, []string{"auth.mode must be"}},
+		{"unknown mode", auth.Config{Mode: "strict"}, []string{"auth.mode must be none or required"}},
 		{"required without issuers", auth.Config{Mode: auth.ModeRequired}, []string{"needs at least one issuer"}},
 		{"issuer name", auth.Config{Issuers: []auth.Issuer{{Name: "Entra ID", Issuer: "https://x.example.com", Audiences: []string{"a"}}}},
 			[]string{"auth.issuers[0]: name"}},
@@ -115,20 +142,8 @@ func TestResolvedReportsProblems(t *testing.T) {
 		{"entra with another issuer", auth.Config{Issuers: []auth.Issuer{{Name: "a", Issuer: "https://login.example.com", Audiences: []string{"a"},
 			Entra: &auth.Entra{TenantID: entraTenant}}}}, []string{"is not the tenant's"}},
 		{"duplicate name", auth.Config{Issuers: []auth.Issuer{generic(), generic()}}, []string{"is used twice", "both accept issuer"}},
-		{"rule for an unknown issuer", auth.Config{Issuers: []auth.Issuer{generic()}, Rules: []auth.Rule{rule("okta", auth.RolePlatformAdmin)}},
-			[]string{"auth.rules[0]: match.issuer \"okta\""}},
-		{"unknown role", auth.Config{Issuers: []auth.Issuer{generic()}, Rules: []auth.Rule{rule("keycloak", "Owner", "acme")}},
-			[]string{"grant.role must be"}},
-		{"platform admin with tenants", auth.Config{Issuers: []auth.Issuer{generic()}, Rules: []auth.Rule{rule("keycloak", auth.RolePlatformAdmin, "acme")}},
-			[]string{"must be unset for PlatformAdmin"}},
-		{"tenant role without tenants", auth.Config{Issuers: []auth.Issuer{generic()}, Rules: []auth.Rule{rule("keycloak", auth.RoleTenantAdmin)}},
-			[]string{"grant.tenants needs the tenants"}},
-		{"star with others", auth.Config{Issuers: []auth.Issuer{generic()}, Rules: []auth.Rule{rule("keycloak", auth.RoleTenantViewer, "*", "acme")}},
-			[]string{"stands alone"}},
-		{"bad tenant", auth.Config{Issuers: []auth.Issuer{generic()}, Rules: []auth.Rule{rule("keycloak", auth.RoleTenantViewer, "Acme_Corp")}},
-			[]string{"is not a tenant ID"}},
-		{"all at once", auth.Config{Mode: "x", Issuers: []auth.Issuer{{Name: "a", Issuer: "https://x.example.com"}},
-			Rules: []auth.Rule{rule("b", "Owner")}}, []string{"auth.mode", "audiences", "match.issuer", "grant.role"}},
+		{"all at once", auth.Config{Mode: "x", Issuers: []auth.Issuer{{Name: "a", Issuer: "https://x.example.com"}}},
+			[]string{"auth.mode", "audiences"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -144,9 +159,8 @@ func TestResolvedReportsProblems(t *testing.T) {
 			}
 		})
 	}
-	ok := auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{withClaim, {Name: "dev", Issuer: "http://localhost:8081/realms/x", Audiences: []string{"a"}}},
-		Rules: []auth.Rule{rule("keycloak", auth.RoleTenantAdmin), rule("keycloak", auth.RoleTenantViewer, "*"), rule("dev", auth.RolePlatformAdmin)}}
+	ok := auth.Config{Mode: auth.ModeRequired, Issuers: []auth.Issuer{generic(), {Name: "dev", Issuer: "http://localhost:8081/realms/x", Audiences: []string{"a"}}}}
 	if _, err := ok.Resolved(); err != nil {
-		t.Errorf("a tenant claim, a wildcard and a loopback issuer are valid: %v", err)
+		t.Errorf("a loopback issuer is valid: %v", err)
 	}
 }

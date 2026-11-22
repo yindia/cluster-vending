@@ -101,12 +101,7 @@ func newAPI(t *testing.T, mode auth.Mode) *api {
 	t.Helper()
 	idp := authtest.New(t)
 	cfg, err := auth.Config{Mode: mode,
-		Issuers: []auth.Issuer{{Name: "idp", Issuer: idp.URL, Audiences: []string{audience}, RolesClaim: "roles", UsernameClaim: "name"}},
-		Rules: []auth.Rule{
-			{Match: auth.Match{Issuer: "idp", Role: "platform-admin"}, Grant: auth.Grant{Role: auth.RolePlatformAdmin}},
-			{Match: auth.Match{Issuer: "idp", Role: "acme.admin"}, Grant: auth.Grant{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}},
-			{Match: auth.Match{Issuer: "idp", Role: "acme.viewer"}, Grant: auth.Grant{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}},
-		}}.Resolved()
+		Issuers: []auth.Issuer{{Name: "idp", Issuer: idp.URL, Audiences: []string{audience}, UsernameClaim: "name"}}}.Resolved()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,10 +124,11 @@ func newAPI(t *testing.T, mode auth.Mode) *api {
 	return a
 }
 
-// token is a token of the API's issuer for a caller with roles.
-func (a *api) token(t *testing.T, roles ...string) string {
+// token is a token of the API's issuer. Groups and roles in it change
+// nothing: the API has no roles.
+func (a *api) token(t *testing.T, groups ...string) string {
 	t.Helper()
-	return a.idp.Sign(t, a.idp.Claims(audience, "user-1", map[string]any{"roles": roles, "name": "Ada"}))
+	return a.idp.Sign(t, a.idp.Claims(audience, "user-1", map[string]any{"groups": groups, "name": "Ada"}))
 }
 
 // with returns a context that sends header as Authorization; "" sends
@@ -171,42 +167,34 @@ func (a *api) calls() map[string]func(ctx context.Context, tenant string) error 
 	}
 }
 
-func TestAuthorization(t *testing.T) {
+// Authentication only: an accepted token reaches every RPC, a platform
+// call included, for every tenant, whatever groups the token carries.
+func TestAnAcceptedCallerMayCallEverything(t *testing.T) {
 	a := newAPI(t, auth.ModeRequired)
-	ok := connect.Code(0)
-	denied := connect.CodePermissionDenied
 	tests := []struct {
 		name   string
-		roles  []string
+		groups []string
 		call   string
 		tenant string
-		want   connect.Code
 	}{
-		{"platform admin: platform call", []string{"platform-admin"}, "platform", "acme", ok},
-		{"platform admin: any tenant's write", []string{"platform-admin"}, "write", "globex", ok},
-		{"tenant admin reads its tenant", []string{"acme.admin"}, "read", "acme", ok},
-		{"tenant admin writes its tenant", []string{"acme.admin"}, "write", "acme", ok},
-		{"tenant admin: another tenant", []string{"acme.admin"}, "read", "globex", denied},
-		{"tenant admin: platform call on its own tenant", []string{"acme.admin"}, "platform", "acme", denied},
-		{"viewer reads", []string{"acme.viewer"}, "read", "acme", ok},
-		{"viewer attempts a write", []string{"acme.viewer"}, "write", "acme", denied},
-		{"viewer: another tenant", []string{"acme.viewer"}, "read", "globex", denied},
-		{"no role: tenant call", nil, "read", "acme", denied},
-		{"no role: the request names no tenant", nil, "read", "", denied},
-		{"no role: who am I", nil, "whoami", "", ok},
+		{"platform call", nil, "platform", ""},
+		{"read of a tenant", nil, "read", "acme"},
+		{"write of a tenant", nil, "write", "acme"},
+		{"write of another tenant", []string{"tenant-acme-viewer"}, "write", "globex"},
+		{"a request that names no tenant", nil, "read", ""},
+		{"who am I", nil, "whoami", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			before := a.handlers.reached.Load()
 
-			err := a.calls()[tt.call](with(t, bearer(a.token(t, tt.roles...))), tt.tenant)
+			err := a.calls()[tt.call](with(t, bearer(a.token(t, tt.groups...))), tt.tenant)
 
-			if got := connect.CodeOf(err); (err == nil) != (tt.want == ok) || (err != nil && got != tt.want) {
-				t.Fatalf("call = %v, want code %v", err, tt.want)
+			if err != nil {
+				t.Fatalf("call = %v, want it accepted", err)
 			}
-			reached := a.handlers.reached.Load() - before
-			if (tt.want == ok) != (reached == 1) {
-				t.Errorf("the handler ran %d times for a call that ended %v", reached, tt.want)
+			if reached := a.handlers.reached.Load() - before; reached != 1 {
+				t.Errorf("the handler ran %d times", reached)
 			}
 		})
 	}
@@ -216,13 +204,13 @@ func TestAuthorization(t *testing.T) {
 func TestHandlerSeesTheCaller(t *testing.T) {
 	a := newAPI(t, auth.ModeRequired)
 
-	res, err := a.clients.tenant.WhoAmI(with(t, bearer(a.token(t, "acme.admin"))), &cloudv1.WhoAmIRequest{})
+	res, err := a.clients.tenant.WhoAmI(with(t, bearer(a.token(t))), &cloudv1.WhoAmIRequest{})
 
 	if err != nil || res.GetSubject() != "user-1" {
 		t.Fatalf("WhoAmI = %v, %v", res, err)
 	}
 	caller := a.handlers.caller.Load()
-	if caller.Anonymous || caller.Username != "Ada" || caller.Issuer != "idp" || len(caller.Grants) != 1 {
+	if caller.Anonymous || caller.Username != "Ada" || caller.Issuer != "idp" {
 		t.Errorf("caller = %+v", caller)
 	}
 }
@@ -241,19 +229,26 @@ func TestAuthenticationByMode(t *testing.T) {
 	}{
 		{"none: no token", auth.ModeNone, nil, accepted, true},
 		{"none: a bad token is not looked at", auth.ModeNone, func(*api, *testing.T) string { return "Bearer garbage" }, accepted, true},
-		{"optional: no token", auth.ModeOptional, nil, accepted, true},
-		{"optional: a good token", auth.ModeOptional, func(a *api, t *testing.T) string { return bearer(a.token(t, "acme.admin")) }, accepted, false},
-		{"optional: a bad token", auth.ModeOptional, func(*api, *testing.T) string { return "Bearer garbage" }, unauthenticated, false},
 		{"required: no token", auth.ModeRequired, nil, unauthenticated, false},
-		{"required: a good token", auth.ModeRequired, func(a *api, t *testing.T) string { return bearer(a.token(t, "acme.admin")) }, accepted, false},
-		{"required: lower-case scheme", auth.ModeRequired, func(a *api, t *testing.T) string { return "bearer " + a.token(t, "acme.admin") }, accepted, false},
+		{"required: a good token", auth.ModeRequired, func(a *api, t *testing.T) string { return bearer(a.token(t)) }, accepted, false},
+		{"required: lower-case scheme", auth.ModeRequired, func(a *api, t *testing.T) string { return "bearer " + a.token(t) }, accepted, false},
 		{"required: basic credentials", auth.ModeRequired, func(*api, *testing.T) string { return "Basic dXNlcjpwYXNz" }, unauthenticated, false},
 		{"required: bearer without a token", auth.ModeRequired, func(*api, *testing.T) string { return "Bearer " }, unauthenticated, false},
 		{"required: an expired token", auth.ModeRequired, func(a *api, t *testing.T) string {
 			return bearer(a.idp.Sign(t, a.idp.Claims(audience, "u", map[string]any{"exp": 1})))
 		}, unauthenticated, false},
 		{"required: alg none", auth.ModeRequired, func(a *api, t *testing.T) string {
-			return bearer(authtest.Unsigned(t, a.idp.Claims(audience, "u", map[string]any{"roles": []string{"platform-admin"}})))
+			return bearer(authtest.Unsigned(t, a.idp.Claims(audience, "u", nil)))
+		}, unauthenticated, false},
+		{"required: signed by another key", auth.ModeRequired, func(a *api, t *testing.T) string {
+			return bearer(a.idp.SignWithOtherKey(t, a.idp.Claims(audience, "u", nil)))
+		}, unauthenticated, false},
+		{"required: another audience", auth.ModeRequired, func(a *api, t *testing.T) string {
+			return bearer(a.idp.Sign(t, a.idp.Claims("api://another", "u", nil)))
+		}, unauthenticated, false},
+		{"required: another issuer", auth.ModeRequired, func(_ *api, t *testing.T) string {
+			other := authtest.New(t)
+			return bearer(other.Sign(t, other.Claims(audience, "u", nil)))
 		}, unauthenticated, false},
 	}
 	for _, tt := range tests {
@@ -305,30 +300,27 @@ func TestUnauthenticatedAnswer(t *testing.T) {
 // Writes and refusals are logged with who made them; reads are not, and
 // the token never is.
 func TestAuditLog(t *testing.T) {
-	a := newAPI(t, auth.ModeOptional)
-	admin, viewer := a.token(t, "acme.admin"), a.token(t, "acme.viewer")
+	a := newAPI(t, auth.ModeRequired)
+	token := a.token(t)
 
-	_ = a.calls()["read"](with(t, bearer(admin)), "acme")
+	_ = a.calls()["read"](with(t, bearer(token)), "acme")
 	if a.logs.Len() != 0 {
 		t.Errorf("a read was logged: %s", a.logs)
 	}
-	_ = a.calls()["write"](with(t, bearer(admin)), "acme")
-	_ = a.calls()["write"](with(t, bearer(viewer)), "acme")
+	_ = a.calls()["write"](with(t, bearer(token)), "acme")
 	_ = a.calls()["write"](with(t, ""), "acme")
 	_ = a.calls()["write"](with(t, "Bearer garbage"), "acme")
 
 	logs := a.logs.String()
 	for _, want := range []string{
 		`msg="api write" procedure=/cloud.v1.ClusterService/DeleteCluster subject=user-1 username=Ada issuer=idp tenant=acme outcome=ok`,
-		`msg="api call denied" procedure=/cloud.v1.ClusterService/DeleteCluster subject=user-1 username=Ada issuer=idp tenant=acme outcome=permission_denied`,
-		`subject=anonymous`,
-		`msg="api call refused"`,
+		`msg="api call refused" procedure=/cloud.v1.ClusterService/DeleteCluster`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log lacks %q:\n%s", want, logs)
 		}
 	}
-	if strings.Contains(logs, admin) || strings.Contains(logs, viewer) || strings.Contains(logs, "garbage") {
+	if strings.Contains(logs, token) || strings.Contains(logs, "garbage") {
 		t.Errorf("a token is in the log:\n%s", logs)
 	}
 }
@@ -341,9 +333,9 @@ func (unavailable) Verify(context.Context, string) (*auth.Identity, error) {
 }
 
 // While the issuer is down a token cannot be verified: the call fails
-// closed, as UNAVAILABLE, and an unknown procedure is still UNIMPLEMENTED.
+// closed, as UNAVAILABLE, and a call without a token is UNAUTHENTICATED.
 func TestFailsClosedWhenTheIssuerIsDown(t *testing.T) {
-	interceptor := authn.Interceptor(authn.Options{Mode: auth.ModeOptional, Verifier: unavailable{}})
+	interceptor := authn.Interceptor(authn.Options{Mode: auth.ModeRequired, Verifier: unavailable{}})
 	reached := false
 	info := &connect.CallInfo{}
 	info.RequestHeader().Set("Authorization", "Bearer some-token")
@@ -358,7 +350,7 @@ func TestFailsClosedWhenTheIssuerIsDown(t *testing.T) {
 	if !fault.Is(err, fault.Unavailable) || reached {
 		t.Fatalf("issuer down: %v (handler reached: %t), want Unavailable before any handler", err, reached)
 	}
-	if got := server.Call(t.Context(), "/cloud.v1.ClusterService/Nope", &connect.CallInfo{}, nil); connect.CodeOf(got) != connect.CodeUnimplemented {
-		t.Errorf("an unknown procedure without a token = %v, want UNIMPLEMENTED", got)
+	if got := server.Call(t.Context(), "/cloud.v1.ClusterService/Nope", &connect.CallInfo{}, nil); !fault.Is(got, fault.Unauthenticated) || reached {
+		t.Errorf("a call without a token = %v, want UNAUTHENTICATED before any handler", got)
 	}
 }

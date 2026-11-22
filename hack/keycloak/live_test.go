@@ -34,13 +34,8 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier := auth.NewVerifier(cfg)
-	for _, fixture := range []struct {
-		user, passwordKey string
-		role              auth.Role
-	}{
-		{"acme-admin", "KEYCLOAK_ACME_ADMIN_PASSWORD", auth.RoleTenantAdmin},
-		{"acme-viewer", "KEYCLOAK_ACME_VIEWER_PASSWORD", auth.RoleTenantViewer},
-	} {
+	for _, u := range localUsers {
+		fixture := struct{ user, passwordKey string }{u[0], u[1]}
 		for _, clientID := range []string{"cv-cli", "cv-cli-confidential", "cv-ui"} {
 			t.Run(fixture.user+"/"+clientID, func(t *testing.T) {
 				jar, err := cookiejar.New(nil)
@@ -103,14 +98,8 @@ func TestLiveKeycloakPKCE(t *testing.T) {
 				if err != nil {
 					t.Fatal("API JWT verification failed")
 				}
-				if id.Username != fixture.user || id.IsPlatformAdmin() || len(id.Grants) != 1 || id.Grants[0].Role != fixture.role || id.Grants[0].Tenants[0] != "acme" {
-					t.Fatal("unexpected tenant grants")
-				}
-				if err := id.Authorize(auth.Access{Scope: auth.ScopeTenant}, "globex"); err == nil {
-					t.Fatal("cross-tenant access was granted")
-				}
-				if fixture.role == auth.RoleTenantViewer && id.Authorize(auth.Access{Scope: auth.ScopeTenant, Write: true}, "acme") == nil {
-					t.Fatal("viewer write was granted")
+				if id.Anonymous || id.Username != fixture.user || id.Issuer != "keycloak" {
+					t.Fatal("unexpected identity")
 				}
 			})
 		}
@@ -168,8 +157,8 @@ func TestLiveKeycloakCLIBrowser(t *testing.T) {
 				t.Fatal(err)
 			}
 			identity, err := auth.NewVerifier(cfg).Verify(t.Context(), credentials.Bearer())
-			if err != nil || identity.Username != "acme-admin" || identity.IsPlatformAdmin() {
-				t.Fatal("CLI token did not verify with expected tenant identity")
+			if err != nil || identity.Username != "acme-admin" {
+				t.Fatal("CLI token did not verify with the expected identity")
 			}
 		})
 	}

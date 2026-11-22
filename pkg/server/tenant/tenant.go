@@ -16,7 +16,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/config"
 	awscatalog "github.com/yindia/cluster-vending/pkg/constant/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
@@ -62,9 +61,6 @@ func (s *TenantService) rec() *accountreconcile.Reconciler { return accountrecon
 // namespace. The account controller applies credentials and ProviderConfig;
 // tenant lifecycle exclusively owns namespace creation.
 func (s *TenantService) BootstrapTenant(ctx context.Context, req *cloudv1.BootstrapTenantRequest) (*cloudv1.BootstrapTenantResponse, error) {
-	if err := auth.FromContext(ctx).Authorize(auth.Access{Scope: auth.ScopeTenant, Write: true}, req.GetTenantId()); err != nil {
-		return nil, service.ToConnect(err)
-	}
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}

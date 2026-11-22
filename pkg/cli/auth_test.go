@@ -29,8 +29,7 @@ func (s *whoService) WhoAmI(ctx context.Context, _ *cloudv1.WhoAmIRequest) (*clo
 	if info, ok := connect.CallInfoForServerContext(ctx); ok {
 		s.authorization = info.RequestHeader().Get("Authorization")
 	}
-	return &cloudv1.WhoAmIResponse{Subject: "user-1", Username: "Ada", Issuer: "entra", Roles: []string{"Acme.Admin"},
-		Grants: []*cloudv1.AccessGrant{{Role: cloudv1.AccessRole_ACCESS_ROLE_TENANT_ADMIN, Tenants: []string{"acme"}}}}, nil
+	return &cloudv1.WhoAmIResponse{Subject: "user-1", Username: "Ada", Issuer: "entra"}, nil
 }
 
 func whoServer(t *testing.T) (*whoService, *httptest.Server) {
@@ -69,7 +68,7 @@ func TestClientsSendTheToken(t *testing.T) {
 			if err != nil || svc.authorization != tt.want {
 				t.Fatalf("Run = %v; the server saw Authorization %q, want %q", err, svc.authorization, tt.want)
 			}
-			for _, want := range []string{"username: Ada", "issuer: entra", "ACCESS_ROLE_TENANT_ADMIN", "- acme"} {
+			for _, want := range []string{"username: Ada", "issuer: entra", "subject: user-1"} {
 				if !strings.Contains(out.String(), want) {
 					t.Errorf("output lacks %q:\n%s", want, out.String())
 				}

@@ -1,8 +1,8 @@
 // Package authn applies pkg/auth to the API's requests: a Connect server
-// interceptor that reads the bearer token, has it verified, and refuses
-// the calls the caller's roles do not allow. The handlers stay as they
-// are: they read the caller, where they want it, from the context
-// (auth.FromContext).
+// interceptor that reads the bearer token and has it verified. It is
+// authentication only: a caller whose token is accepted may call every RPC,
+// for every tenant. The handlers read the caller, where they want it, from
+// the context (auth.FromContext).
 package authn
 
 import (
@@ -28,13 +28,12 @@ type Verifier interface {
 
 // Options are how requests are authenticated.
 type Options struct {
-	// Mode is auth.ModeNone (also when empty), ModeOptional or
-	// ModeRequired.
+	// Mode is auth.ModeNone (also when empty) or auth.ModeRequired.
 	Mode auth.Mode
 	// Verifier checks the tokens; required unless Mode is none.
 	Verifier Verifier
-	// Logger receives one line per write and per refused call. Never a
-	// token. Nil: nothing is logged.
+	// Logger receives one line per write and per refused call, with the
+	// caller's subject. Never a token. Nil: nothing is logged.
 	Logger *slog.Logger
 }
 
@@ -44,17 +43,15 @@ const (
 	schemeBearer        = "Bearer"
 )
 
-// Interceptor authenticates and authorizes every RPC:
+// Interceptor authenticates every RPC:
 //
 //   - mode none: nothing is checked; the caller is anonymous.
-//   - a request without a token: anonymous in mode optional, refused
-//     (UNAUTHENTICATED) in mode required.
-//   - a request with a token: the token must verify, in both modes.
-//   - the caller must be allowed what the RPC needs (auth.Classify): a
-//     platform RPC is checked before the handler runs, a tenant RPC when
-//     the handler receives the request, against the tenant_id in it. The
-//     handler never sees a request the caller may not make.
+//   - mode required: a request without a token, or with one no issuer of
+//     the configuration signed for this API (signature, issuer, audience,
+//     expiry), is refused UNAUTHENTICATED before the handler runs.
 //
+// An accepted caller may call every RPC; nothing is authorized. Writes and
+// refusals are logged with the caller's subject and the request's tenant.
 // It answers with faults, so it goes inside service.Faults.
 func Interceptor(o Options) connect.ServerInterceptor {
 	if o.Logger == nil {
@@ -70,7 +67,7 @@ func Interceptor(o Options) connect.ServerInterceptor {
 	}
 }
 
-// serve is one RPC in mode optional or required.
+// serve is one RPC in mode required.
 func (o Options) serve(ctx context.Context, spec connect.Spec, stream connect.ServerStream, next connect.ServerFunc) error {
 	id, err := o.authenticate(ctx)
 	if err != nil {
@@ -79,28 +76,16 @@ func (o Options) serve(ctx context.Context, spec connect.Spec, stream connect.Se
 	}
 	ctx = auth.WithIdentity(ctx, id)
 	method, ok := spec.Schema.(protoreflect.MethodDescriptor)
-	if !ok {
-		// Not an RPC of the API (an unknown procedure): the server answers
-		// UNIMPLEMENTED, there is nothing to protect.
+	if !ok || !auth.Writes(method) {
+		// A read, or not an RPC of the API (the server answers
+		// UNIMPLEMENTED): nothing to log.
 		return next(ctx, spec, stream)
 	}
 	call := &call{options: o, spec: spec, id: id}
-	access, err := auth.Classify(method)
-	if err != nil {
-		o.Logger.ErrorContext(ctx, "unclassified RPC refused", "procedure", spec.Procedure, "error", err)
-		return call.done(ctx, fault.New(fault.PermissionDenied, "this call is not open to callers"))
-	}
-	call.access = access
-	if access.Scope == auth.ScopeTenant {
-		stream = &guardedStream{ServerStream: stream, call: call}
-	} else if err := id.Authorize(access, ""); err != nil {
-		return call.done(ctx, err)
-	}
-	return call.done(ctx, next(ctx, spec, stream))
+	return call.done(ctx, next(ctx, spec, &recordedStream{ServerStream: stream, call: call}))
 }
 
-// authenticate is the caller of the request in ctx: anonymous without a
-// token where the mode allows it, otherwise whom the token stands for.
+// authenticate is whom the bearer token of the request in ctx stands for.
 func (o Options) authenticate(ctx context.Context) (*auth.Identity, error) {
 	info, _ := connect.CallInfoForServerContext(ctx)
 	header := ""
@@ -108,11 +93,8 @@ func (o Options) authenticate(ctx context.Context) (*auth.Identity, error) {
 		header = info.RequestHeader().Get(headerAuthorization)
 	}
 	if header == "" {
-		if o.Mode == auth.ModeRequired {
-			challenge(info)
-			return nil, fault.New(fault.Unauthenticated, "this API needs a bearer token: run `cluster-vending login`, or set CV_TOKEN")
-		}
-		return auth.Anonymous(), nil
+		challenge(info)
+		return nil, fault.New(fault.Unauthenticated, "this API needs a bearer token: run `cluster-vending login`, or set CV_TOKEN")
 	}
 	scheme, token, _ := strings.Cut(header, " ")
 	token = strings.TrimSpace(token)
@@ -137,58 +119,40 @@ func challenge(info *connect.CallInfo) {
 	}
 }
 
-// call is one authenticated RPC: what it needs and who makes it.
+// call is one authenticated write: who makes it, on which tenant.
 type call struct {
 	options Options
 	spec    connect.Spec
 	id      *auth.Identity
-	access  auth.Access
 	// tenant is the tenant the request named, once it was received.
 	tenant string
 }
 
-// done logs the end of the call when it is a write or was refused, and
-// returns err.
+// done logs the end of the write and returns err.
 func (c *call) done(ctx context.Context, err error) error {
-	denied := fault.Is(err, fault.PermissionDenied)
-	if !c.access.Write && !denied {
-		return err
-	}
-	subject, issuer := c.id.Subject, c.id.Issuer
-	if c.id.Anonymous {
-		subject = "anonymous"
-	}
 	outcome := "ok"
 	if err != nil {
 		outcome = connect.CodeOf(service.ToConnect(err)).String()
 	}
-	attrs := []any{"procedure", c.spec.Procedure, "subject", subject, "username", c.id.Username, "issuer", issuer,
-		"tenant", c.tenant, "outcome", outcome}
-	if denied {
-		c.options.Logger.WarnContext(ctx, "api call denied", attrs...)
-		return err
-	}
-	c.options.Logger.InfoContext(ctx, "api write", attrs...)
+	c.options.Logger.InfoContext(ctx, "api write", "procedure", c.spec.Procedure, "subject", c.id.Subject,
+		"username", c.id.Username, "issuer", c.id.Issuer, "tenant", c.tenant, "outcome", outcome)
 	return err
 }
 
-// guardedStream is the stream of a tenant RPC: every request the handler
-// receives is checked against the caller's tenants first.
-type guardedStream struct {
+// recordedStream is the stream of a write: it notes the tenant of the
+// request for the log. It checks nothing.
+type recordedStream struct {
 	connect.ServerStream
 	call *call
 }
 
-// Receive reads the next request and refuses it (PermissionDenied) when
-// the caller may not make it for the tenant it names.
-func (g *guardedStream) Receive(msg any) error {
-	if err := g.ServerStream.Receive(msg); err != nil {
+// Receive reads the next request and notes its tenant.
+func (r *recordedStream) Receive(msg any) error {
+	if err := r.ServerStream.Receive(msg); err != nil {
 		return err
 	}
-	request, ok := msg.(proto.Message)
-	if !ok {
-		return fault.New(fault.PermissionDenied, "this call is not open to callers")
+	if request, ok := msg.(proto.Message); ok {
+		r.call.tenant = auth.Tenant(request.ProtoReflect())
 	}
-	g.call.tenant = auth.Tenant(request.ProtoReflect())
-	return g.call.id.Authorize(g.call.access, g.call.tenant)
+	return nil
 }

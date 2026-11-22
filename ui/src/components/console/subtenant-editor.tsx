@@ -23,7 +23,7 @@ import { ValuesEditor } from "./values-editor";
 import { WizardDialog } from "./wizard-dialog";
 
 export function SubTenantEditor({ scope, baseline, onClose, onAccepted }: { scope: SubTenantScope; baseline?: SubTenant; onClose: () => void; onAccepted: (resource: SubTenant, action: "create" | "update") => void }) {
-  const { api, canWrite } = usePlatform();
+  const { api } = usePlatform();
   const [mode, setMode] = useState("guided");
   const [draft, setDraft] = useState(() => baseline ? subTenantDraft(baseline) : { ...emptySubTenantDraft });
   const [yaml, setYaml] = useState(() => subTenantYaml(scope, baseline));
@@ -41,7 +41,7 @@ export function SubTenantEditor({ scope, baseline, onClose, onAccepted }: { scop
   function invalidate() { setReview(undefined); setError(""); }
   function change<K extends keyof SubTenantDraft>(field: K, value: SubTenantDraft[K]) { invalidate(); setDraft((previous) => ({ ...previous, [field]: value })); }
   function prepare() {
-    if (!canWrite || pending.current) return;
+    if (pending.current) return;
     try {
       if (mode === "guided" && step === 0) { validateSubTenantDraft(draft, 0, baseline?.spec?.namespaceKeys, baseline ? baseline.spec?.name ?? "" : undefined); setStep(1); setError(""); return; }
       const spec = mode === "guided" ? draftSubTenantSpec(draft, baseline) : yamlSubTenantSpec(yaml, scope, baseline);
@@ -52,7 +52,7 @@ export function SubTenantEditor({ scope, baseline, onClose, onAccepted }: { scop
     } catch (cause) { setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
   }
   async function apply() {
-    if (!canWrite || !review || pending.current) return;
+    if (!review || pending.current) return;
     const controller = new AbortController(); pending.current = controller;
     setBusy(true); setError("");
     try {
@@ -66,7 +66,7 @@ export function SubTenantEditor({ scope, baseline, onClose, onAccepted }: { scop
   const removedAccess = baseline?.spec?.access?.bindings.filter((binding) => !spec?.access?.bindings.some((next) => next.identityRef === binding.identityRef)) ?? [];
   return <WizardDialog isOpen title={baseline ? "Edit Sub Tenant" : "Create Sub Tenant"} description={`Tenant ${scope.tenantId} · Cluster ${scope.clusterId}`} steps={steps} step={step} busy={busy} onOpenChange={(open) => { if (!open && !pending.current) onClose(); }}
     headerContent={<SegmentedControl label="Sub Tenant input method" value={mode} onChange={(value) => { if (pending.current || (value !== "guided" && value !== "yaml")) return; setMode(value); setStep(0); setReview(undefined); setError(""); }} isDisabled={busy} layout="hug"><SegmentedControlItem value="guided" label="Guided form" /><SegmentedControlItem value="yaml" label="Paste YAML" /></SegmentedControl>}
-    footer={<HStack gap={2} wrap="wrap"><Button label="Cancel" isDisabled={busy} onClick={onClose} />{step > 0 && <Button label="Back" isDisabled={busy} onClick={() => { setStep(step - 1); setReview(undefined); setError(""); }} />}<Button label={step === last ? baseline ? "Apply Sub Tenant update" : "Confirm create Sub Tenant" : mode === "guided" && step === 0 ? "Next" : "Review Sub Tenant"} variant="primary" type="submit" form={formId} isLoading={busy} isDisabled={!canWrite || (step === last && !review)} /></HStack>}>
+    footer={<HStack gap={2} wrap="wrap"><Button label="Cancel" isDisabled={busy} onClick={onClose} />{step > 0 && <Button label="Back" isDisabled={busy} onClick={() => { setStep(step - 1); setReview(undefined); setError(""); }} />}<Button label={step === last ? baseline ? "Apply Sub Tenant update" : "Confirm create Sub Tenant" : mode === "guided" && step === 0 ? "Next" : "Review Sub Tenant"} variant="primary" type="submit" form={formId} isLoading={busy} isDisabled={(step === last && !review)} /></HStack>}>
     <form id={formId} method="post" aria-label={baseline ? "Edit Sub Tenant configuration" : "Create Sub Tenant configuration"} noValidate onSubmit={(event) => { event.preventDefault(); if (step === last) void apply(); else prepare(); }}>
       <VStack gap={4}>
         {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><Banner status="error" title="Sub Tenant request could not be completed" description={error} /></VStack>}

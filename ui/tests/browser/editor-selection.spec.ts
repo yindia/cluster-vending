@@ -13,7 +13,7 @@ async function mockEditorReads(page: Page) {
     const component = { id: "00000000-0000-4000-8000-000000000004", tenantId: "acme", clusterId, component: "external-dns", etag: "editor-etag", values, management: "COMPONENT_MANAGEMENT_TENANT", version: "0.16.0", status: { phase: "COMPONENT_PHASE_READY" } };
     let response: object;
     switch (method) {
-      case "WhoAmI": response = { subject: "editor-reader", grants: [{ role: "ACCESS_ROLE_TENANT_ADMIN", tenants: ["acme"] }] }; break;
+      case "WhoAmI": response = { subject: "editor-reader" }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
       case "ListCloudAccounts": response = { accounts: [] }; break;
       case "ListNetworks": response = { networks: [] }; break;

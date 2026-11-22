@@ -62,8 +62,8 @@ export type ListTenantsResponse = Message<"cloud.v1.ListTenantsResponse"> & {
   tenants: TenantInfo[];
 
   /**
-   * Indicates a creation capability, not permission for every tenant ID.
-   * The caller must hold a TenantAdmin grant for the requested ID.
+   * Whether the caller may create tenants: always true, since the API has
+   * no roles and every accepted caller may create one.
    *
    * @generated from field: bool can_create_tenants = 2;
    */

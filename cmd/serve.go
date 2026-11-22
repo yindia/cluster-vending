@@ -105,7 +105,13 @@ func newServeCmd(g *globals) *cobra.Command {
 					cancel()
 				}
 			}()
-			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers), "rules", len(authCfg.Rules))
+			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers))
+			if authCfg.Mode == auth.ModeNone {
+				g.logger.Warn("authentication is off (auth.mode none): every caller has full access to every tenant; for local development only")
+			}
+			for _, ignored := range authCfg.Ignored {
+				g.logger.Warn(ignored)
+			}
 			// The scan results are read from the clusters' buckets, through
 			// each account's tenant role, read-only (docs/architecture.md#results-in-s3);
 			// nothing else of AWS is called.

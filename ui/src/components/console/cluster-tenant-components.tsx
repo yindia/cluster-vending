@@ -44,7 +44,7 @@ export function ClusterComponentsPanel({ clusterId, ...actions }: ComponentsProp
 }
 
 function TenantComponentsContent({ clusterId, onRefreshCluster, onRetry, children, clusterRefreshing }: ComponentsProps) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [search, setSearch] = useState("");
   const [availability, setAvailability] = useState("all");
   const [page, setPage] = useState(1);
@@ -67,7 +67,7 @@ function TenantComponentsContent({ clusterId, onRefreshCluster, onRetry, childre
     refresh();
   }, [refresh]);
   const inventoryComplete = inventory.data !== undefined && !inventory.error && !inventory.loading;
-  const writesAvailable = !!tenantId && !!clusterId && canWrite && catalog.data !== undefined && inventoryComplete &&
+  const writesAvailable = !!tenantId && !!clusterId && catalog.data !== undefined && inventoryComplete &&
     !catalog.loading && !catalog.error && !catalog.refreshing && !inventory.refreshing;
 
   const installedByName = new Map<string, Component[]>();
@@ -136,12 +136,11 @@ function TenantComponentsContent({ clusterId, onRefreshCluster, onRetry, childre
     { key: "configuration", header: "Configurability", renderCell: (row) => <Text maxLines={1}>{!row.definition ? "Unknown · read-only" : row.definition.configurable ? "Tenant values" : "No tenant values"}</Text> },
     { key: "availability", header: "Availability", renderCell: (row) => <Text maxLines={1}>{readOnlyReason(row) || (row.definition?.disabled ? row.definition.disabledReason || "Disabled by the platform" : "Available")}</Text> },
     { key: "actions", header: "Actions", renderCell: (row) => {
-      if (!canWrite) return <Text color="secondary">Read-only</Text>;
       const reason = readOnlyReason(row);
       if (reason || !row.definition) return <Text color="secondary">Read-only</Text>;
       if (!writesAvailable || !row.current && row.definition.disabled) return <Button label={row.current ? "Manage component" : "Enable component"} isDisabled tooltip={row.definition.disabled && !row.current ? row.definition.disabledReason || "Disabled by the platform" : "Load and refresh the complete catalog and inventory before changing components."} />;
       return <ComponentMutationForm key={`${row.definition.name}:${row.current?.id ?? "new"}:${row.current?.etag ?? ""}:${row.definition.disabled}:${row.definition.configurable}`}
-        context={{ tenantId, clusterId, canWrite, definition: row.definition, current: row.current }} onAccepted={onAccepted} />;
+        context={{ tenantId, clusterId, definition: row.definition, current: row.current }} onAccepted={onAccepted} />;
     } },
   ];
 
@@ -153,10 +152,9 @@ function TenantComponentsContent({ clusterId, onRefreshCluster, onRetry, childre
     {children}
     <VStack as="section" aria-label="Tenant components" gap={4}>
       <VStack gap={1}><Heading level={3}>Tenant components</Heading><Text color="secondary">Enable optional components or manage their tenant settings. Versions are selected by the cluster’s release.</Text></VStack>
-      {canWrite && inventory.data?.some(item => item.management === ComponentManagement.TENANT && componentInstallationStatus(item).tone === "error") &&
+      {inventory.data?.some(item => item.management === ComponentManagement.TENANT && componentInstallationStatus(item).tone === "error") &&
         <HStack><Button label="Retry failed work" onClick={onRetry} /></HStack>}
       {(!tenantId || !clusterId) && <Banner status="info" title="Select a tenant and cluster to manage components" />}
-      {!canWrite && <Text color="secondary">Your session has read-only access. Tenant write permission is required to enable, update or disable components.</Text>}
       {catalog.error && <Banner status="error" title="Tenant component catalog unavailable" description={catalog.error} />}
       {inventory.error && <Banner status="error" title="Complete component inventory unavailable" description={inventory.error} />}
       {(catalog.loading || inventory.loading) && <Text role="status">Loading the tenant catalog and complete cluster inventory…</Text>}

@@ -99,7 +99,7 @@ function FreezeScopes({ initialSelection }: { initialSelection?: FreezeSelection
 }
 
 function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel: string }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [action, setAction] = useState<Action>("freeze");
   const [reason, setReason] = useState("");
   const [until, setUntil] = useState("");
@@ -158,7 +158,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
     prepareAction(action);
   }
   function prepareAction(requestedAction: Action) {
-    if (!canWrite || actionBusy(requestedAction)) return;
+    if (actionBusy(requestedAction)) return;
     try {
       if (!status || !targetMatches || query.error) throw new Error("Load canonical status for this scope before reviewing an action.");
       if (requestedAction === "unfreeze" && status.platformFrozen) throw new Error("An additional platform pause applies. Tenant unfreeze cannot override it.");
@@ -174,7 +174,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!review || !canWrite || actionBusy(review.action) || controller.current) return;
+    if (!review || actionBusy(review.action) || controller.current) return;
     if (review.action === "unfreeze" && status?.platformFrozen) { setActionError("An additional platform pause applies. Tenant unfreeze cannot override it."); return; }
     if (!status || !targetMatches || query.error || review.revision !== status.revision) {
       setReview(undefined); setConfirmation("");
@@ -209,11 +209,10 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
     <HStack gap={4} hAlign="end" vAlign="center" wrap="wrap" width="100%">
       <StackItem size="fill"><HStack gap={2} vAlign="center" wrap="wrap"><Heading level={2}>{scopeLabel}</Heading><CopyButton value={scopeId} label="scope ID" /></HStack></StackItem>
       <HStack gap={2} wrap="wrap" vAlign="center">
-        {canWrite && <Button label="Unfreeze scope" variant="primary" aria-haspopup="dialog" isDisabled={actionBusy("unfreeze") || !status || !targetMatches || !!query.error || !!status.platformFrozen} tooltip={status?.platformFrozen ? "An additional platform pause applies and cannot be overridden by tenant controls." : undefined} onClick={() => prepareAction("unfreeze")} />}
+        {<Button label="Unfreeze scope" variant="primary" aria-haspopup="dialog" isDisabled={actionBusy("unfreeze") || !status || !targetMatches || !!query.error || !!status.platformFrozen} tooltip={status?.platformFrozen ? "An additional platform pause applies and cannot be overridden by tenant controls." : undefined} onClick={() => prepareAction("unfreeze")} />}
         <RefreshButton label="Refresh freeze status" isLoading={query.refreshing} onClick={query.refresh} />
       </HStack>
     </HStack>
-    {!canWrite && <Text color="secondary">Read-only access. Tenant administrator permission is required to freeze or unfreeze resources.</Text>}
     {status?.platformFrozen && <Banner status="info" title="An additional platform pause applies" description="These resources are also paused by the platform. Tenant controls cannot remove that pause." />}
     {query.loading && <Text role="status">Loading freeze status…</Text>}
     {query.error && <Banner status="error" title="Freeze status unavailable" description={query.error} />}
@@ -246,7 +245,7 @@ function ScopedFreeze({ target, scopeLabel }: { target: FreezeTarget; scopeLabel
       ]} /> : <Text>No nested freeze scopes returned.</Text>}
       {status.exceptions.length ? <VStack gap={2}><Heading level={3}>Exceptions</Heading>{status.exceptions.map((exception, index) => <CopyValue key={index} value={exception} label="exception resource" />)}</VStack> : <Text>No exceptions reported.</Text>}
     </VStack>}
-    {canWrite && <>
+    {<>
     <Heading level={3}>Change policy</Heading>
     <Text>Unfreezing a cluster keeps its shared network’s freeze. Network unfreeze resumes that network and its clusters; tenant unfreeze applies only to this tenant.</Text>
     <form method="post" onSubmit={prepare} noValidate aria-label="Review freeze action">

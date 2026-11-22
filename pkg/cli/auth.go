@@ -66,7 +66,7 @@ func sendsTokensSafely(server string) bool {
 }
 
 // WhoAmI shows the caller as the server sees it (TenantService.WhoAmI):
-// who the token stands for and what the server's rules grant.
+// who the token stands for. The API has no roles.
 func WhoAmI(ctx context.Context, c Clients, _ Options) (proto.Message, error) {
 	return call(ctx, &cloudv1.WhoAmIRequest{}, c.Tenant.WhoAmI)
 }

@@ -26,22 +26,20 @@ func (h subTenantHandlers) CreateSubTenant(ctx context.Context, _ *cloudv1.Creat
 	return &cloudv1.CreateSubTenantResponse{}, nil
 }
 
-func TestSubTenantAuthorization(t *testing.T) {
+// Any authenticated caller reaches the sub-tenant RPCs of any tenant.
+func TestSubTenantCallsNeedOnlyAToken(t *testing.T) {
 	a := newAPI(t, auth.ModeRequired)
 	for _, tt := range []struct {
-		name, role, tenant string
-		write              bool
-		want               connect.Code
+		name, tenant string
+		write        bool
 	}{
-		{"viewer reads own tenant", "acme.viewer", "acme", false, 0},
-		{"viewer cannot create", "acme.viewer", "acme", true, connect.CodePermissionDenied},
-		{"admin creates own tenant", "acme.admin", "acme", true, 0},
-		{"admin cannot read another tenant", "acme.admin", "globex", false, connect.CodePermissionDenied},
-		{"admin cannot write another tenant", "acme.admin", "globex", true, connect.CodePermissionDenied},
-		{"missing tenant refused", "acme.admin", "", false, connect.CodePermissionDenied},
+		{"read", "acme", false},
+		{"create", "acme", true},
+		{"another tenant's read", "globex", false},
+		{"another tenant's create", "globex", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := with(t, bearer(a.token(t, tt.role)))
+			ctx := with(t, bearer(a.token(t)))
 			before := a.handlers.reached.Load()
 			var err error
 			if tt.write {
@@ -49,12 +47,15 @@ func TestSubTenantAuthorization(t *testing.T) {
 			} else {
 				_, err = a.clients.subtenant.GetSubTenant(ctx, &cloudv1.GetSubTenantRequest{TenantId: tt.tenant})
 			}
-			if (err == nil) != (tt.want == 0) || (err != nil && connect.CodeOf(err) != tt.want) {
-				t.Fatalf("call = %v, want %v", err, tt.want)
+			if err != nil {
+				t.Fatalf("call = %v, want it to reach the handler", err)
 			}
-			if reached := a.handlers.reached.Load() - before; (reached == 1) != (tt.want == 0) {
-				t.Fatalf("handler reached %d times, want allowed=%v", reached, tt.want == 0)
+			if reached := a.handlers.reached.Load() - before; reached != 1 {
+				t.Fatalf("handler reached %d times", reached)
 			}
 		})
+	}
+	if _, err := a.clients.subtenant.GetSubTenant(with(t, ""), &cloudv1.GetSubTenantRequest{TenantId: "acme"}); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("no token = %v, want UNAUTHENTICATED", err)
 	}
 }

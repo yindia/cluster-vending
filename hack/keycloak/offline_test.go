@@ -29,7 +29,7 @@ func TestOfflineMigrationOnlyChangesFixtureOfflineGrants(t *testing.T) {
 		t.Fatal("expected offline-only migration and exact rerun to be supported")
 	}
 	for _, changed := range []string{
-		strings.Replace(string(after), "tenant-acme-admin", "platform-admin", 1),
+		strings.Replace(string(after), "acme-admin@localhost.test", "someone@localhost.test", 1),
 		strings.Replace(string(after), "18081", "18082", 1),
 		strings.Replace(string(after), `"realmRoles":["offline_access"]`, `"realmRoles":["offline_access","admin"]`, 1),
 		strings.Replace(string(after), `"realmRoles":["offline_access"]`, `"realmRoles":[{"unexpected":"role"}]`, 1),

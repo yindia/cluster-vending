@@ -79,7 +79,7 @@ async function mockAPI(page: Page, options: { viewer?: boolean; failApply?: bool
     let response: unknown;
     let status = 200;
     switch (method) {
-      case "WhoAmI": response = options.wildcardAdmin ? { subject: "tenant-manager", grants: [{ role: "ACCESS_ROLE_TENANT_ADMIN", tenants: ["*"] }] } : options.viewer ? { subject: "reader", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] } : options.tenantAdmin ? { subject: "tenant-admin", grants: [{ role: "ACCESS_ROLE_TENANT_ADMIN", tenants: ["acme"] }] } : { anonymous: true }; break;
+      case "WhoAmI": response = options.wildcardAdmin ? { subject: "tenant-manager" } : options.viewer ? { subject: "reader" } : options.tenantAdmin ? { subject: "tenant-admin" } : { anonymous: true }; break;
       case "ListTenants": response = { tenants: [...tenants].filter(id => !options.viewer && !options.tenantAdmin || id === "acme").map(id => ({ id })), canCreateTenants: !options.viewer }; break;
       case "CreateTenant":
         if (options.failTenantCreate) { status = 403; response = { code: "permission_denied", message: "Tenant creation denied by the API" }; break; }
@@ -310,7 +310,7 @@ test("tenant creation requires a reviewed name and switches only after API accep
   await page.screenshot({ path: "/tmp/cv-ui-tenant-selector.png", animations: "disabled" });
 });
 
-test("tenant creation errors preserve the current scope and viewer access remains read-only", async ({ page }) => {
+test("tenant creation errors preserve the current scope", async ({ page }) => {
   const calls = await mockAPI(page, { failTenantCreate: true, wildcardAdmin: true });
   await page.goto("/");
   await page.getByRole("button", { name: "Create tenant", exact: true }).click();
@@ -323,14 +323,6 @@ test("tenant creation errors preserve the current scope and viewer access remain
   await expect(dialog.getByRole("textbox", { name: /^Tenant ID/ })).toHaveValue("team-denied");
   expect(calls.filter(call => call.method === "CreateTenant")).toHaveLength(1);
   await expect(page.getByRole("button", { name: /^Tenant acme/ })).toBeVisible();
-  await page.unroute("**/api/rpc/**");
-  const viewerCalls = await mockAPI(page, { viewer: true });
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: /^Tenant acme/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create tenant", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: /^Tenant acme/ }).click();
-  await expect(page.getByRole("option", { name: "other-tenant", exact: true })).toHaveCount(0);
-  expect(viewerCalls.filter(call => call.method === "CreateTenant")).toHaveLength(0);
 });
 
 test("cluster kubeconfig commands fetch current cloud identity and are copyable for viewers", async ({ page }) => {
@@ -815,16 +807,6 @@ test("cluster tenant catalog enables configured components only after exact revi
   await page.screenshot({ path: "/tmp/cv-ui-cluster-tenant-components.png", fullPage: true, animations: "disabled" });
 });
 
-test("cluster component catalog is read-only for tenant viewers", async ({ page }) => {
-  await mockAPI(page, { componentCatalog: true, viewer: true });
-  await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
-  const table = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true });
-  await expect(table).toContainText("policies");
-  await expect(table.getByRole("button", { name: "Enable component", exact: true })).toHaveCount(0);
-  await expect(table.getByRole("button", { name: "Manage component", exact: true })).toHaveCount(0);
-});
-
 test("account IDs remain visible and each copy control copies its adjacent identity once", async ({ page }) => {
   await mockClipboard(page);
   await mockAPI(page);
@@ -1131,15 +1113,6 @@ test("account form sends a generated bootstrap request and reports acceptance", 
   await expect(page.getByText(/connection accepted/i).first()).toBeVisible();
 });
 
-test("tenant viewers get tenant navigation but cannot bootstrap accounts", async ({ page }) => {
-  const calls = await mockAPI(page, { viewer: true });
-  await page.goto("/accounts");
-  await expect(page.getByRole("button", { name: "Connect account", exact: true })).toBeDisabled();
-  await expect(page.getByRole("link", { name: "Freeze controls", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Releases", exact: true })).toBeVisible();
-  expect(calls.filter((call) => call.method === "BootstrapTenant")).toHaveLength(0);
-});
-
 test("freeze requires an explicit target review and confirms the returned revision", async ({ page }) => {
   const calls = await mockAPI(page);
   await page.goto("/freeze");
@@ -1214,14 +1187,10 @@ test("resource details link to their own freeze scope without changing policy", 
   }
 });
 
-test("freeze links reject invalid scopes and stay read-only for viewers", async ({ page }) => {
-  const calls = await mockAPI(page, { viewer: true });
-  await page.goto(`/clusters/${clusterId}`);
-  await expect(page.getByRole("link", { name: /^(Freeze|Unfreeze) cluster$/ })).toHaveCount(0);
+test("freeze links reject invalid scopes", async ({ page }) => {
+  const calls = await mockAPI(page);
   await page.goto(`/freeze?scope=cluster&id=${clusterId}`);
-  await expect(page.getByText(/Tenant administrator permission is required/)).toBeVisible();
   await expect.poll(() => calls.filter(call => call.method === "GetFreeze").length).toBeGreaterThan(0);
-  await expect(page.getByRole("button", { name: "Unfreeze scope", exact: true })).toHaveCount(0);
   await page.goto("/freeze?scope=cluster&id=invalid");
   await expect(page.getByRole("heading", { name: "404", exact: true })).toBeVisible();
   expect(calls.filter(call => ["Freeze", "Unfreeze"].includes(call.method))).toHaveLength(0);

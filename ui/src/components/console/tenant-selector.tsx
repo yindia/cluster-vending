@@ -30,7 +30,7 @@ export function TenantSelector({ onSwitch, children }: { onSwitch: (tenantId: st
   const capability = !directory.error && !!directory.data?.canCreateTenants;
   const canOfferCreate = canCreateTenant(identity, capability);
   const target = draft.trim();
-  const canSubmit = validTenantId(target) && canCreateTenant(identity, capability, target);
+  const canSubmit = validTenantId(target) && canCreateTenant(identity, capability);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,8 +40,8 @@ export function TenantSelector({ onSwitch, children }: { onSwitch: (tenantId: st
       input.current?.focus();
       return;
     }
-    if (!canCreateTenant(identity, capability, target)) {
-      setError("Your current grants do not allow creating this tenant ID, or tenant creation is unavailable.");
+    if (!canCreateTenant(identity, capability)) {
+      setError("Tenant creation is unavailable. Sign in and refresh the tenant directory.");
       return;
     }
     setError("");
@@ -82,21 +82,21 @@ export function TenantSelector({ onSwitch, children }: { onSwitch: (tenantId: st
       {directory.error && <Button label="Retry tenant directory" variant="ghost" onClick={directory.refresh} isLoading={directory.refreshing} />}
     </HStack>
     {!directory.loading && !directory.error && ids.length === 0 && <Text type="supporting" role="status">No allowed tenants were returned. The current connection is unchanged.</Text>}
-    {!identity && <Text type="supporting">Tenant creation is unavailable until your identity and grants are verified.</Text>}
+    {!identity && <Text type="supporting">Tenant creation is unavailable until you are signed in.</Text>}
     <Dialog isOpen={open} onOpenChange={(next) => { if (!busy) setOpen(next); }} purpose="form" width="min(40rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={0}>
       <VStack gap={5} padding={6}>
-        <DialogHeader title={review ? "Review tenant" : "Create tenant"} subtitle="Create a cluster-scoped Tenant CR and its namespace. Cloud accounts and access grants are configured separately." onOpenChange={(next) => { if (!busy) setOpen(next); }} />
+        <DialogHeader title={review ? "Review tenant" : "Create tenant"} subtitle="Create a cluster-scoped Tenant CR and its namespace. Cloud accounts are connected separately." onOpenChange={(next) => { if (!busy) setOpen(next); }} />
         <form id={formId} method="post" onSubmit={submit} aria-label="Create tenant" noValidate>
           <VStack gap={4}>
             {error && <Banner status="error" role="alert" title="Could not create tenant" description={error} />}
             {review ? <VStack gap={2}>
               <Text>Tenant ID: {target}</Text>
-              <Text>This creates the cluster-scoped Tenant CR and its namespace, then switches your workspace to it. No cloud accounts, cloud resources or access grants will be created.</Text>
+              <Text>This creates the cluster-scoped Tenant CR and its namespace, then switches your workspace to it. No cloud accounts or cloud resources will be created.</Text>
               <Text>Connect a cloud account before provisioning networks or clusters in the new tenant.</Text>
             </VStack> : <TextInput ref={input} label="Tenant ID" htmlName="tenantId" value={draft} onChange={(value) => { setDraft(value); setError(""); }}
               description="1–56 lowercase letters, numbers and hyphens; start and end with a letter or number."
               isRequired autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} width="100%" />}
-            {!review && validTenantId(target) && !canSubmit && <Text role="status">Your current grants do not allow creating this tenant ID.</Text>}
+            {!review && validTenantId(target) && !canSubmit && <Text role="status">Tenant creation is unavailable until you are signed in.</Text>}
             <HStack gap={2} wrap="wrap" hAlign="end">
               <Button label="Cancel" type="button" variant="ghost" isDisabled={busy} onClick={() => setOpen(false)} />
               {review && <Button label="Back" type="button" isDisabled={busy} onClick={() => { setReview(false); setError(""); }} />}

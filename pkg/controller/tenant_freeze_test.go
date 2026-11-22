@@ -91,7 +91,7 @@ func TestTenantFreezeRPCProjection(t *testing.T) {
 	reconcile("acme")
 	reconcile("other")
 	operator := admin.NewService(deps)
-	ctx := auth.WithIdentity(t.Context(), &auth.Identity{Subject: "tenant-admin", Grants: []auth.Grant{{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}}})
+	ctx := auth.WithIdentity(t.Context(), &auth.Identity{Subject: "tenant-user"})
 	if err := cli.Run(ctx, cli.TenantFreeze, clients, cli.Options{Tenant: "acme", Reason: "maintenance"}, &output, cli.OutputJSON); err != nil {
 		t.Fatal(err)
 	}

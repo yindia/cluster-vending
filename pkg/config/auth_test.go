@@ -38,19 +38,26 @@ func TestLoadAuthNextToTheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Mode != auth.ModeRequired || len(cfg.Issuers) != 2 || len(cfg.Rules) != 3 {
+	if cfg.Mode != auth.ModeRequired || len(cfg.Issuers) != 2 {
 		t.Fatalf("auth = %+v", cfg)
 	}
 	entra, keycloak := cfg.Issuers[0], cfg.Issuers[1]
 	if entra.Issuer != "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0" ||
-		entra.RolesClaim != "roles" || len(entra.Alternates) != 1 || len(entra.Audiences) != 2 {
+		len(entra.Alternates) != 1 || len(entra.Audiences) != 2 {
 		t.Errorf("entra issuer = %+v", entra)
 	}
-	if keycloak.UsernameClaim != "preferred_username" || keycloak.TenantClaim != "org" || keycloak.RolesClaim != "groups" {
+	if keycloak.UsernameClaim != "preferred_username" {
 		t.Errorf("keycloak issuer = %+v", keycloak)
 	}
-	if got := cfg.Rules[1].Grant; got.Role != auth.RoleTenantAdmin || !slices.Equal(got.Tenants, []string{"acme"}) {
-		t.Errorf("rule 1 grants %+v", got)
+	// The removed role keys of an older file load, each with one warning.
+	want := []string{"auth.rules is ignored", "auth.issuers[1].tenantClaim is ignored", "auth.issuers[1].rolesClaim is ignored"}
+	if len(cfg.Ignored) != len(want) {
+		t.Fatalf("ignored = %q, want %q", cfg.Ignored, want)
+	}
+	for i := range want {
+		if !strings.Contains(cfg.Ignored[i], want[i]) {
+			t.Errorf("ignored[%d] = %q, want %q", i, cfg.Ignored[i], want[i])
+		}
 	}
 	file, err := config.LoadFile(path)
 	if err != nil {
@@ -102,8 +109,8 @@ func TestLoadAuthRejects(t *testing.T) {
 		{"an unknown key", "auth:\n  mode: none\n  issuer: []\n", []string{"auth", "issuer"}},
 		{"a misspelled issuer key", "auth:\n  issuers:\n  - {name: a, issuer: https://x.example.com, audience: [a]}\n", []string{"audience"}},
 		{"a secret-looking key", "auth:\n  issuers:\n  - {name: a, issuer: https://x.example.com, audiences: [a], clientSecret: s}\n", []string{"clientSecret"}},
-		{"every problem at once", "auth:\n  mode: strict\n  issuers:\n  - {name: a, issuer: https://x.example.com}\n  rules:\n  - {match: {issuer: b}, grant: {role: Owner}}\n",
-			[]string{"invalid configuration", "auth.mode", "audiences", "match.issuer", "grant.role"}},
+		{"every problem at once", "auth:\n  mode: strict\n  issuers:\n  - {name: a, issuer: https://x.example.com}\n",
+			[]string{"invalid configuration", "auth.mode", "audiences"}},
 		{"invalid yaml", "auth: [\n", []string{"invalid yaml"}},
 	}
 	for _, tt := range tests {
@@ -132,5 +139,17 @@ func TestAuthHasNoFlags(t *testing.T) {
 		if strings.HasPrefix(s.Flag, config.SectionAuth) {
 			t.Errorf("%s: authentication is configured in the settings file only", s)
 		}
+	}
+}
+
+// A file that still sets the removed optional mode stops the server at
+// start, saying what to set instead.
+func TestLoadAuthRefusesTheOptionalMode(t *testing.T) {
+	path := writeYAML(t, "auth:\n  mode: optional\n  issuers:\n  - {name: idp, issuer: https://login.example.com, audiences: [api]}\n")
+
+	_, err := config.LoadAuth(path)
+
+	if err == nil || !strings.Contains(err.Error(), "optional is removed") || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("LoadAuth = %v, want a refusal of mode optional", err)
 	}
 }

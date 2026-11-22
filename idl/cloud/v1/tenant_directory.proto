@@ -15,8 +15,8 @@ message ListTenantsRequest {}
 
 message ListTenantsResponse {
   repeated TenantInfo tenants = 1;
-  // Indicates a creation capability, not permission for every tenant ID.
-  // The caller must hold a TenantAdmin grant for the requested ID.
+  // Whether the caller may create tenants: always true, since the API has
+  // no roles and every accepted caller may create one.
   bool can_create_tenants = 2;
 }
 

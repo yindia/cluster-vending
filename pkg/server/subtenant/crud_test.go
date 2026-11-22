@@ -174,14 +174,15 @@ func TestCreateIdempotencyBindsPayloadAndParent(t *testing.T) {
 func TestTenantAndClusterBoundaries(t *testing.T) {
 	w := newWorld(t, interceptor.Funcs{})
 	created := w.create(t)
-	viewer := auth.WithIdentity(t.Context(), &auth.Identity{Subject: "viewer", Grants: []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}}})
-	if _, err := w.service.GetSubTenant(viewer, &v1.GetSubTenantRequest{TenantId: "acme", ClusterId: clusterID, SubtenantId: created.Id}); err != nil {
+	// No roles: any caller reads, and a tenant with no sub-tenants lists none.
+	caller := auth.WithIdentity(t.Context(), &auth.Identity{Subject: "someone"})
+	if _, err := w.service.GetSubTenant(caller, &v1.GetSubTenantRequest{TenantId: "acme", ClusterId: clusterID, SubtenantId: created.Id}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := w.service.CreateSubTenant(viewer, createRequest())
-	requireCode(t, err, connect.CodePermissionDenied)
-	_, err = w.service.ListSubTenants(viewer, &v1.ListSubTenantsRequest{TenantId: "other"})
-	requireCode(t, err, connect.CodePermissionDenied)
+	if res, err := w.service.ListSubTenants(caller, &v1.ListSubTenantsRequest{TenantId: "other"}); err != nil || len(res.GetSubtenants()) != 0 {
+		t.Fatalf("another tenant's list = %v, %v; want none", res, err)
+	}
+	var err error
 	for _, req := range []*v1.GetSubTenantRequest{{TenantId: "other", ClusterId: clusterID, SubtenantId: created.Id}, {TenantId: "acme", ClusterId: secondClusterID, SubtenantId: created.Id}} {
 		_, err := w.service.GetSubTenant(t.Context(), req)
 		requireCode(t, err, connect.CodeNotFound)

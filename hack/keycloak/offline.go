@@ -47,7 +47,7 @@ func onlyOfflineRoleAddition(previous, next []byte) bool {
 				return false
 			}
 			name, _ := user["username"].(string)
-			if name != "acme-admin" && name != "acme-viewer" {
+			if !isLocalUser(name) {
 				continue
 			}
 			if seen[name] {
@@ -142,7 +142,8 @@ func ensureOfflineAccess(ctx context.Context, client *http.Client, base, passwor
 	if err := call(http.MethodGet, "/roles/offline_access", nil, &role); err != nil || role.ID == "" || role.Name != "offline_access" {
 		return errors.New("built-in offline_access role is unavailable")
 	}
-	for _, username := range []string{"acme-admin", "acme-viewer"} {
+	for _, u := range localUsers {
+		username := u[0]
 		var users []struct {
 			ID       string `json:"id"`
 			Username string `json:"username"`

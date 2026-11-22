@@ -38,9 +38,9 @@ const (
 	dashboardForeignCluster = "0190a000-0000-7000-8000-000000000004"
 )
 
-func dashboardIdentity(t *testing.T, role auth.Role) context.Context {
+func dashboardIdentity(t *testing.T) context.Context {
 	t.Helper()
-	return auth.WithIdentity(t.Context(), &auth.Identity{Subject: "tenant-user", Grants: []auth.Grant{{Role: role, Tenants: []string{"acme"}}}})
+	return auth.WithIdentity(t.Context(), &auth.Identity{Subject: "tenant-user"})
 }
 
 func dashboardWorld(t *testing.T, extra ...client.Object) (*TenantService, client.Client) {
@@ -86,7 +86,7 @@ func dashboardHold(t *testing.T, c client.Client) *cloud.ReleaseHold {
 
 func TestDashboardTenantFreezeLifecycleAndIsolation(t *testing.T) {
 	s, c := dashboardWorld(t)
-	ctx := dashboardIdentity(t, auth.RoleTenantAdmin)
+	ctx := dashboardIdentity(t)
 	foreign := admin.NewService(s.deps)
 	if _, err := foreign.Freeze(t.Context(), &v1.FreezeRequest{Target: &v1.FreezeTarget{Scope: &v1.FreezeTarget_TenantId{TenantId: "foreign-tenant"}}, Reason: "foreign-secret"}); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestDashboardTenantFreezeLifecycleAndIsolation(t *testing.T) {
 	if err != nil || updated.GetStatus().GetFreeze().GetReason() != "updated own reason" {
 		t.Fatalf("update: %v %v", updated, err)
 	}
-	view, err := s.GetFreeze(dashboardIdentity(t, auth.RoleTenantViewer), &v1.TenantGetFreezeRequest{TenantId: "acme"})
+	view, err := s.GetFreeze(dashboardIdentity(t), &v1.TenantGetFreezeRequest{TenantId: "acme"})
 	if err != nil || view.Clusters != 1 || view.Networks != 1 || view.TotalResources != 2 || len(view.Scopes) != 0 || len(view.Exceptions) != 0 {
 		t.Fatalf("tenant read: %v %v", view, err)
 	}
@@ -132,7 +132,7 @@ func TestDashboardOwnedResourceScopes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, _ := dashboardWorld(t)
-			ctx := dashboardIdentity(t, auth.RoleTenantAdmin)
+			ctx := dashboardIdentity(t)
 			out, err := s.Freeze(ctx, &v1.TenantFreezeRequest{TenantId: "acme", Target: target})
 			if err != nil || !proto.Equal(out.GetStatus().GetTarget(), target) {
 				t.Fatalf("freeze: %v %v", out, err)
@@ -149,7 +149,7 @@ func TestDashboardOwnedResourceScopes(t *testing.T) {
 
 func TestDashboardRejectsForeignAndPlatformTargetsWithoutMutation(t *testing.T) {
 	s, c := dashboardWorld(t)
-	ctx := dashboardIdentity(t, auth.RoleTenantAdmin)
+	ctx := dashboardIdentity(t)
 	if _, err := admin.NewService(s.deps).Freeze(t.Context(), &v1.FreezeRequest{Target: &v1.FreezeTarget{Scope: &v1.FreezeTarget_TenantId{TenantId: "foreign-tenant"}}, Reason: "foreign-secret"}); err != nil {
 		t.Fatal(err)
 	}
@@ -177,33 +177,10 @@ func TestDashboardRejectsForeignAndPlatformTargetsWithoutMutation(t *testing.T) 
 			}
 		})
 	}
-	if _, err := s.Freeze(ctx, &v1.TenantFreezeRequest{TenantId: "foreign-tenant"}); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatal(err)
-	}
-	if !protoSpecEqual(before, dashboardHold(t, c)) {
-		t.Fatal("cross-tenant request mutated policy")
-	}
 }
 
 func protoSpecEqual(a, b *cloud.ReleaseHold) bool {
 	return a.ResourceVersion == b.ResourceVersion && reflect.DeepEqual(a.Spec, b.Spec)
-}
-
-func TestDashboardViewerWritesDeniedWithoutMutation(t *testing.T) {
-	s, c := dashboardWorld(t)
-	ctx := dashboardIdentity(t, auth.RoleTenantViewer)
-	if _, err := s.Freeze(ctx, &v1.TenantFreezeRequest{TenantId: "acme"}); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatal(err)
-	}
-	if _, err := s.Unfreeze(ctx, &v1.TenantUnfreezeRequest{TenantId: "acme"}); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Fatal(err)
-	}
-	if _, err := s.GetFreeze(ctx, &v1.TenantGetFreezeRequest{TenantId: "acme"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Get(t.Context(), client.ObjectKey{Name: reconcile.FreezeName}, &cloud.ReleaseHold{}); client.IgnoreNotFound(err) != nil || err == nil {
-		t.Fatalf("viewer wrote hold: %v", err)
-	}
 }
 
 func TestDashboardPlatformFreezeCannotBeBypassed(t *testing.T) {
@@ -213,14 +190,14 @@ func TestDashboardPlatformFreezeCannotBeBypassed(t *testing.T) {
 	}
 	before := dashboardHold(t, c).DeepCopy()
 	for _, target := range []*v1.FreezeTarget{nil, {Scope: &v1.FreezeTarget_NetworkId{NetworkId: dashboardNetwork}}, {Scope: &v1.FreezeTarget_ClusterId{ClusterId: dashboardCluster}}} {
-		if _, err := s.Unfreeze(dashboardIdentity(t, auth.RoleTenantAdmin), &v1.TenantUnfreezeRequest{TenantId: "acme", Target: target}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		if _, err := s.Unfreeze(dashboardIdentity(t), &v1.TenantUnfreezeRequest{TenantId: "acme", Target: target}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 			t.Fatalf("platform bypass: %v", err)
 		}
 	}
 	if !protoSpecEqual(before, dashboardHold(t, c)) {
 		t.Fatal("platform hold changed")
 	}
-	view, err := s.GetFreeze(dashboardIdentity(t, auth.RoleTenantViewer), &v1.TenantGetFreezeRequest{TenantId: "acme"})
+	view, err := s.GetFreeze(dashboardIdentity(t), &v1.TenantGetFreezeRequest{TenantId: "acme"})
 	if err != nil || !view.GetPlatformFrozen() || view.GetMessage() != platformFreezeReadOnly {
 		t.Fatalf("readonly platform view: %v %v", view, err)
 	}
@@ -232,7 +209,7 @@ func TestDashboardPlatformFreezeCannotBeBypassed(t *testing.T) {
 
 func TestDashboardConcurrentPlatformFreezeCannotBeBypassed(t *testing.T) {
 	s, c := dashboardWorld(t)
-	ctx := dashboardIdentity(t, auth.RoleTenantAdmin)
+	ctx := dashboardIdentity(t)
 	if _, err := s.Freeze(ctx, &v1.TenantFreezeRequest{TenantId: "acme"}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +246,7 @@ func TestDashboardRejectsUnknownLegacyMutationFields(t *testing.T) {
 	s, c := dashboardWorld(t)
 	req := &v1.TenantFreezeRequest{TenantId: "acme"}
 	req.ProtoReflect().SetUnknown([]byte{0x30, 0x01}) // former reset_exceptions = true
-	if _, err := s.Freeze(dashboardIdentity(t, auth.RoleTenantAdmin), req); connect.CodeOf(err) != connect.CodeInvalidArgument {
+	if _, err := s.Freeze(dashboardIdentity(t), req); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatal(err)
 	}
 	if err := c.Get(t.Context(), client.ObjectKey{Name: reconcile.FreezeName}, &cloud.ReleaseHold{}); err == nil {

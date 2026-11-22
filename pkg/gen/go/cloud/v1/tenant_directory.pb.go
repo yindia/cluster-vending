@@ -115,8 +115,8 @@ func (*ListTenantsRequest) Descriptor() ([]byte, []int) {
 type ListTenantsResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Tenants []*TenantInfo          `protobuf:"bytes,1,rep,name=tenants,proto3" json:"tenants,omitempty"`
-	// Indicates a creation capability, not permission for every tenant ID.
-	// The caller must hold a TenantAdmin grant for the requested ID.
+	// Whether the caller may create tenants: always true, since the API has
+	// no roles and every accepted caller may create one.
 	CanCreateTenants bool `protobuf:"varint,2,opt,name=can_create_tenants,json=canCreateTenants,proto3" json:"can_create_tenants,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache

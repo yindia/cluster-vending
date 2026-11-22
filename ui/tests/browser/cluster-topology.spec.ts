@@ -73,7 +73,7 @@ async function mockClusterTopology(page: Page, options: MockOptions = {}) {
     calls.push({ method, service, body });
     let response: object;
     switch (method) {
-      case "WhoAmI": response = { subject: "cluster-topology-viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] }; break;
+      case "WhoAmI": response = { subject: "cluster-topology-viewer" }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }], canCreateTenants: false }; break;
       case "GetCluster": {
         if (body.live && options.failLive) { await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "unavailable", message: "Live cluster architecture temporarily unavailable" }) }); return; }

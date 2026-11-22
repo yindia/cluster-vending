@@ -268,10 +268,10 @@ type TenantServiceClient interface {
 	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
 	//   no management role configured (aws-management-role-arn).
 	GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error)
-	// Returns the caller as the server sees it: who its token stands for and
-	// what the server's rules let it do. Any accepted caller may ask. Where
-	// the server does not authenticate (auth.mode none, or optional and no
-	// token sent) the caller is anonymous and may do everything.
+	// Returns the caller as the server sees it: who its token stands for.
+	// Any accepted caller may ask. The API has no roles: an accepted caller
+	// may call every RPC, for every tenant. Where the server does not
+	// authenticate (auth.mode none) the caller is anonymous.
 	WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error)
 }
 
@@ -354,10 +354,10 @@ type TenantServiceHandler interface {
 	//   asks for VerifyCloudAccount. FAILED_PRECONDITION when the server has
 	//   no management role configured (aws-management-role-arn).
 	GetAccountOnboarding(context.Context, *v1.GetAccountOnboardingRequest) (*v1.GetAccountOnboardingResponse, error)
-	// Returns the caller as the server sees it: who its token stands for and
-	// what the server's rules let it do. Any accepted caller may ask. Where
-	// the server does not authenticate (auth.mode none, or optional and no
-	// token sent) the caller is anonymous and may do everything.
+	// Returns the caller as the server sees it: who its token stands for.
+	// Any accepted caller may ask. The API has no roles: an accepted caller
+	// may call every RPC, for every tenant. Where the server does not
+	// authenticate (auth.mode none) the caller is anonymous.
 	WhoAmI(context.Context, *v1.WhoAmIRequest) (*v1.WhoAmIResponse, error)
 }
 

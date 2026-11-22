@@ -2,7 +2,7 @@
 
 import { ResourceActions } from "./resource-actions";
 import { FilterRow } from "./filter-row";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
@@ -28,7 +28,7 @@ export function ClusterActions({ cluster, ...props }: TakeoverProps) {
 }
 
 function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
   const [review, setReview] = useState<ClusterTakeoverReview>();
@@ -40,8 +40,6 @@ function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
   const [kind, setKind] = useState("all");
   const [busy, setBusy] = useState<"read" | "write">();
   const controller = useRef<AbortController | null>(null);
-  const writable = useRef(canWrite);
-  useLayoutEffect(() => { writable.current = canWrite; }, [canWrite]);
   useEffect(() => () => controller.current?.abort(), []);
   const formId = useId();
   const cancelButton = useRef<HTMLButtonElement>(null);
@@ -52,7 +50,7 @@ function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
     setOpen(next);
   }
   async function loadReview() {
-    if (controller.current || !writable.current) return;
+    if (controller.current) return;
     const request = new AbortController();
     controller.current = request;
     setOpen(true); setBusy("read"); setError(""); setReview(undefined); setStep(0); setConfirmation(""); setAcknowledge(false); setSkipPlatform(false); setSearch(""); setKind("all");
@@ -63,7 +61,7 @@ function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
     finally { if (controller.current === request) { controller.current = null; setBusy(undefined); } }
   }
   async function submit() {
-    if (!review || !writable.current || controller.current) return;
+    if (!review || controller.current) return;
     if (step === 0) { setStep(1); return; }
     const request = new AbortController();
     controller.current = request; setBusy("write"); setError("");
@@ -76,7 +74,6 @@ function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
         throw new Error("The cluster or parent network changed. Review the current plan and confirm again.");
       }
       request.signal.throwIfAborted();
-      if (!writable.current) throw new Error("Write access is required to take over a cluster.");
       accepted = (await api.cluster.takeOverCluster(message, { signal: request.signal })).cluster;
       request.signal.throwIfAborted();
       if (!accepted?.id || accepted.id !== cluster.id || accepted.tenantId !== tenantId) throw new Error("The response did not identify the accepted cluster. Refresh its status before retrying.");
@@ -95,13 +92,13 @@ function ClusterTakeover({ cluster, onAccepted, onDelete }: TakeoverProps) {
         { id: "freeze", label: cluster.status?.freeze && !cluster.status.freeze.letThrough ? "Unfreeze cluster" : "Freeze cluster",
           href: `/freeze?scope=cluster&id=${encodeURIComponent(cluster.id)}` },
         ...(cluster.status?.import ? [{ id: "takeover", label: "Take over imported cluster",
-          isDisabled: !canWrite || cluster.status.state !== ClusterState.IMPORTED, onClick: () => { void loadReview(); } }] : []),
+          isDisabled: cluster.status.state !== ClusterState.IMPORTED, onClick: () => { void loadReview(); } }] : []),
         { id: "delete", label: "Delete cluster", variant: "destructive", onClick: onDelete },
       ]} />
     <WizardDialog isOpen={open} onOpenChange={close} title="Take over imported cluster" steps={["Review import plan", "Confirm ownership"]} step={step} busy={busy === "write"} footer={<HStack gap={2} wrap="wrap">
       <Button ref={cancelButton} label="Cancel takeover" isDisabled={busy === "write"} onClick={() => close(false)} />
       {step === 1 && <Button label="Back" isDisabled={!!busy} onClick={() => { setStep(0); setError(""); }} />}
-      <Button label={step === 0 ? "Next" : "Confirm cluster takeover"} form={formId} type="submit" variant="primary" isLoading={!!busy} isDisabled={!!busy || !canWrite || !review || step === 1 && (confirmation !== `take over ${review.cluster.name}` || !!notImported.length && !acknowledge)} />
+      <Button label={step === 0 ? "Next" : "Confirm cluster takeover"} form={formId} type="submit" variant="primary" isLoading={!!busy} isDisabled={!!busy || !review || step === 1 && (confirmation !== `take over ${review.cluster.name}` || !!notImported.length && !acknowledge)} />
     </HStack>}>
       <form id={formId} method="post" noValidate aria-label="Review cluster ownership" onSubmit={event => { event.preventDefault(); void submit(); }}><VStack gap={4}>
         {busy === "read" && <Text role="status">Loading the current cluster import plan and parent network…</Text>}

@@ -45,7 +45,7 @@ type Dialog = { mode: "add" } | { mode: "edit" | "remove"; name: string };
 
 /** The system node group (the platform's only one) is read-only; user groups are added, edited and removed as one reviewed list. */
 export function ClusterNodeGroups({ cluster, onApplied, onRefresh, refreshing }: { cluster: Cluster; onApplied: (message: string) => void; onRefresh: () => void; refreshing: boolean }) {
-  const { api, canWrite, tenantId } = usePlatform();
+  const { api, tenantId } = usePlatform();
   const [dialog, setDialog] = useState<Dialog>();
   // The exact Karpenter objects the controller applies, rendered from the stored spec; they change with the cluster's etag.
   const clusterId = cluster.id, etag = cluster.etag;
@@ -67,20 +67,19 @@ export function ClusterNodeGroups({ cluster, onApplied, onRefresh, refreshing }:
         <Text type="supporting">Karpenter provisions workload nodes for each group of your own. The system group runs Karpenter, the cluster autoscaler and the platform, is autoscaled between its minimum and maximum size, and cannot be changed here.</Text>
       </VStack>
       <HStack gap={2} wrap="wrap" vAlign="center">
-        {canWrite && <Button label="Add node group" variant="primary" onClick={() => setDialog({ mode: "add" })} isDisabled={full} tooltip={full ? `A cluster allows at most ${MAX_NODE_GROUPS} node groups.` : undefined} />}
+        {<Button label="Add node group" variant="primary" onClick={() => setDialog({ mode: "add" })} isDisabled={full} tooltip={full ? `A cluster allows at most ${MAX_NODE_GROUPS} node groups.` : undefined} />}
         <RefreshButton label="Refresh node groups" onClick={() => { onRefresh(); manifests.refresh(); }} isLoading={refreshing || manifests.refreshing} />
       </HStack>
     </HStack>
     {manifests.error && <Banner status="warning" title="YAML is unavailable" description={manifests.error} />}
-    {!canWrite && <Text type="supporting">Read-only access. Tenant administrator permission is required to change node groups.</Text>}
-    <NodeGroupTable clusterId={clusterId} rows={rows} canWrite={canWrite} onEdit={name => setDialog({ mode: "edit", name })} onRemove={name => setDialog({ mode: "remove", name })} />
+    <NodeGroupTable clusterId={clusterId} rows={rows} onEdit={name => setDialog({ mode: "edit", name })} onRemove={name => setDialog({ mode: "remove", name })} />
     {!!rows.length && !specGroups.length && <Text type="supporting">No node groups of your own yet. Add one to run workloads on Karpenter-managed nodes.</Text>}
-    {dialog && canWrite && (dialog.mode === "add" || target) && <NodeGroupDialog key={`${dialog.mode}:${"name" in dialog ? dialog.name : ""}`} cluster={cluster} dialog={dialog} target={target} onClose={() => setDialog(undefined)}
+    {dialog && (dialog.mode === "add" || target) && <NodeGroupDialog key={`${dialog.mode}:${"name" in dialog ? dialog.name : ""}`} cluster={cluster} dialog={dialog} target={target} onClose={() => setDialog(undefined)}
       onApplied={message => { setDialog(undefined); onApplied(message); }} />}
   </VStack>;
 }
 
-function NodeGroupTable({ clusterId, rows, canWrite, onEdit, onRemove }: { clusterId: string; rows: NodeGroupRow[]; canWrite: boolean; onEdit: (name: string) => void; onRemove: (name: string) => void }) {
+function NodeGroupTable({ clusterId, rows, onEdit, onRemove }: { clusterId: string; rows: NodeGroupRow[]; onEdit: (name: string) => void; onRemove: (name: string) => void }) {
   const container = useRef<HTMLElement>(null);
   const [width, setWidth] = useState(0);
   // Optional columns follow the container width, not the viewport.
@@ -111,12 +110,12 @@ function NodeGroupTable({ clusterId, rows, canWrite, onEdit, onRemove }: { clust
       </VStack> },
       { key: "nodes", header: "Nodes", align: "end", width: proportional(0.7, { minWidth: 64 }), renderCell: row => <Text>{row.nodes === undefined ? "—" : row.nodes}</Text> },
       { key: "yaml", header: "YAML", align: "center" as const, width: pixel(120), resizable: false, renderCell: (row: NodeGroupRow) => row.manifest ? <NodeGroupYamlButton manifest={row.manifest} /> : <Text type="supporting" color="secondary">—</Text> },
-      ...(canWrite ? [{ key: "actions", header: "Actions", align: "center" as const, width: pixel(76), resizable: false, renderCell: (row: NodeGroupRow) => row.editable
+      { key: "actions", header: "Actions", align: "center" as const, width: pixel(76), resizable: false, renderCell: (row: NodeGroupRow) => row.editable
         ? <DropdownMenu presentation="adaptive" alignment="end" aria-label="Actions" renderTrigger={props => <Button {...props} label={`Actions for node group ${row.name}`} icon={<Icon icon="moreHorizontal" />} isIconOnly size="sm" variant="ghost" />} items={[
           { id: "edit", label: "Edit", onClick: () => onEdit(row.name) },
           { id: "remove", label: "Remove", variant: "destructive" as const, onClick: () => onRemove(row.name) },
         ]} />
-        : <Text type="supporting" color="secondary">{row.platformManaged ? "Locked" : "—"}</Text> }] : []),
+        : <Text type="supporting" color="secondary">{row.platformManaged ? "Locked" : "—"}</Text> },
     ]} />
   </VStack>;
 }
@@ -135,7 +134,7 @@ function rowIssues(message: string | undefined, rows: FormEntry[], noun: string)
 }
 
 function NodeGroupDialog({ cluster, dialog, target, onClose, onApplied }: { cluster: Cluster; dialog: Dialog; target?: NodeGroupSpec; onClose: () => void; onApplied: (message: string) => void }) {
-  const { api, tenantId, canWrite } = usePlatform();
+  const { api, tenantId } = usePlatform();
   // The cluster as it was when the dialog opened: the etag and list that the reviewed plan is bound to.
   const [baseline] = useState(cluster);
   const loadOptions = useCallback(async (signal: AbortSignal) => nodeGroupAllowlist(await api.cluster.getNodeGroupOptions({ tenantId }, { signal })), [api, tenantId]);
@@ -180,7 +179,7 @@ function NodeGroupDialog({ cluster, dialog, target, onClose, onApplied }: { clus
     return applyNodeGroupChange(baseline.spec?.nodeGroups ?? [], change);
   }
   async function submit(apply: boolean) {
-    if (!canWrite || locked.current) return;
+    if (locked.current) return;
     if (!apply && !removing && step === 0) {
       try { validateNodeGroupStep(form, others, 0, allow); setShowIssues(false); setStep(1); setError(""); }
       catch (cause) { setShowIssues(true); fail(cause); }
@@ -217,7 +216,7 @@ function NodeGroupDialog({ cluster, dialog, target, onClose, onApplied }: { clus
       <Button label="Cancel" variant="secondary" onClick={onClose} isDisabled={busy} />
       {step > 0 && <Button label="Back" variant="secondary" onClick={() => { setStep(step - 1); setError(""); }} isDisabled={busy} />}
       <Button label={nextLabel} type="submit" form={formId} variant={removing && step === reviewStep ? "destructive" : "primary"} isLoading={busy}
-        isDisabled={!canWrite || stale || (step === reviewStep && (!review || !clusterPlanApplicable(review.plan)))} />
+        isDisabled={stale || (step === reviewStep && (!review || !clusterPlanApplicable(review.plan)))} />
     </HStack>}>
     {stale && <Banner status="warning" title="Cluster changed" description="Close this dialog and reopen it to review the latest node groups." />}
     {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><Banner status="error" title="Request failed" description={error} /></VStack>}

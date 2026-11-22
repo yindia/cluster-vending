@@ -1,8 +1,9 @@
-// Package auth is who may call the API: the configuration of the OIDC
-// issuers the server accepts tokens from (config.go), the verification of
-// a bearer token (verify.go), the caller it stands for and what that
-// caller may do (identity.go), and what each RPC needs (access.go). It
-// knows no RPC library; pkg/server/authn applies it to requests.
+// Package auth is who calls the API: the configuration of the OIDC issuers
+// the server accepts tokens from (config.go), the verification of a bearer
+// token (verify.go), and the caller it stands for (identity.go). It is
+// authentication only: an accepted caller may call every RPC, for every
+// tenant; there are no roles. It knows no RPC library; pkg/server/authn
+// applies it to requests.
 package auth
 
 import (
@@ -19,45 +20,26 @@ type Mode string
 
 // Modes.
 const (
-	// ModeNone accepts every request without looking at a token: the API
-	// trusts the tenant a request names. For local testing only.
+	// ModeNone accepts every request without looking at a token. For local
+	// development only: every caller has full access.
 	ModeNone Mode = "none"
-	// ModeOptional verifies a token when one is sent (a bad one is
-	// refused) and lets requests without one through as ModeNone does: the
-	// step between none and required.
-	ModeOptional Mode = "optional"
-	// ModeRequired refuses every request without an accepted token.
+	// ModeRequired refuses every request without a token an issuer of the
+	// configuration signed for this API.
 	ModeRequired Mode = "required"
+
+	// modeOptional is the removed mode between none and required: a file
+	// that still sets it is refused, with what to set instead.
+	modeOptional Mode = "optional"
 )
-
-// Role is what a caller may do.
-type Role string
-
-// Roles.
-const (
-	// RolePlatformAdmin may call everything, for every tenant.
-	RolePlatformAdmin Role = "PlatformAdmin"
-	// RoleTenantAdmin may call every tenant RPC of its tenants.
-	RoleTenantAdmin Role = "TenantAdmin"
-	// RoleTenantViewer may call the RPCs without side effects of its
-	// tenants.
-	RoleTenantViewer Role = "TenantViewer"
-)
-
-// AllTenants in a grant's tenants means every tenant.
-const AllTenants = "*"
 
 // Claims used when an issuer names none.
 const (
 	defaultUsernameClaim = "sub"
-	defaultRolesClaim    = "groups"
 	entraUsernameClaim   = "oid"
-	entraRolesClaim      = "roles"
 )
 
 var (
 	issuerNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	tenantPattern     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$`)
 	guidPattern       = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
@@ -68,9 +50,14 @@ type Config struct {
 	Mode Mode `yaml:"mode"`
 	// Issuers are the OIDC issuers whose tokens are accepted.
 	Issuers []Issuer `yaml:"issuers"`
-	// Rules say what the callers of an issuer may do. Every rule that
-	// matches a caller adds its grant: there is no first match.
-	Rules []Rule `yaml:"rules"`
+
+	// LegacyRules is the removed "rules" key (roles and their grants). It
+	// is read so an older file still loads, and ignored with a warning
+	// (Ignored).
+	LegacyRules any `yaml:"rules,omitempty"`
+	// Ignored are the warnings of the keys that are read and ignored, set
+	// by Resolved: one line each, for the log at start.
+	Ignored []string `yaml:"-"`
 }
 
 // Issuer is one OIDC issuer.
@@ -88,13 +75,11 @@ type Issuer struct {
 	// UsernameClaim is the claim shown as the caller's name. Default "sub"
 	// ("oid" with entra).
 	UsernameClaim string `yaml:"usernameClaim"`
-	// TenantClaim is a claim whose value is the caller's platform tenant:
-	// a tenant rule without tenants grants its role for that tenant.
-	TenantClaim string `yaml:"tenantClaim"`
-	// RolesClaim is the claim rules match their role against: a string or
-	// a list of strings. Default "groups" ("roles", the app roles, with
-	// entra).
-	RolesClaim string `yaml:"rolesClaim"`
+	// LegacyTenantClaim and LegacyRolesClaim are the removed tenantClaim
+	// and rolesClaim keys: read so an older file still loads, and ignored
+	// with a warning (Config.Ignored).
+	LegacyTenantClaim string `yaml:"tenantClaim,omitempty"`
+	LegacyRolesClaim  string `yaml:"rolesClaim,omitempty"`
 
 	// Alternates are further "iss" values accepted for this issuer, each
 	// with where its discovery document is. Set by presets (entra
@@ -122,59 +107,44 @@ type Alternate struct {
 	DiscoveryURL string
 }
 
-// Rule grants a role to the callers it matches.
-type Rule struct {
-	Match Match `yaml:"match"`
-	Grant Grant `yaml:"grant"`
-}
-
-// Match selects callers.
-type Match struct {
-	// Issuer is an Issuer's name.
-	Issuer string `yaml:"issuer"`
-	// Role is a value of the issuer's roles claim. Unset: every caller of
-	// the issuer.
-	Role string `yaml:"role"`
-}
-
-// Grant is a role, for tenants unless it is PlatformAdmin.
-type Grant struct {
-	Role Role `yaml:"role"`
-	// Tenants the role is for; AllTenants ("*") alone for every tenant.
-	// Unset for a tenant role: the tenant in the issuer's tenantClaim.
-	Tenants []string `yaml:"tenants"`
-}
-
 // Resolved returns the configuration with its defaults and presets
 // applied, or every problem it has.
 func (c Config) Resolved() (Config, error) {
-	out := Config{Mode: c.Mode, Rules: slices.Clone(c.Rules)}
+	out := Config{Mode: c.Mode}
 	if out.Mode == "" {
 		out.Mode = ModeNone
 	}
 	var errs []error
-	if !slices.Contains([]Mode{ModeNone, ModeOptional, ModeRequired}, out.Mode) {
-		errs = append(errs, fmt.Errorf("auth.mode must be none, optional or required, got %q", out.Mode))
+	switch out.Mode {
+	case ModeNone, ModeRequired:
+	case modeOptional:
+		errs = append(errs, errors.New("auth.mode optional is removed: set required (every call needs a token), or none for local development"))
+	default:
+		errs = append(errs, fmt.Errorf("auth.mode must be none or required, got %q", out.Mode))
+	}
+	if c.LegacyRules != nil {
+		out.Ignored = append(out.Ignored, "auth.rules is ignored: the API has no roles, every authenticated caller may call every RPC for every tenant")
 	}
 	if out.Mode != ModeNone && len(c.Issuers) == 0 {
 		errs = append(errs, fmt.Errorf("auth.mode %s needs at least one issuer in auth.issuers", out.Mode))
 	}
-	names := map[string]Issuer{}
+	names := map[string]bool{}
 	for i, issuer := range c.Issuers {
 		resolved, problems := issuer.resolved()
 		for _, p := range problems {
 			errs = append(errs, fmt.Errorf("auth.issuers[%d]: %w", i, p))
 		}
-		if _, dup := names[resolved.Name]; dup && resolved.Name != "" {
+		if names[resolved.Name] && resolved.Name != "" {
 			errs = append(errs, fmt.Errorf("auth.issuers[%d]: name %q is used twice", i, resolved.Name))
 		}
-		names[resolved.Name] = resolved
-		out.Issuers = append(out.Issuers, resolved)
-	}
-	for i, rule := range out.Rules {
-		for _, p := range rule.problems(names) {
-			errs = append(errs, fmt.Errorf("auth.rules[%d]: %w", i, p))
+		names[resolved.Name] = true
+		for _, key := range []struct{ name, value string }{{"tenantClaim", issuer.LegacyTenantClaim}, {"rolesClaim", issuer.LegacyRolesClaim}} {
+			if key.value != "" {
+				out.Ignored = append(out.Ignored, fmt.Sprintf("auth.issuers[%d].%s is ignored: the API has no roles or tenant claims", i, key.name))
+			}
 		}
+		resolved.LegacyTenantClaim, resolved.LegacyRolesClaim = "", ""
+		out.Issuers = append(out.Issuers, resolved)
 	}
 	errs = append(errs, duplicateIssuerURLs(out.Issuers)...)
 	if len(errs) > 0 {
@@ -218,16 +188,13 @@ func (i Issuer) resolved() (Issuer, []error) {
 	if !issuerNamePattern.MatchString(i.Name) {
 		errs = append(errs, fmt.Errorf("name %q must be lower-case letters, digits and dashes (at most 63)", i.Name))
 	}
-	usernameClaim, rolesClaim := defaultUsernameClaim, defaultRolesClaim
+	usernameClaim := defaultUsernameClaim
 	if i.Entra != nil {
-		usernameClaim, rolesClaim = entraUsernameClaim, entraRolesClaim
+		usernameClaim = entraUsernameClaim
 		errs = append(errs, out.applyEntra()...)
 	}
 	if out.UsernameClaim == "" {
 		out.UsernameClaim = usernameClaim
-	}
-	if out.RolesClaim == "" {
-		out.RolesClaim = rolesClaim
 	}
 	if err := checkIssuerURL(out.Issuer); err != nil {
 		errs = append(errs, err)
@@ -285,49 +252,4 @@ func checkIssuerURL(raw string) error {
 // isLoopback reports whether host names this machine.
 func isLoopback(host string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
-}
-
-// problems are what is wrong with the rule, given the issuers by name.
-func (r Rule) problems(issuers map[string]Issuer) []error {
-	var errs []error
-	issuer, known := issuers[r.Match.Issuer]
-	if !known || r.Match.Issuer == "" {
-		errs = append(errs, fmt.Errorf("match.issuer %q is not the name of an issuer", r.Match.Issuer))
-	}
-	switch r.Grant.Role {
-	case RolePlatformAdmin:
-		if len(r.Grant.Tenants) > 0 {
-			errs = append(errs, errors.New("grant.tenants must be unset for PlatformAdmin: it is for every tenant"))
-		}
-	case RoleTenantAdmin, RoleTenantViewer:
-		errs = append(errs, tenantProblems(r.Grant.Tenants, known && issuer.TenantClaim != "")...)
-	default:
-		errs = append(errs, fmt.Errorf("grant.role must be %s, %s or %s, got %q",
-			RolePlatformAdmin, RoleTenantAdmin, RoleTenantViewer, r.Grant.Role))
-	}
-	return errs
-}
-
-// tenantProblems checks a tenant role's tenants; fromClaim: the issuer
-// has a tenant claim, so the list may be empty.
-func tenantProblems(tenants []string, fromClaim bool) []error {
-	if len(tenants) == 0 {
-		if fromClaim {
-			return nil
-		}
-		return []error{errors.New("grant.tenants needs the tenants the role is for (\"*\" for all), or the issuer a tenantClaim")}
-	}
-	if slices.Contains(tenants, AllTenants) {
-		if len(tenants) > 1 {
-			return []error{errors.New("grant.tenants: \"*\" stands alone")}
-		}
-		return nil
-	}
-	var errs []error
-	for _, t := range tenants {
-		if !tenantPattern.MatchString(t) {
-			errs = append(errs, fmt.Errorf("grant.tenants: %q is not a tenant ID", t))
-		}
-	}
-	return errs
 }

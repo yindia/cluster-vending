@@ -40,7 +40,7 @@ func run() error {
 	probe := flag.Bool("probe", false, "verify existing API requires authentication")
 	checkPort := flag.Bool("check-keycloak-port", false, "refuse a conflicting listener before creating Keycloak")
 	checkOfflineMigration := flag.Bool("check-offline-migration", false, "verify an existing realm differs only by local offline-access grants")
-	grantOffline := flag.Bool("grant-offline-access", false, "enable offline access for the two local fixture users without resetting the realm")
+	grantOffline := flag.Bool("grant-offline-access", false, "enable offline access for the local users without resetting the realm")
 	flag.Parse()
 	if *checkOfflineMigration {
 		return checkOfflineRoleMigration(*state)
@@ -65,15 +65,33 @@ func run() error {
 	return prepare(*base, *state, *redirect)
 }
 
+// localAuth is the server's auth section for the local realm:
+// authentication only, as everywhere (the API has no roles).
 func localAuth() auth.Config {
 	return auth.Config{
 		Mode:    auth.ModeRequired,
-		Issuers: []auth.Issuer{{Name: "keycloak", Issuer: issuer, Audiences: []string{"cv-api"}, UsernameClaim: "preferred_username", RolesClaim: "groups"}},
-		Rules: []auth.Rule{
-			{Match: auth.Match{Issuer: "keycloak", Role: "tenant-acme-admin"}, Grant: auth.Grant{Role: auth.RoleTenantAdmin, Tenants: []string{"acme"}}},
-			{Match: auth.Match{Issuer: "keycloak", Role: "tenant-acme-viewer"}, Grant: auth.Grant{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}},
-		},
+		Issuers: []auth.Issuer{{Name: "keycloak", Issuer: issuer, Audiences: []string{"cv-api"}, UsernameClaim: "preferred_username"}},
 	}
+}
+
+// secretKeys are the generated credentials of the local realm. The users
+// keep their names, so an existing secrets.env still reads.
+var secretKeys = []string{"KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_UI_CLIENT_SECRET", "KEYCLOAK_CLI_CLIENT_SECRET", "KEYCLOAK_ACME_ADMIN_PASSWORD", "KEYCLOAK_ACME_VIEWER_PASSWORD", "AUTH_SECRET"}
+
+// localUsers are the realm's users and the secrets.env key of each one's
+// password. They are plain users: no groups or roles, since any user who
+// can log in may do everything. The names are kept from the time they
+// stood for roles, so the browser tests and existing secrets still work.
+var localUsers = [][2]string{{"acme-admin", "KEYCLOAK_ACME_ADMIN_PASSWORD"}, {"acme-viewer", "KEYCLOAK_ACME_VIEWER_PASSWORD"}}
+
+// isLocalUser reports whether name is one of localUsers.
+func isLocalUser(name string) bool {
+	for _, u := range localUsers {
+		if u[0] == name {
+			return true
+		}
+	}
+	return false
 }
 
 func prepare(base, state, redirect string) error {
@@ -96,7 +114,7 @@ func prepare(base, state, redirect string) error {
 	}
 	if secrets == nil {
 		secrets = map[string]string{}
-		for _, key := range []string{"KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_UI_CLIENT_SECRET", "KEYCLOAK_CLI_CLIENT_SECRET", "KEYCLOAK_ACME_ADMIN_PASSWORD", "KEYCLOAK_ACME_VIEWER_PASSWORD", "AUTH_SECRET"} {
+		for _, key := range secretKeys {
 			value := make([]byte, 32)
 			if _, err := rand.Read(value); err != nil {
 				return err
@@ -146,9 +164,8 @@ func prepare(base, state, redirect string) error {
 
 func localRealm(secrets map[string]string, redirect string) map[string]any {
 	audience := map[string]any{"name": "cv-api-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "config": map[string]string{"included.custom.audience": "cv-api", "access.token.claim": "true", "id.token.claim": "false"}}
-	groups := map[string]any{"name": "tenant-groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper", "config": map[string]string{"claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"}}
 	client := func(id string, public bool, secret string, redirects []string) map[string]any {
-		c := map[string]any{"clientId": id, "protocol": "openid-connect", "enabled": true, "publicClient": public, "standardFlowEnabled": true, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false, "redirectUris": redirects, "defaultClientScopes": []string{"profile", "email"}, "optionalClientScopes": []string{"offline_access"}, "attributes": map[string]string{"pkce.code.challenge.method": "S256"}, "protocolMappers": []any{audience, groups}}
+		c := map[string]any{"clientId": id, "protocol": "openid-connect", "enabled": true, "publicClient": public, "standardFlowEnabled": true, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false, "redirectUris": redirects, "defaultClientScopes": []string{"profile", "email"}, "optionalClientScopes": []string{"offline_access"}, "attributes": map[string]string{"pkce.code.challenge.method": "S256"}, "protocolMappers": []any{audience}}
 		if !public {
 			c["secret"] = secret
 			c["clientAuthenticatorType"] = "client-secret"
@@ -160,14 +177,17 @@ func localRealm(secrets map[string]string, redirect string) map[string]any {
 		}
 		return c
 	}
-	user := func(name, password, group string) map[string]any {
-		return map[string]any{"username": name, "enabled": true, "emailVerified": true, "email": name + "@localhost.test", "firstName": "Local", "lastName": name, "credentials": []any{map[string]any{"type": "password", "value": password, "temporary": false}}, "groups": []string{group}, "realmRoles": []string{"offline_access"}}
+	user := func(name, password string) map[string]any {
+		return map[string]any{"username": name, "enabled": true, "emailVerified": true, "email": name + "@localhost.test", "firstName": "Local", "lastName": name, "credentials": []any{map[string]any{"type": "password", "value": password, "temporary": false}}, "realmRoles": []string{"offline_access"}}
+	}
+	users := make([]any, 0, len(localUsers))
+	for _, u := range localUsers {
+		users = append(users, user(u[0], secrets[u[1]]))
 	}
 	return map[string]any{
 		"realm": "cluster-vending", "enabled": true, "sslRequired": "none", "registrationAllowed": false, "resetPasswordAllowed": false, "accessTokenLifespan": 300,
-		"groups":  []any{map[string]string{"name": "tenant-acme-admin"}, map[string]string{"name": "tenant-acme-viewer"}},
 		"clients": []any{client("cv-ui", false, secrets["KEYCLOAK_UI_CLIENT_SECRET"], []string{"http://localhost:3000/api/auth/callback/keycloak"}), client("cv-cli", true, "", []string{redirect}), client("cv-cli-confidential", false, secrets["KEYCLOAK_CLI_CLIENT_SECRET"], []string{redirect})},
-		"users":   []any{user("acme-admin", secrets["KEYCLOAK_ACME_ADMIN_PASSWORD"], "tenant-acme-admin"), user("acme-viewer", secrets["KEYCLOAK_ACME_VIEWER_PASSWORD"], "tenant-acme-viewer")},
+		"users":   users,
 	}
 }
 
@@ -194,7 +214,7 @@ func readSecrets(path string) (map[string]string, error) {
 		}
 		out[key] = value
 	}
-	for _, key := range []string{"KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_UI_CLIENT_SECRET", "KEYCLOAK_CLI_CLIENT_SECRET", "KEYCLOAK_ACME_ADMIN_PASSWORD", "KEYCLOAK_ACME_VIEWER_PASSWORD", "AUTH_SECRET"} {
+	for _, key := range secretKeys {
 		if out[key] == "" {
 			return nil, errors.New("incomplete secrets.env; refusing to rotate existing credentials")
 		}

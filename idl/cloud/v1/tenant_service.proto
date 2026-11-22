@@ -119,10 +119,10 @@ service TenantService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Returns the caller as the server sees it: who its token stands for and
-  // what the server's rules let it do. Any accepted caller may ask. Where
-  // the server does not authenticate (auth.mode none, or optional and no
-  // token sent) the caller is anonymous and may do everything.
+  // Returns the caller as the server sees it: who its token stands for.
+  // Any accepted caller may ask. The API has no roles: an accepted caller
+  // may call every RPC, for every tenant. Where the server does not
+  // authenticate (auth.mode none) the caller is anonymous.
   rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -131,7 +131,7 @@ service TenantService {
 message WhoAmIRequest {}
 
 message WhoAmIResponse {
-  // No token was sent and the server let the request through.
+  // The server does not authenticate (auth.mode none).
   bool anonymous = 1;
   // The token's "sub".
   string subject = 2;
@@ -139,29 +139,10 @@ message WhoAmIResponse {
   string username = 3;
   // Name of the issuer in the server's configuration.
   string issuer = 4;
-  // Values of the issuer's roles claim (Microsoft Entra ID: app roles).
-  repeated string roles = 5;
-  // What the server's rules grant the caller. Empty: only the calls open
-  // to every accepted caller.
-  repeated AccessGrant grants = 6;
-}
-
-// AccessRole is what a caller may do.
-enum AccessRole {
-  ACCESS_ROLE_UNSPECIFIED = 0;
-  // Everything, for every tenant.
-  ACCESS_ROLE_PLATFORM_ADMIN = 1;
-  // Every tenant RPC of the grant's tenants.
-  ACCESS_ROLE_TENANT_ADMIN = 2;
-  // The RPCs without side effects of the grant's tenants.
-  ACCESS_ROLE_TENANT_VIEWER = 3;
-}
-
-// AccessGrant is a role and the tenants it is for.
-message AccessGrant {
-  AccessRole role = 1;
-  // Tenant IDs; "*" for every tenant. Empty for ACCESS_ROLE_PLATFORM_ADMIN.
-  repeated string tenants = 2;
+  // Removed with the roles: the issuer's roles claim and the grants the
+  // server's rules gave the caller.
+  reserved 5, 6;
+  reserved "roles", "grants";
 }
 
 message BootstrapTenantRequest {

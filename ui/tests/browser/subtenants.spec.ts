@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 const clusterId = "00000000-0000-4000-8000-000000000003";
 const id = "00000000-0000-4000-8000-000000000004";
 const spec = { name: "payments", displayName: "Payments", namespaceKeys: ["payments"], quota: { namespaceCount: 1, hard: { pods: "10" } }, policyProfile: "restricted-ambient-v1" };
-async function mock(page: Page, options: { existing?: boolean; fail?: boolean; naas?: boolean; viewer?: boolean; foreign?: boolean; deleting?: boolean; protection?: boolean; legacy?: boolean; failProtection?: boolean; duplicate?: boolean; longValues?: boolean } = {}) {
+async function mock(page: Page, options: { existing?: boolean; fail?: boolean; naas?: boolean; foreign?: boolean; deleting?: boolean; protection?: boolean; legacy?: boolean; failProtection?: boolean; duplicate?: boolean; longValues?: boolean } = {}) {
   const calls: { method: string; body: Record<string, unknown> }[] = [], unexpected: string[] = [];
   let current: Record<string, unknown> | undefined = options.existing ? { tenantId: "acme", clusterId, id, spec: { ...spec, ...(options.longValues ? { displayName: "Payments platform with a very long team allocation name for production workloads" } : {}), ...(options.legacy ? { name: "" } : {}), ...(options.protection !== undefined ? { deletionProtection: options.protection } : {}) }, etag: "fresh-etag", generation: "1", status: { state: options.deleting ? "SUB_TENANT_STATE_DELETING" : "SUB_TENANT_STATE_READY", observedGeneration: "1", ...(options.longValues ? { message: "Waiting for Capsule to reconcile namespace policy and resource quota across all workload namespaces. ".repeat(8) } : {}), remoteCapsuleTenant: "remote-team", namespaces: [{ key: "payments", name: "physical-payments", uid: "namespace-uid", templateRevision: "policy-1" }] } } : undefined;
   await page.route("**/api/rpc/**", async (route) => {
@@ -21,7 +21,7 @@ async function mock(page: Page, options: { existing?: boolean; fail?: boolean; n
     const error = async (status: number, code: string, message: string) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ code, message }) });
     let response: object;
     switch (method) {
-      case "WhoAmI": response = options.viewer ? { subject: "viewer", grants: [{ role: "ACCESS_ROLE_TENANT_VIEWER", tenants: ["acme"] }] } : { anonymous: true }; break;
+      case "WhoAmI": response = { anonymous: true }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
       case "GetCluster": response = { cluster: { id: clusterId, tenantId: "acme", name: "production", etag: "cluster-etag", spec: { aws: {}, naas: options.naas !== false, region: "us-west-1", defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } } }, status: { state: "CLUSTER_STATE_RUNNING" } }, asRequested: true }; break;
       case "ListClusterEvents": response = { events: [] }; break;
@@ -112,8 +112,8 @@ test("existing allocations prevent disabling NaaS", async ({ page }) => {
   const api = await mock(page, { existing: true }); await page.goto(`/clusters/${clusterId}`); await page.getByRole("button", { name: "Edit cluster", exact: true }).click(); const d = page.getByRole("dialog", { name: "Edit cluster", exact: true }); await expect(d.getByRole("checkbox", { name: "Namespace as a Service (NaaS)", exact: true })).toBeDisabled(); await expect(d).toContainText("Delete all Sub Tenants, including those still deleting"); expect(api.unexpected).toEqual([]);
 });
 
-test("foreign results fail closed for viewers", async ({ page }) => {
-  const api = await mock(page, { existing: true, foreign: true, viewer: true }); await open(page); await expect(page.getByText("Sub Tenants unavailable", { exact: true })).toBeVisible(); await expect(page.getByRole("button", { name: "Create Sub Tenant", exact: true })).toHaveCount(0); await expect(page.getByRole("table", { name: "Cluster Sub Tenants", exact: true })).toHaveCount(0); expect(api.unexpected).toEqual([]);
+test("foreign results fail closed", async ({ page }) => {
+  const api = await mock(page, { existing: true, foreign: true }); await open(page); await expect(page.getByText("Sub Tenants unavailable", { exact: true })).toBeVisible(); await expect(page.getByRole("button", { name: "Create Sub Tenant", exact: true })).toHaveCount(0); await expect(page.getByRole("table", { name: "Cluster Sub Tenants", exact: true })).toHaveCount(0); expect(api.unexpected).toEqual([]);
 });
 
 test("disabled NaaS exposes no tab and makes no allocation calls", async ({ page }) => {
@@ -135,20 +135,6 @@ test("row actions support keyboard opening, navigation, dismissal and selection"
   await page.keyboard.press("Escape"); await expect(menu).toHaveCount(0); await expect(trigger).toBeFocused();
   await trigger.press("ArrowDown"); await expect(menu.getByRole("menuitem", { name: "View", exact: true })).toBeFocused(); await page.keyboard.press("Enter");
   await expect(page.getByRole("region", { name: "Sub Tenant details", exact: true })).toBeVisible();
-  expect(api.unexpected).toEqual([]);
-});
-
-test("viewer action menus offer View only and never expose mutations", async ({ page }) => {
-  const api = await mock(page, { existing: true, viewer: true }); await open(page);
-  await page.getByRole("button", { name: `Actions for Sub Tenant Payments (${id})`, exact: true }).click();
-  const menu = page.getByRole("menu", { name: "Actions", exact: true });
-  await expect(menu.getByRole("menuitem")).toHaveCount(1);
-  await expect(menu.getByRole("menuitem", { name: "View", exact: true })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: /^(Edit|Delete)$/ })).toHaveCount(0);
-  await menu.getByRole("menuitem", { name: "View", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Sub Tenant details", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create cloud resource" })).toHaveCount(0);
-  expect(api.calls.filter((call) => /^(Create|Update|Delete)SubTenant$/.test(call.method))).toHaveLength(0);
   expect(api.unexpected).toEqual([]);
 });
 

@@ -61,12 +61,12 @@ export function ManagedResourcePreviews(props: Scope & { owner: string; region: 
   const { owner, region, provider, deleting, ownership } = props;
   const ownerLabel = ownership === "platform" ? "Platform" : "Sub Tenant";
   const ownerDescription = ownerLabel + " · " + owner;
-  const { canWrite, tenantId } = usePlatform();
+  const { tenantId } = usePlatform();
   const [inspected, setInspected] = useState<AwsResourcePreview>();
   const { rows, error, append } = usePreviews(props);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
-  const allowCreate = canWrite && provider === "aws" && !deleting && !error;
+  const allowCreate = provider === "aws" && !deleting && !error;
   const heading = ownership === "platform" ? "Platform-owned cloud resources" : "Sub Tenant cloud resources";
   return <VStack as="section" aria-label={heading} gap={4}>
     <HStack hAlign="between" vAlign="center" gap={3} wrap="wrap">

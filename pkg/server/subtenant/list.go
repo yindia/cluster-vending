@@ -24,7 +24,7 @@ type cursor struct {
 }
 
 func (s *Service) ListSubTenants(ctx context.Context, req *v1.ListSubTenantsRequest) (*v1.ListSubTenantsResponse, error) {
-	if err := s.access(ctx, req.GetTenantId(), false, req); err != nil {
+	if err := s.access(req.GetTenantId(), req); err != nil {
 		return nil, err
 	}
 	tenant, err := s.tenant(ctx, req.TenantId, false)

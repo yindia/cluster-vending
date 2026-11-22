@@ -43,7 +43,6 @@ var signingAlgorithms = []string{oidc.RS256, oidc.ES256}
 // startup: the server starts while an issuer is unreachable, and tokens of
 // that issuer are refused until it is back.
 type Verifier struct {
-	rules   []Rule
 	sources map[string]*source // by "iss"
 	client  *http.Client
 	now     func() time.Time
@@ -60,7 +59,7 @@ func WithClock(now func() time.Time) VerifierOption { return func(v *Verifier) {
 
 // NewVerifier is a Verifier of a resolved configuration (Config.Resolved).
 func NewVerifier(cfg Config, opts ...VerifierOption) *Verifier {
-	v := &Verifier{rules: slices.Clone(cfg.Rules), sources: map[string]*source{},
+	v := &Verifier{sources: map[string]*source{},
 		client: &http.Client{Timeout: discoveryTimeout}, now: time.Now}
 	for _, opt := range opts {
 		opt(v)
@@ -126,15 +125,10 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (*Identity, error) {
 
 // identity is the caller a verified token of issuer stands for.
 func (v *Verifier) identity(issuer Issuer, subject string, claims map[string]any) *Identity {
-	id := &Identity{Subject: subject, Issuer: issuer.Name, Roles: claimStrings(claims[issuer.RolesClaim])}
+	id := &Identity{Subject: subject, Issuer: issuer.Name}
 	if id.Username = claimString(claims[issuer.UsernameClaim]); id.Username == "" {
 		id.Username = subject
 	}
-	tenant := ""
-	if issuer.TenantClaim != "" {
-		tenant = claimString(claims[issuer.TenantClaim])
-	}
-	id.Grants = grantsFor(v.rules, issuer, id.Roles, tenant)
 	return id
 }
 
@@ -209,26 +203,4 @@ func unverifiedIssuer(raw string) (string, error) {
 func claimString(v any) string {
 	s, _ := v.(string)
 	return s
-}
-
-// claimStrings is a claim that is a string or a list of strings; other
-// values and other elements are dropped.
-func claimStrings(v any) []string {
-	switch c := v.(type) {
-	case string:
-		if c == "" {
-			return nil
-		}
-		return []string{c}
-	case []any:
-		out := make([]string, 0, len(c))
-		for _, e := range c {
-			if s, ok := e.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
 }

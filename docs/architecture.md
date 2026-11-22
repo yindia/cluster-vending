@@ -159,9 +159,9 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
 
 **Authentication and metrics**
 
-- API authentication with OIDC bearer tokens, off by default. Callers get
-  `PlatformAdmin`, `TenantAdmin` or `TenantViewer` from rules over the token's
-  claims. The CLI has `login`, `logout` and `whoami`.
+- API authentication with OIDC bearer tokens, off by default. Authentication
+  only: there are no roles, and any authenticated user can act on every tenant.
+  The CLI has `login`, `logout` and `whoami`.
 - Prometheus metrics on both processes (RPC metrics on the API; fleet, freeze
   and reconcile metrics on the controller).
 
@@ -217,7 +217,7 @@ Each layer has one job. The import rules were checked with `go list -deps`.
 | `pkg/reconcile/network`, `cluster`, `account`, `deprecations`, `recommendations` | A reconciler for each kind. They are the only code that looks at AWS, besides the access and results readers. | As `pkg/reconcile`. |
 | `pkg/management` | Prepares the management cluster for the two commands: the manager, the store, and (for the controller) the providers, CRDs and AWS lookups. | No RPC library. |
 | `pkg/server/*` | The RPC handlers: validate, read and write rows, map errors to Connect codes. They make no AWS call except reading results. | Everything above. |
-| `pkg/auth`, `pkg/server/authn` | Who may call the API: the `auth` settings, OIDC token verification, rules, and the RPC classification. | No storage. |
+| `pkg/auth`, `pkg/server/authn` | Who calls the API: the `auth` settings, OIDC token verification, and the audit log of writes. No authorization. | No storage. |
 | `pkg/database/repository`, `pkg/database/cloudstore`, `pkg/database/model` | The storage interface, its one implementation on the custom resources, and the row types. | `repository` and `model` import nothing else from the repository. |
 | `pkg/controller/*`, `pkg/convert`, `pkg/owner`, `api/v1alpha1` | The custom resource types, the controllers, the manager, owner references, and the conversion between the typed spec and the contract. | Types import nothing from `pkg/`. |
 | `pkg/results`, `pkg/reconcile/resultsink` | Writes and reads a cluster's results objects in S3, with bounds and ETags. | The S3 client only. |
@@ -1011,62 +1011,50 @@ does not use this protocol is not seen by it.
 
 ### Authentication
 
-The API server can authenticate its callers with OIDC bearer tokens and authorize
-each call by tenant and role. It is off by default: without an `auth` section in
-the settings file, the server takes the `tenant_id` of a request as given.
+The API server authenticates its callers with OIDC bearer tokens. It is
+**authentication only**: there are no roles, rules or grants. Any user whose token
+is accepted can call every RPC, `AdminService` included, for every tenant: read,
+change and delete any tenant's networks and clusters, create tenants, and freeze the
+platform. It is off by default: without an `auth` section in the settings file,
+every caller is anonymous and has the same full access.
 
 **Modes** (`auth.mode`):
 
 | Mode | A request without a token | A request with a token |
 |---|---|---|
-| `none` (default) | Served. The caller is anonymous and may do everything. | Served; the token is not checked. |
-| `optional` | Served, as with `none`. | The token must verify, and the caller's roles are enforced. A bad token is `UNAUTHENTICATED`. |
-| `required` | `UNAUTHENTICATED` (HTTP 401, `WWW-Authenticate: Bearer`). | As `optional`. |
+| `none` (default) | Served. The caller is anonymous. For local development only; the server logs a warning at start. | Served; the token is not checked. |
+| `required` | `UNAUTHENTICATED` (HTTP 401, `WWW-Authenticate: Bearer`). | The token must verify: signature (RS256 or ES256, from the issuer's keys), issuer, one accepted audience and expiry. Otherwise `UNAUTHENTICATED`. |
 
-`/healthz`, `/readyz` and `/metrics` are not RPCs and are never authenticated.
+`optional` is removed: a file that sets it stops the server at start, with a message
+to set `required` (or `none` locally). `/healthz`, `/readyz` and `/metrics` are not
+RPCs and are never authenticated.
 
 `config/server/base` deploys the API with mode `none`: it accepts anonymous callers
 for every tenant, so the Service must be restricted. `config/server/auth` is an opt-in
-deployable example that requires JWTs, with the issuer, audience and group-to-tenant
-grants to edit before use. It holds public verification settings only.
+deployable example that requires tokens, with the issuer and audience to edit before
+use. It holds public verification settings only.
 
 **Issuers** (`auth.issuers`): `name`, `issuer` (the `iss` of the tokens; `https`, or
 `http` for `localhost` only), `audiences` (at least one must be in the token's `aud`),
 `entra.tenantId` (a Microsoft Entra ID preset: issuer
-`https://login.microsoftonline.com/<tenantId>/v2.0`, optional `acceptV1`),
-`usernameClaim` (default `sub`; `oid` with Entra), `rolesClaim` (default `groups`;
-`roles` with Entra), `tenantClaim` (a claim whose value is the caller's tenant).
+`https://login.microsoftonline.com/<tenantId>/v2.0`, optional `acceptV1`), and
+`usernameClaim` (default `sub`; `oid` with Entra), the name shown in logs and `whoami`.
 
-**Rules** (`auth.rules`): `match.issuer`, optional `match.role` (a value of the
-roles claim), `grant.role` (`PlatformAdmin`, `TenantAdmin` or `TenantViewer`) and
-`grant.tenants` (a list of tenant IDs, or `["*"]`). Every matching rule adds its
-grant; there is no first match, and no rule takes access away. A rule with
-`tenantClaim` set on its issuer and no `tenants` grants its role for the tenant named
-in the caller's claim.
+**Removed keys.** `auth.rules`, and `rolesClaim` and `tenantClaim` on an issuer, were
+the roles. A file that still has them loads; each is ignored with one warning at start.
 
-**What each call needs.** The server classifies every RPC from the contract: a
-method marked `NO_SIDE_EFFECTS` is a read, and an RPC whose request has a `tenant_id`
-is checked against that tenant.
-
-| Role | May call |
-|---|---|
-| `PlatformAdmin` | Everything, for every tenant, including `AdminService`. |
-| `TenantAdmin` | Every tenant RPC of its tenants: reads and writes. |
-| `TenantViewer` | The tenant RPCs marked `NO_SIDE_EFFECTS` (get, list, status) of its tenants. |
-
-`AdminService.Freeze` and `Unfreeze`, and the release and channel reads, need
-`PlatformAdmin`. `WhoAmI`, `ListTenants` (filtered to what the caller reads) and the
-component values file are open to any accepted caller. An RPC that is neither
-listed nor carries a `tenant_id` is refused, and a test fails when one is added.
+**Audit.** Every write (an RPC not marked `NO_SIDE_EFFECTS`) and every refused call is
+logged with the caller's subject, username, issuer, the request's tenant and the
+outcome. A token is never logged. `WhoAmI` returns the caller's subject, username and
+issuer.
 
 **Microsoft Entra ID.** Two app registrations, one for the API and one for the CLI.
-With Entra the roles claim is `roles` (the app roles assigned to the user), and the
-rules match on those values. The CLI's `login` uses the device-code flow, or the
-browser flow with PKCE (`--browser`), and keeps the token in a local file
-(`pkg/cli/login`). `logout` removes it.
+Every user Entra issues a token to for the API's audience can call it, so the API's
+app registration should require assignment if only some users may sign in. The CLI's
+`login` uses the device-code flow, or the browser flow with PKCE (`--browser`), and
+keeps the token in a local file (`pkg/cli/login`). `logout` removes it.
 
-**The UI** uses the operator-supplied access token; web OIDC login and refresh are
-not implemented. Backend authorisation is authoritative in any case.
+**The UI** signs in with the same issuer and forwards the user's token to the API.
 
 ### Cluster OIDC
 
@@ -1993,9 +1981,10 @@ What is not verified, or not built. Anything not on this list works as described
   version it asks for, or EKS's default, although `release.yaml` marks one minor as
   `default`.
 - **Sub-tenant access** opens only after a trusted operator's qualification run. There is
-  no tenant-facing switch for it, and the CLI has no sub-tenant commands.
-- **Tenant authorisation is off by default.** With `auth.mode: none` the server takes the
-  `tenant_id` of a request as given.
+  no tenant-facing switch for it.
+- **No authorization.** The API authenticates callers and nothing more: any
+  authenticated user (and, with `auth.mode: none`, any caller) can act on every tenant
+  and on the platform. Who may sign in is decided at the identity provider.
 - **Recommendations** do not model HPA effects: a workload scaled by an HPA spreads its
   load over its replicas, so the per-pod usage is lower than the total.
 - **Policy events** are not a durable audit log: they expire with Kubernetes' retention, and

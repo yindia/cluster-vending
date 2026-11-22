@@ -34,12 +34,11 @@ export interface SubTenantRow extends Record<string, unknown> {
   allocationName: string;
 }
 
-export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onRefresh, onCreate, detailHref, onView, onEdit, onDelete, onDisableProtection }: {
+export function SubTenantsView({ rows, loading, refreshing, error, onRefresh, onCreate, detailHref, onView, onEdit, onDelete, onDisableProtection }: {
   rows: SubTenantRow[];
   loading: boolean;
   refreshing: boolean;
   error: string;
-  canWrite: boolean;
   onRefresh: () => void;
   onCreate: () => void;
   detailHref: (id: string) => string;
@@ -69,11 +68,10 @@ export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onR
   return <VStack ref={container} gap={4} as="section" aria-label="Cluster Sub Tenants" width="100%">
     <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap" width="100%">
       <VStack gap={1}><Heading level={3}>Sub Tenants</Heading><Text type="supporting">Manage team namespaces, quotas and access within this cluster.</Text></VStack>
-      <HStack gap={2} wrap="wrap" vAlign="center">{canWrite && <Button label="Create Sub Tenant" variant="primary" onClick={onCreate} />}<RefreshButton label="Refresh Sub Tenants" onClick={onRefresh} isLoading={refreshing} /></HStack>
+      <HStack gap={2} wrap="wrap" vAlign="center">{<Button label="Create Sub Tenant" variant="primary" onClick={onCreate} />}<RefreshButton label="Refresh Sub Tenants" onClick={onRefresh} isLoading={refreshing} /></HStack>
     </HStack>
     {error && <Banner status="error" title="Sub Tenants unavailable" description={error} />}
     {loading && <Text role="status">Loading all Sub Tenants…</Text>}
-    {!canWrite && <Text type="supporting">Read-only access. Tenant administrator permission is required to create, edit or delete Sub Tenants.</Text>}
     <FilterRow label="Sub Tenant filters">
       <TextInput label="Search Sub Tenants" type="search" value={search} onChange={(value) => { setSearch(value); setPage(1); }} autoComplete="off" hasClear width="min(100%, 24rem)" />
       <Selector label="Sub Tenant kind" value={kind} onChange={(value) => { setKind(value); setPage(1); }} options={[{ value: "all", label: "All kinds" }, { value: "SubTenant", label: "Sub Tenant" }]} />
@@ -90,11 +88,9 @@ export function SubTenantsView({ rows, loading, refreshing, error, canWrite, onR
       ...(width >= 1050 ? [{ key: "message", header: "Message", width: proportional(2, { minWidth: 150 }), renderCell: (row: SubTenantRow) => <Text maxLines={1} hasTruncateTooltip hasCapsize={false}>{row.message || "No message reported"}</Text> }] : []),
       { key: "actions", header: "Actions", align: "center", width: pixel(76), resizable: false, renderCell: (row) => <DropdownMenu presentation="adaptive" alignment="end" aria-label="Actions" renderTrigger={(props) => <Button {...props} label={`Actions for Sub Tenant ${row.name} (${row.id})`} icon={<Icon icon="moreHorizontal" />} isIconOnly size="sm" variant="ghost" />} items={[
         { id: "view", label: "View", onClick: () => onView(row.id) },
-        ...(canWrite ? [
           { id: "edit", label: "Edit", isDisabled: !row.mutable || loading || refreshing || !!error, onClick: () => onEdit(row.id) },
           ...(row.protected ? [{ id: "unprotect", label: "Disable deletion protection", isDisabled: !row.hasEtag || loading || refreshing || !!error, onClick: () => onDisableProtection(row.id) }] : []),
           { id: "delete", label: "Delete", description: row.protected ? "Disable deletion protection before deleting this Sub Tenant." : undefined, variant: "destructive" as const, isDisabled: row.protected || !row.mutable || loading || refreshing || !!error, onClick: () => onDelete(row.id) },
-        ] : []),
       ]} /> },
     ]} />}
     {!loading && !filtered.length && <Text>{rows.length ? "No Sub Tenants match these filters." : error ? "No Sub Tenants can be confirmed. Refresh to retry." : "No Sub Tenants have been created in this cluster."}</Text>}

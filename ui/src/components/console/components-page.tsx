@@ -156,7 +156,7 @@ function ValuesTemplate({ name, onRefreshDefinition }: { name: string; onRefresh
 }
 
 export function ComponentMutationForm({ context, onAccepted }: { context: ComponentMutationContext; onAccepted: (action: ComponentAction, component: Component) => void }) {
-  const { api, canWrite } = usePlatform();
+  const { api } = usePlatform();
   const { definition, current } = context;
   const enabled = !!current?.id;
   const [action, setAction] = useState<ComponentAction>(enabled ? "update" : "enable");
@@ -175,7 +175,7 @@ export function ComponentMutationForm({ context, onAccepted }: { context: Compon
   const valuesRef = useRef<ValuesEditorHandle>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
-  const mutable = canWrite && definition.management === ComponentManagement.TENANT && (!current || current.management === ComponentManagement.TENANT);
+  const mutable = definition.management === ComponentManagement.TENANT && (!current || current.management === ComponentManagement.TENANT);
   if (!mutable) return <Text>This component is read-only.</Text>;
   if (enabled && !current?.etag) return <Text>This component has no etag. Reload current component before editing or disabling.</Text>;
   if (current?.status?.phase === ComponentPhase.DELETING) return <Text>This component is being removed. Refresh inventory to observe deletion.</Text>;
@@ -186,16 +186,16 @@ export function ComponentMutationForm({ context, onAccepted }: { context: Compon
   }
   async function validate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWrite || controller.current) return;
+    if (controller.current) return;
     const request = new AbortController(); controller.current = request;
     setError(""); setValuesError(""); setReview(undefined); setConfirmation(""); setBusy("validate");
     try {
       let result: ComponentReview;
-      if (action === "disable") result = reviewDisableComponent({ ...context, canWrite });
+      if (action === "disable") result = reviewDisableComponent({ ...context });
       else if (action === "enable") {
         requestId.current ??= crypto.randomUUID();
-        result = await reviewEnableComponent(api, { ...context, canWrite }, values, requestId.current, request.signal);
-      } else result = await reviewUpdateComponent(api, { ...context, canWrite }, values, request.signal);
+        result = await reviewEnableComponent(api, { ...context }, values, requestId.current, request.signal);
+      } else result = await reviewUpdateComponent(api, { ...context }, values, request.signal);
       if (!request.signal.aborted) { setReview(result); setStep(1); }
     } catch (failure) {
       if (!request.signal.aborted) {
@@ -208,14 +208,14 @@ export function ComponentMutationForm({ context, onAccepted }: { context: Compon
   }
   async function apply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWrite || !review || controller.current) return;
+    if (!review || controller.current) return;
     if (review.action === "disable" && confirmation !== componentDisablePhrase(context)) {
       setConfirmationError("Type the exact tenant, cluster, component name and ID shown below."); confirmationRef.current?.focus(); return;
     }
     const request = new AbortController(); controller.current = request;
     setBusy("apply"); setError("");
     try {
-      const component = await applyComponentReview(api, { ...context, canWrite }, review, confirmation, request.signal);
+      const component = await applyComponentReview(api, { ...context }, review, confirmation, request.signal);
       if (!request.signal.aborted) {
         setReview(undefined); setConfirmation(""); setOpen(false); setStep(0);
         onAccepted(review.action, component);

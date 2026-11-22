@@ -17,7 +17,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -37,10 +36,9 @@ func (s *Service) reader() client.Reader {
 	return s.deps.Kube
 }
 
-func (s *Service) access(ctx context.Context, tenant string, write bool, req proto.Message) error {
-	if err := auth.FromContext(ctx).Authorize(auth.Access{Scope: auth.ScopeTenant, Write: write}, tenant); err != nil {
-		return service.ToConnect(err)
-	}
+// access checks a request: a valid tenant ID, valid fields, none unknown.
+// It checks no caller: the API has no roles.
+func (s *Service) access(tenant string, req proto.Message) error {
 	if !tenantlife.ValidID(tenant) {
 		return connect.NewError(connect.CodeInvalidArgument, "tenant_id must be a valid tenant DNS label")
 	}

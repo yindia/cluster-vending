@@ -22,7 +22,7 @@ const requestId = "33333333-3333-4333-8333-333333333333";
 const signal = () => new AbortController().signal;
 function context(enabled = false): ComponentMutationContext {
   return {
-    tenantId: "acme", clusterId, canWrite: true,
+    tenantId: "acme", clusterId,
     definition: create(ComponentDefinitionSchema, { name: "policies", configurable: true, management: ComponentManagement.TENANT }),
     current: enabled ? create(ComponentSchema, {
       id: componentId, tenantId: "acme", clusterId, component: "policies", etag: "etag-7",
@@ -160,15 +160,6 @@ test("missing previews, invalid values and absent current etags never yield an a
   const ctx = context(true); ctx.current!.etag = "";
   await assert.rejects(reviewUpdateComponent(api, ctx, "{}", signal()), /ID and etag/);
   assert.throws(() => reviewDisableComponent(ctx), /ID and etag/);
-});
-
-test("tenant write gates cover every action and a revoked grant invalidates apply", async t => {
-  const api = client(t), ctx = { ...context(), canWrite: false };
-  await assert.rejects(reviewEnableComponent(api, ctx, "{}", requestId, signal()), /write permission/);
-  await assert.rejects(reviewUpdateComponent(api, { ...context(true), canWrite: false }, "{}", signal()), /write permission/);
-  assert.throws(() => reviewDisableComponent({ ...context(true), canWrite: false }), /write permission/);
-  const review = reviewDisableComponent(context(true));
-  await assert.rejects(applyComponentReview(api, { ...context(true), canWrite: false }, review, "", signal()), /write permission/);
 });
 
 test("platform and unknown management remain read-only, even for rows without IDs", async t => {

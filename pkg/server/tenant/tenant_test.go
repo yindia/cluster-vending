@@ -20,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
@@ -447,17 +446,6 @@ func TestBootstrapRejectsUnownedNamespace(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
-	}
-}
-
-func TestBootstrapRequiresTenantAdmin(t *testing.T) {
-	for _, grant := range []auth.Grant{{Role: auth.RoleTenantViewer, Tenants: []string{"acme"}}, {Role: auth.RoleTenantAdmin, Tenants: []string{"foreign"}}} {
-		f := newFixture(t, noWrites())
-		ctx := auth.WithIdentity(t.Context(), &auth.Identity{Subject: "caller", Grants: []auth.Grant{grant}})
-		_, err := f.svc.BootstrapTenant(ctx, request("acme", account))
-		if connect.CodeOf(err) != connect.CodePermissionDenied {
-			t.Fatalf("unauthorized bootstrap: %v", err)
-		}
 	}
 }
 

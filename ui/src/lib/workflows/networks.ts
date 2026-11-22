@@ -302,8 +302,7 @@ export interface NetworkTakeoverConfirmation {
   acknowledgeNotImported: boolean;
 }
 
-export function buildTakeOverNetwork(tenantId: string, network: Network, account: CloudAccount | undefined, confirmation: NetworkTakeoverConfirmation, canWrite: boolean): TakeOverNetworkRequest {
-  if (!canWrite) throw new Error("Write access is required to take over a network.");
+export function buildTakeOverNetwork(tenantId: string, network: Network, account: CloudAccount | undefined, confirmation: NetworkTakeoverConfirmation): TakeOverNetworkRequest {
   const blocked = networkTakeoverBlockReason(tenantId, network, account);
   if (blocked) throw new Error(blocked);
   if (confirmation.reviewKey !== networkTakeoverKey(network)) throw new Error("The import plan changed. Review it and confirm ownership again.");

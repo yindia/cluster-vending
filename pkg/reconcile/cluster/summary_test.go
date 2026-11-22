@@ -214,9 +214,9 @@ func TestPodsAreListedOncePerPassInPages(t *testing.T) {
 	require.Equal(t, int64(12000), sys.RequestedCPUMillis)
 }
 
-// Passes within a minute of each other read the pods and write the summary
-// once.
-func TestSummaryIsThrottledToOnceAMinute(t *testing.T) {
+// Passes within five minutes of each other read the pods and write the
+// summary once.
+func TestSummaryIsThrottledToOnceInFiveMinutes(t *testing.T) {
 	setNow(t, summaryAt)
 	podLists := 0
 	funcs := interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -228,10 +228,10 @@ func TestSummaryIsThrottledToOnceAMinute(t *testing.T) {
 	w, row, _ := summaryWorld(t, funcs, summaryNode("n1", "", true, "2", "4Gi"))
 
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
-	setNow(t, summaryAt.Add(20*time.Second))
+	setNow(t, summaryAt.Add(4*time.Minute))
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 	require.Equal(t, 1, podLists)
-	setNow(t, summaryAt.Add(61*time.Second))
+	setNow(t, summaryAt.Add(5*time.Minute+time.Second))
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 	require.Equal(t, 2, podLists)
 }
@@ -249,7 +249,7 @@ func TestFailedPodListKeepsRecordedRequests(t *testing.T) {
 	w, row, _ := summaryWorld(t, funcs, fortyPods()...)
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 	fail = true
-	setNow(t, summaryAt.Add(2*time.Minute))
+	setNow(t, summaryAt.Add(6*time.Minute))
 
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 

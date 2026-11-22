@@ -565,8 +565,25 @@ Out of scope: kustomize only. The text below is kept for the record.
   Crossplane objects (`ClusterSet`), the Helm ProviderConfig included, and not the platform
   components' Helm releases. Phase 5 adds a separate catalog fingerprint per definition (4.7).
 
-The questions below are kept for the record. Questions 1, 2, 3, 4 and 7 are closed by the five
-decisions above; 5, 6, 8, 9 and 10 are open.
+**Decided (2026-11-22):**
+
+- **Promotion of `beta` and `stable` (question 5):** kept as the CEL rule says. A pinned
+  promotion is `promotion: Manual` with `release`; going back to `Automatic` removes `release`.
+  A temporary stop is a `ReleaseHold` or `paused`, not a pin on an `Automatic` channel.
+- **Release names (question 6):** new releases are named `YYYY-MM-<letter>` by hand. Existing
+  `shipped-<hash>` releases keep their names; nothing is renamed.
+- **The `Shipped` field (question 8):** removed from `admin release list`. The proto field
+  (`AdminRelease.shipped`, number 2) is reserved, not reused, and the CLI column goes in phase 3.
+- **Drift without a GitOps tool (question 9):** accepted. `kubectl apply` is supported and gets
+  no drift signal; a hand edit stays until the next apply. The production guide recommends Argo
+  CD or Flux, which report and revert drift. The platform does not require one.
+- **Prune (question 10):** required on the production path. The base sets the label
+  `cloud.cluster-vending.io/catalog: "true"` on every catalog object (`labels` in its
+  kustomization), so `kubectl apply --prune -l cloud.cluster-vending.io/catalog=true` and the
+  GitOps tools' prune remove exactly the catalog objects whose file was deleted. Without prune a
+  deleted file leaves its object in place, and `--check` cannot see that.
+
+Every question below is closed by the decisions above; they are kept for the record.
 
 1. **AMI pins of old releases.** `shippedAMIPins` (`pkg/reconcile/cluster/nodegroups.go`) fills
    in the pins of releases published before `nodeAmiPin` existed, from `release.yaml`. That file

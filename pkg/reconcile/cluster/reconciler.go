@@ -53,7 +53,7 @@ type Reconciler struct {
 
 // New returns the Reconciler.
 func New(d reconcile.Deps) *Reconciler {
-	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}, summary: &nodeRowWrites{}}
+	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}, summary: &nodeRowWrites{every: summaryInterval}}
 }
 
 // Target is everything a cluster is built from: its network, account and

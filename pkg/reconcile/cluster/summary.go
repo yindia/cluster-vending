@@ -23,6 +23,9 @@ import (
 // be read. The pass reads the nodes it already reads and lists the pods once,
 // in pages; it keeps no row.
 const (
+	// summaryInterval is how often a cluster's pods are listed for the summary
+	// (PROP-02 open question 2): at most every 5 minutes, whatever the pass rate.
+	summaryInterval = 5 * time.Minute
 	// summaryPodPages bounds the pod list of one pass: 200 pages of 500.
 	summaryPodPages = 200
 	// summaryWriteTimeout bounds the write, whatever is left of the pass.
@@ -32,7 +35,7 @@ const (
 var podListKind = schema.GroupVersionKind{Version: "v1", Kind: "PodList"}
 
 // summaryDue claims the cluster's turn: false while it was served less than
-// nodeRowsInterval ago (the node rows' throttle interval).
+// summaryInterval ago.
 func (s *Reconciler) summaryDue(id string) bool { return s.summary.claim(id, now()) }
 
 // readPods lists the pods once, with limit and continue, adding each page to

@@ -74,7 +74,7 @@ starts from.
 | P3 | Event history is 30 days, not one hour. | Each changed pass writes `history/violation-events/…`. | Up to 288 history objects a day per cluster. | Events are live only (5.4). No history object. |
 | P4 | Event objects can exceed the object bound. | 16 MiB per object, about 400 bytes per row. | About 40,000 event rows fill the bound. | No S3 object for events. Live view cap of 50,000 rows (5.9). |
 | P5 | S3 write rate. | Nodes, violations and events each write latest and history. | About 10,300 PUTs an hour across 100 clusters. | Only deprecations and recommendations are written (6.4). |
-| P6 | Controller load. | Pods in the node pass for group totals. | About 2,300 more LIST requests an hour across the fleet (6.3). | Kept, for the summary. Accepted cost (open question 2). |
+| P6 | Controller load. | Pods in the node pass for group totals. | At most about 4,600 more LIST requests an hour across the fleet (6.3). | Kept, for the summary, at most every 5 minutes per cluster. Accepted (open question 2). |
 | P7 | API memory. | 16 cached objects, no byte bound. | Up to 256 MiB of decoded results per API replica. | 64 MiB byte bound for the two stored kinds (6.5). |
 | P8 | Browser load. | `collectPages` follows every page. | 50,000 violations are 250 requests before anything is shown. | Server paging for every list (5.10). |
 | P9 | No sort. | No `sort_by` on any RPC. | Users cannot see the most-requested nodes first across pages. | `sort_by` on live views (5.7), in-memory sort for the stored kinds. |
@@ -429,7 +429,7 @@ Estimates from the code's own limits, labelled as such. Each must be measured in
 | Pods | 178,000 (18,000 + 60,000 + 100,000), aggregated, not stored |
 | Stored latest bytes, deprecations and recommendations | about 23 MB (60 × 31 KB + 30 × 260 KB + 10 × 1.3 MB) |
 | Stored history bytes, 30 days, recommendations (upper bound) | about 13 GB (72,000 objects × about 175 KB average, estimate) |
-| Extra controller LIST requests an hour for pods | about 2,300 (1,200 large + 720 medium + 360 small). Accepted (open question 2). |
+| Extra controller LIST requests an hour for pods | at most about 4,600 (2,400 large + 1,440 medium + 720 small: pod pages x 12 an hour, the summary's 5-minute bound). Accepted (open question 2). |
 | Controller policy counts pass | Every 15 minutes instead of 5: a third of today's report reads. Each live view of violations adds one full read of the reports. |
 | Live read requests, if every large cluster is viewed at once | Capped by 8 builds in flight: at most about 16 requests a second across the fleet |
 
@@ -673,27 +673,36 @@ are not implemented yet; they ship with phase 2b.
 
 ## 10. Open questions
 
-1. **Pod request definition.** This proposal uses the scheduler's definition (init containers and overhead
-   included). Confirm, or choose container requests only.
-2. **Pod list in the controller pass.** The node pass now lists pods for the summary: about 26 extra requests an
-   hour for a large cluster (6.3). Confirm the cost, or add a slower cadence for the pods part of the summary.
-3. **Live reader as a Deployment.** This adds one Deployment and one identity per cluster. Confirm that the
-   operational cost is acceptable compared with option A.
-4. **Flow schema for the live identity.** The cluster owner's APF configuration decides whether live LISTs share
-   the `global-default` seats. Decide whether the platform provides a dedicated FlowSchema for the live reader, or
-   leaves it to the cluster.
-5. **Event TTL on EKS.** The window assumes Kubernetes' default event TTL of one hour. Confirm it on the EKS
-   versions in use. A shorter TTL shortens what the live reader can show.
-6. **Scan identity.** The deprecation scan and the recommendation reads use the controller's kubeconfig, including
-   Helm release Secrets. Decide whether that identity should lose Secret read, with Helm storage read through another
-   identity. This is a separate change and is not needed for this proposal.
-7. **Limits.** The caps of 5.9 (5,000 nodes, 50,000 events, 50,000 violations, 15 to 30 seconds per build) are reasoned
-   from the code, not measured. Confirm them after the phase 3 load test.
+All closed (2026-11-22). Kept for the record, with the decision.
+
+1. **Pod request definition.** Decided: the scheduler's definition (init containers and overhead included), as
+   built in phase 2. A pod that sets pod-level `spec.resources` (Kubernetes 1.32 and later) counts those instead of
+   its containers' sum, as the scheduler does; that is a code follow-up of phase 3.
+2. **Pod list in the controller pass.** Decided: accepted, at most once every 5 minutes per cluster, whatever the
+   pass rate (`summaryInterval`, `pkg/reconcile/cluster/summary.go`). The node rows keep their own 1-minute
+   throttle until phase 6 removes them. A large cluster costs at most about 240 pod LIST requests an hour (20 pages
+   x 12), and the fleet at most about 4,600 (6.3).
+3. **Live reader as a Deployment.** Decided: accepted (option D), one replica in v1 (5.5).
+4. **Flow schema for the live identity.** Decided: the platform provides it. With the live RBAC (phase 3) the
+   controller applies, in each workload cluster, a PriorityLevelConfiguration `cluster-vending-live` (limited,
+   `nominalConcurrencyShares` 10, queuing on) and a FlowSchema `cluster-vending-live` matching the group
+   `cluster-vending:live-reader`. Live LISTs then queue in their own level: they neither take the cluster's
+   `global-default` seats nor get starved by them.
+5. **Event TTL on EKS.** Decided: EKS runs the apiserver with the default event TTL of one hour and offers no
+   setting to change it, so the one-hour window of 5.4 matches what the cluster keeps. The window rule does not rely
+   on it either way.
+6. **Scan identity.** Deferred to a separate proposal. Not needed here: the controller's identity is unchanged.
+7. **Limits.** Decided: the caps of 5.9 are the starting values. The phase 3 load test measures them, and the
+   measured values replace them in 5.9 before phase 3 is accepted.
 8. **Summary staleness.** Decided: the node part of the summary is "old" after 15 minutes, and the upgrade readiness
    gates wait (not pass, not fail) on a summary that old or on `Reachable` False (5.2). The policy counts are "old"
    after 30 minutes.
-9. **Violation history.** Violations and events lose their 30-day history in phase 6. Nothing audit-style remains for
-   violations. Confirm that live-only is acceptable, or keep an hourly stored history for violations (a new, small
-   kind).
-10. **Stored history retention and notice wording.** Confirm the 30-day retention of the stored history (about
-    13 GB at the upper bound, 6.3), and the tenant-facing notice and reason split of 5.9.
+9. **Violation history.** Decided: live only, as the user chose ("everything to live"): no stored history of
+   violations or events after phase 6. Until then the interim hourly history of phase 0 keeps being written. An audit
+   trail of violations, if needed later, is a separate proposal.
+10. **Stored history retention and notice wording.** Decided: 30 days for deprecations and recommendations, as
+    today, and the notice and the reason split of 5.9 as written.
+
+**Recommendation sort (5.8).** Decided: `CPU_CHANGE` and `MEMORY_CHANGE` order by the size of the change, up or
+down, largest first (`sort_order` reverses it); rows without a recommendation come last in either order, then by
+namespace and name.

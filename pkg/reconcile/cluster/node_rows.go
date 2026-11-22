@@ -40,8 +40,10 @@ const (
 // nodeRowWrites remembers when each cluster's rows were last written (or
 // tried), so a pass every few seconds writes once a minute.
 type nodeRowWrites struct {
-	mu   sync.Mutex
-	last map[string]time.Time
+	mu sync.Mutex
+	// every is how often a cluster is due; zero is nodeRowsInterval.
+	every time.Duration
+	last  map[string]time.Time
 }
 
 // claim reports whether the cluster's rows are due at at, and if so records
@@ -52,7 +54,11 @@ func (w *nodeRowWrites) claim(id string, at time.Time) bool {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if last, ok := w.last[id]; ok && at.Sub(last) < nodeRowsInterval {
+	every := w.every
+	if every == 0 {
+		every = nodeRowsInterval
+	}
+	if last, ok := w.last[id]; ok && at.Sub(last) < every {
 		return false
 	}
 	if w.last == nil {

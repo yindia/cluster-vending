@@ -9,8 +9,9 @@
 # the CLI derives it from the request, so creating the same file again returns
 # the same SubTenant. To edit, add metadata.id and run subtenant update -f.
 #
-# Creation stores desired state. Workload provisioning remains pending until
-# the workload controller is implemented; this file applies no resources itself.
+# The controller creates one Capsule Tenant on the cluster; Capsule creates the
+# namespaces, quota and policies. `subtenant get` shows them as they appear.
+# Deleting a SubTenant never deletes user data: non-empty namespaces block it.
 apiVersion: cluster-vending.io/v1
 kind: SubTenant
 metadata:
@@ -45,13 +46,13 @@ spec:
       secrets: "40"
       # Other supported quota keys: limits.cpu, configmaps.
       # Values are nonnegative Kubernetes quantities; object counts are integral.
-  # Omitted/empty access grants no developer access. Nonempty bindings require
-  # a trusted identity resolver, which is not implemented yet; leave commented.
-  # Raw OIDC groups, Kubernetes subjects and arbitrary roles are not accepted.
+  # Omitted/empty access grants no developer access. Groups are exact values
+  # of the cluster's OIDC groups claim (the cluster needs OIDC configured).
+  # Access opens only once the cluster's runtime qualification is current
+  # (PROP-05); until then the SubTenant is Ready with AccessReady false.
   # access:
-  #   bindings:
-  #     - identityRef: payments-developers
-  #       roleProfile: workload-editor
+  #   adminGroups: [payments-admins]
+  #   viewerGroups: [payments-readers]
 # Parent cluster/tenant references and physical namespace names are assigned by
 # the platform. Do not supply status, generation, etag, credentials, or UID refs.
 # Disabling NaaS or deleting the cluster is blocked while SubTenants remain.

@@ -14,6 +14,7 @@ import (
 	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -134,6 +135,67 @@ func ObserveTenantNamespaces(ctx context.Context, c client.Client, remote *unstr
 	if err := c.List(ctx, list); err != nil {
 		return nil, nil, err
 	}
+	return observeNamespaces(ctx, c, remote, sub, b, list.Items)
+}
+
+// ObserveSelectedNamespaces is ObserveTenantNamespaces for the steady-state
+// pass (PROP-05 6.3): it reads only the namespaces labelled for this Capsule
+// Tenant or this sub-tenant, plus, by name, each allocated key and each
+// namespace the status already records, instead of every namespace of the
+// cluster. A namespace that matches only by name prefix is not seen here;
+// deletion keeps the complete scan (PreflightNamespaceCleanup).
+func ObserveSelectedNamespaces(ctx context.Context, c client.Client, remote *unstructured.Unstructured, sub *cloud.SubTenant, b *Bootstrap) ([]cloud.SubTenantNamespaceStatus, []string, error) {
+	items, err := selectedNamespaces(ctx, c, sub)
+	if err != nil {
+		return nil, nil, err
+	}
+	return observeNamespaces(ctx, c, remote, sub, b, items)
+}
+
+func selectedNamespaces(ctx context.Context, c client.Client, sub *cloud.SubTenant) ([]corev1.Namespace, error) {
+	name, err := RemoteTenantName(sub)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []corev1.Namespace
+	for _, selector := range []client.MatchingLabels{{"capsule.clastix.io/tenant": name}, {LabelSubTenantID: sub.Name}} {
+		list := &corev1.NamespaceList{}
+		if err := c.List(ctx, list, selector); err != nil {
+			return nil, err
+		}
+		for _, ns := range list.Items {
+			if !seen[ns.Name] {
+				seen[ns.Name] = true
+				out = append(out, ns)
+			}
+		}
+	}
+	var named []string
+	for _, key := range sub.Spec.NamespaceKeys {
+		named = append(named, name+"-"+string(key))
+	}
+	for _, recorded := range sub.Status.Namespaces {
+		named = append(named, recorded.Name)
+	}
+	for _, nsName := range named {
+		if nsName == "" || seen[nsName] {
+			continue
+		}
+		seen[nsName] = true
+		ns := &corev1.Namespace{}
+		if err := c.Get(ctx, client.ObjectKey{Name: nsName}, ns); apierrors.IsNotFound(err) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out = append(out, *ns)
+	}
+	slices.SortFunc(out, func(a, b corev1.Namespace) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+func observeNamespaces(ctx context.Context, c client.Client, remote *unstructured.Unstructured, sub *cloud.SubTenant, b *Bootstrap, items []corev1.Namespace) ([]cloud.SubTenantNamespaceStatus, []string, error) {
 	name, err := RemoteTenantName(sub)
 	if err != nil {
 		return nil, nil, err
@@ -145,7 +207,7 @@ func ObserveTenantNamespaces(ctx context.Context, c client.Client, remote *unstr
 	var inventory []cloud.SubTenantNamespaceStatus
 	var blockers []string
 	found := map[string]bool{}
-	for _, ns := range list.Items {
+	for _, ns := range items {
 		owned := false
 		for _, owner := range ns.OwnerReferences {
 			if owner.APIVersion == TenantGVK.GroupVersion().String() && owner.Kind == "Tenant" && owner.Name == name && uid != "" && string(owner.UID) == uid {

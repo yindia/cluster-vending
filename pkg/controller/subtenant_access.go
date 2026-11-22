@@ -72,41 +72,42 @@ func renderSubTenantAccess(obj *cloud.SubTenant, parent *cloud.Cluster, revision
 
 // reconcileSubTenantAccess never equates static baseline observation with runtime
 // qualification. Only the protected operator attestation can authorize opening.
-func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj *cloud.SubTenant, parent *cloud.Cluster, st *cloud.SubTenantStatus, guard *subTenantAccessGuard, bootstrap *naas.Bootstrap, access *naas.ResolvedAccess, spec *cloudv1.ClusterSpec, accessErr error) (string, string) {
+func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj *cloud.SubTenant, parent *cloud.Cluster, st *cloud.SubTenantStatus, guard *subTenantAccessGuard, bootstrap *naas.Bootstrap, access *naas.ResolvedAccess, spec *cloudv1.ClusterSpec, accessErr error) (string, string, time.Time) {
 	if accessErr != nil {
 		subTenantAccessCondition(st, obj.Generation, "OIDCReady", false, "OIDCPending", accessErr.Error())
 		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "OIDCPending", "Current EKS OIDC mapping is required before qualification")
 		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "OIDCPending", accessErr.Error())
-		return "OIDCPending", "Namespace allocation provisioned; group access is waiting for EKS OIDC configuration"
+		return "OIDCPending", "Namespace allocation provisioned; group access is waiting for EKS OIDC configuration", time.Time{}
 	}
 	if len(access.Bindings) == 0 {
 		subTenantAccessCondition(st, obj.Generation, "OIDCReady", false, "NoGroupsRequested", "OIDC group access was not requested")
 		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "NoGroupsRequested", "Human access qualification was not requested")
 		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "NoGroupsRequested", "Namespace allocation is provisioned; no human access groups were requested")
-		return "Provisioned", "Namespace allocation provisioned; no human access groups were requested"
+		return "Provisioned", "Namespace allocation provisioned; no human access groups were requested", time.Time{}
 	}
 	associationUID, err := naas.ObserveAccessOIDC(ctx, r.deps.Direct, parent, spec)
 	if err != nil {
 		subTenantAccessCondition(st, obj.Generation, "OIDCReady", false, "OIDCAssociationPending", err.Error())
 		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "OIDCAssociationPending", "Current observed EKS OIDC mapping is required before qualification")
 		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "OIDCAssociationPending", err.Error())
-		return "OIDCAssociationPending", "Namespace allocation provisioned; waiting for the current ACTIVE EKS OIDC association"
+		return "OIDCAssociationPending", "Namespace allocation provisioned; waiting for the current ACTIVE EKS OIDC association", time.Time{}
 	}
 	subTenantAccessCondition(st, obj.Generation, "OIDCReady", true, "OIDCAssociationObserved", "Ready, Synced, ACTIVE EKS association matches the current cluster and OIDC mapping")
 	binding, err := naas.BindAccessQualification(obj, parent, guard.remote, st.Namespaces, bootstrap.Revision(), access, associationUID)
+	var expires time.Time
 	if err == nil {
-		err = naas.VerifyAccessQualification(ctx, guard.workload, binding, time.Now())
+		expires, err = naas.VerifyAccessQualification(ctx, guard.workload, binding, time.Now())
 	}
 	if err != nil {
 		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "QualificationRequired", err.Error())
 		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "QualificationRequired", err.Error())
-		return "QualificationRequired", "Namespace allocation provisioned; current trusted runtime qualification is required before group access"
+		return "QualificationRequired", "Namespace allocation provisioned; current trusted runtime qualification is required before group access", time.Time{}
 	}
 	subTenantAccessCondition(st, obj.Generation, "AccessQualified", true, "QualificationVerified", "Protected, unexpired operator qualification matches current identities and revisions")
 	bindingsErr := naas.ObserveAccessBindings(ctx, guard.workload, obj, guard.remote, access)
 	if bindingsErr != nil && !errors.Is(bindingsErr, naas.ErrAccessBindingsPending) {
 		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "AccessBindingMismatch", bindingsErr.Error())
-		return "AccessBindingMismatch", "Namespace allocation provisioned; unexpected namespace RBAC prevents access"
+		return "AccessBindingMismatch", "Namespace allocation provisioned; unexpected namespace RBAC prevents access", time.Time{}
 	}
 	if guard.remote.GetLabels()[naas.LabelAccessReady] != "true" {
 		next := guard.remote.DeepCopy()
@@ -115,7 +116,7 @@ func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj 
 		next.SetLabels(labels)
 		if err := guard.workload.Update(ctx, next); err != nil {
 			subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "AccessGrantPending", "Qualified access gate update was not confirmed")
-			return "AccessGrantPending", "Namespace allocation provisioned; qualified group access update is pending"
+			return "AccessGrantPending", "Namespace allocation provisioned; qualified group access update is pending", time.Time{}
 		}
 		guard.remote = next
 		bindingsErr = naas.ErrAccessBindingsPending
@@ -123,8 +124,8 @@ func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj 
 	guard.keep = true
 	if bindingsErr != nil {
 		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "AccessBindingsPending", bindingsErr.Error())
-		return "AccessBindingsPending", "Namespace allocation provisioned and qualified; waiting for Capsule namespace access bindings"
+		return "AccessBindingsPending", "Namespace allocation provisioned and qualified; waiting for Capsule namespace access bindings", expires
 	}
 	subTenantAccessCondition(st, obj.Generation, "AccessReady", true, "AccessBindingsObserved", "Qualified namespace-only group bindings and namespace readiness were freshly observed")
-	return "AccessReady", fmt.Sprintf("Namespace allocation provisioned; %d qualified group bindings are ready in every allocated namespace", len(access.Bindings))
+	return "AccessReady", fmt.Sprintf("Namespace allocation provisioned; %d qualified group bindings are ready in every allocated namespace", len(access.Bindings)), expires
 }

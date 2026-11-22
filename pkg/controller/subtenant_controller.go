@@ -34,9 +34,14 @@ import (
 // SubTenantReconciler provisions only its owned Capsule Tenant. Shared Capsule
 // resources own namespace/policy generation; guarded offboarding may delete an
 // owned empty Namespace, but never directly deletes child resources.
-type SubTenantReconciler struct{ deps Deps }
+type SubTenantReconciler struct {
+	deps Deps
+	pace *subTenantPace
+}
 
-func NewSubTenantReconciler(d Deps) *SubTenantReconciler { return &SubTenantReconciler{deps: d} }
+func NewSubTenantReconciler(d Deps) *SubTenantReconciler {
+	return &SubTenantReconciler{deps: d, pace: newSubTenantPace()}
+}
 
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=subtenants,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=cloud.cluster-vending.io,resources=subtenants/status,verbs=get;update;patch
@@ -49,8 +54,16 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	defer leave()
 	obj := &cloud.SubTenant{}
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.pace.forget(req.String())
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	release, ok := r.pace.acquire(obj.Spec.ClusterRef.ID)
+	if !ok {
+		return ctrl.Result{RequeueAfter: subTenantBusyDelay}, nil
+	}
+	defer release()
 	st := obj.DeepCopy().Status
 	subTenantAccessCondition(&st, obj.Generation, "ProvisioningReady", false, "Reconciling", "Current Tenant and namespace baselines have not yet been verified")
 	subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, "Reconciling", "Current access prerequisites have not yet been verified")
@@ -120,7 +133,7 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, reason, message+"; runtime availability: "+err.Error(), failed)
 		}
 	}
-	bootstrap, err := naas.VerifyTenantBootstrap(ctx, workload)
+	bootstrap, err := r.verifiedBootstrap(ctx, workload, string(parent.UID))
 	if err != nil {
 		st.TemplateRevision = ""
 		message := fmt.Sprintf("Waiting for the Capsule bootstrap installation on cluster %s: %s. Provisioning will resume automatically when prerequisites are ready", parent.Name, err)
@@ -174,7 +187,7 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	st.RemoteCapsuleTenantUID = string(remote.GetUID())
 	st.TemplateRevision = bootstrap.Revision()
 	st.ObservedGeneration = obj.Generation
-	inventory, _, err := naas.ObserveTenantNamespaces(ctx, workload, remote, obj, bootstrap)
+	inventory, _, err := naas.ObserveSelectedNamespaces(ctx, workload, remote, obj, bootstrap)
 	if err != nil {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateProvisioning, "NamespaceObservationUnavailable", "Cannot read generated namespaces; last observations are retained and access remains closed", true)
 	}
@@ -187,8 +200,10 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	if subTenantProvisioned(obj, remote, inventory) {
 		subTenantAccessCondition(&st, obj.Generation, "ProvisioningReady", true, "Provisioned", "Current Capsule Tenant Ready and all allocated namespace baselines were observed")
-		reason, message := r.reconcileSubTenantAccess(ctx, obj, parent, &st, accessGuard, bootstrap, access, clusterSpec, accessErr)
-		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateReady, reason, message, false)
+		reason, message, expires := r.reconcileSubTenantAccess(ctx, obj, parent, &st, accessGuard, bootstrap, access, clusterSpec, accessErr)
+		result, err := r.subTenantReport(ctx, obj, st, cloud.SubTenantStateReady, reason, message, false)
+		result.RequeueAfter = untilExpiry(result.RequeueAfter, expires, time.Now())
+		return result, err
 	}
 	return r.subTenantReport(ctx, obj, st, cloud.SubTenantStateProvisioning, "BaselinePending", fmt.Sprintf("Waiting for current Capsule Tenant Ready and namespace baselines (%d/%d observed)", ready, len(obj.Spec.NamespaceKeys)), false)
 }
@@ -302,6 +317,7 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 			meta.SetStatusCondition(&ns.Conditions, condition)
 		}
 	}
+	wrote := false
 	changed := obj.Status.State != state || obj.Status.Message != message || meta.FindStatusCondition(obj.Status.Conditions, "Ready") == nil || meta.FindStatusCondition(obj.Status.Conditions, "Ready").Reason != reason
 	if !equality.Semantic.DeepEqual(obj.Status, st) {
 		before := obj.DeepCopy()
@@ -309,6 +325,7 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 		if err := r.deps.Direct.Status().Patch(ctx, obj, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
+		wrote = true
 		if changed {
 			eventType := platform.EventNormal
 			if warning {
@@ -317,7 +334,27 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 			r.deps.Emit(ctx, platform.Object{Kind: platform.KindSubTenant, Namespace: obj.Namespace, Name: obj.Name}, eventType, reason, message)
 		}
 	}
-	return ctrl.Result{RequeueAfter: pendingDelay}, nil
+	if state == cloud.SubTenantStatePending || state == cloud.SubTenantStateProvisioning {
+		r.pace.forgetBootstrap(obj.Spec.ClusterRef.UID)
+	}
+	return ctrl.Result{RequeueAfter: r.pace.delay(client.ObjectKeyFromObject(obj).String(), state, reason, wrote)}, nil
+}
+
+// verifiedBootstrap is the cluster's shared Capsule installation, read in full
+// at most every subTenantBootstrapTTL for all of its sub-tenants (PROP-05
+// 6.3). A sub-tenant pass that does not settle forgets it, so the next pass
+// reads it again.
+func (r *SubTenantReconciler) verifiedBootstrap(ctx context.Context, workload client.Client, cluster string) (*naas.Bootstrap, error) {
+	now := time.Now()
+	if b := r.pace.cachedBootstrap(cluster, now); b != nil {
+		return b, nil
+	}
+	b, err := naas.VerifyTenantBootstrap(ctx, workload)
+	if err != nil {
+		return nil, err
+	}
+	r.pace.rememberBootstrap(cluster, b, now)
+	return b, nil
 }
 
 func (r *SubTenantReconciler) SetupWithManager(mgr ctrl.Manager) error {

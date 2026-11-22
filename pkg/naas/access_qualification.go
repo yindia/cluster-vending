@@ -83,58 +83,59 @@ func BindAccessQualification(sub *cloud.SubTenant, parent *cloud.Cluster, remote
 // VerifyAccessQualification reads only the protected workload namespace. Fixed
 // SubTenant roles never grant permissions in this namespace. A platform admin
 // or narrowly authorized qualifier writes this record after actual tests.
-// Expiry revocation is reconciliation-bound, not a Kubernetes RBAC hard TTL.
-func VerifyAccessQualification(ctx context.Context, workload client.Reader, expected QualificationBinding, now time.Time) error {
+// Expiry revocation is reconciliation-bound, not a Kubernetes RBAC hard TTL:
+// the expiry is returned so the caller looks again no later than then.
+func VerifyAccessQualification(ctx context.Context, workload client.Reader, expected QualificationBinding, now time.Time) (time.Time, error) {
 	if expected.AllocationUID == "" {
-		return fmt.Errorf("qualification allocation identity is missing")
+		return time.Time{}, fmt.Errorf("qualification allocation identity is missing")
 	}
 	namespace := &corev1.Namespace{}
 	if err := workload.Get(ctx, client.ObjectKey{Name: QualificationNamespace}, namespace); err != nil {
-		return fmt.Errorf("protected qualification namespace is unavailable: %w", err)
+		return time.Time{}, fmt.Errorf("protected qualification namespace is unavailable: %w", err)
 	}
 	if namespace.UID == "" || !namespace.DeletionTimestamp.IsZero() || namespace.Labels["capsule.clastix.io/tenant"] != "" || namespace.Labels[LabelSubTenantID] != "" {
-		return fmt.Errorf("qualification namespace must be an active platform namespace outside Capsule tenant ownership")
+		return time.Time{}, fmt.Errorf("qualification namespace must be an active platform namespace outside Capsule tenant ownership")
 	}
 	for _, owner := range namespace.OwnerReferences {
 		if owner.Kind == "Tenant" && owner.APIVersion == TenantGVK.GroupVersion().String() {
-			return fmt.Errorf("qualification namespace must not be owned by a Capsule Tenant")
+			return time.Time{}, fmt.Errorf("qualification namespace must not be owned by a Capsule Tenant")
 		}
 	}
 	cm := &corev1.ConfigMap{}
 	if err := workload.Get(ctx, client.ObjectKey{Namespace: QualificationNamespace, Name: QualificationName(expected.AllocationUID)}, cm); err != nil {
-		return fmt.Errorf("read protected runtime qualification: %w", err)
+		return time.Time{}, fmt.Errorf("read protected runtime qualification: %w", err)
 	}
 	raw := cm.Data[QualificationKey]
 	if len(raw) == 0 || len(raw) > 64*1024 || !cm.DeletionTimestamp.IsZero() {
-		return fmt.Errorf("runtime qualification is missing, oversized, or being revoked")
+		return time.Time{}, fmt.Errorf("runtime qualification is missing, oversized, or being revoked")
 	}
 	var qualification AccessQualification
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&qualification); err != nil {
-		return fmt.Errorf("runtime qualification is invalid: %w", err)
+		return time.Time{}, fmt.Errorf("runtime qualification is invalid: %w", err)
 	}
 	if decoder.Decode(new(any)) != io.EOF {
-		return fmt.Errorf("runtime qualification has trailing content")
+		return time.Time{}, fmt.Errorf("runtime qualification has trailing content")
 	}
 	if qualification.Version != "v1" || !reflect.DeepEqual(qualification.Binding, expected) {
-		return fmt.Errorf("runtime qualification does not match current identities, intent, templates and OIDC")
+		return time.Time{}, fmt.Errorf("runtime qualification does not match current identities, intent, templates and OIDC")
 	}
 	if qualification.IssuedAt.IsZero() || qualification.IssuedAt.After(now.Add(time.Minute)) || !qualification.ExpiresAt.After(now) ||
 		!qualification.ExpiresAt.After(qualification.IssuedAt) || qualification.ExpiresAt.Sub(qualification.IssuedAt) > time.Hour {
-		return fmt.Errorf("runtime qualification is expired or has an invalid validity period (maximum one hour)")
+		return time.Time{}, fmt.Errorf("runtime qualification is expired or has an invalid validity period (maximum one hour)")
 	}
 	if strings.TrimSpace(qualification.Evidence) == "" || len(qualification.Evidence) > 2048 {
-		return fmt.Errorf("runtime qualification requires a bounded evidence reference")
+		return time.Time{}, fmt.Errorf("runtime qualification requires a bounded evidence reference")
 	}
 	checks := RequiredQualificationChecks()
 	if len(qualification.Checks) != len(checks) {
-		return fmt.Errorf("runtime qualification requires the complete approved test suite")
+		return time.Time{}, fmt.Errorf("runtime qualification requires the complete approved test suite")
 	}
 	for _, check := range checks {
 		if !qualification.Checks[check] {
-			return fmt.Errorf("runtime qualification check %s has not passed", check)
+			return time.Time{}, fmt.Errorf("runtime qualification check %s has not passed", check)
 		}
 	}
-	return nil
+	return qualification.ExpiresAt, nil
 }

@@ -82,7 +82,7 @@ func TestAccessQualificationProtectedCurrentBoundAndExpiring(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, cm).Build()
-			if err := VerifyAccessQualification(t.Context(), c, binding, time.Now()); (err == nil) != test.ok {
+			if _, err := VerifyAccessQualification(t.Context(), c, binding, time.Now()); (err == nil) != test.ok {
 				t.Fatalf("ok=%t err=%v", test.ok, err)
 			}
 		})
@@ -99,7 +99,7 @@ func TestAccessQualificationRejectsMalformedAndUntrustedPayloads(t *testing.T) {
 		}
 		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: QualificationName(binding.AllocationUID), Namespace: QualificationNamespace}, Data: map[string]string{QualificationKey: payload}}
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: QualificationNamespace, UID: "protected"}}, cm).Build()
-		if err := VerifyAccessQualification(t.Context(), c, binding, time.Now()); err == nil {
+		if _, err := VerifyAccessQualification(t.Context(), c, binding, time.Now()); err == nil {
 			t.Fatal("accepted invalid qualification")
 		}
 	}

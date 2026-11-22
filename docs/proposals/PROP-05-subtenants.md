@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Proposed |
+| Status | Accepted; phase 0 implemented |
 | Author | `<author>` |
 | Date | 2026-11-22 |
 | Reviewers | `<reviewers>` |
@@ -195,7 +195,7 @@ bound).
 |---|---|---|
 | Reconciles a second, fleet | 2,200 / 20 s = about 110 | About 4 (2,200 / 600 s) at rest, plus one per change |
 | Workload requests per pass | about 20: Tenant get, 16 bootstrap gets, provisioner get, a list of all namespaces | about 3: Tenant get and a namespace list filtered by `capsule.clastix.io/tenant=<name>`. The bootstrap check runs once per cluster per revision (or every 10 minutes), not per sub-tenant. |
-| Requests a second against one large cluster | 100 / 20 s x 20 = about 100, plus 5 full namespace lists a second | about 0.5 at rest (100 / 600 s x 3) |
+| Requests a second against one large cluster | 100 / 20 s x 20 = about 100, plus 5 full namespace lists a second | about 2.7 at rest, measured (100 / 600 s x 16, see phase 0) |
 | Bytes per namespace list, large cluster | about 1 MB (400 namespaces), 5 times a second | about 6 KB (3 namespaces) |
 
 ### 5.3 Usage collection (6.5)
@@ -469,8 +469,15 @@ Each phase ships alone and leaves the system consistent.
 
 - 6.3 (requeue by state, filtered namespace list, bootstrap cache, per-cluster concurrency); 6.10 (stale
   example note).
-- **Accepted when**: a fixture of 100 Ready sub-tenants on one cluster makes at most 1 workload request a
-  second at rest, against about 100 before. A changed sub-tenant is reconciled within one pass of the
+- **Implemented** (2026-11-23): `pkg/controller/subtenant_pace.go`, `naas.ObserveSelectedNamespaces`.
+  Measured on the controller fixture with access open (`TestSubTenantSettledPassIsCheapAndSlow`): 33
+  workload reads on a cold pass, 16 with the cluster's bootstrap cached. That is about 2.7 reads a second
+  for 100 settled sub-tenants of one cluster, against about 165 before (33 every 20 seconds). The 16 are
+  mostly the per-namespace isolation baseline reads, which stay uncached on purpose. A Ready sub-tenant
+  with open access is looked at again no later than its qualification's expiry, so access still closes on
+  time.
+- **Accepted when**: a fixture of 100 Ready sub-tenants on one cluster makes at most 4 workload requests a
+  second at rest, against about 165 before. A changed sub-tenant is reconciled within one pass of the
   change. Deletion still runs its full scan.
 - **Tests**: a counting fake workload client over 100 sub-tenants for 10 minutes of fake time; the
   label-selected list; the bootstrap cache hit, miss and mismatch; the requeue per state.
@@ -542,7 +549,23 @@ Each phase ships alone and leaves the system consistent.
   - A failing qualification halts the rollout at Capsule.
 - **Tests**: the planner with the Capsule step and `NaaSQualified`, the halt, and the overlap.
 
-## 10. Open questions
+## 10. Decisions (2026-11-23)
+
+All seven questions were closed with the recommendation:
+
+1. **Qualification validity**: 30 days, with overlapping renewal; any change to what it checked ends it
+   sooner.
+2. **Test identities**: the qualifier impersonates two test groups, limited by a Role to the two throwaway
+   sub-tenants.
+3. **Default `allowedGroups`**: empty. Access stays closed until an operator sets the list. Ships with
+   phase 1.
+4. **Caps**: 250 sub-tenants and 2,000 namespaces per cluster, then measured on the sandbox and raised.
+5. **`bindings`**: dropped. Refused on create now, removed in the next API version.
+6. **Overcommit**: a warning only (`NaaSOvercommitted`), because tenant pools scale.
+7. **Capsule webhooks**: an eleventh qualification check, admission available during a platform-pool
+   outage.
+
+### Questions as asked
 
 1. **Qualification validity.** 30 days, with overlapping renewal. *Recommendation*: 30 days. Shorter
    gives no extra safety, because every change that matters already changes the key.

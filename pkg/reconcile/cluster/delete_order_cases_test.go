@@ -158,9 +158,12 @@ func TestDeletionRemovesThePlatformPoolBeforeKarpenter(t *testing.T) {
 	d.run(80)
 
 	require.True(t, d.gone(), "log %v", d.log)
+	// A log line is "<rank> <kind> <name>": match the object exactly. A
+	// substring match on the rank alone also matched a random cluster ID
+	// that contains its digits ("prod-01458106-dash" holds "10").
 	index := func(want string) int {
 		for i, l := range d.log {
-			if strings.Contains(l, want) {
+			if _, object, _ := strings.Cut(l, " "); object == want {
 				return i
 			}
 		}
@@ -168,10 +171,11 @@ func TestDeletionRemovesThePlatformPoolBeforeKarpenter(t *testing.T) {
 		return -1
 	}
 	pool, claim, class := index("NodePool platform-pool"), index("NodeClaim platform-pool-z1"), index("EC2NodeClass platform-pool")
-	karpenter := index(fmt.Sprintf("%02d", rankKarpenterChart))
+	karpenter := index("Release " + crossplaneaws.HelmReleaseObjectName(d.prefix, "karpenter"))
+	require.True(t, strings.HasPrefix(d.log[karpenter], fmt.Sprintf("%02d ", rankKarpenterChart)), "Karpenter's chart has its rank: %v", d.log)
 	require.Less(t, pool, claim)
 	require.Less(t, claim, class)
-	require.Less(t, class, karpenter, "the pool is removed in stage 4, before Karpenter's stage 5")
+	require.Less(t, class, karpenter, "the pool is removed in stage 4, before Karpenter's stage 5: %v", d.log)
 }
 
 // A forced deletion does not wait for the workload cluster: no load

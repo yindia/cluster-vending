@@ -282,7 +282,7 @@ func catalogOrder(pending []string, now map[string]catalogEntry, removedSequence
 	others = takeInOrder(others, func(name string, left []string) bool {
 		return !slices.ContainsFunc(requires[name], func(r string) bool { return r != name && slices.Contains(left, r) })
 	}, func(a, b string) int { return cmp.Or(cmp.Compare(seq(a), seq(b)), strings.Compare(a, b)) })
-	rest := append(removals, others...)
+	rest := slices.Concat(removals, others)
 	out := make([]string, 0, len(rest))
 	for _, name := range explicit {
 		if slices.Contains(rest, name) && !slices.Contains(out, name) {
@@ -324,6 +324,8 @@ func catalogFinished(prev *cloudv1.CatalogChange, applied map[string]string, now
 	case catalogPending, catalogApplying, catalogHalted:
 		st.Phase, st.FinishTime, st.Message, st.Component, st.Pending = catalogDone, timestamppb.New(at), "", "", nil
 		st.Step, st.ComponentStartTime, st.ComponentApplied, st.Recoveries = st.GetSteps(), nil, false, 0
+	case cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_UNSPECIFIED, cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_DONE:
+		// Nothing was waiting: kept as it was, with what is applied.
 	}
 	return st
 }

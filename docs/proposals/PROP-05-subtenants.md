@@ -304,6 +304,12 @@ Files:
 - **Change-driven.** Today the controller watches `Cluster`, `Tenant` and `ReleaseHold`. Watches on the
   workload cluster are not added, because that would mean watch streams in 100 clusters (PROP-02 5.7(b)).
   Remote drift is caught by the resync.
+- **Only what the platform creates is tracked** (decision 9). The pass checks the Tenant, its namespaces
+  and the objects Capsule generates from our templates (NetworkPolicies, Istio policies, LimitRange,
+  ServiceAccounts, access RoleBindings). Objects someone else adds to a sub-tenant namespace are not
+  inspected, reported or removed. Capsule re-applies its generated objects every 60 seconds
+  (`resyncPeriod: 60s`), so an edited or deleted one is repaired by Capsule; the controller reports it
+  until then.
 - **Filtered namespace reads** (`ObserveTenantNamespaces`, `pkg/naas/tenant_observe.go`): list with the
   label selector `capsule.clastix.io/tenant=<name>`. Deletion keeps its full, unfiltered scan, because
   completeness matters there (`PreflightNamespaceCleanup`).
@@ -413,8 +419,8 @@ Conditions after this proposal (on `SubTenant`):
 | `ProvisioningReady` | As today: the current Tenant and every namespace's baseline are observed. |
 | `GroupsAllowed` (new) | Every named group is inside `naas.allowedGroups` and outside `deniedGroups`. |
 | `OIDCReady` | As today: an ACTIVE EKS association matches the cluster's OIDC. |
-| `ClusterQualified` (replaces `AccessQualified`) | The cluster's current qualification record matches its key and has passed. |
-| `AccessReady` | All of the above, and at least one group is named. |
+| ~~`ClusterQualified`~~ | Removed with 6.1 (decision 8); dropped from existing status with `AccessQualified`. |
+| `AccessReady` | All of the above, the Tenant equals its render, the platform's access RoleBindings match the approved groups, and at least one group is named. A RoleBinding not created by the platform is ignored; one of ours (`naas-access-*`) that is no longer wanted closes access with `AccessBindingMismatch`. |
 | `Ready` | `ProvisioningReady`, and `AccessReady` when groups are named. |
 
 A Ready sub-tenant whose access closes goes to `Degraded` with the reason, not `Pending`.
@@ -618,6 +624,12 @@ All seven questions were closed with the recommendation:
    to its render, namespaces and baselines observed), every group is allowed and the OIDC association is
    active. The platform trusts the CNI, Capsule, Istio and Pod Security settings it installs, and does not
    test isolation at runtime. The `naas-qual-` name prefix is no longer reserved.
+9. **Track only our own resources (2026-11-23).** The controller checks only the objects the platform
+   creates for a sub-tenant. A RoleBinding or other object someone else adds to a sub-tenant namespace no
+   longer closes access and is never deleted. Tenants reach their resources only through the platform's
+   API, from the platform's server, so objects outside the platform's are not its concern. Repair of the
+   generated objects is left to Capsule's 60-second resync; the 10-minute resync of a Ready sub-tenant
+   bounds how late the controller reports it.
 
 ### Questions as asked
 

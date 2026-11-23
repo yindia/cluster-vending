@@ -225,6 +225,8 @@ func jobFinished(job *batchv1.Job) (bool, string) {
 			return true, ""
 		case batchv1.JobFailed, batchv1.JobFailureTarget:
 			return true, strings.TrimSpace("the qualifier Job failed: " + c.Reason + " " + c.Message)
+		case batchv1.JobSuspended:
+			// A suspended Job is not finished; it resumes or is replaced.
 		}
 	}
 	return false, ""

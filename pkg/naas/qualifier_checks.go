@@ -340,6 +340,8 @@ func PodProbe(image string, poll time.Duration) ProbeFunc {
 				return true, nil
 			case corev1.PodFailed:
 				return false, nil
+			case corev1.PodPending, corev1.PodRunning, corev1.PodUnknown:
+				// Not finished: look again on the next tick.
 			}
 			select {
 			case <-ctx.Done():

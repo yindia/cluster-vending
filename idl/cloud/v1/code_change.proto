@@ -43,3 +43,46 @@ enum CodeChangePhase {
   // renders it otherwise or an update applies it.
   CODE_CHANGE_PHASE_HALTED = 4;
 }
+
+// CatalogChange is a change of the platform catalog that reaches a
+// cluster: a platform ComponentDefinition's values, chart, install
+// timeout, requires or disabled changed, a definition was added or
+// removed, or the platform pool's configuration changed. It is admitted
+// by the channel's code rollout, as a code change is (tiers, max in
+// progress, soak, windows, freezes, halted past max failed), and applied
+// one definition at a time: removals first (highest sequence first, so
+// dependents go before what they require), then installs and value
+// changes (lowest sequence first), unless the platform supplies an order.
+message CatalogChange {
+  // Where it is.
+  CodeChangePhase phase = 1;
+  // What changes, for people: "2 platform components change: kyverno (values), cert-manager (removed)".
+  string summary = 2;
+  // The entries still to apply, in the order they are applied.
+  repeated string pending = 3;
+  // The entry being applied now (a definition name, or "platform-pool").
+  string component = 4;
+  // Its place among the entries of this change (1-based), and how many.
+  int32 step = 5;
+  int32 steps = 6;
+  // What it waits for, or what failed.
+  string message = 7;
+  // When it started, when it was applied in full, and when the current
+  // entry started.
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp finish_time = 9;
+  google.protobuf.Timestamp component_start_time = 10;
+  // A pass after the one that started the current entry recorded it: its
+  // state is read from then on.
+  bool component_applied = 11;
+  // How many times the current entry was recovered automatically; the
+  // change halts after the last one.
+  int32 recoveries = 12;
+  // The catalog it applies (a digest of the entries' fingerprints): a
+  // halted change is tried again once the catalog changes again.
+  string target = 13;
+  // The fingerprint of each entry as the cluster has it applied, by name:
+  // what the next catalog is compared against. An entry's fingerprint
+  // moves only once its Helm operation settled.
+  map<string, string> applied = 14;
+}

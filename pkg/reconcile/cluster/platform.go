@@ -48,6 +48,12 @@ type platform struct {
 	// move is the release move (release_move.go); nil when component
 	// upgrades are off.
 	move *cloudv1.ClusterReleaseMove
+	// catalog is the catalog change (catalog_change.go); nil: the
+	// recorded one stays.
+	catalog *cloudv1.CatalogChange
+	// holdPool: the platform pool's change waits its turn in the catalog
+	// change, so the node pass does not apply it.
+	holdPool bool
 }
 
 // storedStatus decodes the status recorded with the row; empty when there
@@ -84,7 +90,8 @@ func startedPlatform(row *model.Cluster) map[string]bool {
 // not look reports again.
 func storedPlatform(row *model.Cluster) *platform {
 	st := storedStatus(row)
-	return &platform{release: st.GetPlatformRelease(), components: st.GetPlatformComponents(), move: st.GetReleaseMove()}
+	return &platform{release: st.GetPlatformRelease(), components: st.GetPlatformComponents(), move: st.GetReleaseMove(),
+		catalog: st.GetCatalogChange()}
 }
 
 // PlatformPending reports whether the row's recorded status says platform
@@ -106,6 +113,9 @@ func withPlatform(st *cloudv1.ClusterStatus, p *platform) {
 		return
 	}
 	st.PlatformRelease, st.PlatformComponents, st.ReleaseMove = p.release, p.components, p.move
+	if p.catalog != nil {
+		st.CatalogChange = p.catalog
+	}
 	if len(p.components) == 0 {
 		return
 	}
@@ -185,7 +195,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	}
 	if problem != "" {
 		p := unavailable(in.Entries, release, problem)
-		p.move = move
+		p.move, p.catalog = move, storedStatus(row).GetCatalogChange()
 		s.describe(ctx, row, in.Plan.Namespace, p, nil)
 		return p, nil
 	}
@@ -198,14 +208,30 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		}
 	}
 	plan, skipped := component.PlanPlatform(in)
+	gate := s.gateOf(ctx, row, in.Plan.Namespace)
+	// The catalog change (catalog_change.go): a definition whose change
+	// waits its turn keeps what runs on the cluster.
+	spec, err := SpecOf(row)
+	if err != nil {
+		return nil, err
+	}
+	catalog, err := s.catalogChange(ctx, row, spec, in, plan, move)
+	if err != nil {
+		return nil, fmt.Errorf("catalog change: %w", err)
+	}
+	if r := catalog.d.Recover; r != "" {
+		ctx = withRetry(ctx, retryWith(row.Retry, r, now()))
+	}
+	plan = catalog.plan(plan)
+	plan.ReleaseGate = catalog.releaseGate(gate, plan.ReleaseGate)
 	owner := reconcile.Owner{TenantID: row.TenantID, CloudAccountID: row.CloudAccountID, Kind: model.OwnerClusterComponents, ID: row.ID}
-	inventory := s.deps.Inventory(owner)
+	inventory := catalog.inventory(ctx, gate, in.Plan.ClusterPrefix, s.deps.Inventory(owner))
 	if slices.ContainsFunc(skipped, func(c component.NotInstalled) bool { return c.Preserve }) {
 		// A partial plan cannot prove deletion intent. Apply valid components but
 		// retain all previous inventory until the entire plan is renderable.
 		inventory = sequence.Keeping(inventory, func(sequence.Entry) bool { return true })
 	}
-	s.gateOf(ctx, row, in.Plan.Namespace).register(plan, false)
+	gate.register(catalog.registered(plan), false)
 	res, err := s.deps.Sequence().Apply(ctx, crossplaneaws.PlatformSet(plan), inventory)
 	if err != nil {
 		s.logger().ErrorContext(ctx, "apply platform components", "cluster_id", row.ID, "error", err)
@@ -220,13 +246,13 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 		return nil, err
 	}
 	components, objects := platformStatus(in, plan, skipped, res, views)
-	gate := s.gateOf(ctx, row, in.Plan.Namespace)
 	for _, pc := range components {
 		if c, ok := plannedComponent(plan, pc.GetName()); ok {
 			gate.markUnchanged(pc, plan, c)
 		}
 	}
-	p := &platform{release: release, components: components, move: move}
+	catalog.report(components)
+	p := &platform{release: release, components: components, move: move, catalog: catalog.status(), holdPool: catalog.holdPool()}
 	s.describe(ctx, row, in.Plan.Namespace, p, objects)
 	explainTakenOver(row, p.components)
 	return p, nil

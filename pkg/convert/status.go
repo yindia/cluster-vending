@@ -56,6 +56,7 @@ func ClusterStatusInto(p *cloudv1.ClusterStatus, state string, at metav1.Time, i
 	into.PlatformRelease = p.GetPlatformRelease()
 	into.ReleaseMove = ReleaseMoveToAPI(p.GetReleaseMove())
 	into.CodeChange = CodeChangeToAPI(p.GetCodeChange())
+	into.CatalogChange = CatalogChangeToAPI(p.GetCatalogChange())
 	into.NodeGroups = nodeGroupStatuses(p.GetNodeGroups())
 	into.Kubernetes = clusterKubernetes(p.GetKubernetes())
 	into.PlatformComponents = platformComponents(p.GetPlatformComponents())

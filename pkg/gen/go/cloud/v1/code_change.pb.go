@@ -198,6 +198,180 @@ func (x *CodeChange) GetTarget() string {
 	return ""
 }
 
+// CatalogChange is a change of the platform catalog that reaches a
+// cluster: a platform ComponentDefinition's values, chart, install
+// timeout, requires or disabled changed, a definition was added or
+// removed, or the platform pool's configuration changed. It is admitted
+// by the channel's code rollout, as a code change is (tiers, max in
+// progress, soak, windows, freezes, halted past max failed), and applied
+// one definition at a time: removals first (highest sequence first, so
+// dependents go before what they require), then installs and value
+// changes (lowest sequence first), unless the platform supplies an order.
+type CatalogChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Where it is.
+	Phase CodeChangePhase `protobuf:"varint,1,opt,name=phase,proto3,enum=cloud.v1.CodeChangePhase" json:"phase,omitempty"`
+	// What changes, for people: "2 platform components change: kyverno (values), cert-manager (removed)".
+	Summary string `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	// The entries still to apply, in the order they are applied.
+	Pending []string `protobuf:"bytes,3,rep,name=pending,proto3" json:"pending,omitempty"`
+	// The entry being applied now (a definition name, or "platform-pool").
+	Component string `protobuf:"bytes,4,opt,name=component,proto3" json:"component,omitempty"`
+	// Its place among the entries of this change (1-based), and how many.
+	Step  int32 `protobuf:"varint,5,opt,name=step,proto3" json:"step,omitempty"`
+	Steps int32 `protobuf:"varint,6,opt,name=steps,proto3" json:"steps,omitempty"`
+	// What it waits for, or what failed.
+	Message string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	// When it started, when it was applied in full, and when the current
+	// entry started.
+	StartTime          *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	FinishTime         *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=finish_time,json=finishTime,proto3" json:"finish_time,omitempty"`
+	ComponentStartTime *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=component_start_time,json=componentStartTime,proto3" json:"component_start_time,omitempty"`
+	// A pass after the one that started the current entry recorded it: its
+	// state is read from then on.
+	ComponentApplied bool `protobuf:"varint,11,opt,name=component_applied,json=componentApplied,proto3" json:"component_applied,omitempty"`
+	// How many times the current entry was recovered automatically; the
+	// change halts after the last one.
+	Recoveries int32 `protobuf:"varint,12,opt,name=recoveries,proto3" json:"recoveries,omitempty"`
+	// The catalog it applies (a digest of the entries' fingerprints): a
+	// halted change is tried again once the catalog changes again.
+	Target string `protobuf:"bytes,13,opt,name=target,proto3" json:"target,omitempty"`
+	// The fingerprint of each entry as the cluster has it applied, by name:
+	// what the next catalog is compared against. An entry's fingerprint
+	// moves only once its Helm operation settled.
+	Applied       map[string]string `protobuf:"bytes,14,rep,name=applied,proto3" json:"applied,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CatalogChange) Reset() {
+	*x = CatalogChange{}
+	mi := &file_cloud_v1_code_change_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CatalogChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CatalogChange) ProtoMessage() {}
+
+func (x *CatalogChange) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_code_change_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CatalogChange.ProtoReflect.Descriptor instead.
+func (*CatalogChange) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_code_change_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CatalogChange) GetPhase() CodeChangePhase {
+	if x != nil {
+		return x.Phase
+	}
+	return CodeChangePhase_CODE_CHANGE_PHASE_UNSPECIFIED
+}
+
+func (x *CatalogChange) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *CatalogChange) GetPending() []string {
+	if x != nil {
+		return x.Pending
+	}
+	return nil
+}
+
+func (x *CatalogChange) GetComponent() string {
+	if x != nil {
+		return x.Component
+	}
+	return ""
+}
+
+func (x *CatalogChange) GetStep() int32 {
+	if x != nil {
+		return x.Step
+	}
+	return 0
+}
+
+func (x *CatalogChange) GetSteps() int32 {
+	if x != nil {
+		return x.Steps
+	}
+	return 0
+}
+
+func (x *CatalogChange) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *CatalogChange) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *CatalogChange) GetFinishTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishTime
+	}
+	return nil
+}
+
+func (x *CatalogChange) GetComponentStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ComponentStartTime
+	}
+	return nil
+}
+
+func (x *CatalogChange) GetComponentApplied() bool {
+	if x != nil {
+		return x.ComponentApplied
+	}
+	return false
+}
+
+func (x *CatalogChange) GetRecoveries() int32 {
+	if x != nil {
+		return x.Recoveries
+	}
+	return 0
+}
+
+func (x *CatalogChange) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *CatalogChange) GetApplied() map[string]string {
+	if x != nil {
+		return x.Applied
+	}
+	return nil
+}
+
 var File_cloud_v1_code_change_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_code_change_proto_rawDesc = "" +
@@ -214,7 +388,30 @@ const file_cloud_v1_code_change_proto_rawDesc = "" +
 	"\vfinish_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishTime\x12\x1a\n" +
 	"\bfailures\x18\a \x01(\x05R\bfailures\x12\x16\n" +
-	"\x06target\x18\b \x01(\tR\x06target*\xad\x01\n" +
+	"\x06target\x18\b \x01(\tR\x06target\"\xfd\x04\n" +
+	"\rCatalogChange\x12/\n" +
+	"\x05phase\x18\x01 \x01(\x0e2\x19.cloud.v1.CodeChangePhaseR\x05phase\x12\x18\n" +
+	"\asummary\x18\x02 \x01(\tR\asummary\x12\x18\n" +
+	"\apending\x18\x03 \x03(\tR\apending\x12\x1c\n" +
+	"\tcomponent\x18\x04 \x01(\tR\tcomponent\x12\x12\n" +
+	"\x04step\x18\x05 \x01(\x05R\x04step\x12\x14\n" +
+	"\x05steps\x18\x06 \x01(\x05R\x05steps\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x129\n" +
+	"\n" +
+	"start_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x12;\n" +
+	"\vfinish_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"finishTime\x12L\n" +
+	"\x14component_start_time\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x12componentStartTime\x12+\n" +
+	"\x11component_applied\x18\v \x01(\bR\x10componentApplied\x12\x1e\n" +
+	"\n" +
+	"recoveries\x18\f \x01(\x05R\n" +
+	"recoveries\x12\x16\n" +
+	"\x06target\x18\r \x01(\tR\x06target\x12>\n" +
+	"\aapplied\x18\x0e \x03(\v2$.cloud.v1.CatalogChange.AppliedEntryR\aapplied\x1a:\n" +
+	"\fAppliedEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xad\x01\n" +
 	"\x0fCodeChangePhase\x12!\n" +
 	"\x1dCODE_CHANGE_PHASE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19CODE_CHANGE_PHASE_PENDING\x10\x01\x12\x1e\n" +
@@ -236,21 +433,28 @@ func file_cloud_v1_code_change_proto_rawDescGZIP() []byte {
 }
 
 var file_cloud_v1_code_change_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_cloud_v1_code_change_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_cloud_v1_code_change_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_cloud_v1_code_change_proto_goTypes = []any{
 	(CodeChangePhase)(0),          // 0: cloud.v1.CodeChangePhase
 	(*CodeChange)(nil),            // 1: cloud.v1.CodeChange
-	(*timestamppb.Timestamp)(nil), // 2: google.protobuf.Timestamp
+	(*CatalogChange)(nil),         // 2: cloud.v1.CatalogChange
+	nil,                           // 3: cloud.v1.CatalogChange.AppliedEntry
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_cloud_v1_code_change_proto_depIdxs = []int32{
 	0, // 0: cloud.v1.CodeChange.phase:type_name -> cloud.v1.CodeChangePhase
-	2, // 1: cloud.v1.CodeChange.start_time:type_name -> google.protobuf.Timestamp
-	2, // 2: cloud.v1.CodeChange.finish_time:type_name -> google.protobuf.Timestamp
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 1: cloud.v1.CodeChange.start_time:type_name -> google.protobuf.Timestamp
+	4, // 2: cloud.v1.CodeChange.finish_time:type_name -> google.protobuf.Timestamp
+	0, // 3: cloud.v1.CatalogChange.phase:type_name -> cloud.v1.CodeChangePhase
+	4, // 4: cloud.v1.CatalogChange.start_time:type_name -> google.protobuf.Timestamp
+	4, // 5: cloud.v1.CatalogChange.finish_time:type_name -> google.protobuf.Timestamp
+	4, // 6: cloud.v1.CatalogChange.component_start_time:type_name -> google.protobuf.Timestamp
+	3, // 7: cloud.v1.CatalogChange.applied:type_name -> cloud.v1.CatalogChange.AppliedEntry
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_code_change_proto_init() }
@@ -264,7 +468,7 @@ func file_cloud_v1_code_change_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_code_change_proto_rawDesc), len(file_cloud_v1_code_change_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

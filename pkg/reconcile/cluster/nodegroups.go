@@ -372,6 +372,9 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 		return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
 	}
 	for _, obj := range objects {
+		if installed != nil && installed.holdPool && obj.GetName() == crossplaneaws.PoolPlatform {
+			continue // its change waits its turn in the catalog change: what runs stays
+		}
 		err := call(ctx, func(ctx context.Context) error {
 			return c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj), client.FieldOwner(kube.FieldOwner), client.ForceOwnership)
 		})

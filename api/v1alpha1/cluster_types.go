@@ -1126,6 +1126,11 @@ type ClusterStatus struct {
 	// (a new controller build), applied in turn by its channel's rollout.
 	// +optional
 	CodeChange *CodeChange `json:"codeChange,omitempty"`
+	// catalogChange is a change of the platform catalog applied to the
+	// cluster in turn by its channel's code rollout, one definition at a
+	// time.
+	// +optional
+	CatalogChange *CatalogChange `json:"catalogChange,omitempty"`
 	// nodeGroups are the node groups as observed: the platform's first,
 	// then the user's.
 	// +optional

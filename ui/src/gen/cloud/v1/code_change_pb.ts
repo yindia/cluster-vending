@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/code_change.proto.
  */
 export const file_cloud_v1_code_change: GenFile = /*@__PURE__*/
-  fileDesc("ChpjbG91ZC92MS9jb2RlX2NoYW5nZS5wcm90bxIIY2xvdWQudjEi7AEKCkNvZGVDaGFuZ2USKAoFcGhhc2UYASABKA4yGS5jbG91ZC52MS5Db2RlQ2hhbmdlUGhhc2USDwoHc3VtbWFyeRgCIAEoCRIPCgdvYmplY3RzGAMgASgFEg8KB21lc3NhZ2UYBCABKAkSLgoKc3RhcnRfdGltZRgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZmluaXNoX3RpbWUYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhAKCGZhaWx1cmVzGAcgASgFEg4KBnRhcmdldBgIIAEoCSqtAQoPQ29kZUNoYW5nZVBoYXNlEiEKHUNPREVfQ0hBTkdFX1BIQVNFX1VOU1BFQ0lGSUVEEAASHQoZQ09ERV9DSEFOR0VfUEhBU0VfUEVORElORxABEh4KGkNPREVfQ0hBTkdFX1BIQVNFX0FQUExZSU5HEAISGgoWQ09ERV9DSEFOR0VfUEhBU0VfRE9ORRADEhwKGENPREVfQ0hBTkdFX1BIQVNFX0hBTFRFRBAEQp8BCgxjb20uY2xvdWQudjFCD0NvZGVDaGFuZ2VQcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChpjbG91ZC92MS9jb2RlX2NoYW5nZS5wcm90bxIIY2xvdWQudjEi7AEKCkNvZGVDaGFuZ2USKAoFcGhhc2UYASABKA4yGS5jbG91ZC52MS5Db2RlQ2hhbmdlUGhhc2USDwoHc3VtbWFyeRgCIAEoCRIPCgdvYmplY3RzGAMgASgFEg8KB21lc3NhZ2UYBCABKAkSLgoKc3RhcnRfdGltZRgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZmluaXNoX3RpbWUYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhAKCGZhaWx1cmVzGAcgASgFEg4KBnRhcmdldBgIIAEoCSLdAwoNQ2F0YWxvZ0NoYW5nZRIoCgVwaGFzZRgBIAEoDjIZLmNsb3VkLnYxLkNvZGVDaGFuZ2VQaGFzZRIPCgdzdW1tYXJ5GAIgASgJEg8KB3BlbmRpbmcYAyADKAkSEQoJY29tcG9uZW50GAQgASgJEgwKBHN0ZXAYBSABKAUSDQoFc3RlcHMYBiABKAUSDwoHbWVzc2FnZRgHIAEoCRIuCgpzdGFydF90aW1lGAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hfdGltZRgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOAoUY29tcG9uZW50X3N0YXJ0X3RpbWUYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhkKEWNvbXBvbmVudF9hcHBsaWVkGAsgASgIEhIKCnJlY292ZXJpZXMYDCABKAUSDgoGdGFyZ2V0GA0gASgJEjUKB2FwcGxpZWQYDiADKAsyJC5jbG91ZC52MS5DYXRhbG9nQ2hhbmdlLkFwcGxpZWRFbnRyeRouCgxBcHBsaWVkRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASqtAQoPQ29kZUNoYW5nZVBoYXNlEiEKHUNPREVfQ0hBTkdFX1BIQVNFX1VOU1BFQ0lGSUVEEAASHQoZQ09ERV9DSEFOR0VfUEhBU0VfUEVORElORxABEh4KGkNPREVfQ0hBTkdFX1BIQVNFX0FQUExZSU5HEAISGgoWQ09ERV9DSEFOR0VfUEhBU0VfRE9ORRADEhwKGENPREVfQ0hBTkdFX1BIQVNFX0hBTFRFRBAEQp8BCgxjb20uY2xvdWQudjFCD0NvZGVDaGFuZ2VQcm90b1ABWj1naXRodWIuY29tL3lpbmRpYS9jbHVzdGVyLXZlbmRpbmcvcGtnL2dlbi9nby9jbG91ZC92MTtjbG91ZHYxogIDQ1hYqgIIQ2xvdWQuVjHKAghDbG91ZFxWMeICFENsb3VkXFYxXEdQQk1ldGFkYXRh6gIJQ2xvdWQ6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * CodeChange is a change of what the platform renders for a cluster or a
@@ -88,6 +88,126 @@ export type CodeChange = Message<"cloud.v1.CodeChange"> & {
  */
 export const CodeChangeSchema: GenMessage<CodeChange> = /*@__PURE__*/
   messageDesc(file_cloud_v1_code_change, 0);
+
+/**
+ * CatalogChange is a change of the platform catalog that reaches a
+ * cluster: a platform ComponentDefinition's values, chart, install
+ * timeout, requires or disabled changed, a definition was added or
+ * removed, or the platform pool's configuration changed. It is admitted
+ * by the channel's code rollout, as a code change is (tiers, max in
+ * progress, soak, windows, freezes, halted past max failed), and applied
+ * one definition at a time: removals first (highest sequence first, so
+ * dependents go before what they require), then installs and value
+ * changes (lowest sequence first), unless the platform supplies an order.
+ *
+ * @generated from message cloud.v1.CatalogChange
+ */
+export type CatalogChange = Message<"cloud.v1.CatalogChange"> & {
+  /**
+   * Where it is.
+   *
+   * @generated from field: cloud.v1.CodeChangePhase phase = 1;
+   */
+  phase: CodeChangePhase;
+
+  /**
+   * What changes, for people: "2 platform components change: kyverno (values), cert-manager (removed)".
+   *
+   * @generated from field: string summary = 2;
+   */
+  summary: string;
+
+  /**
+   * The entries still to apply, in the order they are applied.
+   *
+   * @generated from field: repeated string pending = 3;
+   */
+  pending: string[];
+
+  /**
+   * The entry being applied now (a definition name, or "platform-pool").
+   *
+   * @generated from field: string component = 4;
+   */
+  component: string;
+
+  /**
+   * Its place among the entries of this change (1-based), and how many.
+   *
+   * @generated from field: int32 step = 5;
+   */
+  step: number;
+
+  /**
+   * @generated from field: int32 steps = 6;
+   */
+  steps: number;
+
+  /**
+   * What it waits for, or what failed.
+   *
+   * @generated from field: string message = 7;
+   */
+  message: string;
+
+  /**
+   * When it started, when it was applied in full, and when the current
+   * entry started.
+   *
+   * @generated from field: google.protobuf.Timestamp start_time = 8;
+   */
+  startTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp finish_time = 9;
+   */
+  finishTime?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp component_start_time = 10;
+   */
+  componentStartTime?: Timestamp | undefined;
+
+  /**
+   * A pass after the one that started the current entry recorded it: its
+   * state is read from then on.
+   *
+   * @generated from field: bool component_applied = 11;
+   */
+  componentApplied: boolean;
+
+  /**
+   * How many times the current entry was recovered automatically; the
+   * change halts after the last one.
+   *
+   * @generated from field: int32 recoveries = 12;
+   */
+  recoveries: number;
+
+  /**
+   * The catalog it applies (a digest of the entries' fingerprints): a
+   * halted change is tried again once the catalog changes again.
+   *
+   * @generated from field: string target = 13;
+   */
+  target: string;
+
+  /**
+   * The fingerprint of each entry as the cluster has it applied, by name:
+   * what the next catalog is compared against. An entry's fingerprint
+   * moves only once its Helm operation settled.
+   *
+   * @generated from field: map<string, string> applied = 14;
+   */
+  applied: { [key: string]: string };
+};
+
+/**
+ * Describes the message cloud.v1.CatalogChange.
+ * Use `create(CatalogChangeSchema)` to create a new message.
+ */
+export const CatalogChangeSchema: GenMessage<CatalogChange> = /*@__PURE__*/
+  messageDesc(file_cloud_v1_code_change, 1);
 
 /**
  * CodeChangePhase is where a code change is.

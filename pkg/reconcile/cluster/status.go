@@ -91,6 +91,10 @@ func (s *Reconciler) viewWith(ctx context.Context, row *model.Cluster, failure *
 	}
 	withFailure(c.GetStatus(), failure)
 	withPlatform(c.GetStatus(), installed)
+	if c.GetStatus().GetCatalogChange() == nil {
+		// The fingerprints the cluster has applied stay with it.
+		c.GetStatus().CatalogChange = storedStatus(row).GetCatalogChange()
+	}
 	s.withKubernetes(ctx, row.ID, c.GetSpec(), c.GetStatus(), storedStatus(row))
 	tier, err := s.deps.NetworkTier(ctx, row.TenantID, row.NetworkID)
 	if err != nil {

@@ -15,6 +15,13 @@ import (
 func RunCheck(r io.Reader, w io.Writer, opts Options) error {
 	set, problems := Decode(r)
 	problems = append(problems, Check(set, opts)...)
+	// What a disable switches off with it: not a problem, but the review
+	// sees the whole effect.
+	for _, note := range SwitchedOff(set) {
+		if _, err := fmt.Fprintln(w, "note:", note); err != nil {
+			return err
+		}
+	}
 	if len(problems) == 0 {
 		_, err := fmt.Fprintf(w, "catalog ok: %d definitions, %d releases, %d channels\n",
 			len(set.Definitions), len(set.Releases), len(set.Channels))

@@ -17,7 +17,11 @@ import (
 
 // CodeChanging reports whether the cluster has a code change waiting for
 // its turn or being applied.
-func CodeChanging(row *model.Cluster) bool { return changing(storedStatus(row).GetCodeChange()) }
+// A catalog change counts too (CatalogChanging): both are the code
+// rollout's.
+func CodeChanging(row *model.Cluster) bool {
+	return changing(storedStatus(row).GetCodeChange()) || CatalogChanging(row)
+}
 
 func changing(c *cloudv1.CodeChange) bool {
 	p := c.GetPhase()

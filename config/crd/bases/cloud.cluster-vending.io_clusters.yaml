@@ -1113,6 +1113,50 @@ spec:
                     description: platformVersion of the EKS cluster.
                     type: string
                 type: object
+              catalogChange:
+                description: |-
+                  catalogChange is a change of the platform catalog applied to the
+                  cluster in turn by its channel's code rollout, one definition at a
+                  time.
+                properties:
+                  component:
+                    description: component is the entry being applied now.
+                    type: string
+                  finishTime:
+                    description: |-
+                      finishTime is when it was applied in full: the soak of its tier
+                      counts from there.
+                    format: date-time
+                    type: string
+                  message:
+                    description: message says what it waits for, or what failed.
+                    type: string
+                  pending:
+                    description: pending are the entries still to apply, in order.
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  phase:
+                    description: 'phase: Pending, Applying, Done or Halted.'
+                    type: string
+                  startTime:
+                    format: date-time
+                    type: string
+                  step:
+                    description: step is its place among the entries of the change
+                      (1-based), of steps.
+                    format: int32
+                    type: integer
+                  steps:
+                    format: int32
+                    type: integer
+                  summary:
+                    description: 'summary says what changes: "2 platform components
+                      change: kyverno (values)".'
+                    type: string
+                type: object
               codeChange:
                 description: |-
                   codeChange is a change of what the platform renders for the cluster

@@ -212,7 +212,7 @@ func (in memberInputs) codeMember(c *cloudv1alpha1.Cluster) (m upgrade.Member, g
 		return m, nil, false
 	}
 	m = upgrade.Member{ID: c.Namespace + "/" + c.Name, Tier: Tier(c.Status.Tier)}
-	change := c.Status.CodeChange
+	change := clusterChange(c)
 	switch {
 	case change == nil || change.Phase == convert.CodeChangeDone || change.Phase == "":
 		m.State, m.FinishedAt = upgrade.Succeeded, codeFinished(c)
@@ -248,10 +248,41 @@ func (in memberInputs) codeMember(c *cloudv1alpha1.Cluster) (m upgrade.Member, g
 // codeFinished is when the cluster's code change was applied in full;
 // else when it became Ready.
 func codeFinished(c *cloudv1alpha1.Cluster) time.Time {
-	if cc := c.Status.CodeChange; cc != nil && cc.FinishTime != nil {
+	if cc := clusterChange(c); cc != nil && cc.FinishTime != nil {
 		return cc.FinishTime.Time
 	}
 	return FinishedAt(c)
+}
+
+// changeRank orders the phases of a cluster's code and catalog changes:
+// the one further from done stands for the cluster.
+var changeRank = map[string]int{convert.CodeChangeApplying: 4, convert.CodeChangeHalted: 3, convert.CodeChangePending: 2, convert.CodeChangeDone: 1}
+
+// clusterChange is the cluster's code change and catalog change (PROP-01
+// 4.7) as one member of the code rollout: applying while either applies,
+// failed while either halted, pending while either waits, done once both
+// are, finished when the later of the two finished. nil when neither was
+// recorded.
+func clusterChange(c *cloudv1alpha1.Cluster) *cloudv1alpha1.CodeChange {
+	code, cat := c.Status.CodeChange, c.Status.CatalogChange
+	if cat == nil || cat.Phase == "" {
+		return code
+	}
+	catalog := &cloudv1alpha1.CodeChange{Phase: cat.Phase, Summary: cat.Summary, Message: cat.Message, StartTime: cat.StartTime, FinishTime: cat.FinishTime}
+	if code == nil || code.Phase == "" {
+		return catalog
+	}
+	switch rc, rk := changeRank[code.Phase], changeRank[cat.Phase]; {
+	case rk > rc:
+		return catalog
+	case rk < rc:
+		return code
+	}
+	out := code.DeepCopy()
+	if catalog.FinishTime != nil && (out.FinishTime == nil || catalog.FinishTime.After(out.FinishTime.Time)) {
+		out.FinishTime = catalog.FinishTime
+	}
+	return out
 }
 
 // NetworkCodeAdmitted reports whether a network's code change may be

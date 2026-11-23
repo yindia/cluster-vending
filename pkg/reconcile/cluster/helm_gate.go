@@ -151,6 +151,7 @@ func (g *helmGate) load(ctx context.Context) {
 			u := &list.Items[i]
 			d := detailOf(u)
 			d.deleting = !u.GetDeletionTimestamp().IsZero()
+			d.component = u.GetLabels()[crossplane.LabelComponent]
 			g.live[u.GetName()] = d
 			g.names = append(g.names, u.GetName())
 		}
@@ -315,6 +316,48 @@ func (g *helmGate) holdMessage(busy string) string {
 		chart = d.Chart
 	}
 	return fmt.Sprintf("Helm release %s to settle (one Helm operation per cluster at a time)", chart)
+}
+
+// releasesOf are the object names of the cluster's live Releases of the
+// component (by its label), sorted; none when they cannot be read.
+func (g *helmGate) releasesOf(ctx context.Context, component string) []string {
+	g.load(ctx)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []string
+	for _, n := range g.names {
+		if g.live[n].component == component {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// readable reports whether the cluster's Releases could be read this pass.
+func (g *helmGate) readable(ctx context.Context) bool {
+	g.load(ctx)
+	return g.err == nil
+}
+
+// settledAt reports whether every Release of want (object name to the
+// digest it must have) is live at that digest and its Helm operation
+// settled: deployed, Ready and Synced, the provider caught up with its
+// spec, not paused, given up or going away.
+func (g *helmGate) settledAt(ctx context.Context, want map[string]string) bool {
+	g.load(ctx)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.err != nil || len(want) == 0 {
+		return false
+	}
+	for name, digest := range want {
+		d := g.live[name]
+		if d == nil || d.Digest != digest || d.deleting || d.behind || d.Paused || d.PausedByUs || d.GaveUp ||
+			!d.Ready || !d.Synced || d.HelmState != crossplaneaws.HelmDeployed {
+			return false
+		}
+	}
+	return true
 }
 
 // wasUnchanged reports whether the Release already had the digest the plan

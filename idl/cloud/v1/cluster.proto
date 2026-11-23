@@ -515,6 +515,13 @@ message ClusterStatus {
   // last applied.
   CodeChange code_change = 51;
 
+  // catalog_change is a change of the platform catalog (a platform
+  // definition's values, chart, timeout, requires or disabled, or the
+  // platform pool) applied to the cluster in turn by its channel's code
+  // rollout, one definition at a time. Unset until the controller
+  // fingerprinted the cluster's catalog.
+  CatalogChange catalog_change = 53;
+
   // Node groups as observed: the platform group first, then the user's.
   repeated NodeGroupStatus node_groups = 52;
 

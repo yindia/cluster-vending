@@ -550,8 +550,9 @@ shipped in `cloud.cluster-vending.io/shipped-hash`:
 | Shipped, edited, no longer in the build, or the platform team's own | Leaves it. |
 
 `spec.disabled` switches a definition off without deleting it: a platform
-component is removed from every cluster on its next pass, and a tenant component
-can no longer be enabled. Definitions that require it are off with it.
+component is removed from existing clusters by the gated catalog change (see
+Code changes), and a tenant component can no longer be enabled. Definitions that
+require it are off with it, in the same change.
 
 **Providers.** Each definition is for one cloud, in `spec.provider` (`aws`,
 `gcp` or `azure`, default `aws`). Only `aws` definitions ship. A variant for
@@ -784,6 +785,35 @@ channel of its clusters reaches its tier. A failed apply is tried 3 times, then
 the change halts (`CodeChangeHalted`) until a newer build renders it otherwise or
 an update applies it. Objects of an owner are never removed by a code change;
 a dropped object's cloud resource stays in place.
+
+The code-change fingerprint covers only the cluster's Crossplane objects
+(`ClusterSet`, Helm ProviderConfig included), not the platform components'
+Helm releases. **Catalog changes** have their own fingerprint (PROP-01 4.7,
+`pkg/reconcile/cluster/catalog_change.go`): each cluster records, in
+`status.catalogChange.applied`, one fingerprint per platform definition (its
+values with the placeholders resolved, its charts, install timeout, `requires`
+and namespace; `component.CatalogFingerprint`) and one for the platform pool
+(`nodeGroups.platform`). Chart versions are the release's pins and are not part
+of it: a release move or a Kubernetes upgrade changes them under its own
+rollout. Sequence and IAM are not part of it either. A definition whose
+fingerprint differs, one added, or one removed (disabled, deleted, or switched
+off by the cascade) is a catalog change pending (`status.catalogChange`:
+`N catalog entries change`). It is a member of the channel's code rollout with
+the code change (tiers, `maxInProgress`, soak, windows, freezes, halt past
+`maxFailed`; Manual clusters too). Until it is admitted, what runs stays: the
+Release objects of a changed definition are not written, a new definition is
+not installed, a removed one is not uninstalled, the platform pool is not
+applied. Once admitted, the cluster applies the entries one at a time:
+removals first, highest sequence first (dependents before what they require),
+then installs and value changes, lowest sequence first, unless the platform
+supplies an order (`reconcile.Deps.CatalogOrder`, for PROP-03's placement
+moves). An entry's fingerprint is recorded only once its Helm operation settled
+(digest written, deployed, Ready, observed); one that fails or does not settle
+in 30 minutes is recovered 3 times, then the change halts until `cluster retry`.
+A cluster fingerprinted for the first time takes what it renders as applied. A
+change to a component that was never Ready, a fingerprint that cannot be
+computed yet, and changes that land during a Kubernetes upgrade or a release
+move are not gated separately.
 
 **Admin views.** `admin release list` and `get`, and `admin channel list` and
 `get` (read-only; platform admins only). `admin channel get` plans the rollout at
@@ -1265,6 +1295,7 @@ are marked so in the type; the rest can be updated.
 | `status.results` | list | One reference per result kind in S3: `kind`, `bucket`, `key`, `etag`, `digest`, `collectedAt`, `attemptedAt`, `total`, `removed`, `incomplete`, `truncated`. |
 | `status.policySnapshot` | string | The bounded policy snapshot (protojson). |
 | `status.codeChange` | object | A pending code change (`phase`: `Pending`, `Applying`, `Done`, `Halted`; `summary`; `objects`). |
+| `status.catalogChange` | object | A pending catalog change (`phase` as above; `summary`; `pending[]`, in order; `component`, `step`, `steps`; `message`; times). The applied fingerprints are in `contractStatus`. |
 | `status.inventory` | list | Every Crossplane object of the cluster, with its external name. |
 | `status.network` | object | The VPC, subnets, NAT gateways and egress IPs of the cluster's network. |
 | `status.importPlan` | object | As for a network. |
@@ -1776,7 +1807,7 @@ through the management network.
 | `cluster_vending_rpc_in_flight` | Gauge | Calls executing now. |
 | `cluster_vending_fleet_resources` | Gauge | Accounts, networks, clusters and tenant components by phase (`kind`, `phase`). |
 | `cluster_vending_fleet_conditions` | Gauge | Ready and Synced counts by `kind`, `condition`, `status`. |
-| `cluster_vending_fleet_upgrade_clusters`, `cluster_vending_fleet_release_moves`, `cluster_vending_fleet_code_changes` | Gauge | Upgrades, component moves and code changes in progress, by phase. |
+| `cluster_vending_fleet_upgrade_clusters`, `cluster_vending_fleet_release_moves`, `cluster_vending_fleet_code_changes` | Gauge | Upgrades, component moves and code changes in progress, by phase. Code changes by kind: `cluster`, `network`, `catalog`. |
 | `cluster_vending_fleet_components` | Gauge | Platform and tenant component instances by phase. |
 | `cluster_vending_fleet_frozen_resources`, `cluster_vending_freeze_phase`, `cluster_vending_freeze_resources` | Gauge | Frozen owners, and the freeze's phase and paused resources. |
 | `cluster_vending_fleet_metrics_active`, `cluster_vending_fleet_metrics_last_success_timestamp_seconds`, `cluster_vending_fleet_metrics_refresh_errors_total` | Gauge, Counter | Only the elected leader publishes fleet snapshots; standbys publish 0. |

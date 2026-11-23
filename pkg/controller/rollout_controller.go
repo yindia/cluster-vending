@@ -162,10 +162,15 @@ func rolloutInput(c *cloudv1alpha1.Cluster) []any {
 // codePhase is where the cluster's code change is: one that turns
 // pending, starts, halts or ends changes the channel's code rollout.
 func codePhase(c *cloudv1alpha1.Cluster) string {
-	if c.Status.CodeChange == nil {
-		return ""
+	phase := ""
+	if c.Status.CodeChange != nil {
+		phase = c.Status.CodeChange.Phase
 	}
-	return c.Status.CodeChange.Phase
+	if c.Status.CatalogChange != nil {
+		// The catalog change is a member of the same rollout.
+		phase += "/" + c.Status.CatalogChange.Phase
+	}
+	return phase
 }
 
 // movePhase is where the cluster's release move is: a move that starts,

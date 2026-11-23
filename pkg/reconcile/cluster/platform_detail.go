@@ -58,6 +58,9 @@ type releaseDetail struct {
 	Ready, Synced bool
 	// deleting: the Release is being deleted.
 	deleting bool
+	// component is the platform component the Release is of (its
+	// component label).
+	component string
 	// behind: the provider has not yet acted on the Release's latest
 	// spec (the Ready condition's observedGeneration is older than the
 	// Release's generation): what Ready says is about the spec before.

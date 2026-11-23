@@ -98,6 +98,12 @@ type Deps struct {
 	// component catalog and the releases that pin its versions. Only what
 	// reconciles has it; nil installs nothing (the API handlers, tests).
 	Platform PlatformSource
+	// CatalogOrder is the order a cluster applies the entries of a catalog
+	// change in (definition names, or "platform-pool"): the ones named go
+	// first, in this order, then the rest in the default order (removals
+	// highest sequence first, then the others lowest sequence first).
+	// PROP-03's placement moves supply theirs here. Nil: the default.
+	CatalogOrder []string
 	// Releases reads the release channels and the releases a cluster's
 	// Kubernetes version is checked against (create and update) and
 	// reported against (its status): the API handlers have it without

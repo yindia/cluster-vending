@@ -280,6 +280,9 @@ func (f *Fleet) Refresh(ctx context.Context, now time.Time) (err error) {
 			b.add("fleet_release_moves", 1, label(move.Phase, "Idle", "Pending", "Components", "Halted"))
 		}
 		b.code("cluster", cluster.Status.CodeChange)
+		if cat := cluster.Status.CatalogChange; cat != nil && cat.Phase != "" {
+			b.code("catalog", &cloud.CodeChange{Phase: cat.Phase})
+		}
 	}
 	for _, component := range components.Items {
 		b.owner("component", component.Status.Phase, &component, component.Status.ObservedGeneration, component.Status.Conditions, len(component.Status.Inventory), now)

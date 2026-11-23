@@ -523,7 +523,7 @@ Each phase ships on its own and leaves the system consistent.
   `TargetInvalid`, and deletes complete. A restart with an invalid object behaves as in 4.6.
 - **Tests**: a table with one row per row of 4.6, on the fake client.
 
-### Phase 5: Gated catalog changes
+### Phase 5: Gated catalog changes — implemented
 
 - The catalog fingerprint per definition, and the rendered platform pool as one entry (4.7).
   Disable, enable and values changes admitted by the code-change rollout and applied one
@@ -538,6 +538,62 @@ Each phase ships on its own and leaves the system consistent.
   the default and an explicit one; the recorded hash moving only after the Helm operation
   settles. `--check` tables for `requires`, cycles and sequence 0.
 - PROP-03 phase 4 depends on this phase.
+- **Implemented** (2026-11-23):
+  - The fingerprint: `component.CatalogFingerprint` (`pkg/component/catalog_fingerprint.go`) per
+    platform definition, from its values with the placeholders resolved, its charts (main, CRDs,
+    companions), install timeout, sorted `requires` and namespace; the platform pool is the entry
+    `platform-pool`, a fingerprint of `nodeGroups.platform`. Recorded per cluster in
+    `ClusterStatus.catalog_change.applied` (new `CatalogChange` message, `cluster.proto` field 53;
+    `status.catalogChange` on the `Cluster` kind without the map).
+  - The decision: `decideCatalog` (`pkg/reconcile/cluster/catalog_change.go`), pure. Pending is
+    every entry changed, added or removed (disable, delete, or the cascade). Admission is the
+    channel's code rollout (`ClusterCodeAdmitted`, the freeze check): `rollout.ComputeCode` counts a
+    cluster's catalog change and code change as one member (`clusterChange`), so tiers,
+    `maxInProgress`, soak, windows, the platform freeze, `maxFailed` and Manual clusters behave as
+    for a code change; `CodeChanging` includes it, so a Kubernetes upgrade does not start under it.
+    Order (`catalogOrder`): the caller's order first (`reconcile.Deps.CatalogOrder`, the interface
+    PROP-03 phase 4 sets for its M2 order), then removals highest sequence first with a dependent
+    before what it requires, then installs and changes lowest sequence first with what is required
+    first; the pool before the definitions. One entry at a time; its fingerprint is recorded only
+    on a pass after the one that started it, once every Release of it is at the rendered digest and
+    deployed, Ready, Synced and observed (`helmGate.settledAt`), or for a removal once no Release of
+    it is left. Watch, recover and halt as a release move: 30 minutes, 3 recoveries, then `Halted`
+    until `cluster retry` or a new catalog.
+  - The hold (`catalog_pass.go`): until its turn, a changed definition's Releases are not written
+    (the Helm gate's `Skip`, and the gate does not see it, so it holds nothing else back), an added
+    definition is left out of the plan (`PENDING`, "waiting for the catalog change"), a removed
+    one's Releases, IAM objects and Usages are kept in the inventory, and the node pass does not
+    apply the platform pool.
+  - `--check` prints a note for each disable listing the dependents it switches off
+    (`catalog.SwitchedOff`); the `requires`, cycle and sequence-0 rules were already in the check
+    (phase 0) and keep their tables. `cluster get` prints a `Catalog Change` line; the fleet metric
+    `fleet_code_changes` has the kind `catalog`.
+  - Tests: `decideCatalog` and `catalogOrder` tables, `CatalogFingerprint`, `ComputeCode` with
+    catalog members (tiers, Manual, in progress, soak, halt, freeze), and fake-client passes: two
+    values changes one after the other with the hash recorded only after the first settled, a wait
+    for the rollout, a failure of the first halting before the second, and a disable uninstalling
+    the dependent before the definition.
+- **Deviations from the text above.**
+  - The fingerprint does not include the chart version: versions are the release's pins, already
+    gated by the release move and the Kubernetes upgrade. Including them would gate every move twice.
+  - Not gated separately, by design: a change to a component that was never Ready (its first install
+    is still going on, or it fails for another reason), a fingerprint that cannot be computed yet (a
+    placeholder without a value keeps the recorded one), a removed definition of which nothing is on
+    the cluster, and any catalog change that lands while the cluster upgrades Kubernetes or moves
+    release (it goes with that step, which is itself gated). A cluster fingerprinted for the first
+    time (every existing cluster, on the first pass of this build) takes what it renders as applied.
+  - A component's IAM objects (`cloudResources`, e.g. Karpenter's policy) are not in the fingerprint
+    and still apply on the next pass, as before.
+  - Capsule is fingerprinted on every cluster, NaaS or not: turning NaaS on or off is the tenant's
+    spec change, not a catalog change.
+  - The platform pool's fingerprint is its configuration, not the rendered objects (whose AMI pin
+    moves with releases); a pool that does not exist yet is created ungated, as phase 2 of PROP-03
+    does.
+- **Not verified** (no real cluster, no AWS): the hold and the settle check on a live provider-helm
+  (a Release left unwritten keeps running; `observedGeneration` catching up after a values-only
+  upgrade), the Usage ordering of a held removal on a real Crossplane, a three-tier fleet end to end
+  through the rollout controller (the planner and one cluster's passes are tested separately), and
+  the UI (only `ui/src/gen` was regenerated; no UI code reads the new field).
 
 ### Phase 6: Helm chart and CI (deferred, decided 2026-11-20)
 

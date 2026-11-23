@@ -91,6 +91,10 @@ const (
 	NodeSortBy_NODE_SORT_BY_CPU_REQUESTED_PERCENT    NodeSortBy = 4
 	NodeSortBy_NODE_SORT_BY_MEMORY_REQUESTED_PERCENT NodeSortBy = 5
 	NodeSortBy_NODE_SORT_BY_POD_COUNT                NodeSortBy = 6
+	// Used CPU and memory as a percentage of allocatable; nodes without usage
+	// come last in either order.
+	NodeSortBy_NODE_SORT_BY_CPU_USED_PERCENT    NodeSortBy = 7
+	NodeSortBy_NODE_SORT_BY_MEMORY_USED_PERCENT NodeSortBy = 8
 )
 
 // Enum value maps for NodeSortBy.
@@ -103,6 +107,8 @@ var (
 		4: "NODE_SORT_BY_CPU_REQUESTED_PERCENT",
 		5: "NODE_SORT_BY_MEMORY_REQUESTED_PERCENT",
 		6: "NODE_SORT_BY_POD_COUNT",
+		7: "NODE_SORT_BY_CPU_USED_PERCENT",
+		8: "NODE_SORT_BY_MEMORY_USED_PERCENT",
 	}
 	NodeSortBy_value = map[string]int32{
 		"NODE_SORT_BY_UNSPECIFIED":              0,
@@ -112,6 +118,8 @@ var (
 		"NODE_SORT_BY_CPU_REQUESTED_PERCENT":    4,
 		"NODE_SORT_BY_MEMORY_REQUESTED_PERCENT": 5,
 		"NODE_SORT_BY_POD_COUNT":                6,
+		"NODE_SORT_BY_CPU_USED_PERCENT":         7,
+		"NODE_SORT_BY_MEMORY_USED_PERCENT":      8,
 	}
 )
 
@@ -267,9 +275,11 @@ func (x *ListNodeGroupNodesRequest) GetSortOrder() SortOrder {
 	return SortOrder_SORT_ORDER_UNSPECIFIED
 }
 
-// ListNodeGroupNodesResponse is a page of a node group's nodes, in name order,
-// read from the cluster's results bucket: the API server never reads the
-// workload cluster.
+// ListNodeGroupNodesResponse is a page of a node group's nodes. With the live
+// reader deployed it is read live from the workload cluster by the live
+// reader (live_at set, sorted as asked); otherwise it is read from the
+// cluster's results bucket, in name order. The API server itself never
+// reads the workload cluster.
 type ListNodeGroupNodesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Nodes []*NodeGroupNode       `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
@@ -400,7 +410,7 @@ const file_cloud_v1_node_group_nodes_proto_rawDesc = "" +
 	"\x1eNODE_STATUS_FILTER_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16NODE_STATUS_FILTER_ALL\x10\x01\x12\x1c\n" +
 	"\x18NODE_STATUS_FILTER_READY\x10\x02\x12 \n" +
-	"\x1cNODE_STATUS_FILTER_NOT_READY\x10\x03*\xe2\x01\n" +
+	"\x1cNODE_STATUS_FILTER_NOT_READY\x10\x03*\xab\x02\n" +
 	"\n" +
 	"NodeSortBy\x12\x1c\n" +
 	"\x18NODE_SORT_BY_UNSPECIFIED\x10\x00\x12\x15\n" +
@@ -409,7 +419,9 @@ const file_cloud_v1_node_group_nodes_proto_rawDesc = "" +
 	"\x16NODE_SORT_BY_READINESS\x10\x03\x12&\n" +
 	"\"NODE_SORT_BY_CPU_REQUESTED_PERCENT\x10\x04\x12)\n" +
 	"%NODE_SORT_BY_MEMORY_REQUESTED_PERCENT\x10\x05\x12\x1a\n" +
-	"\x16NODE_SORT_BY_POD_COUNT\x10\x06B\xa3\x01\n" +
+	"\x16NODE_SORT_BY_POD_COUNT\x10\x06\x12!\n" +
+	"\x1dNODE_SORT_BY_CPU_USED_PERCENT\x10\a\x12$\n" +
+	" NODE_SORT_BY_MEMORY_USED_PERCENT\x10\bB\xa3\x01\n" +
 	"\fcom.cloud.v1B\x13NodeGroupNodesProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
 var (

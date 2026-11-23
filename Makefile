@@ -203,6 +203,10 @@ keycloak: ## Start/configure local Keycloak only; does not start API or UI
 run-controller: build ## Run the controller against the kind cluster (the same file as run, LOCAL_CONFIG); AWS keys from the environment
 	$(BINARY) controller --config "$(LOCAL_CONFIG)"
 
+.PHONY: run-live
+run-live: build ## Run the live reader against the kind cluster (the same file as run, LOCAL_CONFIG): node lists and totals read live
+	$(BINARY) live --config "$(LOCAL_CONFIG)"
+
 .PHONY: clean
 clean: ## Remove build output
 	go clean -testcache

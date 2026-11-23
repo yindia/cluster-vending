@@ -107,8 +107,20 @@ func TestReconcileBootstrapsTheAccount(t *testing.T) {
 	if pc == nil || len(pc.Spec.AssumeRoleChain) != 1 || *pc.Spec.AssumeRoleChain[0].RoleARN != identity {
 		t.Fatalf("ProviderConfig = %+v, want it to assume %s", pc, identity)
 	}
-	if len(records) != 1 || records[0].Kind != "ProviderConfig" || records[0].Name != w.account.ProviderConfigName || records[0].CloudAccountID != w.account.ID || records[0].TenantID != tenant {
-		t.Errorf("records = %+v, want only ProviderConfig", records)
+	if len(records) != 2 || records[0].Kind != "ProviderConfig" || records[0].Name != w.account.ProviderConfigName || records[0].CloudAccountID != w.account.ID || records[0].TenantID != tenant {
+		t.Errorf("records = %+v, want the ProviderConfig and the live one", records)
+	}
+	// The second ProviderConfig assumes the reader role, for the live
+	// reader's ClusterAuths (PROP-02 7.1).
+	live := &awsv1beta1.ProviderConfig{}
+	if err := w.kube.Get(t.Context(), client.ObjectKey{Namespace: pc.Namespace, Name: w.account.ProviderConfigName + "-live"}, live); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 2 && records[1].Name != live.Name {
+		t.Errorf("records = %+v, want the live ProviderConfig recorded", records)
+	}
+	if len(live.Spec.AssumeRoleChain) != 1 || *live.Spec.AssumeRoleChain[0].RoleARN != "arn:aws:iam::444455556666:role/cluster-vending-reader" {
+		t.Errorf("live ProviderConfig = %+v, want it to assume the reader role", live.Spec)
 	}
 
 }
@@ -134,8 +146,8 @@ func TestReconcileTwiceChangesNothing(t *testing.T) {
 		t.Errorf("records after the second Reconcile = %+v, were %+v", records2, records)
 	}
 	configs := &awsv1beta1.ProviderConfigList{}
-	if err := w.kube.List(ctx, configs); err != nil || len(configs.Items) != 1 {
-		t.Errorf("%d ProviderConfigs (%v), want 1", len(configs.Items), err)
+	if err := w.kube.List(ctx, configs); err != nil || len(configs.Items) != 2 {
+		t.Errorf("%d ProviderConfigs (%v), want 2 (the account's and the live one)", len(configs.Items), err)
 	}
 }
 
@@ -201,9 +213,9 @@ func TestView(t *testing.T) {
 		t.Errorf("view = %v", got)
 	}
 	views := st.GetManagedResources()
-	if len(views) != 1 || views[0].GetKind() != "ProviderConfig" ||
+	if len(views) != 2 || views[0].GetKind() != "ProviderConfig" || views[1].GetKind() != "ProviderConfig" ||
 		views[0].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
-		t.Errorf("objects = %v, want only the ProviderConfig, ready", views)
+		t.Errorf("objects = %v, want the two ProviderConfigs, ready", views)
 	}
 }
 

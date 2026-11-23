@@ -459,11 +459,12 @@ func TestCloudAccount(t *testing.T) {
 	w.must(t, w.k.Get(ctx, key, obj))
 	cond := meta.FindStatusCondition(obj.Status.Conditions, ConditionReady)
 	if cond == nil || cond.Status != metav1.ConditionTrue || obj.Status.Phase != cloudv1alpha1.CloudAccountPhaseReady ||
-		obj.Status.ProviderConfigName != "aws-0a1b2c3d" || len(obj.Finalizers) != 1 || len(obj.Status.Inventory) != 1 {
+		obj.Status.ProviderConfigName != "aws-0a1b2c3d" || len(obj.Finalizers) != 1 || len(obj.Status.Inventory) != 2 {
 		t.Errorf("status %+v, finalizers %v", obj.Status, obj.Finalizers)
 	}
-	if len(obj.Status.Inventory) == 1 && (obj.Status.Inventory[0].Kind != "ProviderConfig" || obj.Status.Inventory[0].Name != "aws-0a1b2c3d") {
-		t.Errorf("inventory = %+v, want only the account's ProviderConfig", obj.Status.Inventory)
+	if len(obj.Status.Inventory) == 2 && (obj.Status.Inventory[0].Kind != "ProviderConfig" || obj.Status.Inventory[0].Name != "aws-0a1b2c3d" ||
+		obj.Status.Inventory[1].Name != "aws-0a1b2c3d-live") {
+		t.Errorf("inventory = %+v, want the account's ProviderConfig and the live one", obj.Status.Inventory)
 	}
 	pcKey := client.ObjectKey{Namespace: namespace, Name: "aws-0a1b2c3d"}
 	w.must(t, w.k.Get(ctx, pcKey, &awsv1beta1.ProviderConfig{}))

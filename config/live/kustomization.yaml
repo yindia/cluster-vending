@@ -1,0 +1,16 @@
+# The live reader (`cluster-vending live`, PROP-02 5.5): reads the workload
+# clusters on request with the platform's read-only identity and serves the
+# API server only. Included by ../server/base, which gives these objects its
+# namespace and its cluster-vending- prefix (the service account is then
+# cluster-vending-live, the name the controller binds in each tenant
+# namespace: pkg/reconcile LiveReaderServiceAccount).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- service_account.yaml
+- role.yaml
+- role_binding.yaml
+- deployment.yaml
+- service.yaml
+- network_policy.yaml

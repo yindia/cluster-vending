@@ -118,7 +118,7 @@ func checkKeys(values map[string]string) error {
 	known := map[string]bool{}
 	// Any command's settings: the file is read before the command is known
 	// to it, and the controller's settings are not the server's.
-	for _, s := range slices.Concat(globalSettings, serveSettings, controllerSettings) {
+	for _, s := range slices.Concat(globalSettings, serveSettings, controllerSettings, liveSettings) {
 		known[s.Flag] = true
 	}
 	var errs []error

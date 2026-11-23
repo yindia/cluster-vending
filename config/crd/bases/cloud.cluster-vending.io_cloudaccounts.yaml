@@ -80,6 +80,15 @@ spec:
                     x-kubernetes-validations:
                     - message: accountID is immutable
                       rule: self == oldSelf
+                  readerRole:
+                    description: |-
+                      readerRole is the ARN of the account's read-only role (the reader
+                      stack's), which the live reader's identity assumes (PROP-02 7.1).
+                      Empty: arn:aws:iam::<accountID>:role/cluster-vending-reader, the
+                      stack's default RoleName. An account without the role gets no live
+                      reads; nothing else depends on it.
+                    pattern: ^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$
+                    type: string
                   role:
                     description: |-
                       role is the name (no path) of the IAM role the platform assumes in

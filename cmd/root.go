@@ -83,6 +83,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(
 		newServeCmd(g),
 		newControllerCmd(g),
+		newLiveCmd(g),
 		newAccountCmd(),
 		newTenantCmd(),
 		newNetworkCmd(),

@@ -216,4 +216,9 @@ message NodeGroupNode {
   // Of those pods, the ones with a container that sets no CPU or memory
   // request.
   int32 pods_without_requests = 22;
+  // What the node uses now (NodeMetrics of metrics.k8s.io), from a live
+  // read only. Unset when metrics-server is not installed or its list
+  // failed; the response then says so in its notices.
+  optional int64 used_cpu_millis = 23;
+  optional int64 used_memory_bytes = 24;
 }

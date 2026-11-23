@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -170,8 +171,9 @@ func TestUserNodeGroupsAreAppliedOnceKarpenterIsReady(t *testing.T) {
 	}
 }
 
-// A cluster with no user node groups applies nothing to the workload
-// cluster, and needs none of Karpenter's IAM for it.
+// A cluster with no user node groups applies nothing of them to the workload
+// cluster, and needs none of Karpenter's IAM for it: only the live reader's
+// RBAC and flow schema (PROP-02 7.1), which every cluster gets.
 func TestNoUserNodeGroupsApplyNothing(t *testing.T) {
 	var applied []string
 	fw := newFakeWorkload(interceptor.Funcs{Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
@@ -184,8 +186,9 @@ func TestNoUserNodeGroupsApplyNothing(t *testing.T) {
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-	if len(applied) != 0 {
-		t.Errorf("applied %v", applied)
+	want := []string{crossplaneaws.LiveReaderRole, crossplaneaws.LiveReaderRole, crossplaneaws.LiveFlowSchema, crossplaneaws.LiveFlowSchema}
+	if !slices.Equal(applied, want) {
+		t.Errorf("applied %v, want only %v", applied, want)
 	}
 	if res == nil || len(res.groups) != 0 || !res.system.counted {
 		t.Errorf("result = %+v", res)

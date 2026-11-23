@@ -48,17 +48,21 @@ func isSidecar(c *corev1.Container) bool {
 // A missing request is zero. An init container runs alone (before the next
 // one) unless it is a sidecar (restartPolicy Always), which then keeps running
 // beside everything after it.
+//
+// A pod that sets pod-level spec.resources requests (Kubernetes 1.32 and
+// later) counts those instead, per resource, as the scheduler does (PROP-02
+// open question 1); a resource it sets there is never missing.
 func PodRequests(p *corev1.Pod) Requests {
 	var containers, sidecars, initPeak pair
-	var missing bool
+	var missingCPU, missingMem bool
 	for i := range p.Spec.Containers {
 		c := &p.Spec.Containers[i]
 		containers = containers.plus(requestOf(c))
 		if _, ok := c.Resources.Requests[corev1.ResourceCPU]; !ok {
-			missing = true
+			missingCPU = true
 		}
 		if _, ok := c.Resources.Requests[corev1.ResourceMemory]; !ok {
-			missing = true
+			missingMem = true
 		}
 	}
 	for i := range p.Spec.InitContainers {
@@ -72,7 +76,15 @@ func PodRequests(p *corev1.Pod) Requests {
 		initPeak = initPeak.max(sidecars.plus(req))
 	}
 	total := containers.plus(sidecars).max(initPeak)
+	if pod := p.Spec.Resources; pod != nil {
+		if q, ok := pod.Requests[corev1.ResourceCPU]; ok {
+			total.cpu, missingCPU = q.MilliValue(), false
+		}
+		if q, ok := pod.Requests[corev1.ResourceMemory]; ok {
+			total.mem, missingMem = q.Value(), false
+		}
+	}
 	over := pair{p.Spec.Overhead.Cpu().MilliValue(), p.Spec.Overhead.Memory().Value()}
 	total = total.plus(over)
-	return Requests{CPUMillis: total.cpu, MemoryBytes: total.mem, MissingRequests: missing}
+	return Requests{CPUMillis: total.cpu, MemoryBytes: total.mem, MissingRequests: missingCPU || missingMem}
 }

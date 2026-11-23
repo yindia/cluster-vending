@@ -57,6 +57,15 @@ func TestPodRequests(t *testing.T) {
 		{"init container without requests is not flagged", corev1.PodSpec{
 			InitContainers: []corev1.Container{ctr("", "")},
 			Containers:     []corev1.Container{ctr("100m", "64Mi")}}, 100, 64 * mi, false},
+		{"pod-level requests win over the containers", corev1.PodSpec{
+			Resources:  &corev1.ResourceRequirements{Requests: rl("2", "1Gi")},
+			Containers: []corev1.Container{ctr("100m", ""), ctr("", "")}}, 2000, 1 << 30, false},
+		{"pod-level CPU only: memory from the containers", corev1.PodSpec{
+			Resources:  &corev1.ResourceRequirements{Requests: rl("500m", "")},
+			Containers: []corev1.Container{ctr("", "64Mi")}}, 500, 64 * mi, false},
+		{"pod-level requests plus overhead", corev1.PodSpec{
+			Resources: &corev1.ResourceRequirements{Requests: rl("1", "")}, Overhead: rl("50m", ""),
+			Containers: []corev1.Container{ctr("", "")}}, 1050, 0, true},
 		{"sidecar adds to the running sum", corev1.PodSpec{
 			InitContainers: []corev1.Container{sidecar("100m", "10Mi")},
 			Containers:     []corev1.Container{ctr("200m", "20Mi")}}, 300, 30 * mi, false},

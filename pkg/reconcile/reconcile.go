@@ -167,6 +167,11 @@ type Deps struct {
 // same name.
 const KubeconfigReaderRole = "cluster-vending-kubeconfig-reader"
 
+// LiveReaderServiceAccount is the live reader's service account (the
+// `cluster-vending live` Deployment), in the controller's namespace. Each
+// tenant namespace binds it to KubeconfigReaderRole too (PROP-02 7.1).
+const LiveReaderServiceAccount = "cluster-vending-live"
+
 // UsageHistoryWriterRole is the ClusterRole (config/rbac) that may write
 // ConfigMaps: bound, like KubeconfigReaderRole, only in tenant namespaces,
 // where the controller keeps each cluster's recorded usage (resource

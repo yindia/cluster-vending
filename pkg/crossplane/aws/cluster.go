@@ -143,6 +143,10 @@ type ClusterPlan struct {
 	// (results_bucket.go). It needs AccountID (the bucket's name) and is
 	// never rendered for an imported cluster (HasResultsBucket).
 	ResultsBucket bool
+	// LiveProviderConfigName and LiveReaderRoleARN render the live reader's
+	// identity (live.go): the account's reader-role ProviderConfig and the
+	// role's ARN. Empty: no live identity.
+	LiveProviderConfigName, LiveReaderRoleARN string
 	// Adoption is what an imported cluster keeps of its IAM roles; zero for
 	// a cluster the platform created.
 	Adoption
@@ -275,6 +279,7 @@ func ClusterResources(p ClusterPlan) []client.Object {
 		out = append(out, b.accessEntry(entry, principal), b.accessPolicy(entry, principal))
 	}
 	out = append(out, b.accessEntries()...)
+	out = append(out, b.liveObjects()...)
 	if p.IdentityProvider != nil {
 		out = append(out, b.managedIdentityProvider(*p.IdentityProvider))
 	}

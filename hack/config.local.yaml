@@ -15,6 +15,13 @@ http-addr: 127.0.0.1:8080
 log-format: text
 log-level: debug
 provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
+# The live reader (`make run-live`): `serve` reads node lists and node totals
+# through it. allowWithoutAuth lets it run with auth.mode none; local
+# development only, never in a deployment (PROP-02 7.5).
+live:
+  url: http://127.0.0.1:8090
+  addr: 127.0.0.1:8090
+  allowWithoutAuth: true
 # The controller's own settings (`make run-controller` reads this same file;
 # `serve` ignores them). Its AWS credentials are never here: export
 # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_SESSION_TOKEN) in the

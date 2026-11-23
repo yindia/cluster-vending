@@ -28,6 +28,10 @@ enum NodeSortBy {
   NODE_SORT_BY_CPU_REQUESTED_PERCENT = 4;
   NODE_SORT_BY_MEMORY_REQUESTED_PERCENT = 5;
   NODE_SORT_BY_POD_COUNT = 6;
+  // Used CPU and memory as a percentage of allocatable; nodes without usage
+  // come last in either order.
+  NODE_SORT_BY_CPU_USED_PERCENT = 7;
+  NODE_SORT_BY_MEMORY_USED_PERCENT = 8;
 }
 
 // ListNodeGroupNodesRequest asks for a page of the nodes of one node group.
@@ -67,9 +71,11 @@ message ListNodeGroupNodesRequest {
   SortOrder sort_order = 9 [(buf.validate.field).enum.defined_only = true];
 }
 
-// ListNodeGroupNodesResponse is a page of a node group's nodes, in name order,
-// read from the cluster's results bucket: the API server never reads the
-// workload cluster.
+// ListNodeGroupNodesResponse is a page of a node group's nodes. With the live
+// reader deployed it is read live from the workload cluster by the live
+// reader (live_at set, sorted as asked); otherwise it is read from the
+// cluster's results bucket, in name order. The API server itself never
+// reads the workload cluster.
 message ListNodeGroupNodesResponse {
   repeated NodeGroupNode nodes = 1;
   // Empty when there are no more results.

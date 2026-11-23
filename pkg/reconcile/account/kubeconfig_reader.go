@@ -22,6 +22,16 @@ func kubeconfigReaderBinding(a *model.CloudAccount, sa reconcile.ServiceAccount)
 	return tenantBinding(a, sa, reconcile.KubeconfigReaderRole)
 }
 
+// liveReaderBinding is the second binding of reconcile.KubeconfigReaderRole
+// in the tenant namespace (PROP-02 7.1): the live reader's service account,
+// next to the controller's, gets Secrets there. It reads only the clusters'
+// "<prefix>-live-kubeconfig" Secrets (RBAC cannot narrow it to those).
+func liveReaderBinding(a *model.CloudAccount, sa reconcile.ServiceAccount) *rbacv1.RoleBinding {
+	b := tenantBinding(a, sa, reconcile.KubeconfigReaderRole)
+	b.Name = reconcile.KubeconfigReaderRole + "-live"
+	return b
+}
+
 // tenantBinding binds the controller to the pre-created ClusterRole role
 // in the tenant namespace only, with a RoleBinding of the role's name.
 func tenantBinding(a *model.CloudAccount, sa reconcile.ServiceAccount, role string) *rbacv1.RoleBinding {
@@ -44,7 +54,9 @@ func (r *Reconciler) bindKubeconfigReader(ctx context.Context, a *model.CloudAcc
 	}
 	// The kubeconfig reader (workload cluster scans) and the usage-history
 	// writer (resource recommendations).
-	for _, b := range []*rbacv1.RoleBinding{kubeconfigReaderBinding(a, *sa), tenantBinding(a, *sa, reconcile.UsageHistoryWriterRole)} {
+	bindings := []*rbacv1.RoleBinding{kubeconfigReaderBinding(a, *sa), tenantBinding(a, *sa, reconcile.UsageHistoryWriterRole),
+		liveReaderBinding(a, reconcile.ServiceAccount{Namespace: sa.Namespace, Name: reconcile.LiveReaderServiceAccount})}
+	for _, b := range bindings {
 		if err := kube.Apply(ctx, r.deps.Kube, b); err != nil {
 			r.logger().ErrorContext(ctx, "bind a tenant namespace role", "tenant_id", a.TenantID, "role", b.RoleRef.Name, "error", err)
 			return fault.New(fault.Internal, "could not configure the management cluster")

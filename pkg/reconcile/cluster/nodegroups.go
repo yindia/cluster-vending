@@ -385,6 +385,7 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 			}
 		}
 	}
+	s.applyLiveReader(ctx, c, row)
 	var usage *clustersummary.Aggregator
 	if s.summaryDue(row.ID) {
 		usage = clustersummary.NewAggregator()
@@ -882,7 +883,7 @@ func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemG
 			n := &items[i]
 			pool := n.GetLabels()[crossplaneaws.KarpenterNodePoolLabel]
 			counts.count[pool]++
-			row := nodeRowOf(n)
+			row := clustersummary.NodeRow(n)
 			counts.rows[pool] = append(counts.rows[pool], row)
 			byNode[n.GetName()] = row
 			if usage != nil {
@@ -908,7 +909,7 @@ func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemG
 	err = eachPage(ctx, c, nodeList, func(items []unstructured.Unstructured) {
 		for i := range items {
 			counts.count[systemNodeGroup]++
-			counts.rows[systemNodeGroup] = append(counts.rows[systemNodeGroup], nodeRowOf(&items[i]))
+			counts.rows[systemNodeGroup] = append(counts.rows[systemNodeGroup], clustersummary.NodeRow(&items[i]))
 			if usage != nil {
 				usage.AddNodeObject(systemNodeGroup, &items[i])
 			}
@@ -928,7 +929,7 @@ func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemG
 			if name == "" {
 				view.launching++
 			} else if row := byNode[name]; row != nil {
-				claimInto(row, &items[i])
+				clustersummary.ClaimInto(row, &items[i])
 			}
 		}
 	})

@@ -18,6 +18,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/cloudformation"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
+	"github.com/yindia/cluster-vending/pkg/live"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/admin"
 	"github.com/yindia/cluster-vending/pkg/server/authn"
@@ -46,6 +47,19 @@ type options struct {
 	catalog    reconcile.PlatformSource
 	onboarding tenant.Onboarding
 	results    cluster.ResultStore
+	live       []cluster.Option
+}
+
+// WithLive makes the node lists and GetNodeResources live, read by the live
+// reader c (PROP-02 phase 3). allowWithoutAuth (live.allowWithoutAuth) lets
+// them run with auth.mode none; otherwise they are refused there.
+func WithLive(c live.Client, allowWithoutAuth bool) Option {
+	return func(o *options) {
+		o.live = []cluster.Option{func(s *cluster.ClusterService) {
+			unauthenticated := o.auth.Mode == auth.ModeNone || o.auth.Mode == ""
+			cluster.WithLive(c, unauthenticated && !allowWithoutAuth)(s)
+		}}
+	}
 }
 
 // WithResults gives ClusterService where it reads scan results from: the
@@ -94,7 +108,7 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 	o.auth.Logger = d.Logger
 	// Measure after fault translation, including refusals before the handler runs.
 	server := connect.NewServer(rpcMetrics.Interceptor, service.Faults, authn.Interceptor(o.auth))
-	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d, cluster.WithResults(o.results)))
+	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d, append([]cluster.Option{cluster.WithResults(o.results)}, o.live...)...))
 	cloudv1connect.RegisterNetworkServiceHandler(server, network.NewNetworkService(d))
 	cloudv1connect.RegisterTenantServiceHandler(server, tenant.NewTenantService(d, tenant.WithOnboarding(o.onboarding)))
 	cloudv1connect.RegisterAdminServiceHandler(server, admin.NewService(d))

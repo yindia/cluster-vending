@@ -19,6 +19,14 @@ type AWSAccount struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[\w+=,.@-]{1,64}$`
 	Role string `json:"role,omitempty"`
+	// readerRole is the ARN of the account's read-only role (the reader
+	// stack's), which the live reader's identity assumes (PROP-02 7.1).
+	// Empty: arn:aws:iam::<accountID>:role/cluster-vending-reader, the
+	// stack's default RoleName. An account without the role gets no live
+	// reads; nothing else depends on it.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$`
+	ReaderRole string `json:"readerRole,omitempty"`
 }
 
 // CloudAccountSpec is a cloud account of the tenant, as the platform

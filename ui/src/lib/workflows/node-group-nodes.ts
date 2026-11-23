@@ -1,7 +1,8 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import type { Cluster } from "../../gen/cloud/v1/cluster_pb";
+import type { Cluster, ClusterStatus } from "../../gen/cloud/v1/cluster_pb";
+import { LiveReadErrorSchema } from "../../gen/cloud/v1/live_pb";
 import { NodeGroupPhase, type NodeGroupNode, type NodeGroupSpec, type NodeGroupStatus } from "../../gen/cloud/v1/node_group_pb";
 import { NodeStatusFilter, type ListNodeGroupNodesResponse } from "../../gen/cloud/v1/node_group_nodes_pb";
 import { phaseDisplay, summarizeNodeGroup, type NodeGroupTone } from "./node-groups";
@@ -68,12 +69,29 @@ export function pageRange(page: number, pageSize: number, shown: number, total: 
   return `${first.toLocaleString("en-US")}–${(first + shown - 1).toLocaleString("en-US")} of ${total.toLocaleString("en-US")}`;
 }
 
-/** The server refuses a token of a list that changed (a new collection, filter or search): start again. */
+/** The server refuses a token of a list that changed (a new collection or live view, filter, sort or search): start again. */
 export function isTokenMismatch(error: unknown): boolean {
-  return error instanceof ConnectError && error.code === Code.InvalidArgument && /page_token/.test(error.rawMessage);
+  return error instanceof ConnectError && error.code === Code.InvalidArgument && /page_token|restart the list/.test(error.rawMessage);
 }
 
-export interface CollectionState { collected: boolean; collectedLabel: string; incomplete: boolean; notices: string[] }
+/**
+ * Why a live read failed (PROP-02 5.9), as the notice the node page shows instead of rows: the reason and the counts
+ * of the cluster status summary from the last successful controller pass. Undefined for any other error.
+ */
+export function liveReadFailure(error: unknown, status: ClusterStatus | undefined): string | undefined {
+  if (!(error instanceof ConnectError)) return undefined;
+  const detail = error.findDetails(LiveReadErrorSchema)[0];
+  if (!detail) return undefined;
+  const nodes = status?.nodes;
+  const since = nodes?.nodesCollectedAt ? `, ${utc(nodes.nodesCollectedAt)}` : "";
+  const counts = nodes ? ` Nodes: ${nodes.ready} of ${nodes.total} ready.` : " No controller pass has read the cluster yet.";
+  const lead = detail.reason === "AUTHENTICATION_REQUIRED"
+    ? "Live reads need authentication."
+    : `The workload cluster cannot be reached right now (${detail.message || detail.reason}).`;
+  return `${lead} Showing the counts from the last successful controller pass${since}.${counts}`;
+}
+
+export interface CollectionState { collected: boolean; collectedLabel: string; incomplete: boolean; notices: string[]; live: boolean }
 
 function utc(time: Timestamp): string {
   return timestampDate(time).toISOString().replace("T", " ").replace(/\.\d+Z$/, "").replace("Z", "") + " UTC";
@@ -81,8 +99,12 @@ function utc(time: Timestamp): string {
 
 /** What the response says of the collection; "incomplete" only means a collection that stopped early. */
 export function collectionState(response: ListNodeGroupNodesResponse): CollectionState {
+  if (response.liveAt) {
+    // Read live by the live reader: its time, never a collection's.
+    return { collected: true, live: true, collectedLabel: utc(response.liveAt), incomplete: !response.complete, notices: [...response.notices] };
+  }
   const collected = !!response.collectedAt;
-  return { collected, collectedLabel: response.collectedAt ? utc(response.collectedAt) : "Not collected yet", incomplete: collected && !response.complete, notices: [...response.notices] };
+  return { collected, live: false, collectedLabel: response.collectedAt ? utc(response.collectedAt) : "Not collected yet", incomplete: collected && !response.complete, notices: [...response.notices] };
 }
 
 export type NodeGroupKind = "system" | "user";

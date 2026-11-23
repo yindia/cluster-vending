@@ -1,0 +1,27 @@
+# What the live reader reads in the management cluster (PROP-02 7.1): the
+# Cluster objects (to resolve a request's tenant and cluster IDs) and the
+# live ClusterAuths (Ready or not). Nothing is written. The live kubeconfig
+# Secrets are read through the second binding of
+# cluster-vending-kubeconfig-reader in each tenant namespace, which the
+# controller makes; this role grants no Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-live
+    app.kubernetes.io/managed-by: kustomize
+  name: live-role
+rules:
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - clusters
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - eks.aws.m.upbound.io
+  resources:
+  - clusterauths
+  verbs:
+  - get

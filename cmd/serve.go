@@ -13,6 +13,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/config"
+	"github.com/yindia/cluster-vending/pkg/live"
 	"github.com/yindia/cluster-vending/pkg/management"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server"
@@ -126,10 +127,20 @@ func newServeCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			handler := server.NewHandler(deps, ready.Load, server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
+			opts := []server.Option{server.WithAuth(authCfg.Mode, auth.NewVerifier(authCfg)),
 				server.WithCatalog(catalog), server.WithResults(results),
 				// What account onboarding prints.
-				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN, ServerPrincipalARN: cfg.ServerPrincipalARN()}))
+				server.WithOnboarding(tenant.Onboarding{ManagementRoleARN: cfg.ManagementRoleARN, ServerPrincipalARN: cfg.ServerPrincipalARN()})}
+			// The node lists and totals are read live through the live
+			// reader; the API itself holds no workload credentials.
+			if cfg.LiveURL != "" {
+				opts = append(opts, server.WithLive(live.NewClient(cfg.LiveURL, nil), cfg.LiveAllowWithoutAuth))
+				g.logger.Info("live reads", "live_url", cfg.LiveURL)
+			}
+			if cfg.LiveAllowWithoutAuth {
+				g.logger.Warn("live.allowWithoutAuth is set: live reads run even with auth.mode none, where any caller can read any cluster; for local development only")
+			}
+			handler := server.NewHandler(deps, ready.Load, opts...)
 			return server.Run(ctx, ln, handler, cfg.ShutdownTimeout, g.logger)
 		},
 	}

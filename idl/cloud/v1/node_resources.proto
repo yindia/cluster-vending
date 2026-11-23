@@ -33,6 +33,10 @@ message NodeResourceTotals {
   int64 requested_memory_bytes = 8;
   int64 pod_count = 9;
   int64 pods_without_requests = 10;
+  // Sums of what the nodes use now (metrics.k8s.io); unset when the usage
+  // could not be read.
+  optional int64 used_cpu_millis = 11;
+  optional int64 used_memory_bytes = 12;
 }
 
 // GetNodeResourcesResponse is read live from the workload cluster.

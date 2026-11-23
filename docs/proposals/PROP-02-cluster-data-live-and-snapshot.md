@@ -565,8 +565,9 @@ Each phase ships alone and leaves the system consistent. Stored kinds are unchan
 S3 writers for the live kinds run alongside the live path through phase 5, so the two can be compared and
 rolled back.
 
-**Status (2026-11-23).** Phases 0, 1, 2 and 2b are implemented. Phase 2b put the summary in the API, the
-15-minute counts pass and the gate rule of 5.2.
+**Status (2026-11-23).** Phases 0, 1, 2, 2b and 3 are implemented. Phase 2b put the summary in the API, the
+15-minute counts pass and the gate rule of 5.2. Phase 3 added the live reader, its identity, and live node lists and
+node totals; it has not been run against a real AWS account.
 
 ### Phase 0: Stop violation event history (interim) — implemented
 
@@ -634,7 +635,69 @@ wait. `last_successful_at` is the node counts' collected time. The UI test is a 
 - **Tests:** convert tests (summary present, absent, unreachable); a CLI print golden; a UI component test for the
   overview's three states; gate tests at 14 and 16 minutes and with Reachable False; the policy pass cadence.
 
-### Phase 3: Live reader, nodes and node totals
+### Phase 3: Live reader, nodes and node totals — implemented (not verified on AWS)
+
+**Built.**
+
+- `pkg/live`: the reader. `buildNodes` lists nodes, pods (projected as each page arrives, never kept), NodeClaims
+  and `nodes.metrics.k8s.io` in pages of 500 with the projection of `pkg/clustersummary` (`NodeRow`, `ClaimInto`,
+  `Counted`, `PodRequests`: the same code as the controller's pass). A 410 on a continue token restarts the build
+  once, then fails `CLUSTER_UNREACHABLE` "list expired"; 401/403 is `CREDENTIALS_REJECTED`; a deadline before any page
+  is `CLUSTER_UNREACHABLE`, after one `LIMIT_EXCEEDED`. Views: one build per (tenant, cluster) serves every group,
+  filter and sort; reused for 15 s; paged views with `live:<128-bit id>:<offset>` tokens bound to tenant, cluster,
+  group, filter and sort, alive 60 s after last use and at most 5 minutes after the build; 256 MiB LRU byte bound.
+  Guards: singleflight per key, 4 builds a minute per cluster, 10 per tenant, 8 in flight (2 s wait, then `BUSY`),
+  30 s cooldown and 2 minutes after 3 failures in a row (`NO_LIVE_IDENTITY` and `BUSY` start none). Errors are
+  UNAVAILABLE with a `cloud.v1.LiveReadError` detail (`idl/cloud/v1/live.proto`: reason, message,
+  `retry_after_seconds`). Builds are logged (tenant, cluster, kind, duration, rows, pages, outcome, reason) and
+  counted on `/metrics`.
+- `KubeOpener`: resolves the Cluster object from tenant and cluster IDs only, refuses another tenant's, needs the
+  `<prefix>-live-auth` ClusterAuth Ready and reads only `<prefix>-live-kubeconfig` (else `NO_LIVE_IDENTITY`; the
+  controller's kubeconfig is never read). Client-side limiter QPS 10, burst 20.
+- `cluster-vending live` (`cmd/live.go`, `live.Run`): the internal Connect endpoint (the two live RPCs of
+  `ClusterService`, the rest UNIMPLEMENTED), `/healthz`, `/readyz`, `/metrics`. `config/live`: ServiceAccount
+  `cluster-vending-live`, a ClusterRole of get/list Clusters and get ClusterAuths, the Deployment (one replica,
+  `Recreate`), the Service, the NetworkPolicy (ingress from the API server's pods only; egress DNS and 443/6443),
+  included by `config/server/base`, which sets `CV_LIVE_URL`.
+- API: `live.url` and `live.allowWithoutAuth` (`pkg/config/live.go`, the `live` section of the settings file).
+  With a URL, `ListNodeGroupNodes` and `GetNodeResources` go to the live reader after the API's own tenant, cluster
+  and group checks (`pkg/server/cluster/live.go`); without one they are as before (stored lists, UNIMPLEMENTED).
+  `auth.mode none` without `live.allowWithoutAuth` answers FAILED_PRECONDITION `AUTHENTICATION_REQUIRED`; `serve`
+  warns when the flag is set; only `hack/config.local.yaml` sets it (`make run-live` runs the reader locally).
+- Identity: `spec.aws.readerRole` on the CloudAccount (default `arn:<partition>:iam::<account>:role/cluster-vending-reader`);
+  the account reconcile applies the second ProviderConfig `<account>-live` (reader role, the account's external ID)
+  and a second RoleBinding of `cluster-vending-kubeconfig-reader` for the live reader's service account in the
+  tenant namespace. Every cluster's render (created and imported, not `CONFIG_MAP`) has the `<prefix>-live`
+  AccessEntry (STANDARD, group `cluster-vending:live-reader`, no access policy) and the `<prefix>-live-auth`
+  ClusterAuth, both after the EKS cluster is ACTIVE, deleted with the cluster's other objects by label. The node
+  pass applies, with the controller's kubeconfig, at most hourly, the ClusterRole and ClusterRoleBinding
+  `cluster-vending-live-reader` and the PriorityLevelConfiguration and FlowSchema `cluster-vending-live` (limited,
+  10 shares, queuing on).
+- Proto: `NodeGroupNode.used_cpu_millis`/`used_memory_bytes` and `NodeResourceTotals` used sums (optional: absent
+  without metrics, with the notice "node usage unavailable: metrics.k8s.io is not served"), `NodeSortBy`
+  `CPU_USED_PERCENT` and `MEMORY_USED_PERCENT` (rows without usage last in either order).
+- Console: the node page shows "Live as of …", restarts the list on a gone view ("The list changed; restarting"),
+  and on a failed live read shows the notice of 5.9 with the summary's node counts instead of rows.
+- Open question 1's follow-up: pod-level `spec.resources` requests count instead of the containers', per resource.
+
+**Decisions made while building.** The live identity objects do not hold the cluster's readiness back
+(`withoutLiveIdentity` in the status): an account without the reader stack would otherwise turn every cluster's
+AccessEntry or ClusterAuth into a FAILED cluster. The live reader serves the generated `ClusterService` (no separate
+internal proto). The API's token check stays in the reader: stored decimal tokens answer "restart the list" once the
+reader is deployed. AGE ascending is oldest first.
+
+**Not verified.** No run against a real AWS account or EKS cluster: the reader stack's role being assumable by the
+management role through the new ProviderConfig, EKS accepting the access entry, the ClusterAuth's token being
+accepted, the FlowSchema's effect, and the p95 latencies on a real 1,000-node cluster. The in-process load test
+(`TestLoadSyntheticFleet`: 100 synthetic clusters of the 6.3 mix, 2 ms per call) shows the limits hold (at most 8
+builds reading at once, a cold 1,000-node, 10,000-pod sorted page in about 0.15 s, warm under 0.1 ms); it does not
+replace the measurement on real clusters that open question 7 asks for, and the caps of 5.9 are still the starting
+values.
+
+**Not done.** Lists use JSON (the unstructured dynamic client has no protobuf encoding). There is no scale-out
+routing (one replica, as decided). The live reader's RoleBinding grants get on every Secret of a tenant namespace,
+as the controller's does (RBAC cannot narrow by name); the code reads only the live kubeconfig.
+
 
 - The `cluster-vending live` subcommand, the internal Connect endpoint, the Deployment (one replica, `Recreate`,
   5.5), the Service, the NetworkPolicy, the caps, the cooldown, the views.

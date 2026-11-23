@@ -215,8 +215,12 @@ func fillAccount(a *model.CloudAccount, obj *cloudv1alpha1.CloudAccount) error {
 		return err
 	}
 	annotate(obj, map[string]string{AnnotationAccount: string(raw)})
+	reader := a.ReaderRole
+	if reader == "" && obj.Spec.AWS != nil {
+		reader = obj.Spec.AWS.ReaderRole // set on the object by the platform team; the API does not carry it
+	}
 	obj.Spec = cloudv1alpha1.CloudAccountSpec{AccountName: a.AccountName,
-		AWS: &cloudv1alpha1.AWSAccount{AccountID: a.AccountID, Role: roleName(a.Identity)}}
+		AWS: &cloudv1alpha1.AWSAccount{AccountID: a.AccountID, Role: roleName(a.Identity), ReaderRole: reader}}
 	return nil
 }
 
@@ -236,7 +240,7 @@ func accountRow(obj *cloudv1alpha1.CloudAccount) *model.CloudAccount {
 		ExternalID: m.ExternalID,
 	}
 	if obj.Spec.AWS != nil {
-		a.AccountID = obj.Spec.AWS.AccountID
+		a.AccountID, a.ReaderRole = obj.Spec.AWS.AccountID, obj.Spec.AWS.ReaderRole
 	}
 	a.Access = AccessModel(obj.Status.Access)
 	a.AccessRequestedAt = accessRequestedOf(obj)

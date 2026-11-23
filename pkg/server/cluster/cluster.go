@@ -46,6 +46,9 @@ type ClusterService struct {
 	// results reads scan results from the clusters' results buckets
 	// (WithResults); nil: none can be.
 	results ResultStore
+	// live reads the workload clusters through the live reader (WithLive);
+	// nil: the node lists are the stored ones.
+	live *liveReads
 }
 
 var _ cloudv1connect.ClusterServiceHandler = (*ClusterService)(nil)

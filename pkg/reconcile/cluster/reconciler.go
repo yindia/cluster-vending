@@ -49,11 +49,15 @@ type Reconciler struct {
 	// summary throttles the cluster status summary of the node pass (the
 	// pod list and the write); nil: never throttled.
 	summary *nodeRowWrites
+	// liveReader throttles the live reader's objects in the workload cluster
+	// (applyLiveReader); nil: never throttled.
+	liveReader *nodeRowWrites
 }
 
 // New returns the Reconciler.
 func New(d reconcile.Deps) *Reconciler {
-	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}, summary: &nodeRowWrites{every: summaryInterval}}
+	return &Reconciler{deps: d, checks: &addonChecks{}, nodeRows: &nodeRowWrites{}, summary: &nodeRowWrites{every: summaryInterval},
+		liveReader: &nodeRowWrites{every: liveReaderInterval}}
 }
 
 // Target is everything a cluster is built from: its network, account and
@@ -156,6 +160,11 @@ func (s *Reconciler) Base(row *model.Cluster, a *model.CloudAccount) crossplanea
 		Namespace: a.Namespace, ProviderConfigName: a.ProviderConfigName, TenantID: row.TenantID, AccountID: a.AccountID,
 		ClusterID: row.ID, ClusterName: row.Name, Prefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
 		Tags: row.Labels, Adoption: Adoption(row),
+		// The live reader's identity (PROP-02 7.1): the account's reader role,
+		// through its own ProviderConfig. Rendered for every AWS cluster but
+		// a CONFIG_MAP one; it holds no cluster's readiness back.
+		LiveProviderConfigName: crossplaneaws.LiveProviderConfigName(a.ProviderConfigName),
+		LiveReaderRoleARN:      crossplaneaws.ReaderRoleARN(a.AccountID, a.Identity, a.ReaderRole),
 		// The admin's minimum and maximum size of the default (system) node
 		// group: they apply to every cluster, in place (never its desired
 		// size: that is cluster-autoscaler's).

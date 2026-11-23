@@ -14,9 +14,10 @@ import { usePlatform } from "@/components/platform-provider";
 import { useAsyncQuery } from "@/lib/api/use-query";
 import { hasManifestYaml } from "@/lib/workflows/node-groups";
 import {
-  NODE_PAGE_SIZE, collectionState, groupDetail, isTokenMismatch, nodeFilterOptions, nodeRow, nodeStatusFilter, pageRange, pagerBack, pagerForward, pagerStart,
+  NODE_PAGE_SIZE, collectionState, groupDetail, isTokenMismatch, liveReadFailure, nodeFilterOptions, nodeRow, nodeStatusFilter, pageRange, pagerBack, pagerForward, pagerStart,
   type NodeRow, type NodeStatusChoice,
 } from "@/lib/workflows/node-group-nodes";
+import type { ClusterStatus } from "@/gen/cloud/v1/cluster_pb";
 import { ConsoleTable } from "./console-table";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { NodeGroupYamlButton } from "./node-group-yaml-button";
@@ -69,6 +70,8 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
   }, [draft]);
 
   const token = pager.token;
+  const statusRef = useRef<ClusterStatus | undefined>(undefined);
+  statusRef.current = cluster.data?.status;
   const loadNodes = useCallback(async (signal: AbortSignal) => {
     try {
       const response = await api.cluster.listNodeGroupNodes({ tenantId, clusterId, nodeGroup: group, pageSize: NODE_PAGE_SIZE, pageToken: token, filter: nodeStatusFilter(choice), nameContains: search }, { signal });
@@ -76,6 +79,9 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
     } catch (error) {
       // The list changed under the token (a new collection): show the first page again.
       if (token && isTokenMismatch(error) && !signal.aborted) { setPager(pagerStart()); setRestarted(true); }
+      // A live read that failed shows why, with the summary's counts, and no rows.
+      const failure = liveReadFailure(error, statusRef.current);
+      if (failure) throw new Error(failure);
       throw error;
     }
   }, [api, tenantId, clusterId, group, token, choice, search]);
@@ -136,7 +142,7 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
     <VStack as="section" aria-label="Nodes" gap={3} width="100%">
       <HStack gap={3} hAlign="between" vAlign="end" wrap="wrap" width="100%">
         <VStack gap={1}><Heading level={2}>Nodes</Heading>
-          <Text type="supporting" role="status">{state?.collected ? `Collected ${state.collectedLabel}` : state ? "Not collected yet" : "Loading…"}</Text></VStack>
+          <Text type="supporting" role="status">{state?.live ? `Live as of ${state.collectedLabel}` : state?.collected ? `Collected ${state.collectedLabel}` : state ? "Not collected yet" : "Loading…"}</Text></VStack>
         <HStack gap={3} vAlign="end" wrap="wrap">
           <SegmentedControl label="Node status" value={choice} size="md" onChange={value => { setChoice(value as NodeStatusChoice); setPager(pagerStart()); }}>
             {nodeFilterOptions.map(option => <SegmentedControlItem key={option.value} value={option.value} label={option.label} />)}
@@ -145,7 +151,7 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
           <RefreshButton label="Refresh node group" onClick={refresh} isLoading={refreshing} />
         </HStack>
       </HStack>
-      {restarted && <Banner status="info" title="The node list changed" description="The controller collected the nodes again, so the list starts from the first page." onDismiss={() => setRestarted(false)} />}
+      {restarted && <Banner status="info" title="The node list changed" description="The list changed; restarting from the first page." onDismiss={() => setRestarted(false)} />}
       {nodes.error && !(token && restarted) && <Banner status="error" role="alert" title="Nodes unavailable" description={nodes.error} />}
       {state?.notices.map(notice => <Banner key={notice} status="warning" title={state.collected ? "Node list notice" : "Nodes unavailable"} description={notice} />)}
       <VStack ref={container} width="100%">

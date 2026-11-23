@@ -29,10 +29,11 @@ const (
 	noticeNodesIncomplete   = "the node list is incomplete: the controller stopped collecting before it had read every node"
 )
 
-// ListNodeGroupNodes returns a page of the nodes of one node group, read from
-// the group's shard in the cluster's results bucket: the index first, then
-// only that shard (docs/architecture.md#results-in-s3, Scale). Problems with
-// the bucket are notices in the answer, never errors.
+// ListNodeGroupNodes returns a page of the nodes of one node group: read live
+// by the live reader when one is deployed (WithLive, PROP-02 phase 3), else
+// read from the group's shard in the cluster's results bucket: the index
+// first, then only that shard (docs/architecture.md#results-in-s3, Scale).
+// Problems with the bucket are notices in the answer, never errors.
 func (s *ClusterService) ListNodeGroupNodes(ctx context.Context, req *cloudv1.ListNodeGroupNodesRequest) (_ *cloudv1.ListNodeGroupNodesResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -41,6 +42,9 @@ func (s *ClusterService) ListNodeGroupNodes(ctx context.Context, req *cloudv1.Li
 	row, err := s.get(ctx, req.GetTenantId(), req.GetClusterId())
 	if err != nil {
 		return nil, err
+	}
+	if s.live != nil {
+		return s.liveNodes(ctx, row, req)
 	}
 	if sortScope(int32(req.GetSortBy()), isDesc(req.GetSortOrder(), false), false) != "" {
 		return nil, errSortNotLive("the node list")
@@ -165,9 +169,9 @@ func filterNodes(nodes []*cloudv1.NodeGroupNode, filter cloudv1.NodeStatusFilter
 	return out
 }
 
-// GetNodeResources is the live resource totals of the cluster's node groups.
-// The live reader that serves them does not exist yet (PROP-02 phase 3), so
-// the answer is UNIMPLEMENTED once the caller's tenant and cluster check out.
+// GetNodeResources is the live resource totals of the cluster's node groups,
+// read by the live reader. Without one deployed (WithLive) the answer is
+// UNIMPLEMENTED once the caller's tenant and cluster check out.
 func (s *ClusterService) GetNodeResources(ctx context.Context, req *cloudv1.GetNodeResourcesRequest) (_ *cloudv1.GetNodeResourcesResponse, err error) {
 	defer func() { err = rpcError(err) }()
 	if err := service.Validate(req); err != nil {
@@ -175,6 +179,9 @@ func (s *ClusterService) GetNodeResources(ctx context.Context, req *cloudv1.GetN
 	}
 	if _, err := s.get(ctx, req.GetTenantId(), req.GetClusterId()); err != nil {
 		return nil, err
+	}
+	if s.live != nil {
+		return s.liveNodeResources(ctx, req)
 	}
 	return nil, connect.NewError(connect.CodeUnimplemented, "node resources are read live from the workload cluster, which this deployment does not do yet")
 }

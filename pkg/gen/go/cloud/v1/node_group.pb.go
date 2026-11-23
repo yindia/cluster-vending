@@ -576,8 +576,13 @@ type NodeGroupNode struct {
 	// Of those pods, the ones with a container that sets no CPU or memory
 	// request.
 	PodsWithoutRequests int32 `protobuf:"varint,22,opt,name=pods_without_requests,json=podsWithoutRequests,proto3" json:"pods_without_requests,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// What the node uses now (NodeMetrics of metrics.k8s.io), from a live
+	// read only. Unset when metrics-server is not installed or its list
+	// failed; the response then says so in its notices.
+	UsedCpuMillis   *int64 `protobuf:"varint,23,opt,name=used_cpu_millis,json=usedCpuMillis,proto3,oneof" json:"used_cpu_millis,omitempty"`
+	UsedMemoryBytes *int64 `protobuf:"varint,24,opt,name=used_memory_bytes,json=usedMemoryBytes,proto3,oneof" json:"used_memory_bytes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *NodeGroupNode) Reset() {
@@ -764,6 +769,20 @@ func (x *NodeGroupNode) GetPodsWithoutRequests() int32 {
 	return 0
 }
 
+func (x *NodeGroupNode) GetUsedCpuMillis() int64 {
+	if x != nil && x.UsedCpuMillis != nil {
+		return *x.UsedCpuMillis
+	}
+	return 0
+}
+
+func (x *NodeGroupNode) GetUsedMemoryBytes() int64 {
+	if x != nil && x.UsedMemoryBytes != nil {
+		return *x.UsedMemoryBytes
+	}
+	return 0
+}
+
 var File_cloud_v1_node_group_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_node_group_proto_rawDesc = "" +
@@ -807,7 +826,7 @@ const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\x15pods_without_requests\x18\x0f \x01(\x05R\x13podsWithoutRequests\"U\n" +
 	"\x0eNodeGroupNodes\x12\x14\n" +
 	"\x05group\x18\x01 \x01(\tR\x05group\x12-\n" +
-	"\x05nodes\x18\x02 \x03(\v2\x17.cloud.v1.NodeGroupNodeR\x05nodes\"\xf6\x06\n" +
+	"\x05nodes\x18\x02 \x03(\v2\x17.cloud.v1.NodeGroupNodeR\x05nodes\"\xfe\a\n" +
 	"\rNodeGroupNode\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
 	"\rinstance_type\x18\x02 \x01(\tR\finstanceType\x12\x12\n" +
@@ -835,7 +854,11 @@ const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\x14requested_cpu_millis\x18\x13 \x01(\x03R\x12requestedCpuMillis\x124\n" +
 	"\x16requested_memory_bytes\x18\x14 \x01(\x03R\x14requestedMemoryBytes\x12\x1b\n" +
 	"\tpod_count\x18\x15 \x01(\x05R\bpodCount\x122\n" +
-	"\x15pods_without_requests\x18\x16 \x01(\x05R\x13podsWithoutRequests*\\\n" +
+	"\x15pods_without_requests\x18\x16 \x01(\x05R\x13podsWithoutRequests\x12+\n" +
+	"\x0fused_cpu_millis\x18\x17 \x01(\x03H\x00R\rusedCpuMillis\x88\x01\x01\x12/\n" +
+	"\x11used_memory_bytes\x18\x18 \x01(\x03H\x01R\x0fusedMemoryBytes\x88\x01\x01B\x12\n" +
+	"\x10_used_cpu_millisB\x14\n" +
+	"\x12_used_memory_bytes*\\\n" +
 	"\fArchitecture\x12\x1c\n" +
 	"\x18ARCHITECTURE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ARCHITECTURE_AMD64\x10\x01\x12\x16\n" +
@@ -898,6 +921,7 @@ func file_cloud_v1_node_group_proto_init() {
 	}
 	file_cloud_v1_node_pool_proto_init()
 	file_cloud_v1_node_group_proto_msgTypes[1].OneofWrappers = []any{}
+	file_cloud_v1_node_group_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

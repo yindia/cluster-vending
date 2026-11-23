@@ -148,6 +148,10 @@ type CloudAccount struct {
 	// AccountName is the human-readable name (AWS account name, GCP project
 	// name, Azure subscription name). Informational only.
 	AccountName string
+	// ReaderRole is the ARN of the account's read-only role the live reader
+	// assumes (CloudAccount spec.aws.readerRole); empty takes the reader
+	// stack's default role in the account.
+	ReaderRole string
 	// Access is the controller's last access check of the account (its
 	// status); nil before the first.
 	Access *AccountAccess

@@ -361,8 +361,9 @@ func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 	if err := f.apply(t, stored(account)); err != nil {
 		t.Fatal(err)
 	}
-	if len(*f.recorded) != 1 {
-		t.Fatalf("recorded = %+v, want only the ProviderConfig", *f.recorded)
+	// The account's ProviderConfig, then the live reader's (PROP-02 7.1).
+	if len(*f.recorded) != 2 || (*f.recorded)[1].Name != "aws-0a1b2c3d-live" {
+		t.Fatalf("recorded = %+v, want the ProviderConfig and the live one", *f.recorded)
 	}
 	pc := (*f.recorded)[0]
 	if pc.Kind != "ProviderConfig" || pc.APIVersion != "aws.m.upbound.io/v1beta1" || pc.Name != "aws-0a1b2c3d" ||
@@ -374,7 +375,7 @@ func TestBootstrapRecordsWhatItCreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	views := view.GetStatus().GetManagedResources()
-	if len(views) != 1 || views[0].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
+	if len(views) != 2 || views[0].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
 		views[0].GetKind() != "ProviderConfig" {
 		t.Errorf("account resources = %v", views)
 	}

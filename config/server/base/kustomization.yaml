@@ -22,6 +22,9 @@ resources:
 - role_binding.yaml
 - deployment.yaml
 - service.yaml
+# The live reader the node lists and node totals are read through
+# (PROP-02 5.5): its own Deployment, Service and NetworkPolicy.
+- ../../live
 
 # The node group layout is the file of ../../node-groups, the same one the
 # controller reads: a ConfigMap mounted at /etc/cluster-vending.
@@ -36,6 +39,9 @@ configMapGenerator:
   - CV_HTTP_ADDR=:8080
   - CV_LOG_FORMAT=json
   - CV_LOG_LEVEL=info
+  # The live reader (../../live), by its Service. Never set
+  # CV_LIVE_ALLOW_WITHOUT_AUTH here: live reads need authentication.
+  - CV_LIVE_URL=http://cluster-vending-live:8090
   # Nothing of AWS: the server validates requests and stores the desired
   # state. The controller (../../default) installs the providers, looks the
   # cloud up and reconciles; it is the one with AWS settings and an IAM role.

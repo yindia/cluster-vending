@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+// LiveReadError is the error detail of a live read that failed (PROP-02 5.9):
+// the live RPCs answer UNAVAILABLE (or FAILED_PRECONDITION without
+// authentication) with one of these, and no rows. The console then shows the
+// cluster status summary with the message.
+message LiveReadError {
+  // CLUSTER_UNREACHABLE: the workload cluster could not be reached (no
+  //   cluster, connect, DNS or TLS errors, a deadline before any page, an
+  //   expired list).
+  // CREDENTIALS_REJECTED: the workload cluster answered 401 or 403.
+  // NO_LIVE_IDENTITY: the platform has no read-only identity for the
+  //   cluster (its live kubeconfig is missing or not ready).
+  // BUSY: too many live reads in flight, or of this cluster or tenant in
+  //   the last minute.
+  // LIMIT_EXCEEDED: the read stopped at a cap (rows, pages, deadline).
+  // AUTHENTICATION_REQUIRED: the API runs without authentication.
+  // LIVE_READER_UNAVAILABLE: the API could not reach the live reader.
+  string reason = 1;
+  // For the user; for CREDENTIALS_REJECTED it carries the rotation hint.
+  string message = 2;
+  // Seconds until a retry can succeed (a cooldown or a rate window); 0
+  // when unknown.
+  int32 retry_after_seconds = 3;
+}

@@ -1,0 +1,69 @@
+# `cluster-vending live` (cmd/live.go). One replica, Recreate: its views,
+# singleflight, cooldowns and limits are this process's memory, and two
+# replicas behind the Service would split a list (PROP-02 5.5). A restart
+# loses the views; open page tokens then answer "restart the list".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-live
+    app.kubernetes.io/managed-by: kustomize
+  name: live
+  namespace: system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-vending-live
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cluster-vending-live
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: live
+      terminationGracePeriodSeconds: 45
+      containers:
+      - name: live
+        image: server:latest
+        command:
+        - /cluster-vending
+        - live
+        env:
+        - name: CV_LIVE_ADDR
+          value: :8090
+        - name: CV_LOG_FORMAT
+          value: json
+        ports:
+        - containerPort: 8090
+          name: http
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          periodSeconds: 10
+        # Views are bounded at 256 MiB (pkg/live Limits.ViewBytes), plus the
+        # pages of up to 8 builds in flight.
+        resources:
+          limits:
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi

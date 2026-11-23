@@ -95,8 +95,12 @@ type NodeResourceTotals struct {
 	RequestedMemoryBytes   int64  `protobuf:"varint,8,opt,name=requested_memory_bytes,json=requestedMemoryBytes,proto3" json:"requested_memory_bytes,omitempty"`
 	PodCount               int64  `protobuf:"varint,9,opt,name=pod_count,json=podCount,proto3" json:"pod_count,omitempty"`
 	PodsWithoutRequests    int64  `protobuf:"varint,10,opt,name=pods_without_requests,json=podsWithoutRequests,proto3" json:"pods_without_requests,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Sums of what the nodes use now (metrics.k8s.io); unset when the usage
+	// could not be read.
+	UsedCpuMillis   *int64 `protobuf:"varint,11,opt,name=used_cpu_millis,json=usedCpuMillis,proto3,oneof" json:"used_cpu_millis,omitempty"`
+	UsedMemoryBytes *int64 `protobuf:"varint,12,opt,name=used_memory_bytes,json=usedMemoryBytes,proto3,oneof" json:"used_memory_bytes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *NodeResourceTotals) Reset() {
@@ -199,6 +203,20 @@ func (x *NodeResourceTotals) GetPodsWithoutRequests() int64 {
 	return 0
 }
 
+func (x *NodeResourceTotals) GetUsedCpuMillis() int64 {
+	if x != nil && x.UsedCpuMillis != nil {
+		return *x.UsedCpuMillis
+	}
+	return 0
+}
+
+func (x *NodeResourceTotals) GetUsedMemoryBytes() int64 {
+	if x != nil && x.UsedMemoryBytes != nil {
+		return *x.UsedMemoryBytes
+	}
+	return 0
+}
+
 // GetNodeResourcesResponse is read live from the workload cluster.
 type GetNodeResourcesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -289,7 +307,7 @@ const file_cloud_v1_node_resources_proto_rawDesc = "" +
 	"\x17GetNodeResourcesRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
-	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\"\xbe\x03\n" +
+	"cluster_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\xb0\x01\x01R\tclusterId\"\xc6\x04\n" +
 	"\x12NodeResourceTotals\x12\x1d\n" +
 	"\n" +
 	"node_group\x18\x01 \x01(\tR\tnodeGroup\x12\x14\n" +
@@ -303,7 +321,11 @@ const file_cloud_v1_node_resources_proto_rawDesc = "" +
 	"\x16requested_memory_bytes\x18\b \x01(\x03R\x14requestedMemoryBytes\x12\x1b\n" +
 	"\tpod_count\x18\t \x01(\x03R\bpodCount\x122\n" +
 	"\x15pods_without_requests\x18\n" +
-	" \x01(\x03R\x13podsWithoutRequests\"\xf3\x01\n" +
+	" \x01(\x03R\x13podsWithoutRequests\x12+\n" +
+	"\x0fused_cpu_millis\x18\v \x01(\x03H\x00R\rusedCpuMillis\x88\x01\x01\x12/\n" +
+	"\x11used_memory_bytes\x18\f \x01(\x03H\x01R\x0fusedMemoryBytes\x88\x01\x01B\x12\n" +
+	"\x10_used_cpu_millisB\x14\n" +
+	"\x12_used_memory_bytes\"\xf3\x01\n" +
 	"\x18GetNodeResourcesResponse\x124\n" +
 	"\x06groups\x18\x01 \x03(\v2\x1c.cloud.v1.NodeResourceTotalsR\x06groups\x126\n" +
 	"\acluster\x18\x02 \x01(\v2\x1c.cloud.v1.NodeResourceTotalsR\acluster\x123\n" +
@@ -347,6 +369,7 @@ func file_cloud_v1_node_resources_proto_init() {
 	if File_cloud_v1_node_resources_proto != nil {
 		return
 	}
+	file_cloud_v1_node_resources_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -263,6 +263,9 @@ func status(row *model.Cluster, views []*cloudv1.ManagedResource, awaitingEKS bo
 	if converged {
 		st.ObservedGeneration = row.Generation
 	}
+	// The live reader's identity is listed, but it holds nothing back: an
+	// account without the reader stack runs its clusters without live reads.
+	views = withoutLiveIdentity(row, views)
 	ready, waiting, left := 0, 0, 0
 	var failed *cloudv1.ManagedResource
 	for _, v := range views {
@@ -439,4 +442,17 @@ func versionSkew(v *cloudv1.ManagedResource) bool {
 	}
 	msg := strings.ToLower(v.GetMessage())
 	return strings.Contains(msg, "version") && (strings.Contains(msg, "cluster") || strings.Contains(msg, "kubernetes"))
+}
+
+// withoutLiveIdentity are views without the cluster's live ClusterAuth and
+// access entry (PROP-02 7.1): the cluster's state does not wait for them.
+func withoutLiveIdentity(row *model.Cluster, views []*cloudv1.ManagedResource) []*cloudv1.ManagedResource {
+	prefix := crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name)
+	out := make([]*cloudv1.ManagedResource, 0, len(views))
+	for _, v := range views {
+		if !crossplaneaws.IsLiveIdentity(prefix, v.GetName()) {
+			out = append(out, v)
+		}
+	}
+	return out
 }

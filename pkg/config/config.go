@@ -133,6 +133,7 @@ var serveSettings = withNodeGroupSettings([]Setting{
 	{Flag: FlagAWSServerRoleARN, Env: EnvAWSServerRoleARN,
 		Usage: "the IAM role the API server's own credentials are (its IRSA role): the principal the account role templates trust, next to the management role, to read the results buckets; account create prints it as the role stack's ServerPrincipalArn. Not needed when aws-source-role-arn is set (that role is it). Empty with no source role: the server cannot read results, and account create prints no server principal"},
 	awsAccessSettings[0], awsAccessSettings[1], awsAccessSettings[2],
+	liveServeSettings[0], liveServeSettings[1],
 })
 
 // GlobalSettings returns the settings every command accepts.
@@ -171,6 +172,10 @@ type Serve struct {
 	// results buckets (pkg/cloud/aws). Its base credentials come from the
 	// AWS SDK's default chain, never from a setting.
 	AWSAccess AWSAccess
+	// LiveURL is the live reader's URL; empty: no live reads (PROP-02 5.5).
+	LiveURL string
+	// LiveAllowWithoutAuth lets live reads run with auth.mode none (7.5).
+	LiveAllowWithoutAuth bool
 }
 
 // ServerPrincipalARN is the principal a tenant role trusts for the server:
@@ -216,6 +221,9 @@ func LoadServe(flags, env, file LookupFunc) (Serve, error) {
 		errs = append(errs, err)
 	}
 	cfg.ShutdownTimeout = timeout
+	var liveErrs []error
+	cfg.LiveURL, cfg.LiveAllowWithoutAuth, liveErrs = liveServeFrom(v)
+	errs = append(errs, liveErrs...)
 	allow, allowErrs := nodeGroupsFrom(v)
 	cfg.NodeGroups = allow
 	errs = append(errs, allowErrs...)

@@ -1,0 +1,17 @@
+# Internal only: the API server is its one caller (network_policy.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-live
+    app.kubernetes.io/managed-by: kustomize
+  name: live
+  namespace: system
+spec:
+  ports:
+  - name: http
+    port: 8090
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: cluster-vending-live

@@ -81,7 +81,12 @@ func objects(a *model.CloudAccount, keys *corev1.Secret, direct bool) []client.O
 		ref = &crossplaneaws.CredentialsSecret{Namespace: keys.Namespace, Name: keys.Name, Key: credentialsKey(keys),
 			Direct: direct}
 	}
-	return append(objs, crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, a.ExternalID, ref))
+	objs = append(objs, crossplaneaws.ProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, a.Identity, a.ExternalID, ref))
+	// The reader role's, for the live reader's ClusterAuths (PROP-02 7.1).
+	if reader := crossplaneaws.ReaderRoleARN(a.AccountID, a.Identity, a.ReaderRole); reader != "" {
+		objs = append(objs, crossplaneaws.LiveProviderConfig(a.Namespace, a.ProviderConfigName, a.TenantID, reader, a.ExternalID, ref))
+	}
+	return objs
 }
 
 // credentialsKey is the one key of an account's credentials copy.

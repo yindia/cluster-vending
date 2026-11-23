@@ -1,0 +1,38 @@
+# The live reader accepts only the API server's pods (PROP-02 7.4); the
+# kubelet's probes come from the node. Egress: DNS, and HTTPS to the
+# management cluster's API and the workload clusters' endpoints (EKS
+# endpoints have no fixed addresses, so the port is the bound).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-live
+    app.kubernetes.io/managed-by: kustomize
+  name: live
+  namespace: system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-vending-live
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: cluster-vending-server
+    ports:
+    - port: 8090
+      protocol: TCP
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - ports:
+    - port: 443
+      protocol: TCP
+    - port: 6443
+      protocol: TCP

@@ -25,7 +25,8 @@ import (
 // Keep secrets in the environment: it wins over the file.
 //
 // The top-level "auth" section is not a setting: it is the API server's
-// authentication, read by LoadAuth. The top-level "nodeGroups" section is
+// authentication, read by LoadAuth; the top-level "naas" section is the
+// sub-tenant group rules, read by LoadNaaS. The top-level "nodeGroups" section is
 // the platform admin's node group layout (nodeGroupsSection): its keys map
 // onto the node group settings, so a flag or variable still overrides one
 // value.
@@ -81,6 +82,9 @@ func flatten(n *yaml.Node, prefix string, out map[string]string) error {
 		key := n.Content[i].Value
 		if prefix == "" && key == SectionAuth {
 			continue // not a setting: LoadAuth reads it
+		}
+		if prefix == "" && key == SectionNaaS {
+			continue // not a setting: LoadNaaS reads it
 		}
 		if prefix == "" && key == SectionNodeGroups {
 			if err := flattenNodeGroups(n.Content[i+1], out); err != nil {

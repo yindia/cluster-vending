@@ -50,6 +50,11 @@ func newServeCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Which groups sub-tenants may name: the "naas" section of the file.
+			naasCfg, err := config.NaaSFrom(changedFlags(cmd.Flags()), os.LookupEnv)
+			if err != nil {
+				return err
+			}
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -90,6 +95,8 @@ func newServeCmd(g *globals) *cobra.Command {
 				Logger:   g.logger,
 				// The node group layout: the allowlist of user groups, the system group.
 				NodeGroups: cfg.NodeGroups,
+				// The groups sub-tenants may name (naas.allowedGroups).
+				NaaS: naasCfg,
 			}
 			var ready atomic.Bool
 			done, err := management.Start(ctx, mgr, &ready)

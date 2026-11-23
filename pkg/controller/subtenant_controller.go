@@ -65,6 +65,7 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	defer release()
 	st := obj.DeepCopy().Status
+	meta.RemoveStatusCondition(&st.Conditions, conditionRetiredQualified)
 	subTenantAccessCondition(&st, obj.Generation, "ProvisioningReady", false, "Reconciling", "Current Tenant and namespace baselines have not yet been verified")
 	subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, "Reconciling", "Current access prerequisites have not yet been verified")
 	if !obj.DeletionTimestamp.IsZero() && naas.DeletionProtectionEnabled(obj.Spec.DeletionProtection) {
@@ -149,12 +150,14 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "BootstrapPending", message, warning)
 	}
 	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "PrerequisitesReady", Status: metav1.ConditionTrue, Reason: "PrerequisitesObserved", Message: "Capsule and shared bootstrap prerequisites are ready; workload API access is available", ObservedGeneration: obj.Generation})
-	desired, access, clusterSpec, accessErr, err := renderSubTenantAccess(obj, parent, bootstrap.Revision())
+	desired, access, clusterSpec, accessErr, err := renderSubTenantAccess(obj, parent, bootstrap.Revision(), r.deps.NaaS)
 	if err != nil {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "AllocationValidationFailed", err.Error(), true)
 	}
 	subTenantAccessCondition(&st, obj.Generation, "AccessGroupsResolved", accessErr == nil, "GroupsResolved", "Group intent is translated only through the current cluster OIDC mapping")
-	if accessErr != nil {
+	if errors.Is(accessErr, naas.ErrGroupNotAllowed) {
+		subTenantAccessCondition(&st, obj.Generation, "AccessGroupsResolved", false, "GroupNotAllowed", accessErr.Error())
+	} else if accessErr != nil {
 		subTenantAccessCondition(&st, obj.Generation, "AccessGroupsResolved", false, "OIDCPending", accessErr.Error())
 	}
 	if remote != nil && remote.GetLabels()[naas.LabelAccessReady] == "true" && naas.EqualTenantSpec(remote, desired) && remote.GetAnnotations()[naas.RevisionAnnotation] == bootstrap.Revision() {
@@ -200,8 +203,9 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	if subTenantProvisioned(obj, remote, inventory) {
 		subTenantAccessCondition(&st, obj.Generation, "ProvisioningReady", true, "Provisioned", "Current Capsule Tenant Ready and all allocated namespace baselines were observed")
-		reason, message, expires := r.reconcileSubTenantAccess(ctx, obj, parent, &st, accessGuard, bootstrap, access, clusterSpec, accessErr)
-		result, err := r.subTenantReport(ctx, obj, st, cloud.SubTenantStateReady, reason, message, false)
+		reason, message, expires := r.reconcileSubTenantAccess(ctx, obj, &st, accessGuard, subTenantAccessInput{parent: parent, bootstrap: bootstrap, desired: desired, access: access, spec: clusterSpec, accessErr: accessErr})
+		state := subTenantReadyState(obj.Status, reason)
+		result, err := r.subTenantReport(ctx, obj, st, state, reason, message, state == cloud.SubTenantStateDegraded)
 		result.RequeueAfter = untilExpiry(result.RequeueAfter, expires, time.Now())
 		return result, err
 	}
@@ -282,8 +286,10 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 		state = cloud.SubTenantStateDeleting
 	}
 	st.State, st.Message = state, message
-	provisioned := state == cloud.SubTenantStateReady && meta.IsStatusConditionTrue(st.Conditions, "ProvisioningReady")
-	subTenantAccessCondition(&st, obj.Generation, "Ready", provisioned, reason, message)
+	provisioned := (state == cloud.SubTenantStateReady || state == cloud.SubTenantStateDegraded) && meta.IsStatusConditionTrue(st.Conditions, "ProvisioningReady")
+	// Ready (PROP-05 6.9): provisioned, and access open when groups are named.
+	ready := provisioned && state == cloud.SubTenantStateReady && (!subTenantGroupsNamed(obj) || meta.IsStatusConditionTrue(st.Conditions, "AccessReady"))
+	subTenantAccessCondition(&st, obj.Generation, "Ready", ready, reason, message)
 	if subTenantPrerequisiteReason(reason) {
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "PrerequisitesReady", Status: metav1.ConditionFalse, Reason: reason, Message: message, ObservedGeneration: obj.Generation})
 	}
@@ -293,8 +299,9 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 			accessReason = "PrerequisitesPending"
 		}
 		subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, accessReason, message)
-		subTenantAccessCondition(&st, obj.Generation, "AccessQualified", false, "PrerequisitesPending", "Provisioning prerequisites are not current")
-		subTenantAccessCondition(&st, obj.Generation, "OIDCReady", false, "PrerequisitesPending", "Provisioning prerequisites are not current")
+		for _, kind := range []string{conditionGroupsAllowed, "OIDCReady", conditionClusterQualified} {
+			subTenantAccessCondition(&st, obj.Generation, kind, false, "PrerequisitesPending", "Provisioning prerequisites are not current")
+		}
 	}
 	conditions := append([]metav1.Condition(nil), st.Conditions...)
 	st.Conditions = nil

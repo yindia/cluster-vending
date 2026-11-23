@@ -113,6 +113,13 @@ func (p *subTenantPace) delay(key string, state cloud.SubTenantState, reason str
 		return subTenantReadyResync
 	case state == cloud.SubTenantStateFailed:
 		return subTenantFailedResync
+	case state == cloud.SubTenantStateDegraded && subTenantAccessClosed[reason]:
+		// Closed access (PROP-05 6.9) waits on the cluster or the operator:
+		// it backs off like a pending sub-tenant.
+		if p.unchanged[key] >= subTenantBackoffAfter {
+			return subTenantSlowResync
+		}
+		return pendingDelay
 	case state == cloud.SubTenantStateDeleting || state == cloud.SubTenantStateDegraded:
 		return pendingDelay
 	case p.unchanged[key] >= subTenantBackoffAfter:

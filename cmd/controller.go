@@ -61,6 +61,11 @@ func newControllerCmd(g *globals) *cobra.Command {
 				return err
 			}
 			warnNodeGroups(g.logger, cfg.NodeGroups)
+			// Which groups sub-tenants may name: the "naas" section of the file.
+			naasCfg, err := config.NaaSFrom(changedFlags(cmd.Flags()), os.LookupEnv)
+			if err != nil {
+				return err
+			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return manager.Run(ctx, manager.Options{
@@ -70,6 +75,7 @@ func newControllerCmd(g *globals) *cobra.Command {
 				AWS: cfg.AWS, AWSAccess: cfg.AWSAccess, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
 				RecoverStuckReleases: cfg.RecoverStuckReleases, HelmBackoffMax: cfg.HelmBackoffMax, HelmMaxFailures: cfg.HelmMaxFailures, Recommendations: cfg.Recommendations,
 				NodeGroups:       cfg.NodeGroups,
+				NaaS:             naasCfg,
 				ReconcileWorkers: cfg.ReconcileWorkers, AutomaticUpgrades: cfg.AutomaticUpgrades, UpgradeTimeout: cfg.UpgradeTimeout, TeardownTimeout: cfg.TeardownTimeout,
 			})
 		},

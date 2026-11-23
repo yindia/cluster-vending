@@ -87,6 +87,8 @@ type Options struct {
 	AWSAccess config.AWSAccess
 	// NodeGroups is the platform admin's node group layout.
 	NodeGroups config.NodeGroups
+	// NaaS is the config file's sub-tenant section (config.NaaS).
+	NaaS config.NaaS
 	// ReconcileWorkers is how many accounts, networks and clusters of each
 	// kind are reconciled at once (0: one).
 	ReconcileWorkers int
@@ -223,6 +225,7 @@ func Run(ctx context.Context, o Options) error {
 		Logger:            logger,
 
 		NodeGroups: o.NodeGroups,
+		NaaS:       o.NaaS,
 	}, lookups)
 	checkCredentialsSecret(ctx, reconciling, logger)
 	// What happens to accounts, networks, clusters and releases is also a

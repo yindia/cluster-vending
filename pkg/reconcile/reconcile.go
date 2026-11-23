@@ -145,6 +145,12 @@ type Deps struct {
 	// server enforces on user groups) and the defaults of user groups. The
 	// zero value: the system defaults and no restriction.
 	NodeGroups config.NodeGroups
+	// NaaS is the sub-tenant section of the config file (the same for the
+	// server and the controller): the OIDC groups a sub-tenant may name,
+	// which the API enforces and the controller checks again before it
+	// opens access, and the qualifier's images. The zero value allows no
+	// group and starts no qualifier Job.
+	NaaS config.NaaS
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool

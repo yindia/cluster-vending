@@ -148,13 +148,20 @@ func (r clusters) setStatus(obj *cloudv1alpha1.Cluster, raw model.JSON, state st
 	p := &cloudv1.ClusterStatus{}
 	_ = decode(raw, p) // a status this build cannot read is still kept verbatim
 	st := &obj.Status
-	scan := meta.FindStatusCondition(st.Conditions, cloudv1alpha1.ConditionDeprecationScan)
+	// Conditions other controllers own: the deprecation scan and the NaaS
+	// qualification (PROP-05 6.1) are not part of the contract status.
+	var kept []metav1.Condition
+	for _, kind := range []string{cloudv1alpha1.ConditionDeprecationScan, cloudv1alpha1.ConditionNaaSQualified} {
+		if c := meta.FindStatusCondition(st.Conditions, kind); c != nil {
+			kept = append(kept, *c)
+		}
+	}
 	st.ContractStatus = keepStatus(st.ContractStatus, raw)
 	was := st.DeepCopy()
 	convert.ClusterStatusInto(p, state, metav1.NewTime(now()), st)
 	clustersummary.Keep(st, was) // the summary is not part of the contract status
-	if scan != nil {
-		meta.SetStatusCondition(&st.Conditions, *scan)
+	for _, c := range kept {
+		meta.SetStatusCondition(&st.Conditions, c)
 	}
 	if observed != nil {
 		st.ObservedGeneration = *observed

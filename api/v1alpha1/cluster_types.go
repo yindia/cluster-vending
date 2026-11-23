@@ -933,6 +933,11 @@ type ClusterUpgradeNodeGroup struct {
 // component the platform installs with it is installed.
 const ConditionPlatformComponentsReady = "PlatformComponentsReady"
 
+// ConditionNaaSQualified is a NaaS Cluster's condition that its current
+// sub-tenant qualification record passed (PROP-05 6.1). The NaaS
+// qualification controller owns it; the store's status writes keep it.
+const ConditionNaaSQualified = "NaaSQualified"
+
 // PlatformComponentStatus is one component the platform installed with a
 // cluster.
 type PlatformComponentStatus struct {

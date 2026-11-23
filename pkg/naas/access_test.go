@@ -48,7 +48,7 @@ func TestValidateAccessGroupsExactCaseAndBounds(t *testing.T) {
 func TestResolveAccessExactGroupsStableIDsAndEffectiveOIDC(t *testing.T) {
 	spec := accessCluster()
 	access := &cloud.SubTenantAccess{AdminGroups: []string{"Team", "team"}, ViewerGroups: []string{"Readers"}}
-	resolved, err := ResolveAccess(access, spec)
+	resolved, err := ResolveAccess(access, spec, openGroups)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +66,12 @@ func TestResolveAccessExactGroupsStableIDsAndEffectiveOIDC(t *testing.T) {
 		t.Fatal("changed exact claim case or role", groups)
 	}
 	access.AdminGroups[0], access.AdminGroups[1] = access.AdminGroups[1], access.AdminGroups[0]
-	reordered, err := ResolveAccess(access, spec)
+	reordered, err := ResolveAccess(access, spec, openGroups)
 	if err != nil || !reflect.DeepEqual(resolved, reordered) {
 		t.Fatal("reordering changed binding identity", err)
 	}
 	access.ViewerGroups = append(access.ViewerGroups, "Extra")
-	added, err := ResolveAccess(access, spec)
+	added, err := ResolveAccess(access, spec, openGroups)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,18 +86,18 @@ func TestResolveAccessExactGroupsStableIDsAndEffectiveOIDC(t *testing.T) {
 		t.Fatal("template data aliases resolution")
 	}
 	spec.Access.Oidc.ClientId = "different-audience"
-	changed, err := ResolveAccess(access, spec)
+	changed, err := ResolveAccess(access, spec, openGroups)
 	if err != nil || changed.OIDCRevision == resolved.OIDCRevision || slices.Contains(changed.Bindings, resolved.Bindings[0]) {
 		t.Fatal("OIDC audience change reused previously qualified binding identity", err)
 	}
 	spec.Access.Oidc = &cloudv1.OidcIdentityProvider{Entra: &cloudv1.EntraIdentityProvider{TenantId: "directory", ClientId: "public-client"}}
-	entra, err := ResolveAccess(&cloud.SubTenantAccess{ViewerGroups: []string{"GroupObjectID"}}, spec)
+	entra, err := ResolveAccess(&cloud.SubTenantAccess{ViewerGroups: []string{"GroupObjectID"}}, spec, openGroups)
 	if err != nil || entra.Bindings[0].Group != "entra:GroupObjectID" {
 		t.Fatal("did not use the shared Entra mapping", entra, err)
 	}
 	spec.Access.Oidc = accessCluster().Access.Oidc
 	spec.Access.Oidc.GroupsPrefix = ""
-	unprefixed, err := ResolveAccess(&cloud.SubTenantAccess{ViewerGroups: []string{"Exact"}}, spec)
+	unprefixed, err := ResolveAccess(&cloud.SubTenantAccess{ViewerGroups: []string{"Exact"}}, spec, openGroups)
 	if err != nil || unprefixed.Bindings[0].Group != "Exact" {
 		t.Fatal("invented a prefix not configured on EKS", err)
 	}
@@ -106,25 +106,25 @@ func TestResolveAccessExactGroupsStableIDsAndEffectiveOIDC(t *testing.T) {
 func TestResolveAccessFailsClosedWithoutIdentityConfiguration(t *testing.T) {
 	access := &cloud.SubTenantAccess{AdminGroups: []string{"admins"}}
 	for _, spec := range []*cloudv1.ClusterSpec{nil, {}, {Access: accessCluster().Access}, {Provider: accessCluster().Provider}, {Provider: accessCluster().Provider, Access: &cloudv1.AccessSpec{Oidc: &cloudv1.OidcIdentityProvider{IssuerUrl: "https://example.test", ClientId: "client"}}}} {
-		if _, err := ResolveAccess(access, spec); !errors.Is(err, ErrAccessOIDCNotConfigured) {
+		if _, err := ResolveAccess(access, spec, openGroups); !errors.Is(err, ErrAccessOIDCNotConfigured) {
 			t.Errorf("OIDC prerequisite was not enforced: %v", err)
 		}
 	}
 	for _, prefix := range []string{"system:", "SYSTEM:", "oidc:*", " oidc:", "oidc:\n"} {
 		spec := accessCluster()
 		spec.Access.Oidc.GroupsPrefix = prefix
-		if _, err := ResolveAccess(access, spec); err == nil {
+		if _, err := ResolveAccess(access, spec, openGroups); err == nil {
 			t.Errorf("accepted unsafe prefix %q", prefix)
 		}
 	}
-	if _, err := ResolveAccess(&cloud.SubTenantAccess{ViewerGroups: []string{"oidc:already-prefixed"}}, accessCluster()); err == nil {
+	if _, err := ResolveAccess(&cloud.SubTenantAccess{ViewerGroups: []string{"oidc:already-prefixed"}}, accessCluster(), openGroups); err == nil {
 		t.Fatal("accepted already-prefixed group")
 	}
-	if _, err := ResolveAccess(&cloud.SubTenantAccess{Bindings: []cloud.SubTenantAccessBinding{{IdentityRef: "admins", RoleProfile: "workload-editor"}}}, accessCluster()); !errors.Is(err, ErrLegacyAccessBindings) {
+	if _, err := ResolveAccess(&cloud.SubTenantAccess{Bindings: []cloud.SubTenantAccessBinding{{IdentityRef: "admins", RoleProfile: "workload-editor"}}}, accessCluster(), openGroups); !errors.Is(err, ErrLegacyAccessBindings) {
 		t.Fatal("legacy identityRef was accepted as a group", err)
 	}
 	for _, access := range []*cloud.SubTenantAccess{nil, {}} {
-		if empty, err := ResolveAccess(access, nil); err != nil || len(empty.Bindings) != 0 {
+		if empty, err := ResolveAccess(access, nil, openGroups); err != nil || len(empty.Bindings) != 0 {
 			t.Fatal("empty intent should grant nothing and require no OIDC", err)
 		}
 	}
@@ -163,7 +163,7 @@ func TestGroupAccessGTRScopesStableBindingsAndKeepsQualificationGate(t *testing.
 	sub := allocationFixture()
 	sub.Spec.NamespaceKeys = []cloud.SubTenantNamespaceKey{"app", "worker"}
 	sub.Spec.Access = &cloud.SubTenantAccess{AdminGroups: []string{`Team "Blue" {{ literal }}`}, ViewerGroups: []string{"Readers"}}
-	remote, err := RenderTenantWithAccess(sub, "1.35", "revision", accessCluster())
+	remote, err := RenderTenantWithAccess(sub, "1.35", "revision", accessCluster(), openGroups)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestGroupAccessGTRScopesStableBindingsAndKeepsQualificationGate(t *testing.
 		t.Fatal("access rendered for unowned namespace identity")
 	}
 	sub.Spec.Access.AdminGroups = nil
-	revoked, err := RenderTenantWithAccess(sub, "1.35", "revision", accessCluster())
+	revoked, err := RenderTenantWithAccess(sub, "1.35", "revision", accessCluster(), openGroups)
 	if err != nil {
 		t.Fatal(err)
 	}

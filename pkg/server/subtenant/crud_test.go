@@ -24,6 +24,7 @@ import (
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/auth"
+	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	v1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -69,7 +70,8 @@ func newWorld(t *testing.T, funcs interceptor.Funcs) world {
 		return c.Create(ctx, obj, opts...)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithStatusSubresource(&cloud.SubTenant{}, &cloud.Cluster{}, &cloud.Tenant{}).WithInterceptorFuncs(funcs).Build()
-	return world{service: NewService(reconcile.Deps{Kube: c}), kube: c}
+	// Every group is allowed here; the allowlist has its own tests.
+	return world{service: NewService(reconcile.Deps{Kube: c, NaaS: config.NaaS{AllowedGroups: []string{"*"}}}), kube: c}
 }
 func createRequest() *v1.CreateSubTenantRequest {
 	// Lifecycle tests explicitly opt out; default protection is tested separately.

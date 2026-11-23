@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/config"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/oidc"
 )
@@ -66,10 +67,17 @@ func exactGroup(group string) bool {
 		!strings.HasPrefix(strings.ToLower(group), "system:") && !strings.ContainsAny(group, "*?") && !strings.ContainsFunc(group, unicode.IsControl)
 }
 
+// ErrGroupNotAllowed closes access: a named group is outside the platform's
+// naas.allowedGroups or inside naas.deniedGroups (PROP-05 6.2).
+var ErrGroupNotAllowed = config.ErrGroupNotAllowed
+
 // ResolveAccess translates raw token-claim values using exactly the same
 // effective provider as the EKS adapter. Empty group intent needs no OIDC setup.
 // Supplying an already-prefixed group is refused, never silently double-prefixed.
-func ResolveAccess(access *cloud.SubTenantAccess, spec *cloudv1.ClusterSpec) (*ResolvedAccess, error) {
+// Every raw group must be allowed by groups (deny first); one that is not is
+// ErrGroupNotAllowed, checked before OIDC so it is reported whatever the
+// cluster's OIDC state.
+func ResolveAccess(access *cloud.SubTenantAccess, spec *cloudv1.ClusterSpec, groups config.NaaS) (*ResolvedAccess, error) {
 	if access == nil {
 		return &ResolvedAccess{}, nil
 	}
@@ -82,28 +90,14 @@ func ResolveAccess(access *cloud.SubTenantAccess, spec *cloudv1.ClusterSpec) (*R
 	if len(access.AdminGroups)+len(access.ViewerGroups) == 0 {
 		return &ResolvedAccess{}, nil
 	}
-	if spec == nil || spec.GetAws() == nil {
-		return nil, ErrAccessOIDCNotConfigured
+	if err := groups.CheckGroups(access.AdminGroups, access.ViewerGroups); err != nil {
+		return nil, err
 	}
-	p := oidc.Resolve(spec.GetAccess().GetOidc())
-	if p == nil || p.ClientID == "" || p.GroupsClaim == "" {
-		return nil, ErrAccessOIDCNotConfigured
-	}
-	issuer, err := url.Parse(p.IssuerURL)
-	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
-		return nil, ErrAccessOIDCNotConfigured
-	}
-	if p.GroupsPrefix != "" && (!exactGroup(p.GroupsPrefix) || utf8.RuneCountInString(p.GroupsPrefix) > 255) {
-		return nil, fmt.Errorf("effective OIDC groups prefix is unsafe")
-	}
-	// Bind to the complete effective authentication mapping, including required
-	// claims. A changed issuer/audience/claim mapping requires new qualification.
-	raw, err := json.Marshal(p)
+	p, revision, err := effectiveOIDC(spec)
 	if err != nil {
-		return nil, fmt.Errorf("encode effective OIDC settings: %w", err)
+		return nil, err
 	}
-	digest := sha256.Sum256(raw)
-	resolved := &ResolvedAccess{OIDCRevision: "sha256:" + hex.EncodeToString(digest[:])}
+	resolved := &ResolvedAccess{OIDCRevision: revision}
 	for _, role := range []struct {
 		name   string
 		groups []string
@@ -124,6 +118,39 @@ func ResolveAccess(access *cloud.SubTenantAccess, spec *cloudv1.ClusterSpec) (*R
 	return resolved, nil
 }
 
+// OIDCRevision is the digest of the cluster's complete effective OIDC
+// mapping, as access and the cluster qualification key bind it. It is
+// ErrAccessOIDCNotConfigured when the cluster has no usable OIDC.
+func OIDCRevision(spec *cloudv1.ClusterSpec) (string, error) {
+	_, revision, err := effectiveOIDC(spec)
+	return revision, err
+}
+
+func effectiveOIDC(spec *cloudv1.ClusterSpec) (*oidc.Provider, string, error) {
+	if spec == nil || spec.GetAws() == nil {
+		return nil, "", ErrAccessOIDCNotConfigured
+	}
+	p := oidc.Resolve(spec.GetAccess().GetOidc())
+	if p == nil || p.ClientID == "" || p.GroupsClaim == "" {
+		return nil, "", ErrAccessOIDCNotConfigured
+	}
+	issuer, err := url.Parse(p.IssuerURL)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return nil, "", ErrAccessOIDCNotConfigured
+	}
+	if p.GroupsPrefix != "" && (!exactGroup(p.GroupsPrefix) || utf8.RuneCountInString(p.GroupsPrefix) > 255) {
+		return nil, "", fmt.Errorf("effective OIDC groups prefix is unsafe")
+	}
+	// Bind to the complete effective authentication mapping, including required
+	// claims. A changed issuer/audience/claim mapping requires new qualification.
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return nil, "", fmt.Errorf("encode effective OIDC settings: %w", err)
+	}
+	digest := sha256.Sum256(raw)
+	return p, "sha256:" + hex.EncodeToString(digest[:]), nil
+}
+
 // BindingData returns independent JSON-compatible GTR input. GTRs create one
 // namespaced binding per stable ID in every namespace of this Capsule Tenant.
 func (a *ResolvedAccess) BindingData() []any {
@@ -137,8 +164,8 @@ func (a *ResolvedAccess) BindingData() []any {
 // RenderTenantWithAccess adds validated group intent to the existing Tenant-only
 // renderer. It never changes Capsule owners or opens either readiness label.
 // Controllers must verify active OIDC and trusted qualification separately.
-func RenderTenantWithAccess(sub *cloud.SubTenant, currentVersion, revision string, spec *cloudv1.ClusterSpec) (*unstructured.Unstructured, error) {
-	access, err := ResolveAccess(sub.Spec.Access, spec)
+func RenderTenantWithAccess(sub *cloud.SubTenant, currentVersion, revision string, spec *cloudv1.ClusterSpec, groups config.NaaS) (*unstructured.Unstructured, error) {
+	access, err := ResolveAccess(sub.Spec.Access, spec, groups)
 	if err != nil {
 		return nil, err
 	}

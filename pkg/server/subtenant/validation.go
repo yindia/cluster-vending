@@ -8,6 +8,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/yindia/cluster-vending/pkg/config"
 )
 
 func validateGroups(admin, viewer []string) error {
@@ -25,6 +27,16 @@ func validateGroups(admin, viewer []string) error {
 			}
 			seen[group] = true
 		}
+	}
+	return nil
+}
+
+// allowedGroups refuses a group outside the platform's naas.allowedGroups,
+// or inside naas.deniedGroups, naming the allowed patterns (PROP-05 6.2). It
+// bounds the groups a sub-tenant may name, not who may name them.
+func allowedGroups(groups config.NaaS, admin, viewer []string) error {
+	if err := groups.CheckGroups(admin, viewer); err != nil {
+		return invalid("access groups must be allowed by the platform: %v", err)
 	}
 	return nil
 }

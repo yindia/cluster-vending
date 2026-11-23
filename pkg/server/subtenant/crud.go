@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -18,17 +19,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	v1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/naas"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
 var _ cloudv1connect.SubTenantServiceHandler = (*Service)(nil)
 
-func validateSpec(spec *v1.SubTenantSpec) error {
+func validateSpec(spec *v1.SubTenantSpec, groups config.NaaS) error {
 	if spec == nil {
 		return invalid("subtenant.spec is required")
 	}
@@ -46,6 +49,12 @@ func validateSpec(spec *v1.SubTenantSpec) error {
 	}
 	if err := validateGroups(spec.GetAccess().GetAdminGroups(), spec.GetAccess().GetViewerGroups()); err != nil {
 		return err
+	}
+	if err := allowedGroups(groups, spec.GetAccess().GetAdminGroups(), spec.GetAccess().GetViewerGroups()); err != nil {
+		return err
+	}
+	if strings.HasPrefix(spec.GetName(), naas.QualifierTenantPrefix) {
+		return invalid("spec.name must not start with %q: the platform's qualifier uses it", naas.QualifierTenantPrefix)
 	}
 	return nil
 }
@@ -89,7 +98,7 @@ func (s *Service) CreateSubTenant(ctx context.Context, req *v1.CreateSubTenantRe
 	if in.Id != "" || in.TenantId != "" || in.ClusterId != "" || in.Status != nil || in.Etag != "" || in.Generation != 0 || in.CreateTime != nil || in.UpdateTime != nil {
 		return nil, invalid("create accepts only subtenant.spec; identity and status are assigned by the server")
 	}
-	if err := validateSpec(in.Spec); err != nil {
+	if err := validateSpec(in.Spec, s.deps.NaaS); err != nil {
 		return nil, err
 	}
 	if in.Spec.Name == "" {
@@ -267,7 +276,7 @@ func (s *Service) UpdateSubTenant(ctx context.Context, req *v1.UpdateSubTenantRe
 		}
 	}
 	if !unprotectOnly {
-		if err := validateSpec(merged); err != nil {
+		if err := validateSpec(merged, s.deps.NaaS); err != nil {
 			return nil, err
 		}
 	}

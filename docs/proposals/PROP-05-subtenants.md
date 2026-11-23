@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Accepted; phase 0 implemented |
+| Status | Accepted; phases 0 and 1 implemented (phase 1 not yet run on a sandbox cluster) |
 | Author | `<author>` |
 | Date | 2026-11-22 |
 | Reviewers | `<reviewers>` |
@@ -498,6 +498,45 @@ Each phase ships alone and leaves the system consistent.
   - the allowlist (exact, prefix, deny-first, empty list);
   - the controller's access state machine on a fake;
   - the sandbox run, opt-in, as the e2e harness of `830afe6`.
+- **Implemented** (2026-11-23), except the sandbox run:
+  - `pkg/naas/access_qualification.go`: the per-cluster key and the `v2` record
+    `naas-system/naas-qualified-cluster`, at most 30 days; a passed record is renewed 3
+    days before it expires and stays valid meanwhile; a failed record (reason
+    `QualificationFailed`, naming the checks) is retried after an hour. The operator
+    override is the same record written by hand. The per-allocation hourly record is
+    retired. `RequiredQualificationChecks` has the eleventh check,
+    `admission-platform-pool-outage`: Capsule's webhook pods are Ready on the bootstrap
+    group.
+  - `pkg/naas/qualifier_job.go` renders the `naas-qualifier` ServiceAccount, its
+    ClusterRole and Roles with bindings (impersonation limited by name to the two test
+    users and groups; delete limited to the two test Tenants; the Job writes only its
+    result ConfigMap, never the record), and the Job. `pkg/naas/qualifier_run.go` and
+    `qualifier_checks.go` are the runner: two test Tenants through the normal renderer,
+    the eleven checks, cleanup, and the result. Deny checks need a positive control
+    (traffic inside the sub-tenant works), so a broken probe image cannot pass them.
+    `pkg/naas/cmd/access-qualification` has `--run` (the Job) and `--print`.
+  - `pkg/controller/naas_qualification_controller.go`, registered in `SetupAll`: starts
+    the Job, records its result only when it is that Job's (UID) for the same key,
+    removes Jobs of an older key, and sets the Cluster condition `NaaSQualified`, which
+    the store's status writes keep. It respects the platform freeze.
+  - `naas.allowedGroups` and `naas.deniedGroups` (`pkg/config/naas.go`), read by the server
+    and the controller; enforced in `pkg/server/subtenant` (`INVALID_ARGUMENT` with the
+    allowed patterns) and in `naas.ResolveAccess` (`GroupNotAllowed`). The `naas-qual-`
+    name prefix is reserved at the API.
+  - The 6.9 conditions: `GroupsAllowed`, `ClusterQualified` (replacing
+    `AccessQualified`), `Ready` false while named groups have no access, and `Degraded`
+    when open access closes (it backs off to 2 minutes like a pending sub-tenant).
+  - Chosen differently: the qualifier's RBAC is rendered by the controller with the Job,
+    not added to `pkg/naas/assets/bootstrap.yaml`, so the bootstrap revision (and every
+    key) does not change with it. The Job needs `naas.qualifierImage` and
+    `naas.probeImage` (default `busybox:1.36.1`); the platform image does not contain
+    the runner. `NaaSQualified` is on the Cluster object only; the API and the console
+    do not show it yet.
+  - **Not verified**: no live or sandbox run. The checks, the Job and the controller ran
+    only against controller-runtime fakes: RBAC refusals, admission, Capsule's
+    generation, test pods and network behaviour are simulated. The acceptance items
+    above that need a cluster (the Job passing at NaaS enable, access kept beyond an
+    hour, the renewal with no gap) are proven on fakes only.
 
 ### Phase 2: Owner access
 

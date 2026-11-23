@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -13,11 +14,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/naas"
 )
+
+// The SubTenant access conditions (PROP-05 6.9). ClusterQualified replaces
+// the retired per-allocation AccessQualified.
+const (
+	conditionGroupsAllowed    = "GroupsAllowed"
+	conditionClusterQualified = "ClusterQualified"
+	conditionRetiredQualified = "AccessQualified"
+)
+
+// subTenantAccessClosed are the access reasons of a provisioned sub-tenant
+// whose named groups have no access. One that had access goes Degraded.
+var subTenantAccessClosed = map[string]bool{
+	"GroupNotAllowed": true, "OIDCPending": true, "OIDCAssociationPending": true, "QualificationRequired": true,
+	"QualificationFailed": true, "AccessBindingMismatch": true, "TenantSpecMismatch": true,
+}
 
 type subTenantAccessGuard struct {
 	workload client.Client
@@ -52,61 +69,114 @@ func subTenantProvisioned(obj *cloud.SubTenant, remote *unstructured.Unstructure
 	return naas.TenantProvisioningReady(obj, remote, inventory)
 }
 
-func renderSubTenantAccess(obj *cloud.SubTenant, parent *cloud.Cluster, revision string) (*unstructured.Unstructured, *naas.ResolvedAccess, *cloudv1.ClusterSpec, error, error) {
+// subTenantAccessPrerequisite is an access error that leaves provisioning
+// alone: the Tenant is rendered without access, which removes the generated
+// RoleBindings, and access is reported closed.
+func subTenantAccessPrerequisite(err error) bool {
+	return errors.Is(err, naas.ErrAccessOIDCNotConfigured) || errors.Is(err, naas.ErrGroupNotAllowed)
+}
+
+func renderSubTenantAccess(obj *cloud.SubTenant, parent *cloud.Cluster, revision string, groups config.NaaS) (*unstructured.Unstructured, *naas.ResolvedAccess, *cloudv1.ClusterSpec, error, error) {
 	spec := convert.ClusterSpecFromAPI(parent.Spec, parent.Labels[cloudstore.LabelNetworkID], nil)
-	access, accessErr := naas.ResolveAccess(obj.Spec.Access, spec)
-	if accessErr != nil && !errors.Is(accessErr, naas.ErrAccessOIDCNotConfigured) {
+	access, accessErr := naas.ResolveAccess(obj.Spec.Access, spec, groups)
+	if accessErr != nil && !subTenantAccessPrerequisite(accessErr) {
 		return nil, nil, spec, accessErr, accessErr
 	}
 	if accessErr != nil {
-		// Missing OIDC is an access prerequisite, not a provisioning failure.
-		// The original management intent is retained unchanged.
+		// Missing OIDC or a group outside naas.allowedGroups is an access
+		// prerequisite, not a provisioning failure: no binding is rendered for
+		// any group. The original management intent is retained unchanged.
 		base := obj.DeepCopy()
 		base.Spec.Access = nil
-		desired, err := naas.RenderTenantWithAccess(base, parent.Status.CurrentKubernetesVersion, revision, spec)
+		desired, err := naas.RenderTenantWithAccess(base, parent.Status.CurrentKubernetesVersion, revision, spec, groups)
 		return desired, &naas.ResolvedAccess{}, spec, accessErr, err
 	}
-	desired, err := naas.RenderTenantWithAccess(obj, parent.Status.CurrentKubernetesVersion, revision, spec)
+	desired, err := naas.RenderTenantWithAccess(obj, parent.Status.CurrentKubernetesVersion, revision, spec, groups)
 	return desired, access, spec, nil, err
 }
 
-// reconcileSubTenantAccess never equates static baseline observation with runtime
-// qualification. Only the protected operator attestation can authorize opening.
-func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj *cloud.SubTenant, parent *cloud.Cluster, st *cloud.SubTenantStatus, guard *subTenantAccessGuard, bootstrap *naas.Bootstrap, access *naas.ResolvedAccess, spec *cloudv1.ClusterSpec, accessErr error) (string, string, time.Time) {
-	if accessErr != nil {
-		subTenantAccessCondition(st, obj.Generation, "OIDCReady", false, "OIDCPending", accessErr.Error())
-		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "OIDCPending", "Current EKS OIDC mapping is required before qualification")
-		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "OIDCPending", accessErr.Error())
-		return "OIDCPending", "Namespace allocation provisioned; group access is waiting for EKS OIDC configuration", time.Time{}
+// subTenantAccessInput is what one pass knows when it decides access.
+type subTenantAccessInput struct {
+	parent    *cloud.Cluster
+	bootstrap *naas.Bootstrap
+	desired   *unstructured.Unstructured
+	access    *naas.ResolvedAccess
+	spec      *cloudv1.ClusterSpec
+	accessErr error
+}
+
+// closeAccess reports access closed for reason on every access condition
+// from GroupsAllowed on that has not passed yet.
+func closeAccess(st *cloud.SubTenantStatus, generation int64, from, reason, message string) {
+	conditions := []string{conditionGroupsAllowed, "OIDCReady", conditionClusterQualified}
+	for _, kind := range conditions[indexOf(conditions, from):] {
+		subTenantAccessCondition(st, generation, kind, false, reason, message)
 	}
-	if len(access.Bindings) == 0 {
-		subTenantAccessCondition(st, obj.Generation, "OIDCReady", false, "NoGroupsRequested", "OIDC group access was not requested")
-		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "NoGroupsRequested", "Human access qualification was not requested")
-		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "NoGroupsRequested", "Namespace allocation is provisioned; no human access groups were requested")
+	subTenantAccessCondition(st, generation, "AccessReady", false, reason, message)
+}
+
+func indexOf(list []string, item string) int {
+	for i, v := range list {
+		if v == item {
+			return i
+		}
+	}
+	return 0
+}
+
+// reconcileSubTenantAccess never equates static baseline observation with runtime
+// qualification. Access opens only when every named group is allowed, the
+// cluster's OIDC association is current, the cluster's qualification record
+// is current and passed, and the Tenant is exactly the render (the static
+// per-allocation checks; namespaces and baselines were checked by the caller).
+func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj *cloud.SubTenant, st *cloud.SubTenantStatus, guard *subTenantAccessGuard, in subTenantAccessInput) (string, string, time.Time) {
+	g := obj.Generation
+	switch {
+	case errors.Is(in.accessErr, naas.ErrGroupNotAllowed):
+		closeAccess(st, g, conditionGroupsAllowed, "GroupNotAllowed", in.accessErr.Error())
+		return "GroupNotAllowed", "Namespace allocation provisioned; access is closed because a named group is not allowed by the platform: " + in.accessErr.Error(), time.Time{}
+	case in.accessErr != nil:
+		subTenantAccessCondition(st, g, conditionGroupsAllowed, true, "GroupsAllowed", "Every named group is allowed by naas.allowedGroups")
+		closeAccess(st, g, "OIDCReady", "OIDCPending", in.accessErr.Error())
+		return "OIDCPending", "Namespace allocation provisioned; group access is waiting for EKS OIDC configuration", time.Time{}
+	case len(in.access.Bindings) == 0:
+		closeAccess(st, g, conditionGroupsAllowed, "NoGroupsRequested", "Namespace allocation is provisioned; no human access groups were requested")
 		return "Provisioned", "Namespace allocation provisioned; no human access groups were requested", time.Time{}
 	}
-	associationUID, err := naas.ObserveAccessOIDC(ctx, r.deps.Direct, parent, spec)
-	if err != nil {
-		subTenantAccessCondition(st, obj.Generation, "OIDCReady", false, "OIDCAssociationPending", err.Error())
-		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "OIDCAssociationPending", "Current observed EKS OIDC mapping is required before qualification")
-		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "OIDCAssociationPending", err.Error())
+	subTenantAccessCondition(st, g, conditionGroupsAllowed, true, "GroupsAllowed", "Every named group is allowed by naas.allowedGroups")
+	associationUID, err := naas.ObserveAccessOIDC(ctx, r.deps.Direct, in.parent, in.spec)
+	if err != nil || associationUID == "" {
+		message := "the current ACTIVE EKS OIDC association is not observed"
+		if err != nil {
+			message = err.Error()
+		}
+		closeAccess(st, g, "OIDCReady", "OIDCAssociationPending", message)
 		return "OIDCAssociationPending", "Namespace allocation provisioned; waiting for the current ACTIVE EKS OIDC association", time.Time{}
 	}
-	subTenantAccessCondition(st, obj.Generation, "OIDCReady", true, "OIDCAssociationObserved", "Ready, Synced, ACTIVE EKS association matches the current cluster and OIDC mapping")
-	binding, err := naas.BindAccessQualification(obj, parent, guard.remote, st.Namespaces, bootstrap.Revision(), access, associationUID)
+	subTenantAccessCondition(st, g, "OIDCReady", true, "OIDCAssociationObserved", "Ready, Synced, ACTIVE EKS association matches the current cluster and OIDC mapping")
+	key, err := naas.ClusterQualificationKeyFor(in.parent, in.bootstrap.Revision(), in.spec)
 	var expires time.Time
 	if err == nil {
-		expires, err = naas.VerifyAccessQualification(ctx, guard.workload, binding, time.Now())
+		expires, err = naas.VerifyAccessQualification(ctx, guard.workload, key, time.Now())
+	}
+	var failed *naas.QualificationFailedError
+	if errors.As(err, &failed) {
+		message := fmt.Sprintf("Cluster %s failed qualification: %s", in.parent.Name, strings.Join(failed.Checks, ", "))
+		closeAccess(st, g, conditionClusterQualified, "QualificationFailed", message)
+		return "QualificationFailed", "Namespace allocation provisioned; access is closed on this cluster: " + message, time.Time{}
 	}
 	if err != nil {
-		subTenantAccessCondition(st, obj.Generation, "AccessQualified", false, "QualificationRequired", err.Error())
-		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "QualificationRequired", err.Error())
-		return "QualificationRequired", "Namespace allocation provisioned; current trusted runtime qualification is required before group access", time.Time{}
+		closeAccess(st, g, conditionClusterQualified, "QualificationRequired", err.Error())
+		return "QualificationRequired", "Namespace allocation provisioned; waiting for the cluster's current qualification before group access", time.Time{}
 	}
-	subTenantAccessCondition(st, obj.Generation, "AccessQualified", true, "QualificationVerified", "Protected, unexpired operator qualification matches current identities and revisions")
-	bindingsErr := naas.ObserveAccessBindings(ctx, guard.workload, obj, guard.remote, access)
+	subTenantAccessCondition(st, g, conditionClusterQualified, true, "QualificationVerified", "The cluster's protected qualification record matches its current key and passed every check")
+	if !naas.EqualTenantSpec(guard.remote, in.desired) || guard.remote.GetAnnotations()[naas.SpecAnnotation] != in.desired.GetAnnotations()[naas.SpecAnnotation] {
+		subTenantAccessCondition(st, g, "AccessReady", false, "TenantSpecMismatch", "The observed Capsule Tenant does not match its render")
+		return "TenantSpecMismatch", "Namespace allocation provisioned; the observed Tenant does not match its render, so access stays closed", time.Time{}
+	}
+	bindingsErr := naas.ObserveAccessBindings(ctx, guard.workload, obj, guard.remote, in.access)
 	if bindingsErr != nil && !errors.Is(bindingsErr, naas.ErrAccessBindingsPending) {
-		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "AccessBindingMismatch", bindingsErr.Error())
+		subTenantAccessCondition(st, g, "AccessReady", false, "AccessBindingMismatch", bindingsErr.Error())
 		return "AccessBindingMismatch", "Namespace allocation provisioned; unexpected namespace RBAC prevents access", time.Time{}
 	}
 	if guard.remote.GetLabels()[naas.LabelAccessReady] != "true" {
@@ -115,7 +185,7 @@ func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj 
 		labels[naas.LabelAccessReady] = "true"
 		next.SetLabels(labels)
 		if err := guard.workload.Update(ctx, next); err != nil {
-			subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "AccessGrantPending", "Qualified access gate update was not confirmed")
+			subTenantAccessCondition(st, g, "AccessReady", false, "AccessGrantPending", "Qualified access gate update was not confirmed")
 			return "AccessGrantPending", "Namespace allocation provisioned; qualified group access update is pending", time.Time{}
 		}
 		guard.remote = next
@@ -123,9 +193,27 @@ func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj 
 	}
 	guard.keep = true
 	if bindingsErr != nil {
-		subTenantAccessCondition(st, obj.Generation, "AccessReady", false, "AccessBindingsPending", bindingsErr.Error())
+		subTenantAccessCondition(st, g, "AccessReady", false, "AccessBindingsPending", bindingsErr.Error())
 		return "AccessBindingsPending", "Namespace allocation provisioned and qualified; waiting for Capsule namespace access bindings", expires
 	}
-	subTenantAccessCondition(st, obj.Generation, "AccessReady", true, "AccessBindingsObserved", "Qualified namespace-only group bindings and namespace readiness were freshly observed")
-	return "AccessReady", fmt.Sprintf("Namespace allocation provisioned; %d qualified group bindings are ready in every allocated namespace", len(access.Bindings)), expires
+	subTenantAccessCondition(st, g, "AccessReady", true, "AccessBindingsObserved", "Qualified namespace-only group bindings and namespace readiness were freshly observed")
+	return "AccessReady", fmt.Sprintf("Namespace allocation provisioned; %d qualified group bindings are ready in every allocated namespace", len(in.access.Bindings)), expires
+}
+
+// subTenantGroupsNamed: the sub-tenant asks for human access.
+func subTenantGroupsNamed(obj *cloud.SubTenant) bool {
+	return obj.Spec.Access != nil && len(obj.Spec.Access.AdminGroups)+len(obj.Spec.Access.ViewerGroups) > 0
+}
+
+// subTenantReadyState is the state of a provisioned sub-tenant after its
+// access pass: Degraded when access had been open (or the sub-tenant was
+// already Degraded) and is now closed for reason, else Ready.
+func subTenantReadyState(previous cloud.SubTenantStatus, reason string) cloud.SubTenantState {
+	if !subTenantAccessClosed[reason] {
+		return cloud.SubTenantStateReady
+	}
+	if previous.State == cloud.SubTenantStateDegraded || meta.IsStatusConditionTrue(previous.Conditions, "AccessReady") {
+		return cloud.SubTenantStateDegraded
+	}
+	return cloud.SubTenantStateReady
 }

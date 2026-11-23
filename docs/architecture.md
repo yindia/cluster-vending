@@ -139,8 +139,9 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
 - `SubTenant` is a namespace allocation inside a cluster that runs Capsule
   (`naas: true`): namespace keys, quotas, a policy profile, and access
   bindings to identity groups.
-- A sub-tenant's access opens only after its EKS OIDC association is active
-  and a trusted qualification run has passed ([SubTenants and NaaS](#subtenants-and-naas)).
+- A sub-tenant's access opens only when its groups are in the platform's
+  `naas.allowedGroups`, its EKS OIDC association is active and its cluster's
+  qualification record has passed ([SubTenants and NaaS](#subtenants-and-naas)).
 
 **Scans and visibility**
 
@@ -1128,10 +1129,50 @@ workload cluster. Its spec is described in [SubTenant](#subtenant). The controll
 
 - **Provisioning** (`ProvisioningReady`): the current Tenant and every requested
   namespace baseline are acknowledged by Capsule.
-- **Access** (`AccessReady`): an ACTIVE EKS OIDC association for the cluster,
-  a trusted qualification run of the exact configuration (`pkg/naas/access_qualification.go`,
-  run by a trusted operator, not by a tenant), propagated namespace readiness and
-  the exact generated RoleBindings. Provisioning does not grant human access.
+- **Access** (`AccessReady`) opens when all of these hold, and closes when one stops
+  holding. Provisioning does not grant human access.
+  - `GroupsAllowed`: every group in `adminGroups` and `viewerGroups` is in the
+    config file's `naas.allowedGroups` and not in `naas.deniedGroups` (exact values
+    or a prefix ending in `*`; deny is checked first; empty, the default, allows
+    none). The API refuses other groups with `INVALID_ARGUMENT`, listing the allowed
+    patterns. The controller checks again before it renders access, so a group
+    removed from the list closes access with reason `GroupNotAllowed` and no
+    RoleBinding is rendered. This bounds the group names, not the caller.
+  - `OIDCReady`: an ACTIVE EKS OIDC association matches the cluster's OIDC.
+  - `ClusterQualified`: the cluster's qualification record (below) matches the
+    cluster's current key and passed every check. A failed run closes access with
+    reason `QualificationFailed`, naming the checks.
+  - The static per-allocation checks: the Tenant equals its render (spec hash),
+    every namespace exists with its UID, and each baseline is observed
+    (`BaselineReady`). Nothing is recorded per allocation.
+  - Propagated namespace readiness and the exact generated RoleBindings.
+
+  `Ready` is `ProvisioningReady`, and `AccessReady` when groups are named. A
+  sub-tenant whose open access closes goes to the `Degraded` state with the reason.
+- **Qualification** is per cluster, not per allocation (`pkg/naas/access_qualification.go`).
+  The record is the ConfigMap `naas-system/naas-qualified-cluster`. It carries the key
+  (cluster UID, bootstrap revision, Kubernetes minor, installed Capsule and Istio versions,
+  OIDC revision), the result of each of the eleven checks (`RequiredQualificationChecks`:
+  namespace RBAC, cross-namespace RBAC, admission guards, ambient mTLS, cross-sub-tenant
+  traffic, DNS, egress deny, restricted PSS, shared quota, group delegation, and Capsule
+  admission available during a platform-pool outage), the evidence and the time. It is
+  valid until the key changes, for at most 30 days. The NaaS qualification controller
+  (`pkg/controller/naas_qualification_controller.go`) starts the `naas-qualifier` Job
+  (`pkg/naas/qualifier_job.go`, the binary `pkg/naas/cmd/access-qualification --run`) when
+  a NaaS cluster has no current record for its key, and 3 days before a passed record
+  expires: the old record stays valid while the renewal runs. The Job runs on the
+  bootstrap group, creates two throwaway sub-tenants (`naas-qual-a`, `naas-qual-b`; the
+  prefix is reserved at the API), runs the checks as test pods and as the two test groups
+  `cv-naas-qual-a` and `cv-naas-qual-b` (impersonated through a ClusterRole limited to
+  those names), deletes the test sub-tenants and leaves its result in
+  `naas-system/naas-qualifier-result`. The controller records it only when it is the
+  result of the Job it started, for the same key; a Job that ends without one is a failed
+  run. It sets the Cluster condition `NaaSQualified` (on the Cluster object; the API's
+  cluster view does not carry it yet). The Job needs `naas.qualifierImage` (the image of
+  the access-qualification binary, which the platform image does not include); without
+  it no Job runs, and an operator can write the record by hand in the same format
+  (`--print` gives the key and the checks). A failed record is retried after an hour.
+  The per-allocation, one-hour record of earlier versions no longer opens access.
 - **Access bindings** map an identity group to a role profile (`workload-editor` is
   the only one). `adminGroups` and `viewerGroups` are exact group-claim values, never
   wildcards.
@@ -1985,8 +2026,9 @@ What is not verified, or not built. Anything not on this list works as described
 
 - **Not run against real AWS, EKS or Crossplane.** Every test runs against a fake API
   server. The provider upgrade runbook is not run end to end.
-- **Sub-tenant isolation and access qualification** are written as staged lab
-  procedures. They have not been run on a live cluster.
+- **Sub-tenant isolation and access qualification** have not been run on a live
+  cluster. The qualifier's checks run against fakes only; the sandbox run of
+  PROP-05 phase 1 is still open.
 - **Ordered deletion through Usages is untested**: the fake server has no Usage
   webhook, so the refusals and waits of the webhook are not exercised.
 - **CEL rules** in the CRDs are not loaded into a real API server.
@@ -2011,8 +2053,10 @@ What is not verified, or not built. Anything not on this list works as described
 - **A release's `default` minor is not applied.** A cluster on no channel keeps the
   version it asks for, or EKS's default, although `release.yaml` marks one minor as
   `default`.
-- **Sub-tenant access** opens only after a trusted operator's qualification run. There is
-  no tenant-facing switch for it.
+- **Sub-tenant access** opens only on a passed per-cluster qualification record, written
+  by the controller from the qualifier Job or by an operator. There is no tenant-facing
+  switch for it. The `naas.allowedGroups` list ships empty, so access stays closed until
+  an operator sets it.
 - **No authorization.** The API authenticates callers and nothing more: any
   authenticated user (and, with `auth.mode: none`, any caller) can act on every tenant
   and on the platform. Who may sign in is decided at the identity provider.

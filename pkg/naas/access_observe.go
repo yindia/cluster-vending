@@ -16,7 +16,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -173,9 +172,11 @@ func ObserveAccessBindings(ctx context.Context, workload client.Client, sub *clo
 		for _, binding := range list.Items {
 			wanted, exists := expected[binding.Name]
 			if !exists {
-				raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&binding)
-				if err != nil || !platformOwnerBinding(&unstructured.Unstructured{Object: raw}, remote) {
-					return fmt.Errorf("unexpected namespace RoleBinding %s/%s", namespace.Name, binding.Name)
+				// Only the access bindings the platform generates are
+				// tracked; any other RoleBinding is not ours and is left
+				// alone. One of ours that is no longer wanted is drift.
+				if strings.HasPrefix(binding.Name, "naas-access-") && binding.Labels[LabelSubTenantID] == sub.Name {
+					return fmt.Errorf("namespace RoleBinding %s/%s is no longer approved group access", namespace.Name, binding.Name)
 				}
 				continue
 			}

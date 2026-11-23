@@ -1141,7 +1141,10 @@ workload cluster. Its spec is described in [SubTenant](#subtenant). The controll
   - `OIDCReady`: an ACTIVE EKS OIDC association matches the cluster's OIDC.
   - The per-allocation checks: the Tenant equals its render (spec hash), every
     namespace exists with its UID, and each baseline is observed (`BaselineReady`).
-  - Propagated namespace readiness and the exact generated RoleBindings.
+  - Propagated namespace readiness and the exact generated RoleBindings. Only the
+    objects the platform creates are tracked: a RoleBinding or other object someone else
+    adds to a sub-tenant namespace is left alone. A platform access binding
+    (`naas-access-*`) that is no longer wanted closes access (`AccessBindingMismatch`).
 
   `Ready` is `ProvisioningReady`, and `AccessReady` when groups are named. A
   sub-tenant whose open access closes goes to the `Degraded` state with the reason.

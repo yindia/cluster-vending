@@ -202,3 +202,34 @@ func TestSubTenantAccessOpensWithoutFlapping(t *testing.T) {
 		t.Fatal("display name or scaling edit unnecessarily revoked access")
 	}
 }
+
+// Only the platform's own access bindings are tracked: a RoleBinding someone
+// else made is left alone, and one of ours that is no longer wanted closes
+// access.
+func TestSubTenantAccessTracksOnlyOwnBindings(t *testing.T) {
+	w := provisionAccessWorld(t, true)
+	w.pass(t)
+	materializeAccessBindings(t, w)
+	w.pass(t)
+	namespace := w.tenant(t).GetName() + "-app"
+	foreign := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "team-extra", Namespace: namespace},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+		Subjects: []rbacv1.Subject{{Kind: "Group", APIGroup: rbacv1.GroupName, Name: "someone-else"}}}
+	if err := w.remote.Create(t.Context(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	w.pass(t)
+	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") {
+		t.Fatalf("a RoleBinding the platform did not create closed access: %+v", w.sub(t).Status.Conditions)
+	}
+	stale := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "naas-access-stale", Namespace: namespace, Labels: map[string]string{naas.LabelSubTenantID: stID}},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: naas.WorkloadAdminRole},
+		Subjects: []rbacv1.Subject{{Kind: "Group", APIGroup: rbacv1.GroupName, Name: "removed-group"}}}
+	if err := w.remote.Create(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	w.pass(t)
+	if condition := meta.FindStatusCondition(w.sub(t).Status.Conditions, "AccessReady"); condition.Status == metav1.ConditionTrue || condition.Reason != "AccessBindingMismatch" {
+		t.Fatalf("a stale platform binding did not close access: %+v", condition)
+	}
+}

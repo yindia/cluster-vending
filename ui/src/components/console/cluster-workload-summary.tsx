@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Heading } from "@astryxdesign/core/Heading";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
@@ -17,8 +18,16 @@ interface ClusterWorkloadSummaryProps {
 // passes recorded (PROP-02 5.2): node, violation and event counts with their
 // ages, the node groups' requested and allocatable totals, and whether the
 // platform can read the cluster. Old counts are marked; none are zeros.
+// How often the ages, and the "old" marks, are worked out again.
+const CLOCK_TICK_MS = 60_000;
+
 export function ClusterWorkloadSummary({ status }: ClusterWorkloadSummaryProps) {
-  const view = clusterSummaryView(status, Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const view = clusterSummaryView(status, now);
   const groups = (status?.nodeGroups ?? []).map(group => ({ group, totals: nodeGroupTotals(group) })).filter(entry => entry.totals);
   return <VStack gap={4}>
     <Heading level={3}>Workload summary</Heading>

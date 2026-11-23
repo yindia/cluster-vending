@@ -70,8 +70,11 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
   }, [draft]);
 
   const token = pager.token;
+  // The latest summary, for a failed live read's notice, without reloading
+  // the nodes each time the cluster is read again.
   const statusRef = useRef<ClusterStatus | undefined>(undefined);
-  statusRef.current = cluster.data?.status;
+  const clusterStatus = cluster.data?.status;
+  useEffect(() => { statusRef.current = clusterStatus; }, [clusterStatus]);
   const loadNodes = useCallback(async (signal: AbortSignal) => {
     try {
       const response = await api.cluster.listNodeGroupNodes({ tenantId, clusterId, nodeGroup: group, pageSize: NODE_PAGE_SIZE, pageToken: token, filter: nodeStatusFilter(choice), nameContains: search }, { signal });

@@ -134,12 +134,3 @@ func (p *subTenantPace) forget(key string) {
 	defer p.mu.Unlock()
 	delete(p.unchanged, key)
 }
-
-// untilExpiry caps a resync at an open access record's expiry, so access
-// closes on time whatever the state's resync.
-func untilExpiry(delay time.Duration, expires, now time.Time) time.Duration {
-	if expires.IsZero() {
-		return delay
-	}
-	return max(min(delay, expires.Sub(now)), soon)
-}

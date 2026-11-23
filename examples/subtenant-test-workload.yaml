@@ -1,6 +1,6 @@
 # LAB ONLY. Render SUBTENANT_TEST_IMAGE to an approved Python 3 image@sha256:digest.
 # Requires the generated app ServiceAccount. Contains no credentials or volumes.
-# Apply only after operator approval of the qualification test identity/admission.
+# Apply only after operator approval of the test identity and admission.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

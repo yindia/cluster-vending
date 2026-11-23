@@ -27,22 +27,10 @@ const maxGroupPatterns = 256
 // access groups: exact values, or a prefix ending in "*". Empty (the
 // default) allows no group: access stays closed until an operator sets it.
 // DeniedGroups may never be named; they are checked first.
-//
-// QualifierImage is the image of the naas-qualifier Job (the
-// access-qualification runner, PROP-05 6.1). Empty: the controller starts
-// no Job, and clusters are qualified only by a record an operator writes.
-// ProbeImage is the image of the qualifier's test pods (a shell with nc,
-// wget and nslookup); empty is DefaultQualifierProbeImage.
 type NaaS struct {
-	AllowedGroups  []string `yaml:"allowedGroups"`
-	DeniedGroups   []string `yaml:"deniedGroups"`
-	QualifierImage string   `yaml:"qualifierImage"`
-	ProbeImage     string   `yaml:"probeImage"`
+	AllowedGroups []string `yaml:"allowedGroups"`
+	DeniedGroups  []string `yaml:"deniedGroups"`
 }
-
-// DefaultQualifierProbeImage is the qualifier's test pod image when the
-// section does not name one.
-const DefaultQualifierProbeImage = "busybox:1.36.1"
 
 // ErrGroupNotAllowed is the error of a group outside naas.allowedGroups or
 // inside naas.deniedGroups.
@@ -109,9 +97,6 @@ func (n NaaS) Validate() error {
 			}
 		}
 	}
-	if strings.ContainsFunc(n.QualifierImage, unicode.IsSpace) || strings.ContainsFunc(n.ProbeImage, unicode.IsSpace) {
-		errs = append(errs, fmt.Errorf("%s image references must not contain whitespace", SectionNaaS))
-	}
 	return errors.Join(errs...)
 }
 
@@ -174,12 +159,4 @@ func (n NaaS) AllowedPatterns() string {
 		return "none; the platform operator has not set naas.allowedGroups"
 	}
 	return strings.Join(n.AllowedGroups, ", ")
-}
-
-// QualifierProbeImage is ProbeImage or its default.
-func (n NaaS) QualifierProbeImage() string {
-	if n.ProbeImage == "" {
-		return DefaultQualifierProbeImage
-	}
-	return n.ProbeImage
 }

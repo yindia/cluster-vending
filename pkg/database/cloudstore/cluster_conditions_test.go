@@ -12,12 +12,11 @@ import (
 // A store status write keeps the conditions other controllers own.
 func TestSetStatusKeepsForeignConditions(t *testing.T) {
 	obj := &cloudv1alpha1.Cluster{Status: cloudv1alpha1.ClusterStatus{Conditions: []metav1.Condition{
-		{Type: cloudv1alpha1.ConditionNaaSQualified, Status: metav1.ConditionTrue, Reason: "QualificationPassed"},
 		{Type: cloudv1alpha1.ConditionDeprecationScan, Status: metav1.ConditionTrue, Reason: "Scanned"},
 		{Type: "Stale", Status: metav1.ConditionTrue, Reason: "Old"},
 	}}}
 	clusters{}.setStatus(obj, []byte(`{}`), "CLUSTER_STATE_RUNNING", nil)
-	for _, kind := range []string{cloudv1alpha1.ConditionNaaSQualified, cloudv1alpha1.ConditionDeprecationScan} {
+	for _, kind := range []string{cloudv1alpha1.ConditionDeprecationScan} {
 		if !meta.IsStatusConditionTrue(obj.Status.Conditions, kind) {
 			t.Fatalf("%s dropped: %+v", kind, obj.Status.Conditions)
 		}

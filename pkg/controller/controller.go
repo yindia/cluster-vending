@@ -139,7 +139,6 @@ func SetupAll(mgr ctrl.Manager, d Deps) error {
 	}{
 		{"tenant", NewTenantReconciler(d).SetupWithManager},
 		{"subtenant", NewSubTenantReconciler(d).SetupWithManager},
-		{"naas qualification", NewNaaSQualificationReconciler(d).SetupWithManager},
 		{"cloudaccount", NewCloudAccountReconciler(d).SetupWithManager},
 		{"network", NewNetworkReconciler(d).SetupWithManager},
 		{"cluster", NewClusterReconciler(d).SetupWithManager},

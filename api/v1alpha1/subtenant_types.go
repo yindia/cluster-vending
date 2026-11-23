@@ -152,7 +152,7 @@ const (
 )
 
 // SubTenantNamespaceStatus is an observation, never permission to create directly.
-// Readiness requires current baseline qualification; GTR Ready alone is insufficient.
+// Readiness requires the observed baseline objects; GTR Ready alone is insufficient.
 type SubTenantNamespaceStatus struct {
 	Key SubTenantNamespaceKey `json:"key"`
 	// +optional

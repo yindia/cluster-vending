@@ -57,8 +57,8 @@ func TestLoadNaaS(t *testing.T) {
 		err        string
 	}{
 		{name: "no section", file: "http-addr: 127.0.0.1:9090\n"},
-		{name: "section", file: "naas:\n  allowedGroups: [\"cv-subtenant-*\", team]\n  deniedGroups: [cv-platform-operators]\n  qualifierImage: registry.example/cv:1\n",
-			want: config.NaaS{AllowedGroups: []string{"cv-subtenant-*", "team"}, DeniedGroups: []string{"cv-platform-operators"}, QualifierImage: "registry.example/cv:1"}},
+		{name: "section", file: "naas:\n  allowedGroups: [\"cv-subtenant-*\", team]\n  deniedGroups: [cv-platform-operators]\n",
+			want: config.NaaS{AllowedGroups: []string{"cv-subtenant-*", "team"}, DeniedGroups: []string{"cv-platform-operators"}}},
 		{name: "unknown key", file: "naas:\n  allowGroups: [a]\n", err: "allowGroups"},
 		{name: "inner wildcard", file: "naas:\n  allowedGroups: [\"a*b\"]\n", err: "trailing"},
 		{name: "empty pattern", file: "naas:\n  deniedGroups: [\"\"]\n", err: "is empty"},
@@ -76,7 +76,7 @@ func TestLoadNaaS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Join(got.AllowedGroups, ",") != strings.Join(tt.want.AllowedGroups, ",") || strings.Join(got.DeniedGroups, ",") != strings.Join(tt.want.DeniedGroups, ",") || got.QualifierImage != tt.want.QualifierImage {
+			if strings.Join(got.AllowedGroups, ",") != strings.Join(tt.want.AllowedGroups, ",") || strings.Join(got.DeniedGroups, ",") != strings.Join(tt.want.DeniedGroups, ",") {
 				t.Fatalf("LoadNaaS = %+v, want %+v", got, tt.want)
 			}
 		})

@@ -287,7 +287,7 @@ export const DeleteSubTenantResponseSchema: GenMessage<DeleteSubTenantResponse> 
  * clusters must belong to that tenant and have spec.naas enabled. Identity refs
  * require trusted resolution; this service never accepts arbitrary RBAC/groups.
  * Mutations acknowledge persistence, not remote readiness. Observe GetSubTenant
- * until status.observed_generation catches up and current qualification is Ready.
+ * until status.observed_generation catches up and the state is Ready.
  *
  * @generated from service cloud.v1.SubTenantService
  */

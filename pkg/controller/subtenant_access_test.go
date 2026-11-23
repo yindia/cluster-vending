@@ -6,7 +6,6 @@ import (
 	"io"
 	"testing"
 	"text/template"
-	"time"
 
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
@@ -115,7 +114,7 @@ func provisionAccessWorld(t *testing.T, configured bool) *stWorld {
 		}
 	}
 	protected := &corev1.Namespace{}
-	if err := w.remote.Get(t.Context(), client.ObjectKey{Name: naas.QualificationNamespace}, protected); err != nil {
+	if err := w.remote.Get(t.Context(), client.ObjectKey{Name: "naas-system"}, protected); err != nil {
 		t.Fatal(err)
 	}
 	protected.UID = "platform-namespace-uid"
@@ -124,44 +123,6 @@ func provisionAccessWorld(t *testing.T, configured bool) *stWorld {
 	}
 	w.pass(t)
 	return w
-}
-
-// qualifyAccessWorld writes the parent cluster's record, as the qualification
-// controller does after a passed run (or an operator by hand).
-func qualifyAccessWorld(t *testing.T, w *stWorld) *corev1.ConfigMap {
-	t.Helper()
-	return writeClusterRecord(t, w, func(*naas.ClusterQualification) {})
-}
-
-func writeClusterRecord(t *testing.T, w *stWorld, mutate func(*naas.ClusterQualification)) *corev1.ConfigMap {
-	t.Helper()
-	request, err := naas.CurrentClusterQualificationRequest(t.Context(), w.management, w.remote, "tenant-acme", "parent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	issued := time.Now().Add(-time.Minute)
-	qualification := &naas.ClusterQualification{Version: naas.ClusterQualificationVersion, Key: request.Key, IssuedAt: issued, ExpiresAt: issued.Add(naas.MaxQualificationValidity),
-		Evidence: "https://qualification.example.test/run/test", Checks: map[string]bool{}}
-	for _, check := range request.RequiredChecks {
-		qualification.Checks[check] = true
-	}
-	mutate(qualification)
-	desired, err := naas.ClusterQualificationConfigMap(qualification)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current := &corev1.ConfigMap{}
-	if err := w.remote.Get(t.Context(), client.ObjectKeyFromObject(desired), current); err == nil {
-		current.Data = desired.Data
-		if err := w.remote.Update(t.Context(), current); err != nil {
-			t.Fatal(err)
-		}
-		return current
-	}
-	if err := w.remote.Create(t.Context(), desired); err != nil {
-		t.Fatal(err)
-	}
-	return desired
 }
 
 func materializeAccessBindings(t *testing.T, w *stWorld) {
@@ -185,7 +146,7 @@ func materializeAccessBindings(t *testing.T, w *stWorld) {
 	}
 }
 
-func TestSubTenantAccessProvisioningIndependentOfOIDCAndQualification(t *testing.T) {
+func TestSubTenantAccessProvisioningIndependentOfOIDC(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		w := provisionAccessWorld(t, configured)
 		sub := w.sub(t)
@@ -195,22 +156,21 @@ func TestSubTenantAccessProvisioningIndependentOfOIDCAndQualification(t *testing
 			t.Fatalf("provisioning incorrectly blocked by human access: %+v", sub.Status)
 		}
 		condition := meta.FindStatusCondition(sub.Status.Conditions, "AccessReady")
-		want := "QualificationRequired"
+		want, gate := "AccessBindingsPending", "true"
 		if !configured {
-			want = "OIDCPending"
+			want, gate = "OIDCPending", "false"
 		}
-		if condition.Reason != want || w.tenant(t).GetLabels()[naas.LabelAccessReady] != "false" {
-			t.Fatalf("configured=%t: wrong closed access reason: %+v", configured, condition)
+		if condition.Reason != want || w.tenant(t).GetLabels()[naas.LabelAccessReady] != gate {
+			t.Fatalf("configured=%t: wrong access reason or gate: %+v", configured, condition)
 		}
 	}
 }
 
-func TestSubTenantAccessQualifiesWithoutFlappingAndRevokesExpiredEvidence(t *testing.T) {
+func TestSubTenantAccessOpensWithoutFlapping(t *testing.T) {
 	w := provisionAccessWorld(t, true)
-	cm := qualifyAccessWorld(t, w)
 	w.pass(t)
 	if w.tenant(t).GetLabels()[naas.LabelAccessReady] != "true" || meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") {
-		t.Fatal("qualification did not stage access through observed RBAC")
+		t.Fatal("access was not staged through observed RBAC")
 	}
 	// A normal Capsule readiness-label replication lag must not revoke the gate.
 	w.pass(t)
@@ -220,12 +180,12 @@ func TestSubTenantAccessQualifiesWithoutFlappingAndRevokesExpiredEvidence(t *tes
 	materializeAccessBindings(t, w)
 	w.pass(t)
 	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") {
-		t.Fatalf("qualified, observed namespace bindings not Ready: %+v", w.sub(t).Status)
+		t.Fatalf("observed namespace bindings not Ready: %+v", w.sub(t).Status)
 	}
 	writes := len(w.writes)
 	w.pass(t)
 	if len(w.writes) != writes {
-		t.Fatal("unchanged qualified reconciliation rewrote the access gate")
+		t.Fatal("unchanged reconciliation rewrote the access gate")
 	}
 	sub, parent := w.sub(t), w.parent(t)
 	sub.Spec.DisplayName, sub.Generation = "Cosmetic edit", sub.Generation+1
@@ -239,16 +199,6 @@ func TestSubTenantAccessQualifiesWithoutFlappingAndRevokesExpiredEvidence(t *tes
 	}
 	w.pass(t)
 	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") || len(w.writes) != writes {
-		t.Fatal("display name or scaling edit unnecessarily revoked qualified access")
-	}
-	if cm.Name != naas.ClusterQualificationName {
-		t.Fatalf("record %s is not the cluster's", cm.Name)
-	}
-	writeClusterRecord(t, w, func(q *naas.ClusterQualification) {
-		q.IssuedAt, q.ExpiresAt = time.Now().Add(-31*24*time.Hour), time.Now().Add(-time.Second)
-	})
-	w.pass(t)
-	if w.tenant(t).GetLabels()[naas.LabelAccessReady] != "false" || meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") || !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "ProvisioningReady") {
-		t.Fatal("expired evidence did not revoke access independently of provisioning")
+		t.Fatal("display name or scaling edit unnecessarily revoked access")
 	}
 }

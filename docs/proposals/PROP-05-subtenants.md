@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Accepted; phases 0 and 1 implemented (phase 1 not yet run on a sandbox cluster) |
+| Status | Accepted; phases 0 and 1 implemented; qualification (6.1) removed on 2026-11-23, see 10 |
 | Author | `<author>` |
 | Date | 2026-11-22 |
 | Reviewers | `<reviewers>` |
@@ -211,6 +211,10 @@ bound).
 
 ### 6.1 Automatic qualification, per cluster and revision (P1, P2)
 
+> **Removed (2026-11-23).** The qualifier, its Job and the per-cluster record were removed (decision 8 in
+> section 10). Access no longer waits on a runtime isolation test; it opens on the per-allocation checks,
+> the group allowlist (6.2) and an active OIDC association. The design below is kept as history.
+
 **What is qualified.** The ten checks test the shared templates on a given cluster: the bootstrap
 revision, the Kubernetes minor, the CNI, the Istio version and the cluster's OIDC configuration. They do
 not depend on which sub-tenant they run in. So qualification moves from per allocation to per cluster:
@@ -386,6 +390,9 @@ naas:
 
 ### 6.8 Capsule and template upgrades (P11)
 
+> With 6.1 removed, an upgrade has no re-qualification step; the points on the qualification key and
+> `QualificationFailed` below no longer apply.
+
 - The bootstrap stays in the Capsule release pin (`CapsuleBootstrapValues`). A new revision reaches a
   cluster only through its release move, gated per definition by PROP-01 phase 5. That gives tiers, soak,
   windows, the freeze and a halt on failures.
@@ -483,6 +490,8 @@ Each phase ships alone and leaves the system consistent.
   label-selected list; the bootstrap cache hit, miss and mismatch; the requeue per state.
 
 ### Phase 1: Automatic qualification and the group allowlist
+
+> The qualification half of this phase was removed on 2026-11-23 (decision 8). The group allowlist stays.
 
 - 6.1 and 6.2; conditions of 6.9. The per-allocation hourly record is retired. The per-cluster record and
   the manual override format are accepted.
@@ -602,7 +611,13 @@ All seven questions were closed with the recommendation:
 5. **`bindings`**: dropped. Refused on create now, removed in the next API version.
 6. **Overcommit**: a warning only (`NaaSOvercommitted`), because tenant pools scale.
 7. **Capsule webhooks**: an eleventh qualification check, admission available during a platform-pool
-   outage.
+   outage. Superseded by 8.
+8. **No qualification (later the same day).** The qualifier Job, its image setting
+   (`naas.qualifierImage`, `naas.probeImage`), the per-cluster record and the `NaaSQualified` and
+   `ClusterQualified` conditions are removed. Access opens when the allocation is provisioned (Tenant equal
+   to its render, namespaces and baselines observed), every group is allowed and the OIDC association is
+   active. The platform trusts the CNI, Capsule, Istio and Pod Security settings it installs, and does not
+   test isolation at runtime. The `naas-qual-` name prefix is no longer reserved.
 
 ### Questions as asked
 

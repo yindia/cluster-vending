@@ -113,19 +113,6 @@ func TestSubTenantPaceBootstrapCache(t *testing.T) {
 	}
 }
 
-func TestUntilExpiryCapsTheResync(t *testing.T) {
-	now := time.Now()
-	if got := untilExpiry(subTenantReadyResync, time.Time{}, now); got != subTenantReadyResync {
-		t.Fatalf("no expiry changed the delay: %s", got)
-	}
-	if got := untilExpiry(subTenantReadyResync, now.Add(3*time.Minute), now); got != 3*time.Minute {
-		t.Fatalf("delay = %s, want the expiry", got)
-	}
-	if got := untilExpiry(subTenantReadyResync, now.Add(-time.Minute), now); got != soon {
-		t.Fatalf("a past expiry gave %s", got)
-	}
-}
-
 // stCounting counts the workload reads of a pass and the namespace lists that
 // select nothing (every namespace of the cluster).
 type stCounting struct {
@@ -151,7 +138,6 @@ func (c *stCounting) List(ctx context.Context, list client.ObjectList, opts ...c
 // enough that 100 of them on one cluster stay near one read a second.
 func TestSubTenantSettledPassIsCheapAndSlow(t *testing.T) {
 	w := provisionAccessWorld(t, true)
-	qualifyAccessWorld(t, w)
 	w.pass(t)
 	materializeAccessBindings(t, w)
 	w.pass(t)

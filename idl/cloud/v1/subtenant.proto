@@ -151,7 +151,7 @@ enum SubTenantState {
   SUB_TENANT_STATE_DELETING = 6;
 }
 
-// Ready requires current baseline and isolation qualification for this allocation;
+// Ready requires the observed Tenant and namespace baselines of this allocation;
 // Capsule Tenant existence or global GTR Ready alone is never sufficient.
 message SubTenantStatus {
   int64 observed_generation = 1;

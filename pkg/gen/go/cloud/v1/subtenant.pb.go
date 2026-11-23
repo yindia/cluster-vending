@@ -464,7 +464,7 @@ func (x *SubTenantAccessBinding) GetRoleProfile() string {
 	return ""
 }
 
-// Ready requires current baseline and isolation qualification for this allocation;
+// Ready requires the observed Tenant and namespace baselines of this allocation;
 // Capsule Tenant existence or global GTR Ready alone is never sufficient.
 type SubTenantStatus struct {
 	state                  protoimpl.MessageState      `protogen:"open.v1"`

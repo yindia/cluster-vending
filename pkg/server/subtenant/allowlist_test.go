@@ -55,11 +55,3 @@ func TestAccessGroupsMustBeAllowed(t *testing.T) {
 		})
 	}
 }
-
-func TestQualifierNamesAreReserved(t *testing.T) {
-	w := newWorld(t, interceptor.Funcs{})
-	req := createRequest()
-	req.Subtenant.Spec.Name = "naas-qual-a"
-	_, err := w.service.CreateSubTenant(t.Context(), req)
-	requireCode(t, err, connect.CodeInvalidArgument)
-}

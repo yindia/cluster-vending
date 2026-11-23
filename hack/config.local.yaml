@@ -40,15 +40,11 @@ skip-tenant-role: true
 # and sub-tenant access stays closed. The API server refuses a group outside
 # the list, and the controller closes access for a group that left it, so
 # keep this section the same in the server's and the controller's file.
-# qualifierImage runs the naas-qualifier Job (pkg/naas/cmd/access-qualification);
-# without it no Job runs and only an operator-written record qualifies a cluster.
 # naas:
 #   allowedGroups:
 #     - "cv-subtenant-*"
 #   deniedGroups:
 #     - "cv-platform-operators"
-#   qualifierImage: registry.example.com/cluster-vending-qualifier:v0.1.0
-#   probeImage: busybox:1.36.1
 # The node group layout: one section for both processes, because they read
 # this one file (docs/architecture.md#node-groups-configuration). Flags and
 # CV_* variables win over single values.

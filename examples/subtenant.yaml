@@ -48,8 +48,9 @@ spec:
       # Values are nonnegative Kubernetes quantities; object counts are integral.
   # Omitted/empty access grants no developer access. Groups are exact values
   # of the cluster's OIDC groups claim (the cluster needs OIDC configured).
-  # Access opens only once the cluster's runtime qualification is current
-  # (PROP-05); until then the SubTenant is Ready with AccessReady false.
+  # Groups must be allowed by the platform's naas.allowedGroups. Access opens
+  # once the namespaces are provisioned and the cluster's OIDC is active;
+  # until then the SubTenant is Ready with AccessReady false.
   # access:
   #   adminGroups: [payments-admins]
   #   viewerGroups: [payments-readers]

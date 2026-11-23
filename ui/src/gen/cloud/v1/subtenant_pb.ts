@@ -218,7 +218,7 @@ export const SubTenantAccessBindingSchema: GenMessage<SubTenantAccessBinding> = 
   messageDesc(file_cloud_v1_subtenant, 4);
 
 /**
- * Ready requires current baseline and isolation qualification for this allocation;
+ * Ready requires the observed Tenant and namespace baselines of this allocation;
  * Capsule Tenant existence or global GTR Ready alone is never sufficient.
  *
  * @generated from message cloud.v1.SubTenantStatus

@@ -77,7 +77,7 @@ func resourceView(obj *cloud.SubTenant) *v1.SubTenant {
 		status.Message = "Deletion requested. Require-empty reconciliation must confirm remote resources can be removed; this registration remains terminating until a controller completes it."
 	} else if pending {
 		status.State = v1.SubTenantState_SUB_TENANT_STATE_PENDING
-		status.Message = "Desired allocation stored; awaiting controller reconciliation and isolation qualification. Persistence does not mean Ready."
+		status.Message = "Desired allocation stored; awaiting controller reconciliation. Persistence does not mean Ready."
 	}
 	if pending || !obj.DeletionTimestamp.IsZero() {
 		filtered := status.Conditions[:0]

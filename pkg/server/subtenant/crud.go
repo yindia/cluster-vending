@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -25,7 +24,6 @@ import (
 	v1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/kube"
-	"github.com/yindia/cluster-vending/pkg/naas"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
 
@@ -52,9 +50,6 @@ func validateSpec(spec *v1.SubTenantSpec, groups config.NaaS) error {
 	}
 	if err := allowedGroups(groups, spec.GetAccess().GetAdminGroups(), spec.GetAccess().GetViewerGroups()); err != nil {
 		return err
-	}
-	if strings.HasPrefix(spec.GetName(), naas.QualifierTenantPrefix) {
-		return invalid("spec.name must not start with %q: the platform's qualifier uses it", naas.QualifierTenantPrefix)
 	}
 	return nil
 }

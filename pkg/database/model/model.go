@@ -287,6 +287,12 @@ type Cluster struct {
 	// ClusterRecommendations), set with Clusters.SetRecommendations.
 	// Empty: never sampled.
 	Recommendations JSON
+	// Summary is the cluster status summary (PROP-02 5.2) the controller's
+	// passes recorded with Clusters.SetSummary: protojson cloud.v1
+	// ClusterStatus with only nodes, violations, violation_events,
+	// reachable and the node groups' resource totals set. Read only; not
+	// part of Status. Empty: no pass has read the cluster yet.
+	Summary JSON
 	// Results are the summaries of the scan results kept in the cluster's
 	// results bucket (one per kind), from status.results; set with
 	// Clusters.SetResultRefs. A kind without a summary is read from the

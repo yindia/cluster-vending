@@ -88,7 +88,7 @@ func TestPolicyEventExpirationAndStaleSnapshot(t *testing.T) {
 	oldNow := now
 	now = func() time.Time { return clock }
 	t.Cleanup(func() { now = oldNow })
-	p := &cloudv1.ClusterPolicySnapshot{Summary: &cloudv1.ClusterPolicySnapshotSummary{CollectedAt: timestamppb.New(clock.Add(-20 * time.Minute))}, Events: []*cloudv1.ClusterViolationEvent{{Id: "old", LastObservedAt: timestamppb.New(clock.Add(-2 * time.Hour))}, {Id: "a", LastObservedAt: timestamppb.New(clock.Add(-59 * time.Minute))}, {Id: "b", LastObservedAt: timestamppb.New(clock)}}}
+	p := &cloudv1.ClusterPolicySnapshot{Summary: &cloudv1.ClusterPolicySnapshotSummary{CollectedAt: timestamppb.New(clock.Add(-40 * time.Minute))}, Events: []*cloudv1.ClusterViolationEvent{{Id: "old", LastObservedAt: timestamppb.New(clock.Add(-2 * time.Hour))}, {Id: "a", LastObservedAt: timestamppb.New(clock.Add(-59 * time.Minute))}, {Id: "b", LastObservedAt: timestamppb.New(clock)}}}
 	recordPolicy(t, w, p)
 	req := &cloudv1.ListClusterViolationEventsRequest{TenantId: worldTenant, ClusterId: w.row.ID, PageSize: 1}
 	got, err := w.svc.ListClusterViolationEvents(t.Context(), req)

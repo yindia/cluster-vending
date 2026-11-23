@@ -565,9 +565,8 @@ Each phase ships alone and leaves the system consistent. Stored kinds are unchan
 S3 writers for the live kinds run alongside the live path through phase 5, so the two can be compared and
 rolled back.
 
-**Status (2026-11-21).** Phases 0, 1 and 2 are implemented on `main` (commit `2ce6048`). Phase 2b is not: the
-summary is on the Cluster object but not yet in the API. The 15-minute counts pass and the gate rule of 5.2
-are not implemented yet; they ship with phase 2b.
+**Status (2026-11-23).** Phases 0, 1, 2 and 2b are implemented. Phase 2b put the summary in the API, the
+15-minute counts pass and the gate rule of 5.2.
 
 ### Phase 0: Stop violation event history (interim) — implemented
 
@@ -597,7 +596,27 @@ are not implemented yet; they ship with phase 2b.
   requests); a fake API with paginated pods; the summary bound; the status write rule (time-only refresh at most
   every 10 minutes).
 
-### Phase 2b: Summary in the API
+### Phase 2b: Summary in the API — implemented
+
+**Built.** `idl/cloud/v1/cluster_summary.proto` (`ClusterNodeCounts`, `ClusterViolationCounts`,
+`ClusterViolationEventCounts`, `ClusterReachability`) and `ClusterStatus.nodes`, `violations`, `violation_events`,
+`reachable` (54 to 57; 53 is `catalog_change`); `NodeGroupStatus` gains `ready_nodes`, `not_ready_nodes`, allocatable and requested CPU and
+memory, `allocatable_pods`, `pod_count`, `pods_without_requests` (7 to 15). `convert.SummaryFromAPI` reads the Cluster
+status into them (nil when no pass has read the cluster) and the store carries it on the row (`model.Cluster.Summary`);
+`GetCluster` and `ListClusters` merge it into the status (`convert.WithSummary`, node groups by name). `cluster get`
+prints Reachable, Nodes and Violations (with the last hour's policy events on the same line, one pass reads both) and
+the node groups' ready, requested/allocatable CPU and memory and pod count; "not read yet" when absent, "(old)" past 15
+and 30 minutes. The console overview shows a "Workload summary" (`cluster-workload-summary.tsx`, logic and tests in
+`ui/src/lib/workflows/cluster-summary.ts`). `policy.Interval` is 15 minutes (stale after 30). `clustersummary.Wait`
+feeds the `NOT_READY` gate (`upgrade.Facts.SummaryWait`, `pkg/rollout`) and `UpgradeHold`.
+
+**Decisions made while building.** A cluster with no summary at all does not wait at the gates (the other gates
+decide; the first node pass records one within 5 minutes); only Reachable False or node counts older than 15 minutes
+wait. `last_successful_at` is the node counts' collected time. The UI test is a `node --test` test of the view logic
+(the repo has no component test runner), not a rendered component test.
+
+**Not verified.** No run against a real cluster or AWS account.
+
 
 - `idl/cloud/v1`: on `Cluster`, the `nodes` counts (total, ready, not ready, `nodes_collected_at`), the
   `violations` counts (total, by severity, `policy_collected_at`), the `violation_events` counts (total, by

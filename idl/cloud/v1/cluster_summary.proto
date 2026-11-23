@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package cloud.v1;
+
+import "cloud/v1/conditions.proto";
+import "google/protobuf/timestamp.proto";
+
+// The cluster status summary (PROP-02 5.2): counts the controller's passes
+// read of the workload cluster. Bounded: no names of nodes, violations or
+// events. A summary field is unset until a pass has read it, never zero for
+// "not read".
+
+// ClusterNodeCounts are the node totals of the controller's last node pass.
+message ClusterNodeCounts {
+  int32 total = 1;
+  int32 ready = 2;
+  int32 not_ready = 3;
+  // When the node pass last read the nodes. The console marks the counts
+  // old after 15 minutes; the upgrade gates wait on a summary that old.
+  google.protobuf.Timestamp nodes_collected_at = 4;
+}
+
+// ClusterCount is a count under a name: a severity or an event reason.
+message ClusterCount {
+  string name = 1;
+  int32 count = 2;
+}
+
+// ClusterViolationCounts are the policy violation counts of the controller's
+// last policy counts pass (every 15 minutes).
+message ClusterViolationCounts {
+  int32 total = 1;
+  // Up to 8 severities by name, the rest summed under "other".
+  repeated ClusterCount by_severity = 2;
+  // When the policy pass last collected. Old after 30 minutes.
+  google.protobuf.Timestamp policy_collected_at = 3;
+}
+
+// ClusterViolationEventCounts are the policy and admission events of the
+// last hour, as the controller's last policy counts pass saw them.
+message ClusterViolationEventCounts {
+  int32 total = 1;
+  // PolicyViolation, FailedAdmission, WarningAdmission, DryrunViolation;
+  // a reason without events is left out.
+  repeated ClusterCount by_reason = 2;
+  google.protobuf.Timestamp policy_collected_at = 3;
+}
+
+// ClusterReachability is whether the controller could read the workload
+// cluster on its last pass (the Reachable condition).
+message ClusterReachability {
+  // TRUE: the last pass read the cluster. FALSE: it could not; the counts
+  // are those of the last successful pass.
+  ConditionStatus status = 1;
+  // Empty when reachable; CLUSTER_UNREACHABLE or CREDENTIALS_REJECTED when
+  // not.
+  string reason = 2;
+  string message = 3;
+  // When a pass last read the cluster: the time of the node counts.
+  google.protobuf.Timestamp last_successful_at = 4;
+}

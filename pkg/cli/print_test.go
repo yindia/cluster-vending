@@ -108,6 +108,9 @@ func TestPrintClusterDescribe(t *testing.T) {
 		"Tier:          2 (from network)\n" +
 		"Upgrades:      Automatic (follow the channel's minor)\n" +
 		"Maintenance:   Sat,Sun 02:00 UTC for 4h\n" +
+		"Reachable:     not read yet\n" +
+		"Nodes:         not read yet\n" +
+		"Violations:    not read yet\n" +
 		"Message:       <none>\n" +
 		"Age:           2d2h\n" +
 		"\nResources:\n" +

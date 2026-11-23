@@ -16,7 +16,10 @@ import (
 )
 
 const (
-	Interval = 5 * time.Minute
+	// Interval is the policy counts pass (PROP-02 5.2): every 15 minutes, a
+	// third of the reports' reads of the earlier 5. The counts are "old" after
+	// two missed passes (2 * Interval, 30 minutes).
+	Interval = 15 * time.Minute
 	Timeout  = 45 * time.Second
 	EventTTL = time.Hour
 	MaxBytes = 128 * 1024

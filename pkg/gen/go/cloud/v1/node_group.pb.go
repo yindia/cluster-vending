@@ -320,9 +320,25 @@ type NodeGroupStatus struct {
 	// Why the group's node list (ListNodeGroupNodes) is not available, when
 	// it is not: the results bucket cannot be written. The counts above are
 	// still kept.
-	NodesNotice   string `protobuf:"bytes,6,opt,name=nodes_notice,json=nodesNotice,proto3" json:"nodes_notice,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NodesNotice string `protobuf:"bytes,6,opt,name=nodes_notice,json=nodesNotice,proto3" json:"nodes_notice,omitempty"`
+	// The group's resource totals from the controller's node pass (the
+	// cluster status summary, PROP-02 5.2): requests only, no usage. All zero
+	// until a pass has read the group. CPU in millicores, memory in bytes.
+	ReadyNodes             int32 `protobuf:"varint,7,opt,name=ready_nodes,json=readyNodes,proto3" json:"ready_nodes,omitempty"`
+	NotReadyNodes          int32 `protobuf:"varint,8,opt,name=not_ready_nodes,json=notReadyNodes,proto3" json:"not_ready_nodes,omitempty"`
+	AllocatableCpuMillis   int64 `protobuf:"varint,9,opt,name=allocatable_cpu_millis,json=allocatableCpuMillis,proto3" json:"allocatable_cpu_millis,omitempty"`
+	AllocatableMemoryBytes int64 `protobuf:"varint,10,opt,name=allocatable_memory_bytes,json=allocatableMemoryBytes,proto3" json:"allocatable_memory_bytes,omitempty"`
+	AllocatablePods        int64 `protobuf:"varint,11,opt,name=allocatable_pods,json=allocatablePods,proto3" json:"allocatable_pods,omitempty"`
+	// The scheduler's definition: max(init containers, sum of containers)
+	// plus overhead, over the pods bound to the group's nodes.
+	RequestedCpuMillis   int64 `protobuf:"varint,12,opt,name=requested_cpu_millis,json=requestedCpuMillis,proto3" json:"requested_cpu_millis,omitempty"`
+	RequestedMemoryBytes int64 `protobuf:"varint,13,opt,name=requested_memory_bytes,json=requestedMemoryBytes,proto3" json:"requested_memory_bytes,omitempty"`
+	// Pods bound to the group's nodes that are not Succeeded or Failed.
+	PodCount int32 `protobuf:"varint,14,opt,name=pod_count,json=podCount,proto3" json:"pod_count,omitempty"`
+	// Of those, the pods with a container that sets no CPU or memory request.
+	PodsWithoutRequests int32 `protobuf:"varint,15,opt,name=pods_without_requests,json=podsWithoutRequests,proto3" json:"pods_without_requests,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NodeGroupStatus) Reset() {
@@ -395,6 +411,69 @@ func (x *NodeGroupStatus) GetNodesNotice() string {
 		return x.NodesNotice
 	}
 	return ""
+}
+
+func (x *NodeGroupStatus) GetReadyNodes() int32 {
+	if x != nil {
+		return x.ReadyNodes
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetNotReadyNodes() int32 {
+	if x != nil {
+		return x.NotReadyNodes
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetAllocatableCpuMillis() int64 {
+	if x != nil {
+		return x.AllocatableCpuMillis
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetAllocatableMemoryBytes() int64 {
+	if x != nil {
+		return x.AllocatableMemoryBytes
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetAllocatablePods() int64 {
+	if x != nil {
+		return x.AllocatablePods
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetRequestedCpuMillis() int64 {
+	if x != nil {
+		return x.RequestedCpuMillis
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetRequestedMemoryBytes() int64 {
+	if x != nil {
+		return x.RequestedMemoryBytes
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetPodCount() int32 {
+	if x != nil {
+		return x.PodCount
+	}
+	return 0
+}
+
+func (x *NodeGroupStatus) GetPodsWithoutRequests() int32 {
+	if x != nil {
+		return x.PodsWithoutRequests
+	}
+	return 0
 }
 
 // NodeGroupNodes is the nodes of one node group: one shard of the `nodes`
@@ -707,14 +786,25 @@ const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\n" +
 	"memory_gib\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00H\x01R\tmemoryGib\x88\x01\x01B\x06\n" +
 	"\x04_cpuB\r\n" +
-	"\v_memory_gib\"\xd3\x01\n" +
+	"\v_memory_gib\"\xf0\x04\n" +
 	"\x0fNodeGroupStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12)\n" +
 	"\x10platform_managed\x18\x02 \x01(\bR\x0fplatformManaged\x12.\n" +
 	"\x05phase\x18\x03 \x01(\x0e2\x18.cloud.v1.NodeGroupPhaseR\x05phase\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12\x14\n" +
 	"\x05nodes\x18\x05 \x01(\x05R\x05nodes\x12!\n" +
-	"\fnodes_notice\x18\x06 \x01(\tR\vnodesNotice\"U\n" +
+	"\fnodes_notice\x18\x06 \x01(\tR\vnodesNotice\x12\x1f\n" +
+	"\vready_nodes\x18\a \x01(\x05R\n" +
+	"readyNodes\x12&\n" +
+	"\x0fnot_ready_nodes\x18\b \x01(\x05R\rnotReadyNodes\x124\n" +
+	"\x16allocatable_cpu_millis\x18\t \x01(\x03R\x14allocatableCpuMillis\x128\n" +
+	"\x18allocatable_memory_bytes\x18\n" +
+	" \x01(\x03R\x16allocatableMemoryBytes\x12)\n" +
+	"\x10allocatable_pods\x18\v \x01(\x03R\x0fallocatablePods\x120\n" +
+	"\x14requested_cpu_millis\x18\f \x01(\x03R\x12requestedCpuMillis\x124\n" +
+	"\x16requested_memory_bytes\x18\r \x01(\x03R\x14requestedMemoryBytes\x12\x1b\n" +
+	"\tpod_count\x18\x0e \x01(\x05R\bpodCount\x122\n" +
+	"\x15pods_without_requests\x18\x0f \x01(\x05R\x13podsWithoutRequests\"U\n" +
 	"\x0eNodeGroupNodes\x12\x14\n" +
 	"\x05group\x18\x01 \x01(\tR\x05group\x12-\n" +
 	"\x05nodes\x18\x02 \x03(\v2\x17.cloud.v1.NodeGroupNodeR\x05nodes\"\xf6\x06\n" +

@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"github.com/yindia/cluster-vending/pkg/clustersummary"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -14,6 +15,9 @@ import (
 func UpgradeHold(row *model.Cluster, components []model.Component) string {
 	if row.State != StateRunning {
 		return "the cluster is not RUNNING (its EKS add-ons and resources are not all Ready)"
+	}
+	if why := clustersummary.Wait(StoredSummary(row), now()); why != "" {
+		return why
 	}
 	if name := platformNotReady(row); name != "" {
 		return "platform component " + name + " is not Ready"
@@ -40,4 +44,17 @@ func platformNotReady(row *model.Cluster) string {
 		}
 	}
 	return ""
+}
+
+// StoredSummary is the cluster status summary the row carries (PROP-02 5.2);
+// nil when no pass has recorded one, or it cannot be read.
+func StoredSummary(row *model.Cluster) *cloudv1.ClusterStatus {
+	if len(row.Summary) == 0 {
+		return nil
+	}
+	sum := &cloudv1.ClusterStatus{}
+	if err := Lenient.Unmarshal(row.Summary, sum); err != nil {
+		return nil
+	}
+	return sum
 }

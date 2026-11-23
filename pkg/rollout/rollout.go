@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/clustersummary"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/maintenance"
@@ -331,6 +332,7 @@ func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Fa
 	f := upgrade.Facts{Mode: upgrade.Mode(c.Spec.UpgradeMode), Target: target,
 		Ready:         meta.IsStatusConditionTrue(c.Status.Conditions, "Ready") || c.Status.Phase == cloudv1alpha1.ClusterPhaseRunning,
 		PlatformReady: platformReady(c),
+		SummaryWait:   clustersummary.Wait(convert.SummaryFromAPI(&c.Status), in.now),
 	}
 	if h := HoldOf(in.holds, c, in.now); h != nil {
 		f.Frozen, f.FrozenMessage = true, FreezeMessage(h)

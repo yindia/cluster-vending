@@ -73,6 +73,11 @@ type Facts struct {
 	// Upgrading: an upgrade is in progress; Halted: the last one failed
 	// and has not been fixed.
 	Upgrading, Halted bool
+	// SummaryWait is why the cluster status summary makes the upgrade wait
+	// (clustersummary.Wait: the platform cannot read the cluster, or the
+	// summary is too old); "" when it does not. Reported as NOT_READY: the
+	// gate waits, it neither passes on old data nor fails the upgrade.
+	SummaryWait string
 }
 
 // Check returns every reason the cluster may not start its upgrade to
@@ -101,8 +106,11 @@ func Check(f Facts) []Gate {
 	if f.Paused {
 		block(GatePaused, "the cluster is paused")
 	}
-	if !f.Ready {
+	switch {
+	case !f.Ready:
 		block(GateNotReady, "the cluster is not Ready")
+	case f.SummaryWait != "":
+		block(GateNotReady, f.SummaryWait)
 	}
 	if !f.PlatformReady {
 		block(GatePlatform, "a platform component is not Ready")

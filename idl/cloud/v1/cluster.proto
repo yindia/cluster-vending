@@ -5,6 +5,7 @@ package cloud.v1;
 import "buf/validate/validate.proto";
 import "cloud/v1/access.proto";
 import "cloud/v1/aws.proto";
+import "cloud/v1/cluster_summary.proto";
 import "cloud/v1/code_change.proto";
 import "cloud/v1/component.proto";
 import "cloud/v1/conditions.proto";
@@ -524,6 +525,18 @@ message ClusterStatus {
 
   // Node groups as observed: the platform group first, then the user's.
   repeated NodeGroupStatus node_groups = 52;
+
+  // The cluster status summary (PROP-02 5.2), from the controller's passes.
+  // Each is unset until a pass has read it: "not read yet", never zeros.
+  // nodes are the node totals of the last node pass.
+  ClusterNodeCounts nodes = 54;
+  // violations are the policy violation counts of the last policy pass.
+  ClusterViolationCounts violations = 55;
+  // violation_events are the policy and admission events of the last hour.
+  ClusterViolationEventCounts violation_events = 56;
+  // reachable is whether the last pass could read the workload cluster;
+  // when not, the counts above are those of the last successful pass.
+  ClusterReachability reachable = 57;
 
   // Read-only topology from scoped live managed-resource inventory. Unset in
   // older stored snapshots; missing links do not prove absence or reachability.

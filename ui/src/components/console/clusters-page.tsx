@@ -58,6 +58,7 @@ import { supportsCapability } from "@/lib/providers/registry";
 import { ClusterAccessButton } from "./cluster-access";
 import { ClusterActions } from "./cluster-takeover";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
+import { ClusterWorkloadSummary } from "./cluster-workload-summary";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
 import { ClusterExtraFields, ClusterExtraReview, useClusterFieldRows } from "./cluster-form-fields";
@@ -617,6 +618,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           { label: "Release channel", value: channelSlug ? <Link href={`/channels/${channelSlug}`}>{channel}</Link> : channel, note: cluster.spec?.upgradeMode === UpgradeMode.AUTOMATIC ? "Automatic upgrades" : "Manual upgrades" },
         ]} />
         {status?.message && <Text color="secondary">{status.message}</Text>}
+        <ClusterWorkloadSummary status={status} />
         <Grid columns={{ minWidth: 300, max: 2 }} gap={8}>
           <VStack gap={4}>
             <Heading level={3}>Deployment</Heading>

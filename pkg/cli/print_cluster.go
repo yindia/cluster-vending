@@ -155,6 +155,7 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 		kv = append(kv, [2]string{"Frozen", freezeLine(p)})
 	}
 
+	kv = append(kv, summaryLines(st)...)
 	kv = append(kv, [2]string{"Message", oneLine(st.GetMessage())}, [2]string{"Age", age(c.GetCreateTime())})
 	if err := fields(w, kv); err != nil {
 		return err
@@ -191,8 +192,9 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 }
 
 // nodeGroupSection lists the node groups the controller observed: the
-// platform's first, then the user's. Nothing is written for a cluster that
-// has reported none yet.
+// platform's first, then the user's, with the resource totals of the
+// cluster status summary (requests only). Nothing is written for a cluster
+// that has reported none yet.
 func nodeGroupSection(w io.Writer, groups []*cloudv1.NodeGroupStatus) error {
 	if len(groups) == 0 {
 		return nil
@@ -203,8 +205,15 @@ func nodeGroupSection(w io.Writer, groups []*cloudv1.NodeGroupStatus) error {
 		if g.GetPlatformManaged() {
 			owner = "platform"
 		}
+		ready, cpu, memory, pods := none, none, none, none
+		if groupRead(g) {
+			ready = strconv.Itoa(int(g.GetReadyNodes()))
+			cpu = share(g.GetRequestedCpuMillis(), g.GetAllocatableCpuMillis(), cpuText)
+			memory = share(g.GetRequestedMemoryBytes(), g.GetAllocatableMemoryBytes(), memoryText)
+			pods = strconv.Itoa(int(g.GetPodCount()))
+		}
 		rows = append(rows, []string{g.GetName(), owner, word(g.GetPhase().String(), "NODE_GROUP_PHASE_"),
-			strconv.Itoa(int(g.GetNodes())), orNone(oneLine(g.GetMessage()))})
+			strconv.Itoa(int(g.GetNodes())), ready, cpu, memory, pods, orNone(oneLine(g.GetMessage()))})
 	}
-	return section(w, "Node Groups", []string{"NAME", "OWNER", "PHASE", "NODES", "MESSAGE"}, rows)
+	return section(w, "Node Groups", []string{"NAME", "OWNER", "PHASE", "NODES", "READY", "CPU REQUESTED", "MEMORY REQUESTED", "PODS", "MESSAGE"}, rows)
 }

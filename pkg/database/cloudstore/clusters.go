@@ -130,6 +130,11 @@ func (r clusters) row(obj *cloudv1alpha1.Cluster) (*model.Cluster, error) {
 			return nil, err
 		}
 	}
+	if sum := convert.SummaryFromAPI(&obj.Status); sum != nil {
+		if c.Summary, err = protojson.Marshal(sum); err != nil {
+			return nil, err
+		}
+	}
 	m.into(&c.Resource)
 	c.Seen, c.SeenGeneration = seen(obj), obj.Generation
 	c.Retry = retryOf(obj)

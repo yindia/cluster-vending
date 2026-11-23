@@ -2,6 +2,7 @@ package cloudstore_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,6 +47,14 @@ func TestSetSummarySurvivesStatusWrites(t *testing.T) {
 	// The group listed by the contract keeps the summary's usage.
 	if len(obj.Status.NodeGroups) != 1 || obj.Status.NodeGroups[0].RequestedCPUMillis != 900 {
 		t.Fatalf("groups = %+v", obj.Status.NodeGroups)
+	}
+	// The row carries the summary for the API (PROP-02 phase 2b).
+	got, err := w.s.Clusters().Get(ctx, "acme", c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got.Summary), `"total":3`) || !strings.Contains(string(got.Summary), `"requestedCpuMillis":"900"`) {
+		t.Fatalf("row summary = %s", got.Summary)
 	}
 	if err := w.s.Clusters().SetSummary(ctx, "acme", c.ID, model.JSON("not json")); !errors.Is(err, repository.ErrInvalid) {
 		t.Errorf("garbage stored: %v", err)

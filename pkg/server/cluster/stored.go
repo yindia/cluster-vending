@@ -9,6 +9,7 @@ import (
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 
+	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
@@ -62,6 +63,7 @@ func stored(row *model.Cluster) (*cloudv1.Cluster, error) {
 	st.Deprecations = deprecationSummary(row)
 	st.Recommendations = recommendationSummary(row)
 	st.Rollout = rolloutOf(row)
+	convert.WithSummary(st, reconcilecluster.StoredSummary(row))
 	return reconcilecluster.ClusterProto(row, spec, st), nil
 }
 

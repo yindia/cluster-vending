@@ -2,8 +2,10 @@ package cluster
 
 import (
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -53,6 +55,11 @@ func TestUpgradeHold(t *testing.T) {
 			want:       "tenant component grafana is not Ready"},
 		{name: "tenant component being removed", row: readyRow(t, readyPC),
 			components: []model.Component{tenantComponent(t, "grafana", componentDeleting, cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED)}},
+		{name: "summary 14 minutes old", row: withSummary(readyRow(t, readyPC), 14*time.Minute, true)},
+		{name: "summary 16 minutes old waits", row: withSummary(readyRow(t, readyPC), 16*time.Minute, true),
+			want: "the cluster's summary is 16 minutes old"},
+		{name: "unreachable waits", row: withSummary(readyRow(t, readyPC), time.Minute, false),
+			want: "the platform cannot read the cluster"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,4 +68,22 @@ func TestUpgradeHold(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withSummary gives row a cluster status summary whose node counts are age
+// old, the cluster reachable or not.
+func withSummary(row *model.Cluster, age time.Duration, reachable bool) *model.Cluster {
+	status := cloudv1.ConditionStatus_CONDITION_STATUS_TRUE
+	if !reachable {
+		status = cloudv1.ConditionStatus_CONDITION_STATUS_FALSE
+	}
+	raw, err := protojson.Marshal(&cloudv1.ClusterStatus{
+		Nodes:     &cloudv1.ClusterNodeCounts{Total: 3, NodesCollectedAt: timestamppb.New(now().Add(-age))},
+		Reachable: &cloudv1.ClusterReachability{Status: status},
+	})
+	if err != nil {
+		panic(err)
+	}
+	row.Summary = raw
+	return row
 }

@@ -1158,6 +1158,17 @@ type ClusterStatus struct {
 	CatalogChange *CatalogChange `protobuf:"bytes,53,opt,name=catalog_change,json=catalogChange,proto3" json:"catalog_change,omitempty"`
 	// Node groups as observed: the platform group first, then the user's.
 	NodeGroups []*NodeGroupStatus `protobuf:"bytes,52,rep,name=node_groups,json=nodeGroups,proto3" json:"node_groups,omitempty"`
+	// The cluster status summary (PROP-02 5.2), from the controller's passes.
+	// Each is unset until a pass has read it: "not read yet", never zeros.
+	// nodes are the node totals of the last node pass.
+	Nodes *ClusterNodeCounts `protobuf:"bytes,54,opt,name=nodes,proto3" json:"nodes,omitempty"`
+	// violations are the policy violation counts of the last policy pass.
+	Violations *ClusterViolationCounts `protobuf:"bytes,55,opt,name=violations,proto3" json:"violations,omitempty"`
+	// violation_events are the policy and admission events of the last hour.
+	ViolationEvents *ClusterViolationEventCounts `protobuf:"bytes,56,opt,name=violation_events,json=violationEvents,proto3" json:"violation_events,omitempty"`
+	// reachable is whether the last pass could read the workload cluster;
+	// when not, the counts above are those of the last successful pass.
+	Reachable *ClusterReachability `protobuf:"bytes,57,opt,name=reachable,proto3" json:"reachable,omitempty"`
 	// Read-only topology from scoped live managed-resource inventory. Unset in
 	// older stored snapshots; missing links do not prove absence or reachability.
 	Architecture  *ClusterArchitecture `protobuf:"bytes,20,opt,name=architecture,proto3" json:"architecture,omitempty"`
@@ -1396,6 +1407,34 @@ func (x *ClusterStatus) GetCatalogChange() *CatalogChange {
 func (x *ClusterStatus) GetNodeGroups() []*NodeGroupStatus {
 	if x != nil {
 		return x.NodeGroups
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetNodes() *ClusterNodeCounts {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetViolations() *ClusterViolationCounts {
+	if x != nil {
+		return x.Violations
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetViolationEvents() *ClusterViolationEventCounts {
+	if x != nil {
+		return x.ViolationEvents
+	}
+	return nil
+}
+
+func (x *ClusterStatus) GetReachable() *ClusterReachability {
+	if x != nil {
+		return x.Reachable
 	}
 	return nil
 }
@@ -2462,7 +2501,7 @@ var File_cloud_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x1acloud/v1/code_change.proto\x1a\x18cloud/v1/component.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/freeze.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x19cloud/v1/node_group.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1dcloud/v1/recommendation.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
+	"\x16cloud/v1/cluster.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x15cloud/v1/access.proto\x1a\x12cloud/v1/aws.proto\x1a\x1ecloud/v1/cluster_summary.proto\x1a\x1acloud/v1/code_change.proto\x1a\x18cloud/v1/component.proto\x1a\x19cloud/v1/conditions.proto\x1a\x1ccloud/v1/control_plane.proto\x1a\x1acloud/v1/deprecation.proto\x1a\x15cloud/v1/events.proto\x1a\x15cloud/v1/freeze.proto\x1a\x15cloud/v1/import.proto\x1a\x1fcloud/v1/managed_resource.proto\x1a\x16cloud/v1/network.proto\x1a\x19cloud/v1/node_group.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1dcloud/v1/recommendation.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x04\n" +
 	"\aCluster\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12@\n" +
@@ -2519,7 +2558,7 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"\x04days\x18\x01 \x03(\x0e2\x11.cloud.v1.WeekdayB\x13\xbaH\x10\x92\x01\r\x10\a\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x04days\x12<\n" +
 	"\x05start\x18\x02 \x01(\tB&\xbaH#r!2\x1f^([01][0-9]|2[0-3]):[0-5][0-9]$R\x05start\x12\x1a\n" +
 	"\bduration\x18\x03 \x01(\tR\bduration:\x88\x02\xbaH\x84\x02\x1a\x81\x02\n" +
-	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xeb\f\n" +
+	"\x1bmaintenance_window.duration\x12>duration must be from 1h to 24h, written like 4h, 90m or 1h30m\x1a\xa1\x01this.duration.matches('^([0-9]+h)?([0-9]+m)?$') && this.duration != '' && duration(this.duration) >= duration('1h') && duration(this.duration) <= duration('24h')\"\xef\x0e\n" +
 	"\rClusterStatus\x12)\n" +
 	"\x04tier\x18< \x01(\x0e2\x15.cloud.v1.ClusterTierR\x04tier\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.cloud.v1.ClusterStateR\x05state\x12\x18\n" +
@@ -2555,7 +2594,13 @@ const file_cloud_v1_cluster_proto_rawDesc = "" +
 	"codeChange\x12>\n" +
 	"\x0ecatalog_change\x185 \x01(\v2\x17.cloud.v1.CatalogChangeR\rcatalogChange\x12:\n" +
 	"\vnode_groups\x184 \x03(\v2\x19.cloud.v1.NodeGroupStatusR\n" +
-	"nodeGroups\x12A\n" +
+	"nodeGroups\x121\n" +
+	"\x05nodes\x186 \x01(\v2\x1b.cloud.v1.ClusterNodeCountsR\x05nodes\x12@\n" +
+	"\n" +
+	"violations\x187 \x01(\v2 .cloud.v1.ClusterViolationCountsR\n" +
+	"violations\x12P\n" +
+	"\x10violation_events\x188 \x01(\v2%.cloud.v1.ClusterViolationEventCountsR\x0fviolationEvents\x12;\n" +
+	"\treachable\x189 \x01(\v2\x1d.cloud.v1.ClusterReachabilityR\treachable\x12A\n" +
 	"\farchitecture\x18\x14 \x01(\v2\x1d.cloud.v1.ClusterArchitectureR\farchitectureB\n" +
 	"\n" +
 	"\bproviderJ\x04\b0\x101R\rupgrade_pause\"\xca\x02\n" +
@@ -2778,10 +2823,14 @@ var file_cloud_v1_cluster_proto_goTypes = []any{
 	(*CodeChange)(nil),                    // 40: cloud.v1.CodeChange
 	(*CatalogChange)(nil),                 // 41: cloud.v1.CatalogChange
 	(*NodeGroupStatus)(nil),               // 42: cloud.v1.NodeGroupStatus
-	(ComponentPhase)(0),                   // 43: cloud.v1.ComponentPhase
-	(ManagedResourceState)(0),             // 44: cloud.v1.ManagedResourceState
-	(*NetworkArchitectureResource)(nil),   // 45: cloud.v1.NetworkArchitectureResource
-	(*NetworkArchitectureConnection)(nil), // 46: cloud.v1.NetworkArchitectureConnection
+	(*ClusterNodeCounts)(nil),             // 43: cloud.v1.ClusterNodeCounts
+	(*ClusterViolationCounts)(nil),        // 44: cloud.v1.ClusterViolationCounts
+	(*ClusterViolationEventCounts)(nil),   // 45: cloud.v1.ClusterViolationEventCounts
+	(*ClusterReachability)(nil),           // 46: cloud.v1.ClusterReachability
+	(ComponentPhase)(0),                   // 47: cloud.v1.ComponentPhase
+	(ManagedResourceState)(0),             // 48: cloud.v1.ManagedResourceState
+	(*NetworkArchitectureResource)(nil),   // 49: cloud.v1.NetworkArchitectureResource
+	(*NetworkArchitectureConnection)(nil), // 50: cloud.v1.NetworkArchitectureConnection
 }
 var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	22, // 0: cloud.v1.Cluster.labels:type_name -> cloud.v1.Cluster.LabelsEntry
@@ -2822,33 +2871,37 @@ var file_cloud_v1_cluster_proto_depIdxs = []int32{
 	40, // 35: cloud.v1.ClusterStatus.code_change:type_name -> cloud.v1.CodeChange
 	41, // 36: cloud.v1.ClusterStatus.catalog_change:type_name -> cloud.v1.CatalogChange
 	42, // 37: cloud.v1.ClusterStatus.node_groups:type_name -> cloud.v1.NodeGroupStatus
-	21, // 38: cloud.v1.ClusterStatus.architecture:type_name -> cloud.v1.ClusterArchitecture
-	23, // 39: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
-	23, // 40: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
-	5,  // 41: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
-	43, // 42: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
-	23, // 43: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
-	23, // 44: cloud.v1.PlatformComponent.next_retry_at:type_name -> google.protobuf.Timestamp
-	23, // 45: cloud.v1.PlatformComponent.last_recovery_at:type_name -> google.protobuf.Timestamp
-	6,  // 46: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
-	23, // 47: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
-	17, // 48: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
-	23, // 49: cloud.v1.ClusterUpgrade.phase_start_time:type_name -> google.protobuf.Timestamp
-	6,  // 50: cloud.v1.ClusterUpgrade.skipped_steps:type_name -> cloud.v1.ClusterUpgradePhase
-	44, // 51: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
-	23, // 52: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
-	23, // 53: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
-	7,  // 54: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
-	8,  // 55: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
-	23, // 56: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
-	23, // 57: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
-	45, // 58: cloud.v1.ClusterArchitecture.resources:type_name -> cloud.v1.NetworkArchitectureResource
-	46, // 59: cloud.v1.ClusterArchitecture.connections:type_name -> cloud.v1.NetworkArchitectureConnection
-	60, // [60:60] is the sub-list for method output_type
-	60, // [60:60] is the sub-list for method input_type
-	60, // [60:60] is the sub-list for extension type_name
-	60, // [60:60] is the sub-list for extension extendee
-	0,  // [0:60] is the sub-list for field type_name
+	43, // 38: cloud.v1.ClusterStatus.nodes:type_name -> cloud.v1.ClusterNodeCounts
+	44, // 39: cloud.v1.ClusterStatus.violations:type_name -> cloud.v1.ClusterViolationCounts
+	45, // 40: cloud.v1.ClusterStatus.violation_events:type_name -> cloud.v1.ClusterViolationEventCounts
+	46, // 41: cloud.v1.ClusterStatus.reachable:type_name -> cloud.v1.ClusterReachability
+	21, // 42: cloud.v1.ClusterStatus.architecture:type_name -> cloud.v1.ClusterArchitecture
+	23, // 43: cloud.v1.ClusterRollout.start_time:type_name -> google.protobuf.Timestamp
+	23, // 44: cloud.v1.ClusterRollout.finish_time:type_name -> google.protobuf.Timestamp
+	5,  // 45: cloud.v1.ClusterRollout.result:type_name -> cloud.v1.ClusterRolloutResult
+	47, // 46: cloud.v1.PlatformComponent.phase:type_name -> cloud.v1.ComponentPhase
+	23, // 47: cloud.v1.PlatformComponent.since:type_name -> google.protobuf.Timestamp
+	23, // 48: cloud.v1.PlatformComponent.next_retry_at:type_name -> google.protobuf.Timestamp
+	23, // 49: cloud.v1.PlatformComponent.last_recovery_at:type_name -> google.protobuf.Timestamp
+	6,  // 50: cloud.v1.ClusterUpgrade.phase:type_name -> cloud.v1.ClusterUpgradePhase
+	23, // 51: cloud.v1.ClusterUpgrade.start_time:type_name -> google.protobuf.Timestamp
+	17, // 52: cloud.v1.ClusterUpgrade.node_groups:type_name -> cloud.v1.ClusterUpgradeNodeGroup
+	23, // 53: cloud.v1.ClusterUpgrade.phase_start_time:type_name -> google.protobuf.Timestamp
+	6,  // 54: cloud.v1.ClusterUpgrade.skipped_steps:type_name -> cloud.v1.ClusterUpgradePhase
+	48, // 55: cloud.v1.ClusterUpgradeNodeGroup.state:type_name -> cloud.v1.ManagedResourceState
+	23, // 56: cloud.v1.ClusterTeardown.start_time:type_name -> google.protobuf.Timestamp
+	23, // 57: cloud.v1.ClusterTeardown.finish_time:type_name -> google.protobuf.Timestamp
+	7,  // 58: cloud.v1.ClusterTeardown.result:type_name -> cloud.v1.ClusterTeardownResult
+	8,  // 59: cloud.v1.ClusterReleaseMove.phase:type_name -> cloud.v1.ClusterReleaseMovePhase
+	23, // 60: cloud.v1.ClusterReleaseMove.start_time:type_name -> google.protobuf.Timestamp
+	23, // 61: cloud.v1.ClusterReleaseMove.component_start_time:type_name -> google.protobuf.Timestamp
+	49, // 62: cloud.v1.ClusterArchitecture.resources:type_name -> cloud.v1.NetworkArchitectureResource
+	50, // 63: cloud.v1.ClusterArchitecture.connections:type_name -> cloud.v1.NetworkArchitectureConnection
+	64, // [64:64] is the sub-list for method output_type
+	64, // [64:64] is the sub-list for method input_type
+	64, // [64:64] is the sub-list for extension type_name
+	64, // [64:64] is the sub-list for extension extendee
+	0,  // [0:64] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_cluster_proto_init() }
@@ -2858,6 +2911,7 @@ func file_cloud_v1_cluster_proto_init() {
 	}
 	file_cloud_v1_access_proto_init()
 	file_cloud_v1_aws_proto_init()
+	file_cloud_v1_cluster_summary_proto_init()
 	file_cloud_v1_code_change_proto_init()
 	file_cloud_v1_component_proto_init()
 	file_cloud_v1_conditions_proto_init()

@@ -40,7 +40,7 @@ func byName(items []*cloudv1.RetryItem) map[string]*cloudv1.RetryItem {
 func TestRetryPlanEverythingFailed(t *testing.T) {
 	comps, rollout := failingCluster()
 
-	items, retry, err := retryPlan(comps, rollout, nil, false)
+	items, retry, err := retryPlan(comps, rollout, nil, nil, false)
 
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestRetryPlanEverythingFailed(t *testing.T) {
 func TestRetryPlanNamed(t *testing.T) {
 	comps, rollout := failingCluster()
 
-	items, retry, err := retryPlan(comps, rollout, []string{"istiod", "kyverno"}, false)
+	items, retry, err := retryPlan(comps, rollout, nil, []string{"istiod", "kyverno"}, false)
 
 	if err != nil {
 		t.Fatal(err)
@@ -83,10 +83,10 @@ func TestRetryPlanNamed(t *testing.T) {
 	if retry.Upgrade || len(retry.Components) != 1 || !retry.Has("kyverno") {
 		t.Errorf("request = %+v", retry)
 	}
-	if _, _, err := retryPlan(comps, rollout, []string{"nope"}, false); err == nil || !strings.Contains(err.Error(), "nope") {
+	if _, _, err := retryPlan(comps, rollout, nil, []string{"nope"}, false); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Errorf("unknown component: %v", err)
 	}
-	items, retry, _ = retryPlan(comps, nil, nil, true)
+	items, retry, _ = retryPlan(comps, nil, nil, nil, true)
 	if up := byName(items)[upgradeItem]; up.GetAction() != cloudv1.RetryAction_RETRY_ACTION_NOTHING || retry.Upgrade {
 		t.Errorf("no failed upgrade: %v, %+v", up, retry)
 	}
@@ -96,7 +96,7 @@ func TestRetryPlanNamed(t *testing.T) {
 func TestRetryPlanNothingFailed(t *testing.T) {
 	comps := []retryComponent{{Name: "istiod", Kind: cloudv1.RetryItemKind_RETRY_ITEM_KIND_PLATFORM_COMPONENT, Phase: phaseReady}}
 
-	items, retry, err := retryPlan(comps, nil, nil, false)
+	items, retry, err := retryPlan(comps, nil, nil, nil, false)
 
 	if err != nil || len(items) != 0 || retry.Upgrade || len(retry.Components) != 0 {
 		t.Fatalf("items = %v, request = %+v, err = %v", items, retry, err)

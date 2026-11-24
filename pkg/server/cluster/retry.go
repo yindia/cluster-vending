@@ -45,7 +45,7 @@ func (s *ClusterService) RetryCluster(ctx context.Context, req *cloudv1.RetryClu
 	if len(row.Rollout) == 0 || reconcilecluster.Lenient.Unmarshal(row.Rollout, rollout) != nil {
 		rollout = nil
 	}
-	items, retry, err := retryPlan(comps, rollout, req.GetComponents(), req.GetUpgrade())
+	items, retry, err := retryPlan(comps, rollout, haltedUpgrade(row), req.GetComponents(), req.GetUpgrade())
 	if err != nil {
 		return nil, err
 	}
@@ -86,14 +86,25 @@ func (s *ClusterService) retryComponents(ctx context.Context, row *model.Cluster
 	return out, nil
 }
 
+// haltedUpgrade is the cluster's upgrade as its status records it when it
+// halted (add-ons that did not settle); nil otherwise.
+func haltedUpgrade(row *model.Cluster) *cloudv1.ClusterUpgrade {
+	st := &cloudv1.ClusterStatus{}
+	if reconcilecluster.Lenient.Unmarshal(row.Status, st) != nil || !st.GetUpgrade().GetHalted() {
+		return nil
+	}
+	return st.GetUpgrade()
+}
+
 // retryPlan decides what a RetryCluster does: the named components (or,
 // with none named and upgrade false, every failed one and a failed
 // upgrade), and the upgrade with upgrade true. A failed component whose
 // chart failed is tried again; one that failed before it had a chart (a
 // precondition: IRSA off, a requirement missing, not in the release) has
 // something to fix first, which its message says. The request records
-// only what is tried again.
-func retryPlan(comps []retryComponent, rollout *cloudv1.ClusterRollout, names []string, upgrade bool) ([]*cloudv1.RetryItem, model.Retry, error) {
+// only what is tried again. halted is the cluster's halted upgrade, nil
+// for none.
+func retryPlan(comps []retryComponent, rollout *cloudv1.ClusterRollout, halted *cloudv1.ClusterUpgrade, names []string, upgrade bool) ([]*cloudv1.RetryItem, model.Retry, error) {
 	everything := len(names) == 0 && !upgrade
 	byName := map[string]retryComponent{}
 	for _, c := range comps {
@@ -132,7 +143,7 @@ func retryPlan(comps []retryComponent, rollout *cloudv1.ClusterRollout, names []
 		items = append(items, item)
 	}
 	if everything || upgrade {
-		if item, ok := upgradeRetry(rollout, upgrade); ok {
+		if item, ok := upgradeRetry(rollout, halted, upgrade); ok {
 			items = append(items, item)
 			retry.Upgrade = item.GetAction() == cloudv1.RetryAction_RETRY_ACTION_RETRY
 		}
@@ -141,9 +152,11 @@ func retryPlan(comps []retryComponent, rollout *cloudv1.ClusterRollout, names []
 }
 
 // upgradeRetry is the upgrade's item: RETRY for a failed or timed-out
-// automatic upgrade; NOTHING when asked for one and there is none. ok is
-// false when nothing is to be said (everything asked, no failed upgrade).
-func upgradeRetry(rollout *cloudv1.ClusterRollout, asked bool) (*cloudv1.RetryItem, bool) {
+// automatic upgrade, or else a halted one (a manual upgrade has no rollout
+// record; the recorded request clears the halt); NOTHING when asked for
+// one and there is none. ok is false when nothing is to be said
+// (everything asked, no failed upgrade).
+func upgradeRetry(rollout *cloudv1.ClusterRollout, halted *cloudv1.ClusterUpgrade, asked bool) (*cloudv1.RetryItem, bool) {
 	item := &cloudv1.RetryItem{Name: upgradeItem, Kind: cloudv1.RetryItemKind_RETRY_ITEM_KIND_UPGRADE}
 	switch rollout.GetResult() {
 	case cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_FAILED, cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_TIMED_OUT:
@@ -156,6 +169,11 @@ func upgradeRetry(rollout *cloudv1.ClusterRollout, asked bool) (*cloudv1.RetryIt
 		cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_SUCCEEDED,
 		cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_PENDING,
 		cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_BLOCKED:
+	}
+	if halted != nil {
+		item.Action = cloudv1.RetryAction_RETRY_ACTION_RETRY
+		item.Message = fmt.Sprintf("the halted upgrade to %s is tried again on the next pass (its recoveries start over)", halted.GetToVersion())
+		return item, true
 	}
 	if !asked {
 		return nil, false

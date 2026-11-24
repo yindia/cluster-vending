@@ -51,6 +51,39 @@ func TestVersionChangeRefusedDuringAnUpgrade(t *testing.T) {
 	}
 }
 
+// A halted upgrade with no failed automatic rollout (a manual version
+// change) is tried again by cluster retry: the request is recorded, so the
+// controller clears the halt.
+func TestRetryResumesAHaltedManualUpgrade(t *testing.T) {
+	for name, asked := range map[string]bool{"everything": false, "upgrade": true} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t, interceptor.Funcs{}, nil)
+			ctx := t.Context()
+			row := w.cluster(t)
+			status := &cloudv1.ClusterStatus{Upgrade: &cloudv1.ClusterUpgrade{FromVersion: "1.34", ToVersion: "1.35", Halted: true}}
+			var err error
+			if row.Status, err = reconcilecluster.Encode(status); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.store.Clusters().Record(ctx, row); err != nil {
+				t.Fatal(err)
+			}
+
+			res, err := w.svc.RetryCluster(ctx, &cloudv1.RetryClusterRequest{TenantId: worldTenant, ClusterId: row.ID, Upgrade: asked})
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if up := byName(res.GetItems())[upgradeItem]; up.GetAction() != cloudv1.RetryAction_RETRY_ACTION_RETRY {
+				t.Errorf("upgrade = %v, want RETRY", up)
+			}
+			if got := w.cluster(t).Retry; got == nil || !got.Upgrade {
+				t.Errorf("recorded retry = %+v, want the upgrade", got)
+			}
+		})
+	}
+}
+
 // A cluster on no channel runs the release's default minor when it names
 // none, and a minor the stable channel's release does not offer is refused
 // at create (its components could never be installed).

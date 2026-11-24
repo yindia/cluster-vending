@@ -81,22 +81,29 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 	if err := service.Validate(req); err != nil {
 		return nil, err
 	}
-	if rid := req.GetRequestId(); rid != "" {
-		if row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid); err == nil {
-			if !createMatches(row, req) {
-				return nil, requestIDReused(rid)
-			}
-			c, err := s.stored(ctx, row)
-			return &cloudv1.CreateClusterResponse{Cluster: c}, err
-		} else if !errors.Is(err, repository.ErrNotFound) {
-			return nil, service.ToConnect(err)
+	if row, err := s.createdBefore(ctx, req); row != nil || err != nil {
+		if err != nil {
+			return nil, err
 		}
+		c, err := s.stored(ctx, row)
+		return &cloudv1.CreateClusterResponse{Cluster: c}, err
 	}
 	if err := checkNodeGroupAllowlist(req.GetCluster().GetSpec().GetNodeGroups(), nil,
 		s.deps.NodeGroups.Karpenter.InstanceFamilies, s.deps.NodeGroups.Karpenter.InstanceTypes); err != nil {
 		return nil, err
 	}
 	row, err := s.NewRow(ctx, req)
+	if fault.Is(err, fault.AlreadyExists) {
+		// The name may be taken by this very request, stored concurrently
+		// after the lookup above.
+		if won, werr := s.createdBefore(ctx, req); won != nil || werr != nil {
+			if werr != nil {
+				return nil, werr
+			}
+			c, err := s.stored(ctx, won)
+			return &cloudv1.CreateClusterResponse{Cluster: c}, err
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

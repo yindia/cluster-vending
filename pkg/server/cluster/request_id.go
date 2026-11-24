@@ -20,6 +20,27 @@ func requestIDReused(rid string) error {
 		"request_id %s was already used for a different request (another operation or another payload)", rid))
 }
 
+// createdBefore is the cluster a create with req's request_id already
+// stored, when it is the same request; requestIDReused when it is another.
+// (nil, nil): no request_id, or none stored.
+func (s *ClusterService) createdBefore(ctx context.Context, req *cloudv1.CreateClusterRequest) (*model.Cluster, error) {
+	rid := req.GetRequestId()
+	if rid == "" {
+		return nil, nil
+	}
+	row, err := s.deps.Store.Clusters().GetByCreateRequest(ctx, req.GetTenantId(), rid)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, service.ToConnect(err)
+	}
+	if !createMatches(row, req) {
+		return nil, requestIDReused(rid)
+	}
+	return row, nil
+}
+
 // requestWinner resolves an insert that failed with AlreadyExists on a
 // request_id: the claim of the request ID is held by a create that ran
 // concurrently. Its cluster is the idempotent result when it is the same

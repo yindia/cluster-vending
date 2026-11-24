@@ -68,6 +68,28 @@ func TestConcurrentRequestIDReuseForAnotherPayloadIsInvalidArgument(t *testing.T
 	}
 }
 
+// A retry that misses the winner on the first lookup is refused by the
+// name check, not the insert: it still returns the winner's cluster.
+func TestConcurrentRetryRefusedByTheNameIsTheIdempotentResult(t *testing.T) {
+	w := raceWorld(t)
+	req := createRequest(w, "managed-one")
+	req.RequestId = uuid.NewString()
+	real := w.svc.deps.Store
+	w.svc.deps.Store = real.(racingStore).Store
+	created, err := w.svc.CreateCluster(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.svc.deps.Store = real
+	real.(racingStore).clusters.hideOnce = true
+
+	got, err := w.svc.CreateCluster(t.Context(), req)
+
+	if err != nil || got.GetCluster().GetId() != created.GetCluster().GetId() {
+		t.Fatalf("retry = %v, %v; want cluster %s", got.GetCluster().GetId(), err, created.GetCluster().GetId())
+	}
+}
+
 func TestRequestWinnerOfAnIdenticalRetryIsTheIdempotentResult(t *testing.T) {
 	w := raceWorld(t)
 	rid := uuid.NewString()

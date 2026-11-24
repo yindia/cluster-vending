@@ -13,14 +13,15 @@ import "google/protobuf/timestamp.proto";
 // `platform` NodePool) are not part of the spec.
 message NodeGroupSpec {
   // DNS label, unique within the cluster, at most 40 characters. "platform",
-  // "default" and "system" are reserved. Immutable in effect: renaming a
-  // group removes it and adds another.
+  // "platform-pool", "default" and "system" are reserved. Immutable in
+  // effect: renaming a group removes it and adds another.
   string name = 1 [(buf.validate.field).string = {
     min_len: 1
     max_len: 40
     pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$"
     not_in: [
       "platform",
+      "platform-pool",
       "default",
       "system"
     ]

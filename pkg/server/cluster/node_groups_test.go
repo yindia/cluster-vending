@@ -67,6 +67,7 @@ func TestCreateClusterRefusesInvalidNodeGroups(t *testing.T) {
 		"reserved platform": {{Name: "platform"}},
 		"reserved default":  {{Name: "default"}},
 		"reserved system":   {{Name: "system"}},
+		"reserved pool":     {{Name: "platform-pool"}},
 		"duplicate names":   {{Name: "a"}, {Name: "a"}},
 		"upper case":        {{Name: "Batch"}},
 		"starts with digit": {{Name: "1batch"}},
@@ -119,9 +120,12 @@ func TestUpdateClusterChangesNodeGroupsAsOneMaskPath(t *testing.T) {
 
 func TestUpdateClusterRefusesInvalidNodeGroups(t *testing.T) {
 	w := newWorld(t, interceptor.Funcs{}, nil)
-	_, err := w.svc.UpdateCluster(t.Context(), updateRequest(w,
-		&cloudv1.ClusterSpec{NodeGroups: []*cloudv1.NodeGroupSpec{{Name: "system"}}}, "spec.node_groups"))
-	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err), "%v", err)
+	// platform-pool is the platform's NodePool; the renderer refuses it.
+	for _, name := range []string{"system", "platform-pool"} {
+		_, err := w.svc.UpdateCluster(t.Context(), updateRequest(w,
+			&cloudv1.ClusterSpec{NodeGroups: []*cloudv1.NodeGroupSpec{{Name: name}}}, "spec.node_groups"))
+		require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err), "%s: %v", name, err)
+	}
 }
 
 func TestUpdateClusterRefusesDefaultNodeGroupChanges(t *testing.T) {

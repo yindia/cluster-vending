@@ -140,8 +140,8 @@ func (NodeGroupPhase) EnumDescriptor() ([]byte, []int) {
 type NodeGroupSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// DNS label, unique within the cluster, at most 40 characters. "platform",
-	// "default" and "system" are reserved. Immutable in effect: renaming a
-	// group removes it and adds another.
+	// "platform-pool", "default" and "system" are reserved. Immutable in
+	// effect: renaming a group removes it and adds another.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Exact machine types, e.g. "m7i.large". Empty: any type of
 	// instance_families.
@@ -787,9 +787,9 @@ var File_cloud_v1_node_group_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\n" +
-	"\x19cloud/v1/node_group.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb9\x06\n" +
-	"\rNodeGroupSpec\x12V\n" +
-	"\x04name\x18\x01 \x01(\tBB\xbaH?r=\x10\x01\x18(2\x1c^[a-z]([-a-z0-9]*[a-z0-9])?$Z\bplatformZ\adefaultZ\x06systemR\x04name\x12X\n" +
+	"\x19cloud/v1/node_group.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc8\x06\n" +
+	"\rNodeGroupSpec\x12e\n" +
+	"\x04name\x18\x01 \x01(\tBQ\xbaHNrL\x10\x01\x18(2\x1c^[a-z]([-a-z0-9]*[a-z0-9])?$Z\bplatformZ\rplatform-poolZ\adefaultZ\x06systemR\x04name\x12X\n" +
 	"\x0einstance_types\x18\x02 \x03(\tB1\xbaH.\x92\x01+\x10\x14\x18\x01\"%r#\x10\x01\x18@2\x1d^[a-z][a-z0-9-]*[.][a-z0-9]+$R\rinstanceTypes\x12R\n" +
 	"\x11instance_families\x18\x03 \x03(\tB%\xbaH\"\x92\x01\x1f\x10\x14\x18\x01\"\x19r\x17\x10\x01\x18 2\x11^[a-z][a-z0-9-]*$R\x10instanceFamilies\x12Q\n" +
 	"\rarchitectures\x18\x04 \x03(\x0e2\x16.cloud.v1.ArchitectureB\x13\xbaH\x10\x92\x01\r\x10\x02\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\rarchitectures\x12R\n" +

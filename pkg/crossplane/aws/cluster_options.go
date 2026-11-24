@@ -145,13 +145,30 @@ func kindName(obj client.Object) string {
 func isSubnetUsage(u *protectionv1beta1.Usage) bool { return u.Spec.Of.Kind == awsec2.Subnet_Kind }
 
 // roleNamed is role with the IAM name externalName when it is not the
-// object's.
+// object's. A role adopted by an import (externalName set) may be other
+// clusters' too: it is retained (RetainAnnotation), never deleted here.
 func (b clusterBuilder) roleNamed(suffix, trust, externalName string) *awsiam.Role {
 	r := b.role(suffix, trust)
-	if externalName != "" && externalName != r.Name {
-		r.Annotations = map[string]string{ExternalNameAnnotation: externalName}
+	if externalName == "" {
+		return r
+	}
+	r.Annotations = map[string]string{RetainAnnotation: "true"}
+	if externalName != r.Name {
+		r.Annotations[ExternalNameAnnotation] = externalName
 	}
 	return r
+}
+
+// attachRetained is attach, owned without Delete (RetainAnnotation) when
+// its role is adopted: detaching a policy from a shared role breaks the
+// other clusters that use it.
+func (b clusterBuilder) attachRetained(suffix, role, policy string, adopted bool) *awsiam.RolePolicyAttachment {
+	a := b.attach(suffix, role, policy)
+	if adopted {
+		a.Annotations = map[string]string{RetainAnnotation: "true"}
+		a.Spec.ManagementPolicies = slices.Clone(PolicyNoDelete)
+	}
+	return a
 }
 
 // beforeCluster are the objects that must exist before the EKS cluster:

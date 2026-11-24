@@ -193,7 +193,7 @@ type PodIdentityPlan struct{ ID, Namespace, ServiceAccount string }
 // CarriedOver renders c for the cluster of p: Observe-only objects marked
 // crossplane.CarriedOverAnnotation, with these names and external names:
 //
-//	RolePolicyAttachment "<prefix>-<role>-x-<hash8>"   <role name>/<policy ARN>
+//	RolePolicyAttachment "<prefix>-<role>-x-<hash8>"   <role name>/<policy ARN> (retained)
 //	OpenIDConnectProvider "<prefix>-oidc"              its ARN
 //	Group "<prefix>-logs"                              the log group name
 //	Key "<prefix>-secrets-key"                         the key ID (retained)
@@ -209,7 +209,7 @@ func CarriedOver(p ClusterPlan, c CarriedOverResources) []client.Object {
 	for _, role := range []string{"cluster-role", "node-role"} {
 		for _, policy := range c.ExtraPolicies[role] {
 			a := b.attach(role+"-x-"+shortHash(policy), role, policy)
-			a.ObjectMeta = b.carried(a.Name, c.RoleNames[role]+"/"+policy, false)
+			a.ObjectMeta = b.carried(a.Name, c.RoleNames[role]+"/"+policy, true)
 			a.Spec.ManagementPolicies = PolicyObserveLateInit
 			out = append(out, a)
 		}

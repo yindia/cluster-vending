@@ -1,6 +1,7 @@
 package aws_test
 
 import (
+	"slices"
 	"testing"
 
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
@@ -142,8 +143,9 @@ func TestCarriedOverClusterResources(t *testing.T) {
 			t.Errorf("object %d (%T) annotations = %v, want external name %s, carried over", i, obj, a, want[i])
 		}
 		_, isKey := obj.(*awskms.Key)
-		if (a[crossplaneaws.RetainAnnotation] == "true") != isKey {
-			t.Errorf("%T retained = %q: only the KMS key is never deleted here", obj, a[crossplaneaws.RetainAnnotation])
+		_, isAttachment := obj.(*awsiam.RolePolicyAttachment)
+		if (a[crossplaneaws.RetainAnnotation] == "true") != (isKey || isAttachment) {
+			t.Errorf("%T retained = %q: only the KMS key and the roles' policies are never deleted here", obj, a[crossplaneaws.RetainAnnotation])
 		}
 	}
 	for _, obj := range objects {
@@ -173,6 +175,44 @@ func TestCarriedOverClusterResources(t *testing.T) {
 			if len(policies) != 2 || o.Spec.ForProvider.ThumbprintList != nil {
 				t.Errorf("OIDC provider policies %v, thumbprints %v", policies, o.Spec.ForProvider.ThumbprintList)
 			}
+		}
+	}
+}
+
+// The cluster and node roles of an imported cluster may be other clusters'
+// too: once taken over they and their policy attachments are owned without
+// Delete, like the KMS key, so deleting the cluster leaves them in IAM.
+// The roles the platform creates itself are deleted with the cluster.
+func TestAdoptedRolesAreRetained(t *testing.T) {
+	iam := []string{"cluster-role", "cluster-policy", "node-role", "node-worker", "node-cni", "node-ecr"}
+	adopted := clusterPlan()
+	adopted.ClusterRoleName, adopted.NodeRoleName = "tf-cluster", "tf-node"
+	for name, tc := range map[string]struct {
+		p    crossplaneaws.ClusterPlan
+		keep bool
+	}{"adopted": {adopted, true}, "created": {clusterPlan(), false}} {
+		objects := byName(crossplaneaws.ClusterResources(tc.p))
+		for _, suffix := range iam {
+			obj := objects["prod-1a2b3c4d-"+suffix]
+			if obj == nil {
+				t.Fatalf("%s: no %s", name, suffix)
+			}
+			if got := obj.GetAnnotations()[crossplaneaws.RetainAnnotation] == "true"; got != tc.keep {
+				t.Errorf("%s: %s retained = %v, want %v", name, suffix, got, tc.keep)
+			}
+			a, ok := obj.(*awsiam.RolePolicyAttachment)
+			if ok && tc.keep && !slices.Equal(a.Spec.ManagementPolicies, crossplaneaws.PolicyNoDelete) {
+				t.Errorf("%s: %s policies = %v, want without Delete", name, suffix, a.Spec.ManagementPolicies)
+			}
+		}
+	}
+	// The other policies the import found on the roles too.
+	for _, obj := range crossplaneaws.CarriedOver(adopted, crossplaneaws.CarriedOverResources{
+		RoleNames:     map[string]string{"cluster-role": "tf-cluster", "node-role": "tf-node"},
+		ExtraPolicies: map[string][]string{"node-role": {"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"}},
+	}) {
+		if obj.GetAnnotations()[crossplaneaws.RetainAnnotation] != "true" {
+			t.Errorf("carried-over %s is not retained", obj.GetName())
 		}
 	}
 }

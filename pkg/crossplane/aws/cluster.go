@@ -260,10 +260,11 @@ func ClusterResources(p ClusterPlan) []client.Object {
 	out = append(out, b.beforeCluster()...)
 	out = append(out,
 		b.roleNamed("cluster-role", orDefault(p.ClusterRoleTrust, trustEKS), p.ClusterRoleName),
-		b.attach("cluster-policy", "cluster-role", policyEKSCluster),
+		b.attachRetained("cluster-policy", "cluster-role", policyEKSCluster, p.ClusterRoleName != ""),
 		b.roleNamed("node-role", orDefault(p.NodeRoleTrust, trustEC2), p.NodeRoleName),
-		b.attach("node-worker", "node-role", policyWorkerNode), b.attach("node-cni", "node-role", policyCNI),
-		b.attach("node-ecr", "node-role", policyECRRead),
+		b.attachRetained("node-worker", "node-role", policyWorkerNode, p.NodeRoleName != ""),
+		b.attachRetained("node-cni", "node-role", policyCNI, p.NodeRoleName != ""),
+		b.attachRetained("node-ecr", "node-role", policyECRRead, p.NodeRoleName != ""),
 		b.cluster(),
 	)
 	if lt := b.launchTemplate(); lt != nil {

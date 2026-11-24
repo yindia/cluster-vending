@@ -613,3 +613,32 @@ func TestAbandonedEKSReservationIsReclaimed(t *testing.T) {
 		})
 	}
 }
+
+// strayCluster stores a Cluster named name in ns whose network cannot be
+// read: its scope (account) is unknown.
+func strayCluster(t *testing.T, k client.Client, ns, name, region string) {
+	t.Helper()
+	stray := &cloud.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	stray.Spec.Region = region
+	stray.Spec.Network.NetworkRef.Name = "missing"
+	if err := k.Create(t.Context(), stray); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPhysicalEKSNameIgnoresClustersOutsideTenantNamespaces(t *testing.T) {
+	w := newWorld(t)
+	strayCluster(t, w.k, "default", "payments", w.network.Region)
+	if err := w.s.Clusters().Create(t.Context(), reservationCluster(t, w.network, "payments")); err != nil {
+		t.Fatalf("a Cluster in no tenant's namespace blocked the name: %v", err)
+	}
+}
+
+func TestPhysicalEKSNameUnknownScopeInTenantNamespaceStaysClosed(t *testing.T) {
+	w := newWorld(t)
+	other := reservationPeer(t, w, "other", w.network.Region)
+	strayCluster(t, w.k, "tenant-other", "payments", other.Region)
+	if err := w.s.Clusters().Create(t.Context(), reservationCluster(t, w.network, "payments")); !errors.Is(err, repository.ErrAlreadyExists) {
+		t.Fatalf("a tenant's Cluster of unknown scope did not fail closed: %v", err)
+	}
+}

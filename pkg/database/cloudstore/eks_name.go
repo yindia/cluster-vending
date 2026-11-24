@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -90,6 +91,11 @@ func (r clusters) checkLegacyEKSOwners(ctx context.Context, row *model.Cluster, 
 		}
 		if own != nil && candidate.UID == own.UID && candidate.Namespace == own.Namespace && candidate.Name == own.Name {
 			continue // adopting this native management object, not its cloud peer
+		}
+		if !strings.HasPrefix(candidate.Namespace, kube.TenantNamespacePrefix) {
+			// No tenant's: never a row, never rendered (rows live in tenant
+			// namespaces), so it holds nothing in the cloud.
+			continue
 		}
 		network := &cloud.Network{}
 		if err := r.c.Get(ctx, client.ObjectKey{Namespace: candidate.Namespace, Name: candidate.Spec.Network.NetworkRef.Name}, network); err != nil {

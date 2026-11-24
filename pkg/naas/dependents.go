@@ -29,6 +29,16 @@ type ClusterIdentity struct {
 // namespaced list includes unlabeled and terminating objects; missing APIs and
 // read errors fail closed. Labels are conservative hints, never a list filter.
 func ClusterDependents(ctx context.Context, reader client.Reader, parent ClusterIdentity) ([]string, error) {
+	return clusterDependents(ctx, reader, parent, true)
+}
+
+// LiveClusterDependents is ClusterDependents without the children already
+// being deleted: what a cluster's deletion request is refused for.
+func LiveClusterDependents(ctx context.Context, reader client.Reader, parent ClusterIdentity) ([]string, error) {
+	return clusterDependents(ctx, reader, parent, false)
+}
+
+func clusterDependents(ctx context.Context, reader client.Reader, parent ClusterIdentity, terminating bool) ([]string, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("fresh SubTenant reader is unavailable")
 	}
@@ -47,6 +57,9 @@ func ClusterDependents(ctx context.Context, reader client.Reader, parent Cluster
 	}
 	var names []string
 	for _, child := range children.Items {
+		if !terminating && !child.DeletionTimestamp.IsZero() {
+			continue
+		}
 		ref, labels := child.Spec.ClusterRef, child.Labels
 		if parent.ID != "" && (ref.ID == parent.ID || labels[cloudstore.LabelClusterID] == parent.ID || labels[cloudv1alpha1.LabelCluster] == parent.ID) ||
 			parent.UID != "" && ref.UID == string(parent.UID) ||

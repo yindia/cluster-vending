@@ -2,6 +2,7 @@ package naas
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,6 +48,9 @@ func TestClusterDependentsIncludesRefsUIDLabelsAndTerminatingChildren(t *testing
 	names, err := ClusterDependents(t.Context(), k, parent)
 	if err != nil || len(names) != 5 {
 		t.Fatalf("dependents = %v, %v; want 5 including terminating/unlabeled/UID", names, err)
+	}
+	if live, err := LiveClusterDependents(t.Context(), k, parent); err != nil || len(live) != 4 || slices.Contains(live, "terminating") {
+		t.Fatalf("live dependents = %v, %v; want 4 without the terminating one", live, err)
 	}
 	// Reconciler callers with row identity must resolve the current CR UID.
 	obj := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: parent.Name, Namespace: parent.Namespace, UID: parent.UID}}

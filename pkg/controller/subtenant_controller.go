@@ -94,12 +94,19 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return untilFreezeEnds(frozen, result, time.Now()), err
 	}
 	meta.RemoveStatusCondition(&st.Conditions, platform.ConditionFrozen)
-	if r.deps.SubTenantWorkloads == nil || parent.Status.KubeconfigSecret == "" {
+	if _, force := parentRemoval(parent); force && !obj.DeletionTimestamp.IsZero() {
+		return r.releaseWithParent(ctx, obj, st, "ParentForceDeleted",
+			"The parent cluster is being force-deleted; releasing this controller's protection without workload calls, the cluster's deletion removes its namespaces")
+	}
+	if r.deps.SubTenantWorkloads == nil {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "WorkloadClientPending", "Waiting for the parent kubeconfig and configured workload client; no workload writes have been attempted", false)
+	}
+	if parent.Status.KubeconfigSecret == "" {
+		return r.workloadUnavailable(ctx, obj, st, parent, "WorkloadClientPending", "Waiting for the parent kubeconfig and configured workload client; no workload writes have been attempted", false)
 	}
 	workload, err := r.deps.SubTenantWorkloads.Client(ctx, parent.Namespace, parent.Status.KubeconfigSecret)
 	if err != nil || workload == nil {
-		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "WorkloadClientUnavailable", "Cannot connect to the parent workload cluster; credentials are not exposed in status", true)
+		return r.workloadUnavailable(ctx, obj, st, parent, "WorkloadClientUnavailable", "Cannot connect to the parent workload cluster; credentials are not exposed in status", true)
 	}
 	name, err := naas.RemoteTenantName(obj)
 	if err != nil {
@@ -110,8 +117,9 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := workload.Get(ctx, client.ObjectKey{Name: name}, remote); apierrors.IsNotFound(err) {
 		remote = nil
 	} else if err != nil {
-		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "CapsuleAPIUnavailable", "Cannot read Capsule Tenant API; install the supported Capsule bootstrap and restore workload connectivity", true)
+		return r.workloadUnavailable(ctx, obj, st, parent, "CapsuleAPIUnavailable", "Cannot read Capsule Tenant API; install the supported Capsule bootstrap and restore workload connectivity", true)
 	}
+	subTenantUnreachable.Delete(obj.UID)
 	if remote != nil && !naas.OwnTenant(remote, obj) {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "RemoteOwnershipMismatch", "A Capsule Tenant with this name has foreign ownership or a different recorded UID; adoption and writes are refused", true)
 	}

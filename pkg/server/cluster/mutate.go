@@ -273,7 +273,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		}
 	}
 	if slices.Contains(paths, "spec.naas") && !spec.GetNaas() {
-		if err := s.requireNoSubTenants(ctx, row); err != nil {
+		if err := s.requireNoSubTenants(ctx, row, false); err != nil {
 			return nil, err
 		}
 	}
@@ -517,7 +517,7 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
 	}
-	if err := s.requireNoSubTenants(ctx, row); err != nil {
+	if err := s.requireNoSubTenants(ctx, row, true); err != nil {
 		return nil, err
 	}
 	if row.State != reconcilecluster.StateDeleting || (req.GetForce() && !row.DeleteForce) {

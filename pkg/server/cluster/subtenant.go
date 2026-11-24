@@ -14,9 +14,15 @@ import (
 // requireNoSubTenants reads through the direct API reader, not the informer
 // cache. List the entire namespace so a missing or stale label cannot hide a
 // child whose spec still references this cluster. Terminating children keep
-// blocking until Kubernetes has actually removed them.
-func (s *ClusterService) requireNoSubTenants(ctx context.Context, row *model.Cluster) error {
-	names, err := naas.ClusterDependents(ctx, s.deps.Reader(), naas.ClusterIdentity{
+// blocking NaaS disabling until Kubernetes has actually removed them; a
+// deletion is refused only for live ones (the reconciler holds it until the
+// terminating ones are gone).
+func (s *ClusterService) requireNoSubTenants(ctx context.Context, row *model.Cluster, deleting bool) error {
+	dependents := naas.ClusterDependents
+	if deleting {
+		dependents = naas.LiveClusterDependents
+	}
+	names, err := dependents(ctx, s.deps.Reader(), naas.ClusterIdentity{
 		Namespace: kube.TenantNamespace(row.TenantID), ID: row.ID, Name: row.Name,
 	})
 	if err != nil {

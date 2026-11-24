@@ -91,7 +91,6 @@ func TestSubTenantSafetyBlocksClusterDeletionIncludingForce(t *testing.T) {
 		nameLabel   bool
 	}{
 		{name: "unlabeled spec reference"},
-		{name: "terminating spec reference", terminating: true},
 		{name: "cluster ID label", label: cloudstore.LabelClusterID},
 		{name: "cluster reference ID label", label: cloudv1alpha1.LabelCluster},
 		{name: "cluster name label", label: cloudv1alpha1.LabelCluster, nameLabel: true},
@@ -123,6 +122,21 @@ func TestSubTenantSafetyBlocksClusterDeletionIncludingForce(t *testing.T) {
 				t.Fatalf("fresh SubTenant lists = %d, want 2", reader.calls)
 			}
 		})
+	}
+}
+
+// A SubTenant already being deleted does not refuse the cluster's deletion:
+// the reconciler holds the deletion until it is gone (or released).
+func TestSubTenantSafetyTerminatingChildDoesNotRefuseDeletion(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		w, reader := subTenantSafetyWorld(t)
+		addSubTenantDependency(t, reader, "child", worldNS, w.row.ID, nil, true)
+		if _, err := w.svc.DeleteCluster(t.Context(), &cloudv1.DeleteClusterRequest{TenantId: worldTenant, ClusterId: w.row.ID, Force: force}); err != nil {
+			t.Fatalf("force=%t: %v", force, err)
+		}
+		if after := w.cluster(t); after.State != reconcilecluster.StateDeleting || after.DeleteForce != force {
+			t.Fatalf("force=%t: state %s force %t", force, after.State, after.DeleteForce)
+		}
 	}
 }
 

@@ -233,7 +233,7 @@ func (s *Reconciler) sweep(ctx context.Context, row *model.Cluster, namespace st
 			if obj.GetDeletionTimestamp() != nil {
 				continue
 			}
-			err := s.deps.Kube.Delete(ctx, obj)
+			err := s.deleteLeftover(ctx, obj)
 			if err != nil && !apierrors.IsNotFound(err) && !managed.IsUsageRefusal(err) {
 				return found, fmt.Errorf("delete %s %s: %w", kindOf(list), obj.GetName(), err)
 			}
@@ -241,6 +241,21 @@ func (s *Reconciler) sweep(ctx context.Context, row *model.Cluster, namespace st
 		}
 	}
 	return found, nil
+}
+
+// deleteLeftover deletes an object no record names as a recorded one is
+// (managed.Client.Delete): a protected one is switched to full management
+// first, so its cloud resource goes too; a retained or imported one is not.
+// Usages are deleted as they are.
+func (s *Reconciler) deleteLeftover(ctx context.Context, obj client.Object) error {
+	if _, usage := obj.(*protectionv1beta1.Usage); usage {
+		return s.deps.Kube.Delete(ctx, obj)
+	}
+	r, err := managed.RefOf(obj, s.deps.Kube.Scheme())
+	if err != nil {
+		return err
+	}
+	return s.deps.Objects().Delete(ctx, []managed.Ref{r})
 }
 
 // kindOf is the item kind of a typed list, e.g. NodeGroupList -> NodeGroup.

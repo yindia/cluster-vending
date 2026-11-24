@@ -5,14 +5,44 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/database/model"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
+
+// The node group stage is over only once Karpenter's own objects began to
+// go: a node group an update replaced, still being deleted when the
+// cluster's deletion is asked for, does not skip it.
+func TestNodeStagePastOnlyByKarpenterObjects(t *testing.T) {
+	prefix := "p"
+	deleting := cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING
+	ready := cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY
+	queue := model.ManagedResource{Kind: awssqs.Queue_Kind, Name: prefix + "-karpenter"}
+	old := model.ManagedResource{Kind: KindNodeGroup, Name: prefix + "-default-old"}
+	removal := func(states map[string]cloudv1.ManagedResourceState, records ...model.ManagedResource) *clusterRemoval {
+		c := &clusterRemoval{records: records, prefix: prefix, views: map[string]*cloudv1.ManagedResource{}}
+		for _, r := range records {
+			c.views[viewKey(r.Kind, r.Name)] = &cloudv1.ManagedResource{Kind: r.Kind, Name: r.Name, State: states[r.Name]}
+		}
+		return c
+	}
+	require.Equal(t, crossplaneaws.DeleteStageKarpenter, crossplaneaws.ClusterObjectDeleteStage(prefix, queue.Kind, queue.Name))
+
+	require.False(t, removal(map[string]cloudv1.ManagedResourceState{queue.Name: ready, old.Name: deleting}, queue, old).past(),
+		"a replaced node group being deleted is not the deletion's")
+	require.True(t, removal(map[string]cloudv1.ManagedResourceState{queue.Name: deleting, old.Name: ready}, queue, old).past())
+	gone := queue
+	gone.GoneAt = ptr.To(time.Now())
+	require.True(t, removal(nil, gone, old).past())
+}
 
 // Karpenter's stage is fixed (it is removed after the node groups): it is
 // sequence 0 by name, whatever a catalog says.

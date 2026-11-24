@@ -69,13 +69,15 @@ func (c *clusterRemoval) left(rs []model.ManagedResource) []model.ManagedResourc
 	return out
 }
 
-// past reports whether the deletion of anything at Karpenter's stage or
-// after it began: an object of it is being deleted, or went. It is the node
-// groups' stage's memory (nothing else is stored for it): it is not run again
-// once what comes after it started, however the workload cluster looks then.
+// past reports whether Karpenter's stage began: an object of it is being
+// deleted, or went. It is the node groups' stage's memory (nothing else is
+// stored for it): it is not run again once what comes after it started,
+// however the workload cluster looks then. Only Karpenter's objects count:
+// a later stage's (a node group an update replaced) may be going since
+// before the cluster's deletion was asked for.
 func (c *clusterRemoval) past() bool {
 	for _, r := range c.records {
-		if r.Kind == managed.UsageKind || crossplaneaws.ClusterObjectDeleteStage(c.prefix, r.Kind, r.Name) < crossplaneaws.DeleteStageKarpenter {
+		if r.Kind == managed.UsageKind || crossplaneaws.ClusterObjectDeleteStage(c.prefix, r.Kind, r.Name) != crossplaneaws.DeleteStageKarpenter {
 			continue
 		}
 		if v := c.views[viewKey(r.Kind, r.Name)]; r.GoneAt != nil || v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING {

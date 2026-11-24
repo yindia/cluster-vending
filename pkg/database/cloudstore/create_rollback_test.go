@@ -347,3 +347,46 @@ func TestCreateIdenticalRetryDoesNotSucceedForARolledBackWinner(t *testing.T) {
 		t.Fatalf("retry reported %v for a cluster that is gone", err)
 	}
 }
+
+// finalizeBeforeStatus adds a finalizer to every new object of obj's kind
+// between its create and its first status write, like the controller does.
+func finalizeBeforeStatus(t *testing.T, k client.Client) client.Client {
+	seen := map[string]bool{}
+	return interceptor.NewClient(k.(client.WithWatch), interceptor.Funcs{SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+		key := obj.GetNamespace() + "/" + obj.GetName()
+		if !seen[key] {
+			seen[key] = true
+			live := obj.DeepCopyObject().(client.Object)
+			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
+				t.Fatal(err)
+			}
+			live.SetFinalizers(append(live.GetFinalizers(), "example.com/controller"))
+			if err := c.Update(ctx, live); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return c.SubResource(sub).Update(ctx, obj, opts...)
+	}})
+}
+
+func TestCreateSurvivesFinalizerAddedBeforeStatusWrite(t *testing.T) {
+	w := newWorld(t)
+	s := cloudstore.New(finalizeBeforeStatus(t, w.k))
+	row := reservationCluster(t, w.network, "finalized")
+	if err := s.Clusters().Create(t.Context(), row); err != nil {
+		t.Fatalf("create with a finalizer added meanwhile: %v", err)
+	}
+	live := &cloud.Cluster{}
+	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: "finalized"}, live); err != nil {
+		t.Fatal(err)
+	}
+	if !live.DeletionTimestamp.IsZero() || len(live.Finalizers) != 1 || live.Status.Phase == "" {
+		t.Fatalf("cluster not stored with its status: %+v", live)
+	}
+	n := &model.Network{TenantID: "acme", Name: "second", Provider: "aws", Region: "us-east-1", CloudAccountID: w.account,
+		Resource: model.Resource{State: "NETWORK_STATE_PROVISIONING"}}
+	n.Spec = document(t, networkSpec(n))
+	if err := s.Networks().Create(t.Context(), n); err != nil {
+		t.Fatalf("network create with a finalizer added meanwhile: %v", err)
+	}
+}

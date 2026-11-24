@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -290,13 +291,32 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 // insert creates obj and then writes its status (set fills it in): the
 // API server stores no status on create. A status that cannot be written
 // takes the object back: an imported row without its import plan must not
-// exist.
+// exist. A metadata write in between (the controller's finalizer) is no
+// failure: the status is set again on the object read back, while it is
+// still the one created (same UID).
 func (s store) insert(ctx context.Context, obj client.Object, set func()) error {
 	if err := s.c.Create(ctx, obj); err != nil {
 		return translate(err)
 	}
-	set()
-	if err := s.c.Status().Update(ctx, obj); err != nil {
+	uid := obj.GetUID()
+	err := retry(func() error {
+		set()
+		err := s.c.Status().Update(ctx, obj)
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+		if gerr := s.c.Get(ctx, client.ObjectKeyFromObject(obj), obj); gerr != nil {
+			return gerr
+		}
+		if obj.GetUID() != uid {
+			return fmt.Errorf("%w: %s was replaced", repository.ErrConflict, obj.GetName())
+		}
+		return err
+	})
+	if err != nil {
+		if obj.GetUID() != uid {
+			return translate(err) // another object now: not ours to take back
+		}
 		if derr := s.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan)); derr != nil {
 			return errors.Join(translate(err), fmt.Errorf("take %s back: %w", obj.GetName(), derr))
 		}

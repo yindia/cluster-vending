@@ -86,6 +86,16 @@ func releaseOnly(paths []string) bool {
 	return len(paths) > 0
 }
 
+// automaticUpgradeRunning reports whether the rollout record of the
+// cluster is an upgrade in progress.
+func automaticUpgradeRunning(row *model.Cluster) bool {
+	rec := &cloudv1.ClusterRollout{}
+	if len(row.Rollout) == 0 || reconcilecluster.Lenient.Unmarshal(row.Rollout, rec) != nil {
+		return false
+	}
+	return rec.GetResult() == cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_IN_PROGRESS
+}
+
 // specPaths are the spec paths UpdateCluster changes, each copying one
 // field of the request's spec onto the stored one. Every one of them but
 // releasePaths is rolled out by applying the cluster's resources again.
@@ -251,6 +261,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
 	nodeGroupsBefore, addonsBefore := spec.GetNodeGroups(), slices.Clone(spec.GetAws().GetAddons())
+	channelBefore := spec.GetReleaseChannel()
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
@@ -288,6 +299,12 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		if err := s.CheckChannelVersion(ctx, spec, versionBefore); err != nil {
 			return nil, err
 		}
+	}
+	// Only the channel's rollout finishes its upgrade record: moved to
+	// another channel, an upgrade in progress would stay so.
+	if slices.Contains(paths, pathReleaseChannel) && spec.GetReleaseChannel() != channelBefore && automaticUpgradeRunning(row) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
+			"cluster %s is in an automatic upgrade of its channel: wait for it to finish before changing release_channel", row.ID))
 	}
 	if row.Input, err = updatedInput(row, in, paths); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error())

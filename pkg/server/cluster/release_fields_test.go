@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -54,6 +55,36 @@ func TestReleaseFieldsAreUpdatableWithoutTouchingTheCloud(t *testing.T) {
 		if !reflect.DeepEqual(u.Object["spec"], now[key].Object["spec"]) {
 			t.Errorf("%s changed: an update of the release fields must not change a cloud resource", key)
 		}
+	}
+}
+
+// The channel is not changed while an automatic upgrade of the current one
+// is in progress: no rollout would finish its record. The same channel
+// again is accepted.
+func TestReleaseChannelChangeRefusedDuringAnAutomaticUpgrade(t *testing.T) {
+	w := appliedWorld(t)
+	ctx := t.Context()
+	alpha := &cloudv1.ClusterSpec{ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_ALPHA}
+	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, alpha, pathReleaseChannel)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := protojson.Marshal(&cloudv1.ClusterRollout{Channel: "alpha", ToVersion: "1.36",
+		Result: cloudv1.ClusterRolloutResult_CLUSTER_ROLLOUT_RESULT_IN_PROGRESS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.Clusters().SetRollout(ctx, worldTenant, w.row.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+
+	beta := &cloudv1.ClusterSpec{ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA}
+	_, err = w.svc.UpdateCluster(ctx, updateRequest(w, beta, pathReleaseChannel))
+
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("channel change = %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := w.svc.UpdateCluster(ctx, updateRequest(w, alpha, pathReleaseChannel)); err != nil {
+		t.Errorf("same channel = %v, want accepted", err)
 	}
 }
 

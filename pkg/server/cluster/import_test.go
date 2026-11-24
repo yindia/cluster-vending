@@ -106,7 +106,34 @@ func importTF(t *testing.T, w world) *cloudv1.Cluster {
 			t.Fatal(err)
 		}
 	}
+	observeAll(t, w, id)
 	return live(t, w, id)
+}
+
+// observeAll makes every object of the cluster Ready and Synced, as its
+// provider reports once it observed the cloud resource.
+func observeAll(t *testing.T, w world, id string) {
+	t.Helper()
+	records, err := w.store.ManagedResources().ListByOwner(t.Context(), model.OwnerCluster, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion(r.APIVersion)
+		u.SetKind(r.Kind)
+		if err := w.kube.Get(t.Context(), client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, u); err != nil {
+			continue
+		}
+		conds := []any{map[string]any{"type": "Ready", "status": "True", "reason": "Available"},
+			map[string]any{"type": "Synced", "status": "True", "reason": "ReconcileSuccess"}}
+		if err := unstructured.SetNestedSlice(u.Object, conds, "status", "conditions"); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.kube.Update(t.Context(), u); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // update stores an update of a cluster and, when it was stored, runs the

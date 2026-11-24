@@ -9,12 +9,13 @@ import (
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"google.golang.org/protobuf/encoding/protojson"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
+	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/fault"
@@ -199,8 +200,10 @@ func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster
 // versions and the access entries' groups. The takeover applies the stored
 // plan, so a difference means it would push old values (a version EKS
 // refuses, reverted CIDRs, an add-on rolled back). A field the object does
-// not report yet is not a difference. Empty when the row has no stored
-// objects (a cluster the platform created, or an older import).
+// not report yet is not a difference. A planned object that is gone, or
+// whose provider does not report its cloud resource (deleted in AWS since),
+// is one too: owned, it would be created again. Empty when the row has no
+// stored objects (a cluster the platform created, or an older import).
 func (s *Reconciler) ImportDrift(ctx context.Context, row *model.Cluster) ([]string, error) {
 	planned, _, ok, err := storedImportObjects(row, s.deps.Kube.Scheme())
 	if err != nil || !ok {
@@ -208,22 +211,39 @@ func (s *Reconciler) ImportDrift(ctx context.Context, row *model.Cluster) ([]str
 	}
 	var diffs []string
 	for _, obj := range planned {
-		live, found, err := s.liveOf(ctx, obj)
+		live, gone, err := s.liveOf(ctx, obj)
 		if err != nil {
 			return nil, err
 		}
-		if !found {
+		if gone != "" {
+			diffs = append(diffs, gone)
 			continue
 		}
-		diffs = append(diffs, driftOf(obj, live)...)
+		if live != nil {
+			diffs = append(diffs, driftOf(obj, live)...)
+		}
 	}
 	return diffs, nil
 }
 
-// liveOf reads the object as the management cluster has it now, for the
-// kinds ImportDrift compares; false for the others and for a missing one.
-func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (client.Object, bool, error) {
-	var live client.Object
+// liveOf reads the object as the management cluster has it now. gone says
+// why it cannot be owned as planned: missing, or its cloud resource not
+// observed (not Ready). live is set for the kinds ImportDrift compares.
+func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (live client.Object, gone string, err error) {
+	ref, err := managed.RefOf(planned, s.deps.Kube.Scheme())
+	if err != nil {
+		return nil, "", fault.New(fault.Internal, err.Error())
+	}
+	u, err := s.deps.Objects().Read(ctx, ref)
+	if err != nil {
+		return nil, "", fault.New(fault.Unavailable, fmt.Sprintf("cannot read %s %s: %v", ref.Kind, ref.Name, err))
+	}
+	if u == nil {
+		return nil, fmt.Sprintf("%s %s: gone from the management cluster", ref.Kind, ref.Name), nil
+	}
+	if why, ok := observed(ref, u); !ok {
+		return nil, fmt.Sprintf("%s %s: its cloud resource is not observed (%s)", ref.Kind, ref.Name, why), nil
+	}
 	switch planned.(type) {
 	case *awseks.Cluster:
 		live = &awseks.Cluster{}
@@ -234,16 +254,39 @@ func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (client.
 	case *awseks.AccessEntry:
 		live = &awseks.AccessEntry{}
 	default:
-		return nil, false, nil
+		return nil, "", nil
 	}
-	key := client.ObjectKeyFromObject(planned)
-	if err := s.deps.Get(ctx, key, live); err != nil {
-		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-			return nil, false, nil
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, live); err != nil {
+		return nil, "", fault.New(fault.Internal, fmt.Sprintf("%s %s: %v", ref.Kind, ref.Name, err))
+	}
+	return live, "", nil
+}
+
+// observed reports whether u's provider observes its cloud resource: Ready
+// and not Synced=False/Unknown. An Observe-only object whose resource is
+// deleted keeps Ready and turns Synced=False ("external resource does not
+// exist"). why is the provider's message otherwise.
+func observed(ref managed.Ref, u *unstructured.Unstructured) (why string, ok bool) {
+	v := managed.View(ref, u)
+	state := v.GetState()
+	ready := state == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
+		state == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_UPDATING
+	synced := v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_FALSE &&
+		v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_UNKNOWN
+	if ready && synced {
+		return "", true
+	}
+	why = v.GetMessage()
+	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+	for _, c := range conds {
+		if m, _ := c.(map[string]any); m["type"] == "Synced" && m["status"] != "True" {
+			why, _ = m["message"].(string)
 		}
-		return nil, false, fault.New(fault.Unavailable, fmt.Sprintf("cannot read %s %s: %v", planned.GetObjectKind().GroupVersionKind().Kind, key.Name, err))
 	}
-	return live, true, nil
+	if why == "" {
+		why = "not reported yet"
+	}
+	return why, false
 }
 
 // driftOf compares a planned object with the same object as observed.

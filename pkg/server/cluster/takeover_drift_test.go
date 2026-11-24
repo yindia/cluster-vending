@@ -1,10 +1,12 @@
 package cluster
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect/v2"
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -167,5 +169,54 @@ func TestImportOfATransientClusterWaits(t *testing.T) {
 	reconcile(t, w, id)
 	if got := live(t, w, id).GetStatus().GetImport().GetPhase(); got != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
 		t.Fatalf("phase = %s, want PLANNED once ACTIVE", got)
+	}
+}
+
+// A takeover renders every planned object fully managed: one the customer
+// deleted since the import (its object gone, or its Observe-only object
+// reporting the cloud resource does not exist) would be created again, so
+// the takeover is refused naming it.
+func TestTakeOverRefusesAnImportWhoseResourcesAreGone(t *testing.T) {
+	association := func(t *testing.T, w world) awseks.AccessPolicyAssociation {
+		t.Helper()
+		list := &awseks.AccessPolicyAssociationList{}
+		if err := w.kube.List(t.Context(), list); err != nil || len(list.Items) == 0 {
+			t.Fatalf("access policy associations: %v, %d", err, len(list.Items))
+		}
+		return list.Items[0]
+	}
+	cases := map[string]func(t *testing.T, w world) string{
+		"object deleted": func(t *testing.T, w world) string {
+			a := association(t, w)
+			if err := w.kube.Delete(t.Context(), &a); err != nil {
+				t.Fatal(err)
+			}
+			return a.Name
+		},
+		"external resource gone": func(t *testing.T, w world) string {
+			a := association(t, w)
+			a.SetConditions(xpv2.ReconcileError(errors.New("external resource does not exist")))
+			if err := w.kube.Update(t.Context(), &a); err != nil {
+				t.Fatal(err)
+			}
+			return a.Name
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := importWorld(t, terraformCluster())
+			c := importTF(t, w)
+			observeAsImported(t, w, c)
+			gone := change(t, w)
+
+			_, err := w.svc.TakeOverCluster(t.Context(), takeOverRequest(c))
+
+			if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "AccessPolicyAssociation "+gone) {
+				t.Fatalf("err = %v, want FAILED_PRECONDITION naming AccessPolicyAssociation %s", err, gone)
+			}
+			if got := storedCluster(t, w, c.GetId()).GetStatus().GetState(); got != cloudv1.ClusterState_CLUSTER_STATE_IMPORTED {
+				t.Errorf("state = %s, want still IMPORTED", got)
+			}
+		})
 	}
 }

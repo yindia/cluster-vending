@@ -202,6 +202,7 @@ func TestHandlersWriteNothingToTheManagementCluster(t *testing.T) {
 			t.Errorf("imported %s managementPolicies = %v, want Observe-only", name, got)
 		}
 	}
+	observeAll(t, w, imported.GetId())
 
 	// TakeOver: stored, nothing owned.
 	g.during(t, "TakeOverCluster", func() error {

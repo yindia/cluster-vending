@@ -236,7 +236,7 @@ func TestOldPlatformPoolThenItsNodeClassAreDeletedOnceSettled(t *testing.T) {
 	res = lw.pass(t, karpenter)
 	require.Nil(t, lw.legacyObject(t, "EC2NodeClass"), "nodes gone: the class is deleted")
 	require.Zero(t, *lw.applied, "nothing re-applied the platform objects")
-	for _, g := range res.groups {
+	for _, g := range res.removed {
 		require.NotEqual(t, "platform", g.GetName(), "no platform row")
 	}
 	// Nothing is left to say.

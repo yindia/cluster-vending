@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -97,11 +96,7 @@ func StoredImport(row *model.Cluster) *cloudv1.ImportStatus {
 // Adoption is what the cluster keeps of the resources it was imported
 // from; zero for a cluster the platform created.
 func Adoption(row *model.Cluster) crossplaneaws.Adoption {
-	var a crossplaneaws.Adoption
-	if len(row.Adoption) > 0 {
-		_ = json.Unmarshal(row.Adoption, &a) // written by insertImport
-	}
-	return a
+	return crossplaneaws.ParseAdoption(row.Adoption)
 }
 
 // withCarriedOver is set (what the cluster's spec renders) preceded by the

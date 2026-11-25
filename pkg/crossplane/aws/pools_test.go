@@ -12,32 +12,31 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
-func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
-	old := clusterPlan().NodePool // a tenant-chosen pool: other taints, scaling 1..3
+// The system group is the admin's settings with the platform's placement:
+// the system label and taint, one static size as min, max and desired;
+// zero values are the defaults.
+func TestSystemNodePool(t *testing.T) {
+	got := crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{Size: 3, InstanceTypes: []string{"m7i.large"}, CapacityType: "SPOT",
+		AMIType: "BOTTLEROCKET_x86_64", DiskSizeGiB: 40})
 
-	got := crossplaneaws.FixedSystemNodePool(old, 3)
-
-	if !reflect.DeepEqual(got.Labels, map[string]string{"node.cluster-vending.io/pool": "system"}) {
-		t.Errorf("labels = %v", got.Labels)
+	want := crossplaneaws.NodePoolPlan{InstanceTypes: []string{"m7i.large"}, CapacityType: "SPOT", AMIType: "BOTTLEROCKET_x86_64", DiskSizeGB: 40,
+		MinSize: 3, MaxSize: 3, Desired: 3, Labels: map[string]string{"node.cluster-vending.io/pool": "system"},
+		Taints: []crossplaneaws.TaintPlan{{Key: "node.cluster-vending.io/pool", Value: "system", Effect: "NO_SCHEDULE"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("system pool = %+v\nwant %+v", got, want)
 	}
-	if want := []crossplaneaws.TaintPlan{{Key: "node.cluster-vending.io/pool", Value: "system", Effect: "NO_SCHEDULE"}}; !reflect.DeepEqual(got.Taints, want) {
-		t.Errorf("taints = %v, want %v", got.Taints, want)
-	}
-	// A static size: nothing scales the group, so min, max and desired
-	// are the one size.
-	if got.MinSize != 3 || got.MaxSize != 3 || got.Desired != 3 {
-		t.Errorf("size = %d/%d/%d, want 3/3/3", got.MinSize, got.MaxSize, got.Desired)
+	defaults := crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{})
+	if !reflect.DeepEqual(defaults.InstanceTypes, []string{"t3.medium"}) || defaults.CapacityType != "ON_DEMAND" ||
+		defaults.AMIType != "AL2023_x86_64_STANDARD" || defaults.DiskSizeGB != 0 || defaults.LaunchTemplate != nil {
+		t.Errorf("defaults = %+v", defaults)
 	}
 	for _, c := range []struct{ size, want int }{
 		{0, 2}, {1, 2}, {-3, 2}, // unset or below the least: the default
 		{2, 2}, {9, 9},
 	} {
-		if p := crossplaneaws.FixedSystemNodePool(old, c.size); p.MinSize != c.want || p.MaxSize != c.want || p.Desired != c.want {
+		if p := crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{Size: c.size}); p.MinSize != c.want || p.MaxSize != c.want || p.Desired != c.want {
 			t.Errorf("size %d gave %d/%d/%d, want %d", c.size, p.MinSize, p.MaxSize, p.Desired, c.want)
 		}
-	}
-	if len(old.Taints) != 1 || old.Taints[0].Key != "gpu" || old.MaxSize != 3 {
-		t.Error("the input plan was changed")
 	}
 }
 
@@ -48,9 +47,9 @@ func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 // the former autoscaler) goes back to it, and Crossplane holds it there.
 func TestFixingTheSystemPoolDoesNotReplaceTheNodeGroup(t *testing.T) {
 	before := clusterPlan()
-	before.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 2)
+	before.NodePool = crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{Size: 2})
 	after := before
-	after.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 3)
+	after.NodePool = crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{Size: 3})
 
 	if a, b := crossplaneaws.ReplacementNodeGroupName(before.Prefix, before.NodePool), crossplaneaws.ReplacementNodeGroupName(after.Prefix, after.NodePool); a != b {
 		t.Errorf("replacement name changed: %s -> %s", a, b)
@@ -118,7 +117,7 @@ func applyBodyScaling(t *testing.T, p crossplaneaws.ClusterPlan) (forProvider, i
 // cluster-autoscaler discovery tags.
 func TestNoNodeGroupIsTaggedForClusterAutoscaler(t *testing.T) {
 	p := clusterPlan()
-	p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2)
+	p.NodePool = crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{})
 	for _, plan := range []crossplaneaws.ClusterPlan{p, clusterPlan()} {
 		for key := range nodeGroupOf(t, plan).Spec.ForProvider.Tags {
 			if strings.HasPrefix(key, "k8s.io/cluster-autoscaler/") {

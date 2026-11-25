@@ -16,20 +16,43 @@ import (
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
-// existingClusterField is the number of ClusterSpec's removed
-// existing_cluster (reserved in the contract).
-const existingClusterField = 7
+// Numbers of removed ClusterSpec fields (reserved in the contract):
+// existing_cluster, default_node_pool and node_groups; and of the removed
+// AwsClusterSpec.default_node_pool.
+const (
+	existingClusterField    = 7
+	defaultNodePoolField    = 4
+	nodeGroupsField         = 16
+	awsDefaultNodePoolField = 4
+)
+
+// ErrNodeGroupsPlatformOwned is the message of a request that still sets the
+// node group fields a client built against an older contract has.
+const ErrNodeGroupsPlatformOwned = "the platform owns a cluster's node groups: spec.default_node_pool, spec.aws.default_node_pool " +
+	"and spec.node_groups were removed; every cluster gets the platform's system node group and Karpenter platform pool"
 
 // supported rejects what this version cannot build.
 func supported(spec *cloudv1.ClusterSpec) error {
+	unknown := spec.ProtoReflect().GetUnknown()
 	switch {
 	case spec.GetAws() == nil:
 		return fault.New(fault.Unimplemented, "only aws clusters are supported")
-	case hasUnknownField(spec.ProtoReflect().GetUnknown(), existingClusterField):
+	case hasUnknownField(unknown, existingClusterField):
 		// A client built against the old contract asks for an import:
 		// creating a new cluster of the name instead would be wrong.
 		return fault.New(fault.Unimplemented,
 			"spec.existing_cluster is not supported; import a cluster with ImportCluster and TakeOverCluster")
+	}
+	return NodeGroupFieldsRefused(spec)
+}
+
+// NodeGroupFieldsRefused is an Invalid fault when spec (a binary request's:
+// JSON drops unknown fields) still carries a removed node group field.
+func NodeGroupFieldsRefused(spec *cloudv1.ClusterSpec) error {
+	if hasUnknownField(spec.ProtoReflect().GetUnknown(), defaultNodePoolField) ||
+		hasUnknownField(spec.ProtoReflect().GetUnknown(), nodeGroupsField) ||
+		hasUnknownField(spec.GetAws().ProtoReflect().GetUnknown(), awsDefaultNodePoolField) {
+		return fault.New(fault.Invalid, ErrNodeGroupsPlatformOwned)
 	}
 	return nil
 }
@@ -107,9 +130,7 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err := s.withIRSA(ctx, requested); err != nil {
 		return nil, err
 	}
-	sys := s.deps.NodeGroups.System
-	spec, err := corecluster.ResolveSpecWith(requested, t.Zones, corecluster.SystemPool{Size: sys.MinSize, InstanceTypes: sys.InstanceTypes,
-		CapacityType: sys.CapacityType, DiskSizeGiB: sys.DiskSizeGiB})
+	spec, err := corecluster.ResolveSpec(requested, t.Zones)
 	if err != nil {
 		return nil, fault.New(fault.Invalid, err.Error())
 	}

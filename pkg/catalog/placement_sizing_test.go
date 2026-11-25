@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/component"
 	"github.com/yindia/cluster-vending/pkg/config"
@@ -12,8 +13,15 @@ import (
 // PROP-03 4.5: the bootstrap set against the bootstrap group (CPU, memory
 // and pods per node), and the platform set against the platform pool.
 
+// karpenterSizing is the shipped karpenter definition's spec.sizing.
+func karpenterSizing() *cloudv1alpha1.ComponentSizing {
+	return &cloudv1alpha1.ComponentSizing{Deployments: []cloudv1alpha1.SizedDeployment{
+		{Name: "karpenter", Replicas: "replicas", Requests: "controller.resources.requests"}}}
+}
+
 func tinyKarpenter(replicas int) component.Definition {
-	return component.Definition{Name: "karpenter", Management: component.Platform, HasInstall: true,
+	return component.Definition{Name: "karpenter", Role: component.RoleNodeProvisioner, Management: component.Platform, HasInstall: true,
+		Sizing: component.SizingOf(karpenterSizing()),
 		PlatformValues: component.Values{"replicas": replicas, "controller": map[string]any{
 			"resources": map[string]any{"requests": map[string]any{"cpu": "1m", "memory": "1Mi"}}}}}
 }
@@ -189,7 +197,9 @@ func TestCheckRunsThePlatformRule(t *testing.T) {
 	ng := config.DefaultNodeGroups()
 	opts := checkOptions
 	opts.PlatformPool = &ng.Platform
-	text := strings.Join(problemStrings(catalog.Check(goodSet(), opts)), "\n")
+	set := goodSet()
+	set.Definitions[0].Spec.Sizing = karpenterSizing()
+	text := strings.Join(problemStrings(catalog.Check(set, opts)), "\n")
 	if !strings.Contains(text, "karpenter: platformValues has no") {
 		t.Errorf("problems = %s, want the platform rule to have run", text)
 	}

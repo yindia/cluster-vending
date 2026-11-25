@@ -29,13 +29,8 @@ nodeGroups:
     minSize: 3
     maxSize: 9
     capacityType: SPOT
+    amiType: BOTTLEROCKET_x86_64
     diskSizeGiB: 80
-  karpenter:
-    instanceFamilies: [m7i, c7i]
-    instanceTypes: [t3.large]
-    defaults:
-      architectures: [ARM64]
-      capacityTypes: [SPOT]
 `
 
 // One file read by both commands gives the same node group layout.
@@ -64,7 +59,7 @@ func TestServeAndControllerReadTheSameNodeGroupsFromOneFile(t *testing.T) {
 // An invalid file is refused by both commands with the same problems.
 func TestServeAndControllerRejectAnInvalidFileIdentically(t *testing.T) {
 	cases := map[string]string{
-		"values":            "nodeGroups:\n  system:\n    minSize: 1\n    maxSize: 0\n    capacityType: LUXURY\n  karpenter:\n    instanceFamilies: [\"T3!\"]\n",
+		"values":            "nodeGroups:\n  system:\n    minSize: 1\n    maxSize: 0\n    capacityType: LUXURY\n    amiType: CUSTOM\n",
 		"unknown key":       "nodeGroups:\n  system:\n    colour: red\n",
 		"not a mapping":     "nodeGroups: [a]\n",
 		"list for a scalar": "nodeGroups:\n  system:\n    minSize: [2]\n",
@@ -134,4 +129,53 @@ func TestLeftoverVariableStillOverridesTheFile(t *testing.T) {
 	if err != nil || cfg.NodeGroups.System.MinSize != 12 {
 		t.Errorf("size = %d (%v)", cfg.NodeGroups.System.MinSize, err)
 	}
+}
+
+// The three config files that carry the nodeGroups section (the deployed
+// one, the local run's and the auth overlay's) have the same section, which
+// loads as the defaults without a warning.
+func TestShippedConfigFilesHaveOneNodeGroupsSection(t *testing.T) {
+	var sections []string
+	for _, path := range []string{"../../config/node-groups/platform.yaml", "../../hack/config.local.yaml", "../../config/server/auth/platform.yaml"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sections = append(sections, nodeGroupsSectionOf(string(raw)))
+		file, err := config.LoadFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		controller, err := config.LoadController(nil, lookupIn(management(nil)), file)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if !reflect.DeepEqual(controller.NodeGroups, config.DefaultNodeGroups()) {
+			t.Errorf("%s: nodeGroups = %+v (warnings %v), want the defaults without a warning", path, controller.NodeGroups, controller.NodeGroups.Warnings)
+		}
+	}
+	for i, s := range sections {
+		if s == "" || s != sections[0] {
+			t.Errorf("file %d's nodeGroups section differs from the first:\n%s", i, s)
+		}
+	}
+}
+
+// nodeGroupsSectionOf is the text of a file's nodeGroups section: its line
+// and the indented or comment lines after it.
+func nodeGroupsSectionOf(body string) string {
+	var out []string
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case line == "nodeGroups:":
+			in = true
+		case in && line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "#"):
+			in = false
+		}
+		if in {
+			out = append(out, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }

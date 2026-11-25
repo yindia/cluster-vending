@@ -28,6 +28,16 @@ spec:
       # Istio's own gateway chart, at the version of the other Istio charts.
       repository: https://blob.istio.io/istio-release/charts
       chart: gateway
+  # What it runs, for the sizing rule of the group it runs on (`controller
+  # --check`; docs/architecture.md#node-layout, "Sizing the system group"):
+  # where each workload's replicas and per-pod requests are in
+  # platformValues below, which must set them explicitly.
+  # With autoscaling the HPA's minimum is the replica count.
+  sizing:
+    deployments:
+      - name: istio-ingress-gateway
+        replicas: autoscaling.minReplicas
+        requests: resources.requests
   platformValues:
     # Phase 2: Karpenter's platform pool (docs/architecture.md#node-layout,
     # "Install order"): its labels, and a toleration of its taint. They have

@@ -19,7 +19,8 @@ import (
 )
 
 // The labels that put a node in a node group: Karpenter's NodePool (the
-// platform pool and the user groups), and the managed node group's, whose
+// platform pool, and a removed tenant group while it drains), and the
+// managed node group's, whose
 // nodes are the "system" group.
 const (
 	labelNodePool    = "karpenter.sh/nodepool"

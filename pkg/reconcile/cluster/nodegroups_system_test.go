@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -15,11 +14,11 @@ func holdResult(ctx context.Context, r *nodeGroupsResult) {
 }
 
 // status.node_groups lists the system group first (platform managed), its
-// phase from the NodeGroup managed resource, then the user groups.
+// phase from the NodeGroup managed resource, then a removed tenant group.
 func TestSystemNodeGroupIsFirstWithThePhaseOfItsManagedResource(t *testing.T) {
-	user := []*cloudv1.NodeGroupStatus{{Name: "gpu", Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, Nodes: 4}}
+	removed := []*cloudv1.NodeGroupStatus{{Name: "gpu", Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING, Nodes: 4}}
 	ctx := withNodeGroupsHolder(context.Background())
-	holdResult(ctx, &nodeGroupsResult{groups: user, system: systemObserved{nodes: 2, counted: true}})
+	holdResult(ctx, &nodeGroupsResult{removed: removed, system: systemObserved{nodes: 2, counted: true}})
 	for _, tt := range []struct {
 		name    string
 		state   cloudv1.ManagedResourceState
@@ -55,14 +54,14 @@ func TestSystemNodeGroupIsFirstWithThePhaseOfItsManagedResource(t *testing.T) {
 	}
 }
 
-// With no pass (a read, or the applier off) the recorded counts and user
-// groups stay; a platform group an earlier build recorded is dropped; a
+// With no pass (a read, or the applier off) the recorded counts and removed
+// tenant groups stay; a platform group an earlier build recorded is dropped; a
 // cluster with no node group object yet has a PENDING system group.
 func TestSystemNodeGroupFromTheRecordedStatus(t *testing.T) {
 	stored := &cloudv1.ClusterStatus{NodeGroups: []*cloudv1.NodeGroupStatus{
 		{Name: "platform", PlatformManaged: true, Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, Nodes: 1},
 		{Name: "system", PlatformManaged: true, Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, Nodes: 2, NodesNotice: "later"},
-		{Name: "gpu", Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, Nodes: 5}}}
+		{Name: "gpu", Phase: cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING, Nodes: 5}}}
 	st := &cloudv1.ClusterStatus{}
 
 	withNodeGroups(context.Background(), st, stored)
@@ -87,29 +86,4 @@ func TestSystemNodeGroupSaysWhenMovingOffTheOldPool(t *testing.T) {
 
 	require.Equal(t, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, st.NodeGroups[0].GetPhase())
 	require.Equal(t, "moving components off the old platform pool: 2 left (a, b)", st.NodeGroups[0].GetMessage())
-}
-
-// The cluster's default node group shows the admin's static size now (as
-// min, max and desired), not the one stored when it was created; an
-// imported cluster keeps its own.
-func TestViewShowsTheAdminsSystemNodeGroupSize(t *testing.T) {
-	w, row := nodeGroupWorld(t, newFakeWorkload(interceptor.Funcs{}))
-	w.svc.deps.NodeGroups.System.MinSize = 9
-
-	c, err := w.svc.View(t.Context(), row)
-
-	require.NoError(t, err)
-	sc := c.GetSpec().GetDefaultNodePool().GetScalingConfig()
-	require.EqualValues(t, 9, sc.GetMinSize())
-	require.EqualValues(t, 9, sc.GetMaxSize())
-	require.EqualValues(t, 9, sc.GetDesiredSize(), "the group has one static size")
-	stored, err := SpecOf(row)
-	require.NoError(t, err)
-	require.NotEqualValues(t, 9, stored.GetDefaultNodePool().GetScalingConfig().GetMaxSize(), "the stored spec is not rewritten")
-
-	imported := w.cluster(t)
-	imported.Imported, imported.State = true, StateImported
-	c, err = w.svc.View(t.Context(), imported)
-	require.NoError(t, err)
-	require.NotEqualValues(t, 9, c.GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize())
 }

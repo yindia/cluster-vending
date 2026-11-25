@@ -135,9 +135,6 @@ type Options struct {
 	// Manifests is --manifests of cluster nodes: the NodePool and
 	// EC2NodeClass YAML of the groups instead of their nodes.
 	Manifests bool
-	// NodeGroupOptions is --options of cluster nodes: what node groups of
-	// the tenant may use (families, types, architectures, capacity types).
-	NodeGroupOptions bool
 	// Engine and Events are --engine and --events of cluster violations:
 	// one policy engine; the admission events of the last hour instead of
 	// the violations.
@@ -145,6 +142,10 @@ type Options struct {
 	Events bool
 	// OnlyWarnings is --only-warnings of cluster events and network events.
 	OnlyWarnings bool
+	// Management is --management of account create: print how to create
+	// the management account's roles (AccountCreateManagement) instead of
+	// onboarding a tenant account.
+	Management bool
 	// OIDC is --oidc of cluster kubeconfig: the user signs in through the
 	// cluster's OIDC identity provider.
 	OIDC bool

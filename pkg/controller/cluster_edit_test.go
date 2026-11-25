@@ -57,13 +57,26 @@ func (w world) pinned(t *testing.T, id string) map[string]string {
 	return reconcilecluster.PinnedAddons(input.GetSpec())
 }
 
-func maxSize(t *testing.T, row *model.Cluster) uint32 {
+// editedCIDR is the public access CIDR editCIDRs sets.
+const editedCIDR = "198.51.100.0/24"
+
+// editCIDRs is a kubectl edit of the public endpoint's CIDRs.
+func editCIDRs(o *cloudv1alpha1.Cluster) {
+	o.Spec.ControlPlane.EndpointAccess.PublicAccessCIDRs = []string{editedCIDR}
+}
+
+// publicCIDR is the first public access CIDR of the stored spec.
+func publicCIDR(t *testing.T, row *model.Cluster) string {
 	t.Helper()
 	spec, err := reconcilecluster.SpecOf(row)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize()
+	cidrs := spec.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()
+	if len(cidrs) == 0 {
+		return ""
+	}
+	return cidrs[0]
 }
 
 func TestKubectlEditKeepsAddonPinsAndDropsRemovedOnes(t *testing.T) {
@@ -96,13 +109,13 @@ func TestKubectlEditIsBumpedAppliedAndObserved(t *testing.T) {
 	r, id := w.settledCluster(t)
 	before, err := w.store.Clusters().Get(t.Context(), tenant, id)
 	w.must(t, err)
-	w.edit(t, 2, func(o *cloudv1alpha1.Cluster) { o.Spec.DefaultNodePool.Scaling.MaxSize = 9 })
+	w.edit(t, 2, editCIDRs)
 	_, err = r.Reconcile(t.Context(), request("prod"))
 	w.must(t, err)
 	row, err := w.store.Clusters().Get(t.Context(), tenant, id)
 	w.must(t, err)
-	if row.Generation != before.Generation+1 || maxSize(t, row) != 9 {
-		t.Fatalf("generation %d (was %d), max size %d: the edit was not applied", row.Generation, before.Generation, maxSize(t, row))
+	if row.Generation != before.Generation+1 || publicCIDR(t, row) != editedCIDR {
+		t.Fatalf("generation %d (was %d), public CIDR %q: the edit was not applied", row.Generation, before.Generation, publicCIDR(t, row))
 	}
 	if obj := w.cluster(t, "prod"); edited(obj.Generation, obj.Status.ObservedGeneration) {
 		t.Fatalf("the edit still counts as not seen: generation %d, observed %d", obj.Generation, obj.Status.ObservedGeneration)
@@ -117,7 +130,7 @@ func TestKubectlEditWhileFrozenIsAppliedAfterUnfreeze(t *testing.T) {
 	hold := &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: platform.FreezeName},
 		Spec: cloudv1alpha1.ReleaseHoldSpec{Platform: true, Reason: "maintenance", By: "operator"}}
 	w.must(t, w.k.Create(t.Context(), hold))
-	w.edit(t, 2, func(o *cloudv1alpha1.Cluster) { o.Spec.DefaultNodePool.Scaling.MaxSize = 9 })
+	w.edit(t, 2, editCIDRs)
 	for range 3 {
 		_, err := r.Reconcile(t.Context(), request("prod"))
 		w.must(t, err)
@@ -127,8 +140,8 @@ func TestKubectlEditWhileFrozenIsAppliedAfterUnfreeze(t *testing.T) {
 	}
 	row, err := w.store.Clusters().Get(t.Context(), tenant, id)
 	w.must(t, err)
-	if row.Generation != before.Generation || maxSize(t, row) != 9 {
-		t.Fatalf("frozen: generation %d (was %d), max size %d", row.Generation, before.Generation, maxSize(t, row))
+	if row.Generation != before.Generation || publicCIDR(t, row) != editedCIDR {
+		t.Fatalf("frozen: generation %d (was %d), public CIDR %q", row.Generation, before.Generation, publicCIDR(t, row))
 	}
 	w.must(t, w.k.Delete(t.Context(), &cloudv1alpha1.ReleaseHold{ObjectMeta: metav1.ObjectMeta{Name: platform.FreezeName}}))
 	for range 2 {
@@ -137,8 +150,8 @@ func TestKubectlEditWhileFrozenIsAppliedAfterUnfreeze(t *testing.T) {
 	}
 	row, err = w.store.Clusters().Get(t.Context(), tenant, id)
 	w.must(t, err)
-	if row.Generation != before.Generation+1 || maxSize(t, row) != 9 {
-		t.Fatalf("after the unfreeze: generation %d (was %d), max size %d: the edit was lost", row.Generation, before.Generation, maxSize(t, row))
+	if row.Generation != before.Generation+1 || publicCIDR(t, row) != editedCIDR {
+		t.Fatalf("after the unfreeze: generation %d (was %d), public CIDR %q: the edit was lost", row.Generation, before.Generation, publicCIDR(t, row))
 	}
 	if obj := w.cluster(t, "prod"); edited(obj.Generation, obj.Status.ObservedGeneration) {
 		t.Fatalf("the edit is not observed after the unfreeze: generation %d, observed %d", obj.Generation, obj.Status.ObservedGeneration)

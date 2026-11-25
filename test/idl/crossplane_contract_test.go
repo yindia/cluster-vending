@@ -25,13 +25,7 @@ func TestEnumsDeclareCrossplaneValues(t *testing.T) {
 		{name: "aws", enum: cloudv1.AwsAuthenticationMode(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
 		{name: "aws", enum: cloudv1.AwsClusterLogType(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
 		{name: "aws", enum: cloudv1.AwsSupportType(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
-		{name: "aws", enum: cloudv1.AwsAmiType(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
 		{name: "aws", enum: cloudv1.NatGatewayMode(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
-		{name: "aws", enum: cloudv1.CapacityType(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
-		{name: "aws", enum: cloudv1.TaintEffect(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAws},
-		{name: "gcp", enum: cloudv1.TaintEffect(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetGcp},
-		{name: "azure", enum: cloudv1.TaintEffect(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAzure},
-		{name: "azure", enum: cloudv1.CapacityType(0).Descriptor(), provider: (*cloudv1.CrossplaneValues).GetAzure},
 	}
 
 	for _, tt := range tests {
@@ -57,9 +51,7 @@ func TestCrossplaneValueSpellings(t *testing.T) {
 		got   func(*cloudv1.CrossplaneValues) string
 		want  string
 	}{
-		{cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD.Descriptor().Values().ByNumber(1), (*cloudv1.CrossplaneValues).GetAws, "AL2023_x86_64_STANDARD"},
 		{cloudv1.AwsClusterLogType(0).Descriptor().Values().ByNumber(4), (*cloudv1.CrossplaneValues).GetAws, "controllerManager"},
-		{cloudv1.TaintEffect(0).Descriptor().Values().ByNumber(1), (*cloudv1.CrossplaneValues).GetAzure, "NoSchedule"},
 		{cloudv1.NatGatewayMode(0).Descriptor().Values().ByNumber(3), (*cloudv1.CrossplaneValues).GetAws, "regional"},
 	}
 	for _, tt := range tests {

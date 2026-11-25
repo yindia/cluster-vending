@@ -189,7 +189,7 @@ func TestSubTenantAccessOpensWithoutFlapping(t *testing.T) {
 	}
 	sub, parent := w.sub(t), w.parent(t)
 	sub.Spec.DisplayName, sub.Generation = "Cosmetic edit", sub.Generation+1
-	parent.Spec.DefaultNodePool = &cloud.NodePoolSpec{Scaling: &cloud.ScalingConfig{MinSize: 2, MaxSize: 8}}
+	parent.Spec.MaintenanceWindow = &cloud.MaintenanceWindow{Days: []cloud.Weekday{"Saturday"}, Start: "02:00", Duration: "4h"}
 	parent.Generation++
 	if err := w.management.Update(t.Context(), sub); err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestSubTenantAccessOpensWithoutFlapping(t *testing.T) {
 	}
 	w.pass(t)
 	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") || len(w.writes) != writes {
-		t.Fatal("display name or scaling edit unnecessarily revoked access")
+		t.Fatal("display name or maintenance window edit unnecessarily revoked access")
 	}
 }
 

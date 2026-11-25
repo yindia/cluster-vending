@@ -294,15 +294,18 @@ func definitionMessage(e entry, versions map[string]string) (*cloudv1.ComponentD
 		ConflictsWithAddons: slices.Clone(e.ConflictsWithAddons), Management: management(e.Definition),
 		Configurable: configurable(e.Definition), Versions: versions, Provider: providerOf(e.Provider),
 	}
-	if e.IsPlatform() {
-		return out, nil // fixed: its values are not a tenant's concern
-	}
-	out.UserValues = e.UserValues
 	var err error
-	if out.ValuesSchema, err = structOf(e.ValuesSchema); err != nil {
+	// The default config the platform applies is shown for every component,
+	// read-only; a platform component offers tenants nothing to set (no
+	// template, not configurable), so only the platform team changes it.
+	if out.PlatformValues, err = structOf(e.PlatformValues); err != nil {
 		return nil, err
 	}
-	if out.PlatformValues, err = structOf(e.PlatformValues); err != nil {
+	if e.IsPlatform() {
+		return out, nil
+	}
+	out.UserValues = e.UserValues
+	if out.ValuesSchema, err = structOf(e.ValuesSchema); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -364,13 +367,19 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 			offered, minor = t.offering.Versions, t.cluster.KubernetesMinor
 		}
 	}
+	var byMinor map[string]map[string]string
+	if req.GetClusterId() == "" {
+		if byMinor, err = s.channelVersions(ctx); err != nil {
+			return nil, err
+		}
+	}
 	res := &cloudv1.ListComponentDefinitionsResponse{}
 	off := core.Off(definitions(entries))
 	for _, e := range entries {
 		if !e.Valid || e.Internal || provider != "" && !e.Covers(provider) {
 			continue
 		}
-		var versions map[string]string
+		versions := byMinor[e.Name]
 		if v, ok := offered[e.Name]; ok {
 			versions = map[string]string{minor: v}
 		}
@@ -383,6 +392,35 @@ func (s *Service) ListComponentDefinitions(ctx context.Context, req *cloudv1.Lis
 		res.Definitions = append(res.Definitions, def)
 	}
 	return res, nil
+}
+
+// channelVersions are, by component and Kubernetes minor, the versions the
+// catalog offers without a cluster: for each channel, the release it offers
+// pins the minor that channel's clusters run. A channel offering nothing
+// adds nothing.
+func (s *Service) channelVersions(ctx context.Context) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	for _, channel := range []string{cloudv1alpha1.ChannelAlpha, cloudv1alpha1.ChannelBeta, cloudv1alpha1.ChannelStable} {
+		rel, err := s.release(ctx, "", channel)
+		if err != nil {
+			return nil, err
+		}
+		if rel == nil {
+			continue
+		}
+		for _, k := range rel.Spec.Content.Kubernetes {
+			if !strings.EqualFold(k.Channel, channel) {
+				continue
+			}
+			for _, pin := range k.Components {
+				if out[pin.Name] == nil {
+					out[pin.Name] = map[string]string{}
+				}
+				out[pin.Name][k.Minor] = pin.Version
+			}
+		}
+	}
+	return out, nil
 }
 
 // GetComponentValues returns a definition's values file as written.

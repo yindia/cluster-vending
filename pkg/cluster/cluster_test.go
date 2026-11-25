@@ -60,9 +60,7 @@ func minimalSpec() *cloudv1.ClusterSpec {
 		Region:       "us-east-1",
 		Network:      &cloudv1.ClusterNetwork{NetworkId: "0190a000-0000-7000-8000-000000000001"},
 		ControlPlane: &cloudv1.ControlPlaneSpec{EndpointAccess: &cloudv1.EndpointAccess{PublicAccessCidrs: []string{"203.0.113.0/24"}}},
-		DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m6i.large"},
-			ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
-		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
+		Provider:     &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
 	}
 }
 
@@ -90,8 +88,8 @@ func TestResolveSpecFillsDefaultsWithoutTouchingInput(t *testing.T) {
 		t.Error("no public access CIDRs: want an error, not a 0.0.0.0/0 default")
 	}
 	plan := RenderPlan(spec, []string{"subnet-a", "subnet-b"}, crossplaneawsBase())
-	if plan.AuthenticationMode != DefaultAuthMode || plan.NodePool.CapacityType != DefaultCapacityType ||
-		plan.NodePool.AMIType != DefaultAMIType {
+	if plan.AuthenticationMode != DefaultAuthMode || plan.NodePool.CapacityType != crossplaneaws.DefaultSystemCapacityType ||
+		plan.NodePool.AMIType != crossplaneaws.DefaultSystemAMIType {
 		t.Errorf("plan defaults = %q %q %q", plan.AuthenticationMode, plan.NodePool.CapacityType, plan.NodePool.AMIType)
 	}
 	if plan.NodePool.Desired != 2 {
@@ -139,8 +137,7 @@ func TestResolveOptions(t *testing.T) {
 	zones := []string{"use1-az1", "use1-az2"}
 	plain := mustResolve(t, minimalSpec(), zones)
 	if plain.GetAws().GetControlPlaneLogGroup() != nil || plain.GetAccess().GetAccessEntries() != nil ||
-		plain.GetControlPlane().GetEndpointAccess().EndpointPublicAccess != nil || plain.GetAws().Irsa != nil ||
-		plain.GetAws().GetDefaultNodePool().GetLaunchTemplate() != nil {
+		plain.GetControlPlane().GetEndpointAccess().EndpointPublicAccess != nil || plain.GetAws().Irsa != nil {
 		t.Errorf("optional settings appeared in a spec without them: %v", plain)
 	}
 	base := crossplaneaws.ClusterPlan{Prefix: "prod", ClusterName: "prod"}
@@ -157,18 +154,16 @@ func TestResolveOptions(t *testing.T) {
 		Policies: []*cloudv1.AccessPolicy{{PolicyArn: viewPolicy}}}},
 		Oidc: &cloudv1.OidcIdentityProvider{Name: "okta", IssuerUrl: "https://example.okta.com", ClientId: "kubernetes",
 			GroupsClaim: "groups", RequiredClaims: map[string]string{"hd": "example.com"}}}
-	in.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{ImageId: "ami-0123456789abcdef0", UserData: "Zm9v"}}
 	in.ControlPlane.SecretsEncryption = &cloudv1.SecretsEncryption{Enabled: true}
 	got := mustResolve(t, in, zones)
 	entry := got.GetAccess().GetAccessEntries()[0]
 	if got.GetAws().GetControlPlaneLogGroup().GetRetentionDays() != 90 ||
 		entry.GetType() != cloudv1.AccessEntryType_ACCESS_ENTRY_TYPE_STANDARD ||
-		entry.GetPolicies()[0].GetScope() != cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_CLUSTER ||
-		got.GetAws().GetDefaultNodePool().GetAmiType() != cloudv1.AwsAmiType_AWS_AMI_TYPE_CUSTOM {
+		entry.GetPolicies()[0].GetScope() != cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_CLUSTER {
 		t.Errorf("defaults not filled: %v", got)
 	}
 	p := RenderPlan(got, []string{"subnet-a"}, base)
-	if p.LogGroupRetentionDays != 90 || !p.CreateEncryptionKey || p.NodePool.AMIType != "CUSTOM" || !p.NodePool.LaunchTemplate.Rendered() ||
+	if p.LogGroupRetentionDays != 90 || !p.CreateEncryptionKey || p.NodePool.LaunchTemplate != nil ||
 		p.AccessEntries[0].Type != "STANDARD" || p.AccessEntries[0].Policies[0].Scope != "cluster" {
 		t.Errorf("plan = %+v", p)
 	}
@@ -178,10 +173,6 @@ func TestResolveOptions(t *testing.T) {
 	}
 
 	for name, change := range map[string]func(*cloudv1.ClusterSpec){
-		"launch template with a disk size": func(s *cloudv1.ClusterSpec) {
-			s.DefaultNodePool.DiskSizeGb = 50
-			s.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{Id: "lt-0123456789abcdef0", Version: "1"}}
-		},
 		"public endpoint without CIDRs": func(s *cloudv1.ClusterSpec) { s.ControlPlane.EndpointAccess.PublicAccessCidrs = nil },
 	} {
 		bad := minimalSpec()

@@ -205,9 +205,7 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 	spec, err := corecluster.ResolveSpec(&cloudv1.ClusterSpec{Region: "us-east-1",
 		Network:      &cloudv1.ClusterNetwork{NetworkId: net.ID},
 		ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.33", EndpointAccess: &cloudv1.EndpointAccess{PublicAccessCidrs: []string{"203.0.113.0/24"}}},
-		DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m6i.large"},
-			ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
-		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
+		Provider:     &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
 	}, []string{"use1-az1", "use1-az2"})
 	must(err)
 	row := &model.Cluster{TenantID: tenant, Name: "prod", NetworkID: net.ID, Provider: model.ProviderAWS, Region: "us-east-1",
@@ -239,6 +237,12 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 	if err := k.List(ctx, groups, client.MatchingLabels{crossplane.LabelCluster: row.ID}); err != nil || len(groups.Items) != 1 {
 		t.Fatalf("%d node groups after the loop's pass (%v)", len(groups.Items), err)
 	}
+	// The default managed node group is the platform's system group, of the
+	// admin's static size (2 by default) and default instance type.
+	if sc, fp := groups.Items[0].Spec.ForProvider.ScalingConfig, groups.Items[0].Spec.ForProvider; sc == nil ||
+		*sc.MinSize != 2 || *sc.MaxSize != 2 || *sc.DesiredSize != 2 || len(fp.InstanceTypes) != 1 || *fp.InstanceTypes[0] != "t3.medium" {
+		t.Fatalf("system node group %+v", fp)
+	}
 	obj := &cloudv1alpha1.Cluster{}
 	key := client.ObjectKey{Namespace: namespace, Name: "prod"}
 	must(k.Get(ctx, key, obj))
@@ -248,12 +252,7 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 	}
 
 	got, err := svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: row.ID})
-	if err != nil || got.GetCluster().GetSpec().GetNetwork().GetNetworkId() != net.ID ||
-		// The default managed node group has the admin's static size, 2 by
-		// default (FixedSystemNodePool): the requested 2..4 is not kept.
-		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 2 ||
-		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetDesiredSize() != 2 ||
-		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMinSize() != 2 {
+	if err != nil || got.GetCluster().GetSpec().GetNetwork().GetNetworkId() != net.ID {
 		t.Fatalf("GetCluster = %v, %v", got.GetCluster().GetSpec(), err)
 	}
 	updated, err := svc.UpdateCluster(ctx, &cloudv1.UpdateClusterRequest{TenantId: tenant,

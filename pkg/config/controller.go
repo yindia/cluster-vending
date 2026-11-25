@@ -144,8 +144,7 @@ type Controller struct {
 	// TeardownTimeout bounds a cluster deletion's teardown.
 	TeardownTimeout time.Duration
 	// NodeGroups is the node group layout (the server's too): the system
-	// group's size and, for new clusters, instance type; the user groups'
-	// defaults.
+	// group and the platform pool.
 	NodeGroups NodeGroups
 	// AWS is the management role the providers run as (its account
 	// derived from it), the credentials Secret of the providers when set,

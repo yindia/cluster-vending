@@ -75,39 +75,47 @@ func withDeleteStageStatus(ctx context.Context, st *cloudv1.ClusterStatus) {
 
 // definitionOrder are the components' sequences and requirements, as the
 // catalog has them now. A component the catalog no longer has is unknown:
-// it is removed with the platform components of the default sequence
-// (Karpenter, by name, stays sequence 0). Without the catalog nothing is
-// known and the Usages alone order the platform components.
+// it is removed with the platform components of the default sequence. The
+// NodeProvisioner stays sequence 0 (its stage is fixed): every definition
+// that plays the role, or the shipped one's name when the catalog has none
+// or cannot be read (component.RoleName). Without the catalog nothing else
+// is known and the Usages alone order the platform components.
 type definitionOrder struct {
-	sequence map[string]int32
-	requires map[string][]string
+	sequence     map[string]int32
+	requires     map[string][]string
+	provisioners map[string]bool
 }
 
 func (s *Reconciler) definitionOrder(ctx context.Context) definitionOrder {
-	out := definitionOrder{sequence: map[string]int32{}, requires: map[string][]string{}}
+	out := definitionOrder{sequence: map[string]int32{}, requires: map[string][]string{},
+		provisioners: map[string]bool{component.RoleName(nil, component.RoleNodeProvisioner, ""): true}}
 	if s.deps.Platform == nil {
 		return out
 	}
-	defs, err := s.deps.Platform.Definitions(ctx)
+	objs, err := s.deps.Platform.Definitions(ctx)
 	if err != nil {
 		s.logger().WarnContext(ctx, "deletion: the component catalog cannot be read; components are removed in the order of their Usages", "error", err)
 		return out
 	}
-	for i := range defs {
-		d, err := component.DefinitionOf(&defs[i])
-		if err != nil {
-			continue
-		}
+	defs := component.DefinitionsOf(objs)
+	for _, d := range defs {
 		out.sequence[d.Name], out.requires[d.Name] = d.Sequence, d.Requires
+	}
+	if provisioners := component.WithRole(defs, component.RoleNodeProvisioner, ""); len(provisioners) > 0 {
+		out.provisioners = map[string]bool{}
+		for _, d := range provisioners {
+			out.provisioners[d.Name] = true
+		}
 	}
 	return out
 }
 
-// sequenceOf is a component's sequence: 0 for Karpenter (by name, whatever
-// the catalog says: its stage is fixed), else the catalog's, else the default.
+// sequenceOf is a component's sequence: 0 for the NodeProvisioner (its
+// stage is fixed, whatever the catalog says), else the catalog's, else the
+// default.
 func (o definitionOrder) sequenceOf(name string) int32 {
-	if name == karpenterComponent {
-		return 0 // by name first: a catalog that moved it would put it among the rest
+	if o.provisioners[name] {
+		return component.NodeProvisionerSequence // first: a catalog that moved it would put it among the rest
 	}
 	if seq, ok := o.sequence[name]; ok {
 		return seq

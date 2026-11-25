@@ -32,7 +32,6 @@ func allOptions(p *crossplaneaws.ClusterPlan) {
 	p.LogGroupRetentionDays = 90
 	p.CreateEncryptionKey, p.EncryptionKeyARN = true, testKeyARN
 	p.IRSA, p.OIDCIssuer = true, testIssuer
-	p.ClusterSecurityGroupID = "sg-0c1u5ter"
 	p.ClusterRoleName, p.NodeRoleName = "tf-cluster", "tf-node"
 	p.AccessEntries = []crossplaneaws.AccessEntryPlan{
 		{Principal: "arn:aws:iam::444455556666:role/dev", Policies: []crossplaneaws.AccessPolicyPlan{
@@ -41,9 +40,8 @@ func allOptions(p *crossplaneaws.ClusterPlan) {
 	}
 	p.IdentityProvider = &crossplaneaws.IdentityProviderPlan{Name: "okta", IssuerURL: "https://example.okta.com", ClientID: "kubernetes",
 		UsernameClaim: "email", GroupsClaim: "groups", GroupsPrefix: "oidc:", RequiredClaims: map[string]string{"hd": "example.com"}}
-	p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{SecurityGroupIDs: []string{"sg-0bbb"},
-		ImageID: "ami-0123456789abcdef0", UserData: "Zm9v"}
-	p.NodePool.AMIType, p.NodePool.DiskSizeGB = "CUSTOM", 0
+	p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ID: "lt-0aaa", Version: "3"}
+	p.NodePool.DiskSizeGB = 0
 }
 
 func byName(objects []client.Object) map[string]client.Object {
@@ -145,16 +143,15 @@ func TestClusterOptionsRender(t *testing.T) {
 		len(oidc.Spec.ForProvider.ThumbprintList) != 1 || oidc.Annotations[crossplaneaws.ExternalNameAnnotation] != "" {
 		t.Errorf("oidc provider = %+v", oidc.Spec.ForProvider)
 	}
-	// ec2 LaunchTemplate: IdentifierFromProvider (lt-..., set by the provider).
+	// An existing launch template (an imported node group's) is referred
+	// to, never rendered.
 	ng := o["prod-1a2b3c4d-default"].(*awseks.NodeGroup)
-	lt := o["prod-1a2b3c4d-default-lt"].(*awsec2.LaunchTemplate).Spec.ForProvider
-	if *lt.VPCSecurityGroupIds[0] != "sg-0c1u5ter" || *lt.VPCSecurityGroupIds[1] != "sg-0bbb" || *lt.ImageID != "ami-0123456789abcdef0" ||
-		*lt.UserData != "Zm9v" || *lt.Name != "prod-1a2b3c4d-default-lt" {
-		t.Errorf("launch template = %+v", lt)
+	if o["prod-1a2b3c4d-default-lt"] != nil {
+		t.Error("a launch template was rendered")
 	}
-	if got := ng.Spec.ForProvider; *got.LaunchTemplate.Name != "prod-1a2b3c4d-default-lt" || *got.LaunchTemplate.Version != "1" ||
-		got.Version != nil || *got.AMIType != "CUSTOM" || ng.Annotations[crossplaneaws.LaunchTemplateAnnotation] == "" {
-		t.Errorf("node group = %+v %v, want the rendered template, no version (custom AMI)", got.LaunchTemplate, ng.Annotations)
+	if got := ng.Spec.ForProvider; *got.LaunchTemplate.ID != "lt-0aaa" || *got.LaunchTemplate.Version != "3" ||
+		ng.Annotations[crossplaneaws.LaunchTemplateAnnotation] != "existing:lt-0aaa" {
+		t.Errorf("node group = %+v %v, want the existing template", got.LaunchTemplate, ng.Annotations)
 	}
 	// Access entries: named by principal and type; the association by
 	// policy and scope.
@@ -210,7 +207,7 @@ func TestClusterOptionsRender(t *testing.T) {
 		}
 	}
 	for of, by := range map[string]string{"Group/prod-1a2b3c4d-logs": "Cluster", "Key/prod-1a2b3c4d-secrets-key": "Cluster",
-		"OpenIDConnectProvider/prod-1a2b3c4d-oidc": "Cluster", "LaunchTemplate/prod-1a2b3c4d-default-lt": "NodeGroup"} {
+		"OpenIDConnectProvider/prod-1a2b3c4d-oidc": "Cluster"} {
 		if held[of] != by {
 			t.Errorf("usage of %s by %q, want by %s", of, held[of], by)
 		}
@@ -248,12 +245,10 @@ func TestClusterResourcesPending(t *testing.T) {
 	}{
 		{"nothing", func(*crossplaneaws.ClusterPlan) {}, nil},
 		{"held for the log group", func(p *crossplaneaws.ClusterPlan) { p.ClusterHeld = true },
-			[]string{"Cluster", "ClusterAuth", "LaunchTemplate", "NodeGroup"}},
+			[]string{"Cluster", "ClusterAuth", "NodeGroup"}},
 		{"key without an ARN yet", func(p *crossplaneaws.ClusterPlan) { p.EncryptionKeyARN = "" },
-			[]string{"Cluster", "ClusterAuth", "LaunchTemplate", "NodeGroup"}},
+			[]string{"Cluster", "ClusterAuth", "NodeGroup"}},
 		{"issuer unknown", func(p *crossplaneaws.ClusterPlan) { p.OIDCIssuer = "" }, []string{"OpenIDConnectProvider"}},
-		{"cluster security group unknown", func(p *crossplaneaws.ClusterPlan) { p.ClusterSecurityGroupID = "" },
-			[]string{"LaunchTemplate", "NodeGroup"}},
 	} {
 		p := clusterPlan()
 		allOptions(&p)
@@ -288,10 +283,8 @@ func TestNodeGroupReplacementOnLaunchTemplate(t *testing.T) {
 	v1 := name(&crossplaneaws.LaunchTemplatePlan{ID: "lt-0aaa", Version: "1"})
 	v2 := name(&crossplaneaws.LaunchTemplatePlan{ID: "lt-0aaa", Version: "2"})
 	other := name(&crossplaneaws.LaunchTemplatePlan{ID: "lt-0bbb", Version: "1"})
-	rendered := name(&crossplaneaws.LaunchTemplatePlan{SecurityGroupIDs: []string{"sg-1"}})
-	renderedMore := name(&crossplaneaws.LaunchTemplatePlan{SecurityGroupIDs: []string{"sg-1", "sg-2"}})
-	if v1 != v2 || none == v1 || v1 == other || rendered == renderedMore || rendered == none {
-		t.Errorf("names: none %s, v1 %s, v2 %s, other %s, rendered %s / %s", none, v1, v2, other, rendered, renderedMore)
+	if v1 != v2 || none == v1 || v1 == other {
+		t.Errorf("names: none %s, v1 %s, v2 %s, other %s", none, v1, v2, other)
 	}
 	p := clusterPlan()
 	p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ID: "lt-0aaa", Version: "1"}

@@ -3,6 +3,7 @@ package cloudformation
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,14 +23,36 @@ var goldenHashes = map[int]map[string]string{
 	},
 }
 
+// managementGoldenHashes is goldenHashes of the management account's
+// templates, by ManagementTemplateVersion.
+var managementGoldenHashes = map[int]map[string]string{
+	1: {
+		"management": "8c2d5659467d4256d2a30300006cdff373576d35b18dfd222a0a5521a305300a",
+		"server":     "5f0e74cc9d129567b00ae5d03540f3c7a250cb0213ee0e8e38754076895b2d20",
+	},
+}
+
 func hashOf(t *testing.T, role string) string {
 	t.Helper()
-	body, err := Template(role)
-	if err != nil {
-		t.Fatal(err)
+	body, ok := anyTemplate(role)
+	if !ok {
+		t.Fatalf("no template of %s", role)
 	}
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
+}
+
+func TestManagementTemplatesChangeOnlyWithAVersionBump(t *testing.T) {
+	golden, ok := managementGoldenHashes[ManagementTemplateVersion]
+	if !ok {
+		t.Fatalf("ManagementTemplateVersion %d has no entry in managementGoldenHashes", ManagementTemplateVersion)
+	}
+	for _, role := range managementRoles {
+		if got := hashOf(t, role); got != golden[role] {
+			t.Errorf("the %s template changed (sha256 %s, version %d expects %q): bump ManagementTemplateVersion in version.go, "+
+				"run make cf-generate, and record the new hashes", role, got, ManagementTemplateVersion, golden[role])
+		}
+	}
 }
 
 func TestTemplatesChangeOnlyWithAVersionBump(t *testing.T) {
@@ -46,12 +69,13 @@ func TestTemplatesChangeOnlyWithAVersionBump(t *testing.T) {
 }
 
 func TestTemplatesCarryTheirVersion(t *testing.T) {
-	want := "Key: " + TagTemplateVersion + "\n          Value: '" + strconv.Itoa(TemplateVersion) + "'"
-	for _, role := range roles {
-		body, err := Template(role)
-		if err != nil {
-			t.Fatal(err)
+	for _, role := range slices.Concat(roles, managementRoles) {
+		version := TemplateVersion
+		if slices.Contains(managementRoles, role) {
+			version = ManagementTemplateVersion
 		}
+		want := "Key: " + TagTemplateVersion + "\n          Value: '" + strconv.Itoa(version) + "'"
+		body, _ := anyTemplate(role)
 		if !strings.Contains(string(body), want) {
 			t.Errorf("the %s template has no role tag %s", role, want)
 		}

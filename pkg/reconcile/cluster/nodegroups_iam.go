@@ -22,8 +22,10 @@ import (
 // as applied (the live Policy, Ready) allows iam:PassRole on the node
 // role. A node class applied earlier makes Karpenter call
 // AddRoleToInstanceProfile, which is denied until the policy has caught
-// up. It reads a handful of the cluster's own objects, never a list.
-func (s *Reconciler) karpenterIAMWait(ctx context.Context, namespace, prefix, accountID, region string) (string, error) {
+// up. provisioner is the NodeProvisioner's definition name, which names its
+// controller policy. It reads a handful of the cluster's own objects, never
+// a list.
+func (s *Reconciler) karpenterIAMWait(ctx context.Context, provisioner, namespace, prefix, accountID, region string) (string, error) {
 	objects := crossplaneaws.KarpenterNodeIAMObjects(namespace, prefix)
 	refs := make([]managed.Ref, 0, len(objects))
 	for _, o := range objects {
@@ -53,7 +55,7 @@ func (s *Reconciler) karpenterIAMWait(ctx context.Context, namespace, prefix, ac
 		waits = append(waits, fmt.Sprintf("%s %s not Ready", kind, strings.Join(notReady[kind], ", ")))
 	}
 	roleARN := "arn:" + crossplaneaws.Partition(region) + ":iam::" + accountID + ":role/" + crossplaneaws.KarpenterNodeRoleName(prefix)
-	policyName := crossplaneaws.ComponentPolicyName(crossplaneaws.ComponentIAMPlan{ClusterPrefix: prefix, Component: karpenterComponent})
+	policyName := crossplaneaws.ComponentPolicyName(crossplaneaws.ComponentIAMPlan{ClusterPrefix: prefix, Component: provisioner})
 	if w, err := s.policyWait(ctx, namespace, policyName, roleARN); err != nil {
 		return "", err
 	} else if w != "" {

@@ -39,10 +39,7 @@ func (p *ClusterPlan) FillLive(ctx context.Context, seen sequence.Observed) erro
 			return fmt.Errorf("read EKS cluster %s: %w", eks.Name, err)
 		}
 		if at := eks.Status.AtProvider; found && ptr.Deref(at.Status, "") == EKSActive {
-			p.OIDCIssuer, p.ClusterSecurityGroupID = issuerOf(at), ""
-			if at.VPCConfig != nil {
-				p.ClusterSecurityGroupID = ptr.Deref(at.VPCConfig.ClusterSecurityGroupID, "")
-			}
+			p.OIDCIssuer = issuerOf(at)
 		}
 	}
 	if p.CreateEncryptionKey {
@@ -91,8 +88,7 @@ func issuerOf(at awseks.ClusterObservation) string {
 // late reports whether the plan has objects that need a value of another
 // resource (FillLive): its render then depends on what exists.
 func (p ClusterPlan) late() bool {
-	lt := p.NodePool.LaunchTemplate
-	return p.LogGroupRetentionDays > 0 || p.CreateEncryptionKey || p.IRSA || p.Karpenter && p.AccountID == "" || (lt.Rendered() && len(lt.SecurityGroupIDs) > 0)
+	return p.LogGroupRetentionDays > 0 || p.CreateEncryptionKey || p.IRSA || p.Karpenter && p.AccountID == ""
 }
 
 // lateRender renders a plan with what the management cluster has at the

@@ -110,17 +110,8 @@ service ClusterService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // Reads what user node groups may use: the platform admin's allowlist of
-  // instance families and types (the server's node-group-instance-families
-  // and node-group-instance-types settings), the architectures and the
-  // capacity types. CreateCluster and UpdateCluster refuse node groups
-  // outside it.
-  rpc GetNodeGroupOptions(GetNodeGroupOptionsRequest) returns (GetNodeGroupOptionsResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
-
   // Lists the Karpenter objects (EC2NodeClass and NodePool) of the
-  // cluster's node groups, the platform group first, rendered from the
+  // cluster's platform pool, rendered from the
   // stored spec exactly as the controller applies them to the workload
   // cluster. Empty for an imported cluster that was not taken over. Never
   // connects to the workload cluster.
@@ -225,7 +216,8 @@ message ImportClusterRequest {
 
 // AwsImportCluster says how an EKS cluster maps onto the contract.
 message AwsImportCluster {
-  // The node group that becomes spec.default_node_pool. Required: the
+  // The node group adopted as the cluster's default node group, kept as it
+  // is (read-only: the platform never changes its settings). Required: the
   // contract has one node group per cluster. The cluster's other node
   // groups are NOT_IMPORTED: they stay unmanaged and block deleting the
   // cluster until they are removed. No node group is created or replaced
@@ -389,17 +381,6 @@ message UpdateClusterRequest {
   //   spec.control_plane.secrets_encryption  (the whole message; it can be
   //                                           turned on, never off or moved
   //                                           to another key)
-  //   spec.default_node_pool.scaling_config.min_size
-  //   spec.default_node_pool.scaling_config.max_size
-  //   spec.default_node_pool.labels
-  //   spec.default_node_pool.taints
-  //   spec.default_node_pool.instance_types
-  //   spec.default_node_pool.capacity_type
-  //   spec.default_node_pool.disk_size_gb
-  //   spec.aws.default_node_pool.ami_type
-  //   spec.aws.default_node_pool.launch_template
-  //     (EKS cannot change these five in place: a new node group is created
-  //     and the old one is deleted once the new one is ready)
   //   spec.aws.addons                                 (the whole list)
   //   spec.aws.enabled_cluster_log_types
   //   spec.aws.upgrade_policy.support_type

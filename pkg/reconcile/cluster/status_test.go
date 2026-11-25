@@ -13,9 +13,7 @@ func minimalSpec() *cloudv1.ClusterSpec {
 		Region:       "us-east-1",
 		Network:      &cloudv1.ClusterNetwork{NetworkId: "0190a000-0000-7000-8000-000000000001"},
 		ControlPlane: &cloudv1.ControlPlaneSpec{EndpointAccess: &cloudv1.EndpointAccess{PublicAccessCidrs: []string{"203.0.113.0/24"}}},
-		DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m6i.large"},
-			ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
-		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
+		Provider:     &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
 	}
 }
 

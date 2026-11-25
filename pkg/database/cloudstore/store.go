@@ -79,6 +79,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
@@ -118,7 +119,7 @@ const (
 	AnnotationInput = group + "input"
 	// AnnotationAdoption is what an imported cluster keeps of the resources
 	// it was imported from (JSON crossplaneaws.Adoption).
-	AnnotationAdoption = group + "adoption"
+	AnnotationAdoption = crossplaneaws.AdoptionAnnotation
 	// AnnotationRemainder holds the fields of the contract spec the typed
 	// spec has no place for (protojson of a spec with only those fields).
 	AnnotationRemainder = group + "spec-remainder"

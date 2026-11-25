@@ -9,9 +9,12 @@ spec:
   description: Karpenter node autoscaler. It launches EC2 nodes for the platform pool and the cluster's own (user) node groups; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them. It runs on the system managed node group; the platform's other components run on its platform pool (docs/architecture.md#node-layout).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
-  # The first platform component (phase 1): every other one installs after
-  # it, by sequence; those on the platform pool also wait for that pool.
-  sequence: 0
+  # The node provisioner (pkg/component/roles.go): by its role it installs
+  # first (phase 1, sequence 0) and is the only definition on the system
+  # group; every other platform component installs after it, by sequence,
+  # those on the platform pool also wait for that pool; it cannot be
+  # disabled; the user node groups are applied once it is Ready.
+  role: NodeProvisioner
   namespace: kube-system
   install:
     helm:
@@ -299,6 +302,15 @@ spec:
             }
           ]
         }
+  # What it runs, for the sizing rule of the group it runs on (`controller
+  # --check`; docs/architecture.md#node-layout, "Sizing the system group"):
+  # where each workload's replicas and per-pod requests are in
+  # platformValues below, which must set them explicitly.
+  sizing:
+    deployments:
+      - name: karpenter
+        replicas: replicas
+        requests: controller.resources.requests
   platformValues:
     serviceAccount:
       create: true

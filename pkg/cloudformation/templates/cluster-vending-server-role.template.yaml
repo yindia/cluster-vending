@@ -1,0 +1,174 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Conditions:
+  HasBoth: !And
+    - !Condition 'HasOidcProvider'
+    - !Condition 'HasLocalPrincipal'
+  HasLocalPrincipal: !Not
+    - !Equals
+      - !Ref 'LocalPrincipalArn'
+      - ''
+  HasOidcProvider: !Not
+    - !Equals
+      - !Ref 'OidcProviderArn'
+      - ''
+Description: >-
+  cluster-vending server role: the identity the cluster-vending API server runs as (IRSA, or a local principal), which reads the cluster results buckets through the tenant roles. It may only assume them.
+Outputs:
+  RoleName:
+    Description: The role's name
+    Value: !Ref 'Role'
+  ServerRoleArn:
+    Description: aws-server-role-arn of the API server, and ServerPrincipalArn of every tenant role stack
+    Value: !GetAtt 'Role.Arn'
+  TemplateVersion:
+    Description: The version of this template (ManagementTemplateVersion of pkg/cloudformation/version.go)
+    Value: '1'
+Parameters:
+  LocalPrincipalArn:
+    AllowedPattern: ^$|^arn:aws[a-z-]*:iam::\d{12}:(user|role)/.+$
+    Default: ''
+    Description: 'ARN of an IAM user or role that may assume this role (local development: aws sts get-caller-identity; an SSO session''s role, not its assumed-role ARN). Empty: none.'
+    Type: String
+  MaxSessionDuration:
+    Default: 3600
+    Description: 'Longest session of this role, in seconds (3600 to 43200): up to 43200 for a long local session; IRSA renews by itself.'
+    MaxValue: 43200
+    MinValue: 3600
+    Type: Number
+  OidcProviderArn:
+    AllowedPattern: ^$|^arn:aws[a-z-]*:iam::\d{12}:oidc-provider/.+$
+    Default: ''
+    Description: 'ARN of the IAM OIDC provider of the management EKS cluster (production, IRSA): the role trusts the service accounts that run as it there. Empty: no IRSA (local development).'
+    Type: String
+  PlatformNamespace:
+    AllowedPattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+    Default: cluster-vending-system
+    Description: Namespace of the cluster-vending controller and API server in the management cluster (with IRSA).
+    Type: String
+  RoleName:
+    AllowedPattern: ^[\w+=,.@-]{1,64}$
+    Default: cluster-vending-server
+    Description: Name of the IAM role, and prefix of its policy.
+    MaxLength: 64
+    Type: String
+  ServiceAccount:
+    AllowedPattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+    Default: cluster-vending-server
+    Description: 'Service account of the cluster-vending API server in PlatformNamespace (with IRSA): the Helm chart''s cluster-vending-server by default.'
+    Type: String
+  TenantRolePattern:
+    AllowedPattern: ^[\w+=,.@*?/-]{1,128}$
+    Default: cluster-vending-*
+    Description: 'Names of the tenant roles this role may assume, in any account: cluster-vending-* covers every template''s role (reader, updater, provisioner).'
+    Type: String
+Resources:
+  Role:
+    Properties:
+      AssumeRolePolicyDocument: !If
+        - HasBoth
+        - !Sub
+          - |-
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "ServerIRSA",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "${OidcProviderArn}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${Issuer}:aud": "sts.amazonaws.com",
+                      "${Issuer}:sub": "system:serviceaccount:${PlatformNamespace}:${ServiceAccount}"
+                    }
+                  }
+                },
+                {
+                  "Sid": "LocalPrincipal",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "${LocalPrincipalArn}"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            }
+          - Issuer: !Select
+              - 1
+              - !Split
+                - :oidc-provider/
+                - !Sub '${OidcProviderArn}:oidc-provider/none'
+        - !If
+          - HasOidcProvider
+          - !Sub
+            - |-
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Sid": "ServerIRSA",
+                    "Effect": "Allow",
+                    "Principal": {
+                      "Federated": "${OidcProviderArn}"
+                    },
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Condition": {
+                      "StringEquals": {
+                        "${Issuer}:aud": "sts.amazonaws.com",
+                        "${Issuer}:sub": "system:serviceaccount:${PlatformNamespace}:${ServiceAccount}"
+                      }
+                    }
+                  }
+                ]
+              }
+            - Issuer: !Select
+                - 1
+                - !Split
+                  - :oidc-provider/
+                  - !Sub '${OidcProviderArn}:oidc-provider/none'
+          - Statement:
+              - Action:
+                  - sts:AssumeRole
+                Effect: Allow
+                Principal:
+                  AWS:
+                    - !Ref 'LocalPrincipalArn'
+                Sid: LocalPrincipal
+            Version: '2012-10-17'
+      Description: The cluster-vending platform's server role
+      MaxSessionDuration: !Ref 'MaxSessionDuration'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - sts:AssumeRole
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::*:role/${TenantRolePattern}'
+                Sid: AssumeTenantRoles
+            Version: '2012-10-17'
+          PolicyName: !Sub '${RoleName}-assume-tenant-roles'
+      RoleName: !Ref 'RoleName'
+      Tags:
+        - Key: cluster-vending.io/role
+          Value: server
+        - Key: cluster-vending.io/template-version
+          Value: '1'
+        - Key: managed-by
+          Value: cluster-vending
+    Type: AWS::IAM::Role
+Rules:
+  TrustSource:
+    Assertions:
+      - Assert: !Or
+          - !Not
+            - !Equals
+              - !Ref 'OidcProviderArn'
+              - ''
+          - !Not
+            - !Equals
+              - !Ref 'LocalPrincipalArn'
+              - ''
+        AssertDescription: 'Set OidcProviderArn (IRSA), LocalPrincipalArn (local), or both: the role must trust someone.'

@@ -96,7 +96,7 @@ func TestRenderedNamesAreValidObjectNames(t *testing.T) {
 	plans := map[string][]client.Object{"default cluster": crossplaneaws.ClusterResources(clusterPlanForNames())}
 	full := clusterPlanForNames()
 	full.LogGroupRetentionDays, full.CreateEncryptionKey, full.IRSA = 90, true, true
-	full.EncryptionKeyARN, full.OIDCIssuer, full.ClusterSecurityGroupID = "arn:aws:kms:us-east-1:444455556666:key/k", "https://oidc.eks.us-east-1.amazonaws.com/id/A", "sg-0aaa"
+	full.EncryptionKeyARN, full.OIDCIssuer = "arn:aws:kms:us-east-1:444455556666:key/k", "https://oidc.eks.us-east-1.amazonaws.com/id/A"
 	full.AccessEntries = []crossplaneaws.AccessEntryPlan{{Principal: "arn:aws:iam::444455556666:role/dev", Type: "STANDARD",
 		Policies: []crossplaneaws.AccessPolicyPlan{{PolicyARN: "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy", Scope: "cluster"}}}}
 	plans["cluster with every option"] = crossplaneaws.ClusterResources(full)

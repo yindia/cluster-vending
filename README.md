@@ -44,7 +44,7 @@ Then the CLI (terminal 3). Manifests are in `examples/`; each command has `--hel
 
 ```sh
 bin/cluster-vending tenant create acme
-bin/cluster-vending account create -f examples/cloudaccount.yaml   # prints the role stack to create
+bin/cluster-vending account create -f examples/cloudaccount.yaml   # prints the role stacks to create (provisioner, then the recommended reader)
 bin/cluster-vending account verify --id BOOTSTRAP_ID --tenant acme --wait
 bin/cluster-vending network create -f examples/network.yaml --wait
 bin/cluster-vending cluster create -f examples/cluster.yaml --wait
@@ -54,7 +54,18 @@ The local setup, the AWS credential modes, login and the console are described i
 [docs/architecture.md#run-locally](docs/architecture.md#run-locally) and
 [docs/architecture.md#aws-credentials](docs/architecture.md#aws-credentials).
 
+## Deploy
+
+The Helm chart [`charts/cluster-vending`](charts/cluster-vending/README.md) runs the
+API server, the controller, the live reader and the console in a management cluster
+with Crossplane installed. See
+[docs/architecture.md#install-with-helm](docs/architecture.md#install-with-helm).
+
 ## Where to read more
+
+- [docs/local-development.md](docs/local-development.md): running the controller,
+  API and console locally against a management cluster and AWS account of your
+  choice, and troubleshooting.
 
 - [docs/architecture.md](docs/architecture.md): what exists, how it works, the
   custom resources, configuration, operations and known limits.

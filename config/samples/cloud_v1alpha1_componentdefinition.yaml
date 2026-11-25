@@ -73,8 +73,9 @@ spec:
   provider: aws
   description: Node autoscaling. Launches EC2 instances for pending pods.
   namespace: kube-system
-  # Karpenter is the first platform component: the CRD refuses any other
-  # sequence for it.
+  # Sequence 0 is the node provisioner's: the shipped Platform karpenter
+  # declares role: NodeProvisioner, which puts it first; a definition named
+  # karpenter without the role must say 0 (`controller --check`).
   sequence: 0
   # An IRSA role (the default access): the cluster needs spec.aws.irsa. The
   # ${...} placeholders are filled in per cluster. No interruption queue
@@ -130,15 +131,6 @@ spec:
       batchMaxDuration: 10s
       # featureGates:
       #   spotToSpotConsolidation: true
-    defaultNodePool:
-      # false: no default NodePool; bring your own.
-      enabled: true
-      # The most CPU the default NodePool may launch.
-      limits:
-        cpu: "64"
-      # Replaced as a whole when you set it. Add spot to save money.
-      requirements:
-      - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
   valuesSchema:
     type: object
     additionalProperties: false
@@ -151,14 +143,6 @@ spec:
         properties:
           featureGates: {type: object, additionalProperties: {type: boolean}}
           batchMaxDuration: {type: string}
-      defaultNodePool:
-        type: object
-        additionalProperties: false
-        properties:
-          enabled: {type: boolean}
-          limits: {type: object}
-          requirements: {type: array}
-          disruption: {type: object}
 ---
 # A chart in a private OCI registry (ECR). The operator keeps a
 # kubernetes.io/dockerconfigjson Secret fresh in the platform namespace (ECR

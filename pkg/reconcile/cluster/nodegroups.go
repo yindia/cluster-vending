@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -22,7 +20,6 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/clustersummary"
-	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -36,30 +33,12 @@ const (
 	nodeGroupTotalTimeout = 45 * time.Second
 	nodeListLimit         = 500
 	nodeGroupMessageMax   = 200
-	// karpenterComponent is the platform component whose Ready phase
-	// releases the node groups.
-	karpenterComponent = component.KarpenterComponent
 	// legacyPlatformPool is the name of the Karpenter NodePool and
 	// EC2NodeClass an earlier build applied for the platform's components.
 	// The system node group runs them now; what is left of it in a
 	// workload cluster is removed once nothing needs it (legacyPoolGate).
 	legacyPlatformPool = "platform"
 )
-
-// nodeGroup is a user node group as the status names it.
-type nodeGroup struct {
-	Name string
-}
-
-// nodeGroupsOf are the spec's user node groups, in order. The system node
-// group, the platform's only one, is not among them (withNodeGroups).
-func nodeGroupsOf(spec *cloudv1.ClusterSpec) []nodeGroup {
-	out := make([]nodeGroup, 0, len(spec.GetNodeGroups()))
-	for _, g := range spec.GetNodeGroups() {
-		out = append(out, nodeGroup{Name: g.GetName()})
-	}
-	return out
-}
 
 func objectRef(u *unstructured.Unstructured) string {
 	return strings.ToLower(u.GetKind()) + "/" + u.GetName()
@@ -78,8 +57,10 @@ type kubeletView struct {
 
 // nodeGroupsResult is what a pass learned of the cluster's node groups.
 type nodeGroupsResult struct {
-	// groups are the user groups' statuses.
-	groups []*cloudv1.NodeGroupStatus
+	// removed are the statuses of the tenant groups a cluster had before
+	// the platform owned its node groups, DELETING while they are removed
+	// (removeNodeGroups).
+	removed []*cloudv1.NodeGroupStatus
 	// platformPool is the platform pool's status (PROP-03); nil: there is
 	// no pool configured, or nothing is known of it.
 	platformPool *cloudv1.NodeGroupStatus
@@ -124,23 +105,21 @@ func nodeGroupsOfPass(ctx context.Context) *nodeGroupsResult {
 // withNodeGroups puts the node groups into a status being built: the
 // system group first (its phase from the node group's managed resource in
 // st, its node count from the pass or, failing that, the recorded status),
-// then the user groups this pass found, else the ones recorded.
+// then the platform pool, then the removed tenant groups still being
+// deleted, as this pass found them, else as recorded.
 func withNodeGroups(ctx context.Context, st, stored *cloudv1.ClusterStatus) {
 	var observed systemObserved
-	var user []*cloudv1.NodeGroupStatus
+	removed := recordedRemoved(stored.GetNodeGroups())
 	var pool *cloudv1.NodeGroupStatus
 	if r := nodeGroupsOfPass(ctx); r != nil {
-		observed, user, pool = r.system, r.groups, r.platformPool
+		observed, removed, pool = r.system, r.removed, r.platformPool
 	} else {
 		for _, g := range stored.GetNodeGroups() {
 			// The system group is rebuilt below; the platform pool's record
 			// stays; a platform group recorded by an earlier build is gone
 			// with its pool.
-			switch {
-			case g.GetPlatformManaged() && g.GetName() == crossplaneaws.PoolPlatform:
+			if g.GetPlatformManaged() && g.GetName() == crossplaneaws.PoolPlatform {
 				pool = g
-			case !g.GetPlatformManaged():
-				user = append(user, g)
 			}
 		}
 	}
@@ -148,7 +127,19 @@ func withNodeGroups(ctx context.Context, st, stored *cloudv1.ClusterStatus) {
 	if pool != nil {
 		platform = append(platform, pool)
 	}
-	st.NodeGroups = slices.Concat(platform, user)
+	st.NodeGroups = slices.Concat(platform, removed)
+}
+
+// recordedRemoved are the recorded statuses of removed tenant groups (the
+// groups that are not the platform's): kept while a pass cannot look.
+func recordedRemoved(stored []*cloudv1.NodeGroupStatus) []*cloudv1.NodeGroupStatus {
+	var out []*cloudv1.NodeGroupStatus
+	for _, g := range stored {
+		if !g.GetPlatformManaged() {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // systemStatus is the status of the default managed node group: PENDING,
@@ -199,11 +190,12 @@ func systemStatus(st, stored *cloudv1.ClusterStatus, observed systemObserved) *c
 	return out
 }
 
-// hasKarpenterNodes: the recorded status has a user node group that was
-// READY, so Karpenter's nodes follow an upgrade's target too.
+// hasKarpenterNodes: the recorded status has a Karpenter group (the
+// platform pool, or a removed tenant group still draining) that was READY,
+// so Karpenter's nodes follow an upgrade's target too.
 func hasKarpenterNodes(row *model.Cluster) bool {
 	for _, g := range storedStatus(row).GetNodeGroups() {
-		if !g.GetPlatformManaged() && g.GetPhase() == cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY {
+		if g.GetName() != systemNodeGroup && g.GetPhase() == cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY {
 			return true
 		}
 	}
@@ -222,13 +214,14 @@ func groupStatus(name string, platform bool, phase cloudv1.NodeGroupPhase, messa
 	return &cloudv1.NodeGroupStatus{Name: name, PlatformManaged: platform, Phase: phase, Message: shortMessage(message), Nodes: nodes}
 }
 
-// reconcileNodeGroups applies the cluster's user Karpenter node groups into
-// its workload cluster (a cluster with none gets nothing applied), reads
-// their status and the system group's nodes into the pass (nodeGroupsOfPass),
-// and removes what an earlier build applied for the platform pool once
-// nothing needs it. It runs after the platform components, and only once the
+// reconcileNodeGroups applies the platform pool into the cluster's workload
+// cluster, reads its status and the system group's nodes into the pass
+// (nodeGroupsOfPass), and removes the Karpenter objects the platform
+// applied that it no longer renders: the tenant node groups of a cluster
+// built before the platform owned its node groups, and the old platform
+// pool once nothing needs it. It runs after the platform components, and only once the
 // Karpenter component is READY: nothing is applied before. It never fails the pass:
-// what cannot be applied or read is the node group's status message, and a
+// what cannot be applied or read is the platform pool's status message, and a
 // status that cannot be read keeps its last good phase.
 func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster, installed *platform) {
 	if s.deps.NodeGroupClients == nil || row.State == StateDeleting || noPlatform(row) {
@@ -236,14 +229,15 @@ func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster
 	}
 	karpenter := cloudv1.ComponentPhase_COMPONENT_PHASE_UNSPECIFIED
 	if installed != nil {
+		provisioner := s.nodeProvisioner(ctx, row)
 		found := false
 		for _, c := range installed.components {
-			if c.GetName() == karpenterComponent {
+			if c.GetName() == provisioner {
 				karpenter, found = c.GetPhase(), true
 			}
 		}
 		if !found && len(installed.components) > 0 {
-			return // the catalog has no Karpenter: no node groups
+			return // the catalog has no NodeProvisioner: no node groups
 		}
 	}
 	holder, _ := ctx.Value(nodeGroupsKey{}).(*nodeGroupsHolder)
@@ -255,20 +249,11 @@ func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster
 		s.logger().WarnContext(ctx, "node groups: read spec", "cluster_id", row.ID, "error", err)
 		return
 	}
-	groups := nodeGroupsOf(spec)
 	stored := storedStatus(row).GetNodeGroups()
 	if karpenter != cloudv1.ComponentPhase_COMPONENT_PHASE_READY {
-		// Visible from the start: PENDING until Karpenter is Ready, the
-		// recorded state kept for groups that already have one.
-		pending := allGroups(groups, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, "waiting for Karpenter to be Ready")
-		for i, g := range pending {
-			for _, o := range stored {
-				if o.GetName() == g.GetName() {
-					pending[i] = o
-				}
-			}
-		}
-		holder.r = &nodeGroupsResult{groups: pending}
+		// Visible from the start: PENDING until Karpenter is Ready, with the
+		// recorded state of the removed groups.
+		holder.r = &nodeGroupsResult{removed: recordedRemoved(stored)}
 		if s.platformPoolOn() {
 			holder.r.platformPool = recordedPool(stored, "waiting for Karpenter to be Ready")
 		}
@@ -276,49 +261,14 @@ func (s *Reconciler) reconcileNodeGroups(ctx context.Context, row *model.Cluster
 	}
 	ctx, cancel := context.WithTimeout(ctx, nodeGroupTotalTimeout)
 	defer cancel()
-	holder.r = s.applyNodeGroups(ctx, row, spec, installed, groups, stored)
+	holder.r = s.applyNodeGroups(ctx, row, spec, installed, stored)
 }
 
-func allGroups(groups []nodeGroup, phase cloudv1.NodeGroupPhase, message string) []*cloudv1.NodeGroupStatus {
-	out := make([]*cloudv1.NodeGroupStatus, 0, len(groups))
-	for _, g := range groups {
-		out = append(out, groupStatus(g.Name, false, phase, message, 0))
-	}
-	return out
-}
-
-// degraded is every group's status when the workload cluster cannot be
-// used: the last good phase and node count, with the reason as message.
-func degraded(groups []nodeGroup, stored []*cloudv1.NodeGroupStatus, why string) *nodeGroupsResult {
-	out := make([]*cloudv1.NodeGroupStatus, 0, len(groups))
-	for _, g := range groups {
-		phase, nodes := cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, int32(0)
-		for _, o := range stored {
-			if o.GetName() == g.Name {
-				phase, nodes = o.GetPhase(), o.GetNodes()
-			}
-		}
-		out = append(out, groupStatus(g.Name, false, phase, "status unavailable: "+why, nodes))
-	}
-	return &nodeGroupsResult{groups: out}
-}
-
-// waitingForIAM is every group's status while Karpenter's IAM is not ready
-// for the node classes: nothing was applied, so a group that is not known
-// to be anywhere yet is PENDING; one that has a recorded phase keeps it
-// (what runs keeps running), with the wait as its message.
-func waitingForIAM(groups []nodeGroup, stored []*cloudv1.NodeGroupStatus, what string) *nodeGroupsResult {
-	out := make([]*cloudv1.NodeGroupStatus, 0, len(groups))
-	for _, g := range groups {
-		phase, nodes := cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, int32(0)
-		for _, o := range stored {
-			if o.GetName() == g.Name {
-				phase, nodes = o.GetPhase(), o.GetNodes()
-			}
-		}
-		out = append(out, groupStatus(g.Name, false, phase, "waiting for Karpenter's IAM ("+what+")", nodes))
-	}
-	return &nodeGroupsResult{groups: out}
+// unavailable is the result while the workload cluster cannot be used: the
+// recorded removed groups, and the platform pool's last good phase with why
+// as its message.
+func (s *Reconciler) unavailable(stored []*cloudv1.NodeGroupStatus, why string) *nodeGroupsResult {
+	return s.withPoolUnavailable(&nodeGroupsResult{removed: recordedRemoved(stored)}, stored, why)
 }
 
 // call runs f with its own short timeout.
@@ -329,7 +279,7 @@ func call(ctx context.Context, f func(context.Context) error) error {
 }
 
 func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, installed *platform,
-	groups []nodeGroup, stored []*cloudv1.NodeGroupStatus) *nodeGroupsResult {
+	stored []*cloudv1.NodeGroupStatus) *nodeGroupsResult {
 	release := ""
 	if installed != nil {
 		release = installed.release
@@ -337,23 +287,19 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 	in, extra, err := s.nodeGroupsInput(ctx, row, spec, release)
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: prepare", "cluster_id", row.ID, "error", err)
-		return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
+		return s.unavailable(stored, err.Error())
 	}
-	// The node classes name Karpenter's node role: no user group is applied
-	// before its IAM chain is Ready and the controller policy passes it, and
-	// neither is the platform pool's. A cluster with neither needs none of it.
-	if len(groups) > 0 || s.platformPoolOn() {
-		wait, err := s.karpenterIAMWait(ctx, extra.namespace, in.ClusterPrefix, extra.accountID, spec.GetRegion())
+	// The node class names Karpenter's node role: the platform pool is not
+	// applied before its IAM chain is Ready and the controller policy passes
+	// it. A cluster without the pool needs none of it.
+	if s.platformPoolOn() {
+		wait, err := s.karpenterIAMWait(ctx, s.nodeProvisioner(ctx, row), extra.namespace, in.ClusterPrefix, extra.accountID, spec.GetRegion())
 		if err != nil {
 			s.logger().WarnContext(ctx, "node groups: read Karpenter's IAM", "cluster_id", row.ID, "error", err)
-			return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
+			return s.unavailable(stored, err.Error())
 		}
 		if wait != "" {
-			res := waitingForIAM(groups, stored, wait)
-			if s.platformPoolOn() {
-				res.platformPool = recordedPool(stored, "waiting for Karpenter's IAM ("+wait+")")
-			}
-			return res
+			return &nodeGroupsResult{removed: recordedRemoved(stored), platformPool: recordedPool(stored, "waiting for Karpenter's IAM ("+wait+")")}
 		}
 	}
 	var c client.Client
@@ -364,12 +310,12 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 	if err != nil {
 		s.logger().WarnContext(ctx, "node groups: open the cluster", "cluster_id", row.ID, "error", err)
 		s.noteUnreachable(ctx, row, err)
-		return s.withPoolUnavailable(degraded(groups, stored, "cannot reach the cluster: "+err.Error()), stored, "cannot reach the cluster: "+err.Error())
+		return s.unavailable(stored, "cannot reach the cluster: "+err.Error())
 	}
 	failed := map[string]string{}
 	objects, err := crossplaneaws.KarpenterNodeGroupObjects(in)
 	if err != nil {
-		return s.withPoolUnavailable(degraded(groups, stored, err.Error()), stored, err.Error())
+		return s.unavailable(stored, err.Error())
 	}
 	for _, obj := range objects {
 		if installed != nil && installed.holdPool && obj.GetName() == crossplaneaws.PoolPlatform {
@@ -393,29 +339,32 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 	nodes, kubelets := s.readNodesInto(ctx, c, extra.systemGroup, usage)
 	s.summarize(ctx, c, row, nodes)
 	legacy := &legacyPoolGate{s: s, c: c, row: row, installed: installed, extra: extra, nodes: nodes}
-	removing := s.removeNodeGroups(ctx, c, row, groups, legacy, nodes)
+	removing := s.removeNodeGroups(ctx, c, row, legacy, nodes)
 	out := &nodeGroupsResult{kubelets: kubelets, system: systemObserved{nodes: nodes.count[systemNodeGroup], counted: nodes.complete,
 		move: legacy.message}}
 	if s.platformPoolOn() {
 		out.platformPool = s.readPlatformPool(ctx, c, stored, failed[crossplaneaws.PoolPlatform], nodes)
 	}
-	for _, g := range groups {
-		out.groups = append(out.groups, s.readGroup(ctx, c, g, stored, failed[g.Name], nodes))
-	}
 	for _, name := range removing {
-		out.groups = append(out.groups, groupStatus(name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING,
-			"removed from the cluster; Karpenter drains its nodes", nodes.count[name]))
+		out.removed = append(out.removed, groupStatus(name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING,
+			removedGroupMessage, nodes.count[name]))
 	}
 	// The per-node rows go to the results bucket; the status keeps counts and,
 	// when they cannot be stored, a notice.
 	attempted, notice := s.writeNodeRows(ctx, row, nodes)
-	withNodesNotice(out.groups, stored, attempted, notice)
+	withNodesNotice(out.removed, stored, attempted, notice)
 	out.system.notice, out.system.noticeSet = notice, attempted
-	withAMINotice(out.groups, extra.amiNotice)
+	if out.platformPool != nil {
+		withAMINotice([]*cloudv1.NodeGroupStatus{out.platformPool}, extra.amiNotice)
+	}
 	return out
 }
 
-// withAMINotice adds the AMI pin notice to the user groups' messages.
+// removedGroupMessage is the status message of a tenant group being
+// removed: the platform owns a cluster's node groups now.
+const removedGroupMessage = "removed: the platform runs only its system group and platform pool now; Karpenter drains its nodes"
+
+// withAMINotice adds the AMI pin notice to the groups' messages.
 func withAMINotice(groups []*cloudv1.NodeGroupStatus, notice string) {
 	if notice == "" {
 		return
@@ -603,17 +552,18 @@ func describeApplyError(obj *unstructured.Unstructured, err error) string {
 	return "apply " + objectRef(obj) + ": " + err.Error()
 }
 
-// NodeGroupObjects are the EC2NodeClasses and NodePools the controller
-// applies to the cluster's workload cluster, rendered from the stored spec
+// NodeGroupObjects are the EC2NodeClass and NodePool of the platform pool
+// the controller applies to the cluster's workload cluster, rendered from the stored spec
 // and status exactly as a pass renders them. None for a cluster whose
 // platform is not managed (imported, not taken over) or whose catalog has
-// no Karpenter. The API shows these.
+// no NodeProvisioner. The API shows these.
 func (s *Reconciler) NodeGroupObjects(ctx context.Context, row *model.Cluster) ([]*unstructured.Unstructured, error) {
 	if noPlatform(row) {
 		return nil, nil
 	}
 	comps := storedStatus(row).GetPlatformComponents()
-	if len(comps) > 0 && !slices.ContainsFunc(comps, func(c *cloudv1.PlatformComponent) bool { return c.GetName() == karpenterComponent }) {
+	provisioner := s.nodeProvisioner(ctx, row)
+	if len(comps) > 0 && !slices.ContainsFunc(comps, func(c *cloudv1.PlatformComponent) bool { return c.GetName() == provisioner }) {
 		return nil, nil
 	}
 	spec, err := SpecOf(row)
@@ -627,15 +577,13 @@ func (s *Reconciler) NodeGroupObjects(ctx context.Context, row *model.Cluster) (
 	return crossplaneaws.KarpenterNodeGroupObjects(in)
 }
 
-// nodeGroupsInput are the node groups' shared values: the pinned AMI of
+// nodeGroupsInput is what the platform pool is rendered from: the pinned AMI of
 // the release's pin for the cluster's Kubernetes minor, and how subnets
 // are found. release is the platform release the cluster follows ("": the
 // default pin).
 func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, release string) (crossplaneaws.KarpenterNodeGroupsInput, nodeGroupsExtra, error) {
 	in := crossplaneaws.KarpenterNodeGroupsInput{ClusterName: row.Name, ClusterPrefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
-		Discovery: true, NodeGroups: spec.GetNodeGroups(),
-		DefaultArchitectures: s.deps.NodeGroups.Karpenter.Defaults.Architectures, DefaultCapacityTypes: s.deps.NodeGroups.Karpenter.Defaults.CapacityTypes,
-		PlatformPool: s.platformPoolInput()}
+		Discovery: true, PlatformPool: s.platformPoolInput()}
 	var rel *cloudv1alpha1.Release
 	if src := s.releases(); src != nil && release != "" {
 		var err error
@@ -740,20 +688,19 @@ func nodeAMIMinor(specVersion string, stored *cloudv1.ClusterStatus) string {
 	return want
 }
 
-// removeNodeGroups deletes the platform's NodePools and EC2NodeClasses
-// that no group wants any more (only objects with the managed-by label),
-// and returns the names still there. A pool goes before its class. The
+// removeNodeGroups deletes the NodePools and EC2NodeClasses the platform
+// applied but no longer renders (only objects with the managed-by label):
+// every one but the platform pool's, so the tenant groups of a cluster built
+// before the platform owned its node groups go. It returns the names still
+// there. Deleting a NodePool makes Karpenter drain and terminate its nodes. A pool goes before its class. The
 // objects of the old platform pool are left alone until legacy allows
 // (nothing changes them, nothing is reported as a group); then its pool is
 // deleted, and its class once its pool and its nodes are gone.
-func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row *model.Cluster, groups []nodeGroup,
+func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row *model.Cluster,
 	legacy *legacyPoolGate, nodes nodeCounts) []string {
 	want := map[string]bool{}
-	for _, g := range groups {
-		want[g.Name] = true
-	}
 	if s.platformPoolOn() {
-		want[crossplaneaws.PoolPlatform] = true // the platform's own pool, not a user group
+		want[crossplaneaws.PoolPlatform] = true
 	}
 	var still []string
 	pools := map[string]bool{}
@@ -817,165 +764,6 @@ func appendOnce(list []string, name string) []string {
 		}
 	}
 	return append(list, name)
-}
-
-// nodeCounts are the Karpenter nodes by node pool.
-type nodeCounts struct {
-	count map[string]int32
-	// rows are the nodes by node group (the default managed group is
-	// "system"), collected during the same reads; complete: the node lists
-	// were read to the end. Written to the results bucket, never kept in the
-	// Cluster.
-	rows     map[string][]*cloudv1.NodeGroupNode
-	complete bool
-	// usage sums the nodes (and, once read, the pods) per group for the
-	// cluster status summary; nil when the summary is not due.
-	usage *clustersummary.Aggregator
-	// err is why the node lists could not be read, nil when they were.
-	err error
-}
-
-// eachPage lists kind with limit nodeListLimit and continue, calling f with
-// each page's items, until every page was read. Only a page is held at a
-// time. ctx is the pass deadline: when it ends, the read stops with its
-// error and what f saw is partial. A kind the cluster does not have
-// (Karpenter's CRDs are not there yet) is a no-match error.
-func eachPage(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, f func([]unstructured.Unstructured), opts ...client.ListOption) error {
-	token := ""
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		page := &unstructured.UnstructuredList{}
-		page.SetGroupVersionKind(gvk)
-		pageOpts := append(slices.Clone(opts), client.Limit(nodeListLimit), client.Continue(token))
-		if err := call(ctx, func(ctx context.Context) error { return c.List(ctx, page, pageOpts...) }); err != nil {
-			return err
-		}
-		f(page.Items)
-		if token = page.GetContinue(); token == "" {
-			return nil
-		}
-	}
-}
-
-// readNodes counts the Karpenter nodes per pool and reads their kubelet
-// minors, with paginated lists (limit 500 and continue, however many nodes
-// there are, bounded by the pass deadline); only counts are kept for the
-// status. The same reads collect the per-node rows (nodeCounts.rows): the
-// Karpenter nodes by pool, the default managed group's nodes as "system", each
-// joined with its NodeClaim. A failed or unfinished read is "not known", and
-// its rows are incomplete.
-func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup string) (nodeCounts, kubeletView) {
-	return s.readNodesInto(ctx, c, systemGroup, nil)
-}
-
-// readNodesInto is readNodes that also sums the nodes into usage when it is
-// not nil.
-func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemGroup string, usage *clustersummary.Aggregator) (nodeCounts, kubeletView) {
-	counts := nodeCounts{count: map[string]int32{}, rows: map[string][]*cloudv1.NodeGroupNode{}, usage: usage}
-	view := kubeletView{}
-	minors := map[string]bool{}
-	byNode := map[string]*cloudv1.NodeGroupNode{}
-	nodeList := schema.GroupVersionKind{Version: "v1", Kind: "NodeList"}
-	err := eachPage(ctx, c, nodeList, func(items []unstructured.Unstructured) {
-		for i := range items {
-			n := &items[i]
-			pool := n.GetLabels()[crossplaneaws.KarpenterNodePoolLabel]
-			counts.count[pool]++
-			row := clustersummary.NodeRow(n)
-			counts.rows[pool] = append(counts.rows[pool], row)
-			byNode[n.GetName()] = row
-			if usage != nil {
-				usage.AddNodeObject(pool, n)
-			}
-			if v, _, _ := unstructured.NestedString(n.Object, "status", "nodeInfo", "kubeletVersion"); v != "" {
-				minors[kubernetesMinor(strings.TrimPrefix(v, "v"))] = true
-			}
-		}
-	}, client.HasLabels{crossplaneaws.KarpenterNodePoolLabel})
-	if err != nil {
-		s.logger().WarnContext(ctx, "node groups: list nodes", "error", err)
-		return nodeCounts{count: map[string]int32{}, rows: counts.rows, usage: usage, err: err}, kubeletView{}
-	}
-	counts.complete = true
-	// The default managed node group's nodes are the "system" group: the
-	// nodes labelled with its name (any managed group's, where it is not
-	// known).
-	var managed client.ListOption = client.HasLabels{managedNodeGroupLabel}
-	if systemGroup != "" {
-		managed = client.MatchingLabels{managedNodeGroupLabel: systemGroup}
-	}
-	err = eachPage(ctx, c, nodeList, func(items []unstructured.Unstructured) {
-		for i := range items {
-			counts.count[systemNodeGroup]++
-			counts.rows[systemNodeGroup] = append(counts.rows[systemNodeGroup], clustersummary.NodeRow(&items[i]))
-			if usage != nil {
-				usage.AddNodeObject(systemNodeGroup, &items[i])
-			}
-		}
-	}, managed)
-	if err != nil {
-		s.logger().WarnContext(ctx, "node groups: list managed nodes", "error", err)
-		counts.complete = false
-		counts.err = err
-	}
-	for m := range minors {
-		view.minors = append(view.minors, m)
-	}
-	err = eachPage(ctx, c, crossplaneaws.KarpenterNodeClaimGVK.GroupVersion().WithKind("NodeClaimList"), func(items []unstructured.Unstructured) {
-		for i := range items {
-			name, _, _ := unstructured.NestedString(items[i].Object, "status", "nodeName")
-			if name == "" {
-				view.launching++
-			} else if row := byNode[name]; row != nil {
-				clustersummary.ClaimInto(row, &items[i])
-			}
-		}
-	})
-	switch {
-	case err == nil:
-		view.known = true
-	case meta.IsNoMatchError(err):
-		view.known = true
-	default:
-		s.logger().WarnContext(ctx, "node groups: list node claims", "error", err)
-		counts.complete = false
-	}
-	return counts, view
-}
-
-// readGroup is a group's status: its NodePool's Ready condition and node
-// count (unstructured, so extra fields, missing ones and any order of
-// conditions are fine), or why that is not known.
-func (s *Reconciler) readGroup(ctx context.Context, c client.Client, g nodeGroup, stored []*cloudv1.NodeGroupStatus, applyFailure string, nodes nodeCounts) *cloudv1.NodeGroupStatus {
-	if applyFailure != "" {
-		return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED, applyFailure, nodes.count[g.Name])
-	}
-	pool := &unstructured.Unstructured{}
-	pool.SetGroupVersionKind(crossplaneaws.KarpenterNodePoolGVK)
-	err := call(ctx, func(ctx context.Context) error { return c.Get(ctx, client.ObjectKey{Name: g.Name}, pool) })
-	switch {
-	case err == nil:
-	case meta.IsNoMatchError(err) || apierrors.IsNotFound(err):
-		return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, "waiting for Karpenter to report the node group", 0)
-	default:
-		return degraded([]nodeGroup{g}, stored, err.Error()).groups[0]
-	}
-	n := nodes.count[g.Name]
-	if v, _, _ := unstructured.NestedString(pool.Object, "status", "resources", "nodes"); v != "" {
-		if parsed, err := strconv.ParseInt(v, 10, 32); err == nil {
-			n = int32(parsed)
-		}
-	}
-	ready, message := readyCondition(pool)
-	if ready {
-		return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, "", n)
-	}
-	if message == "" {
-		message = "waiting for Karpenter to report the node group"
-	}
-	return groupStatus(g.Name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, message, n)
 }
 
 // readyCondition is whether the object's Ready condition is True and,

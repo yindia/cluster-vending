@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect/v2"
+	"k8s.io/utils/ptr"
 
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/database/model"
@@ -15,9 +16,7 @@ func minimalSpec() *cloudv1.ClusterSpec {
 		Region:       "us-east-1",
 		Network:      &cloudv1.ClusterNetwork{NetworkId: "0190a000-0000-7000-8000-000000000001"},
 		ControlPlane: &cloudv1.ControlPlaneSpec{EndpointAccess: &cloudv1.EndpointAccess{PublicAccessCidrs: []string{"203.0.113.0/24"}}},
-		DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m6i.large"},
-			ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
-		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
+		Provider:     &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}},
 	}
 }
 
@@ -35,20 +34,16 @@ func TestApplyMask(t *testing.T) {
 	newSpec := func() *cloudv1.ClusterSpec { return mustResolve(t, minimalSpec(), []string{"use1-az1", "use1-az2"}) }
 	row := &model.Cluster{Name: "prod"}
 	in := &cloudv1.Cluster{DisplayName: "Prod", Spec: minimalSpec()}
-	in.Spec.DefaultNodePool.DiskSizeGb = 50
+	in.Spec.GetAws().Irsa = ptr.To(true)
 
 	changed, err := applyMask(row, newSpec(), in, []string{"display_name"})
 	if err != nil || changed || row.DisplayName != "Prod" {
 		t.Errorf("display_name: changed=%v err=%v name=%q", changed, err, row.DisplayName)
 	}
 	spec := newSpec()
-	changed, err = applyMask(row, spec, in, []string{"spec.default_node_pool.disk_size_gb"})
-	if err != nil || !changed || spec.GetDefaultNodePool().GetDiskSizeGb() != 50 {
-		t.Errorf("disk_size_gb: changed=%v err=%v", changed, err)
-	}
-	in.Spec.DefaultNodePool.DiskSizeGb = 10 // below the 20 GiB minimum
-	if _, err := applyMask(row, newSpec(), in, []string{"spec.default_node_pool.disk_size_gb"}); connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("disk below 20: err = %v, want invalid_argument", err)
+	changed, err = applyMask(row, spec, in, []string{"spec.aws.irsa"})
+	if err != nil || !changed || !spec.GetAws().GetIrsa() {
+		t.Errorf("irsa: changed=%v err=%v", changed, err)
 	}
 	for path, code := range map[string]connect.Code{"spec.region": connect.CodeInvalidArgument,
 		"spec.existing_cluster":                      connect.CodeInvalidArgument,

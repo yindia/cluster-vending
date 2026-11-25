@@ -15,9 +15,6 @@ import (
 // resource, which is how the leak check finds what was left.
 const labelRun = "cv-e2e"
 
-// userNodeGroup is the Karpenter node group scenario 4 adds and removes.
-const userNodeGroup = "t3"
-
 func (e *env) manifest(kind, name string, labels map[string]string, spec map[string]any) (*cli.Manifest, error) {
 	raw, err := json.Marshal(spec)
 	if err != nil {
@@ -73,19 +70,6 @@ func (e *env) clusterManifest(name, networkID string) (*cloudv1.Cluster, error) 
 		return nil, err
 	}
 	return m.Cluster()
-}
-
-// userNodeGroupSpec is the t3 Karpenter group of scenario 4.
-func userNodeGroupSpec() *cloudv1.NodeGroupSpec {
-	cpu, mem := int32(8), int32(32)
-	return &cloudv1.NodeGroupSpec{
-		Name:             userNodeGroup,
-		InstanceFamilies: []string{"t3"},
-		Architectures:    []cloudv1.Architecture{cloudv1.Architecture_ARCHITECTURE_AMD64},
-		CapacityTypes:    []cloudv1.CapacityType{cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND},
-		Labels:           map[string]string{"cv-e2e": "t3"},
-		Limits:           &cloudv1.NodeGroupLimits{Cpu: &cpu, MemoryGib: &mem},
-	}
 }
 
 // networkImportRequest is the read-only import of the existing VPC.

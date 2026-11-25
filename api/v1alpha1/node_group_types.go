@@ -1,15 +1,5 @@
 package v1alpha1
 
-// Architecture is a node CPU architecture, as the kinds spell it.
-// +kubebuilder:validation:Enum=Amd64;Arm64
-type Architecture string
-
-// The architectures of a node group.
-const (
-	ArchitectureAmd64 Architecture = "Amd64"
-	ArchitectureArm64 Architecture = "Arm64"
-)
-
 // NodeGroupPhase is where a node group is.
 // +kubebuilder:validation:Enum=Pending;Ready;Failed;Deleting
 type NodeGroupPhase string
@@ -22,74 +12,12 @@ const (
 	NodeGroupPhaseDeleting NodeGroupPhase = "Deleting"
 )
 
-// NodeGroupSpec is one user node group: a Karpenter NodePool with its own
-// EC2NodeClass in the workload cluster.
-type NodeGroupSpec struct {
-	// name is a DNS label, unique in the cluster. "platform", "default" and
-	// "system" are reserved.
-	// +required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=40
-	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]*[a-z0-9])?$`
-	// +kubebuilder:validation:XValidation:rule="!(self in ['platform', 'default', 'system'])",message="name is reserved"
-	Name string `json:"name"`
-	// instanceTypes are exact machine types, e.g. m7i.large. Empty: any
-	// type of instanceFamilies.
-	// +optional
-	// +listType=set
-	// +kubebuilder:validation:MaxItems=20
-	// +kubebuilder:validation:items:MinLength=1
-	// +kubebuilder:validation:items:MaxLength=64
-	// +kubebuilder:validation:items:Pattern=`^[a-z][a-z0-9-]*[.][a-z0-9]+$`
-	InstanceTypes []string `json:"instanceTypes,omitempty"`
-	// instanceFamilies are instance families, e.g. m7i, c7g.
-	// +optional
-	// +listType=set
-	// +kubebuilder:validation:MaxItems=20
-	// +kubebuilder:validation:items:MinLength=1
-	// +kubebuilder:validation:items:MaxLength=32
-	// +kubebuilder:validation:items:Pattern=`^[a-z][a-z0-9-]*$`
-	InstanceFamilies []string `json:"instanceFamilies,omitempty"`
-	// architectures of the nodes. Empty: Amd64.
-	// +optional
-	// +listType=set
-	// +kubebuilder:validation:MaxItems=2
-	Architectures []Architecture `json:"architectures,omitempty"`
-	// capacityTypes are how the nodes are bought. Empty: OnDemand.
-	// +optional
-	// +listType=set
-	// +kubebuilder:validation:MaxItems=2
-	CapacityTypes []CapacityType `json:"capacityTypes,omitempty"`
-	// labels of the nodes.
-	// +optional
-	// +kubebuilder:validation:MaxProperties=64
-	Labels map[string]string `json:"labels,omitempty"`
-	// taints of the nodes.
-	// +optional
-	// +kubebuilder:validation:MaxItems=50
-	Taints []Taint `json:"taints,omitempty"`
-	// limits is the ceiling of what the group may provision. Unset: none.
-	// +optional
-	Limits *NodeGroupLimits `json:"limits,omitempty"`
-}
-
-// NodeGroupLimits bounds what a node group may provision in total.
-type NodeGroupLimits struct {
-	// cpu is the vCPU ceiling.
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	CPU *int32 `json:"cpu,omitempty"`
-	// memoryGiB is the memory ceiling in GiB.
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	MemoryGiB *int32 `json:"memoryGiB,omitempty"`
-}
-
 // NodeGroupStatus is what the controller observed of one node group.
 type NodeGroupStatus struct {
 	// name of the group.
 	Name string `json:"name"`
-	// platformManaged is true for the platform's own groups.
+	// platformManaged is true for the platform's own groups; false only for
+	// a removed tenant group while it is deleted.
 	// +optional
 	PlatformManaged bool `json:"platformManaged,omitempty"`
 	// phase of the group.

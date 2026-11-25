@@ -66,10 +66,10 @@ func renderPlatformPool(in KarpenterNodeGroupsInput) ([]*unstructured.Unstructur
 	}
 	taint := PoolTaint(PoolPlatform)
 	reqs := []any{
-		requirement("kubernetes.io/arch", "In", archNamesByConfig[p.Architecture]),
-		requirement("karpenter.sh/capacity-type", "In", "on-demand"),
-		requirement("karpenter.k8s.aws/instance-family", "In", sortedUnique(p.Families)...),
-		requirement("karpenter.k8s.aws/instance-size", "In", sortedUnique(p.Sizes)...),
+		inRequirement("kubernetes.io/arch", archNamesByConfig[p.Architecture]),
+		inRequirement("karpenter.sh/capacity-type", "on-demand"),
+		inRequirement("karpenter.k8s.aws/instance-family", sortedUnique(p.Families)...),
+		inRequirement("karpenter.k8s.aws/instance-size", sortedUnique(p.Sizes)...),
 	}
 	spec := map[string]any{
 		"template": map[string]any{

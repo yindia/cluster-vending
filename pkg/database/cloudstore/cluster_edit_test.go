@@ -58,13 +58,13 @@ func newEditWorld(t *testing.T) editWorld {
 }
 
 // kubectlEdit is a spec edit made on the object, as kubectl does.
-func (w editWorld) kubectlEdit(t *testing.T, name string, maxSize int32) {
+func (w editWorld) kubectlEdit(t *testing.T, name string, retention int32) {
 	t.Helper()
 	obj := &cloud.Cluster{}
 	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: name}, obj); err != nil {
 		t.Fatal(err)
 	}
-	obj.Spec.DefaultNodePool.Scaling.MaxSize = maxSize
+	obj.Spec.AWS.ControlPlaneLogGroup.RetentionDays = retention
 	if err := w.k.Update(t.Context(), obj); err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +90,13 @@ func (w editWorld) create(t *testing.T, name string) *model.Cluster {
 	return c
 }
 
-func maxSizeOf(t *testing.T, row *model.Cluster) uint32 {
+func retentionOf(t *testing.T, row *model.Cluster) uint32 {
 	t.Helper()
 	spec := &cloudv1.ClusterSpec{}
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	return spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize()
+	return spec.GetAws().GetControlPlaneLogGroup().GetRetentionDays()
 }
 
 func TestRecordRefusesToOverwriteAnEditMadeSinceTheRead(t *testing.T) {
@@ -115,8 +115,8 @@ func TestRecordRefusesToOverwriteAnEditMadeSinceTheRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if maxSizeOf(t, got) != 9 {
-		t.Fatalf("the edit was reverted: max size %d", maxSizeOf(t, got))
+	if retentionOf(t, got) != 9 {
+		t.Fatalf("the edit was reverted: retention %d", retentionOf(t, got))
 	}
 }
 
@@ -148,7 +148,7 @@ func TestStatusWritesNeverObserveAnUnseenEdit(t *testing.T) {
 	if got := w.object(t, "prod").Status.ObservedGeneration; got != before {
 		t.Fatalf("Record without a new generation observed the edit: %d, want %d", got, before)
 	}
-	if maxSizeOf(t, row) != 9 {
+	if retentionOf(t, row) != 9 {
 		t.Fatal("the edit was lost")
 	}
 }
@@ -182,7 +182,7 @@ func TestAPIUpdatesStayObservedAndKeepTheirSpec(t *testing.T) {
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	spec.GetAws().ControlPlaneLogGroup.RetentionDays = 7
 	if row.Spec, err = protojson.Marshal(spec); err != nil {
 		t.Fatal(err)
 	}
@@ -191,13 +191,13 @@ func TestAPIUpdatesStayObservedAndKeepTheirSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj := w.object(t, "prod")
-	if obj.Spec.DefaultNodePool.Scaling.MaxSize != 7 || obj.Status.ObservedGeneration != obj.Generation {
-		t.Fatalf("API update: max size %d, observed %d, generation %d",
-			obj.Spec.DefaultNodePool.Scaling.MaxSize, obj.Status.ObservedGeneration, obj.Generation)
+	if obj.Spec.AWS.ControlPlaneLogGroup.RetentionDays != 7 || obj.Status.ObservedGeneration != obj.Generation {
+		t.Fatalf("API update: retention %d, observed %d, generation %d",
+			obj.Spec.AWS.ControlPlaneLogGroup.RetentionDays, obj.Status.ObservedGeneration, obj.Generation)
 	}
 	// A platform write of the spec (resolved values) is observed as well.
 	row, _ = w.s.Clusters().Get(t.Context(), "acme", c.ID)
-	spec.DefaultNodePool.ScalingConfig.MaxSize = 8
+	spec.GetAws().ControlPlaneLogGroup.RetentionDays = 8
 	row.Spec, _ = protojson.Marshal(spec)
 	if err := w.s.Clusters().Record(t.Context(), row); err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestStoreWriteRecordsTheGenerationItProduced(t *testing.T) {
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	spec.GetAws().ControlPlaneLogGroup.RetentionDays = 7
 	row.Spec, _ = protojson.Marshal(spec)
 	row.Generation++
 	if err := w.s.Clusters().Update(t.Context(), row); err != nil {
@@ -256,7 +256,7 @@ func TestStoreWriteNeverRecordsAGenerationAheadOfTheObject(t *testing.T) {
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	spec.GetAws().ControlPlaneLogGroup.RetentionDays = 7
 	row.Spec, _ = protojson.Marshal(spec)
 	row.Generation++
 	if err := w.s.Clusters().Update(t.Context(), row); err != nil {
@@ -282,7 +282,7 @@ func TestRecordObservesAGenerationTheStoreProduced(t *testing.T) {
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	spec.DefaultNodePool.ScalingConfig.MaxSize = 7
+	spec.GetAws().ControlPlaneLogGroup.RetentionDays = 7
 	row.Spec, _ = protojson.Marshal(spec)
 	row.Generation++
 	if err := w.s.Clusters().Update(t.Context(), row); err != nil {

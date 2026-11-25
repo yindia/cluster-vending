@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
-	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
@@ -55,7 +54,6 @@ func latePlan() crossplaneaws.ClusterPlan {
 	p.LogGroupRetentionDays = 90
 	p.CreateEncryptionKey = true
 	p.IRSA = true
-	p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{SecurityGroupIDs: []string{"sg-0bbb"}}
 	return p
 }
 
@@ -141,7 +139,7 @@ func TestClusterSetBuildsFromWhatExists(t *testing.T) {
 		t.Fatalf("EKS cluster built with the key = %v", objects[eksName])
 	}
 	if waits[typeName(&awseks.Cluster{})] != "" || waits[typeName(&awsiam.OpenIDConnectProvider{})] == "" ||
-		waits[typeName(&awsec2.LaunchTemplate{})] == "" || waits[typeName(&awseks.NodeGroup{})] == "" {
+		waits[typeName(&awseks.NodeGroup{})] != "" {
 		t.Errorf("with the key: waits = %v, want only what needs an ACTIVE cluster", waits)
 	}
 
@@ -158,7 +156,7 @@ func TestClusterSetBuildsFromWhatExists(t *testing.T) {
 		t.Fatalf("active cluster: still waiting: %v", waits)
 	}
 	filled := plan
-	filled.EncryptionKeyARN, filled.OIDCIssuer, filled.ClusterSecurityGroupID = testKeyARN, testIssuer, "sg-0c1u5ter"
+	filled.EncryptionKeyARN, filled.OIDCIssuer = testKeyARN, testIssuer
 	want := crossplaneaws.ClusterResources(filled)
 	if len(objects) != len(want) {
 		t.Errorf("active cluster: built %d objects, want the %d of the render with the live values", len(objects), len(want))
@@ -191,14 +189,13 @@ func TestEveryStageOfALateRenderIsInTheSet(t *testing.T) {
 		inSet[seenKey(item.Object)] = true
 	}
 	for name, fill := range map[string]func(*crossplaneaws.ClusterPlan){
-		"nothing yet":    func(*crossplaneaws.ClusterPlan) {},
-		"cluster held":   func(p *crossplaneaws.ClusterPlan) { p.ClusterHeld = true },
-		"key":            func(p *crossplaneaws.ClusterPlan) { p.EncryptionKeyARN = "arn:aws:kms:us-east-1:444455556666:key/k" },
-		"issuer":         func(p *crossplaneaws.ClusterPlan) { p.OIDCIssuer = "https://oidc.eks.us-east-1.amazonaws.com/id/A" },
-		"security group": func(p *crossplaneaws.ClusterPlan) { p.ClusterSecurityGroupID = "sg-0aaa" },
+		"nothing yet":  func(*crossplaneaws.ClusterPlan) {},
+		"cluster held": func(p *crossplaneaws.ClusterPlan) { p.ClusterHeld = true },
+		"key":          func(p *crossplaneaws.ClusterPlan) { p.EncryptionKeyARN = "arn:aws:kms:us-east-1:444455556666:key/k" },
+		"issuer":       func(p *crossplaneaws.ClusterPlan) { p.OIDCIssuer = "https://oidc.eks.us-east-1.amazonaws.com/id/A" },
 		"everything exists": func(p *crossplaneaws.ClusterPlan) {
 			p.EncryptionKeyARN = "arn:aws:kms:us-east-1:444455556666:key/k"
-			p.OIDCIssuer, p.ClusterSecurityGroupID = "https://oidc.eks.us-east-1.amazonaws.com/id/A", "sg-0aaa"
+			p.OIDCIssuer = "https://oidc.eks.us-east-1.amazonaws.com/id/A"
 		},
 	} {
 		p := latePlan()

@@ -19,6 +19,23 @@ import "strconv"
 //	   profile cleanup, the DryRun CreateTags check, the version tag.
 const TemplateVersion = 1
 
+// ManagementTemplateVersion is the version of the management account's
+// role templates (management and server), bumped whenever one of them
+// changes (version_test.go). They carry it as TagTemplateVersion and the
+// output TemplateVersion like the tenant templates; the platform does not
+// read it back (it never reads its own roles), so the two versions move
+// apart: a change of a management template is not a tenant stack update.
+//
+// scripts/generate.py reads this line: keep it
+// "const ManagementTemplateVersion = N".
+//
+// History:
+//
+//	1: the management and server roles: IRSA of the controller, the
+//	   Crossplane AWS providers and the API server, or a local principal;
+//	   sts:AssumeRole on the tenant roles only.
+const ManagementTemplateVersion = 1
+
 // TagTemplateVersion is the role tag holding the template's version.
 // iam:ListRoleTags, which every role grants itself (the reader's
 // ReadIAM statement), reads it.

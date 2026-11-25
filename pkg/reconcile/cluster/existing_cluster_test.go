@@ -62,3 +62,49 @@ func TestHasUnknownField(t *testing.T) {
 		}
 	}
 }
+
+// A binary request from a client built against an older contract that
+// still sets a node group field (ClusterSpec.default_node_pool 4,
+// node_groups 16, AwsClusterSpec.default_node_pool 4, now reserved) is
+// refused with what replaced them: the platform owns the node groups.
+func TestRemovedNodeGroupFieldsAreRefused(t *testing.T) {
+	withUnknown := func(t *testing.T, aws bool, number protowire.Number) *cloudv1.ClusterSpec {
+		t.Helper()
+		var inner []byte
+		if aws {
+			inner = protowire.AppendTag(nil, number, protowire.BytesType)
+			inner = protowire.AppendBytes(inner, []byte{0x08, 0x01}) // ami_type: 1
+		}
+		var raw []byte
+		if aws {
+			raw = protowire.AppendTag(raw, 10, protowire.BytesType) // ClusterSpec.aws
+			raw = protowire.AppendBytes(raw, inner)
+		} else {
+			raw = protowire.AppendTag(raw, 10, protowire.BytesType)
+			raw = protowire.AppendBytes(raw, nil)
+			raw = protowire.AppendTag(raw, number, protowire.BytesType)
+			raw = protowire.AppendBytes(raw, []byte{0x0a, 0x03, 'g', 'p', 'u'}) // {name: "gpu"} / {instance_types: ["gpu"]}
+		}
+		out := &cloudv1.ClusterSpec{}
+		if err := proto.Unmarshal(raw, out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	for name, spec := range map[string]*cloudv1.ClusterSpec{
+		"spec.default_node_pool":     withUnknown(t, false, defaultNodePoolField),
+		"spec.node_groups":           withUnknown(t, false, nodeGroupsField),
+		"spec.aws.default_node_pool": withUnknown(t, true, awsDefaultNodePoolField),
+	} {
+		err := supported(spec)
+		if !fault.Is(err, fault.Invalid) || err.Error() == "" {
+			t.Errorf("%s: %v, want an Invalid fault", name, err)
+		}
+		if fe, ok := fault.As(err); !ok || fe.Message != ErrNodeGroupsPlatformOwned {
+			t.Errorf("%s: message %v", name, err)
+		}
+	}
+	if err := supported(withUnknown(t, true, 99)); err != nil {
+		t.Errorf("an unknown aws field 99: %v, want accepted", err)
+	}
+}

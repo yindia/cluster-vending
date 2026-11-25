@@ -228,16 +228,25 @@ func TestImportClusterPlan(t *testing.T) {
 	}
 	// The spec says what the cluster is.
 	spec := c.GetSpec()
-	pool, aws := spec.GetDefaultNodePool(), spec.GetAws()
+	aws := spec.GetAws()
 	if spec.GetControlPlane().GetKubernetesVersion() != "1.31" || spec.GetControlPlane().GetSecretsEncryption().GetKmsKeyArn() != existingKey ||
 		spec.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()[0] != "203.0.113.0/24" ||
 		spec.GetNetwork().GetServiceCidr() != "172.20.0.0/16" || len(spec.GetNetwork().GetZoneIds()) != 2 ||
 		aws.GetAdditionalSecurityGroupIds()[0] != "sg-0123456789abcdef0" ||
 		aws.GetAccessConfig().GetAuthenticationMode() != cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_API_AND_CONFIG_MAP ||
-		len(aws.GetEnabledClusterLogTypes()) != 2 || pool.GetInstanceTypes()[0] != "m6i.large" || pool.GetDiskSizeGb() != 50 ||
-		pool.GetScalingConfig().GetMaxSize() != 6 || pool.GetTaints()[0].GetEffect() != cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE ||
+		len(aws.GetEnabledClusterLogTypes()) != 2 ||
 		aws.GetIrsa() || aws.GetControlPlaneLogGroup() != nil {
 		t.Errorf("derived spec = %v", spec)
+	}
+	// The node group it adopted is kept with the cluster, read-only, not in
+	// the spec.
+	row, err := w.store.Clusters().Get(t.Context(), worldTenant, c.GetId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := crossplaneaws.ParseAdoption(row.Adoption).NodeGroup
+	if g == nil || g.InstanceTypes[0] != "m6i.large" || g.DiskSizeGB != 50 || g.MaxSize != 6 || g.Taints[0].Effect != "NO_SCHEDULE" {
+		t.Errorf("adopted node group = %+v", g)
 	}
 	if entries := spec.GetAccess().GetAccessEntries(); len(entries) != 1 || entries[0].GetPrincipalArn() != devRole ||
 		entries[0].GetPolicies()[0].GetScope() != cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_NAMESPACE {

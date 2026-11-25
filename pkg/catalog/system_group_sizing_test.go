@@ -30,20 +30,19 @@ func TestAllocatableFollowsTheEKSReservations(t *testing.T) {
 	}
 }
 
-func TestSizingNamesEveryPlatformDefinition(t *testing.T) {
-	// Every key of the lists is a Platform definition (no stale entries).
-	platform := map[string]bool{}
+// What each definition runs is its spec.sizing: every workload of the
+// shipped catalog is named once, by a Platform definition.
+func TestSizingNamesEachWorkloadOnce(t *testing.T) {
+	seen := map[string]string{}
 	for _, d := range catalogDefinitions(t) {
-		if d.Management == component.Platform {
-			platform[d.Name] = true
-		}
-	}
-	deployments, daemonSets, without := catalog.SizedPlatformNames()
-	for list, names := range map[string][]string{"platformDeployments": deployments, "platformDaemonSets": daemonSets, "platformWithoutWorkloads": without} {
-		for _, name := range names {
-			if !platform[name] {
-				t.Errorf("%s names %s, which is not a Platform definition", list, name)
+		for _, w := range append(d.Sizing.Deployments, d.Sizing.DaemonSets...) {
+			if d.Management != component.Platform {
+				t.Errorf("%s sizes %s, but it is not a Platform definition", d.Name, w.Name)
 			}
+			if other, ok := seen[w.Name]; ok {
+				t.Errorf("workload %s is sized by %s and %s", w.Name, other, d.Name)
+			}
+			seen[w.Name] = d.Name
 		}
 	}
 }
@@ -101,12 +100,14 @@ func TestCheckSystemGroupSizing(t *testing.T) {
 		// DaemonSets): its CPU fits one t3.small, its memory and pods do not.
 		{"one small node does not", defs, group("t3.small", 1), []string{"memory requests", "pods exceed"}},
 		{"unknown instance type", defs, group("x9.huge", 2), []string{`"x9.huge" is not an instance type the sizing rule knows`}},
-		{"a definition no list names", append(append([]component.Definition{}, defs...),
-			component.Definition{Name: "extra", Management: component.Platform, HasInstall: true}), config.DefaultNodeGroups().System,
-			[]string{"extra is in no sizing list"}},
+		// What a definition runs is its spec.sizing: one without it runs
+		// no workload, whatever its name.
+		{"a definition without sizing runs nothing", append(append([]component.Definition{}, defs...),
+			component.Definition{Name: "extra", Management: component.Platform, HasInstall: true}), config.DefaultNodeGroups().System, nil},
 		{"a request that is not explicit", func() []component.Definition {
 			out := without("kyverno")
 			return append(out, component.Definition{Name: "kyverno", Management: component.Platform, HasInstall: true,
+				Sizing:         component.Sizing{Deployments: []component.Workload{{Name: "kyverno-admission", Replicas: "admissionController.replicas", Requests: "admissionController.container.resources.requests"}}},
 				PlatformValues: component.Values{"admissionController": map[string]any{"replicas": 1}}})
 		}(), config.DefaultNodeGroups().System, []string{`kyverno: platformValues has no "admissionController.container.resources.requests"`}},
 	}

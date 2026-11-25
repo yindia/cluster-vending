@@ -1,26 +1,33 @@
 package component
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/fault"
 )
 
-// clusterWithPool is the test cluster with a default node pool.
-func clusterWithPool(labels map[string]string, taints []cloudv1alpha1.Taint) *cloudv1alpha1.Cluster {
-	c := testCluster(true)
-	c.Spec.DefaultNodePool = &cloudv1alpha1.NodePoolSpec{Labels: labels, Taints: taints}
-	return c
+// importedClusterWithPool is a cluster that was imported: its default node
+// group is the one it adopted (Adoption.NodeGroup, kept in the adoption
+// annotation; EKS taint effects), not the platform's.
+func importedClusterWithPool(t *testing.T, labels map[string]string, taints []crossplaneaws.TaintPlan) *cloudv1alpha1.Cluster {
+	t.Helper()
+	raw, err := json.Marshal(crossplaneaws.Adoption{NodeRoleName: "adopted-node-role",
+		NodeGroup: &crossplaneaws.NodePoolPlan{InstanceTypes: []string{"m6i.large"}, Labels: labels, Taints: taints}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return importedClusterWithAdoption(string(raw))
 }
 
-// importedClusterWithPool is a cluster that was imported: its default node
-// pool is what it had, not the platform's.
-func importedClusterWithPool(labels map[string]string, taints []cloudv1alpha1.Taint) *cloudv1alpha1.Cluster {
-	c := clusterWithPool(labels, taints)
+func importedClusterWithAdoption(adoption string) *cloudv1alpha1.Cluster {
+	c := testCluster(true)
 	c.Spec.ImportFrom = &cloudv1alpha1.ClusterImport{}
+	c.Annotations = map[string]string{crossplaneaws.AdoptionAnnotation: adoption}
 	return c
 }
 
@@ -44,15 +51,19 @@ func TestExpandSystemPlacement(t *testing.T) {
 		wantTolerations []any
 	}{
 		{name: "no default pool: the platform's", cluster: testCluster(true), wantSelector: systemSelector, wantTolerations: systemTaints},
-		{name: "a stored pool's old labels and taints do not count",
-			cluster:      clusterWithPool(map[string]string{"role": "old"}, []cloudv1alpha1.Taint{{Key: "old", Effect: "NoSchedule"}}),
-			wantSelector: systemSelector, wantTolerations: systemTaints},
-		{name: "imported, pool without labels or taints", cluster: importedClusterWithPool(nil, nil),
+		{name: "imported, pool without labels or taints", cluster: importedClusterWithPool(t, nil, nil),
 			wantSelector: map[string]any{}, wantTolerations: []any{}},
+		{name: "imported, nothing adopted known", cluster: importedClusterWithAdoption(""),
+			wantSelector: map[string]any{}, wantTolerations: []any{}},
+		{name: "imported before the adoption kept the node group: the spec its import derived",
+			cluster: importedClusterWithAdoption(`{"nodeRoleName":"r","importDiscovered":{"spec":{"defaultNodePool":` +
+				`{"labels":{"role":"legacy"},"taints":[{"key":"dedicated","value":"x","effect":"TAINT_EFFECT_NO_SCHEDULE"}]}}}}`),
+			wantSelector:    map[string]any{"role": "legacy"},
+			wantTolerations: []any{map[string]any{"key": "dedicated", "operator": "Equal", "value": "x", "effect": "NoSchedule"}}},
 		{name: "imported, two labels and two taints",
-			cluster: importedClusterWithPool(map[string]string{"role": "system", "team": "platform"}, []cloudv1alpha1.Taint{
-				{Key: "dedicated", Value: "system", Effect: "NoSchedule"},
-				{Key: "critical", Effect: "NoExecute"}}),
+			cluster: importedClusterWithPool(t, map[string]string{"role": "system", "team": "platform"}, []crossplaneaws.TaintPlan{
+				{Key: "dedicated", Value: "system", Effect: "NO_SCHEDULE"},
+				{Key: "critical", Effect: "NO_EXECUTE"}}),
 			wantSelector: map[string]any{"role": "system", "team": "platform"},
 			wantTolerations: []any{
 				map[string]any{"key": "dedicated", "operator": "Equal", "value": "system", "effect": "NoSchedule"},
@@ -94,7 +105,7 @@ func TestExpandPlatformPlacement(t *testing.T) {
 		wantTol      []any
 	}{
 		{name: "a platform cluster: the platform pool", cluster: testCluster(true), wantSelector: poolSelector, wantTol: poolTaints},
-		{name: "imported: its default pool", cluster: importedClusterWithPool(map[string]string{"role": "system"}, nil),
+		{name: "imported: its default pool", cluster: importedClusterWithPool(t, map[string]string{"role": "system"}, nil),
 			wantSelector: map[string]any{"role": "system"}, wantTol: []any{}},
 	}
 	for _, tt := range tests {

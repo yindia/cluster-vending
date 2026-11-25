@@ -220,10 +220,6 @@ spec:
     endpointAccess:
       publicAccessCidrs: ["0.0.0.0/0"]
     secretsEncryption: {enabled: true}
-  defaultNodePool:
-    instanceTypes: [t3.medium]
-    diskSizeGb: 30
-    scalingConfig: {minSize: 2, maxSize: 3}
   releaseChannel: RELEASE_CHANNEL_BETA
   upgradeMode: UPGRADE_MODE_AUTOMATIC
   aws:

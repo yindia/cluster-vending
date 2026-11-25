@@ -120,7 +120,7 @@ tidy: ## Run go mod tidy
 $(BIN_DIR)/golangci-lint:
 	GOBIN=$(abspath $(BIN_DIR)) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
-##@ CloudFormation (the IAM roles of a tenant account; Python, requirements.txt)
+##@ CloudFormation (the IAM roles of a tenant account and of the management account; Python, requirements.txt)
 
 PYTHON ?= python3
 
@@ -129,16 +129,16 @@ cf-requirements: ## Install the Python tools of the cf-* targets (requirements.t
 	$(PYTHON) -m pip install -r requirements.txt
 
 .PHONY: cf-generate
-cf-generate: ## Generate the account role templates into pkg/cloudformation/templates (scripts/generate.py)
+cf-generate: ## Generate the tenant and management account role templates into pkg/cloudformation/templates (scripts/generate.py)
 	$(PYTHON) scripts/generate.py
 
 .PHONY: cf-lint
-cf-lint: cf-requirements ## Lint the account role templates with cfn-lint
+cf-lint: cf-requirements ## Lint the role templates with cfn-lint
 	cfn-lint pkg/cloudformation/templates/*.yaml
 
 .PHONY: cf-format-check
-cf-format-check: cf-requirements ## Check scripts/generate.py is black-formatted
-	black --check scripts/generate.py
+cf-format-check: cf-requirements ## Check scripts/*.py (generate.py, management.py) are black-formatted
+	black --check scripts/*.py
 
 ##@ Test
 
@@ -237,3 +237,54 @@ deploy-manifests: ## Render the controller's and the server's manifests into bin
 	  $(KUSTOMIZE) $$dir | sed 's|ghcr.io/yindia/cluster-vending:latest|$(IMAGE):$(TAG)|' > $$out; \
 	  echo "$$dir -> $$out"; \
 	done
+
+##@ Helm chart (charts/cluster-vending)
+
+# The console's image (ui/Dockerfile, Next.js standalone), tagged like IMAGE.
+UI_IMAGE ?= ghcr.io/yindia/cluster-vending-ui
+HELM_CHART   := charts/cluster-vending
+HELM_RELEASE ?= cluster-vending
+HELM_NAMESPACE ?= cluster-vending-system
+# lint and template need the controller's required value; a placeholder.
+HELM_LINT_SET := --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws
+# A second kind cluster for the chart, never the development one (KIND_CLUSTER).
+HELM_KIND_CLUSTER ?= cv-helm
+
+.PHONY: docker-build-ui
+docker-build-ui: ## Build the console image UI_IMAGE:TAG from ui/ (needs Docker; nothing is pushed)
+	docker build -t $(UI_IMAGE):$(TAG) ui
+
+.PHONY: helm-sync
+helm-sync: ## Copy the RBAC of config/ into the chart (files/rbac); config/helm_chart_test.go checks the copies
+	@mkdir -p $(HELM_CHART)/files/rbac
+	cp config/rbac/role.yaml config/rbac/platform_role.yaml config/rbac/kubeconfig_reader_role.yaml \
+	  config/rbac/usage_history_writer_role.yaml config/rbac/leader_election_role.yaml \
+	  config/rbac/cluster_*_role.yaml config/rbac/network_*_role.yaml config/rbac/cloudaccount_*_role.yaml \
+	  config/rbac/release_admin_role.yaml config/rbac/release_viewer_role.yaml $(HELM_CHART)/files/rbac/
+	cp config/server/base/role.yaml $(HELM_CHART)/files/rbac/server_role.yaml
+	cp config/live/role.yaml $(HELM_CHART)/files/rbac/live_role.yaml
+
+.PHONY: helm-lint
+helm-lint: ## Lint the chart with the defaults and with each workload turned off
+	helm lint --strict $(HELM_CHART) $(HELM_LINT_SET)
+	@for w in server controller live ui; do \
+	  echo "helm lint ($$w.enabled=false)"; \
+	  helm lint --strict --quiet $(HELM_CHART) $(HELM_LINT_SET) --set $$w.enabled=false --set ui.apiBaseUrl=http://api.example:8080; \
+	done
+
+.PHONY: helm-template
+helm-template: ## Render the chart into bin/helm/cluster-vending.yaml (nothing is applied)
+	@mkdir -p $(BIN_DIR)/helm
+	helm template $(HELM_RELEASE) $(HELM_CHART) -n $(HELM_NAMESPACE) $(HELM_LINT_SET) > $(BIN_DIR)/helm/cluster-vending.yaml
+	@echo "$(HELM_CHART) -> $(BIN_DIR)/helm/cluster-vending.yaml"
+
+.PHONY: kind-load
+kind-load: ## Load IMAGE:TAG and UI_IMAGE:TAG into the kind cluster HELM_KIND_CLUSTER
+	kind load docker-image $(IMAGE):$(TAG) $(UI_IMAGE):$(TAG) --name $(HELM_KIND_CLUSTER)
+
+.PHONY: helm-install-kind
+helm-install-kind: ## Install the chart on kind-HELM_KIND_CLUSTER with the loaded images (ci/kind-values.yaml; Crossplane first: make kind-up KIND_CLUSTER=cv-helm)
+	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) --kube-context kind-$(HELM_KIND_CLUSTER) \
+	  -n $(HELM_NAMESPACE) --create-namespace -f $(HELM_CHART)/ci/kind-values.yaml \
+	  --set image.repository=$(IMAGE) --set image.tag=$(TAG) \
+	  --set ui.image.repository=$(UI_IMAGE) --set ui.image.tag=$(TAG)

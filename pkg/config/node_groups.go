@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -10,25 +11,27 @@ import (
 
 // The platform admin's node group layout (docs/architecture.md#node-layout).
 // It is the `nodeGroups` section of the config file, the same for the
-// server and the controller:
+// server and the controller. A cluster has exactly these two groups:
+// tenants define none.
 //
 //	nodeGroups:
-//	  system:                     # the bootstrap group: the default EKS managed node group
-//	    instanceTypes: [t3.medium] # new clusters only; existing ones keep theirs
+//	  system:                     # the default EKS managed node group: Karpenter and the EKS add-ons
+//	    instanceTypes: [t3.medium] # one architecture
 //	    minSize: 2                # at least 2; the static size (maxSize is ignored)
 //	    capacityType: ON_DEMAND
+//	    amiType: AL2023_x86_64_STANDARD
 //	    diskSizeGiB: 0            # 0: EKS's default
 //	  platform: {...}             # the platform pool (node_groups_platform.go)
-//	  karpenter:                  # what users may create as their own groups
-//	    instanceFamilies: [t3]
-//	    instanceTypes: []
-//	    defaults:                 # for a user group that leaves them unset
-//	      architectures: [AMD64]
-//	      capacityTypes: [ON_DEMAND]
 //
-// Each value is also a flag and an environment variable (below), which win
-// over the file; lists are comma-separated there. An empty list (or
-// "none") means no restriction.
+// Every cluster the platform created runs them; EKS cannot change a node
+// group's instance types, capacity type, AMI type or disk in place, so a
+// change of one of them replaces each cluster's system group (the new one
+// first, the old one retired once the new one is Ready), rolled out like a
+// code change. Each value is also a flag and an environment variable
+// (below), which win over the file; lists are comma-separated there.
+//
+// The old karpenter section (what tenants could create as their own groups)
+// is ignored with a warning, so old configs still start.
 
 // Flag names and environment variables of the node group layout. The two
 // allowlist flags are older than the section and stay.
@@ -49,6 +52,11 @@ const (
 	EnvSystemNodeGroupCapacityType  = "CV_SYSTEM_NODE_GROUP_CAPACITY_TYPE"
 	FlagSystemNodeGroupDiskSizeGiB  = "system-node-group-disk-size-gib"
 	EnvSystemNodeGroupDiskSizeGiB   = "CV_SYSTEM_NODE_GROUP_DISK_SIZE_GIB"
+	FlagSystemNodeGroupAMIType      = "system-node-group-ami-type"
+	EnvSystemNodeGroupAMIType       = "CV_SYSTEM_NODE_GROUP_AMI_TYPE"
+
+	// The tenant node groups' allowlist and defaults are gone with the
+	// groups: still accepted, ignored with a warning.
 
 	FlagNodeGroupInstanceFamilies = "node-group-instance-families"
 	EnvNodeGroupInstanceFamilies  = "CV_NODE_GROUP_INSTANCE_FAMILIES"
@@ -70,9 +78,11 @@ const (
 	// DefaultSystemNodeGroupMinSize is the group's static size unless the
 	// admin sets another: its min, max and desired size.
 	DefaultSystemNodeGroupMinSize = 2
+	// DefaultSystemNodeGroupAMIType is the system group's AMI type unless
+	// the admin sets another.
+	DefaultSystemNodeGroupAMIType = "AL2023_x86_64_STANDARD"
 	defaultCapacityType           = "ON_DEMAND"
 	defaultArchitecture           = "AMD64"
-	defaultInstanceFamily         = "t3"
 	maxSystemDiskSizeGiB          = 16384
 	// noList is the value of a list setting that means "empty": the setting
 	// is set (a flag or variable may not be empty), and restricts nothing.
@@ -80,17 +90,25 @@ const (
 )
 
 var (
-	instanceFamilyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	instanceTypePattern   = regexp.MustCompile(`^[a-z][a-z0-9-]*[.][a-z0-9]+$`)
-	capacityTypes         = []string{"ON_DEMAND", "SPOT"}
-	architectures         = []string{"AMD64", "ARM64"}
+	instanceTypePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*[.][a-z0-9]+$`)
+	capacityTypes       = []string{"ON_DEMAND", "SPOT"}
+	architectures       = []string{"AMD64", "ARM64"}
+	// systemAMITypes are the AMI types the system group may run, by
+	// architecture: Linux ones Karpenter and the EKS add-ons run on.
+	systemAMITypes = map[string]string{
+		"AL2023_x86_64_STANDARD": "AMD64", "AL2023_ARM_64_STANDARD": "ARM64",
+		"BOTTLEROCKET_x86_64": "AMD64", "BOTTLEROCKET_ARM_64": "ARM64",
+	}
+	// ignoredTenantSettings are the old tenant node group settings.
+	ignoredTenantSettings = []string{FlagNodeGroupInstanceFamilies, FlagNodeGroupInstanceTypes,
+		FlagNodeGroupDefaultArchitectures, FlagNodeGroupDefaultCapacityTypes}
 )
 
 // nodeGroupSettings are the layout's settings, for the server and the
 // controller alike.
 var nodeGroupSettings = []Setting{
 	{Flag: FlagSystemInstanceTypes, Env: EnvSystemInstanceTypes,
-		Usage: "comma-separated instance types of the bootstrap (system) managed node group of NEW clusters, one architecture and one vCPU/memory class (nodeGroups.system.instanceTypes); default t3.medium; existing clusters keep theirs: EKS cannot change it in place"},
+		Usage: "comma-separated instance types of the system managed node group, one architecture and one vCPU/memory class (nodeGroups.system.instanceTypes); default t3.medium. A change replaces every cluster's system group (EKS cannot change it in place)"},
 	{Flag: FlagSystemNodeGroupInstanceType, Env: EnvSystemNodeGroupInstanceType,
 		Usage: "deprecated: one instance type, the old form of --" + FlagSystemInstanceTypes + " (nodeGroups.system.instanceType)"},
 	{Flag: FlagSystemNodeGroupSize, Env: EnvSystemNodeGroupSize,
@@ -100,17 +118,19 @@ var nodeGroupSettings = []Setting{
 	{Flag: FlagSystemNodeGroupMaxSize, Env: EnvSystemNodeGroupMaxSize,
 		Usage: "ignored: the system managed node group has one static size, --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.maxSize); accepted with a warning so old configs still start"},
 	{Flag: FlagSystemNodeGroupCapacityType, Env: EnvSystemNodeGroupCapacityType, Default: defaultCapacityType,
-		Usage: "capacity type of the system node group of NEW clusters, ON_DEMAND or SPOT (nodeGroups.system.capacityType)"},
+		Usage: "capacity type of the system node group, ON_DEMAND or SPOT (nodeGroups.system.capacityType). A change replaces every cluster's system group"},
+	{Flag: FlagSystemNodeGroupAMIType, Env: EnvSystemNodeGroupAMIType, Default: DefaultSystemNodeGroupAMIType,
+		Usage: "EKS AMI type of the system node group, of the instance types' architecture: AL2023_x86_64_STANDARD, AL2023_ARM_64_STANDARD, BOTTLEROCKET_x86_64 or BOTTLEROCKET_ARM_64 (nodeGroups.system.amiType). A change replaces every cluster's system group"},
 	{Flag: FlagSystemNodeGroupDiskSizeGiB, Env: EnvSystemNodeGroupDiskSizeGiB, Default: "0",
-		Usage: "disk size in GiB of the system node group of NEW clusters (nodeGroups.system.diskSizeGiB); 0: EKS's default"},
-	{Flag: FlagNodeGroupInstanceFamilies, Env: EnvNodeGroupInstanceFamilies, Default: defaultInstanceFamily,
-		Usage: "comma-separated instance families (t3,m7i,...) user node groups may use (nodeGroups.karpenter.instanceFamilies); none: no restriction on families"},
+		Usage: "disk size in GiB of the system node group (nodeGroups.system.diskSizeGiB); 0: EKS's default. A change replaces every cluster's system group"},
+	{Flag: FlagNodeGroupInstanceFamilies, Env: EnvNodeGroupInstanceFamilies,
+		Usage: "ignored: tenants define no node groups (nodeGroups.karpenter.instanceFamilies); accepted with a warning so old configs still start"},
 	{Flag: FlagNodeGroupInstanceTypes, Env: EnvNodeGroupInstanceTypes,
-		Usage: "comma-separated instance types (t3.large,...) user node groups may use besides every type of an allowed family (nodeGroups.karpenter.instanceTypes); empty: none besides the families'"},
-	{Flag: FlagNodeGroupDefaultArchitectures, Env: EnvNodeGroupDefaultArchitectures, Default: defaultArchitecture,
-		Usage: "comma-separated architectures (AMD64,ARM64) of a user node group that sets none (nodeGroups.karpenter.defaults.architectures)"},
-	{Flag: FlagNodeGroupDefaultCapacityTypes, Env: EnvNodeGroupDefaultCapacityTypes, Default: defaultCapacityType,
-		Usage: "comma-separated capacity types (ON_DEMAND,SPOT) of a user node group that sets none (nodeGroups.karpenter.defaults.capacityTypes)"},
+		Usage: "ignored: tenants define no node groups (nodeGroups.karpenter.instanceTypes); accepted with a warning"},
+	{Flag: FlagNodeGroupDefaultArchitectures, Env: EnvNodeGroupDefaultArchitectures,
+		Usage: "ignored: tenants define no node groups (nodeGroups.karpenter.defaults.architectures); accepted with a warning"},
+	{Flag: FlagNodeGroupDefaultCapacityTypes, Env: EnvNodeGroupDefaultCapacityTypes,
+		Usage: "ignored: tenants define no node groups (nodeGroups.karpenter.defaults.capacityTypes); accepted with a warning"},
 }
 
 // withNodeGroupSettings is settings followed by the node group layout's.
@@ -121,55 +141,36 @@ func withNodeGroupSettings(settings []Setting) []Setting {
 // NodeGroups is the validated node group layout. Server and controller load
 // the same struct from the same section, so their views cannot drift.
 type NodeGroups struct {
-	System    SystemNodeGroup
-	Platform  PlatformNodePool
-	Karpenter KarpenterNodeGroups
+	System   SystemNodeGroup
+	Platform PlatformNodePool
 	// Warnings are keys that still work but are on their way out; the
 	// commands log them at start.
 	Warnings []string
 }
 
 // SystemNodeGroup is the default EKS managed node group, which runs
-// Karpenter, CoreDNS and every platform and tenant component.
+// Karpenter and the EKS add-ons, on every cluster the platform created.
 type SystemNodeGroup struct {
-	// InstanceTypes, CapacityType and DiskSizeGiB apply to new clusters
-	// only. MinSize (nodeGroups.system.minSize) is the static size, the
-	// group's min, max and desired size on every cluster, in place:
-	// nothing autoscales the group. The old maxSize key is ignored.
+	// MinSize (nodeGroups.system.minSize) is the static size, the group's
+	// min, max and desired size, changed in place: nothing autoscales the
+	// group. The old maxSize key is ignored. A change of InstanceTypes,
+	// CapacityType, AMIType or DiskSizeGiB replaces the group.
 	InstanceTypes []string
 	MinSize       int
 	CapacityType  string
-	DiskSizeGiB   int
-}
-
-// KarpenterNodeGroups is what users may create as their own node groups.
-type KarpenterNodeGroups struct {
-	// InstanceFamilies and InstanceTypes are the allowlist; empty
-	// restricts nothing in its dimension.
-	InstanceFamilies []string
-	InstanceTypes    []string
-	Defaults         NodeGroupDefaults
-}
-
-// NodeGroupDefaults are applied to a user group that leaves them unset.
-type NodeGroupDefaults struct {
-	Architectures []string
-	CapacityTypes []string
+	// AMIType is the EKS AMI type (AL2023_x86_64_STANDARD, ...), of the
+	// instance types' architecture.
+	AMIType     string
+	DiskSizeGiB int
 }
 
 // DefaultNodeGroups is the layout when nothing is configured.
 func DefaultNodeGroups() NodeGroups {
 	return NodeGroups{
-		System:   SystemNodeGroup{InstanceTypes: []string{DefaultSystemNodeGroupInstanceType}, MinSize: DefaultSystemNodeGroupMinSize, CapacityType: defaultCapacityType},
+		System: SystemNodeGroup{InstanceTypes: []string{DefaultSystemNodeGroupInstanceType}, MinSize: DefaultSystemNodeGroupMinSize,
+			CapacityType: defaultCapacityType, AMIType: DefaultSystemNodeGroupAMIType},
 		Platform: defaultPlatformNodePool(),
-		Karpenter: KarpenterNodeGroups{InstanceFamilies: []string{defaultInstanceFamily},
-			Defaults: NodeGroupDefaults{Architectures: []string{defaultArchitecture}, CapacityTypes: []string{defaultCapacityType}}},
 	}
-}
-
-// Restricted reports whether any allowlist is set.
-func (k KarpenterNodeGroups) Restricted() bool {
-	return len(k.InstanceFamilies) > 0 || len(k.InstanceTypes) > 0
 }
 
 func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
@@ -195,18 +196,34 @@ func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
 		errs = append(errs, fmt.Errorf("%s must be a number from 0 to %d, got %q", setting(FlagSystemNodeGroupDiskSizeGiB), maxSystemDiskSizeGiB, v[FlagSystemNodeGroupDiskSizeGiB]))
 	}
 	out.System.DiskSizeGiB = disk
-	out.Karpenter.InstanceFamilies, err = parseList(setting(FlagNodeGroupInstanceFamilies), v[FlagNodeGroupInstanceFamilies], instanceFamilyPattern, "an instance family like t3")
+	out.System.AMIType, err = systemAMIType(v[FlagSystemNodeGroupAMIType], out.System.InstanceTypes)
 	check(err)
-	out.Karpenter.InstanceTypes, err = parseList(setting(FlagNodeGroupInstanceTypes), v[FlagNodeGroupInstanceTypes], instanceTypePattern, "an instance type like t3.large")
-	check(err)
-	out.Karpenter.Defaults.Architectures, err = enumList(setting(FlagNodeGroupDefaultArchitectures), v[FlagNodeGroupDefaultArchitectures], architectures)
-	check(err)
-	out.Karpenter.Defaults.CapacityTypes, err = enumList(setting(FlagNodeGroupDefaultCapacityTypes), v[FlagNodeGroupDefaultCapacityTypes], capacityTypes)
-	check(err)
+	for _, flag := range ignoredTenantSettings {
+		if v[flag] != "" {
+			out.Warnings = append(out.Warnings, "nodeGroups.karpenter is ignored: tenants define no node groups, every cluster runs the system group and the platform pool; remove it")
+			break
+		}
+	}
 	var platformErrs []error
 	out.Platform, platformErrs = platformFrom(v)
 	errs = append(errs, platformErrs...)
 	return out, errs
+}
+
+// systemAMIType reads the system group's AMI type: one of systemAMITypes,
+// of the instance types' architecture.
+func systemAMIType(raw string, types []string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	arch, ok := systemAMITypes[raw]
+	if !ok {
+		allowed := slices.Sorted(maps.Keys(systemAMITypes))
+		return "", fmt.Errorf("%s: %q is not one of %s", nodeSetting(FlagSystemNodeGroupAMIType), raw, strings.Join(allowed, ", "))
+	}
+	if len(types) > 0 && !mixed(types) && ArchitectureOfInstanceType(types[0]) != arch {
+		return "", fmt.Errorf("%s %s is %s, but the instance types (%s) are not: the AMI must match their architecture",
+			nodeSetting(FlagSystemNodeGroupAMIType), raw, arch, strings.Join(types, ", "))
+	}
+	return raw, nil
 }
 
 // systemInstanceTypes reads the bootstrap group's types: a non-empty list

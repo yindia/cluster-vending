@@ -94,7 +94,7 @@ func catalog() []cloudv1alpha1.ComponentDefinition {
 }
 
 func release(pins ...string) *cloudv1alpha1.Release {
-	k := cloudv1alpha1.KubernetesRelease{Minor: "1.37", Default: true}
+	k := cloudv1alpha1.KubernetesRelease{Minor: "1.37", Default: true, Channel: cloudv1alpha1.ChannelAlpha}
 	for _, name := range pins {
 		k.Components = append(k.Components, cloudv1alpha1.ComponentPin{Name: name, Version: "1.2.3"})
 	}
@@ -200,8 +200,8 @@ func TestCatalogListsEveryComponentWithWhoManagesIt(t *testing.T) {
 	}
 	for _, d := range res.GetDefinitions() {
 		platform := d.GetManagement() == cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM
-		if platform && (d.GetUserValues() != "" || d.GetPlatformValues() != nil) {
-			t.Errorf("%s shows values to tenants", d.GetName())
+		if platform && (d.GetUserValues() != "" || d.GetConfigurable()) {
+			t.Errorf("%s offers tenants values to set", d.GetName())
 		}
 		if d.GetName() == "policies" && (d.GetUserValues() != policiesValues || d.GetValuesSchema() == nil ||
 			!slices.Equal(d.GetRequires(), []string{"scanner"}) || d.GetDescription() == "") {
@@ -679,4 +679,49 @@ func TestDisabledDefinitions(t *testing.T) {
 	if messages["scanner"] != "disabled by the platform" || messages["policies"] != "off: it requires scanner, which is off" {
 		t.Errorf("list messages = %v", messages)
 	}
+}
+
+// A platform component shows the default config the platform applies,
+// read-only: tenants see what runs, and still cannot change it.
+func TestCatalogShowsAPlatformComponentsDefaultConfig(t *testing.T) {
+	w := newWorld(t)
+	for i := range w.catalog.defs {
+		if w.catalog.defs[i].Name == "karpenter" {
+			w.catalog.defs[i].Spec.PlatformValues = raw(`{"replicas":2}`)
+		}
+	}
+
+	res, err := w.svc.ListComponentDefinitions(t.Context(), &cloudv1.ListComponentDefinitionsRequest{TenantId: tenant})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := findDefinition(res, "karpenter")
+	if d == nil || d.GetPlatformValues().AsMap()["replicas"] != float64(2) || d.GetConfigurable() || d.GetUserValues() != "" {
+		t.Fatalf("karpenter = %v, want its platform values, read-only", d)
+	}
+}
+
+// Without a cluster, a component lists the version each channel's
+// clusters get, by the Kubernetes minor that channel runs.
+func TestCatalogListsVersionsWithoutACluster(t *testing.T) {
+	w := newWorld(t)
+
+	res, err := w.svc.ListComponentDefinitions(t.Context(), &cloudv1.ListComponentDefinitionsRequest{TenantId: tenant})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := findDefinition(res, "karpenter"); d == nil || d.GetVersions()["1.37"] != "1.2.3" {
+		t.Fatalf("karpenter versions = %v, want 1.37: 1.2.3", d.GetVersions())
+	}
+}
+
+func findDefinition(res *cloudv1.ListComponentDefinitionsResponse, name string) *cloudv1.ComponentDefinition {
+	for _, d := range res.GetDefinitions() {
+		if d.GetName() == name {
+			return d
+		}
+	}
+	return nil
 }

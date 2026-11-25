@@ -38,9 +38,8 @@ func testCluster() *cloudv1.Cluster {
 	return &cloudv1.Cluster{
 		TenantId: "acme", Id: "01a1d2f6-12a9-7505-b7b2-8b8acfcab306", Name: "prod-eks", CreateTime: ago(50 * time.Hour),
 		Spec: &cloudv1.ClusterSpec{Region: "us-west-1",
-			Network:         &cloudv1.ClusterNetwork{NetworkId: "01a1d0a1-3333-7766-a4ff-84f3f49a774f"},
-			ControlPlane:    &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.37"},
-			DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"t3.large"}, ScalingConfig: &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 4}},
+			Network:      &cloudv1.ClusterNetwork{NetworkId: "01a1d0a1-3333-7766-a4ff-84f3f49a774f"},
+			ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.37"},
 			MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY, cloudv1.Weekday_WEEKDAY_SUNDAY},
 				Start: "02:00", Duration: "4h"},
 			ReleaseChannel: cloudv1.ReleaseChannel_RELEASE_CHANNEL_ALPHA,
@@ -70,7 +69,10 @@ func testCluster() *cloudv1.Cluster {
 
 func TestPrintClusterList(t *testing.T) {
 	withClock(t)
-	list := &cloudv1.ListClustersResponse{Clusters: []*cloudv1.Cluster{testCluster()}}
+	c := testCluster()
+	c.Status.NodeGroups = []*cloudv1.NodeGroupStatus{{Name: "system", PlatformManaged: true, Nodes: 2},
+		{Name: "platform-pool", PlatformManaged: true, Nodes: 3}}
+	list := &cloudv1.ListClustersResponse{Clusters: []*cloudv1.Cluster{c}}
 	tests := []struct {
 		name, format, want string
 	}{
@@ -78,8 +80,8 @@ func TestPrintClusterList(t *testing.T) {
 			"NAME       ID                                     PHASE     VERSION   REGION      AGE\n" +
 				"prod-eks   01a1d2f6-12a9-7505-b7b2-8b8acfcab306   Running   1.37      us-west-1   2d2h\n"},
 		{"wide", OutputWide,
-			"NAME       ID                                     PHASE     VERSION   REGION      AGE    NETWORK                                NODE POOL        RELEASE            MESSAGE\n" +
-				"prod-eks   01a1d2f6-12a9-7505-b7b2-8b8acfcab306   Running   1.37      us-west-1   2d2h   01a1d0a1-3333-7766-a4ff-84f3f49a774f   t3.large (2-4)   shipped-f874cd2c   <none>\n"},
+			"NAME       ID                                     PHASE     VERSION   REGION      AGE    NETWORK                                NODE GROUPS                RELEASE            MESSAGE\n" +
+				"prod-eks   01a1d2f6-12a9-7505-b7b2-8b8acfcab306   Running   1.37      us-west-1   2d2h   01a1d0a1-3333-7766-a4ff-84f3f49a774f   system:2,platform-pool:3   shipped-f874cd2c   <none>\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

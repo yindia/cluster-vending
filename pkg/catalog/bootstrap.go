@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
+	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/component"
 	"github.com/yindia/cluster-vending/pkg/naas"
 )
 
 // CapsuleBootstrapValues locks this build's shared bootstrap into a NEW release
-// pin. Never use this to augment values read from an already-published Release:
+// pin of the shipped NamespaceTenancy definition (component.RoleNamespaceTenancy). Never use this to augment values read from an already-published Release:
 // its chart, templates and authority must move together through release gates.
 // The complete platform values snapshot also retains the PDB and system placement.
 func CapsuleBootstrapValues(overrides map[string]any) (map[string]any, error) {
@@ -17,7 +18,7 @@ func CapsuleBootstrapValues(overrides map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	definition, err := read("capsule.yaml")
+	definition, err := shippedWithRole(component.RoleNamespaceTenancy)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +53,9 @@ func CapsuleBootstrapValues(overrides map[string]any) (map[string]any, error) {
 	// All of these settings belong to the pin, not the mutable definition. Older
 	// releases retain their original operator-only values until a release move.
 	locked := map[string]any{
-		"fullnameOverride": "capsule",
-		"serviceAccount":   map[string]any{"create": true, "name": "capsule"},
+		// The chart's object names naas.ObserveCapsuleAvailability looks for.
+		"fullnameOverride": naas.CapsuleFullname,
+		"serviceAccount":   map[string]any{"create": true, "name": naas.CapsuleServiceAccount},
 		"extraManifests":   extra,
 		"manager": map[string]any{
 			"rbac": map[string]any{
@@ -76,4 +78,28 @@ func CapsuleBootstrapValues(overrides map[string]any) (map[string]any, error) {
 		},
 	}
 	return component.Merge(nil, base, overrides, locked), nil
+}
+
+// shippedWithRole is the shipped definition that declares role.
+func shippedWithRole(role component.Role) (*cloudv1alpha1.ComponentDefinition, error) {
+	defs, err := Definitions()
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range defs {
+		if component.Role(d.Spec.Role) == role {
+			return d, nil
+		}
+	}
+	return nil, fmt.Errorf("the shipped catalog has no %s definition", role)
+}
+
+// ShippedRoleName is the name of the shipped definition that declares
+// role; "" when none does.
+func ShippedRoleName(role component.Role) string {
+	d, err := shippedWithRole(role)
+	if err != nil {
+		return ""
+	}
+	return d.Name
 }

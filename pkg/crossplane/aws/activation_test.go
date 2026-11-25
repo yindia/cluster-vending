@@ -53,7 +53,6 @@ func TestActivationPolicy(t *testing.T) {
 	plan.LogGroupRetentionDays, plan.CreateEncryptionKey, plan.EncryptionKeyARN = 90, true, "arn:aws:kms:us-east-1:111122223333:key/k"
 	plan.IRSA, plan.OIDCIssuer = true, "https://oidc.eks.us-east-1.amazonaws.com/id/ABC"
 	plan.AccountID, plan.ResultsBucket = "111122223333", true
-	plan.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ImageID: "ami-0123456789abcdef0", UserData: "Zm9v"}
 	built := append(crossplaneaws.ClusterResources(plan), crossplaneaws.NetworkObjects()...)
 	for _, obj := range built {
 		gvk, err := apiutil.GVKForObject(obj, scheme)

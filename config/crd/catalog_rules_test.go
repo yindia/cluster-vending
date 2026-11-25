@@ -43,23 +43,43 @@ func TestDefinitionInstallTimeoutBounds(t *testing.T) {
 	}
 }
 
-func TestKarpenterDefinitionRule(t *testing.T) {
+// The CRD's role rules: the NodeProvisioner is not disabled, a role is a
+// Platform definition's, and the name karpenter is no rule of its own.
+func TestDefinitionRoleRules(t *testing.T) {
 	v := newValidator(t, "ComponentDefinition")
 	for _, tc := range []struct {
 		name, spec string
 		refused    bool
 	}{
-		{"karpenter", "  sequence: 0\n", false},
-		{"karpenter", "  sequence: 100\n", true},
-		{"karpenter", "", true}, // the default sequence is 100
-		{"karpenter", "  sequence: 0\n  disabled: true\n", true},
-		{"karpenter", "  sequence: 0\n  disabled: false\n", false},
-		{"other", "  sequence: 100\n", false},
+		{"nodes", "  management: Platform\n  role: NodeProvisioner\n", false},
+		{"nodes", "  management: Platform\n  role: NodeProvisioner\n  disabled: true\n", true},
+		{"nodes", "  management: Platform\n  role: NodeProvisioner\n  disabled: false\n", false},
+		{"tenancy", "  management: Platform\n  role: NamespaceTenancy\n  disabled: true\n", false},
+		{"nodes", "  role: NodeProvisioner\n", true}, // management defaults to Tenant
+		{"nodes", "  management: Platform\n  role: Gateway\n", true},
+		{"karpenter", "  sequence: 100\n", false},
 		{"other", "  sequence: 0\n", false},
 	} {
 		errs := v.validate(t, definitionDoc(tc.name, tc.spec))
 		if tc.refused != (len(errs) > 0) {
 			t.Errorf("%s %q: errors %v, want refused %v", tc.name, strings.TrimSpace(tc.spec), errs.ToAggregate(), tc.refused)
+		}
+	}
+}
+
+func TestDefinitionSizingShape(t *testing.T) {
+	v := newValidator(t, "ComponentDefinition")
+	for _, tc := range []struct {
+		spec    string
+		refused bool
+	}{
+		{"  sizing:\n    deployments: [{name: a, replicas: replicaCount, requests: resources.requests}]\n    daemonSets: [{name: b, requests: node.resources.requests}]\n", false},
+		{"  sizing:\n    deployments: [{name: a, requests: resources.requests}]\n", true},
+		{"  sizing:\n    deployments: [{name: a, replicas: 'a..b', requests: resources.requests}]\n", true},
+	} {
+		errs := v.validate(t, definitionDoc("x", "  management: Platform\n"+tc.spec))
+		if tc.refused != (len(errs) > 0) {
+			t.Errorf("%q: errors %v, want refused %v", strings.TrimSpace(tc.spec), errs.ToAggregate(), tc.refused)
 		}
 	}
 }

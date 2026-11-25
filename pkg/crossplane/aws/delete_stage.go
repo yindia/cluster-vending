@@ -22,7 +22,7 @@ const (
 	// its access entry (karpenterObjects).
 	DeleteStageKarpenter ClusterDeleteStage = iota + 1
 	// DeleteStageAddons: the EKS add-ons, their pod identity associations
-	// and their roles and policies (addonSetups).
+	// and their roles and policies (setup in addons.yaml).
 	DeleteStageAddons
 	// DeleteStageRest: the default managed node group, the EKS cluster and
 	// its IAM, the results bucket and the rest, ordered by their Usages.
@@ -47,7 +47,7 @@ func ClusterObjectDeleteStage(prefix, kind, name string) ClusterDeleteStage {
 		if strings.HasPrefix(name, prefix+"-karpenter-node") {
 			return DeleteStageKarpenter
 		}
-		for _, setup := range addonSetups {
+		for _, setup := range addonCatalog.setups {
 			if strings.HasPrefix(name, prefix+"-"+setup.short+"-") {
 				return DeleteStageAddons
 			}

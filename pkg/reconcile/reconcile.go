@@ -140,10 +140,9 @@ type Deps struct {
 	TeardownTimeout time.Duration
 	// NodeGroups is the platform admin's node group layout (the nodeGroups
 	// section of the config file, the same for the server and the
-	// controller): the system group's size and, for new clusters, its
-	// instance type, capacity type and disk; the allowlist (which the API
-	// server enforces on user groups) and the defaults of user groups. The
-	// zero value: the system defaults and no restriction.
+	// controller): the system group (size, instance types, capacity type,
+	// AMI type, disk) and the platform pool, the only groups a cluster has.
+	// The zero value: the system defaults and no platform pool.
 	NodeGroups config.NodeGroups
 	// NaaS is the sub-tenant section of the config file (the same for the
 	// server and the controller): the OIDC groups a sub-tenant may name,

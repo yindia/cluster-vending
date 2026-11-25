@@ -1,13 +1,15 @@
 package aws
 
+import "slices"
+
 // The node pools of a cluster (docs/architecture.md#node-layout): the
 // default managed node group ("system") runs phase 1 of the install order,
 // Karpenter and the EKS add-on controllers, at a static size the platform
 // admin sets (nothing autoscales it); Karpenter's platform pool (PoolPlatform) runs every other
-// platform component and the tenant's components; a user's own Karpenter
-// node groups run their workloads. The system group's nodes carry the label
-// PoolLabelKey=system and are tainted with it (NoSchedule); a user group's
-// nodes carry the label PoolLabelKey=<name>.
+// platform component and the tenant's components. Both are the platform's,
+// from its config (nodeGroups): tenants define no node groups. The system
+// group's nodes carry the label PoolLabelKey=system and are tainted with it
+// (NoSchedule).
 const (
 	// PoolLabelKey is the node label (and taint key) that names a pool.
 	PoolLabelKey = "node.cluster-vending.io/pool"
@@ -25,11 +27,14 @@ const (
 	// Karpenter runs two replicas with anti-affinity, one on each of two
 	// nodes.
 	MinSystemPoolSize = 2
-	// DefaultSystemInstanceType is the default group's instance type for a
-	// new cluster unless the admin sets another (--system-node-group-
-	// instance-type) and the spec names none. An existing cluster keeps
-	// the instance type stored in its spec (no node group replacement).
+	// DefaultSystemInstanceType is the system group's instance type unless
+	// the admin sets others (nodeGroups.system.instanceTypes).
 	DefaultSystemInstanceType = "t3.medium"
+	// DefaultSystemCapacityType and DefaultSystemAMIType are the system
+	// group's capacity and AMI type unless the admin sets others (EKS
+	// spellings).
+	DefaultSystemCapacityType = "ON_DEMAND"
+	DefaultSystemAMIType      = "AL2023_x86_64_STANDARD"
 
 	taintNoSchedule = "NO_SCHEDULE"
 )
@@ -58,18 +63,36 @@ func SystemPoolSize(size int) int {
 	return size
 }
 
-// FixedSystemNodePool is plan with the default node group's placement and
-// size the platform fixes: the system label and taint, and one static size
-// (SystemPoolSize) as min, max and desired. Nothing autoscales the group
-// (Karpenter scales every other pool), and the apply sends desired in
-// forProvider (ClusterSet), so a change of the size, or a group that grew
-// under the former cluster-autoscaler, is applied in place. Instance types,
-// capacity type, AMI, disk and launch template are the plan's own (EKS
-// cannot change them in place; the size it can).
-func FixedSystemNodePool(plan NodePoolPlan, size int) NodePoolPlan {
-	size = SystemPoolSize(size)
-	plan.Labels = PoolLabels(PoolSystem)
-	plan.Taints = []TaintPlan{PoolTaint(PoolSystem)}
-	plan.MinSize, plan.MaxSize, plan.Desired = size, size, size
-	return plan
+// SystemNodeGroup is the platform admin's settings of the system group
+// (nodeGroups.system), the same for every cluster the platform created.
+// Zero values are the defaults.
+type SystemNodeGroup struct {
+	// Size is the static size (SystemPoolSize).
+	Size          int
+	InstanceTypes []string
+	// CapacityType and AMIType are EKS spellings (ON_DEMAND, SPOT;
+	// AL2023_x86_64_STANDARD, ...).
+	CapacityType, AMIType string
+	// DiskSizeGiB is the nodes' disk; 0: EKS's default.
+	DiskSizeGiB int
+}
+
+// SystemNodePool is the system group of s: the system label and taint, one
+// static size (SystemPoolSize) as min, max and desired, and the admin's
+// instance types, capacity type, AMI type and disk. Nothing autoscales the
+// group (Karpenter scales the platform pool), and the apply sends desired
+// in forProvider (ClusterSet), so a change of the size is applied in place.
+// EKS cannot change the instance types, capacity type, AMI type or disk in
+// place: a change of one of them replaces the group (a new one is created,
+// the old one retired once the new one is Ready).
+func SystemNodePool(s SystemNodeGroup) NodePoolPlan {
+	size := SystemPoolSize(s.Size)
+	types := slices.Clone(s.InstanceTypes)
+	if len(types) == 0 {
+		types = []string{DefaultSystemInstanceType}
+	}
+	return NodePoolPlan{InstanceTypes: types, CapacityType: orDefault(s.CapacityType, DefaultSystemCapacityType),
+		AMIType: orDefault(s.AMIType, DefaultSystemAMIType), DiskSizeGB: s.DiskSizeGiB,
+		MinSize: size, MaxSize: size, Desired: size,
+		Labels: PoolLabels(PoolSystem), Taints: []TaintPlan{PoolTaint(PoolSystem)}}
 }

@@ -69,7 +69,8 @@ func CheckTenantAccess(d Definition, catalog []Definition) error {
 //   - requirements exist and have no cycle;
 //   - providers agree within a bundle, a requirement covers the clouds of
 //     what requires it, and no two definitions install one chart into one
-//     namespace on the same cloud (checkProviders).
+//     namespace on the same cloud (checkProviders);
+//   - a role is a Platform definition's, one per cloud (checkRoles).
 func CheckCatalog(defs []Definition) []string {
 	byName := make(map[string]Definition, len(defs))
 	for _, d := range defs {
@@ -88,6 +89,7 @@ func CheckCatalog(defs []Definition) []string {
 		out = append(out, checkInternal(d, byName, bundleOf[d.Name])...)
 		out = append(out, checkProviders(d, byName, defs)...)
 	}
+	out = append(out, checkRoles(defs)...)
 	if _, err := release.UpgradeOrder(orderEntries(defs)); err != nil {
 		out = append(out, err.Error())
 	}

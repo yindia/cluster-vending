@@ -8,13 +8,25 @@ spec:
   provider: aws
   description: Capsule multi-tenancy controller for NaaS-enabled clusters, with platform-managed values and certificates issued by the cluster's existing cert-manager.
   management: Platform
-  # ClusterSpec.naas must be true: the reconciler filters this entry out for
-  # other clusters, including from release-move ordering.
+  # Namespace tenancy (pkg/component/roles.go): by its role it is installed
+  # only where ClusterSpec.naas is true (the reconciler filters this entry
+  # out for other clusters, including from release-move ordering), and
+  # sub-tenants wait for it.
+  role: NamespaceTenancy
   namespace: capsule-system
   install:
     helm:
       repository: oci://ghcr.io/projectcapsule/charts
       chart: capsule
+  # What it runs, for the sizing rule of the group it runs on (`controller
+  # --check`; docs/architecture.md#node-layout, "Sizing the system group"):
+  # where each workload's replicas and per-pod requests are in
+  # platformValues below, which must set them explicitly.
+  sizing:
+    deployments:
+      - name: capsule
+        replicas: replicaCount
+        requests: manager.resources.requests
   # cert-manager is already supplied by the cluster. Do not install a second
   # copy or use requires without a catalog definition for the dependency.
   platformValues:

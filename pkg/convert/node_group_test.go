@@ -1,77 +1,18 @@
 package convert_test
 
 import (
-	"testing"
-
+	"encoding/json"
 	"reflect"
+	"strings"
+	"testing"
 
 	"google.golang.org/protobuf/proto"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
-
-func sampleNodeGroups() []*cloudv1.NodeGroupSpec {
-	return []*cloudv1.NodeGroupSpec{
-		{
-			Name:             "batch",
-			InstanceTypes:    []string{"m7i.large"},
-			InstanceFamilies: []string{"c7g"},
-			Architectures:    []cloudv1.Architecture{cloudv1.Architecture_ARCHITECTURE_AMD64, cloudv1.Architecture_ARCHITECTURE_ARM64},
-			CapacityTypes:    []cloudv1.CapacityType{cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND, cloudv1.CapacityType_CAPACITY_TYPE_SPOT},
-			Labels:           map[string]string{"team": "data"},
-			Taints:           []*cloudv1.Taint{{Key: "dedicated", Value: "batch", Effect: cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE}},
-			Limits:           &cloudv1.NodeGroupLimits{Cpu: ptr.To(int32(200)), MemoryGib: ptr.To(int32(800))},
-		},
-		{Name: "bare"},
-	}
-}
-
-func TestClusterSpecNodeGroupsRoundTrip(t *testing.T) {
-	in := &cloudv1.ClusterSpec{NodeGroups: sampleNodeGroups()}
-	api, rem := convert.ClusterSpecToAPI(in, "net")
-	if len(api.NodeGroups) != 2 || api.NodeGroups[0].Architectures[1] != cloudv1alpha1.ArchitectureArm64 ||
-		api.NodeGroups[0].CapacityTypes[1] != cloudv1alpha1.CapacityTypeSpot ||
-		api.NodeGroups[0].Taints[0].Effect != cloudv1alpha1.TaintEffect("NoSchedule") {
-		t.Fatalf("to API: %+v", api.NodeGroups)
-	}
-	out := convert.ClusterSpecFromAPI(*api.DeepCopy(), "id", rem)
-	if len(out.NodeGroups) != 2 {
-		t.Fatalf("round trip: %v", out.NodeGroups)
-	}
-	for i := range in.NodeGroups {
-		if !proto.Equal(in.NodeGroups[i], out.NodeGroups[i]) {
-			t.Fatalf("round trip %d: %v != %v", i, in.NodeGroups[i], out.NodeGroups[i])
-		}
-	}
-}
-
-func TestClusterSpecNoNodeGroupsStaysNil(t *testing.T) {
-	api, rem := convert.ClusterSpecToAPI(&cloudv1.ClusterSpec{}, "net")
-	if api.NodeGroups != nil || api.DefaultNodePool != nil {
-		t.Fatalf("expected nil: %+v", api)
-	}
-	if out := convert.ClusterSpecFromAPI(api, "id", rem); out.NodeGroups != nil || out.DefaultNodePool != nil {
-		t.Fatalf("expected nil: %v", out)
-	}
-}
-
-func TestNodeGroupLimitsNilVersusZeroPresence(t *testing.T) {
-	in := &cloudv1.ClusterSpec{NodeGroups: []*cloudv1.NodeGroupSpec{
-		{Name: "a", Limits: &cloudv1.NodeGroupLimits{Cpu: ptr.To(int32(4))}},
-	}}
-	api, rem := convert.ClusterSpecToAPI(in, "net")
-	if api.NodeGroups[0].Limits.MemoryGiB != nil {
-		t.Fatal("memory limit must stay unset")
-	}
-	out := convert.ClusterSpecFromAPI(api, "id", rem)
-	if out.NodeGroups[0].Limits.MemoryGib != nil || out.NodeGroups[0].Limits.GetCpu() != 4 {
-		t.Fatalf("limits: %v", out.NodeGroups[0].Limits)
-	}
-}
 
 func TestClusterStatusIntoNodeGroups(t *testing.T) {
 	p := &cloudv1.ClusterStatus{NodeGroups: []*cloudv1.NodeGroupStatus{
@@ -102,5 +43,43 @@ func TestClusterStatusIntoNodeGroups(t *testing.T) {
 	convert.ClusterStatusInto(&cloudv1.ClusterStatus{}, "", metav1.Time{}, &into)
 	if into.NodeGroups != nil {
 		t.Fatal("status node groups must clear")
+	}
+}
+
+// A Cluster object stored before the platform owned node groups still
+// carries spec.defaultNodePool, spec.nodeGroups and spec.aws.defaultNodePool:
+// they are not fields of the kind any more, so they are ignored on read and
+// never come back, whatever they said.
+func TestLegacyNodeGroupFieldsOfAStoredClusterAreIgnored(t *testing.T) {
+	stored := []byte(`{"apiVersion":"cloud.cluster-vending.io/v1alpha1","kind":"Cluster","metadata":{"name":"c"},
+	"spec":{"region":"us-east-1","network":{"networkRef":{"name":"n"}},
+	"defaultNodePool":{"instanceTypes":["m6i.large"],"scaling":{"minSize":1,"maxSize":3}},
+	"nodeGroups":[{"name":"batch","instanceFamilies":["c7g"]}],
+	"aws":{"irsa":true,"defaultNodePool":{"amiType":"CUSTOM","launchTemplate":{"id":"lt-0123456789abcdef0","version":"3"}}}}}`)
+	var obj cloudv1alpha1.Cluster
+	if err := json.Unmarshal(stored, &obj); err != nil {
+		t.Fatal(err)
+	}
+	spec := convert.ClusterSpecFromAPI(obj.Spec, "net-1", nil)
+	if len(spec.ProtoReflect().GetUnknown()) != 0 || len(spec.GetAws().ProtoReflect().GetUnknown()) != 0 {
+		t.Fatal("legacy fields must not survive as unknown fields")
+	}
+	want := &cloudv1.ClusterSpec{Region: "us-east-1", Network: &cloudv1.ClusterNetwork{NetworkId: "net-1"},
+		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: proto.Bool(true)}}}
+	if !proto.Equal(spec, want) {
+		t.Fatalf("decoded %v, want %v", spec, want)
+	}
+	again, _ := convert.ClusterSpecToAPI(spec, "n")
+	raw, err := json.Marshal(again)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, legacy := range []string{"defaultNodePool", "nodeGroups", "launchTemplate"} {
+		if strings.Contains(string(raw), legacy) {
+			t.Fatalf("%s came back: %s", legacy, raw)
+		}
+	}
+	if !proto.Equal(convert.ClusterSpecFromAPI(again, "net-1", nil), want) {
+		t.Fatal("the spec does not round-trip")
 	}
 }

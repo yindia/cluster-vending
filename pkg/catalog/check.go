@@ -24,10 +24,6 @@ type Options struct {
 	PlatformPool *config.PlatformNodePool
 }
 
-// karpenterName is the one definition that must be first: every other
-// platform component waits for the nodes it provides.
-const karpenterName = "karpenter"
-
 // Check makes the cross-object rules of the catalog (PROP-01 4.5) over a
 // set, with no cluster call, and returns every problem in a stable order;
 // none means the set is consistent. The rules are the ones the controller
@@ -158,8 +154,10 @@ func checkDefinitions(defs []component.Definition) []Problem {
 	return problems
 }
 
-// checkSequences: sequence 0 is karpenter's alone, karpenter is on, and a
-// platform component's sequence is not below that of what it requires.
+// checkSequences: the NodeProvisioner (component.RoleOf) is on and first,
+// sequence 0 is no other definition's, and a platform component's sequence
+// is not below that of what it requires. A NodeProvisioner that declares
+// its role is first by it; one stored before spec.role must say 0.
 func checkSequences(defs []component.Definition) []Problem {
 	var problems []Problem
 	bySeq := map[string]component.Definition{}
@@ -167,13 +165,14 @@ func checkSequences(defs []component.Definition) []Problem {
 		bySeq[d.Name] = d
 	}
 	for _, d := range defs {
+		provisioner := component.RoleOf(d, defs) == component.RoleNodeProvisioner
 		switch {
-		case d.Name == karpenterName && d.Sequence != 0:
-			problems = append(problems, problemf("ComponentDefinition", d.Name, "spec.sequence must be 0, not %d: every other platform component waits for its nodes", d.Sequence))
-		case d.Name == karpenterName && d.Disabled:
-			problems = append(problems, problemf("ComponentDefinition", d.Name, "karpenter cannot be disabled: every other platform component waits for its nodes"))
-		case d.Name != karpenterName && d.Sequence == 0:
-			problems = append(problems, problemf("ComponentDefinition", d.Name, "spec.sequence 0 is karpenter's: it installs before everything else"))
+		case provisioner && d.Sequence != component.NodeProvisionerSequence:
+			problems = append(problems, problemf("ComponentDefinition", d.Name, "spec.sequence must be 0, not %d, or declare role: NodeProvisioner: every other platform component waits for its nodes", d.Sequence))
+		case provisioner && d.Disabled:
+			problems = append(problems, problemf("ComponentDefinition", d.Name, "the NodeProvisioner cannot be disabled: every other platform component waits for its nodes"))
+		case !provisioner && d.Sequence == component.NodeProvisionerSequence:
+			problems = append(problems, problemf("ComponentDefinition", d.Name, "spec.sequence 0 is the NodeProvisioner's: it installs before everything else"))
 		}
 		if !d.IsPlatform() {
 			continue

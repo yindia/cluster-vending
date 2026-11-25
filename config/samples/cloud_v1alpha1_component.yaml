@@ -15,5 +15,3 @@ spec:
     replicas: 3
     settings:
       batchMaxDuration: 15s
-    defaultNodePool:
-      limits: {cpu: "128"}

@@ -94,7 +94,7 @@ func newServeCmd(g *globals) *cobra.Command {
 				// minor its release channel offers.
 				Releases: catalog,
 				Logger:   g.logger,
-				// The node group layout: the allowlist of user groups, the system group.
+				// The node group layout: the system group and the platform pool.
 				NodeGroups: cfg.NodeGroups,
 				// The groups sub-tenants may name (naas.allowedGroups).
 				NaaS: naasCfg,

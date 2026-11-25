@@ -15,7 +15,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
-// A small catalog that passes every rule: karpenter at 0 and a chain of two
+// A small catalog that passes every rule: karpenter, the NodeProvisioner, and a chain of two
 // platform components, one tenant component, one release on three minors
 // pinning each of them, and the three channels.
 
@@ -80,7 +80,7 @@ func mkChannel(name string, mutate func(*cloudv1alpha1.ReleaseChannel)) cloudv1a
 func goodSet() catalog.Set {
 	return catalog.Set{
 		Definitions: []cloudv1alpha1.ComponentDefinition{
-			mkDef("karpenter", func(d *cloudv1alpha1.ComponentDefinition) { d.Spec.Sequence = int32p(0) }),
+			mkDef("karpenter", func(d *cloudv1alpha1.ComponentDefinition) { d.Spec.Role = cloudv1alpha1.ComponentRoleNodeProvisioner }),
 			mkDef("mesh", func(d *cloudv1alpha1.ComponentDefinition) {
 				d.Spec.Requires = []string{"karpenter"}
 				d.Spec.Install.Helm.Companions = []cloudv1alpha1.HelmCompanion{{Name: "mesh-cni",
@@ -139,14 +139,18 @@ func TestCheckRules(t *testing.T) {
 			})
 		}, []string{"ComponentDefinition/mesh: spec.sequence 50 is below that of late (200), which it requires"}},
 		{"another definition with sequence 0", func(s *catalog.Set) { s.Definitions[1].Spec.Sequence = int32p(0) },
-			[]string{"ComponentDefinition/mesh: spec.sequence 0 is karpenter's"}},
-		{"karpenter not at sequence 0", func(s *catalog.Set) { s.Definitions[0].Spec.Sequence = int32p(100) },
+			[]string{"ComponentDefinition/mesh: spec.sequence 0 is the NodeProvisioner's"}},
+		{"a karpenter stored before spec.role not at sequence 0", func(s *catalog.Set) { s.Definitions[0].Spec.Role = "" },
 			[]string{"ComponentDefinition/karpenter: spec.sequence must be 0"}},
+		{"two NodeProvisioners on one cloud", func(s *catalog.Set) { s.Definitions[1].Spec.Role = cloudv1alpha1.ComponentRoleNodeProvisioner },
+			[]string{"karpenter and mesh both declare role NodeProvisioner on aws"}},
+		{"a role on a Tenant component", func(s *catalog.Set) { s.Definitions[2].Spec.Role = cloudv1alpha1.ComponentRoleNamespaceTenancy },
+			[]string{"tool: role NamespaceTenancy is for a Platform component only"}},
 		{"karpenter on the platform pool", func(s *catalog.Set) { withValues(&s.Definitions[0], `{"nodeSelector":"${platform.nodeSelector}"}`) },
-			[]string{"ComponentDefinition/karpenter: karpenter must not run on the platform pool"}},
+			[]string{"ComponentDefinition/karpenter: the NodeProvisioner must not run on the platform pool"}},
 		{"another definition on the system group", func(s *catalog.Set) {
 			withValues(&s.Definitions[1], `{"nodeSelector":"${system.nodeSelector}","tolerations":"${system.tolerations}"}`)
-		}, []string{"ComponentDefinition/mesh: only karpenter runs on the system group"}},
+		}, []string{"ComponentDefinition/mesh: only the NodeProvisioner runs on the system group"}},
 		{"a definition on both pools", func(s *catalog.Set) {
 			withValues(&s.Definitions[1], `{"nodeSelector":"${system.nodeSelector}","tolerations":"${platform.tolerations}"}`)
 		}, []string{"ComponentDefinition/mesh: mesh uses both ${system.*} and ${platform.*}"}},
@@ -163,7 +167,7 @@ func TestCheckRules(t *testing.T) {
 			})
 		}, []string{"ComponentDefinition/mesh: runs on the system group (phase 1) but requires pooled, which runs on the platform pool (phase 2)"}},
 		{"karpenter disabled", func(s *catalog.Set) { s.Definitions[0].Spec.Disabled = true },
-			[]string{"ComponentDefinition/karpenter: karpenter cannot be disabled"}},
+			[]string{"ComponentDefinition/karpenter: the NodeProvisioner cannot be disabled"}},
 		{"a release without a serial", func(s *catalog.Set) { s.Releases[0].Spec.Serial = nil }, []string{"Release/2026-11-a: spec.serial is not set"}},
 		{"a serial of 0", func(s *catalog.Set) { s.Releases[0].Spec.Serial = int64p(0) }, []string{"Release/2026-11-a: spec.serial 0 is below 1"}},
 		{"serials that tie", func(s *catalog.Set) { s.Releases = append(s.Releases, mkRelease("2026-11-b", 1, nil)) },
@@ -236,7 +240,8 @@ func problemStrings(ps []catalog.Problem) []string {
 func TestCheckListsEveryProblem(t *testing.T) {
 	s := goodSet()
 	s.Channels = s.Channels[:1]                             // beta, stable missing
-	s.Definitions[0].Spec.Sequence = int32p(5)              // karpenter
+	s.Definitions[0].Spec.Role = ""                         // karpenter as stored before spec.role,
+	s.Definitions[0].Spec.Sequence = int32p(5)              // not at 0
 	s.Releases[0].Spec.Serial = nil                         // serial
 	s.Releases[0].Spec.Content.Kubernetes[1].Minor = "1.30" // minors
 	got := catalog.Check(s, checkOptions)
@@ -264,6 +269,7 @@ func TestCheckSystemGroupSizingRule(t *testing.T) {
 	opts := checkOptions
 	opts.SystemGroup = &small
 	// karpenter's requests are not set in the small catalog: the rule says so.
+	s.Definitions[0].Spec.Sizing = karpenterSizing()
 	text := strings.Join(problemStrings(catalog.Check(s, opts)), "\n")
 	if !strings.Contains(text, "karpenter: platformValues has no") {
 		t.Errorf("problems = %s, want the missing requests of karpenter", text)
@@ -298,6 +304,7 @@ func TestRunCheck(t *testing.T) {
 	bad := goodSet()
 	bad.Channels = bad.Channels[:1]
 	bad.Releases[0].Spec.Serial = nil
+	bad.Definitions[0].Spec.Role = "" // as stored before spec.role, not at 0
 	bad.Definitions[0].Spec.Sequence = int32p(7)
 	var stream strings.Builder
 	if err := bad.WriteStream(&stream); err != nil {

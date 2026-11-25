@@ -4,12 +4,8 @@ package e2e
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,8 +18,11 @@ import (
 
 const (
 	maskLabels     = "labels"
-	maskNodeGroups = "spec.node_groups"
 	maskK8sVersion = "spec.control_plane.kubernetes_version"
+
+	// platformPool is the Karpenter platform pool every cluster has next to
+	// the system group.
+	platformPool = "platform-pool"
 
 	labelPhase = "cv-e2e-phase"
 )
@@ -76,8 +75,9 @@ func inPlace(res *cloudv1.UpdateClusterResponse) []string {
 	return bad
 }
 
-// scenarioClusterUpdate changes the labels (tags, in place), adds a user
-// Karpenter node group with nodes, and removes it.
+// scenarioClusterUpdate changes the labels (tags, in place), checks the
+// cluster has exactly the platform's node groups, and that an update naming
+// a removed node group field is refused.
 func (e *env) scenarioClusterUpdate(t *testing.T) {
 	need(t, e.st.clusterID != "", "no cluster (scenario 3)")
 	id := e.st.clusterID
@@ -85,8 +85,8 @@ func (e *env) scenarioClusterUpdate(t *testing.T) {
 	defer cancel()
 
 	t.Run("labels_in_place", func(t *testing.T) { e.updateLabels(ctx, t, id) })
-	t.Run("add_node_group", func(t *testing.T) { e.addNodeGroup(ctx, t, id) })
-	t.Run("remove_node_group", func(t *testing.T) { e.removeNodeGroup(ctx, t, id) })
+	t.Run("platform_node_groups", func(t *testing.T) { e.assertPlatformNodeGroups(t, id) })
+	t.Run("node_group_fields_refused", func(t *testing.T) { e.assertNodeGroupFieldsRefused(t, id) })
 }
 
 // groupIdentity is what changes when EKS replaces a node group: its creation time.
@@ -154,73 +154,17 @@ func (e *env) updateLabels(ctx context.Context, t *testing.T, id string) {
 	}
 }
 
-// workloadKubeconfig writes the workload cluster's kubeconfig, read from the
-// Secret on the management cluster, to a private temporary file.
-func (e *env) workloadKubeconfig(ctx context.Context, t *testing.T, c *cloudv1.Cluster) (string, error) {
-	t.Helper()
-	if !e.haveKube() {
-		return "", fmt.Errorf("no management cluster (CV_E2E_KUBECONTEXT)")
-	}
-	ns, name, ok := strings.Cut(c.GetStatus().GetKubeconfigSecret(), "/")
-	if !ok {
-		return "", fmt.Errorf("status.kubeconfigSecret %q is not <namespace>/<name>", c.GetStatus().GetKubeconfigSecret())
-	}
-	out, err := e.kubectl(ctx, "", "get", "secret", name, "-n", ns, "-o", "jsonpath={.data.kubeconfig}")
-	if err != nil {
-		return "", err
-	}
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
-	if err != nil {
-		return "", fmt.Errorf("decode the kubeconfig: %w", err)
-	}
-	path := filepath.Join(t.TempDir(), "kubeconfig")
-	return path, os.WriteFile(path, raw, 0o600)
-}
-
-func workloadKubectl(ctx context.Context, kubeconfig, stdin string, args ...string) ([]byte, error) {
-	return run(ctx, stdin, "kubectl", append([]string{"--kubeconfig", kubeconfig}, args...)...)
-}
-
-// pinnedDeployment is a pod that only the t3 group can run: Karpenter
-// provisions a node for it.
-const pinnedDeployment = `apiVersion: apps/v1
-kind: Deployment
-metadata: {name: cv-e2e-t3, namespace: default}
-spec:
-  replicas: 1
-  selector: {matchLabels: {app: cv-e2e-t3}}
-  template:
-    metadata: {labels: {app: cv-e2e-t3}}
-    spec:
-      nodeSelector: {node.cluster-vending.io/pool: t3}
-      containers:
-        - name: pause
-          image: registry.k8s.io/pause:3.9
-          resources: {requests: {cpu: 100m, memory: 64Mi}}
-`
-
-func (e *env) addNodeGroup(ctx context.Context, t *testing.T, id string) {
-	res, err := e.updateCluster(t, id, []string{maskNodeGroups}, func(c *cloudv1.Cluster) {
-		c.Spec.NodeGroups = append(slices.Clone(c.GetSpec().GetNodeGroups()), userNodeGroupSpec())
-	})
-	if err != nil {
-		t.Fatalf("add node group: %v", err)
-	}
-	c, err := e.waitCluster(t, "cluster after adding "+userNodeGroup, id, e.cfg.UpdateTimeout, nil, settled(res.GetCluster().GetGeneration()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = e.waitFor(t, "node group "+userNodeGroup+" READY", e.cfg.UpdateTimeout, func() (bool, string, error) {
+// assertPlatformNodeGroups: status.nodeGroups is the system group and the
+// platform pool, both platform managed, and the platform pool Ready.
+func (e *env) assertPlatformNodeGroups(t *testing.T, id string) {
+	err := e.waitFor(t, "platform pool READY", e.cfg.UpdateTimeout, func() (bool, string, error) {
 		cur, err := e.getCluster(id)
 		if err != nil {
 			return false, "", err
 		}
-		g := nodeGroupStatus(cur, userNodeGroup)
+		g := nodeGroupStatus(cur, platformPool)
 		if g == nil {
 			return false, "no status yet", nil
-		}
-		if g.GetPhase() == cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED {
-			return false, "", fmt.Errorf("node group %s FAILED: %s", userNodeGroup, g.GetMessage())
 		}
 		return g.GetPhase() == cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, fmt.Sprintf("%s: %s", g.GetPhase(), g.GetMessage()), nil
 	})
@@ -228,33 +172,27 @@ func (e *env) addNodeGroup(ctx context.Context, t *testing.T, id string) {
 		e.dumpCluster(t, id)
 		t.Fatal(err)
 	}
-	if g := nodeGroupStatus(c, userNodeGroup); g != nil && g.GetPlatformManaged() {
-		t.Errorf("%s is marked platform managed", userNodeGroup)
-	}
-	kubeconfig, err := e.workloadKubeconfig(ctx, t, c)
-	if err != nil {
-		t.Logf("no nodes are requested (%v): only the NodePool is asserted", err)
-		return
-	}
-	if _, err := workloadKubectl(ctx, kubeconfig, pinnedDeployment, "apply", "-f", "-"); err != nil {
-		t.Fatalf("apply the pinned workload: %v", err)
-	}
-	res2, err := e.waitNodes(t, c, userNodeGroup, 1)
-	if err != nil {
-		e.dumpCluster(t, id)
-		t.Fatalf("no node of %s: %v", userNodeGroup, err)
-	}
-	for _, n := range res2.GetNodes() {
-		t.Logf("node %s %s %s %s claim %s %s", n.GetName(), n.GetInstanceType(), n.GetZone(), n.GetCapacityType(), n.GetNodeclaimName(), n.GetNodeclaimPhase())
-		if !strings.HasPrefix(n.GetInstanceType(), "t3.") {
-			t.Errorf("node %s is a %s, want t3", n.GetName(), n.GetInstanceType())
-		}
-		if n.GetNodeclaimName() == "" {
-			t.Errorf("node %s has no NodeClaim", n.GetName())
+	c := mustCluster(e, id)
+	var names []string
+	for _, g := range c.GetStatus().GetNodeGroups() {
+		names = append(names, g.GetName())
+		if !g.GetPlatformManaged() {
+			t.Errorf("node group %s is not platform managed", g.GetName())
 		}
 	}
-	if g := nodeGroupStatus(mustCluster(e, id), userNodeGroup); g != nil && g.GetNodes() < 1 {
-		t.Logf("status.nodeGroups counts %d nodes of %s (the count follows the node list)", g.GetNodes(), userNodeGroup)
+	if !slices.Equal(names, []string{systemGroup, platformPool}) {
+		t.Errorf("status.nodeGroups = %v, want [%s %s]", names, systemGroup, platformPool)
+	}
+}
+
+// assertNodeGroupFieldsRefused: the node group fields are gone from the
+// API; an update mask that names one is refused.
+func (e *env) assertNodeGroupFieldsRefused(t *testing.T, id string) {
+	for _, path := range []string{"spec.node_groups", "spec.default_node_pool.instance_types", "spec.aws.default_node_pool.ami_type"} {
+		_, err := e.updateCluster(t, id, []string{path}, func(*cloudv1.Cluster) {})
+		if !isCode(err, connect.CodeInvalidArgument) {
+			t.Errorf("update of %s: %v, want INVALID_ARGUMENT", path, err)
+		}
 	}
 }
 
@@ -264,62 +202,4 @@ func mustCluster(e *env, id string) *cloudv1.Cluster {
 		return nil
 	}
 	return c
-}
-
-func (e *env) removeNodeGroup(ctx context.Context, t *testing.T, id string) {
-	c, err := e.getCluster(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nodeGroupStatus(c, userNodeGroup) == nil {
-		t.Skipf("no %s group to remove", userNodeGroup)
-	}
-	kubeconfig, kerr := e.workloadKubeconfig(ctx, t, c)
-	if kerr == nil {
-		if _, err := workloadKubectl(ctx, kubeconfig, "", "delete", "deployment", "cv-e2e-t3", "-n", "default", "--ignore-not-found"); err != nil {
-			t.Logf("delete the pinned workload: %v", err)
-		}
-	}
-	res, err := e.updateCluster(t, id, []string{maskNodeGroups}, func(c *cloudv1.Cluster) {
-		c.Spec.NodeGroups = slices.DeleteFunc(slices.Clone(c.GetSpec().GetNodeGroups()), func(g *cloudv1.NodeGroupSpec) bool { return g.GetName() == userNodeGroup })
-	})
-	if err != nil {
-		t.Fatalf("remove node group: %v", err)
-	}
-	if _, err := e.waitCluster(t, "cluster after removing "+userNodeGroup, id, e.cfg.UpdateTimeout, nil, settled(res.GetCluster().GetGeneration())); err != nil {
-		t.Fatal(err)
-	}
-	err = e.waitFor(t, "node group "+userNodeGroup+" gone", e.cfg.UpdateTimeout, func() (bool, string, error) {
-		cur, err := e.getCluster(id)
-		if err != nil {
-			return false, "", err
-		}
-		g := nodeGroupStatus(cur, userNodeGroup)
-		if g != nil {
-			return false, fmt.Sprintf("%s: %s", g.GetPhase(), g.GetMessage()), nil
-		}
-		return true, "gone", nil
-	})
-	if err != nil {
-		e.dumpCluster(t, id)
-		t.Fatal(err)
-	}
-	if kerr != nil {
-		return
-	}
-	// Its NodePool and the nodes Karpenter made for it go with it.
-	err = e.waitFor(t, "NodeClaims of "+userNodeGroup+" gone", e.cfg.UpdateTimeout, func() (bool, string, error) {
-		out, err := workloadKubectl(ctx, kubeconfig, "", "get", "nodeclaims.karpenter.sh", "-l", "karpenter.sh/nodepool="+userNodeGroup, "-o", "name")
-		if err != nil {
-			return false, "", err
-		}
-		left := strings.TrimSpace(string(out))
-		return left == "", fmt.Sprintf("left: %q", left), nil
-	})
-	if err != nil {
-		t.Error(err)
-	}
-	if res, err := e.listNodes(id, userNodeGroup); err == nil && res.GetTotal() > 0 && !isCode(err, connect.CodeNotFound) {
-		t.Logf("the node list still has %d nodes of %s (the next collection removes them)", res.GetTotal(), userNodeGroup)
-	}
 }

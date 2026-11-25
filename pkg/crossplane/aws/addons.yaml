@@ -1,0 +1,159 @@
+# The EKS add-ons the platform knows, one entry each, in install order of
+# the default set. Adding or changing an add-on is an edit here; the Go
+# code reads this file (addon_catalog.go) and checks it when the package
+# loads and in its tests.
+#
+# Each entry:
+#
+#   name       the EKS add-on name. The API's list of add-on names
+#              (AWSAddon.name in api/v1alpha1/cluster_types.go,
+#              conflictsWithAddons in api/v1alpha1/component_types.go and
+#              AwsAddon.name in idl/cloud/v1/aws.proto) must name exactly
+#              these: TestAddonCatalogMatchesTheAPI fails otherwise.
+#   default    every cluster gets it (spec.aws.addons is merged into the
+#              default set by name).
+#   placement  the add-on's controller pods run on the default node pool
+#              (the system group): its labels become their nodeSelector
+#              and they tolerate each of its taints, written into the
+#              add-on's configurationValues. A nodeSelector or tolerations
+#              the tenant set wins.
+#     paths               the configurationValues objects that take
+#                         nodeSelector and tolerations, by dotted keys;
+#                         "." is the top level.
+#     defaultTolerations  the add-on's own default tolerations, written
+#                         after the pool's: EKS replaces a list whole.
+#   schema     where the placement keys were confirmed: EKS refuses a
+#              configuration with a key its schema lacks, so no key is
+#              guessed and every placement names its source.
+#   setup      what the platform creates for an add-on that calls AWS: an
+#              IAM role "<prefix>-<short>-role" for its service account
+#              (EKS Pod Identity) with policies
+#              (https://docs.aws.amazon.com/eks/latest/userguide/workloads-add-ons-available-eks.html).
+#     short            names the IAM objects: at most 8 characters so the
+#                      role name stays within IAM's 64.
+#     namespace, serviceAccount  the pod identity association's.
+#     managedPolicies  AWS managed policies attached to the role.
+#     hook             platform code behind a name (addonHooks in
+#                      addon_catalog.go). s3-bucket-policy: a policy for the
+#                      add-on's spec s3BucketNames.
+#     protectIAM       Usages keep the role, its policy attachments and the
+#                      pod identity association until the add-on is gone.
+#
+# Not placed: DaemonSets that run on every node and tolerate every taint
+# already (vpc-cni, kube-proxy, eks-pod-identity-agent, and the node pods
+# of the EBS, EFS, FSx and Mountpoint CSI drivers: node.tolerateAllTaints,
+# operator Exists in their charts). Without a placement the controllers of
+# the others wait for tenant nodes: on a cluster without tenant node groups
+# they never run.
+#
+# Changing what an entry renders (placement, setup) changes the render of
+# existing clusters: bump RenderVersion (addons_render_version_test.go).
+addons:
+  # Its policy is on the node role.
+  - name: vpc-cni
+    default: true
+
+  - name: coredns
+    default: true
+    placement:
+      paths: ["."]
+      defaultTolerations:
+        - {key: CriticalAddonsOnly, operator: Exists}
+        - {key: node-role.kubernetes.io/control-plane, effect: NoSchedule}
+    schema:
+      version: v1.11.1-eksbuild.8
+      source: >-
+        quoted in terraform-aws-eks docs/faq.md and
+        https://aws-ia.github.io/terraform-aws-eks-blueprints-addons/main/amazon-eks-addons
+
+  - name: kube-proxy
+    default: true
+
+  - name: eks-pod-identity-agent
+    default: true
+
+  - name: aws-ebs-csi-driver
+    default: true
+    placement:
+      paths: [controller]
+      defaultTolerations:
+        - {key: CriticalAddonsOnly, operator: Exists}
+        - {effect: NoExecute, operator: Exists, tolerationSeconds: 300}
+    schema:
+      version: the chart's values.schema.json
+      source: >-
+        https://gist.github.com/kcemenike-sb/1939bc036d201b21c2f1afc48934e4fd,
+        https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/charts/aws-ebs-csi-driver/values.yaml
+    setup:
+      short: ebs-csi
+      namespace: kube-system
+      serviceAccount: ebs-csi-controller-sa
+      managedPolicies: [arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy]
+      # The driver deletes its volumes on the way out, with its role.
+      protectIAM: true
+
+  - name: aws-efs-csi-driver
+    placement:
+      paths: [controller]
+    schema:
+      version: v3.6.0-eksbuild.1
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25
+    setup:
+      short: efs-csi
+      namespace: kube-system
+      serviceAccount: efs-csi-controller-sa
+      managedPolicies: [arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy]
+
+  - name: aws-fsx-csi-driver
+    placement:
+      paths: [controller]
+    schema:
+      version: v1.11.0-eksbuild.1
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25
+    setup:
+      short: fsx-csi
+      namespace: kube-system
+      serviceAccount: fsx-csi-controller-sa
+      managedPolicies: [arn:aws:iam::aws:policy/AmazonFSxFullAccess]
+
+  # Its buckets are the tenant's (spec s3BucketNames): an import cannot read
+  # them back, so an imported cluster keeps it outside the spec.
+  - name: aws-mountpoint-s3-csi-driver
+    placement:
+      paths: [controller]
+    schema:
+      version: v2.9.2-eksbuild.1
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25
+    setup:
+      short: s3-csi
+      namespace: kube-system
+      serviceAccount: s3-csi-driver-sa
+      hook: s3-bucket-policy
+
+  - name: snapshot-controller
+    placement:
+      paths: ["."]
+    schema:
+      version: v8.7.0-eksbuild.5
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25
+
+  - name: cert-manager
+    placement:
+      paths: [".", cainjector, webhook]
+    schema:
+      version: v1.21.3-eksbuild.1
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25
+
+  - name: metrics-server
+    placement:
+      paths: ["."]
+    schema:
+      version: v0.9.1-eksbuild.2
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25
+
+  - name: kube-state-metrics
+    placement:
+      paths: ["."]
+    schema:
+      version: v2.20.0-eksbuild.11
+      source: describe-addon-configuration, us-west-1, Kubernetes 1.35, 2026-11-25

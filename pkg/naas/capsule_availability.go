@@ -13,6 +13,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// The names the Capsule chart's objects have on a workload cluster. The
+// fullname and service account are locked into every new release pin of
+// the NamespaceTenancy definition (catalog.CapsuleBootstrapValues), and the
+// namespace is the shipped definition's, so this check finds them with no
+// catalog at hand; they are the chart's names, not the definition's.
+const (
+	CapsuleFullname       = "capsule"
+	CapsuleServiceAccount = "capsule"
+	CapsuleNamespace      = "capsule-system"
+)
+
 // ObserveCapsuleAvailability is a fresh, read-only fallback when recorded Helm
 // progress is not Ready. The pinned bootstrap fixes the controller/service names
 // and service account. An old ReplicaSet may still serve during a rolling update;
@@ -20,12 +31,12 @@ import (
 // This is availability evidence, not runtime isolation qualification. Callers
 // must separately verify the Capsule API and exact shared bootstrap payload.
 func ObserveCapsuleAvailability(ctx context.Context, reader client.Reader) error {
-	const ns = "capsule-system"
+	const ns = CapsuleNamespace
 	deployment := &appsv1.Deployment{}
-	if err := reader.Get(ctx, client.ObjectKey{Namespace: ns, Name: "capsule-controller-manager"}, deployment); err != nil {
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: ns, Name: CapsuleFullname + "-controller-manager"}, deployment); err != nil {
 		return fmt.Errorf("read Capsule controller Deployment: %w", err)
 	}
-	if deployment.UID == "" || !deployment.DeletionTimestamp.IsZero() || deployment.Status.AvailableReplicas < 1 || deployment.Spec.Template.Spec.ServiceAccountName != "capsule" || deployment.Spec.Selector == nil {
+	if deployment.UID == "" || !deployment.DeletionTimestamp.IsZero() || deployment.Status.AvailableReplicas < 1 || deployment.Spec.Template.Spec.ServiceAccountName != CapsuleServiceAccount || deployment.Spec.Selector == nil {
 		return fmt.Errorf("waiting for an available trusted Capsule controller replica")
 	}
 	selector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
@@ -33,7 +44,7 @@ func ObserveCapsuleAvailability(ctx context.Context, reader client.Reader) error
 		return fmt.Errorf("capsule controller selector is unavailable")
 	}
 	service := &corev1.Service{}
-	if err := reader.Get(ctx, client.ObjectKey{Namespace: ns, Name: "capsule-webhook-service"}, service); err != nil {
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: ns, Name: CapsuleFullname + "-webhook-service"}, service); err != nil {
 		return fmt.Errorf("read Capsule webhook Service: %w", err)
 	}
 	if service.UID == "" || !service.DeletionTimestamp.IsZero() || len(service.Spec.Selector) == 0 {
@@ -45,7 +56,7 @@ func ObserveCapsuleAvailability(ctx context.Context, reader client.Reader) error
 	}
 	webhookPort := int32(0)
 	for _, config := range webhookConfigs.Items {
-		if config.Name != "capsule-validating-webhook-configuration" && config.Name != "capsule-dynamic-webhook" {
+		if config.Name != CapsuleFullname+"-validating-webhook-configuration" && config.Name != CapsuleFullname+"-dynamic-webhook" {
 			continue
 		}
 		if !config.DeletionTimestamp.IsZero() {
@@ -105,7 +116,7 @@ func ObserveCapsuleAvailability(ctx context.Context, reader client.Reader) error
 			if err := reader.Get(ctx, client.ObjectKey{Namespace: ns, Name: ref.Name}, pod); err != nil {
 				return fmt.Errorf("read Capsule serving Pod: %w", err)
 			}
-			if pod.UID != ref.UID || !pod.DeletionTimestamp.IsZero() || pod.Spec.ServiceAccountName != "capsule" || !selector.Matches(labels.Set(pod.Labels)) || !labels.SelectorFromSet(service.Spec.Selector).Matches(labels.Set(pod.Labels)) {
+			if pod.UID != ref.UID || !pod.DeletionTimestamp.IsZero() || pod.Spec.ServiceAccountName != CapsuleServiceAccount || !selector.Matches(labels.Set(pod.Labels)) || !labels.SelectorFromSet(service.Spec.Selector).Matches(labels.Set(pod.Labels)) {
 				continue
 			}
 			ready := false

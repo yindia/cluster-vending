@@ -48,6 +48,7 @@ const (
 //   - install.timeout is not between 1m and 60m;
 //   - a bundle (includes) has an install, values, a schema or cloud
 //     resources of its own, or is internal;
+//   - sizing is set on a Tenant component, or names a workload twice;
 //   - userValues does not parse as a YAML object;
 //   - userValues and platformValues share a path (the same leaf, or one
 //     inside the other): the file would offer a key the tenant may not
@@ -77,6 +78,7 @@ func CheckDefinition(d Definition) []string {
 		out = append(out, fmt.Sprintf("install.timeout %s must be between 1m and 60m", d.InstallTimeout))
 	}
 	out = append(out, bundleProblems(d)...)
+	out = append(out, sizingProblems(d)...)
 	user, err := ParseUserValues(d.UserValues)
 	if err != nil {
 		return append(out, "userValues: "+err.Error())

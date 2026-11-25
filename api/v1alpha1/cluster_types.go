@@ -168,98 +168,6 @@ type ControlPlaneSpec struct {
 	SecretsEncryption *SecretsEncryption `json:"secretsEncryption,omitempty"`
 }
 
-// CapacityType is how the nodes of a pool are bought.
-// +kubebuilder:validation:Enum=OnDemand;Spot
-type CapacityType string
-
-// Capacity types.
-const (
-	CapacityTypeOnDemand CapacityType = "OnDemand"
-	CapacityTypeSpot     CapacityType = "Spot"
-)
-
-// ScalingConfig is the size of a node pool.
-// +kubebuilder:validation:XValidation:rule="self.minSize <= self.maxSize && (!has(self.desiredSize) || (self.minSize <= self.desiredSize && self.desiredSize <= self.maxSize))",message="minSize <= desiredSize <= maxSize"
-type ScalingConfig struct {
-	// minSize is the smallest number of nodes.
-	// +required
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1000
-	MinSize int32 `json:"minSize"`
-	// maxSize is the largest number of nodes.
-	// +required
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=1000
-	MaxSize int32 `json:"maxSize"`
-	// desiredSize is the number of nodes the pool starts with. Defaults to
-	// minSize, at least 1. The platform's default node group has one static
-	// size (minSize = maxSize = desiredSize), applied in place.
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1000
-	DesiredSize *int32 `json:"desiredSize,omitempty"`
-}
-
-// TaintEffect is the effect of a node taint, as Kubernetes spells it.
-// +kubebuilder:validation:Enum=NoSchedule;PreferNoSchedule;NoExecute
-type TaintEffect string
-
-// Taint is a taint on the nodes of a pool.
-type Taint struct {
-	// key of the taint.
-	// +required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
-	Key string `json:"key"`
-	// value of the taint.
-	// +optional
-	// +kubebuilder:validation:MaxLength=63
-	Value string `json:"value,omitempty"`
-	// effect of the taint.
-	// +required
-	Effect TaintEffect `json:"effect"`
-}
-
-// NodePoolSpec is the default node pool: the one created with the cluster.
-// EKS cannot change a node group's instance types, capacity type, AMI
-// type, disk size or launch template: a change to one of them creates a
-// replacement node group and retires the old one once the new one is
-// ready.
-type NodePoolSpec struct {
-	// instanceTypes of the nodes. AWS accepts several (e.g. "m6i.large");
-	// other providers one.
-	// +required
-	// +listType=set
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=20
-	// +kubebuilder:validation:items:MinLength=1
-	// +kubebuilder:validation:items:MaxLength=64
-	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9._-]+$`
-	InstanceTypes []string `json:"instanceTypes"`
-	// capacityType is how the nodes are bought.
-	// +optional
-	// +kubebuilder:default=OnDemand
-	CapacityType CapacityType `json:"capacityType,omitempty"`
-	// scaling is the size of the pool.
-	// +required
-	Scaling *ScalingConfig `json:"scaling"`
-	// diskSizeGB is the root volume size of a node. Unset: the provider's
-	// default. Not with a launch template: the template decides.
-	// +optional
-	// +kubebuilder:validation:Minimum=20
-	// +kubebuilder:validation:Maximum=16384
-	DiskSizeGB *int32 `json:"diskSizeGB,omitempty"`
-	// labels are the Kubernetes labels of the nodes.
-	// +optional
-	// +kubebuilder:validation:MaxProperties=64
-	Labels map[string]string `json:"labels,omitempty"`
-	// taints of the nodes.
-	// +listType=atomic
-	// +optional
-	// +kubebuilder:validation:MaxItems=50
-	Taints []Taint `json:"taints,omitempty"`
-}
-
 // AccessEntryType is what kind of principal an EKS access entry is for
 // (AWS's own spelling). Only STANDARD entries take access policies.
 // +kubebuilder:validation:Enum=STANDARD;EC2_LINUX;EC2_WINDOWS;FARGATE_LINUX;EC2;HYBRID_LINUX;HYPERPOD_LINUX
@@ -450,58 +358,6 @@ type AWSUpgradePolicy struct {
 	SupportType AWSSupportType `json:"supportType,omitempty"`
 }
 
-// AWSAMIType is the AMI type of an EKS node group (AWS's own spelling).
-// CUSTOM is an image given in the launch template.
-// +kubebuilder:validation:Enum=AL2023_x86_64_STANDARD;AL2023_ARM_64_STANDARD;AL2023_x86_64_NVIDIA;AL2023_x86_64_NEURON;AL2023_ARM_64_NVIDIA;BOTTLEROCKET_x86_64;BOTTLEROCKET_ARM_64;BOTTLEROCKET_x86_64_NVIDIA;BOTTLEROCKET_ARM_64_NVIDIA;BOTTLEROCKET_x86_64_FIPS;BOTTLEROCKET_ARM_64_FIPS;BOTTLEROCKET_x86_64_NVIDIA_FIPS;BOTTLEROCKET_ARM_64_NVIDIA_FIPS;WINDOWS_CORE_2019_x86_64;WINDOWS_FULL_2019_x86_64;WINDOWS_CORE_2022_x86_64;WINDOWS_FULL_2022_x86_64;WINDOWS_CORE_2025_x86_64;WINDOWS_FULL_2025_x86_64;CUSTOM
-type AWSAMIType string
-
-// AWSLaunchTemplate is the launch template of the default node group:
-// either an existing one (id or name, with a version), or one the platform
-// renders from securityGroupIDs and/or a custom image.
-// +kubebuilder:validation:XValidation:rule="((has(self.id) != has(self.name)) && has(self.version) && !has(self.securityGroupIDs) && !has(self.imageID) && !has(self.userData)) || (!has(self.id) && !has(self.name) && !has(self.version) && (has(self.securityGroupIDs) || has(self.imageID)))",message="name an existing launch template (id or name, with a version) or give what the platform renders one from (securityGroupIDs, imageID with userData), not both"
-// +kubebuilder:validation:XValidation:rule="has(self.imageID) == has(self.userData)",message="imageID and userData go together: a custom image needs its bootstrap script"
-type AWSLaunchTemplate struct {
-	// id of an existing launch template.
-	// +optional
-	// +kubebuilder:validation:Pattern=`^lt-[0-9a-f]{8,17}$`
-	ID string `json:"id,omitempty"`
-	// name of an existing launch template.
-	// +optional
-	// +kubebuilder:validation:MaxLength=128
-	Name string `json:"name,omitempty"`
-	// version of the existing launch template.
-	// +optional
-	// +kubebuilder:validation:Pattern=`^[1-9][0-9]*$`
-	Version string `json:"version,omitempty"`
-	// securityGroupIDs the nodes get in addition to the cluster's security
-	// group.
-	// +listType=set
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=4
-	// +kubebuilder:validation:items:Pattern=`^sg-[0-9a-f]{8,17}$`
-	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
-	// imageID of a custom AMI. Makes the AMI type CUSTOM.
-	// +optional
-	// +kubebuilder:validation:Pattern=`^ami-[0-9a-f]{8,17}$`
-	ImageID string `json:"imageID,omitempty"`
-	// userData is the bootstrap script of the custom AMI.
-	// +optional
-	// +kubebuilder:validation:MaxLength=21848
-	UserData string `json:"userData,omitempty"`
-}
-
-// AWSNodePoolSpec are the AWS settings of the default node pool.
-// +kubebuilder:validation:XValidation:rule="!has(self.amiType) || self.amiType != 'CUSTOM' || has(self.launchTemplate)",message="amiType CUSTOM needs a launch template with the image"
-type AWSNodePoolSpec struct {
-	// amiType of the nodes. Defaults to AL2023_x86_64_STANDARD.
-	// +optional
-	AMIType AWSAMIType `json:"amiType,omitempty"`
-	// launchTemplate of the node group. Unset: EKS's own.
-	// +optional
-	LaunchTemplate *AWSLaunchTemplate `json:"launchTemplate,omitempty"`
-}
-
 // AWSAddon is an EKS add-on. The platform always installs vpc-cni,
 // coredns, kube-proxy and eks-pod-identity-agent; an entry of the same
 // name overrides its version or configuration.
@@ -558,9 +414,6 @@ type AWSClusterSpec struct {
 	// upgradePolicy is the EKS upgrade policy.
 	// +optional
 	UpgradePolicy *AWSUpgradePolicy `json:"upgradePolicy,omitempty"`
-	// defaultNodePool are the AWS settings of the default node pool.
-	// +optional
-	DefaultNodePool *AWSNodePoolSpec `json:"defaultNodePool,omitempty"`
 	// addons are EKS add-ons beyond, or overriding, the default ones.
 	// +listType=map
 	// +listMapKey=name
@@ -588,9 +441,9 @@ type AWSClusterSpec struct {
 // AWSImportCluster names what of an existing EKS cluster is imported. The
 // EKS cluster itself is the one named like the Cluster object.
 type AWSImportCluster struct {
-	// defaultNodeGroupName is the node group that becomes
-	// spec.defaultNodePool. The cluster's other node groups are not
-	// imported: they stay unmanaged and block deleting the cluster until
+	// defaultNodeGroupName is the node group adopted as the cluster's
+	// default node group, kept as it is (the platform never changes its
+	// settings). The cluster's other node groups are not imported: they stay unmanaged and block deleting the cluster until
 	// they are removed.
 	// +required
 	// +kubebuilder:validation:MinLength=1
@@ -613,23 +466,21 @@ type ClusterImport struct {
 }
 
 // ClusterSpec is the desired state of a cluster. Region, network, control
-// plane, default node pool and access mean the same on every cloud; the
+// plane and access mean the same on every cloud; the platform owns the
+// node groups (its config, not the spec); the
 // provider struct (aws) selects the cloud and carries what has no
 // cross-cloud equivalent. Exactly one provider is set, even if empty
 // (`aws: {}`).
 // +kubebuilder:validation:XValidation:rule="has(self.aws)",message="exactly one provider must be set: aws (it may be empty)"
 // +kubebuilder:validation:XValidation:rule="has(self.importFrom) == has(oldSelf.importFrom)",message="a cluster is created or imported for good: importFrom cannot be added or removed"
-// +kubebuilder:validation:XValidation:rule="!has(self.nodeGroups) || self.nodeGroups.all(g, self.nodeGroups.exists_one(h, h.name == g.name))",message="node group names must be unique"
 // +kubebuilder:validation:XValidation:rule="has(self.importFrom) || (has(self.controlPlane) && has(self.controlPlane.endpointAccess) && ((has(self.controlPlane.endpointAccess.publicAccessCIDRs) && size(self.controlPlane.endpointAccess.publicAccessCIDRs) > 0) || (has(self.controlPlane.endpointAccess.publicAccess) && !self.controlPlane.endpointAccess.publicAccess)))",message="controlPlane.endpointAccess.publicAccessCIDRs needs at least one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || self.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')",message="region must be an AWS region, e.g. us-east-1"
-// +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.defaultNodePool) || self.defaultNodePool.instanceTypes.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))",message="AWS instance types look like m6i.large"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.access) || !has(self.access.adminPrincipals) || self.access.adminPrincipals.all(p, p.matches('^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$') && !p.contains(':role/aws-service-role/'))",message="AWS admin principals must be IAM role or user ARNs, not service-linked roles"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.aws.accessConfig) || self.aws.accessConfig.authenticationMode != 'CONFIG_MAP' || !has(self.access) || ((!has(self.access.adminPrincipals) || size(self.access.adminPrincipals) == 0) && (!has(self.access.accessEntries) || size(self.access.accessEntries) == 0))",message="adminPrincipals and accessEntries need authenticationMode API or API_AND_CONFIG_MAP"
 // +kubebuilder:validation:XValidation:rule="!has(self.access) || !has(self.access.accessEntries) || !has(self.access.adminPrincipals) || self.access.accessEntries.all(e, !(e.principalARN in self.access.adminPrincipals))",message="a principal is either in adminPrincipals or in accessEntries, not both"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.network.podCIDR) || size(self.network.podCIDR) == 0",message="AWS pods take IPs from the VPC subnets; network.podCIDR must be empty"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.network.zoneIDs) || size(self.network.zoneIDs) == 0 || (size(self.network.zoneIDs) >= 2 && self.network.zoneIDs.all(z, z.matches('^[a-z]+[0-9]-az[0-9]+$')))",message="AWS clusters need at least two zoneIDs, given as zone IDs like use1-az1"
 // +kubebuilder:validation:XValidation:rule="!has(self.aws) || !has(self.network.serviceCIDR) || size(self.network.serviceCIDR) == 0 || self.network.serviceCIDR.matches('/(1[2-9]|2[0-4])$')",message="EKS serviceCIDR must be /12 to /24"
-// +kubebuilder:validation:XValidation:rule="!has(self.defaultNodePool) || !has(self.defaultNodePool.diskSizeGB) || !has(self.aws) || !has(self.aws.defaultNodePool) || !has(self.aws.defaultNodePool.launchTemplate)",message="defaultNodePool.diskSizeGB cannot be set with a launch template: EKS takes the disk from the template"
 type ClusterSpec struct {
 	// displayName is a human-friendly name. Mutable.
 	// +optional
@@ -654,10 +505,6 @@ type ClusterSpec struct {
 	// controlPlane settings.
 	// +optional
 	ControlPlane *ControlPlaneSpec `json:"controlPlane,omitempty"`
-	// defaultNodePool is the default managed node group. Optional: the
-	// platform fills it; its taints, labels and scaling are the platform's.
-	// +optional
-	DefaultNodePool *NodePoolSpec `json:"defaultNodePool,omitempty"`
 	// access controls who administers the cluster. Mutable.
 	// +optional
 	Access *AccessSpec `json:"access,omitempty"`
@@ -688,12 +535,6 @@ type ClusterSpec struct {
 	// +optional
 	// +kubebuilder:default=false
 	NaaS *bool `json:"naas,omitempty"`
-	// nodeGroups are the user's Karpenter node groups.
-	// +optional
-	// +listType=map
-	// +listMapKey=name
-	// +kubebuilder:validation:MaxItems=20
-	NodeGroups []NodeGroupSpec `json:"nodeGroups,omitempty"`
 	// aws selects AWS (EKS) and carries its settings.
 	// +optional
 	AWS *AWSClusterSpec `json:"aws,omitempty"`
@@ -1131,8 +972,8 @@ type ClusterStatus struct {
 	// time.
 	// +optional
 	CatalogChange *CatalogChange `json:"catalogChange,omitempty"`
-	// nodeGroups are the node groups as observed: the platform's first,
-	// then the user's.
+	// nodeGroups are the node groups as observed: the system group, then
+	// the platform pool (and a removed tenant group while it is deleted).
 	// +optional
 	NodeGroups []NodeGroupStatus `json:"nodeGroups,omitempty"`
 	// nodes are the node totals the controller's node pass read last.

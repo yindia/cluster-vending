@@ -66,9 +66,17 @@ type Definition struct {
 	InstallTimeout time.Duration
 	// Requires are components that must be enabled first.
 	Requires []string
+	// Role is the part of the platform the definition plays (roles.go);
+	// RoleNone for an ordinary component. Read it through RoleOf, which
+	// also knows definitions stored before the field.
+	Role Role
 	// Sequence orders Platform components: one installs once every Platform
-	// component of a lower sequence is Ready (DefaultSequence when unset).
+	// component of a lower sequence is Ready (DefaultSequence when unset;
+	// NodeProvisionerSequence for the NodeProvisioner, by its role).
 	Sequence int32
+	// Sizing is what a Platform component runs, for the sizing rule
+	// (spec.sizing); empty: no workload.
+	Sizing Sizing
 	// Provider is the cloud the component is installed on (aws, gcp,
 	// azure); Covers.
 	Provider string

@@ -165,6 +165,7 @@ var nodeGroupsSection = map[string]struct {
 	"system.size":                      {FlagSystemNodeGroupSize, false},
 	"system.capacityType":              {FlagSystemNodeGroupCapacityType, false},
 	"system.diskSizeGiB":               {FlagSystemNodeGroupDiskSizeGiB, false},
+	"system.amiType":                   {FlagSystemNodeGroupAMIType, false},
 	"platform.instanceFamilies":        {FlagPlatformInstanceFamilies, true},
 	"platform.instanceSizes":           {FlagPlatformInstanceSizes, true},
 	"platform.architectures":           {FlagPlatformArchitectures, true},

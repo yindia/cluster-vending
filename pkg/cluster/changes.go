@@ -13,7 +13,8 @@ import (
 )
 
 // apiFields maps a managed resource's forProvider field (by prefix) to the
-// API field it is rendered from, so a plan names what the client set.
+// API field it is rendered from, so a plan names what the client set (the
+// default node group's: the platform config's key).
 var apiFields = map[string]map[string]string{
 	"Cluster": {
 		"version":                         "spec.control_plane.kubernetes_version",
@@ -27,17 +28,16 @@ var apiFields = map[string]map[string]string{
 		"accessConfig.authenticationMode": "spec.aws.access_config.authentication_mode",
 		"tags":                            "labels",
 	},
+	// The node group is the platform's: its settings are the platform
+	// config's (nodeGroups.system), named so.
 	"NodeGroup": {
 		"version":               "spec.control_plane.kubernetes_version",
-		"scalingConfig.minSize": "spec.default_node_pool.scaling_config.min_size",
-		"scalingConfig.maxSize": "spec.default_node_pool.scaling_config.max_size",
-		"labels":                "spec.default_node_pool.labels",
-		"taint":                 "spec.default_node_pool.taints",
-		"instanceTypes":         "spec.default_node_pool.instance_types",
-		"capacityType":          "spec.default_node_pool.capacity_type",
-		"diskSize":              "spec.default_node_pool.disk_size_gb",
-		"amiType":               "spec.aws.default_node_pool.ami_type",
-		"launchTemplate":        "spec.aws.default_node_pool.launch_template",
+		"scalingConfig.minSize": "nodeGroups.system.minSize",
+		"scalingConfig.maxSize": "nodeGroups.system.minSize",
+		"instanceTypes":         "nodeGroups.system.instanceTypes",
+		"capacityType":          "nodeGroups.system.capacityType",
+		"diskSize":              "nodeGroups.system.diskSizeGiB",
+		"amiType":               "nodeGroups.system.amiType",
 		"tags":                  "labels",
 	},
 	"Addon": {"addonVersion": "spec.aws.addons", "configurationValues": "spec.aws.addons", "tags": "labels"},

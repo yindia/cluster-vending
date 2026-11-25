@@ -280,3 +280,46 @@ func TestSyncTreatsTheManagementDefaultAsUnedited(t *testing.T) {
 		t.Error("a spec and the same spec with management at its default hash differently")
 	}
 }
+
+// spec.role and spec.sizing came after definitions were hashed. Both are
+// omitempty with no CRD default, so a definition stored without them hashes
+// as before (not edited), and this build's role and sizing replace an
+// unedited Karpenter that predates them: the role, not sequence 0, puts it
+// first now, and the API server's sequence default is still no edit.
+func TestSyncTakesRoleAndSizingOverDefinitionsThatPredateThem(t *testing.T) {
+	old := spec("version one")
+	old.Sequence = ptrTo(int32(0))
+	raw, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"role"`) || strings.Contains(string(raw), `"sizing"`) {
+		t.Fatalf("a spec without a role or sizing marshals them: %s", raw)
+	}
+	c := newClient(t, shipped("karpenter", old))
+	next := spec("version two")
+	next.Role = cloudv1alpha1.ComponentRoleNodeProvisioner
+	next.Sizing = &cloudv1alpha1.ComponentSizing{Deployments: []cloudv1alpha1.SizedDeployment{
+		{Name: "karpenter", Replicas: "replicas", Requests: "controller.resources.requests"}}}
+
+	res, err := catalog.Sync(t.Context(), c, []*cloudv1alpha1.ComponentDefinition{definition("karpenter", next)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := get(t, c, "karpenter")
+	if !slices.Contains(res.Updated, "karpenter") || got.Spec.Role != cloudv1alpha1.ComponentRoleNodeProvisioner || got.Spec.Sizing == nil {
+		t.Fatalf("karpenter = %+v, want this build's role and sizing (result %+v)", got.Spec, res)
+	}
+
+	got.Spec.Sequence = ptrTo(cloudv1alpha1.DefaultComponentSequence) // what the API server returns now
+	if err := c.Update(t.Context(), got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := catalog.Sync(t.Context(), c, []*cloudv1alpha1.ComponentDefinition{definition("karpenter", next)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(again.Existing, "karpenter") {
+		t.Errorf("the next sync of the same build = %+v, want karpenter as it is", again)
+	}
+}

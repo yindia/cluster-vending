@@ -46,6 +46,8 @@ type verb struct {
 	parent string
 	// idHelp replaces the help of --id.
 	idHelp string
+	// management adds --management (account create).
+	management bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -136,6 +138,10 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
 		}
+		if v.management {
+			f.BoolVar(&o.Management, "management", false, "print how to create the management account's roles (the management role "+
+				"the controller and the Crossplane providers run as, the API server's role) instead of onboarding a tenant account; no -f, no tenant")
+		}
 		if v.etag {
 			f.StringVar(&o.ETag, "etag", "", "fail unless the resource still has this etag")
 		}
@@ -168,7 +174,6 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 			f.BoolVar(&o.NotReady, "not-ready", false, "only nodes that are not Ready")
 			f.StringVar(&o.NameContains, "name", "", "only nodes whose name contains this")
 			f.BoolVar(&o.Manifests, "manifests", false, "print the NodePool and EC2NodeClass YAML the platform applies for the Karpenter groups (one with --group) instead of the nodes")
-			f.BoolVar(&o.NodeGroupOptions, "options", false, "print what the tenant's node groups may use (instance families and types, architectures, capacity types); needs no cluster ID")
 		}
 		if v.violations {
 			f.StringVar(&o.Namespace, "namespace", "", "only this namespace of the cluster")
@@ -239,8 +244,9 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 func newAccountCmd() *cobra.Command {
 	return newResourceCmd("account", "Onboard and check a tenant's cloud accounts (TenantService)", []verb{
 		{use: "create", short: "Onboard the account in a CloudAccount manifest (-f): its account ProviderConfig (requires an existing Tenant and its namespace; run tenant create first), then print how to " +
-			"create the platform's IAM role in it with CloudFormation (the template this server serves at /cloudformation/) and have its access checked",
-			run: cli.AccountCreate, args: cobra.NoArgs, input: true},
+			"create the platform's IAM roles in it with CloudFormation (the templates this server serves at /cloudformation/: the account's role and, recommended, the reader role) and have its access checked; " +
+			"--management prints the management account's roles instead",
+			run: cli.AccountCreate, args: cobra.NoArgs, input: true, management: true},
 		{use: "get", short: "Show the account --id, with its access check", run: cli.BootstrapGet, args: cobra.MaximumNArgs(1), id: true},
 		{use: "list", short: "List the tenant's accounts", run: cli.BootstrapList, args: cobra.NoArgs},
 		{use: "verify", short: "Ask the controller to check the account --id's access now (the tenant role in each region, and the calls the platform needs); get shows the result",

@@ -104,20 +104,27 @@ func reportBackoff(c *cloudv1.PlatformComponent, st helmrel.State, d *releaseDet
 	if st.Digest != "" {
 		c.Digest = st.Digest
 	}
-	if st.Attempts == 0 || d.LastError == "" {
+	// While our own pause holds the Release, Crossplane reports it paused
+	// with no error: the failure that started the backoff is the one
+	// remembered, not the provider's generic pause message.
+	lastError := d.LastError
+	if lastError == "" && d.PausedByUs {
+		lastError = st.LastError
+	}
+	if st.Attempts == 0 || lastError == "" {
 		return
 	}
 	switch {
 	case st.GaveUp:
 		c.Phase = cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED
 		c.Message = fmt.Sprintf("gave up after %d failed attempts (%s error), next try at %s: %s",
-			st.Counted, st.Class, st.NextRetry.UTC().Format(time.RFC3339), d.LastError)
+			st.Counted, st.Class, st.NextRetry.UTC().Format(time.RFC3339), lastError)
 	case st.Class == helmrel.ClassTransient:
 		c.Phase = cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING
-		c.Message = fmt.Sprintf("retrying after a transient error, next try at %s: %s", st.NextRetry.UTC().Format(time.RFC3339), d.LastError)
+		c.Message = fmt.Sprintf("retrying after a transient error, next try at %s: %s", st.NextRetry.UTC().Format(time.RFC3339), lastError)
 	case backingOff:
 		c.Phase = cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED
-		c.Message = fmt.Sprintf("chart %s: %s (%s error, attempt %d, next try at %s)", d.Chart, d.LastError, st.Class, st.Attempts,
+		c.Message = fmt.Sprintf("chart %s: %s (%s error, attempt %d, next try at %s)", d.Chart, lastError, st.Class, st.Attempts,
 			st.NextRetry.UTC().Format(time.RFC3339))
 	}
 }

@@ -412,88 +412,6 @@ spec:
                         format: int32
                         type: integer
                     type: object
-                  defaultNodePool:
-                    description: defaultNodePool are the AWS settings of the default
-                      node pool.
-                    properties:
-                      amiType:
-                        description: amiType of the nodes. Defaults to AL2023_x86_64_STANDARD.
-                        enum:
-                        - AL2023_x86_64_STANDARD
-                        - AL2023_ARM_64_STANDARD
-                        - AL2023_x86_64_NVIDIA
-                        - AL2023_x86_64_NEURON
-                        - AL2023_ARM_64_NVIDIA
-                        - BOTTLEROCKET_x86_64
-                        - BOTTLEROCKET_ARM_64
-                        - BOTTLEROCKET_x86_64_NVIDIA
-                        - BOTTLEROCKET_ARM_64_NVIDIA
-                        - BOTTLEROCKET_x86_64_FIPS
-                        - BOTTLEROCKET_ARM_64_FIPS
-                        - BOTTLEROCKET_x86_64_NVIDIA_FIPS
-                        - BOTTLEROCKET_ARM_64_NVIDIA_FIPS
-                        - WINDOWS_CORE_2019_x86_64
-                        - WINDOWS_FULL_2019_x86_64
-                        - WINDOWS_CORE_2022_x86_64
-                        - WINDOWS_FULL_2022_x86_64
-                        - WINDOWS_CORE_2025_x86_64
-                        - WINDOWS_FULL_2025_x86_64
-                        - CUSTOM
-                        type: string
-                      launchTemplate:
-                        description: 'launchTemplate of the node group. Unset: EKS''s
-                          own.'
-                        properties:
-                          id:
-                            description: id of an existing launch template.
-                            pattern: ^lt-[0-9a-f]{8,17}$
-                            type: string
-                          imageID:
-                            description: imageID of a custom AMI. Makes the AMI type
-                              CUSTOM.
-                            pattern: ^ami-[0-9a-f]{8,17}$
-                            type: string
-                          name:
-                            description: name of an existing launch template.
-                            maxLength: 128
-                            type: string
-                          securityGroupIDs:
-                            description: |-
-                              securityGroupIDs the nodes get in addition to the cluster's security
-                              group.
-                            items:
-                              pattern: ^sg-[0-9a-f]{8,17}$
-                              type: string
-                            maxItems: 4
-                            minItems: 1
-                            type: array
-                            x-kubernetes-list-type: set
-                          userData:
-                            description: userData is the bootstrap script of the custom
-                              AMI.
-                            maxLength: 21848
-                            type: string
-                          version:
-                            description: version of the existing launch template.
-                            pattern: ^[1-9][0-9]*$
-                            type: string
-                        type: object
-                        x-kubernetes-validations:
-                        - message: name an existing launch template (id or name, with
-                            a version) or give what the platform renders one from
-                            (securityGroupIDs, imageID with userData), not both
-                          rule: ((has(self.id) != has(self.name)) && has(self.version)
-                            && !has(self.securityGroupIDs) && !has(self.imageID) &&
-                            !has(self.userData)) || (!has(self.id) && !has(self.name)
-                            && !has(self.version) && (has(self.securityGroupIDs) ||
-                            has(self.imageID)))
-                        - message: 'imageID and userData go together: a custom image
-                            needs its bootstrap script'
-                          rule: has(self.imageID) == has(self.userData)
-                    type: object
-                    x-kubernetes-validations:
-                    - message: amiType CUSTOM needs a launch template with the image
-                      rule: '!has(self.amiType) || self.amiType != ''CUSTOM'' || has(self.launchTemplate)'
                   enabledClusterLogTypes:
                     description: |-
                       enabledClusterLogTypes are the control plane logs sent to CloudWatch
@@ -607,110 +525,6 @@ spec:
                       rule: '!(has(oldSelf.enabled) && oldSelf.enabled && !has(oldSelf.kmsKeyARN))
                         || !has(self.kmsKeyARN)'
                 type: object
-              defaultNodePool:
-                description: |-
-                  defaultNodePool is the default managed node group. Optional: the
-                  platform fills it; its taints, labels and scaling are the platform's.
-                properties:
-                  capacityType:
-                    default: OnDemand
-                    description: capacityType is how the nodes are bought.
-                    enum:
-                    - OnDemand
-                    - Spot
-                    type: string
-                  diskSizeGB:
-                    description: |-
-                      diskSizeGB is the root volume size of a node. Unset: the provider's
-                      default. Not with a launch template: the template decides.
-                    format: int32
-                    maximum: 16384
-                    minimum: 20
-                    type: integer
-                  instanceTypes:
-                    description: |-
-                      instanceTypes of the nodes. AWS accepts several (e.g. "m6i.large");
-                      other providers one.
-                    items:
-                      maxLength: 64
-                      minLength: 1
-                      pattern: ^[A-Za-z0-9._-]+$
-                      type: string
-                    maxItems: 20
-                    minItems: 1
-                    type: array
-                    x-kubernetes-list-type: set
-                  labels:
-                    additionalProperties:
-                      type: string
-                    description: labels are the Kubernetes labels of the nodes.
-                    maxProperties: 64
-                    type: object
-                  scaling:
-                    description: scaling is the size of the pool.
-                    properties:
-                      desiredSize:
-                        description: |-
-                          desiredSize is the number of nodes the pool starts with. Defaults to
-                          minSize, at least 1. The platform's default node group has one static
-                          size (minSize = maxSize = desiredSize), applied in place.
-                        format: int32
-                        maximum: 1000
-                        minimum: 0
-                        type: integer
-                      maxSize:
-                        description: maxSize is the largest number of nodes.
-                        format: int32
-                        maximum: 1000
-                        minimum: 1
-                        type: integer
-                      minSize:
-                        description: minSize is the smallest number of nodes.
-                        format: int32
-                        maximum: 1000
-                        minimum: 0
-                        type: integer
-                    required:
-                    - maxSize
-                    - minSize
-                    type: object
-                    x-kubernetes-validations:
-                    - message: minSize <= desiredSize <= maxSize
-                      rule: self.minSize <= self.maxSize && (!has(self.desiredSize)
-                        || (self.minSize <= self.desiredSize && self.desiredSize <=
-                        self.maxSize))
-                  taints:
-                    description: taints of the nodes.
-                    items:
-                      description: Taint is a taint on the nodes of a pool.
-                      properties:
-                        effect:
-                          description: effect of the taint.
-                          enum:
-                          - NoSchedule
-                          - PreferNoSchedule
-                          - NoExecute
-                          type: string
-                        key:
-                          description: key of the taint.
-                          maxLength: 253
-                          minLength: 1
-                          type: string
-                        value:
-                          description: value of the taint.
-                          maxLength: 63
-                          type: string
-                      required:
-                      - effect
-                      - key
-                      type: object
-                    maxItems: 50
-                    type: array
-                    x-kubernetes-list-type: atomic
-                required:
-                - instanceTypes
-                - scaling
-                type: object
               displayName:
                 description: displayName is a human-friendly name. Mutable.
                 maxLength: 128
@@ -730,9 +544,9 @@ spec:
                     properties:
                       defaultNodeGroupName:
                         description: |-
-                          defaultNodeGroupName is the node group that becomes
-                          spec.defaultNodePool. The cluster's other node groups are not
-                          imported: they stay unmanaged and block deleting the cluster until
+                          defaultNodeGroupName is the node group adopted as the cluster's
+                          default node group, kept as it is (the platform never changes its
+                          settings). The cluster's other node groups are not imported: they stay unmanaged and block deleting the cluster until
                           they are removed.
                         maxLength: 63
                         minLength: 1
@@ -851,127 +665,6 @@ spec:
                 x-kubernetes-validations:
                 - message: network is immutable
                   rule: self == oldSelf
-              nodeGroups:
-                description: nodeGroups are the user's Karpenter node groups.
-                items:
-                  description: |-
-                    NodeGroupSpec is one user node group: a Karpenter NodePool with its own
-                    EC2NodeClass in the workload cluster.
-                  properties:
-                    architectures:
-                      description: 'architectures of the nodes. Empty: Amd64.'
-                      items:
-                        description: Architecture is a node CPU architecture, as the
-                          kinds spell it.
-                        enum:
-                        - Amd64
-                        - Arm64
-                        type: string
-                      maxItems: 2
-                      type: array
-                      x-kubernetes-list-type: set
-                    capacityTypes:
-                      description: 'capacityTypes are how the nodes are bought. Empty:
-                        OnDemand.'
-                      items:
-                        description: CapacityType is how the nodes of a pool are bought.
-                        enum:
-                        - OnDemand
-                        - Spot
-                        type: string
-                      maxItems: 2
-                      type: array
-                      x-kubernetes-list-type: set
-                    instanceFamilies:
-                      description: instanceFamilies are instance families, e.g. m7i,
-                        c7g.
-                      items:
-                        maxLength: 32
-                        minLength: 1
-                        pattern: ^[a-z][a-z0-9-]*$
-                        type: string
-                      maxItems: 20
-                      type: array
-                      x-kubernetes-list-type: set
-                    instanceTypes:
-                      description: |-
-                        instanceTypes are exact machine types, e.g. m7i.large. Empty: any
-                        type of instanceFamilies.
-                      items:
-                        maxLength: 64
-                        minLength: 1
-                        pattern: ^[a-z][a-z0-9-]*[.][a-z0-9]+$
-                        type: string
-                      maxItems: 20
-                      type: array
-                      x-kubernetes-list-type: set
-                    labels:
-                      additionalProperties:
-                        type: string
-                      description: labels of the nodes.
-                      maxProperties: 64
-                      type: object
-                    limits:
-                      description: 'limits is the ceiling of what the group may provision.
-                        Unset: none.'
-                      properties:
-                        cpu:
-                          description: cpu is the vCPU ceiling.
-                          format: int32
-                          minimum: 1
-                          type: integer
-                        memoryGiB:
-                          description: memoryGiB is the memory ceiling in GiB.
-                          format: int32
-                          minimum: 1
-                          type: integer
-                      type: object
-                    name:
-                      description: |-
-                        name is a DNS label, unique in the cluster. "platform", "default" and
-                        "system" are reserved.
-                      maxLength: 40
-                      minLength: 1
-                      pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
-                      type: string
-                      x-kubernetes-validations:
-                      - message: name is reserved
-                        rule: '!(self in [''platform'', ''default'', ''system''])'
-                    taints:
-                      description: taints of the nodes.
-                      items:
-                        description: Taint is a taint on the nodes of a pool.
-                        properties:
-                          effect:
-                            description: effect of the taint.
-                            enum:
-                            - NoSchedule
-                            - PreferNoSchedule
-                            - NoExecute
-                            type: string
-                          key:
-                            description: key of the taint.
-                            maxLength: 253
-                            minLength: 1
-                            type: string
-                          value:
-                            description: value of the taint.
-                            maxLength: 63
-                            type: string
-                        required:
-                        - effect
-                        - key
-                        type: object
-                      maxItems: 50
-                      type: array
-                  required:
-                  - name
-                  type: object
-                maxItems: 20
-                type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
               region:
                 description: 'region the cluster runs in: its network''s. Immutable.'
                 maxLength: 64
@@ -1023,9 +716,6 @@ spec:
             - message: 'a cluster is created or imported for good: importFrom cannot
                 be added or removed'
               rule: has(self.importFrom) == has(oldSelf.importFrom)
-            - message: node group names must be unique
-              rule: '!has(self.nodeGroups) || self.nodeGroups.all(g, self.nodeGroups.exists_one(h,
-                h.name == g.name))'
             - message: controlPlane.endpointAccess.publicAccessCIDRs needs at least
                 one CIDR allowed to reach the public API endpoint (0.0.0.0/0 for any)
               rule: has(self.importFrom) || (has(self.controlPlane) && has(self.controlPlane.endpointAccess)
@@ -1033,9 +723,6 @@ spec:
                 > 0) || (has(self.controlPlane.endpointAccess.publicAccess) && !self.controlPlane.endpointAccess.publicAccess)))
             - message: region must be an AWS region, e.g. us-east-1
               rule: '!has(self.aws) || self.region.matches(''^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$'')'
-            - message: AWS instance types look like m6i.large
-              rule: '!has(self.aws) || !has(self.defaultNodePool) || self.defaultNodePool.instanceTypes.all(t,
-                t.matches(''^[a-z][a-z0-9-]*[.][a-z0-9]+$''))'
             - message: AWS admin principals must be IAM role or user ARNs, not service-linked
                 roles
               rule: '!has(self.aws) || !has(self.access) || !has(self.access.adminPrincipals)
@@ -1063,10 +750,6 @@ spec:
             - message: EKS serviceCIDR must be /12 to /24
               rule: '!has(self.aws) || !has(self.network.serviceCIDR) || size(self.network.serviceCIDR)
                 == 0 || self.network.serviceCIDR.matches(''/(1[2-9]|2[0-4])$'')'
-            - message: 'defaultNodePool.diskSizeGB cannot be set with a launch template:
-                EKS takes the disk from the template'
-              rule: '!has(self.defaultNodePool) || !has(self.defaultNodePool.diskSizeGB)
-                || !has(self.aws) || !has(self.aws.defaultNodePool) || !has(self.aws.defaultNodePool.launchTemplate)'
           status:
             description: status defines the observed state of Cluster
             properties:
@@ -1634,8 +1317,8 @@ spec:
                 type: object
               nodeGroups:
                 description: |-
-                  nodeGroups are the node groups as observed: the platform's first,
-                  then the user's.
+                  nodeGroups are the node groups as observed: the system group, then
+                  the platform pool (and a removed tenant group while it is deleted).
                 items:
                   description: NodeGroupStatus is what the controller observed of
                     one node group.
@@ -1681,8 +1364,9 @@ spec:
                       - Deleting
                       type: string
                     platformManaged:
-                      description: platformManaged is true for the platform's own
-                        groups.
+                      description: |-
+                        platformManaged is true for the platform's own groups; false only for
+                        a removed tenant group while it is deleted.
                       type: boolean
                     podCount:
                       description: podCount is the pods bound to the nodes that are

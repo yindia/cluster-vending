@@ -14,7 +14,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"k8s.io/utils/ptr"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -22,10 +21,8 @@ import (
 
 // Defaults of a cluster spec.
 const (
-	DefaultAuthMode     = "API"
-	DefaultCapacityType = "ON_DEMAND"
-	DefaultAMIType      = "AL2023_x86_64_STANDARD"
-	minZones            = 2
+	DefaultAuthMode = "API"
+	minZones        = 2
 )
 
 // PrivateSubnet is a private subnet of the network, as observed: its
@@ -84,67 +81,16 @@ func ChooseSubnets(subnets []PrivateSubnet, zoneIDs []string) ([]string, []strin
 	return zones, ids, nil
 }
 
-// ResolveSpec fills the spec's defaults (zones, auth mode, node pool
-// capacity and AMI, and those of the optional settings in use:
-// ResolveOptions) so the stored spec says what was built. The public
-// endpoint's CIDRs have no default: who may reach the API is the
-// client's choice (the contract requires at least one while that endpoint
-// is on).
-//
-// The default node pool is the platform's: omitted, it is filled with the
-// default instance type and capacity; its labels, taints and size are
-// always the fixed ones (crossplaneaws.FixedSystemNodePool), whatever the
-// request said; the size is the platform admin's static one, as min, max
-// and desired (a render takes the admin's current one,
-// ClusterPlan.SystemPoolSize). Instance types, capacity type, AMI, disk and
-// launch template stay the client's.
+// ResolveSpec fills the spec's defaults (zones, auth mode, and those of the
+// optional settings in use: ResolveOptions) so the stored spec says what
+// was built. The public endpoint's CIDRs have no default: who may reach the
+// API is the client's choice (the contract requires at least one while that
+// endpoint is on). Node groups are not in the spec: the platform renders
+// them from its config (ClusterPlan.System), or an imported cluster from
+// what its import found (Adoption.NodeGroup).
 func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
-	return ResolveSpecWith(in, zones, SystemPool{})
-}
-
-// SystemPool is the platform admin's settings of the default node group of
-// a new cluster (--system-node-group-min-size, the static size; --system-
-// node-group-instance-types). Zero values, and a size below
-// crossplaneaws.MinSystemPoolSize, are the defaults.
-type SystemPool struct {
-	Size          int
-	InstanceTypes []string
-	// CapacityType ("ON_DEMAND", "SPOT") and DiskSizeGiB are used when the
-	// request names none; empty and 0: ON_DEMAND and EKS's default.
-	CapacityType string
-	DiskSizeGiB  int
-}
-
-func (p SystemPool) instanceTypes() []string {
-	if len(p.InstanceTypes) == 0 {
-		return []string{crossplaneaws.DefaultSystemInstanceType}
-	}
-	return slices.Clone(p.InstanceTypes)
-}
-
-// ResolveSpecWith is ResolveSpec with the admin's settings of the default
-// node group: they apply to this (new) cluster only, never to one that
-// exists.
-func ResolveSpecWith(in *cloudv1.ClusterSpec, zones []string, pool SystemPool) (*cloudv1.ClusterSpec, error) {
-	return resolveSpecWith(in, zones, true, pool)
-}
-
-// resolveSpec is ResolveSpec; fixPool false leaves the default node pool's
-// placement and size as they are (an imported cluster's: PlanImport).
-func resolveSpec(in *cloudv1.ClusterSpec, zones []string, fixPool bool) (*cloudv1.ClusterSpec, error) {
-	return resolveSpecWith(in, zones, fixPool, SystemPool{})
-}
-
-func resolveSpecWith(in *cloudv1.ClusterSpec, zones []string, fixPool bool, system SystemPool) (*cloudv1.ClusterSpec, error) {
 	spec := cloneSpec(in)
 	spec.Network.ZoneIds = zones
-	if fixPool {
-		spec.DefaultNodePool = fixedNodePool(spec.DefaultNodePool, system, spec.GetAws().GetDefaultNodePool().GetLaunchTemplate() != nil)
-	}
-	pool := spec.DefaultNodePool
-	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED {
-		pool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND
-	}
 	aws := spec.GetAws()
 	if aws.AccessConfig == nil {
 		aws.AccessConfig = &cloudv1.AwsAccessConfig{}
@@ -152,42 +98,9 @@ func resolveSpecWith(in *cloudv1.ClusterSpec, zones []string, fixPool bool, syst
 	if aws.AccessConfig.AuthenticationMode == cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_UNSPECIFIED {
 		aws.AccessConfig.AuthenticationMode = cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_API
 	}
-	if aws.DefaultNodePool == nil {
-		aws.DefaultNodePool = &cloudv1.AwsNodePoolSpec{}
-	}
-	if aws.DefaultNodePool.AmiType == cloudv1.AwsAmiType_AWS_AMI_TYPE_UNSPECIFIED {
-		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD
-	}
 	aws.Addons = MergeAddons(aws.GetAddons())
 	ResolveReleaseFields(spec)
 	return spec, ResolveOptions(spec)
-}
-
-// fixedNodePool is pool (nil: an empty one) with the platform's placement
-// and size, and the admin's (default) instance type when it names none. The
-// admin's disk size is not applied with a launch template: it owns the disk.
-func fixedNodePool(pool *cloudv1.NodePoolSpec, system SystemPool, hasLaunchTemplate bool) *cloudv1.NodePoolSpec {
-	if pool == nil {
-		pool = &cloudv1.NodePoolSpec{}
-	}
-	if len(pool.InstanceTypes) == 0 {
-		pool.InstanceTypes = system.instanceTypes()
-	}
-	if pool.CapacityType == cloudv1.CapacityType_CAPACITY_TYPE_UNSPECIFIED && system.CapacityType == "SPOT" {
-		pool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_SPOT
-	}
-	if pool.DiskSizeGb == 0 && system.DiskSizeGiB > 0 && !hasLaunchTemplate {
-		pool.DiskSizeGb = uint32(system.DiskSizeGiB) //nolint:gosec // validated: at most 16384
-	}
-	fixed := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{}, system.Size)
-	pool.Labels = fixed.Labels
-	pool.Taints = nil
-	for _, t := range fixed.Taints {
-		pool.Taints = append(pool.Taints, &cloudv1.Taint{Key: t.Key, Value: t.Value, Effect: cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE})
-	}
-	pool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: uint32(fixed.MinSize), MaxSize: uint32(fixed.MaxSize), //nolint:gosec // small, validated settings
-		DesiredSize: ptr.To(uint32(fixed.Desired))} //nolint:gosec // the static size
-	return pool
 }
 
 // ResolveReleaseFields stores the defaults of the fields that say how
@@ -247,39 +160,23 @@ func RenderPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplaneaw
 	if st := aws.GetUpgradePolicy().GetSupportType(); st != cloudv1.AwsSupportType_AWS_SUPPORT_TYPE_UNSPECIFIED {
 		p.SupportType = CrossplaneName(st, "")
 	}
-	pool := spec.GetDefaultNodePool()
-	sc := pool.GetScalingConfig()
-	desired := sc.GetDesiredSize()
-	if sc.DesiredSize == nil {
-		desired = max(sc.GetMinSize(), 1)
-	}
-	p.NodePool = crossplaneaws.NodePoolPlan{
-		InstanceTypes: pool.GetInstanceTypes(),
-		CapacityType:  CrossplaneName(pool.GetCapacityType(), DefaultCapacityType),
-		AMIType:       CrossplaneName(aws.GetDefaultNodePool().GetAmiType(), DefaultAMIType),
-		DiskSizeGB:    int(pool.GetDiskSizeGb()),
-		MinSize:       int(sc.GetMinSize()), MaxSize: int(sc.GetMaxSize()), Desired: int(desired),
-		Labels: pool.GetLabels(),
-	}
 	for _, a := range aws.GetAddons() {
 		p.Addons = append(p.Addons, crossplaneaws.AddonPlan{Name: a.GetName(), Version: a.GetVersion(),
 			ConfigurationValues: a.GetConfigurationValues(), S3BucketNames: a.GetS3BucketNames()})
 	}
-	for _, t := range pool.GetTaints() {
-		p.NodePool.Taints = append(p.NodePool.Taints, crossplaneaws.TaintPlan{Key: t.GetKey(), Value: t.GetValue(),
-			Effect: CrossplaneName(t.GetEffect(), "")})
-	}
 	optionsPlan(spec, &p)
-	// A cluster the platform created has the fixed default node group and
-	// Karpenter's setup, whatever its stored spec says (a cluster created
-	// before them is moved in place: nothing EKS cannot change changes,
-	// min, max and desired are the admin's current static size). An imported cluster (it has
-	// adopted objects) keeps what it has.
-	if !base.Imported() {
-		p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, base.SystemPoolSize)
-		p.Karpenter = true
-		p.ResultsBucket = true // rendered once the plan has the account (HasResultsBucket)
+	// A cluster the platform created has the platform's system group
+	// (nodeGroups.system) and Karpenter's setup. An imported cluster (it has
+	// adopted objects) keeps the node group its import found.
+	if base.Imported() {
+		if g := base.NodeGroup; g != nil {
+			p.NodePool = *g
+		}
+		return p
 	}
+	p.NodePool = crossplaneaws.SystemNodePool(base.System)
+	p.Karpenter = true
+	p.ResultsBucket = true // rendered once the plan has the account (HasResultsBucket)
 	return p
 }
 

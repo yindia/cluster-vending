@@ -8,14 +8,16 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
 // The platform pool (docs/proposals/PROP-03-component-placement.md, phase 2):
 // the EC2NodeClass and NodePool crossplaneaws.PoolPlatform, built from
-// nodeGroups.platform and applied like a user group once Karpenter is Ready.
-// No component is placed on it yet. It is Ready when its objects are Ready,
+// nodeGroups.platform and applied once Karpenter is Ready. Every platform
+// component but Karpenter and the EKS add-ons, and every tenant component,
+// runs on it. It is Ready when its objects are Ready,
 // not when it has nodes: pods create the nodes, and a wait for nodes would
 // bring back the deadlock of PROP-03 2.3.
 
@@ -43,6 +45,13 @@ func (s *Reconciler) platformPoolInput() *crossplaneaws.PlatformPoolInput {
 		ExpireAfter: p.ExpireAfter, TerminationGracePeriod: p.TerminationGracePeriod,
 		DisruptionBudget: p.DisruptionBudget, MaxPods: p.MaxPods,
 	}
+}
+
+// SystemNodeGroup is nodeGroups.system as the render takes it: the system
+// group of every cluster the platform created.
+func SystemNodeGroup(c config.SystemNodeGroup) crossplaneaws.SystemNodeGroup {
+	return crossplaneaws.SystemNodeGroup{Size: c.MinSize, InstanceTypes: c.InstanceTypes, CapacityType: c.CapacityType,
+		AMIType: c.AMIType, DiskSizeGiB: c.DiskSizeGiB}
 }
 
 // recordedPool is the pool's status with the phase and node count last

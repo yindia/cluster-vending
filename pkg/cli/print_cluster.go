@@ -13,13 +13,13 @@ import (
 var clusterHeader = []string{"NAME", "ID", "PHASE", "VERSION", "REGION", "AGE"}
 
 // clusterRow is a cluster's row of cluster list; wide adds its network,
-// node pool, release and message.
+// node groups, release and message.
 func clusterRow(c *cloudv1.Cluster, wide bool) []string {
 	st := c.GetStatus()
 	r := []string{orNone(c.GetName()), orNone(c.GetId()), clusterPhase(st), clusterVersion(c), orNone(c.GetSpec().GetRegion()),
 		age(c.GetCreateTime())}
 	if wide {
-		r = append(r, orNone(c.GetSpec().GetNetwork().GetNetworkId()), nodePool(c.GetSpec().GetDefaultNodePool()),
+		r = append(r, orNone(c.GetSpec().GetNetwork().GetNetworkId()), nodeGroupsColumn(st.GetNodeGroups()),
 			orNone(st.GetPlatformRelease()), orNone(oneLine(st.GetMessage())))
 	}
 	return r
@@ -42,16 +42,14 @@ func clusterVersion(c *cloudv1.Cluster) string {
 	return orNone(c.GetSpec().GetControlPlane().GetKubernetesVersion())
 }
 
-// nodePool is a node pool's instance types and size range.
-func nodePool(p *cloudv1.NodePoolSpec) string {
-	if p == nil {
-		return none
+// nodeGroupsColumn is the node groups the status reports with their node
+// counts: "system:2,platform-pool:3".
+func nodeGroupsColumn(groups []*cloudv1.NodeGroupStatus) string {
+	parts := make([]string, 0, len(groups))
+	for _, g := range groups {
+		parts = append(parts, fmt.Sprintf("%s:%d", g.GetName(), g.GetNodes()))
 	}
-	types := orNone(strings.Join(p.GetInstanceTypes(), ","))
-	if sc := p.GetScalingConfig(); sc != nil {
-		return fmt.Sprintf("%s (%d-%d)", types, sc.GetMinSize(), sc.GetMaxSize())
-	}
-	return types
+	return orNone(strings.Join(parts, ","))
 }
 
 func printClusters(w io.Writer, clusters []*cloudv1.Cluster, wide bool) error {
@@ -61,7 +59,7 @@ func printClusters(w io.Writer, clusters []*cloudv1.Cluster, wide bool) error {
 	}
 	header := clusterHeader
 	if wide {
-		header = append(append([]string{}, header...), "NETWORK", "NODE POOL", "RELEASE", "MESSAGE")
+		header = append(append([]string{}, header...), "NETWORK", "NODE GROUPS", "RELEASE", "MESSAGE")
 	}
 	rows := make([][]string, 0, len(clusters))
 	for _, c := range clusters {

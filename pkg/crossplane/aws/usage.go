@@ -3,7 +3,6 @@ package aws
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"slices"
 	"strings"
 
 	protectionv1beta1 "github.com/crossplane/crossplane/apis/v2/protection/v1beta1"
@@ -90,7 +89,6 @@ var (
 	flowLogKind     = UsageRef{APIVersion: awsec2.CRDGroupVersion.String(), Kind: awsec2.FlowLog_Kind}
 	kmsKeyKind      = UsageRef{APIVersion: awskms.CRDGroupVersion.String(), Kind: awskms.Key_Kind}
 	oidcKind        = UsageRef{APIVersion: awsiam.CRDGroupVersion.String(), Kind: awsiam.OpenIDConnectProvider_Kind}
-	launchTmplKind  = UsageRef{APIVersion: awsec2.CRDGroupVersion.String(), Kind: awsec2.LaunchTemplate_Kind}
 	logGroupKind    = UsageRef{APIVersion: awscwl.CRDGroupVersion.String(), Kind: awscwl.Group_Kind}
 	accessEntryKind = UsageRef{APIVersion: awseks.CRDGroupVersion.String(), Kind: awseks.AccessEntry_Kind}
 	queueKind       = UsageRef{APIVersion: awssqs.CRDGroupVersion.String(), Kind: awssqs.Queue_Kind}
@@ -104,8 +102,8 @@ func (r UsageRef) named(name string) UsageRef { r.Name = name; return r }
 // usagePairs is the cluster's deletion order as Usages (Of cannot go while
 // By exists): node groups before the EKS cluster and before their IAM role
 // and the kubeconfig the cleanup Job needs; the EKS cluster before its IAM
-// role and the network subnets its interfaces sit in; the EBS CSI driver
-// add-on before its IAM.
+// role and the network subnets its interfaces sit in; an add-on whose
+// setup has protectIAM (the EBS CSI driver) before its IAM.
 func (b clusterBuilder) usagePairs() []UsagePair {
 	p := b.p
 	nodeGroup := nodeGroupKind.named(b.nodeGroupName())
@@ -125,19 +123,13 @@ func (b clusterBuilder) usagePairs() []UsagePair {
 	for _, a := range []string{"node-worker", "node-cni", "node-ecr"} {
 		pairs = append(pairs, UsagePair{Of: attachmentKind.named(b.name(a)), By: nodeGroup})
 	}
-	if b.hasAddon(AddonEBSCSI) {
-		ebs := addonKind.named(b.name("addon-" + AddonEBSCSI))
-		pairs = append(pairs,
-			UsagePair{Of: roleKind.named(b.name("ebs-csi-role")), By: ebs},
-			UsagePair{Of: attachmentKind.named(b.name("ebs-csi-policy")), By: ebs},
-			UsagePair{Of: podIdentityKind.named(b.name("ebs-csi-identity")), By: ebs})
-	}
+	pairs = append(pairs, b.addonIAMUsagePairs()...)
 	for _, subnet := range p.SubnetObjects {
 		pairs = append(pairs, UsagePair{Of: subnetKind.named(subnet), By: eks})
 	}
 	pairs = append(pairs, b.karpenterUsagePairs(eks)...)
 	pairs = append(pairs, b.resultsUsagePairs()...)
-	return append(pairs, b.optionUsagePairs(eks, nodeGroup)...)
+	return append(pairs, b.optionUsagePairs(eks)...)
 }
 
 func (b clusterBuilder) nodeGroupName() string {
@@ -147,9 +139,26 @@ func (b clusterBuilder) nodeGroupName() string {
 	return DefaultNodeGroupName(b.p.Prefix)
 }
 
-func (b clusterBuilder) hasAddon(name string) bool {
-	if len(b.p.Addons) == 0 {
-		return slices.Contains(DefaultAddons, name)
+// addonIAMUsagePairs keep the role, managed policy attachments and pod
+// identity association of each add-on whose setup has protectIAM until
+// the add-on is gone.
+func (b clusterBuilder) addonIAMUsagePairs() []UsagePair {
+	plans := b.p.Addons
+	if len(plans) == 0 {
+		plans = DefaultAddonPlans()
 	}
-	return slices.ContainsFunc(b.p.Addons, func(a AddonPlan) bool { return a.Name == name })
+	var pairs []UsagePair
+	for _, a := range plans {
+		s, ok := addonCatalog.setups[a.Name]
+		if !ok || !s.protectIAM {
+			continue
+		}
+		addon := addonKind.named(b.name("addon-" + a.Name))
+		pairs = append(pairs, UsagePair{Of: roleKind.named(b.name(s.short + "-role")), By: addon})
+		for i := range s.managedPolicies {
+			pairs = append(pairs, UsagePair{Of: attachmentKind.named(b.name(s.attachmentSuffix(i))), By: addon})
+		}
+		pairs = append(pairs, UsagePair{Of: podIdentityKind.named(b.name(s.short + "-identity")), By: addon})
+	}
+	return pairs
 }

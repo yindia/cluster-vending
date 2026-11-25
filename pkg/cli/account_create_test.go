@@ -208,6 +208,108 @@ func TestAccountCreatePrintsTheRoleSteps(t *testing.T) {
 	t.Logf("stdout:\n%s", r.out)
 }
 
+// account create also prints the account's reader role stack, recommended:
+// each cluster's live reads use the reader role, which trusts the
+// management role with the account's external ID (not the API server),
+// before the access check, after the account's role.
+func TestAccountCreatePrintsTheReaderStack(t *testing.T) {
+	const principal = "arn:aws:iam::111122223333:role/cluster-vending-server"
+	r := runAccount(t, AccountCreate, Options{Input: manifest(t, "cluster-vending-provisioner"), Server: apiServer},
+		&accountAPI{serverPrincipal: principal}, "")
+
+	if r.err != nil {
+		t.Fatalf("%v\n%s", r.err, r.progress)
+	}
+	url := apiServer + "/cloudformation/reader.yaml"
+	_, reader, ok := strings.Cut(r.out, "Recommended: the reader role")
+	if !ok {
+		t.Fatalf("no reader step:\n%s", r.out)
+	}
+	contains(t, "reader step", reader,
+		" cluster-vending-reader in account "+tenantAccount,
+		"The specified principalArn is invalid",
+		"curl -fsSL "+url+" -o cluster-vending-reader.yaml",
+		"aws cloudformation create-stack --stack-name cluster-vending-reader",
+		"--template-body file://cluster-vending-reader.yaml --capabilities CAPABILITY_NAMED_IAM",
+		"--parameters ParameterKey=ManagementRoleArn,ParameterValue="+managementRole,
+		"ParameterKey=ExternalId,ParameterValue="+externalID,
+		"ParameterKey=RoleName,ParameterValue=cluster-vending-reader",
+		"When the stack is CREATE_COMPLETE: cluster-vending account verify")
+	if before, _, _ := strings.Cut(reader, "When the stack is"); strings.Contains(before, "ServerPrincipalArn") {
+		t.Errorf("the reader stack trusts the server:\n%s", before)
+	}
+	if strings.Index(r.out, "--stack-name cluster-vending-provisioner") > strings.Index(r.out, "Recommended: the reader role") {
+		t.Errorf("the reader stack comes before the account's role:\n%s", r.out)
+	}
+}
+
+// An account whose role is the reader has no second reader step; a role
+// none of the templates creates still gets the reader stack.
+func TestAccountCreateReaderStackByRole(t *testing.T) {
+	for _, tt := range []struct {
+		role       string
+		wantReader bool
+	}{
+		{"cluster-vending-reader", false},
+		{"cluster-vending-updater", true},
+		{"acme-platform", true},
+	} {
+		t.Run(tt.role, func(t *testing.T) {
+			r := runAccount(t, AccountCreate, Options{Input: manifest(t, tt.role), Server: apiServer}, &accountAPI{}, "")
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+			if got := strings.Contains(r.out, "Recommended: the reader role"); got != tt.wantReader {
+				t.Errorf("reader step %v, want %v:\n%s", got, tt.wantReader, r.out)
+			}
+			if tt.wantReader {
+				contains(t, "output", r.out, "--stack-name cluster-vending-reader")
+			}
+		})
+	}
+}
+
+// account create --management onboards nothing and calls no API: it prints
+// the management account's two stacks (the management role, then the
+// server role) from the templates the API server serves, how to trust IRSA
+// or a local principal, and the setting each role's ARN goes in.
+func TestAccountCreateManagementPrintsTheManagementAccountRoles(t *testing.T) {
+	api := &accountAPI{}
+
+	r := runAccount(t, AccountCreate, Options{Management: true, Server: apiServer + "/"}, api, "")
+
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	if len(api.onboarded) != 0 || api.bootstrapped != nil {
+		t.Errorf("onboarded %v, bootstrapped %v: want no API call", api.onboarded, api.bootstrapped)
+	}
+	contains(t, "output", r.out,
+		"1. The management role cluster-vending-management",
+		"curl -fsSL "+apiServer+"/cloudformation/management.yaml -o cluster-vending-management.yaml",
+		"aws cloudformation create-stack --stack-name cluster-vending-management",
+		"--parameters ParameterKey=OidcProviderArn,ParameterValue=<OIDC provider ARN>",
+		"ParameterKey=LocalPrincipalArn,ParameterValue=<your IAM user or role",
+		"ParameterKey=MaxSessionDuration,ParameterValue=43200",
+		"set aws-management-role-arn of the controller and the API server to its ManagementRoleArn output",
+		"OutputKey=='ManagementRoleArn'",
+		"2. The server role cluster-vending-server",
+		"curl -fsSL "+apiServer+"/cloudformation/server.yaml -o cluster-vending-server.yaml",
+		"set aws-server-role-arn of the API server to its ServerRoleArn output",
+		"Then: cluster-vending account create -f")
+	if strings.Index(r.out, "cluster-vending-server.yaml") < strings.Index(r.out, "cluster-vending-management.yaml") {
+		t.Errorf("the server role comes first:\n%s", r.out)
+	}
+	t.Logf("stdout:\n%s", r.out)
+}
+
+func TestAccountCreateManagementTakesNoManifest(t *testing.T) {
+	r := runAccount(t, AccountCreate, Options{Management: true, Input: manifest(t, "cluster-vending-provisioner")}, &accountAPI{}, "")
+	if r.err == nil || !strings.Contains(r.err.Error(), "no manifest") {
+		t.Fatalf("err = %v", r.err)
+	}
+}
+
 // A role name of its own (cluster-vending-<anything>-<role>) is that
 // role's template, as a stack named after it, with RoleName set.
 func TestAccountCreateWithARoleOfItsOwn(t *testing.T) {
@@ -226,7 +328,8 @@ func TestAccountCreateWithARoleOfItsOwn(t *testing.T) {
 }
 
 // A role none of the templates creates is the tenant's to make: account
-// create says what it must trust, and prints no stack.
+// create says what it must trust, and prints no stack of it (only the
+// reader's, TestAccountCreateReaderStackByRole).
 func TestAccountCreateWithARoleNotOfTheTemplates(t *testing.T) {
 	api := &accountAPI{}
 
@@ -240,8 +343,8 @@ func TestAccountCreateWithARoleNotOfTheTemplates(t *testing.T) {
 	}
 	contains(t, "output", r.out, "Create the role acme-platform in account "+tenantAccount+" yourself",
 		"trusting "+managementRole, "external ID "+externalID, "account verify --id "+accountID)
-	if strings.Contains(r.out, "create-stack") {
-		t.Errorf("output has a stack:\n%s", r.out)
+	if strings.Contains(r.out, "--stack-name acme-platform") || strings.Contains(r.out, "provisioner.yaml -o") {
+		t.Errorf("output has a stack of the role:\n%s", r.out)
 	}
 }
 
@@ -392,7 +495,8 @@ func TestAccountCreatePrintsTheServerPrincipalWhenThereIsOne(t *testing.T) {
 
 // For an account whose role template is older than the platform needs,
 // account create prints the update-stack command (same template and
-// parameters) instead of create-stack.
+// parameters) instead of create-stack, for the reader stack too (or its
+// create-stack, for an account that has none yet).
 func TestAccountCreatePrintsTheUpdateCommandForAnOutdatedStack(t *testing.T) {
 	api := &accountAPI{outdated: true}
 
@@ -407,8 +511,10 @@ func TestAccountCreatePrintsTheUpdateCommandForAnOutdatedStack(t *testing.T) {
 		"aws cloudformation update-stack --stack-name cluster-vending-provisioner",
 		"--capabilities CAPABILITY_NAMED_IAM",
 		"ParameterKey=ExternalId,ParameterValue="+externalID,
+		"aws cloudformation update-stack --stack-name cluster-vending-reader",
+		"an account without a reader stack yet: the same command with create-stack",
 		"When the stack is UPDATE_COMPLETE: cluster-vending account verify")
-	if strings.Contains(r.out, "create-stack") {
+	if strings.Contains(r.out, "aws cloudformation create-stack") {
 		t.Errorf("an update prints create-stack:\n%s", r.out)
 	}
 }

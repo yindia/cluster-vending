@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/yindia/cluster-vending/pkg/catalog"
+	"github.com/yindia/cluster-vending/pkg/component"
 )
 
 // release.yaml is valid, and gives a version to exactly the components the
@@ -162,25 +163,25 @@ channels:
 	}
 }
 
-// Karpenter installs first (sequence 0) and gates everything after it; every
-// other component is at the default 100. A component of a lower sequence is
-// waited for by the later ones.
+// Karpenter installs first (sequence 0, by its NodeProvisioner role) and
+// gates everything after it; every other component is at the default 100.
+// A component of a lower sequence is waited for by the later ones.
 func TestKarpenterInstallsFirst(t *testing.T) {
 	defs, err := catalog.Definitions()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range defs {
-		got := int32(100)
-		if d.Spec.Sequence != nil {
-			got = *d.Spec.Sequence
+	for _, def := range defs {
+		d, err := component.DefinitionOf(def)
+		if err != nil {
+			t.Fatal(err)
 		}
 		want, ok := map[string]int32{"karpenter": 0}[d.Name]
 		if !ok {
 			want = 100
 		}
-		if got != want {
-			t.Errorf("%s has sequence %d, want %d", d.Name, got, want)
+		if d.Sequence != want {
+			t.Errorf("%s has sequence %d, want %d", d.Name, d.Sequence, want)
 		}
 	}
 }

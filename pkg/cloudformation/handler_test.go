@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-// The server serves each role's template read-only at
+// The server serves each role's template (the tenant roles' and the
+// management account's) read-only at
 // /cloudformation/<role>.yaml, lists them at /cloudformation/, and serves
 // nothing else.
 func TestHandlerServesTheTemplates(t *testing.T) {
@@ -20,7 +21,10 @@ func TestHandlerServesTheTemplates(t *testing.T) {
 		{"/cloudformation/provisioner.yaml", http.MethodGet, http.StatusOK, "AWS::IAM::Role"},
 		{"/cloudformation/updater.yaml", http.MethodGet, http.StatusOK, "AWS::IAM::Role"},
 		{"/cloudformation/reader.yaml", http.MethodHead, http.StatusOK, ""},
+		{"/cloudformation/management.yaml", http.MethodGet, http.StatusOK, "ManagementRoleArn"},
+		{"/cloudformation/server.yaml", http.MethodGet, http.StatusOK, "ServerRoleArn"},
 		{"/cloudformation/", http.MethodGet, http.StatusOK, "/cloudformation/updater.yaml"},
+		{"/cloudformation/", http.MethodGet, http.StatusOK, "/cloudformation/management.yaml\n/cloudformation/server.yaml"},
 		{"/cloudformation/admin.yaml", http.MethodGet, http.StatusNotFound, ""},
 		{"/cloudformation/provisioner", http.MethodGet, http.StatusNotFound, ""},
 		{"/cloudformation/cluster-vending-provisioner-role.template.yaml", http.MethodGet, http.StatusNotFound, ""},

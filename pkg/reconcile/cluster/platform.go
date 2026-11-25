@@ -484,7 +484,7 @@ func (s *Reconciler) platformInput(ctx context.Context, row *model.Cluster, inst
 		// The provider spec.aws.irsa renders, or the one a taken-over
 		// cluster was imported with.
 		IRSA: HasIRSA(spec, records)}
-	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM, in.Cluster.IRSA, in.Plan.NodeGroupName, installed)
+	in.Vars = s.platformVars(ctx, row, spec, t, clusterPlan, in.IAM, in.Cluster.IRSA, in.Plan.NodeGroupName)
 
 	// The recorded release is kept once something is installed from it.
 	// Until then the cluster follows its channel: a release that pinned no
@@ -623,7 +623,7 @@ func kubernetesMinor(version string) string {
 // as the management cluster has them now. What does not exist yet is left
 // empty: the component then waits.
 func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, t Target,
-	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan, irsa bool, nodeGroup string, installed bool) func(string) component.Vars {
+	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan, irsa bool, nodeGroup string) func(string) component.Vars {
 	recorded := storedStatus(row)
 	kindSpec, _ := convert.ClusterSpecToAPI(spec, "")
 	if irsa {
@@ -634,7 +634,10 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		}
 		kindSpec.AWS.IRSA = ptr.To(true)
 	}
-	cluster := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: row.Name}, Spec: kindSpec}
+	// The adoption carries an imported cluster's node group: its placement
+	// (component.placement).
+	cluster := &cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: row.Name,
+		Annotations: map[string]string{crossplaneaws.AdoptionAnnotation: string(row.Adoption)}}, Spec: kindSpec}
 	cluster.Status.OIDCIssuerURL = recorded.GetOidcIssuerUrl()
 	if e := recorded.GetEndpoint(); e.GetUrl() != "" {
 		cluster.Status.Endpoint = &cloudv1alpha1.ClusterEndpoint{URL: e.GetUrl()}
@@ -645,7 +648,7 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		network.Status.Resources = &cloudv1alpha1.NetworkResources{CloudNetworkID: vpc}
 	}
 	nodeRole := crossplaneaws.NodeRoleName(clusterPlan)
-	live, liveErr := s.livePlacement(ctx, cluster, clusterPlan.Namespace, nodeGroup, installed)
+	live, liveErr := s.livePlacement(ctx, cluster, clusterPlan.Namespace, nodeGroup)
 	poolWait := s.platformPoolWait(ctx, row, cluster.Spec.ImportFrom != nil)
 	return func(name string) component.Vars {
 		p := iam

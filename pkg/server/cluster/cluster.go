@@ -88,10 +88,6 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *cloudv1.CreateC
 		c, err := s.stored(ctx, row)
 		return &cloudv1.CreateClusterResponse{Cluster: c}, err
 	}
-	if err := checkNodeGroupAllowlist(req.GetCluster().GetSpec().GetNodeGroups(), nil,
-		s.deps.NodeGroups.Karpenter.InstanceFamilies, s.deps.NodeGroups.Karpenter.InstanceTypes); err != nil {
-		return nil, err
-	}
 	row, err := s.NewRow(ctx, req)
 	if fault.Is(err, fault.AlreadyExists) {
 		// The name may be taken by this very request, stored concurrently

@@ -2,130 +2,16 @@ syntax = "proto3";
 
 package cloud.v1;
 
-import "buf/validate/validate.proto";
-import "cloud/v1/node_pool.proto";
 import "google/protobuf/timestamp.proto";
 
-// NodeGroupSpec is one user node group: a Karpenter NodePool with its own
-// EC2NodeClass in the workload cluster (docs/architecture.md#node-layout).
-// Nodes carry the label node.cluster-vending.io/pool=<name> in addition to
-// labels. The platform's own groups (the default managed node group and the
-// `platform` NodePool) are not part of the spec.
-message NodeGroupSpec {
-  // DNS label, unique within the cluster, at most 40 characters. "platform",
-  // "platform-pool", "default" and "system" are reserved. Immutable in
-  // effect: renaming a group removes it and adds another.
-  string name = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 40
-    pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$"
-    not_in: [
-      "platform",
-      "platform-pool",
-      "default",
-      "system"
-    ]
-  }];
-
-  // Exact machine types, e.g. "m7i.large". Empty: any type of
-  // instance_families.
-  repeated string instance_types = 2 [(buf.validate.field).repeated = {
-    max_items: 20
-    unique: true
-    items: {
-      string: {
-        min_len: 1
-        max_len: 64
-        pattern: "^[a-z][a-z0-9-]*[.][a-z0-9]+$"
-      }
-    }
-  }];
-
-  // Instance families, e.g. "m7i", "c7g".
-  repeated string instance_families = 3 [(buf.validate.field).repeated = {
-    max_items: 20
-    unique: true
-    items: {
-      string: {
-        min_len: 1
-        max_len: 32
-        pattern: "^[a-z][a-z0-9-]*$"
-      }
-    }
-  }];
-
-  // CPU architectures. Empty: AMD64.
-  repeated Architecture architectures = 4 [(buf.validate.field).repeated = {
-    max_items: 2
-    unique: true
-    items: {
-      enum: {
-        defined_only: true
-        not_in: [0]
-      }
-    }
-  }];
-
-  // Capacity types. Empty: ON_DEMAND.
-  repeated CapacityType capacity_types = 5 [(buf.validate.field).repeated = {
-    max_items: 2
-    unique: true
-    items: {
-      enum: {
-        defined_only: true
-        not_in: [0]
-      }
-    }
-  }];
-
-  // Kubernetes labels of the group's nodes.
-  map<string, string> labels = 6 [(buf.validate.field).map = {
-    max_pairs: 64
-    keys: {
-      string: {
-        min_len: 1
-        max_len: 317
-        pattern: "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
-      }
-    }
-    values: {
-      string: {
-        max_len: 63
-        pattern: "^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$"
-      }
-    }
-  }];
-
-  // Kubernetes taints of the group's nodes. Capped at 50, like
-  // NodePoolSpec.taints.
-  repeated Taint taints = 7 [(buf.validate.field).repeated.max_items = 50];
-
-  // Ceiling of the resources the group may provision. Unset: no ceiling.
-  NodeGroupLimits limits = 8;
-}
-
-// NodeGroupLimits bounds what a node group may provision in total
-// (NodePool.spec.limits).
-message NodeGroupLimits {
-  // vCPUs.
-  optional int32 cpu = 1 [(buf.validate.field).int32.gt = 0];
-  // Memory in GiB.
-  optional int32 memory_gib = 2 [(buf.validate.field).int32.gt = 0];
-}
-
-// Architecture is a node CPU architecture.
-enum Architecture {
-  // Server default: AMD64.
-  ARCHITECTURE_UNSPECIFIED = 0;
-  ARCHITECTURE_AMD64 = 1;
-  ARCHITECTURE_ARM64 = 2;
-}
-
-// NodeGroupStatus is what the controller observed of one node group. The
-// platform group comes first, then the user's.
+// NodeGroupStatus is what the controller observed of one node group: the
+// platform's system group first, then its platform pool. A tenant node
+// group a cluster had before the platform owned its node groups is listed
+// last, DELETING, while it is removed.
 message NodeGroupStatus {
   string name = 1;
-  // True for the platform's own groups, false for the user's.
+  // True for the platform's own groups; false only for a removed tenant
+  // group while it is deleted.
   bool platform_managed = 2;
   NodeGroupPhase phase = 3;
   // Why the group is not ready, when it is not.
@@ -161,7 +47,7 @@ enum NodeGroupPhase {
   NODE_GROUP_PHASE_PENDING = 1;
   NODE_GROUP_PHASE_READY = 2;
   NODE_GROUP_PHASE_FAILED = 3;
-  // Removed from the spec, being deleted from the workload cluster.
+  // Being deleted from the workload cluster.
   NODE_GROUP_PHASE_DELETING = 4;
 }
 

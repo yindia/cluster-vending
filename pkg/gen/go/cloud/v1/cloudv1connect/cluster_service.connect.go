@@ -50,9 +50,6 @@ const (
 	// ClusterServiceListClusterRecommendationsProcedure is the procedure name of the ClusterService's
 	// ListClusterRecommendations RPC.
 	ClusterServiceListClusterRecommendationsProcedure = "/cloud.v1.ClusterService/ListClusterRecommendations"
-	// ClusterServiceGetNodeGroupOptionsProcedure is the procedure name of the ClusterService's
-	// GetNodeGroupOptions RPC.
-	ClusterServiceGetNodeGroupOptionsProcedure = "/cloud.v1.ClusterService/GetNodeGroupOptions"
 	// ClusterServiceListClusterNodeGroupManifestsProcedure is the procedure name of the
 	// ClusterService's ListClusterNodeGroupManifests RPC.
 	ClusterServiceListClusterNodeGroupManifestsProcedure = "/cloud.v1.ClusterService/ListClusterNodeGroupManifests"
@@ -143,14 +140,6 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("ListClusterRecommendations"),
 			Procedure:        ClusterServiceListClusterRecommendationsProcedure,
-			IdempotencyLevel: connect.IdempotencyNoSideEffects,
-		}
-	})
-	clusterServiceGetNodeGroupOptionsSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType:       connect.StreamTypeUnary,
-			Schema:           v1.File_cloud_v1_cluster_service_proto.Services().ByName("ClusterService").Methods().ByName("GetNodeGroupOptions"),
-			Procedure:        ClusterServiceGetNodeGroupOptionsProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -273,14 +262,8 @@ type ClusterServiceClient interface {
 	// (it samples the cluster every five minutes, read-only), read from the
 	// platform's store. Empty for a cluster that was not sampled yet.
 	ListClusterRecommendations(context.Context, *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error)
-	// Reads what user node groups may use: the platform admin's allowlist of
-	// instance families and types (the server's node-group-instance-families
-	// and node-group-instance-types settings), the architectures and the
-	// capacity types. CreateCluster and UpdateCluster refuse node groups
-	// outside it.
-	GetNodeGroupOptions(context.Context, *v1.GetNodeGroupOptionsRequest) (*v1.GetNodeGroupOptionsResponse, error)
 	// Lists the Karpenter objects (EC2NodeClass and NodePool) of the
-	// cluster's node groups, the platform group first, rendered from the
+	// cluster's platform pool, rendered from the
 	// stored spec exactly as the controller applies them to the workload
 	// cluster. Empty for an imported cluster that was not taken over. Never
 	// connects to the workload cluster.
@@ -398,14 +381,8 @@ type ClusterServiceHandler interface {
 	// (it samples the cluster every five minutes, read-only), read from the
 	// platform's store. Empty for a cluster that was not sampled yet.
 	ListClusterRecommendations(context.Context, *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error)
-	// Reads what user node groups may use: the platform admin's allowlist of
-	// instance families and types (the server's node-group-instance-families
-	// and node-group-instance-types settings), the architectures and the
-	// capacity types. CreateCluster and UpdateCluster refuse node groups
-	// outside it.
-	GetNodeGroupOptions(context.Context, *v1.GetNodeGroupOptionsRequest) (*v1.GetNodeGroupOptionsResponse, error)
 	// Lists the Karpenter objects (EC2NodeClass and NodePool) of the
-	// cluster's node groups, the platform group first, rendered from the
+	// cluster's platform pool, rendered from the
 	// stored spec exactly as the controller applies them to the workload
 	// cluster. Empty for an imported cluster that was not taken over. Never
 	// connects to the workload cluster.
@@ -469,7 +446,6 @@ func RegisterClusterServiceHandler(server *connect.Server, svc ClusterServiceHan
 		connect.Method{Spec: clusterServiceListClusterDeprecationsSpec(), Handler: adapter.listClusterDeprecations},
 		connect.Method{Spec: clusterServiceListClusterEventsSpec(), Handler: adapter.listClusterEvents},
 		connect.Method{Spec: clusterServiceListClusterRecommendationsSpec(), Handler: adapter.listClusterRecommendations},
-		connect.Method{Spec: clusterServiceGetNodeGroupOptionsSpec(), Handler: adapter.getNodeGroupOptions},
 		connect.Method{Spec: clusterServiceListClusterNodeGroupManifestsSpec(), Handler: adapter.listClusterNodeGroupManifests},
 		connect.Method{Spec: clusterServiceListNodeGroupNodesSpec(), Handler: adapter.listNodeGroupNodes},
 		connect.Method{Spec: clusterServiceGetNodeResourcesSpec(), Handler: adapter.getNodeResources},
@@ -517,10 +493,6 @@ func (UnimplementedClusterServiceHandler) ListClusterEvents(context.Context, *v1
 
 func (UnimplementedClusterServiceHandler) ListClusterRecommendations(context.Context, *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.ListClusterRecommendations is not implemented")
-}
-
-func (UnimplementedClusterServiceHandler) GetNodeGroupOptions(context.Context, *v1.GetNodeGroupOptionsRequest) (*v1.GetNodeGroupOptionsResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.ClusterService.GetNodeGroupOptions is not implemented")
 }
 
 func (UnimplementedClusterServiceHandler) ListClusterNodeGroupManifests(context.Context, *v1.ListClusterNodeGroupManifestsRequest) (*v1.ListClusterNodeGroupManifestsResponse, error) {
@@ -622,14 +594,6 @@ func (c *clusterServiceClient) ListClusterEvents(ctx context.Context, req *v1.Li
 func (c *clusterServiceClient) ListClusterRecommendations(ctx context.Context, req *v1.ListClusterRecommendationsRequest) (*v1.ListClusterRecommendationsResponse, error) {
 	var res v1.ListClusterRecommendationsResponse
 	if err := c.client.CallUnary(ctx, clusterServiceListClusterRecommendationsSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *clusterServiceClient) GetNodeGroupOptions(ctx context.Context, req *v1.GetNodeGroupOptionsRequest) (*v1.GetNodeGroupOptionsResponse, error) {
-	var res v1.GetNodeGroupOptionsResponse
-	if err := c.client.CallUnary(ctx, clusterServiceGetNodeGroupOptionsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -795,18 +759,6 @@ func (h clusterServiceHandler) listClusterRecommendations(ctx context.Context, _
 		return err
 	}
 	res, err := h.svc.ListClusterRecommendations(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h clusterServiceHandler) getNodeGroupOptions(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.GetNodeGroupOptionsRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.GetNodeGroupOptions(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -61,7 +61,7 @@ func noPlatform(row *model.Cluster) bool {
 }
 
 // PlatformManaged reports whether the platform manages the cluster's node
-// groups: the system group, and the user groups' Karpenter objects. False
+// groups: the system group, and the platform pool's Karpenter objects. False
 // for an imported cluster that is only observed (or whose takeover kept the
 // platform components off).
 func PlatformManaged(row *model.Cluster) bool { return !noPlatform(row) }

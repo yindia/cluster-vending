@@ -192,28 +192,6 @@ func TestTolerationsOf(t *testing.T) {
 	}
 }
 
-func TestDedicatedPoolWarning(t *testing.T) {
-	tests := []struct {
-		name   string
-		taints []crossplaneaws.TaintPlan
-		warns  bool
-	}{
-		{name: "no taints"},
-		{name: "a soft taint only", taints: []crossplaneaws.TaintPlan{{Key: "spot", Effect: "PREFER_NO_SCHEDULE"}}},
-		{name: "NoSchedule", taints: []crossplaneaws.TaintPlan{{Key: "dedicated", Value: "system", Effect: "NO_SCHEDULE"}}, warns: true},
-		{name: "NoExecute after a soft one", taints: []crossplaneaws.TaintPlan{
-			{Key: "spot", Effect: "PREFER_NO_SCHEDULE"}, {Key: "critical", Effect: "NO_EXECUTE"}}, warns: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := crossplaneaws.DedicatedPoolWarning(crossplaneaws.NodePoolPlan{Taints: tt.taints})
-			if (got != "") != tt.warns {
-				t.Errorf("warning = %q, want one: %v", got, tt.warns)
-			}
-		})
-	}
-}
-
 // On a cluster with Karpenter node groups, CoreDNS and the EBS CSI
 // controller both run on the default (system) group.
 func TestAddonsOnTheSystemPool(t *testing.T) {
@@ -250,7 +228,7 @@ func TestAddonsOnTheSystemPool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := planWithAddons(tt.configurations)
 			p.Karpenter = true
-			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2)
+			p.NodePool = crossplaneaws.SystemNodePool(crossplaneaws.SystemNodeGroup{})
 			if tt.imported {
 				p.ExternalNames = map[string]string{"prod-1a2b3c4d-default": "ng-1"}
 			}

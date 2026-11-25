@@ -14,6 +14,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	recon "github.com/yindia/cluster-vending/pkg/reconcile"
+	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
 // withVersions gives the service an EKS lookup that resolves add-on
@@ -93,25 +94,38 @@ func TestPlanKubernetesUpgradeIsDisruptive(t *testing.T) {
 	}
 }
 
-func TestPlanInstanceTypeChangeReplacesTheNodeGroup(t *testing.T) {
+// The node group fields are gone from the contract: an update that names
+// one of them (or a path inside one) is refused, as a plan and as an update,
+// with what replaced them, and nothing is stored.
+func TestUpdateRefusesTheRemovedNodeGroupPaths(t *testing.T) {
 	w := appliedWorld(t)
-	spec := &cloudv1.ClusterSpec{DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m7i.xlarge"}}}
-	res, err := update(t, w, planRequest(w, spec, "spec.default_node_pool.instance_types"))
+	before, err := w.store.Clusters().Get(t.Context(), worldTenant, w.row.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := res.GetPlan()
-	created := changesOf(plan, "NodeGroup", cloudv1.PlannedAction_PLANNED_ACTION_CREATE)
-	deleted := changesOf(plan, "NodeGroup", cloudv1.PlannedAction_PLANNED_ACTION_DELETE)
-	prefix := crossplaneaws.ClusterPrefix(worldTenant, w.row.ID, w.row.Name)
-	if len(created) != 1 || !created[0].GetRequiresReplacement() || created[0].GetName() == prefix+"-default" {
-		t.Errorf("created = %v, want the replacement node group", created)
+	for _, path := range []string{
+		"spec.default_node_pool",
+		"spec.default_node_pool.instance_types",
+		"spec.default_node_pool.scaling_config.min_size",
+		"spec.aws.default_node_pool",
+		"spec.aws.default_node_pool.launch_template",
+		"spec.node_groups",
+	} {
+		for _, validateOnly := range []bool{true, false} {
+			req := planRequest(w, &cloudv1.ClusterSpec{}, path)
+			req.ValidateOnly = validateOnly
+			_, err := update(t, w, req)
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), reconcilecluster.ErrNodeGroupsPlatformOwned) {
+				t.Errorf("%s (validate_only %v): err = %v, want invalid_argument naming that the platform owns node groups", path, validateOnly, err)
+			}
+		}
 	}
-	if len(deleted) != 1 || !deleted[0].GetRequiresReplacement() || deleted[0].GetName() != prefix+"-default" {
-		t.Errorf("deleted = %v, want the current node group, requiring replacement", deleted)
+	after, err := w.store.Clusters().Get(t.Context(), worldTenant, w.row.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if rejected := changesOf(plan, "NodeGroup", cloudv1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE); len(rejected) != 0 || !plan.GetApplicable() {
-		t.Errorf("rejected %v, applicable %v: a replacement is not an immutable change", rejected, plan.GetApplicable())
+	if after.Generation != before.Generation || after.ETag != before.ETag {
+		t.Errorf("a refused update changed the cluster: generation %d -> %d", before.Generation, after.Generation)
 	}
 }
 

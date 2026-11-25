@@ -20,17 +20,14 @@ const maxNodePages = 50
 // (ClusterService.ListNodeGroupNodes), one group with --group or every
 // group the cluster's status lists, as the console's node group pages show
 // them. --manifests prints the groups' NodePool and EC2NodeClass YAML
-// instead (ListClusterNodeGroupManifests); --options what the tenant's
-// node groups may use (GetNodeGroupOptions), with no cluster needed.
+// instead (ListClusterNodeGroupManifests).
 func ClusterNodes(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if err := o.requireTenant(); err != nil {
 		return nil, err
 	}
 	switch {
-	case o.NodeGroupOptions:
-		return nodeGroupOptions(ctx, c, o)
 	case o.ID == "":
-		return nil, errors.New("--id is required: the cluster's ID (only --options needs none)")
+		return nil, errors.New("--id is required: the cluster's ID")
 	case o.Manifests:
 		return nodeGroupManifests(ctx, c, o)
 	}
@@ -314,36 +311,4 @@ func printNodeGroupManifests(w io.Writer, res *cloudv1.ListClusterNodeGroupManif
 		}
 	}
 	return nil
-}
-
-// nodeGroupOptions prints what the tenant's node groups may use, as the
-// console's node group form offers it.
-func nodeGroupOptions(ctx context.Context, c Clients, o Options) (proto.Message, error) {
-	res, err := call(ctx, &cloudv1.GetNodeGroupOptionsRequest{TenantId: o.Tenant}, c.Cluster.GetNodeGroupOptions)
-	if err != nil {
-		return nil, err
-	}
-	out := res.(*cloudv1.GetNodeGroupOptionsResponse)
-	if !isTable(o.Output) {
-		return out, nil
-	}
-	list := func(values []string, empty string) string {
-		if len(values) == 0 {
-			return empty
-		}
-		return strings.Join(values, ", ")
-	}
-	var arch, capacity []string
-	for _, a := range out.GetArchitectures() {
-		arch = append(arch, strings.TrimPrefix(a.String(), "ARCHITECTURE_"))
-	}
-	for _, t := range out.GetCapacityTypes() {
-		capacity = append(capacity, strings.TrimPrefix(t.String(), "CAPACITY_TYPE_"))
-	}
-	return nil, fields(o.Out, [][2]string{
-		{"Instance families", list(out.GetInstanceFamilies(), "any")},
-		{"Instance types", list(out.GetInstanceTypes(), "any")},
-		{"Architectures", list(arch, "")},
-		{"Capacity types", list(capacity, "")},
-	})
 }

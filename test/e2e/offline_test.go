@@ -41,7 +41,7 @@ func TestManifestsAreValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, msg := range map[string]proto.Message{
-		"network": network, "cluster": cluster, "node group": userNodeGroupSpec(),
+		"network": network, "cluster": cluster,
 		"network import": netImport, "cluster import": clusterImport,
 	} {
 		if err := protovalidate.Validate(msg); err != nil {

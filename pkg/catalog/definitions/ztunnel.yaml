@@ -21,6 +21,15 @@ spec:
     helm:
       repository: https://blob.istio.io/istio-release/charts
       chart: ztunnel
+  # What it runs, for the sizing rule of the group it runs on (`controller
+  # --check`; docs/architecture.md#node-layout, "Sizing the system group"):
+  # where each workload's replicas and per-pod requests are in
+  # platformValues below, which must set them explicitly.
+  # A DaemonSet: one pod on every node.
+  sizing:
+    daemonSets:
+      - name: ztunnel
+        requests: resources.requests
   platformValues:
     # The ambient guide installs ztunnel with no profile.
     istioNamespace: istio-system

@@ -39,7 +39,9 @@ func DefinitionOf(def *cloudv1alpha1.ComponentDefinition) (Definition, error) {
 		HasInstall:          def.Spec.Install != nil,
 		InstallTimeout:      installTimeoutOf(def),
 		Requires:            slices.Clone(def.Spec.Requires),
+		Role:                Role(def.Spec.Role),
 		Sequence:            sequenceOf(def),
+		Sizing:              SizingOf(def.Spec.Sizing),
 		Provider:            string(def.Spec.Provider),
 		Chart:               chartOf(def),
 		Namespace:           def.Spec.Namespace,
@@ -113,15 +115,15 @@ func chartOf(def *cloudv1alpha1.ComponentDefinition) string {
 	return def.Spec.Install.Helm.Repository + " " + def.Spec.Install.Helm.Chart
 }
 
-// KarpenterComponent is the definition of Karpenter, which serves the user
-// node groups; sequence 0, so it installs first.
-const KarpenterComponent = "karpenter"
-
 // DefaultSequence is the sequence of a definition that sets none.
 const DefaultSequence = cloudv1alpha1.DefaultComponentSequence
 
-// sequenceOf is the definition's spec.sequence, DefaultSequence when unset.
+// sequenceOf is the definition's spec.sequence, DefaultSequence when unset;
+// NodeProvisionerSequence for the NodeProvisioner, whose role puts it first.
 func sequenceOf(def *cloudv1alpha1.ComponentDefinition) int32 {
+	if Role(def.Spec.Role) == RoleNodeProvisioner {
+		return NodeProvisionerSequence
+	}
 	if def.Spec.Sequence == nil {
 		return DefaultSequence
 	}

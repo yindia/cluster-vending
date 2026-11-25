@@ -17,7 +17,6 @@ import "cloud/v1/import.proto";
 import "cloud/v1/managed_resource.proto";
 import "cloud/v1/network.proto";
 import "cloud/v1/node_group.proto";
-import "cloud/v1/node_pool.proto";
 import "cloud/v1/recommendation.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -95,7 +94,7 @@ message Cluster {
 // ClusterSpec is the desired state of a cluster.
 //
 // It is one provider-neutral contract: region, network, control_plane,
-// default_node_pool and tags mean the same thing on every cloud and each
+// access and labels mean the same thing on every cloud and each
 // field documents its Crossplane mapping per provider. The `provider` oneof
 // selects the cloud and carries only settings that have no cross-cloud
 // equivalent. Provider-specific constraints on the common fields are the
@@ -109,12 +108,6 @@ message ClusterSpec {
     message: "region must be an AWS region, e.g. us-east-1"
     expression: "!has(this.aws) || this.region.matches('^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]+$')"
   };
-  option (buf.validate.message).cel = {
-    id: "aws.instance_types"
-    message: "AWS instance types look like m6i.large"
-    expression: "!has(this.aws) || !has(this.default_node_pool) || this.default_node_pool.instance_types.all(t, t.matches('^[a-z][a-z0-9-]*[.][a-z0-9]+$'))"
-  };
-
   option (buf.validate.message).cel = {
     id: "aws.admin_principals"
     message: "AWS admin principals must be IAM role or user ARNs, not service-linked roles (role/aws-service-role/...: EKS manages their access entries)"
@@ -161,19 +154,9 @@ message ClusterSpec {
 
   // --- Constraints for every non-AWS provider ---
   option (buf.validate.message).cel = {
-    id: "node_groups.unique_names"
-    message: "node group names must be unique"
-    expression: "this.node_groups.all(g, this.node_groups.exists_one(h, h.name == g.name))"
-  };
-  option (buf.validate.message).cel = {
     id: "oidc_aws_only"
     message: "only AWS takes access.oidc"
     expression: "has(this.aws) || !has(this.access.oidc)"
-  };
-  option (buf.validate.message).cel = {
-    id: "single_instance_type"
-    message: "only AWS accepts more than one instance type"
-    expression: "has(this.aws) || !has(this.default_node_pool) || size(this.default_node_pool.instance_types) == 1"
   };
 
   // Region the cluster runs in. Immutable.
@@ -193,11 +176,13 @@ message ClusterSpec {
   // Control plane settings. Optional; every field has a default.
   ControlPlaneSpec control_plane = 3;
 
-  // The default managed node group: the platform's system group, which runs
-  // Karpenter and CoreDNS. Optional: when omitted the platform fills it.
-  // Its taints, labels and scaling are managed by the platform; UpdateCluster
-  // refuses a change to them (FAILED_PRECONDITION).
-  NodePoolSpec default_node_pool = 4;
+  // default_node_pool was the tenant's settings of the default managed node
+  // group. The platform owns a cluster's node groups (the system group and
+  // the Karpenter platform pool, docs/architecture.md#node-layout), from
+  // its config (nodeGroups). A binary request that still carries field 4
+  // is refused (INVALID_ARGUMENT); JSON drops it.
+  reserved 4;
+  reserved "default_node_pool";
 
   // Cloud tags are the cluster's labels (Cluster.labels).
   reserved 5;
@@ -242,10 +227,12 @@ message ClusterSpec {
   // cert-manager is an external prerequisite and is not installed by this flag.
   optional bool naas = 15;
 
-  // User node groups: further Karpenter NodePools, each with its own
-  // EC2NodeClass (docs/architecture.md#node-layout). At most 20. One
-  // update-mask path: the list is compared whole.
-  repeated NodeGroupSpec node_groups = 16 [(buf.validate.field).repeated.max_items = 20];
+  // node_groups were tenant Karpenter node groups. The platform owns a
+  // cluster's node groups; a binary request that still carries field 16 is
+  // refused (INVALID_ARGUMENT); JSON drops it. ClusterStatus.node_groups
+  // still reports the platform's groups.
+  reserved 16;
+  reserved "node_groups";
 
   // The cloud the cluster runs on. Exactly one must be set, even if empty
   // (e.g. `aws: {}`).

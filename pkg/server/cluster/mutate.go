@@ -34,30 +34,15 @@ const (
 	pathSecretsEncryption = "spec.control_plane.secrets_encryption"
 )
 
-// pathNodeGroups is the user's Karpenter node groups, one path for the whole
-// list.
-const pathNodeGroups = "spec.node_groups"
+// removedNodeGroupPaths are the node group fields the contract had before
+// the platform owned a cluster's node groups: an update that names one, or
+// a path inside one, is refused with what replaced them.
+var removedNodeGroupPaths = []string{"spec.default_node_pool", "spec.aws.default_node_pool", "spec.node_groups"}
 
-// managedNodeGroupPaths are the default node group's fields that the platform
-// owns: an update that names one is refused. Instance types, capacity type
-// and disk size stay changeable.
-var managedNodeGroupPaths = []string{
-	"spec.default_node_pool.taints",
-	"spec.default_node_pool.labels",
-	"spec.default_node_pool.scaling_config",
-}
-
-// errDefaultNodeGroupManaged is the refusal of a change to a field of the
-// default node group the platform owns.
-func errDefaultNodeGroupManaged(path string) error {
-	return connect.NewError(connect.CodeFailedPrecondition,
-		fmt.Sprintf("the default node group is managed by the platform: %s cannot be changed", path))
-}
-
-// isManagedNodeGroupPath reports whether path is, or is inside, one of
-// managedNodeGroupPaths.
-func isManagedNodeGroupPath(path string) bool {
-	return slices.ContainsFunc(managedNodeGroupPaths, func(m string) bool {
+// isRemovedNodeGroupPath reports whether path is, or is inside, one of
+// removedNodeGroupPaths.
+func isRemovedNodeGroupPath(path string) bool {
+	return slices.ContainsFunc(removedNodeGroupPaths, func(m string) bool {
 		return path == m || strings.HasPrefix(path, m+".")
 	})
 }
@@ -107,10 +92,6 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 			dst.Naas = src.Naas
 		}
 	},
-	// The user's node groups are compared and applied as a whole list.
-	pathNodeGroups: func(dst, src *cloudv1.ClusterSpec) {
-		dst.NodeGroups = proto.CloneOf(&cloudv1.ClusterSpec{NodeGroups: src.GetNodeGroups()}).GetNodeGroups()
-	},
 	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
 	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
 	pathMaintenanceWindow: func(dst, src *cloudv1.ClusterSpec) {
@@ -121,16 +102,6 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	},
 	"spec.control_plane.endpoint_access.public_access_cidrs": func(dst, src *cloudv1.ClusterSpec) {
 		dst.ControlPlane.EndpointAccess.PublicAccessCidrs = src.GetControlPlane().GetEndpointAccess().GetPublicAccessCidrs()
-	},
-	// EKS cannot change these in place: the node group is replaced.
-	"spec.default_node_pool.instance_types": func(dst, src *cloudv1.ClusterSpec) {
-		dst.DefaultNodePool.InstanceTypes = src.GetDefaultNodePool().GetInstanceTypes()
-	},
-	"spec.default_node_pool.capacity_type": func(dst, src *cloudv1.ClusterSpec) {
-		dst.DefaultNodePool.CapacityType = src.GetDefaultNodePool().GetCapacityType()
-	},
-	"spec.default_node_pool.disk_size_gb": func(dst, src *cloudv1.ClusterSpec) {
-		dst.DefaultNodePool.DiskSizeGb = src.GetDefaultNodePool().GetDiskSizeGb()
 	},
 	"spec.aws.enabled_cluster_log_types": func(dst, src *cloudv1.ClusterSpec) {
 		dst.GetAws().EnabledClusterLogTypes = src.GetAws().GetEnabledClusterLogTypes()
@@ -183,15 +154,6 @@ var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
 	"spec.aws.control_plane_log_group": func(dst, src *cloudv1.ClusterSpec) {
 		dst.GetAws().ControlPlaneLogGroup = src.GetAws().GetControlPlaneLogGroup()
 	},
-	// EKS cannot swap a node group's launch template or AMI type in place:
-	// the node group is replaced. A new version of the same template is
-	// rolled out in place.
-	"spec.aws.default_node_pool.launch_template": func(dst, src *cloudv1.ClusterSpec) {
-		awsNodePool(dst).LaunchTemplate = src.GetAws().GetDefaultNodePool().GetLaunchTemplate()
-	},
-	"spec.aws.default_node_pool.ami_type": func(dst, src *cloudv1.ClusterSpec) {
-		awsNodePool(dst).AmiType = src.GetAws().GetDefaultNodePool().GetAmiType()
-	},
 }
 
 // optionalBool reads an optional bool of a message the request may have
@@ -211,13 +173,6 @@ func endpointAccess(spec *cloudv1.ClusterSpec) *cloudv1.EndpointAccess {
 		spec.ControlPlane.EndpointAccess = &cloudv1.EndpointAccess{}
 	}
 	return spec.ControlPlane.EndpointAccess
-}
-
-func awsNodePool(spec *cloudv1.ClusterSpec) *cloudv1.AwsNodePoolSpec {
-	if spec.GetAws().DefaultNodePool == nil {
-		spec.GetAws().DefaultNodePool = &cloudv1.AwsNodePoolSpec{}
-	}
-	return spec.GetAws().DefaultNodePool
 }
 
 // UpdateCluster changes the fields named in update_mask in the stored
@@ -260,17 +215,11 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		return &cloudv1.UpdateClusterResponse{Cluster: c}, err
 	}
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
-	nodeGroupsBefore, addonsBefore := spec.GetNodeGroups(), slices.Clone(spec.GetAws().GetAddons())
+	addonsBefore := slices.Clone(spec.GetAws().GetAddons())
 	channelBefore := spec.GetReleaseChannel()
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
-	}
-	if slices.Contains(paths, pathNodeGroups) {
-		if err := checkNodeGroupAllowlist(spec.GetNodeGroups(), nodeGroupsBefore,
-			s.deps.NodeGroups.Karpenter.InstanceFamilies, s.deps.NodeGroups.Karpenter.InstanceTypes); err != nil {
-			return nil, err
-		}
 	}
 	if slices.Contains(paths, "spec.naas") && !spec.GetNaas() {
 		if err := s.requireNoSubTenants(ctx, row, false); err != nil {
@@ -429,8 +378,9 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 			row.DisplayName = in.GetDisplayName()
 		case p == pathLabels:
 			row.Labels = model.Labels(in.GetLabels())
-		case isManagedNodeGroupPath(p):
-			return false, errDefaultNodeGroupManaged(p)
+		case isRemovedNodeGroupPath(p):
+			return false, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Sprintf("update_mask path %q cannot be updated: %s", p, reconcilecluster.ErrNodeGroupsPlatformOwned))
 		case ok:
 			copyField(spec, in.GetSpec())
 		case p == "spec.aws.access_config.authentication_mode":
@@ -494,9 +444,6 @@ func ensureSpec(c *cloudv1.Cluster) {
 	}
 	if c.Spec.ControlPlane.EndpointAccess == nil {
 		c.Spec.ControlPlane.EndpointAccess = &cloudv1.EndpointAccess{}
-	}
-	if c.Spec.DefaultNodePool == nil {
-		c.Spec.DefaultNodePool = &cloudv1.NodePoolSpec{}
 	}
 	if c.Spec.GetAws() == nil {
 		c.Spec.Provider = &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{}}

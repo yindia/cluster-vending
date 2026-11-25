@@ -159,7 +159,7 @@ type ListNodeGroupNodesRequest struct {
 	// Cluster.id.
 	ClusterId string `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	// The node group's name: "system" for the default managed node group,
-	// "platform" for the platform's, or one of the spec's.
+	// "platform-pool" for the platform pool (Karpenter).
 	NodeGroup string `protobuf:"bytes,3,opt,name=node_group,json=nodeGroup,proto3" json:"node_group,omitempty"`
 	// Maximum nodes per page. Defaults to 100; values above 500 are coerced to
 	// 500.

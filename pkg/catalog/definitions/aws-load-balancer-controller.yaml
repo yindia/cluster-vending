@@ -279,6 +279,15 @@ spec:
             ]
         }
       managedPolicyArns: []
+  # What it runs, for the sizing rule of the group it runs on (`controller
+  # --check`; docs/architecture.md#node-layout, "Sizing the system group"):
+  # where each workload's replicas and per-pod requests are in
+  # platformValues below, which must set them explicitly.
+  sizing:
+    deployments:
+      - name: aws-load-balancer-controller
+        replicas: replicaCount
+        requests: resources.requests
   platformValues:
     clusterName: ${cluster.name}
     region: ${region}

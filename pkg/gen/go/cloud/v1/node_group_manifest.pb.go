@@ -22,131 +22,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// GetNodeGroupOptionsRequest asks what a tenant's node groups may use.
-type GetNodeGroupOptionsRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Tenant scope. DNS label, at most 56 chars so the tenant namespace
-	// "tenant-<id>" fits the 63-char Kubernetes limit.
-	TenantId      string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetNodeGroupOptionsRequest) Reset() {
-	*x = GetNodeGroupOptionsRequest{}
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetNodeGroupOptionsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetNodeGroupOptionsRequest) ProtoMessage() {}
-
-func (x *GetNodeGroupOptionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetNodeGroupOptionsRequest.ProtoReflect.Descriptor instead.
-func (*GetNodeGroupOptionsRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *GetNodeGroupOptionsRequest) GetTenantId() string {
-	if x != nil {
-		return x.TenantId
-	}
-	return ""
-}
-
-// GetNodeGroupOptionsResponse is the platform admin's allowlist for user
-// node groups (the server's node-group-instance-families and
-// node-group-instance-types settings). The server is the authority:
-// CreateCluster and UpdateCluster refuse a group outside it.
-type GetNodeGroupOptionsResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Allowed instance families, e.g. "m7i". Empty: any family.
-	InstanceFamilies []string `protobuf:"bytes,1,rep,name=instance_families,json=instanceFamilies,proto3" json:"instance_families,omitempty"`
-	// Allowed instance types besides every type of an allowed family, e.g.
-	// "r7i.large". Empty: only the families' types (or any, when no family
-	// is listed either).
-	InstanceTypes []string `protobuf:"bytes,2,rep,name=instance_types,json=instanceTypes,proto3" json:"instance_types,omitempty"`
-	// Architectures a group may ask for.
-	Architectures []Architecture `protobuf:"varint,3,rep,packed,name=architectures,proto3,enum=cloud.v1.Architecture" json:"architectures,omitempty"`
-	// Capacity types a group may ask for.
-	CapacityTypes []CapacityType `protobuf:"varint,4,rep,packed,name=capacity_types,json=capacityTypes,proto3,enum=cloud.v1.CapacityType" json:"capacity_types,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetNodeGroupOptionsResponse) Reset() {
-	*x = GetNodeGroupOptionsResponse{}
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetNodeGroupOptionsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetNodeGroupOptionsResponse) ProtoMessage() {}
-
-func (x *GetNodeGroupOptionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetNodeGroupOptionsResponse.ProtoReflect.Descriptor instead.
-func (*GetNodeGroupOptionsResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *GetNodeGroupOptionsResponse) GetInstanceFamilies() []string {
-	if x != nil {
-		return x.InstanceFamilies
-	}
-	return nil
-}
-
-func (x *GetNodeGroupOptionsResponse) GetInstanceTypes() []string {
-	if x != nil {
-		return x.InstanceTypes
-	}
-	return nil
-}
-
-func (x *GetNodeGroupOptionsResponse) GetArchitectures() []Architecture {
-	if x != nil {
-		return x.Architectures
-	}
-	return nil
-}
-
-func (x *GetNodeGroupOptionsResponse) GetCapacityTypes() []CapacityType {
-	if x != nil {
-		return x.CapacityTypes
-	}
-	return nil
-}
-
 // ListClusterNodeGroupManifestsRequest asks for the Karpenter objects of
 // one cluster's node groups.
 type ListClusterNodeGroupManifestsRequest struct {
@@ -162,7 +37,7 @@ type ListClusterNodeGroupManifestsRequest struct {
 
 func (x *ListClusterNodeGroupManifestsRequest) Reset() {
 	*x = ListClusterNodeGroupManifestsRequest{}
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[2]
+	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -174,7 +49,7 @@ func (x *ListClusterNodeGroupManifestsRequest) String() string {
 func (*ListClusterNodeGroupManifestsRequest) ProtoMessage() {}
 
 func (x *ListClusterNodeGroupManifestsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[2]
+	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -187,7 +62,7 @@ func (x *ListClusterNodeGroupManifestsRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ListClusterNodeGroupManifestsRequest.ProtoReflect.Descriptor instead.
 func (*ListClusterNodeGroupManifestsRequest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ListClusterNodeGroupManifestsRequest) GetTenantId() string {
@@ -204,8 +79,8 @@ func (x *ListClusterNodeGroupManifestsRequest) GetClusterId() string {
 	return ""
 }
 
-// ListClusterNodeGroupManifestsResponse lists the platform group first,
-// then the user's groups in spec order. Empty for a cluster whose node
+// ListClusterNodeGroupManifestsResponse lists the platform's Karpenter
+// groups (the platform pool). Empty for a cluster whose node
 // groups the platform does not manage (imported, not taken over).
 type ListClusterNodeGroupManifestsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -216,7 +91,7 @@ type ListClusterNodeGroupManifestsResponse struct {
 
 func (x *ListClusterNodeGroupManifestsResponse) Reset() {
 	*x = ListClusterNodeGroupManifestsResponse{}
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[3]
+	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -228,7 +103,7 @@ func (x *ListClusterNodeGroupManifestsResponse) String() string {
 func (*ListClusterNodeGroupManifestsResponse) ProtoMessage() {}
 
 func (x *ListClusterNodeGroupManifestsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[3]
+	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -241,7 +116,7 @@ func (x *ListClusterNodeGroupManifestsResponse) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use ListClusterNodeGroupManifestsResponse.ProtoReflect.Descriptor instead.
 func (*ListClusterNodeGroupManifestsResponse) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ListClusterNodeGroupManifestsResponse) GetNodeGroups() []*NodeGroupManifest {
@@ -252,7 +127,7 @@ func (x *ListClusterNodeGroupManifestsResponse) GetNodeGroups() []*NodeGroupMani
 }
 
 // NodeGroupManifest is a node group's Karpenter objects, rendered from the
-// stored spec exactly as the controller applies them to the workload
+// platform's config exactly as the controller applies them to the workload
 // cluster.
 type NodeGroupManifest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -269,7 +144,7 @@ type NodeGroupManifest struct {
 
 func (x *NodeGroupManifest) Reset() {
 	*x = NodeGroupManifest{}
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[4]
+	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -281,7 +156,7 @@ func (x *NodeGroupManifest) String() string {
 func (*NodeGroupManifest) ProtoMessage() {}
 
 func (x *NodeGroupManifest) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[4]
+	mi := &file_cloud_v1_node_group_manifest_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -294,7 +169,7 @@ func (x *NodeGroupManifest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeGroupManifest.ProtoReflect.Descriptor instead.
 func (*NodeGroupManifest) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_node_group_manifest_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NodeGroupManifest) GetName() string {
@@ -329,14 +204,7 @@ var File_cloud_v1_node_group_manifest_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_node_group_manifest_proto_rawDesc = "" +
 	"\n" +
-	"\"cloud/v1/node_group_manifest.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19cloud/v1/node_group.proto\x1a\x18cloud/v1/node_pool.proto\"j\n" +
-	"\x1aGetNodeGroupOptionsRequest\x12L\n" +
-	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"\xee\x01\n" +
-	"\x1bGetNodeGroupOptionsResponse\x12+\n" +
-	"\x11instance_families\x18\x01 \x03(\tR\x10instanceFamilies\x12%\n" +
-	"\x0einstance_types\x18\x02 \x03(\tR\rinstanceTypes\x12<\n" +
-	"\rarchitectures\x18\x03 \x03(\x0e2\x16.cloud.v1.ArchitectureR\rarchitectures\x12=\n" +
-	"\x0ecapacity_types\x18\x04 \x03(\x0e2\x16.cloud.v1.CapacityTypeR\rcapacityTypes\"\x9d\x01\n" +
+	"\"cloud/v1/node_group_manifest.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\"\x9d\x01\n" +
 	"$ListClusterNodeGroupManifestsRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\x12'\n" +
 	"\n" +
@@ -363,25 +231,19 @@ func file_cloud_v1_node_group_manifest_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_node_group_manifest_proto_rawDescData
 }
 
-var file_cloud_v1_node_group_manifest_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_cloud_v1_node_group_manifest_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_cloud_v1_node_group_manifest_proto_goTypes = []any{
-	(*GetNodeGroupOptionsRequest)(nil),            // 0: cloud.v1.GetNodeGroupOptionsRequest
-	(*GetNodeGroupOptionsResponse)(nil),           // 1: cloud.v1.GetNodeGroupOptionsResponse
-	(*ListClusterNodeGroupManifestsRequest)(nil),  // 2: cloud.v1.ListClusterNodeGroupManifestsRequest
-	(*ListClusterNodeGroupManifestsResponse)(nil), // 3: cloud.v1.ListClusterNodeGroupManifestsResponse
-	(*NodeGroupManifest)(nil),                     // 4: cloud.v1.NodeGroupManifest
-	(Architecture)(0),                             // 5: cloud.v1.Architecture
-	(CapacityType)(0),                             // 6: cloud.v1.CapacityType
+	(*ListClusterNodeGroupManifestsRequest)(nil),  // 0: cloud.v1.ListClusterNodeGroupManifestsRequest
+	(*ListClusterNodeGroupManifestsResponse)(nil), // 1: cloud.v1.ListClusterNodeGroupManifestsResponse
+	(*NodeGroupManifest)(nil),                     // 2: cloud.v1.NodeGroupManifest
 }
 var file_cloud_v1_node_group_manifest_proto_depIdxs = []int32{
-	5, // 0: cloud.v1.GetNodeGroupOptionsResponse.architectures:type_name -> cloud.v1.Architecture
-	6, // 1: cloud.v1.GetNodeGroupOptionsResponse.capacity_types:type_name -> cloud.v1.CapacityType
-	4, // 2: cloud.v1.ListClusterNodeGroupManifestsResponse.node_groups:type_name -> cloud.v1.NodeGroupManifest
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 0: cloud.v1.ListClusterNodeGroupManifestsResponse.node_groups:type_name -> cloud.v1.NodeGroupManifest
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_node_group_manifest_proto_init() }
@@ -389,15 +251,13 @@ func file_cloud_v1_node_group_manifest_proto_init() {
 	if File_cloud_v1_node_group_manifest_proto != nil {
 		return
 	}
-	file_cloud_v1_node_group_proto_init()
-	file_cloud_v1_node_pool_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_node_group_manifest_proto_rawDesc), len(file_cloud_v1_node_group_manifest_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

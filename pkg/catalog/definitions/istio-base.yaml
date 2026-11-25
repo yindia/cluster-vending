@@ -18,6 +18,7 @@ spec:
     helm:
       repository: https://blob.istio.io/istio-release/charts
       chart: base
+  # No sizing: it installs CRDs and a webhook configuration, no workload.
   platformValues:
     # The ambient guide installs base with no profile.
     global:

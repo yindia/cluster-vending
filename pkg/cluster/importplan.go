@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -21,10 +22,11 @@ import (
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
-// specAddons are the add-ons the contract has a name for (AwsAddon.name),
-// without aws-mountpoint-s3-csi-driver: its buckets cannot be read back.
-var specAddons = []string{"vpc-cni", "coredns", "kube-proxy", "eks-pod-identity-agent", "aws-ebs-csi-driver",
-	"aws-efs-csi-driver", "aws-fsx-csi-driver", "snapshot-controller", "cert-manager", "metrics-server", "kube-state-metrics"}
+// specAddons are the add-ons an imported cluster's spec can name
+// (addons.yaml): every known add-on but those whose setup takes what an
+// import cannot read back (aws-mountpoint-s3-csi-driver's buckets). The
+// others stay outside the spec, carried over.
+var specAddons = crossplaneaws.ImportableAddons()
 
 // ImportInput is what an import plan is made from.
 type ImportInput struct {
@@ -116,7 +118,7 @@ func PlanImport(in ImportInput) ImportPlan {
 	if p.plan.Blocked() {
 		return p.plan
 	}
-	spec, err := resolveSpec(p.deriveSpec(group, zones), zones, false)
+	spec, err := ResolveSpec(p.deriveSpec(zones), zones)
 	if err == nil {
 		err = protovalidate.Validate(&cloudv1.Cluster{Name: in.Name, Spec: spec})
 	}
@@ -127,7 +129,7 @@ func PlanImport(in ImportInput) ImportPlan {
 	p.plan.Spec = spec
 	p.plan.Adoption = crossplaneaws.Adoption{ClusterRoleName: d.Role.Name, ClusterRoleTrust: d.Role.AssumeRolePolicy,
 		NodeRoleName: d.NodeRole.Name, NodeRoleTrust: d.NodeRole.AssumeRolePolicy, ExternalNames: map[string]string{},
-		BootstrapAdmin: d.BootstrapAdmin}
+		BootstrapAdmin: d.BootstrapAdmin, NodeGroup: nodePool(group)}
 	base := in.Base
 	base.Adoption = p.plan.Adoption
 	render := RenderPlan(spec, subnetIDs, base)
@@ -189,6 +191,9 @@ func (p *importPlanner) preconditions() awscloud.NodeGroup {
 	if d.NodeRole.Unreadable != "" {
 		p.block("Role", d.NodeRole.ARN, "the node group's role cannot be read: "+d.NodeRole.Unreadable)
 	}
+	if g := d.NodeGroups[i]; !slices.Contains(importableAMITypes, g.AMIType) {
+		p.block("NodeGroup", g.Name, fmt.Sprintf("AMI type %s is not one a new EKS node group can use (end of support)", g.AMIType))
+	}
 	return d.NodeGroups[i]
 }
 
@@ -241,7 +246,7 @@ func enumFor[E interface {
 }
 
 // deriveSpec is the spec that says what the cluster is.
-func (p *importPlanner) deriveSpec(g awscloud.NodeGroup, zones []string) *cloudv1.ClusterSpec {
+func (p *importPlanner) deriveSpec(zones []string) *cloudv1.ClusterSpec {
 	d := p.in.Found
 	access := &cloudv1.EndpointAccess{}
 	if !d.EndpointPrivateAccess {
@@ -256,8 +261,7 @@ func (p *importPlanner) deriveSpec(g awscloud.NodeGroup, zones []string) *cloudv
 	if d.EncryptionKeyARN != "" {
 		controlPlane.SecretsEncryption = &cloudv1.SecretsEncryption{KmsKeyArn: d.EncryptionKeyARN}
 	}
-	aws := &cloudv1.AwsClusterSpec{AccessConfig: &cloudv1.AwsAccessConfig{}, AdditionalSecurityGroupIds: d.SecurityGroupIDs,
-		DefaultNodePool: &cloudv1.AwsNodePoolSpec{}}
+	aws := &cloudv1.AwsClusterSpec{AccessConfig: &cloudv1.AwsAccessConfig{}, AdditionalSecurityGroupIds: d.SecurityGroupIDs}
 	aws.AccessConfig.AuthenticationMode, _ = enumFor[cloudv1.AwsAuthenticationMode](d.AuthenticationMode)
 	if st, ok := enumFor[cloudv1.AwsSupportType](d.SupportType); ok {
 		aws.UpgradePolicy = &cloudv1.AwsUpgradePolicy{SupportType: st}
@@ -273,9 +277,8 @@ func (p *importPlanner) deriveSpec(g awscloud.NodeGroup, zones []string) *cloudv
 		}
 	}
 	spec := &cloudv1.ClusterSpec{Region: p.in.Region, ControlPlane: controlPlane,
-		Network:         &cloudv1.ClusterNetwork{NetworkId: p.in.NetworkID, ZoneIds: zones, ServiceCidr: d.ServiceCIDR},
-		DefaultNodePool: p.nodePool(g, aws.DefaultNodePool),
-		Provider:        &cloudv1.ClusterSpec_Aws{Aws: aws}}
+		Network:  &cloudv1.ClusterNetwork{NetworkId: p.in.NetworkID, ZoneIds: zones, ServiceCidr: d.ServiceCIDR},
+		Provider: &cloudv1.ClusterSpec_Aws{Aws: aws}}
 	for _, e := range d.AccessEntries {
 		if p.eksManaged(e) {
 			continue
@@ -294,25 +297,31 @@ func (p *importPlanner) deriveSpec(g awscloud.NodeGroup, zones []string) *cloudv
 	return spec
 }
 
-// nodePool is the node group as a NodePoolSpec; its AWS-only settings go
-// to aws.
-func (p *importPlanner) nodePool(g awscloud.NodeGroup, aws *cloudv1.AwsNodePoolSpec) *cloudv1.NodePoolSpec {
-	pool := &cloudv1.NodePoolSpec{InstanceTypes: g.InstanceTypes, Labels: g.Labels,
-		ScalingConfig: &cloudv1.ScalingConfig{MinSize: uint32(g.MinSize), MaxSize: uint32(g.MaxSize), DesiredSize: ptr.To(uint32(g.DesiredSize))}} //nolint:gosec // EKS sizes are small and not negative
-	pool.CapacityType, _ = enumFor[cloudv1.CapacityType](g.CapacityType)
-	ami, ok := enumFor[cloudv1.AwsAmiType](g.AMIType)
-	if !ok {
-		p.block("NodeGroup", g.Name, fmt.Sprintf("AMI type %s is not one the contract has", g.AMIType))
-	}
-	aws.AmiType = ami
+// importableAMITypes are the EKS AMI types a new managed node group can
+// still use (no end-of-support AL2): an adopted group on another cannot be
+// rendered as the platform renders node groups.
+var importableAMITypes = []string{
+	"AL2023_x86_64_STANDARD", "AL2023_ARM_64_STANDARD", "AL2023_x86_64_NVIDIA", "AL2023_x86_64_NEURON", "AL2023_ARM_64_NVIDIA",
+	"BOTTLEROCKET_x86_64", "BOTTLEROCKET_ARM_64", "BOTTLEROCKET_x86_64_NVIDIA", "BOTTLEROCKET_ARM_64_NVIDIA",
+	"BOTTLEROCKET_x86_64_FIPS", "BOTTLEROCKET_ARM_64_FIPS", "BOTTLEROCKET_x86_64_NVIDIA_FIPS", "BOTTLEROCKET_ARM_64_NVIDIA_FIPS",
+	"WINDOWS_CORE_2019_x86_64", "WINDOWS_FULL_2019_x86_64", "WINDOWS_CORE_2022_x86_64", "WINDOWS_FULL_2022_x86_64",
+	"WINDOWS_CORE_2025_x86_64", "WINDOWS_FULL_2025_x86_64", "CUSTOM",
+}
+
+// nodePool is the adopted node group's settings as found (EKS
+// spellings): what the imported cluster's node group is rendered from, kept
+// with its adoption. The platform never changes them. With a launch
+// template the disk is the template's.
+func nodePool(g awscloud.NodeGroup) *crossplaneaws.NodePoolPlan {
+	pool := &crossplaneaws.NodePoolPlan{InstanceTypes: slices.Clone(g.InstanceTypes), CapacityType: g.CapacityType,
+		AMIType: g.AMIType, Labels: maps.Clone(g.Labels), MinSize: g.MinSize, MaxSize: g.MaxSize, Desired: g.DesiredSize}
 	if g.LaunchTemplateID != "" {
-		aws.LaunchTemplate = &cloudv1.AwsLaunchTemplate{Id: g.LaunchTemplateID, Version: g.LaunchTemplateVersion}
+		pool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ID: g.LaunchTemplateID, Version: g.LaunchTemplateVersion}
 	} else {
-		pool.DiskSizeGb = uint32(g.DiskSizeGB) //nolint:gosec // 20 to 16384
+		pool.DiskSizeGB = g.DiskSizeGB
 	}
 	for _, t := range g.Taints {
-		effect, _ := enumFor[cloudv1.TaintEffect](t.Effect)
-		pool.Taints = append(pool.Taints, &cloudv1.Taint{Key: t.Key, Value: t.Value, Effect: effect})
+		pool.Taints = append(pool.Taints, crossplaneaws.TaintPlan{Key: t.Key, Value: t.Value, Effect: t.Effect})
 	}
 	return pool
 }
@@ -605,7 +614,7 @@ func (p *importPlanner) leftAlone(g awscloud.NodeGroup) {
 		}
 	}
 	if g.LaunchTemplateID != "" {
-		p.line("ec2.aws.m.upbound.io/v1beta1", "LaunchTemplate", "", g.LaunchTemplateID, "spec.aws.default_node_pool.launch_template",
+		p.line("ec2.aws.m.upbound.io/v1beta1", "LaunchTemplate", "", g.LaunchTemplateID, "",
 			cloudv1.Disposition_DISPOSITION_NOT_IMPORTED, "the node group's launch template stays with its owner; the node group refers to it by ID and version")
 	}
 }

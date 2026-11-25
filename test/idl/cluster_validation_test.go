@@ -27,10 +27,6 @@ func validCreate() *cloudv1.CreateClusterRequest {
 						PublicAccessCidrs: []string{"203.0.113.0/24"},
 					},
 				},
-				DefaultNodePool: &cloudv1.NodePoolSpec{
-					InstanceTypes: []string{"m6i.large"},
-					ScalingConfig: &cloudv1.ScalingConfig{MinSize: 1, DesiredSize: proto.Uint32(2), MaxSize: 5},
-				},
 				Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{
 					EnabledClusterLogTypes: []cloudv1.AwsClusterLogType{cloudv1.AwsClusterLogType_AWS_CLUSTER_LOG_TYPE_AUDIT},
 				}},
@@ -64,10 +60,6 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "valid", req: validCreate()},
-		{name: "valid multiple spot instance types", req: mutate(func(s *spec, _ *req) {
-			s.DefaultNodePool.InstanceTypes = []string{"m6i.large", "m7i.large"}
-			s.DefaultNodePool.CapacityType = cloudv1.CapacityType_CAPACITY_TYPE_SPOT
-		})},
 
 		{name: "network id not a uuid", wantErr: true, req: mutate(func(s *spec, _ *req) { useNetwork(s, "shared-use1") })},
 		{name: "empty network id", wantErr: true, req: mutate(func(s *spec, _ *req) { useNetwork(s, "") })},
@@ -124,21 +116,9 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "bad kubernetes version", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.ControlPlane.KubernetesVersion = "v1.33.1"
 		})},
-		{name: "no instance types", wantErr: true, req: mutate(func(s *spec, _ *req) { s.DefaultNodePool.InstanceTypes = nil })},
-		{name: "desired above max", wantErr: true, req: mutate(func(s *spec, _ *req) {
-			s.DefaultNodePool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: 1, DesiredSize: proto.Uint32(9), MaxSize: 5}
-		})},
-		{name: "missing scaling config", wantErr: true, req: mutate(func(s *spec, _ *req) { s.DefaultNodePool.ScalingConfig = nil })},
-		{name: "disk too small", wantErr: true, req: mutate(func(s *spec, _ *req) { s.DefaultNodePool.DiskSizeGb = 10 })},
-		{name: "taint without effect", wantErr: true, req: mutate(func(s *spec, _ *req) {
-			s.DefaultNodePool.Taints = []*cloudv1.Taint{{Key: "gpu"}}
-		})},
 
 		// AWS constraints on the common fields.
 		{name: "aws: bad region", wantErr: true, req: mutate(func(s *spec, _ *req) { s.Region = "eastus" })},
-		{name: "aws: bad instance type", wantErr: true, req: mutate(func(s *spec, _ *req) {
-			s.DefaultNodePool.InstanceTypes = []string{"Standard_D4s_v5"}
-		})},
 		{name: "no public access cidrs", wantErr: true, req: mutate(func(s *spec, _ *req) {
 			s.ControlPlane.EndpointAccess.PublicAccessCidrs = nil
 		})},
@@ -160,17 +140,6 @@ func TestCreateClusterRequestValidation(t *testing.T) {
 		{name: "tenant id 57 chars", wantErr: true, req: mutate(func(_ *spec, r *req) { r.TenantId = strings.Repeat("a", 57) })},
 
 		{name: "new cluster without network", wantErr: true, req: mutate(func(s *spec, _ *req) { s.Network = nil })},
-		// default_node_pool is optional since the Karpenter-only layout: the
-		// platform fills the default managed node group.
-		{name: "new cluster without node pool is filled by the platform", req: mutate(func(s *spec, _ *req) { s.DefaultNodePool = nil })},
-
-		// Scaling: desired_size is create-only and optional.
-		{name: "desired size omitted", req: mutate(func(s *spec, _ *req) {
-			s.DefaultNodePool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: 2, MaxSize: 5}
-		})},
-		{name: "min above max", wantErr: true, req: mutate(func(s *spec, _ *req) {
-			s.DefaultNodePool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: 6, MaxSize: 5}
-		})},
 
 		// Admin access.
 		{name: "admin principals role and user", req: mutate(func(s *spec, _ *req) {

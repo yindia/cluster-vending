@@ -61,10 +61,6 @@ func clusterSpec(c *model.Cluster) *cloudv1.ClusterSpec {
 		ControlPlane: &cloudv1.ControlPlaneSpec{KubernetesVersion: "1.33",
 			EndpointAccess:    &cloudv1.EndpointAccess{PublicAccessCidrs: []string{"203.0.113.0/24"}, EndpointPrivateAccess: ptr.To(false)},
 			SecretsEncryption: &cloudv1.SecretsEncryption{Enabled: true}},
-		DefaultNodePool: &cloudv1.NodePoolSpec{InstanceTypes: []string{"m6i.large"}, CapacityType: cloudv1.CapacityType_CAPACITY_TYPE_SPOT,
-			ScalingConfig: &cloudv1.ScalingConfig{MinSize: 1, MaxSize: 3, DesiredSize: ptr.To(uint32(2))}, DiskSizeGb: 50,
-			Labels: map[string]string{"pool": "default"},
-			Taints: []*cloudv1.Taint{{Key: "dedicated", Value: "x", Effect: cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE}}},
 		Access: &cloudv1.AccessSpec{AdminPrincipals: []string{"arn:aws:iam::444455556666:role/admin"},
 			AccessEntries: []*cloudv1.AccessEntry{{PrincipalArn: "arn:aws:iam::444455556666:role/dev",
 				Type: cloudv1.AccessEntryType_ACCESS_ENTRY_TYPE_STANDARD, Policies: []*cloudv1.AccessPolicy{{
@@ -75,7 +71,6 @@ func clusterSpec(c *model.Cluster) *cloudv1.ClusterSpec {
 			AccessConfig:           &cloudv1.AwsAccessConfig{AuthenticationMode: cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_API},
 			EnabledClusterLogTypes: []cloudv1.AwsClusterLogType{cloudv1.AwsClusterLogType_AWS_CLUSTER_LOG_TYPE_AUDIT},
 			UpgradePolicy:          &cloudv1.AwsUpgradePolicy{SupportType: cloudv1.AwsSupportType_AWS_SUPPORT_TYPE_STANDARD},
-			DefaultNodePool:        &cloudv1.AwsNodePoolSpec{AmiType: cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_ARM_64_STANDARD},
 			Addons:                 []*cloudv1.AwsAddon{{Name: "coredns", Version: "v1.11.4-eksbuild.2"}},
 			ControlPlaneLogGroup:   &cloudv1.AwsControlPlaneLogGroup{Enabled: ptr.To(true), RetentionDays: 90},
 			Irsa:                   ptr.To(true), AdditionalSecurityGroupIds: []string{"sg-0123456789abcdef0"},
@@ -161,7 +156,7 @@ func TestRowsAreObjectsOfTheKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cs := cluster.Spec; cs.Network.NetworkRef.Name != "shared" ||
-		cs.ReleaseChannel != cloudv1alpha1.ReleaseChannelBeta || cs.DefaultNodePool.Scaling.MaxSize != 3 || cs.AWS == nil {
+		cs.ReleaseChannel != cloudv1alpha1.ReleaseChannelBeta || cs.ControlPlane.KubernetesVersion != "1.33" || cs.AWS == nil {
 		t.Errorf("cluster spec = %+v", cs)
 	}
 	if !metav1.IsControlledBy(cluster, network) || cluster.Labels[cloudstore.LabelNetworkID] != w.network.ID ||
@@ -180,7 +175,7 @@ func TestAnEditOfTheTypedSpecIsRead(t *testing.T) {
 	if err := w.k.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "prod"}, obj); err != nil {
 		t.Fatal(err)
 	}
-	obj.Spec.DefaultNodePool.Scaling.MaxSize, obj.Spec.Tags = 9, cloudv1alpha1.Tags{"cost": "x"}
+	obj.Spec.ControlPlane.KubernetesVersion, obj.Spec.Tags = "1.34", cloudv1alpha1.Tags{"cost": "x"}
 	if err := w.k.Update(ctx, obj); err != nil {
 		t.Fatal(err)
 	}
@@ -192,9 +187,9 @@ func TestAnEditOfTheTypedSpecIsRead(t *testing.T) {
 	if err := protojson.Unmarshal(row.Spec, spec); err != nil {
 		t.Fatal(err)
 	}
-	if spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 9 ||
+	if spec.GetControlPlane().GetKubernetesVersion() != "1.34" ||
 		row.Labels["cost"] != "x" || row.ETag != c.ETag {
-		t.Errorf("row after the edit: max size %d, labels %v", spec.GetDefaultNodePool().GetScalingConfig().GetMaxSize(), row.Labels)
+		t.Errorf("row after the edit: version %s, labels %v", spec.GetControlPlane().GetKubernetesVersion(), row.Labels)
 	}
 }
 

@@ -44,8 +44,9 @@ func ControlPlaneLogGroupName(clusterName string) string {
 // encrypted with: the Alias' external name.
 func EncryptionAliasName(clusterName string) string { return "alias/" + clusterName + "-eks" }
 
-// LaunchTemplateName is the rendered launch template of a node group: the
-// object's name and the template's.
+// LaunchTemplateName is the launch template an earlier build rendered for a
+// node group (the object's name and the template's): one a cluster still
+// has is kept until its node group is retired.
 func LaunchTemplateName(nodeGroup string) string { return nodeGroup + "-lt" }
 
 // KnownAfterApply stands, in a plan, for a value that only exists once
@@ -56,8 +57,7 @@ const KnownAfterApply = "(known after apply)"
 // need does not exist yet, each with what it waits for; the plan is
 // rendered again later. The EKS cluster (with its node group and
 // kubeconfig) waits for ClusterHeld and for the encryption key's ARN; the
-// OIDC provider for the cluster's issuer; a rendered launch template with
-// security groups (and its node group) for the cluster security group.
+// OIDC provider for the cluster's issuer.
 func (p ClusterPlan) Waits() map[string]string {
 	waits := map[string]string{}
 	var cluster []string
@@ -68,7 +68,7 @@ func (p ClusterPlan) Waits() map[string]string {
 		cluster = append(cluster, "the encryption key exists")
 	}
 	if len(cluster) > 0 {
-		for _, kind := range []string{awseks.Cluster_Kind, awseks.NodeGroup_Kind, awseks.ClusterAuth_Kind, awsec2.LaunchTemplate_Kind} {
+		for _, kind := range []string{awseks.Cluster_Kind, awseks.NodeGroup_Kind, awseks.ClusterAuth_Kind} {
 			waits[kind] = strings.Join(cluster, " and ")
 		}
 	}
@@ -79,13 +79,6 @@ func (p ClusterPlan) Waits() map[string]string {
 	}
 	if p.IRSA && p.OIDCIssuer == "" {
 		waits[awsiam.OpenIDConnectProvider_Kind] = "the EKS cluster is ACTIVE (its OIDC issuer is known then)"
-	}
-	if lt := p.NodePool.LaunchTemplate; lt.Rendered() && len(lt.SecurityGroupIDs) > 0 && p.ClusterSecurityGroupID == "" {
-		for _, kind := range []string{awsec2.LaunchTemplate_Kind, awseks.NodeGroup_Kind} {
-			if waits[kind] == "" {
-				waits[kind] = "the EKS cluster is ACTIVE (its security group is known then)"
-			}
-		}
 	}
 	return waits
 }
@@ -113,9 +106,6 @@ func (p *ClusterPlan) AssumeLive() {
 	}
 	if p.Karpenter && p.queueARN() == "" {
 		p.KarpenterQueueARN = KnownAfterApply
-	}
-	if lt := p.NodePool.LaunchTemplate; lt.Rendered() && len(lt.SecurityGroupIDs) > 0 && p.ClusterSecurityGroupID == "" {
-		p.ClusterSecurityGroupID = KnownAfterApply
 	}
 }
 
@@ -200,28 +190,6 @@ func (b clusterBuilder) beforeCluster() []client.Object {
 				}}})
 	}
 	return out
-}
-
-// launchTemplate is the node group's rendered launch template, nil when it
-// has none: the node security groups (the cluster's own first, EKS only
-// adds it by itself to nodes without a template's groups) and / or a
-// custom AMI with its user data.
-func (b clusterBuilder) launchTemplate() *awsec2.LaunchTemplate {
-	lt := b.p.NodePool.LaunchTemplate
-	if !lt.Rendered() {
-		return nil
-	}
-	name := LaunchTemplateName(b.nodeGroupName())
-	params := awsec2.LaunchTemplateParameters_2{
-		Region: ptr.To(b.p.Region), Name: ptr.To(name),
-		Description: ptr.To("Nodes of EKS cluster " + b.p.ClusterName), Tags: b.tags(name),
-		ImageID: optional(lt.ImageID), UserData: optional(lt.UserData),
-	}
-	if len(lt.SecurityGroupIDs) > 0 {
-		params.VPCSecurityGroupIds = ptrs(append([]string{b.p.ClusterSecurityGroupID}, lt.SecurityGroupIDs...))
-	}
-	return &awsec2.LaunchTemplate{ObjectMeta: b.meta(name),
-		Spec: awsec2.LaunchTemplateSpec{ManagedResourceSpec: b.spec(), ForProvider: params}}
 }
 
 // accessEntries renders the plan's access entries: an AccessEntry
@@ -329,8 +297,8 @@ func (b clusterBuilder) oidcProvider() *awsiam.OpenIDConnectProvider {
 
 // optionUsagePairs are the deletion dependencies of the optional objects:
 // the log group, the encryption key and the OIDC provider outlive the EKS
-// cluster; a rendered launch template outlives its node group.
-func (b clusterBuilder) optionUsagePairs(eks, nodeGroup UsageRef) []UsagePair {
+// cluster.
+func (b clusterBuilder) optionUsagePairs(eks UsageRef) []UsagePair {
 	var pairs []UsagePair
 	p := b.p
 	if p.LogGroupRetentionDays > 0 {
@@ -341,9 +309,6 @@ func (b clusterBuilder) optionUsagePairs(eks, nodeGroup UsageRef) []UsagePair {
 	}
 	if p.IRSA {
 		pairs = append(pairs, UsagePair{Of: oidcKind.named(b.name("oidc")), By: eks})
-	}
-	if p.NodePool.LaunchTemplate.Rendered() {
-		pairs = append(pairs, UsagePair{Of: launchTmplKind.named(LaunchTemplateName(nodeGroup.Name)), By: nodeGroup})
 	}
 	return pairs
 }

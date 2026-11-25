@@ -15,7 +15,7 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// PROP-03 phase 2: the platform pool, built and empty.
+// The platform pool: the Karpenter group every other component runs on.
 
 const platformPool = crossplaneaws.PoolPlatform
 
@@ -36,7 +36,7 @@ func setObjectReady(t *testing.T, fw *fakeWorkload, kind, name string, ready boo
 	require.NoError(t, fw.c.Update(t.Context(), u))
 }
 
-func TestPlatformPoolIsAppliedOnceKarpenterIsReadyWithoutUserGroups(t *testing.T) {
+func TestPlatformPoolIsAppliedOnceKarpenterIsReady(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
 	w, row := nodeGroupWorld(t, fw)
 	withPlatformPool(w)
@@ -54,7 +54,7 @@ func TestPlatformPoolIsAppliedOnceKarpenterIsReadyWithoutUserGroups(t *testing.T
 	require.Equal(t, platformPool, st.GetName())
 	require.True(t, st.GetPlatformManaged())
 	require.Equal(t, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING, st.GetPhase(), "Karpenter has not reported it yet")
-	require.Empty(t, res.groups, "it is not one of the user groups")
+	require.Empty(t, res.removed, "it is not a removed group")
 }
 
 // Nothing is applied, and the pool is PENDING, until Karpenter is READY.
@@ -72,8 +72,7 @@ func TestPlatformPoolWaitsForKarpenter(t *testing.T) {
 	require.Contains(t, res.platformPool.GetMessage(), "waiting for Karpenter to be Ready")
 }
 
-// The class names Karpenter's node role: the pool waits for its IAM chain
-// even when the cluster has no user groups.
+// The class names Karpenter's node role: the pool waits for its IAM chain.
 func TestPlatformPoolWaitsForKarpenterIAM(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
 	w, row, _ := nodeGroupWorldSrc(t, fw) // no IAM seeded
@@ -120,13 +119,12 @@ func TestPlatformPoolApplyFailureIsItsFailedStatus(t *testing.T) {
 		}
 		return c.Apply(ctx, obj, opts...)
 	}})
-	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
+	w, row := nodeGroupWorld(t, fw)
 	withPlatformPool(w)
 
 	res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
 	require.Equal(t, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_FAILED, res.platformPool.GetPhase())
-	require.NotNil(t, fw.get(t, "NodePool", "", "gpu"), "the user group goes on")
 }
 
 // A pass that is not given the config renders no pool (the zero value).
@@ -140,8 +138,7 @@ func TestNoPlatformPoolWithoutItsConfig(t *testing.T) {
 	require.Nil(t, res.platformPool)
 }
 
-// The pool is not a user group: removeNodeGroups must keep it although no
-// spec group names it, and a changed object is put back.
+// removeNodeGroups keeps the pool, and a deleted object is put back.
 func TestPlatformPoolIsKeptAndRevertedNotRemovedAsUnwanted(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
 	w, row := nodeGroupWorld(t, fw)
@@ -177,7 +174,7 @@ func TestLegacyGateLeavesThePlatformPoolAlone(t *testing.T) {
 	require.NotNil(t, lw.fw.get(t, "NodePool", "", platformPool), "the platform pool is not touched by the gate")
 	require.NotNil(t, lw.fw.get(t, "EC2NodeClass", "", platformPool))
 	require.NotNil(t, res.platformPool)
-	for _, g := range res.groups {
+	for _, g := range res.removed {
 		require.NotEqual(t, platformPool, g.GetName())
 	}
 }
@@ -195,10 +192,10 @@ func TestPlatformPoolNodesAreCountedAndNotTheLegacyPoolsPods(t *testing.T) {
 	require.NotContains(t, res.system.move, "pods on its nodes")
 }
 
-// The API shows the pool's objects first, as the pass applies them.
-func TestNodeGroupObjectsShowThePlatformPoolFirst(t *testing.T) {
+// The API shows the pool's objects, as the pass applies them.
+func TestNodeGroupObjectsShowThePlatformPool(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{})
-	w, row := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
+	w, row := nodeGroupWorld(t, fw)
 	withPlatformPool(w)
 	row.Status = mustStatus(t, &cloudv1.ClusterStatus{PlatformRelease: "2026-11-a"})
 
@@ -209,15 +206,16 @@ func TestNodeGroupObjectsShowThePlatformPoolFirst(t *testing.T) {
 	for _, o := range shown {
 		names = append(names, o.GetKind()+"/"+o.GetName())
 	}
-	require.Equal(t, "EC2NodeClass/platform-pool NodePool/platform-pool EC2NodeClass/gpu NodePool/gpu", strings.Join(names, " "))
+	require.Equal(t, "EC2NodeClass/platform-pool NodePool/platform-pool", strings.Join(names, " "))
 }
 
-// The status lists the platform's groups first: system, then platform-pool.
+// The status lists the platform's groups first: system, then platform-pool,
+// then a removed tenant group.
 func TestStatusListsThePlatformPoolAfterTheSystemGroup(t *testing.T) {
 	ctx := withNodeGroupsHolder(context.Background())
 	holder, _ := ctx.Value(nodeGroupsKey{}).(*nodeGroupsHolder)
 	holder.r = &nodeGroupsResult{
-		groups:       []*cloudv1.NodeGroupStatus{groupStatus("gpu", false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, "", 1)},
+		removed:      []*cloudv1.NodeGroupStatus{groupStatus("gpu", false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING, "", 1)},
 		platformPool: groupStatus(platformPool, true, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_READY, "", 0)}
 	st := &cloudv1.ClusterStatus{}
 
@@ -229,7 +227,7 @@ func TestStatusListsThePlatformPoolAfterTheSystemGroup(t *testing.T) {
 	}
 	require.Equal(t, []string{systemNodeGroup, platformPool, "gpu"}, names)
 
-	// Without a pass the recorded pool stays, and a user group is not
+	// Without a pass the recorded pool stays, and a removed group is not
 	// confused with it.
 	stored := &cloudv1.ClusterStatus{NodeGroups: st.GetNodeGroups()}
 	again := &cloudv1.ClusterStatus{}

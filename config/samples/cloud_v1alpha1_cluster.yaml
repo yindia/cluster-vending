@@ -20,13 +20,7 @@ spec:
     endpointAccess:
       publicAccessCIDRs:
         - 0.0.0.0/0
-  defaultNodePool:
-    instanceTypes:
-      - m7i-flex.large
-    diskSizeGB: 30
-    scaling:
-      minSize: 2
-      maxSize: 3
+  # Node groups are the platform's (its config, nodeGroups): not in the spec.
   access:
     # IAM role/user ARNs; the creator is admin already.
     adminPrincipals: []

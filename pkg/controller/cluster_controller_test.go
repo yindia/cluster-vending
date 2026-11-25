@@ -73,12 +73,6 @@ spec:
     endpointAccess:
       publicAccessCIDRs:
         - 203.0.113.0/24
-  defaultNodePool:
-    instanceTypes:
-      - m6i.large
-    scaling:
-      minSize: 2
-      maxSize: 4
   aws: {}
 `), obj)
 	if err != nil {

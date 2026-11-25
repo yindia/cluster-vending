@@ -76,14 +76,19 @@ func TestNodeStageNotPastByReplacedKarpenterObject(t *testing.T) {
 	require.True(t, removal(map[string]cloudv1.ManagedResourceState{queue.Name: deleting, target.Name: missing}, queue, target).past())
 }
 
-// Karpenter's stage is fixed (it is removed after the node groups): it is
-// sequence 0 by name, whatever a catalog says.
-func TestKarpenterIsSequenceZeroByNameFirst(t *testing.T) {
-	o := definitionOrder{sequence: map[string]int32{karpenterComponent: 50, "base": 100}}
+// The NodeProvisioner's stage is fixed (it is removed after the node
+// groups): it is sequence 0 by its role, whatever a catalog says; without
+// a catalog, the shipped one's name is.
+func TestNodeProvisionerIsSequenceZeroFirst(t *testing.T) {
+	o := definitionOrder{sequence: map[string]int32{"nodes": 50, "karpenter": 100, "base": 100}, provisioners: map[string]bool{"nodes": true}}
 
-	require.Equal(t, int32(0), o.sequenceOf(karpenterComponent))
+	require.Equal(t, int32(0), o.sequenceOf("nodes"))
+	require.Equal(t, int32(100), o.sequenceOf("karpenter"), "a name is not a role")
 	require.Equal(t, int32(100), o.sequenceOf("base"))
 	require.Equal(t, int32(100), o.sequenceOf("unknown"))
+
+	none := New(reconcile.Deps{}).definitionOrder(t.Context())
+	require.Equal(t, int32(0), none.sequenceOf("karpenter"), "without a catalog the shipped name is first")
 }
 
 // The sweep of what a deletion left finds the Helm Releases and the

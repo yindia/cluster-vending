@@ -156,11 +156,13 @@ func VarsFor(cluster *cloudv1alpha1.Cluster, network *cloudv1alpha1.Network, acc
 
 // placement sets the whole-value placeholders of the node pools: on a
 // platform cluster system.* is the system group and platform.* the
-// platform pool; an imported one has its own default pool for both.
+// platform pool; an imported one has the node group it adopted for both
+// (Adoption.NodeGroup, kept with the cluster object).
 func placement(v Vars, cluster *cloudv1alpha1.Cluster) {
 	if cluster.Spec.ImportFrom != nil {
-		v[VarSystemNodeSelector] = systemNodeSelector(cluster.Spec.DefaultNodePool)
-		v[VarSystemTolerations] = systemTolerations(cluster.Spec.DefaultNodePool)
+		adopted := crossplaneaws.ParseAdoption([]byte(cluster.Annotations[crossplaneaws.AdoptionAnnotation])).NodeGroup
+		v[VarSystemNodeSelector] = systemNodeSelector(adopted)
+		v[VarSystemTolerations] = systemTolerations(adopted)
 		v[VarPlatformNodeSelector], v[VarPlatformTolerations] = v[VarSystemNodeSelector], v[VarSystemTolerations]
 		return
 	}
@@ -243,8 +245,9 @@ func clusterPrefix(iam IAMOutputs) string {
 // nodeRoleSuffix ends the platform's own node role name.
 const nodeRoleSuffix = "-node-role"
 
-// systemNodeSelector is the default pool's labels as JSON; "{}" for none.
-func systemNodeSelector(pool *cloudv1alpha1.NodePoolSpec) string {
+// systemNodeSelector is the adopted node group's labels as JSON; "{}" for
+// none.
+func systemNodeSelector(pool *crossplaneaws.NodePoolPlan) string {
 	labels := map[string]string{}
 	if pool != nil {
 		for k, v := range pool.Labels {
@@ -254,13 +257,13 @@ func systemNodeSelector(pool *cloudv1alpha1.NodePoolSpec) string {
 	return mustJSON(labels)
 }
 
-// systemTolerations are tolerations of each of the default pool's taints,
-// as JSON; "[]" for none.
-func systemTolerations(pool *cloudv1alpha1.NodePoolSpec) string {
+// systemTolerations are tolerations of each of the adopted node group's
+// taints, as JSON; "[]" for none.
+func systemTolerations(pool *crossplaneaws.NodePoolPlan) string {
 	out := []map[string]string{}
 	if pool != nil {
 		for _, t := range pool.Taints {
-			out = append(out, map[string]string{"key": t.Key, "operator": "Equal", "value": t.Value, "effect": string(t.Effect)})
+			out = append(out, map[string]string{"key": t.Key, "operator": "Equal", "value": t.Value, "effect": crossplaneaws.KubernetesTaintEffect(t.Effect)})
 		}
 	}
 	return mustJSON(out)

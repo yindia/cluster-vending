@@ -46,7 +46,7 @@ message ListNodeGroupNodesRequest {
   // Cluster.id.
   string cluster_id = 2 [(buf.validate.field).string.uuid = true];
   // The node group's name: "system" for the default managed node group,
-  // "platform" for the platform's, or one of the spec's.
+  // "platform-pool" for the platform pool (Karpenter).
   string node_group = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 64

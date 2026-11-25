@@ -306,10 +306,81 @@ const (
 	ComponentManagementTenant ComponentManagement = "Tenant"
 )
 
+// ComponentRole is a part of the platform only one definition plays, per
+// cloud. The platform finds the definition by its role, never by its name;
+// what each role implies is in pkg/component/roles.go.
+// +kubebuilder:validation:Enum=NodeProvisioner;NamespaceTenancy
+type ComponentRole string
+
+// Component roles.
+const (
+	// ComponentRoleNodeProvisioner launches the cluster's nodes (Karpenter):
+	// it installs first, it is the only definition on the system group
+	// (${system.*}), it cannot be disabled, and the platform pool is applied
+	// once it is Ready.
+	ComponentRoleNodeProvisioner ComponentRole = "NodeProvisioner"
+	// ComponentRoleNamespaceTenancy runs namespace tenancy (Capsule): it is
+	// installed only on clusters with spec.naas, and sub-tenants wait for it.
+	ComponentRoleNamespaceTenancy ComponentRole = "NamespaceTenancy"
+)
+
+// SizedDeployment is a Deployment a component runs, as the sizing rule
+// counts it: where its replica count and per-pod requests are in the
+// definition's platformValues (dotted paths). The values must set both
+// explicitly: a chart default is never guessed.
+type SizedDeployment struct {
+	// name of the Deployment, for the sizing table.
+	// +required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
+	Name string `json:"name"`
+	// replicas is the platformValues path of its replica count (with an
+	// HPA, its minimum), e.g. replicaCount.
+	// +required
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`
+	Replicas string `json:"replicas"`
+	// requests is the platformValues path of one pod's requests, a map
+	// with cpu and memory, e.g. resources.requests.
+	// +required
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`
+	Requests string `json:"requests"`
+}
+
+// SizedDaemonSet is a DaemonSet a component runs: one pod on every node of
+// the group it runs on.
+type SizedDaemonSet struct {
+	// name of the DaemonSet, for the sizing table.
+	// +required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
+	Name string `json:"name"`
+	// requests is the platformValues path of one pod's requests, a map
+	// with cpu and memory.
+	// +required
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`
+	Requests string `json:"requests"`
+}
+
+// ComponentSizing is what a Platform component runs, for the sizing rule
+// of the system group and the platform pool (`controller --check`).
+type ComponentSizing struct {
+	// deployments the component runs.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	Deployments []SizedDeployment `json:"deployments,omitempty"`
+	// daemonSets the component runs.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	DaemonSets []SizedDaemonSet `json:"daemonSets,omitempty"`
+}
+
 // ComponentDefinitionSpec is one entry of the catalog.
 // +kubebuilder:validation:XValidation:rule="has(self.install) != has(self.includes)",message="exactly one of install and includes is set"
 // +kubebuilder:validation:XValidation:rule="!has(self.install) || has(self.__namespace__)",message="namespace is required with install"
 // +kubebuilder:validation:XValidation:rule="!has(self.includes) || !has(self.internal) || !self.internal",message="a bundle (includes) is not internal: bundles do not nest"
+// +kubebuilder:validation:XValidation:rule="!has(self.role) || (has(self.management) && self.management == 'Platform')",message="only a Platform component has a role"
 type ComponentDefinitionSpec struct {
 	// description shown to tenants.
 	// +required
@@ -376,10 +447,17 @@ type ComponentDefinitionSpec struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	Requires []string `json:"requires,omitempty"`
+	// role is the part of the platform this definition plays, if any:
+	// NodeProvisioner or NamespaceTenancy (ComponentRole). At most one
+	// definition per cloud plays a role, and only a Platform one. Unset:
+	// an ordinary component, ordered by sequence and requires alone.
+	// +optional
+	Role ComponentRole `json:"role,omitempty"`
 	// sequence orders Platform components: they install in ascending
 	// sequence, and one starts only once every Platform component of a lower
-	// sequence is deployed and Ready (requires still applies). Karpenter is 0,
-	// so it installs first; nothing waits for a node group.
+	// sequence is deployed and Ready (requires still applies). The
+	// NodeProvisioner is first (sequence 0) by its role, whatever this says;
+	// 0 is reserved for it, so nothing waits for a node group.
 	// Removal runs in reverse. Ignored for tenant components.
 	// +optional
 	// +kubebuilder:default=100
@@ -422,6 +500,12 @@ type ComponentDefinitionSpec struct {
 	// +kubebuilder:validation:Schemaless
 	// +kubebuilder:validation:Type=object
 	PlatformValues *runtime.RawExtension `json:"platformValues,omitempty"`
+	// sizing is what a Platform component runs, for the sizing rule: its
+	// Deployments and DaemonSets, and where their replicas and requests are
+	// in platformValues. Unset: it runs no workload (CRDs, policies or
+	// webhook configuration only).
+	// +optional
+	Sizing *ComponentSizing `json:"sizing,omitempty"`
 	// userValues is the starting values file tenants pull (cluster-vending
 	// component values <name>), edit and send with enable/update; only keys
 	// a tenant may change. YAML kept as written, so the platform team's
@@ -463,7 +547,7 @@ type ComponentDefinitionStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')",message="a component definition is named as a DNS label"
 // +kubebuilder:validation:XValidation:rule="!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)",message="a component cannot require itself"
-// +kubebuilder:validation:XValidation:rule="self.metadata.name != 'karpenter' || (has(self.spec.sequence) && self.spec.sequence == 0 && !(has(self.spec.disabled) && self.spec.disabled))",message="karpenter has sequence 0 and is not disabled: every other platform component waits for its nodes"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.role) || self.spec.role != 'NodeProvisioner' || !(has(self.spec.disabled) && self.spec.disabled)",message="the NodeProvisioner is not disabled: every other platform component waits for its nodes"
 // +kubebuilder:printcolumn:name="Requires",type=string,JSONPath=`.spec.requires`
 // +kubebuilder:printcolumn:name="IAM",type=string,JSONPath=`.spec.cloudResources.iamRole.access`
 // +kubebuilder:printcolumn:name="Disabled",type=boolean,JSONPath=`.spec.disabled`

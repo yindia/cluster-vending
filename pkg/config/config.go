@@ -162,8 +162,8 @@ type Serve struct {
 	// ManagementRoleARN is what account onboarding puts in the role's stack
 	// (optional).
 	ManagementRoleARN string
-	// NodeGroups is the node group layout: the allowlist and defaults of
-	// user node groups, and the system group.
+	// NodeGroups is the node group layout: the system group and the
+	// platform pool.
 	NodeGroups NodeGroups
 	// ServerRoleARN is the role the server's own credentials are (optional;
 	// see ServerPrincipalARN).

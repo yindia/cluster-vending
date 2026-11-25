@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -17,7 +16,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
-	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
 	"github.com/yindia/cluster-vending/pkg/convert"
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -30,9 +28,9 @@ import (
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 )
 
-// ConditionEditRefused is True on a Cluster whose edit (made without the
-// API) the API would have refused: the edit is not applied, the message says
-// why. It goes when the edit is corrected.
+// ConditionEditRefused was True on a Cluster whose edit (made without the
+// API) named node groups outside the admin's allowlist. Tenants define no
+// node groups now: a condition an earlier build set is removed.
 const ConditionEditRefused = "EditRefused"
 
 // ClusterReconciler reconciles Cluster objects by calling the cluster
@@ -88,12 +86,8 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if edited(obj.Generation, obj.Status.ObservedGeneration) {
-		refused, err := r.bump(ctx, obj, tenant, id)
-		if err != nil {
+		if err := r.bump(ctx, obj, tenant, id); err != nil {
 			return ctrl.Result{}, err
-		}
-		if refused != "" {
-			return r.refuseEdit(ctx, obj, refused)
 		}
 	}
 	if err := r.clearRefusal(ctx, obj); err != nil {
@@ -161,38 +155,33 @@ func nextCluster(row *model.Cluster, err error) ctrl.Result {
 // add-ons the client pinned). The edit is applied as written; of what the API's update
 // checks (version steps, what a carried-over resource allows, resolving
 // add-on versions) only what the kind's own validation rules say is
-// checked, and the node group allowlist: the groups the edit adds or
-// changes are refused (refused is why) as the API refuses them, and the
-// change is not applied.
+// checked.
 //
 // A generation the store itself produced (an API update, whose status
 // write has not come yet) is no edit: the row took it up, and only its
 // acknowledgement is made good.
-func (r *ClusterReconciler) bump(ctx context.Context, obj *cloudv1alpha1.Cluster, tenant, id string) (refused string, err error) {
+func (r *ClusterReconciler) bump(ctx context.Context, obj *cloudv1alpha1.Cluster, tenant, id string) error {
 	row, err := r.deps.Store.Clusters().Get(ctx, tenant, id)
 	if err != nil {
-		return "", fmt.Errorf("read cluster %s: %w", id, err)
+		return fmt.Errorf("read cluster %s: %w", id, err)
 	}
 	if row.State == reconcilecluster.StateDeleting {
-		return "", nil
+		return nil
 	}
 	if row.Imported && (row.State == reconcilecluster.StateImported || row.State == reconcilecluster.StateBlocked) {
 		// Imported and not taken over: read-only. The edit is not a new
 		// generation; the reconciler puts the discovered spec back and
 		// reports it (keepDiscovered).
-		return "", nil
+		return nil
 	}
 	if cloudstore.StoreWrote(obj) {
 		// The row already is this generation (and its etag the API
 		// caller's): a second bump would rotate the etag and force a full
 		// re-apply. A write of the row acknowledges the generation.
 		if err := r.deps.Store.Clusters().Record(ctx, row); err != nil && !errors.Is(err, repository.ErrConflict) {
-			return "", fmt.Errorf("acknowledge the update of cluster %s: %w", id, err)
+			return fmt.Errorf("acknowledge the update of cluster %s: %w", id, err)
 		}
-		return "", nil
-	}
-	if refused, err := r.checkAllowlist(row); refused != "" || err != nil {
-		return refused, err
+		return nil
 	}
 	installed := map[string]string{}
 	if obj.Status.AWS != nil {
@@ -201,7 +190,7 @@ func (r *ClusterReconciler) bump(ctx context.Context, obj *cloudv1alpha1.Cluster
 		}
 	}
 	if row.Input, err = reconcilecluster.EditedInput(row, installed); err != nil {
-		return "", fmt.Errorf("rebuild the input of cluster %s: %w", id, err)
+		return fmt.Errorf("rebuild the input of cluster %s: %w", id, err)
 	}
 	row.Generation++
 	if row.State == reconcilecluster.StateRunning {
@@ -209,58 +198,12 @@ func (r *ClusterReconciler) bump(ctx context.Context, obj *cloudv1alpha1.Cluster
 	}
 	reconcilecluster.ClearFailure(row)
 	if err := r.deps.Store.Clusters().Update(ctx, row); err != nil && !errors.Is(err, repository.ErrConflict) {
-		return "", fmt.Errorf("record the edit of cluster %s: %w", id, err)
+		return fmt.Errorf("record the edit of cluster %s: %w", id, err)
 	}
-	return "", nil // a conflict: the row changed; the event of that change comes
+	return nil // a conflict: the row changed; the event of that change comes
 }
 
-// checkAllowlist is what the API's UpdateCluster does with the node groups
-// of an edit: the groups that are new or differ from the ones of the
-// stored input (what the API last accepted) must be on the platform
-// admin's allowlist. refused is the message of the refusal.
-func (r *ClusterReconciler) checkAllowlist(row *model.Cluster) (refused string, err error) {
-	families, types := r.deps.NodeGroups.Karpenter.InstanceFamilies, r.deps.NodeGroups.Karpenter.InstanceTypes
-	if len(families) == 0 && len(types) == 0 {
-		return "", nil
-	}
-	want, err := reconcilecluster.SpecOf(row)
-	if err != nil {
-		return "", err
-	}
-	var have []*cloudv1.NodeGroupSpec
-	if len(row.Input) > 0 {
-		input := &cloudv1.Cluster{}
-		if err := reconcilecluster.Lenient.Unmarshal(row.Input, input); err != nil {
-			return "", fmt.Errorf("cluster %s: stored input: %w", row.ID, err)
-		}
-		have = input.GetSpec().GetNodeGroups()
-	}
-	return messageOf(corecluster.CheckNodeGroupAllowlist(want.GetNodeGroups(), have, families, types)), nil
-}
-
-// messageOf is what a refusal says: nothing for none.
-func messageOf(refusal error) string {
-	if refusal == nil {
-		return ""
-	}
-	return refusal.Error()
-}
-
-// refuseEdit says on the object why its edit is not applied, and looks at
-// it again later: the cluster is left as it was until the edit is
-// corrected.
-func (r *ClusterReconciler) refuseEdit(ctx context.Context, obj *cloudv1alpha1.Cluster, message string) (ctrl.Result, error) {
-	err := setCondition(ctx, r.deps.Direct, obj, &obj.Status.Conditions, metav1.Condition{Type: ConditionEditRefused,
-		Status: metav1.ConditionTrue, Reason: reasonInvalid, Message: message})
-	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	r.deps.logger().InfoContext(ctx, "edit of the cluster refused", "namespace", obj.Namespace, "name", obj.Name, "message", message)
-	return ctrl.Result{RequeueAfter: failedDelay}, nil
-}
-
-// clearRefusal removes the refusal of an earlier edit once the object has
-// no refused edit.
+// clearRefusal removes the refusal an earlier build set on the object.
 func (r *ClusterReconciler) clearRefusal(ctx context.Context, obj *cloudv1alpha1.Cluster) error {
 	if meta.FindStatusCondition(obj.Status.Conditions, ConditionEditRefused) == nil {
 		return nil
@@ -325,10 +268,6 @@ func (r *ClusterReconciler) adopt(ctx context.Context, obj *cloudv1alpha1.Cluste
 		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonWaiting, fmt.Sprintf("network %s does not exist in this namespace (yet)", obj.Spec.Network.NetworkRef.Name))
 	}
 	networkID := network.Labels[cloudstore.LabelID]
-	if err := corecluster.CheckNodeGroupAllowlist(convert.ClusterSpecFromAPI(obj.Spec, networkID, nil).GetNodeGroups(), nil,
-		r.deps.NodeGroups.Karpenter.InstanceFamilies, r.deps.NodeGroups.Karpenter.InstanceTypes); err != nil {
-		return flag(ctx, r.deps, obj, &obj.Status.Conditions, reasonInvalid, err.Error())
-	}
 	row, err := r.rec.NewRow(ctx, &cloudv1.CreateClusterRequest{TenantId: tenant, Cluster: &cloudv1.Cluster{
 		Name: obj.Name, DisplayName: obj.Spec.DisplayName, Labels: obj.Spec.Tags,
 		Spec: convert.ClusterSpecFromAPI(obj.Spec, networkID, nil),

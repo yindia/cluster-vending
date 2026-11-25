@@ -1,16 +1,14 @@
 package cluster
 
 import (
-	"errors"
-
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/oidc"
 )
 
 // ResolveOptions fills the defaults of the optional settings that are in
-// use (the log group's retention, an access entry's type and scope, the
-// AMI type of a custom AMI) and checks what the schema cannot. Settings
+// use (the log group's retention, an access entry's type and scope) and
+// checks what the schema cannot. Settings
 // that are not in use are left as they are: the stored spec of a cluster
 // without them does not change.
 func ResolveOptions(spec *cloudv1.ClusterSpec) error {
@@ -31,16 +29,6 @@ func ResolveOptions(spec *cloudv1.ClusterSpec) error {
 				p.Scope = cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_CLUSTER
 			}
 		}
-	}
-	lt := aws.GetDefaultNodePool().GetLaunchTemplate()
-	if lt == nil {
-		return nil
-	}
-	if spec.GetDefaultNodePool().GetDiskSizeGb() != 0 {
-		return errors.New("spec.default_node_pool.disk_size_gb cannot be set with a launch template: EKS takes the disk from the template")
-	}
-	if lt.GetImageId() != "" {
-		aws.DefaultNodePool.AmiType = cloudv1.AwsAmiType_AWS_AMI_TYPE_CUSTOM
 	}
 	return nil
 }
@@ -82,10 +70,6 @@ func optionsPlan(spec *cloudv1.ClusterSpec, p *crossplaneaws.ClusterPlan) {
 		p.IdentityProvider = &crossplaneaws.IdentityProviderPlan{Name: o.Name, IssuerURL: o.IssuerURL, ClientID: o.ClientID,
 			GroupsClaim: o.GroupsClaim, GroupsPrefix: o.GroupsPrefix,
 			UsernameClaim: o.UsernameClaim, UsernamePrefix: o.UsernamePrefix, RequiredClaims: o.RequiredClaims}
-	}
-	if lt := aws.GetDefaultNodePool().GetLaunchTemplate(); lt != nil {
-		p.NodePool.LaunchTemplate = &crossplaneaws.LaunchTemplatePlan{ID: lt.GetId(), Name: lt.GetName(), Version: lt.GetVersion(),
-			SecurityGroupIDs: lt.GetSecurityGroupIds(), ImageID: lt.GetImageId(), UserData: lt.GetUserData()}
 	}
 }
 

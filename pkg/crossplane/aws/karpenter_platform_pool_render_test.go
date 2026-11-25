@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/yaml"
 
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
-	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
 // PROP-03 4.3 and phase 2: the EC2NodeClass and NodePool `platform-pool`.
@@ -27,8 +26,8 @@ func defaultPlatformPool() *crossplaneaws.PlatformPoolInput {
 	}
 }
 
-func platformInput(pool *crossplaneaws.PlatformPoolInput, groups ...*cloudv1.NodeGroupSpec) crossplaneaws.KarpenterNodeGroupsInput {
-	in := nodeGroupsInput(groups...)
+func platformInput(pool *crossplaneaws.PlatformPoolInput) crossplaneaws.KarpenterNodeGroupsInput {
+	in := nodeGroupsInput()
 	in.PlatformPool = pool
 	return in
 }
@@ -143,9 +142,9 @@ func TestPlatformPoolNameLabelAndTaintAreOneValue(t *testing.T) {
 	}
 }
 
-// Same input, same bytes; user groups follow the pool, in the spec's order.
-func TestPlatformPoolIsFirstAndDeterministic(t *testing.T) {
-	in := platformInput(defaultPlatformPool(), &cloudv1.NodeGroupSpec{Name: "gpu"}, &cloudv1.NodeGroupSpec{Name: "batch"})
+// Same input, same bytes: the pool's class, then its pool.
+func TestPlatformPoolIsDeterministic(t *testing.T) {
+	in := platformInput(defaultPlatformPool())
 	first, err := crossplaneaws.KarpenterNodeGroupObjects(in)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +153,7 @@ func TestPlatformPoolIsFirstAndDeterministic(t *testing.T) {
 	for _, o := range first {
 		names = append(names, o.GetKind()+"/"+o.GetName())
 	}
-	want := []string{"EC2NodeClass/platform-pool", "NodePool/platform-pool", "EC2NodeClass/gpu", "NodePool/gpu", "EC2NodeClass/batch", "NodePool/batch"}
+	want := []string{"EC2NodeClass/platform-pool", "NodePool/platform-pool"}
 	if !slices.Equal(names, want) {
 		t.Errorf("objects = %v, want %v", names, want)
 	}
@@ -163,14 +162,6 @@ func TestPlatformPoolIsFirstAndDeterministic(t *testing.T) {
 	b, _ := json.Marshal(again)
 	if !bytes.Equal(a, b) {
 		t.Error("the same input gave different objects")
-	}
-}
-
-// Without a platform pool in the input nothing changes for the user groups.
-func TestNoPlatformPoolWithoutItsInput(t *testing.T) {
-	objs, err := crossplaneaws.KarpenterNodeGroupObjects(platformInput(nil))
-	if err != nil || len(objs) != 0 {
-		t.Fatalf("%d objects (%v), want none", len(objs), err)
 	}
 }
 
@@ -227,16 +218,5 @@ func TestPlatformPoolRefusesSpotAndEmptyShapes(t *testing.T) {
 		if _, err := crossplaneaws.KarpenterNodeGroupObjects(platformInput(pool)); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
-	}
-}
-
-// A user group cannot take the pool's name.
-func TestUserGroupCannotBeNamedLikeThePlatformPool(t *testing.T) {
-	_, err := crossplaneaws.KarpenterNodeGroupObjects(platformInput(defaultPlatformPool(), &cloudv1.NodeGroupSpec{Name: "platform-pool"}))
-	if err == nil {
-		t.Fatal("want an error")
-	}
-	if _, err := crossplaneaws.KarpenterNodeGroupObjects(platformInput(nil, &cloudv1.NodeGroupSpec{Name: "platform-pool"})); err == nil {
-		t.Fatal("the name is reserved with or without the pool")
 	}
 }

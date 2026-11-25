@@ -25,6 +25,9 @@ type iamFake struct {
 	attachments          int // how many of the four are Ready
 	passRoleOn           string
 	policyNotReady       bool
+	// provisioner names the NodeProvisioner's controller policy; "" is
+	// the shipped karpenter.
+	provisioner string
 }
 
 func passRoleDocument(resource string) string {
@@ -72,7 +75,11 @@ func (f iamFake) seed(t *testing.T, w world, row *model.Cluster, region string) 
 		create(a)
 	}
 	if f.policy {
-		p := &awsiam.Policy{ObjectMeta: meta(crossplaneaws.ComponentPolicyName(crossplaneaws.ComponentIAMPlan{ClusterPrefix: prefix, Component: "karpenter"}))}
+		provisioner := f.provisioner
+		if provisioner == "" {
+			provisioner = "karpenter"
+		}
+		p := &awsiam.Policy{ObjectMeta: meta(crossplaneaws.ComponentPolicyName(crossplaneaws.ComponentIAMPlan{ClusterPrefix: prefix, Component: provisioner}))}
 		p.Spec.ForProvider.Policy = ptr.To(passRoleDocument(f.passRoleOn))
 		p.Status.AtProvider.Policy = ptr.To(passRoleDocument(f.passRoleOn))
 		p.Status.ConditionedStatus = conds(!f.policyNotReady)
@@ -113,15 +120,16 @@ func TestNodeGroupsWaitForKarpenterIAM(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fw := newFakeWorkload(interceptor.Funcs{})
-			w, row, _ := nodeGroupWorldSrc(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"})
+			w, row, _ := nodeGroupWorldSrc(t, fw)
+			withPlatformPool(w)
 			f := good(row)
 			tt.mutate(&f, row)
 			f.seed(t, w, row, "us-east-1")
 
 			res := passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 
-			applied := fw.get(t, "EC2NodeClass", "", "gpu") != nil || fw.get(t, "NodePool", "", "gpu") != nil
-			p := statusOf(res, "gpu")
+			applied := fw.get(t, "EC2NodeClass", "", platformPool) != nil || fw.get(t, "NodePool", "", platformPool) != nil
+			p := res.platformPool
 			if tt.waitsOn == "" {
 				if !applied {
 					t.Fatalf("the node groups were not applied although the IAM chain is ready: %v", p)
@@ -133,7 +141,7 @@ func TestNodeGroupsWaitForKarpenterIAM(t *testing.T) {
 			}
 			if p.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_PENDING ||
 				!strings.Contains(p.GetMessage(), "waiting for Karpenter's IAM") || !strings.Contains(p.GetMessage(), tt.waitsOn) {
-				t.Errorf("gpu status = %v %q, want PENDING waiting for Karpenter's IAM (%s)", p.GetPhase(), p.GetMessage(), tt.waitsOn)
+				t.Errorf("platform pool status = %v %q, want PENDING waiting for Karpenter's IAM (%s)", p.GetPhase(), p.GetMessage(), tt.waitsOn)
 			}
 		})
 	}

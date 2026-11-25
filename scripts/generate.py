@@ -1,5 +1,6 @@
 """Generate the CloudFormation templates of the IAM roles cluster-vending
-assumes in a tenant AWS account.
+assumes in a tenant AWS account, and of the two roles of the platform's own
+(management) account it runs as (scripts/management.py).
 
 Run with `make cf-generate`. The templates are written to
 pkg/cloudformation/templates/ and embedded in the cluster-vending binary,
@@ -67,6 +68,8 @@ from troposphere import (
 )
 from troposphere.iam import ManagedPolicy, Role, ServiceLinkedRole
 
+import management
+
 # The platform's name, on every role, policy and stack.
 PLATFORM = "cluster-vending"
 
@@ -75,16 +78,17 @@ ROLES = ["reader", "updater", "provisioner"]
 PROVISIONER = "provisioner"
 
 
-def template_version(root):
-    """Return TemplateVersion of pkg/cloudformation/version.go: the Go
-    constant is the one source, bumped whenever a template changes (a test
-    fails otherwise), and written into every template as a role tag and an
-    output."""
+def template_version(root, constant="TemplateVersion"):
+    """Return a version constant of pkg/cloudformation/version.go:
+    TemplateVersion of the tenant templates, ManagementTemplateVersion of
+    the management account's. The Go constant is the one source, bumped
+    whenever a template changes (a test fails otherwise), and written into
+    every template as a role tag and an output."""
     path = os.path.join(root, "pkg", "cloudformation", "version.go")
     with open(path) as file:
-        match = re.search(r"^const TemplateVersion = (\d+)$", file.read(), re.M)
+        match = re.search(rf"^const {constant} = (\d+)$", file.read(), re.M)
     if match is None:
-        sys.exit(f"{path}: no line 'const TemplateVersion = N'")
+        sys.exit(f"{path}: no line 'const {constant} = N'")
     return match.group(1)
 
 
@@ -691,6 +695,11 @@ def main():
         path = os.path.join(out_dir, f"{PLATFORM}-{role}-role.template.yaml")
         with open(path, "w") as file:
             file.write(template_of(role, version).to_yaml())
+    version = template_version(root, "ManagementTemplateVersion")
+    for role in management.ROLES:
+        path = os.path.join(out_dir, f"{PLATFORM}-{role}-role.template.yaml")
+        with open(path, "w") as file:
+            file.write(management.template_of(role, version).to_yaml())
 
 
 if __name__ == "__main__":

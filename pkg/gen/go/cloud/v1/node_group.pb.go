@@ -7,7 +7,6 @@
 package cloudv1
 
 import (
-	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -23,57 +22,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Architecture is a node CPU architecture.
-type Architecture int32
-
-const (
-	// Server default: AMD64.
-	Architecture_ARCHITECTURE_UNSPECIFIED Architecture = 0
-	Architecture_ARCHITECTURE_AMD64       Architecture = 1
-	Architecture_ARCHITECTURE_ARM64       Architecture = 2
-)
-
-// Enum value maps for Architecture.
-var (
-	Architecture_name = map[int32]string{
-		0: "ARCHITECTURE_UNSPECIFIED",
-		1: "ARCHITECTURE_AMD64",
-		2: "ARCHITECTURE_ARM64",
-	}
-	Architecture_value = map[string]int32{
-		"ARCHITECTURE_UNSPECIFIED": 0,
-		"ARCHITECTURE_AMD64":       1,
-		"ARCHITECTURE_ARM64":       2,
-	}
-)
-
-func (x Architecture) Enum() *Architecture {
-	p := new(Architecture)
-	*p = x
-	return p
-}
-
-func (x Architecture) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (Architecture) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_node_group_proto_enumTypes[0].Descriptor()
-}
-
-func (Architecture) Type() protoreflect.EnumType {
-	return &file_cloud_v1_node_group_proto_enumTypes[0]
-}
-
-func (x Architecture) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use Architecture.Descriptor instead.
-func (Architecture) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{0}
-}
-
 // NodeGroupPhase is where a node group is.
 type NodeGroupPhase int32
 
@@ -83,7 +31,7 @@ const (
 	NodeGroupPhase_NODE_GROUP_PHASE_PENDING NodeGroupPhase = 1
 	NodeGroupPhase_NODE_GROUP_PHASE_READY   NodeGroupPhase = 2
 	NodeGroupPhase_NODE_GROUP_PHASE_FAILED  NodeGroupPhase = 3
-	// Removed from the spec, being deleted from the workload cluster.
+	// Being deleted from the workload cluster.
 	NodeGroupPhase_NODE_GROUP_PHASE_DELETING NodeGroupPhase = 4
 )
 
@@ -116,11 +64,11 @@ func (x NodeGroupPhase) String() string {
 }
 
 func (NodeGroupPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_cloud_v1_node_group_proto_enumTypes[1].Descriptor()
+	return file_cloud_v1_node_group_proto_enumTypes[0].Descriptor()
 }
 
 func (NodeGroupPhase) Type() protoreflect.EnumType {
-	return &file_cloud_v1_node_group_proto_enumTypes[1]
+	return &file_cloud_v1_node_group_proto_enumTypes[0]
 }
 
 func (x NodeGroupPhase) Number() protoreflect.EnumNumber {
@@ -129,188 +77,18 @@ func (x NodeGroupPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NodeGroupPhase.Descriptor instead.
 func (NodeGroupPhase) EnumDescriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{1}
-}
-
-// NodeGroupSpec is one user node group: a Karpenter NodePool with its own
-// EC2NodeClass in the workload cluster (docs/architecture.md#node-layout).
-// Nodes carry the label node.cluster-vending.io/pool=<name> in addition to
-// labels. The platform's own groups (the default managed node group and the
-// `platform` NodePool) are not part of the spec.
-type NodeGroupSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// DNS label, unique within the cluster, at most 40 characters. "platform",
-	// "platform-pool", "default" and "system" are reserved. Immutable in
-	// effect: renaming a group removes it and adds another.
-	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// Exact machine types, e.g. "m7i.large". Empty: any type of
-	// instance_families.
-	InstanceTypes []string `protobuf:"bytes,2,rep,name=instance_types,json=instanceTypes,proto3" json:"instance_types,omitempty"`
-	// Instance families, e.g. "m7i", "c7g".
-	InstanceFamilies []string `protobuf:"bytes,3,rep,name=instance_families,json=instanceFamilies,proto3" json:"instance_families,omitempty"`
-	// CPU architectures. Empty: AMD64.
-	Architectures []Architecture `protobuf:"varint,4,rep,packed,name=architectures,proto3,enum=cloud.v1.Architecture" json:"architectures,omitempty"`
-	// Capacity types. Empty: ON_DEMAND.
-	CapacityTypes []CapacityType `protobuf:"varint,5,rep,packed,name=capacity_types,json=capacityTypes,proto3,enum=cloud.v1.CapacityType" json:"capacity_types,omitempty"`
-	// Kubernetes labels of the group's nodes.
-	Labels map[string]string `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Kubernetes taints of the group's nodes. Capped at 50, like
-	// NodePoolSpec.taints.
-	Taints []*Taint `protobuf:"bytes,7,rep,name=taints,proto3" json:"taints,omitempty"`
-	// Ceiling of the resources the group may provision. Unset: no ceiling.
-	Limits        *NodeGroupLimits `protobuf:"bytes,8,opt,name=limits,proto3" json:"limits,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *NodeGroupSpec) Reset() {
-	*x = NodeGroupSpec{}
-	mi := &file_cloud_v1_node_group_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NodeGroupSpec) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NodeGroupSpec) ProtoMessage() {}
-
-func (x *NodeGroupSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NodeGroupSpec.ProtoReflect.Descriptor instead.
-func (*NodeGroupSpec) Descriptor() ([]byte, []int) {
 	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *NodeGroupSpec) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *NodeGroupSpec) GetInstanceTypes() []string {
-	if x != nil {
-		return x.InstanceTypes
-	}
-	return nil
-}
-
-func (x *NodeGroupSpec) GetInstanceFamilies() []string {
-	if x != nil {
-		return x.InstanceFamilies
-	}
-	return nil
-}
-
-func (x *NodeGroupSpec) GetArchitectures() []Architecture {
-	if x != nil {
-		return x.Architectures
-	}
-	return nil
-}
-
-func (x *NodeGroupSpec) GetCapacityTypes() []CapacityType {
-	if x != nil {
-		return x.CapacityTypes
-	}
-	return nil
-}
-
-func (x *NodeGroupSpec) GetLabels() map[string]string {
-	if x != nil {
-		return x.Labels
-	}
-	return nil
-}
-
-func (x *NodeGroupSpec) GetTaints() []*Taint {
-	if x != nil {
-		return x.Taints
-	}
-	return nil
-}
-
-func (x *NodeGroupSpec) GetLimits() *NodeGroupLimits {
-	if x != nil {
-		return x.Limits
-	}
-	return nil
-}
-
-// NodeGroupLimits bounds what a node group may provision in total
-// (NodePool.spec.limits).
-type NodeGroupLimits struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// vCPUs.
-	Cpu *int32 `protobuf:"varint,1,opt,name=cpu,proto3,oneof" json:"cpu,omitempty"`
-	// Memory in GiB.
-	MemoryGib     *int32 `protobuf:"varint,2,opt,name=memory_gib,json=memoryGib,proto3,oneof" json:"memory_gib,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *NodeGroupLimits) Reset() {
-	*x = NodeGroupLimits{}
-	mi := &file_cloud_v1_node_group_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NodeGroupLimits) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NodeGroupLimits) ProtoMessage() {}
-
-func (x *NodeGroupLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NodeGroupLimits.ProtoReflect.Descriptor instead.
-func (*NodeGroupLimits) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *NodeGroupLimits) GetCpu() int32 {
-	if x != nil && x.Cpu != nil {
-		return *x.Cpu
-	}
-	return 0
-}
-
-func (x *NodeGroupLimits) GetMemoryGib() int32 {
-	if x != nil && x.MemoryGib != nil {
-		return *x.MemoryGib
-	}
-	return 0
-}
-
-// NodeGroupStatus is what the controller observed of one node group. The
-// platform group comes first, then the user's.
+// NodeGroupStatus is what the controller observed of one node group: the
+// platform's system group first, then its platform pool. A tenant node
+// group a cluster had before the platform owned its node groups is listed
+// last, DELETING, while it is removed.
 type NodeGroupStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// True for the platform's own groups, false for the user's.
+	// True for the platform's own groups; false only for a removed tenant
+	// group while it is deleted.
 	PlatformManaged bool           `protobuf:"varint,2,opt,name=platform_managed,json=platformManaged,proto3" json:"platform_managed,omitempty"`
 	Phase           NodeGroupPhase `protobuf:"varint,3,opt,name=phase,proto3,enum=cloud.v1.NodeGroupPhase" json:"phase,omitempty"`
 	// Why the group is not ready, when it is not.
@@ -343,7 +121,7 @@ type NodeGroupStatus struct {
 
 func (x *NodeGroupStatus) Reset() {
 	*x = NodeGroupStatus{}
-	mi := &file_cloud_v1_node_group_proto_msgTypes[2]
+	mi := &file_cloud_v1_node_group_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -355,7 +133,7 @@ func (x *NodeGroupStatus) String() string {
 func (*NodeGroupStatus) ProtoMessage() {}
 
 func (x *NodeGroupStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_proto_msgTypes[2]
+	mi := &file_cloud_v1_node_group_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -368,7 +146,7 @@ func (x *NodeGroupStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeGroupStatus.ProtoReflect.Descriptor instead.
 func (*NodeGroupStatus) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{2}
+	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *NodeGroupStatus) GetName() string {
@@ -491,7 +269,7 @@ type NodeGroupNodes struct {
 
 func (x *NodeGroupNodes) Reset() {
 	*x = NodeGroupNodes{}
-	mi := &file_cloud_v1_node_group_proto_msgTypes[3]
+	mi := &file_cloud_v1_node_group_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -503,7 +281,7 @@ func (x *NodeGroupNodes) String() string {
 func (*NodeGroupNodes) ProtoMessage() {}
 
 func (x *NodeGroupNodes) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_proto_msgTypes[3]
+	mi := &file_cloud_v1_node_group_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -516,7 +294,7 @@ func (x *NodeGroupNodes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeGroupNodes.ProtoReflect.Descriptor instead.
 func (*NodeGroupNodes) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{3}
+	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *NodeGroupNodes) GetGroup() string {
@@ -587,7 +365,7 @@ type NodeGroupNode struct {
 
 func (x *NodeGroupNode) Reset() {
 	*x = NodeGroupNode{}
-	mi := &file_cloud_v1_node_group_proto_msgTypes[4]
+	mi := &file_cloud_v1_node_group_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -599,7 +377,7 @@ func (x *NodeGroupNode) String() string {
 func (*NodeGroupNode) ProtoMessage() {}
 
 func (x *NodeGroupNode) ProtoReflect() protoreflect.Message {
-	mi := &file_cloud_v1_node_group_proto_msgTypes[4]
+	mi := &file_cloud_v1_node_group_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -612,7 +390,7 @@ func (x *NodeGroupNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeGroupNode.ProtoReflect.Descriptor instead.
 func (*NodeGroupNode) Descriptor() ([]byte, []int) {
-	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{4}
+	return file_cloud_v1_node_group_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NodeGroupNode) GetName() string {
@@ -787,25 +565,7 @@ var File_cloud_v1_node_group_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\n" +
-	"\x19cloud/v1/node_group.proto\x12\bcloud.v1\x1a\x1bbuf/validate/validate.proto\x1a\x18cloud/v1/node_pool.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc8\x06\n" +
-	"\rNodeGroupSpec\x12e\n" +
-	"\x04name\x18\x01 \x01(\tBQ\xbaHNrL\x10\x01\x18(2\x1c^[a-z]([-a-z0-9]*[a-z0-9])?$Z\bplatformZ\rplatform-poolZ\adefaultZ\x06systemR\x04name\x12X\n" +
-	"\x0einstance_types\x18\x02 \x03(\tB1\xbaH.\x92\x01+\x10\x14\x18\x01\"%r#\x10\x01\x18@2\x1d^[a-z][a-z0-9-]*[.][a-z0-9]+$R\rinstanceTypes\x12R\n" +
-	"\x11instance_families\x18\x03 \x03(\tB%\xbaH\"\x92\x01\x1f\x10\x14\x18\x01\"\x19r\x17\x10\x01\x18 2\x11^[a-z][a-z0-9-]*$R\x10instanceFamilies\x12Q\n" +
-	"\rarchitectures\x18\x04 \x03(\x0e2\x16.cloud.v1.ArchitectureB\x13\xbaH\x10\x92\x01\r\x10\x02\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\rarchitectures\x12R\n" +
-	"\x0ecapacity_types\x18\x05 \x03(\x0e2\x16.cloud.v1.CapacityTypeB\x13\xbaH\x10\x92\x01\r\x10\x02\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\rcapacityTypes\x12\xd9\x01\n" +
-	"\x06labels\x18\x06 \x03(\v2#.cloud.v1.NodeGroupSpec.LabelsEntryB\x9b\x01\xbaH\x97\x01\x9a\x01\x93\x01\x10@\"ZrX\x10\x01\x18\xbd\x022Q^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$*3r1\x18?2-^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$R\x06labels\x121\n" +
-	"\x06taints\x18\a \x03(\v2\x0f.cloud.v1.TaintB\b\xbaH\x05\x92\x01\x02\x102R\x06taints\x121\n" +
-	"\x06limits\x18\b \x01(\v2\x19.cloud.v1.NodeGroupLimitsR\x06limits\x1a9\n" +
-	"\vLabelsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"u\n" +
-	"\x0fNodeGroupLimits\x12\x1e\n" +
-	"\x03cpu\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00H\x00R\x03cpu\x88\x01\x01\x12+\n" +
-	"\n" +
-	"memory_gib\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02 \x00H\x01R\tmemoryGib\x88\x01\x01B\x06\n" +
-	"\x04_cpuB\r\n" +
-	"\v_memory_gib\"\xf0\x04\n" +
+	"\x19cloud/v1/node_group.proto\x12\bcloud.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf0\x04\n" +
 	"\x0fNodeGroupStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12)\n" +
 	"\x10platform_managed\x18\x02 \x01(\bR\x0fplatformManaged\x12.\n" +
@@ -858,11 +618,7 @@ const file_cloud_v1_node_group_proto_rawDesc = "" +
 	"\x0fused_cpu_millis\x18\x17 \x01(\x03H\x00R\rusedCpuMillis\x88\x01\x01\x12/\n" +
 	"\x11used_memory_bytes\x18\x18 \x01(\x03H\x01R\x0fusedMemoryBytes\x88\x01\x01B\x12\n" +
 	"\x10_used_cpu_millisB\x14\n" +
-	"\x12_used_memory_bytes*\\\n" +
-	"\fArchitecture\x12\x1c\n" +
-	"\x18ARCHITECTURE_UNSPECIFIED\x10\x00\x12\x16\n" +
-	"\x12ARCHITECTURE_AMD64\x10\x01\x12\x16\n" +
-	"\x12ARCHITECTURE_ARM64\x10\x02*\xa8\x01\n" +
+	"\x12_used_memory_bytes*\xa8\x01\n" +
 	"\x0eNodeGroupPhase\x12 \n" +
 	"\x1cNODE_GROUP_PHASE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18NODE_GROUP_PHASE_PENDING\x10\x01\x12\x1a\n" +
@@ -883,35 +639,24 @@ func file_cloud_v1_node_group_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_node_group_proto_rawDescData
 }
 
-var file_cloud_v1_node_group_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_cloud_v1_node_group_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_cloud_v1_node_group_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_cloud_v1_node_group_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_cloud_v1_node_group_proto_goTypes = []any{
-	(Architecture)(0),             // 0: cloud.v1.Architecture
-	(NodeGroupPhase)(0),           // 1: cloud.v1.NodeGroupPhase
-	(*NodeGroupSpec)(nil),         // 2: cloud.v1.NodeGroupSpec
-	(*NodeGroupLimits)(nil),       // 3: cloud.v1.NodeGroupLimits
-	(*NodeGroupStatus)(nil),       // 4: cloud.v1.NodeGroupStatus
-	(*NodeGroupNodes)(nil),        // 5: cloud.v1.NodeGroupNodes
-	(*NodeGroupNode)(nil),         // 6: cloud.v1.NodeGroupNode
-	nil,                           // 7: cloud.v1.NodeGroupSpec.LabelsEntry
-	(CapacityType)(0),             // 8: cloud.v1.CapacityType
-	(*Taint)(nil),                 // 9: cloud.v1.Taint
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(NodeGroupPhase)(0),           // 0: cloud.v1.NodeGroupPhase
+	(*NodeGroupStatus)(nil),       // 1: cloud.v1.NodeGroupStatus
+	(*NodeGroupNodes)(nil),        // 2: cloud.v1.NodeGroupNodes
+	(*NodeGroupNode)(nil),         // 3: cloud.v1.NodeGroupNode
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_cloud_v1_node_group_proto_depIdxs = []int32{
-	0,  // 0: cloud.v1.NodeGroupSpec.architectures:type_name -> cloud.v1.Architecture
-	8,  // 1: cloud.v1.NodeGroupSpec.capacity_types:type_name -> cloud.v1.CapacityType
-	7,  // 2: cloud.v1.NodeGroupSpec.labels:type_name -> cloud.v1.NodeGroupSpec.LabelsEntry
-	9,  // 3: cloud.v1.NodeGroupSpec.taints:type_name -> cloud.v1.Taint
-	3,  // 4: cloud.v1.NodeGroupSpec.limits:type_name -> cloud.v1.NodeGroupLimits
-	1,  // 5: cloud.v1.NodeGroupStatus.phase:type_name -> cloud.v1.NodeGroupPhase
-	6,  // 6: cloud.v1.NodeGroupNodes.nodes:type_name -> cloud.v1.NodeGroupNode
-	10, // 7: cloud.v1.NodeGroupNode.created_at:type_name -> google.protobuf.Timestamp
-	8,  // [8:8] is the sub-list for method output_type
-	8,  // [8:8] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	0, // 0: cloud.v1.NodeGroupStatus.phase:type_name -> cloud.v1.NodeGroupPhase
+	3, // 1: cloud.v1.NodeGroupNodes.nodes:type_name -> cloud.v1.NodeGroupNode
+	4, // 2: cloud.v1.NodeGroupNode.created_at:type_name -> google.protobuf.Timestamp
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_node_group_proto_init() }
@@ -919,16 +664,14 @@ func file_cloud_v1_node_group_proto_init() {
 	if File_cloud_v1_node_group_proto != nil {
 		return
 	}
-	file_cloud_v1_node_pool_proto_init()
-	file_cloud_v1_node_group_proto_msgTypes[1].OneofWrappers = []any{}
-	file_cloud_v1_node_group_proto_msgTypes[4].OneofWrappers = []any{}
+	file_cloud_v1_node_group_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_node_group_proto_rawDesc), len(file_cloud_v1_node_group_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   6,
+			NumEnums:      1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

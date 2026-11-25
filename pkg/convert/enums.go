@@ -106,8 +106,6 @@ const (
 	prefixSubnetRole     = "SUBNET_ROLE_"
 	prefixNAT            = "NAT_GATEWAY_MODE_"
 	prefixFlowLog        = "FLOW_LOG_TRAFFIC_TYPE_"
-	prefixCapacity       = "CAPACITY_TYPE_"
-	prefixTaintEffect    = "TAINT_EFFECT_"
 	prefixPolicyScope    = "ACCESS_POLICY_SCOPE_"
 	prefixReleaseChannel = "RELEASE_CHANNEL_"
 	prefixTier           = "CLUSTER_" // CLUSTER_TIER_0 -> "Tier0"

@@ -34,7 +34,6 @@ const (
 	policyWorkerNode = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
 	policyCNI        = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
 	policyECRRead    = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-	policyEBSCSI     = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 	policyAdmin      = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 )
 
@@ -116,21 +115,16 @@ type ClusterPlan struct {
 	// OIDCIssuer (the EKS cluster's, known when it is ACTIVE) is set.
 	IRSA       bool
 	OIDCIssuer string
-	// ClusterSecurityGroupID is the security group EKS created for the
-	// cluster (known once it is ACTIVE): a rendered launch template with
-	// security groups lists it next to them.
-	ClusterSecurityGroupID string
 	// Karpenter renders what a cluster with Karpenter node groups needs
 	// beyond the managed node group: the node role with its EC2_LINUX
 	// access entry, and the interruption queue with its EventBridge rules
 	// (karpenter.go). The platform's own clusters have it; an imported one
 	// does not unless the caller says so.
 	Karpenter bool
-	// SystemPoolSize is the platform admin's static size of the default
-	// node group (SystemPoolSize: 0 is the default): its min, max and
-	// desired size, applied in place. Not used for an imported cluster's
-	// own group.
-	SystemPoolSize int
+	// System is the platform admin's system group (nodeGroups.system): the
+	// default node group of a cluster the platform created. Not used for an
+	// imported cluster's own group (Adoption.NodeGroup).
+	System SystemNodeGroup
 	// AccountID is the AWS account of the cluster: with it the interruption
 	// queue's ARN is known up front. Without it (and without
 	// KarpenterQueueARN) the queue policy and the rules' targets wait for
@@ -169,6 +163,11 @@ type Adoption struct {
 	// name, "<cluster>:<add-on>", ... Rendered with every apply, or the
 	// object would lose its cloud resource.
 	ExternalNames map[string]string `json:"externalNames,omitempty"`
+	// NodeGroup is the adopted default node group's settings as the import
+	// found them: an imported cluster's node group is rendered from them
+	// (read-only: no API field changes them). Nil for a cluster the
+	// platform created.
+	NodeGroup *NodePoolPlan `json:"nodeGroup,omitempty"`
 	// BootstrapAdmin is the EKS cluster's
 	// accessConfig.bootstrapClusterCreatorAdminPermissions as it was
 	// created (EKS cannot change it); nil is true, what the platform
@@ -197,47 +196,46 @@ type AccessPolicyPlan struct {
 	Namespaces       []string
 }
 
-// LaunchTemplatePlan is the node group's launch template: an existing one
-// (ID or Name, and Version) or a rendered one (SecurityGroupIDs, ImageID
-// with UserData).
+// LaunchTemplatePlan is an imported node group's existing launch template
+// (ID or Name, and Version): the platform does not change or delete it.
 type LaunchTemplatePlan struct {
-	ID, Name, Version string
-	SecurityGroupIDs  []string
-	ImageID, UserData string
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
 }
-
-// Rendered reports whether the platform renders the template.
-func (l *LaunchTemplatePlan) Rendered() bool { return l != nil && l.ID == "" && l.Name == "" }
 
 // identity is what a node group cannot change in place about its launch
-// template: which existing template, or the rendered one's content.
+// template: which existing template.
 func (l *LaunchTemplatePlan) identity() string {
-	switch {
-	case l == nil:
+	if l == nil {
 		return ""
-	case !l.Rendered():
-		return "existing:" + l.ID + l.Name
 	}
-	groups := slices.Clone(l.SecurityGroupIDs)
-	slices.Sort(groups)
-	sum := sha256.Sum256(fmt.Appendf(nil, "%v|%s|%s", groups, l.ImageID, l.UserData))
-	return "rendered:" + hex.EncodeToString(sum[:])[:12]
+	return "existing:" + l.ID + l.Name
 }
 
-// NodePoolPlan is the default node group.
+// NodePoolPlan is the default node group. CapacityType and AMIType are EKS
+// spellings. Stored as JSON for an imported cluster (Adoption.NodeGroup).
 type NodePoolPlan struct {
-	InstanceTypes             []string
-	CapacityType, AMIType     string
-	DiskSizeGB                int
-	MinSize, MaxSize, Desired int
-	Labels                    map[string]string
-	Taints                    []TaintPlan
-	// LaunchTemplate, when set, is the node group's launch template.
-	LaunchTemplate *LaunchTemplatePlan
+	InstanceTypes []string          `json:"instanceTypes,omitempty"`
+	CapacityType  string            `json:"capacityType,omitempty"`
+	AMIType       string            `json:"amiType,omitempty"`
+	DiskSizeGB    int               `json:"diskSizeGB,omitempty"`
+	MinSize       int               `json:"minSize,omitempty"`
+	MaxSize       int               `json:"maxSize,omitempty"`
+	Desired       int               `json:"desired,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Taints        []TaintPlan       `json:"taints,omitempty"`
+	// LaunchTemplate, when set, is the node group's existing launch
+	// template (an imported group's).
+	LaunchTemplate *LaunchTemplatePlan `json:"launchTemplate,omitempty"`
 }
 
 // TaintPlan is a node taint; Effect is the EKS spelling (NO_SCHEDULE, ...).
-type TaintPlan struct{ Key, Value, Effect string }
+type TaintPlan struct {
+	Key    string `json:"key"`
+	Value  string `json:"value,omitempty"`
+	Effect string `json:"effect"`
+}
 
 // ClusterPrefix is "<name>-<hash8>", like NetworkPrefix.
 func ClusterPrefix(tenantID, clusterID, name string) string {
@@ -266,11 +264,8 @@ func ClusterResources(p ClusterPlan) []client.Object {
 		b.attachRetained("node-cni", "node-role", policyCNI, p.NodeRoleName != ""),
 		b.attachRetained("node-ecr", "node-role", policyECRRead, p.NodeRoleName != ""),
 		b.cluster(),
+		b.nodeGroup(),
 	)
-	if lt := b.launchTemplate(); lt != nil {
-		out = append(out, lt)
-	}
-	out = append(out, b.nodeGroup())
 	out = append(out, addons...)
 	out = append(out, b.clusterAuth(), b.helmProviderConfig())
 	out = append(out, b.karpenterObjects()...)
@@ -498,11 +493,6 @@ func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 	if lt := n.LaunchTemplate; lt != nil {
 		meta.Annotations = map[string]string{LaunchTemplateAnnotation: lt.identity()}
 		params.LaunchTemplate = &awseks.LaunchTemplateParameters{ID: optional(lt.ID), Name: optional(lt.Name), Version: ptr.To(lt.Version)}
-		if lt.Rendered() {
-			// A rendered template is never changed (a change renders a new
-			// one, with a new node group): its only version is 1.
-			params.LaunchTemplate = &awseks.LaunchTemplateParameters{Name: ptr.To(LaunchTemplateName(name)), Version: ptr.To("1")}
-		}
 	}
 	if n.DiskSizeGB > 0 {
 		params.DiskSize = ptr.To(float64(n.DiskSizeGB))

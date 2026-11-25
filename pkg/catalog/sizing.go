@@ -11,8 +11,9 @@ import (
 	"github.com/yindia/cluster-vending/pkg/config"
 )
 
-// The system managed node group runs phase 1 of the install order: Karpenter,
-// the EKS add-on controllers and the DaemonSets of each node. Every other platform
+// The system managed node group runs phase 1 of the install order: the
+// NodeProvisioner (Karpenter), the EKS add-on controllers and the DaemonSets
+// of each node. Every other platform
 // component runs on Karpenter's platform pool (${platform.*}) and is sized
 // against it (CheckPlatformSizing), not here. CheckSystemGroupSizing fails
 // when what the system group's components REQUEST there no longer fits the configured group at its
@@ -22,10 +23,13 @@ import (
 // autoscales it (Karpenter scales every other pool), so what does not fit
 // is pods left Pending there.
 //
-// Only what a definition's platformValues set is counted, so a component's
-// requests and replicas must be explicit there: a chart default is never
-// guessed (a missing key is a problem). Key names were checked against the
-// pinned chart's values with `helm show values` / `helm template`.
+// What a definition runs is data: its spec.sizing names its Deployments and
+// DaemonSets and where their replicas and requests are in platformValues
+// (component.Sizing); a definition without sizing runs no workload. Only
+// what platformValues set is counted, so a component's requests and
+// replicas must be explicit there: a chart default is never guessed (a
+// missing key is a problem). Key names were checked against the pinned
+// chart's values with `helm show values` / `helm template`.
 
 // SystemGroupFillLimit is the share of the group's allocatable CPU and
 // memory the platform may request; the rest is for tenant components,
@@ -125,65 +129,6 @@ type SizingLine struct {
 // Total is the usage of all the row's pods.
 func (l SizingLine) Total() Usage { return l.Each.Times(l.Replicas) }
 
-// A Deployment of a Platform definition: where its replicas and per-pod
-// requests are in the definition's platformValues.
-type workload struct {
-	name, replicas, requests string
-}
-
-// platformDeployments are the Deployments each Platform definition runs,
-// on the pool of its phase. Karpenter's own two replicas are the only HA the
-// platform keeps beyond CoreDNS and the EBS CSI controller (add-ons).
-var platformDeployments = map[string][]workload{
-	"karpenter": {{"karpenter", "replicas", "controller.resources.requests"}},
-	"kyverno": {
-		{"kyverno-admission", "admissionController.replicas", "admissionController.container.resources.requests"},
-		{"kyverno-background", "backgroundController.replicas", "backgroundController.resources.requests"},
-		{"kyverno-cleanup", "cleanupController.replicas", "cleanupController.resources.requests"},
-		{"kyverno-reports", "reportsController.replicas", "reportsController.resources.requests"},
-	},
-	// With autoscaleEnabled the HPA's minimum is the replica count.
-	"istiod":                {{"istiod", "autoscaleMin", "resources.requests"}},
-	"istio-ingress-gateway": {{"istio-ingress-gateway", "autoscaling.minReplicas", "resources.requests"}},
-	"external-secrets": {
-		{"external-secrets", "replicaCount", "resources.requests"},
-		{"external-secrets-webhook", "webhook.replicaCount", "webhook.resources.requests"},
-		{"external-secrets-cert-controller", "certController.replicaCount", "certController.resources.requests"},
-	},
-	"capsule":                      {{"capsule", "replicaCount", "manager.resources.requests"}},
-	"aws-load-balancer-controller": {{"aws-load-balancer-controller", "replicaCount", "resources.requests"}},
-}
-
-// platformDaemonSets are the DaemonSets of Platform definitions: one pod on
-// every system node (requests in the definition's platformValues).
-var platformDaemonSets = map[string]workload{
-	"istio-cni": {name: "istio-cni", requests: "resources.requests"},
-	"ztunnel":   {name: "ztunnel", requests: "resources.requests"},
-}
-
-// platformWithoutWorkloads install CRDs, policies or webhooks configuration
-// only (kyverno-policies is a Tenant component). A new Platform definition
-// must be listed here or above.
-var platformWithoutWorkloads = map[string]bool{"istio": true, "istio-base": true}
-
-// SizedPlatformNames are the definitions the sizing table knows: those with
-// Deployments, with DaemonSets, and those that run no workload.
-func SizedPlatformNames() (deployments, daemonSets, withoutWorkloads []string) {
-	for n := range platformDeployments {
-		deployments = append(deployments, n)
-	}
-	for n := range platformDaemonSets {
-		daemonSets = append(daemonSets, n)
-	}
-	for n := range platformWithoutWorkloads {
-		withoutWorkloads = append(withoutWorkloads, n)
-	}
-	slices.Sort(deployments)
-	slices.Sort(daemonSets)
-	slices.Sort(withoutWorkloads)
-	return deployments, daemonSets, withoutWorkloads
-}
-
 // Add-ons are not in the catalog; their requests are the EKS add-on
 // defaults (describe-addon-configuration / the upstream charts):
 //
@@ -212,8 +157,9 @@ func AddonDaemonSetsPerNode() []SizingLine { return slices.Clone(addonDaemonSets
 // SizingTable is every request the enabled platform components (defs, with
 // what is off left out) and the add-ons place on the system group, for a
 // group of nodes nodes, and what could not be counted: a requests or
-// replicas key a definition's platformValues lack, and a Platform
-// definition no list names.
+// replicas key a definition's platformValues lack. Each definition's rows
+// come from its sizing (spec.sizing): its Deployments at their replicas,
+// its DaemonSets one pod per node.
 func SizingTable(defs []component.Definition, nodes int64) ([]SizingLine, []string) {
 	var rows []SizingLine
 	var problems []string
@@ -224,39 +170,42 @@ func SizingTable(defs []component.Definition, nodes int64) ([]SizingLine, []stri
 		if _, isOff := off[d.Name]; isOff || d.Management != component.Platform {
 			continue
 		}
-		if deployments, ok := platformDeployments[d.Name]; ok {
-			for _, w := range deployments {
-				replicas, err := replicasAt(d, w.replicas)
-				if err != nil {
-					problems = append(problems, err.Error())
-					continue
-				}
-				each, err := requestsAt(d, w.requests)
-				if err != nil {
-					problems = append(problems, err.Error())
-					continue
-				}
-				rows = append(rows, SizingLine{w.name, replicas, each})
-			}
-			continue
-		}
-		if w, ok := platformDaemonSets[d.Name]; ok {
-			each, err := requestsAt(d, w.requests)
-			if err != nil {
-				problems = append(problems, err.Error())
-				continue
-			}
-			rows = append(rows, SizingLine{w.name, nodes, each})
-			continue
-		}
-		if !platformWithoutWorkloads[d.Name] {
-			problems = append(problems, fmt.Sprintf("Platform definition %s is in no sizing list: add its Deployments and DaemonSets to platformDeployments / platformDaemonSets (pkg/catalog/sizing.go), or to platformWithoutWorkloads if it runs none", d.Name))
-		}
+		defRows, defProblems := workloadRows(d, nodes)
+		rows, problems = append(rows, defRows...), append(problems, defProblems...)
 	}
 	rows = append(rows, SizingLine{"coredns (add-on)", corednsReplicas, corednsEach},
 		SizingLine{"ebs-csi controller (add-on)", ebsCSIReplicas, ebsCSIController})
 	for _, ds := range addonDaemonSetsPer {
 		rows = append(rows, SizingLine{ds.Name + " (add-on DaemonSet)", nodes, ds.Each})
+	}
+	return rows, problems
+}
+
+// workloadRows are the sizing rows of one definition: each Deployment of
+// its sizing at its replicas, each DaemonSet on every one of nodes.
+func workloadRows(d component.Definition, nodes int64) ([]SizingLine, []string) {
+	var rows []SizingLine
+	var problems []string
+	for _, w := range d.Sizing.Deployments {
+		replicas, err := replicasAt(d, w.Replicas)
+		if err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		each, err := requestsAt(d, w.Requests)
+		if err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		rows = append(rows, SizingLine{w.Name, replicas, each})
+	}
+	for _, w := range d.Sizing.DaemonSets {
+		each, err := requestsAt(d, w.Requests)
+		if err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		rows = append(rows, SizingLine{w.Name, nodes, each})
 	}
 	return rows, problems
 }
@@ -285,11 +234,8 @@ func poolRows(defs []component.Definition) func(SizingLine) bool {
 		if phase, err := component.InstallPhaseOf(d); err != nil || phase != component.PhasePlatformPool {
 			continue
 		}
-		for _, w := range platformDeployments[d.Name] {
-			pooled[w.name] = true
-		}
-		if w, ok := platformDaemonSets[d.Name]; ok {
-			pooled[w.name] = true
+		for _, w := range slices.Concat(d.Sizing.Deployments, d.Sizing.DaemonSets) {
+			pooled[w.Name] = true
 		}
 	}
 	return func(l SizingLine) bool { return pooled[l.Name] }

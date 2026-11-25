@@ -22,7 +22,6 @@ type nodeService struct {
 	nodes     map[string][]*cloudv1.NodeGroupNode
 	requests  []*cloudv1.ListNodeGroupNodesRequest
 	manifests []*cloudv1.NodeGroupManifest
-	options   *cloudv1.GetNodeGroupOptionsResponse
 }
 
 func (s *nodeService) GetCluster(_ context.Context, _ *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
@@ -53,10 +52,6 @@ func (s *nodeService) ListNodeGroupNodes(_ context.Context, req *cloudv1.ListNod
 
 func (s *nodeService) ListClusterNodeGroupManifests(context.Context, *cloudv1.ListClusterNodeGroupManifestsRequest) (*cloudv1.ListClusterNodeGroupManifestsResponse, error) {
 	return &cloudv1.ListClusterNodeGroupManifestsResponse{NodeGroups: s.manifests}, nil
-}
-
-func (s *nodeService) GetNodeGroupOptions(context.Context, *cloudv1.GetNodeGroupOptionsRequest) (*cloudv1.GetNodeGroupOptionsResponse, error) {
-	return s.options, nil
 }
 
 func node(name string, ready bool, cpu, cpuAlloc int64) *cloudv1.NodeGroupNode {
@@ -129,33 +124,21 @@ func TestClusterNodesRefusals(t *testing.T) {
 	}
 }
 
-func TestClusterNodesManifestsAndOptions(t *testing.T) {
+func TestClusterNodesManifests(t *testing.T) {
 	svc := &nodeService{
 		manifests: []*cloudv1.NodeGroupManifest{
-			{Name: "platform-pool", PlatformManaged: true, Ec2NodeClassYaml: "kind: EC2NodeClass\n", NodePoolYaml: "kind: NodePool\n"},
-			{Name: "batch", NodePoolYaml: "kind: NodePool"},
+			{Name: "system", PlatformManaged: true},
+			{Name: "platform-pool", PlatformManaged: true, Ec2NodeClassYaml: "kind: EC2NodeClass\n", NodePoolYaml: "kind: NodePool"},
 		},
-		options: &cloudv1.GetNodeGroupOptionsResponse{InstanceFamilies: []string{"t3"},
-			Architectures: []cloudv1.Architecture{cloudv1.Architecture_ARCHITECTURE_AMD64},
-			CapacityTypes: []cloudv1.CapacityType{cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND}},
 	}
 	var out bytes.Buffer
-	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", ID: nodesCluster, Manifests: true, NodeGroup: "batch"}, &out, OutputTable); err != nil {
+	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", ID: nodesCluster, Manifests: true, NodeGroup: "platform-pool"}, &out, OutputTable); err != nil {
 		t.Fatalf("manifests: %v", err)
 	}
-	if got := out.String(); got != "---\n# node group batch (tenant)\nkind: NodePool\n" {
+	if got := out.String(); got != "---\n# node group platform-pool (platform)\nkind: EC2NodeClass\n---\n# node group platform-pool (platform)\nkind: NodePool\n" {
 		t.Errorf("manifests = %q", got)
 	}
 	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", ID: nodesCluster, Manifests: true, NodeGroup: "web"}, &out, OutputTable); err == nil {
 		t.Error("an unknown group was accepted")
-	}
-	out.Reset()
-	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", NodeGroupOptions: true}, &out, OutputTable); err != nil {
-		t.Fatalf("options: %v", err)
-	}
-	for _, want := range []string{"Instance families:", "t3", "Instance types:", "any", "AMD64", "ON_DEMAND"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("options lack %q:\n%s", want, out.String())
-		}
 	}
 }

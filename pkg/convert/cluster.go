@@ -4,8 +4,6 @@ import (
 	"maps"
 	"slices"
 
-	"k8s.io/utils/ptr"
-
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -28,13 +26,11 @@ func ClusterSpecToAPI(p *cloudv1.ClusterSpec, networkName string) (cloudv1alpha1
 			ZoneIDs:    slices.Clone(n.GetZoneIds()), PodCIDR: n.GetPodCidr(), ServiceCIDR: n.GetServiceCidr(),
 		},
 		ControlPlane:      controlPlaneToAPI(p.GetControlPlane()),
-		DefaultNodePool:   nodePoolToAPI(p.GetDefaultNodePool()),
 		Access:            accessToAPI(p.GetAccess()),
 		ReleaseChannel:    cloudv1alpha1.ReleaseChannelName(camel(p.GetReleaseChannel(), prefixReleaseChannel)),
 		UpgradeMode:       cloudv1alpha1.UpgradeMode(camel(p.GetUpgradeMode(), prefixUpgradeMode)),
 		MaintenanceWindow: windowToAPI(p.GetMaintenanceWindow()),
 		NaaS:              p.Naas,
-		NodeGroups:        nodeGroupsToAPI(p.GetNodeGroups()),
 		AWS:               awsToAPI(p.GetAws()),
 	}
 	return spec, nil
@@ -73,9 +69,8 @@ func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, _ *cloudv
 			NetworkId: networkID, ZoneIds: slices.Clone(s.Network.ZoneIDs),
 			PodCidr: s.Network.PodCIDR, ServiceCidr: s.Network.ServiceCIDR,
 		},
-		ControlPlane:    controlPlaneFromAPI(s.ControlPlane),
-		DefaultNodePool: nodePoolFromAPI(s.DefaultNodePool),
-		Access:          accessFromAPI(s.Access),
+		ControlPlane: controlPlaneFromAPI(s.ControlPlane),
+		Access:       accessFromAPI(s.Access),
 		ReleaseChannel: cloudv1.ReleaseChannel(uncamel(
 			cloudv1.ReleaseChannel(0).Descriptor(), prefixReleaseChannel, string(s.ReleaseChannel))),
 
@@ -83,7 +78,6 @@ func ClusterSpecFromAPI(s cloudv1alpha1.ClusterSpec, networkID string, _ *cloudv
 			cloudv1.UpgradeMode(0).Descriptor(), prefixUpgradeMode, string(s.UpgradeMode))),
 		MaintenanceWindow: windowFromAPI(s.MaintenanceWindow),
 		Naas:              s.NaaS,
-		NodeGroups:        nodeGroupsFromAPI(s.NodeGroups),
 	}
 	if s.AWS != nil {
 		p.Provider = &cloudv1.ClusterSpec_Aws{Aws: awsFromAPI(s.AWS)}
@@ -121,55 +115,6 @@ func controlPlaneFromAPI(c *cloudv1alpha1.ControlPlaneSpec) *cloudv1.ControlPlan
 	}
 	if e := c.SecretsEncryption; e != nil {
 		out.SecretsEncryption = &cloudv1.SecretsEncryption{Enabled: e.Enabled, KmsKeyArn: e.KMSKeyARN}
-	}
-	return out
-}
-
-func nodePoolToAPI(p *cloudv1.NodePoolSpec) *cloudv1alpha1.NodePoolSpec {
-	if p == nil {
-		return nil
-	}
-	out := &cloudv1alpha1.NodePoolSpec{
-		InstanceTypes: slices.Clone(p.GetInstanceTypes()),
-		CapacityType:  cloudv1alpha1.CapacityType(camel(p.GetCapacityType(), prefixCapacity)),
-		Labels:        maps.Clone(p.GetLabels()),
-	}
-	if sc := p.GetScalingConfig(); sc != nil {
-		out.Scaling = &cloudv1alpha1.ScalingConfig{MinSize: toInt32(sc.GetMinSize()), MaxSize: toInt32(sc.GetMaxSize())}
-		if sc.DesiredSize != nil {
-			out.Scaling.DesiredSize = ptr.To(toInt32(sc.GetDesiredSize()))
-		}
-	}
-	if d := p.GetDiskSizeGb(); d != 0 {
-		out.DiskSizeGB = ptr.To(toInt32(d))
-	}
-	for _, t := range p.GetTaints() {
-		out.Taints = append(out.Taints, cloudv1alpha1.Taint{Key: t.GetKey(), Value: t.GetValue(),
-			Effect: cloudv1alpha1.TaintEffect(camel(t.GetEffect(), prefixTaintEffect))})
-	}
-	return out
-}
-
-func nodePoolFromAPI(n *cloudv1alpha1.NodePoolSpec) *cloudv1.NodePoolSpec {
-	if n == nil {
-		return nil
-	}
-	out := &cloudv1.NodePoolSpec{
-		InstanceTypes: slices.Clone(n.InstanceTypes),
-		CapacityType: cloudv1.CapacityType(uncamel(
-			cloudv1.CapacityType(0).Descriptor(), prefixCapacity, string(n.CapacityType))),
-		DiskSizeGb: toUint32(ptr.Deref(n.DiskSizeGB, 0)),
-		Labels:     maps.Clone(n.Labels),
-	}
-	if sc := n.Scaling; sc != nil {
-		out.ScalingConfig = &cloudv1.ScalingConfig{MinSize: toUint32(sc.MinSize), MaxSize: toUint32(sc.MaxSize)}
-		if sc.DesiredSize != nil {
-			out.ScalingConfig.DesiredSize = ptr.To(toUint32(*sc.DesiredSize))
-		}
-	}
-	for _, t := range n.Taints {
-		out.Taints = append(out.Taints, &cloudv1.Taint{Key: t.Key, Value: t.Value, Effect: cloudv1.TaintEffect(uncamel(
-			cloudv1.TaintEffect(0).Descriptor(), prefixTaintEffect, string(t.Effect)))})
 	}
 	return out
 }
@@ -240,7 +185,6 @@ func awsToAPI(p *cloudv1.AwsClusterSpec) *cloudv1alpha1.AWSClusterSpec {
 	out := &cloudv1alpha1.AWSClusterSpec{
 		IRSA:                       p.Irsa,
 		AdditionalSecurityGroupIDs: slices.Clone(p.GetAdditionalSecurityGroupIds()),
-		DefaultNodePool:            awsNodePoolToAPI(p.GetDefaultNodePool()),
 	}
 	if c := p.GetAccessConfig(); c != nil {
 		out.AccessConfig = &cloudv1alpha1.AWSAccessConfig{
@@ -263,23 +207,10 @@ func awsToAPI(p *cloudv1.AwsClusterSpec) *cloudv1alpha1.AWSClusterSpec {
 	return out
 }
 
-func awsNodePoolToAPI(p *cloudv1.AwsNodePoolSpec) *cloudv1alpha1.AWSNodePoolSpec {
-	if p == nil {
-		return nil
-	}
-	out := &cloudv1alpha1.AWSNodePoolSpec{AMIType: cloudv1alpha1.AWSAMIType(awsName(p.GetAmiType()))}
-	if lt := p.GetLaunchTemplate(); lt != nil {
-		out.LaunchTemplate = &cloudv1alpha1.AWSLaunchTemplate{ID: lt.GetId(), Name: lt.GetName(), Version: lt.GetVersion(),
-			SecurityGroupIDs: slices.Clone(lt.GetSecurityGroupIds()), ImageID: lt.GetImageId(), UserData: lt.GetUserData()}
-	}
-	return out
-}
-
 func awsFromAPI(a *cloudv1alpha1.AWSClusterSpec) *cloudv1.AwsClusterSpec {
 	out := &cloudv1.AwsClusterSpec{
 		Irsa:                       a.IRSA,
 		AdditionalSecurityGroupIds: slices.Clone(a.AdditionalSecurityGroupIDs),
-		DefaultNodePool:            awsNodePoolFromAPI(a.DefaultNodePool),
 	}
 	if c := a.AccessConfig; c != nil {
 		out.AccessConfig = &cloudv1.AwsAccessConfig{AuthenticationMode: cloudv1.AwsAuthenticationMode(fromAWSName(
@@ -299,18 +230,6 @@ func awsFromAPI(a *cloudv1alpha1.AWSClusterSpec) *cloudv1.AwsClusterSpec {
 	}
 	if lg := a.ControlPlaneLogGroup; lg != nil {
 		out.ControlPlaneLogGroup = &cloudv1.AwsControlPlaneLogGroup{Enabled: lg.Enabled, RetentionDays: toUint32(lg.RetentionDays)}
-	}
-	return out
-}
-
-func awsNodePoolFromAPI(n *cloudv1alpha1.AWSNodePoolSpec) *cloudv1.AwsNodePoolSpec {
-	if n == nil {
-		return nil
-	}
-	out := &cloudv1.AwsNodePoolSpec{AmiType: cloudv1.AwsAmiType(fromAWSName(cloudv1.AwsAmiType(0).Descriptor(), string(n.AMIType)))}
-	if lt := n.LaunchTemplate; lt != nil {
-		out.LaunchTemplate = &cloudv1.AwsLaunchTemplate{Id: lt.ID, Name: lt.Name, Version: lt.Version,
-			SecurityGroupIds: slices.Clone(lt.SecurityGroupIDs), ImageId: lt.ImageID, UserData: lt.UserData}
 	}
 	return out
 }

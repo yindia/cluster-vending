@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -120,9 +121,20 @@ func (m *Manifest) decode(fields map[string]any, msg proto.Message) error {
 		return err
 	}
 	if err := protojson.Unmarshal(js, msg); err != nil {
+		if removedNodeGroupField(err) {
+			return fmt.Errorf("%s %s: %w: the platform owns a cluster's node groups (its system group and Karpenter platform pool); "+
+				"remove defaultNodePool, aws.defaultNodePool and nodeGroups from the manifest", m.Kind, m.Metadata.Name, err)
+		}
 		return fmt.Errorf("%s %s: %w", m.Kind, m.Metadata.Name, err)
 	}
 	return nil
+}
+
+// removedNodeGroupField reports whether a decode failed on a node group
+// field the cluster spec had before the platform owned its node groups.
+func removedNodeGroupField(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, `unknown field "defaultNodePool"`) || strings.Contains(msg, `unknown field "nodeGroups"`)
 }
 
 // Network is the manifest as a cloud.v1 Network.

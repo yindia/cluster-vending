@@ -49,32 +49,9 @@ spec:
     #   kmsKeyArn: arn:aws:kms:us-west-1:111122223333:key/00000000-0000-0000-0000-000000000000
     # An existing key is not created/deleted by the platform. Once enabled,
     # encryption cannot be disabled or switched to a different key.
-  # The default node group is the platform's: it runs Karpenter and CoreDNS, is tainted and
-  # labelled for that, and has one static size the platform admin sets (nothing autoscales it;
-  # Karpenter scales every other pool). Omit defaultNodePool and
-  # the platform fills it; a request that changes its taints, labels or scaling
-  # is refused ("the default node group is managed by the platform").
-  # Your workloads run on Karpenter node groups, below.
-  # defaultNodePool:         # optional; instance types, capacity type and disk stay settable
-  #   instanceTypes: [t3.medium]    # 1-20 unique AWS types
-  #   scalingConfig: {minSize: 2, maxSize: 2}   # required when defaultNodePool is set; platform-managed
-  #   diskSizeGb: 30                # 20-16384 GiB
-  #   capacityType: CAPACITY_TYPE_ON_DEMAND
-  #   Changing instanceTypes, capacityType or diskSizeGb replaces the node group.
-  # nodeGroups: your Karpenter node groups (up to 20), each a NodePool with its own
-  # EC2NodeClass in the cluster. Updating compares the list whole (spec.node_groups):
-  # add, change or remove entries. Nodes get the label
-  # node.cluster-vending.io/pool=<name> next to your labels. Names are DNS labels
-  # of at most 40 characters, unique; platform, default and system are reserved.
-  # nodeGroups:
-  #   - name: batch
-  #     instanceFamilies: [m7i, c7g]         # or exact instanceTypes: [m7i.large]; empty: any
-  #     architectures: [ARCHITECTURE_AMD64, ARCHITECTURE_ARM64]   # empty: AMD64
-  #     capacityTypes: [CAPACITY_TYPE_ON_DEMAND, CAPACITY_TYPE_SPOT]   # empty: on-demand
-  #     labels: {team: data}                 # Kubernetes node labels (up to 64)
-  #     taints:                              # up to 50
-  #       - {key: dedicated, value: batch, effect: TAINT_EFFECT_NO_SCHEDULE}
-  #     limits: {cpu: 200, memoryGib: 800}   # ceiling of what the group may provision; optional, > 0
+  # Node groups are the platform's, not part of the spec: every cluster gets the system
+  # managed node group (Karpenter and the EKS add-ons) and Karpenter's platform pool
+  # (everything else), both from the platform config (nodeGroups).
   releaseChannel: RELEASE_CHANNEL_ALPHA     # alpha: Kubernetes 1.37 | beta: 1.36 | stable: 1.35
   upgradeMode: UPGRADE_MODE_AUTOMATIC       # follow the channel's minor; MANUAL (default) never upgrades
   # Channels: RELEASE_CHANNEL_ALPHA, RELEASE_CHANNEL_BETA, RELEASE_CHANNEL_STABLE.
@@ -127,33 +104,6 @@ spec:
     # AWS_AUTHENTICATION_MODE_CONFIG_MAP (legacy; cannot use the access entries above).
     # Immutable extra control-plane security groups (up to 4); not created/deleted here.
     # additionalSecurityGroupIds: [sg-0123456789abcdef0]
-    # AWS settings for the default node group, separate from the common node-pool block:
-    # defaultNodePool:
-    #   amiType: AWS_AMI_TYPE_AL2023_X86_64_STANDARD  # default
-    #   # Option A: existing launch template (id OR name, plus numeric version).
-    #   launchTemplate:
-    #     id: lt-0123456789abcdef0
-    #     # name: existing-node-template   # alternative to id, never both
-    #     version: "3"                    # not $Latest or $Default
-    #   # Option B: replace launchTemplate above with a platform-owned template:
-    #   # launchTemplate:
-    #   #   securityGroupIds: [sg-0123456789abcdef0]  # up to 4 extra node security groups
-    #   #   imageId: ami-0123456789abcdef0           # optional custom AMI
-    #   #   userData: <base64-bootstrap-script>      # required with imageId
-    # With any launchTemplate, omit common defaultNodePool.diskSizeGb; put disk
-    # settings in the existing template. CUSTOM needs a template carrying an AMI.
-    # Setting/removing/switching templates or amiType replaces the node group;
-    # a new numeric version of the same template rolls the nodes in place.
-    # amiType choices (all prefixed AWS_AMI_TYPE_):
-    # AL2023_X86_64_STANDARD, AL2023_ARM_64_STANDARD, AL2023_X86_64_NVIDIA,
-    # AL2023_X86_64_NEURON, AL2023_ARM_64_NVIDIA,
-    # BOTTLEROCKET_X86_64, BOTTLEROCKET_ARM_64, BOTTLEROCKET_X86_64_NVIDIA,
-    # BOTTLEROCKET_ARM_64_NVIDIA, BOTTLEROCKET_X86_64_FIPS, BOTTLEROCKET_ARM_64_FIPS,
-    # BOTTLEROCKET_X86_64_NVIDIA_FIPS, BOTTLEROCKET_ARM_64_NVIDIA_FIPS,
-    # WINDOWS_CORE_2019_X86_64, WINDOWS_FULL_2019_X86_64,
-    # WINDOWS_CORE_2022_X86_64, WINDOWS_FULL_2022_X86_64,
-    # WINDOWS_CORE_2025_X86_64, WINDOWS_FULL_2025_X86_64, CUSTOM.
-    # AMI must be compatible with the instance architecture and workload needs.
     irsa: true               # the cluster's IAM OIDC provider: platform components' IAM roles need it
     controlPlaneLogGroup: {enabled: true, retentionDays: 30}   # /aws/eks/<name>/cluster, created before the EKS cluster
     # Log-group enabled: true/false. Default retention when enabled: 90 days.
@@ -165,7 +115,14 @@ spec:
     upgradePolicy:
       supportType: AWS_SUPPORT_TYPE_STANDARD
       # Alternative: AWS_SUPPORT_TYPE_EXTENDED (paid extended support).
-    addons:                  # merged into vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver
+    # EKS add-ons. Every cluster gets the default set of pkg/crossplane/aws/addons.yaml
+    # (vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver); entries
+    # here are merged into it by name. The platform places the add-ons' controller pods
+    # (not their node DaemonSets) on the default node group: a nodeSelector and
+    # tolerations in configurationValues. A nodeSelector or tolerations you set in
+    # configurationValues wins.
+    # The add-ons addons.yaml knows: the default set above and those below.
+    addons:
       - name: metrics-server
         # Optional on any add-on; omit version for EKS-recommended compatible version.
         # version: v0.0.0-eksbuild.1   # illustrative only: choose a compatible version

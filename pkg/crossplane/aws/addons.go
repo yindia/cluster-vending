@@ -11,51 +11,33 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// DefaultAddons are the EKS add-ons every cluster gets, in install order.
-var DefaultAddons = []string{"vpc-cni", "coredns", "kube-proxy", "eks-pod-identity-agent", "aws-ebs-csi-driver"}
-
-// Add-on names with platform setup.
-const (
-	AddonEBSCSI       = "aws-ebs-csi-driver"
-	AddonEFSCSI       = "aws-efs-csi-driver"
-	AddonFSxCSI       = "aws-fsx-csi-driver"
-	AddonMountpointS3 = "aws-mountpoint-s3-csi-driver"
-)
-
 // AddonPlan is one add-on resolved to concrete values.
 type AddonPlan struct {
 	Name string
 	// Version is the addonVersion; empty takes the EKS default.
 	Version             string
 	ConfigurationValues string
-	// S3BucketNames: aws-mountpoint-s3-csi-driver's buckets (its policy).
+	// S3BucketNames: the buckets of an add-on whose setup has the
+	// s3-bucket-policy hook (aws-mountpoint-s3-csi-driver): its policy.
 	S3BucketNames []string
 }
 
-// addonSetup is what the platform creates for an add-on that calls AWS: a
-// role for its service account (EKS Pod Identity) with policies. Add-ons
-// without an entry need nothing (coredns, kube-proxy, the pod identity
-// agent, snapshot-controller) or have their policy on the node role
-// (vpc-cni). From
-// https://docs.aws.amazon.com/eks/latest/userguide/workloads-add-ons-available-eks.html.
+// addonSetup is what the platform creates for an add-on that calls AWS
+// (setup in addons.yaml): a role for its service account (EKS Pod
+// Identity) with policies. Add-ons without one need nothing (coredns,
+// kube-proxy, the pod identity agent, snapshot-controller) or have their
+// policy on the node role (vpc-cni).
 type addonSetup struct {
 	// short names the IAM objects, "<prefix>-<short>-role": at most 8
 	// characters so the role name stays within IAM's 64.
 	short                     string
 	namespace, serviceAccount string
 	managedPolicies           []string
-	// s3Policy: write a policy for the add-on's S3 buckets.
-	s3Policy bool
-}
-
-var addonSetups = map[string]addonSetup{
-	AddonEBSCSI: {short: "ebs-csi", namespace: "kube-system", serviceAccount: "ebs-csi-controller-sa",
-		managedPolicies: []string{policyEBSCSI}},
-	AddonEFSCSI: {short: "efs-csi", namespace: "kube-system", serviceAccount: "efs-csi-controller-sa",
-		managedPolicies: []string{"arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"}},
-	AddonFSxCSI: {short: "fsx-csi", namespace: "kube-system", serviceAccount: "fsx-csi-controller-sa",
-		managedPolicies: []string{"arn:aws:iam::aws:policy/AmazonFSxFullAccess"}},
-	AddonMountpointS3: {short: "s3-csi", namespace: "kube-system", serviceAccount: "s3-csi-driver-sa", s3Policy: true},
+	// hook names platform code adding objects (addonHooks).
+	hook string
+	// protectIAM: Usages keep the role, its managed policy attachments and
+	// the pod identity association until the add-on is gone.
+	protectIAM bool
 }
 
 // DefaultAddonPlans are the default add-ons with no pinned versions.
@@ -77,7 +59,7 @@ func (b clusterBuilder) addons() []client.Object {
 		out = append(out, b.addon(a))
 	}
 	for _, a := range plans {
-		if setup, ok := addonSetups[a.Name]; ok {
+		if setup, ok := addonCatalog.setups[a.Name]; ok {
 			out = append(out, b.addonSetup(a, setup)...)
 		}
 	}
@@ -100,27 +82,17 @@ func (b clusterBuilder) addon(a AddonPlan) *awseks.Addon {
 	return &awseks.Addon{ObjectMeta: b.meta(name), Spec: awseks.AddonSpec{ManagedResourceSpec: b.spec(), ForProvider: params}}
 }
 
-// addonSetup is the add-on's role "<prefix>-<short>-role", its policies
-// (managed, or written: "<prefix>-<short>-s3"), their attachments and the
-// pod identity association of its service account.
+// addonSetup is the add-on's role "<prefix>-<short>-role", its managed
+// policies' attachments, its hook's objects and the pod identity
+// association of its service account.
 func (b clusterBuilder) addonSetup(a AddonPlan, s addonSetup) []client.Object {
 	role := s.short + "-role"
 	out := []client.Object{b.role(role, trustPodIdentity)}
 	for i, policy := range s.managedPolicies {
-		suffix := s.short + "-policy"
-		if i > 0 {
-			suffix = fmt.Sprintf("%s-%d", suffix, i+1)
-		}
-		out = append(out, b.attach(suffix, role, policy))
+		out = append(out, b.attach(s.attachmentSuffix(i), role, policy))
 	}
-	if s.s3Policy {
-		policy := b.name(s.short + "-s3")
-		out = append(out, b.s3Policy(policy, a.S3BucketNames), &awsiam.RolePolicyAttachment{
-			ObjectMeta: b.meta(b.name(s.short + "-policy")),
-			Spec: awsiam.RolePolicyAttachmentSpec{ManagedResourceSpec: b.spec(), ForProvider: awsiam.RolePolicyAttachmentParameters{
-				PolicyArnRef: b.ref(policy), RoleRef: b.ref(b.name(role)),
-			}},
-		})
+	if s.hook != "" {
+		out = append(out, addonHooks[s.hook].objects(b, a, s, role)...)
 	}
 	name := b.name(s.short + "-identity")
 	return append(out, &awseks.PodIdentityAssociation{
@@ -130,6 +102,29 @@ func (b clusterBuilder) addonSetup(a AddonPlan, s addonSetup) []client.Object {
 			Namespace: ptr.To(s.namespace), ServiceAccount: ptr.To(s.serviceAccount), Tags: b.tags(name),
 		}},
 	})
+}
+
+// attachmentSuffix names the attachment of the i-th managed policy:
+// "<short>-policy", then "<short>-policy-2" and on.
+func (s addonSetup) attachmentSuffix(i int) string {
+	suffix := s.short + "-policy"
+	if i > 0 {
+		suffix = fmt.Sprintf("%s-%d", suffix, i+1)
+	}
+	return suffix
+}
+
+// s3BucketPolicyObjects is the s3-bucket-policy hook: the policy
+// "<prefix>-<short>-s3" for the add-on's buckets and its attachment
+// "<prefix>-<short>-policy" to the role.
+func (b clusterBuilder) s3BucketPolicyObjects(a AddonPlan, s addonSetup, role string) []client.Object {
+	policy := b.name(s.short + "-s3")
+	return []client.Object{b.s3Policy(policy, a.S3BucketNames), &awsiam.RolePolicyAttachment{
+		ObjectMeta: b.meta(b.name(s.short + "-policy")),
+		Spec: awsiam.RolePolicyAttachmentSpec{ManagedResourceSpec: b.spec(), ForProvider: awsiam.RolePolicyAttachmentParameters{
+			PolicyArnRef: b.ref(policy), RoleRef: b.ref(b.name(role)),
+		}},
+	}}
 }
 
 // s3Policy is Mountpoint's recommended policy for the buckets: list them,

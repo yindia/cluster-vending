@@ -70,12 +70,12 @@ func smallestShape(types []string) (Shape, string, []string) {
 	return least, name, nil
 }
 
-// isBootstrapDefinition: the definitions that run on the bootstrap group,
-// Karpenter and the DaemonSets of every node (CoreDNS and the EBS controller
-// are add-ons, which SizingTable adds itself).
-func isBootstrapDefinition(name string) bool {
-	_, daemonSet := platformDaemonSets[name]
-	return name == karpenterName || daemonSet
+// isBootstrapDefinition: the definitions of defs that run on the bootstrap
+// group, the NodeProvisioner and those with DaemonSets on every node
+// (CoreDNS and the EBS controller are add-ons, which SizingTable adds
+// itself).
+func isBootstrapDefinition(d component.Definition, defs []component.Definition) bool {
+	return component.RoleOf(d, defs) == component.RoleNodeProvisioner || len(d.Sizing.DaemonSets) > 0
 }
 
 // CheckBootstrapSizing reports what keeps the bootstrap set from fitting
@@ -90,7 +90,7 @@ func CheckBootstrapSizing(defs []component.Definition, group config.SystemNodeGr
 	}
 	var bootstrap []component.Definition
 	for _, d := range defs {
-		if isBootstrapDefinition(d.Name) {
+		if isBootstrapDefinition(d, defs) {
 			bootstrap = append(bootstrap, d)
 		}
 	}

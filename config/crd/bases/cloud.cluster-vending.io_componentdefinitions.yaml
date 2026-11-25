@@ -501,18 +501,98 @@ spec:
                 maxItems: 16
                 type: array
                 x-kubernetes-list-type: set
+              role:
+                description: |-
+                  role is the part of the platform this definition plays, if any:
+                  NodeProvisioner or NamespaceTenancy (ComponentRole). At most one
+                  definition per cloud plays a role, and only a Platform one. Unset:
+                  an ordinary component, ordered by sequence and requires alone.
+                enum:
+                - NodeProvisioner
+                - NamespaceTenancy
+                type: string
               sequence:
                 default: 100
                 description: |-
                   sequence orders Platform components: they install in ascending
                   sequence, and one starts only once every Platform component of a lower
-                  sequence is deployed and Ready (requires still applies). Karpenter is 0,
-                  so it installs first; nothing waits for a node group.
+                  sequence is deployed and Ready (requires still applies). The
+                  NodeProvisioner is first (sequence 0) by its role, whatever this says;
+                  0 is reserved for it, so nothing waits for a node group.
                   Removal runs in reverse. Ignored for tenant components.
                 format: int32
                 maximum: 10000
                 minimum: 0
                 type: integer
+              sizing:
+                description: |-
+                  sizing is what a Platform component runs, for the sizing rule: its
+                  Deployments and DaemonSets, and where their replicas and requests are
+                  in platformValues. Unset: it runs no workload (CRDs, policies or
+                  webhook configuration only).
+                properties:
+                  daemonSets:
+                    description: daemonSets the component runs.
+                    items:
+                      description: |-
+                        SizedDaemonSet is a DaemonSet a component runs: one pod on every node of
+                        the group it runs on.
+                      properties:
+                        name:
+                          description: name of the DaemonSet, for the sizing table.
+                          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                          type: string
+                        requests:
+                          description: |-
+                            requests is the platformValues path of one pod's requests, a map
+                            with cpu and memory.
+                          pattern: ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$
+                          type: string
+                      required:
+                      - name
+                      - requests
+                      type: object
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  deployments:
+                    description: deployments the component runs.
+                    items:
+                      description: |-
+                        SizedDeployment is a Deployment a component runs, as the sizing rule
+                        counts it: where its replica count and per-pod requests are in the
+                        definition's platformValues (dotted paths). The values must set both
+                        explicitly: a chart default is never guessed.
+                      properties:
+                        name:
+                          description: name of the Deployment, for the sizing table.
+                          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                          type: string
+                        replicas:
+                          description: |-
+                            replicas is the platformValues path of its replica count (with an
+                            HPA, its minimum), e.g. replicaCount.
+                          pattern: ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$
+                          type: string
+                        requests:
+                          description: |-
+                            requests is the platformValues path of one pod's requests, a map
+                            with cpu and memory, e.g. resources.requests.
+                          pattern: ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$
+                          type: string
+                      required:
+                      - name
+                      - replicas
+                      - requests
+                      type: object
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                type: object
               upgradeOneMinorAtATime:
                 description: |-
                   upgradeOneMinorAtATime: the component supports in-place upgrades of
@@ -559,6 +639,9 @@ spec:
               rule: '!has(self.install) || has(self.__namespace__)'
             - message: 'a bundle (includes) is not internal: bundles do not nest'
               rule: '!has(self.includes) || !has(self.internal) || !self.internal'
+            - message: only a Platform component has a role
+              rule: '!has(self.role) || (has(self.management) && self.management ==
+                ''Platform'')'
           status:
             description: ComponentDefinitionStatus is written by the controller.
             properties:
@@ -636,10 +719,10 @@ spec:
           rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')
         - message: a component cannot require itself
           rule: '!has(self.spec.requires) || !(self.metadata.name in self.spec.requires)'
-        - message: 'karpenter has sequence 0 and is not disabled: every other platform
-            component waits for its nodes'
-          rule: self.metadata.name != 'karpenter' || (has(self.spec.sequence) && self.spec.sequence
-            == 0 && !(has(self.spec.disabled) && self.spec.disabled))
+        - message: 'the NodeProvisioner is not disabled: every other platform component
+            waits for its nodes'
+          rule: '!has(self.spec.role) || self.spec.role != ''NodeProvisioner'' ||
+            !(has(self.spec.disabled) && self.spec.disabled)'
     served: true
     storage: true
     subresources:

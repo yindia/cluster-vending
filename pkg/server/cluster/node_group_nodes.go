@@ -90,8 +90,8 @@ func (s *ClusterService) ListNodeGroupNodes(ctx context.Context, req *cloudv1.Li
 }
 
 // nodeGroupKnown reports whether the cluster has the node group: the default
-// managed group and the platform's own always, else the spec's and the
-// status's. The notice is the group's status notice (the controller could not
+// managed group always, else the status's (the platform pool, a removed
+// tenant group still draining). The notice is the group's status notice (the controller could not
 // write its node list), if any.
 func nodeGroupKnown(row *model.Cluster, name string) (bool, string) {
 	cl, err := stored(row)
@@ -105,7 +105,6 @@ func nodeGroupKnown(row *model.Cluster, name string) (bool, string) {
 		}
 	}
 	known := name == systemNodeGroup ||
-		slices.ContainsFunc(cl.GetSpec().GetNodeGroups(), func(g *cloudv1.NodeGroupSpec) bool { return g.GetName() == name }) ||
 		slices.ContainsFunc(cl.GetStatus().GetNodeGroups(), func(g *cloudv1.NodeGroupStatus) bool { return g.GetName() == name })
 	return known, notice
 }

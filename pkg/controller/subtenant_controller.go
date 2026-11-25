@@ -147,7 +147,7 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			reconcileErr = errors.Join(reconcileErr, err)
 		}
 	}()
-	if reason, message, failed := subTenantPrerequisite(parent); reason != "" {
+	if reason, message, failed := subTenantPrerequisite(parent, r.tenancyName(ctx)); reason != "" {
 		if err := naas.ObserveCapsuleAvailability(ctx, workload); err != nil {
 			return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, reason, message+"; runtime availability: "+err.Error(), failed)
 		}

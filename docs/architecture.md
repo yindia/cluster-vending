@@ -87,15 +87,16 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
 - EKS clusters: Kubernetes minor (from the channel, or pinned), endpoint
   access, secrets encryption (a platform KMS key or an existing key), EKS
   access (admin principals, access entries, access policies), IRSA, control
-  plane log group, EKS add-ons with recommended versions, launch templates and
-  custom AMIs.
+  plane log group, EKS add-ons with recommended versions. Node groups are the
+  platform's: a system managed node group and a Karpenter platform pool.
 - Cluster OIDC sign-in (Microsoft Entra ID, or any OIDC issuer) through an EKS
   identity provider association ([Cluster OIDC](#cluster-oidc)).
 - Import of an existing EKS cluster, then takeover, and a kubeconfig download
   (IAM, or OIDC with `kubectl oidc-login`).
-- Node groups: one platform-managed system node group of a static size, and
-  the tenant's own Karpenter node groups under an allowlist (Karpenter is the
-  only scaler) ([Node layout](#node-layout)).
+- Node groups: exactly two, both the platform's, from its config: a system
+  managed node group of a static size (Karpenter and the EKS add-ons) and the
+  Karpenter platform pool (everything else). Tenants define none
+  ([Node layout](#node-layout)).
 - Retry of failed components and automatic upgrades (`cluster retry`).
 
 **Components**
@@ -277,6 +278,13 @@ Onboarding:
    first). The API prints the template URL, its parameters and the create-stack
    command. Parameters: `RoleName`, `ManagementRoleArn`, `ExternalId`, and
    `ServerPrincipalArn` (the API server's role, which reads results) when set.
+   It then prints a second, recommended stack: the account's `reader` role
+   (`cluster-vending-reader`, same `ManagementRoleArn` and `ExternalId`, no
+   server principal), which each cluster's live-reader access entry and the
+   account's live `ProviderConfig` use. Without it the live access entry fails
+   (`The specified principalArn is invalid`) and the cluster has no live reads;
+   nothing else depends on it. An account whose role is the reader gets no
+   second stack.
 2. The tenant runs the command with its own AWS credentials. The role's trust
    trusts the management role, and the server principal when given, and both
    only with the external ID.
@@ -299,6 +307,38 @@ The stack name and role name follow `cluster-vending-<role>` (or
 `cluster-vending-<anything>-<role>`, up to 64 characters). Deleting the account
 removes the platform's `ProviderConfig`; the role's stack is the tenant's to
 delete.
+
+**The management account's roles.** The same script (`scripts/management.py`)
+generates two templates for the platform's own AWS account, embedded and served
+next to the tenant ones (`/cloudformation/management.yaml`, `/cloudformation/server.yaml`).
+They are created once, before any tenant account; `account create --management`
+prints both create-stack commands (no manifest, no tenant, no API call: the server
+serves the templates without a management role configured).
+
+| Template | Runs as it | Trust | Permissions | Output, and where it goes |
+|---|---|---|---|---|
+| `cluster-vending-management` | The controller and the Crossplane AWS providers | IRSA: `system:serviceaccount:<PlatformNamespace>:<ServiceAccount>` (the controller, default `cluster-vending-system`/`cluster-vending-controller`, the Helm chart's; `cluster-vending-controller-manager` with `config/default`) and, by `StringLike`, `system:serviceaccount:<CrossplaneNamespace>:provider-aws-*` (Crossplane names a provider's service account after its revision, `provider-aws-ec2-<hash>`); and/or `LocalPrincipalArn` | `sts:AssumeRole` on `arn:<partition>:iam::*:role/<TenantRolePattern>` (default `cluster-vending-*`), nothing else | `ManagementRoleArn`: `aws-management-role-arn` (controller and server), and every tenant stack's `ManagementRoleArn` |
+| `cluster-vending-server` | The API server | IRSA: `system:serviceaccount:<PlatformNamespace>:<ServiceAccount>` (default `cluster-vending-server`); and/or `LocalPrincipalArn` | the same | `ServerRoleArn`: `aws-server-role-arn`, which tenant stacks trust as `ServerPrincipalArn` |
+
+Parameters of both: `RoleName`, `OidcProviderArn` (the management EKS cluster's IAM
+OIDC provider; the issuer is taken from it), `PlatformNamespace`, `ServiceAccount`,
+`LocalPrincipalArn` (an IAM user or role, for local runs), `TenantRolePattern`,
+`MaxSessionDuration` (3600 to 43200 seconds, default 3600), and `CrossplaneNamespace`
+(management only, default `crossplane-system`). A CloudFormation rule requires
+`OidcProviderArn`, `LocalPrincipalArn` or both. The platform makes no other AWS
+call with these identities (`sts:GetCallerIdentity` needs no permission) and
+passes no session tags, so there is no `sts:TagSession`. They carry their own
+version, `cloudformation.ManagementTemplateVersion`, as the same tag and output;
+the platform does not read it back.
+
+How each role is created:
+
+| Role | Production | Local (`docs/local-development.md`) |
+|---|---|---|
+| Management | `account create --management`'s stack with `OidcProviderArn`; its ARN in `aws.managementRoleArn` and the controller's service account annotation | Mode A: none. Mode B: the stack with `LocalPrincipalArn` (your identity) and `MaxSessionDuration=43200`, then a session of it for the controller, the server and the providers' Secret |
+| Server | The same, second stack; its ARN in `aws.serverRoleArn` and the server's service account annotation | Optional: the server runs with the controller's identity |
+| Tenant provisioner (or updater, reader) | `account create -f`, run by the tenant in its account | The same |
+| Tenant reader | `account create -f`'s second stack, recommended | The same |
 
 **The access check** (controller, `pkg/reconcile/account`): for each region the
 account's networks use, plus `us-east-1` and any region added with `--region`:
@@ -414,8 +454,8 @@ engine removes nothing.
 | Add-ons, access entries, policy associations and pod identity associations wait for the EKS cluster to be `ACTIVE`. A Usage whose user waits waits with it. | A `Field` condition in `ClusterSet`. |
 | Values that exist only after another object: the platform's KMS key ARN, the cluster's OIDC issuer (for IRSA), its security group. A new cluster waits for its log group. | Items with a `Build` in `ClusterSet`, filled by `ClusterPlan.FillLive`. |
 | During a Kubernetes upgrade, node groups and add-ons stay at the running version until the control plane reports the target. | `upgrade.phase` (`pkg/reconcile/cluster/upgrade.go`), reported as `status.upgrade`. |
-| A change EKS cannot make in place on a node group (instance types, capacity type, AMI type, disk size, launch template) creates a new node group. The old one is retired once the new one is ready. | `NodeGroupName` and retirement on a later pass in `pkg/reconcile/cluster`. |
-| A node group's Karpenter pools and classes are applied only after Karpenter is ready. | `pkg/reconcile/cluster/nodegroups.go`. |
+| A change EKS cannot make in place on a node group (instance types, capacity type, AMI type, disk size of `nodeGroups.system`, or an earlier build's launch template dropped) creates a new node group. The old one is retired once the new one is ready. | `NodeGroupName` and retirement on a later pass in `pkg/reconcile/cluster`. |
+| The platform pool's NodePool and EC2NodeClass are applied only after Karpenter is ready. | `pkg/reconcile/cluster/nodegroups.go`. |
 
 ### Deletion
 
@@ -502,8 +542,8 @@ then its CRD chart (when it has one), its chart, and its companions.
 The install order of a new cluster:
 
 1. The EKS cluster, its node groups and its add-ons (part of reaching `Running`).
-2. Karpenter (sequence 0, the platform's first component; everything after it
-   waits for it).
+2. Karpenter (the `NodeProvisioner` role: sequence 0, the platform's first
+   component; everything after it waits for it).
 3. The other platform components by sequence (default 100), in `requires`
    order, on the platform pool: AWS Load Balancer Controller, External
    Secrets, Kyverno, the Istio bundle, and Capsule when `naas` is set.
@@ -517,16 +557,34 @@ recoveries, next retry) and the condition `PlatformComponentsReady`. That
 condition does not hold back the cluster's own `Ready`. Platform components are
 removed in reverse order when the cluster is deleted.
 
+**Roles.** Two definitions play a part of the platform no other does. They
+declare it in `spec.role`, and the platform finds them by it, never by name
+(`pkg/component/roles.go` is the one place that knows the roles and what each
+implies). At most one definition per cloud plays a role, and only a Platform
+one (`controller --check`, the `Valid` condition):
+
+| Role | Shipped as | What the role implies |
+|---|---|---|
+| `NodeProvisioner` | `karpenter` | Installs first (sequence 0, whatever `spec.sequence` says; 0 is no other definition's). The only definition on the system group (`${system.*}`), never on the platform pool. Cannot be disabled (CEL). The platform pool is applied once it is `Ready`, and its controller policy is the one the pool's node class needs. Removed last on deletion, after the node groups. |
+| `NamespaceTenancy` | `capsule` | Installed only on clusters with `spec.naas`, with what requires it. Sub-tenants wait for it. A new release pin of it carries the build's NaaS bootstrap values. |
+
+A definition without a role is an ordinary component: `sequence` and
+`requires` order it and `sizing` sizes it, so adding or removing one is a
+definition file and a release pin, with no Go change. A shipped definition the
+platform team edited before `spec.role` existed is not updated by a build;
+until it declares the role, the shipped name (`karpenter`, `capsule`, or the
+Capsule chart) stands for it, on a cloud where no definition declares the role.
+
 The shipped platform set (`pkg/catalog/definitions`):
 
 | Component | Chart (pinned in `release.yaml`) | Namespace | Notes |
 |---|---|---|---|
-| `karpenter` | `karpenter` 1.15.1 (OCI, public ECR) | `kube-system` | sequence 0. Its IAM role is IRSA. Ships no NodePool or EC2NodeClass. |
+| `karpenter` | `karpenter` 1.15.1 (OCI, public ECR) | `kube-system` | `role: NodeProvisioner` (sequence 0). Its IAM role is IRSA. Ships no NodePool or EC2NodeClass. |
 | `aws-load-balancer-controller` | 3.6.2 | `kube-system` | IRSA. |
 | `external-secrets` | 2.15.0 | `external-secrets` | |
 | `kyverno` | 3.10.0 | `kyverno` | Enabled by default. The policies are `kyverno-policies`, a tenant component. |
 | `istio` (bundle) | 1.32.0 | `istio-system`, `istio-ingress` | Members are internal: `istio-base`, `istiod`, `istio-cni`, `ztunnel`, `istio-ingress-gateway`, in that `requires` order. Ambient mode, no sidecars. |
-| `capsule` | 0.15.2 (OCI) | `capsule-system` | Only when `spec.naas: true`. Needs cert-manager on the cluster. |
+| `capsule` | 0.15.2 (OCI) | `capsule-system` | `role: NamespaceTenancy`: only when `spec.naas: true`. Needs cert-manager on the cluster. |
 
 Tenant components: `gpu-operator` (v26.7.2, `gpu-operator`), and
 `kyverno-policies` (3.10.0, requires `kyverno`). Only these two have a values
@@ -622,25 +680,35 @@ with leader election. The runtime configs are `cluster-vending-aws`,
 
 ### Node layout
 
-A cluster has three kinds of nodes:
+A cluster has exactly two node groups, both the platform's, from its config
+(`nodeGroups`); tenants define none:
 
 | Pool | Label | Taint | Runs |
 |---|---|---|---|
 | The system node group (`system`), EKS managed | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Phase 1: the EKS add-on controllers (CoreDNS and the others below) and Karpenter (`${system.*}`), nothing else |
 | The platform pool (`platform-pool`, Karpenter) | `node.cluster-vending.io/pool=platform-pool` | `node.cluster-vending.io/pool=platform-pool:NoSchedule` | Phase 2: every other platform component (AWS Load Balancer Controller, External Secrets, Capsule, Kyverno, istiod, the ingress gateway) and the tenant's components (the GPU operator's controllers), through `${platform.*}` |
-| The tenant's Karpenter node groups (`spec.nodeGroups`) | `node.cluster-vending.io/pool=<name>` and the tenant's labels | The tenant's taints | The tenant's workloads |
 
 DaemonSets (VPC CNI, kube-proxy, the pod identity agent, istio-cni, ztunnel)
 tolerate every taint and run everywhere.
 
 The platform places the EKS add-on controllers on the system group through
-their `configurationValues` (`addonPlacements` in
-`pkg/crossplane/aws/addon_placement.go`): CoreDNS, metrics-server,
-kube-state-metrics, snapshot-controller, cert-manager (with its cainjector and
-webhook) and the controllers of the EBS, EFS, FSx and Mountpoint S3 CSI drivers.
+their `configurationValues`, as `pkg/crossplane/aws/addons.yaml` says: CoreDNS,
+metrics-server, kube-state-metrics, snapshot-controller, cert-manager (with its
+cainjector and webhook) and the controllers of the EBS, EFS, FSx and Mountpoint
+S3 CSI drivers. That file is the one list of the EKS add-ons the platform knows:
+per add-on, whether every cluster gets it (`default`), the `configurationValues`
+objects that take the `nodeSelector` and `tolerations` and the add-on's own
+default tolerations (`placement`), the schema version and source those keys were
+confirmed from (`schema`), and the IAM role with Pod Identity it needs (`setup`:
+managed policies, or a named Go hook such as `s3-bucket-policy` for the
+Mountpoint driver's buckets). Adding or changing an add-on is an edit there; the
+package refuses a file with unknown fields, duplicate names, empty paths or
+unknown hooks when it loads, and a test fails when the API's add-on names
+(`AWSAddon.name`, `conflictsWithAddons`, `AwsAddon.name`) or
+`examples/cluster.yaml` disagree with it.
 A `nodeSelector` or `tolerations` the tenant sets in an add-on's
-`configurationValues` wins. Without this, a cluster without tenant node groups
-would never run those add-ons: the only other nodes are the tainted platform pool's.
+`configurationValues` wins. Without this, a cluster would never run those
+add-ons: the only other nodes are the tainted platform pool's.
 
 **Install order.** A cluster's components install in two phases, on the pool
 they run on (`component.InstallPhase`):
@@ -662,8 +730,8 @@ they run on (`component.InstallPhase`):
 `controller --check` refuses a definition that uses both `${system.*}` and
 `${platform.*}`, a Karpenter placed on the platform pool, any other definition
 placed on the system group, and a system-group component that requires one on
-the pool. An imported cluster keeps its own
-default pool for both placeholders. If the config has no platform pool,
+the pool. An imported cluster keeps the node group it adopted for both
+placeholders. If the config has no platform pool,
 `${platform.*}` falls back to the system group.
 
 On an existing cluster, the new `${platform.*}` value changes the rendered values
@@ -675,11 +743,11 @@ was not edited takes the build's spec, an edited or unlabelled one is kept as
 it is (`kubectl replace -f pkg/catalog/definitions/<name>.yaml` takes the
 build's).
 
-**System group.** The default managed node group of every new cluster, sized from
-the platform's `nodeGroups.system` settings. It has one static size, `minSize`
+**System group.** The default managed node group of every cluster the platform
+created, from the platform's `nodeGroups.system` settings. It has one static size, `minSize`
 (default 2, the least allowed, since Karpenter runs two replicas): the node
 group's min, max and desired size are all that number, and nothing autoscales
-it. Karpenter is the only scaler, of the platform pool and the tenant's groups.
+it. Karpenter is the only scaler, of the platform pool.
 The old `maxSize` is ignored, with a warning at start. Changing `minSize`
 applies to existing clusters in place, desired size included (Crossplane keeps
 `forProvider.scalingConfig.desiredSize`, so a group that grew is brought back to
@@ -690,13 +758,17 @@ shipped definition is deleted at the next controller start (`catalog.Sync`), the
 in-use finalizer keeps it until every cluster has removed it, and each cluster
 uninstalls its Helm release and IAM role as a catalog change (PROP-01 4.7),
 gated by the channel's code rollout and the freeze like any other.
-`instanceTypes` (a list of one architecture and
-one vCPU and memory class), `capacityType` and `diskSizeGiB` apply to new clusters only, since EKS cannot change them on a node
-group. Users cannot change the group's labels, taints or scaling.
+`instanceTypes` (a list of one architecture and one vCPU and memory class),
+`capacityType`, `amiType` and `diskSizeGiB` apply to every cluster the platform
+created. EKS cannot change them on a node group, so a change replaces each
+cluster's system group: the new group is created first and the old one retired
+once the new one is `Ready`. The change reaches clusters as a code change does
+(the render's fingerprints differ), in turn by channel. Nothing in the API sets
+the group: the spec has no node group fields.
 
 **Platform pool.** `nodeGroups.platform` configures one Karpenter `NodePool` and one
 `EC2NodeClass`, both named `platform-pool` (not the legacy `platform`, which the legacy gate removes).
-The controller applies them through the workload kubeconfig, like a tenant group, once Karpenter is
+The controller applies them through the workload kubeconfig once Karpenter is
 `Ready` and its IAM chain is. The pool is on-demand only (`SPOT` is refused), tainted and labelled
 with its own name, `WhenEmpty` consolidation by default, with limits, a disruption budget, `expireAfter`
 and `terminationGracePeriod`. It is `Ready` when its two objects are `Ready`, not when it has nodes: pods
@@ -705,27 +777,43 @@ create the nodes, so no wait for nodes can deadlock Karpenter. `status.nodeGroup
 `controller --check` sizes what runs on the system group (CPU, memory and pods per node: 17 on a `t3.medium`) against
 `nodeGroups.system`, and the components placed on the pool against `nodeGroups.platform.limits` and the shapes the pool allows.
 
-**Tenant node groups.** `spec.nodeGroups` is a list of Karpenter node groups
-(at most 20, names unique and not `platform`, `platform-pool`, `default` or `system`). For each
-one, the controller applies one `EC2NodeClass` and one `NodePool` into the
-workload cluster after Karpenter is ready, labelled
-`cloud.cluster-vending.io/managed-by=platform`, and removes them when the group
-leaves the spec. A group sets instance types or families, architectures
-(`AMD64`, `ARM64`), capacity types (`OnDemand`, `Spot`), labels (at most 64),
-taints (at most 50) and CPU and memory limits. The server refuses a group
-outside the allowlist of the platform's `nodeGroups.karpenter` settings. A group
-that sets no architecture or capacity type gets the defaults. A cluster built
-before the system group existed has an old `platform` pool, removed once its
-components have moved off it.
+**Tenant node groups of existing clusters.** The API had `spec.nodeGroups`
+(tenant Karpenter node groups) and tenant settings of the default group
+(`spec.defaultNodePool`, `spec.aws.defaultNodePool`: instance types, capacity
+type, disk, AMI type, launch templates, custom AMIs). They are gone: their
+field numbers and names are reserved, a binary request that still carries them
+is refused (`INVALID_ARGUMENT`), JSON drops them, and an `update_mask` path
+under `spec.default_node_pool`, `spec.aws.default_node_pool` or
+`spec.node_groups` is refused (`INVALID_ARGUMENT`). A stored cluster that still
+has them is read without them and never renders them. The
+controller deletes the `NodePool` and `EC2NodeClass` objects it applied
+(`cloud.cluster-vending.io/managed-by=platform`) that it no longer renders,
+every one but `platform-pool` (`removeNodeGroups`): a pool before its class,
+the class once the pool is gone; Karpenter drains and terminates their nodes.
+Such a group is listed in `status.nodeGroups` as `Deleting`, with a message,
+until it is gone. A system group a tenant setting had changed (instance types,
+a launch template) is replaced by the platform's like any other change of
+`nodeGroups.system`. A cluster built before the system group existed has an
+old `platform` pool, removed once its components have moved off it.
+
+**Imported clusters.** An imported cluster keeps the node group it adopted,
+read-only: its settings as the import found them are kept in the cluster's
+adoption (`Adoption.NodeGroup`), not the spec, and rendered as they are. A
+cluster imported before that falls back to the spec its import derived.
 
 **Sizing.** The default group is 2 x `t3.medium`. Only phase 1 counts against it:
-Karpenter, the add-ons and the DaemonSets. The pod count is the tight limit. No node is added
+the NodeProvisioner (Karpenter), the add-ons and the DaemonSets. What a
+definition runs is data, its `spec.sizing`: each Deployment with the
+`platformValues` paths of its replicas and per-pod requests, each DaemonSet
+with the path of its requests (one pod per node). A definition without
+`sizing` runs no workload. The values must set those keys explicitly; a chart
+default is never guessed. The pod count is the tight limit. No node is added
 when pods are pending there: the size is static. `pkg/catalog/system_group_sizing_test.go`
 fails the build when the shipped requests exceed 85 % of the default group's
 allocatable CPU or memory, or its pod capacity.
 
-**Status.** `status.nodeGroups` lists the system group first, then the tenant's
-groups: phase (`Pending`, `Ready`, `Failed`, `Deleting`), node counts, and a
+**Status.** `status.nodeGroups` lists the system group first, then the platform
+pool, then any removed tenant group while it drains: phase (`Pending`, `Ready`, `Failed`, `Deleting`), node counts, and a
 message. Node lists are kept in the results bucket (the `nodes` kind, sharded by
 group). Reads and applies to a workload cluster are bounded: 500 items a list, 10 s
 a call, 45 s a pass, and they never fail the cluster's own pass.
@@ -1332,15 +1420,14 @@ are marked so in the type; the rest can be updated.
 | `spec.controlPlane.kubernetesVersion` | `1.NN` | The minor. Empty on a cluster with a channel: the channel's minor is written into it. Empty on a cluster with no channel: the version it asks for, or EKS's default. The rollout sets it on automatic upgrades. |
 | `spec.controlPlane.endpointAccess` | object | `publicAccessCIDRs`, `privateAccess` (default true), `publicAccess` (default true). |
 | `spec.controlPlane.secretsEncryption` | object | `enabled` (a KMS key the platform creates and deletes) or `kmsKeyARN` (an existing key, not deleted). |
-| `spec.defaultNodePool` | object | The default managed node group: `instanceTypes`, `capacityType` (`OnDemand` default, `Spot`), `scaling` (`minSize`, `maxSize` 1 to 1000, `desiredSize`), `diskSizeGB`, `labels`, `taints`. Filled by the platform when omitted. |
 | `spec.access` | object | `adminPrincipals` (cluster-admin), `accessEntries` (EKS entries and their policies, `Cluster` or `Namespace` scope), `oidc` ([Cluster OIDC](#cluster-oidc)). |
 | `spec.releaseChannel` | `Alpha`, `Beta`, `Stable` | The channel the cluster takes platform releases from. |
 | `spec.upgradeMode` | `Manual` (default), `Automatic` | Whether platform releases and Kubernetes upgrades may move the cluster. |
 | `spec.maintenanceWindow` | `{days, start, duration}` | When an automatic upgrade may start: days (empty: every day), start in UTC (`HH:MM`), duration 1 h to 24 h. |
 | `spec.naas` | bool | Installs Capsule (namespace tenancy). Default false. |
-| `spec.nodeGroups` | list of `NodeGroupSpec` (max 20, keyed by `name`) | The tenant's Karpenter node groups ([Node layout](#node-layout)). |
-| `spec.aws` | object | `accessConfig.authenticationMode`, `enabledClusterLogTypes`, `upgradePolicy.supportType`, `defaultNodePool` (`amiType`, `launchTemplate`), `addons[]` (name, version, configuration, S3 buckets), `controlPlaneLogGroup`, `irsa`, `additionalSecurityGroupIDs` (immutable). |
-| `spec.importFrom.aws` | `{defaultNodeGroupName}` | Imports an existing EKS cluster. Its other node groups are not imported. |
+| (node groups) | none | The platform's, not the spec's: the system group and the platform pool ([Node layout](#node-layout)). The old `spec.nodeGroups` and `spec.defaultNodePool` are gone; a stored object that still has them is read without them. |
+| `spec.aws` | object | `accessConfig.authenticationMode`, `enabledClusterLogTypes`, `upgradePolicy.supportType`, `addons[]` (name, version, configuration, S3 buckets), `controlPlaneLogGroup`, `irsa`, `additionalSecurityGroupIDs` (immutable). |
+| `spec.importFrom.aws` | `{defaultNodeGroupName}` | Imports an existing EKS cluster. The named node group is adopted read-only, as it is; its other node groups are not imported. |
 | `status.phase` | enum | `Provisioning`, `Imported`, `Running`, `Updating`, `Deleting`, `Failed`. |
 | `status.conditions` | list | `Ready`, `Synced`, `NetworkReady`, `ControlPlaneReady`, `NodePoolReady`, `PlatformComponentsReady`, `Frozen`, `UpgradePaused`, `DeletionBlocked`, `Adopted`, `SpecEditIgnored`. |
 | `status.endpoint` | `{url, certificateAuthorityData}` | The API endpoint, once the control plane is ready. |
@@ -1355,7 +1442,7 @@ are marked so in the type; the rest can be updated.
 | `status.platformComponents` | list | Per platform component: `name`, `version`, `phase` (`Pending`, `Installing`, `Ready`, `Failed`), `message`, `chart`, `helmState`, `lastError`, `failures`, `since`, `recoveries`, `chartVersion`, `revision`, `digest`, `attempts`, `countedFailures`, `nextRetryAt`, `lastErrorClass` (`transient`, `chart`, `release`), `lastRecovery`, `unchanged`. |
 | `status.platformRelease` | string | The release the platform components' versions come from. |
 | `status.componentInventory` | list | The Crossplane objects of the platform components (IAM roles, Helm releases). |
-| `status.nodeGroups` | list | The system group, then the tenant's groups: `name`, `platformManaged`, `phase`, `message`, `nodes`, `nodesNotice`. |
+| `status.nodeGroups` | list | The system group, then the platform pool, then a removed tenant group while it drains (`Deleting`): `name`, `platformManaged`, `phase`, `message`, `nodes`, `nodesNotice`. |
 | `status.deprecations` | object | The last deprecation scan's summary (target, times, counts, error). |
 | `status.recommendations` | object | The last sample's summary (times, workloads, containers, `metricsAvailable`, `vpaAvailable`, error, message). |
 | `status.results` | list | One reference per result kind in S3: `kind`, `bucket`, `key`, `etag`, `digest`, `collectedAt`, `attemptedAt`, `total`, `removed`, `incomplete`, `truncated`. |
@@ -1387,7 +1474,9 @@ while a component uses it.
 | `spec.namespace` | string | Namespace in the workload cluster. Required with `install`. |
 | `spec.includes` | list | Makes the definition a bundle of other definitions. |
 | `spec.requires` | list, up to 16 | Components that must be ready first. |
-| `spec.sequence` | int32, 0 to 10000, default 100 | Platform components install in ascending sequence. Karpenter is 0 (CEL: the definition named `karpenter` has sequence 0 and is not disabled); every other shipped definition uses the default. |
+| `spec.role` | `NodeProvisioner`, `NamespaceTenancy` | The part of the platform it plays ([Roles](#platform-components)). Platform only, one per cloud. Unset: an ordinary component. |
+| `spec.sequence` | int32, 0 to 10000, default 100 | Platform components install in ascending sequence. The `NodeProvisioner` is 0 by its role (CEL: it is not disabled), and 0 is no other definition's; every other shipped definition uses the default. |
+| `spec.sizing` | object | What a Platform component runs, for the sizing rule: `deployments` (`name`, `replicas` and `requests`: `platformValues` paths) and `daemonSets` (`name`, `requests`). Unset: no workload. |
 | `spec.versionGroup` | string | Components that are versions of one product, upgraded together (`istio`, `kyverno`). |
 | `spec.upgradeOneMinorAtATime` | bool | Supports in-place upgrades of one minor at a time (Istio). |
 | `spec.conflictsWithAddons` | list | EKS add-ons the cluster must not have while this is enabled. |
@@ -1490,7 +1579,6 @@ Used inside the kinds above:
 | `NetworkResources` | `status.network`, `status.resources` | `cloudNetworkID`, subnet IDs, NAT gateway IDs, egress IPs. |
 | `ClusterResultRef` | `status.results[]` | An S3 result: `kind` (`deprecations`, `recommendations`, `violations`, `violation-events`, `nodes`), `bucket`, `key`, `etag`, `digest`, counts, flags. |
 | `DeprecationFinding` | the S3 kind `deprecations` | `namespace`, `kind`, `name`, `apiVersion`, `component`, `deprecatedIn`, `removedIn`, `replacementAPI`, `replacementAvailableIn`, `source` (`Manifest` or `HelmRelease`), `helmRelease`, `removed`. |
-| `NodeGroupSpec` | `Cluster.spec.nodeGroups[]` | `name` (DNS label), `instanceTypes`, `instanceFamilies`, `architectures` (`Amd64`, `Arm64`), `capacityTypes` (`OnDemand`, `Spot`), `labels`, `taints`, `limits` (`cpu`, `memoryGiB`). |
 
 ### Field mapping to AWS
 
@@ -1515,11 +1603,9 @@ for providers that do not exist yet, and are left out here.
 | `network.network_id` | the private `Subnet`s: `vpcConfig.subnetIds` and `NodeGroup.subnetIds` |
 | `network.zone_ids` | the private subnets of those zones only |
 | `network.service_cidr` | `kubernetesNetworkConfig.serviceIpv4Cidr` |
-| pool `instance_types`, `capacity_type` | `NodeGroup.instanceTypes`, `capacityType` |
-| pool `scaling_config.min_size`, `max_size` | `scalingConfig.minSize`, `maxSize` |
-| pool `scaling_config.desired_size` | `scalingConfig.desiredSize`, sent at creation only |
-| pool `disk_size_gb` | `diskSize` |
-| pool `labels`, `taints` | `labels`, `taint[]` |
+| `nodeGroups.system` (platform config) `instanceTypes`, `capacityType`, `amiType`, `diskSizeGiB` | `NodeGroup.instanceTypes`, `capacityType`, `amiType`, `diskSize` |
+| `nodeGroups.system.minSize` | `NodeGroup.scalingConfig.minSize`, `maxSize`, `desiredSize` |
+| (fixed) | `NodeGroup.labels`, `taint[]`: `node.cluster-vending.io/pool=system` |
 | `labels` (as cloud tags) | `tags` |
 | `spec.access.admin_principals` | `AccessEntry` and an `AccessPolicyAssociation` (`AmazonEKSClusterAdminPolicy`) |
 | `spec.access.access_entries` | `AccessEntry`, and one `AccessPolicyAssociation` per policy |
@@ -1527,7 +1613,6 @@ for providers that do not exist yet, and are left out here.
 | `spec.aws.control_plane_log_group` | cloudwatchlogs `Group` `/aws/eks/<name>/cluster`, created before the `Cluster` |
 | `spec.aws.irsa` | iam `OpenIDConnectProvider` of the cluster's issuer |
 | `spec.aws.additional_security_group_ids` | `Cluster.vpcConfig.securityGroupIds` |
-| `spec.aws.default_node_pool.launch_template` | `NodeGroup.launchTemplate` (an existing template, or a rendered `LaunchTemplate`) |
 | `status.network.egress_ips` | `EIP.atProvider.publicIp` |
 
 Created for every AWS cluster without a spec field: the cluster and node IAM
@@ -1554,7 +1639,7 @@ with JSON or binary bodies. Its services:
 |---|---|
 | `TenantService` | `ListTenants`, `CreateTenant`, `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel`, `BootstrapTenant`, `GetCloudAccount`, `ListCloudAccounts`, `VerifyCloudAccount`, `DeleteCloudAccount`, `GetAccountOnboarding`, `WhoAmI` |
 | `NetworkService` | `CreateNetwork`, `ImportNetwork`, `TakeOverNetwork`, `GetNetwork`, `ListNetworks`, `UpdateNetwork`, `DeleteNetwork`, `ListNetworkEvents` |
-| `ClusterService` | `CreateCluster`, `ImportCluster`, `TakeOverCluster`, `GetCluster`, `ListClusters`, `UpdateCluster`, `DeleteCluster`, `RetryCluster`, `ListClusterEvents`, `ListClusterDeprecations`, `ListClusterRecommendations`, `ListClusterViolations`, `ListClusterViolationEvents`, `GetNodeGroupOptions`, `ListClusterNodeGroupManifests`, `ListNodeGroupNodes` |
+| `ClusterService` | `CreateCluster`, `ImportCluster`, `TakeOverCluster`, `GetCluster`, `ListClusters`, `UpdateCluster`, `DeleteCluster`, `RetryCluster`, `ListClusterEvents`, `ListClusterDeprecations`, `ListClusterRecommendations`, `ListClusterViolations`, `ListClusterViolationEvents`, `ListClusterNodeGroupManifests`, `ListNodeGroupNodes` |
 | `SubTenantService` | `CreateSubTenant`, `GetSubTenant`, `ListSubTenants`, `UpdateSubTenant`, `DeleteSubTenant` |
 | `ComponentService` | `ListComponentDefinitions`, `GetComponentValues`, `EnableComponent`, `UpdateComponent`, `DisableComponent`, `GetComponent`, `ListComponents` |
 | `AdminService` | `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel` |
@@ -1645,7 +1730,7 @@ Accepted by every command.
 | Flag | Meaning |
 |---|---|
 | `--export` | Reads the management cluster (`--kubeconfig`) and writes its `ComponentDefinition`s, `Release`s and `ReleaseChannel`s as clean manifests (no status, uid, resourceVersion, managed fields, finalizers or shipped label and hash; the `cloud.cluster-vending.io/catalog-schema: "1"` annotation added; releases without a serial numbered in creation order). One multi-document stream on stdout, or with `--export-dir <dir>` the layout `definitions/`, `releases/`, `channels/` with one file per object and a `kustomization.yaml`. On stderr it lists how the live definitions differ from this build's embedded catalog. |
-| `--check -f <path\|->` | Reads rendered manifests (`kustomize build ... \| cluster-vending controller --config platform.yaml --check -f -`), makes no cluster call, prints every problem and exits 1 if there is any: the three channels once each, requirements that exist and do not cycle, a requirement's sequence not above its dependent's, sequence 0 for karpenter alone, unique serials, consecutive minors and one minor per channel, a pin for every enabled chart (and companion) on every minor, channels naming releases of the set, each definition's `Valid` checks, the schema annotation, and the sizing of the system group, of the bootstrap set (CPU, memory and pods per node) and of the platform pool against `nodeGroups.system` and `nodeGroups.platform` of `--config` (the defaults without it). Disabling a component switches its dependents off with it: that is not a problem. |
+| `--check -f <path\|->` | Reads rendered manifests (`kustomize build ... \| cluster-vending controller --config platform.yaml --check -f -`), makes no cluster call, prints every problem and exits 1 if there is any: the three channels once each, requirements that exist and do not cycle, a requirement's sequence not above its dependent's, one definition per role per cloud, the `NodeProvisioner` on and alone at sequence 0 and on the system group, unique serials, consecutive minors and one minor per channel, a pin for every enabled chart (and companion) on every minor, channels naming releases of the set, each definition's `Valid` checks, the schema annotation, and the sizing of the system group, of the bootstrap set (CPU, memory and pods per node) and of the platform pool against `nodeGroups.system` and `nodeGroups.platform` of `--config` (the defaults without it). Disabling a component switches its dependents off with it: that is not a problem. |
 
 
 The controller's `--aws-region`, `--aws-source-role-arn` and `--aws-external-id` are
@@ -1679,12 +1764,13 @@ section for the server's one `--config` (a config test keeps the two equal).
 
 ```yaml
 nodeGroups:
-  system:                      # the bootstrap group: the default managed node group of every cluster
-    instanceTypes: [t3.medium] # new clusters only; one architecture, one vCPU/memory class
-    minSize: 2                 # at least 2 (Karpenter's two replicas); the fixed size
-    capacityType: ON_DEMAND    # new clusters only
-    diskSizeGiB: 0             # new clusters only; 0 is EKS's default
-  platform:                    # the Karpenter pool `platform-pool` (PROP-03)
+  system:                      # the default managed node group of every cluster: Karpenter and the EKS add-ons
+    instanceTypes: [t3.medium] # one architecture, one vCPU/memory class
+    minSize: 2                 # at least 2 (Karpenter's two replicas); the fixed size, changed in place
+    capacityType: ON_DEMAND
+    amiType: AL2023_x86_64_STANDARD  # of the instance types' architecture
+    diskSizeGiB: 0             # 0 is EKS's default
+  platform:                    # the Karpenter pool `platform-pool`: everything else
     instanceFamilies: [m7i, m6i]
     instanceSizes: [large, xlarge, 2xlarge]
     architectures: [AMD64]     # exactly one
@@ -1696,13 +1782,12 @@ nodeGroups:
     terminationGracePeriod: 1h
     disruptionBudget: 1        # nodes disrupted at once
     maxPods: 0                 # 0: Karpenter's default; at most 110
-  karpenter:                   # what tenants may create as their own node groups
-    instanceFamilies: [t3]     # empty list or `none`: no restriction
-    instanceTypes: []          # extra allowed types
-    defaults:                  # applied to a tenant group that leaves them unset
-      architectures: [AMD64]
-      capacityTypes: [ON_DEMAND]
 ```
+
+A change of `system.instanceTypes`, `capacityType`, `amiType` or `diskSizeGiB`
+replaces the system group of every cluster the platform created (new group
+first, the old one retired once the new one is `Ready`), rolled out like a code
+change. Tenants define no node groups.
 
 | Key | Flag | Environment | Default |
 |---|---|---|---|
@@ -1712,21 +1797,19 @@ nodeGroups:
 | `system.maxSize` | `--system-node-group-max-size` | `CV_SYSTEM_NODE_GROUP_MAX_SIZE` | ignored, warned about at start (accepted so old configs still start) |
 | `system.size` | `--system-node-group-size` | `CV_SYSTEM_NODE_GROUP_SIZE` | none: the old fixed-size setting, an alias of `minSize` (two different values are an error) |
 | `system.capacityType` | `--system-node-group-capacity-type` | `CV_SYSTEM_NODE_GROUP_CAPACITY_TYPE` | `ON_DEMAND` |
+| `system.amiType` | `--system-node-group-ami-type` | `CV_SYSTEM_NODE_GROUP_AMI_TYPE` | `AL2023_x86_64_STANDARD`; or `AL2023_ARM_64_STANDARD`, `BOTTLEROCKET_x86_64`, `BOTTLEROCKET_ARM_64`, matching the instance types' architecture |
 | `system.diskSizeGiB` | `--system-node-group-disk-size-gib` | `CV_SYSTEM_NODE_GROUP_DISK_SIZE_GIB` | `0` (EKS default) |
 | `platform.instanceFamilies`, `.instanceSizes`, `.architectures`, `.capacityTypes` | `--platform-instance-families`, `-sizes`, `-architectures`, `-capacity-types` | `CV_PLATFORM_INSTANCE_FAMILIES`, ... | `m7i,m6i`; `large,xlarge,2xlarge`; `AMD64`; `ON_DEMAND` |
 | `platform.limits.cpu`, `.memory` | `--platform-limit-cpu`, `--platform-limit-memory` | `CV_PLATFORM_LIMIT_CPU`, `CV_PLATFORM_LIMIT_MEMORY` | `128`, `512Gi` |
 | `platform.consolidationPolicy`, `.consolidateAfter`, `.expireAfter`, `.terminationGracePeriod` | `--platform-consolidation-policy`, `-consolidate-after`, `-expire-after`, `-termination-grace-period` | `CV_PLATFORM_*` | `WhenEmpty`, `5m`, `336h`, `1h` |
 | `platform.disruptionBudget`, `.maxPods` | `--platform-disruption-budget`, `--platform-max-pods` | `CV_PLATFORM_DISRUPTION_BUDGET`, `CV_PLATFORM_MAX_PODS` | `1`, `0` |
-| `karpenter.instanceFamilies` | `--node-group-instance-families` | `CV_NODE_GROUP_INSTANCE_FAMILIES` | `t3` |
-| `karpenter.instanceTypes` | `--node-group-instance-types` | `CV_NODE_GROUP_INSTANCE_TYPES` | none |
-| `karpenter.defaults.architectures` | `--node-group-default-architectures` | `CV_NODE_GROUP_DEFAULT_ARCHITECTURES` | `AMD64` |
-| `karpenter.defaults.capacityTypes` | `--node-group-default-capacity-types` | `CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES` | `ON_DEMAND` |
+| `karpenter.*` (`instanceFamilies`, `instanceTypes`, `defaults.*`) | `--node-group-instance-families`, `-instance-types`, `--node-group-default-architectures`, `-capacity-types` | `CV_NODE_GROUP_*` | ignored, warned about at start (the old tenant node group allowlist; accepted so old configs still start) |
 
 Startup fails with every problem listed: a `minSize` below 2, an empty `system.instanceTypes` or one that mixes architectures, a platform
 family or size not shaped like `m7i` or `xlarge`, a platform pool with more than one
 architecture, a family of another architecture than the pool's, `SPOT` in the platform pool,
 non-positive limits, a disruption budget below 1, `maxPods` above 110, an instance type not like `t3.large`, a family not like `t3`, a capacity
-type other than `ON_DEMAND` or `SPOT`, an architecture other than `AMD64` or `ARM64`.
+type other than `ON_DEMAND` or `SPOT`, an architecture other than `AMD64` or `ARM64`, an `amiType` not in the list or not of the instance types' architecture.
 The two allowlist flags are the names that shipped before the section, and they
 still work.
 
@@ -1736,9 +1819,9 @@ The platform has four ways to get AWS credentials, and never a flag value for a 
 
 | Mode | Where | How |
 |---|---|---|
-| IRSA | Production | The controller's service account and the providers run with the management role through the cluster's OIDC provider. `config/default/kustomization.yaml` sets the annotation. |
+| IRSA | Production | The controller's service account and the providers run with the management role through the cluster's OIDC provider, the API server's with the server role. Both roles come from the management account's templates (`account create --management`, [AWS access and accounts](#aws-access-and-accounts)), which trust exactly those service accounts. The Helm chart (`controller.serviceAccount.annotations`, `server.serviceAccount.annotations`) or `config/default/kustomization.yaml` sets the annotation. |
 | Source role | Either process | `aws-source-role-arn`: the own credentials assume it first, then the tenant role. |
-| Environment keys | Local runs | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` in the shell. The SDK's default chain reads them for the controller and the server. |
+| Environment keys | Local runs | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` in the shell. The SDK's default chain reads them for the controller and the server. To run as the management role (mode B), create it from its template with `LocalPrincipalArn` and export a session of it. |
 | Secret for the providers | Local kind | `--provider-credentials-secret`. The providers and the accounts use the Secret's shared credentials file. The controller copies the key into each tenant namespace as `<providerConfig>-credentials`. |
 
 In every mode the tenant role is assumed for the tenant's account. The
@@ -1748,6 +1831,9 @@ for local testing only.
 ## 6. Operating it
 
 ### Run locally
+
+The step-by-step guide, including another management cluster or AWS account
+and troubleshooting, is [local-development.md](local-development.md).
 
 The controller does the AWS work and is the only process that makes changes in AWS.
 The API server validates and stores. Three terminals, against a kind cluster:
@@ -1797,8 +1883,55 @@ Make targets:
 | `make deprecation-rules PLUTO_VERSION=...` | Refreshes the deprecated-API rules from Pluto. |
 | `make cf-requirements`, `make cf-generate`, `make cf-lint`, `make cf-format-check` | The account role templates: install the Python tools, generate, lint, format-check. |
 | `make docker-build`, `make deploy-manifests` | The container image (nothing is pushed), and the rendered manifests of the controller and the server (nothing is applied). |
+| `make docker-build-ui`, `make helm-lint`, `make helm-template`, `make helm-sync` | The console image; lint and render the Helm chart; copy `config/` RBAC into it ([Install with Helm](#install-with-helm)). |
+| `make kind-load`, `make helm-install-kind` | Load both images into the kind cluster `HELM_KIND_CLUSTER` (default `cv-helm`) and install the chart there. |
 
 No test reads a file under `docs/`. Two tests name a section of this document in a comment.
+
+### Install with Helm
+
+The chart [`charts/cluster-vending`](../charts/cluster-vending/README.md) deploys the
+same objects as `config/` (the kustomize bases stay the reference), with each
+workload on or off from one values file: the API server, the controller, the live
+reader and the console. Crossplane must be installed first (as `hack/start.sh` does).
+
+```sh
+helm install cluster-vending charts/cluster-vending \
+  -n cluster-vending-system --create-namespace \
+  --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws \
+  --set controller.serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::111122223333:role/crossplane-provider-aws
+```
+
+- **Settings.** The `platform` value is the shared settings file: one ConfigMap,
+  mounted at `/etc/cluster-vending/platform.yaml` into the server and the controller,
+  with a checksum annotation that restarts both on a change. Its default is
+  `config/node-groups/platform.yaml`. `aws.*` values are added to it as flat keys.
+  Secrets are referenced by name only.
+- **CRDs.** The chart ships none: the controller installs and updates them on start
+  from its binary. The API server's startup probe waits for them.
+- **Identities.** The controller's service account carries the management role
+  (IRSA). The server's may carry its own server role (`aws.serverRoleArn`), never the
+  management role. The live reader's (`cluster-vending-live`, a fixed name the
+  controller binds in tenant namespaces) has none, and the chart refuses one. The API
+  server gets no workload-cluster credentials. The RBAC rules are copies of
+  `config/` (`make helm-sync`), and `config/helm_chart_test.go` fails when they drift.
+- **Live reader.** One replica, strategy `Recreate`, reachable from the API server's
+  pods only (`networkPolicy.live`, on by default).
+- **Console.** The browser calls only the console's origin (`/api/rpc/...`). The
+  console's server side forwards each call to the API's Service (`CV_API_BASE_URL`).
+  One port-forward is enough:
+  `kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000:3000`.
+  For the CLI: `kubectl -n cluster-vending-system port-forward svc/cluster-vending-server 8080:8080`,
+  then `cluster-vending --server http://localhost:8080 ...`. The image's entrypoint
+  (`ui/docker/serve.mjs`) makes same-origin calls pass whatever host and port the
+  browser uses, which Next's standalone server alone does not do with login off. With
+  web login on, the console needs HTTPS URLs: use `ui.ingress` with TLS.
+- **One release per management cluster**: the names the controller binds in tenant
+  namespaces are fixed.
+
+Images: `make docker-build` (the binary) and `make docker-build-ui` (the console,
+`ui/Dockerfile`, Next.js standalone, non-root). The chart's appVersion is the default
+tag of both.
 
 ### CLI
 
@@ -1812,7 +1945,7 @@ commands `login`, `logout`, `whoami`, `serve`, `controller` are the complete set
 | `tenant` | `create <id>`, `list`, `freeze [--reason --until --wait]`, `freeze status`, `unfreeze [--wait]` | `list` needs no `--tenant`. Freezes are the tenant's own scope. |
 | `account` | `create -f`, `get --id`, `list`, `verify --id [--region ... --wait]`, `delete --id [--wait]` | `create` prints the role template's steps (or the trust, for a custom role). |
 | `network` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--wait]`, `import -f`, `takeover <id> [--wait]`, `events <id> [--only-warnings]` | `--plan` shows the changes without applying them. `--live` reads the status from the management cluster. |
-| `cluster` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed --sort --order]`, `recommendations <id> [--namespace --only-changes --sort --order]`, `nodes <id> [--group --ready \| --not-ready --name --sort --order]`, `nodes <id> --manifests [--group]`, `nodes --options`, `violations <id> [--namespace --engine --sort --order]`, `violations <id> --events`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. `nodes` reads every group the cluster reports unless `--group`; `--manifests` prints the NodePool and EC2NodeClass YAML; `--options` is what the tenant's node groups may use. `violations --events` is the policy and admission events of the last hour. `--sort` takes the list's keys in lower case (`cpu-requested-percent`, `cpu-change`); `--order` is `asc` or `desc`. |
+| `cluster` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed --sort --order]`, `recommendations <id> [--namespace --only-changes --sort --order]`, `nodes <id> [--group --ready \| --not-ready --name --sort --order]`, `nodes <id> --manifests [--group]`, `violations <id> [--namespace --engine --sort --order]`, `violations <id> --events`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. `nodes` reads every group the cluster reports unless `--group`; `--manifests` prints the platform pool's NodePool and EC2NodeClass YAML. `violations --events` is the policy and admission events of the last hour. `--sort` takes the list's keys in lower case (`cpu-requested-percent`, `cpu-change`); `--order` is `asc` or `desc`. |
 | `subtenant` | `create -f [--cluster] [--wait]`, `get <id> --cluster`, `list [--cluster]`, `update <id> -f [--wait]`, `delete <id> --cluster [--etag] [--wait]` | The console's SubTenant manifest: the cluster is `metadata.clusterId` or `--cluster`, the name is `spec.name`. `delete` reads the etag when `--etag` is not given and refuses while deletion protection is on. |
 | `component` | `catalog [--cluster]`, `template <name>`, `enable <name> --cluster [-f] [--validate-only] [--wait]`, `update <id> -f [--validate-only] [--etag]`, `disable <id> [--etag]`, `get <id> [--values]`, `list [--cluster] [--details]` | `template` prints the values file to start from. The version is not a flag. |
 | `admin` | `freeze [--platform \| --tenant \| --network \| --cluster] --reason [--until --wait --reset-exceptions]`, `freeze status`, `unfreeze [scope] [--wait]`, `release list`, `release get --id`, `channel list`, `channel get --id` | Platform admins only. Releases and channels are read-only. |

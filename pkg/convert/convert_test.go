@@ -136,13 +136,12 @@ func TestUnsetStaysUnset(t *testing.T) {
 		"nothing optional": {Region: "us-east-1", Network: &cloudv1.ClusterNetwork{NetworkId: "n"}},
 		"empty messages": {Network: &cloudv1.ClusterNetwork{NetworkId: "n"}, ControlPlane: &cloudv1.ControlPlaneSpec{
 			EndpointAccess: &cloudv1.EndpointAccess{}, SecretsEncryption: &cloudv1.SecretsEncryption{}},
-			DefaultNodePool: &cloudv1.NodePoolSpec{ScalingConfig: &cloudv1.ScalingConfig{}}, Access: &cloudv1.AccessSpec{},
+			Access: &cloudv1.AccessSpec{},
 			Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{AccessConfig: &cloudv1.AwsAccessConfig{},
-				UpgradePolicy: &cloudv1.AwsUpgradePolicy{}, DefaultNodePool: &cloudv1.AwsNodePoolSpec{LaunchTemplate: &cloudv1.AwsLaunchTemplate{}},
+				UpgradePolicy:        &cloudv1.AwsUpgradePolicy{},
 				ControlPlaneLogGroup: &cloudv1.AwsControlPlaneLogGroup{}}}},
 		"false is not absent": {Network: &cloudv1.ClusterNetwork{NetworkId: "n"}, ControlPlane: &cloudv1.ControlPlaneSpec{
 			EndpointAccess: &cloudv1.EndpointAccess{EndpointPrivateAccess: ptr.To(false), EndpointPublicAccess: ptr.To(true)}},
-			DefaultNodePool: &cloudv1.NodePoolSpec{ScalingConfig: &cloudv1.ScalingConfig{DesiredSize: ptr.To(uint32(0))}},
 			Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{Irsa: ptr.To(false),
 				ControlPlaneLogGroup: &cloudv1.AwsControlPlaneLogGroup{Enabled: ptr.To(false)}}}},
 		"an empty provider is a provider": {Network: &cloudv1.ClusterNetwork{NetworkId: "n"},
@@ -161,14 +160,11 @@ func TestEnumSpellings(t *testing.T) {
 	spec, _ := convert.ClusterSpecToAPI(&cloudv1.ClusterSpec{
 		ReleaseChannel:    cloudv1.ReleaseChannel_RELEASE_CHANNEL_BETA,
 		MaintenanceWindow: &cloudv1.MaintenanceWindow{Days: []cloudv1.Weekday{cloudv1.Weekday_WEEKDAY_SATURDAY}},
-		DefaultNodePool: &cloudv1.NodePoolSpec{CapacityType: cloudv1.CapacityType_CAPACITY_TYPE_ON_DEMAND,
-			Taints: []*cloudv1.Taint{{Key: "k", Effect: cloudv1.TaintEffect_TAINT_EFFECT_PREFER_NO_SCHEDULE}}},
 		Access: &cloudv1.AccessSpec{AccessEntries: []*cloudv1.AccessEntry{{Type: cloudv1.AccessEntryType_ACCESS_ENTRY_TYPE_EC2_LINUX,
 			Policies: []*cloudv1.AccessPolicy{{Scope: cloudv1.AccessPolicyScope_ACCESS_POLICY_SCOPE_NAMESPACE}}}}},
 		Provider: &cloudv1.ClusterSpec_Aws{Aws: &cloudv1.AwsClusterSpec{
 			AccessConfig:           &cloudv1.AwsAccessConfig{AuthenticationMode: cloudv1.AwsAuthenticationMode_AWS_AUTHENTICATION_MODE_API_AND_CONFIG_MAP},
 			EnabledClusterLogTypes: []cloudv1.AwsClusterLogType{cloudv1.AwsClusterLogType_AWS_CLUSTER_LOG_TYPE_CONTROLLER_MANAGER},
-			DefaultNodePool:        &cloudv1.AwsNodePoolSpec{AmiType: cloudv1.AwsAmiType_AWS_AMI_TYPE_AL2023_X86_64_STANDARD},
 		}},
 	}, "n")
 	layout := convert.LayoutToAPI(&cloudv1.NetworkLayout{NatGatewayMode: cloudv1.NatGatewayMode_NAT_GATEWAY_MODE_PER_ZONE,
@@ -176,13 +172,10 @@ func TestEnumSpellings(t *testing.T) {
 	for got, want := range map[string]string{
 		string(spec.ReleaseChannel):                                          "Beta",
 		string(spec.MaintenanceWindow.Days[0]):                               "Saturday",
-		string(spec.DefaultNodePool.CapacityType):                            "OnDemand",
-		string(spec.DefaultNodePool.Taints[0].Effect):                        "PreferNoSchedule",
 		string(spec.Access.AccessEntries[0].Type):                            "EC2_LINUX",
 		string(spec.Access.AccessEntries[0].Policies[0].Scope):               "Namespace",
 		string(spec.AWS.AccessConfig.AuthenticationMode):                     "API_AND_CONFIG_MAP",
 		string(spec.AWS.EnabledClusterLogTypes[0]):                           "controllerManager",
-		string(spec.AWS.DefaultNodePool.AMIType):                             "AL2023_x86_64_STANDARD",
 		string(layout.NATGatewayMode):                                        "PerZone",
 		string(layout.Subnets[0].Role):                                       "Private",
 		string(convert.LayoutToAPI(&cloudv1.NetworkLayout{}).NATGatewayMode): "",

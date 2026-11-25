@@ -35,7 +35,10 @@ type rowsWorld struct {
 	fw     *fakeWorkload
 }
 
-func newRowsWorld(t *testing.T, fw *fakeWorkload, bucketReady bool, groups ...*cloudv1.NodeGroupSpec) *rowsWorld {
+// newRowsWorld is a cluster whose workload cluster is fw. A group's nodes
+// are rows whatever the group: tests give fw a tenant group (tenantGroup)
+// for a status entry of it while it is removed.
+func newRowsWorld(t *testing.T, fw *fakeWorkload, bucketReady bool) *rowsWorld {
 	t.Helper()
 	rw := &rowsWorld{fw: fw}
 	w, src := platformWorld(t, func(d *reconcile.Deps) {
@@ -43,14 +46,6 @@ func newRowsWorld(t *testing.T, fw *fakeWorkload, bucketReady bool, groups ...*c
 		d.ResultsS3 = func(awscloud.Access, string) (results.S3API, error) { return rw.s3, nil }
 	})
 	src.release.Spec.Content.Kubernetes[0].NodeAMIPin = "v20261107"
-	row := w.cluster(t)
-	spec, err := SpecOf(row)
-	require.NoError(t, err)
-	spec.NodeGroups = groups
-	raw, err := Encode(spec)
-	require.NoError(t, err)
-	row.Spec = raw
-	require.NoError(t, w.store.Clusters().Update(t.Context(), row))
 	rw.world, rw.row = w, w.cluster(t)
 	iamFake{role: true, access: true, policy: true, attachments: 4, passRoleOn: nodeRoleARN(rw.row)}.seed(t, w, rw.row, "us-east-1")
 
@@ -139,9 +134,9 @@ func TestNodeRowsAreCollectedPerGroupAndWritten(t *testing.T) {
 	gpu2.Status.Conditions = append(gpu2.Status.Conditions, corev1.NodeCondition{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionTrue},
 		corev1.NodeCondition{Type: corev1.NodeDiskPressure, Status: corev1.ConditionFalse}, corev1.NodeCondition{Type: corev1.NodeNetworkUnavailable, Status: corev1.ConditionTrue})
 	gpu3.Labels["kubernetes.io/arch"] = "arm64"
-	fw := newFakeWorkload(interceptor.Funcs{}, gpu1, gpu2, gpu3, karpenterNode("ip-10-0-2-1", "platform", true),
-		nodeClaim("gpu-abc", "ip-10-0-1-1", "Launched", "Registered", "Initialized", "Ready"), nodeClaim("gpu-def", "ip-10-0-1-2", "Launched", "Registered"))
-	rw := newRowsWorld(t, fw, true, &cloudv1.NodeGroupSpec{Name: "gpu", InstanceFamilies: []string{"g5"}})
+	fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), gpu1, gpu2, gpu3, karpenterNode("ip-10-0-2-1", "platform", true),
+		nodeClaim("gpu-abc", "ip-10-0-1-1", "Launched", "Registered", "Initialized", "Ready"), nodeClaim("gpu-def", "ip-10-0-1-2", "Launched", "Registered"))...)
+	rw := newRowsWorld(t, fw, true)
 	// The system group's nodes are the ones labelled with the default node
 	// group's name; another managed group's nodes are not.
 	systemGroup := crossplaneaws.DefaultNodeGroupName(crossplaneaws.ClusterPrefix(rw.row.TenantID, rw.row.ID, rw.row.Name))
@@ -153,7 +148,7 @@ func TestNodeRowsAreCollectedPerGroupAndWritten(t *testing.T) {
 
 	// Counts stay in the CR; no per-node rows.
 	require.Equal(t, int32(3), statusOf(res, "gpu").GetNodes(), "the count stays in the status")
-	for _, g := range res.groups {
+	for _, g := range res.removed {
 		require.Empty(t, g.GetNodesNotice())
 	}
 	idx := rw.index(t)
@@ -209,7 +204,7 @@ func TestNodeRowsAreCollectedPerGroupAndWritten(t *testing.T) {
 
 func TestNodeRowsAreWrittenAtMostOncePerMinuteAndOnlyWhenChanged(t *testing.T) {
 	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "platform", true), karpenterNode("b", "gpu", true))
-	rw := newRowsWorld(t, fw, true, &cloudv1.NodeGroupSpec{Name: "gpu", InstanceFamilies: []string{"g5"}})
+	rw := newRowsWorld(t, fw, true)
 	rw.pass(t)
 	first := rw.puts()
 	require.Positive(t, first)
@@ -263,11 +258,11 @@ func TestUnchangedNodeRowsRefreshTheSummaryTimeSlowly(t *testing.T) {
 }
 
 func TestNodeRowsNeedingNoS3AreSilent(t *testing.T) {
-	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "gpu", true))
-	w, _ := nodeGroupWorld(t, fw, &cloudv1.NodeGroupSpec{Name: "gpu"}) // no ResultsS3: a test, or a controller with no AWS
+	fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), karpenterNode("a", "gpu", true))...)
+	w, _ := nodeGroupWorld(t, fw) // no ResultsS3: a test, or a controller with no AWS
 	res := passOf(w, w.cluster(t), karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 	require.Equal(t, int32(1), statusOf(res, "gpu").GetNodes())
-	for _, g := range res.groups {
+	for _, g := range res.removed {
 		require.Empty(t, g.GetNodesNotice())
 	}
 }
@@ -289,14 +284,14 @@ func TestNodeRowsWhenS3IsUnavailable(t *testing.T) {
 		}, "writing to the results bucket failed"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "platform", true), karpenterNode("b", "gpu", true))
-			rw := newRowsWorld(t, fw, tt.ready, &cloudv1.NodeGroupSpec{Name: "gpu", InstanceFamilies: []string{"g5"}})
+			fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), karpenterNode("a", "platform", true), karpenterNode("b", "gpu", true))...)
+			rw := newRowsWorld(t, fw, tt.ready)
 			rw.s3.Fail = tt.fail
 
 			res := rw.pass(t)
 
 			require.Equal(t, int32(1), statusOf(res, "gpu").GetNodes(), "counts are still there")
-			for _, g := range res.groups {
+			for _, g := range res.removed {
 				require.Equal(t, "the node list is unavailable: "+tt.notice, g.GetNodesNotice(), g.GetName())
 			}
 			require.Nil(t, rw.cluster(t).ResultRef("nodes"))
@@ -307,13 +302,13 @@ func TestNodeRowsWhenS3IsUnavailable(t *testing.T) {
 
 // A throttled pass keeps the notice of the last attempt.
 func TestThrottledPassKeepsTheNodesNotice(t *testing.T) {
-	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "gpu", true))
-	rw := newRowsWorld(t, fw, false, &cloudv1.NodeGroupSpec{Name: "gpu"})
+	fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), karpenterNode("a", "gpu", true))...)
+	rw := newRowsWorld(t, fw, false)
 	first := rw.pass(t)
 	require.NotEmpty(t, statusOf(first, "gpu").GetNodesNotice())
 	require.True(t, first.system.noticeSet && first.system.notice != "", "the system group's status carries it too")
 	// The recorded status is what the next pass starts from.
-	st := &cloudv1.ClusterStatus{NodeGroups: first.groups}
+	st := &cloudv1.ClusterStatus{NodeGroups: first.removed}
 	rw.rememberStatus(t, st)
 	rw.at(10 * time.Second)
 	second := rw.pass(t)

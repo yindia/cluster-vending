@@ -27,8 +27,8 @@ func TestEveryRenderedFieldIsClassified(t *testing.T) {
 	plan.ResultsBucket = true                             // the results bucket and its settings
 	plan.Addons = []crossplaneaws.AddonPlan{
 		{Name: "coredns", Version: "v1.12.0-eksbuild.1", ConfigurationValues: `{"replicaCount":3}`},
-		{Name: crossplaneaws.AddonEBSCSI}, {Name: crossplaneaws.AddonEFSCSI}, {Name: crossplaneaws.AddonFSxCSI},
-		{Name: crossplaneaws.AddonMountpointS3, S3BucketNames: []string{"data"}},
+		{Name: "aws-ebs-csi-driver"}, {Name: "aws-efs-csi-driver"}, {Name: "aws-fsx-csi-driver"},
+		{Name: "aws-mountpoint-s3-csi-driver", S3BucketNames: []string{"data"}},
 	}
 	seen := 0
 	for _, obj := range crossplaneaws.ClusterResources(plan) {

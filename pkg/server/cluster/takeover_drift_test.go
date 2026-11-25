@@ -175,7 +175,9 @@ func TestImportOfATransientClusterWaits(t *testing.T) {
 // A takeover renders every planned object fully managed: one the customer
 // deleted since the import (its object gone, or its Observe-only object
 // reporting the cloud resource does not exist) would be created again, so
-// the takeover is refused naming it.
+// the takeover is refused naming it and telling to import again. One
+// Crossplane has not reported on yet is refused too, but only until it
+// has: the message says to wait and retry, not to import again.
 func TestTakeOverRefusesAnImportWhoseResourcesAreGone(t *testing.T) {
 	association := func(t *testing.T, w world) awseks.AccessPolicyAssociation {
 		t.Helper()
@@ -185,34 +187,63 @@ func TestTakeOverRefusesAnImportWhoseResourcesAreGone(t *testing.T) {
 		}
 		return list.Items[0]
 	}
-	cases := map[string]func(t *testing.T, w world) string{
-		"object deleted": func(t *testing.T, w world) string {
+	setConditions := func(t *testing.T, w world, a *awseks.AccessPolicyAssociation, conds ...xpv2.Condition) {
+		t.Helper()
+		a.Status.Conditions = nil
+		a.SetConditions(conds...)
+		if err := w.kube.Update(t.Context(), a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	importAgain := "delete the import and import it again"
+	waitRetry := "wait for the import to finish observing its resources, then retry the takeover"
+	cases := map[string]struct {
+		change  func(t *testing.T, w world) string
+		want    []string
+		notWant string
+	}{
+		"object deleted": {func(t *testing.T, w world) string {
 			a := association(t, w)
 			if err := w.kube.Delete(t.Context(), &a); err != nil {
 				t.Fatal(err)
 			}
 			return a.Name
-		},
-		"external resource gone": func(t *testing.T, w world) string {
+		}, []string{"gone from the management cluster", importAgain}, waitRetry},
+		"external resource gone": {func(t *testing.T, w world) string {
 			a := association(t, w)
-			a.SetConditions(xpv2.ReconcileError(errors.New("external resource does not exist")))
-			if err := w.kube.Update(t.Context(), &a); err != nil {
-				t.Fatal(err)
-			}
+			setConditions(t, w, &a, xpv2.Available(), xpv2.ReconcileError(errors.New("external resource does not exist")))
 			return a.Name
-		},
+		}, []string{"Crossplane reports its cloud resource missing or failing", "external resource does not exist", importAgain}, waitRetry},
+		"not reported yet": {func(t *testing.T, w world) string {
+			a := association(t, w)
+			setConditions(t, w, &a)
+			return a.Name
+		}, []string{"Crossplane has not reported on its cloud resource yet", waitRetry}, importAgain},
+		"synced unknown": {func(t *testing.T, w world) string {
+			a := association(t, w)
+			setConditions(t, w, &a, xpv2.Available(), xpv2.Condition{Type: xpv2.TypeSynced, Status: "Unknown", Reason: "Pending"})
+			return a.Name
+		}, []string{"Crossplane has not reported on its cloud resource yet", waitRetry}, importAgain},
 	}
-	for name, change := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := importWorld(t, terraformCluster())
 			c := importTF(t, w)
 			observeAsImported(t, w, c)
-			gone := change(t, w)
+			gone := tc.change(t, w)
 
 			_, err := w.svc.TakeOverCluster(t.Context(), takeOverRequest(c))
 
 			if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "AccessPolicyAssociation "+gone) {
 				t.Fatalf("err = %v, want FAILED_PRECONDITION naming AccessPolicyAssociation %s", err, gone)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to say %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), tc.notWant) || strings.Contains(err.Error(), "changed since it was imported") {
+				t.Errorf("err = %v, want it not to say %q or that the cluster changed", err, tc.notWant)
 			}
 			if got := storedCluster(t, w, c.GetId()).GetStatus().GetState(); got != cloudv1.ClusterState_CLUSTER_STATE_IMPORTED {
 				t.Errorf("state = %s, want still IMPORTED", got)

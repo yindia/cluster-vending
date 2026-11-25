@@ -200,49 +200,89 @@ func (s *Reconciler) CarriedOverConflict(ctx context.Context, row *model.Cluster
 // versions and the access entries' groups. The takeover applies the stored
 // plan, so a difference means it would push old values (a version EKS
 // refuses, reverted CIDRs, an add-on rolled back). A field the object does
-// not report yet is not a difference. A planned object that is gone, or
-// whose provider does not report its cloud resource (deleted in AWS since),
-// is one too: owned, it would be created again. Empty when the row has no
-// stored objects (a cluster the platform created, or an older import).
+// not report yet is not a difference. Empty when the row has no stored
+// objects (a cluster the platform created, or an older import).
+//
+// A planned object that cannot be owned as planned refuses the takeover
+// with FailedPrecondition instead. One gone from the management cluster,
+// or whose provider reports its cloud resource missing or failing
+// (deleted in AWS since: owned, it would be created again), says to import
+// again. One the provider has not reported on yet says to wait and retry:
+// nothing changed, the import is still observing it.
 func (s *Reconciler) ImportDrift(ctx context.Context, row *model.Cluster) ([]string, error) {
 	planned, _, ok, err := storedImportObjects(row, s.deps.Kube.Scheme())
 	if err != nil || !ok {
 		return nil, err
 	}
-	var diffs []string
+	var diffs, gone, pending []string
 	for _, obj := range planned {
-		live, gone, err := s.liveOf(ctx, obj)
+		live, st, err := s.liveOf(ctx, obj)
 		if err != nil {
 			return nil, err
 		}
-		if gone != "" {
-			diffs = append(diffs, gone)
-			continue
+		switch st.kind {
+		case liveGone, liveFailing:
+			gone = append(gone, st.why)
+		case livePending:
+			pending = append(pending, st.why)
+		default:
+			if live != nil {
+				diffs = append(diffs, driftOf(obj, live)...)
+			}
 		}
-		if live != nil {
-			diffs = append(diffs, driftOf(obj, live)...)
-		}
+	}
+	if len(gone) > 0 {
+		return nil, fault.New(fault.FailedPrecondition, fmt.Sprintf(
+			"resources of the import are gone since it was imported, and taking over would create them again: %s; delete the import and import it again to review the current plan",
+			strings.Join(gone, "; ")))
+	}
+	if len(pending) > 0 {
+		return nil, fault.New(fault.FailedPrecondition, fmt.Sprintf(
+			"the import has not finished observing its resources: %s; wait for the import to finish observing its resources, then retry the takeover (cluster get --live)",
+			strings.Join(pending, "; ")))
 	}
 	return diffs, nil
 }
 
-// liveOf reads the object as the management cluster has it now. gone says
-// why it cannot be owned as planned: missing, or its cloud resource not
-// observed (not Ready). live is set for the kinds ImportDrift compares.
-func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (live client.Object, gone string, err error) {
+// liveKind says whether a planned object can be owned as planned.
+type liveKind int
+
+const (
+	// liveObserved: its provider observes the cloud resource.
+	liveObserved liveKind = iota
+	// liveGone: the object is gone from the management cluster.
+	liveGone
+	// liveFailing: its provider reports the cloud resource missing or
+	// failing (Synced=False).
+	liveFailing
+	// livePending: its provider has not reported on it yet.
+	livePending
+)
+
+// liveState is a planned object's liveKind, and why for the refusal (it
+// names the object).
+type liveState struct {
+	kind liveKind
+	why  string
+}
+
+// liveOf reads the object as the management cluster has it now. st says
+// whether it can be owned as planned; live is set for the kinds
+// ImportDrift compares, once observed.
+func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (live client.Object, st liveState, err error) {
 	ref, err := managed.RefOf(planned, s.deps.Kube.Scheme())
 	if err != nil {
-		return nil, "", fault.New(fault.Internal, err.Error())
+		return nil, st, fault.New(fault.Internal, err.Error())
 	}
 	u, err := s.deps.Objects().Read(ctx, ref)
 	if err != nil {
-		return nil, "", fault.New(fault.Unavailable, fmt.Sprintf("cannot read %s %s: %v", ref.Kind, ref.Name, err))
+		return nil, st, fault.New(fault.Unavailable, fmt.Sprintf("cannot read %s %s: %v", ref.Kind, ref.Name, err))
 	}
 	if u == nil {
-		return nil, fmt.Sprintf("%s %s: gone from the management cluster", ref.Kind, ref.Name), nil
+		return nil, liveState{liveGone, fmt.Sprintf("%s %s: gone from the management cluster", ref.Kind, ref.Name)}, nil
 	}
-	if why, ok := observed(ref, u); !ok {
-		return nil, fmt.Sprintf("%s %s: its cloud resource is not observed (%s)", ref.Kind, ref.Name, why), nil
+	if st = observed(ref, u); st.kind != liveObserved {
+		return nil, st, nil
 	}
 	switch planned.(type) {
 	case *awseks.Cluster:
@@ -254,39 +294,55 @@ func (s *Reconciler) liveOf(ctx context.Context, planned client.Object) (live cl
 	case *awseks.AccessEntry:
 		live = &awseks.AccessEntry{}
 	default:
-		return nil, "", nil
+		return nil, st, nil
 	}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, live); err != nil {
-		return nil, "", fault.New(fault.Internal, fmt.Sprintf("%s %s: %v", ref.Kind, ref.Name, err))
+		return nil, st, fault.New(fault.Internal, fmt.Sprintf("%s %s: %v", ref.Kind, ref.Name, err))
 	}
-	return live, "", nil
+	return live, st, nil
 }
 
-// observed reports whether u's provider observes its cloud resource: Ready
-// and not Synced=False/Unknown. An Observe-only object whose resource is
-// deleted keeps Ready and turns Synced=False ("external resource does not
-// exist"). why is the provider's message otherwise.
-func observed(ref managed.Ref, u *unstructured.Unstructured) (why string, ok bool) {
+// observed says whether u's provider observes its cloud resource: Ready
+// (or UPDATING) and Synced neither False nor Unknown. An Observe-only
+// object whose resource is deleted keeps Ready and turns Synced=False
+// ("external resource does not exist"): failing, with the provider's
+// message. No conditions yet, Synced Unknown, a reference not resolved yet
+// (WAITING) or not Ready yet: not reported on yet.
+func observed(ref managed.Ref, u *unstructured.Unstructured) liveState {
 	v := managed.View(ref, u)
 	state := v.GetState()
+	name := ref.Kind + " " + ref.Name
+	if v.GetSynced() == cloudv1.ConditionStatus_CONDITION_STATUS_FALSE &&
+		state != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_WAITING {
+		why := name + ": Crossplane reports its cloud resource missing or failing"
+		if m := conditionMessage(u, "Synced"); m != "" {
+			why += " (" + m + ")"
+		}
+		return liveState{liveFailing, why}
+	}
 	ready := state == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY ||
 		state == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_UPDATING
-	synced := v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_FALSE &&
-		v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_UNKNOWN
-	if ready && synced {
-		return "", true
+	if ready && v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_FALSE &&
+		v.GetSynced() != cloudv1.ConditionStatus_CONDITION_STATUS_UNKNOWN {
+		return liveState{kind: liveObserved}
 	}
-	why = v.GetMessage()
+	why := name + ": Crossplane has not reported on its cloud resource yet"
+	if m := v.GetMessage(); m != "" {
+		why += " (" + m + ")"
+	}
+	return liveState{livePending, why}
+}
+
+// conditionMessage is the message of u's condition of type t.
+func conditionMessage(u *unstructured.Unstructured, t string) string {
 	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
 	for _, c := range conds {
-		if m, _ := c.(map[string]any); m["type"] == "Synced" && m["status"] != "True" {
-			why, _ = m["message"].(string)
+		if m, _ := c.(map[string]any); m["type"] == t {
+			msg, _ := m["message"].(string)
+			return msg
 		}
 	}
-	if why == "" {
-		why = "not reported yet"
-	}
-	return why, false
+	return ""
 }
 
 // driftOf compares a planned object with the same object as observed.

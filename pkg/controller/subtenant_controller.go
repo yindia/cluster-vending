@@ -56,8 +56,13 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.deps.Direct.Get(ctx, req.NamespacedName, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.pace.forget(req.String())
+			forgetSubTenantOutages(req.NamespacedName, "")
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	forgetSubTenantOutages(req.NamespacedName, obj.UID)
+	if obj.DeletionTimestamp.IsZero() || !controllerutil.ContainsFinalizer(obj, cloud.SubTenantFinalizer) {
+		subTenantUnreachable.Delete(obj.UID)
 	}
 	release, ok := r.pace.acquire(obj.Spec.ClusterRef.ID)
 	if !ok {
@@ -76,6 +81,9 @@ func (r *SubTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	parent, err := r.subTenantParent(ctx, obj)
 	if err != nil {
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, "ParentBindingUnavailable", err.Error(), true)
+	}
+	if deleting, _ := parentRemoval(parent); !deleting {
+		subTenantUnreachable.Delete(obj.UID)
 	}
 	d := r.deps.Deps
 	d.Kube = r.deps.Direct

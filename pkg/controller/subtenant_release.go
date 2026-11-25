@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -15,10 +16,29 @@ import (
 	platform "github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
-// subTenantUnreachable is when each SubTenant being deleted, whose parent
-// is being deleted, first could not use the parent's workload cluster. A
-// restart forgets it: the timeout then counts again.
+// subTenantUnreachable is, by SubTenant UID, when each SubTenant being
+// deleted, whose parent is being deleted, first could not use the parent's
+// workload cluster in the current outage. A restart forgets it: the timeout
+// then counts again.
 var subTenantUnreachable sync.Map
+
+// subTenantOutage is a subTenantUnreachable entry. The key lets one be
+// forgotten once its SubTenant is gone and only its name is known.
+type subTenantOutage struct {
+	key   types.NamespacedName
+	since time.Time
+}
+
+// forgetSubTenantOutages forgets the outages recorded for SubTenants named
+// key other than keep (the one that exists now, if any): those are gone.
+func forgetSubTenantOutages(key types.NamespacedName, keep types.UID) {
+	subTenantUnreachable.Range(func(uid, value any) bool {
+		if uid.(types.UID) != keep && value.(subTenantOutage).key == key {
+			subTenantUnreachable.Delete(uid)
+		}
+		return true
+	})
+}
 
 // parentRemoval says whether the parent cluster is being deleted, and with
 // force (DeleteClusterRequest.force: the in-cluster cleanup is skipped).
@@ -43,8 +63,8 @@ func (r *SubTenantReconciler) workloadUnavailable(ctx context.Context, obj *clou
 		subTenantUnreachable.Delete(obj.UID)
 		return r.subTenantReport(ctx, obj, st, cloud.SubTenantStatePending, reason, message, warning)
 	}
-	first, _ := subTenantUnreachable.LoadOrStore(obj.UID, time.Now())
-	if time.Since(first.(time.Time)) >= r.teardownTimeout() {
+	first, _ := subTenantUnreachable.LoadOrStore(obj.UID, subTenantOutage{key: client.ObjectKeyFromObject(obj), since: time.Now()})
+	if time.Since(first.(subTenantOutage).since) >= r.teardownTimeout() {
 		return r.releaseWithParent(ctx, obj, st, "ParentUnreachable",
 			"The parent cluster is being deleted and its workload API could not be reached; releasing this controller's protection, the cluster's deletion removes its namespaces")
 	}

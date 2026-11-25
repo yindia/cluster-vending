@@ -84,15 +84,15 @@ bin/cluster-vending --server http://localhost:8080 tenant list
 A port-forward enters the pod's network namespace, so the network policies do
 not block it.
 
-The console's RPC route refuses a request whose `Origin` is not its own. Next's
-standalone server derives "its own" from its listen address (`http://0.0.0.0:3000`),
-not from the host the browser used, so with login off every browser call would be
-refused behind a port-forward or an Ingress. The image's entrypoint
-(`ui/docker/serve.mjs`) sits in front of Next on port 3000 and runs Next on
-loopback. When a request's `Origin` names the host it was sent to (a same-origin
-call), the entrypoint rewrites `Origin` to Next's internal origin. Any other
-`Origin` passes through unchanged and is still refused. With login on, nothing is
-rewritten: the route checks against `AUTH_URL`.
+The console's RPC route refuses a request whose `Origin` is not its own. With
+login off, "its own" is the host the browser addressed (the `Host` header), so a
+port-forward or an Ingress works with no setting: a page on any other origin, or a
+request marked `Sec-Fetch-Site: cross-site`, is refused. Two optional settings,
+through `ui.extraEnv`: `CV_PUBLIC_ORIGIN` (e.g. `https://console.example.com`)
+accepts that origin as well, and `CV_TRUST_FORWARDED_HEADERS=true` checks the first
+`X-Forwarded-Host`/`X-Forwarded-Proto` instead of `Host`. Set the latter only when
+an ingress in front of the console sets those headers itself. With login on, the
+route accepts the `AUTH_URL` origin only.
 
 With web login on (`ui.auth.enabled`), the console refuses plain-HTTP URLs in
 production (`AUTH_URL` and the issuer must be HTTPS). Use the Ingress with TLS

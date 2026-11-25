@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { proxyRPC } from "./proxy";
+import { checkOrigin, proxyRPC } from "./proxy";
 
 function request(options: { origin?: string; body?: string; headers?: Record<string, string> } = {}) {
   return new Request("https://console.example.test/api/rpc/cloud.v1.TenantService/WhoAmI", {
     method: "POST", body: options.body ?? "{}",
-    headers: { "Content-Type": "application/json", Origin: options.origin ?? "https://console.example.test", ...options.headers },
+    headers: { "Content-Type": "application/json", Host: "console.example.test", Origin: options.origin ?? "https://console.example.test", ...options.headers },
   });
 }
 
@@ -74,4 +74,70 @@ test("bridge uses structured errors without exposing backend credentials or netw
   const body = await response.json();
   assert.equal(body.code, "unavailable");
   assert.doesNotMatch(body.message, /private-host|secret|127\.0\.0\.1/);
+});
+
+// Next's standalone server builds request.url from its listen address, not
+// from the host the browser used.
+function addressed(headers: Record<string, string>) {
+  return new Request("http://0.0.0.0:3000/api/rpc/cloud.v1.TenantService/WhoAmI", { method: "POST", body: "{}", headers: { "Content-Type": "application/json", ...headers } });
+}
+
+test("login off: Origin must name the Host the request was addressed to, not Next's listen address", () => {
+  const off = { publicOrigin: "", trustForwardedHeaders: false };
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000" }), off), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "console.example.com", Origin: "https://console.example.com" }), off), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "Localhost:3000", Origin: "http://localhost:3000" }), off), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000" }), off), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://evil.example" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3001" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://0.0.0.0:3000" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "null" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "file://localhost:3000" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000/path" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Origin: "http://localhost:3000" }), off), "deny");
+});
+
+test("login off: Sec-Fetch-Site cross-site is refused even when the host matches", () => {
+  const off = { publicOrigin: "", trustForwardedHeaders: false };
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000", "Sec-Fetch-Site": "cross-site" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", "Sec-Fetch-Site": "cross-site" }), off), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000", "Sec-Fetch-Site": "same-origin" }), off), "allow");
+});
+
+test("login off: forwarded headers are ignored unless explicitly trusted", () => {
+  const spoofed = { Host: "console.internal:3000", "X-Forwarded-Host": "evil.example", "X-Forwarded-Proto": "https", Origin: "https://evil.example" };
+  assert.equal(checkOrigin(addressed(spoofed), { publicOrigin: "", trustForwardedHeaders: false }), "deny");
+  const viaIngress = { Host: "console.internal:3000", "X-Forwarded-Host": "console.example.com, proxy.internal", "X-Forwarded-Proto": "https", Origin: "https://console.example.com" };
+  assert.equal(checkOrigin(addressed(viaIngress), { publicOrigin: "", trustForwardedHeaders: false }), "deny");
+  assert.equal(checkOrigin(addressed(viaIngress), { publicOrigin: "", trustForwardedHeaders: true }), "allow");
+  assert.equal(checkOrigin(addressed({ ...viaIngress, "X-Forwarded-Proto": "http" }), { publicOrigin: "", trustForwardedHeaders: true }), "deny");
+  assert.equal(checkOrigin(addressed({ ...viaIngress, Origin: "https://evil.example" }), { publicOrigin: "", trustForwardedHeaders: true }), "deny");
+});
+
+test("login off: a configured public origin is accepted in addition to the Host", () => {
+  const options = { publicOrigin: "https://console.example.com/", trustForwardedHeaders: false };
+  assert.equal(checkOrigin(addressed({ Host: "console.internal:3000", Origin: "https://console.example.com" }), options), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000" }), options), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "console.internal:3000", Origin: "http://console.example.com" }), options), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "console.internal:3000", Origin: "https://evil.example" }), options), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000" }), { publicOrigin: "not a url" }), "misconfigured");
+});
+
+test("login on: only the AUTH_URL origin passes, whatever the Host or forwarded headers say", () => {
+  const on = { trustedOrigin: "https://console.example.com", trustForwardedHeaders: true };
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "https://console.example.com" }), on), "allow");
+  assert.equal(checkOrigin(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000" }), on), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "evil.example", "X-Forwarded-Host": "evil.example", Origin: "https://evil.example" }), on), "deny");
+  assert.equal(checkOrigin(addressed({ Host: "console.example.com", Origin: "https://console.example.com", "Sec-Fetch-Site": "cross-site" }), on), "deny");
+});
+
+test("bridge forwards a same-host call behind a port-forward and refuses before fetch otherwise", async () => {
+  let called = 0;
+  const options = { baseUrl: "https://platform.example.test", publicOrigin: "", trustForwardedHeaders: false, fetch: (async () => { called++; return Response.json({}); }) as typeof fetch };
+  assert.equal((await proxyRPC(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000" }), "cloud.v1.TenantService", "WhoAmI", options)).status, 200);
+  assert.equal(called, 1);
+  assert.equal((await proxyRPC(addressed({ Host: "localhost:3000", Origin: "http://evil.example" }), "cloud.v1.TenantService", "WhoAmI", options)).status, 403);
+  assert.equal((await proxyRPC(addressed({ Host: "localhost:3000", "Sec-Fetch-Site": "cross-site" }), "cloud.v1.TenantService", "WhoAmI", options)).status, 403);
+  assert.equal((await proxyRPC(addressed({ Host: "localhost:3000", Origin: "http://localhost:3000" }), "cloud.v1.TenantService", "WhoAmI", { ...options, publicOrigin: "ftp://x" })).status, 503);
+  assert.equal(called, 1);
 });

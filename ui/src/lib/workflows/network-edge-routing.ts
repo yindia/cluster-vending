@@ -8,7 +8,11 @@ export type RoutedArchitectureEdge = ArchitectureEdge & { data: ArchitectureEdge
 export type RoutingOptions = {
   /** Return the complete rendered label box (including padding), in diagram units. */
   measureLabel?: (text: string, edge: ArchitectureEdge) => { width: number; height: number };
+  /** Called once per candidate path checked and per grid cell expanded: a
+   * deterministic measure of routing work, independent of machine speed. */
+  onSearchStep?: () => void;
 };
+const noStep = () => {};
 export class ArchitectureRoutingError extends Error {
   constructor(public readonly edgeId: string, public readonly reason: string) {
     super(`Cannot route edge ${edgeId}: ${reason}`);
@@ -120,7 +124,7 @@ function congestion(a: Point, b: Point, segments: Segment[]): number {
   }
   return cost;
 }
-function search(start: Point, end: Point, obstacles: Obstacle[], used: Point[][], quickOnly = false): { points: Point[]; cost: number } | undefined {
+function search(start: Point, end: Point, obstacles: Obstacle[], used: Point[][], quickOnly = false, step: () => void = noStep): { points: Point[]; cost: number } | undefined {
   if (obstacles.some(r => contains(r, start) || contains(r, end))) return;
   const segments = used.flatMap(points => points.slice(1).map((b, i) => ({ a: points[i], b })));
   // At most twelve additional coordinates per axis, independent of edge count.
@@ -128,7 +132,7 @@ function search(start: Point, end: Point, obstacles: Obstacle[], used: Point[][]
     .sort((a, b) => Math.abs(a - (vertical ? start.x + end.x : start.y + end.y) / 2) - Math.abs(b - (vertical ? start.x + end.x : start.y + end.y) / 2) || a - b)
     .slice(0, 6).flatMap(value => [value - 12, value + 12]);
   const laneX = lanes(true), laneY = lanes(false);
-  const clearPath = (points: Point[]) => points.slice(1).every((p, i) => !obstacles.some(r => segmentHitsRectangle(points[i], p, r)));
+  const clearPath = (points: Point[]) => { step(); return points.slice(1).every((p, i) => !obstacles.some(r => segmentHitsRectangle(points[i], p, r))); };
   const quickPaths: Point[][] = [
     [start, { x: start.x, y: end.y }, end],
     [start, { x: end.x, y: start.y }, end],
@@ -160,6 +164,7 @@ function search(start: Point, end: Point, obstacles: Obstacle[], used: Point[][]
   while (queue.items.length) {
     const current = queue.pop()!;
     if (costs.get(current.key) !== current.cost) continue;
+    step();
     const cell = Math.floor(current.key / 3), axis = current.key % 3;
     if (cell === endCell) {
       const points: Point[] = []; let key: number | undefined = current.key;
@@ -198,7 +203,7 @@ function labelPosition(points: Point[], size: { width: number; height: number },
 }
 /** Reserve a horizontal label corridor and route both ends to it. The bounded
  * candidate search may fail explicitly; it never emits a detached label. */
-function viaLabelCorridor(start: Point, end: Point, size: { width: number; height: number }, obstacles: Obstacle[], used: Point[][], accept: (points: Point[]) => boolean) {
+function viaLabelCorridor(start: Point, end: Point, size: { width: number; height: number }, obstacles: Obstacle[], used: Point[][], accept: (points: Point[]) => boolean, step: () => void = noStep) {
   const xs = new Set([(start.x + end.x) / 2, start.x, end.x]);
   const ys = new Set([(start.y + end.y) / 2, start.y, end.y]);
   for (const r of obstacles) {
@@ -216,9 +221,9 @@ function viaLabelCorridor(start: Point, end: Point, size: { width: number; heigh
       const a = { x: center.x - direction * (size.width / 2 + 12), y: center.y };
       const b = { x: center.x + direction * (size.width / 2 + 12), y: center.y };
       const reserved = [...obstacles, inflate(rect, 8)];
-      const first = search(start, a, reserved, used, true);
+      const first = search(start, a, reserved, used, true, step);
       if (!first) continue;
-      const last = search(b, end, reserved, used, true);
+      const last = search(b, end, reserved, used, true, step);
       if (last) {
         const points = simplify([...first.points, b, ...last.points]);
         if (accept(points)) return points;
@@ -260,7 +265,7 @@ export function routeArchitectureEdges(nodes: readonly ArchitectureNode[], edges
       if (best?.hasLabel && candidate.estimate > best.cost) break;
       // The short connector may cross its own padding, but no other card/title.
       if ([...raw, ...labels].some(r => r.nodeId !== edge.source && segmentHitsRectangle(candidate.a.anchor, candidate.a.stub, r) || r.nodeId !== edge.target && segmentHitsRectangle(candidate.b.anchor, candidate.b.stub, r))) continue;
-      const found = search(candidate.a.stub, candidate.b.stub, obstacles, used);
+      const found = search(candidate.a.stub, candidate.b.stub, obstacles, used, false, options.onSearchStep);
       if (!found) continue;
       const points = simplify([candidate.a.anchor, ...found.points, candidate.b.anchor]);
       // Include the short port connectors: in dense drawings another route may
@@ -276,7 +281,7 @@ export function routeArchitectureEdges(nodes: readonly ArchitectureNode[], edges
     if (!label) {
       const candidate = pairs.find(p => p.sourceSide === best!.sourceSide && p.targetSide === best!.targetSide)!;
       const detour = viaLabelCorridor(candidate.a.stub, candidate.b.stub, size, obstacles, used,
-        points => !!labelPosition(simplify([candidate.a.anchor, ...points, candidate.b.anchor]), size, [...raw, ...labels], used));
+        points => !!labelPosition(simplify([candidate.a.anchor, ...points, candidate.b.anchor]), size, [...raw, ...labels], used), options.onSearchStep);
       if (detour) {
         best.points = simplify([candidate.a.anchor, ...detour, candidate.b.anchor]);
         label = labelPosition(best.points, size, [...raw, ...labels], used);

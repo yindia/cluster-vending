@@ -21,9 +21,8 @@ metadata:
   {{- end }}
 automountServiceAccountToken: false
 ---
-# The console (ui/Dockerfile: ui/docker/serve.mjs in front of the Next.js
-# standalone server). The browser calls only this origin; /api/rpc/* is
-# proxied server-side to CV_API_BASE_URL.
+# The console (ui/Dockerfile: the Next.js standalone server). The browser
+# calls only this origin; /api/rpc/* is proxied server-side to CV_API_BASE_URL.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

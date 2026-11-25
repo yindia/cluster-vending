@@ -202,6 +202,14 @@ function routeConflicts(routes: ReturnType<typeof routeArchitectureEdges>) {
   return { crossings, sharedVertical, unrelatedOverlap };
 }
 
+// Routing work per fixture, counted in candidate paths checked plus grid cells
+// expanded (RoutingOptions.onSearchStep) instead of wall-clock time, so a busy
+// machine cannot fail it while a slower algorithm still does. The count is
+// deterministic; each budget is about 1.5x today's larger count of the two
+// header variants (A 28306, B 2127, C 119599, D 5858, E 32770, F 1207,
+// G 26501, H 9458, I 9128). Raise one only for a deliberate routing change.
+const routingStepBudgets = { A: 43_000, B: 3_200, C: 180_000, D: 8_800, E: 49_000, F: 1_800, G: 40_000, H: 14_000, I: 13_700 };
+
 test("A–I overview bounds crossings and overlap while retaining safe geometry", async t => {
   // Independent segment-pair counts, with local destinations excluded by the
   // overview. Keep full topology geometry coverage separate below.
@@ -215,16 +223,15 @@ test("A–I overview bounds crossings and overlap while retaining safe geometry"
       const dimensions = headerHeight ? new Map(initial.nodes.filter(node => node.type === "group").map(node => [node.id, { width: 288, height: headerHeight, headerHeight }])) : undefined;
       const graph = dimensions ? buildNetworkArchitectureOverview(network, undefined, [], dimensions) : initial;
       assert.ok(graph.edges.length > 0, `${id} must exercise routing`);
-      const started = performance.now();
       const visibleEdges = graph.edges.filter(edge => edge.data.relation !== "nat_internet_egress");
-      const routes = assertClearRoutes(graph.nodes, visibleEdges);
+      let steps = 0;
+      const routes = assertClearRoutes(graph.nodes, visibleEdges, { onSearchStep: () => { steps++; } });
       const conflicts = routeConflicts(routes);
       assert.ok(conflicts.crossings <= crossingLimits[id], `${id}: ${conflicts.crossings} crossings exceed ${crossingLimits[id]}`);
       assert.equal(conflicts.sharedVertical, 0, `${id} contains a shared vertical trunk`);
       assert.equal(conflicts.unrelatedOverlap, 0, `${id} contains overlap between different targets`);
-      t.diagnostic(JSON.stringify(conflicts));
-      const elapsed = performance.now() - started;
-      assert.ok(elapsed < 1000, `${id} routing took ${elapsed.toFixed(0)}ms`);
+      t.diagnostic(JSON.stringify({ ...conflicts, steps }));
+      assert.ok(steps <= routingStepBudgets[id], `${id} routing examined ${steps} paths and grid cells, over the budget of ${routingStepBudgets[id]}`);
     });
   }
 });

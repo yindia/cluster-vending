@@ -113,7 +113,9 @@ test("existing allocations prevent disabling NaaS", async ({ page }) => {
 });
 
 test("foreign results fail closed", async ({ page }) => {
-  const api = await mock(page, { existing: true, foreign: true }); await open(page); await expect(page.getByText("Sub Tenants unavailable", { exact: true })).toBeVisible(); await expect(page.getByRole("button", { name: "Create Sub Tenant", exact: true })).toHaveCount(0); await expect(page.getByRole("table", { name: "Cluster Sub Tenants", exact: true })).toHaveCount(0); expect(api.unexpected).toEqual([]);
+  const api = await mock(page, { existing: true, foreign: true }); await open(page); await expect(page.getByText("Sub Tenants unavailable", { exact: true })).toBeVisible(); await expect(page.getByRole("table", { name: "Cluster Sub Tenants", exact: true })).toHaveCount(0); await expect(page.getByRole("button", { name: /^Actions for Sub Tenant/ })).toHaveCount(0); await expect(page.getByText("No Sub Tenants can be confirmed. Refresh to retry.", { exact: true })).toBeVisible();
+  // No roles since PROP-04: Create stays available; it does not depend on the refused list.
+  await expect(page.getByRole("button", { name: "Create Sub Tenant", exact: true })).toBeVisible(); expect(api.unexpected).toEqual([]);
 });
 
 test("disabled NaaS exposes no tab and makes no allocation calls", async ({ page }) => {

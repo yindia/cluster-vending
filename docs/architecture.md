@@ -1922,10 +1922,12 @@ helm install cluster-vending charts/cluster-vending \
   One port-forward is enough:
   `kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000:3000`.
   For the CLI: `kubectl -n cluster-vending-system port-forward svc/cluster-vending-server 8080:8080`,
-  then `cluster-vending --server http://localhost:8080 ...`. The image's entrypoint
-  (`ui/docker/serve.mjs`) makes same-origin calls pass whatever host and port the
-  browser uses, which Next's standalone server alone does not do with login off. With
-  web login on, the console needs HTTPS URLs: use `ui.ingress` with TLS.
+  then `cluster-vending --server http://localhost:8080 ...`. With login off, the
+  RPC route accepts an `Origin` that names the host the browser addressed (`Host`;
+  `X-Forwarded-Host` only with `CV_TRUST_FORWARDED_HEADERS=true`), plus
+  `CV_PUBLIC_ORIGIN` if set, so any port-forward or Ingress host works. With web
+  login on, it accepts the `AUTH_URL` origin only, and the console needs HTTPS URLs:
+  use `ui.ingress` with TLS.
 - **One release per management cluster**: the names the controller binds in tenant
   namespaces are fixed.
 

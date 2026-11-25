@@ -128,6 +128,6 @@ export function manifestTemplate(kind: ManifestKind, tenantId: string): string {
   if (kind === "NetworkImport" || kind === "ClusterImport") return importManifestTemplate(kind, tenantId);
   const spec = kind === "CloudAccount" ? { aws: { accountId: "111122223333", role: "cluster-vending-provisioner" } }
     : kind === "Network" ? { bootstrapId: "REPLACE_WITH_ACCOUNT_UUID", region: "us-west-1", tier: "TIER_2", layout: { cidrBlock: "10.0.0.0/16", availabilityZoneCount: 3, natGatewayMode: "NAT_GATEWAY_MODE_SINGLE" } }
-    : { region: "us-west-1", network: { networkId: "REPLACE_WITH_NETWORK_UUID" }, aws: {}, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL" };
+    : { region: "us-west-1", network: { networkId: "REPLACE_WITH_NETWORK_UUID" }, aws: {}, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL" };
   return stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: kind === "CloudAccount" ? "production" : "prod", tenant: tenantId }, spec });
 }

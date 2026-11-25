@@ -7,42 +7,47 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { InfoTip } from "@astryxdesign/core/InfoTip";
+import { StackItem } from "@astryxdesign/core/Stack";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { usePlatform } from "@/components/platform-provider";
 import { useAsyncQuery } from "@/lib/api/use-query";
-import { hasManifestYaml } from "@/lib/workflows/node-groups";
+import { PLATFORM_MANAGED_LABEL, hasManifestYaml } from "@/lib/workflows/node-groups";
 import {
-  NODE_PAGE_SIZE, collectionState, groupDetail, isTokenMismatch, liveReadFailure, nodeFilterOptions, nodeRow, nodeStatusFilter, pageRange, pagerBack, pagerForward, pagerStart,
+  NODE_PAGE_SIZE, collectionState, groupDetail, groupResources, isInfoNotice, isTokenMismatch, liveReadFailure, nodeCount, nodeFilterOptions, nodeRow, nodeStatusFilter, pageRange, pagerBack, pagerForward, pagerStart,
   type NodeRow, type NodeStatusChoice,
 } from "@/lib/workflows/node-group-nodes";
 import type { ClusterStatus } from "@/gen/cloud/v1/cluster_pb";
 import { ConsoleTable } from "./console-table";
-import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
+import { DetailHeader, StatusValue } from "./detail-layout";
+import { NodeGroupResources } from "./node-group-resources";
 import { NodeGroupYamlButton } from "./node-group-yaml-button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { RefreshButton } from "./refresh-button";
 
 const SEARCH_DELAY_MS = 300;
 
-/** Optional columns follow the table's own width, so a narrow window shows name and status and never overflows. */
+/**
+ * Optional columns follow the table's own width, so a narrow window shows name and status and never overflows. A
+ * callback ref: the table mounts only after the cluster loads, so an effect run on the first render would find nothing.
+ */
 function useElementWidth() {
-  const ref = useRef<HTMLElement>(null);
+  const [element, setElement] = useState<HTMLElement | null>(null);
   const [width, setWidth] = useState(0);
   useEffect(() => {
-    const element = ref.current;
     if (!element) return;
     const measure = () => setWidth(Math.floor(element.getBoundingClientRect().width));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
-  return [ref, width] as const;
+  }, [element]);
+  return [setElement, width] as const;
 }
 
-/** One node group of a cluster: its settings, and its nodes one server page at a time (the API reads one shard of the results bucket). */
+/** One node group of a cluster, read-only: its status and usage, and its nodes one server page at a time (the API reads one shard of the results bucket). */
 export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group: string }) {
   const { api, tenantId } = usePlatform();
   const loadCluster = useCallback(async (signal: AbortSignal) => {
@@ -107,56 +112,42 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
 
   const total = loaded?.response.total ?? 0;
   const filtered = choice !== "all" || !!search;
-  const columns: TableColumn<NodeRow>[] = [
-    { key: "name", header: "Node", width: proportional(3, { minWidth: 140 }), renderCell: row => <VStack gap={1}>
-      <Text type="label" maxLines={1} hasTruncateTooltip>{row.name}</Text>
-      {row.providerId && width >= 640 && <Text type="supporting" maxLines={1} hasTruncateTooltip>{row.providerId}</Text>}
-    </VStack> },
-    { key: "status", header: "Status", width: proportional(2, { minWidth: 110 }), renderCell: row => <VStack gap={1}>
-      <StatusValue label={row.statusLabel} tone={row.tone} />
-      {row.detail && <Text type="supporting">{row.detail}</Text>}
-    </VStack> },
-    ...(width >= 520 ? [{ key: "instanceType", header: "Instance type", width: proportional(1.5, { minWidth: 100 }), renderCell: (row: NodeRow) => <Text>{row.instanceType}</Text> }] : []),
-    ...(width >= 680 ? [{ key: "zone", header: "Zone", width: proportional(1.2, { minWidth: 90 }), renderCell: (row: NodeRow) => <Text>{row.zone}</Text> }] : []),
-    ...(width >= 800 ? [{ key: "capacity", header: "Capacity", width: proportional(1, { minWidth: 90 }), renderCell: (row: NodeRow) => <Text>{row.capacity}</Text> }] : []),
-    ...(width >= 920 ? [{ key: "kubeletVersion", header: "Kubelet", width: proportional(1.3, { minWidth: 100 }), renderCell: (row: NodeRow) => <Text>{row.kubeletVersion}</Text> }] : []),
-    ...(width >= 1000 ? [{ key: "age", header: "Age", align: "end" as const, width: proportional(0.6, { minWidth: 60 }), renderCell: (row: NodeRow) => <Text>{row.age}</Text> }] : []),
-    ...(width >= 1100 ? [{ key: "nodeClaim", header: "NodeClaim", width: proportional(2, { minWidth: 130 }), renderCell: (row: NodeRow) => <VStack gap={1}>
-      <Text maxLines={1} hasTruncateTooltip>{row.nodeClaim}</Text>
-      {row.nodeClaimDetail && <StatusValue label={row.nodeClaimDetail} tone={row.nodeClaimTone} />}
-    </VStack> }] : []),
-  ];
+  const columns = nodeColumns(width, rows.some(row => row.nodeClaim !== "—"));
   const emptyState = !state ? "Loading nodes…"
     : !state.collected ? "Nodes have not been collected yet. The controller collects them while it reconciles the cluster's node groups, at most once a minute."
       : filtered ? "No nodes match this filter. Change the status or clear the search to see more."
         : "This node group has no nodes right now.";
-  const nodeCount = detail.nodes ?? (!filtered && state?.collected ? total : undefined);
+  const count = nodeCount(loaded ? total : undefined, !!state?.collected, filtered, detail.observed ? detail.nodes : undefined);
+  // The whole group is on screen when the list is unfiltered, complete and one page: its nodes are summed live.
+  const wholeGroup = loaded && !filtered && pager.page === 1 && !loaded.response.nextPageToken && loaded.response.complete ? loaded.response.nodes : undefined;
+  const resources = groupResources(detail.observed, wholeGroup);
+  const clusterName = cluster.data.displayName || cluster.data.name || clusterId;
+  const statusLine = state?.live ? `Live as of ${state.collectedLabel}` : state?.collected ? `Collected ${state.collectedLabel}` : state ? "Not collected yet" : "Loading…";
   return <VStack as="section" aria-label="Node group details" gap={6}>
-    <DetailHeader title={detail.name} description={`Node group in ${cluster.data.displayName || cluster.data.name || clusterId}`}
-      status={<HStack gap={3} vAlign="center" wrap="wrap"><StatusValue label={detail.phaseLabel} tone={detail.tone} />{detail.platformManaged && <Badge label="Managed by platform" variant="blue" />}</HStack>}
+    <DetailHeader title={detail.name} description={detail.kind === "system" ? `Default node group of ${clusterName}` : detail.kind === "pool" ? `Karpenter platform pool of ${clusterName}` : `Node group in ${clusterName}`}
+      status={<HStack gap={3} vAlign="center" wrap="wrap"><StatusValue label={detail.phaseLabel} tone={detail.tone} />
+        {detail.platformManaged && <HStack gap={1} vAlign="center"><Badge label={PLATFORM_MANAGED_LABEL} variant="blue" />{detail.about && <InfoTip label={detail.kind === "pool" ? "About the platform pool" : "About the system node group"} content={detail.about} />}</HStack>}</HStack>}
       actions={manifest && <NodeGroupYamlButton manifest={manifest} />}
       metadata={back} />
     {detail.message && <Banner status={detail.tone === "error" ? "error" : "warning"} title="Node group status" description={detail.message} />}
-    <DetailSummary items={[
-      { label: "Phase", value: <StatusValue label={detail.phaseLabel} tone={detail.tone} /> },
-      { label: "Nodes", value: nodeCount === undefined ? "—" : String(nodeCount), note: nodeCount === undefined ? "Not reported yet" : undefined },
-      ...detail.summary,
-    ]} />
+    <VStack gap={3}>
+      <NodeGroupResources nodes={count} resources={resources} />
+      {resources && <Text type="supporting">{resources.source === "live" ? `Requests summed from the ${count === 1 ? "node" : `${count} nodes`} below.` : "Requests as of the controller's last pass."}</Text>}
+    </VStack>
     <VStack as="section" aria-label="Nodes" gap={3} width="100%">
-      <HStack gap={3} hAlign="between" vAlign="end" wrap="wrap" width="100%">
-        <VStack gap={1}><Heading level={2}>Nodes</Heading>
-          <Text type="supporting" role="status">{state?.live ? `Live as of ${state.collectedLabel}` : state?.collected ? `Collected ${state.collectedLabel}` : state ? "Not collected yet" : "Loading…"}</Text></VStack>
-        <HStack gap={3} vAlign="end" wrap="wrap">
-          <SegmentedControl label="Node status" value={choice} size="md" onChange={value => { setChoice(value as NodeStatusChoice); setPager(pagerStart()); }}>
-            {nodeFilterOptions.map(option => <SegmentedControlItem key={option.value} value={option.value} label={option.label} />)}
-          </SegmentedControl>
-          <TextInput label="Search nodes" type="search" value={draft} onChange={setDraft} placeholder="Node name" hasClear autoComplete="off" width="min(100%, 18rem)" />
-          <RefreshButton label="Refresh node group" onClick={refresh} isLoading={refreshing} />
-        </HStack>
+      <HStack gap={3} vAlign="center" wrap="wrap"><Heading level={2}>Nodes</Heading><Text type="supporting" role="status">{statusLine}</Text></HStack>
+      <HStack gap={3} vAlign="center" wrap="wrap" width="100%">
+        <StackItem size="fill"><TextInput label="Search nodes" isLabelHidden type="search" value={draft} onChange={setDraft} placeholder="Search nodes by name" hasClear autoComplete="off" /></StackItem>
+        <SegmentedControl label="Node status" value={choice} size="md" onChange={value => { setChoice(value as NodeStatusChoice); setPager(pagerStart()); }}>
+          {nodeFilterOptions.map(option => <SegmentedControlItem key={option.value} value={option.value} label={option.label} />)}
+        </SegmentedControl>
+        <RefreshButton label="Refresh node group" onClick={refresh} isLoading={refreshing} />
       </HStack>
       {restarted && <Banner status="info" title="The node list changed" description="The list changed; restarting from the first page." onDismiss={() => setRestarted(false)} />}
       {nodes.error && !(token && restarted) && <Banner status="error" role="alert" title="Nodes unavailable" description={nodes.error} />}
-      {state?.notices.map(notice => <Banner key={notice} status="warning" title={state.collected ? "Node list notice" : "Nodes unavailable"} description={notice} />)}
+      {state?.notices.map(notice => isInfoNotice(notice)
+        ? <Banner key={notice} status="info" title="Live usage unavailable" description={`${notice}. Requests and allocatable resources still show.`} />
+        : <Banner key={notice} status="warning" title={state.collected ? "Node list notice" : "Nodes unavailable"} description={notice} />)}
       <VStack ref={container} width="100%">
         <ConsoleTable aria-label={`Nodes of node group ${detail.name}`} hasFullDetails idKey="id" data={rows} columns={columns} emptyState={emptyState} />
       </VStack>
@@ -169,4 +160,57 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
       </HStack>
     </VStack>
   </VStack>;
+}
+
+/** A value with an optional second line in the supporting style. */
+function Stacked({ value, detail, tooltip = false }: { value: string; detail?: string; tooltip?: boolean }) {
+  return <VStack gap={1}>
+    <Text maxLines={1} hasTruncateTooltip={tooltip}>{value}</Text>
+    {detail && <Text type="supporting" maxLines={1} hasTruncateTooltip>{detail}</Text>}
+  </VStack>;
+}
+
+/**
+ * A flexible column whose weight follows its floor. The table's minimum width is the largest floor-to-weight ratio
+ * times the summed weights, so equal ratios make that minimum exactly the sum of the floors the column budget counts.
+ */
+const fit = (minWidth: number) => proportional(minWidth / 100, { minWidth });
+
+/** Below this table width the name column gives up room so name and status still fit side by side. */
+const NARROW_TABLE = 400;
+
+/**
+ * The node table's columns. Name and status always show; the others join in priority order while the sum of their
+ * minimum widths (each wide enough for its content) fits the table, so nothing is clipped and the table never scrolls.
+ */
+function nodeColumns(width: number, hasClaims: boolean): TableColumn<NodeRow>[] {
+  const nameMin = width < NARROW_TABLE ? 120 : 200;
+  const fixed: TableColumn<NodeRow>[] = [
+    { key: "name", header: "Node", width: fit(nameMin), renderCell: row => <VStack gap={1}>
+      <Text type="label" maxLines={1} hasTruncateTooltip>{row.name}</Text>
+      {row.providerId && width >= 640 && <Text type="supporting" maxLines={1} hasTruncateTooltip>{row.providerId}</Text>}
+    </VStack> },
+    { key: "status", header: "Status", width: fit(110), renderCell: row => <VStack gap={1}>
+      <StatusValue label={row.statusLabel} tone={row.tone} />
+      {row.detail && <Text type="supporting" maxLines={1} hasTruncateTooltip>{row.detail}</Text>}
+    </VStack> },
+  ];
+  const optional: [number, TableColumn<NodeRow>][] = [
+    [150, { key: "instanceType", header: "Instance", width: fit(150), renderCell: row =>
+      <Stacked value={row.instanceType} detail={[row.capacity !== "—" ? row.capacity : "", row.architecture].filter(Boolean).join(" · ")} /> }],
+    [130, { key: "cpu", header: "CPU", align: "end", width: fit(130), renderCell: row => <Stacked value={row.cpu} detail={row.cpuDetail} /> }],
+    [130, { key: "memory", header: "Memory", align: "end", width: fit(130), renderCell: row => <Stacked value={row.memory} detail={row.memoryDetail} /> }],
+    [150, { key: "pods", header: "Pods", align: "end", width: fit(150), renderCell: row => <Stacked value={row.pods} detail={row.podsDetail} /> }],
+    [110, { key: "zone", header: "Zone", width: fit(110), renderCell: row => <Text>{row.zone}</Text> }],
+    [80, { key: "age", header: "Age", align: "end", width: fit(80), renderCell: row => <Text>{row.age}</Text> }],
+    [180, { key: "kubeletVersion", header: "Kubelet", width: fit(180), renderCell: row => <Text>{row.kubeletVersion}</Text> }],
+    ...(hasClaims ? [[200, { key: "nodeClaim", header: "NodeClaim", width: fit(200), renderCell: (row: NodeRow) => <VStack gap={1}>
+      <Text maxLines={1} hasTruncateTooltip>{row.nodeClaim}</Text>
+      {row.nodeClaimDetail && <StatusValue label={row.nodeClaimDetail} tone={row.nodeClaimTone} />}
+    </VStack> }] as [number, TableColumn<NodeRow>]] : []),
+  ];
+  // Greedy and in order: a column that does not fit is skipped, a later narrower one may still join.
+  const { columns } = optional.reduce((acc, [min, column]) => acc.used + min <= width
+    ? { used: acc.used + min, columns: [...acc.columns, column] } : acc, { used: nameMin + 110, columns: fixed });
+  return columns;
 }

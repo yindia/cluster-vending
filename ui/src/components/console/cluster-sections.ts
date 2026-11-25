@@ -7,7 +7,6 @@ const groups = [
   ] },
   { label: "Services & tenancy", pages: [
     { value: "components", label: "Components & add-ons" },
-    { value: "cloud-resources", label: "Platform cloud resources" },
     { value: "subtenants", label: "Sub Tenants" },
   ] },
   { label: "Operations", pages: [

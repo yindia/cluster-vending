@@ -13,10 +13,9 @@ import { CopyValue } from "./copy-value";
 type ConfigurationRow = { path: string; label: string; value: string; copy?: boolean };
 type ConfigurationGroup = { key: string; title: string; rows: ConfigurationRow[] };
 const titles: Record<string, string> = {
-  network: "Network", controlPlane: "Control plane", defaultNodePool: "Default node pool",
+  network: "Network", controlPlane: "Control plane",
   access: "Access", maintenanceWindow: "Maintenance window",
-  scalingConfig: "Scaling", minSize: "Minimum nodes", maxSize: "Maximum nodes", desiredSize: "Initial desired nodes",
-  diskSizeGb: "Disk size (GiB)", naas: "Namespace as a Service", endpointAccess: "API endpoint",
+  naas: "Namespace as a Service", endpointAccess: "API endpoint",
 };
 const acronyms: Record<string, string> = { aws: "AWS", api: "API", oidc: "OIDC", cidr: "CIDR", cidrs: "CIDRs", id: "ID", ids: "IDs", arn: "ARN", arns: "ARNs", url: "URL", irsa: "IRSA", ami: "AMI", cpu: "CPU", gb: "GB", kms: "KMS", ssh: "SSH" };
 function label(name: string): string {

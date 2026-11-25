@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 
 const accountId = "00000000-0000-4000-8000-000000000001";
@@ -9,7 +9,7 @@ const network = { id: networkId, tenantId: "acme", name: "production", displayNa
 const spec = {
   region: "us-west-1", network: { networkId }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL",
   controlPlane: { kubernetesVersion: "1.35", endpointAccess: { publicAccessCidrs: ["203.0.113.0/24"] } },
-  defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } }, aws: { irsa: false },
+  aws: { irsa: false },
 };
 const manifest = (tenant = "acme") => stringify({ apiVersion: "cluster-vending.io/v1", kind: "Cluster", metadata: { name: "yaml-production", tenant }, spec });
 
@@ -46,61 +46,71 @@ async function mockClusterCreate(page: Page, failFirstCreate = false) {
   return { calls, unexpected };
 }
 
-test("cluster creation mode chooser preserves both drafts and keeps tenant validation and final review", async ({ page }) => {
+async function addToken(dialog: Locator, label: string, value: string) {
+  await dialog.getByRole("combobox", { name: label, exact: true }).fill(value);
+  await dialog.page().getByRole("option", { name: new RegExp(value.replace(/\./g, "\\.")) }).first().click();
+}
+
+test("form and YAML are two views of one create draft, and YAML edits come back to the form", async ({ page }) => {
   const mock = await mockClusterCreate(page);
   await page.goto("/clusters");
   await page.getByRole("button", { name: "Create cluster", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create cluster", exact: true });
-  await expect(dialog.getByRole("radiogroup", { name: "Creation method", exact: true })).toBeVisible();
-  await expect(dialog.getByRole("radio", { name: "Guided form", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("radiogroup", { name: "Edit as", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("radio", { name: "Form", exact: true })).toBeChecked();
   await dialog.getByRole("textbox", { name: /^Cluster name\b/ }).fill("guided-orders");
   await dialog.getByRole("button", { name: /^Existing network\b/ }).click();
   await page.getByRole("option", { name: /Production network/ }).click();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "Compute", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("heading", { name: "Access", exact: true })).toBeFocused();
   await expect(dialog.getByRole("complementary")).toContainText("111122223333");
-  await dialog.getByRole("textbox", { name: /^Instance types\b/ }).fill("c7i.large");
-  await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
-  const editor = dialog.getByRole("textbox", { name: "Cluster manifest", exact: true });
-  await editor.fill(manifest("foreign"));
-  await dialog.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(dialog).toContainText("must match the active tenant");
-  await expect(editor).toBeFocused();
-  await dialog.getByRole("radio", { name: "Guided form", exact: true }).click();
-  await expect(dialog.getByRole("textbox", { name: /^Instance types\b/ })).toHaveValue("c7i.large");
+  await addToken(dialog, "Allowed IPv4 CIDRs", "198.51.100.0/24");
+  await dialog.getByRole("radio", { name: "YAML", exact: true }).click();
+  const editor = dialog.getByRole("textbox", { name: "Cluster YAML", exact: true });
+  await expect(editor).toContainText("name: guided-orders");
+  await expect(editor).toContainText("198.51.100.0/24");
+  await expect(editor).not.toContainText("defaultNodePool");
+  await expect(editor).not.toContainText("nodeGroups");
+  await expect(editor).toContainText(`networkId: ${networkId}`);
+  // A mistake keeps the YAML open and names its line.
+  await editor.fill(`${await editor.innerText()}\n  colour: blue\n`);
+  await dialog.getByRole("radio", { name: "Form", exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: "YAML", exact: true })).toBeChecked();
+  await expect(dialog).toContainText(/Line \d+: .*colour/);
+  // Node groups are the platform's: YAML that defines one is refused with its line.
+  await editor.fill(stringify({ apiVersion: "cluster-vending.io/v1", kind: "Cluster", metadata: { name: "yaml-orders" }, spec: { ...spec, nodeGroups: [{ name: "batch" }] } }));
+  await dialog.getByRole("radio", { name: "Form", exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: "YAML", exact: true })).toBeChecked();
+  await expect(dialog).toContainText(/Line \d+: Node groups are managed by the platform\. Remove spec\.nodeGroups\./);
+  await editor.fill(stringify({ apiVersion: "cluster-vending.io/v1", kind: "Cluster", metadata: { name: "yaml-orders" }, spec: { ...spec, controlPlane: { ...spec.controlPlane, endpointAccess: { publicAccessCidrs: ["192.0.2.0/24"] } } } }));
+  await dialog.getByRole("radio", { name: "Form", exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: "Form", exact: true })).toBeChecked();
+  await expect(dialog).toContainText("192.0.2.0/24");
   await dialog.getByRole("button", { name: "Back", exact: true }).click();
-  await expect(dialog.getByRole("textbox", { name: /^Cluster name\b/ })).toHaveValue("guided-orders");
-  await expect(dialog.getByRole("button", { name: /^Existing network\b/ })).toContainText("Production network");
+  await expect(dialog.getByRole("textbox", { name: /^Cluster name\b/ })).toHaveValue("yaml-orders");
   await page.screenshot({ path: "/tmp/cv-cluster-create-guided-mode.png" });
-  await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
-  await expect(editor).toContainText("foreign");
-  await editor.fill(manifest());
+  await dialog.getByRole("radio", { name: "YAML", exact: true }).click();
   await dialog.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "Review creation", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   expect(mock.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
   await dialog.getByRole("button", { name: "Back", exact: true }).click();
-  await expect(editor).toContainText("yaml-production");
+  await expect(editor).toContainText("yaml-orders");
   await page.screenshot({ path: "/tmp/cv-cluster-create-yaml-mode.png" });
   expect(mock.unexpected).toEqual([]);
 });
 
-test("switching cluster creation modes after a failed apply retains the reviewed YAML request ID", async ({ page }) => {
+test("a retried create from YAML reuses the reviewed request ID", async ({ page }) => {
   const mock = await mockClusterCreate(page, true);
   await page.goto("/clusters");
   await page.getByRole("button", { name: "Create cluster", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create cluster", exact: true });
-  await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
-  await dialog.getByRole("textbox", { name: "Cluster manifest", exact: true }).fill(manifest());
+  await dialog.getByRole("radio", { name: "YAML", exact: true }).click();
+  await dialog.getByRole("textbox", { name: "Cluster YAML", exact: true }).fill(manifest());
   await dialog.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "Review creation", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   expect(mock.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
   await dialog.getByRole("button", { name: "Create cluster", exact: true }).click();
   await expect(dialog).toContainText("Retry the same reviewed request");
-  await dialog.getByRole("radio", { name: "Guided form", exact: true }).click();
-  await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
-  await expect(dialog.getByRole("textbox", { name: "Cluster manifest", exact: true })).toContainText("yaml-production");
-  await dialog.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "Review creation", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Create cluster", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   const requests = mock.calls.filter((call) => call.method === "CreateCluster").map((call) => call.body);
@@ -112,24 +122,36 @@ test("switching cluster creation modes after a failed apply retains the reviewed
   expect(mock.unexpected).toEqual([]);
 });
 
+test("a YAML manifest for another tenant is refused with its line", async ({ page }) => {
+  const mock = await mockClusterCreate(page);
+  await page.goto("/clusters");
+  await page.getByRole("button", { name: "Create cluster", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Create cluster", exact: true });
+  await dialog.getByRole("radio", { name: "YAML", exact: true }).click();
+  await dialog.getByRole("textbox", { name: "Cluster YAML", exact: true }).fill(manifest("foreign"));
+  await dialog.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(dialog).toContainText(/Line \d+: metadata\.tenant must match the active tenant/);
+  expect(mock.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
+});
+
 test("cluster creation mode chooser supports keyboard selection and fits mobile", async ({ page }) => {
   const mock = await mockClusterCreate(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/clusters");
   await page.getByRole("button", { name: "Create cluster", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create cluster", exact: true });
-  await dialog.getByRole("radio", { name: "Guided form", exact: true }).focus();
+  await dialog.getByRole("radio", { name: "Form", exact: true }).focus();
   await page.keyboard.press("ArrowRight");
-  await expect(dialog.getByRole("radio", { name: "Paste YAML", exact: true })).toBeChecked();
-  await expect(dialog.getByRole("radio", { name: "Paste YAML", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("radio", { name: "YAML", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("radio", { name: "YAML", exact: true })).toBeFocused();
   await page.keyboard.press("ArrowLeft");
-  await expect(dialog.getByRole("radio", { name: "Guided form", exact: true })).toBeChecked();
-  await expect(dialog.getByRole("radio", { name: "Guided form", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("radio", { name: "Form", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("radio", { name: "Form", exact: true })).toBeFocused();
   const bounds = (await dialog.boundingBox())!;
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(375);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(812);
-  await expect(dialog.getByRole("radiogroup", { name: "Creation method", exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(dialog.getByRole("radiogroup", { name: "Edit as", exact: true })).toBeInViewport({ ratio: 1 });
   await expect(dialog.getByRole("complementary")).toBeHidden();
   const fields = dialog.locator("[data-workflow-body]");
   const next = dialog.getByRole("button", { name: "Next", exact: true });

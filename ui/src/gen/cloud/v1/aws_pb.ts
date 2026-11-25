@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/aws.proto.
  */
 export const file_cloud_v1_aws: GenFile = /*@__PURE__*/
-  fileDesc("ChJjbG91ZC92MS9hd3MucHJvdG8SCGNsb3VkLnYxItQECg5Bd3NDbHVzdGVyU3BlYxIwCg1hY2Nlc3NfY29uZmlnGAEgASgLMhkuY2xvdWQudjEuQXdzQWNjZXNzQ29uZmlnElEKGWVuYWJsZWRfY2x1c3Rlcl9sb2dfdHlwZXMYAiADKA4yGy5jbG91ZC52MS5Bd3NDbHVzdGVyTG9nVHlwZUIRukgOkgELGAEiB4IBBBABIAASMgoOdXBncmFkZV9wb2xpY3kYAyABKAsyGi5jbG91ZC52MS5Bd3NVcGdyYWRlUG9saWN5EjQKEWRlZmF1bHRfbm9kZV9wb29sGAQgASgLMhkuY2xvdWQudjEuQXdzTm9kZVBvb2xTcGVjEiwKBmFkZG9ucxgFIAMoCzISLmNsb3VkLnYxLkF3c0FkZG9uQgi6SAWSAQIQDBJCChdjb250cm9sX3BsYW5lX2xvZ19ncm91cBgGIAEoCzIhLmNsb3VkLnYxLkF3c0NvbnRyb2xQbGFuZUxvZ0dyb3VwEhEKBGlyc2EYByABKAhIAIgBARJKCh1hZGRpdGlvbmFsX3NlY3VyaXR5X2dyb3VwX2lkcxgIIAMoCUIjukggkgEdEAQYASIXchUyE15zZy1bMC05YS1mXXs4LDE3fSQ6ebpIdhp0Cg1hZGRvbnMudW5pcXVlEhphZGRvbiBuYW1lcyBtdXN0IGJlIHVuaXF1ZRpHdGhpcy5hZGRvbnMuYWxsKGEsIHRoaXMuYWRkb25zLmZpbHRlcihiLCBiLm5hbWUgPT0gYS5uYW1lKS5zaXplKCkgPT0gMSlCBwoFX2lyc2EilgEKF0F3c0NvbnRyb2xQbGFuZUxvZ0dyb3VwEhQKB2VuYWJsZWQYASABKAhIAIgBARJZCg5yZXRlbnRpb25fZGF5cxgCIAEoDUJBukg+2AEBKjkwATADMAUwBzAOMB4wPDBaMHgwlgEwtAEw7QIwkAMwoQQw2wUwyAgwow4wkBEw/RMw6hYw2BkwxRxCCgoIX2VuYWJsZWQi6gQKCEF3c0FkZG9uEu0BCgRuYW1lGAEgASgJQt4BukjaAXLXAVIHdnBjLWNuaVIHY29yZWRuc1IKa3ViZS1wcm94eVIWZWtzLXBvZC1pZGVudGl0eS1hZ2VudFISYXdzLWVicy1jc2ktZHJpdmVyUhJhd3MtZWZzLWNzaS1kcml2ZXJSEmF3cy1mc3gtY3NpLWRyaXZlclIcYXdzLW1vdW50cG9pbnQtczMtY3NpLWRyaXZlclITc25hcHNob3QtY29udHJvbGxlclIMY2VydC1tYW5hZ2VyUg5tZXRyaWNzLXNlcnZlclISa3ViZS1zdGF0ZS1tZXRyaWNzEjQKB3ZlcnNpb24YAiABKAlCI7pIIHIeGEAyGl4odlswLTldWzAtOUEtWmEtei4rLV0qKT8kEicKFGNvbmZpZ3VyYXRpb25fdmFsdWVzGAMgASgJQgm6SAZyBBiAgAQSSwoPczNfYnVja2V0X25hbWVzGAQgAygJQjK6SC+SASwQMhgBIiZyJDIiXlthLXowLTldW2EtejAtOS4tXXsxLDYxfVthLXowLTldJDrBAbpIvQEaugEKEGFkZG9uLnMzX2J1Y2tldHMSU3MzX2J1Y2tldF9uYW1lcyBpcyByZXF1aXJlZCBmb3IgYXdzLW1vdW50cG9pbnQtczMtY3NpLWRyaXZlciBhbmQgb25seSBhbGxvd2VkIHRoZXJlGlEodGhpcy5uYW1lID09ICdhd3MtbW91bnRwb2ludC1zMy1jc2ktZHJpdmVyJykgPT0gKHNpemUodGhpcy5zM19idWNrZXRfbmFtZXMpID4gMCkibwoOQXdzQWRkb25TdGF0dXMSDAoEbmFtZRgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEi0KBXN0YXRlGAMgASgOMh4uY2xvdWQudjEuTWFuYWdlZFJlc291cmNlU3RhdGUSDwoHbWVzc2FnZRgEIAEoCSJ+ChBBd3NJbXBvcnROZXR3b3JrEisKBnZwY19pZBgBIAEoCUIbukgYchYyFF52cGMtWzAtOWEtZl17OCwxN30kEj0KCnN1Ym5ldF9pZHMYAiADKAlCKbpIJpIBIwgBECAYASIbchkyF15zdWJuZXQtWzAtOWEtZl17OCwxN30kIlkKD0F3c0FjY2Vzc0NvbmZpZxJGChNhdXRoZW50aWNhdGlvbl9tb2RlGAEgASgOMh8uY2xvdWQudjEuQXdzQXV0aGVudGljYXRpb25Nb2RlQgi6SAWCAQIQASJMChBBd3NVcGdyYWRlUG9saWN5EjgKDHN1cHBvcnRfdHlwZRgBIAEoDjIYLmNsb3VkLnYxLkF3c1N1cHBvcnRUeXBlQgi6SAWCAQIQASKxAgoPQXdzTm9kZVBvb2xTcGVjEjAKCGFtaV90eXBlGAEgASgOMhQuY2xvdWQudjEuQXdzQW1pVHlwZUIIukgFggECEAESNAoPbGF1bmNoX3RlbXBsYXRlGAIgASgLMhsuY2xvdWQudjEuQXdzTGF1bmNoVGVtcGxhdGU6tQG6SLEBGq4BChlub2RlX3Bvb2wuY3VzdG9tX2FtaV90eXBlEl9hbWlfdHlwZSBDVVNUT00gbmVlZHMgYSBsYXVuY2hfdGVtcGxhdGUgdGhhdCBicmluZ3MgdGhlIEFNSSAoaW1hZ2VfaWQsIG9yIGFuIGV4aXN0aW5nIHRlbXBsYXRlKRowdGhpcy5hbWlfdHlwZSAhPSAyMCB8fCBoYXModGhpcy5sYXVuY2hfdGVtcGxhdGUpIoQHChFBd3NMYXVuY2hUZW1wbGF0ZRIpCgJpZBgBIAEoCUIdukga2AEBchUyE15sdC1bMC05YS1mXXs4LDE3fSQSFgoEbmFtZRgCIAEoCUIIukgFcgMYgAESKAoHdmVyc2lvbhgDIAEoCUIXukgU2AEBcg8yDV5bMS05XVswLTldKiQSPwoSc2VjdXJpdHlfZ3JvdXBfaWRzGAQgAygJQiO6SCCSAR0QBBgBIhdyFTITXnNnLVswLTlhLWZdezgsMTd9JBIwCghpbWFnZV9pZBgFIAEoCUIeukgb2AEBchYyFF5hbWktWzAtOWEtZl17OCwxN30kEhwKCXVzZXJfZGF0YRgGIAEoCUIJukgGcgQY2KoBOvAEukjsBBq1AwokbGF1bmNoX3RlbXBsYXRlLmV4aXN0aW5nX29yX3JlbmRlcmVkEn9naXZlIGFuIGV4aXN0aW5nIHRlbXBsYXRlIChpZCBvciBuYW1lLCB3aXRoIHZlcnNpb24pIG9yIGEgcmVuZGVyZWQgb25lIChzZWN1cml0eV9ncm91cF9pZHMsIGltYWdlX2lkKSwgbm90IGJvdGggYW5kIG5vdCBuZWl0aGVyGosCKCh0aGlzLmlkICE9ICcnKSAhPSAodGhpcy5uYW1lICE9ICcnKSAmJiB0aGlzLnZlcnNpb24gIT0gJycgJiYgc2l6ZSh0aGlzLnNlY3VyaXR5X2dyb3VwX2lkcykgPT0gMCAmJiB0aGlzLmltYWdlX2lkID09ICcnICYmIHRoaXMudXNlcl9kYXRhID09ICcnKSB8fCAodGhpcy5pZCA9PSAnJyAmJiB0aGlzLm5hbWUgPT0gJycgJiYgdGhpcy52ZXJzaW9uID09ICcnICYmIChzaXplKHRoaXMuc2VjdXJpdHlfZ3JvdXBfaWRzKSA+IDAgfHwgdGhpcy5pbWFnZV9pZCAhPSAnJykpGrEBChpsYXVuY2hfdGVtcGxhdGUuY3VzdG9tX2FtaRJiaW1hZ2VfaWQgYW5kIHVzZXJfZGF0YSBnbyB0b2dldGhlcjogbm9kZXMgb2YgYSBjdXN0b20gQU1JIGpvaW4gdGhlIGNsdXN0ZXIgdGhyb3VnaCB0aGVpciB1c2VyIGRhdGEaLyh0aGlzLmltYWdlX2lkICE9ICcnKSA9PSAodGhpcy51c2VyX2RhdGEgIT0gJycpIqYBChBBd3NDbHVzdGVyU3RhdHVzEhMKC2NsdXN0ZXJfYXJuGAEgASgJEiEKGWNsdXN0ZXJfc2VjdXJpdHlfZ3JvdXBfaWQYAiABKAkSGAoQcGxhdGZvcm1fdmVyc2lvbhgDIAEoCRIWCg5ub2RlX2dyb3VwX2FybhgEIAEoCRIoCgZhZGRvbnMYBSADKAsyGC5jbG91ZC52MS5Bd3NBZGRvblN0YXR1cyrwAQoVQXdzQXV0aGVudGljYXRpb25Nb2RlEicKI0FXU19BVVRIRU5USUNBVElPTl9NT0RFX1VOU1BFQ0lGSUVEEAASKgobQVdTX0FVVEhFTlRJQ0FUSU9OX01PREVfQVBJEAEaCYq1GAUKA0FQSRJICipBV1NfQVVUSEVOVElDQVRJT05fTU9ERV9BUElfQU5EX0NPTkZJR19NQVAQAhoYirUYFAoSQVBJX0FORF9DT05GSUdfTUFQEjgKIkFXU19BVVRIRU5USUNBVElPTl9NT0RFX0NPTkZJR19NQVAQAxoQirUYDAoKQ09ORklHX01BUCrHAgoRQXdzQ2x1c3RlckxvZ1R5cGUSJAogQVdTX0NMVVNURVJfTE9HX1RZUEVfVU5TUEVDSUZJRUQQABInChhBV1NfQ0xVU1RFUl9MT0dfVFlQRV9BUEkQARoJirUYBQoDYXBpEisKGkFXU19DTFVTVEVSX0xPR19UWVBFX0FVRElUEAIaC4q1GAcKBWF1ZGl0EjsKIkFXU19DTFVTVEVSX0xPR19UWVBFX0FVVEhFTlRJQ0FUT1IQAxoTirUYDwoNYXV0aGVudGljYXRvchJECidBV1NfQ0xVU1RFUl9MT0dfVFlQRV9DT05UUk9MTEVSX01BTkFHRVIQBBoXirUYEwoRY29udHJvbGxlck1hbmFnZXISMwoeQVdTX0NMVVNURVJfTE9HX1RZUEVfU0NIRURVTEVSEAUaD4q1GAsKCXNjaGVkdWxlciqQAQoOQXdzU3VwcG9ydFR5cGUSIAocQVdTX1NVUFBPUlRfVFlQRV9VTlNQRUNJRklFRBAAEi0KGUFXU19TVVBQT1JUX1RZUEVfU1RBTkRBUkQQARoOirUYCgoIU1RBTkRBUkQSLQoZQVdTX1NVUFBPUlRfVFlQRV9FWFRFTkRFRBACGg6KtRgKCghFWFRFTkRFRCrSCwoKQXdzQW1pVHlwZRIcChhBV1NfQU1JX1RZUEVfVU5TUEVDSUZJRUQQABJFCiNBV1NfQU1JX1RZUEVfQUwyMDIzX1g4Nl82NF9TVEFOREFSRBABGhyKtRgYChZBTDIwMjNfeDg2XzY0X1NUQU5EQVJEEkUKI0FXU19BTUlfVFlQRV9BTDIwMjNfQVJNXzY0X1NUQU5EQVJEEAIaHIq1GBgKFkFMMjAyM19BUk1fNjRfU1RBTkRBUkQSQQohQVdTX0FNSV9UWVBFX0FMMjAyM19YODZfNjRfTlZJRElBEAMaGoq1GBYKFEFMMjAyM194ODZfNjRfTlZJRElBEkEKIUFXU19BTUlfVFlQRV9BTDIwMjNfWDg2XzY0X05FVVJPThAEGhqKtRgWChRBTDIwMjNfeDg2XzY0X05FVVJPThI/CiBBV1NfQU1JX1RZUEVfQk9UVExFUk9DS0VUX1g4Nl82NBAFGhmKtRgVChNCT1RUTEVST0NLRVRfeDg2XzY0Ej8KIEFXU19BTUlfVFlQRV9CT1RUTEVST0NLRVRfQVJNXzY0EAYaGYq1GBUKE0JPVFRMRVJPQ0tFVF9BUk1fNjQSTQonQVdTX0FNSV9UWVBFX0JPVFRMRVJPQ0tFVF9YODZfNjRfTlZJRElBEAcaIIq1GBwKGkJPVFRMRVJPQ0tFVF94ODZfNjRfTlZJRElBEk0KJ0FXU19BTUlfVFlQRV9CT1RUTEVST0NLRVRfQVJNXzY0X05WSURJQRAIGiCKtRgcChpCT1RUTEVST0NLRVRfQVJNXzY0X05WSURJQRJBCiFBV1NfQU1JX1RZUEVfQUwyMDIzX0FSTV82NF9OVklESUEQCRoairUYFgoUQUwyMDIzX0FSTV82NF9OVklESUESSQolQVdTX0FNSV9UWVBFX0JPVFRMRVJPQ0tFVF9YODZfNjRfRklQUxAKGh6KtRgaChhCT1RUTEVST0NLRVRfeDg2XzY0X0ZJUFMSSQolQVdTX0FNSV9UWVBFX0JPVFRMRVJPQ0tFVF9BUk1fNjRfRklQUxALGh6KtRgaChhCT1RUTEVST0NLRVRfQVJNXzY0X0ZJUFMSVwosQVdTX0FNSV9UWVBFX0JPVFRMRVJPQ0tFVF9YODZfNjRfTlZJRElBX0ZJUFMQDBolirUYIQofQk9UVExFUk9DS0VUX3g4Nl82NF9OVklESUFfRklQUxJXCixBV1NfQU1JX1RZUEVfQk9UVExFUk9DS0VUX0FSTV82NF9OVklESUFfRklQUxANGiWKtRghCh9CT1RUTEVST0NLRVRfQVJNXzY0X05WSURJQV9GSVBTEkkKJUFXU19BTUlfVFlQRV9XSU5ET1dTX0NPUkVfMjAxOV9YODZfNjQQDhoeirUYGgoYV0lORE9XU19DT1JFXzIwMTlfeDg2XzY0EkkKJUFXU19BTUlfVFlQRV9XSU5ET1dTX0ZVTExfMjAxOV9YODZfNjQQDxoeirUYGgoYV0lORE9XU19GVUxMXzIwMTlfeDg2XzY0EkkKJUFXU19BTUlfVFlQRV9XSU5ET1dTX0NPUkVfMjAyMl9YODZfNjQQEBoeirUYGgoYV0lORE9XU19DT1JFXzIwMjJfeDg2XzY0EkkKJUFXU19BTUlfVFlQRV9XSU5ET1dTX0ZVTExfMjAyMl9YODZfNjQQERoeirUYGgoYV0lORE9XU19GVUxMXzIwMjJfeDg2XzY0EkkKJUFXU19BTUlfVFlQRV9XSU5ET1dTX0NPUkVfMjAyNV9YODZfNjQQEhoeirUYGgoYV0lORE9XU19DT1JFXzIwMjVfeDg2XzY0EkkKJUFXU19BTUlfVFlQRV9XSU5ET1dTX0ZVTExfMjAyNV9YODZfNjQQExoeirUYGgoYV0lORE9XU19GVUxMXzIwMjVfeDg2XzY0EiUKE0FXU19BTUlfVFlQRV9DVVNUT00QFBoMirUYCAoGQ1VTVE9NQpgBCgxjb20uY2xvdWQudjFCCEF3c1Byb3RvUAFaPWdpdGh1Yi5jb20veWluZGlhL2NsdXN0ZXItdmVuZGluZy9wa2cvZ2VuL2dvL2Nsb3VkL3YxO2Nsb3VkdjGiAgNDWFiqAghDbG91ZC5WMcoCCENsb3VkXFYx4gIUQ2xvdWRcVjFcR1BCTWV0YWRhdGHqAglDbG91ZDo6VjFiBnByb3RvMw", [file_buf_validate_validate, file_cloud_v1_managed_resource, file_cloud_v1_options]);
+  fileDesc("ChJjbG91ZC92MS9hd3MucHJvdG8SCGNsb3VkLnYxIrcECg5Bd3NDbHVzdGVyU3BlYxIwCg1hY2Nlc3NfY29uZmlnGAEgASgLMhkuY2xvdWQudjEuQXdzQWNjZXNzQ29uZmlnElEKGWVuYWJsZWRfY2x1c3Rlcl9sb2dfdHlwZXMYAiADKA4yGy5jbG91ZC52MS5Bd3NDbHVzdGVyTG9nVHlwZUIRukgOkgELGAEiB4IBBBABIAASMgoOdXBncmFkZV9wb2xpY3kYAyABKAsyGi5jbG91ZC52MS5Bd3NVcGdyYWRlUG9saWN5EiwKBmFkZG9ucxgFIAMoCzISLmNsb3VkLnYxLkF3c0FkZG9uQgi6SAWSAQIQDBJCChdjb250cm9sX3BsYW5lX2xvZ19ncm91cBgGIAEoCzIhLmNsb3VkLnYxLkF3c0NvbnRyb2xQbGFuZUxvZ0dyb3VwEhEKBGlyc2EYByABKAhIAIgBARJKCh1hZGRpdGlvbmFsX3NlY3VyaXR5X2dyb3VwX2lkcxgIIAMoCUIjukggkgEdEAQYASIXchUyE15zZy1bMC05YS1mXXs4LDE3fSQ6ebpIdhp0Cg1hZGRvbnMudW5pcXVlEhphZGRvbiBuYW1lcyBtdXN0IGJlIHVuaXF1ZRpHdGhpcy5hZGRvbnMuYWxsKGEsIHRoaXMuYWRkb25zLmZpbHRlcihiLCBiLm5hbWUgPT0gYS5uYW1lKS5zaXplKCkgPT0gMSlCBwoFX2lyc2FKBAgEEAVSEWRlZmF1bHRfbm9kZV9wb29sIpYBChdBd3NDb250cm9sUGxhbmVMb2dHcm91cBIUCgdlbmFibGVkGAEgASgISACIAQESWQoOcmV0ZW50aW9uX2RheXMYAiABKA1CQbpIPtgBASo5MAEwAzAFMAcwDjAeMDwwWjB4MJYBMLQBMO0CMJADMKEEMNsFMMgIMKMOMJARMP0TMOoWMNgZMMUcQgoKCF9lbmFibGVkIuoECghBd3NBZGRvbhLtAQoEbmFtZRgBIAEoCULeAbpI2gFy1wFSB3ZwYy1jbmlSB2NvcmVkbnNSCmt1YmUtcHJveHlSFmVrcy1wb2QtaWRlbnRpdHktYWdlbnRSEmF3cy1lYnMtY3NpLWRyaXZlclISYXdzLWVmcy1jc2ktZHJpdmVyUhJhd3MtZnN4LWNzaS1kcml2ZXJSHGF3cy1tb3VudHBvaW50LXMzLWNzaS1kcml2ZXJSE3NuYXBzaG90LWNvbnRyb2xsZXJSDGNlcnQtbWFuYWdlclIObWV0cmljcy1zZXJ2ZXJSEmt1YmUtc3RhdGUtbWV0cmljcxI0Cgd2ZXJzaW9uGAIgASgJQiO6SCByHhhAMhpeKHZbMC05XVswLTlBLVphLXouKy1dKik/JBInChRjb25maWd1cmF0aW9uX3ZhbHVlcxgDIAEoCUIJukgGcgQYgIAEEksKD3MzX2J1Y2tldF9uYW1lcxgEIAMoCUIyukgvkgEsEDIYASImciQyIl5bYS16MC05XVthLXowLTkuLV17MSw2MX1bYS16MC05XSQ6wQG6SL0BGroBChBhZGRvbi5zM19idWNrZXRzElNzM19idWNrZXRfbmFtZXMgaXMgcmVxdWlyZWQgZm9yIGF3cy1tb3VudHBvaW50LXMzLWNzaS1kcml2ZXIgYW5kIG9ubHkgYWxsb3dlZCB0aGVyZRpRKHRoaXMubmFtZSA9PSAnYXdzLW1vdW50cG9pbnQtczMtY3NpLWRyaXZlcicpID09IChzaXplKHRoaXMuczNfYnVja2V0X25hbWVzKSA+IDApIm8KDkF3c0FkZG9uU3RhdHVzEgwKBG5hbWUYASABKAkSDwoHdmVyc2lvbhgCIAEoCRItCgVzdGF0ZRgDIAEoDjIeLmNsb3VkLnYxLk1hbmFnZWRSZXNvdXJjZVN0YXRlEg8KB21lc3NhZ2UYBCABKAkifgoQQXdzSW1wb3J0TmV0d29yaxIrCgZ2cGNfaWQYASABKAlCG7pIGHIWMhRednBjLVswLTlhLWZdezgsMTd9JBI9CgpzdWJuZXRfaWRzGAIgAygJQim6SCaSASMIARAgGAEiG3IZMhdec3VibmV0LVswLTlhLWZdezgsMTd9JCJZCg9Bd3NBY2Nlc3NDb25maWcSRgoTYXV0aGVudGljYXRpb25fbW9kZRgBIAEoDjIfLmNsb3VkLnYxLkF3c0F1dGhlbnRpY2F0aW9uTW9kZUIIukgFggECEAEiTAoQQXdzVXBncmFkZVBvbGljeRI4CgxzdXBwb3J0X3R5cGUYASABKA4yGC5jbG91ZC52MS5Bd3NTdXBwb3J0VHlwZUIIukgFggECEAEipgEKEEF3c0NsdXN0ZXJTdGF0dXMSEwoLY2x1c3Rlcl9hcm4YASABKAkSIQoZY2x1c3Rlcl9zZWN1cml0eV9ncm91cF9pZBgCIAEoCRIYChBwbGF0Zm9ybV92ZXJzaW9uGAMgASgJEhYKDm5vZGVfZ3JvdXBfYXJuGAQgASgJEigKBmFkZG9ucxgFIAMoCzIYLmNsb3VkLnYxLkF3c0FkZG9uU3RhdHVzKvABChVBd3NBdXRoZW50aWNhdGlvbk1vZGUSJwojQVdTX0FVVEhFTlRJQ0FUSU9OX01PREVfVU5TUEVDSUZJRUQQABIqChtBV1NfQVVUSEVOVElDQVRJT05fTU9ERV9BUEkQARoJirUYBQoDQVBJEkgKKkFXU19BVVRIRU5USUNBVElPTl9NT0RFX0FQSV9BTkRfQ09ORklHX01BUBACGhiKtRgUChJBUElfQU5EX0NPTkZJR19NQVASOAoiQVdTX0FVVEhFTlRJQ0FUSU9OX01PREVfQ09ORklHX01BUBADGhCKtRgMCgpDT05GSUdfTUFQKscCChFBd3NDbHVzdGVyTG9nVHlwZRIkCiBBV1NfQ0xVU1RFUl9MT0dfVFlQRV9VTlNQRUNJRklFRBAAEicKGEFXU19DTFVTVEVSX0xPR19UWVBFX0FQSRABGgmKtRgFCgNhcGkSKwoaQVdTX0NMVVNURVJfTE9HX1RZUEVfQVVESVQQAhoLirUYBwoFYXVkaXQSOwoiQVdTX0NMVVNURVJfTE9HX1RZUEVfQVVUSEVOVElDQVRPUhADGhOKtRgPCg1hdXRoZW50aWNhdG9yEkQKJ0FXU19DTFVTVEVSX0xPR19UWVBFX0NPTlRST0xMRVJfTUFOQUdFUhAEGheKtRgTChFjb250cm9sbGVyTWFuYWdlchIzCh5BV1NfQ0xVU1RFUl9MT0dfVFlQRV9TQ0hFRFVMRVIQBRoPirUYCwoJc2NoZWR1bGVyKpABCg5Bd3NTdXBwb3J0VHlwZRIgChxBV1NfU1VQUE9SVF9UWVBFX1VOU1BFQ0lGSUVEEAASLQoZQVdTX1NVUFBPUlRfVFlQRV9TVEFOREFSRBABGg6KtRgKCghTVEFOREFSRBItChlBV1NfU1VQUE9SVF9UWVBFX0VYVEVOREVEEAIaDoq1GAoKCEVYVEVOREVEQpgBCgxjb20uY2xvdWQudjFCCEF3c1Byb3RvUAFaPWdpdGh1Yi5jb20veWluZGlhL2NsdXN0ZXItdmVuZGluZy9wa2cvZ2VuL2dvL2Nsb3VkL3YxO2Nsb3VkdjGiAgNDWFiqAghDbG91ZC5WMcoCCENsb3VkXFYx4gIUQ2xvdWRcVjFcR1BCTWV0YWRhdGHqAglDbG91ZDo6VjFiBnByb3RvMw", [file_buf_validate_validate, file_cloud_v1_managed_resource, file_cloud_v1_options]);
 
 /**
  * AWS-only settings. Everything with a cross-cloud equivalent lives in the
@@ -45,13 +45,6 @@ export type AwsClusterSpec = Message<"cloud.v1.AwsClusterSpec"> & {
    * @generated from field: cloud.v1.AwsUpgradePolicy upgrade_policy = 3;
    */
   upgradePolicy?: AwsUpgradePolicy | undefined;
-
-  /**
-   * AWS-only settings for ClusterSpec.default_node_pool (NodeGroup).
-   *
-   * @generated from field: cloud.v1.AwsNodePoolSpec default_node_pool = 4;
-   */
-  defaultNodePool?: AwsNodePoolSpec | undefined;
 
   /**
    * EKS add-ons (Addon), merged by name into the defaults every cluster
@@ -342,99 +335,6 @@ export const AwsUpgradePolicySchema: GenMessage<AwsUpgradePolicy> = /*@__PURE__*
   messageDesc(file_cloud_v1_aws, 6);
 
 /**
- * AwsNodePoolSpec carries NodeGroup fields with no cross-cloud equivalent.
- *
- * @generated from message cloud.v1.AwsNodePoolSpec
- */
-export type AwsNodePoolSpec = Message<"cloud.v1.AwsNodePoolSpec"> & {
-  /**
-   * NodeGroup.amiType. With launch_template.image_id it is CUSTOM.
-   *
-   * @generated from field: cloud.v1.AwsAmiType ami_type = 1;
-   */
-  amiType: AwsAmiType;
-
-  /**
-   * An EC2 launch template for the node group (NodeGroup.launchTemplate).
-   * Unset: none, as before. With one, disk_size_gb must be unset (EKS takes
-   * the disk from the template). Setting, removing or switching the
-   * template replaces the node group (a new one is created, the old one
-   * deleted once it is ready); a new version of the same template is
-   * rolled out in place.
-   *
-   * @generated from field: cloud.v1.AwsLaunchTemplate launch_template = 2;
-   */
-  launchTemplate?: AwsLaunchTemplate | undefined;
-};
-
-/**
- * Describes the message cloud.v1.AwsNodePoolSpec.
- * Use `create(AwsNodePoolSpecSchema)` to create a new message.
- */
-export const AwsNodePoolSpecSchema: GenMessage<AwsNodePoolSpec> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_aws, 7);
-
-/**
- * AwsLaunchTemplate is either an existing launch template (id or name, and
- * version) or one the platform renders (security_group_ids and / or
- * image_id + user_data).
- *
- * @generated from message cloud.v1.AwsLaunchTemplate
- */
-export type AwsLaunchTemplate = Message<"cloud.v1.AwsLaunchTemplate"> & {
-  /**
-   * An existing template: its ID ("lt-...") or its name, one of the two.
-   * The template is the client's: the platform does not change or delete
-   * it.
-   *
-   * @generated from field: string id = 1;
-   */
-  id: string;
-
-  /**
-   * @generated from field: string name = 2;
-   */
-  name: string;
-
-  /**
-   * The version number of the existing template to use, e.g. "3".
-   * "$Latest" and "$Default" are refused: EKS resolves them to a number,
-   * which would read as a change on every reconcile.
-   *
-   * @generated from field: string version = 3;
-   */
-  version: string;
-
-  /**
-   * A rendered template (ec2 LaunchTemplate, owned by the cluster): extra
-   * security groups for the nodes, next to the cluster security group.
-   *
-   * @generated from field: repeated string security_group_ids = 4;
-   */
-  securityGroupIds: string[];
-
-  /**
-   * A rendered template: a custom AMI (ami_type becomes CUSTOM) and the
-   * base64 user data that makes its nodes join the cluster.
-   *
-   * @generated from field: string image_id = 5;
-   */
-  imageId: string;
-
-  /**
-   * @generated from field: string user_data = 6;
-   */
-  userData: string;
-};
-
-/**
- * Describes the message cloud.v1.AwsLaunchTemplate.
- * Use `create(AwsLaunchTemplateSchema)` to create a new message.
- */
-export const AwsLaunchTemplateSchema: GenMessage<AwsLaunchTemplate> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_aws, 8);
-
-/**
  * AwsClusterStatus is AWS-only observed state, read from
  * status.atProvider of the Crossplane managed resources.
  *
@@ -482,7 +382,7 @@ export type AwsClusterStatus = Message<"cloud.v1.AwsClusterStatus"> & {
  * Use `create(AwsClusterStatusSchema)` to create a new message.
  */
 export const AwsClusterStatusSchema: GenMessage<AwsClusterStatus> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_aws, 9);
+  messageDesc(file_cloud_v1_aws, 7);
 
 /**
  * AwsAuthenticationMode is Cluster.accessConfig.authenticationMode.
@@ -601,126 +501,4 @@ export enum AwsSupportType {
  */
 export const AwsSupportTypeSchema: GenEnum<AwsSupportType> = /*@__PURE__*/
   enumDesc(file_cloud_v1_aws, 2);
-
-/**
- * AwsAmiType is NodeGroup.amiType: the EKS AMI types a new managed node
- * group can use (no end-of-support AL2). CUSTOM is for a launch template
- * that names its own AMI. Values may be added over time.
- *
- * @generated from enum cloud.v1.AwsAmiType
- */
-export enum AwsAmiType {
-  /**
-   * Server default: AL2023_X86_64_STANDARD.
-   *
-   * @generated from enum value: AWS_AMI_TYPE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_AL2023_X86_64_STANDARD = 1;
-   */
-  AL2023_X86_64_STANDARD = 1,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_AL2023_ARM_64_STANDARD = 2;
-   */
-  AL2023_ARM_64_STANDARD = 2,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_AL2023_X86_64_NVIDIA = 3;
-   */
-  AL2023_X86_64_NVIDIA = 3,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_AL2023_X86_64_NEURON = 4;
-   */
-  AL2023_X86_64_NEURON = 4,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_X86_64 = 5;
-   */
-  BOTTLEROCKET_X86_64 = 5,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_ARM_64 = 6;
-   */
-  BOTTLEROCKET_ARM_64 = 6,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_X86_64_NVIDIA = 7;
-   */
-  BOTTLEROCKET_X86_64_NVIDIA = 7,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_ARM_64_NVIDIA = 8;
-   */
-  BOTTLEROCKET_ARM_64_NVIDIA = 8,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_AL2023_ARM_64_NVIDIA = 9;
-   */
-  AL2023_ARM_64_NVIDIA = 9,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_X86_64_FIPS = 10;
-   */
-  BOTTLEROCKET_X86_64_FIPS = 10,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_ARM_64_FIPS = 11;
-   */
-  BOTTLEROCKET_ARM_64_FIPS = 11,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_X86_64_NVIDIA_FIPS = 12;
-   */
-  BOTTLEROCKET_X86_64_NVIDIA_FIPS = 12,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_BOTTLEROCKET_ARM_64_NVIDIA_FIPS = 13;
-   */
-  BOTTLEROCKET_ARM_64_NVIDIA_FIPS = 13,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_WINDOWS_CORE_2019_X86_64 = 14;
-   */
-  WINDOWS_CORE_2019_X86_64 = 14,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_WINDOWS_FULL_2019_X86_64 = 15;
-   */
-  WINDOWS_FULL_2019_X86_64 = 15,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_WINDOWS_CORE_2022_X86_64 = 16;
-   */
-  WINDOWS_CORE_2022_X86_64 = 16,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_WINDOWS_FULL_2022_X86_64 = 17;
-   */
-  WINDOWS_FULL_2022_X86_64 = 17,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_WINDOWS_CORE_2025_X86_64 = 18;
-   */
-  WINDOWS_CORE_2025_X86_64 = 18,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_WINDOWS_FULL_2025_X86_64 = 19;
-   */
-  WINDOWS_FULL_2025_X86_64 = 19,
-
-  /**
-   * @generated from enum value: AWS_AMI_TYPE_CUSTOM = 20;
-   */
-  CUSTOM = 20,
-}
-
-/**
- * Describes the enum cloud.v1.AwsAmiType.
- */
-export const AwsAmiTypeSchema: GenEnum<AwsAmiType> = /*@__PURE__*/
-  enumDesc(file_cloud_v1_aws, 3);
 

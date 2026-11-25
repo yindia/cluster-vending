@@ -35,7 +35,7 @@ test("network advanced fields and cluster optional false survive the exact revie
   assert.equal(request.network?.spec?.layout?.cidrBlock, "10.2.0.0/16");
   assert.deepEqual(request.network?.labels, { team: "platform" });
   assert.equal(request.requestId, id);
-  const value = envelope("Cluster", { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, aws: { irsa: false }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } } });
+  const value = envelope("Cluster", { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, aws: { irsa: false } });
   const cluster = fromJsonString(CreateClusterRequestSchema, parseManifest(stringify(value), "Cluster", "acme", id).requestJson).cluster!;
   assert.equal(cluster.spec?.provider.case, "aws");
   assert.equal(cluster.spec?.provider.value?.irsa, false);
@@ -59,7 +59,7 @@ test("unsafe, ambiguous and oversized YAML fail before review", () => {
 
 test("cluster YAML accepts generated NaaS booleans and preserves their reviewed value", () => {
   for (const naas of [false, true]) {
-    const spec = { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } }, aws: {}, naas };
+    const spec = { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, aws: {}, naas };
     const review = parseManifest(stringify(envelope("Cluster", spec)), "Cluster", "acme", id);
     const request = fromJsonString(CreateClusterRequestSchema, review.requestJson);
     assert.equal(request.cluster?.spec?.naas, naas);
@@ -68,9 +68,11 @@ test("cluster YAML accepts generated NaaS booleans and preserves their reviewed 
   const template = manifestTemplate("Cluster", "acme").replace("REPLACE_WITH_NETWORK_UUID", id);
   assert.equal(fromJsonString(CreateClusterRequestSchema, parseManifest(template, "Cluster", "acme", id).requestJson).cluster?.spec?.naas ?? false, false);
 });
-test("generated validation catches cross-field node pool constraints", () => {
-  const value = envelope("Cluster", { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 5, maxSize: 2 } } });
-  assert.throws(() => parseManifest(stringify(value), "Cluster", "acme", id), /min_size|max_size|minSize|maxSize|scaling/i);
+test("a Cluster manifest cannot define node groups: the platform creates them", () => {
+  const spec = { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } } };
+  for (const extra of [{ defaultNodePool: { instanceTypes: ["m6i.large"] } }, { nodeGroups: [{ name: "batch" }] }]) {
+    assert.throws(() => parseManifest(stringify(envelope("Cluster", { ...spec, ...extra })), "Cluster", "acme", id), /defaultNodePool|nodeGroups/);
+  }
 });
 test("omitted tenant uses active tenant and output status is ignored like CLI", () => {
   const value = { ...account, metadata: { name: "prod" }, status: { anything: "output only" } };
@@ -97,7 +99,7 @@ test("review uses read-only tenant checks; apply uses the reviewed request uncha
 });
 
 test("cluster review refuses cross-tenant and region-mismatched network references", async () => {
-  const value = envelope("Cluster", { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, aws: {}, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } } });
+  const value = envelope("Cluster", { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, aws: {} });
   for (const referenced of [{ id, tenantId: "other", spec: { region: "us-west-1" } }, { id, tenantId: "acme", spec: { region: "eu-west-1" } }]) {
     const api = { network: { getNetwork: async () => ({ network: referenced }) } } as unknown as BrowserClients;
     await assert.rejects(reviewManifest(api, stringify(value), "Cluster", "acme", id, new AbortController().signal), /tenant|region/i);

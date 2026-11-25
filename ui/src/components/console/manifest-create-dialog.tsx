@@ -22,10 +22,11 @@ import { ValuesEditor, type ValuesEditorHandle } from "./values-editor";
 import { WizardDialog, type WizardDialogProps } from "./wizard-dialog";
 import { KubernetesIcon } from "./provider-icons";
 
-/** Guided and YAML drafts share a dialog while keeping independent reviews. */
+/** Guided and YAML drafts share a dialog while keeping independent reviews. An `inline` method
+ * keeps the wizard open in YAML mode: the body renders the YAML of the same draft itself. */
 export function ResourceWorkflowDialog({ mark, method, yamlContent, placement, busy = false, ...props }: WizardDialogProps & {
   mark?: ReactNode;
-  method?: { label: string; value: "guided" | "yaml"; onChange: (mode: "guided" | "yaml") => void };
+  method?: { label: string; value: "guided" | "yaml"; onChange: (mode: "guided" | "yaml") => void; labels?: { guided: string; yaml: string }; inline?: boolean };
   yamlContent?: ReactNode;
   placement?: ReactNode;
 }) {
@@ -39,11 +40,11 @@ export function ResourceWorkflowDialog({ mark, method, yamlContent, placement, b
       {method && <VStack data-workflow-method="" gap={2}>
         <Text type="label">{method.label}</Text>
         <SegmentedControl label={method.label} value={method.value} onChange={(value) => { if (value === "guided" || value === "yaml") method.onChange(value); }} isDisabled={busy} layout="hug" size="md">
-          <SegmentedControlItem value="guided" label="Guided form" />
-          <SegmentedControlItem value="yaml" label="Paste YAML" />
+          <SegmentedControlItem value="guided" label={method.labels?.guided ?? "Guided form"} />
+          <SegmentedControlItem value="yaml" label={method.labels?.yaml ?? "Paste YAML"} />
         </SegmentedControl>
       </VStack>}
-      <ResourceWorkflowBody {...props} placement={placement} isOpen={props.isOpen && method?.value !== "yaml"} />
+      <ResourceWorkflowBody {...props} placement={placement} isOpen={props.isOpen && (!!method?.inline || method?.value !== "yaml")} />
       {yamlContent}
     </VStack>
   </Dialog>;

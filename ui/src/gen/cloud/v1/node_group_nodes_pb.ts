@@ -42,7 +42,7 @@ export type ListNodeGroupNodesRequest = Message<"cloud.v1.ListNodeGroupNodesRequ
 
   /**
    * The node group's name: "system" for the default managed node group,
-   * "platform" for the platform's, or one of the spec's.
+   * "platform-pool" for the platform pool (Karpenter).
    *
    * @generated from field: string node_group = 3;
    */

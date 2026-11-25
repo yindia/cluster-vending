@@ -36,6 +36,10 @@ function enumLabel(value: string | undefined, number: number) {
   return value ? value.toLowerCase().replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase()) : `Unknown (${number})`;
 }
 
+function platformManaged(management: ComponentManagement) {
+  return management === ComponentManagement.PLATFORM;
+}
+
 function componentHref(name: string) {
   return `/components/${encodeURIComponent(name)}`;
 }
@@ -134,10 +138,24 @@ function ComponentDetail({ name }: { name: string }) {
           </VStack>
         </>}
         {tab === "values" && <>
-          <ValuesEditor label="Platform locked values" language="yaml" value={stringify(definition.platformValues ?? {})} description="Platform managed settings are read-only and override tenant settings." readOnly />
-          <ValuesTemplate name={definition.name} onRefreshDefinition={definitionQuery.refresh} />
+          <VStack gap={3}>
+            <Heading level={2}>Default config</Heading>
+            {definition.platformValues && Object.keys(definition.platformValues).length
+              ? <ValuesEditor label="Default config" language="yaml" value={stringify(definition.platformValues)} description="What the platform applies on every cluster. Read-only, and it takes precedence over tenant values. Placeholders such as ${platform.nodeSelector} are filled in per cluster." readOnly />
+              : <Text>The platform sets no values for this component; the chart&apos;s own defaults apply.</Text>}
+          </VStack>
+          <VStack gap={3}>
+            <Heading level={2}>Values you can change</Heading>
+            {platformManaged(definition.management)
+              ? <Banner status="info" title="Managed by the platform" description="Tenants can't change this component's values. The platform team changes its default config in the component catalog." />
+              : definition.configurable
+                ? <ValuesTemplate name={definition.name} onRefreshDefinition={definitionQuery.refresh} />
+                : <Text>This component takes no tenant values.</Text>}
+          </VStack>
         </>}
-        {tab === "schema" && <ValuesEditor label="Values schema" language="json" value={JSON.stringify(definition.valuesSchema ?? {}, null, 2)} readOnly />}
+        {tab === "schema" && (definition.valuesSchema && Object.keys(definition.valuesSchema).length
+          ? <ValuesEditor label="Values schema" language="json" value={JSON.stringify(definition.valuesSchema, null, 2)} description="Tenant values are checked against this schema before they are stored." readOnly />
+          : <Text>{platformManaged(definition.management) ? "No schema: tenants set no values on a platform-managed component." : "No schema: this component takes no tenant values."}</Text>)}
       </VStack> : null)}
     </>}
   </VStack>;
@@ -148,7 +166,7 @@ function ValuesTemplate({ name, onRefreshDefinition }: { name: string; onRefresh
   const load = useCallback((signal: AbortSignal) => api.component.getComponentValues({ name }, { signal }), [api, name]);
   const query = useAsyncQuery(load);
   return <VStack gap={4}>
-    <HStack hAlign="between" vAlign="center" gap={3} width="100%"><Heading level={3}>Values template</Heading><RefreshButton label="Refresh values template" isLoading={query.refreshing} onClick={() => { onRefreshDefinition(); query.refresh(); }} /></HStack>
+    <HStack hAlign="between" vAlign="center" gap={3} width="100%"><Text color="secondary">The template to edit and send when you enable or update this component on a cluster.</Text><RefreshButton label="Refresh values template" isLoading={query.refreshing} onClick={() => { onRefreshDefinition(); query.refresh(); }} /></HStack>
     {query.loading && <Text role="status">Loading values template…</Text>}
     {query.error && <Banner status="error" title="Values template unavailable" description={query.error} />}
     {query.data && <ValuesEditor label="Helm values template" language="yaml" value={query.data.userValues} description={query.data.userValues ? "Catalog template, including its original comments." : "No user values template returned."} readOnly />}

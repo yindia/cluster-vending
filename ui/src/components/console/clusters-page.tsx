@@ -13,14 +13,12 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
-import { StackItem } from "@astryxdesign/core/Stack";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ConsoleTable as Table } from "./console-table";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
-import { ManagedResourcePreviews } from "./managed-resource-previews";
 import { ClusterSubTenants } from "./cluster-subtenants";
 import { clusterSections } from "./cluster-sections";
 import { DetailNavigation, useDetailSection } from "./detail-navigation";
@@ -31,37 +29,32 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { VStack } from "@astryxdesign/core/VStack";
 import { usePlatform } from "@/components/platform-provider";
-import { PlanReview } from "@/components/resources/plan-review";
 import { collectPages } from "@/lib/api/pagination";
 import { errorMessage, useAsyncQuery } from "@/lib/api/use-query";
 import {
-  applyReviewedClusterPlan, bindClusterPlan, buildClusterUpdate, buildCreateCluster,
-  clusterForm, clusterIsConverging, clusterPlanApplicable, clusterProvider, clusterWizardSteps,
-  validateClusterFormStep, buildImportCluster, platformManagedClusterFields, type ClusterImportForm,
-  createRequestIdentity, emptyClusterForm,
-  type ClusterForm, type ReviewedClusterPlan,
+  buildImportCluster, clusterIsConverging, createRequestIdentity, type ClusterImportForm,
 } from "@/lib/workflows/clusters";
 import {
   ClusterState, ClusterRolloutResult, ClusterUpgradePhase, UpgradeMode, type Cluster, type PlatformComponent,
 } from "@/gen/cloud/v1/cluster_pb";
-import { CreateClusterRequestSchema, ImportClusterRequestSchema, UpdateClusterRequestSchema, type CreateClusterRequest, type ImportClusterRequest } from "@/gen/cloud/v1/cluster_service_pb";
+import { ImportClusterRequestSchema, type ImportClusterRequest } from "@/gen/cloud/v1/cluster_service_pb";
 import { platformInstallationStatus } from "@/lib/workflows/installation-status";
 import { awsAddonInventory } from "@/lib/providers/aws-addons";
 import { ManagedResourceState, type ManagedResource } from "@/gen/cloud/v1/managed_resource_pb";
 import { ConditionStatus } from "@/gen/cloud/v1/conditions_pb";
 import { Disposition, ImportPhase } from "@/gen/cloud/v1/import_pb";
 import { RetryAction } from "@/gen/cloud/v1/cluster_retry_pb";
-import type { Network } from "@/gen/cloud/v1/network_pb";
 import { ResourceWorkflowDialog, ManifestCreateDialog } from "./manifest-create-dialog";
 import { accountDescription } from "@/lib/workflows/cluster-placement";
-import { supportsCapability } from "@/lib/providers/registry";
 import { ClusterAccessButton } from "./cluster-access";
 import { ClusterActions } from "./cluster-takeover";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { ClusterWorkloadSummary } from "./cluster-workload-summary";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
-import { ClusterExtraFields, ClusterExtraReview, useClusterFieldRows } from "./cluster-form-fields";
+import { CreateCluster } from "./cluster-create";
+import { EditCluster } from "./cluster-edit";
+import { ErrorNotice, NetworkPicker, NetworkPlacement, tierLabel, useClusterNetworks } from "./cluster-network-picker";
 import { ClusterTopology } from "./cluster-topology";
 import { ClusterConfiguration } from "./cluster-configuration";
 import { ClusterNodeGroups } from "./cluster-node-groups";
@@ -87,10 +80,6 @@ function statusValue(values: Record<number, string>, value?: number) {
       : ["provisioning", "updating", "creating", "waiting", "deleting", "pending", "installing", "degraded", "discovering", "converging", "will update", "will create"].includes(key) ? "warning"
         : "neutral";
   return <StatusValue label={text} tone={tone} />;
-}
-
-function ErrorNotice({ message }: { message: string }) {
-  return message ? <Banner status="error" title="Request failed" description={message} /> : null;
 }
 
 // Reuse the table-page template's content frame inside the parent console shell.
@@ -197,251 +186,6 @@ function ClusterList() {
     {creating && <CreateCluster onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setAcceptedId(id); setAcknowledgement("Create request recorded. Readiness is reported separately in cluster details."); list.refresh(); }} />}
     {importing && <ImportCluster onClose={() => setImporting(false)} onImported={(id) => { setImporting(false); setAcceptedId(id); setAcknowledgement("Import request recorded. Discovery is asynchronous; cloud resources remain read-only until takeover."); list.refresh(); }} />}
   </VStack>;
-}
-
-function tierLabel(tier?: number) {
-  return tier ? `Tier ${tier - 1} (from network)` : "Network default";
-}
-
-const platformManagedNote = "Managed by the platform: the system node group, which runs Karpenter and the platform's components.";
-
-interface FieldsProps {
-  value: ClusterForm;
-  onChange: <K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) => void;
-  disabled: boolean;
-  creating?: boolean;
-  naasLockReason?: string;
-  rows: ReturnType<typeof useClusterFieldRows>;
-  baseline?: Cluster;
-  networkPicker?: ReactNode;
-  networkName?: string;
-  region: string;
-  tier?: number;
-  step: number;
-}
-
-function ClusterFields({ value, onChange, disabled, creating, networkPicker, networkName, region, tier, step, naasLockReason, rows, baseline }: FieldsProps) {
-  const text = (field: keyof ClusterForm, title: string, description?: string, required = false, locked = false) => <TextInput
-    label={title} value={String(value[field])} onChange={(next) => { if (!locked) onChange(field, next); }}
-    description={locked ? platformManagedNote : description} isRequired={required && !locked} isReadOnly={locked} isDisabled={disabled}
-    autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false}
-  />;
-  return <VStack gap={5}>
-    {step === 0 && <>
-      {creating ? <FormLayout>
-        <TextInput label="Cluster name" value={value.name} onChange={(next) => onChange("name", next)} placeholder="production-eks" isRequired isDisabled={disabled} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} description="1–40 lowercase letters, digits and hyphens. Start with a letter and end with a letter or digit." />
-        {networkPicker}
-      </FormLayout> : <>
-        {text("displayName", "Display name", "Optional name shown in the dashboard.")}
-        <VStack data-placement-inline=""><Text type="supporting">{networkName || value.networkId} · {region} · {tierLabel(tier)}</Text></VStack>
-      </>}
-      <Divider />
-      <VStack gap={3}>
-        <Heading level={4}>Release policy</Heading>
-        <FormLayout direction="horizontal" data-workflow-fields="">
-          <Selector label="Release channel" value={value.releaseChannel} isDisabled={disabled} onChange={(next) => onChange("releaseChannel", next)} options={[
-            { value: "0", label: Number(value.upgradeMode) === UpgradeMode.AUTOMATIC ? "Stable (default)" : "None (default)" }, { value: "1", label: "Alpha" }, { value: "2", label: "Beta" }, { value: "3", label: "Stable" },
-          ]} />
-          <Selector label="Upgrades" value={value.upgradeMode} isDisabled={disabled} onChange={(next) => onChange("upgradeMode", next)} options={[{ value: "1", label: "Manual" }, { value: "2", label: "Automatic" }]} />
-        </FormLayout>
-        <Text type="supporting">{Number(value.upgradeMode) === UpgradeMode.AUTOMATIC ? "Kubernetes upgrades follow the selected release channel." : "You choose when to upgrade Kubernetes."}</Text>
-      </VStack>
-      <CheckboxInput label="Namespace as a Service (NaaS)" htmlName="naas" value={value.naas} isDisabled={disabled || !!naasLockReason} onChange={(next) => onChange("naas", next)} description={naasLockReason || "Enable support for team namespaces with separate access, quotas, and policies."} />
-    </>}
-    {step === 1 && <>
-      <Text color="secondary">Configure the default node pool across the selected availability zones.</Text>
-      {text("instanceTypes", "Instance types", "Comma-separated AWS instance types.", true)}
-      <VStack gap={3}>
-        <Heading level={4}>Scaling limits</Heading>
-        <FormLayout direction="horizontal" data-workflow-fields="">
-          {text("minSize", "Minimum nodes", undefined, true, !creating)}
-          {creating ? text("desiredSize", "Initial desired nodes") : <TextInput label="Initial desired nodes" value={value.desiredSize} isReadOnly autoComplete="off" />}
-          {text("maxSize", "Maximum nodes", undefined, true, !creating)}
-        </FormLayout>
-        {!creating && <Text type="supporting">Managed by the platform: the default node group runs Karpenter and the platform&apos;s components. Add capacity for workloads with node groups.</Text>}
-        {creating && <Text type="supporting">Leave the initial count empty to start at the minimum, or at 1 if the minimum is 0.</Text>}
-      </VStack>
-      <Selector label="Capacity" value={value.capacityType} isDisabled={disabled} onChange={(next) => onChange("capacityType", next)} options={[{ value: "0", label: "On demand · server default" }, { value: "1", label: "On demand" }, { value: "2", label: "Spot" }]} />
-      {!creating && <Text type="supporting">Instance, capacity and disk changes may replace a node group. The server plan shows the exact impact.</Text>}
-    </>}
-    {step === 2 && <>
-      <Text color="secondary">Control who can reach the Kubernetes API. At least one endpoint must remain enabled.</Text>
-      <FormLayout>
-        <CheckboxInput label="Private endpoint" description="Reachable from the cluster network." value={value.privateAccess} isDisabled={disabled} onChange={(next) => onChange("privateAccess", next)} />
-        <CheckboxInput label="Public endpoint" description="Allow access from specific IPv4 networks." value={value.publicAccess} isDisabled={disabled} onChange={(next) => onChange("publicAccess", next)} />
-        {value.publicAccess && text("publicCIDRs", "Allowed IPv4 CIDRs", "Comma-separated ranges. 0.0.0.0/0 allows any source.", true)}
-      </FormLayout>
-      {!value.publicAccess && <Text type="supporting">The management plane must be able to reach the private endpoint to install charts.</Text>}
-    </>}
-    <VStack gap={4} data-advanced-options="">
-      {step === 0 && (creating || Number(value.upgradeMode) !== UpgradeMode.AUTOMATIC) && <Collapsible trigger={creating ? "Advanced identity and version" : "Kubernetes version"} defaultIsOpen={false}>
-        <VStack gap={4} paddingBlock={3}>
-          {creating && text("displayName", "Display name", "Optional friendly name.")}
-          {Number(value.upgradeMode) !== UpgradeMode.AUTOMATIC && text("kubernetesVersion", "Kubernetes minor version", "Optional. Leave empty for the server default.")}
-        </VStack>
-      </Collapsible>}
-      {step === 1 && <Collapsible trigger="Advanced storage" defaultIsOpen={false}><VStack paddingBlock={3}>{text("diskSize", "Root disk (GiB)", "Leave empty for the provider default, or enter 20–16384 GiB.")}</VStack></Collapsible>}
-      {step === 2 && <Collapsible trigger="Advanced permissions and identity" defaultIsOpen={false}>
-        <VStack gap={4} paddingBlock={3}>
-          {text("adminPrincipals", "Cluster administrators", "Optional comma-separated IAM role or user ARNs.")}
-          <Selector label="AWS service account roles (IRSA)" value={value.irsa} isDisabled={disabled} onChange={(next) => onChange("irsa", next)} options={[{ value: "default", label: "Enabled · server default" }, { value: "true", label: "Enabled" }, { value: "false", label: "Disabled" }]} />
-        </VStack>
-      </Collapsible>}
-      <ClusterExtraFields value={value} onChange={onChange} disabled={disabled} creating={!!creating} step={step} rows={rows} baseline={baseline} />
-    </VStack>
-  </VStack>;
-}
-
-function ClusterReview({ form, region, networkName, accountName, tier }: { form: ClusterForm; region: string; networkName: string; accountName?: string; tier?: number }) {
-  const automatic = Number(form.upgradeMode) === UpgradeMode.AUTOMATIC;
-  return <VStack gap={5}>
-    <MetadataList columns="multi" title={<Heading level={4}>Placement</Heading>}>
-      <MetadataListItem label="Cluster name">{form.name}</MetadataListItem>
-      {form.displayName && <MetadataListItem label="Display name">{form.displayName}</MetadataListItem>}
-      <MetadataListItem label="Cloud account">{accountName}</MetadataListItem>
-      <MetadataListItem label="Network">{networkName}</MetadataListItem>
-      <MetadataListItem label="Region / tier">{region} · {tierLabel(tier)}</MetadataListItem>
-    </MetadataList>
-    <Divider />
-    <MetadataList columns="multi" title={<Heading level={4}>Runtime and capacity</Heading>}>
-      <MetadataListItem label="Release channel">{[automatic ? "Stable · server default" : "None · server default", "Alpha", "Beta", "Stable"][Number(form.releaseChannel)]}</MetadataListItem>
-      <MetadataListItem label="Upgrade policy">{automatic ? "Automatic · no version pin" : `Manual · ${form.kubernetesVersion || "server default version"}`}</MetadataListItem>
-      <MetadataListItem label="Node pool">{form.instanceTypes} · {form.minSize}–{form.maxSize} nodes · {form.capacityType === "2" ? "Spot" : "On demand"}</MetadataListItem>
-      <MetadataListItem label="Initial desired nodes">{form.desiredSize || Math.max(1, Number(form.minSize))}</MetadataListItem>
-      <MetadataListItem label="Root disk">{form.diskSize ? `${form.diskSize} GiB` : "Provider default"}</MetadataListItem>
-      <MetadataListItem label="Namespace as a Service (NaaS)">{form.naas ? "Enabled" : "Disabled"}</MetadataListItem>
-    </MetadataList>
-    <Divider />
-    <MetadataList columns="multi" title={<Heading level={4}>Access</Heading>}>
-      <MetadataListItem label="API endpoints">{[form.privateAccess && "Private", form.publicAccess && "Public"].filter(Boolean).join(" + ")}</MetadataListItem>
-      {form.publicAccess && <MetadataListItem label="Allowed sources">{form.publicCIDRs}</MetadataListItem>}
-      <MetadataListItem label="Administrators">{form.adminPrincipals || "No additional principals"}</MetadataListItem>
-      <MetadataListItem label="Service account roles">{form.irsa === "false" ? "Disabled" : "Enabled"}</MetadataListItem>
-    </MetadataList>
-    <ClusterExtraReview form={form} creating />
-  </VStack>;
-}
-
-function useClusterNetworks() {
-  const { api, tenantId } = usePlatform();
-  const load = useCallback(async (signal: AbortSignal) => {
-    const [accounts, networks] = await Promise.all([
-      api.tenant.listCloudAccounts({ tenantId }, { signal }),
-      collectPages(async (pageToken) => {
-        const page = await api.network.listNetworks({ tenantId, pageSize: 200, pageToken }, { signal });
-        return { items: page.networks, nextPageToken: page.nextPageToken };
-      }, signal),
-    ]);
-    return { networks, accounts: accounts.accounts };
-  }, [api, tenantId]);
-  return useAsyncQuery(load);
-}
-
-function NetworkPlacement({ network, choices, cluster }: { network?: Network; choices?: ReturnType<typeof useClusterNetworks>; cluster?: Cluster }) {
-  const networkName = network?.displayName || network?.name || cluster?.spec?.network?.networkId;
-  if (!networkName) return null;
-  const account = choices?.data?.accounts.find((item) => item.id === network?.spec?.bootstrapId);
-  const tier = network?.spec?.tier || cluster?.status?.tier;
-  return <VStack gap={3}>
-    <Divider />
-    <VStack gap={1}><Text type="supporting" color="secondary">Selected network</Text><Heading level={4}>{networkName}</Heading></VStack>
-    <MetadataList label={{ position: "top" }}>
-      {choices && <MetadataListItem label="Cloud account">{accountDescription(account)}</MetadataListItem>}
-      <MetadataListItem label="Region">{network?.spec?.region || cluster?.spec?.region}</MetadataListItem>
-      <MetadataListItem label="Inherited tier">{tier ? `Tier ${tier - 1}` : "Network default"}</MetadataListItem>
-    </MetadataList>
-  </VStack>;
-}
-
-function NetworkPicker({ choices, value, disabled, onChange, operation }: { choices: ReturnType<typeof useClusterNetworks>; value: string; disabled: boolean; onChange: (value: string) => void; operation: "cluster.create" | "cluster.import" }) {
-  const networks = choices.data?.networks ?? [];
-  const selected = networks.find((item) => item.id === value);
-  const accountFor = (item: Network) => choices.data?.accounts.find((account) => account.id === item.spec?.bootstrapId);
-  const options = networks.map((item) => {
-    const account = accountFor(item);
-    const supported = supportsCapability(account?.provider.case ?? "", operation);
-    return { value: item.id, label: `${item.displayName || item.name} · ${item.spec?.region || "Unknown region"}`, disabled: !supported, description: supported ? accountDescription(account) : "Unsupported or missing cloud account" };
-  });
-  return <VStack gap={3}>
-    <ErrorNotice message={choices.error} />
-    <HStack gap={2} vAlign="end" width="100%">
-      <StackItem size="fill"><Selector label="Existing network" hasSearch value={value} isLoading={choices.loading} isDisabled={disabled || choices.loading || !options.length} placeholder="Choose a network" onChange={onChange} options={options} /></StackItem>
-      <RefreshButton label="Refresh networks and accounts" onClick={choices.refresh} isDisabled={disabled} isLoading={choices.refreshing} />
-    </HStack>
-    {selected && <VStack data-placement-inline=""><Text type="supporting">{accountDescription(accountFor(selected))} · {tierLabel(selected.spec?.tier)}</Text></VStack>}
-    {choices.data && !choices.error && !options.some((option) => !option.disabled) &&
-      <Text type="supporting">{options.length ? "This tenant has no networks with a supported cloud account." : "Create or import a network in this tenant, then refresh this list."}</Text>}
-  </VStack>;
-}
-
-function CreateCluster({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const { api, tenantId } = usePlatform();
-  const [form, setForm] = useState<ClusterForm>({ ...emptyClusterForm });
-  const rows = useClusterFieldRows(form);
-  const [step, setStep] = useState(0);
-  const [mode, setMode] = useState<"guided" | "yaml">("guided");
-  const [manifestVisited, setManifestVisited] = useState(false);
-  const [manifestBusy, setManifestBusy] = useState(false);
-  const [review, setReview] = useState<CreateClusterRequest>();
-  const [busy, setBusy] = useState(false);
-  const locked = useRef(false);
-  const [error, setError] = useState("");
-  const errorRef = useRef<HTMLElement>(null);
-  const formId = useId();
-  const identity = useRef(createRequestIdentity(() => crypto.randomUUID()));
-  const choices = useClusterNetworks();
-  const network = choices.data?.networks.find((item) => item.id === form.networkId);
-  function change<K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) {
-    identity.current.invalidate(); setReview(undefined); setError("");
-    setForm((old) => ({ ...old, [field]: value }));
-  }
-  async function submit() {
-    if (locked.current) return;
-    try {
-      if (step < 3) {
-        rows.validate(step);
-        validateClusterFormStep(form, step);
-        if (step === 0) {
-          if (!network || !choices.data) throw new Error("Choose an existing network.");
-          clusterProvider(network, choices.data.accounts);
-        }
-        if (step === 2) {
-          if (!network || !choices.data) throw new Error("Choose an existing network.");
-          setReview(buildCreateCluster(tenantId, form, network, choices.data.accounts, identity.current.get()));
-        }
-        setError(""); setStep(step + 1); return;
-      }
-      if (!review) throw new Error("Review the create request before submitting.");
-      locked.current = true; setBusy(true); setError("");
-      const result = await api.cluster.createCluster(review);
-      if (!result.cluster?.id) throw new Error("The server returned no cluster ID. Retry unchanged inputs with the same request ID.");
-      onCreated(result.cluster.id);
-    } catch (cause) { setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
-    finally { locked.current = false; setBusy(false); }
-  }
-  return <>
-  <ResourceWorkflowDialog method={{ label: "Creation method", value: mode, onChange: (next) => { if (next === "yaml") setManifestVisited(true); setMode(next); } }} isOpen onOpenChange={(open) => { if (!open && !locked.current) onClose(); }} title="Create cluster" steps={clusterWizardSteps} step={step} busy={busy || manifestBusy}
-    placement={<NetworkPlacement network={network} choices={choices} />}
-    yamlContent={manifestVisited ? <ManifestCreateDialog kind="Cluster" embedded isOpen={mode === "yaml"} onBusyChange={setManifestBusy} onOpenChange={(open: boolean) => { if (!open) onClose(); }} onCreated={(resource: Cluster) => onCreated(resource.id)} /> : undefined}
-    description={`Provision a managed cluster in tenant ${tenantId}.`}
-    footer={<HStack gap={3} wrap="wrap">
-      <Button label="Cancel creation" variant="secondary" onClick={onClose} isDisabled={busy} />
-      {step > 0 && <Button label="Back" variant="secondary" onClick={() => { setStep(step - 1); setError(""); }} isDisabled={busy} />}
-      <Button label={step === 3 ? "Create cluster" : "Next"} variant="primary" type="submit" form={formId} isLoading={busy} />
-    </HStack>}>
-    <form id={formId} method="post" aria-label="Cluster creation settings" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <VStack gap={5}>
-        {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
-        {step < 3 ? <ClusterFields step={step} value={form} onChange={change} rows={rows} disabled={busy} creating region={network?.spec?.region ?? "Select a network"} tier={network?.spec?.tier}
-          networkPicker={<NetworkPicker operation="cluster.create" choices={choices} value={form.networkId} disabled={busy} onChange={(next) => change("networkId", next)} />} /> : <>
-          <ClusterReview form={form} region={network?.spec?.region ?? ""} networkName={network?.displayName || network?.name || form.networkId} accountName={accountDescription(choices.data?.accounts.find((account) => account.id === network?.spec?.bootstrapId))} tier={network?.spec?.tier} />
-          <Banner status="info" title="Creates managed cloud resources" description="The controller provisions the control plane and node pool asynchronously. Readiness appears on the detail page; cloud charges may apply." />
-          <Collapsible trigger="Advanced · exact API request" defaultIsOpen={false}><VStack as="pre" isScrollable><Text type="code">{review && toJsonString(CreateClusterRequestSchema, review, { prettySpaces: 2 })}</Text></VStack></Collapsible>
-        </>}
-      </VStack>
-    </form>
-  </ResourceWorkflowDialog>
-  </>;
 }
 
 function ImportCluster({ onClose, onImported }: { onClose: () => void; onImported: (id: string) => void }) {
@@ -575,7 +319,6 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const networkId = cluster?.spec?.network?.networkId;
   const loadNetwork = useCallback((signal: AbortSignal) => networkId ? api.network.getNetwork({ tenantId, networkId }, { signal }) : Promise.resolve(undefined), [api, tenantId, networkId]);
   const network = useAsyncQuery(loadNetwork);
-  const pool = cluster?.spec?.defaultNodePool;
   const channel = ["Server default", "Alpha", "Beta", "Stable"][cluster?.spec?.releaseChannel ?? 0] || "Unknown";
   const channelSlug = [undefined, "alpha", "beta", "stable"][cluster?.spec?.releaseChannel ?? 0];
   const desiredAws = cluster?.spec?.provider.case === "aws" ? cluster.spec.provider.value : undefined;
@@ -585,7 +328,8 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   const filteredEvents = filterActivityEvents(activityEvents, activityFilters);
   const availableEventKinds = [...pageEvents, ...(allEvents.data ?? [])];
   const pause = cluster && clusterPause(cluster);
-  const systemPool = status?.nodeGroups.find(group => group.platformManaged && group.name === "system");
+  const platformGroups = (status?.nodeGroups ?? []).filter(group => group.platformManaged && group.name !== "platform");
+  const platformNodes = platformGroups.reduce((total, group) => total + group.nodes, 0);
   const failedComponents = status?.platformComponents.filter(component => component.phase === ComponentPhase.FAILED) ?? [];
   const rollout = status?.rollout;
   const failedUpgrade = rollout?.result === ClusterRolloutResult.FAILED || rollout?.result === ClusterRolloutResult.TIMED_OUT;
@@ -614,11 +358,11 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         <DetailSummary items={[
           { label: "Kubernetes", value: <HStack gap={2} vAlign="center"><KubernetesIcon /><Text type="large" weight="semibold" hasCapsize>{status?.currentKubernetesVersion || "Resolving"}</Text></HStack>, note: status?.kubernetes?.available ? `${status.kubernetes.available} available` : "Observed control plane" },
           { label: "Resources ready", value: resources.length ? `${ready} / ${resources.length}` : "Not reported", note: resources.some((resource) => resource.paused) ? `${resources.filter((resource) => resource.paused).length} paused` : "Managed cloud inventory" },
-          { label: "Default pool limits", value: pool?.scalingConfig ? `${pool.scalingConfig.minSize}–${pool.scalingConfig.maxSize}` : "Pending", note: [systemPool && `${systemPool.nodes} observed`, pool?.instanceTypes.join(", ")].filter(Boolean).join(" · ") || "Configured minimum–maximum" },
+          { label: "Platform nodes", value: platformGroups.length ? String(platformNodes) : "Pending", note: `${platformGroups.map(group => group.name).join(" · ") || "Node groups"} · managed by the platform` },
           { label: "Release channel", value: channelSlug ? <Link href={`/channels/${channelSlug}`}>{channel}</Link> : channel, note: cluster.spec?.upgradeMode === UpgradeMode.AUTOMATIC ? "Automatic upgrades" : "Manual upgrades" },
         ]} />
         {status?.message && <Text color="secondary">{status.message}</Text>}
-        <ClusterWorkloadSummary status={status} />
+        <ClusterWorkloadSummary status={status} clusterId={cluster.id} />
         <Grid columns={{ minWidth: 300, max: 2 }} gap={8}>
           <VStack gap={4}>
             <Heading level={3}>Deployment</Heading>
@@ -693,7 +437,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         </VStack>
       </VStack>}
       {activeTab === "configuration" && <VStack id={panelId("configuration")} role="tabpanel" aria-label="Configuration" tabIndex={0} gap={6}><ClusterConfiguration cluster={cluster} actions={<HStack gap={2} vAlign="center"><ResourceYamlButton kind="Cluster" resourceId={clusterId} /><RefreshButton label="Refresh configuration" onClick={refresh} isLoading={detail.refreshing} /></HStack>} /></VStack>}
-      {activeTab === "node-groups" && <VStack id={panelId("node-groups")} role="tabpanel" aria-label="Node groups" tabIndex={0} gap={6}><ClusterNodeGroups cluster={cluster} refreshing={detail.refreshing} onRefresh={detail.refresh} onApplied={(note) => { setMessage(note); refresh(); }} /></VStack>}
+      {activeTab === "node-groups" && <VStack id={panelId("node-groups")} role="tabpanel" aria-label="Node groups" tabIndex={0} gap={6}><ClusterNodeGroups cluster={cluster} refreshing={detail.refreshing} onRefresh={detail.refresh} /></VStack>}
       {activeTab === "topology" && <VStack id={panelId("topology")} role="tabpanel" aria-label="Topology" tabIndex={0} gap={6}><ClusterTopology cluster={cluster} network={network.data?.network} /></VStack>}
       {activeTab === "resources" && <VStack id={panelId("resources")} role="tabpanel" aria-label="Infrastructure inventory" tabIndex={0} gap={6}>
         <ManagedInventory resources={resources} title="Cluster managed resource inventory" onRefresh={refresh} refreshing={detail.refreshing} />
@@ -740,14 +484,9 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         <ClusterViolationsPanel clusterId={clusterId} />
       </VStack>}
       {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
-      {activeTab === "cloud-resources" && <VStack id={panelId("cloud-resources")} role="tabpanel" aria-label="Platform cloud resources" tabIndex={0} gap={4}>
-        <ManagedResourcePreviews key={cluster.id} ownership="platform" clusterId={cluster.id}
-          owner={cluster.displayName || cluster.name || cluster.id} region={cluster.spec?.region ?? ""}
-          provider={cluster.spec?.provider.case || cluster.status?.provider.case} deleting={cluster.status?.state === ClusterState.DELETING} />
-      </VStack>}
       {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="Sub Tenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
       {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
-      {editing && <EditCluster network={network.data?.network} clusterId={clusterId} currentEtag={cluster.etag} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
+      {editing && <EditCluster network={network.data?.network} clusterId={clusterId} current={cluster} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
       {deleting && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
       {retrying && <RetryCluster clusterId={clusterId} onClose={() => setRetrying(false)} onRetried={refresh} />}
     </>}
@@ -823,97 +562,6 @@ function DetailRows({ title, rows }: { title: string; rows: RelatedResourceRow[]
     { key: "detail", header: "Details", width: proportional(3, { minWidth: 80 }), renderCell: (row) => typeof row.detail === "string" ? <Text>{row.detail}</Text> : row.detail },
   ];
   return rows.length ? <Table aria-label={title} data={rows.map((row, id) => ({ ...row, id }))} columns={columns} idKey="id" textOverflow="wrap" density="compact" hasHover /> : <Text type="supporting">No {title.toLowerCase()} reported.</Text>;
-}
-
-function EditCluster({ clusterId, currentEtag, network, onClose, onApplied }: { network?: Network; clusterId: string; currentEtag: string; onClose: () => void; onApplied: () => void }) {
-  const { api, tenantId } = usePlatform();
-  const load = useCallback((signal: AbortSignal) => api.cluster.getCluster({ tenantId, clusterId, asRequested: true }, { signal }), [api, tenantId, clusterId]);
-  const requested = useAsyncQuery(load);
-  if (requested.data?.cluster) return <ClusterEditor network={network} key={requested.data.cluster.etag} baseline={requested.data.cluster} asRequested={requested.data.asRequested} currentEtag={currentEtag} onApplied={onApplied} onClose={onClose} onReload={requested.refresh} />;
-  return <ResourceWorkflowDialog isOpen onOpenChange={(open) => { if (!open) onClose(); }} title="Edit cluster" steps={clusterWizardSteps} step={0}
-    footer={<HStack gap={3}><Button label="Cancel editing" variant="secondary" onClick={onClose} />{!requested.loading && <Button label="Reload editable cluster" onClick={requested.refresh} />}</HStack>}>
-    <ErrorNotice message={requested.error} />
-    {requested.loading ? <Text role="status">Loading cluster settings…</Text> : !requested.error && <Text>The server returned no cluster settings to edit.</Text>}
-  </ResourceWorkflowDialog>;
-}
-
-function ClusterEditor({ baseline, network, asRequested, currentEtag, onApplied, onClose, onReload }: { baseline: Cluster; network?: Network; asRequested: boolean; currentEtag: string; onApplied: () => void; onClose: () => void; onReload: () => void }) {
-  const { api, tenantId } = usePlatform();
-  const loadSubTenants = useCallback(async (signal: AbortSignal) => baseline.spec?.naas ? api.subtenant.listSubTenants({ tenantId, clusterId: baseline.id, pageSize: 1 }, { signal }) : undefined, [api, tenantId, baseline.id, baseline.spec?.naas]);
-  const allocations = useAsyncQuery(loadSubTenants);
-  const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing Sub Tenants before allowing NaaS to be disabled…" : allocations.error ? "Sub Tenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all Sub Tenants, including those still deleting, before disabling NaaS." : undefined;
-  const [form, setForm] = useState(() => clusterForm(baseline));
-  const rows = useClusterFieldRows(form);
-  const [step, setStep] = useState(0);
-  const formId = useId();
-  const [touched, setTouched] = useState<Set<string>>(new Set());
-  const [review, setReview] = useState<ReviewedClusterPlan>();
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const locked = useRef(false);
-  const revision = useRef(0);
-  const errorRef = useRef<HTMLElement>(null);
-  function change<K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) {
-    if (["desiredSize", "zoneIds", "serviceCidr", "awsAdditionalSecurityGroups", "awsAuthenticationMode", ...platformManagedClusterFields].includes(field)) return;
-    if (field === "naas" && value === false && naasLockReason) return;
-    revision.current++;
-    setReview(undefined); setError("");
-    setForm((old) => ({ ...old, [field]: value }));
-    setTouched((old) => new Set([...old, field]));
-  }
-  async function submit(apply: boolean) {
-    if (locked.current) return;
-    if (!apply && step < 2) {
-      try { rows.validate(step); validateClusterFormStep(form, step, touched); setStep(step + 1); setError(""); }
-      catch (cause) { setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
-      return;
-    }
-    locked.current = true; setBusy(true); setError("");
-    const inputRevision = revision.current;
-    try {
-      if (baseline.etag !== currentEtag) throw new Error("The cluster changed. Reload editable cluster and review a new plan.");
-      if (baseline.spec?.naas && !form.naas && naasLockReason) throw new Error(naasLockReason);
-      rows.validate(step);
-      const request = buildClusterUpdate(tenantId, baseline, form, touched);
-      if (apply) {
-        if (!review) throw new Error("Review a plan first.");
-        const response = await api.cluster.updateCluster(applyReviewedClusterPlan(review, request));
-        if (!response.updateRecorded) throw new Error("The server did not acknowledge the update. Reload and review again.");
-        onApplied();
-      } else {
-        setReview(undefined);
-        const response = await api.cluster.updateCluster(request);
-        if (!response.plan) throw new Error("The server returned no plan. Apply is blocked.");
-        if (revision.current === inputRevision) { setReview(bindClusterPlan(request, response.plan)); setStep(3); }
-      }
-    } catch (cause) { setReview(undefined); setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
-    finally { locked.current = false; setBusy(false); }
-  }
-  return <ResourceWorkflowDialog isOpen onOpenChange={(open) => { if (!open && !locked.current) onClose(); }} title="Edit cluster" steps={clusterWizardSteps} step={step} busy={busy}
-    description={`Review changes to ${baseline.name} in tenant ${tenantId} before applying.`}
-    placement={<NetworkPlacement network={network} cluster={baseline} />}
-    footer={<HStack gap={3} wrap="wrap">
-      <Button label="Cancel editing" variant="secondary" onClick={onClose} isDisabled={busy} />
-      {step > 0 && <Button label="Back" variant="secondary" onClick={() => { setStep(step - 1); setError(""); }} isDisabled={busy} />}
-      <Button label={step === 3 ? "Apply reviewed plan" : step === 2 ? "Preview update plan" : "Next"} type="submit" form={formId} variant="primary" isLoading={busy} isDisabled={(step === 3 && (!review || !clusterPlanApplicable(review.plan) || baseline.etag !== currentEtag))} />
-    </HStack>}>
-    {!asRequested && <Banner status="info" title="Original input unavailable" description="The server returned resolved defaults. Only fields you edit will be included in the update mask." />}
-    {baseline.etag !== currentEtag && <Banner status="warning" title="Cluster changed" description="Reload editable cluster before previewing or applying changes." />}
-    {baseline.etag !== currentEtag && <Button label="Reload editable cluster" onClick={onReload} isDisabled={busy} />}
-    {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
-    <form id={formId} method="post" aria-label="Cluster update settings" onSubmit={(event) => { event.preventDefault(); void submit(step === 3); }}>
-      <VStack gap={6}>
-        {step < 3 && <ClusterFields step={step} value={form} onChange={change} rows={rows} baseline={baseline} naasLockReason={naasLockReason} disabled={busy} networkName={network?.displayName || network?.name} region={baseline.spec?.region ?? ""} tier={network?.spec?.tier || baseline.status?.tier} />}
-    {step === 3 && review && <VStack gap={4}>
-      <PlanReview plan={review.plan} />
-      <ClusterExtraReview form={form} touched={touched} />
-      {touched.has("naas") && <Banner status={form.naas ? "info" : "warning"} title={form.naas ? "Enable Namespace as a Service" : "Disable Namespace as a Service"} description={form.naas ? "Enable support for team namespaces with separate access, quotas, and policies. Setup continues after you apply this change." : "Turn off namespace tenancy controls for this cluster. Existing namespaces, workloads, and data will remain. Review the impact on teams using these controls before applying."} />}
-      <MetadataList><MetadataListItem label="Edited settings">{[...touched].filter((field) => !(field === "kubernetesVersion" && Number(form.upgradeMode) === UpgradeMode.AUTOMATIC)).map((field) => field.replace(/([A-Z])/g, " $1").toLowerCase()).join(", ")}</MetadataListItem><MetadataListItem label="Concurrency token">{baseline.etag}</MetadataListItem></MetadataList>
-      <Collapsible trigger="Advanced · exact reviewed request" defaultIsOpen={false}><VStack as="pre" isScrollable><Text type="code">{toJsonString(UpdateClusterRequestSchema, review.request, { prettySpaces: 2 })}</Text></VStack></Collapsible>
-    </VStack>}
-      </VStack>
-    </form>
-  </ResourceWorkflowDialog>;
 }
 
 function DeleteCluster({ cluster, onCancel, onDeleted }: { cluster: Cluster; onCancel: () => void; onDeleted: () => void }) {

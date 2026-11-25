@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clone, create, toJson } from "@bufbuild/protobuf";
-import { ClusterSchema, ClusterState, UpgradeMode } from "../../gen/cloud/v1/cluster_pb";
+import { clone, create, fromJson, toJson } from "@bufbuild/protobuf";
+import { AccessSpecSchema } from "../../gen/cloud/v1/access_pb";
+import { ClusterSchema, ClusterSpecSchema, ClusterState, UpgradeMode } from "../../gen/cloud/v1/cluster_pb";
 import { NetworkSchema } from "../../gen/cloud/v1/network_pb";
 import { CloudAccountSchema } from "../../gen/cloud/v1/tenant_service_pb";
 import { PlanSchema } from "../../gen/cloud/v1/plan_pb";
 import {
   applyReviewedClusterPlan, bindClusterPlan, buildClusterUpdate, buildCreateCluster,
   clusterForm, clusterIsConverging, clusterPlanApplicable, clusterProvider,
-  createRequestIdentity, emptyClusterForm,
-  validateClusterFormStep, buildImportCluster,
+  createRequestIdentity, emptyClusterForm, changedClusterFields, clusterReviewStep, clusterWizardSteps,
+  validateClusterForm, validateClusterFormStep, buildImportCluster,
 } from "./clusters";
 
 const network = create(NetworkSchema, {
@@ -23,14 +24,13 @@ const resolved = create(ClusterSchema, {
   spec: {
     region: "ap-northeast-1", network: { networkId: network.id }, upgradeMode: UpgradeMode.MANUAL,
     controlPlane: { kubernetesVersion: "1.33", endpointAccess: { endpointPublicAccess: true, endpointPrivateAccess: true, publicAccessCidrs: ["203.0.113.0/24"] } },
-    defaultNodePool: { instanceTypes: ["m6i.large"], capacityType: 1, diskSizeGb: 20, scalingConfig: { minSize: 1, maxSize: 5, desiredSize: 3 } },
     provider: { case: "aws", value: { irsa: true, addons: [{ name: "coredns", version: "v1.0.0" }] } },
   },
 });
 
 test("fallback resolved spec updates contain only touched fields, with no defaults or immutable paths", () => {
   const form = { ...clusterForm(resolved), displayName: "Renamed" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["displayName"]));
+  const request = buildClusterUpdate("tenant-a", resolved, form);
   assert.deepEqual(request.updateMask?.paths, ["display_name"]);
   assert.deepEqual(toJson(ClusterSchema, request.cluster!), { id: "cluster-1", etag: "version-one", displayName: "Renamed" });
   assert.equal(resolved.spec?.controlPlane?.kubernetesVersion, "1.33");
@@ -40,54 +40,51 @@ test("fallback resolved spec updates contain only touched fields, with no defaul
 });
 
 test("leaf masks preserve false, zero, empty lists and clearing optional IRSA without replacing parent messages", () => {
-  const form = { ...clusterForm(resolved), publicAccess: false, diskSize: "", adminPrincipals: "", irsa: "default" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["publicAccess", "diskSize", "adminPrincipals", "irsa"]));
+  const baseline = clone(ClusterSchema, resolved);
+  baseline.spec!.access = { $typeName: "cloud.v1.AccessSpec", adminPrincipals: ["arn:aws:iam::123456789012:role/admin"], accessEntries: [] };
+  const form = { ...clusterForm(baseline), publicAccess: false, adminPrincipals: "", irsa: "default" };
+  const request = buildClusterUpdate("tenant-a", baseline, form);
   assert.deepEqual(request.updateMask?.paths, [
-    "spec.access.admin_principals", "spec.aws.irsa", "spec.control_plane.endpoint_access.endpoint_public_access", "spec.default_node_pool.disk_size_gb",
+    "spec.access.admin_principals", "spec.aws.irsa", "spec.control_plane.endpoint_access.endpoint_public_access",
   ]);
   assert.equal(request.cluster?.spec?.controlPlane?.endpointAccess?.endpointPublicAccess, false);
-  assert.equal(request.cluster?.spec?.defaultNodePool?.diskSizeGb, 0);
   assert.deepEqual(request.cluster?.spec?.access?.adminPrincipals, []);
   assert.equal(request.cluster?.spec?.provider.case, "aws");
   if (request.cluster?.spec?.provider.case === "aws") assert.equal(request.cluster.spec.provider.value.irsa, undefined);
-  assert.equal(request.cluster?.spec?.defaultNodePool?.scalingConfig?.desiredSize, undefined);
   assert.equal(request.cluster?.spec?.controlPlane?.kubernetesVersion, "");
 });
 
-test("rejects edits to immutable name/network and unsupported masks including region, tier and desired size", () => {
+test("rejects edits to immutable name/network and unsupported masks including region and tier", () => {
   const form = clusterForm(resolved);
   for (const field of ["name", "networkId"]) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, [field]: "changed" }, new Set(["displayName"])), /immutable/);
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, displayName: "Renamed", [field]: "changed" }), /immutable/);
   }
-  for (const path of ["region", "spec.region", "tier", "spec.tier", "spec.network", "desiredSize", "defaultNodePool"]) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set([path])), /immutable or unsupported/);
-  }
-  assert.throws(() => buildClusterUpdate("tenant-a", { ...resolved, etag: "" }, form, new Set(["displayName"])), /etag/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set()), /at least one/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, zoneIds: "apne1-az1, apne1-az2" }), /immutable/);
+  assert.throws(() => buildClusterUpdate("tenant-a", { ...resolved, etag: "" }, { ...form, displayName: "Renamed" }), /etag/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, form), /at least one/);
 });
 
 test("switching to automatic mode never converts a resolved or previously edited version into a pin", () => {
   const form = { ...clusterForm(resolved), upgradeMode: "2", kubernetesVersion: "1.34" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["upgradeMode", "kubernetesVersion"]));
+  const request = buildClusterUpdate("tenant-a", resolved, form);
   assert.deepEqual(request.updateMask?.paths, ["spec.upgrade_mode"]);
   assert.equal(request.cluster?.spec?.controlPlane, undefined);
   assert.equal(request.cluster?.spec?.upgradeMode, UpgradeMode.AUTOMATIC);
-  const unrelated = buildClusterUpdate("tenant-a", resolved, form, new Set(["displayName"]));
+  const unrelated = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), displayName: "Renamed" });
   assert.equal(unrelated.cluster?.spec, undefined);
 });
 
 test("manual version is masked only after explicit editing; unedited resolved version stays absent", () => {
-  const form = { ...clusterForm(resolved), kubernetesVersion: "1.34", diskSize: "40" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["diskSize"]));
-  assert.deepEqual(request.updateMask?.paths, ["spec.default_node_pool.disk_size_gb"]);
+  const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), naas: true });
+  assert.deepEqual(request.updateMask?.paths, ["spec.naas"]);
   assert.equal(request.cluster?.spec?.controlPlane, undefined);
-  const pin = buildClusterUpdate("tenant-a", resolved, form, new Set(["kubernetesVersion"]));
+  const pin = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), kubernetesVersion: "1.34" });
   assert.deepEqual(pin.updateMask?.paths, ["spec.control_plane.kubernetes_version"]);
   assert.equal(pin.cluster?.spec?.controlPlane?.kubernetesVersion, "1.34");
 });
 
 test("create derives immutable region and provider from existing network/account and never submits cluster tier", () => {
-  const form = { ...emptyClusterForm, networkId: network.id, name: "new-cluster", instanceTypes: "m6i.large, m6a.large", publicCIDRs: "203.0.113.0/24" };
+  const form = { ...emptyClusterForm, networkId: network.id, name: "new-cluster", publicCIDRs: "203.0.113.0/24" };
   const request = buildCreateCluster("tenant-a", form, network, accounts, "stable-uuid");
   const json = toJson(ClusterSchema, request.cluster!);
   assert.equal(request.cluster?.spec?.region, network.spec?.region);
@@ -96,6 +93,8 @@ test("create derives immutable region and provider from existing network/account
   assert.equal(request.requestId, "stable-uuid");
   assert.equal(JSON.stringify(json).includes('"tier"'), false);
   assert.equal(JSON.stringify(json).includes('"kubernetesVersion"'), false);
+  assert.equal(JSON.stringify(json).includes("NodePool"), false, "the platform creates the node groups");
+  assert.equal(JSON.stringify(json).includes("nodeGroups"), false);
   if (request.cluster?.spec?.provider.case === "aws") assert.equal(request.cluster.spec.provider.value.irsa, undefined);
   const automatic = buildCreateCluster("tenant-a", { ...form, upgradeMode: "2", kubernetesVersion: "1.34" }, network, accounts, "stable-uuid");
   assert.equal(automatic.cluster?.spec?.controlPlane?.kubernetesVersion, "");
@@ -104,14 +103,14 @@ test("create derives immutable region and provider from existing network/account
   assert.throws(() => clusterProvider(network, [create(CloudAccountSchema, { id: "account-1" })]), /no supported cluster provider/);
 });
 
-test("validate only touched inputs on updates, and validate endpoint and scaling dependencies on submit", () => {
+test("validate only touched inputs on updates, and validate endpoint dependencies on submit", () => {
   const form = clusterForm(resolved);
-  assert.doesNotThrow(() => buildClusterUpdate("tenant-a", resolved, { ...form, instanceTypes: "", diskSize: "broken" }, new Set(["displayName"])));
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, diskSize: "5" }, new Set(["diskSize"])), /Disk size/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, diskSize: "-1" }, new Set(["diskSize"])), /whole number/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "" }, new Set(["publicCIDRs"])), /requires at least one/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicAccess: false, privateAccess: false }, new Set(["publicAccess", "privateAccess"])), /at least one API endpoint/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "999.1.1.1/33" }, new Set(["publicCIDRs"])), /IPv4 CIDRs/);
+  const odd = { ...form, awsLogRetentionDays: "broken" };
+  assert.doesNotThrow(() => buildClusterUpdate("tenant-a", resolved, { ...odd, displayName: "Renamed" }, odd));
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, awsLogRetentionDays: "-1" }), /whole number/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "" }), /requires at least one/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicAccess: false, privateAccess: false }), /at least one API endpoint/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "999.1.1.1/33" }), /IPv4 CIDRs/);
 });
 
 test("NaaS defaults off, hydrates saved values and is included in guided creation", () => {
@@ -133,7 +132,7 @@ test("NaaS updates use a sparse leaf mask and preserve disabling false through r
     const baseline = clone(ClusterSchema, resolved);
     baseline.spec!.naas = !naas;
     const form = { ...clusterForm(baseline), naas };
-    const request = buildClusterUpdate("tenant-a", baseline, form, new Set(["naas"]));
+    const request = buildClusterUpdate("tenant-a", baseline, form);
     assert.deepEqual(request.updateMask?.paths, ["spec.naas"]);
     assert.equal(request.cluster?.spec?.naas, naas);
     assert.equal(request.cluster?.spec?.network, undefined);
@@ -145,17 +144,17 @@ test("NaaS updates use a sparse leaf mask and preserve disabling false through r
     assert.deepEqual(apply.updateMask?.paths, ["spec.naas"]);
     assert.equal(apply.validateOnly, false);
     assert.equal(apply.planId, "naas-plan");
-    const changed = buildClusterUpdate("tenant-a", baseline, { ...form, naas: !naas }, new Set(["naas"]));
+    const changed = buildClusterUpdate("tenant-a", baseline, { ...form, displayName: "Other" });
     assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
-    const unrelated = buildClusterUpdate("tenant-a", baseline, { ...form, displayName: "Renamed" }, new Set(["displayName"]));
+    const unrelated = buildClusterUpdate("tenant-a", baseline, { ...clusterForm(baseline), displayName: "Renamed" });
     assert.deepEqual(unrelated.updateMask?.paths, ["display_name"]);
     assert.equal(unrelated.cluster?.spec, undefined);
   }
 });
 
 test("applying uses exact reviewed payload, tenant, mask and etag with explicit plan ID", () => {
-  const form = { ...clusterForm(resolved), diskSize: "40" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["diskSize"]));
+  const form = { ...clusterForm(resolved), maintenanceStart: "02:00", maintenanceDuration: "4h" };
+  const request = buildClusterUpdate("tenant-a", resolved, form);
   const plan = create(PlanSchema, { planId: "plan-1", applicable: true, changes: [{ action: 2, name: "nodegroup" }] });
   const review = bindClusterPlan(request, plan);
   const apply = applyReviewedClusterPlan(review, request);
@@ -165,7 +164,7 @@ test("applying uses exact reviewed payload, tenant, mask and etag with explicit 
   assert.deepEqual(apply.updateMask, request.updateMask);
   assert.equal(request.validateOnly, true);
   assert.equal(request.planId, "");
-  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, diskSize: "50" }, new Set(["diskSize"]));
+  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, maintenanceDuration: "5h" });
   assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
   assert.throws(() => applyReviewedClusterPlan(review, { ...request, tenantId: "tenant-b" }), /Inputs or etag changed/);
   assert.throws(() => applyReviewedClusterPlan(review, { ...request, cluster: { ...request.cluster!, etag: "new-etag" } }), /Inputs or etag changed/);
@@ -178,7 +177,7 @@ test("applying uses exact reviewed payload, tenant, mask and etag with explicit 
 });
 
 test("missing IDs, rejected and unknown actions and non-applicable plans fail closed", () => {
-  const request = buildClusterUpdate("tenant-a", resolved, clusterForm(resolved), new Set(["displayName"]));
+  const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), displayName: "Renamed" });
   for (const plan of [
     create(PlanSchema, { applicable: true }),
     create(PlanSchema, { planId: " ", applicable: true }),
@@ -213,14 +212,15 @@ test("asynchronous acknowledgement is distinct from observed readiness", () => {
 });
 
 test("wizard Next validates only the active step; editing ignores unedited resolved defaults", () => {
-  const draft = { ...emptyClusterForm, name: "new-cluster", networkId: network.id, instanceTypes: "invalid", publicCIDRs: "" };
+  const draft = { ...emptyClusterForm, name: "new-cluster", networkId: network.id, addonsYaml: "- unexpected: true", publicCIDRs: "" };
   assert.doesNotThrow(() => validateClusterFormStep(draft, 0));
-  assert.throws(() => validateClusterFormStep(draft, 1), /instance types/);
-  assert.throws(() => validateClusterFormStep(draft, 2), /requires at least one/);
+  assert.throws(() => validateClusterFormStep(draft, 1), /requires at least one/);
+  assert.throws(() => validateClusterFormStep(draft, 2));
   assert.throws(() => validateClusterFormStep({ ...draft, name: "Bad_Name" }, 0), /DNS label/);
   assert.doesNotThrow(() => validateClusterFormStep({ ...draft, upgradeMode: "2", kubernetesVersion: "not-a-version" }, 0));
-  assert.doesNotThrow(() => validateClusterFormStep(draft, 1, new Set(["displayName"])));
-  assert.doesNotThrow(() => validateClusterFormStep(draft, 2, new Set(["maxSize"])));
+  assert.doesNotThrow(() => validateClusterFormStep(draft, 1, draft));
+  assert.doesNotThrow(() => validateClusterFormStep(draft, 2, draft));
+  assert.throws(() => validateClusterFormStep(draft, 1, { ...draft, publicCIDRs: "203.0.113.0/24" }), /requires at least one/);
 });
 
 test("import maps only supported AWS network and node group inputs into a read-only import request", () => {
@@ -237,15 +237,14 @@ test("import maps only supported AWS network and node group inputs into a read-o
   assert.throws(() => buildImportCluster("tenant-a", { ...form, defaultNodeGroupName: "bad/name" }, network, accounts, "id"), /node group name/);
 });
 
-test("guided create covers tags, node metadata, initial size, maintenance, access and AWS settings", () => {
+test("guided create covers tags, maintenance, access and AWS settings", () => {
   const form = {
     ...emptyClusterForm, name: "complete", networkId: network.id, publicCIDRs: "203.0.113.0/24",
-    labels: '{"cost-center":"42"}', nodeLabels: '{"team.example.com/pool":"payments"}',
-    nodeTaints: '[{"key":"team.example.com/dedicated","value":"payments","effect":1}]', desiredSize: "2",
+    labels: '{"cost-center":"42"}',
     maintenanceDays: "Monday, Saturday", maintenanceStart: "23:30", maintenanceDuration: "90m",
     zoneIds: "apne1-az1, apne1-az2", serviceCidr: "172.20.0.0/16", encryptionEnabled: "true",
     encryptionKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/key-123",
-    awsAmiType: "1", awsAdditionalSecurityGroups: "sg-12345678", awsAuthenticationMode: "2", awsSupportType: "1",
+    awsAdditionalSecurityGroups: "sg-12345678", awsAuthenticationMode: "2", awsSupportType: "1",
     awsLogGroupEnabled: "true", awsLogRetentionDays: "90", awsLogTypes: "api, audit",
     oidcYaml: 'name: corp\nissuerUrl: https://id.example.com\nclientId: platform\ngroupsClaim: groups\ngroupsPrefix: "oidc:"',
     accessEntriesYaml: '- principalArn: arn:aws:iam::123456789012:role/reader\n  policies:\n    - policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy\n      scope: 2\n      namespaces: [payments]',
@@ -253,9 +252,6 @@ test("guided create covers tags, node metadata, initial size, maintenance, acces
   };
   const created = buildCreateCluster("tenant-a", form, network, accounts, "same-request").cluster!;
   assert.deepEqual(created.labels, { "cost-center": "42" });
-  assert.deepEqual(created.spec?.defaultNodePool?.labels, { "team.example.com/pool": "payments" });
-  assert.equal(created.spec?.defaultNodePool?.taints[0].effect, 1);
-  assert.equal(created.spec?.defaultNodePool?.scalingConfig?.desiredSize, 2);
   assert.deepEqual(created.spec?.network?.zoneIds, ["apne1-az1", "apne1-az2"]);
   assert.equal(created.spec?.network?.serviceCidr, "172.20.0.0/16");
   assert.deepEqual(created.spec?.maintenanceWindow?.days, [1, 6]);
@@ -266,7 +262,6 @@ test("guided create covers tags, node metadata, initial size, maintenance, acces
   assert.equal(created.spec?.provider.case, "aws");
   if (created.spec?.provider.case === "aws") {
     const aws = created.spec.provider.value;
-    assert.equal(aws.defaultNodePool?.amiType, 1);
     assert.deepEqual(aws.additionalSecurityGroupIds, ["sg-12345678"]);
     assert.equal(aws.accessConfig?.authenticationMode, 2);
     assert.equal(aws.upgradePolicy?.supportType, 1);
@@ -275,14 +270,13 @@ test("guided create covers tags, node metadata, initial size, maintenance, acces
     assert.equal(aws.addons[0].configurationValues, '{"replicaCount":3}');
   }
   const hydrated = clusterForm(created);
-  assert.equal(JSON.parse(hydrated.nodeTaints)[0].effect, 1);
   const roundtrip = buildCreateCluster("tenant-a", hydrated, network, accounts, "same-request").cluster!;
   assert.deepEqual(toJson(ClusterSchema, roundtrip), toJson(ClusterSchema, created));
 });
 
 test("cloud tag updates are a sparse map and preserve all unshown settings", () => {
-  const form = { ...clusterForm(resolved), labels: '{"team":"platform"}', oidcYaml: "malformed: [" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["labels"]));
+  const unshown = { ...clusterForm(resolved), oidcYaml: "malformed: [" };
+  const request = buildClusterUpdate("tenant-a", resolved, { ...unshown, labels: '{"team":"platform"}' }, unshown);
   assert.deepEqual(request.updateMask?.paths, ["labels"]);
   assert.deepEqual(request.cluster?.labels, { team: "platform" });
   assert.equal(request.cluster?.spec?.provider.case, undefined);
@@ -290,32 +284,24 @@ test("cloud tag updates are a sparse map and preserve all unshown settings", () 
   assert.deepEqual(resolved.labels, { environment: "production" });
 });
 
-test("Kubernetes keys/values, duplicate taints and map keys are validated", () => {
+test("cloud tags follow AWS tag rules", () => {
   const form = clusterForm(resolved);
-  for (const nodeLabels of ['{"UPPER.example/pool":"ok"}', '{"example.com/":"bad"}', '{"pool":"bad value"}', '{"a":"one","a":"two"}', '{"a":3}']) {
-    assert.throws(() => validateClusterFormStep({ ...form, nodeLabels }, 1));
-  }
-  for (const nodeTaints of ['[{"key":"bad/key/extra","effect":1}]', '[{"key":"x","effect":0}]', '[{"key":"x","effect":1},{"key":"x","effect":1}]']) {
-    assert.throws(() => validateClusterFormStep({ ...form, nodeTaints }, 1));
-  }
-  assert.doesNotThrow(() => validateClusterFormStep({ ...form, nodeLabels: '{"example.com/pool":""}', nodeTaints: '[{"key":"x","effect":1},{"key":"x","effect":3}]' }, 1));
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, labels: '{"aws:reserved":"x"}' }, new Set(["labels"])), /AWS tag/);
+  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, labels: '{"aws:reserved":"x"}' }), /AWS tag/);
 });
 
 test("immutable create-only fields cannot leak into updates", () => {
   const form = clusterForm(resolved);
-  for (const field of ["desiredSize", "zoneIds", "serviceCidr", "awsAdditionalSecurityGroups", "awsAuthenticationMode"]) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set([field])), /immutable or unsupported/);
+  for (const [field, value] of [["zoneIds", "apne1-az1, apne1-az2"], ["serviceCidr", "172.20.0.0/16"], ["awsAdditionalSecurityGroups", "sg-12345678"], ["awsAuthenticationMode", "2"]]) {
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, [field]: value }), /immutable/);
   }
-  assert.throws(() => buildCreateCluster("tenant-a", { ...emptyClusterForm, name: "new", networkId: network.id, publicCIDRs: "203.0.113.0/24", desiredSize: "5" }, network, accounts, "retry"), /between minimum/);
 });
 
 test("atomic grouped masks preserve untouched siblings and clear only on explicit edits", () => {
   const baseline = clone(ClusterSchema, resolved);
   baseline.spec!.maintenanceWindow = { $typeName: "cloud.v1.MaintenanceWindow", days: [1, 3], start: "02:00", duration: "4h" };
   if (baseline.spec!.provider.case === "aws") baseline.spec!.provider.value.controlPlaneLogGroup = { $typeName: "cloud.v1.AwsControlPlaneLogGroup", enabled: true, retentionDays: 90 };
-  const form = { ...clusterForm(baseline), maintenanceStart: "03:00", maintenanceDuration: "bad unedited value", awsLogRetentionDays: "30", awsLogGroupEnabled: "false" };
-  const update = buildClusterUpdate("tenant-a", baseline, form, new Set(["maintenanceStart", "awsLogRetentionDays"]));
+  const form = { ...clusterForm(baseline), maintenanceStart: "03:00", awsLogRetentionDays: "30" };
+  const update = buildClusterUpdate("tenant-a", baseline, form);
   assert.deepEqual(update.updateMask?.paths, ["spec.aws.control_plane_log_group", "spec.maintenance_window"]);
   assert.deepEqual(update.cluster?.spec?.maintenanceWindow?.days, [1, 3]);
   assert.equal(update.cluster?.spec?.maintenanceWindow?.duration, "4h");
@@ -323,87 +309,81 @@ test("atomic grouped masks preserve untouched siblings and clear only on explici
     assert.equal(update.cluster.spec.provider.value.controlPlaneLogGroup?.enabled, true);
     assert.equal(update.cluster.spec.provider.value.controlPlaneLogGroup?.retentionDays, 30);
   }
-  const clear = buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceDays: "", maintenanceStart: "", maintenanceDuration: "" }, new Set(["maintenanceDays", "maintenanceStart", "maintenanceDuration"]));
+  const clear = buildClusterUpdate("tenant-a", baseline, { ...clusterForm(baseline), maintenanceDays: "", maintenanceStart: "", maintenanceDuration: "" });
   assert.deepEqual(clear.updateMask?.paths, ["spec.maintenance_window"]);
   assert.equal(clear.cluster?.spec?.maintenanceWindow, undefined);
-  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceDuration: "30m" }, new Set(["maintenanceDuration"])));
-  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceStart: "25:00" }, new Set(["maintenanceStart"])));
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceDuration: "30m" }));
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, maintenanceStart: "25:00" }));
 });
 
 test("encryption transitions keep the key and cannot disable existing encryption", () => {
   const baseline = clone(ClusterSchema, resolved);
   baseline.spec!.controlPlane!.secretsEncryption = { $typeName: "cloud.v1.SecretsEncryption", enabled: true, kmsKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/original" };
   const form = clusterForm(baseline);
-  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, encryptionEnabled: "false", encryptionKeyArn: "" }, new Set(["encryptionEnabled", "encryptionKeyArn"])), /cannot be disabled/);
-  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, encryptionKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/other" }, new Set(["encryptionKeyArn"])), /another key/);
-  const update = buildClusterUpdate("tenant-a", baseline, form, new Set(["encryptionEnabled"]));
-  assert.deepEqual(update.updateMask?.paths, ["spec.control_plane.secrets_encryption"]);
-  assert.equal(update.cluster?.spec?.controlPlane?.secretsEncryption?.kmsKeyArn, baseline.spec?.controlPlane?.secretsEncryption?.kmsKeyArn);
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, encryptionEnabled: "false", encryptionKeyArn: "" }), /cannot be disabled/);
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...form, encryptionKeyArn: "arn:aws:kms:ap-northeast-1:123456789012:key/other" }), /another key/);
+  // Restating the stored setting is not a change: nothing about encryption is sent.
+  const update = buildClusterUpdate("tenant-a", baseline, { ...form, encryptionEnabled: "true", displayName: "Renamed" });
+  assert.deepEqual(update.updateMask?.paths, ["display_name"]);
+  assert.equal(update.cluster?.spec?.controlPlane?.secretsEncryption, undefined);
 });
 
-test("typed bounded nested YAML handles launch templates, add-ons and exact plan binding", () => {
-  const form = { ...clusterForm(resolved), launchTemplateYaml: 'id: lt-12345678\nversion: "2"', diskSize: "", addonsYaml: "- name: coredns" };
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set(["launchTemplateYaml"])), /excludes disk size/);
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["launchTemplateYaml", "diskSize", "addonsYaml"]));
-  assert.deepEqual(request.updateMask?.paths, ["spec.aws.addons", "spec.aws.default_node_pool.launch_template", "spec.default_node_pool.disk_size_gb"]);
+test("typed bounded nested YAML handles add-ons and exact plan binding", () => {
+  const form = { ...clusterForm(resolved), addonsYaml: "- name: coredns" };
+  const request = buildClusterUpdate("tenant-a", resolved, form);
+  assert.deepEqual(request.updateMask?.paths, ["spec.aws.addons"]);
   if (request.cluster?.spec?.provider.case === "aws") {
-    assert.equal(request.cluster.spec.provider.value.defaultNodePool?.launchTemplate?.version, "2");
     assert.equal(request.cluster.spec.provider.value.addons[0].version, ""); // no fabricated channel pin
   }
   const review = bindClusterPlan(request, create(PlanSchema, { planId: "advanced", applicable: true }));
   assert.equal(applyReviewedClusterPlan(review, request).planId, "advanced");
-  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, launchTemplateYaml: 'id: lt-12345678\nversion: "3"' }, new Set(["launchTemplateYaml", "diskSize", "addonsYaml"]));
+  const changed = buildClusterUpdate("tenant-a", resolved, { ...form, addonsYaml: "- name: coredns\n  version: v1.2.3" });
   assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
   for (const oidcYaml of ["unexpected: true", "name: corp\nname: other", "a: &a\n  b: *a", `name: ${"a".repeat(65537)}`]) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, oidcYaml }, new Set(["oidcYaml"])));
+    assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, oidcYaml }));
   }
 });
 
 test("nested message clears and access changes retain sparse masks and sibling defaults", () => {
-  const form = { ...clusterForm(resolved), oidcYaml: "", accessEntriesYaml: "", addonsYaml: "", launchTemplateYaml: "" };
-  const request = buildClusterUpdate("tenant-a", resolved, form, new Set(["oidcYaml", "accessEntriesYaml", "addonsYaml", "launchTemplateYaml"]));
-  assert.deepEqual(request.updateMask?.paths, ["spec.access.access_entries", "spec.access.oidc", "spec.aws.addons", "spec.aws.default_node_pool.launch_template"]);
+  const configured = clone(ClusterSchema, resolved);
+  configured.spec!.access = fromJson(AccessSpecSchema, { oidc: { name: "corp", issuerUrl: "https://id.example.com", clientId: "platform" }, accessEntries: [{ principalArn: "arn:aws:iam::123456789012:role/reader" }] });
+  const form = { ...clusterForm(configured), oidcYaml: "", accessEntriesYaml: "", addonsYaml: "" };
+  const request = buildClusterUpdate("tenant-a", configured, form);
+  assert.deepEqual(request.updateMask?.paths, ["spec.access.access_entries", "spec.access.oidc", "spec.aws.addons"]);
   assert.equal(request.cluster?.spec?.access?.oidc, undefined);
   assert.deepEqual(request.cluster?.spec?.access?.accessEntries, []);
   if (request.cluster?.spec?.provider.case === "aws") {
     assert.deepEqual(request.cluster.spec.provider.value.addons, []);
-    assert.equal(request.cluster.spec.provider.value.defaultNodePool?.launchTemplate, undefined);
     assert.equal(request.cluster.spec.provider.value.irsa, undefined);
   }
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, adminPrincipals: "not-an-arn" }, new Set(["adminPrincipals"])), /IAM role/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, irsa: "typo" }, new Set(["irsa"])), /true, false/);
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, awsLogRetentionDays: "4" }, new Set(["awsLogRetentionDays"])));
-  assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, addonsYaml: "- name: coredns\n- name: coredns" }, new Set(["addonsYaml"])));
+  assert.throws(() => buildClusterUpdate("tenant-a", configured, { ...form, adminPrincipals: "not-an-arn" }), /IAM role/);
+  assert.throws(() => buildClusterUpdate("tenant-a", configured, { ...form, irsa: "typo" }), /true, false/);
+  assert.throws(() => buildClusterUpdate("tenant-a", configured, { ...form, awsLogRetentionDays: "4" }));
+  assert.throws(() => buildClusterUpdate("tenant-a", configured, { ...form, addonsYaml: "- name: coredns\n- name: coredns" }));
   const baseline = clone(ClusterSchema, resolved);
   baseline.spec!.access = { $typeName: "cloud.v1.AccessSpec", adminPrincipals: ["arn:aws:iam::123456789012:role/admin"], accessEntries: [] };
-  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...clusterForm(baseline), accessEntriesYaml: "- principalArn: arn:aws:iam::123456789012:role/admin" }, new Set(["accessEntriesYaml"])), /cannot be both/);
+  assert.throws(() => buildClusterUpdate("tenant-a", baseline, { ...clusterForm(baseline), accessEntriesYaml: "- principalArn: arn:aws:iam::123456789012:role/admin" }), /cannot be both/);
 });
 
 test("advanced network and addon validation belongs to the rendered Access step", () => {
   const base = { ...emptyClusterForm, name: "wizard", networkId: network.id, publicCIDRs: "203.0.113.0/24" };
-  for (const invalid of [{ zoneIds: "invalid-zone" }, { serviceCidr: "172.20.0.0/25" }, { addonsYaml: "- unexpected: true" }]) {
+  for (const [step, invalid] of [[1, { zoneIds: "invalid-zone" }], [1, { serviceCidr: "172.20.0.0/25" }], [2, { addonsYaml: "- unexpected: true" }]] as const) {
     const form = { ...base, ...invalid };
-    assert.doesNotThrow(() => validateClusterFormStep(form, 0));
-    assert.doesNotThrow(() => validateClusterFormStep(form, 1));
-    assert.throws(() => validateClusterFormStep(form, 2));
-    const touched = new Set(Object.keys(invalid));
-    assert.doesNotThrow(() => validateClusterFormStep(form, 0, touched));
-    assert.doesNotThrow(() => validateClusterFormStep(form, 1, touched));
-    assert.throws(() => validateClusterFormStep(form, 2, touched));
+    for (const other of [0, 1, 2].filter((index) => index !== step)) {
+      assert.doesNotThrow(() => validateClusterFormStep(form, other));
+      assert.doesNotThrow(() => validateClusterFormStep(form, other, base));
+    }
+    assert.throws(() => validateClusterFormStep(form, step));
+    assert.throws(() => validateClusterFormStep(form, step, base));
   }
-  const invalidCompute = { ...base, nodeTaints: '[{"key":"dedicated","effect":0}]' };
-  assert.doesNotThrow(() => validateClusterFormStep(invalidCompute, 0));
-  assert.throws(() => validateClusterFormStep(invalidCompute, 1));
-  assert.doesNotThrow(() => validateClusterFormStep(invalidCompute, 2));
 });
 
 test("advanced AWS leaf edits never replace unrelated provider settings", () => {
   for (const [field, value, path] of [
-    ["awsAmiType", "2", "spec.aws.default_node_pool.ami_type"],
     ["awsSupportType", "2", "spec.aws.upgrade_policy.support_type"],
     ["awsLogTypes", "1,5", "spec.aws.enabled_cluster_log_types"],
   ] as const) {
-    const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), [field]: value }, new Set([field]));
+    const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), [field]: value });
     assert.deepEqual(request.updateMask?.paths, [path]);
     assert.equal(request.cluster?.spec?.provider.case, "aws");
     if (request.cluster?.spec?.provider.case === "aws") {
@@ -415,19 +395,67 @@ test("advanced AWS leaf edits never replace unrelated provider settings", () => 
   }
 });
 
-test("the default node group's labels, taints and scaling are platform-managed and refused in updates", () => {
-  const form = { ...clusterForm(resolved), minSize: "2", maxSize: "9", nodeLabels: '{"pool":"jobs"}', nodeTaints: '[{"key":"dedicated","effect":1}]' };
-  for (const field of ["minSize", "maxSize", "nodeLabels", "nodeTaints"]) {
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set([field])), /managed by the platform/);
-    assert.throws(() => buildClusterUpdate("tenant-a", resolved, form, new Set(["displayName", field])), /managed by the platform/);
+test("node groups are not part of the cluster form: the platform creates them", () => {
+  assert.deepEqual([...clusterWizardSteps], ["Cluster settings", "Access", "Add-ons and logging", "Review"]);
+  for (const field of ["instanceTypes", "minSize", "maxSize", "desiredSize", "diskSize", "capacityType", "nodeLabels", "nodeTaints", "awsAmiType", "launchTemplateYaml", "nodeGroups"]) {
+    assert.equal(Object.hasOwn(emptyClusterForm, field), false, field);
+    assert.equal(Object.hasOwn(clusterForm(resolved), field), false, field);
   }
-  const editable = buildClusterUpdate("tenant-a", resolved, { ...form, capacityType: "2", instanceTypes: "m6i.xlarge" }, new Set(["capacityType", "instanceTypes"]));
-  assert.deepEqual(editable.updateMask?.paths, ["spec.default_node_pool.capacity_type", "spec.default_node_pool.instance_types"]);
 });
 
-test("create still sets the default node group's metadata and scaling", () => {
-  const form = { ...emptyClusterForm, name: "fresh", networkId: network.id, publicCIDRs: "203.0.113.0/24", minSize: "2", maxSize: "4", nodeLabels: '{"pool":"jobs"}' };
-  const pool = buildCreateCluster("tenant-a", form, network, accounts, "r1").cluster?.spec?.defaultNodePool;
-  assert.equal(pool?.scalingConfig?.minSize, 2);
-  assert.deepEqual(pool?.labels, { pool: "jobs" });
+// GetCluster(as_requested) of a platform-created cluster: the system group is the platform's, so the stored input has none.
+const requested = create(ClusterSchema, {
+  id: "cluster-2", name: "requested", etag: "etag-2", labels: { team: "payments" },
+  spec: {
+    region: "ap-northeast-1", network: { networkId: network.id }, upgradeMode: UpgradeMode.MANUAL,
+    controlPlane: { endpointAccess: { endpointPublicAccess: true, publicAccessCidrs: ["203.0.113.0/24"] } },
+    provider: { case: "aws", value: {} },
+  },
+});
+const running = clone(ClusterSchema, requested);
+running.spec = create(ClusterSpecSchema, {
+  region: "ap-northeast-1", upgradeMode: UpgradeMode.MANUAL,
+  network: { networkId: network.id, zoneIds: ["apne1-az1", "apne1-az2"], serviceCidr: "172.20.0.0/16" },
+  controlPlane: { kubernetesVersion: "1.33", endpointAccess: { endpointPublicAccess: true, endpointPrivateAccess: true, publicAccessCidrs: ["203.0.113.0/24"] } },
+  provider: { case: "aws", value: { accessConfig: { authenticationMode: 1 } } },
+});
+
+test("an edit form shows the create-time settings the cluster runs from the resolved spec", () => {
+  const form = clusterForm(requested, running);
+  assert.equal(form.awsAuthenticationMode, "1");
+  assert.equal(form.zoneIds, "apne1-az1, apne1-az2");
+  assert.equal(form.serviceCidr, "172.20.0.0/16");
+  assert.equal(form.kubernetesVersion, "", "an unpinned version stays the server default");
+  const bare = clusterForm(requested);
+  assert.equal(bare.zoneIds, "");
+  assert.equal(bare.awsAuthenticationMode, "");
+});
+
+test("an untouched edit passes every step and has nothing to preview", () => {
+  const baseline = clusterForm(requested, running);
+  assert.doesNotThrow(() => validateClusterForm(baseline, baseline));
+  for (let step = 0; step < clusterReviewStep; step++) assert.doesNotThrow(() => validateClusterFormStep(baseline, step, baseline));
+  assert.throws(() => buildClusterUpdate("tenant-a", requested, baseline, baseline), /No changes/);
+  const request = buildClusterUpdate("tenant-a", requested, { ...baseline, displayName: "Payments" }, baseline);
+  assert.deepEqual(request.updateMask?.paths, ["display_name"]);
+  assert.equal(request.cluster?.spec, undefined);
+});
+
+test("the update mask is the diff against the form as it opened: reformatting and reverting are not changes", () => {
+  const baseline = clusterForm(requested, running);
+  assert.deepEqual([...changedClusterFields(baseline, { ...baseline, publicCIDRs: " 203.0.113.0/24 ", labels: '{ "team": "payments" }' })], []);
+  assert.deepEqual([...changedClusterFields(baseline, { ...baseline, displayName: "Payments" })], ["displayName"]);
+  assert.deepEqual([...changedClusterFields(baseline, { ...baseline, displayName: "" })], [], "an edit back to the opened value is no change");
+  const edited = { ...baseline, naas: true, maintenanceStart: "02:00", maintenanceDuration: "4h" };
+  const request = buildClusterUpdate("tenant-a", requested, edited, baseline);
+  assert.deepEqual(request.updateMask?.paths, ["spec.maintenance_window", "spec.naas"]);
+  assert.throws(() => buildClusterUpdate("tenant-a", requested, { ...baseline, serviceCidr: "172.21.0.0/16" }, baseline), /immutable/);
+});
+
+test("create never sends node groups or a default node pool: the server's platform defaults apply", () => {
+  const draft = { ...emptyClusterForm, name: "fresh", networkId: network.id, publicCIDRs: "203.0.113.0/24" };
+  const json = toJson(ClusterSchema, buildCreateCluster("tenant-a", draft, network, accounts, "r1").cluster!) as { spec: Record<string, unknown> };
+  assert.equal(json.spec.defaultNodePool, undefined);
+  assert.equal(json.spec.nodeGroups, undefined);
+  assert.equal((json.spec.aws as Record<string, unknown> | undefined)?.defaultNodePool, undefined);
 });

@@ -6,7 +6,7 @@ const networkId = "00000000-0000-4000-8000-000000000002";
 const clusterId = "00000000-0000-4000-8000-000000000003";
 const account = { id: accountId, tenantId: "acme", accountName: "Production", aws: { accountId: "111122223333", role: "cluster-vending-provisioner" }, status: { state: "CLOUD_ACCOUNT_STATE_READY", managedResources: [{ kind: "ProviderConfig", name: "production-provider", externalName: "production-provider", state: "MANAGED_RESOURCE_STATE_READY", ready: "CONDITION_STATUS_TRUE", synced: "CONDITION_STATUS_TRUE" }], access: { verified: true, checkedTime: "2026-11-16T00:00:00Z", attemptedTime: "2026-11-16T00:00:00Z" } } };
 const network = { id: networkId, name: "prod-network", displayName: "Production network", tenantId: "acme", etag: "network-etag", generation: "1", spec: { region: "us-west-1", bootstrapId: accountId, tier: "TIER_1", layout: { cidrBlock: "10.1.0.0/16", availabilityZoneCount: 2, natGatewayMode: "NAT_GATEWAY_MODE_SINGLE" } }, status: { state: "NETWORK_STATE_READY", observedGeneration: "1", clusterIds: [clusterId], managedResources: [{ kind: "VPC", name: "production-vpc", externalName: "vpc-0123456789abcdef0", state: "MANAGED_RESOURCE_STATE_READY", ready: "CONDITION_STATUS_TRUE", synced: "CONDITION_STATUS_TRUE" }] } };
-const cluster = { id: clusterId, name: "payments", tenantId: "acme", etag: "cluster-etag", generation: "1", spec: { region: "us-west-1", network: { networkId }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL", controlPlane: { kubernetesVersion: "1.35", endpointAccess: { publicAccessCidrs: ["203.0.113.0/24"] } }, defaultNodePool: { instanceTypes: ["t3.medium"], diskSizeGb: 20, scalingConfig: { minSize: 2, maxSize: 3 } }, aws: { irsa: true } }, status: { state: "CLUSTER_STATE_RUNNING", currentKubernetesVersion: "1.35", platformRelease: "release-stable", observedGeneration: "1", tier: "CLUSTER_TIER_1", managedResources: [{ kind: "NodeGroup", name: "payments-workers", externalName: "payments-workers-external", state: "MANAGED_RESOURCE_STATE_READY", ready: "CONDITION_STATUS_TRUE", synced: "CONDITION_STATUS_TRUE", paused: true }] } };
+const cluster = { id: clusterId, name: "payments", tenantId: "acme", etag: "cluster-etag", generation: "1", spec: { region: "us-west-1", network: { networkId }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL", controlPlane: { kubernetesVersion: "1.35", endpointAccess: { publicAccessCidrs: ["203.0.113.0/24"] } }, aws: { irsa: true } }, status: { state: "CLUSTER_STATE_RUNNING", currentKubernetesVersion: "1.35", platformRelease: "release-stable", observedGeneration: "1", tier: "CLUSTER_TIER_1", managedResources: [{ kind: "NodeGroup", name: "payments-workers", externalName: "payments-workers-external", state: "MANAGED_RESOURCE_STATE_READY", ready: "CONDITION_STATUS_TRUE", synced: "CONDITION_STATUS_TRUE", paused: true }] } };
 
 const componentId = "00000000-0000-4000-8000-000000000004";
 const component = { id: componentId, tenantId: "acme", clusterId, component: "external-dns", etag: "component-etag", generation: "1", management: "COMPONENT_MANAGEMENT_TENANT", version: "0.16.0", values: { replicaCount: 2 }, status: { phase: "COMPONENT_PHASE_READY", observedGeneration: "1", installedVersion: "0.15.0", targetVersion: "0.16.0", clusterName: "payments", release: "release-stable", effectiveValues: { replicaCount: 2, policy: "sync" } } };
@@ -175,19 +175,22 @@ test("YAML creates preserve advanced configuration and require explicit reviewed
   ] as const) {
     await page.goto(url);
     await page.getByRole("button", { name: action, exact: true }).click();
-    await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
+    // The cluster wizard's YAML is a view of its own draft (Form | YAML); the others paste a separate manifest.
+    const synced = kind === "Cluster";
+    const reviewHeading = synced ? "Review" : "Review creation";
+    await page.getByRole("radio", { name: synced ? "YAML" : "Paste YAML", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const draft = stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: "yaml-production", tenant: "acme" }, spec });
-    const editor = dialog.getByRole("textbox", { name: `${kind} manifest`, exact: true });
+    const editor = dialog.getByRole("textbox", { name: synced ? "Cluster YAML" : `${kind} manifest`, exact: true });
     await editor.fill(draft);
     const before = calls.filter(call => call.method === method).length;
     await dialog.getByRole("button", { name: "Review", exact: true }).click();
-    await expect(dialog.getByRole("heading", { name: "Review creation", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: reviewHeading, exact: true })).toBeVisible();
     expect(calls.filter(call => call.method === method)).toHaveLength(before);
     await dialog.getByRole("button", { name: "Back", exact: true }).click();
     await expect(editor).toContainText("yaml-production");
     await dialog.getByRole("button", { name: "Review", exact: true }).click();
-    await expect(dialog.getByRole("heading", { name: "Review creation", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: reviewHeading, exact: true })).toBeVisible();
     await page.screenshot({ path: `/tmp/cv-ui-${kind.toLowerCase()}-yaml-review.png` });
     await dialog.getByRole("button", { name: action, exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -700,6 +703,8 @@ test("Kind filters narrow deprecation findings and workload recommendations", as
   await page.goto(`/clusters/${clusterId}`);
   await page.getByRole("tab", { name: "Operations", exact: true }).click();
   await page.getByRole("tab", { name: "Deprecated APIs", exact: true }).click();
+  // The tab follows the URL, which updates asynchronously: wait for its panel before using its filters.
+  await expect(page.getByRole("tabpanel", { name: "Deprecated APIs", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "Kind", exact: true }).click();
   await page.getByRole("option", { name: "Ingress", exact: true }).click();
   const findings = page.getByRole("table", { name: "Cluster deprecated API findings", exact: true });
@@ -709,6 +714,7 @@ test("Kind filters narrow deprecation findings and workload recommendations", as
   await page.getByRole("button", { name: "Clear finding filters", exact: true }).click();
   await expect(findings.getByRole("row")).toHaveCount(3);
   await page.getByRole("tab", { name: "Recommendations", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "Recommendations", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "Kind", exact: true }).click();
   await page.getByRole("option", { name: "StatefulSet", exact: true }).click();
   const recommendations = page.getByRole("table", { name: "Container resource recommendations", exact: true });
@@ -1047,15 +1053,18 @@ test("create cluster is a four-step modal that preserves values before submissio
   await dialog.getByRole("button", { name: /^Existing network\b/ }).click();
   await page.getByRole("option", { name: /Production network/ }).click();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "Compute", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("heading", { name: "Access", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("heading", { name: "Compute", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Back", exact: true }).click();
   await expect(dialog.getByRole("textbox", { name: /^Cluster name\b/ })).toHaveValue("orders");
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
-  await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Public API access requires at least one allowed CIDR");
   expect(calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
-  await dialog.getByRole("textbox", { name: /^Allowed IPv4 CIDRs\b/ }).fill("203.0.113.0/24");
+  await dialog.getByRole("combobox", { name: "Allowed IPv4 CIDRs", exact: true }).fill("203.0.113.0/24");
+  await page.getByRole("option", { name: /203\.0\.113\.0\/24/ }).first().click();
+  await dialog.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(dialog.getByRole("heading", { name: "Add-ons and logging", exact: true })).toBeFocused();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Review", exact: true })).toBeFocused();
   await expect(dialog).toContainText("orders");

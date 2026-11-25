@@ -3,9 +3,8 @@ import { test } from "node:test";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { ClusterSchema } from "../../gen/cloud/v1/cluster_pb";
-import { NodeGroupNodeSchema, NodeGroupPhase, NodeGroupSpecSchema, NodeGroupStatusSchema } from "../../gen/cloud/v1/node_group_pb";
+import { NodeGroupNodeSchema, NodeGroupPhase, NodeGroupStatusSchema } from "../../gen/cloud/v1/node_group_pb";
 import { ListNodeGroupNodesResponseSchema, NodeStatusFilter } from "../../gen/cloud/v1/node_group_nodes_pb";
-import { CapacityType } from "../../gen/cloud/v1/node_pool_pb";
 import {
   NODE_PAGE_SIZE, capacityLabel, collectionState, groupDetail, nodeAge, nodeFilterOptions, nodeRow, nodeStatusFilter, pageRange, pagerBack, pagerForward, pagerStart, isTokenMismatch,
 } from "./node-group-nodes";
@@ -110,30 +109,32 @@ test("collection state: never collected, collected, incomplete, with notices", (
   assert.equal(unreadable.incomplete, false);
 });
 
-test("a group's detail: user groups show their spec, the system group says who manages it", () => {
+test("a group's detail is read-only: the platform's groups say who manages them, without settings", () => {
   const cluster = create(ClusterSchema, {
-    id: "c1", spec: { nodeGroups: [create(NodeGroupSpecSchema, { name: "gpu", instanceFamilies: ["g5"], capacityTypes: [CapacityType.SPOT] })], defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 2, maxSize: 6 } } },
+    id: "c1",
     status: { nodeGroups: [
-      create(NodeGroupStatusSchema, { name: "gpu", phase: NodeGroupPhase.FAILED, message: "No GPU capacity", nodes: 0 }),
+      create(NodeGroupStatusSchema, { name: "platform-pool", platformManaged: true, phase: NodeGroupPhase.FAILED, message: "No capacity", nodes: 0 }),
       create(NodeGroupStatusSchema, { name: "system", platformManaged: true, phase: NodeGroupPhase.READY, nodes: 2 }),
+      create(NodeGroupStatusSchema, { name: "batch", phase: NodeGroupPhase.DELETING, message: "draining", nodes: 1 }),
     ] },
   });
-  const gpu = groupDetail(cluster, "gpu");
-  assert.ok(gpu);
-  assert.deepEqual([gpu.kind, gpu.platformManaged, gpu.phaseLabel, gpu.tone, gpu.message, gpu.nodes], ["user", false, "Failed", "error", "No GPU capacity", 0]);
-  assert.deepEqual(gpu.summary.map(item => item.label), ["Capacity", "Instances", "Architectures", "Labels", "Taints", "Limits"]);
-  assert.equal(gpu.summary[0].value, "Spot");
-  assert.equal(gpu.summary[1].value, "g5 family");
+  const pool = groupDetail(cluster, "platform-pool");
+  assert.ok(pool);
+  assert.deepEqual([pool.kind, pool.platformManaged, pool.phaseLabel, pool.tone, pool.message, pool.nodes], ["pool", true, "Failed", "error", "No capacity", 0]);
+  assert.match(pool.about, /Karpenter NodePool the platform creates/);
+  assert.equal("summary" in pool, false, "no settings to show");
 
   const system = groupDetail(cluster, "system");
   assert.deepEqual([system?.kind, system?.platformManaged, system?.phaseLabel, system?.nodes], ["system", true, "Ready", 2]);
-  assert.match(String(system?.summary[0].value), /Karpenter, CoreDNS/);
-  assert.match(String(system?.summary[0].value), /every platform component/);
-  assert.equal(system?.summary.find(item => item.label === "Instance types")?.value, "t3.large");
-  assert.equal(system?.summary.find(item => item.label === "Size")?.value, "2–6 (autoscaled)");
-  assert.match(String(system?.summary[0].value), /autoscaled/);
-  assert.doesNotMatch(String(system?.summary[0].value), /fixed/);
-  assert.equal(system?.summary.find(item => item.label === "Nodes now")?.value, "2 nodes");
+  assert.match(system?.about ?? "", /Karpenter and the EKS add-ons/);
+  assert.match(system?.about ?? "", /static size/);
+  assert.match(system?.about ?? "", /platform's configuration/);
+  assert.doesNotMatch(system?.about ?? "", /cluster autoscaler|autoscaled by/);
+  assert.equal(system?.observed?.nodes, 2);
+
+  // A group an earlier layout left behind is shown while it drains, without a platform explanation.
+  const batch = groupDetail(cluster, "batch");
+  assert.deepEqual([batch?.kind, batch?.platformManaged, batch?.phaseLabel, batch?.about], ["other", false, "Deleting", ""]);
 
   // "platform" is no node group any more: it is reserved, and unknown unless a status still says so.
   assert.equal(groupDetail(cluster, "platform"), undefined);
@@ -141,9 +142,9 @@ test("a group's detail: user groups show their spec, the system group says who m
 });
 
 test("system exists before the controller reports it", () => {
-  const cluster = create(ClusterSchema, { id: "c1", spec: { defaultNodePool: { instanceTypes: ["t3.large"], scalingConfig: { minSize: 1, maxSize: 3 } } } });
+  const cluster = create(ClusterSchema, { id: "c1" });
   const system = groupDetail(cluster, "system");
   assert.deepEqual([system?.phaseLabel, system?.tone, system?.nodes], ["Not reported", "neutral", undefined]);
-  assert.equal(system?.summary.find(item => item.label === "Size")?.value, "1–3 (autoscaled)");
-  assert.equal(system?.summary.find(item => item.label === "Nodes now"), undefined, "no count before the controller reports it");
+  assert.equal(system?.observed, undefined, "no report before the controller makes one");
+  assert.equal(groupDetail(cluster, "platform-pool"), undefined, "the platform pool resolves once the controller reports it");
 });

@@ -4,9 +4,6 @@
 
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
-import type { CapacityType, Taint } from "./node_pool_pb";
-import { file_cloud_v1_node_pool } from "./node_pool_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -15,118 +12,13 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/node_group.proto.
  */
 export const file_cloud_v1_node_group: GenFile = /*@__PURE__*/
-  fileDesc("ChljbG91ZC92MS9ub2RlX2dyb3VwLnByb3RvEghjbG91ZC52MSLfBQoNTm9kZUdyb3VwU3BlYxJfCgRuYW1lGAEgASgJQlG6SE5yTBABGCgyHF5bYS16XShbLWEtejAtOV0qW2EtejAtOV0pPyRaCHBsYXRmb3JtWg1wbGF0Zm9ybS1wb29sWgdkZWZhdWx0WgZzeXN0ZW0SSQoOaW5zdGFuY2VfdHlwZXMYAiADKAlCMbpILpIBKxAUGAEiJXIjEAEYQDIdXlthLXpdW2EtejAtOS1dKlsuXVthLXowLTldKyQSQAoRaW5zdGFuY2VfZmFtaWxpZXMYAyADKAlCJbpIIpIBHxAUGAEiGXIXEAEYIDIRXlthLXpdW2EtejAtOS1dKiQSQgoNYXJjaGl0ZWN0dXJlcxgEIAMoDjIWLmNsb3VkLnYxLkFyY2hpdGVjdHVyZUITukgQkgENEAIYASIHggEEEAEgABJDCg5jYXBhY2l0eV90eXBlcxgFIAMoDjIWLmNsb3VkLnYxLkNhcGFjaXR5VHlwZUITukgQkgENEAIYASIHggEEEAEgABLRAQoGbGFiZWxzGAYgAygLMiMuY2xvdWQudjEuTm9kZUdyb3VwU3BlYy5MYWJlbHNFbnRyeUKbAbpIlwGaAZMBEEAiWnJYEAEYvQIyUV4oW2EtejAtOV0oWy1hLXowLTkuXSpbYS16MC05XSk/Lyk/W0EtWmEtejAtOV0oWy1BLVphLXowLTlfLl17MCw2MX1bQS1aYS16MC05XSk/JCozcjEYPzItXihbQS1aYS16MC05XShbLUEtWmEtejAtOV8uXSpbQS1aYS16MC05XSk/KT8kEikKBnRhaW50cxgHIAMoCzIPLmNsb3VkLnYxLlRhaW50Qgi6SAWSAQIQMhIpCgZsaW1pdHMYCCABKAsyGS5jbG91ZC52MS5Ob2RlR3JvdXBMaW1pdHMaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJlCg9Ob2RlR3JvdXBMaW1pdHMSGQoDY3B1GAEgASgFQge6SAQaAiAASACIAQESIAoKbWVtb3J5X2dpYhgCIAEoBUIHukgEGgIgAEgBiAEBQgYKBF9jcHVCDQoLX21lbW9yeV9naWIikgMKD05vZGVHcm91cFN0YXR1cxIMCgRuYW1lGAEgASgJEhgKEHBsYXRmb3JtX21hbmFnZWQYAiABKAgSJwoFcGhhc2UYAyABKA4yGC5jbG91ZC52MS5Ob2RlR3JvdXBQaGFzZRIPCgdtZXNzYWdlGAQgASgJEg0KBW5vZGVzGAUgASgFEhQKDG5vZGVzX25vdGljZRgGIAEoCRITCgtyZWFkeV9ub2RlcxgHIAEoBRIXCg9ub3RfcmVhZHlfbm9kZXMYCCABKAUSHgoWYWxsb2NhdGFibGVfY3B1X21pbGxpcxgJIAEoAxIgChhhbGxvY2F0YWJsZV9tZW1vcnlfYnl0ZXMYCiABKAMSGAoQYWxsb2NhdGFibGVfcG9kcxgLIAEoAxIcChRyZXF1ZXN0ZWRfY3B1X21pbGxpcxgMIAEoAxIeChZyZXF1ZXN0ZWRfbWVtb3J5X2J5dGVzGA0gASgDEhEKCXBvZF9jb3VudBgOIAEoBRIdChVwb2RzX3dpdGhvdXRfcmVxdWVzdHMYDyABKAUiRwoOTm9kZUdyb3VwTm9kZXMSDQoFZ3JvdXAYASABKAkSJgoFbm9kZXMYAiADKAsyFy5jbG91ZC52MS5Ob2RlR3JvdXBOb2RlIpsFCg1Ob2RlR3JvdXBOb2RlEgwKBG5hbWUYASABKAkSFQoNaW5zdGFuY2VfdHlwZRgCIAEoCRIMCgR6b25lGAMgASgJEhUKDWNhcGFjaXR5X3R5cGUYBCABKAkSFAoMYXJjaGl0ZWN0dXJlGAUgASgJEhcKD2t1YmVsZXRfdmVyc2lvbhgGIAEoCRINCgVyZWFkeRgHIAEoCBISCgpjb25kaXRpb25zGAggAygJEhUKDXVuc2NoZWR1bGFibGUYCSABKAgSFAoMdGFpbnRzX2NvdW50GAogASgFEi4KCmNyZWF0ZWRfYXQYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDm5vZGVjbGFpbV9uYW1lGAwgASgJEhcKD25vZGVjbGFpbV9waGFzZRgNIAEoCRIXCg9ub2RlY2xhaW1fcmVhZHkYDiABKAgSEwoLcHJvdmlkZXJfaWQYDyABKAkSHgoWYWxsb2NhdGFibGVfY3B1X21pbGxpcxgQIAEoAxIgChhhbGxvY2F0YWJsZV9tZW1vcnlfYnl0ZXMYESABKAMSGAoQYWxsb2NhdGFibGVfcG9kcxgSIAEoBRIcChRyZXF1ZXN0ZWRfY3B1X21pbGxpcxgTIAEoAxIeChZyZXF1ZXN0ZWRfbWVtb3J5X2J5dGVzGBQgASgDEhEKCXBvZF9jb3VudBgVIAEoBRIdChVwb2RzX3dpdGhvdXRfcmVxdWVzdHMYFiABKAUSHAoPdXNlZF9jcHVfbWlsbGlzGBcgASgDSACIAQESHgoRdXNlZF9tZW1vcnlfYnl0ZXMYGCABKANIAYgBAUISChBfdXNlZF9jcHVfbWlsbGlzQhQKEl91c2VkX21lbW9yeV9ieXRlcypcCgxBcmNoaXRlY3R1cmUSHAoYQVJDSElURUNUVVJFX1VOU1BFQ0lGSUVEEAASFgoSQVJDSElURUNUVVJFX0FNRDY0EAESFgoSQVJDSElURUNUVVJFX0FSTTY0EAIqqAEKDk5vZGVHcm91cFBoYXNlEiAKHE5PREVfR1JPVVBfUEhBU0VfVU5TUEVDSUZJRUQQABIcChhOT0RFX0dST1VQX1BIQVNFX1BFTkRJTkcQARIaChZOT0RFX0dST1VQX1BIQVNFX1JFQURZEAISGwoXTk9ERV9HUk9VUF9QSEFTRV9GQUlMRUQQAxIdChlOT0RFX0dST1VQX1BIQVNFX0RFTEVUSU5HEARCngEKDGNvbS5jbG91ZC52MUIOTm9kZUdyb3VwUHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_cloud_v1_node_pool, file_google_protobuf_timestamp]);
+  fileDesc("ChljbG91ZC92MS9ub2RlX2dyb3VwLnByb3RvEghjbG91ZC52MSKSAwoPTm9kZUdyb3VwU3RhdHVzEgwKBG5hbWUYASABKAkSGAoQcGxhdGZvcm1fbWFuYWdlZBgCIAEoCBInCgVwaGFzZRgDIAEoDjIYLmNsb3VkLnYxLk5vZGVHcm91cFBoYXNlEg8KB21lc3NhZ2UYBCABKAkSDQoFbm9kZXMYBSABKAUSFAoMbm9kZXNfbm90aWNlGAYgASgJEhMKC3JlYWR5X25vZGVzGAcgASgFEhcKD25vdF9yZWFkeV9ub2RlcxgIIAEoBRIeChZhbGxvY2F0YWJsZV9jcHVfbWlsbGlzGAkgASgDEiAKGGFsbG9jYXRhYmxlX21lbW9yeV9ieXRlcxgKIAEoAxIYChBhbGxvY2F0YWJsZV9wb2RzGAsgASgDEhwKFHJlcXVlc3RlZF9jcHVfbWlsbGlzGAwgASgDEh4KFnJlcXVlc3RlZF9tZW1vcnlfYnl0ZXMYDSABKAMSEQoJcG9kX2NvdW50GA4gASgFEh0KFXBvZHNfd2l0aG91dF9yZXF1ZXN0cxgPIAEoBSJHCg5Ob2RlR3JvdXBOb2RlcxINCgVncm91cBgBIAEoCRImCgVub2RlcxgCIAMoCzIXLmNsb3VkLnYxLk5vZGVHcm91cE5vZGUimwUKDU5vZGVHcm91cE5vZGUSDAoEbmFtZRgBIAEoCRIVCg1pbnN0YW5jZV90eXBlGAIgASgJEgwKBHpvbmUYAyABKAkSFQoNY2FwYWNpdHlfdHlwZRgEIAEoCRIUCgxhcmNoaXRlY3R1cmUYBSABKAkSFwoPa3ViZWxldF92ZXJzaW9uGAYgASgJEg0KBXJlYWR5GAcgASgIEhIKCmNvbmRpdGlvbnMYCCADKAkSFQoNdW5zY2hlZHVsYWJsZRgJIAEoCBIUCgx0YWludHNfY291bnQYCiABKAUSLgoKY3JlYXRlZF9hdBgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoObm9kZWNsYWltX25hbWUYDCABKAkSFwoPbm9kZWNsYWltX3BoYXNlGA0gASgJEhcKD25vZGVjbGFpbV9yZWFkeRgOIAEoCBITCgtwcm92aWRlcl9pZBgPIAEoCRIeChZhbGxvY2F0YWJsZV9jcHVfbWlsbGlzGBAgASgDEiAKGGFsbG9jYXRhYmxlX21lbW9yeV9ieXRlcxgRIAEoAxIYChBhbGxvY2F0YWJsZV9wb2RzGBIgASgFEhwKFHJlcXVlc3RlZF9jcHVfbWlsbGlzGBMgASgDEh4KFnJlcXVlc3RlZF9tZW1vcnlfYnl0ZXMYFCABKAMSEQoJcG9kX2NvdW50GBUgASgFEh0KFXBvZHNfd2l0aG91dF9yZXF1ZXN0cxgWIAEoBRIcCg91c2VkX2NwdV9taWxsaXMYFyABKANIAIgBARIeChF1c2VkX21lbW9yeV9ieXRlcxgYIAEoA0gBiAEBQhIKEF91c2VkX2NwdV9taWxsaXNCFAoSX3VzZWRfbWVtb3J5X2J5dGVzKqgBCg5Ob2RlR3JvdXBQaGFzZRIgChxOT0RFX0dST1VQX1BIQVNFX1VOU1BFQ0lGSUVEEAASHAoYTk9ERV9HUk9VUF9QSEFTRV9QRU5ESU5HEAESGgoWTk9ERV9HUk9VUF9QSEFTRV9SRUFEWRACEhsKF05PREVfR1JPVVBfUEhBU0VfRkFJTEVEEAMSHQoZTk9ERV9HUk9VUF9QSEFTRV9ERUxFVElORxAEQp4BCgxjb20uY2xvdWQudjFCDk5vZGVHcm91cFByb3RvUAFaPWdpdGh1Yi5jb20veWluZGlhL2NsdXN0ZXItdmVuZGluZy9wa2cvZ2VuL2dvL2Nsb3VkL3YxO2Nsb3VkdjGiAgNDWFiqAghDbG91ZC5WMcoCCENsb3VkXFYx4gIUQ2xvdWRcVjFcR1BCTWV0YWRhdGHqAglDbG91ZDo6VjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
- * NodeGroupSpec is one user node group: a Karpenter NodePool with its own
- * EC2NodeClass in the workload cluster (docs/architecture.md#node-layout).
- * Nodes carry the label node.cluster-vending.io/pool=<name> in addition to
- * labels. The platform's own groups (the default managed node group and the
- * `platform` NodePool) are not part of the spec.
- *
- * @generated from message cloud.v1.NodeGroupSpec
- */
-export type NodeGroupSpec = Message<"cloud.v1.NodeGroupSpec"> & {
-  /**
-   * DNS label, unique within the cluster, at most 40 characters. "platform",
-   * "platform-pool", "default" and "system" are reserved. Immutable in
-   * effect: renaming a group removes it and adds another.
-   *
-   * @generated from field: string name = 1;
-   */
-  name: string;
-
-  /**
-   * Exact machine types, e.g. "m7i.large". Empty: any type of
-   * instance_families.
-   *
-   * @generated from field: repeated string instance_types = 2;
-   */
-  instanceTypes: string[];
-
-  /**
-   * Instance families, e.g. "m7i", "c7g".
-   *
-   * @generated from field: repeated string instance_families = 3;
-   */
-  instanceFamilies: string[];
-
-  /**
-   * CPU architectures. Empty: AMD64.
-   *
-   * @generated from field: repeated cloud.v1.Architecture architectures = 4;
-   */
-  architectures: Architecture[];
-
-  /**
-   * Capacity types. Empty: ON_DEMAND.
-   *
-   * @generated from field: repeated cloud.v1.CapacityType capacity_types = 5;
-   */
-  capacityTypes: CapacityType[];
-
-  /**
-   * Kubernetes labels of the group's nodes.
-   *
-   * @generated from field: map<string, string> labels = 6;
-   */
-  labels: { [key: string]: string };
-
-  /**
-   * Kubernetes taints of the group's nodes. Capped at 50, like
-   * NodePoolSpec.taints.
-   *
-   * @generated from field: repeated cloud.v1.Taint taints = 7;
-   */
-  taints: Taint[];
-
-  /**
-   * Ceiling of the resources the group may provision. Unset: no ceiling.
-   *
-   * @generated from field: cloud.v1.NodeGroupLimits limits = 8;
-   */
-  limits?: NodeGroupLimits | undefined;
-};
-
-/**
- * Describes the message cloud.v1.NodeGroupSpec.
- * Use `create(NodeGroupSpecSchema)` to create a new message.
- */
-export const NodeGroupSpecSchema: GenMessage<NodeGroupSpec> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_node_group, 0);
-
-/**
- * NodeGroupLimits bounds what a node group may provision in total
- * (NodePool.spec.limits).
- *
- * @generated from message cloud.v1.NodeGroupLimits
- */
-export type NodeGroupLimits = Message<"cloud.v1.NodeGroupLimits"> & {
-  /**
-   * vCPUs.
-   *
-   * @generated from field: optional int32 cpu = 1;
-   */
-  cpu?: number | undefined;
-
-  /**
-   * Memory in GiB.
-   *
-   * @generated from field: optional int32 memory_gib = 2;
-   */
-  memoryGib?: number | undefined;
-};
-
-/**
- * Describes the message cloud.v1.NodeGroupLimits.
- * Use `create(NodeGroupLimitsSchema)` to create a new message.
- */
-export const NodeGroupLimitsSchema: GenMessage<NodeGroupLimits> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_node_group, 1);
-
-/**
- * NodeGroupStatus is what the controller observed of one node group. The
- * platform group comes first, then the user's.
+ * NodeGroupStatus is what the controller observed of one node group: the
+ * platform's system group first, then its platform pool. A tenant node
+ * group a cluster had before the platform owned its node groups is listed
+ * last, DELETING, while it is removed.
  *
  * @generated from message cloud.v1.NodeGroupStatus
  */
@@ -137,7 +29,8 @@ export type NodeGroupStatus = Message<"cloud.v1.NodeGroupStatus"> & {
   name: string;
 
   /**
-   * True for the platform's own groups, false for the user's.
+   * True for the platform's own groups; false only for a removed tenant
+   * group while it is deleted.
    *
    * @generated from field: bool platform_managed = 2;
    */
@@ -233,7 +126,7 @@ export type NodeGroupStatus = Message<"cloud.v1.NodeGroupStatus"> & {
  * Use `create(NodeGroupStatusSchema)` to create a new message.
  */
 export const NodeGroupStatusSchema: GenMessage<NodeGroupStatus> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_node_group, 2);
+  messageDesc(file_cloud_v1_node_group, 0);
 
 /**
  * NodeGroupNodes is the nodes of one node group: one shard of the `nodes`
@@ -262,7 +155,7 @@ export type NodeGroupNodes = Message<"cloud.v1.NodeGroupNodes"> & {
  * Use `create(NodeGroupNodesSchema)` to create a new message.
  */
 export const NodeGroupNodesSchema: GenMessage<NodeGroupNodes> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_node_group, 3);
+  messageDesc(file_cloud_v1_node_group, 1);
 
 /**
  * NodeGroupNode is one node of a node group and its NodeClaim, with only the
@@ -430,37 +323,7 @@ export type NodeGroupNode = Message<"cloud.v1.NodeGroupNode"> & {
  * Use `create(NodeGroupNodeSchema)` to create a new message.
  */
 export const NodeGroupNodeSchema: GenMessage<NodeGroupNode> = /*@__PURE__*/
-  messageDesc(file_cloud_v1_node_group, 4);
-
-/**
- * Architecture is a node CPU architecture.
- *
- * @generated from enum cloud.v1.Architecture
- */
-export enum Architecture {
-  /**
-   * Server default: AMD64.
-   *
-   * @generated from enum value: ARCHITECTURE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: ARCHITECTURE_AMD64 = 1;
-   */
-  AMD64 = 1,
-
-  /**
-   * @generated from enum value: ARCHITECTURE_ARM64 = 2;
-   */
-  ARM64 = 2,
-}
-
-/**
- * Describes the enum cloud.v1.Architecture.
- */
-export const ArchitectureSchema: GenEnum<Architecture> = /*@__PURE__*/
-  enumDesc(file_cloud_v1_node_group, 0);
+  messageDesc(file_cloud_v1_node_group, 2);
 
 /**
  * NodeGroupPhase is where a node group is.
@@ -491,7 +354,7 @@ export enum NodeGroupPhase {
   FAILED = 3,
 
   /**
-   * Removed from the spec, being deleted from the workload cluster.
+   * Being deleted from the workload cluster.
    *
    * @generated from enum value: NODE_GROUP_PHASE_DELETING = 4;
    */
@@ -502,5 +365,5 @@ export enum NodeGroupPhase {
  * Describes the enum cloud.v1.NodeGroupPhase.
  */
 export const NodeGroupPhaseSchema: GenEnum<NodeGroupPhase> = /*@__PURE__*/
-  enumDesc(file_cloud_v1_node_group, 1);
+  enumDesc(file_cloud_v1_node_group, 0);
 

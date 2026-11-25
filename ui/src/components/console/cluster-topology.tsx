@@ -85,7 +85,7 @@ export function ClusterTopology({ cluster, network }: { cluster: Cluster; networ
     width: node.width, height: node.height, measured: { width: node.width, height: node.height }, style: { width: node.width, height: node.height },
     selected: node.id === selectedId || highlighted.has(node.id), ariaLabel: `${node.data.kind}: ${node.data.title}`,
     data: { ...node.data, summary: safeCluster && ["NodeGroup", "NodePool", "Node", "Instance", "EC2Instance", "WorkerNode", "KarpenterNode", "Cluster"].includes(node.data.kind) ? clusterComputeDetails(safeCluster, node.data).filter(row => node.data.kind === "Cluster" ? row.label === "Kubernetes version" : row.label !== "Initial desired nodes") : undefined,
-      summaryNote: node.data.kind === "Cluster" ? safeCluster?.spec?.provider.case === "aws" ? "AWS-managed control plane" : "Managed control plane" : safeCluster && ["NodeGroup", "NodePool"].includes(node.data.kind) && clusterComputeDetails(safeCluster, node.data).some(row => row.source === "Configured default pool") ? "Configured default pool" : undefined, nodeId: node.id, inspect: () => select(node.id), inspectAttachment: select, reportSize } }));
+      summaryNote: node.data.kind === "Cluster" ? safeCluster?.spec?.provider.case === "aws" ? "AWS-managed control plane" : "Managed control plane" : undefined, nodeId: node.id, inspect: () => select(node.id), inspectAttachment: select, reportSize } }));
   const routing = useMemo(() => {
     try {
       const context = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");

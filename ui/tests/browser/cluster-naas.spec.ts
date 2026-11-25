@@ -10,7 +10,7 @@ const network = { id: networkId, tenantId: "acme", name: "production", displayNa
 const spec = {
   region: "us-west-1", network: { networkId }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL",
   controlPlane: { kubernetesVersion: "1.35", endpointAccess: { endpointPrivateAccess: true, endpointPublicAccess: false } },
-  defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 1, maxSize: 3 } }, aws: { irsa: true },
+  aws: { irsa: true },
 };
 
 async function mockNaaS(page: Page, initiallyEnabled = false) {
@@ -62,12 +62,14 @@ test("guided NaaS starts off, survives mode switching and is enabled only after 
   await dialog.getByRole("textbox", { name: /^Cluster name\b/ }).fill("naas-enabled");
   await dialog.getByRole("button", { name: /^Existing network\b/ }).click();
   await page.getByRole("option", { name: /Production network/ }).click();
-  await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
-  await dialog.getByRole("radio", { name: "Guided form", exact: true }).click();
+  await dialog.getByRole("radio", { name: "YAML", exact: true }).click();
+  await expect(dialog.getByRole("textbox", { name: "Cluster YAML", exact: true })).toContainText("naas: true");
+  await dialog.getByRole("radio", { name: "Form", exact: true }).click();
   await expect(checkbox).toBeChecked();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("checkbox", { name: "Public endpoint", exact: true }).uncheck();
+  await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await expect(dialog.locator("dt").filter({ hasText: controlName }).locator("xpath=following-sibling::dd[1]")).toHaveText("Enabled");
   expect(mock.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
@@ -88,8 +90,7 @@ test("disabling NaaS previews Capsule removal with retained data and applies onl
   const checkbox = dialog.getByRole("checkbox", { name: controlName, exact: true });
   await expect(checkbox).toBeChecked();
   await checkbox.uncheck();
-  await dialog.getByRole("button", { name: "Next", exact: true }).click();
-  await dialog.getByRole("button", { name: "Next", exact: true }).click();
+  for (let next = 0; next < 2; next++) await dialog.getByRole("button", { name: "Next", exact: true }).click();
   await dialog.getByRole("button", { name: "Preview update plan", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   await expect(dialog).toContainText("Turn off namespace tenancy controls");
@@ -122,10 +123,10 @@ for (const naas of [false, true]) {
     await page.goto("/clusters");
     await page.getByRole("button", { name: "Create cluster", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Create cluster", exact: true });
-    await dialog.getByRole("radio", { name: "Paste YAML", exact: true }).click();
-    await dialog.getByRole("textbox", { name: "Cluster manifest", exact: true }).fill(stringify({ apiVersion: "cluster-vending.io/v1", kind: "Cluster", metadata: { tenant: "acme", name: "yaml-naas" }, spec: { ...spec, naas } }));
+    await dialog.getByRole("radio", { name: "YAML", exact: true }).click();
+    await dialog.getByRole("textbox", { name: "Cluster YAML", exact: true }).fill(stringify({ apiVersion: "cluster-vending.io/v1", kind: "Cluster", metadata: { tenant: "acme", name: "yaml-naas" }, spec: { ...spec, naas } }));
     await dialog.getByRole("button", { name: "Review", exact: true }).click();
-    await expect(dialog.getByRole("heading", { name: "Review creation", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
     expect(mock.calls.filter((call) => call.method === "CreateCluster")).toHaveLength(0);
     await dialog.getByRole("button", { name: "Create cluster", exact: true }).click();
     await expect(dialog).toHaveCount(0);

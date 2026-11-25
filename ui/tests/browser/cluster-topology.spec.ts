@@ -36,7 +36,7 @@ const architecture = create(ClusterArchitectureSchema, {
 });
 const cluster = create(ClusterSchema, {
   id: clusterId, tenantId: "acme", name: "payments", displayName: "Payments", generation: 1n, etag: "cluster-topology-etag",
-  spec: { region: "us-west-2", network: { networkId }, defaultNodePool: { instanceTypes: ["m6i.large"], scalingConfig: { minSize: 2, maxSize: 6, desiredSize: 3 }, diskSizeGb: 80, labels: { workload: "payments" } }, provider: { case: "aws", value: { irsa: true } } },
+  spec: { region: "us-west-2", network: { networkId }, provider: { case: "aws", value: { irsa: true } } },
   status: { state: ClusterState.RUNNING, observedGeneration: 1n, architecture, provider: { case: "aws", value: { clusterArn: controlArn, nodeGroupArn } },
     managedResources: architecture.resources.filter(resource => !resource.referenceOnly).map(resource => ({ kind: resource.kind, name: resource.name, externalName: resource.cloudId, generation: 1n, observedGeneration: 1n, state: ManagedResourceState.READY, ready: ConditionStatus.TRUE, synced: ConditionStatus.TRUE })),
   },
@@ -190,11 +190,8 @@ test("default topology always shows the network with the control plane and node 
   await expect(canvas.getByRole("button", { name: `Inspect ${vpc.name}`, exact: true })).toBeVisible();
   for (const name of ["payments-control", "payments-workers"]) await expect(canvas.getByRole("button", { name: `Inspect ${name}`, exact: true })).toBeVisible();
   const workerCard = canvas.locator(".react-flow__node-resource").filter({ has: page.getByRole("button", { name: "Inspect payments-workers", exact: true }) });
-  await expect(workerCard).toContainText("Configured default pool");
-  for (const [label, value] of [["Instance types", "m6i.large"], ["Minimum nodes", "2"], ["Maximum nodes", "6"], ["Desired nodes", "Not reported"], ["Current nodes", "Not reported"]]) {
-    await expect(workerCard.getByText(label, { exact: true }).locator("..").getByText(value, { exact: true })).toBeVisible();
-  }
-  await expect(workerCard.getByText("Initial desired nodes", { exact: true })).toHaveCount(0);
+  await expect(workerCard.getByText("Managed by", { exact: true }).locator("..").getByText("The platform", { exact: true })).toBeVisible();
+  for (const label of ["Instance types", "Minimum nodes", "Maximum nodes", "Initial desired nodes"]) await expect(workerCard.getByText(label, { exact: true })).toHaveCount(0);
   await expect(page.getByRole("table", { name: "Cluster topology resources", exact: true })).toHaveCount(0);
   await expect(page.getByRole("table", { name: "Cluster topology relationships", exact: true })).toHaveCount(0);
   assertReadOnly(api);
@@ -249,11 +246,9 @@ test("inspection preserves managed names, actual AWS IDs, relationship details a
   const inspector = page.getByLabel("Selected cluster topology resource", { exact: true });
   await expect(inspector).toContainText("payments-workers");
   await expect(inspector).toContainText(nodeGroupArn);
-  for (const [label, value] of [["Instance types", "m6i.large"], ["Minimum nodes", "2"], ["Maximum nodes", "6"], ["Desired nodes", "Not reported"], ["Current nodes", "Not reported"], ["Initial desired nodes", "3"]]) {
-    const detail = inspector.locator("dt").filter({ hasText: new RegExp(`^${label}$`) }).locator("xpath=following-sibling::dd[1]");
-    await expect(detail.getByText(value, { exact: true })).toBeVisible();
-  }
-  await expect(inspector).toContainText("Create-time setting; not the current autoscaler target");
+  const managedBy = inspector.locator("dt").filter({ hasText: /^Managed by$/ }).locator("xpath=following-sibling::dd[1]");
+  await expect(managedBy.getByText("The platform", { exact: true })).toBeVisible();
+  await expect(inspector).toContainText("Created from the platform's configuration");
   const copyButtons = inspector.getByRole("button", { name: /^Copy / });
   await expect(copyButtons.first()).toBeVisible();
   for (const button of await copyButtons.all()) await button.click();
